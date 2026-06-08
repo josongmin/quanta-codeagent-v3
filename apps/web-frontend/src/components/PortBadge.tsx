@@ -32,16 +32,20 @@ export const PortBadge = ({ wsUrl, connected }: PortBadgeProps): JSX.Element | n
   if (parsed === null) return null
   return (
     <div
-      className={cx(
-        "rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider",
-        connected
-          ? "border-emerald-800/60 text-emerald-400"
-          : "border-neutral-800 text-neutral-500",
-      )}
+      className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-xs text-ink-secondary"
       title={wsUrl}
     >
-      <span className="text-neutral-500">{parsed.host}:</span>
-      <span className="ml-0.5">{parsed.port}</span>
+      <span
+        aria-hidden="true"
+        className={cx(
+          "size-1.5 shrink-0 rounded-full",
+          connected ? "bg-ok" : "bg-ink-tertiary",
+        )}
+      />
+      <span className="font-mono text-[11px]">
+        <span className="text-ink-tertiary">{parsed.host}:</span>
+        <span className="ml-0.5 text-ink-secondary">{parsed.port}</span>
+      </span>
     </div>
   )
 }

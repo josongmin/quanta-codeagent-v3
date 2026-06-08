@@ -537,7 +537,7 @@ export const App = (): JSX.Element => {
   const contextUsage = useContextUsage(canvasSource)
 
   return (
-    <div className="flex h-full min-h-screen flex-col bg-neutral-950 text-neutral-100">
+    <div className="flex h-full min-h-screen flex-col bg-surface text-ink">
       <SessionChrome
         connection={connection}
         model={resolvedModel}
@@ -585,7 +585,7 @@ const SessionChrome = memo(
     return (
       <>
         {resolvedConnection !== null ? (
-          <div className="flex items-center justify-end border-b border-neutral-900 bg-neutral-950 px-4 py-1">
+          <div className="flex items-center justify-end border-b border-line-subtle bg-surface px-4 py-1.5">
             <ConnectionUrlPill
               url={resolvedConnection.url}
               {...(resolvedConnection.token !== undefined
@@ -594,9 +594,9 @@ const SessionChrome = memo(
             />
           </div>
         ) : null}
-        <header className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2">
+        <header className="flex items-center justify-between gap-3 border-b border-line-subtle px-4 py-2">
           <HeaderTitle model={model} />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <PortBadge
               wsUrl={resolvedConnection?.url ?? null}
               connected={connection.kind === "connected"}

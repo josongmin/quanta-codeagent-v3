@@ -39,8 +39,8 @@ export const HotkeyToast = (): JSX.Element | null => {
     <div
       className={cx(
         "pointer-events-none fixed bottom-20 right-6 z-50",
-        "rounded-md border border-accent/30 bg-neutral-900/90 px-3 py-2",
-        "font-mono text-xs text-accent shadow-lg backdrop-blur",
+        "rounded-xl border border-line bg-surface-overlay px-3 py-2",
+        "text-xs text-ink shadow-lg backdrop-blur",
       )}
       role="status"
     >

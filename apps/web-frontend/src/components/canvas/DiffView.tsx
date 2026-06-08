@@ -168,9 +168,9 @@ const inlineDiffTable = ({
                 aria-hidden="true"
                 className={cx(
                   "w-10 select-none px-1 text-right align-top tabular-nums",
-                  coloredLineNumbers && line.type === "added" && "text-emerald-400",
-                  coloredLineNumbers && line.type === "removed" && "text-rose-400",
-                  (!coloredLineNumbers || line.type === "unchanged") && "text-neutral-500",
+                  coloredLineNumbers && line.type === "added" && "text-ok",
+                  coloredLineNumbers && line.type === "removed" && "text-err",
+                  (!coloredLineNumbers || line.type === "unchanged") && "text-ink-tertiary",
                 )}
               >
                 {line.lineNumber ?? ""}
@@ -184,7 +184,7 @@ const inlineDiffTable = ({
       })}
       {truncated ? (
         <tr>
-          <td colSpan={3} className="px-2 py-0.5 text-neutral-500 italic">
+          <td colSpan={3} className="px-2 py-0.5 text-ink-tertiary italic">
             … ({moreLines} more line{moreLines === 1 ? "" : "s"})
           </td>
         </tr>

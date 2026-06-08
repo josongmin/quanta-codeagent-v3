@@ -97,7 +97,7 @@ export const SlashPalette = ({
     <div
       role="listbox"
       aria-label="Slash command palette"
-      className="mb-2 max-h-56 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900 text-xs shadow-lg"
+      className="mb-2 max-h-56 animate-fade-in overflow-y-auto rounded-xl border border-line bg-surface-overlay p-1 shadow-lg"
     >
       {filtered.map((cmd, idx) => (
         <button
@@ -110,19 +110,17 @@ export const SlashPalette = ({
             void accept(cmd)
           }}
           className={cx(
-            "flex w-full items-baseline gap-2 px-3 py-1.5 text-left transition",
-            idx === activeIdx
-              ? "bg-neutral-800 text-neutral-100"
-              : "text-neutral-300 hover:bg-neutral-800/60",
+            "flex w-full items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-white/5",
+            idx === activeIdx && "bg-white/5",
           )}
         >
-          <span className="font-mono font-medium text-accent">/{cmd.slug}</span>
-          <span className="truncate text-[11px] text-neutral-500">
+          <span className="font-mono text-sm font-medium text-ink">/{cmd.slug}</span>
+          <span className="truncate text-xs text-ink-tertiary">
             {cmd.description}
           </span>
         </button>
       ))}
-      <div className="px-3 py-1 text-[10px] text-neutral-600">
+      <div className="px-2.5 py-1 text-[11px] text-ink-faint">
         ↑/↓ navigate · Tab/Enter accept · Esc dismiss
       </div>
       <PaletteRef

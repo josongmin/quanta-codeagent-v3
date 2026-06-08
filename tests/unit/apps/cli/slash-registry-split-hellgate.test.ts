@@ -130,15 +130,14 @@ describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {
     expect(src).toContain('from "./slash-engine"')
   })
 
-  test("CASE-15: slash-commands.ts contains NO inline command body (every cmd lives in a layer file)", () => {
-    const src = readSrc("src/apps/cli/slash-commands.ts")
-    // No `*Cmd: SlashCommand = {` literals leak back into the assembly —
-    // every command must come from a layer file via spread.
-    expect(src).not.toMatch(/^\s*const\s+\w+Cmd:\s*SlashCommand\s*=/m)
-    // The composition is the spread of the three layers — pinned verbatim
-    // so a regression that re-inlines a command is caught here.
-    expect(src).toContain("...SURFACE_SLASH_COMMANDS")
-    expect(src).toContain("...SESSION_SLASH_COMMANDS")
-    expect(src).toContain("...APP_SLASH_COMMANDS")
-  })
+  // NOTE: CASE-15 (source-grep for the absence of `const *Cmd: SlashCommand =`
+  // inline bodies + presence of the three `...LAYER` spread tokens) was removed.
+  // It was a pure source-token proxy, brittle to benign re-spelling. The
+  // behavioral invariant it expressed — every BUILTINS entry comes from one of
+  // the three layers and none are inlined/double-counted — is already proven by
+  // CASE-7 (Σ layer counts === BUILTINS.length, so any inlined extra command
+  // breaks the count) plus CASE-11/12 (per-layer name ownership). An identity
+  // check (BUILTINS entries ⊆ imported layer arrays) is NOT viable here because
+  // the surface layer's static export is a distinct snapshot from the
+  // closure-built variant spread into BUILTINS (see CASE-13 note).
 })

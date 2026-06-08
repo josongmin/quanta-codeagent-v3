@@ -40,10 +40,10 @@ export const ModeBadge = ({ state }: ModeBadgeProps): JSX.Element | null => {
 type PillTone = "neutral" | "danger" | "warn" | "ok"
 
 const TONE_BORDER: Record<PillTone, string> = {
-  neutral: "border-neutral-800 text-neutral-400",
-  ok: "border-emerald-800/60 text-emerald-400",
-  warn: "border-amber-800/60 text-amber-400",
-  danger: "border-red-800/60 text-red-400",
+  neutral: "border-line text-ink-secondary",
+  ok: "border-ok/40 text-ok",
+  warn: "border-warn/40 text-warn",
+  danger: "border-err/40 text-err",
 }
 
 const Pill = ({
@@ -53,12 +53,12 @@ const Pill = ({
 }: { label: string; value: string; tone: PillTone }): JSX.Element => (
   <div
     className={cx(
-      "rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider",
+      "rounded-full border px-2 py-0.5 text-xs",
       TONE_BORDER[tone],
     )}
   >
-    <span className="text-neutral-500">{label}:</span>
-    <span className="ml-1">{value}</span>
+    <span className="text-ink-tertiary">{label}:</span>
+    <span className="ml-1 font-mono">{value}</span>
   </div>
 )
 

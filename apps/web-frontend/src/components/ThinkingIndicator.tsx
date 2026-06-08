@@ -25,14 +25,17 @@ export const ThinkingIndicator = ({
   const elapsedSec = useElapsedSeconds(visible)
   if (!visible) return null
   return (
-    <div className="mt-2 flex items-center gap-2 px-1 text-xs text-neutral-500">
+    <div className="mt-3 flex items-center gap-2 px-4 text-xs text-ink-secondary">
       <span className="flex gap-0.5" aria-label="thinking">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-500" style={{ animationDelay: "0ms" }} />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-500" style={{ animationDelay: "120ms" }} />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-500" style={{ animationDelay: "240ms" }} />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-tertiary" style={{ animationDelay: "0ms" }} />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-tertiary" style={{ animationDelay: "120ms" }} />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-tertiary" style={{ animationDelay: "240ms" }} />
       </span>
-      <span className="font-mono">
-        thinking{elapsedSec >= 2 ? ` · ${elapsedSec}s` : ""}
+      <span>
+        thinking
+        {elapsedSec >= 2 ? (
+          <span className="font-mono text-ink-tertiary"> · {elapsedSec}s</span>
+        ) : null}
       </span>
     </div>
   )

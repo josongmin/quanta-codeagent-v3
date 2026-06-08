@@ -80,6 +80,8 @@ const BARE_CATCH_BASELINE: Readonly<Record<string, number>> = {
   "src/agent/observability-wire/wire.ts": 1,
 }
 
+// Matches the canonical SILENT form `} catch {` (no binding, swallowed error);
+// a bound `} catch (e) { ... }` deliberately does NOT match.
 const BARE_CATCH_RE = /\}\s*catch\s*\{/g
 
 // The 2026-06 loop decomposition split `src/agent/loop.ts` into a thin shim +
@@ -164,17 +166,7 @@ describe("R3 audit-H — bare-catch count must EQUAL baseline (R5 tightened)", (
   }
 })
 
-describe("R3 audit-H — self-checks (proof the regex actually catches drift)", () => {
-  test("bare-catch regex matches the canonical silent form", () => {
-    expect("function f() { try {} catch { /* swallowed */ } }".match(BARE_CATCH_RE)?.length).toBe(1)
-  })
-
-  test("bound-catch with logger.warn does NOT match the bare-catch regex", () => {
-    // Build the sample without a literal `${...}` so biome's
-    // `noTemplateCurlyInString` doesn't flag the sample — we just need
-    // the `} catch (e) { ... }` SHAPE to be present, not the exact
-    // production logger.warn body.
-    const seed = "function f() { try {} catch (e) { logSomething() } }"
-    expect(seed.match(BARE_CATCH_RE)?.length ?? 0).toBe(0)
-  })
-})
+// NOTE: the two regex self-check tests (canonical-form match / bound-catch
+// non-match) were removed as tautological — they asserted hand-written string
+// literals against the test's own BARE_CATCH_RE, exercising RegExp not src/.
+// BARE_CATCH_RE intent is documented at its definition above.

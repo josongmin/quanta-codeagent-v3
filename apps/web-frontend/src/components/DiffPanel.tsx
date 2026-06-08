@@ -33,18 +33,18 @@ export const DiffPanel = ({
   return (
     <div
       className={[
-        "rounded-md border border-neutral-800 bg-neutral-900/50 overflow-hidden",
+        "rounded-lg border border-line-subtle bg-surface-raised overflow-hidden",
         className ?? "",
       ]
         .join(" ")
         .trim()}
     >
-      <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-1.5">
-        <span className="truncate font-mono text-xs text-neutral-300">{diff.path ?? "(diff)"}</span>
+      <div className="flex items-center justify-between gap-2 border-b border-line-subtle px-3 py-1.5">
+        <span className="truncate font-mono text-xs text-ink-secondary">{diff.path ?? "(diff)"}</span>
         <DiffStats additions={stats.additions} deletions={stats.deletions} />
       </div>
       {diff.binary === true ? (
-        <div className="px-3 py-2 font-mono text-xs text-neutral-500 italic">
+        <div className="px-3 py-2 font-mono text-xs text-ink-tertiary italic">
           [binary file; preview skipped]
         </div>
       ) : (

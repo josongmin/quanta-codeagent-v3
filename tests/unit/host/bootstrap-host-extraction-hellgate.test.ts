@@ -309,27 +309,10 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     }
   })
 
-  test("6. Each factory type is named (not `Function` / generic `(...) => unknown`)", () => {
-    const src = readFileSync(join(REPO_ROOT, "src/host/bootstrap/types.ts"), "utf8")
-    for (const t of [
-      "BuildLlmFactory",
-      "BuildStreamingFactory",
-      "BuildToolingFactory",
-      "LoadFeaturesFactory",
-      "LoadImageBlockFactory",
-      "PickIdentityFactory",
-      "PickPersonaFactory",
-      "ResolveResumeFactory",
-      "ComposeShellEventFactory",
-      "SwitchToSessionCwdFactory",
-      "MaterializeReviewerAgentFactory",
-      "CreateGuardianReviewFactory",
-      "BuildMcpSurfaceInfoFactory",
-      "BuildIdleGuardsFactory",
-    ]) {
-      expect(src).toContain(`export type ${t}`)
-    }
-  })
+  // NOTE: removed case "6. Each factory type is named" — it grepped types.ts for
+  // `export type <Factory>` literals, a pure compile-time fact already enforced by
+  // SessionBootstrapDeps field references + the typed makeFakeDeps fixture + behavioral
+  // cases 7-20. Source-token grep, zero runtime coverage (test-quality-audit-2026-06-08 #85).
 
   test("7. Smoke: bootstrapSession produces a typed result with re-exposed reviewer factories", async () => {
     const deps = makeFakeDeps()

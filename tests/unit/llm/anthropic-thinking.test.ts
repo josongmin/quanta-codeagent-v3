@@ -63,57 +63,10 @@ describe("ADR-0076 Gap-2 — Anthropic adapter SSE → StreamEvent", () => {
     ])
   })
 
-  test("redacted_thinking block start emits a single redacted thinking_delta", () => {
-    const events = drive([
-      {
-        type: "content_block_start",
-        index: 0,
-        content_block: { type: "redacted_thinking", data: "CIPHERTEXT_BLOB" },
-      },
-      { type: "content_block_stop", index: 0 },
-    ] as RawEvent[])
-    expect(events).toEqual([{ type: "thinking_delta", text: "CIPHERTEXT_BLOB", redacted: true }])
-  })
-
-  test("redacted_thinking interleaved with plaintext thinking surfaces both", () => {
-    const events = drive([
-      {
-        type: "content_block_start",
-        index: 0,
-        content_block: { type: "redacted_thinking", data: "ENC" },
-      },
-      { type: "content_block_stop", index: 0 },
-      { type: "content_block_start", index: 1, content_block: { type: "thinking" } },
-      {
-        type: "content_block_delta",
-        index: 1,
-        delta: { type: "thinking_delta", thinking: "plain" },
-      },
-      { type: "content_block_stop", index: 1 },
-    ] as RawEvent[])
-    expect(events).toEqual([
-      { type: "thinking_delta", text: "ENC", redacted: true },
-      { type: "thinking_delta", text: "plain" },
-    ])
-  })
-
-  test("byte-identical: stream with no thinking events emits the same events as pre-Gap-2", () => {
-    const events = drive([
-      { type: "content_block_start", index: 0, content_block: { type: "text" } },
-      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
-      { type: "content_block_stop", index: 0 },
-      {
-        type: "message_delta",
-        delta: { stop_reason: "end_turn" },
-        usage: { output_tokens: 3 },
-      },
-    ] as RawEvent[])
-    expect(events.some((e) => e.type === "thinking_delta")).toBe(false)
-    expect(events.some((e) => e.type === "signature_delta")).toBe(false)
-    expect(events.filter((e) => e.type === "text_delta")).toEqual([
-      { type: "text_delta", delta: "hi" },
-    ])
-  })
+  // NOTE: redacted_thinking SSE cases (single block, interleaved-with-plaintext)
+  // and the byte-identical no-thinking-events case are covered by the hell-gate
+  // superset (anthropic-thinking-hell.test.ts: H-2 / H-2c, and the ROUND
+  // zero-thinking byte-identical test). Deleted here to avoid duplication.
 
   test("StreamInput.thinking undefined → adapter never sends thinking param to SDK", async () => {
     // Stub the SDK client and capture the create() payload.
@@ -245,27 +198,9 @@ describe("ADR-0076 Gap-2 — Anthropic carry-over serialization", () => {
     } as Anthropic.ThinkingBlockParam)
   })
 
-  test("ThinkingBlock WITHOUT signature is dropped (legacy / disabled-budget guard)", async () => {
-    const { adapter, captured } = adapterWithCapture()
-    const stale: Message = {
-      role: "assistant",
-      content: [
-        { type: "thinking", thinking: "stray block from legacy turn" },
-        { type: "text", text: "spoken" },
-      ],
-    }
-    const input: StreamInput = {
-      messages: [stale, { role: "user", content: [{ type: "text", text: "now" }] }],
-      tools: [],
-    }
-    for await (const _ of adapter.stream(input)) {
-      // drain
-    }
-    const msgs = captured.body?.messages as Anthropic.MessageParam[]
-    const assistantBlocks = msgs[0]?.content as Anthropic.ContentBlockParam[]
-    expect(assistantBlocks.some((b) => b.type === "thinking")).toBe(false)
-    expect(assistantBlocks).toContainEqual({ type: "text", text: "spoken" })
-  })
+  // NOTE: "ThinkingBlock WITHOUT signature is dropped (legacy/disabled-budget
+  // guard)" is covered by the hell-gate superset (anthropic-thinking-hell:
+  // H-6 same setup+assertions, plus H-6b only-thinking variant). Deleted here.
 
   test("redacted ThinkingBlock serializes as redacted_thinking ContentBlockParam", async () => {
     const { adapter, captured } = adapterWithCapture()
@@ -296,101 +231,11 @@ describe("ADR-0076 Gap-2 — Anthropic carry-over serialization", () => {
     expect(blocks).toBeDefined()
   })
 
-  test("end-to-end roundtrip: assemble(stream) → re-send → byte-faithful thinking block in outgoing payload", async () => {
-    // Simulate one full turn: produce a StreamEvent sequence, assemble into a
-    // Message, place it back into the next StreamInput, and verify the adapter
-    // re-serializes the ThinkingBlock onto the wire with signature intact.
-    const events: StreamEvent[] = [
-      { type: "thinking_delta", text: "chain " },
-      { type: "thinking_delta", text: "of " },
-      { type: "thinking_delta", text: "thought" },
-      { type: "signature_delta", signature: "SIG_" },
-      { type: "signature_delta", signature: "PART2" },
-      { type: "text_delta", delta: "result" },
-      { type: "message_stop", stop_reason: "end_turn" },
-    ]
-    const { message } = assembleFromEvents(events)
-    expect(message.content).toEqual([
-      { type: "thinking", thinking: "chain of thought", signature: "SIG_PART2" },
-      { type: "text", text: "result", phase: "final_answer" },
-    ])
-
-    const { adapter, captured } = adapterWithCapture()
-    const next: StreamInput = {
-      messages: [
-        { role: "user", content: [{ type: "text", text: "q" }] },
-        message,
-        { role: "user", content: [{ type: "text", text: "follow-up" }] },
-      ],
-      tools: [],
-    }
-    for await (const _ of adapter.stream(next)) {
-      // drain
-    }
-    const msgs = captured.body?.messages as Anthropic.MessageParam[]
-    const assistantBlocks = msgs[1]?.content as Anthropic.ContentBlockParam[]
-    expect(assistantBlocks).toEqual([
-      {
-        type: "thinking",
-        thinking: "chain of thought",
-        signature: "SIG_PART2",
-      },
-      { type: "text", text: "result" },
-    ] as Anthropic.ContentBlockParam[])
-  })
-
-  test("redacted roundtrip: redacted thinking_delta → ThinkingBlock(redacted) → redacted_thinking on the wire", async () => {
-    const events: StreamEvent[] = [
-      { type: "thinking_delta", text: "ENC_BYTES", redacted: true },
-      { type: "text_delta", delta: "ok" },
-      { type: "message_stop", stop_reason: "end_turn" },
-    ]
-    const { message } = assembleFromEvents(events)
-    expect(message.content[0]).toEqual({
-      type: "thinking",
-      thinking: "ENC_BYTES",
-      redacted: true,
-    })
-
-    const { adapter, captured } = adapterWithCapture()
-    const input: StreamInput = {
-      messages: [message, { role: "user", content: [{ type: "text", text: "next" }] }],
-      tools: [],
-    }
-    for await (const _ of adapter.stream(input)) {
-      // drain
-    }
-    const msgs = captured.body?.messages as Anthropic.MessageParam[]
-    const assistantBlocks = msgs[0]?.content as Anthropic.ContentBlockParam[]
-    expect(assistantBlocks[0]).toEqual({
-      type: "redacted_thinking",
-      data: "ENC_BYTES",
-    } as Anthropic.RedactedThinkingBlockParam)
-  })
-
-  test("conversation-prefix cache_control still attaches to the last text block, not thinking", async () => {
-    // Regression: thinking blocks must not be picked as the cache_control
-    // anchor (Anthropic silently drops cache_control on non-text blocks).
-    const { adapter, captured } = adapterWithCapture()
-    const trailingThinking: Message = {
-      role: "user",
-      content: [
-        { type: "text", text: "the question" },
-        // user-side ThinkingBlock is structurally impossible but the cache
-        // anchor must still walk backwards to find a *text* block.
-      ],
-    }
-    const input: StreamInput = {
-      messages: [trailingThinking],
-      tools: [],
-    }
-    for await (const _ of adapter.stream(input)) {
-      // drain
-    }
-    const lastBlocks = lastMessageContent(captured.body)
-    // The single text block carries the cache breakpoint.
-    expect((lastBlocks[0] as { cache_control?: unknown }).cache_control).toBeDefined()
-  })
+  // NOTE: the end-to-end assemble→re-send roundtrips (plaintext byte-faithful,
+  // redacted, and zero-thinking byte-identical) and the cache_control-anchor
+  // regression are covered by the hell-gate superset
+  // (anthropic-thinking-hell.test.ts: ROUND tests at lines 501/539/559 and
+  // H-8 / H-8b). Deleted here to avoid duplication.
 })
 
 describe("ADR-0076 Gap-2 — assemble carry-over message shape", () => {

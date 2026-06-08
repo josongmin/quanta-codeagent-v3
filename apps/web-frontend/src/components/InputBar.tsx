@@ -120,45 +120,34 @@ export const InputBar = ({
     [onAttachImageFile],
   )
 
+  const canSend =
+    !disabled && (value.trim().length > 0 || pendingImages.length > 0)
+
   return (
-    <div className="border-t border-neutral-800 bg-neutral-950 px-4 py-3">
+    <div className="border-t border-line-subtle bg-surface px-4 py-3">
       <PendingAttachmentsPanel
         pendingImages={pendingImages}
         attachmentError={attachmentError}
         onRemovePendingImage={onRemovePendingImage}
         onClearAllPendingImages={onClearAllPendingImages}
       />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={onFileChange}
+      />
       <div
         className={cx(
-          "flex items-end gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1 transition",
+          "rounded-2xl border border-line bg-surface-input px-3 py-2.5 transition focus-within:border-accent/50",
           disabled && "opacity-60",
         )}
       >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-          className="hidden"
-          onChange={onFileChange}
-        />
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => fileInputRef.current?.click()}
-          className={cx(
-            "shrink-0 rounded-md px-2 py-1 text-xs font-medium transition",
-            "border border-neutral-700 bg-neutral-950 text-neutral-300 hover:border-neutral-500 hover:text-neutral-100",
-            "disabled:cursor-not-allowed disabled:border-neutral-800 disabled:text-neutral-600",
-          )}
-        >
-          Image
-        </button>
         <textarea
           ref={inputRef}
-          className="min-h-[2.25rem] max-h-[12rem] flex-1 resize-none bg-transparent px-2 py-1 font-mono text-sm text-neutral-100 outline-none placeholder:text-neutral-600"
-          placeholder={
-            disabled ? "Connecting…" : "Ask quanta anything…"
-          }
+          className="block max-h-[12rem] min-h-[52px] w-full resize-none bg-transparent text-chat text-ink outline-none placeholder:text-ink-faint"
+          placeholder={disabled ? "Connecting…" : "Ask quanta anything…"}
           value={value}
           onChange={(ev) => onChange(ev.target.value)}
           onKeyDown={onKeyDown}
@@ -169,28 +158,101 @@ export const InputBar = ({
           autoComplete="off"
           autoCorrect="off"
         />
-        <button
-          type="button"
-          disabled={
-            disabled ||
-            (value.trim().length === 0 && pendingImages.length === 0)
-          }
-          onClick={() => onSubmit(value.trim())}
-          className={cx(
-            "shrink-0 rounded-md px-3 py-1 text-sm font-medium transition",
-            "bg-accent text-neutral-950 hover:bg-accent-muted",
-            "disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500",
-          )}
-        >
-          Send
-        </button>
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach image"
+              title="Attach image (or paste a screenshot)"
+              className={cx(
+                "rounded-md p-1.5 text-ink-tertiary transition hover:bg-white/5 hover:text-ink",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
+                "disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent",
+              )}
+            >
+              <ImageGlyph />
+            </button>
+            <span className="select-none text-[11px] text-ink-tertiary">
+              <span className="rounded bg-white/5 px-1 py-0.5 font-mono text-ink-secondary">
+                /
+              </span>{" "}
+              for commands
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={!canSend}
+            onClick={() => onSubmit(value.trim())}
+            aria-label="Send message"
+            title="Send (Enter)"
+            className={cx(
+              "flex size-8 shrink-0 items-center justify-center rounded-full transition",
+              "bg-accent text-accent-fg hover:bg-accent-muted",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
+              "disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-faint",
+            )}
+          >
+            <SendGlyph />
+          </button>
+        </div>
       </div>
-      <div className="mt-1 flex items-center justify-between px-1 text-[10px] text-neutral-600">
-        <span>Enter to send · Shift+Enter newline · paste screenshot or use Image</span>
+      <div className="mt-1.5 px-1 text-[11px] text-ink-tertiary">
+        <span>Enter to send · Shift+Enter newline · paste a screenshot to attach</span>
       </div>
     </div>
   )
 }
+
+const ImageGlyph = (): JSX.Element => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.75}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    className="size-[18px]"
+  >
+    <rect x={3} y={3} width={18} height={18} rx={2} />
+    <circle cx={8.5} cy={8.5} r={1.5} />
+    <path d="m21 15-5-5L5 21" />
+  </svg>
+)
+
+const SendGlyph = (): JSX.Element => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={2}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    className="size-[18px]"
+  >
+    <path d="M12 19V5" />
+    <path d="m5 12 7-7 7 7" />
+  </svg>
+)
+
+const RemoveGlyph = (): JSX.Element => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={2}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    className="size-[14px]"
+  >
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
+  </svg>
+)
 
 const PendingAttachmentsPanel = memo(
   ({
@@ -203,8 +265,8 @@ const PendingAttachmentsPanel = memo(
     return (
       <>
         {pendingImages.length > 0 ? (
-          <div className="mb-2 rounded-md border border-neutral-800 bg-neutral-900 p-2">
-            <div className="mb-1 flex items-center justify-between px-1 text-[11px] text-neutral-500">
+          <div className="mb-3 rounded-xl border border-line-subtle bg-surface-raised p-3">
+            <div className="mb-2 flex items-center justify-between px-0.5 text-xs text-ink-tertiary">
               <span>
                 {pendingImages.length} image{pendingImages.length === 1 ? "" : "s"} attached
               </span>
@@ -212,17 +274,17 @@ const PendingAttachmentsPanel = memo(
                 <button
                   type="button"
                   onClick={onClearAllPendingImages}
-                  className="rounded px-1 py-0.5 text-[11px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+                  className="rounded-md px-1.5 py-0.5 text-xs text-ink-secondary transition hover:bg-white/5 hover:text-ink"
                 >
                   Clear all
                 </button>
               ) : null}
             </div>
-            <ul className="flex flex-wrap gap-2">
+            <ul className="flex flex-wrap gap-3">
               {pendingImages.map((img, idx) => (
                 <li
                   key={`${img.byteSize}-${idx}-${img.title}`}
-                  className="relative h-16 w-24 shrink-0 overflow-hidden rounded border border-neutral-800"
+                  className="relative h-16 w-24 shrink-0 overflow-hidden rounded-lg border border-line-subtle bg-surface-raised"
                 >
                   <img
                     src={`data:${img.mediaType};base64,${img.data}`}
@@ -234,9 +296,9 @@ const PendingAttachmentsPanel = memo(
                     type="button"
                     onClick={() => onRemovePendingImage(idx)}
                     aria-label={`Remove attachment ${idx + 1}`}
-                    className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-neutral-950/80 text-xs leading-none text-neutral-200 hover:bg-neutral-800"
+                    className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-md bg-surface/80 text-ink-secondary backdrop-blur-sm transition hover:bg-surface hover:text-ink"
                   >
-                    ×
+                    <RemoveGlyph />
                   </button>
                 </li>
               ))}
@@ -244,7 +306,7 @@ const PendingAttachmentsPanel = memo(
           </div>
         ) : null}
         {attachmentError !== null ? (
-          <div className="mb-2 rounded-md border border-red-900/80 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+          <div className="mb-3 rounded-lg border border-err/40 bg-err/10 px-3 py-2 text-xs text-err">
             {attachmentError}
           </div>
         ) : null}

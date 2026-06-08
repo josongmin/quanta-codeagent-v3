@@ -77,11 +77,11 @@ export const UsageBreakdownPanel = ({
     <section
       data-testid="usage-breakdown-panel"
       aria-label="context usage breakdown"
-      className={["rounded-md border border-neutral-800 bg-neutral-900 p-3", className ?? ""]
+      className={["rounded-md border border-line bg-surface-raised p-3", className ?? ""]
         .join(" ")
         .trim()}
     >
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-secondary">
         Context usage
       </h3>
       <UsageBar
@@ -108,17 +108,17 @@ export const UsageBreakdownPanel = ({
                   </span>
                 }
               >
-                <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 py-1 text-[11px] text-neutral-400">
+                <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 py-1 text-[11px] text-ink-secondary">
                   <dt>tokens</dt>
-                  <dd className="tabular-nums text-neutral-200">{seg.tokens}</dd>
+                  <dd className="tabular-nums text-ink">{seg.tokens}</dd>
                   {seg.chars !== undefined ? (
                     <>
                       <dt>chars</dt>
-                      <dd className="tabular-nums text-neutral-200">{seg.chars}</dd>
+                      <dd className="tabular-nums text-ink">{seg.chars}</dd>
                     </>
                   ) : null}
                   <dt>share</dt>
-                  <dd className="tabular-nums text-neutral-200">{share}%</dd>
+                  <dd className="tabular-nums text-ink">{share}%</dd>
                 </dl>
               </CollapsibleSection>
             )

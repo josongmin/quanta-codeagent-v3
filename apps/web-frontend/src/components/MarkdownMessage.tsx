@@ -42,7 +42,7 @@ export const MarkdownMessage = ({
   text,
 }: MarkdownMessageProps): JSX.Element => {
   return (
-    <div className="markdown-body whitespace-pre-wrap break-words leading-relaxed">
+    <div className="markdown-body whitespace-pre-wrap break-words font-sans text-chat text-ink">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -62,7 +62,7 @@ export const MarkdownMessage = ({
               return (
                 <code
                   className={cx(
-                    "rounded bg-neutral-950 px-1 py-0.5 text-xs",
+                    "rounded-md border border-line-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[0.85em] text-ink",
                     className,
                   )}
                   {...rest}
@@ -72,33 +72,38 @@ export const MarkdownMessage = ({
               )
             }
             return (
-              <SyntaxHighlighter
-                language={match[1]}
-                style={tomorrow}
-                PreTag="div"
-                wrapLongLines
-                customStyle={{
-                  background: "rgb(10 10 10)",
-                  margin: 0,
-                  borderRadius: "0.375rem",
-                  fontSize: "0.8rem",
-                  // Wrap to the bubble width instead of overflowing
-                  // horizontally. `pre-wrap` keeps real newlines + indents;
-                  // `break-word` breaks long tokens (URLs, paths, etc.) so
-                  // they don't blow past the bubble.
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  overflowX: "hidden",
-                }}
-                codeTagProps={{
-                  style: {
+              <div className="my-2 overflow-hidden rounded-lg border border-line bg-surface-raised">
+                <SyntaxHighlighter
+                  language={match[1]}
+                  style={tomorrow}
+                  PreTag="div"
+                  wrapLongLines
+                  customStyle={{
+                    // Transparent so the bordered token-styled wrapper shows
+                    // through (container = surface-raised + line border).
+                    background: "transparent",
+                    margin: 0,
+                    padding: "0.75rem 0.875rem",
+                    borderRadius: 0,
+                    fontSize: "0.8rem",
+                    // Wrap to the bubble width instead of overflowing
+                    // horizontally. `pre-wrap` keeps real newlines + indents;
+                    // `break-word` breaks long tokens (URLs, paths, etc.) so
+                    // they don't blow past the bubble.
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
-                  },
-                }}
-              >
-                {String(children ?? "").replace(/\n$/, "")}
-              </SyntaxHighlighter>
+                    overflowX: "hidden",
+                  }}
+                  codeTagProps={{
+                    style: {
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    },
+                  }}
+                >
+                  {String(children ?? "").replace(/\n$/, "")}
+                </SyntaxHighlighter>
+              </div>
             )
           },
           a({ children, ...rest }) {

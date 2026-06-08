@@ -104,7 +104,8 @@ describe.if(isDarwin)("sips image downsample — real resize", () => {
 })
 
 describe.if(!isDarwin)("sips image downsample — non-darwin", () => {
-  test("skipped (sips is macOS only)", () => {
-    expect(true).toBe(true)
-  })
+  // `sips` is macOS-only; off-darwin the port is never wired so there is
+  // nothing real to assert. Register an honest skip rather than a self-true
+  // assertion (`expect(true).toBe(true)`) that exercises zero production code.
+  test.skip("sips is macOS only", () => {})
 })

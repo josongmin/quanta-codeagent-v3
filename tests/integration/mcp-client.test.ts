@@ -113,6 +113,11 @@ describe("McpClient against a mock MCP server", () => {
     const c = makeClient()
     await c.start()
     await c.start() // idempotent
+    // A clean round-trip after a double-start proves the handshake actually
+    // landed AND that the second start() was a no-op (single live connection,
+    // not a re-spawn/re-handshake): if either failed this listTools() would
+    // hang or reject instead of returning the live server's tools.
+    expect((await c.listTools()).map((t) => t.name)).toEqual(["alpha", "beta"])
     await c.stop()
   })
 

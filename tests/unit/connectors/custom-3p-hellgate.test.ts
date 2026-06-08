@@ -88,9 +88,6 @@ const tmpJsonl = (): string => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("custom-3p-hellgate", () => {
-  // Wallclock perf assertions flake on loaded CI — gate behind opt-in flag.
-  const PERF_STRICT = process.env.QUANTA_PERF_STRICT === "1"
-
   test("HELL-1: register → list round-trip", async () => {
     const reg = createInMemoryCustom3pRegistry({ healthProbe: fakeOkProbe })
     await reg.register(llmSpec("a"))
@@ -281,14 +278,15 @@ describe("custom-3p-hellgate", () => {
     expect(exported).not.toContain("Custom3pError")
   })
 
-  test("HELL-15: 100-provider perf — register + list under 50ms", async () => {
+  test("HELL-15: 100-provider register-at-scale preserves insertion order", async () => {
     const reg = createInMemoryCustom3pRegistry({ healthProbe: fakeOkProbe })
-    const t0 = performance.now()
     for (let i = 0; i < 100; i++) await reg.register(llmSpec(`p-${i}`))
     const list = await reg.list()
-    const elapsed = performance.now() - t0
     expect(list.length).toBe(100)
-    if (PERF_STRICT) expect(elapsed).toBeLessThan(50)
+    // Algorithmic contract: list() yields rows in Map insertion order at scale.
+    expect(list.map((s) => s.id)).toEqual(
+      Array.from({ length: 100 }, (_, i) => asProviderId(`p-${i}`)),
+    )
   })
 
   test("HELL-16: ProviderKind 2-arm exhaustive — invalid endpoint per kind throws", async () => {

@@ -15,10 +15,10 @@ export interface StatusBarProps {
 }
 
 const DOT_BY_KIND: Record<ConnectionState["kind"], string> = {
-  connected: "bg-emerald-500",
-  connecting: "bg-amber-400 animate-pulse",
-  disconnected: "bg-red-500",
-  closed: "bg-neutral-600",
+  connected: "bg-ok",
+  connecting: "bg-warn animate-pulse",
+  disconnected: "bg-err",
+  closed: "bg-ink-faint",
 }
 
 export const StatusBar = ({
@@ -40,16 +40,16 @@ export const StatusBar = ({
     }
   }
   return (
-    <div className="flex items-center gap-3 text-xs text-neutral-400">
+    <div className="flex items-center gap-3 text-xs text-ink-secondary">
       <div className="flex items-center gap-1.5">
         <span
           className={cx("inline-block h-2 w-2 rounded-full", DOT_BY_KIND[connection.kind])}
           aria-hidden
         />
-        <span className="font-mono">{renderConnection(connection)}</span>
+        <span className="text-ink-secondary">{renderConnection(connection)}</span>
       </div>
       {sessionStatus !== null ? (
-        <div className="rounded border border-neutral-800 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-neutral-500">
+        <div className="rounded-full border border-line px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-ink-tertiary">
           {sessionStatus}
         </div>
       ) : null}
@@ -61,10 +61,9 @@ export const StatusBar = ({
           }}
           disabled={restarting}
           className={cx(
-            "rounded border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors",
-            restarting
-              ? "border-neutral-800 text-neutral-600"
-              : "border-amber-700 text-amber-300 hover:bg-amber-500/10",
+            "rounded-lg border border-line px-3 py-1.5 text-sm text-ink transition hover:bg-white/5",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
+            "disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent",
           )}
           title="서버(데몬) 재시작"
         >

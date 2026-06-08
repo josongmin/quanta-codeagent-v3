@@ -33,60 +33,74 @@ class CapturingStream implements StreamPort {
 
 describe("knobs_applied AgentEvent variant", () => {
   test("constructs with all required fields (compile-time contract)", () => {
-    const event: AgentEvent = {
+    // The `: AgentEvent` annotation IS the assertion: it pins this literal
+    // against the production closed union (required fields, surface enum,
+    // preset:string|null). Runtime expect()s on the same literals just written
+    // would be x===x tautologies — the typecheck delivers the only real pin.
+    const _event: AgentEvent = {
       type: "knobs_applied",
       surface: "bench",
       knobs: { lsp: { value: true, source: "env" } },
       preset: null,
       costMultiplier: 1,
     }
-    expect(event.type).toBe("knobs_applied")
-    expect(event.surface).toBe("bench")
-    expect(event.preset).toBeNull()
+    void _event
   })
 
   test("preset is string | null — null is the absent sentinel, NOT optional", () => {
-    const withPreset: AgentEvent = {
+    // Compile-time pin: both a string preset AND `null` must typecheck against
+    // `: AgentEvent`, while OMITTING `preset` must NOT (it is non-optional).
+    // That string|null-but-required shape is the contract; runtime expect()s on
+    // the just-written literals add nothing.
+    const _withPreset: AgentEvent = {
       type: "knobs_applied",
       surface: "bench",
       knobs: {},
       preset: "agentless-full",
       costMultiplier: 0,
     }
-    const withoutPreset: AgentEvent = {
+    const _withoutPreset: AgentEvent = {
       type: "knobs_applied",
       surface: "bench",
       knobs: {},
       preset: null,
       costMultiplier: 0,
     }
-    expect(withPreset.preset).toBe("agentless-full")
-    expect(withoutPreset.preset).toBeNull()
+    void _withPreset
+    void _withoutPreset
   })
 
   test("empty knobs record is a valid payload (matrix baseline)", () => {
-    const event: AgentEvent = {
+    // Compile-time pin: an empty `{}` knobs map satisfies the `: AgentEvent`
+    // shape. The on-the-wire empty-object behavior (knobs:{} not absent) is
+    // exercised for real by the JsonlRecorder test below ("empty knobs map ⇒
+    // knobs:{} on the wire"). Object.keys({})===[] / costMultiplier===0 here
+    // would only test JS builtins, so they are dropped.
+    const _event: AgentEvent = {
       type: "knobs_applied",
       surface: "bench",
       knobs: {},
       preset: null,
       costMultiplier: 0,
     }
-    expect(Object.keys(event.knobs)).toEqual([])
-    expect(event.costMultiplier).toBe(0)
+    void _event
   })
 
   test("surface mirror accepts the 5-surface closed enum", () => {
+    // Compile-time pin: each of the 5 surface strings must typecheck against
+    // the `surface: SurfaceMirror` field of `: AgentEvent`. If SurfaceMirror
+    // drops/renames a surface, one of these assignments fails to compile.
+    // `event.surface === surface` at runtime would be x===x, so it is dropped.
     const surfaces = ["bench", "cli", "agent-batch", "agent-interactive", "ide"] as const
     for (const surface of surfaces) {
-      const event: AgentEvent = {
+      const _event: AgentEvent = {
         type: "knobs_applied",
         surface,
         knobs: {},
         preset: null,
         costMultiplier: 0,
       }
-      expect(event.surface).toBe(surface)
+      void _event
     }
   })
 })

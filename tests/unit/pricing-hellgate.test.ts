@@ -29,8 +29,18 @@ import { costUsd, PRICING_VERSION } from "@/observability"
 /* ------------------------------------------------------------------ */
 
 describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
-  // Each entry: [model, inPerM, outPerM]. costUsd at 1M/1M = inPerM + outPerM.
-  const PINNED: Array<[string, number, number]> = [
+  // The 1M-in + 1M-out TOTAL for each model is pinned with INDEPENDENT hard
+  // literals in the base suite (tests/unit/pricing.test.ts: gpt-4o→12.5,
+  // gpt-4o-mini→0.75, claude-opus-4-7→90, claude-sonnet-4-6→18,
+  // claude-haiku-4-5→6). Re-asserting the total here against a test-local
+  // `inPerM+outPerM` mirror drifts in lockstep with the table and cannot catch
+  // table drift the base already catches, so it is intentionally NOT repeated.
+  //
+  // What is genuinely additive here: per-model input-ONLY / output-ONLY
+  // isolation (base only isolates gpt-4o). Each leg is pinned with an
+  // independent hard literal so a single-rate edit is caught without a mirror.
+  // Each entry: [model, inPerM hard literal, outPerM hard literal].
+  const ISOLATION: Array<[string, number, number]> = [
     ["gpt-4o", 2.5, 10],
     ["gpt-4o-mini", 0.15, 0.6],
     ["claude-opus-4-7", 15, 75],
@@ -38,10 +48,7 @@ describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
     ["claude-haiku-4-5", 1, 5],
   ]
 
-  for (const [model, inPerM, outPerM] of PINNED) {
-    test(`${model}: 1M in + 1M out === ${inPerM} + ${outPerM}`, () => {
-      expect(costUsd(model, 1_000_000, 1_000_000)).toBe(inPerM + outPerM)
-    })
+  for (const [model, inPerM, outPerM] of ISOLATION) {
     test(`${model}: input-only and output-only isolate the two rates`, () => {
       expect(costUsd(model, 1_000_000, 0)).toBe(inPerM)
       expect(costUsd(model, 0, 1_000_000)).toBe(outPerM)
@@ -67,8 +74,10 @@ describe("G3 cache_read pricing (pricing.v2: provider-aware, discounted)", () =>
     expect(withCache).toBe(11.25)
     // A cache hit LOWERS cost vs an all-fresh prompt of the same size (discount).
     expect(withCache).toBeLessThan(base)
-    // Carve-out identity: fully-cached 1M prompt == pricing 1M purely at cache rate.
-    expect(costUsd("gpt-4o", 1_000_000, 0, 1_000_000)).toBe((1_000_000 * 1.25) / 1_000_000)
+    // Carve-out identity: a fully-cached 1M prompt prices entirely at the
+    // discounted cache rate. Pinned with an independent hard literal ($1.25/1M ×
+    // 1M = 1.25) rather than recomputing the impl's own rate×tokens/1e6 formula.
+    expect(costUsd("gpt-4o", 1_000_000, 0, 1_000_000)).toBe(1.25)
   })
 
   test("Anthropic: cacheRead additive at the discounted cache-read rate", () => {

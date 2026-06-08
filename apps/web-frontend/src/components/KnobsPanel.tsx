@@ -12,9 +12,10 @@
  * reject the write). Redacted string values render as `[redacted]` and are
  * never un-redacted.
  *
- * Styling mirrors `ObservabilityPane` / `SlashPalette` (neutral-900/950
- * surfaces, accent for keys, uppercase-tracking section headers) — no new
- * design system.
+ * Styling follows the Codex-aligned token system (DESIGN.md): a real modal
+ * (`bg-surface-overlay` panel over a `bg-black/50` backdrop), `surface-input`
+ * search field, `hover:bg-white/5` knob rows, mono env keys, uppercase-tracking
+ * section headers.
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react"
@@ -142,18 +143,18 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
       aria-modal="true"
       aria-label="Settings — runtime knobs"
       data-testid="knobs-panel"
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 sm:p-8"
       onClick={(ev) => {
         // Backdrop click closes; clicks inside the card don't bubble here.
         if (ev.target === ev.currentTarget) onClose()
       }}
     >
-      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-surface-overlay shadow-2xl">
         {/* Header */}
-        <header className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3">
+        <header className="flex items-center justify-between gap-3 border-b border-line-subtle px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold text-neutral-100">Settings · Knobs</h2>
-            <p className="mt-0.5 text-[11px] text-neutral-500">
+            <h2 className="text-sm font-medium text-ink">Settings · Knobs</h2>
+            <p className="mt-0.5 text-[11px] text-ink-tertiary">
               {state.kind === "ready"
                 ? `${state.data.total} knob${state.data.total === 1 ? "" : "s"} · showing ${visibleCount}`
                 : "Runtime configuration manifest"}
@@ -163,47 +164,48 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
             type="button"
             onClick={onClose}
             aria-label="Close settings"
-            className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+            title="Close (Esc)"
+            className="rounded-md p-1.5 text-ink-tertiary transition hover:bg-white/5 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50"
           >
-            Esc ✕
+            <CloseIcon />
           </button>
         </header>
 
         {/* Search */}
-        <div className="border-b border-neutral-800 px-4 py-2">
+        <div className="border-b border-line-subtle px-4 py-2">
           <input
             type="text"
             value={query}
             onChange={(ev) => setQuery(ev.target.value)}
             placeholder="Filter by key, description, or group…"
             aria-label="Filter knobs"
-            className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-accent-muted"
+            className="w-full rounded-lg border border-line bg-surface-input px-3 py-1.5 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-accent/50"
           />
         </div>
 
         {/* Body */}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {state.kind === "loading" || state.kind === "idle" ? (
-            <p className="py-8 text-center text-xs text-neutral-500" data-testid="knobs-loading">
+            <p className="py-8 text-center text-xs text-ink-tertiary" data-testid="knobs-loading">
               Loading knobs…
             </p>
           ) : state.kind === "error" ? (
             <div
-              className="rounded-md border border-red-800 bg-red-950 p-3 text-xs text-red-200"
+              className="rounded-lg border border-err/40 bg-err/10 p-3 text-xs text-ink"
               data-testid="knobs-error"
             >
-              <p className="font-medium">Failed to load knobs.</p>
-              <p className="mt-1 text-red-300/80">{state.message}</p>
+              <p className="font-medium text-err">Failed to load knobs.</p>
+              <p className="mt-1 text-ink-secondary">{state.message}</p>
               <button
                 type="button"
                 onClick={() => load()}
-                className="mt-2 rounded bg-red-900 px-2 py-0.5 text-[11px] text-red-100 hover:bg-red-800"
+                className="mt-2 rounded-md border border-line px-2 py-0.5 text-[11px] text-ink hover:bg-white/5"
               >
                 Retry
               </button>
             </div>
           ) : filteredGroups.length === 0 ? (
-            <p className="py-8 text-center text-xs text-neutral-500" data-testid="knobs-empty">
+            <p className="py-8 text-center text-xs text-ink-tertiary" data-testid="knobs-empty">
               {state.data.groups.length === 0
                 ? "No knobs reported by the daemon."
                 : `No knobs match “${query}”.`}
@@ -212,7 +214,7 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
             <div className="space-y-4">
               {filteredGroups.map((group) => (
                 <section key={group.group} data-testid={`knobs-group-${group.group}`}>
-                  <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                  <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
                     {group.group}
                   </h3>
                   <ul className="space-y-1.5">
@@ -251,9 +253,9 @@ interface KnobRowProps {
 }
 
 const SOURCE_TONE: Record<string, string> = {
-  env: "bg-emerald-900 text-emerald-100",
+  env: "bg-ok/15 text-ok",
   session: "bg-accent/20 text-accent",
-  default: "bg-neutral-800 text-neutral-400",
+  default: "bg-white/5 text-ink-tertiary",
 }
 
 const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Element => {
@@ -261,7 +263,7 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
   const sourceTone = SOURCE_TONE[knob.source] ?? SOURCE_TONE.default
   return (
     <li
-      className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2"
+      className="rounded-lg px-2.5 py-2 transition hover:bg-white/5"
       data-testid={`knob-row-${knob.envKey}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -269,18 +271,18 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
           <div className="flex flex-wrap items-baseline gap-2">
             <code className="font-mono text-xs font-medium text-accent">{knob.envKey}</code>
             {knob.home.length > 0 ? (
-              <span className="rounded bg-neutral-800 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500">
+              <span className="rounded bg-white/5 px-1 py-0.5 text-[9px] uppercase tracking-wide text-ink-tertiary">
                 {knob.home}
               </span>
             ) : null}
           </div>
           {knob.describe.length > 0 ? (
-            <p className="mt-0.5 break-words text-[11px] text-neutral-400">{knob.describe}</p>
+            <p className="mt-0.5 break-words text-[11px] text-ink-secondary">{knob.describe}</p>
           ) : null}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
-            <span className="text-neutral-500">
+            <span className="text-ink-tertiary">
               value:{" "}
-              <span className="font-mono text-neutral-300">{displayKnobValue(knob)}</span>
+              <span className="font-mono text-ink-secondary">{displayKnobValue(knob)}</span>
             </span>
             <span
               className={cx(
@@ -290,10 +292,10 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
             >
               {knob.source}
             </span>
-            <span className="text-neutral-600">({knob.kind})</span>
+            <span className="text-ink-faint">({knob.kind})</span>
           </div>
           {error !== undefined ? (
-            <p className="mt-1 text-[10px] text-red-400" data-testid={`knob-error-${knob.envKey}`}>
+            <p className="mt-1 text-[10px] text-err" data-testid={`knob-error-${knob.envKey}`}>
               {error}
             </p>
           ) : null}
@@ -312,7 +314,7 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
             />
           ) : (
             <span
-              className="rounded bg-neutral-800 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500"
+              className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-ink-tertiary"
               title={
                 knob.hotToggleable
                   ? "Not in the daemon's /config write allowlist"
@@ -347,8 +349,8 @@ const Toggle = ({
     disabled={pending}
     onClick={() => onChange(!on)}
     className={cx(
-      "relative inline-flex h-5 w-9 items-center rounded-full transition",
-      on ? "bg-accent" : "bg-neutral-700",
+      "relative inline-flex h-5 w-9 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
+      on ? "bg-accent" : "bg-line-strong",
       pending ? "cursor-wait opacity-60" : "cursor-pointer",
     )}
   >
@@ -359,4 +361,19 @@ const Toggle = ({
       )}
     />
   </button>
+)
+
+const CloseIcon = (): JSX.Element => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="size-4"
+  >
+    <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
 )

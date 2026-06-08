@@ -1,17 +1,23 @@
 /**
  * ADR-0087 — additive eval schema fields (Cursor EvalTracking absorption §7.3).
  *
- * Verifies the new OPTIONAL fields are non-breaking:
- *  (a) records WITHOUT the new fields stay valid (byte-identical envelope),
- *  (b) records WITH metrics[]/tokens/costUsd/status/params are well-typed,
- *  (d) Metric.unit / Metric.step are optional.
+ * Verifies the new OPTIONAL fields are non-breaking on the REAL on-disk path:
+ *  (a) records WITHOUT the new fields survive a write→read round-trip,
+ *  (b) records WITH metrics[]/tokens/costUsd/status/params survive intact,
+ *  (d) Metric.unit / Metric.step are optional (absent fields stay absent).
  * (c) zod round-trip is N/A — schema.ts is plain TS interfaces, no zod.
  *
- * No runtime parser exists for these interfaces, so the "validation" we assert
- * is structural: TS typechecks the literals (tsc --noEmit gates the build) and
- * the values round-trip through JSON (the JSONL on-disk format) unchanged.
+ * There is no zod parser, but the JSONL append-only store IS the production
+ * (de)serializer: `ResultStore.append`/`finish` write a line via JSON.stringify
+ * and `readRunRecords`/`readRunSummary` parse + validate it back. Routing the
+ * round-trips through that store (instead of a no-op JSON.parse(JSON.stringify)
+ * on a test-local literal) means a regression in the store's envelope stamping,
+ * line framing, or validation drop-rules is actually caught here.
  */
-import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type {
   Metric,
   PublicPayload,
@@ -19,10 +25,21 @@ import type {
   SyntheticPayload,
   TokenUsage,
 } from "@/../src/apps/eval/storage/schema"
-import { SCHEMA_VERSION } from "@/../src/apps/eval/storage/schema"
+import { ResultStore, makeRunId } from "@/../src/apps/eval/storage/result-store"
 
 describe("ADR-0087 eval schema additive fields", () => {
-  test("(a) synthetic/public payloads WITHOUT new fields stay valid", () => {
+  let dir: string
+  let store: ResultStore
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "eval-additive-"))
+    store = new ResultStore({ dir, now: () => 1_700_000_000_000 })
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("(a) synthetic/public payloads WITHOUT new fields survive write→read", async () => {
     const syn: SyntheticPayload = {
       kind: "synthetic",
       scenarioId: "pure-function-tests",
@@ -39,14 +56,21 @@ describe("ADR-0087 eval schema additive fields", () => {
       verdict: "fail",
       durationMs: 9000,
     }
-    expect(syn.metrics).toBeUndefined()
-    expect(pub.tokens).toBeUndefined()
-    // JSONL round-trip is identical when no optional fields are set.
-    expect(JSON.parse(JSON.stringify(syn))).toEqual(syn)
-    expect(JSON.parse(JSON.stringify(pub))).toEqual(pub)
+    const synRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "aaaa0001")
+    const pubRun = makeRunId("public", () => 1_700_000_000_000, () => "bbbb0001")
+    await store.append(synRun, { tier: "synthetic", usecase: "uc", payload: syn })
+    await store.append(pubRun, { tier: "public", usecase: "uc", payload: pub })
+
+    const [synBack] = [...store.readRunRecords(synRun)]
+    const [pubBack] = [...store.readRunRecords(pubRun)]
+    expect(synBack?.payload).toEqual(syn)
+    expect(pubBack?.payload).toEqual(pub)
+    // Optional additive fields are genuinely absent after the on-disk round-trip.
+    expect((synBack?.payload as SyntheticPayload).metrics).toBeUndefined()
+    expect((pubBack?.payload as PublicPayload).tokens).toBeUndefined()
   })
 
-  test("(b) payloads WITH metrics[]/tokens/costUsd round-trip", () => {
+  test("(b) payloads WITH metrics[]/tokens/costUsd survive write→read", async () => {
     const tokens: TokenUsage = { prompt: 1200, completion: 340, cacheRead: 800 }
     const metrics: readonly Metric[] = [
       { key: "judge.helpfulness", value: 0.92 },
@@ -73,47 +97,69 @@ describe("ADR-0087 eval schema additive fields", () => {
       tokens,
       costUsd: 0.5,
     }
-    const synBack = JSON.parse(JSON.stringify(syn)) as SyntheticPayload
-    const pubBack = JSON.parse(JSON.stringify(pub)) as PublicPayload
-    expect(synBack).toEqual(syn)
-    expect(pubBack).toEqual(pub)
-    expect(synBack.tokens?.cacheRead).toBe(800)
-    expect(synBack.metrics?.[1]?.unit).toBe("tokens")
-    expect(pubBack.costUsd).toBe(0.5)
+    const synRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "aaaa0002")
+    const pubRun = makeRunId("public", () => 1_700_000_000_000, () => "bbbb0002")
+    await store.append(synRun, { tier: "synthetic", usecase: "uc", payload: syn })
+    await store.append(pubRun, { tier: "public", usecase: "uc", payload: pub })
+
+    const [synBack] = [...store.readRunRecords(synRun)] as { payload: SyntheticPayload }[]
+    const [pubBack] = [...store.readRunRecords(pubRun)] as { payload: PublicPayload }[]
+    expect(synBack?.payload).toEqual(syn)
+    expect(pubBack?.payload).toEqual(pub)
+    expect(synBack?.payload.tokens?.cacheRead).toBe(800)
+    expect(synBack?.payload.metrics?.[1]?.unit).toBe("tokens")
+    expect(pubBack?.payload.costUsd).toBe(0.5)
   })
 
-  test("(b) RunSummaryRecord WITH status/params round-trips; WITHOUT stays valid", () => {
-    const base: RunSummaryRecord = {
-      ts: 1_700_000_000_000,
-      schema: SCHEMA_VERSION,
-      runId: "synthetic-abc",
+  test("(b) RunSummaryRecord WITH status/params survives; WITHOUT stays valid", async () => {
+    const baseRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "cccc0001")
+    const base: Omit<RunSummaryRecord, "ts" | "schema"> = {
+      runId: baseRun,
       tier: "synthetic",
       argv: ["eval", "synthetic"],
       counts: { pass: 3, partial: 0, fail: 1, error: 0, skipped: 0 },
       durationMs: 5000,
     }
-    expect(base.status).toBeUndefined()
-    expect(base.params).toBeUndefined()
-    expect(JSON.parse(JSON.stringify(base))).toEqual(base)
+    await store.finish(base)
+    const baseBack = store.readRunSummary(baseRun)
+    expect(baseBack?.counts).toEqual(base.counts)
+    expect(baseBack?.status).toBeUndefined()
+    expect(baseBack?.params).toBeUndefined()
 
-    const enriched: RunSummaryRecord = {
+    const enrichedRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "cccc0002")
+    const enriched: Omit<RunSummaryRecord, "ts" | "schema"> = {
       ...base,
+      runId: enrichedRun,
       status: "finished",
       params: { model: "claude-opus-4-7", temperature: 0, seed: 42, plan: true },
     }
-    const back = JSON.parse(JSON.stringify(enriched)) as RunSummaryRecord
-    expect(back).toEqual(enriched)
-    expect(back.status).toBe("finished")
-    expect(back.params?.seed).toBe(42)
-    expect(back.params?.plan).toBe(true)
+    await store.finish(enriched)
+    const back = store.readRunSummary(enrichedRun)
+    expect(back?.status).toBe("finished")
+    expect(back?.params?.seed).toBe(42)
+    expect(back?.params?.plan).toBe(true)
   })
 
-  test("(d) Metric.unit and Metric.step are optional", () => {
+  test("(d) Metric.unit and Metric.step are optional through the on-disk round-trip", async () => {
     const minimal: Metric = { key: "k", value: 1 }
     const full: Metric = { key: "k", value: 1, unit: "ms", step: 7 }
-    expect(minimal.unit).toBeUndefined()
-    expect(minimal.step).toBeUndefined()
-    expect(full.unit).toBe("ms")
-    expect(full.step).toBe(7)
+    const runId = makeRunId("synthetic", () => 1_700_000_000_000, () => "dddd0001")
+    const payload: SyntheticPayload = {
+      kind: "synthetic",
+      scenarioId: "metric-optionality",
+      verdict: "pass",
+      rubric: [],
+      toolsUsed: [],
+      durationMs: 1,
+      metrics: [minimal, full],
+    }
+    await store.append(runId, { tier: "synthetic", usecase: "uc", payload })
+
+    const [back] = [...store.readRunRecords(runId)] as { payload: SyntheticPayload }[]
+    const m = back?.payload.metrics
+    expect(m?.[0]?.unit).toBeUndefined()
+    expect(m?.[0]?.step).toBeUndefined()
+    expect(m?.[1]?.unit).toBe("ms")
+    expect(m?.[1]?.step).toBe(7)
   })
 })

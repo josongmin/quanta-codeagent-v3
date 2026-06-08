@@ -67,17 +67,13 @@ describe("memory-fence-stays-clean-hellgate — static scan", () => {
     expect(offenders).toEqual([])
   })
 
-  test("telemetry-port.ts exports the port and the no-op", async () => {
-    const file = join(MEMORY_ROOT, "telemetry-port.ts")
-    const content = await readFile(file, "utf8")
-    expect(content).toContain("export interface MemoryTelemetryPort")
-    expect(content).toContain("export const noopMemoryTelemetry")
-    // Anti-leak invariant is encoded structurally as allow-list constants.
-    expect(content).toContain("PHASE1_EVENT_ALLOWED_KEYS")
-    expect(content).toContain("PHASE2_EVENT_ALLOWED_KEYS")
-    expect(content).toContain("RECALL_EVENT_ALLOWED_KEYS")
-    expect(content).toContain("FORBIDDEN_TELEMETRY_KEYS")
-  })
+  // NOTE: the export-surface + allow-list-contents grep was removed (audit
+  // 2026-06-08 finding 87 [DUPLICATE]). The six exported symbols and their
+  // allow-list contents are covered behaviorally by
+  // tests/unit/memory-telemetry-port-hellgate.test.ts, which imports them live
+  // from @/memory and asserts real Set membership (lines 258-282) plus port
+  // behavior — a strict superset that fails on a structurally-broken module
+  // instead of passing on stale literal text.
 
   test("telemetry-port.ts itself has no @/observability import (the seam IS the slice)", async () => {
     const file = join(MEMORY_ROOT, "telemetry-port.ts")

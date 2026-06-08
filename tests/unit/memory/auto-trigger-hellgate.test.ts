@@ -18,9 +18,7 @@ import {
   DEFAULT_TRIGGER_POLICY,
   DefaultMemoryAutoTrigger,
   type MemoryAutoTrigger,
-  type SessionEndOutcome,
   TriggerError,
-  type TriggerPolicy,
 } from "../../../src/memory/auto-trigger"
 import type {
   Phase1Port,
@@ -694,8 +692,12 @@ describe("HELL-MAT-21: DEFAULT_TRIGGER_POLICY = {0.7, 1}", () => {
   })
 
   test("type-shape conformance — TriggerPolicy is closed-2 field", () => {
-    const p: TriggerPolicy = { promoteThreshold: 0.7, minUsageCount: 1 }
-    expect(Object.keys(p).sort()).toEqual(["minUsageCount", "promoteThreshold"])
+    // Assert the REAL exported constant's field-set (not a hand-built literal),
+    // so adding/dropping a policy field in production is caught here.
+    expect(Object.keys(DEFAULT_TRIGGER_POLICY).sort()).toEqual([
+      "minUsageCount",
+      "promoteThreshold",
+    ])
   })
 })
 
@@ -764,24 +766,9 @@ describe("port shape: DefaultMemoryAutoTrigger implements MemoryAutoTrigger", ()
     expect(typeof t.shouldPromote).toBe("function")
   })
 
-  test("SessionEndOutcome discriminated union exhaustively branches", () => {
-    // Widen with a function so each `case` arm gets non-`never` narrowing
-    // (otherwise the literal `{kind:"skipped",…}` collapses the union).
-    const inspect = (outcome: SessionEndOutcome): string => {
-      switch (outcome.kind) {
-        case "skipped":
-          return outcome.reason
-        case "stored":
-          return outcome.stage1ThreadId
-        case "error":
-          expect(outcome.error).toBeInstanceOf(TriggerError)
-          return outcome.error.reason
-      }
-    }
-    expect(inspect({ kind: "skipped", reason: "empty_session" })).toBe("empty_session")
-    expect(inspect({ kind: "stored", stage1ThreadId: "t-1", promoted: false })).toBe("t-1")
-    expect(inspect({ kind: "error", error: new TriggerError("phase1_throw", "x") })).toBe(
-      "phase1_throw",
-    )
-  })
+  // NOTE: removed the local `inspect`-switch test (REIMPLEMENTED): it fed
+  // self-constructed literals into a test-defined switch, exercising no SUT.
+  // All three SessionEndOutcome kinds are produced and asserted by real
+  // onSessionEnd invocations in HELL-MAT-01/03/05 (stored / skipped /
+  // error+TriggerError.reason at line 277).
 })

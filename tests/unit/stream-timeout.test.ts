@@ -10,18 +10,19 @@
  *  4. On timeout the wrapper aborts the RAW stream's upstream cancellation
  *     handle (`.controller` / `.abort()`), so the provider request is really
  *     torn down instead of only flipping a disconnected local controller.
- *  5. Both adapters import the wrapper (source-level grep).
+ *  5. Both adapters APPLY the wrapper with their own provider tag — proven
+ *     behaviorally by driving the real adapter `.stream()` against an injected
+ *     hung client (the "T1 wiring" suite), not by grepping the adapter source.
  *
- * Real timers are used: budgets are tiny (50–100 ms) so a passing test
+ * Real timers are used: budgets are tiny (40–100 ms) so a passing test
  * completes in <500 ms.
  */
-// source-grep allowed — T1 wiring suite below intentionally pins the
-// `withStreamTimeout` import in both adapter sources so a refactor that rips
-// the wrapper out of one adapter fails fast (per file header item 5).
 
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import type { StreamEvent, StreamInput } from "@/llm"
+import { AnthropicAdapter } from "@/llm/adapters/anthropic"
+import type { RawChunk } from "@/llm/adapters/openai"
+import { OpenAIAdapter } from "@/llm/adapters/openai"
 import {
   DEFAULT_FIRST_CHUNK_MS,
   DEFAULT_IDLE_MS,
@@ -327,30 +328,152 @@ describe("resolveStreamTimeoutMs — precedence", () => {
   })
 })
 
+/**
+ * T1 wiring — both adapters APPLY `withStreamTimeout` with their own provider
+ * literal. Replaces the former source-grep proxies (which pinned the spelling
+ * of `withStreamTimeout` / `provider: "openai"` and a format-pinned ternary)
+ * with behavior: drive the REAL adapter `.stream()` against an injected client
+ * whose raw stream opens and then goes silent forever, with a tiny
+ * `streamFirstChunkMs`. If the wrapper were ripped out of an adapter — or wired
+ * with the wrong provider tag — these would fail. A behavior-preserving refactor
+ * (rename/extract/reflow) keeps them green.
+ */
 describe("T1 wiring — both adapters use withStreamTimeout", () => {
-  const root = resolve(__dirname, "../..")
+  const drainTo = async (it: AsyncIterable<StreamEvent>): Promise<void> => {
+    for await (const _ of it) void _
+  }
 
-  test("openai adapter imports + applies withStreamTimeout", () => {
-    const src = readFileSync(resolve(root, "src/llm/adapters/openai.ts"), "utf8")
-    expect(src).toContain("withStreamTimeout")
-    expect(src).toContain('provider: "openai"')
+  /** An async-iterable that opens but never yields its first chunk. */
+  const neverYielding = (): AsyncIterable<RawChunk> => ({
+    [Symbol.asyncIterator]: (): AsyncIterator<RawChunk> => ({
+      next: () => new Promise<IteratorResult<RawChunk>>(() => {}),
+    }),
   })
 
-  test("anthropic adapter imports + applies withStreamTimeout", () => {
-    const src = readFileSync(resolve(root, "src/llm/adapters/anthropic.ts"), "utf8")
-    expect(src).toContain("withStreamTimeout")
-    expect(src).toContain('provider: "anthropic"')
+  const baseStreamInput = (): StreamInput => ({
+    messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    tools: [],
   })
 
-  test("openai adapter forwards input.signal to SDK options AND timeout wrapper", () => {
-    const src = readFileSync(resolve(root, "src/llm/adapters/openai.ts"), "utf8")
-    expect(src).toContain("input.signal ? { signal: input.signal } : undefined")
-    expect(src).toContain("...(input.signal ? { signal: input.signal } : {})")
+  test("openai adapter applies withStreamTimeout with provider:'openai' (hung stream ⇒ stream_corrupt)", async () => {
+    const a = new OpenAIAdapter({
+      apiKey: "test",
+      model: "gpt-x",
+      maxTokens: 64,
+      streamFirstChunkMs: 40,
+    })
+    ;(
+      a as unknown as { client: { chat: { completions: { create: unknown } } } }
+    ).client = {
+      chat: { completions: { create: async () => neverYielding() } },
+    }
+
+    let caught: unknown
+    try {
+      await drainTo(a.stream(baseStreamInput()))
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(LLMError)
+    const err = caught as LLMError
+    expect(err.kind).toBe("stream_corrupt")
+    expect(err.provider).toBe("openai")
+    expect(err.message.toLowerCase()).toContain("timeout")
   })
 
-  test("anthropic adapter forwards input.signal to SDK options AND timeout wrapper", () => {
-    const src = readFileSync(resolve(root, "src/llm/adapters/anthropic.ts"), "utf8")
-    expect(src).toContain("input.signal ? { signal: input.signal } : undefined")
-    expect(src).toContain("...(input.signal ? { signal: input.signal } : {})")
+  test("anthropic adapter applies withStreamTimeout with provider:'anthropic' (hung stream ⇒ stream_corrupt)", async () => {
+    const a = new AnthropicAdapter({
+      apiKey: "test",
+      model: "claude-test",
+      streamFirstChunkMs: 40,
+    })
+    ;(a as unknown as { client: { messages: { create: unknown } } }).client = {
+      messages: { create: async () => neverYielding() },
+    }
+
+    let caught: unknown
+    try {
+      await drainTo(a.stream(baseStreamInput()))
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(LLMError)
+    const err = caught as LLMError
+    expect(err.kind).toBe("stream_corrupt")
+    expect(err.provider).toBe("anthropic")
+    expect(err.message.toLowerCase()).toContain("timeout")
+  })
+})
+
+/**
+ * Behavioral coverage of the openai signal-forwarding wire (replaces the
+ * former format-pinned source-grep). Drives the REAL `OpenAIAdapter.stream()`
+ * against a local fake client that records the 2nd argument handed to
+ * `chat.completions.create` (the SDK request-options), proving:
+ *   - input.signal set  ⇒ create() receives exactly `{ signal: <that signal> }`
+ *   - input.signal unset ⇒ create() receives `undefined`
+ * The wrapper-half (signal composed into withStreamTimeout so an abort tears
+ * the stream down) is already exercised behaviorally by the
+ * "caller-supplied signal abort propagates …" probed test above; this closes
+ * the create()/TTFT half through the real adapter symbol instead of grepping
+ * its source spelling.
+ */
+describe("OpenAIAdapter — input.signal reaches the SDK create() options", () => {
+  /** Fake OpenAI client capturing the 2nd arg of chat.completions.create. */
+  class CapturingFakeOpenAI {
+    capturedOpts: unknown
+    createCalls = 0
+    readonly chat = {
+      completions: {
+        create: async (
+          _req: unknown,
+          opts?: unknown,
+        ): Promise<AsyncIterable<RawChunk>> => {
+          this.createCalls += 1
+          this.capturedOpts = opts
+          const chunks: RawChunk[] = [
+            { choices: [{ delta: { content: "hi" }, finish_reason: null }] },
+            { choices: [{ delta: {}, finish_reason: "stop" }] },
+          ]
+          return {
+            async *[Symbol.asyncIterator]() {
+              for (const c of chunks) yield c
+            },
+          }
+        },
+      },
+    }
+  }
+
+  const adapterWith = (fake: CapturingFakeOpenAI): OpenAIAdapter => {
+    const a = new OpenAIAdapter({ apiKey: "test", model: "gpt-x", maxTokens: 64 })
+    ;(a as unknown as { client: CapturingFakeOpenAI }).client = fake
+    return a
+  }
+
+  const baseInput = (over: Partial<StreamInput> = {}): StreamInput => ({
+    messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    tools: [],
+    ...over,
+  })
+
+  const drain = async (it: AsyncIterable<StreamEvent>): Promise<void> => {
+    for await (const _ of it) void _
+  }
+
+  test("input.signal is forwarded as { signal } to the SDK create() options", async () => {
+    const fake = new CapturingFakeOpenAI()
+    const ctrl = new AbortController()
+    await drain(adapterWith(fake).stream(baseInput({ signal: ctrl.signal })))
+    expect(fake.createCalls).toBe(1)
+    expect(fake.capturedOpts).toEqual({ signal: ctrl.signal })
+    expect((fake.capturedOpts as { signal: AbortSignal }).signal).toBe(ctrl.signal)
+  })
+
+  test("absent input.signal ⇒ create() options are undefined (byte-identical path)", async () => {
+    const fake = new CapturingFakeOpenAI()
+    await drain(adapterWith(fake).stream(baseInput()))
+    expect(fake.createCalls).toBe(1)
+    expect(fake.capturedOpts).toBeUndefined()
   })
 })

@@ -142,7 +142,7 @@ const TranscriptViewport = memo(
             el.scrollHeight - el.scrollTop - el.clientHeight
           stickRef.current = distanceFromBottom <= 64
         }}
-        className="flex-1 overflow-y-auto px-4 py-4"
+        className="scroll-fade-bottom flex-1 overflow-y-auto px-4 py-4"
         aria-live="polite"
       >
         {messages.length === 0 ? (
@@ -173,13 +173,22 @@ const TranscriptViewport = memo(
 )
 
 const EmptyState = (): JSX.Element => (
-  <div className="flex h-full items-center justify-center">
-    <div className="max-w-md text-center text-sm text-neutral-500">
-      <p>No messages yet.</p>
-      <p className="mt-1">
+  <div className="flex h-full items-center justify-center px-4">
+    <div className="max-w-md text-center text-ink-secondary">
+      <p className="text-sm font-medium text-ink">Start a conversation</p>
+      <p className="mt-2 text-sm text-ink-secondary">
+        Ask quanta to explain code, plan a change, or run a task.
+      </p>
+      <p className="mt-3 text-xs text-ink-tertiary">
         Type a prompt below and press{" "}
-        <kbd className="rounded bg-neutral-800 px-1 py-0.5 text-xs">Enter</kbd>{" "}
-        to start a turn.
+        <kbd className="rounded border border-line-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
+          Enter
+        </kbd>{" "}
+        to start a turn ·{" "}
+        <kbd className="rounded border border-line-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
+          /
+        </kbd>{" "}
+        for commands.
       </p>
     </div>
   </div>

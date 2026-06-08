@@ -112,9 +112,9 @@ const linePrefix = (line: DiffLineData | undefined): string =>
 
 /** Gutter tint class for a cell's line-number column. */
 const gutterTint = (line: DiffLineData | undefined, colored: boolean): string => {
-  if (colored && line?.type === "added") return "text-emerald-400"
-  if (colored && line?.type === "removed") return "text-rose-400"
-  return "text-neutral-500"
+  if (colored && line?.type === "added") return "text-ok"
+  if (colored && line?.type === "removed") return "text-err"
+  return "text-ink-tertiary"
 }
 
 /** One side (old/new) of a split row, rendered as a real <td> so the layout is
@@ -138,7 +138,7 @@ const SplitCell = ({
       // Empty cells are the unpaired side of a change. The aria-label carries
       // per-line meaning so the diff is not conveyed by color alone.
       aria-label={line !== undefined ? `${side} ${ARIA[line.type]}` : undefined}
-      className={cx("w-1/2 align-top", line === undefined && "bg-neutral-900/40")}
+      className={cx("w-1/2 align-top", line === undefined && "bg-surface-raised/40")}
       style={bg !== undefined ? { background: bg } : undefined}
     >
       <span className="flex gap-1 px-2">
@@ -247,7 +247,7 @@ export const SplitDiffView = ({
         ),
       )}
       {truncated ? (
-        <div className="px-2 py-0.5 text-neutral-500 italic">
+        <div className="px-2 py-0.5 text-ink-tertiary italic">
           … ({moreLines} more line{moreLines === 1 ? "" : "s"})
         </div>
       ) : null}

@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test"
 import {
   type AvailabilityVerdict,
   type Connector,
+  createInMemoryConnectorRegistry,
   OAuthDiscoveryError,
   OAuthRegistrationError,
   type RefreshOutcome,
@@ -64,15 +65,20 @@ describe("connectors / types", () => {
     expect(seen).toBe(4)
   })
 
-  test("UNIT-4: Connector requires id/displayName/host/auth", () => {
+  test("UNIT-4: Connector requires id/displayName/host/auth", async () => {
+    // The object literal carries the type contract at compile time; route it
+    // through the real in-memory registry so a regression in get()/list()
+    // indexing (not a literal read-back tautology) is what's asserted.
     const c: Connector = {
       id: "x",
       displayName: "X",
       host: "h.example",
       auth: "none",
     }
-    expect(c.id).toBe("x")
-    expect(c.auth).toBe("none")
+    const reg = createInMemoryConnectorRegistry([c])
+    const fetched = await reg.get("x")
+    expect(fetched).toEqual(c)
+    expect(await reg.list()).toEqual([c])
   })
 
   test("UNIT-5: Connector with auth=oauth carries issuer", () => {

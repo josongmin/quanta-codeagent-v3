@@ -18,17 +18,17 @@ export const TokenCounter = ({ usage }: TokenCounterProps): JSX.Element | null =
   return (
     <div
       className={cx(
-        "flex items-center gap-1.5 rounded border border-neutral-800 px-1.5 py-0.5",
-        "font-mono text-[10px] uppercase tracking-wider text-neutral-400",
+        "flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5",
+        "text-xs text-ink-secondary",
       )}
       title={renderTooltip(usage)}
     >
-      <span className="text-neutral-500">tok</span>
-      <span>{formatTokens(total)}</span>
+      <span className="text-ink-tertiary">tok</span>
+      <span className="font-mono">{formatTokens(total)}</span>
       {cost > 0 ? (
         <>
-          <span className="text-neutral-700">·</span>
-          <span>{formatCost(cost)}</span>
+          <span className="text-ink-tertiary">·</span>
+          <span className="font-mono">{formatCost(cost)}</span>
         </>
       ) : null}
     </div>

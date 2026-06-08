@@ -26,8 +26,8 @@ export const DiffStats = ({
       className={cx("inline-flex items-center gap-2 font-mono text-xs tabular-nums", className)}
       aria-label={`${additions} additions, ${deletions} deletions`}
     >
-      {additions > 0 ? <span className="text-emerald-400">+{additions}</span> : null}
-      {deletions > 0 ? <span className="text-rose-400">-{deletions}</span> : null}
+      {additions > 0 ? <span className="text-ok">+{additions}</span> : null}
+      {deletions > 0 ? <span className="text-err">-{deletions}</span> : null}
     </span>
   )
 }

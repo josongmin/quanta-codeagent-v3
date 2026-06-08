@@ -52,12 +52,8 @@ describe("clearInputLane", () => {
 })
 
 describe("renderInputLane — audit R1 #2: prompt preserved on narrow terminals", () => {
-  test("over-width keeps the PROMPT + the buffer TAIL (prompt never vanishes)", () => {
-    // prompt "» "(2) + "abcdef"(6) = 8; cols 5 ⇒ avail 3 ⇒ "» " + "def".
-    const out = renderInputLane("abcdef", { rows: 24, cols: 5 })
-    expect(out).toContain(`${INPUT_LANE_PROMPT}def`)
-    expect(out.startsWith(SAVE)).toBe(true)
-  })
+  // NOTE: the over-width "prompt + buffer tail" case is pinned EXACTLY by the
+  // `.toBe` superset at the line-36 test above; no weaker substring duplicate here.
   test("cols ≤ prompt width ⇒ degrade to bare buffer tail (never crash)", () => {
     const out = renderInputLane("abcdef", { rows: 24, cols: 2 })
     expect(out).toBe(`${SAVE}${cup(24, 1)}${ERASE}ef${RESTORE}`)

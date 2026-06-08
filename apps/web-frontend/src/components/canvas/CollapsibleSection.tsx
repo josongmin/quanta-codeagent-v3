@@ -53,29 +53,29 @@ export const CollapsibleSection = ({
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-1.5 px-1 py-0.5 text-left text-xs hover:bg-neutral-800/40"
+        className="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-xs hover:bg-white/5"
       >
         <span
           aria-hidden="true"
           className={cx(
-            "inline-block w-3 shrink-0 select-none text-neutral-500 transition-transform",
+            "inline-block w-3 shrink-0 select-none text-ink-tertiary transition-transform",
             open && "rotate-90",
           )}
         >
           ▶
         </span>
         {leading !== undefined ? leading : null}
-        <span className="truncate text-neutral-200">{title}</span>
+        <span className="truncate text-ink">{title}</span>
         {count !== undefined ? (
-          <span className="shrink-0 text-neutral-500 tabular-nums">{count}</span>
+          <span className="shrink-0 text-ink-tertiary tabular-nums">{count}</span>
         ) : null}
         {trailing !== undefined ? (
-          <span className="ml-auto shrink-0 text-neutral-400">{trailing}</span>
+          <span className="ml-auto shrink-0 text-ink-secondary">{trailing}</span>
         ) : null}
       </button>
       {open ? (
         // Indented body so nested sections read as a tree.
-        <div id={bodyId} className="ml-4 border-l border-neutral-800 pl-2">
+        <div id={bodyId} className="ml-4 border-l border-line pl-2">
           {children}
         </div>
       ) : null}

@@ -235,6 +235,8 @@ export const ConnectionUrlPill = ({ url, token }: ConnectionUrlPillProps): JSX.E
       ? `Click to copy ${primary.url}`
       : `Click to copy share link for ${primary.url} (includes ws + token)`
 
+  // Non-loopback primary ⇒ LAN-reachable (status "ok"); else muted.
+  const isLan = primary.label !== "loopback" && primary.label !== "current"
   return (
     <div className="relative inline-flex">
       <button
@@ -242,25 +244,27 @@ export const ConnectionUrlPill = ({ url, token }: ConnectionUrlPillProps): JSX.E
         onClick={() => copy(primary.copyUrl)}
         title={copyTitle}
         className={cx(
-          "group flex items-center gap-1.5 rounded border px-1.5 py-0.5",
-          "font-mono text-[10px] tracking-tight transition",
+          "group flex items-center gap-1.5 rounded-full border px-2 py-0.5",
+          "text-xs transition",
           isCopiedPrimary
-            ? "border-emerald-700/70 bg-emerald-950/30 text-emerald-300"
-            : "border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200",
+            ? "border-ok/40 bg-ok/10 text-ok"
+            : "border-line text-ink-secondary hover:border-line-strong hover:text-ink",
         )}
       >
-        <span aria-hidden className="text-neutral-500 group-hover:text-neutral-400">
-          {isCopiedPrimary ? "✓" : "⎘"}
-        </span>
-        <span className="truncate max-w-[22rem]">
+        <span
+          aria-hidden
+          className={cx(
+            "size-1.5 shrink-0 rounded-full",
+            isCopiedPrimary ? "bg-ok" : isLan ? "bg-ok" : "bg-ink-tertiary",
+          )}
+        />
+        <span className="max-w-[22rem] truncate font-mono text-[11px] tracking-tight">
           {isCopiedPrimary ? "copied" : displayUrl}
         </span>
         <span
           className={cx(
             "ml-0.5 text-[9px] uppercase",
-            primary.label === "loopback" || primary.label === "current"
-              ? "text-neutral-600"
-              : "text-emerald-500/80",
+            isLan ? "text-ok/80" : "text-ink-tertiary",
           )}
         >
           {primary.label}
@@ -273,8 +277,8 @@ export const ConnectionUrlPill = ({ url, token }: ConnectionUrlPillProps): JSX.E
             onClick={() => setOpen((v) => !v)}
             title="Show all reachable URLs"
             className={cx(
-              "ml-1 rounded border border-neutral-800 px-1.5 py-0.5",
-              "font-mono text-[10px] text-neutral-400 hover:border-neutral-600 hover:text-neutral-200",
+              "ml-1 rounded-full border border-line px-2 py-0.5",
+              "text-xs text-ink-secondary hover:border-line-strong hover:text-ink",
             )}
           >
             ▾
@@ -283,7 +287,7 @@ export const ConnectionUrlPill = ({ url, token }: ConnectionUrlPillProps): JSX.E
             <div
               className={cx(
                 "absolute right-0 top-full z-10 mt-1 w-[26rem] max-w-[90vw]",
-                "rounded-md border border-neutral-800 bg-neutral-900 p-1 shadow-lg",
+                "rounded-xl border border-line bg-surface-overlay p-1 shadow-lg",
               )}
             >
               {entries.map((e) => {
@@ -294,31 +298,31 @@ export const ConnectionUrlPill = ({ url, token }: ConnectionUrlPillProps): JSX.E
                     type="button"
                     onClick={() => copy(e.copyUrl)}
                     className={cx(
-                      "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left",
-                      "font-mono text-[10px] tracking-tight transition",
+                      "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left",
+                      "font-mono text-[11px] tracking-tight transition",
                       isCopied
-                        ? "bg-emerald-950/30 text-emerald-300"
-                        : "text-neutral-300 hover:bg-neutral-800",
+                        ? "bg-ok/10 text-ok"
+                        : "text-ink-secondary hover:bg-white/5 hover:text-ink",
                     )}
                   >
                     <span
                       className={cx(
                         "shrink-0 rounded px-1 py-px text-[9px] uppercase tracking-wider",
                         e.label === "loopback"
-                          ? "bg-neutral-800 text-neutral-500"
-                          : "bg-emerald-950/50 text-emerald-400",
+                          ? "bg-white/5 text-ink-tertiary"
+                          : "bg-ok/15 text-ok",
                       )}
                     >
                       {e.label}
                     </span>
-                    <span className="truncate flex-1">{isCopied ? "copied" : e.url}</span>
-                    <span aria-hidden className="text-neutral-600">
+                    <span className="flex-1 truncate">{isCopied ? "copied" : e.url}</span>
+                    <span aria-hidden className="text-ink-tertiary">
                       {isCopied ? "✓" : "⎘"}
                     </span>
                   </button>
                 )
               })}
-              <div className="px-2 py-1 text-[9px] text-neutral-600">
+              <div className="px-2.5 py-1 text-[9px] text-ink-tertiary">
                 Open these URLs in a browser on the same network to share the UI
               </div>
             </div>

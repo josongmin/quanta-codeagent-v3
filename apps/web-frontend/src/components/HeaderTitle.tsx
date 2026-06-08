@@ -18,13 +18,17 @@ export interface HeaderTitleProps {
 export const HeaderTitle = ({ model, wsUrl }: HeaderTitleProps): JSX.Element => {
   return (
     <div className="flex items-center gap-2" title={wsUrl}>
-      <span className="font-mono text-sm font-semibold text-accent">quanta</span>
-      <span className="text-xs text-neutral-500">web</span>
+      <span
+        aria-hidden
+        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+      />
+      <span className="text-sm font-medium text-ink">quanta</span>
+      <span className="text-xs text-ink-tertiary">web</span>
       {typeof model === "string" && model.length > 0 ? (
         <span
           className={cx(
-            "rounded border border-neutral-800 px-1.5 py-0.5 font-mono text-[10px]",
-            "tracking-wider text-neutral-400",
+            "rounded-full border border-line px-2 py-0.5 font-mono text-xs",
+            "text-ink-secondary",
           )}
         >
           {model}

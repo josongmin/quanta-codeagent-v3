@@ -7,12 +7,8 @@
  *   - Uniformity smoke: 100,000 seeds ⇒ no zero-occurrence name, and
  *     max/min ratio < 3.0 (loose; not a hard statistical test).
  *   - nextSequentialNickname: empty / 1-used / 38-used (middle hole) / all-used.
- *   - Source: no `Math.random` (or related non-deterministic call) in the
- *     module — we re-grep at test time as a regression detector.
  */
 import { describe, expect, test } from "bun:test"
-import { readFile } from "node:fs/promises"
-import { join } from "node:path"
 import { assignNickname, MAESTRO_NICKNAMES, nextSequentialNickname } from "@/subagent/nicknames"
 
 /* ── 1. pool invariants (39 unique ASCII names ≤ 12 chars) ──────────────── */
@@ -195,31 +191,11 @@ describe("nextSequentialNickname", () => {
   })
 })
 
-/* ── 5. source-code guard: no Math.random (or sibling) in nicknames.ts ─── */
-
-describe("source guard — no non-deterministic primitives in nicknames.ts", () => {
-  test("the source has NO occurrence of Math.random, Date.now, crypto.randomUUID, etc.", async () => {
-    const path = join(import.meta.dir, "..", "..", "src", "subagent", "nicknames.ts")
-    const src = await readFile(path, "utf8")
-
-    const banned: ReadonlyArray<{ name: string; pattern: RegExp }> = [
-      { name: "Math.random", pattern: /Math\s*\.\s*random/ },
-      { name: "Math.floor(Math.random", pattern: /Math\.floor\s*\(\s*Math\.random/ },
-      { name: "Date.now", pattern: /Date\s*\.\s*now/ },
-      { name: "performance.now", pattern: /performance\s*\.\s*now/ },
-      { name: "crypto.randomUUID", pattern: /crypto\s*\.\s*randomUUID/ },
-      { name: "crypto.randomBytes", pattern: /crypto\s*\.\s*randomBytes/ },
-      { name: "Math.random()", pattern: /Math\.random\s*\(/ },
-    ]
-    const hits: string[] = []
-    for (const { name, pattern } of banned) {
-      if (pattern.test(src)) hits.push(name)
-    }
-    if (hits.length > 0) {
-      throw new Error(
-        `nicknames.ts contains forbidden non-deterministic call(s): ${hits.join(", ")}`,
-      )
-    }
-    expect(hits.length).toBe(0)
-  })
-})
+/*
+ * NOTE: removed source-token grep guard (section 5) — it asserted on source
+ * text (no Math.random / Date.now / crypto.* in nicknames.ts) rather than
+ * behavior. The determinism contract it proxied is covered far more robustly,
+ * and against ANY non-determinism source regardless of spelling, by section 2
+ * (11,000 seed-pairs asserting identical output) and section 3 (100,000
+ * deterministic draws).
+ */

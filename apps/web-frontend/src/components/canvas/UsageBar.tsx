@@ -57,7 +57,7 @@ export const UsageBar = ({
   return (
     <div className={cx("w-full", className)}>
       {(topLeftLabel !== undefined || topRightLabel !== undefined) && (
-        <div className="mb-1 flex items-center justify-between text-xs text-neutral-400">
+        <div className="mb-1 flex items-center justify-between text-xs text-ink-secondary">
           <span>{topLeftLabel}</span>
           <span className="tabular-nums">{topRightLabel}</span>
         </div>
@@ -65,7 +65,7 @@ export const UsageBar = ({
       <div
         role="img"
         aria-label={ariaSummary}
-        className="flex h-2 w-full overflow-hidden rounded-full bg-neutral-800"
+        className="flex h-2 w-full overflow-hidden rounded-full bg-surface-raised"
       >
         {segments.map((seg, idx) => {
           const value = values[idx] ?? 0

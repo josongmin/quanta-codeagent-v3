@@ -33,12 +33,9 @@ describe("writeKnobConfig", () => {
     expect(obj.last_saved.length).toBeGreaterThan(0)
   })
 
-  test("creates parent directory if missing", async () => {
-    const nested = join(dir, "a", "b", "knobs.json")
-    await writeKnobConfig({ k: "v" }, nested)
-    const s = await stat(nested)
-    expect(s.isFile()).toBe(true)
-  })
+  // NOTE: "creates parent directory if missing" deleted — covered by
+  // persist-hellgate.test.ts "missing parent directory is created" (deeper
+  // nested path, same stat().isFile() assertion; strict superset).
 
   test("writes mode 0o600 (best-effort, posix)", async () => {
     await writeKnobConfig({ k: "v" }, file)
@@ -56,33 +53,22 @@ describe("writeKnobConfig", () => {
     expect(obj.user_defaults).toEqual({})
   })
 
-  test("overwrites existing file", async () => {
-    await writeKnobConfig({ a: "1" }, file)
-    await writeKnobConfig({ b: "2" }, file)
-    const obj = JSON.parse(await readFile(file, "utf8"))
-    expect(obj.user_defaults).toEqual({ b: "2" })
-  })
+  // NOTE: "overwrites existing file" deleted — covered 1:1 by
+  // persist-hellgate.test.ts "write to existing file overwrites cleanly"
+  // (same two-write sequence + user_defaults toEqual second-write assertion).
 })
 
 describe("readKnobConfig", () => {
-  test("missing file → null", async () => {
-    expect(await readKnobConfig(join(dir, "missing.json"))).toBeNull()
-  })
-
-  test("malformed JSON → null", async () => {
-    await writeFile(file, "{ not json", "utf8")
-    expect(await readKnobConfig(file)).toBeNull()
-  })
+  // NOTE: "missing file → null" deleted — covered by persist-hellgate.test.ts
+  // "missing file returns null without throwing" (same readKnobConfig(<dne>)
+  // toBeNull assertion).
+  // NOTE: "malformed JSON → null" deleted — covered by hellgate "partial JSON
+  // (truncated) → null" + "garbage bytes → null".
+  // NOTE: "top-level not an object → null" (array root) deleted — covered by
+  // hellgate "nested-array root → null".
 
   test("wrong version → null", async () => {
     await writeFile(file, JSON.stringify({ version: 99, user_defaults: {} }), "utf8")
-    expect(await readKnobConfig(file)).toBeNull()
-  })
-
-  test("top-level not an object → null", async () => {
-    await writeFile(file, JSON.stringify([1, 2, 3]), "utf8")
-    // Arrays in JSON.parse are objects but our shape check rejects them via
-    // the version key absence (Array.version is undefined).
     expect(await readKnobConfig(file)).toBeNull()
   })
 

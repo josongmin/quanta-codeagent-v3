@@ -175,41 +175,6 @@ const collectSuccessfulForks = (
   return { newIds, wtPaths }
 }
 
-/** True when a captured fork failure looks like git worktree/index LOCK
- *  contention rather than a genuine logic error. Under heavy suite-wide CPU/IO
- *  load, concurrent `git worktree add` invocations can transiently lose the
- *  repo-level lock (`.git/worktrees/.../locked`, `index.lock`, "is already
- *  checked out", "File exists") — that is an environmental race, NOT the
- *  "exit 0 but missing from index" correctness bug this battery targets.
- *  NOTE (SRC): `src/runtime/worktree-fork.ts` now wraps `git worktree add` in
- *  `runWorktreeAddWithRetry` (worktree-fork.ts:110), so prod itself retries on
- *  transient lock contention. The extra serial retry in this harness is a
- *  belt-and-braces convergence aid: if prod's bounded retry is exhausted under
- *  extreme suite-wide load and a fork still surfaces a lock error, we re-run it
- *  serially (no contention) so the all-succeed contract stays deterministic
- *  without masking a genuine failure — a NON-lock failure is asserted-against
- *  below. The CLI surfaces this failure via `deps.err` (session-ops `cmdFork`
- *  routes `WorktreeForkError.detail`, itself derived from git's STDERR, to
- *  `deps.err`), so the classifier MUST be fed the captured `.err` buffer. */
-const looksLikeGitLockContention = (errBuf: string): boolean =>
-  /index\.lock|worktrees?\/.+\/locked|already (locked|checked out)|cannot lock|File exists|Unable to create.*lock/i.test(
-    errBuf,
-  )
-
-/** Serially retry a worktree fork that lost the parallel git lock, up to a
- *  bound. A serial `git worktree add` faces no contention, so this converges.
- *  Returns the successful capture (or throws via the expect on exhaustion). */
-const retryForkSerially = async (srcId: string): Promise<Captured> => {
-  let rc = 1
-  let cap: Captured | undefined
-  for (let attempt = 0; attempt < 5 && rc !== 0; attempt++) {
-    cap = captureDeps()
-    rc = await runSessionCommand(["fork", srcId, "--worktree"], cap.deps).catch(() => 1)
-  }
-  expect(rc).toBe(0) // serial retry MUST succeed — no lock to lose
-  return cap as Captured
-}
-
 /** Issue `session delete --force <id>` and return the exit code. Never throws. */
 const dispatcherDelete = async (id: string): Promise<number> => {
   const c = captureDeps()
@@ -694,13 +659,14 @@ describe("session stress — worktree (git required)", () => {
 
       // Fire 5 concurrent worktree forks. The invariant we actually guard is
       // "exit 0 ⟺ a complete, indexed worktree row" (the historical race was
-      // "exit 0 but missing from index"). All-5 success is the CONTRACT, but
-      // `git worktree add` takes a repo-level lock; the SRC already retries on
-      // contention (runWorktreeAddWithRetry), yet under extreme suite-wide load
-      // its bounded retry can still be exhausted and a fork transiently loses
-      // the lock (see `looksLikeGitLockContention`). We absorb ONLY that
-      // environmental race with a further bounded serial retry; any failure
-      // that is NOT lock contention fails the test loudly below.
+      // "exit 0 but missing from index"). `git worktree add` takes a repo-level
+      // lock, but the SUT itself bounds-retries on contention
+      // (runWorktreeAddWithRetry in src/runtime/worktree-fork.ts). We TRUST that
+      // production retry and assert every fork returns exit 0 directly — a
+      // non-zero exit is a real regression (e.g. the SUT's retry was exhausted
+      // or removed) and MUST fail loudly here, NOT be papered over with a serial
+      // re-run in the harness (that would manufacture the all-succeed outcome
+      // regardless of whether the SUT's own retry actually works).
       const captured: Captured[] = []
       const forks = Array.from({ length: 5 }, () => {
         const c = captureDeps()
@@ -709,41 +675,18 @@ describe("session stress — worktree (git required)", () => {
       })
       const exitCodes = await Promise.all(forks)
 
-      // Any non-zero exit MUST be explained by git lock contention — anything
-      // else (a real logic/index bug) is surfaced here, not swallowed.
+      // Every parallel fork must succeed under production's own lock-retry.
+      // Surface the captured stderr on failure so a real regression is legible.
       for (let i = 0; i < exitCodes.length; i++) {
-        if (exitCodes[i] === 0) continue
-        // Git lock-contention errors surface on STDERR (cmdFork → deps.err),
-        // not stdout — classify the captured `.err` buffer.
-        // Git lock-contention text surfaces on STDERR (cmdFork routes
-        // `WorktreeForkError.detail`, derived from git's stderr, to `deps.err`).
-        // Classify the COMBINED err+out buffer — mirroring how prod's
-        // `isTransientWorktreeLockError` concatenates `${stderr}\n${stdout}` —
-        // so the assertion is robust to which stream a given git/cli build picks.
-        const c = captured[i]
-        const buf = `${c?.err ?? ""}\n${c?.out ?? ""}`
-        expect(looksLikeGitLockContention(buf)).toBe(true)
-      }
-
-      // Deterministically reach the all-5 outcome: retry each lock-failed fork
-      // SERIALLY (no contention) up to a bound. A serial `git worktree add`
-      // never hits the parallel lock, so this converges.
-      const successCaptures: Captured[] = []
-      for (let i = 0; i < exitCodes.length; i++) {
-        const c = captured[i]
-        if (exitCodes[i] === 0 && c) {
-          successCaptures.push(c)
-        } else {
-          successCaptures.push(await retryForkSerially(srcId))
+        if (exitCodes[i] !== 0) {
+          throw new Error(`fork #${i} failed (exit ${exitCodes[i]}); stderr: ${captured[i]?.err ?? ""}`)
         }
+        expect(exitCodes[i]).toBe(0)
       }
-      // After convergence every one of the 5 forks has a successful capture.
-      expect(successCaptures.length).toBe(5)
 
       // Strong consistency invariant: each successful fork yielded a DISTINCT
       // id + DISTINCT worktree path, and the path exists on disk.
-      const exitOk = successCaptures.map(() => 0)
-      const { newIds, wtPaths } = collectSuccessfulForks(successCaptures, exitOk)
+      const { newIds, wtPaths } = collectSuccessfulForks(captured, exitCodes)
       expect(newIds.length).toBe(5)
       expect(wtPaths.length).toBe(5)
       expect(new Set(newIds).size).toBe(newIds.length) // distinct ids
