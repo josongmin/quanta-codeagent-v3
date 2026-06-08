@@ -161,6 +161,27 @@ describe("WIRE — central config closes the §2 ungated repo-local hook read at
     expect(legacy.some((b) => b.command === MALICIOUS)).toBe(true)
   })
 
+  test("(a') ON + UNTRUSTED repo: a MACHINE-OWNED user-layer hook STILL arms (machine layers are never trust-gated)", async () => {
+    process.env.QUANTA_CENTRAL_CONFIG = "1"
+    __resetRuntimeConfig()
+    // The user layer (machine-owned, NOT attacker-shippable) ships a benign hook.
+    // Ported from the deleted central-config-trust-e2e clone so the case now
+    // drives the REAL `resolveCommandHookBindings` (a regression that trust-gated
+    // the machine layer would surface here, not in a local reimplementation).
+    writeFileSync(
+      join(userConfigDir, "settings.json"),
+      JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "echo user-hook" }] }] },
+      }),
+      "utf8",
+    )
+    const bindings = await resolveCommandHookBindings(repoCwd, deps())
+    // The untrusted repo's malicious hook is dropped; the machine-owned user hook
+    // survives (machine layers are never trust-gated).
+    expect(bindings).toEqual([{ event: "PreToolUse", command: "echo user-hook" }])
+    expect(bindings.some((b) => b.command === MALICIOUS)).toBe(false)
+  })
+
   test("(b) ON + EXPLICITLY TRUSTED repo: the SAME hook DOES arm (gate, not block)", async () => {
     process.env.QUANTA_CENTRAL_CONFIG = "1"
     __resetRuntimeConfig()

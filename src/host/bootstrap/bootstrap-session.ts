@@ -232,22 +232,39 @@ const buildPromptState = (
  * legacy gate is the tool's own env gate, `gateOn(env, cap.gate.envKey)`.
  */
 const probeCapabilityConsistency = (env: NodeJS.ProcessEnv): void => {
-  const legacyGateFor = (cap: CapabilityDescriptor, _surface: Surface): boolean =>
-    gateOn(env, cap.gate.envKey)
-  const probes = runCapabilityProbe(env, legacyGateFor)
-  const splitBrain = probes.filter((p) => !p.agrees)
-  if (splitBrain.length > 0) {
-    logger.warn(
-      `capability layer: split-brain exposure drift detected (observe-only) on ${splitBrain.length} (capability,surface) pair(s)`,
-      {
-        drift: splitBrain.map((p) => ({
-          capability: p.capabilityId,
-          surface: p.surface,
-          resolved: p.resolved,
-          legacy: p.legacy,
-        })),
-      },
-    )
+  // OBSERVE-ONLY + NON-FATAL: a consistency probe must NEVER be able to break
+  // session bootstrap, so the whole body is try-caught (the warn surface is the
+  // only effect). This matters especially once `legacyGateFor` is upgraded to the
+  // real (throwable) registration predicate — see the SCAFFOLD note below.
+  try {
+    // ⚠️ SCAFFOLD (ADR-0503 P3, not yet the real check): this `legacyGateFor`
+    // re-derives `gateOn(env, gate.envKey)` — the SAME computation `resolveExposure`
+    // makes — so for the current single-surface seed caps `agrees` is TAUTOLOGICAL
+    // (always true) and the probe canNOT detect a real production drift. The real
+    // llmTool exposure is COMPOSITE (e.g. workflow also requires QUANTA_SUBAGENT;
+    // image-gen also requires a provider key), so a genuine probe must compare
+    // `resolveExposure` against the ASSEMBLED tool registry / AgentConfig — a
+    // post-assembly signal, NOT a re-derived env gate. Until then this is a
+    // wiring scaffold (the synthetic e2e fences the mechanism; production is inert).
+    const legacyGateFor = (cap: CapabilityDescriptor, _surface: Surface): boolean =>
+      gateOn(env, cap.gate.envKey)
+    const probes = runCapabilityProbe(env, legacyGateFor)
+    const splitBrain = probes.filter((p) => !p.agrees)
+    if (splitBrain.length > 0) {
+      logger.warn(
+        `capability layer: split-brain exposure drift detected (observe-only) on ${splitBrain.length} (capability,surface) pair(s)`,
+        {
+          drift: splitBrain.map((p) => ({
+            capability: p.capabilityId,
+            surface: p.surface,
+            resolved: p.resolved,
+            legacy: p.legacy,
+          })),
+        },
+      )
+    }
+  } catch (e) {
+    logger.warn(`capability probe skipped (non-fatal): ${errMessage(e)}`)
   }
 }
 

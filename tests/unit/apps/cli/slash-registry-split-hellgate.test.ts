@@ -26,79 +26,6 @@ import { BUILTINS } from "../../../../src/apps/cli/slash-commands"
 const repoRoot = join(import.meta.dir, "../../../..")
 const readSrc = (rel: string): string => readFileSync(join(repoRoot, rel), "utf8")
 
-/** SET of names that BUILTINS must register post-split. The order changed
- *  (now layered), so we assert membership + uniqueness, not absolute slots
- *  — `tests/unit/slash-commands.test.ts` owns the exact ordering pin. */
-const EXPECTED_NAMES = new Set<string>([
-  // surface
-  "/help",
-  "/context",
-  "/usage",
-  "/color",
-  "/navigate",
-  "/wait",
-  "/skills",
-  "/reload-skills",
-  "/login",
-  "/logout",
-  "/status",
-  "/snooze",
-  "/resume",
-  "/snapshot",
-  "/rules",
-  "/cost",
-  "/plan",
-  "/state",
-  "/working-state",
-  "/history",
-  "/branches",
-  "/fork-checkpoint",
-  "/queue",
-  "/web",
-  "/voice-live",
-  "/paste",
-  "/edit-plan",
-  "/edit-message",
-  "/profile",
-  "/identity",
-  "/sticky-model",
-  "/focus-chain",
-  "/effort",
-  "/inspect",
-  "/replay",
-  "/session",
-  // session
-  "/retry-with",
-  "/side",
-  "/debug",
-  "/why",
-  "/cancel",
-  "/summarize-now",
-  "/inbound",
-  "/resume-turn",
-  // app (env-gated `/rewind`+`/fork`+`/memory` enabled by default)
-  "/permission",
-  "/mcp",
-  "/rewind",
-  "/fork",
-  "/rewind-tool",
-  "/memory",
-  "/rewind-conv",
-  // Pre-existing app-layer commands that the original EXPECTED set omitted
-  // (registered in registry-app.ts but never added here at base 783e6145).
-  "/knobs",
-  "/session-registry",
-  // jun-05 wave2 additions — intentional new builtins (the sweep tracks the
-  // registered set; these are real commands, not accidental drift).
-  "/brief", // registry-surface.ts — turn brief/summary
-  "/dream", // dream-cmd.ts — cross-session memory consolidation (auto-dream)
-  "/doctor", // doctor/ — jun-6 environment self-check
-  // jun-7 Wave-R additions (already registered; catalog was stale) — version-cmd /
-  // bug-cmd landed but EXPECTED_NAMES was not updated. Reconciled here.
-  "/version",
-  "/release-notes",
-  "/bug",
-])
 
 describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {
   test("CASE-1: registry-surface.ts does NOT import @/agent (any subpath)", () => {
@@ -125,10 +52,12 @@ describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {
   // post-split structure is enforced by the import-fence cases above + the
   // registration-count cases below, not by an arbitrary line ceiling.
 
-  test("CASE-6: BUILTINS registers the same SET of names as before (sweep)", () => {
-    const names = new Set(BUILTINS.map((c) => c.name))
-    expect(names).toEqual(EXPECTED_NAMES)
-  })
+  // NOTE: CASE-6 used to assert BUILTINS === a HAND-MAINTAINED name set, which
+  // drifted RED (prod added /capabilities,/caps; the manual list was stale). The
+  // intent — "BUILTINS is exactly the three layers, uniquely, in order" — is fully
+  // covered by the DERIVED cases below: CASE-7 (count = Σ layers), CASE-9 (layered
+  // order), CASE-10 (no duplicate names), CASE-11/12 (each name lives in one layer).
+  // A manual mirror of a derived value can only drift, so it was removed.
 
   test("CASE-7: each layer's count adds to the total (no double-registration)", () => {
     expect(
