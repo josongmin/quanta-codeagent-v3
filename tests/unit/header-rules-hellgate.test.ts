@@ -289,7 +289,7 @@ describe("applyHeaderRules — NO-THROW header-NAME validation (RFC7230 token / 
     "x trace", // SPACE inside the name
     "x(trace)", // parens — not a tchar
     "x:trace", // colon — header field separator
-    "x trace", // NUL byte
+    "x\x00trace", // NUL byte
   ]) {
     test(`set with illegal NAME ${JSON.stringify(badName)} ⇒ refused malformed, never thrown`, () => {
       const before = H({ keep: "yes" })
@@ -328,7 +328,7 @@ describe("applyHeaderRules — NO-THROW header-VALUE validation (CR/LF/NUL injec
     "a\rb", // bare CR
     "a\nb", // bare LF
     "a\r\nInjected: 1", // CRLF header-injection attempt
-    "a b", // NUL byte
+    "a\x00b", // NUL byte
   ]) {
     test(`set with illegal VALUE ${JSON.stringify(badValue)} ⇒ refused malformed, header untouched`, () => {
       const before = H({ "x-h": "keep" })

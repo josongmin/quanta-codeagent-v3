@@ -70,6 +70,47 @@ export type PluginAuthor = z.infer<typeof PluginAuthorSchema>
  *  field-by-field migration. `screenshots` is an empty-array marker today;
  *  we accept arbitrary string entries to leave the door open for future
  *  asset-path schemas (see ADR-0039 限界). */
+/**
+ * §2.4 — INLINE plugin-declared hook config. Faithful-minimal mirror of Claude
+ * Code's `.claude-plugin/plugin.json` `hooks` block (`{ EVENT: [{ matcher,
+ * hooks: [{ type, command, ... }] }] }`). We accept it as an OPAQUE-but-shaped
+ * record: an event name → array of `{ matcher?, hooks: [...] }` groups, each
+ * group's `hooks[]` is a CLOSED-`type` action ("command" is the only honored
+ * action — a typo'd action type hard-fails so a manifest can't silently smuggle
+ * an unknown hook kind). The fields beyond `type`/`command` are left permissive
+ * (`.passthrough()` on the action) because the harness's settings-hook loader
+ * owns the full shape; we only validate the SECURITY-load-bearing `type` enum
+ * here. Strict at the outer record level is impossible (event names are open),
+ * so the outer map is a plain `z.record`. */
+const PluginHookActionSchema = z
+  .object({
+    type: z.enum(["command"]),
+    command: z.string().min(1).optional(),
+    timeout: z.number().optional(),
+    statusMessage: z.string().optional(),
+  })
+  .passthrough()
+const PluginHookGroupSchema = z
+  .object({
+    matcher: z.string().optional(),
+    hooks: z.array(PluginHookActionSchema),
+  })
+  .strict()
+export const PluginPointerHooksSchema = z.record(z.string(), z.array(PluginHookGroupSchema))
+export type PluginPointerHooks = z.infer<typeof PluginPointerHooksSchema>
+
+/** §2.4 — the `hooks` pointer field: EITHER a string path to a hooks config
+ *  file (resolved relative to the plugin dir by the loader) OR an INLINE
+ *  {@link PluginPointerHooksSchema} config. */
+export const PluginHooksFieldSchema = z.union([z.string().min(1), PluginPointerHooksSchema])
+export type PluginHooksField = z.infer<typeof PluginHooksFieldSchema>
+
+/** §2.4 — the `apps` pointer field: EITHER a single folder-path string OR an
+ *  array of folder paths the harness auto-loads (Cowork "apps" pointers).
+ *  Resolution + escape-guarding is the loader's job (`resolvePluginPointers`). */
+export const PluginAppsFieldSchema = z.union([z.string().min(1), z.array(z.string().min(1))])
+export type PluginAppsField = z.infer<typeof PluginAppsFieldSchema>
+
 export const PluginInterfaceSchema = z
   .object({
     displayName: z.string().min(1),
@@ -107,6 +148,13 @@ export const PluginManifestSchema = z
     keywords: z.array(z.string()),
     mcpServers: z.record(z.string(), MCPServerSpecSchema).optional(),
     skills: z.array(z.string()).optional(),
+    // §2.4 — additive optional pointer fields (Claude Code parity). A manifest
+    // WITHOUT them parses byte-identically to before. `hooks` = path OR inline
+    // config; `apps` = folder pointer(s). RESOLUTION (path-join + escape guard)
+    // is gated + done by the loader (`resolvePluginPointers`), so merely
+    // DECLARING them changes no behavior until the host opts in.
+    hooks: PluginHooksFieldSchema.optional(),
+    apps: PluginAppsFieldSchema.optional(),
     interface: PluginInterfaceSchema,
   })
   .strict()
@@ -148,6 +196,9 @@ export const PluginManifestCompatSchema = z
     keywords: z.array(z.string()),
     mcpServers: z.record(z.string(), MCPServerSpecSchema).optional(),
     skills: z.array(z.string()).optional(),
+    // §2.4 — additive optional pointer fields, also accepted on the compat path.
+    hooks: PluginHooksFieldSchema.optional(),
+    apps: PluginAppsFieldSchema.optional(),
     interface: PluginInterfaceSchema,
     // Additive optional: cached codex artifacts carry a string URL; some
     // ecosystems use a `{type,url}` object — accept both. Captured (not

@@ -33,6 +33,18 @@ const W_IMPORTANCE = 4
 const ACCESS_CAP = 3
 /** Tier-weight multiplier (durable semantic knowledge outranks raw episodic recap). */
 const W_TIER = 2
+/**
+ * §10.6 routing-meta contributions. Deliberately SMALL — routing is a *refine*
+ * (a soft tiebreak/boost among otherwise-comparable candidates), never a signal
+ * that dominates a real vector hit (W_VEC=10). Codex treats `Task Group` /
+ * `applies_to` as retrieval anchors, not as the primary relevance signal.
+ */
+/** Points when the entry's `taskGroup` exactly matches the query's (case-insensitive). */
+const W_ROUTE_GROUP = 4
+/** Points when the entry's `appliesTo.cwd` exactly matches the query's cwd. */
+const W_ROUTE_CWD_EXACT = 4
+/** Points when the entry cwd and query cwd are in the same family (one prefixes the other). */
+const W_ROUTE_CWD_FAMILY = 2
 
 /**
  * Tier contribution to score, by tier. Semantic (distilled, durable knowledge)
@@ -129,6 +141,43 @@ const tagScore = (e: NormalizedEntry, want: ReadonlySet<string>): number => {
   return overlap * W_TAG
 }
 
+/**
+ * §10.6 — true iff `a` and `b` are in the same checkout family: identical, or
+ * one is a path-prefix of the other AT A SEGMENT BOUNDARY (so `/a/b` and
+ * `/a/bc` are NOT family — only `/a/b` and `/a/b/c`). Trailing slashes are
+ * normalized. Pure; case-sensitive (paths are).
+ */
+const sameCwdFamily = (a: string, b: string): boolean => {
+  const norm = (s: string): string => (s.length > 1 && s.endsWith("/") ? s.slice(0, -1) : s)
+  const x = norm(a)
+  const y = norm(b)
+  if (x === y) return true
+  const [shorter, longer] = x.length < y.length ? [x, y] : [y, x]
+  // longer must start with `shorter` followed by a path separator (segment
+  // boundary) — guards the `/a/b` vs `/a/bc` false-positive.
+  return longer.startsWith(`${shorter}/`)
+}
+
+/**
+ * §10.6 routing-meta contribution. ZERO unless `query.routing` is present AND
+ * the entry's routing meta matches — so a query that does not opt into routing
+ * (the default) scores byte-identically to the legacy weighted-sum. cwd boost
+ * is exact-OR-family (never both): an exact match supersedes the family bonus.
+ */
+const routingScore = (e: NormalizedEntry, query: MemoryQuery): number => {
+  const r = query.routing
+  if (!r) return 0
+  let s = 0
+  if (r.taskGroup && e.taskGroup && lc(r.taskGroup) === lc(e.taskGroup)) {
+    s += W_ROUTE_GROUP
+  }
+  if (r.cwd && e.appliesTo?.cwd) {
+    if (r.cwd === e.appliesTo.cwd) s += W_ROUTE_CWD_EXACT
+    else if (sameCwdFamily(r.cwd, e.appliesTo.cwd)) s += W_ROUTE_CWD_FAMILY
+  }
+  return s
+}
+
 /** Weighted-sum relevance score for an entry that passed the filters. `want` is
  *  the query's precomputed tag set (caller hoists it out of the candidate loop). */
 const scoreOf = (
@@ -143,7 +192,8 @@ const scoreOf = (
   FRESHNESS_WEIGHT[bucketOf(now - e.createdAt)] +
   e.importance * W_IMPORTANCE +
   Math.min(Math.log1p(e.accessCount), ACCESS_CAP) +
-  TIER_WEIGHT[e.tier] * W_TIER
+  TIER_WEIGHT[e.tier] * W_TIER +
+  routingScore(e, query)
 
 /**
  * Pure, exported score-of-one helper (ADR-0082 memory_citation provenance).

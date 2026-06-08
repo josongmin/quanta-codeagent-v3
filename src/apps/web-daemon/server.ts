@@ -17,7 +17,12 @@
 import { networkInterfaces } from "node:os"
 import type { Server, ServerWebSocket } from "bun"
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
-import { type SessionTransport, wrapWebSocketLikeAsSessionTransport } from "@/ipc/session"
+import {
+  encodeSessionTransportMessage,
+  type SessionTransport,
+  tryDecodeSessionTransportMessage,
+  wrapWebSocketLikeAsSessionTransport,
+} from "@/ipc/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, gateDisabled, isSessionForbidden, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
@@ -545,6 +550,35 @@ const collectReachableIps = (bind: string): readonly ReachableIp[] => {
 }
 
 /**
+ * Reconnect-replay bound (WS resume seam). When a client reconnects it sends
+ * `connect{resumeFromSeq}` and the bridge replays the events with `seq >
+ * resumeFromSeq` to that transport instead of a full snapshot. That replay is
+ * served from the bridge's IN-MEMORY tail, whose size we cap here via
+ * `replayWindow` so a long-lived daemon session never replays unbounded
+ * history. A resume whose seq is older than this window falls back to a full
+ * snapshot (the bridge's existing `planSessionReplay` fallback) so the client
+ * resets cleanly. `128` matches the bridge's own default tail magnitude — we
+ * pass it EXPLICITLY so the bound is a deliberate daemon contract rather than
+ * an implicit default, and so the persisted SQLite thread store (full history)
+ * stays the authority for deep transcript hydration on page reload.
+ */
+const WEB_DAEMON_REPLAY_WINDOW = 128
+
+/**
+ * App-level keepalive (ADR — comms heartbeat). Clients send a `heartbeat`
+ * `ping` on a ~25s timer to keep an otherwise-idle WS path warm past a
+ * proxy's idle timeout; the daemon answers each ping with a `pong` so the
+ * client's liveness deadline is reset. Pre-encoded once — every reply is the
+ * SAME byte string, so there is no per-ping allocation on the hot path.
+ *
+ * The interval lives client-side (the daemon is purely reactive: one pong per
+ * ping). It is named here as the documented contract rather than scattered as
+ * a magic literal in the frontend timer.
+ */
+export const HEARTBEAT_INTERVAL_MS = 25_000
+const HEARTBEAT_PONG_FRAME = encodeSessionTransportMessage({ kind: "heartbeat", phase: "pong" })
+
+/**
  * Multi-client shared-session mode (v2):
  *   - The daemon creates ONE session at boot via `runtime.createSession`.
  *   - Every WebSocket connection attaches its own `SessionTransport` to
@@ -562,7 +596,9 @@ const buildRegisteredSession = async (
   sharedSession: RuntimeSession,
 ): Promise<void> => {
   const transport: SessionTransport = wrapWebSocketLikeAsSessionTransport(socket.socket)
-  const connected = await sharedSession.attachSessionTransport(transport)
+  const connected = await sharedSession.attachSessionTransport(transport, {
+    replayWindow: WEB_DAEMON_REPLAY_WINDOW,
+  })
   const entry: RegisteredSession = {
     session: sharedSession,
     transport,
@@ -813,6 +849,27 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         }
       },
       message(ws: ServerWebSocket<WSData>, raw) {
+        // App-level keepalive: a client `heartbeat` ping is answered with a
+        // `pong` BEFORE the frame reaches the session bridge. Heartbeats are
+        // connection-level (no handshake / session state), so we short-circuit
+        // them here — the bridge never sees them and its 5-kind contract is
+        // unchanged. Any non-heartbeat frame (and any binary/undecodable
+        // frame) falls through to the adapter exactly as before.
+        if (typeof raw === "string") {
+          const decoded = tryDecodeSessionTransportMessage(raw)
+          if (decoded?.kind === "heartbeat") {
+            if (decoded.phase === "ping") {
+              try {
+                ws.send(HEARTBEAT_PONG_FRAME)
+              } catch {
+                // Dead socket — the close callback evicts it; swallow so a
+                // bad send never crashes the message pump.
+              }
+            }
+            // A `pong` (or our own reply) is terminal: never forwarded.
+            return
+          }
+        }
         ws.data.adapter?.pushMessage(raw)
       },
       async close(ws: ServerWebSocket<WSData>) {

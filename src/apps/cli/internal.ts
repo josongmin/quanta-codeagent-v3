@@ -648,6 +648,12 @@ export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "fu
  *  default registry byte-identical. Opt-in via `QUANTA_GIT_TOOLS=1`. */
 export const gitToolsEnabled = (): boolean => readCliKnob("QUANTA_GIT_TOOLS", "bool") ?? false
 
+/** §7.2 long-tail — co-change / related-files tool gate. Default-OFF; opt-in via
+ *  `QUANTA_GIT_CO_CHANGE=1`. Rides the git-tools surface (so it ALSO requires
+ *  QUANTA_GIT_TOOLS — the co-change tool is appended to the git tool set). */
+export const gitCoChangeEnabled = (): boolean =>
+  (readCliKnob("QUANTA_GIT_CO_CHANGE", "bool") ?? false) === true
+
 /** MCP crash-detection + auto-restart (ADR-0435). Default-OFF: when unset,
  *  `loadMcpTools` runs the single-client path and MCP behavior is
  *  byte-identical. `QUANTA_MCP_AUTORESTART=1` wraps every server in a
@@ -1352,7 +1358,11 @@ export const loadFeatures = async (
   // ADR-0015: LSP nav tools. NOT in defaultTools — opt-in only.
   const lspNavTools: Tool[] = lspNavEnabled() ? lspNavToolList() : []
   // ADR-0016: first-class git tools. NOT in defaultTools — opt-in only.
-  const gitToolList: Tool[] = gitToolsEnabled() ? gitTools() : []
+  // §7.2: when QUANTA_GIT_CO_CHANGE is also on, append the co-change tool
+  // (opts.coChange). Default-OFF: gate off ⇒ git tool set is byte-identical.
+  const gitToolList: Tool[] = gitToolsEnabled()
+    ? gitTools(undefined, gitCoChangeEnabled() ? { coChange: true } : {})
+    : []
 
   if (planMode) slog.info("plan.mode.on")
   if (metrics) slog.info("metrics.on")

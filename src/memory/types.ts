@@ -92,6 +92,35 @@ export interface MemoryEntry {
   supersededBy?: string
   /** Optional originating session id. */
   sessionId?: string
+  // ── §10.6 routing meta (Codex `MEMORY.md` FORMAT) ──────────────────────
+  // All OPTIONAL and INERT until a recall query opts into routing weighting
+  // (see {@link MemoryQuery.routing}). Absent ⇒ ranking is byte-identical to
+  // the legacy weighted-sum, so pre-existing rows/call-sites are unaffected.
+  /**
+   * Retrieval grouping — Codex `Task Group:` (cwd / project / workflow /
+   * detail-task family; broad but distinguishable). Used to boost recall for
+   * memories from the same task family as the current query.
+   */
+  taskGroup?: string
+  /**
+   * Scope boundary — Codex `applies_to: cwd=...`. The working directory (or
+   * cwd family) this memory is scoped to, so future recall does not confuse
+   * similar tasks from different checkouts. `cwd` is matched against the
+   * query's routing cwd (exact ⇒ strong boost, family/prefix ⇒ weak boost).
+   */
+  appliesTo?: AppliesTo
+  /**
+   * Free-text guidance — Codex `reuse_rule=...`. When this memory is safe to
+   * reuse vs when to treat it as checkout-specific / time-specific. Carried for
+   * surfacing in recall blocks (advisory); does NOT participate in scoring.
+   */
+  reuseRule?: string
+}
+
+/** §10.6 — structured scope boundary (Codex `applies_to: cwd=...`). */
+export interface AppliesTo {
+  /** Primary working directory / cwd family / workflow scope this memory covers. */
+  cwd?: string
 }
 
 /**
@@ -135,6 +164,19 @@ export const normalizeEntry = (e: MemoryEntry): NormalizedEntry => {
   // an explicit `embedding: undefined` is not assignable to `embedding?:`).
   if (embedding) out.embedding = embedding
   else delete out.embedding
+  // §10.6 routing meta — tolerantly carry only well-typed values, drop garbage
+  // (a corrupt persisted row / malformed save must never throw or pollute
+  // scoring). Absent / wrong-typed ⇒ field stays absent (byte-identical).
+  if (typeof e.taskGroup === "string" && e.taskGroup.length > 0) out.taskGroup = e.taskGroup
+  else delete out.taskGroup
+  const cwd =
+    e.appliesTo && typeof e.appliesTo === "object" && typeof e.appliesTo.cwd === "string"
+      ? e.appliesTo.cwd
+      : undefined
+  if (cwd !== undefined && cwd.length > 0) out.appliesTo = { cwd }
+  else delete out.appliesTo
+  if (typeof e.reuseRule === "string" && e.reuseRule.length > 0) out.reuseRule = e.reuseRule
+  else delete out.reuseRule
   return out
 }
 
@@ -209,6 +251,27 @@ export interface MemoryQuery {
   minImportance?: number
   /** Include `supersededBy`-marked entries (default `false`). */
   includeSuperseded?: boolean
+  /**
+   * §10.6 recall routing context. **Opt-in** — when present, entries whose
+   * routing meta ({@link MemoryEntry.taskGroup} / {@link MemoryEntry.appliesTo})
+   * matches this context are scored UP (a soft refine, never a hard filter).
+   * Absent ⇒ ranking is byte-identical to the legacy weighted-sum. The
+   * composition root populates this only when `QUANTA_MEMORY_ROUTING` is on.
+   */
+  routing?: RoutingContext
+}
+
+/**
+ * §10.6 — the current turn's routing context, compared against each entry's
+ * routing meta during recall. Both fields optional; an empty `{}` yields zero
+ * boost (byte-identical to no routing).
+ */
+export interface RoutingContext {
+  /** Current task family — compared (case-insensitive, exact) to {@link MemoryEntry.taskGroup}. */
+  taskGroup?: string
+  /** Current working directory — compared to {@link MemoryEntry.appliesTo} cwd
+   *  (exact ⇒ strong boost; one is a path-prefix of the other ⇒ family boost). */
+  cwd?: string
 }
 
 /** Default {@link MemoryQuery.limit}. */

@@ -49,7 +49,7 @@ import {
   parseMemoryThreadMode,
   parseMemoryWriteGuardPct,
 } from "@/runner/knobs/memory-mode-parse"
-import { gateDisabled } from "@/shared"
+import { gateDisabled, gateOn } from "@/shared"
 import { parseEnvFlag } from "./env-flag"
 import { buildMemoryConfigCore, type MemoryConfigAssembleInput, parseRecallTiers } from "./memory"
 import { buildStoreCore } from "./store"
@@ -196,6 +196,9 @@ export const resolveMemoryConfigFromEnv = (
   const threadMode = parseMemoryThreadMode(env.QUANTA_MEMORY_MODE)
   const lineCitations = parseMemoryLineCitations(env.QUANTA_MEMORY_LINE_CITATIONS)
   const writeGuardPct = parseMemoryWriteGuardPct(env.QUANTA_MEMORY_WRITE_GUARD_PCT)
+  // §10.6 routing weighting — default-OFF opt-in. Read via the canonical
+  // gateOn vocab so `QUANTA_MEMORY_ROUTING` in {1,on,true,yes} all enable it.
+  const routingEnabled = gateOn(env, "QUANTA_MEMORY_ROUTING")
   const input: MemoryConfigAssembleInput = {
     store,
     ...(resolvedLimit !== undefined ? { recallLimit: resolvedLimit } : {}),
@@ -206,6 +209,7 @@ export const resolveMemoryConfigFromEnv = (
     ...(threadMode !== undefined ? { threadMode } : {}),
     ...(lineCitations !== undefined ? { lineCitations } : {}),
     ...(writeGuardPct !== undefined ? { writeGuardMinRemainingPercent: writeGuardPct } : {}),
+    ...(routingEnabled ? { routingEnabled: true } : {}),
   }
   return buildMemoryConfigCore(input)
 }

@@ -702,6 +702,190 @@ export const reactiveCompact = async (
   return { ok: true, messages, summaryTokens: estimateTokens([synthetic]) }
 }
 
+/* ------------------------------------------------------------------ */
+/*  §13.3 — DROP-OLDEST salvage (jun-08 long-tail)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Maximum drop-oldest rounds. Bounds the retry so a pathological transcript
+ * (every turn an indivisible giant payload) cannot spin: after this many drops
+ * we give up and return the last reactiveCompact failure. Codex's
+ * `thread_rollout_truncation` similarly bounds how far it walks the rollout.
+ */
+export const MAX_DROP_OLDEST_ROUNDS = 8
+
+/**
+ * Drop the OLDEST turn from `messages`, orphan-safely, returning the reduced
+ * array — or `null` when nothing more can be dropped without violating the
+ * floor (`keepFloor` messages must always remain). Pure.
+ *
+ * "Oldest turn" = the leading messages up to AND INCLUDING the first assistant
+ * message, plus any immediately-following `tool_result` user message(s) that
+ * reference ONLY tool_use ids in the dropped prefix (so the new head is never
+ * an orphaned tool_result Anthropic would reject). When the head is a leading
+ * user message with no assistant after it within the floor, we drop that single
+ * user message.
+ *
+ * This is the inverse of {@link findBoundary} (which keeps a SUFFIX): here we
+ * remove a PREFIX. It is the mechanism §13.3 layers on top of summarization —
+ * when the summarized prefix + retained suffix STILL overflow because the
+ * limiting payload sits in the kept suffix, dropping the oldest retained turn
+ * frees real headroom that summarization cannot.
+ */
+export const dropOldestTurn = (messages: Message[], keepFloor: number): Message[] | null => {
+  if (messages.length <= keepFloor) return null
+  // Find the index of the first assistant message — the end of the first
+  // "turn" (leading user prompt + assistant reply). We drop through it.
+  let cut = 0
+  let sawAssistant = false
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i] as Message
+    if (m.role === "assistant") {
+      sawAssistant = true
+      cut = i + 1
+      break
+    }
+  }
+  // No assistant at all (only leading user messages): drop the single oldest.
+  if (!sawAssistant) cut = 1
+  // Sweep forward past any tool_result-only user messages that would be orphaned
+  // (their tool_use was just dropped) so the new head is self-consistent.
+  const droppedIds = new Set<string>()
+  for (let i = 0; i < cut; i++) {
+    for (const id of toolUseIds(messages[i] as Message)) droppedIds.add(id)
+  }
+  while (cut < messages.length) {
+    const head = messages[cut] as Message
+    const refs = toolResultRefs(head)
+    // Only sweep a head that is PURELY a tool_result for a dropped tool_use.
+    if (refs.length === 0 || !refs.some((r) => droppedIds.has(r))) break
+    cut++
+  }
+  // Respect the floor: never drop below `keepFloor` retained messages.
+  if (messages.length - cut < keepFloor) return null
+  if (cut <= 0) return null
+  return messages.slice(cut)
+}
+
+export interface DropOldestSalvageInput {
+  messages: Message[]
+  llm: LLMPort
+  system: SystemPromptInput
+  /** Recent turns to keep verbatim through the reactive squeeze attempt.
+   *  Defaults to {@link REACTIVE_KEEP_TURNS}. */
+  keepRecentTurns?: number
+  /** Minimum messages that must survive every drop (orphan-safety floor).
+   *  Defaults to 1 (always keep at least the most-recent message — you can
+   *  never drop the current request). */
+  keepFloor?: number
+  /** Max drop rounds. Defaults to {@link MAX_DROP_OLDEST_ROUNDS}. */
+  maxRounds?: number
+  /** Token budget the salvaged transcript must fit under, when the hard
+   *  drop-oldest fallback engages. When omitted, the fallback drops to the
+   *  floor (drop everything droppable). The recovery executor passes the same
+   *  model-window-derived limit the loop used so the drop stops as soon as the
+   *  transcript would re-fit. */
+  targetTokens?: number
+}
+
+export type DropOldestSalvageResult =
+  | {
+      ok: true
+      messages: Message[]
+      summaryTokens: number
+      droppedRounds: number
+      /** `"reactive"` = the summarization squeeze succeeded (no hard drop
+       *  needed); `"hard-drop"` = the squeeze could not shrink the transcript
+       *  so we shed the oldest turns to fit the budget. */
+      strategy: "reactive" | "hard-drop"
+    }
+  | { ok: false; reason: string; droppedRounds: number }
+
+/**
+ * §13.3 (jun-08) — DROP-OLDEST salvage. The FAIL-FAST-vs-SALVAGE choice: instead
+ * of aborting the turn the moment a reactive squeeze can't help, shed the oldest
+ * context (which a user resuming after PTL cares about least) so the turn can
+ * continue. Two layered strategies, in order:
+ *
+ *   1. REACTIVE first — run {@link reactiveCompact} unchanged. If it shrinks the
+ *      transcript (the common case: a summarizable prefix exists), return that.
+ *   2. HARD-DROP fallback — when the squeeze fails (no summarizable prefix, or
+ *      the limiting payload sits in the retained suffix so summarization frees
+ *      < 15%), drop the OLDEST turn (orphan-safely via {@link dropOldestTurn})
+ *      and re-check the raw token estimate against `targetTokens`. Repeat until
+ *      the transcript fits, nothing more can be shed (floor reached), or the
+ *      round cap is hit. This is the genuine recovery summarization cannot give:
+ *      it removes real tokens regardless of where the payload sits. Mirrors
+ *      Codex `thread_rollout_truncation` (truncate the oldest rollout to fit).
+ *
+ * Pure orchestration — the only I/O is the single summarizer call the reactive
+ * path already makes; the hard-drop fallback is pure array slicing (NO extra
+ * LLM calls). NEVER throws (delegates to the no-throw `reactiveCompact`).
+ * DEFAULT-OFF at the call site: the recovery executor only invokes this when the
+ * salvage knob is on; absent ⇒ the legacy `{ok:false}`→abort path is
+ * byte-identical (this function is not even constructed).
+ */
+export const dropOldestSalvage = async (
+  input: DropOldestSalvageInput,
+): Promise<DropOldestSalvageResult> => {
+  const keepRecentTurns = input.keepRecentTurns ?? REACTIVE_KEEP_TURNS
+  const keepFloor = input.keepFloor ?? 1
+  const maxRounds = input.maxRounds ?? MAX_DROP_OLDEST_ROUNDS
+
+  // Strategy 1 — reactive squeeze (unchanged). Succeeds whenever a summarizable
+  // prefix exists and the kept suffix isn't the limiting payload.
+  const reactive = await reactiveCompact({
+    messages: input.messages,
+    llm: input.llm,
+    system: input.system,
+    keepRecentTurns,
+  })
+  if (reactive.ok) {
+    return {
+      ok: true,
+      messages: reactive.messages,
+      summaryTokens: reactive.summaryTokens,
+      droppedRounds: 0,
+      strategy: "reactive",
+    }
+  }
+
+  // Strategy 2 — hard drop-oldest until the transcript fits. The summary could
+  // not help (its reason is preserved if we ultimately exhaust). Each round
+  // sheds the single oldest orphan-safe turn; we stop as soon as the raw
+  // estimate is at/under the target (or there's no target ⇒ drop everything
+  // droppable). NO extra summarizer call here — pure slicing.
+  let current = input.messages
+  for (let round = 1; round <= maxRounds; round++) {
+    const reduced = dropOldestTurn(current, keepFloor)
+    if (reduced === null || reduced.length >= current.length) {
+      // Floor reached — the limiting payload is in the irreducible tail (e.g.
+      // a single giant current request). Summarization couldn't help and we
+      // cannot drop the most-recent turn, so this is a genuine dead end.
+      return {
+        ok: false,
+        reason: `${reactive.reason} — drop-oldest salvage exhausted (only the irreducible recent tail remains)`,
+        droppedRounds: round - 1,
+      }
+    }
+    current = reduced
+    if (input.targetTokens === undefined || estimateTokens(current) <= input.targetTokens) {
+      return {
+        ok: true,
+        messages: current,
+        summaryTokens: 0,
+        droppedRounds: round,
+        strategy: "hard-drop",
+      }
+    }
+  }
+  return {
+    ok: false,
+    reason: `${reactive.reason} — drop-oldest salvage hit the ${maxRounds}-round cap without fitting the budget`,
+    droppedRounds: maxRounds,
+  }
+}
+
 /**
  * Compact `messages` if over the token threshold. Behavior-preserving when
  * under: returns the same array with `compacted:false`.

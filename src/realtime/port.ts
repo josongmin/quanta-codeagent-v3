@@ -44,6 +44,7 @@ import type {
   RealtimeInboundMessage,
   RealtimeStatus,
   SdpAnswer,
+  VoiceInfo,
 } from "./types"
 
 /** Unsubscribe function returned by `onMessage`. Calling it removes the
@@ -83,6 +84,14 @@ export interface RealtimePort {
   /** Emit an outbound `{type:"audio.stop"}` signal on the open WS.
    *  Pre-connect returns `Err({kind:"not-connected"})`. */
   audioStop(): Result<void, RealtimeError>
+
+  /** §6.5 — query the SERVER for the voices it advertises (Codex
+   *  `ThreadRealtimeListVoices` parity). Returns a server-driven list, NOT a
+   *  hardcoded enum — a provider can add/remove voices server-side. Adapters
+   *  with no voices provider wired return `Err({kind:"voices-unsupported"})`
+   *  (the minimal MVP WS has no voices RPC; a surface wires a `voicesProvider`).
+   *  NO-THROW — operational failures encode as typed `Err`. */
+  listVoices(): Promise<Result<readonly VoiceInfo[], RealtimeError>>
 
   /** Graceful close. Transitions `open → closing → closed`. Idempotent —
    *  closing an already-closed port is `ok`. */

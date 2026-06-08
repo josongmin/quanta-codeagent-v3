@@ -875,6 +875,32 @@ const DAEMON: readonly KnobInventoryEntry[] = [
     readSite: "runtime/os-sandbox/env.ts",
   },
   {
+    // §12.6 (jun-08 long-tail) — Codex `[sandbox_workspace_write].exclude_slash_tmp`.
+    // Default-OFF: absent ⇒ the Seatbelt profile keeps its hardcoded `/tmp`
+    // read-allow (byte-identical Codex baseline). On ⇒ `/tmp` is omitted from
+    // the compiled profile.
+    envKey: "QUANTA_SANDBOX_EXCLUDE_TMPDIR",
+    kind: "bool",
+    default: false,
+    group: "sandbox",
+    home: "runtime-config",
+    describe: "Exclude /tmp from the OS sandbox read scope (Codex exclude_slash_tmp parity).",
+    readSite: "apps/cli/sandbox-wire.ts",
+  },
+  {
+    // P16 (jun-08 long-tail) — win32 shell selection. Default `error`: refuse
+    // to spawn a nonexistent `bash` on Windows and surface a typed error
+    // instead of a silent ENOENT. `cmd` opts into the cmd.exe fallback. No
+    // effect off win32 (the env is not even read there).
+    envKey: "QUANTA_WIN_SHELL",
+    kind: "enum",
+    default: "error",
+    group: "sandbox",
+    home: "runtime-config",
+    describe: "win32 shell fallback mode: 'error' (refuse, default) or 'cmd' (cmd.exe).",
+    readSite: "runtime/shell-argv.ts",
+  },
+  {
     envKey: "QUANTA_SESSION_REGISTRY_SQLITE_PATH",
     kind: "string",
     default: undefined,
@@ -1065,6 +1091,18 @@ const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "Memory recall tier selection.",
     readSite: "runner/assemble/memory-factory.ts",
   },
+  {
+    // §10.6 routing weighting — default-OFF opt-in. When on, per-turn recall
+    // passes the current cwd as a routing context so memories scoped to this
+    // checkout (Codex `applies_to: cwd=...`) score up. Absent ⇒ byte-identical.
+    envKey: "QUANTA_MEMORY_ROUTING",
+    kind: "bool",
+    default: false,
+    group: "memory",
+    home: "runtime-config",
+    describe: "Memory recall routing weighting (cwd/task-group meta; set =1 to enable).",
+    readSite: "runner/assemble/memory-factory.ts",
+  },
   // @-mention resolver caps — all default-ON; numeric caps optional
   {
     envKey: "QUANTA_MENTION_FILE_MAX_BYTES",
@@ -1100,6 +1138,46 @@ const EXTRA: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "@symbol resolver timeout (ms).",
+    readSite: "agent/mention-runner/default-resolver.ts",
+  },
+  // §10.3 — @folder + @git mention kinds (Cursor parity). Gates default-ON
+  // (=off opts out per kind); numeric caps optional. Graceful-omit semantics:
+  // a kind whose dep (cwd / git provider) is absent resolves to null even when
+  // the gate is on — byte-identical to the pre-§10.3 path.
+  {
+    envKey: "QUANTA_MENTION_FOLDER",
+    kind: "bool",
+    default: true,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "@folder mention directory-listing resolver (default ON; =off to disable).",
+    readSite: "agent/mention-runner/default-resolver.ts",
+  },
+  {
+    envKey: "QUANTA_MENTION_FOLDER_MAX_ENTRIES",
+    kind: "int",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "@folder mention listing entry cap.",
+    readSite: "agent/mention-runner/default-resolver.ts",
+  },
+  {
+    envKey: "QUANTA_MENTION_GIT",
+    kind: "bool",
+    default: true,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "@git mention git-context resolver (default ON; =off to disable).",
+    readSite: "agent/mention-runner/default-resolver.ts",
+  },
+  {
+    envKey: "QUANTA_MENTION_GIT_MAX_BYTES",
+    kind: "int",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "@git mention body byte cap.",
     readSite: "agent/mention-runner/default-resolver.ts",
   },
   // bench / swebench harness
@@ -1221,6 +1299,46 @@ const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "Fail if port busy (no auto-increment).",
     readSite: "apps/web-daemon/index.ts",
   },
+  // ── §2.x plugin/skill flags + connector marketplace V1 (jun-08 longtail).
+  // Slice-read gates (read via `gateOn(process.env, …)` in the owning slice, NOT
+  // in runtime-config's loadFromEnv) — so they live HERE, never in
+  // runtime-config-knobs.ts (the disjoint ratchet forbids both). All default-OFF.
+  {
+    envKey: "QUANTA_PLUGIN_POINTERS",
+    kind: "bool",
+    default: false,
+    group: "integration",
+    home: "runtime-config",
+    describe: "§2.4 — resolve plugin manifest hooks/apps pointer fields (opt-in).",
+    readSite: "skill/plugin-loader.ts",
+  },
+  {
+    envKey: "QUANTA_SKILL_IMPLICIT_POLICY",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "§2.3 — honor skill policy.allow_implicit_invocation (filters implicit-inject set).",
+    readSite: "skill/activation.ts",
+  },
+  {
+    envKey: "QUANTA_MARKETPLACE_POLICY",
+    kind: "bool",
+    default: false,
+    group: "integration",
+    home: "runtime-config",
+    describe: "§2.5 — enforce marketplace.json source allow/block policy gating (opt-in).",
+    readSite: "connectors/marketplace-policy.ts",
+  },
+  {
+    envKey: "QUANTA_CONNECTOR_MARKETPLACE",
+    kind: "bool",
+    default: false,
+    group: "integration",
+    home: "runtime-config",
+    describe: "§1.6 — connector DirectoryApp marketplace install/lifecycle V1 (opt-in).",
+    readSite: "connectors/connector-marketplace.ts",
+  },
 ]
 
 /** P2 audit cluster — CONST-KEYED gates surfaced when the ratchet learned to
@@ -1334,6 +1452,16 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "Thin-client dispatch routing (opt-in).",
     readSite: "shared/thin-client-route.ts",
+  },
+  {
+    envKey: "QUANTA_CRASH_RESUME",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "§13.2 persisted interrupted-turn marker — detect a mid-turn crash on restart and offer resume (opt-in).",
+    readSite: "session/crash-resume.ts",
   },
   {
     envKey: "QUANTA_USE_FOUNDRY",

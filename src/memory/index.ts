@@ -88,6 +88,7 @@ export {
   type RecallTelemetryEvent,
 } from "./telemetry-port"
 export {
+  type AppliesTo,
   bucketOf,
   DEFAULT_RECALL_LIMIT,
   EMBED_DIM,
@@ -103,6 +104,7 @@ export {
   type NormalizedEntry,
   normalizeEntry,
   RECENT_MAX_MS,
+  type RoutingContext,
   STALE_MAX_MS,
   type StoredMessage,
 } from "./types"

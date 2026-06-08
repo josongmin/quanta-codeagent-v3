@@ -501,6 +501,18 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   enter_worktree: "bash_mutating",
   exit_worktree: "git_mutating",
   worktree_status: null,
+  // ─── jun-08 long-tail NEW model-facing tools (§5.4 / §7.2 / §7.3) ─────────
+  // Caller-wire (registered only when ghTools/gitTools are built with the
+  // relevant opt, gated default-OFF behind its own QUANTA_* knob). All three are
+  // read-only (`null`): `gh_pr_code_tour` parses a PR diff into a guided tour
+  // (no mutation); `git_co_change` ranks co-occurring files from git log (pure
+  // read); `ci_finding` records the agent's OWN analysis into an in-SESSION
+  // store (no FS/shell/git side effect, plan-safe like communicate_update).
+  // PERMANENT entries so plan-mode dispatch never trips UnknownToolError when a
+  // host wires them.
+  gh_pr_code_tour: null,
+  git_co_change: null,
+  ci_finding: null,
 })
 
 /** SINGLE SOURCE OF TRUTH for the "caller-wire" tool-name allowlist.
@@ -635,6 +647,14 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   "enter_worktree",
   "exit_worktree",
   "worktree_status",
+  // jun-08 long-tail NEW model-facing tools — caller-wire (gh/git tools opts,
+  // gated default-OFF on QUANTA_GH_CODE_TOUR / QUANTA_GIT_CO_CHANGE /
+  // QUANTA_CI_FINDING). Not enumerable from the static gitTools()/ghTools()
+  // default surface, so listed here so the orphan-direction drift check stays
+  // exact. All read-only (`null` kind).
+  "gh_pr_code_tour",
+  "git_co_change",
+  "ci_finding",
 ] as const)
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}

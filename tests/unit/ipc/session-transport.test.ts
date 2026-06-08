@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test"
 import {
   createSessionStdioTransport,
   createSessionTransportBridge,
+  decodeSessionTransportMessage,
   encodeSessionTransportMessage,
   SessionDuplicateCommandError,
   type SessionTransport,
   type SessionTransportMessage,
+  tryDecodeSessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
 } from "@/ipc/session"
 import {
@@ -193,6 +195,71 @@ const createTransportPair = (): { client: SessionTransport; server: SessionTrans
     ),
   }
 }
+
+describe("session transport connect-frame codec", () => {
+  test("round-trips a connect frame carrying resumeFromSeq", () => {
+    const message: SessionTransportMessage = {
+      kind: "connect",
+      sessionId: "session-1",
+      resumeFromSeq: 42,
+    }
+    const wire = encodeSessionTransportMessage(message)
+    expect(JSON.parse(wire).resumeFromSeq).toBe(42)
+    expect(decodeSessionTransportMessage(wire)).toEqual(message)
+  })
+
+  test("round-trips resumeFromSeq=0 (a valid bootstrap seq) without dropping it", () => {
+    const message: SessionTransportMessage = {
+      kind: "connect",
+      sessionId: "session-1",
+      resumeFromSeq: 0,
+    }
+    const wire = encodeSessionTransportMessage(message)
+    expect(JSON.parse(wire).resumeFromSeq).toBe(0)
+    expect(decodeSessionTransportMessage(wire)).toEqual(message)
+  })
+
+  test("a connect frame WITHOUT resumeFromSeq stays byte-identical (no key emitted)", () => {
+    const message: SessionTransportMessage = {
+      kind: "connect",
+      sessionId: "session-1",
+    }
+    const wire = encodeSessionTransportMessage(message)
+    expect("resumeFromSeq" in JSON.parse(wire)).toBe(false)
+    // Decode preserves absence (no spurious resumeFromSeq key on the way back).
+    expect(decodeSessionTransportMessage(wire)).toEqual(message)
+  })
+})
+
+describe("session transport heartbeat codec", () => {
+  test("round-trips a heartbeat ping frame", () => {
+    const message: SessionTransportMessage = { kind: "heartbeat", phase: "ping" }
+    const wire = encodeSessionTransportMessage(message)
+    const parsed = JSON.parse(wire)
+    expect(parsed.kind).toBe("heartbeat")
+    expect(parsed.phase).toBe("ping")
+    expect(decodeSessionTransportMessage(wire)).toEqual(message)
+  })
+
+  test("round-trips a heartbeat pong frame", () => {
+    const message: SessionTransportMessage = { kind: "heartbeat", phase: "pong" }
+    const wire = encodeSessionTransportMessage(message)
+    expect(JSON.parse(wire).phase).toBe("pong")
+    expect(decodeSessionTransportMessage(wire)).toEqual(message)
+  })
+
+  test("a heartbeat frame with an unknown phase is rejected", () => {
+    const wire = JSON.stringify({ version: "session.v1", kind: "heartbeat", phase: "nope" })
+    expect(tryDecodeSessionTransportMessage(wire)).toBeUndefined()
+  })
+
+  test("the 5 legacy transport kinds still decode unchanged (heartbeat is additive)", () => {
+    // A non-heartbeat envelope must round-trip exactly as before — heartbeat
+    // adds a 6th arm without perturbing the existing decoders.
+    const message: SessionTransportMessage = { kind: "connect", sessionId: "session-1" }
+    expect(decodeSessionTransportMessage(encodeSessionTransportMessage(message))).toEqual(message)
+  })
+})
 
 describe("session stdio transport", () => {
   test("decodes partial command frames and encodes snapshot frames", async () => {

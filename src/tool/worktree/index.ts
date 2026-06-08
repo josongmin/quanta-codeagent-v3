@@ -373,9 +373,26 @@ export const makeExitWorktreeTool = (
       return
     }
     // Tear down the worktree + branch (force:true discards a dirty tree).
-    const removed = await deps.removeWorktree(active.worktreePath, active.repoRoot, {
-      branch: active.branch,
-    })
+    // NO-THROW (§2): `removeWorktree` is an injected git-op port returning a bare
+    // boolean — a THROW (git error / FS perm) must not escape the iterator. Guard
+    // it and fold a throw into the SAME typed-failure + keep-slot posture as a
+    // false return (finding #4), so the model can retry/inspect.
+    let removed: boolean
+    try {
+      removed = await deps.removeWorktree(active.worktreePath, active.repoRoot, {
+        branch: active.branch,
+      })
+    } catch (e) {
+      await runShell("git worktree prune", { cwd: active.repoRoot }).catch(() => undefined)
+      yield result(
+        false,
+        `exit_worktree: worktree cleanup threw (${errMessage(e)}) — ${active.worktreePath} may still be registered. ` +
+          "The worktree is still active; retry exit_worktree, or remove it manually " +
+          `(git worktree remove --force ${active.worktreePath}).`,
+        { mode: "rejected", reason: "worktree_cleanup_failed" },
+      )
+      return
+    }
     // ticket-11 finding #4: a FAILED removal must NOT report ok:true + clear the
     // slot — that leaves the EXACT wedging state (a registered worktree on disk +
     // a session that thinks it exited). Surface a TYPED failure and KEEP the slot

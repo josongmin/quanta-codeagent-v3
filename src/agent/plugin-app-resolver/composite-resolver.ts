@@ -33,6 +33,8 @@ import type { MentionResolverPort, MentionResolverResult } from "@/agent/mention
 import type { PluginRegistryPort } from "@/agent/plugin-discovery"
 import { createAppResolver } from "./app-resolver"
 import { createFileResolver, type FileResolverOptions } from "./file-resolver"
+import { createFolderResolver, type FolderResolverOptions } from "./folder-resolver"
+import { createGitResolver, type GitResolverOptions } from "./git-resolver"
 import { createPluginResolver } from "./plugin-resolver"
 import { createSkillResolver } from "./skill-resolver"
 import type { SkillRegistryReadOnly } from "./types"
@@ -56,6 +58,14 @@ export interface CompositeResolverDeps {
    *  `createSymbolResolver`). Omit ⇒ the port has NO `resolveSymbol` and
    *  every `@Symbol` mention resolves to `null`. */
   readonly symbol?: (target: string) => Promise<MentionResolverResult | null>
+  /** §10.3 — folder-mention resolver options (workspace root + entry cap).
+   *  Omit ⇒ the port has NO `resolveFolder` and every `@folder/` mention
+   *  resolves to `null` (byte-identical to the pre-§10.3 composite). */
+  readonly folders?: FolderResolverOptions
+  /** §10.3 — git-context resolver options (injected provider + byte cap).
+   *  Omit ⇒ the port has NO `resolveGit` and every `@git` mention resolves
+   *  to `null`. */
+  readonly git?: GitResolverOptions
 }
 
 /**
@@ -82,6 +92,15 @@ export const createCompositeMentionResolver = (
   }
   if (deps.symbol !== undefined) {
     base.resolveSymbol = deps.symbol
+  }
+  // §10.3 — folder + git, attached only when their dep is supplied so the
+  // pre-§10.3 port shape (no `resolveFolder` / `resolveGit` key) is preserved
+  // when the caller opts out.
+  if (deps.folders !== undefined) {
+    base.resolveFolder = createFolderResolver(deps.folders)
+  }
+  if (deps.git !== undefined) {
+    base.resolveGit = createGitResolver(deps.git)
   }
   return base
 }

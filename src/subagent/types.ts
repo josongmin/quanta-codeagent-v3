@@ -7,6 +7,8 @@
  * its own working memory). Nothing here knows about that implementation.
  */
 
+import type { SubagentAgentType } from "./agent-type"
+
 /** Per-request token/turn ceiling threaded down into a forked agent loop. */
 export interface TaskBudget {
   /** Max model turns the child loop may take. */
@@ -25,8 +27,14 @@ export type TaskKind = "read" | "edit" | "review"
 export interface SubagentRequest {
   /** The task prompt handed to the child agent. */
   prompt: string
-  /** Named subagent profile (e.g. "Explore", "Plan"). Absent ⇒ fork/general. */
-  agentType?: string
+  /** §4.4 — Named subagent profile (e.g. "Explore", "Plan"). Absent ⇒
+   *  fork/general. TYPED-OR-STRING ({@link SubagentAgentType}): a well-known
+   *  {@link SubagentType} kind keeps editor autocompletion, while an arbitrary
+   *  string (a `.quanta/agents` custom name) is STILL accepted — so the
+   *  free-string callers are byte-identical. Boundary validation/normalisation
+   *  (`validateAgentType`) happens at the spawn boundary under
+   *  `QUANTA_SUBAGENT_TYPED_KIND`; the slice itself never rejects. */
+  agentType?: SubagentAgentType
   /** Tool-name allowlist the child registry is filtered to. Absent ⇒ inherit
    *  (or, when `taskKind` is set, a kind-derived default). Explicit value wins
    *  over any kind-derived default. */

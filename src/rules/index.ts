@@ -7,6 +7,7 @@
  * contract.
  */
 
+export { matchArgvRule, parseArgvArrayLiteral, tokenizeArgv } from "./argv"
 export { matchCommand } from "./matcher"
 export { parseRules } from "./parser"
 export type { RulesSnapshot } from "./store"

@@ -40,8 +40,20 @@ export interface Rule {
   readonly action: RuleAction
   /** The verbatim command prefix the rule matches against, with leading and
    *  trailing whitespace stripped but internal whitespace preserved.
-   *  Guaranteed non-empty by the parser. */
+   *  Guaranteed non-empty by the parser. For an argv-array rule (see
+   *  {@link argv}) this mirrors the joined token vector so existing
+   *  diagnostics / ruleId derivation keep working unchanged. */
   readonly prefix: string
+  /**
+   * §10.2 — Codex `prefix_rule(pattern=[...])` parity. When present, the
+   * matcher uses TOKEN-PREFIX matching over the command's argv vector
+   * (each pattern token must equal the corresponding command token; the last
+   * token may end with `*` as a literal-prefix glob) instead of byte-prefix
+   * matching on {@link prefix}. ABSENT for every legacy string-prefix rule
+   * (no bracketed `[...]` in the source) ⇒ byte-identical legacy matching.
+   * The parser populates this ONLY for bracketed token-array lines.
+   */
+  readonly argv?: readonly string[]
   readonly layer: RuleLayer
   /** 1-indexed line number in `sourceFile` where the rule was defined.
    *  Used for diagnostics (e.g. `RuleParseError.lineNumber`). */

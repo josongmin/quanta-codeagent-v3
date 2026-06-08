@@ -96,6 +96,22 @@ export type CompactionConfigBlock = {
    * byte-for-byte identical to the pre-archive path.
    */
   archive?: boolean
+  /**
+   * §13.3 (jun-08 long-tail) — DROP-OLDEST salvage on reactive-compaction
+   * failure. When the loop hits a `prompt-too-long` error and the reactive
+   * squeeze CANNOT shrink the transcript (no summarizable prefix, or the
+   * limiting payload sits in the retained suffix), the default behavior is to
+   * ABORT the turn. When this is `true`, the loop instead DROPS the oldest
+   * retained turn (orphan-safely) and retries the squeeze — repeating until it
+   * succeeds, nothing more can be shed, or a round cap is hit (Codex
+   * `thread_rollout_truncation` intent).
+   *
+   * Absent/`false` ⇒ the legacy fail-fast→abort path is BYTE-IDENTICAL (no
+   * extra summarizer calls, no drop). Opt in deliberately: drop-oldest sheds
+   * real context (the user resuming after PTL loses the oldest history), so it
+   * trades fidelity for a recoverable turn.
+   */
+  dropOldestSalvage?: boolean
 }
 
 /**

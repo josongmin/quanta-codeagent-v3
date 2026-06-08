@@ -1,6 +1,11 @@
 import type { SystemPromptInput } from "@/llm"
 import { runCloseoutCritic } from "../closeout-critic"
-import { estimateTokens, reactiveCompact } from "../compaction"
+import {
+  dropOldestSalvage,
+  estimateTokens,
+  reactiveCompact,
+  resolveCompactionLimitTokens,
+} from "../compaction"
 import { metaUser, runGuardChain } from "../guards"
 import type { AssembledMessage, RecoveryAction } from "../recovery"
 import {
@@ -60,11 +65,27 @@ export const applyNonSuccessRecoveryAction = async (
   // the counter is wired (knob ON); falls back to `estimateTokens` when OFF.
   const before =
     (wm as typeof wm & { tokenTotal?(): number }).tokenTotal?.() ?? estimateTokens(snapshot)
-  const compacted = await reactiveCompact({
-    messages: snapshot,
-    llm: config.compaction?.summarizerLlm ?? config.llm,
-    system: ctxSystem,
-  })
+  const summarizerLlm = config.compaction?.summarizerLlm ?? config.llm
+  // §13.3 (jun-08) — DROP-OLDEST salvage. DEFAULT-OFF: when the knob is absent
+  // we call `reactiveCompact` exactly as before (byte-identical — same single
+  // squeeze, same `{ok:false}`→abort on failure). When ON, `dropOldestSalvage`
+  // wraps the SAME reactive squeeze but, on failure, sheds the oldest retained
+  // turn and retries instead of aborting. Both return the same `{ok, messages,
+  // summaryTokens}` shape so the wire below is unchanged.
+  const compacted =
+    config.compaction?.dropOldestSalvage === true
+      ? await dropOldestSalvage({
+          messages: snapshot,
+          llm: summarizerLlm,
+          system: ctxSystem,
+          // Target the SAME compaction limit the loop uses (model-derived when
+          // a window is known; explicit override wins). The hard-drop fallback
+          // stops shedding as soon as the transcript would re-fit, so it never
+          // drops more than necessary. Omitted limit ⇒ the fallback drops to
+          // the floor (forward progress guaranteed).
+          targetTokens: resolveCompactionLimitTokens(config.compaction?.thresholdTokens),
+        })
+      : await reactiveCompact({ messages: snapshot, llm: summarizerLlm, system: ctxSystem })
   if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
   const after = estimateTokens(compacted.messages)
   breaker?.recordReactive(before, after)

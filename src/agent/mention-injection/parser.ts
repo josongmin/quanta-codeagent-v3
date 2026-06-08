@@ -1,13 +1,26 @@
 /**
  * ADR-0325 / ADR-0418 — Pure mention parser for user input text.
  *
- * FIVE closed-enum mention sigils (ADR-0325 + ADR-0418):
+ * SEVEN closed-enum mention sigils (ADR-0325 + ADR-0418 + §10.3):
  *
  *   `@skill-name`                 → MentionKind = "skill"
  *   `plugin://name`               → MentionKind = "plugin"
  *   `@@app-name`                  → MentionKind = "app"
  *   `@path/to/file` / `@foo.ts`   → MentionKind = "file"   (ADR-0418)
  *   `@FooBar` / `@MyClass.method` → MentionKind = "symbol" (ADR-0418)
+ *   `@dir/` (trailing slash)      → MentionKind = "folder" (§10.3)
+ *   `@git` / `@git:diff`          → MentionKind = "git"    (§10.3)
+ *
+ * §10.3 cascade additions (deterministic, FIRST match wins):
+ *   - `@git` / `@git:(status|diff|log)` is matched by its OWN regex
+ *     alternative BEFORE the generic `@`-cascade, so a `git`-named skill is
+ *     unreachable by bare `@git`. The `@git` literal matches ONLY at a true
+ *     right-boundary: the char after `git` (or after the subcommand) must NOT
+ *     continue an identifier / path (`[A-Za-z0-9_:./~-]`). So `@git/x` is a
+ *     FILE, `@git.foo` is a FILE, `@git-helper` is a SKILL, and an invalid
+ *     subcommand (`@git:bogus`) falls through to `@git` ⇒ skill `git`.
+ *   - A slash-path that ENDS WITH `/` routes to `folder` (priority 2a, before
+ *     `file`).
  *
  * Syntax rules — DETERMINISTIC priority resolution (ADR-0418 §4, VERBATIM):
  *
@@ -87,7 +100,7 @@ const MAX_SYMBOL_LEN = 128
  * payload regex; right-boundary is enforced per-kind in `classifyAtPayload`.
  */
 const MENTION_RE =
-  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<at>@(?<atPayload>[A-Za-z_./~][A-Za-z0-9_./~-]*))/g
+  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<git>@git(?::(?<gitSub>status|diff|log))?)(?![A-Za-z0-9_:./~-])|(?<at>@(?<atPayload>[A-Za-z_./~][A-Za-z0-9_./~-]*))/g
 
 /** Pure kebab identifier check for skill / app / plugin. */
 const KEBAB_RE = /^[a-z][a-z0-9-]*$/
@@ -158,6 +171,16 @@ const asFile = (payload: string): AtClass => {
   return { kind: "file", target: cleaned }
 }
 
+/** §10.3 — narrow a slash-path payload into a `folder` classification when it
+ *  ENDS WITH `/` (Cursor `@Folders` parity). A path that doesn't end in `/`
+ *  after narrowing is NOT a folder (caller falls through to `asFile`). */
+const asFolder = (payload: string): AtClass => {
+  const cleaned = narrowFilePayload(payload)
+  if (cleaned === null || cleaned.length > MAX_FILE_LEN) return null
+  if (!cleaned.endsWith("/")) return null
+  return { kind: "folder", target: cleaned }
+}
+
 /** Narrow + length-cap a symbol payload into a `symbol` classification. */
 const asSymbol = (payload: string): AtClass => {
   const cleaned = narrowSymbolPayload(payload)
@@ -181,7 +204,13 @@ const asSkill = (payload: string): AtClass => {
  * lowercase+dot→file, lowercase-kebab→skill.
  */
 const classifyAtPayload = (payload: string): AtClass => {
-  if (payload.includes("/")) return asFile(payload) // priority 2
+  if (payload.includes("/")) {
+    // §10.3 priority 2a — a trailing-slash slash-path is a FOLDER; otherwise
+    // it is a FILE (priority 2). The folder check is gated on the narrowed
+    // payload still ending in `/`, so an over-captured trailing char that is
+    // trimmed away never spuriously flips a file into a folder.
+    return asFolder(payload) ?? asFile(payload)
+  }
   if (/^[A-Z]/.test(payload)) return asSymbol(payload) // priority 3
   if (/^[a-z]/.test(payload) && payload.includes(".")) return asFile(payload) // priority 4
   if (/^[a-z]/.test(payload)) return asSkill(payload) // priority 5
@@ -234,6 +263,13 @@ const validateMatch = (m: RegExpMatchArray, text: string): ParsedMention | null 
   }
   if (groups.plugin !== undefined && groups.pluginName !== undefined) {
     return kebabMention("plugin", groups.pluginName, start, m[0])
+  }
+  // §10.3 — `@git` reserved literal (matched BEFORE the generic `@` cascade so
+  // a `git`-named skill is unreachable by bare `@git`). The subcommand is a
+  // closed enum (`status|diff|log`); bare `@git` defaults to `status`.
+  if (groups.git !== undefined) {
+    const sub = groups.gitSub ?? "status"
+    return { kind: "git", target: sub, span: { start, end: start + m[0].length }, raw: m[0] }
   }
   if (groups.at !== undefined && groups.atPayload !== undefined) {
     return atMention(groups.atPayload, start)

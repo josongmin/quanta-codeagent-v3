@@ -101,6 +101,13 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "Read file_unchanged dedup gate.",
   },
   {
+    envKey: "QUANTA_SKILL_SCOPE_V2",
+    kind: "bool",
+    default: false,
+    group: "tool",
+    describe: "Skill tool-scoping v2: availability filter + escalation ask (ADR-0512).",
+  },
+  {
     envKey: "QUANTA_IMAGE_GEN",
     kind: "bool",
     default: false,
@@ -428,6 +435,20 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     default: false,
     group: "subagent",
     describe: "Background side-agent daemons gate.",
+  },
+  {
+    envKey: "QUANTA_SIDE_AGENT_PROCESS",
+    kind: "bool",
+    default: false,
+    group: "subagent",
+    describe: "§4.3 — side-agent OS-process daemon V1 (forked child + supervised respawn).",
+  },
+  {
+    envKey: "QUANTA_SUBAGENT_TYPED_KIND",
+    kind: "bool",
+    default: false,
+    group: "subagent",
+    describe: "§4.4 — typed agent_type boundary validation (normalise + miss-reject).",
   },
   // ── session / git / permission
   {

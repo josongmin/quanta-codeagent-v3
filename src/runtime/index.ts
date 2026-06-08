@@ -48,6 +48,13 @@ export {
 } from "./sandbox"
 export { runShell } from "./shell"
 export {
+  buildBaseShellArgv,
+  POSIX_SHELL_ARGV,
+  resolveWinShellMode,
+  type ShellArgvDecision,
+  type WinShellMode,
+} from "./shell-argv"
+export {
   __resetShellSandbox,
   getShellSandbox,
   installShellSandbox,

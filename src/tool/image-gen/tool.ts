@@ -73,7 +73,18 @@ export const imageGenInputSchema = z.object({
     .string()
     .regex(SIZE_RE, "size must be `auto` or WIDTHxHEIGHT")
     .optional()
-    .describe("`auto` (default) or WIDTHxHEIGHT, e.g. 1024x1024"),
+    .describe("`auto` (default) or WIDTHxHEIGHT, e.g. 1024x1024. AUTHORITATIVE over aspectRatio."),
+  // §5.2 (long-tail) — model-friendly output shape WITHOUT computing raw pixels.
+  // The provider port carries it (provider-agnostic); the default OpenAI adapter
+  // resolves it to a concrete supported `size` ONLY when `size` is left at
+  // `auto` (an explicit `size` always wins). Absent ⇒ `auto` (byte-identical).
+  aspectRatio: z
+    .enum(["1:1", "16:9", "9:16", "4:3", "3:4", "auto"])
+    .optional()
+    .describe(
+      "Output aspect ratio (1:1 | 16:9 | 9:16 | 4:3 | 3:4 | auto). A pixel-free " +
+        "alternative to `size`; ignored when an explicit `size` is given.",
+    ),
   quality: z.enum(["low", "medium", "high", "auto"]).optional().describe("Quality tier"),
   n: z
     .number()
@@ -203,6 +214,8 @@ const buildRequest = (
   mode: input.mode ?? "generate",
   prompt: input.prompt,
   size: input.size ?? "auto",
+  // §5.2 — default `auto` (absent ⇒ adapter leaves size untouched: byte-identical).
+  aspectRatio: input.aspectRatio ?? "auto",
   quality: input.quality ?? "auto",
   n: input.n ?? 1,
   format,

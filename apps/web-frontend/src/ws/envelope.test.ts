@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+  CANVAS_PROTOCOL_VERSION,
+  decodeCanvasFrame,
   decodeObservabilityFrame,
   decodeSnapshotFrame,
   decodeRejectedFrame,
@@ -53,6 +55,37 @@ describe("encodeConnectFrame", () => {
       sessionId: "srv-1",
     })
     expect("payload" in parsed).toBe(false)
+  })
+
+  it("omits resumeFromSeq when none is provided (first-connect path stays byte-identical)", () => {
+    const raw = encodeConnectFrame("srv-1")
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    expect("resumeFromSeq" in parsed).toBe(false)
+    // Byte-identical to the legacy 3-key frame.
+    expect(raw).toBe(
+      JSON.stringify({
+        version: SESSION_PROTOCOL_VERSION,
+        kind: "connect",
+        sessionId: "srv-1",
+      }),
+    )
+  })
+
+  it("emits resumeFromSeq on reconnect when a last-seen seq is supplied", () => {
+    const raw = encodeConnectFrame("srv-1", 12)
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    expect(parsed).toMatchObject({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "connect",
+      sessionId: "srv-1",
+      resumeFromSeq: 12,
+    })
+  })
+
+  it("emits resumeFromSeq=0 (a valid bootstrap seq) rather than dropping it", () => {
+    const raw = encodeConnectFrame("srv-1", 0)
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    expect(parsed.resumeFromSeq).toBe(0)
   })
 })
 
@@ -411,5 +444,71 @@ describe("isEventEnvelope", () => {
     expect(isEventEnvelope(null)).toBe(false)
     expect(isEventEnvelope({})).toBe(false)
     expect(isEventEnvelope({ kind: "command" })).toBe(false)
+  })
+})
+
+describe("decodeCanvasFrame", () => {
+  const toolDiffFrame = JSON.stringify({
+    version: CANVAS_PROTOCOL_VERSION,
+    kind: "canvas",
+    payload: {
+      kind: "tool.diff",
+      toolCallId: "tc-1",
+      lines: [{ type: "added", content: "x", lineNumber: 1 }],
+      additions: 1,
+      deletions: 0,
+      emittedAt: 7,
+    },
+  })
+
+  it("decodes a tool.diff canvas frame into its payload", () => {
+    const msg = decodeCanvasFrame(toolDiffFrame)
+    expect(msg?.kind).toBe("tool.diff")
+    if (msg?.kind === "tool.diff") {
+      expect(msg.toolCallId).toBe("tc-1")
+      expect(msg.additions).toBe(1)
+    }
+  })
+
+  it("decodes a context.usage canvas frame into its payload", () => {
+    const raw = JSON.stringify({
+      version: CANVAS_PROTOCOL_VERSION,
+      kind: "canvas",
+      payload: {
+        kind: "context.usage",
+        segments: [{ id: "system", tokens: 10 }],
+        total: 10,
+        max: 100,
+        emittedAt: 3,
+      },
+    })
+    const msg = decodeCanvasFrame(raw)
+    expect(msg?.kind).toBe("context.usage")
+    if (msg?.kind === "context.usage") expect(msg.total).toBe(10)
+  })
+
+  it("rejects a canvas frame carrying a non-matching protocol version", () => {
+    const raw = JSON.stringify({
+      version: "canvas.v2",
+      kind: "canvas",
+      payload: { kind: "context.usage", segments: [], total: 1, max: 10, emittedAt: 1 },
+    })
+    expect(decodeCanvasFrame(raw)).toBeNull()
+  })
+
+  it("returns null for non-canvas / malformed frames", () => {
+    expect(decodeCanvasFrame("{")).toBeNull()
+    expect(decodeCanvasFrame(42)).toBeNull()
+    expect(decodeCanvasFrame(JSON.stringify({ kind: "event" }))).toBeNull()
+    // A canvas envelope whose payload fails the per-kind shape guard.
+    expect(
+      decodeCanvasFrame(
+        JSON.stringify({
+          version: CANVAS_PROTOCOL_VERSION,
+          kind: "canvas",
+          payload: { kind: "tool.diff" },
+        }),
+      ),
+    ).toBeNull()
   })
 })

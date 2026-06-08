@@ -48,6 +48,33 @@ export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"
 export { FALLBACK_METRIC_NAMES, FallbackLLM, isFallbackTrigger } from "./fallback"
 export type { LiveUsageKnobs } from "./live-usage"
 export { estimateTokensFromChars, withLiveUsage } from "./live-usage"
+// §9.6 — Anthropic Message Batches API client core (default-OFF). Surfaced on
+// the barrel so a composition root can build a client without a deep import;
+// inert until a method is called (no request at import).
+export type {
+  BatchError,
+  BatchProcessingStatus,
+  BatchRequest,
+  BatchRequestCounts,
+  BatchResult,
+  BatchResultEntry,
+  CreateBatchInput,
+  MessageBatch,
+  MessageBatchesClient,
+  MessageBatchesClientOpts,
+} from "./message-batches"
+export { createMessageBatchesClient } from "./message-batches"
+// §9.6 — opusplan-style sticky model preset (default-OFF). Pure registry +
+// resolver; importing changes no behaviour until a preset is selected by name.
+export type { ModelPreset, SelectPresetResult, StickyPresetResolver } from "./model-preset"
+export {
+  BUILTIN_MODEL_PRESETS,
+  createStickyPresetResolver,
+  listModelPresets,
+  PresetError,
+  resolveModelForRole,
+  resolveModelPreset,
+} from "./model-preset"
 export type { ModelCandidate, ModelSwapRetryOptions } from "./model-swap"
 export {
   NoAlternateModelError,

@@ -8,6 +8,7 @@
 // `query.routing`; ABSENT => ranking is BYTE-IDENTICAL to legacy.
 
 import { describe, expect, test } from "bun:test"
+import { InMemoryStore } from "@/memory/adapters/in-memory"
 import { rankEntries, scoreEntry } from "@/memory/ranking"
 import {
   EMBED_DIM,
@@ -185,5 +186,36 @@ describe("§10.6 recall weighting — boosts on match (opt-in)", () => {
     const r1 = ids(rankEntries(cand, q, NOW))
     const r2 = ids(rankEntries(cand, q, NOW))
     expect(r1).toEqual(r2)
+  })
+})
+
+describe("§10.6 InMemoryStore — meta round-trips + clone isolates appliesTo", () => {
+  test("save→get preserves routing meta", async () => {
+    const store = new InMemoryStore()
+    await store.save(
+      entry({ id: "m", taskGroup: "g", appliesTo: { cwd: "/x" }, reuseRule: "rr" }),
+    )
+    const got = await store.get("m")
+    expect(got?.taskGroup).toBe("g")
+    expect(got?.appliesTo).toEqual({ cwd: "/x" })
+    expect(got?.reuseRule).toBe("rr")
+  })
+
+  test("recall routes: here-scoped beats foreign peer (in-memory ranker)", async () => {
+    const store = new InMemoryStore([
+      entry({ id: "a-here", appliesTo: { cwd: "/repo" }, importance: 0.5 }),
+      entry({ id: "z-there", appliesTo: { cwd: "/other" }, importance: 0.5 }),
+    ])
+    const ranked = await store.recall({ routing: { cwd: "/repo" } })
+    expect(ranked[0]?.id).toBe("a-here")
+  })
+
+  test("mutating a returned entry's appliesTo cannot corrupt the store", async () => {
+    const store = new InMemoryStore()
+    await store.save(entry({ id: "m", appliesTo: { cwd: "/x" } }))
+    const first = await store.get("m")
+    if (first?.appliesTo) first.appliesTo.cwd = "/HACKED"
+    const second = await store.get("m")
+    expect(second?.appliesTo?.cwd).toBe("/x")
   })
 })

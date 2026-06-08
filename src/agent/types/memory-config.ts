@@ -76,6 +76,15 @@ export type MemoryConfigBlock = {
    * memory slice never imports the budget module (hexagonal boundary).
    */
   writeGuardMinRemainingPercent?: number
+  /**
+   * §10.6 routing weighting opt-in (env `QUANTA_MEMORY_ROUTING=1`). When true,
+   * per-turn recall passes the current `config.cwd` (and, when available, the
+   * task family) as a {@link import("@/memory").RoutingContext} so memories
+   * whose routing meta matches are scored UP (a soft refine, never a hard
+   * filter). Absent / `false` ⇒ no routing context is supplied ⇒ ranking is
+   * BYTE-IDENTICAL to the legacy weighted-sum.
+   */
+  routingEnabled?: boolean
 }
 
 /**

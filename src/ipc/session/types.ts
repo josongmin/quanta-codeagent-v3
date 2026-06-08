@@ -25,12 +25,33 @@ export interface SessionTransportRejectedMessage {
   readonly issue?: string
 }
 
+/**
+ * App-level keepalive frame. ADDITIVE 6th transport kind (the original 5 —
+ * connect / command / event / rejected / snapshot — are untouched in meaning).
+ *
+ * WHY: an idle WS connection carries no frames, and load balancers / reverse
+ * proxies silently drop sockets that go quiet past their idle timeout — the
+ * TCP-level close is often never surfaced, so a client thinks it is still
+ * connected while the daemon has long since evicted it. A periodic
+ * application-level `ping` keeps the path warm AND, when the peer never
+ * answers with a `pong`, lets either side detect a dead socket and reconnect.
+ *
+ * `phase` is the discriminator: a client emits `ping` on its keepalive timer,
+ * the daemon answers `pong`. The frame carries no payload — its sole purpose
+ * is to put a byte on the wire and prove liveness.
+ */
+export interface SessionTransportHeartbeatMessage {
+  readonly kind: "heartbeat"
+  readonly phase: "ping" | "pong"
+}
+
 export type SessionTransportMessage =
   | SessionTransportConnectMessage
   | { readonly kind: "command"; readonly command: SessionCommand }
   | { readonly kind: "event"; readonly event: SessionEvent }
   | SessionTransportRejectedMessage
   | { readonly kind: "snapshot"; readonly snapshot: SessionSnapshotLite }
+  | SessionTransportHeartbeatMessage
 
 export type SessionTransportHandler = (message: SessionTransportMessage) => void | Promise<void>
 

@@ -662,6 +662,21 @@ export interface RuntimeConfig {
    *  `@/side-agent` registry (Phase-2: with the real subagent runner / mailbox /
    *  timers) and the tier1 block exposes the management tools over it. */
   readonly sideAgent: boolean
+  /** §4.4 — TYPED agent kind boundary validation (`QUANTA_SUBAGENT_TYPED_KIND`).
+   *  Opt-in. Default false ⇒ the `agent` tool's `agent_type` is the legacy free
+   *  string (carried verbatim, never rejected — byte-identical). When ON, the
+   *  tier1 subagent block wires `enforceTypedAgentKind` so the spawn boundary
+   *  normalises a well-known {@link SubagentType} kind, accepts a registered
+   *  named-agent name, and REJECTS an unknown type (Claude-Code
+   *  `subagent_type_miss` parity). */
+  readonly subagentTypedKind: boolean
+  /** §4.3 — side-agent OS-process daemon V1 (`QUANTA_SIDE_AGENT_PROCESS`). Opt-in.
+   *  Default false ⇒ the side-agent registry runs IN-PROCESS (byte-identical).
+   *  When ON (and `QUANTA_SIDE_AGENT` is also on), the host may back a daemon
+   *  with a forked child process via the process-fork port abstraction
+   *  (`@/side-agent/process`), supervised with exponential-backoff respawn. V1
+   *  core only — NOT a launchctl/systemd manager. */
+  readonly sideAgentProcess: boolean
   /** N2 — MCP connector discovery (`QUANTA_MCP_CONNECTORS`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ no discovery port, the `mcp_connector_*` tools
    *  are NOT registered (byte-identical). When ON, the composition root wires a
@@ -780,6 +795,14 @@ export interface RuntimeConfig {
    *  field. Repairs the latent live break where the default model `claude-opus-4-8`
    *  400s on any non-zero manual budget. */
   readonly adaptiveThinking: boolean
+  /** ADR-0512 — skill tool-scoping v2: gates the availability FILTER (L1) and
+   *  the escalation ASK (L3). Default false ⇒ ADR-0011 behavior (all tools
+   *  visible; an out-of-scope call is a recoverable `skill-scoped` deny). ON ⇒
+   *  out-of-scope tools are removed from the spec set sent to the model, and a
+   *  model that still calls one is routed to `onConfirm` instead of hard-denied.
+   *  The L2 nav-base carve-out (read-only exploration ladder always in scope) is
+   *  UNCONDITIONAL — it is a bug fix, not gated by this flag. */
+  readonly skillScopeV2: boolean
   /** Advisor full-history forward (RFC jun-6 §5.1 — `QUANTA_ADVISOR_FORWARD_HISTORY`).
    *  Strict `=== "1"` opt-in. Default false ⇒ the advisor knob wires NO
    *  `transcriptSource`, so a `forwardHistory:true` request is a no-op (the
@@ -1377,6 +1400,9 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
     // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
     reasoningCarryover: gateOn(env, "QUANTA_REASONING_CARRYOVER"),
+    // ADR-0512 — skill tool-scoping v2 (availability filter + escalation ask).
+    // Default false ⇒ ADR-0011 dispatch-deny behavior (byte-identical).
+    skillScopeV2: gateOn(env, "QUANTA_SKILL_SCOPE_V2"),
     // H17 — idle goal-continuation + budget enforcement. Strict `=== "1"` opt-in;
     // default false ⇒ objective stays informational-only (byte-identical).
     goalContinuationEnforce: gateOn(env, "QUANTA_GOAL_ENFORCE"),
@@ -1486,6 +1512,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     appshot: gateOn(env, "QUANTA_APPSHOT"),
     // N1 — strict `=== "1"` opt-in. Default false ⇒ no side-agent daemons/tools.
     sideAgent: gateOn(env, "QUANTA_SIDE_AGENT"),
+    // §4.4 — opt-in. Default false ⇒ agent_type is the legacy free string.
+    subagentTypedKind: gateOn(env, "QUANTA_SUBAGENT_TYPED_KIND"),
+    // §4.3 — opt-in OS-process side-agent daemon V1. Default false ⇒ in-process.
+    sideAgentProcess: gateOn(env, "QUANTA_SIDE_AGENT_PROCESS"),
     // N2 — strict `=== "1"` opt-in. Default false ⇒ no MCP connector tools.
     mcpConnectors: gateOn(env, "QUANTA_MCP_CONNECTORS"),
     // N3 — strict `=== "1"` opt-in. Default false ⇒ no MCP resource/prompt tools.

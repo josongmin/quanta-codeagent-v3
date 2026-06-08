@@ -92,6 +92,14 @@ export interface SkillGate {
    *  stream open so the override is turn-scoped to the turns AFTER
    *  activation. */
   activeOverride(): SkillTurnOverride | undefined
+  /** ADR-0512 — the id of the skill that currently scopes the agent, or
+   *  `undefined` when no allowlist-bearing skill is active. Drives the
+   *  escalation card ("skill 'X' scoped this tool out"). */
+  activeSkillName(): string | undefined
+  /** ADR-0512 — widen the active scope to admit `name` for the rest of the
+   *  session. Called after the user APPROVES a skill-scope escalation so the
+   *  same tool is not re-asked. No-op when no scope is armed. */
+  widenScope(name: string): void
 }
 
 /**

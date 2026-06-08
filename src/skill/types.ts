@@ -148,6 +148,17 @@ export interface Skill {
    * gate; additive and byte-identical when absent.
    */
   readonly thinClientDispatch?: ThinClientRoute
+  /**
+   * §2.3 — codex `agents/openai.yaml` `policy.allow_implicit_invocation`. When
+   * FALSE, the skill is NOT injected into the model context by default (the
+   * implicit-suggestion inventory), but can STILL be invoked explicitly via the
+   * Skill tool / `$skill`. Defaults to true (codex semantics) — ABSENT here
+   * means "implicit allowed". Populated by discovery for directory-form skills
+   * whose `agents/openai.yaml` declares a `policy:` block; consumed by
+   * {@link implicitlyInvocableSkills} (`@/skill/activation`) under the
+   * `QUANTA_SKILL_IMPLICIT_POLICY` gate. Additive + byte-identical when absent.
+   */
+  readonly allowImplicitInvocation?: boolean
 }
 
 /**

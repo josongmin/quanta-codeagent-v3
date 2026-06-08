@@ -32,6 +32,7 @@ export type {
   SessionTransport,
   SessionTransportConnectMessage,
   SessionTransportHandler,
+  SessionTransportHeartbeatMessage,
   SessionTransportMessage,
   SessionTransportRejectedMessage,
   SessionTransportRejectReason,

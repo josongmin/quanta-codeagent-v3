@@ -79,6 +79,27 @@ describe("web daemon end-to-end", () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
+  test("answers a client heartbeat ping with a heartbeat pong (keepalive)", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    // A bare ping (no handshake needed — keepalive is connection-level, not
+    // session-level) must come back as a pong so a live socket stays warm.
+    ws.send(encodeSessionTransportMessage({ kind: "heartbeat", phase: "ping" }))
+
+    const pong = await waitForMessage(ws, (m) => m.kind === "heartbeat")
+    if (pong.kind !== "heartbeat") throw new Error("type narrow")
+    expect(pong.phase).toBe("pong")
+
+    ws.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
   test("session id mismatch on connect is rejected (close+protocol_validation)", async () => {
     const { factory } = createStubRuntimeFactory()
     const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
@@ -358,5 +379,159 @@ describe("web daemon end-to-end", () => {
     // Second stop is idempotent (no extra session.close, no throw).
     await handle.stop()
     expect(bag.sessionsClosed).toBe(1)
+  })
+
+  test("daemon attaches transports with a bounded replayWindow (reconnect-replay bound)", async () => {
+    const { factory, bag } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    // The daemon must pass an explicit, bounded replayWindow so a reconnecting
+    // client's resume replay is capped (no unbounded history) and resumes older
+    // than the window fall back to a full snapshot. Today it passes undefined.
+    expect(bag.attachTransportCalls).toBe(1)
+    expect(typeof bag.lastAttachReplayWindow).toBe("number")
+    expect(bag.lastAttachReplayWindow).toBeGreaterThan(0)
+
+    ws.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
+  test("reconnect caught-up to the live seq replays NOTHING (no snapshot, no events)", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    // First client: connect, then advance the session seq via input.append so
+    // the live snapshot moves to seq 1.
+    const wsA = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(wsA)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    wsA.send(encodeSessionTransportMessage({ kind: "connect", sessionId: "stub-session-1" }))
+    await waitForMessage(wsA, (m) => m.kind === "snapshot")
+
+    wsA.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "cmd-append",
+          issuedAt: new Date().toISOString(),
+          type: "input.append",
+          text: "hello",
+        },
+      }),
+    )
+    const appended = await waitForMessage(
+      wsA,
+      (m) => m.kind === "event" && m.event.type === "session.state.updated",
+      2000,
+    )
+    if (appended.kind !== "event") throw new Error("type narrow")
+    const liveSeq = appended.event.seq // 1 — the live high-water mark
+
+    // Reconnecting transport that already saw everything up to `liveSeq`: it
+    // must receive NEITHER a snapshot NOR any replayed events (nothing missed).
+    const wsB = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(wsB)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const framesB: SessionTransportMessage[] = []
+    wsB.addEventListener("message", (event: MessageEvent) => {
+      if (typeof event.data !== "string") return
+      const m = tryDecodeSessionTransportMessage(event.data)
+      if (m !== undefined) framesB.push(m)
+    })
+
+    wsB.send(
+      encodeSessionTransportMessage({
+        kind: "connect",
+        sessionId: "stub-session-1",
+        resumeFromSeq: liveSeq,
+      }),
+    )
+    // Let any replay settle (there should be none).
+    await new Promise((resolve) => setTimeout(resolve, 75))
+
+    expect(framesB.some((m) => m.kind === "snapshot")).toBe(false)
+    expect(framesB.filter((m) => m.kind === "event")).toHaveLength(0)
+
+    wsA.close()
+    wsB.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
+  test("reconnect with resumeFromSeq BEHIND the live snapshot falls back to a full snapshot", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    // Advance the live snapshot to seq 1 via an append on the first client.
+    const wsA = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(wsA)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    wsA.send(encodeSessionTransportMessage({ kind: "connect", sessionId: "stub-session-1" }))
+    await waitForMessage(wsA, (m) => m.kind === "snapshot")
+    wsA.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "cmd-append",
+          issuedAt: new Date().toISOString(),
+          type: "input.append",
+          text: "hello",
+        },
+      }),
+    )
+    await waitForMessage(
+      wsA,
+      (m) => m.kind === "event" && m.event.type === "session.state.updated",
+      2000,
+    )
+
+    // Reconnect from seq 0 — older than the live snapshot (seq 1). The bridge's
+    // planSessionReplay fallback must send a fresh full snapshot so the client
+    // resets cleanly rather than missing the gap.
+    const wsB = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(wsB)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    wsB.send(
+      encodeSessionTransportMessage({
+        kind: "connect",
+        sessionId: "stub-session-1",
+        resumeFromSeq: 0,
+      }),
+    )
+    const snapB = await waitForMessage(wsB, (m) => m.kind === "snapshot", 2000)
+    if (snapB.kind !== "snapshot") throw new Error("type narrow")
+    expect(snapB.snapshot.sessionId).toBe("stub-session-1")
+    // The fallback snapshot reflects the live seq, not the stale resume cursor.
+    expect(snapB.snapshot.seq).toBeGreaterThanOrEqual(1)
+
+    wsA.close()
+    wsB.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
+  test("reconnect WITHOUT resumeFromSeq receives a full snapshot (byte-identical legacy path)", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    ws.send(encodeSessionTransportMessage({ kind: "connect", sessionId: "stub-session-1" }))
+    const snapshotMsg = await waitForMessage(ws, (m) => m.kind === "snapshot")
+    expect(snapshotMsg.kind).toBe("snapshot")
+
+    ws.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 })

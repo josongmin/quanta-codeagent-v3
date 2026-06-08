@@ -217,6 +217,7 @@ export {
   gitBlameTool,
   gitBranchSwitchTool,
   gitChurnTool,
+  gitCoChangeTool,
   gitCommitTool,
   gitConflictInspectTool,
   gitDiffTool,
@@ -225,8 +226,11 @@ export {
   gitStatusTool,
   gitTools,
   gitUpstreamCheckTool,
+  parseCommitGroups,
   rankBlame,
   rankChurn,
+  rankCoChange,
+  rankCoChangePairs,
 } from "./git"
 // `read_image` cluster (ADR-0126): tool + composer helper + magic-byte sniffer.
 // The composer is caller-wired (dispatch.ts is NOT modified by this slice) —

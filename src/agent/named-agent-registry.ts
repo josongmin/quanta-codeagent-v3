@@ -107,6 +107,12 @@ export interface NamedAgentResolver {
   /** Resolve a definition by `agentType`, or `undefined` when no matching
    *  definition exists (so the spawn path stays byte-identical). */
   resolve(agentType: string): NamedAgentDefinition | undefined
+  /** §4.4 — the registered custom agent-type names (the resolver's keys). The
+   *  typed-kind boundary (`validateAgentType`) consults these so a CUSTOM
+   *  named-agent passes enforcement while an unknown type is a miss. Optional so
+   *  a structural resolver that predates this method still satisfies the port
+   *  (the boundary treats absence as "no custom names known"). */
+  names?(): readonly string[]
 }
 
 /** In-memory registry of named-agent definitions. PURE: holds only the loaded
@@ -125,6 +131,12 @@ export class NamedAgentRegistry implements NamedAgentResolver {
 
   resolve(agentType: string): NamedAgentDefinition | undefined {
     return this.byType.get(agentType)
+  }
+
+  /** §4.4 — the registered custom agent-type names (keys), for the typed-kind
+   *  boundary's `knownCustom` set. */
+  names(): readonly string[] {
+    return [...this.byType.keys()]
   }
 
   /** Snapshot of all loaded definitions (observability / tests). */

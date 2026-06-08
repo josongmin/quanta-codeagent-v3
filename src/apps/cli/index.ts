@@ -122,6 +122,18 @@ const main = async (): Promise<void> => {
     process.exit(code)
   }
 
+  // CLI "attach to a running daemon" — `quanta attach [ws-url]`. The legacy CLI
+  // is in-process-only; this subcommand makes it a WS CLIENT of a daemon's
+  // shared session.v1 endpoint (discovery→adopt handshake, live event render,
+  // stdin→input.append+turn.run, y/N approvals). Default-OFF byte-identical: a
+  // bare `quanta` run never reaches here, so the in-process REPL path is
+  // untouched. Dynamic import keeps the WS/attach slice off the common startup
+  // path. `--help` renders usage WITHOUT opening a socket.
+  if (process.argv[2] === "attach") {
+    const { runAttachCmd } = await import("./attach-cmd")
+    process.exit(await runAttachCmd(process.argv.slice(3)))
+  }
+
   // ADR-0290 — `quanta remote …` subcommand. Default-OFF: when
   // `QUANTA_REMOTE_RUNNER` is unset / `none` the dispatcher exits with
   // `remote-not-configured` (exit 64) WITHOUT spawning any subprocess.

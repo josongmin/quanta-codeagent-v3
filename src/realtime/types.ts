@@ -54,6 +54,19 @@ export interface SdpAnswer {
   readonly codec: AudioCodec
 }
 
+/** §6.5 long-tail — one realtime voice the SERVER advertises (Codex
+ *  `ThreadRealtimeListVoices` parity). Surfaces render this to let the user
+ *  pick a TTS voice; the list is server-driven (not a hardcoded enum) because a
+ *  provider can add/remove voices server-side. `id` is the wire value passed
+ *  back on session config; `label` is the human-readable name (defaults to `id`
+ *  when the server omits it). */
+export interface VoiceInfo {
+  readonly id: string
+  readonly label: string
+  /** Optional descriptor the server may attach (e.g. "warm, conversational"). */
+  readonly description?: string
+}
+
 /** Realtime errors — closed-union. */
 export type RealtimeError =
   | { readonly kind: "not-connected" }
@@ -65,3 +78,8 @@ export type RealtimeError =
   | { readonly kind: "empty-sdp" }
   | { readonly kind: "invalid-frame"; readonly degradeReason: string }
   | { readonly kind: "io-error"; readonly degradeReason: string }
+  /** §6.5 — the adapter has no voices provider wired (the default MVP WS has no
+   *  voices-list RPC). Surfaces that need it pass a `voicesProvider`. Distinct
+   *  from `io-error` so a surface can degrade gracefully (hide the voice picker)
+   *  rather than show an error. */
+  | { readonly kind: "voices-unsupported" }

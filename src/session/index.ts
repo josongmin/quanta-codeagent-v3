@@ -15,6 +15,7 @@
 
 // ADR-0034: JSONL envelope (additive rail, not used by the snapshot store).
 export type {
+  DynamicToolRecord,
   EventMsgRecord,
   ResponseItemRecord,
   SessionEnvelopeRecord,
@@ -32,6 +33,8 @@ export {
   // Debug/developer-mode (Track A, 2026-05-25): gate-decision event schemas.
   DecisionGateSchema,
   DecisionOutcomeSchema,
+  DynamicToolActionSchema,
+  DynamicToolRecordSchema,
   EffortSchema,
   EventDecisionSchema,
   EventMsgRecordSchema,
@@ -114,6 +117,27 @@ export type {
 export { forkSessionAtMessage, resolveMessageIdPrefix, rewindSession } from "./rewind"
 export type { SessionRootProvider } from "./root-port"
 export { defaultSessionRootProvider, staticSessionRootProvider } from "./root-port"
+// §13.2 (jun-08): persisted interrupted-turn marker + crash resume (default-OFF
+// behind QUANTA_CRASH_RESUME; pure offer builders).
+export type { CrashResumeOffer, InterruptedSessionDetection } from "./crash-resume"
+export {
+  buildCrashResumeMessage,
+  buildCrashResumeOffer,
+  clearSessionInterrupted,
+  CRASH_RESUME_GATE,
+  crashResumeEnabled,
+  detectInterruptedSessions,
+  markSessionInterrupted,
+} from "./crash-resume"
+// §13.1 (jun-08): store-level aggregate corruption detection + operator
+// recovery guidance (diagnostic; never on the hot path).
+export type {
+  SessionFileHealth,
+  SessionFileStatus,
+  StoreHealthReport,
+  StoreHealthVerdict,
+} from "./store-health"
+export { buildRecoveryGuidance, checkSessionStoreHealth } from "./store-health"
 export {
   appendEnvelope,
   archiveSession,
@@ -128,5 +152,10 @@ export {
   sessionEnvelopePathAsync,
   unarchiveSession,
 } from "./store"
-export type { SavedSession, SavePayload, SessionMeta } from "./types"
+export type {
+  PersistedInterruptedTurn,
+  SavedSession,
+  SavePayload,
+  SessionMeta,
+} from "./types"
 export { SESSION_VERSION } from "./types"

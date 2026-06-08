@@ -113,20 +113,52 @@ export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {}
 
 export interface TurnCancelCommand extends SessionCommandEnvelope<"turn.cancel"> {}
 
+/**
+ * Switch the session's identity/permission mode (mirrors upstream
+ * `SessionIdentitySetCommand`). The UI does not emit this yet — it is mirrored
+ * so the command contract stays member-for-member with the daemon. */
+export interface SessionIdentitySetCommand
+  extends SessionCommandEnvelope<"session.identity.set"> {
+  readonly mode: string
+}
+
+/**
+ * Switch the active tool profile (mirrors upstream
+ * `SessionToolProfileSetCommand`). Not yet emitted by the UI; mirrored for the
+ * drift contract. */
+export interface SessionToolProfileSetCommand
+  extends SessionCommandEnvelope<"session.tool_profile.set"> {
+  readonly profile: string
+}
+
+/**
+ * Replace the session transcript (mirrors upstream
+ * `SessionTranscriptReplaceCommand`). Upstream carries a `readonly Message[]`;
+ * narrowed to `unknown[]` here since the UI does not construct or send it. */
+export interface SessionTranscriptReplaceCommand
+  extends SessionCommandEnvelope<"session.transcript.replace"> {
+  readonly messages: readonly unknown[]
+}
+
 export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval.respond"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
 }
 
 /**
- * Closed union — UI sends only the subset it actually emits today.
- * Upstream defines a few more (identity / transcript / tool profile)
- * that future iterations may surface as slash commands.
+ * Closed union — mirrors the canonical `SessionCommand` member-for-member
+ * (the drift contract enforces parity). The UI today only EMITS a subset
+ * (`input.append` / `turn.run` / `turn.cancel` / `approval.respond`); the
+ * identity / transcript / tool-profile variants are mirrored for wire-shape
+ * parity and may surface as slash commands in a future iteration.
  */
 export type SessionCommand =
   | InputAppendCommand
   | TurnRunCommand
   | TurnCancelCommand
+  | SessionIdentitySetCommand
+  | SessionToolProfileSetCommand
+  | SessionTranscriptReplaceCommand
   | ApprovalRespondCommand
 
 /* --- Event envelopes (server → client) --------------------------------- */
@@ -192,6 +224,40 @@ export interface TurnOutputDeltaEvent extends SessionEventEnvelope<"turn.output.
   readonly delta: string
 }
 
+/**
+ * LLM request lifecycle (mirrors upstream `TurnLlmRequestEvent`). Emitted when
+ * the agent loop dispatches a provider call. The frontend only reads `model` /
+ * `provider` to render a model pill; the routing fields below are narrowed to
+ * strings here (upstream uses branded `LlmSurfaceId` / `LlmTransportId` and a
+ * structured `TurnPolicySnapshot`, none of which the UI inspects). */
+export interface TurnLlmRequestEvent extends SessionEventEnvelope<"turn.llm.request"> {
+  readonly model: string
+  readonly provider?: string
+  readonly surfaceId?: string
+  readonly transportId?: string
+  readonly authMode?: string
+  readonly policy?: unknown
+}
+
+/**
+ * Responses-API continuation lifecycle (mirrors upstream
+ * `TurnLlmContinuationEvent`). Emitted while the OpenAI Responses transport
+ * resumes a multi-phase stream. The UI does not branch on these today (the
+ * reducer treats them as a no-op via `default: return state`); the variant is
+ * mirrored so the contract guard and any future continuation UI stay in sync.
+ * `phase` / `mode` / `reason` are narrowed to strings (upstream uses closed
+ * `Responses*` enums the UI does not enumerate). */
+export interface TurnLlmContinuationEvent
+  extends SessionEventEnvelope<"turn.llm.continuation"> {
+  readonly provider?: string
+  readonly surfaceId: "openai-responses"
+  readonly transportId: string
+  readonly phase: string
+  readonly mode: string
+  readonly reason: string
+  readonly statusCode?: number
+}
+
 export interface TurnFailedEvent extends SessionEventEnvelope<"turn.failed"> {
   readonly message: string
 }
@@ -217,6 +283,8 @@ export type SessionEvent =
   | TurnStartedEvent
   | TurnCompletedEvent
   | TurnOutputDeltaEvent
+  | TurnLlmRequestEvent
+  | TurnLlmContinuationEvent
   | TurnFailedEvent
   | ToolInvokedEvent
   | ToolCompletedEvent

@@ -12,7 +12,7 @@ import {
   type Span,
   startSpan,
 } from "@/observability"
-import { abortReasonOf, errMessage, LLMError } from "@/shared"
+import { abortReasonOf, errMessage, LLMError, runtimeConfig } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { buildTtftAttrs } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
@@ -31,6 +31,7 @@ import {
 } from "./emit-helpers"
 import {
   applyEffortClassifierFloor,
+  filterSpecsByScope,
   readStickyModelForMode,
   resolveSkillTurnOverride,
 } from "./skill-gate"
@@ -101,6 +102,11 @@ export const streamConsume = async (
   const { config, specs, recorder, skillGate, rateLimitProactive } = session
   const { collector, toolChoiceState, onTurnTiming, taskSpend } = state
   const { messages, system } = ctx
+  // ADR-0512 L1 — availability filter. When skill-scope v2 is ON, the model
+  // sees ONLY the tools in scope (nav-base ∪ active skill allowlist); OFF ⇒
+  // `specs` unchanged (byte-identical). Reuses `skillGate.allow` so the visible
+  // set and the dispatch gate share one predicate.
+  const visibleSpecs = runtimeConfig().skillScopeV2 ? filterSpecsByScope(specs, skillGate) : specs
   const toolChoice = resolveToolChoice(consumeTurnSignals(toolChoiceState))
   session.ttfm?.markFirstDispatch()
   emitLlmRequest(
@@ -128,7 +134,7 @@ export const streamConsume = async (
       config.onTurnStreamInput({
         messages,
         system,
-        tools: specs,
+        tools: visibleSpecs,
         ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
         ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
       })
@@ -160,7 +166,7 @@ export const streamConsume = async (
         turnLlm.llm.stream({
           messages,
           system,
-          tools: specs,
+          tools: visibleSpecs,
           ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
           ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
           ...(config.sessionId !== undefined && config.sessionId.length > 0

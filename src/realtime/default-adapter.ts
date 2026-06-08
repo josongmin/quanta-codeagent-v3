@@ -36,7 +36,16 @@ import type {
   RealtimeOutboundSignal,
   RealtimeStatus,
   SdpAnswer,
+  VoiceInfo,
 } from "./types"
+
+/** §6.5 — server voices query. The minimal MVP WS has no built-in voices RPC,
+ *  so a surface that needs the voice list injects this provider (e.g. an HTTPS
+ *  GET to the provider's `/voices` endpoint). NO-THROW expected — a thrown
+ *  provider is mapped to a typed `io-error` by the adapter. */
+export type VoicesProvider = (
+  signal?: AbortSignal,
+) => Promise<Result<readonly VoiceInfo[], RealtimeError>>
 
 /**
  * Minimal WebSocket-like surface — matches `globalThis.WebSocket` shape so
@@ -60,6 +69,10 @@ export interface BunAdapterOpts {
   /** Inject a WebSocket constructor (defaults to `globalThis.WebSocket`).
    *  Test code passes a stub here for HELL-RT-02 / HELL-RT-04 / HELL-RT-15. */
   readonly webSocketCtor?: WebSocketCtor
+  /** §6.5 — optional server-voices provider. Absent ⇒ `listVoices()` returns
+   *  `Err({kind:"voices-unsupported"})` (byte-identical to pre-§6.5: the
+   *  default MVP adapter has no voices RPC). */
+  readonly voicesProvider?: VoicesProvider
 }
 
 /** WebSocket readyState constants — mirror the web spec since we don't
@@ -90,6 +103,7 @@ const defaultCtor: WebSocketCtor = (url, protocols) => {
  */
 export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort => {
   const ctor = opts?.webSocketCtor ?? defaultCtor
+  const voicesProvider = opts?.voicesProvider
 
   let status: RealtimeStatus = "closed"
   let ws: WebSocketLike | null = null
@@ -286,6 +300,18 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
 
     audioStop(): Result<void, RealtimeError> {
       return sendSignal({ type: "audio.stop" })
+    },
+
+    async listVoices(): Promise<Result<readonly VoiceInfo[], RealtimeError>> {
+      // §6.5 — no provider wired ⇒ the MVP WS has no voices RPC; degrade with a
+      // typed `voices-unsupported` (byte-identical to pre-§6.5 behaviour).
+      if (voicesProvider === undefined) return err({ kind: "voices-unsupported" })
+      try {
+        return await voicesProvider()
+      } catch (e) {
+        // NO-THROW boundary — a thrown provider maps to a typed io-error.
+        return err({ kind: "io-error", degradeReason: errMessage(e) })
+      }
     },
 
     async close(code?: number, reason?: string): Promise<Result<void, RealtimeError>> {

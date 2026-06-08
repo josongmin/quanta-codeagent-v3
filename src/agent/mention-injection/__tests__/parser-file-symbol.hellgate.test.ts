@@ -38,10 +38,14 @@ describe("parseMentions @file/@symbol cascade — ADR-0418 hellgate", () => {
     expect(out[0]?.target).toBe("./Foo")
   })
 
-  test("A3 — @docs/decisions/ trailing slash ⇒ file", () => {
+  test("A3 — @docs/decisions/ trailing slash ⇒ folder (§10.3 supersedes ADR-0418)", () => {
+    // §10.3 (jun-08) reclassifies a TRAILING-SLASH slash-path as `folder`
+    // (Cursor `@Folders` parity). Pre-§10.3 this was `file`. The folder
+    // routing is covered in parser-folder-git.hellgate.test.ts; this case is
+    // updated to the superseding classification.
     const out = parseMentions("@docs/decisions/")
     expect(out).toHaveLength(1)
-    expect(out[0]?.kind).toBe("file")
+    expect(out[0]?.kind).toBe("folder")
     expect(out[0]?.target).toBe("docs/decisions/")
   })
 

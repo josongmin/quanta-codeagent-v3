@@ -50,6 +50,16 @@ export interface SandboxPolicy {
    *  Defaults to `"strict"` when the adapter sees `undefined`.
    *  Linux-only — the Windows backend (ADR-0441) IGNORES this field. */
   readonly seccompMode?: "lax" | "strict"
+  /** §12.6 (jun-08 long-tail) — Codex `[sandbox_workspace_write].exclude_slash_tmp`
+   *  parity. The Seatbelt baseline hardcodes a `(literal "/tmp")` read-allow
+   *  (matching the Codex profile). When this is `true`, `/tmp` is OMITTED from
+   *  the compiled profile so a sandboxed command cannot read `/tmp`.
+   *
+   *  DEFAULT-OFF / byte-identical: absent or `false` ⇒ the profile is the
+   *  unchanged Codex-verbatim baseline (the `/tmp` literal stays). Only the
+   *  Seatbelt (macOS) backend honors this today; the Linux/Windows backends do
+   *  not enumerate `/tmp` in their baseline, so the flag is a no-op there. */
+  readonly excludeTmpdir?: boolean
 }
 
 export interface SandboxedSpawnSpec {

@@ -55,9 +55,14 @@ export {
 export {
   charsOf,
   compactIfNeeded,
+  type DropOldestSalvageInput,
+  type DropOldestSalvageResult,
+  dropOldestSalvage,
+  dropOldestTurn,
   estimateTokens,
   findBoundary,
   markBaselineStaleIfShrunk,
+  MAX_DROP_OLDEST_ROUNDS,
   resolveCompactionLimitTokens,
   type TokenBaseline,
   TokenBaselineBox,
@@ -98,9 +103,11 @@ export {
   type SkillEffortAdvisory,
 } from "./effort"
 export {
+  type ProbeRepoMap3Opts,
   type ProbeRepoMapOpts,
   type ProbeTurnEnvOpts,
   probeRepoMap,
+  probeRepoMap3,
   probeTurnEnv,
   REPO_MAP_DEFAULT_MAX_CHARS,
   REPO_MAP_DEFAULT_MAX_DEPTH,

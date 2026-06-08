@@ -1,0 +1,244 @@
+/**
+ * `attachToDaemon` — the CLI "join a running daemon's shared session" client.
+ *
+ * This is the #1 multi-surface unlock: the legacy CLI builds an IN-PROCESS
+ * session, so it can never see what a running daemon is doing. This module
+ * opens a WebSocket to the daemon's session.v1 endpoint, performs the
+ * discovery→adopt handshake (`./handshake`), renders inbound SessionEvents to
+ * the terminal (`./render`), reads stdin line-by-line into `input.append` +
+ * `turn.run` (`./commands`), and prompts y/N on `approval.requested`.
+ *
+ * It REUSES the shared transport infra (`@/ipc/session`) — `createSession
+ * TransportClient` over `wrapWebSocketLikeAsSessionTransport` (resume cursor
+ * tracking included) — and never re-implements the codec. The discovery→adopt
+ * loop that the browser `SessionClient` owns is reproduced here in the pure
+ * `./handshake` driver, because the transport client deliberately stays
+ * transport-only.
+ *
+ * Default-OFF: nothing here runs unless the `attach` subcommand is invoked, so
+ * the in-process REPL path is byte-identical when not attaching.
+ */
+
+import {
+  createSessionTransportClient,
+  type SessionTransport,
+  type SessionTransportMessage,
+  wrapWebSocketLikeAsSessionTransport,
+} from "@/ipc/session"
+import type { SessionCommand, SessionEvent } from "@/protocol/session"
+import { buildApprovalRespondCommand, buildLineCommands } from "./commands"
+import {
+  type AttachHandshake,
+  createAttachHandshake,
+  HANDSHAKE_DISCOVERY_SESSION_ID,
+} from "./handshake"
+import { renderSessionEvent } from "./render"
+
+/** Subset of the WHATWG/Bun `WebSocket` the attach client needs — also the
+ *  shape `wrapWebSocketLikeAsSessionTransport` consumes. The global Bun
+ *  `WebSocket` satisfies it; tests inject a fake. */
+export interface AttachSocket {
+  readonly readyState: number
+  send(data: string): void
+  close(code?: number, reason?: string): void
+  addEventListener(type: "message", handler: (event: { data: unknown }) => void): void
+  addEventListener(type: "open", handler: () => void): void
+  addEventListener(type: "close", handler: () => void): void
+  addEventListener(type: "error", handler: () => void): void
+  removeEventListener?(type: "message", handler: (event: { data: unknown }) => void): void
+}
+
+export type AttachSocketCtor = new (
+  url: string,
+  protocols?: string | readonly string[],
+) => AttachSocket
+
+export interface AttachToDaemonOptions {
+  /** WS URL of the daemon session endpoint, e.g. `ws://127.0.0.1:4096/`. */
+  readonly url: string
+  /** Bearer token — appended as `?token=…` (daemon accepts either header or query). */
+  readonly token?: string
+  /** Line source — defaults to a real stdin reader in `attach-cmd`. */
+  readonly stdin: AsyncIterable<string>
+  /** Terminal sink — defaults to `process.stdout.write`. */
+  readonly write: (chunk: string) => void
+  /** Approval prompt — returns the operator's raw answer (`"y"`/`"n"`/…). */
+  readonly promptApproval: (reason: string) => Promise<string>
+  /** Override the WebSocket ctor (defaults to global `WebSocket`). */
+  readonly webSocketCtor?: AttachSocketCtor
+  /** Fresh unique command id — defaults to `crypto.randomUUID`. */
+  readonly newCommandId?: () => string
+  /** ISO timestamp source — defaults to `() => new Date().toISOString()`. */
+  readonly issuedAt?: () => string
+}
+
+export interface AttachedSession {
+  /** Canonical session id once the handshake settles, else `undefined`. */
+  readonly sessionId: string | undefined
+  /** Resolves once the read loop drains and the socket is closed. */
+  readonly done: Promise<void>
+  /** Send `turn.cancel` (best-effort) then close the socket + read loop. */
+  close(): Promise<void>
+}
+
+const withAuthQuery = (url: string, token: string | undefined): string => {
+  if (token === undefined || token.length === 0) return url
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}token=${encodeURIComponent(token)}`
+}
+
+const resolveCtor = (override: AttachSocketCtor | undefined): AttachSocketCtor => {
+  if (override !== undefined) return override
+  const g = globalThis as { WebSocket?: AttachSocketCtor }
+  if (g.WebSocket === undefined) {
+    throw new Error(
+      "attachToDaemon: no WebSocket constructor available — pass `webSocketCtor` explicitly.",
+    )
+  }
+  return g.WebSocket
+}
+
+export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<AttachedSession> => {
+  const Ctor = resolveCtor(opts.webSocketCtor)
+  const newCommandId = opts.newCommandId ?? (() => crypto.randomUUID())
+  const issuedAt = opts.issuedAt ?? (() => new Date().toISOString())
+
+  const socket = new Ctor(withAuthQuery(opts.url, opts.token))
+  const transport: SessionTransport = wrapWebSocketLikeAsSessionTransport(socket)
+  const handshake: AttachHandshake = createAttachHandshake()
+  // The transport client carries the resume cursor across reconnects; we seed
+  // its sessionId with the discovery sentinel and re-create command sessionIds
+  // off the adopted canonical id (the client only validates command.sessionId
+  // against its own seed, so we send commands directly through the transport).
+  const client = createSessionTransportClient({
+    transport,
+    sessionId: HANDSHAKE_DISCOVERY_SESSION_ID,
+  })
+
+  let closed = false
+  let resolveDone: (() => void) | undefined
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve
+  })
+
+  // Serialize approval prompts so two near-simultaneous requests don't garble
+  // the terminal; each awaits the prior.
+  let approvalChain: Promise<void> = Promise.resolve()
+
+  const sendCommand = async (command: SessionCommand): Promise<void> => {
+    // Send straight through the transport (bypassing the client's seed-id
+    // validation) so the command carries the CANONICAL id the daemon expects.
+    await transport.send({ kind: "command", command })
+  }
+
+  const handleEvent = (event: SessionEvent): void => {
+    const chunk = renderSessionEvent(event)
+    if (chunk.length > 0) opts.write(chunk)
+    if (event.type === "approval.requested") {
+      const approvalId = event.approval.approvalId
+      const reason = event.approval.reason
+      const sid = handshake.sessionId
+      if (sid === undefined) return
+      approvalChain = approvalChain.then(async () => {
+        const answer = await opts.promptApproval(reason).catch(() => "n")
+        await sendCommand(
+          buildApprovalRespondCommand({
+            sessionId: sid,
+            approvalId,
+            answer,
+            commandId: newCommandId(),
+            issuedAt: issuedAt(),
+          }),
+        ).catch(() => undefined)
+      })
+    }
+  }
+
+  const onMessage = (message: SessionTransportMessage): void => {
+    const reaction = handshake.onMessage(message)
+    if (reaction !== undefined) {
+      // Re-handshake with the adopted canonical id.
+      void transport.send(reaction).catch(() => undefined)
+    }
+    if (message.kind === "event") handleEvent(message.event)
+  }
+
+  const unsubscribe = client.onMessage(onMessage)
+
+  // Kick the handshake: send the discovery connect once the socket is open.
+  // Bun's client WS may already be CONNECTING; the `open` listener fires the
+  // first frame. If the socket opens before we attach (unlikely), the readyState
+  // guard sends immediately.
+  const sendInitialConnect = (): void => {
+    void transport.send(handshake.initialConnect()).catch(() => undefined)
+  }
+  if (socket.readyState === 1 /* OPEN */) {
+    sendInitialConnect()
+  } else {
+    socket.addEventListener("open", sendInitialConnect)
+  }
+
+  const close = async (): Promise<void> => {
+    if (closed) return
+    closed = true
+    const sid = handshake.sessionId
+    if (sid !== undefined) {
+      // Best-effort cancel of any in-flight turn before we drop the socket.
+      await sendCommand({
+        sessionId: sid,
+        commandId: newCommandId(),
+        issuedAt: issuedAt(),
+        type: "turn.cancel",
+      }).catch(() => undefined)
+    }
+    unsubscribe()
+    await client.close().catch(() => undefined)
+    resolveDone?.()
+  }
+
+  // stdin read loop — each line becomes input.append + turn.run, but only once
+  // the handshake is READY (so commands carry the canonical id the daemon
+  // accepts). Lines typed before readiness are still consumed in order; we wait
+  // for readiness per line.
+  const waitForReady = async (): Promise<boolean> => {
+    const start = Date.now()
+    while (!handshake.ready && !closed) {
+      if (Date.now() - start > 10_000) return false
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    return handshake.ready && !closed
+  }
+
+  const readLoop = async (): Promise<void> => {
+    try {
+      for await (const line of opts.stdin) {
+        if (closed) break
+        const ready = await waitForReady()
+        if (!ready) break
+        const sid = handshake.sessionId
+        if (sid === undefined) continue
+        const cmds = buildLineCommands({
+          sessionId: sid,
+          line,
+          newCommandId,
+          issuedAt,
+        })
+        for (const cmd of cmds) {
+          await sendCommand(cmd).catch(() => undefined)
+        }
+      }
+    } finally {
+      await close()
+    }
+  }
+
+  void readLoop()
+
+  return {
+    get sessionId() {
+      return handshake.sessionId
+    },
+    done,
+    close,
+  }
+}

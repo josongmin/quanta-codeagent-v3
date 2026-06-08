@@ -93,8 +93,19 @@ describe("writability gating mirrors the daemon allowlist", () => {
   })
 
   it("CONFIG_WRITABLE_KEYS matches the daemon's CONFIG_ALLOWED_KEYS", () => {
+    // Must stay member-for-member in lock-step with `CONFIG_ALLOWED_KEYS` in
+    // `src/apps/web-daemon/server.ts`. The cross-package drift guard lives in
+    // `tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts` (it
+    // reads both files as text). This in-tree assertion pins the literal set.
     expect([...CONFIG_WRITABLE_KEYS].sort()).toEqual(
-      ["QUANTA_FAST", "QUANTA_MODEL", "QUANTA_REASONING_EFFORT", "QUANTA_SERVICE_TIER"].sort(),
+      [
+        "QUANTA_FAST",
+        "QUANTA_MODEL",
+        "QUANTA_REASONING_EFFORT",
+        "QUANTA_REASONING_SUMMARY",
+        "QUANTA_REASONING_VERBOSITY",
+        "QUANTA_SERVICE_TIER",
+      ].sort(),
     )
   })
 })

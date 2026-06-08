@@ -29,9 +29,10 @@ import { buildSystemPrompt } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly, type PermissionContext } from "@/permission"
 import { scrubEnv } from "@/runtime"
-import { logger } from "@/shared"
+import { gateOn, logger } from "@/shared"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { defaultGitRunner, type GitRunner, gitTools, ToolRegistry } from "@/tool"
+import { createCiFindingStore } from "@/tool/ci-finding"
 import { ghTools, type GhRunner as ToolGhRunner } from "@/tool/gh"
 import {
   type AssembleRequest,
@@ -207,8 +208,20 @@ export const buildCiBotWiring = (
   const guarded = branchOnlyGuardedRunner(inner)
   const gh = seams?.ghRun ?? spawnGhRunner(repoCwd)
   const ghToolRunner = seams?.ghRun ? ghToolRunnerFrom(gh) : spawnToolGhRunner(repoCwd)
-  const readOnlyGhTools = ghTools(ghToolRunner).filter((tool) => tool.isReadOnly())
-  const tools = new ToolRegistry([...gitTools(guarded), ...readOnlyGhTools])
+  // jun-08 long-tail gates (default-OFF; each its own QUANTA_* knob, read via the
+  // @/shared SSOT). Absent ⇒ the gh/git opt is empty ⇒ the tool set is
+  // byte-identical to the legacy ci-bot wiring.
+  const env = process.env
+  const ghOpts: Parameters<typeof ghTools>[1] = {
+    ...(gateOn(env, "QUANTA_GH_CODE_TOUR") ? { codeTour: true as const } : {}),
+    // §7.3 — mint a fresh per-wiring CiFinding store when the gate is on.
+    ...(gateOn(env, "QUANTA_CI_FINDING") ? { ciFindingStore: createCiFindingStore() } : {}),
+  }
+  const gitOpts = gateOn(env, "QUANTA_GIT_CO_CHANGE") ? { coChange: true as const } : {}
+  // ci-bot uses the READ-ONLY gh tools (it never posts/merges autonomously here);
+  // gh_pr_code_tour + ci_finding are both read-only so they survive the filter.
+  const readOnlyGhTools = ghTools(ghToolRunner, ghOpts).filter((tool) => tool.isReadOnly())
+  const tools = new ToolRegistry([...gitTools(guarded, gitOpts), ...readOnlyGhTools])
   return { tools, gh }
 }
 

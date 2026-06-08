@@ -526,14 +526,19 @@ export const App = (): JSX.Element => {
   )
   const observability = useObservabilityState(observabilitySource)
 
-  // ADR-0448 (RFC-10): mount point for the rich context-usage breakdown. The
-  // RFC-06 canvas data port (the client-side `tool.diff`/`context.usage`
-  // dispatch) is not yet wired onto `SessionClient` — so the source is `null`
-  // and `useContextUsage` stays `null`, leaving the panel un-rendered
-  // (default-OFF). The moment RFC-06 exposes canvas frames (e.g.
-  // `client.onCanvas`), swap `null` for that source and the
-  // `UsageBreakdownPanel` lights up with no further change here.
-  const canvasSource: CanvasSource | null = null
+  // ADR-0448 (RFC-10): mount point for the rich context-usage breakdown,
+  // backed by the canvas WS channel. Mirrors `observabilitySource` above —
+  // wraps `client.onCanvas` so the `tool.diff` / `context.usage` frames the
+  // daemon emits when gated ON (`QUANTA_WEB_CANVAS=1`) feed `useContextUsage`
+  // / `useToolDiffs` and light up the `UsageBreakdownPanel`. Default-OFF: when
+  // the daemon sends no canvas frames the source never fires, `contextUsage`
+  // stays `null`, and the panel renders nothing (chat UI byte-identical).
+  const canvasSource = useMemo<CanvasSource>(
+    () => ({
+      subscribe: (handler) => client.onCanvas(handler),
+    }),
+    [client],
+  )
   const contextUsage = useContextUsage(canvasSource)
 
   // Codex-like: the observability sidebar stays OFF-screen until there's

@@ -4,7 +4,7 @@ import { errMessage, parseThinClientRoute, runtimeConfig } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
 import { normalizeSkillFrontmatter } from "./manifest-compat"
 import { liftRawDependenciesBlock } from "./skill-frontmatter"
-import { discoverSkillResources } from "./skill-resources"
+import { discoverSkillImplicitPolicy, discoverSkillResources } from "./skill-resources"
 import { checkSkillSize, MAX_SKILL_SIZE_BYTES } from "./skill-size"
 import {
   isSkillInstallState,
@@ -239,8 +239,17 @@ const readNestedSkill = async (dir: string, name: string): Promise<Skill | null>
     // ADR-0457 — directory-form skills MAY ship bundled resources (agents/
     // scripts/ references/ assets/). Fail-safe: a malformed resource omits just
     // that resource and never aborts the skill (helper swallows all errors).
-    const resources = await discoverSkillResources(skillFile)
-    return resources !== undefined ? { ...skill, resources } : skill
+    const [resources, allowImplicit] = await Promise.all([
+      discoverSkillResources(skillFile),
+      // §2.3 — codex policy.allow_implicit_invocation. Additive: absent ⇒ field
+      // omitted (default = implicit allowed), byte-identical to before.
+      discoverSkillImplicitPolicy(skillFile),
+    ])
+    return {
+      ...skill,
+      ...(resources !== undefined ? { resources } : {}),
+      ...(allowImplicit !== undefined ? { allowImplicitInvocation: allowImplicit } : {}),
+    }
   } catch (e) {
     // `checkSkillSize` already stat-confirmed the file exists & is in range, so
     // reaching here means the read itself failed (permissions / transient IO),

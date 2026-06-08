@@ -65,6 +65,14 @@ export interface MentionResolverPort {
   /** ADR-0418 — code symbol resolver. Looks up the symbol via LSP /
    *  semantic search and returns a definition / outline body. */
   resolveSymbol?(target: string): Promise<MentionResolverResult | null>
+  /** §10.3 — workspace folder resolver. Lists the directory entries and
+   *  returns a bounded listing as bodyText. Omit ⇒ `folder` mentions
+   *  resolve to `null` (byte-identical to the pre-§10.3 path). */
+  resolveFolder?(target: string): Promise<MentionResolverResult | null>
+  /** §10.3 — git context resolver. `target` is the subcommand
+   *  (`status` / `diff` / `log`); returns a compressed git body. Omit ⇒
+   *  `git` mentions resolve to `null`. */
+  resolveGit?(target: string): Promise<MentionResolverResult | null>
 }
 
 /** Belt-and-suspenders NO-THROW wrapper around a single resolver call.
@@ -86,7 +94,7 @@ const safeCall = async (
 }
 
 /** Pick the kind-specific resolver method. Exhaustive over the closed
- *  `MentionKind` enum (5 kinds, ADR-0418). */
+ *  `MentionKind` enum (7 kinds: ADR-0418's 5 + §10.3's folder + git). */
 const pickResolver = (
   resolver: MentionResolverPort,
   kind: MentionKind,
@@ -102,6 +110,10 @@ const pickResolver = (
       return resolver.resolveFile?.bind(resolver)
     case "symbol":
       return resolver.resolveSymbol?.bind(resolver)
+    case "folder":
+      return resolver.resolveFolder?.bind(resolver)
+    case "git":
+      return resolver.resolveGit?.bind(resolver)
   }
 }
 

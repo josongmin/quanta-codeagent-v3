@@ -83,6 +83,26 @@ export const gitChurnInputSchema = z.object({
 })
 export type GitChurnInput = z.infer<typeof gitChurnInputSchema>
 
+// --- git_co_change -----------------------------------------------------------
+
+/** Co-change / related-files signal (§7.2 long-tail, Codex change-impact /
+ *  Cursor related-files parity). Builds a co-occurrence matrix from
+ *  `git log --name-only`: which OTHER files change in the SAME commit as a
+ *  target (or, with no target, the most-coupled file pairs globally). The
+ *  second-order companion to `git_churn`'s single-file frequency. READ-ONLY,
+ *  CONCURRENCY-SAFE. */
+export const gitCoChangeInputSchema = z.object({
+  /** Git since-expression for the window (e.g. "30.days", "HEAD~50"). When
+   *  absent, defaults to the last 200 commits (same window as git_churn). */
+  since: z.string().optional().describe('Window, e.g. "30.days" (default last 200 commits)'),
+  /** Target file: rank the other files that co-changed WITH it. When absent,
+   *  return the most-coupled file PAIRS globally (the densest matrix edges). */
+  file: z.string().optional().describe("Target file (omit ⇒ top global co-change pairs)"),
+  /** Max ranked rows / pairs to return. Default 20, capped at 100. */
+  n: z.number().int().positive().max(100).optional().describe("Top-N (default 20, max 100)"),
+})
+export type GitCoChangeInput = z.infer<typeof gitCoChangeInputSchema>
+
 // --- git_blame_heatmap -------------------------------------------------------
 
 /** Stage-1 ownership signal: per-file author line distribution. Who owns the

@@ -10,6 +10,7 @@ import {
   type MemoryTier,
   type PersistentStorePort,
   planEviction,
+  type RoutingContext,
   scoreEntry,
 } from "@/memory"
 import { sliceWholeChars, throwIfAborted } from "@/shared"
@@ -161,7 +162,7 @@ const reinforce = async (
 export const recallContext = async (
   deps: RecallDeps,
   queryText: string | undefined,
-  opts?: { limit?: number; tiers?: MemoryTier[] },
+  opts?: { limit?: number; tiers?: MemoryTier[]; routing?: RoutingContext },
 ): Promise<string | null> => {
   const limit = opts?.limit ?? RECALL_LIMIT
   const text = queryText && queryText.length > 0 ? queryText : undefined
@@ -171,6 +172,12 @@ export const recallContext = async (
   if (text) query.text = text
   if (embedding) query.embedding = embedding
   if (opts?.tiers) query.tiers = opts.tiers
+  // §10.6 routing weighting — opt-in. Only set `query.routing` when the caller
+  // supplied a NON-EMPTY routing context (the composition root gates this on
+  // QUANTA_MEMORY_ROUTING). Absent / empty ⇒ ranking is byte-identical.
+  if (opts?.routing && (opts.routing.taskGroup || opts.routing.cwd)) {
+    query.routing = opts.routing
+  }
 
   let entries = await deps.store.recall(query)
   let fellBack = false

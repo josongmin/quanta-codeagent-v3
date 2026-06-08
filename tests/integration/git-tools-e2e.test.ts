@@ -201,3 +201,114 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     },
   )
 })
+
+// §7.4 3-WAY dirty-checkout — drive each action end-to-end against real git.
+describe("git_branch_switch — §7.4 dirtyAction e2e (real git)", () => {
+  test.skipIf(!HAS_GIT)("dirtyAction:'commit-wip' commits a wip checkpoint then switches", async () => {
+    await git(repoDir, ["checkout", "-q", "main"])
+    // tracked edit + untracked file ⇒ dirty.
+    await writeFile(join(repoDir, "seed.txt"), "seed mutated for commit-wip\n")
+    await writeFile(join(repoDir, "cw-untracked.txt"), "untracked\n")
+
+    const r = await collect(
+      gitBranchSwitchTool(defaultGitRunner),
+      { branch: "feat-commit-wip", create: true, dirtyAction: "commit-wip" },
+      repoDir,
+    )
+    expect(r.ok).toBe(true)
+    expect(r.output).toMatch(/wip checkpoint/i)
+
+    const head = await git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])
+    expect(head.stdout.trim()).toBe("feat-commit-wip")
+    const log = await git(repoDir, ["log", "--oneline", "-1"])
+    expect(log.stdout).toMatch(/wip:/)
+    // The wip commit captured both the tracked edit and the untracked file.
+    const clean = await git(repoDir, ["status", "--porcelain"])
+    expect(clean.stdout.trim()).toBe("")
+  })
+
+  test.skipIf(!HAS_GIT)("dirtyAction:'stash' stashes the dirty tree then switches (recoverable)", async () => {
+    await git(repoDir, ["checkout", "-q", "main"])
+    const headSha = await git(repoDir, ["rev-parse", "HEAD"])
+    await writeFile(join(repoDir, "seed.txt"), "seed mutated for stash\n")
+    await writeFile(join(repoDir, "stash-untracked.txt"), "to be stashed\n")
+
+    const r = await collect(
+      gitBranchSwitchTool(defaultGitRunner),
+      { branch: "feat-stash", create: true, dirtyAction: "stash" },
+      repoDir,
+    )
+    expect(r.ok).toBe(true)
+    expect(r.output).toMatch(/stash/i)
+
+    const head = await git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])
+    expect(head.stdout.trim()).toBe("feat-stash")
+    // No new commit was made (stash, not commit).
+    const afterSha = await git(repoDir, ["rev-parse", "HEAD"])
+    expect(afterSha.stdout).toBe(headSha.stdout)
+    // Tree is clean post-stash on the new branch.
+    const status = await git(repoDir, ["status", "--porcelain"])
+    expect(status.stdout.trim()).toBe("")
+    // The stash is recoverable: an identifiable branch-switch entry exists.
+    const stashList = await git(repoDir, ["stash", "list"])
+    expect(stashList.stdout).toMatch(/branch-switch/)
+    // Pop it back to prove non-destructiveness, then clean up.
+    const pop = await git(repoDir, ["stash", "pop"])
+    expect(pop.ok).toBe(true)
+    const restored = await git(repoDir, ["status", "--porcelain"])
+    expect(restored.stdout).toMatch(/stash-untracked\.txt/)
+    // Reset the new branch to pristine for isolation.
+    await git(repoDir, ["checkout", "--", "."])
+    await git(repoDir, ["clean", "-fd"])
+  })
+
+  test.skipIf(!HAS_GIT)("dirtyAction:'discard' irreversibly drops tracked + untracked then switches", async () => {
+    await git(repoDir, ["checkout", "-q", "main"])
+    // Pristine seed content baseline.
+    await git(repoDir, ["checkout", "--", "."])
+    await git(repoDir, ["clean", "-fd"])
+    const seedBefore = await Bun.file(join(repoDir, "seed.txt")).text()
+
+    // Dirty: mutate a tracked file + add an untracked file.
+    await writeFile(join(repoDir, "seed.txt"), "DESTROY ME\n")
+    await writeFile(join(repoDir, "discard-untracked.txt"), "DESTROY ME TOO\n")
+
+    const r = await collect(
+      gitBranchSwitchTool(defaultGitRunner),
+      { branch: "feat-discard", create: true, dirtyAction: "discard" },
+      repoDir,
+    )
+    expect(r.ok).toBe(true)
+    expect(r.output).toMatch(/discard/i)
+
+    const head = await git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])
+    expect(head.stdout.trim()).toBe("feat-discard")
+    // Tracked edit reverted to committed content.
+    const seedAfter = await Bun.file(join(repoDir, "seed.txt")).text()
+    expect(seedAfter).toBe(seedBefore)
+    // Untracked file is GONE.
+    expect(await Bun.file(join(repoDir, "discard-untracked.txt")).exists()).toBe(false)
+    // Tree is clean.
+    const status = await git(repoDir, ["status", "--porcelain"])
+    expect(status.stdout.trim()).toBe("")
+  })
+
+  test.skipIf(!HAS_GIT)("dirtyAction ABSENT on dirty tree ⇒ ok:false (byte-identical legacy reject)", async () => {
+    await git(repoDir, ["checkout", "-q", "main"])
+    await writeFile(join(repoDir, "legacy-dirty.txt"), "x\n")
+    const before = await git(repoDir, ["rev-parse", "HEAD"])
+
+    const r = await collect(
+      gitBranchSwitchTool(defaultGitRunner),
+      { branch: "feat-legacy", create: true }, // no dirtyAction, no autoWip
+      repoDir,
+    )
+    expect(r.ok).toBe(false)
+
+    const after = await git(repoDir, ["rev-parse", "HEAD"])
+    expect(after.stdout).toBe(before.stdout)
+    const head = await git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])
+    expect(head.stdout.trim()).toBe("main")
+    await rm(join(repoDir, "legacy-dirty.txt"), { force: true })
+  })
+})

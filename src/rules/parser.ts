@@ -23,6 +23,7 @@
  * boundaries so the grammar is auditable line-by-line.
  */
 
+import { parseArgvArrayLiteral } from "./argv"
 import type { Rule, RuleAction, RuleLayer } from "./types"
 import { RuleParseError } from "./types"
 
@@ -34,8 +35,14 @@ const ACTION_TOKENS: ReadonlySet<string> = new Set<RuleAction>(["allow", "deny",
 const isRuleAction = (token: string): token is RuleAction => ACTION_TOKENS.has(token)
 
 /** Parsed-but-not-yet-stored representation of a single non-blank line.
- *  Returned by `parseLine`; `null` signals "skip this line" (blank / comment). */
-type ParsedLine = { readonly action: RuleAction; readonly prefix: string } | null
+ *  Returned by `parseLine`; `null` signals "skip this line" (blank / comment).
+ *  `argv` is populated ONLY for the §10.2 bracketed token-array form; legacy
+ *  string-prefix lines leave it `undefined`. */
+type ParsedLine = {
+  readonly action: RuleAction
+  readonly prefix: string
+  readonly argv?: readonly string[]
+} | null
 
 /**
  * Parse a DSL document into a list of rules.
@@ -52,16 +59,17 @@ type ParsedLine = { readonly action: RuleAction; readonly prefix: string } | nul
  */
 export const parseRules = (text: string, layer: RuleLayer, sourceFile: string): Rule[] => {
   const rules: Rule[] = []
-  // prefix -> first rule encountered with that prefix in THIS parse.
-  // Used both for conflict detection and same-action dedupe.
-  const byPrefix = new Map<string, Rule>()
+  // dedupe-key -> first rule encountered with that key in THIS parse. Used
+  // both for conflict detection and same-action dedupe. The key namespaces
+  // argv rules apart from byte-prefix rules (see `dedupeKey`).
+  const byKey = new Map<string, Rule>()
 
   const lines = text.split("\n")
   for (let i = 0; i < lines.length; i++) {
     const lineNumber = i + 1
     const parsed = parseLine(lines[i] ?? "", sourceFile, lineNumber)
     if (parsed === null) continue
-    appendRule(parsed, layer, sourceFile, lineNumber, rules, byPrefix)
+    appendRule(parsed, layer, sourceFile, lineNumber, rules, byKey)
   }
 
   // Caller-visible immutability — prevents accidental in-place mutation of
@@ -104,21 +112,47 @@ const parseLine = (raw: string, sourceFile: string, lineNumber: number): ParsedL
     throw new RuleParseError(`missing prefix after action "${actionToken}"`, sourceFile, lineNumber)
   }
 
+  // §10.2 — a bracketed body is an argv token-array rule (Codex
+  // `prefix_rule(pattern=[...])` parity). A leading `[` is the unambiguous
+  // signal; a malformed / empty array is a HARD error (no silent fallback to
+  // a byte-prefix rule whose `[` would otherwise be a literal prefix char).
+  if (prefix.startsWith("[")) {
+    const argv = parseArgvArrayLiteral(prefix)
+    if (argv === null) {
+      throw new RuleParseError(
+        `malformed argv token array after action "${actionToken}": ${prefix}`,
+        sourceFile,
+        lineNumber,
+      )
+    }
+    // `prefix` mirrors the joined argv so ruleId / diagnostics stay populated.
+    return { action: actionToken, prefix: argv.join(" "), argv }
+  }
+
   return { action: actionToken, prefix }
 }
 
+/** Dedup / conflict identity key for a parsed line. An argv rule is keyed by
+ *  its token vector (distinct namespace, `\x00`-delimited so it can never
+ *  collide with a byte-prefix rule's key) — so an argv rule and a string rule
+ *  with a coincidentally-equal joined prefix do NOT false-conflict, and two
+ *  argv rules with identical tokens DO dedupe. */
+const dedupeKey = (parsed: { readonly prefix: string; readonly argv?: readonly string[] }): string =>
+  parsed.argv !== undefined ? `argv\x00${parsed.argv.join("\x00")}` : `str\x00${parsed.prefix}`
+
 /** Append a parsed line into the accumulator. Handles same-action dedupe
  *  (silent) and different-action conflicts (throws). Mutates `rules` and
- *  `byPrefix`. */
+ *  `byKey`. */
 const appendRule = (
-  parsed: { readonly action: RuleAction; readonly prefix: string },
+  parsed: { readonly action: RuleAction; readonly prefix: string; readonly argv?: readonly string[] },
   layer: RuleLayer,
   sourceFile: string,
   lineNumber: number,
   rules: Rule[],
-  byPrefix: Map<string, Rule>,
+  byKey: Map<string, Rule>,
 ): void => {
-  const existing = byPrefix.get(parsed.prefix)
+  const key = dedupeKey(parsed)
+  const existing = byKey.get(key)
   if (existing !== undefined) {
     if (existing.action !== parsed.action) {
       throw new RuleParseError(
@@ -136,12 +170,13 @@ const appendRule = (
   const rule: Rule = Object.freeze({
     action: parsed.action,
     prefix: parsed.prefix,
+    ...(parsed.argv !== undefined ? { argv: Object.freeze([...parsed.argv]) } : {}),
     layer,
     sourceLine: lineNumber,
     sourceFile,
   })
   rules.push(rule)
-  byPrefix.set(parsed.prefix, rule)
+  byKey.set(key, rule)
 }
 
 /** Return the index of the first whitespace character in `s`, or -1.

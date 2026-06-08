@@ -47,6 +47,7 @@ const decodeKind = (raw: string): SessionTransportMessage["kind"] => {
     case "event":
     case "rejected":
     case "snapshot":
+    case "heartbeat":
       return envelope.kind
     default:
       throw new SessionProtocolValidationError("bad_transport_kind")
@@ -135,6 +136,16 @@ const decodeRejectedMessage = (raw: string): SessionTransportMessage => {
   }
 }
 
+const decodeHeartbeatMessage = (raw: string): SessionTransportMessage => {
+  const envelope = expectObject(JSON.parse(raw) as unknown)
+  requireProtocolVersion(envelope)
+  const phase = envelope.phase
+  if (phase !== "ping" && phase !== "pong") {
+    throw new SessionProtocolValidationError("bad_transport_heartbeat_phase")
+  }
+  return { kind: "heartbeat", phase }
+}
+
 export const encodeSessionTransportMessage = (message: SessionTransportMessage): string => {
   switch (message.kind) {
     case "connect":
@@ -162,6 +173,8 @@ export const encodeSessionTransportMessage = (message: SessionTransportMessage):
       })
     case "snapshot":
       return encodeSessionSnapshot(message.snapshot)
+    case "heartbeat":
+      return encodeControlEnvelope({ kind: "heartbeat", phase: message.phase })
   }
 }
 
@@ -177,6 +190,8 @@ export const decodeSessionTransportMessage = (raw: string): SessionTransportMess
       return decodeRejectedMessage(raw)
     case "snapshot":
       return { kind: "snapshot", snapshot: decodeSessionSnapshot(raw) }
+    case "heartbeat":
+      return decodeHeartbeatMessage(raw)
   }
 }
 

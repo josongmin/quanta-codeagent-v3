@@ -91,6 +91,49 @@ export const parseOpenaiYamlInterface = (text: string): SkillAgentInterface | un
   return Object.keys(out).length > 0 ? (out as SkillAgentInterface) : undefined
 }
 
+/**
+ * §2.3 — parse the `policy.allow_implicit_invocation` flag from an
+ * `agents/openai.yaml` body. Same minimal, dependency-free block scanner the
+ * interface parser uses: enter the `policy:` block on its top-level key, read
+ * the indented `allow_implicit_invocation: <bool>` child, stop at the next
+ * top-level key. Returns the boolean when the flag is declared, else undefined
+ * (so the caller treats absent as the codex default = implicit ALLOWED).
+ *
+ * Block-scoped on purpose: a flag indented under `interface:` (a typo) is
+ * IGNORED — only the `policy:` block's child is honored. Accepts an optionally-
+ * quoted boolean (`true`/`false`/`"true"`/`"false"`); any other value ⇒
+ * undefined (never coerce a non-boolean into a grant decision).
+ */
+/** Read the `allow_implicit_invocation: <bool>` child of an indented line into a
+ *  boolean, or undefined if the line is not that key / not a clean boolean. */
+const readImplicitFlag = (raw: string): boolean | undefined => {
+  const child = raw.match(/^\s+allow_implicit_invocation\s*:\s*(.*)$/)
+  if (!child) return undefined
+  const v = unquote((child[1] ?? "").trim()).toLowerCase()
+  if (v === "true") return true
+  if (v === "false") return false
+  return undefined // any other value ⇒ no coercion
+}
+
+export const parseOpenaiYamlPolicy = (text: string): boolean | undefined => {
+  const lines = text.replace(/\r\n/g, "\n").split("\n")
+  let inPolicy = false
+  let found: boolean | undefined
+  for (const raw of lines) {
+    if (raw.trim() === "" || raw.trim().startsWith("#")) continue
+    if (/^\s/.test(raw)) {
+      if (inPolicy) {
+        const flag = readImplicitFlag(raw)
+        if (flag !== undefined) found = flag
+      }
+      continue
+    }
+    // Top-level key: enter the block on `policy:`, leave on any other.
+    inPolicy = /^policy\s*:\s*$/.test(raw)
+  }
+  return found
+}
+
 /** Read + parse `agents/openai.yaml`'s interface block; undefined on any error.
  *  The read is size-bounded by the SAME `checkSkillSize` cap discovery uses for
  *  SKILL.md — an oversized/garbage `agents/openai.yaml` (e.g. an auto-fetched
@@ -105,6 +148,27 @@ const readAgentsInterface = async (skillDir: string): Promise<SkillAgentInterfac
   } catch {
     // Missing file is the common case; a malformed/unreadable one is swallowed
     // too — a bundled resource must never crash discovery (fail-safe posture).
+    return undefined
+  }
+}
+
+/**
+ * §2.3 — read the `agents/openai.yaml` `policy.allow_implicit_invocation` flag
+ * for a directory-form skill. Size-bounded by the SAME `checkSkillSize` cap (DoS
+ * guard) and fail-safe like {@link readAgentsInterface}: any IO / parse problem
+ * (incl. absent file) ⇒ undefined (codex default = implicit allowed). `skillMdPath`
+ * is the SKILL.md path; the yaml sits at `<dir>/agents/openai.yaml`.
+ */
+export const discoverSkillImplicitPolicy = async (
+  skillMdPath: string,
+): Promise<boolean | undefined> => {
+  try {
+    const path = join(dirname(skillMdPath), "agents", "openai.yaml")
+    const sized = await checkSkillSize(path)
+    if (!sized.ok) return undefined
+    const raw = await readFile(path, "utf8")
+    return parseOpenaiYamlPolicy(raw)
+  } catch {
     return undefined
   }
 }

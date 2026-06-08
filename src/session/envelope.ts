@@ -452,6 +452,40 @@ export const ThreadSpawnRecordSchema = z
 export type ThreadSpawnRecord = z.infer<typeof ThreadSpawnRecordSchema>
 
 /* ------------------------------------------------------------------ */
+/* 6. dynamic_tools (§8.3 — Codex dynamic-tool session record)         */
+/*                                                                     */
+/* Codex persists dynamically-added MCP/runtime tools per session      */
+/* (`state db persist_dynamic_tools`, `dynamic_tools.rs`). quanta       */
+/* mirrors that as an APPEND-ONLY envelope record: each record names    */
+/* the tool that was added/removed, the source it came from, and when. */
+/* This is a SESSION LOG record — NOT a model-facing tool (no manifest  */
+/* row). It is purely additive: no existing record kind changes, and    */
+/* no producer writes it unless the dynamic-tools feature is wired, so  */
+/* a legacy session log never contains one (byte-identical default-OFF).*/
+/* ------------------------------------------------------------------ */
+
+export const DynamicToolActionSchema = z.enum(["added", "removed"])
+
+export const DynamicToolRecordSchema = z
+  .object({
+    type: z.literal("dynamic_tools"),
+    schema_version: SchemaVersionSchema,
+    /** The turn during which the tool set changed (links to turn_context). */
+    turn_id: NonEmptyString,
+    /** Was the tool added to or removed from the live tool surface. */
+    action: DynamicToolActionSchema,
+    /** The dynamically-(de)registered tool's name. */
+    tool_name: NonEmptyString,
+    /** Where the tool came from (e.g. an MCP server name, "skill", a plugin
+     *  id). Free-form provenance; omitted when not attributable. */
+    source: NonEmptyString.optional(),
+    /** When the change happened. */
+    at: Iso8601,
+  })
+  .strict()
+export type DynamicToolRecord = z.infer<typeof DynamicToolRecordSchema>
+
+/* ------------------------------------------------------------------ */
 /* top-level union                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -468,5 +502,6 @@ export const SessionEnvelopeRecordSchema = z.union([
   EventMsgRecordSchema,
   ResponseItemRecordSchema,
   ThreadSpawnRecordSchema,
+  DynamicToolRecordSchema,
 ])
 export type SessionEnvelopeRecord = z.infer<typeof SessionEnvelopeRecordSchema>

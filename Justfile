@@ -24,6 +24,14 @@ PROVIDER := env_var_or_default("PROVIDER", "openai")
 #   MODEL=gpt-5 just cli
 MODEL := env_var_or_default("MODEL", "gpt-5-mini")
 
+# Web surface — the daemon serves the agent over WS + the built SPA on ONE port.
+#   just web-up    # build frontend + run daemon → http://localhost:4096
+#   just daemon    # server only (after `just web-build`)
+#   just web       # frontend dev server (Vite HMR) → http://localhost:5173
+WEB_PORT := env_var_or_default("WEB_PORT", "4096")
+WEB_BIND := env_var_or_default("WEB_BIND", "127.0.0.1")
+WEB_DIR := "apps/web-frontend"
+
 # Default recipe: show the recipe list.
 default:
     @just --list
@@ -48,6 +56,48 @@ cli-openai *args:
 # `QUANTA_MODEL=claude-...` explicitly.
 cli-anthropic *args:
     QUANTA_LLM_PROVIDER=anthropic {{BUN}} run {{CLI}} {{args}}
+
+# Attach the CLI to a RUNNING daemon's shared session over WS (multi-surface
+# join — the daemon must already be up, e.g. via `just daemon`/`just web-up`).
+# URL defaults to ws://127.0.0.1:{{WEB_PORT}}/; pass another as the first arg.
+# Token via QUANTA_WEB_AUTH_TOKEN or `just cli-attach <url> --token <tok>`.
+cli-attach *args="ws://127.0.0.1:4096/":
+    {{BUN}} run {{CLI}} attach {{args}}
+
+# --- web (server + frontend) --------------------------------------------
+
+# Web daemon — agent-over-WS + the built frontend SPA on one port. Open
+# http://localhost:{{WEB_PORT}} after `just web-build` (or just use `just web-up`).
+# Override port/bind: `WEB_PORT=5000 WEB_BIND=0.0.0.0 just daemon`.
+daemon *args:
+    QUANTA_WEB_PORT={{WEB_PORT}} QUANTA_WEB_BIND={{WEB_BIND}} {{BUN}} run src/apps/web-daemon/index.ts {{args}}
+
+# Build the web frontend (Vite → apps/web-frontend/dist). Skips the tsc gate
+# (a pre-existing test-only type error blocks `bun run build`); use `just web-typecheck`.
+web-build:
+    cd {{WEB_DIR}} && bunx vite build
+
+# Frontend dev server (Vite HMR) → http://localhost:5173. Run `just daemon` alongside for the WS backend.
+web *args:
+    cd {{WEB_DIR}} && {{BUN}} run dev {{args}}
+
+# One-shot: build the frontend, THEN run the daemon serving it at http://localhost:{{WEB_PORT}}.
+web-up: web-build daemon
+
+# Stop whatever is listening on the web port.
+web-down:
+    pids="$(lsof -ti tcp:{{WEB_PORT}} || true)"; if [ -n "$pids" ]; then kill $pids && echo "killed $pids"; else echo "nothing on :{{WEB_PORT}}"; fi
+
+# Frontend unit tests (vitest) + typecheck.
+web-test:
+    cd {{WEB_DIR}} && {{BUN}} run test
+
+web-typecheck:
+    cd {{WEB_DIR}} && bunx tsc --noEmit
+
+# Compile the CLI to a standalone binary at ./dist/agent.
+build:
+    {{BUN}} run build
 
 # Smoke battery (tier-0 replay — hermetic, no API key needed).
 smoke *args:

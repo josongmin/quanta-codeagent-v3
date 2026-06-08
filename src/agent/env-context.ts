@@ -303,3 +303,104 @@ export const probeRepoMap = async (opts: ProbeRepoMapOpts): Promise<string | und
     return undefined
   }
 }
+
+// ─── probeRepoMap3 (§10.4) ───────────────────────────────────────────────────
+
+/**
+ * Closed input shape for the §10.4 THREE-tree probe. Codex orients the model
+ * with up to three bounded directory trees at session start:
+ *
+ *   - cwd      — the working directory (the sub-package the user `cd`'d into).
+ *   - gitRoot  — the repository root (monorepo awareness; may equal cwd).
+ *   - userHome — the user's home (cross-project context; may equal cwd/gitRoot).
+ *
+ * Each root is scanned via the SAME injected `scan` adapter `probeRepoMap`
+ * uses, INDEPENDENTLY capped, IN PARALLEL. Identical roots are DEDUPED so a
+ * cwd that IS the git root is scanned (and rendered) once. Absent gitRoot /
+ * userHome ⇒ those roots are simply not scanned (an absent gitRoot makes this
+ * behave like a single-tree probe with a section label).
+ */
+export interface ProbeRepoMap3Opts {
+  cwd: string
+  /** Repository root (e.g. `git rev-parse --show-toplevel`). Omit / equal-to-cwd
+   *  ⇒ no separate git-root section. */
+  gitRoot?: string
+  /** User home directory (e.g. `os.homedir()`). Omit / equal-to-an-already-scanned
+   *  root ⇒ no separate home section. */
+  userHome?: string
+  /** Injected per-root scanner — same contract as {@link ProbeRepoMapOpts.scan}. */
+  scan: (opts: {
+    cwd: string
+    maxDepth: number
+    maxFiles: number
+    maxChars: number
+  }) => Promise<string | undefined>
+  /** Default {@link REPO_MAP_DEFAULT_MAX_DEPTH}. Applied to EACH root. */
+  maxDepth?: number
+  /** Default {@link REPO_MAP_DEFAULT_MAX_FILES}. Applied to EACH root. */
+  maxFiles?: number
+  /** Default {@link REPO_MAP_DEFAULT_MAX_CHARS}. Applied to EACH root. */
+  maxChars?: number
+}
+
+/** A labelled root the 3-tree probe scans, in render order. */
+interface LabelledRoot {
+  readonly label: string
+  readonly root: string
+}
+
+/** Resolve the deduped, ordered list of roots to scan. cwd is always first;
+ *  gitRoot / userHome are appended only when present AND not already covered by
+ *  an earlier root (exact-path dedup — the caller supplies absolute paths). */
+const resolveRoots = (opts: ProbeRepoMap3Opts): readonly LabelledRoot[] => {
+  const out: LabelledRoot[] = [{ label: "cwd", root: opts.cwd }]
+  const seen = new Set<string>([opts.cwd])
+  if (typeof opts.gitRoot === "string" && opts.gitRoot.length > 0 && !seen.has(opts.gitRoot)) {
+    out.push({ label: "git-root", root: opts.gitRoot })
+    seen.add(opts.gitRoot)
+  }
+  if (typeof opts.userHome === "string" && opts.userHome.length > 0 && !seen.has(opts.userHome)) {
+    out.push({ label: "user-home", root: opts.userHome })
+    seen.add(opts.userHome)
+  }
+  return out
+}
+
+/**
+ * Live THREE-tree repo-map probe (§10.4). Scans up to three deduped roots in
+ * parallel, each independently capped, and combines the non-empty results into
+ * one labelled block. NEVER throws — a per-root scan failure / empty result is
+ * collapsed to "section omitted"; ALL roots failing ⇒ `undefined` (the env
+ * block is byte-identical to the no-map path).
+ *
+ * Each section is framed `### <label> (<root>)\n<tree>` so the model can tell
+ * the three orientations apart. When only the cwd root survives the result is a
+ * single labelled section (NOT byte-identical to `probeRepoMap`'s bare string —
+ * `probeRepoMap` is the contract for the legacy single-tree caller).
+ */
+export const probeRepoMap3 = async (opts: ProbeRepoMap3Opts): Promise<string | undefined> => {
+  const roots = resolveRoots(opts)
+  const caps = {
+    maxDepth: opts.maxDepth ?? REPO_MAP_DEFAULT_MAX_DEPTH,
+    maxFiles: opts.maxFiles ?? REPO_MAP_DEFAULT_MAX_FILES,
+    maxChars: opts.maxChars ?? REPO_MAP_DEFAULT_MAX_CHARS,
+  }
+  // Per-root scan is independently no-throw so one root cannot sink the others.
+  const scanOne = async (r: LabelledRoot): Promise<{ label: string; root: string; tree: string } | null> => {
+    try {
+      const tree = await opts.scan({ cwd: r.root, ...caps })
+      if (tree === undefined || tree.trim().length === 0) return null
+      return { label: r.label, root: r.root, tree }
+    } catch {
+      return null
+    }
+  }
+  const settled = await Promise.all(roots.map(scanOne))
+  const sections: string[] = []
+  for (const s of settled) {
+    if (s === null) continue
+    sections.push(`### ${s.label} (${s.root})\n${s.tree}`)
+  }
+  if (sections.length === 0) return undefined
+  return sections.join("\n\n")
+}

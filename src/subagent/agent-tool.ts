@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { validateAgentType } from "./agent-type"
 import { TaskRegistry } from "./registry"
 import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
 
@@ -180,6 +181,21 @@ export interface AgentToolOptions {
    *  this slice stays plane-clean (no upward `@/agent` import). ABSENT ⇒ the
    *  prompt is used as-is (byte-identical cold start). */
   forkPrompt?: (prompt: string, spec: "none" | "all" | number) => string
+  /** §4.4 — TYPED agent kind enforcement. When true (the composition root read
+   *  `QUANTA_SUBAGENT_TYPED_KIND` and wired it on), the spawn boundary VALIDATES
+   *  `agent_type` via {@link validateAgentType}: a well-known {@link SubagentType}
+   *  is normalised to its canonical spelling, a registered custom name (see
+   *  {@link knownAgentTypes}) is accepted, and an unknown type is REJECTED (CC
+   *  `subagent_type_miss`). ABSENT/false ⇒ the legacy free-string path
+   *  (byte-identical: `agent_type` flows untouched, never rejected). The gate is
+   *  read OUTSIDE the slice so the slice stays pure (no `process.env`). */
+  enforceTypedAgentKind?: boolean
+  /** §4.4 — provider for the registered CUSTOM agent-type names (the named-agent
+   *  registry's keys), consulted ONLY when {@link enforceTypedAgentKind} is on.
+   *  Injected by the composition root (the slice must not import `@/agent`'s
+   *  named-agent registry). ABSENT ⇒ no custom names known ⇒ under enforcement a
+   *  non-well-known type is a miss. */
+  knownAgentTypes?: () => readonly string[]
 }
 
 /** Read the caller's recursion depth off the ToolContext if the host set it.
@@ -534,11 +550,39 @@ export const createAgentTool = (
         return
       }
 
+      // §4.4 — TYPED agent kind boundary validation. DEFAULT-OFF: when
+      // `enforceTypedAgentKind` is falsy the validator carries `agent_type`
+      // untouched (byte-identical). Under enforcement a well-known kind is
+      // canonicalised, a registered custom name passes, and an unknown type is
+      // REJECTED (recoverable deny — never throws). The canonicalised value (if
+      // any) replaces `input.agent_type` so the request + registry record carry
+      // the normalised spelling.
+      const typedKind = validateAgentType(input.agent_type, {
+        ...(opts.enforceTypedAgentKind === true ? { enforce: true } : {}),
+        ...(opts.knownAgentTypes !== undefined ? { knownCustom: opts.knownAgentTypes() } : {}),
+      })
+      if (!typedKind.ok) {
+        yield deny(`Subagent denied: ${typedKind.reason}`)
+        return
+      }
+      // Apply the (possibly canonicalised) value back onto the input the request
+      // + registry record are built from. Under default-OFF `typedKind.value` is
+      // the original raw value, so this is a no-op rebind (byte-identical).
+      const input1: AgentInput =
+        typedKind.value === input.agent_type
+          ? input
+          : typedKind.value === undefined
+            ? (() => {
+                const { agent_type: _drop, ...rest } = input
+                return rest as AgentInput
+              })()
+            : { ...input, agent_type: typedKind.value }
+
       // continue_from OWNERSHIP gate + checkpoint/worktree incompatibility.
       // Either resolves to a deny (returned here) or to the priorAttempt text
       // the runner's seed-augmentation step (parallel agent F) merges. A
       // foreign-lineage continue_from is denied before any finalText is read.
-      const pre = preflight(input, registry, continueFromOwners, requesterLineage)
+      const pre = preflight(input1, registry, continueFromOwners, requesterLineage)
       if (pre.kind === "deny") {
         yield pre.event
         return
@@ -546,18 +590,18 @@ export const createAgentTool = (
 
       // Mint the task id ONCE so the SAME id keys (a) the background registry
       // entry AND (b) the checkpoint file path the child writes to.
-      const { taskId, checkpointPath } = resolveTaskInfo(input, ctx, registry)
+      const { taskId, checkpointPath } = resolveTaskInfo(input1, ctx, registry)
       // GAP8a fork_turns: compose an inherited parent-context preamble onto the
       // prompt when the composition root wired `forkPrompt`. Absent dep or
       // `fork_turns:"none"` ⇒ prompt unchanged (byte-identical cold start).
       const forkedInput: AgentInput =
         opts.forkPrompt !== undefined
-          ? { ...input, prompt: opts.forkPrompt(input.prompt, input.fork_turns ?? "none") }
-          : input
+          ? { ...input1, prompt: opts.forkPrompt(input1.prompt, input1.fork_turns ?? "none") }
+          : input1
       const req = buildRequest(forkedInput, childDepth, pre.priorAttempt, checkpointPath)
 
-      if (input.background === true) {
-        yield launchBackground(opts, registry, input, req, taskId, (id) =>
+      if (input1.background === true) {
+        yield launchBackground(opts, registry, input1, req, taskId, (id) =>
           continueFromOwners.set(id, requesterLineage),
         )
         return

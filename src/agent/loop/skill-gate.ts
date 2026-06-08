@@ -2,6 +2,7 @@ import type { LLMPort, ThinkingConfig } from "@/llm"
 import { supportsAdaptiveThinking } from "@/llm"
 import { runtimeConfig } from "@/shared"
 import { effortToTokenBudget } from "../effort"
+import { READ_ONLY_EXPLORATION } from "../exploration-ladder"
 import { resolveAgentMode } from "../mode"
 import type { SkillGate, SkillTurnOverride } from "../turn-context"
 import type { AgentConfig } from "../types"
@@ -15,6 +16,40 @@ export const SKILL_META_TOOLS = new Set(["Skill", "ToolSearch"])
  *  both sides closes the common Read/Bash/Write/Edit/Grep/Glob gap. */
 const normTool = (name: string): string => name.trim().toLowerCase()
 
+/** ADR-0512 L2 — read-only exploration primitives the system prompt MANDATES
+ *  (the `file_tree_summary → glob → ls → read` ladder + `grep`). Always in
+ *  scope regardless of the active skill's allowlist: the harness must never
+ *  deny a tool its OWN prompt tells the model to reach for first (that was the
+ *  `✕ file_tree_summary skill-scoped` bug). Derived from the single source in
+ *  `../exploration-ladder`; normalized to the lowercase dispatch names. A
+ *  drift ratchet keeps this in lock-step with the prompt. */
+const NAV_BASE_NORM: ReadonlySet<string> = new Set(READ_ONLY_EXPLORATION.map(normTool))
+
+/** True when `name` is a tool that is in scope independent of any active skill:
+ *  a skill-meta tool (`Skill`/`ToolSearch`, raw-name) or a nav-base exploration
+ *  primitive (normalized). The single membership predicate that BOTH the
+ *  dispatch gate (`allow`) and the send-time spec filter (`filterSpecsByScope`)
+ *  share, so "visible set" and "dispatchable set" can never drift (ADR-0512
+ *  invariant #2). */
+export const isAlwaysInScope = (name: string): boolean =>
+  SKILL_META_TOOLS.has(name) || NAV_BASE_NORM.has(normTool(name))
+
+/** ADR-0512 L1 — the availability filter. Removes out-of-scope tools from the
+ *  spec set sent to the model so it never SEES (and so never fumbles into) a
+ *  tool the active skill forbids. REUSES `gate.allow` as the single membership
+ *  predicate so the visible set and the dispatchable set can never drift
+ *  (invariant #2). No gate, or no active skill (every tool allowed) ⇒ returns
+ *  the SAME `specs` reference (byte-identical). The caller gates this on
+ *  `runtimeConfig().skillScopeV2`; OFF ⇒ never invoked, all tools visible. */
+export const filterSpecsByScope = <T extends { name: string }>(
+  specs: T[],
+  gate: SkillGate | undefined,
+): T[] => {
+  if (gate === undefined) return specs
+  const filtered = specs.filter((s) => gate.allow(s.name))
+  return filtered.length === specs.length ? specs : filtered
+}
+
 export const buildSkillGate = (
   allowlists: Map<string, string[]> | undefined,
   overrides: Map<string, SkillTurnOverride> | undefined,
@@ -23,9 +58,10 @@ export const buildSkillGate = (
   const hasOverride = overrides !== undefined && overrides.size > 0
   if (!hasAllow && !hasOverride) return undefined
   let active: Set<string> | undefined
+  let activeSkill: string | undefined
   let activeOverride: SkillTurnOverride | undefined
   return {
-    allow: (name) => active === undefined || SKILL_META_TOOLS.has(name) || active.has(normTool(name)),
+    allow: (name) => active === undefined || isAlwaysInScope(name) || active.has(normTool(name)),
     observe: (name, input, ok) => {
       if (name !== "Skill" || !ok) return
       const raw =
@@ -38,10 +74,19 @@ export const buildSkillGate = (
       // is a tool-less / briefing skill (e.g. "repo onboarding") — it adds
       // guidance, NOT a zero-tool jail. (Was `if (allow)`: `[]` is truthy, so it
       // set `active` to an EMPTY Set and every subsequent tool was denied.)
-      if (allow !== undefined && allow.length > 0) active = new Set(allow.map(normTool))
+      if (allow !== undefined && allow.length > 0) {
+        active = new Set(allow.map(normTool))
+        activeSkill = skill
+      }
       activeOverride = overrides?.get(skill)
     },
     activeOverride: () => activeOverride,
+    activeSkillName: () => (active === undefined ? undefined : activeSkill),
+    // Widen the armed scope (ADR-0512 escalation approve). No-op when nothing is
+    // scoped — there is no set to widen, and `allow` already returns true.
+    widenScope: (name) => {
+      if (active !== undefined) active.add(normTool(name))
+    },
   }
 }
 

@@ -49,8 +49,11 @@
 
 import type { ToolResultBlock } from "@/llm"
 import type { Span, TurnTimingCapture } from "@/observability"
+import { inferToolTier } from "@/permission"
 import type { RedactionHit } from "@/security"
+import { runtimeConfig } from "@/shared"
 import { dispatchTool } from "./dispatch"
+import { decideScopeEscalation } from "./skill-scope-escalation"
 import type { DispatchOutcome, InProgressIndicator, StreamingCall } from "./streaming-dispatch"
 import type { TurnSession, TurnState } from "./turn-context"
 import type { AgentConfig } from "./types"
@@ -134,19 +137,32 @@ const patchHistoryOutcome = (
   }
 }
 
-/** Recoverable deny when a tool is outside the active skill's allowlist. */
-const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut => ({
+/** Recoverable tool_result for a skill-scope outcome that did NOT dispatch.
+ *  `preview` distinguishes the variants in the transcript/UI (legacy deny vs
+ *  ADR-0512 security-block / user-declined / steered). */
+const scopeDeny = (callId: string, content: string, preview: string): StreamDispatchOut => ({
   block: {
     type: "tool_result",
-    tool_use_id: call.id,
-    content:
-      `Tool "${call.name}" is not in the active skill's permitted tool set. ` +
-      "Use only the tools the skill allows, or invoke a different skill.",
+    tool_use_id: callId,
+    content,
     is_error: true,
   } satisfies ToolResultBlock,
   ok: false,
-  preview: "skill-scoped",
+  preview,
 })
+
+/** ADR-0011 legacy deny (skill-scope v2 OFF): a flat "not permitted" tool_result. */
+const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut =>
+  scopeDeny(
+    call.id,
+    `Tool "${call.name}" is not in the active skill's permitted tool set. ` +
+      "Use only the tools the skill allows, or invoke a different skill.",
+    "skill-scoped",
+  )
+
+/** Human reason shown on the escalation card / fed back to the model. */
+const scopeReasonFor = (tool: string, skill: string): string =>
+  `Tool "${tool}" is outside the active skill "${skill}" (not in its allowed-tools).`
 
 /**
  * Build the {@link StreamCallbacks} record `streamingTurn` consumes off the
@@ -169,6 +185,57 @@ export const createStreamDispatcher = (
   const { toolHistory, workingState, collector, onRedaction } = state
   const { turnTimingCapture } = anchors
 
+  // ADR-0512 — resolve a skill-scope outcome for a tool the active skill does
+  // NOT permit. Returns a recoverable tool_result to SHORT-CIRCUIT with, or
+  // `null` to fall through to normal dispatch (the tool is in scope, or the
+  // user APPROVED an escalation). v2 OFF ⇒ the ADR-0011 flat deny
+  // (byte-identical). v2 ON ⇒ hand-off-required is hard-denied (security
+  // boundary), everything else asks the user via `onConfirm`.
+  const handleSkillScope = async (call: StreamingCall): Promise<StreamDispatchOut | null> => {
+    if (!skillGate || skillGate.allow(call.name)) return null
+    if (!runtimeConfig().skillScopeV2) return skillScopeDeny(call)
+    const activeSkill = skillGate.activeSkillName() ?? "active skill"
+    const tool = config.registry.get(call.name)
+    const tier = tool !== undefined ? inferToolTier(tool, call.input) : "always-confirm"
+    const reason = scopeReasonFor(call.name, activeSkill)
+    const verdict = await decideScopeEscalation({
+      tool: call.name,
+      input: call.input,
+      isReadOnly: config.registry.isReadOnly(call.name),
+      tier,
+      activeSkill,
+      scopeReason: reason,
+      onConfirm: config.onConfirm,
+    })
+    switch (verdict.kind) {
+      case "dispatch":
+        // Approved — widen scope so the SAME tool is not re-asked, then fall
+        // through to normal dispatch (the tool's own permission gate still runs).
+        skillGate.widenScope(call.name)
+        return null
+      case "hard_deny":
+        return scopeDeny(
+          call.id,
+          `${reason} It is a hand-off-required action and cannot be granted mid-skill. ` +
+            "Use a permitted tool or exit the skill.",
+          "skill-scoped: blocked",
+        )
+      case "deny":
+        return scopeDeny(
+          call.id,
+          `Declined: ${reason} Use a tool the skill permits.`,
+          "skill-scoped: declined",
+        )
+      case "deny_and_steer":
+        return scopeDeny(call.id, `Declined: ${reason} ${verdict.steer}`, "skill-scoped: steered")
+      default: {
+        // Exhaustiveness: `ScopeVerdict` is closed; a new kind fails to compile.
+        const _never: never = verdict
+        return _never
+      }
+    }
+  }
+
   const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
     const s = recorder?.toolExec()
     // RFC may-22 Phase 1: BudgetMeter tick — every tool dispatch counts
@@ -176,26 +243,27 @@ export const createStreamDispatcher = (
     // Optional chain so absence is byte-identical to pre-RFC.
     tickToolDispatch(config, call.name)
     try {
-      // ADR-0011: enforce the active skill's tool allowlist —
-      // an out-of-scope tool is denied as a recoverable tool_result
-      // WITHOUT dispatching it. No gate / no active skill ⇒ unchanged.
+      // ADR-0011 / ADR-0512: enforce the active skill's tool allowlist. An
+      // out-of-scope tool short-circuits to a recoverable tool_result (v2 OFF)
+      // or an escalation outcome (v2 ON) WITHOUT dispatching; `null` ⇒ in scope
+      // or approved ⇒ dispatch normally. No gate / no active skill ⇒ unchanged.
+      const scoped = await handleSkillScope(call)
       const out =
-        skillGate && !skillGate.allow(call.name)
-          ? skillScopeDeny(call)
-          : await dispatchTool(
-              { type: "tool_use", id: call.id, name: call.name, input: call.input },
-              config,
-              config.permission,
-              (message) =>
-                config.stream.emit({
-                  type: "tool_progress",
-                  id: call.id,
-                  name: call.name,
-                  message,
-                }),
-              classifier,
-              workingState,
-            )
+        scoped ??
+        (await dispatchTool(
+          { type: "tool_use", id: call.id, name: call.name, input: call.input },
+          config,
+          config.permission,
+          (message) =>
+            config.stream.emit({
+              type: "tool_progress",
+              id: call.id,
+              name: call.name,
+              message,
+            }),
+          classifier,
+          workingState,
+        ))
       // A successful `Skill` invocation (re)arms the scope for next calls.
       skillGate?.observe(call.name, call.input, out.ok)
       // ADR-0078 point #1 — fold this tool_result's redaction hits into the

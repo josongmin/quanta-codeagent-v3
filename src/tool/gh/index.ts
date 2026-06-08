@@ -23,9 +23,12 @@
  */
 import { z } from "zod"
 import type { LLMPort } from "../../llm"
+import type { CiFindingStore } from "../ci-finding"
+import { ciFindingTool } from "../ci-finding"
 import type { GitRunner } from "../git/types"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { ghPrBlameTool } from "./pr-blame"
+import { ghPrCodeTourTool } from "./pr-code-tour"
 import { ghPrEditLabelsTool } from "./pr-edit-labels"
 import { ghPrOpenTool } from "./pr-open"
 import { ghPrResolveThreadTool } from "./pr-resolve-thread"
@@ -33,6 +36,7 @@ import { normalizeRef, refRejected } from "./ref"
 import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
 export { ghPrBlameTool } from "./pr-blame"
+export { ghPrCodeTourTool, parseDiffToTour, type TourStop } from "./pr-code-tour"
 export { ghPrEditLabelsTool } from "./pr-edit-labels"
 export { ghPrOpenTool } from "./pr-open"
 export { ghPrResolveThreadTool } from "./pr-resolve-thread"
@@ -408,6 +412,17 @@ export const ghPrListTool = (runner: GhRunner = defaultGhRunner): Tool<PrListInp
 export interface GhToolsOpts extends GhPrCreateToolOpts {
   readonly authorLLM?: LLMPort
   readonly gitRunner?: GitRunner
+  /** §5.4 long-tail — when `true`, register the `gh_pr_code_tour` guided-tour
+   *  tool (ordered walkthrough over `gh pr diff`). Default-OFF: absent/false ⇒
+   *  the tool is NOT constructed and NOT in the registry (byte-identical legacy).
+   *  The composition root flips this on the `QUANTA_GH_CODE_TOUR` gate. */
+  readonly codeTour?: boolean
+  /** §7.3 long-tail — when set, register the `ci_finding` structured-finding
+   *  tool wired to this session store. Default-OFF: absent ⇒ the tool is NOT
+   *  constructed and NOT in the registry (byte-identical legacy). The
+   *  composition root mints the store + flips it on the `QUANTA_CI_FINDING`
+   *  gate. */
+  readonly ciFindingStore?: CiFindingStore
 }
 
 export const ghTools = (runner: GhRunner = defaultGhRunner, opts: GhToolsOpts = {}): Tool[] => [
@@ -432,4 +447,10 @@ export const ghTools = (runner: GhRunner = defaultGhRunner, opts: GhToolsOpts = 
   // RFC jun-6 — `gh_pr_resolve_thread` (GraphQL resolve + bounded rebase). OFF
   // unless a git runner is wired (the rebase boundary); absent ⇒ no extra tool.
   ...(opts.gitRunner !== undefined ? [ghPrResolveThreadTool(runner, opts.gitRunner) as Tool] : []),
+  // §5.4 long-tail — `gh_pr_code_tour` (read-only guided diff walkthrough). OFF
+  // unless `opts.codeTour` (QUANTA_GH_CODE_TOUR); absent/false ⇒ no extra tool.
+  ...(opts.codeTour === true ? [ghPrCodeTourTool(runner) as Tool] : []),
+  // §7.3 long-tail — `ci_finding` (structured CI-investigation record). OFF
+  // unless a session store is wired (QUANTA_CI_FINDING); absent ⇒ no extra tool.
+  ...(opts.ciFindingStore !== undefined ? [ciFindingTool(opts.ciFindingStore) as Tool] : []),
 ]

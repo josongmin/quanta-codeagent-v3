@@ -10,6 +10,20 @@
 
 export type { AvailabilityCheckerPort, AvailabilityVerdict } from "./availability"
 export { createAvailabilityProber } from "./availability-prober"
+// §1.6 — connector marketplace V1 (DirectoryApp install lifecycle core; default-OFF).
+export {
+  type ConnectorMarketplace,
+  createConnectorMarketplace,
+  createInMemoryInstalledAppStore,
+  type DirectoryApp,
+  DirectoryAppSchema,
+  type InstalledApp,
+  type InstalledAppState,
+  type InstalledAppStorePort,
+  isConnectorMarketplaceEnabled,
+  type LifecycleResult,
+  type MarketplaceLifecycleError,
+} from "./connector-marketplace"
 export { createInMemoryConnectorRegistry } from "./in-memory-registry"
 // N2 — MCP connector discovery / catalog (§7). Pure catalog model + the
 // `toMcpServerConfig` install transform; the catalog SOURCE is injected.
@@ -24,6 +38,14 @@ export {
   type McpServerConfigShape,
   toMcpServerConfig,
 } from "./mcp-connector-catalog"
+// §2.5 — marketplace.json install/auth policy gating (pure decision + gated entry).
+export {
+  checkMarketplaceSource,
+  enforceMarketplacePolicy,
+  type MarketplaceBlockReason,
+  type MarketplacePolicy,
+  type MarketplaceVerdict,
+} from "./marketplace-policy"
 export { discoverOAuthEndpoints, type OAuthEndpoints } from "./oauth-discovery"
 export {
   type OAuthClientMetadata,

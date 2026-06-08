@@ -57,6 +57,13 @@ export const resolveMemoryContext = async (
       {
         limit: config.memory?.recallLimit ?? 5,
         ...(config.memory?.recallTiers ? { tiers: config.memory.recallTiers } : {}),
+        // §10.6 routing weighting — opt-in (QUANTA_MEMORY_ROUTING). Supply the
+        // current cwd as the routing context so memories scoped to this
+        // checkout (Codex `applies_to: cwd=...`) are weighted up. Absent flag
+        // (the default) ⇒ no routing passed ⇒ ranking is byte-identical.
+        ...(config.memory?.routingEnabled && config.cwd
+          ? { routing: { cwd: config.cwd } }
+          : {}),
       },
     )
     return block ?? undefined

@@ -97,12 +97,26 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — docker sandbox forwards named env vars (a hardcoded ALLOWLIST) to the container; pass-through, not a feature flag.",
       "subagent/handlers-6.ts":
         "ENV PROPAGATION — subagent child-process spawn forwards parent env (merged with `input.env`); same posture as runtime/shell.ts and tool/git/runner.ts — pass-through, not a feature read.",
+      // jun-09 long-tail (§4.3/§1.6/§2.5/P16/ci-bot wiring) — injection-first DI
+      // boundaries + one env-propagation, same posture as the entries above.
+      "host/runtime/side-agent-fork-port.ts":
+        "ENV PROPAGATION (§4.3) — `{...process.env, ...spec.env}` forwards the parent env into the forked side-agent child; intentional pass-through, not a feature read. Same posture as subagent/handlers-6.ts.",
+      "connectors/connector-marketplace.ts":
+        "Injection-first (§1.6): `process.env` is ONLY the default for the injected `env` param; the gate is read via `gateOn(env, ...)`, never a module-level read. Same DI-boundary posture as config-migration-notice.ts.",
+      "connectors/marketplace-policy.ts":
+        "Injection-first (§2.5): same `env`-param default + `gateOn(env, ...)` DI-boundary posture as connector-marketplace.ts.",
+      "runtime/shell-argv.ts":
+        "Injection-first (P16 win-shell): `process.env` is ONLY the default for the injected `env` param used to resolve the shell mode; tests pass a fake env. Same DI posture as config-migration-notice.ts.",
+      "apps/agent/mode-presets/ci-bot.ts":
+        "ci-bot mode-preset WIRING reads its opt-in long-tail gates (QUANTA_GH_CODE_TOUR / CI_FINDING / GIT_CO_CHANGE) via `gateOn(env, ...)` at the composition site; same launch-time bootstrap posture as apps/cli/internal.ts (threads typed opts downstream).",
       "apps/cli/shell-stream-painter.ts":
         "NO_COLOR is the cross-tool no-color.org convention read at the TTY paint boundary (alongside stderr.isTTY); a presentation-layer signal, not a validated feature flag — routing it through runtimeConfig would be over-centralization.",
       "apps/cli/auth-ui.ts":
         "Same NO_COLOR / FORCE_COLOR presentation read as shell-stream-painter.ts — TTY paint boundary for the /login UI; not a feature flag.",
       "apps/cli/login-cmd.ts":
         "CLI sub-command entry (ADR-0094 ChatGPT-OAuth). Same posture as apps/cli/internal.ts — `deps.env ?? process.env` is the DI fallback at the composition root; downstream `auth/` modules accept env explicitly.",
+      "apps/cli/attach-cmd.ts":
+        "CLI sub-command entry (`quanta attach`). `parseAttachArgs(argv, process.env)` threads env at the composition root for arg-default resolution; the parser reads it off the passed param, tests inject a fake env. Same DI-fallback posture as login-cmd.ts.",
       "apps/cli/status-cmd.ts":
         "CLI sub-command entry (ADR-0094). Same DI fallback posture as login-cmd.ts.",
       "apps/cli/logout-cmd.ts":

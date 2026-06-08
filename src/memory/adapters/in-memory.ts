@@ -58,9 +58,12 @@ export class InMemoryStore implements PersistentStorePort {
   }
 }
 
-/** Deep-copy an entry, including the embedding array. */
+/** Deep-copy an entry, including the embedding array and the §10.6 routing
+ *  `appliesTo` object (so external mutation can never corrupt the backing
+ *  store — the class invariant). */
 const clone = (e: MemoryEntry): MemoryEntry => ({
   ...e,
   tags: [...e.tags],
   ...(e.embedding !== undefined ? { embedding: [...e.embedding] } : {}),
+  ...(e.appliesTo !== undefined ? { appliesTo: { ...e.appliesTo } } : {}),
 })

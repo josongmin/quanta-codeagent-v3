@@ -14,6 +14,10 @@
  *                 `QUANTA_MENTION_SYMBOL`.
  *   - `@skill`  — available when a `SkillRegistryReadOnly` is injected;
  *                 `QUANTA_MENTION_SKILL`.
+ *   - `@folder` — (§10.3) always available (workspace root = `cwd`, same jail
+ *                 as `@file`); `QUANTA_MENTION_FOLDER` (default-ON).
+ *   - `@git`    — (§10.3) available when a `git` context provider is injected
+ *                 (the runner backs it with `runShell`); `QUANTA_MENTION_GIT`.
  *
  * GRACEFUL OMIT: a kind whose dep is absent (no symbol ports / no registry)
  * is simply NOT attached, so that kind resolves to `null` — byte-identical to
@@ -41,6 +45,9 @@ import {
   type CompositeResolverDeps,
   createCompositeMentionResolver,
   type FileResolverOptions,
+  type FolderResolverOptions,
+  type GitContextProvider,
+  type GitResolverOptions,
   type SkillRegistryReadOnly,
 } from "@/agent/plugin-app-resolver"
 import { parseEnvFlag } from "@/shared"
@@ -61,6 +68,9 @@ export interface BuildDefaultMentionResolverOptions {
   readonly lsp?: SymbolLookupLspPort
   /** Semantic-backed `@symbol` lookup. Omit ⇒ semantic strategy disabled. */
   readonly semantic?: SymbolLookupSemanticPort
+  /** §10.3 — injected git-context provider for `@git`. Omit ⇒ `@git`
+   *  resolves null (graceful omit; byte-identical to the legacy path). */
+  readonly git?: GitContextProvider
 }
 
 /** A knob is ON unless explicitly disabled. Delegates to the canonical
@@ -122,6 +132,31 @@ const skillDep = (opts: BuildDefaultMentionResolverOptions): SkillRegistryReadOn
   return opts.skills
 }
 
+/** §10.3 — build the `@folder` deps slot when the knob is ON. Reuses the cwd
+ *  workspace root (same jail as `@file`). `=off` ⇒ undefined. */
+const folderDeps = (
+  opts: BuildDefaultMentionResolverOptions,
+): FolderResolverOptions | undefined => {
+  if (!isOn(opts.env, "QUANTA_MENTION_FOLDER")) return undefined
+  const maxEntries = parsePositiveNumber(opts.env.QUANTA_MENTION_FOLDER_MAX_ENTRIES)
+  return {
+    root: opts.cwd,
+    ...(maxEntries !== undefined ? { maxEntries } : {}),
+  }
+}
+
+/** §10.3 — build the `@git` deps slot when the knob is ON AND a provider is
+ *  injected. No provider ⇒ undefined (graceful omit). */
+const gitDep = (opts: BuildDefaultMentionResolverOptions): GitResolverOptions | undefined => {
+  if (!isOn(opts.env, "QUANTA_MENTION_GIT")) return undefined
+  if (opts.git === undefined) return undefined
+  const maxBytes = parsePositiveNumber(opts.env.QUANTA_MENTION_GIT_MAX_BYTES)
+  return {
+    provider: opts.git,
+    ...(maxBytes !== undefined ? { maxBytes } : {}),
+  }
+}
+
 /**
  * Build the default composite {@link MentionResolverPort} for a surface.
  *
@@ -135,9 +170,13 @@ export const buildDefaultMentionResolver = (
   const files = fileDeps(opts)
   const symbol = symbolDep(opts)
   const skills = skillDep(opts)
+  const folders = folderDeps(opts)
+  const git = gitDep(opts)
   return createCompositeMentionResolver({
     ...(files !== undefined ? { files } : {}),
     ...(symbol !== undefined ? { symbol } : {}),
     ...(skills !== undefined ? { skills } : {}),
+    ...(folders !== undefined ? { folders } : {}),
+    ...(git !== undefined ? { git } : {}),
   })
 }

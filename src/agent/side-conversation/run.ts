@@ -126,6 +126,16 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "git_review_diff",
   "git_moved_code",
   "git_conflict_inspect",
+  // jun-09 long-tail — 4 NEW read-only tools classified `null` (read-only) in
+  // planModeMutatingTable; listed here to keep the allowlist in 1-1 correspondence
+  // (the side-conversation drift invariant enforces equality). All pure analysis:
+  // git_co_change (co-occurrence over history), gh_pr_code_tour (PR-diff walk),
+  // ci_finding (structured CI finding — no FS/shell/network), worktree_status
+  // (worktree slot + porcelain read). No mutation ⇒ side-conversation-safe.
+  "git_co_change",
+  "gh_pr_code_tour",
+  "ci_finding",
+  "worktree_status",
   "file_tree_summary",
   "parse_test_failure",
   "subagent_poll",

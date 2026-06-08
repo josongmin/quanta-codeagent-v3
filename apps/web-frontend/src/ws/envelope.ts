@@ -13,6 +13,7 @@
  */
 
 import type {
+  CanvasMessage,
   CommandEnvelope,
   EventEnvelope,
   ObservabilityMessage,
@@ -136,12 +137,21 @@ export const encodeCommandFrame = (command: SessionCommand): string => {
  *  `encodeControlEnvelope` in `src/ipc/session/codec.ts`. When the client
  *  does not yet know the canonical session id it sends a non-empty discovery
  *  sentinel, provoking a `rejected` connect frame whose `sessionId` carries
- *  the server-minted id. */
-export const encodeConnectFrame = (sessionId: string): string =>
+ *  the server-minted id.
+ *
+ *  Resume-on-reconnect: when `resumeFromSeq` is provided the daemon replays
+ *  only the events with `seq > resumeFromSeq` (or falls back to a full
+ *  snapshot if that seq is older than its in-memory replay window). It is
+ *  OMITTED on the first connect / discovery handshake so that path stays
+ *  byte-identical to the legacy 3-key frame and the client receives a full
+ *  snapshot. `resumeFromSeq === 0` is a real bootstrap seq and IS emitted
+ *  (we gate on `undefined`, not falsiness). */
+export const encodeConnectFrame = (sessionId: string, resumeFromSeq?: number): string =>
   JSON.stringify({
     version: SESSION_PROTOCOL_VERSION,
     kind: "connect",
     sessionId,
+    ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
   })
 
 /**
@@ -252,6 +262,65 @@ export const decodeObservabilityFrame = (raw: unknown): ObservabilityMessage | n
   if (parsed.kind !== "observability") return null
   if (!isString(parsed.version) || parsed.version.length === 0) return null
   return isObservabilityMessage(parsed.payload) ? parsed.payload : null
+}
+
+/* ------------------------------------------------------------------ */
+/* Canvas channel (ADR-0440) — tool.diff / context.usage frames        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Mirror of `CANVAS_PROTOCOL_VERSION` upstream (`src/protocol/canvas/
+ * messages.ts`). Decoupled from the session/observability protocol versions
+ * on purpose — a v2 canvas emitter to a v1 consumer is rejected (read with
+ * the wrong schema ⇒ silent mis-render), same gate as the daemon's decoder.
+ */
+export const CANVAS_PROTOCOL_VERSION = "canvas.v1" as const
+
+const CANVAS_MESSAGE_KINDS = ["tool.diff", "context.usage"] as const
+
+const isCanvasMessageKind = (value: unknown): value is CanvasMessage["kind"] =>
+  isString(value) && (CANVAS_MESSAGE_KINDS as readonly string[]).includes(value)
+
+const isToolDiffShape = (rec: Record<string, unknown>): boolean =>
+  isString(rec.toolCallId) &&
+  Array.isArray(rec.lines) &&
+  isNumber(rec.additions) &&
+  isNumber(rec.deletions)
+
+const isContextUsageShape = (rec: Record<string, unknown>): boolean =>
+  Array.isArray(rec.segments) && isNumber(rec.total) && isNumber(rec.max)
+
+/** Best-effort structural guard for a canvas message payload. Mirrors
+ *  `isCanvasMessage` upstream — tag + per-kind minimal shape, no deep
+ *  field validation (unknown fields are forward-compatible). */
+const isCanvasMessage = (value: unknown): value is CanvasMessage => {
+  if (!isRecord(value)) return false
+  if (!isCanvasMessageKind(value.kind)) return false
+  if (!isNumber(value.emittedAt)) return false
+  return value.kind === "tool.diff" ? isToolDiffShape(value) : isContextUsageShape(value)
+}
+
+/**
+ * Decode a `canvas` wire frame into a typed canvas message, or null on any
+ * shape mismatch. Wire envelope (mirrors the observability `{version, kind,
+ * payload}` shape): `{ version: "canvas.v1", kind: "canvas", payload }`.
+ * NO-THROW: the client logs + drops on null.
+ */
+export const decodeCanvasFrame = (raw: unknown): CanvasMessage | null => {
+  if (!isString(raw)) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+  if (!isRecord(parsed)) return null
+  if (parsed.kind !== "canvas") return null
+  if (!isString(parsed.version) || parsed.version.length === 0) return null
+  // Gate the version we claim to carry: a v2 emitter read with the v1 schema
+  // would be silently mis-rendered.
+  if (parsed.version !== CANVAS_PROTOCOL_VERSION) return null
+  return isCanvasMessage(parsed.payload) ? parsed.payload : null
 }
 
 /**

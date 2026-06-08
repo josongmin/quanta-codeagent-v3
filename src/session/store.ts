@@ -203,6 +203,27 @@ const sessionMetaSchema = z.object({
   // + `.min(1)` mirrors the git-fingerprint optionals' NonEmptyString discipline.
   // Non-strict schema ⇒ absent on legacy/non-fork files is valid (no migration).
   forkedFromId: z.string().min(1).optional(),
+  // §8.2 (jun-08): Codex session-meta provenance. Optional + `.min(1)` mirrors
+  // the discipline above. IMPORTANT: these MUST be mirrored here — zod strips
+  // unknown keys on safeParse, so omitting them would silently LOSE the field on
+  // every load (a resume-fidelity bug; see the LOSSLESS note above messageSchema).
+  agentNickname: z.string().min(1).optional(),
+  dynamicTools: z.array(z.string().min(1)).optional(),
+  originator: z.string().min(1).optional(),
+  threadSource: z.string().min(1).optional(),
+  modelProvider: z.string().min(1).optional(),
+  // §13.2 (jun-08): persisted interrupted-turn marker (crash resume). Same
+  // mirror discipline — omitting it would strip the marker on load and the
+  // restart-resume detection would never fire. `userText`/`partialAssistantText`
+  // may legitimately be EMPTY (a crash before any assistant text), so NO `.min`.
+  interruptedTurn: z
+    .object({
+      userText: z.string(),
+      partialAssistantText: z.string(),
+      reason: z.string().min(1),
+      interruptedAt: z.number().finite(),
+    })
+    .optional(),
 })
 const savedSessionSchema = z.object({
   version: z.literal(SESSION_VERSION),

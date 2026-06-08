@@ -46,6 +46,8 @@ interface StubBag {
   runtimeClosed: boolean
   lastSession: RuntimeSession | undefined
   attachTransportCalls: number
+  /** `replayWindow` the daemon passed on the most recent attach (or undefined). */
+  lastAttachReplayWindow: number | undefined
 }
 
 const sleep = async (ms: number): Promise<void> => {
@@ -73,6 +75,7 @@ export const createStubRuntimeFactory = (): {
     runtimeClosed: false,
     lastSession: undefined,
     attachTransportCalls: 0,
+    lastAttachReplayWindow: undefined,
   }
   let externalEmit = (_event: SessionEvent): void => undefined
   const factory = async (): Promise<RuntimeFacade> => ({
@@ -244,10 +247,13 @@ export const createStubRuntimeFactory = (): {
         }
       }
 
-      const ensureTransportBridge = (): ReturnType<typeof createSessionTransportBridge> => {
+      const ensureTransportBridge = (
+        replayWindow?: number,
+      ): ReturnType<typeof createSessionTransportBridge> => {
         if (transportBridge !== undefined) return transportBridge
         transportBridge = createSessionTransportBridge({
           snapshot,
+          ...(replayWindow !== undefined ? { tailLimit: replayWindow } : {}),
           onCommand: async (command) => {
             transportDispatchQueue = transportDispatchQueue.then(async () => {
               await dispatch(command)
@@ -268,9 +274,11 @@ export const createStubRuntimeFactory = (): {
         snapshot: async () => snapshot,
         attachSessionTransport: async (
           transport: SessionTransport,
+          options: { readonly replayWindow?: number } = {},
         ): Promise<ConnectedSessionTransport> => {
           bag.attachTransportCalls += 1
-          return await ensureTransportBridge().connect(transport)
+          bag.lastAttachReplayWindow = options.replayWindow
+          return await ensureTransportBridge(options.replayWindow).connect(transport)
         },
         close: async () => {
           if (sessionClosed) return

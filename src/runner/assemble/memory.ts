@@ -44,6 +44,8 @@ export interface MemoryConfigAssembleInput {
   lineCitations?: boolean | undefined
   /** ADR-0432 — pre-parsed `QUANTA_MEMORY_WRITE_GUARD_PCT` (integer 0..100). */
   writeGuardMinRemainingPercent?: number | undefined
+  /** §10.6 — pre-parsed `QUANTA_MEMORY_ROUTING` (true iff opt-in gate on). */
+  routingEnabled?: boolean | undefined
 }
 
 /**
@@ -69,6 +71,8 @@ export const buildMemoryConfigCore = (
     ...(input.writeGuardMinRemainingPercent !== undefined
       ? { writeGuardMinRemainingPercent: input.writeGuardMinRemainingPercent }
       : {}),
+    // §10.6 default-OFF: omit unless explicitly enabled ⇒ byte-identical block.
+    ...(input.routingEnabled === true ? { routingEnabled: true } : {}),
   }
   if (!input.store && Object.keys(block).length === 0) return undefined
   return block

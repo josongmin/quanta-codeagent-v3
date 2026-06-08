@@ -22,6 +22,7 @@ export {
 export {
   type BunAdapterOpts,
   createBunWebSocketAdapter,
+  type VoicesProvider,
   type WebSocketCtor,
   type WebSocketLike,
 } from "./default-adapter"
@@ -46,4 +47,5 @@ export type {
   RealtimeOutboundSignal,
   RealtimeStatus,
   SdpAnswer,
+  VoiceInfo,
 } from "./types"

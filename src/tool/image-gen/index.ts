@@ -9,6 +9,7 @@
 
 export type {
   GeneratedImage,
+  ImageAspectRatio,
   ImageGenFormat,
   ImageGenOutcome,
   ImageGenPort,

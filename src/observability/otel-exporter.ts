@@ -117,8 +117,25 @@ export interface OtelExporterOpts {
   /** `fetch` implementation. Default = global `fetch`. Test seam — the
    *  hellgate injects a fake. */
   readonly fetch?: typeof fetch
-  /** Headers added to every request (auth, x-honeycomb-team, etc.). */
+  /** Headers added to every request (auth, x-honeycomb-team, etc.). STATIC —
+   *  resolved once at construction. For a ROTATING credential (OAuth bearer
+   *  against an OTLP collector), use {@link getHeaders} instead/alongside. */
   readonly headers?: Readonly<Record<string, string>>
+  /** §12.7 — DYNAMIC headers port (the `otelHeadersHelper` pattern). When
+   *  present, the exporter `await`s this callback before EACH POST and merges
+   *  the result over {@link headers} (dynamic keys win), so a rotating OAuth
+   *  token is always fresh — unlike a static header that 401s once it expires.
+   *
+   *  No-throw by contract: a rejection / throw is swallowed (logged via
+   *  {@link warn}) and the POST proceeds with the STATIC {@link headers} as
+   *  fallback — an observability path must never break a tool call, and a token
+   *  endpoint blip should degrade to "send with the last static creds", not
+   *  drop the batch. The buffer is preserved on any non-2xx, so a refreshed
+   *  token on the next flush drains the retained spans.
+   *
+   *  Absent (the default) ⇒ the exporter uses the static {@link headers} on
+   *  every POST exactly as before (byte-identical Default-OFF). */
+  readonly getHeaders?: () => Promise<Readonly<Record<string, string>>>
   /** Service name attribute attached to every span/metric resource. Default
    *  `"quanta-codeagent"`. */
   readonly serviceName?: string
@@ -444,6 +461,24 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     return true
   }
 
+  /** Resolve the per-POST header set. Static {@link OtelExporterOpts.headers}
+   *  is the base; when {@link OtelExporterOpts.getHeaders} is present its
+   *  awaited result is merged ON TOP (dynamic keys override static). A
+   *  throw/rejection from the dynamic port is swallowed (no-throw) and we fall
+   *  back to the static headers — a rotating-token endpoint blip degrades to
+   *  "send with last static creds", never drops the batch. */
+  const resolveHeaders = async (): Promise<Record<string, string>> => {
+    const staticHeaders = { ...(opts.headers ?? {}) }
+    if (opts.getHeaders === undefined) return staticHeaders
+    try {
+      const dynamic = await opts.getHeaders()
+      return { ...staticHeaders, ...dynamic }
+    } catch (e) {
+      safeWarn(`[otel-exporter] getHeaders: ${errMessage(e)} (falling back to static headers)`)
+      return staticHeaders
+    }
+  }
+
   /** POST one envelope to `${endpoint}${path}`. Returns true on 2xx, false on
    *  any other status / throw. The caller decides whether to clear the
    *  buffer (only on `true`). */
@@ -455,12 +490,13 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
       safeWarn(`[otel-exporter] serialize ${path}: ${errMessage(e)}`)
       return false
     }
+    const dynamicHeaders = await resolveHeaders()
     try {
       const res = await fetchImpl(`${endpoint}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(opts.headers ?? {}),
+          ...dynamicHeaders,
         },
         body: serialized,
       })
@@ -835,6 +871,7 @@ export const attachOtelExporterFromEnv = (
     flushIntervalMs,
     ...(overrides?.fetch !== undefined ? { fetch: overrides.fetch } : {}),
     ...(overrides?.headers !== undefined ? { headers: overrides.headers } : {}),
+    ...(overrides?.getHeaders !== undefined ? { getHeaders: overrides.getHeaders } : {}),
     ...(overrides?.now !== undefined ? { now: overrides.now } : {}),
     ...(overrides?.setIntervalImpl !== undefined
       ? { setIntervalImpl: overrides.setIntervalImpl }

@@ -28,6 +28,17 @@ export { AgentMetaRegistry } from "./agent-meta"
 export type { AgentToolOptions } from "./agent-tool"
 export { createAgentTool } from "./agent-tool"
 export { createSubagent6Tools, type Subagent6ToolSet } from "./agent-tools-6"
+export {
+  type AgentTypeClass,
+  type AgentTypeValidation,
+  classifyAgentType,
+  isSubagentType,
+  SUBAGENT_KINDS,
+  type SubagentAgentType,
+  type SubagentType,
+  type ValidateAgentTypeOpts,
+  validateAgentType,
+} from "./agent-type"
 export { dispatchSubagent6, isSubagent6Tool, type Subagent6Deps } from "./dispatch-6"
 export {
   DEFAULT_WAIT_TIMEOUT_POLICY,

@@ -30,6 +30,18 @@ export {
   createCompositeMentionResolver,
 } from "./composite-resolver"
 export { createFileResolver, type FileResolverOptions } from "./file-resolver"
+export {
+  createFolderResolver,
+  DEFAULT_FOLDER_MAX_ENTRIES,
+  type FolderResolverOptions,
+} from "./folder-resolver"
+export {
+  createGitResolver,
+  DEFAULT_GIT_MAX_BYTES,
+  type GitContextProvider,
+  type GitResolverOptions,
+  type GitSubcommand,
+} from "./git-resolver"
 export { createPluginResolver } from "./plugin-resolver"
 export { createSkillResolver } from "./skill-resolver"
 export type {

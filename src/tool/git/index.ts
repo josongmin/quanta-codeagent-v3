@@ -20,6 +20,7 @@ import { gitBlameTool } from "./blame"
 import { gitBlameHeatmapTool } from "./blame-heatmap"
 import { gitBranchSwitchTool } from "./branch-switch"
 import { gitChurnTool } from "./churn"
+import { gitCoChangeTool } from "./co-change"
 import { gitCommitTool } from "./commit"
 import { gitComposeCommitTool, gitComposePrTool } from "./compose"
 import { gitConflictInspectTool } from "./conflict-inspect"
@@ -44,6 +45,11 @@ export interface GitToolsOpts {
    *  NOT constructed and NOT in the registry — byte-identical legacy. The
    *  composition root sources this from `config.composeAuthoring`. */
   readonly authorLLM?: LLMPort
+  /** §7.2 long-tail — when `true`, register the `git_co_change` related-files
+   *  tool (co-occurrence matrix from git history). Default-OFF: absent/false ⇒
+   *  the tool is NOT constructed and NOT in the registry, byte-identical legacy.
+   *  The composition root flips this on the `QUANTA_GIT_CO_CHANGE` gate. */
+  readonly coChange?: boolean
 }
 
 // ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
@@ -52,6 +58,14 @@ export { gitBlameTool } from "./blame"
 export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { type GitBranchSwitchToolOpts, gitBranchSwitchTool } from "./branch-switch"
 export { gitChurnTool, rankChurn } from "./churn"
+export {
+  type CoChangePair,
+  type CoChangeRow,
+  gitCoChangeTool,
+  parseCommitGroups,
+  rankCoChange,
+  rankCoChangePairs,
+} from "./co-change"
 export { type GitCommitToolOpts, gitCommitTool } from "./commit"
 export {
   buildCommitAuthorPrompt,
@@ -149,4 +163,9 @@ export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpt
     runner,
     opts.gitDirectiveEmitter !== undefined ? { gitDirectiveEmitter: opts.gitDirectiveEmitter } : {},
   ) as Tool,
+  // §7.2 long-tail — co-change / related-files tool (read-only, concurrency-
+  // safe). Default-OFF: registered ONLY when `opts.coChange` is true
+  // (QUANTA_GIT_CO_CHANGE gate). Absent/false ⇒ omitted (byte-identical legacy
+  // 12-tool registry). Appended LAST so the legacy ordering is untouched.
+  ...(opts.coChange === true ? [gitCoChangeTool(runner) as Tool] : []),
 ]

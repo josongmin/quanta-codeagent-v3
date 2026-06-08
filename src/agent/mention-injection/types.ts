@@ -3,9 +3,13 @@
  *
  * Status: the 3-kind enum (`skill | plugin | app`) frozen by ADR-0325 and the
  * 4-kind sync extension (`+ file`) of ADR-0413 are both **SUPERSEDED by
- * ADR-0418**. The kind enum is now 5-way (`skill | plugin | app | file |
- * symbol`) and the resolver port is **async** (see `./resolver`) so file
- * reads and symbol (LSP / semantic) lookups can perform I/O without blocking.
+ * ADR-0418**, which made the enum 5-way (`+ symbol`) and the resolver port
+ * **async**. §10.3 (jun-08 longtail) **SUPERSEDES ADR-0418**, widening the
+ * enum to SEVEN kinds (`+ folder + git`) — `@folder` (trailing-slash path,
+ * Cursor `@Folders`) and `@git` (reserved literal, Cursor `@git`). The async
+ * resolver port (see `./resolver`) gains two OPTIONAL methods; a resolver that
+ * omits them resolves those kinds to `null` — byte-identical to the 5-kind
+ * path for any input free of trailing-slash paths and `@git` tokens.
  *
  * The original ADR-0325 contract is preserved as a structural subset: a
  * conformant 5-kind resolver still answers `skill | plugin | app` the same
@@ -43,11 +47,18 @@
  *   `/` — or a lowercase-leading dotted token `@foo.ts`).
  * - `symbol` — code symbol (ADR-0418, matches `@FooBar` or
  *   `@MyClass.method` — must start uppercase ASCII).
+ * - `folder` — workspace directory (§10.3, matches a path that ENDS WITH `/`,
+ *   e.g. `@src/` or `@docs/decisions/`). Cursor `@Folders` parity — the model
+ *   gets a directory listing instead of a file read.
+ * - `git` — git context provider (§10.3, the reserved literal `@git`, or
+ *   `@git:status` / `@git:diff` / `@git:log`). Cursor `@git` parity — injects
+ *   a compressed status / diff / recent-log body.
  *
- * **Extending requires a new ADR.** The current 5-kind enum is fixed by
- * ADR-0418; further kinds must explicitly supersede 0418.
+ * **Extending requires a new ADR.** The 5-kind enum was fixed by ADR-0418;
+ * §10.3 (jun-08 longtail) SUPERSEDES that limit, widening the closed set to
+ * SEVEN kinds. Further kinds must explicitly supersede §10.3.
  */
-export type MentionKind = "skill" | "plugin" | "app" | "file" | "symbol"
+export type MentionKind = "skill" | "plugin" | "app" | "file" | "symbol" | "folder" | "git"
 
 /**
  * A single parsed mention. {@link span} carries the half-open

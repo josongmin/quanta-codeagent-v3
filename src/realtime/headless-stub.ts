@@ -29,6 +29,7 @@ import type {
   RealtimeInboundMessage,
   RealtimeStatus,
   SdpAnswer,
+  VoiceInfo,
 } from "./types"
 
 /** Recorded outbound message — text/binary or one of the typed signals. */
@@ -45,6 +46,12 @@ export interface HeadlessStubOpts {
   /** When set, `connect()` resolves only after this many `await Promise.resolve()`
    *  microtasks — gives tests room to abort mid-handshake (HELL-RT-10). */
   readonly connectMicrotaskDelay?: number
+  /** §6.5 — server-advertised voices `listVoices()` returns. When OMITTED (the
+   *  default), `listVoices()` returns `Err({kind:"voices-unsupported"})` —
+   *  byte-identical to a stub with no voices wired (pre-§6.5). When set (even
+   *  to `[]`), `listVoices()` returns `ok` with this list (an empty list is a
+   *  valid "server advertises none" answer, distinct from unsupported). */
+  readonly voices?: readonly VoiceInfo[]
 }
 
 export interface HeadlessStubHandle {
@@ -159,6 +166,13 @@ export const createHeadlessStub = (opts?: HeadlessStubOpts): HeadlessStubHandle 
       if (!guard.ok) return guard
       outboundLog.push({ kind: "audio-stop" })
       return ok(undefined)
+    },
+
+    async listVoices(): Promise<Result<readonly VoiceInfo[], RealtimeError>> {
+      // §6.5 — voices OMITTED ⇒ `voices-unsupported` (byte-identical pre-§6.5);
+      // voices SET (incl. `[]`) ⇒ ok with the server-advertised list.
+      if (opts?.voices === undefined) return err({ kind: "voices-unsupported" })
+      return ok(opts.voices.slice())
     },
 
     async close(_code?: number, _reason?: string): Promise<Result<void, RealtimeError>> {

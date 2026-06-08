@@ -24,6 +24,13 @@ export interface ToolAction {
    *  fails the gate-coverage unit test (in tests/unit) rather than silently
    *  bypassing the denylist. */
   shellCommand?: string | null
+  /** ADR-0512 — present ONLY when this confirm is a skill-scope ESCALATION (the
+   *  tool is outside the active skill's `allowed-tools`), not a normal action
+   *  confirm. A surface renders a distinct "outside skill scope" card from it
+   *  (the active skill + why the tool is out of scope); a surface that ignores
+   *  it sees a plain confirm. Absent ⇒ byte-identical for every pre-ADR-0512
+   *  caller (the field is never set on the legacy always-confirm path). */
+  scopeContext?: { activeSkill: string; reason: string }
 }
 
 /**

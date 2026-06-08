@@ -1,3 +1,4 @@
+import { gateOn } from "@/shared"
 import type { Skill } from "./types"
 
 /**
@@ -186,3 +187,28 @@ export const skillsActivatedFor = (skills: Skill[], changedPaths: string[]): Ski
       s.paths.length > 0 &&
       changedPaths.some((p) => matchesAnyGlob(p, s.paths as string[])),
   )
+
+/**
+ * §2.3 — pure, host-callable filter: given the full skill set, return the subset
+ * that may be IMPLICITLY injected into the model context (the suggestion
+ * inventory). A skill with `allowImplicitInvocation === false` (codex
+ * `policy.allow_implicit_invocation: false`) is EXCLUDED; absent ⇒ included
+ * (codex default = implicit allowed).
+ *
+ * DEFAULT-OFF: when `QUANTA_SKILL_IMPLICIT_POLICY` is not gate-on, returns the
+ * input UNCHANGED (byte-identical — the policy flag has no runtime effect until
+ * the host opts in). This filters ONLY the implicit-injection set — the EXPLICIT
+ * invocation surface (the Skill tool / `$skill`) is NEVER narrowed by this
+ * (mirrors `skillsActivatedFor`'s honesty note).
+ *
+ * `env` is REQUIRED (no `process.env` default): the `@/skill` slice must not
+ * read the ambient environment itself (slice-boundary guard — take plain
+ * config). The HOST passes `process.env`; tests pass a synthetic bag.
+ */
+export const implicitlyInvocableSkills = (
+  skills: Skill[],
+  env: Record<string, string | undefined>,
+): Skill[] => {
+  if (!gateOn(env, "QUANTA_SKILL_IMPLICIT_POLICY")) return skills
+  return skills.filter((s) => s.allowImplicitInvocation !== false)
+}

@@ -785,6 +785,33 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "G1 — visual appshot-and-verify loop: scaffold/render a UI, screenshot it (BrowserPort), then judge the screenshot against an intent with a verify LLM; writes the scaffold + screenshot through the jailed FS scaffold and registers the artifact. Mutating (jailed-write) + browser-backed. Minted only when DefaultToolPorts.appshot is wired (QUANTA_APPSHOT on AND a BrowserPort + judge LLM are reachable); off ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE.",
   },
   {
+    name: "gh_pr_code_tour",
+    origin: "@/tool/gh/pr-code-tour (via ghTools opts.codeTour)",
+    gate: { kind: "env-flag", env: "QUANTA_GH_CODE_TOUR" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "network",
+    adr: "5.4-longtail",
+    note: "§5.4 long-tail (Cursor code-tour / Codex review-stops parity) — produces an ORDERED guided walkthrough of a PR's diff: one numbered 'stop' per hunk with file path, new-side line range (verbatim from the `@@` header — no tuned heuristic), enclosing-symbol context, and add/remove counts. The STRUCTURED itinerary over `gh pr diff` (vs re-parsing a raw wall of diff). Read-only; same ref-injection guard + scoped-env `gh` spawn boundary as every gh tool. Registered only when ghTools is built with opts.codeTour (the composition root flips it on QUANTA_GH_CODE_TOUR); absent/false ⇒ tool absent, byte-identical legacy gh tool set. Rides the gh-tool surface (ci-bot read-only filter / CLI git-tools path).",
+  },
+  {
+    name: "git_co_change",
+    origin: "@/tool/git/co-change (via gitTools opts.coChange)",
+    gate: { kind: "env-flag", env: "QUANTA_GIT_CO_CHANGE" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    adr: "7.2-longtail",
+    note: "§7.2 long-tail (Codex change-impact / Cursor related-files parity) — co-change / related-files: builds a co-occurrence matrix from `git log --name-only` (same blank-format trick as git_churn). With a target `file`: ranks the OTHER files that historically changed in the SAME commit + a Jaccard affinity (standard index, NOT a tuned cutoff). Without a target: the densest co-change PAIRS globally. The second-order companion to git_churn's single-file frequency ('if you touch X you probably also need Y'). Read-only, concurrency-safe; pure ranking exported for unit tests. Registered only when gitTools is built with opts.coChange (composition root flips it on QUANTA_GIT_CO_CHANGE); absent/false ⇒ tool absent, byte-identical legacy 12-tool git set.",
+  },
+  {
+    name: "ci_finding",
+    origin: "@/tool/ci-finding (via ghTools opts.ciFindingStore)",
+    gate: { kind: "config-slot", slot: "ghTools opts.ciFindingStore", env: "QUANTA_CI_FINDING" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "meta",
+    adr: "7.3-longtail",
+    note: "§7.3 long-tail (Codex/Cursor CI-investigation structured-record parity) — records a STRUCTURED CiFinding (job + category + summary + root-cause + evidence + suggested-fix + confidence) into a session store, vs leaving the conclusion as prose. op: record | list | get. The typed record is rendererable / dedupable / feedable to a next stage. risk:meta — record mutates ONLY the in-session store (no FS/shell/git/network side effect), so it self-reports isReadOnly + hitlTier:none like communicate_update / objective_*. Pure in-memory store (@/tool/ci-finding, injected clock + id-factory, oldest-evicted ring). Registered only when ghTools is built with opts.ciFindingStore (composition root mints the store + flips it on QUANTA_CI_FINDING); absent ⇒ tool absent, byte-identical legacy gh tool set.",
+  },
+  {
     name: "code_cell",
     origin: "@/tool (codeCellTool, via DefaultToolPorts.codeMode)",
     gate: {

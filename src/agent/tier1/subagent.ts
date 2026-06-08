@@ -12,6 +12,7 @@
  * the composer skips the block (byte-identical, RFC §1.2).
  */
 
+import { runtimeConfig } from "@/shared"
 import { resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
 import { spawnAgentsCsvTool } from "@/tool/spawn-agents-csv"
@@ -127,6 +128,19 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
         prompt,
         buildForkTurnsPreamble(config.messages ?? [], spec, redactTranscript),
       ),
+    // §4.4 — TYPED agent kind boundary validation. Gate read at the composition
+    // root (ADR-0144: `@/agent` reads `runtimeConfig()`, never `process.env`).
+    // Default-OFF (gate absent) ⇒ `enforceTypedAgentKind` omitted ⇒ the legacy
+    // free-string path (byte-identical). When ON, the registered named-agent
+    // names are the boundary's `knownCustom` set so a custom agent passes while
+    // an unknown type is a Claude-Code-style miss. `names?.()` is the resolver's
+    // optional enumeration — `?? []` when the wired resolver predates it.
+    ...(runtimeConfig().subagentTypedKind
+      ? {
+          enforceTypedAgentKind: true,
+          knownAgentTypes: () => config.namedAgentResolver?.names?.() ?? [],
+        }
+      : {}),
   })
   // Bind a NON-undefined local so the cleanup closure doesn't need a non-
   // null assertion on the outer `taskRegistry` (which is typed as optional

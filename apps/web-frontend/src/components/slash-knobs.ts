@@ -62,6 +62,8 @@ export const CONFIG_WRITABLE_KEYS: ReadonlySet<string> = new Set([
   "QUANTA_SERVICE_TIER",
   "QUANTA_MODEL",
   "QUANTA_REASONING_EFFORT",
+  "QUANTA_REASONING_SUMMARY",
+  "QUANTA_REASONING_VERBOSITY",
 ])
 
 /** Sentinel the daemon emits for redacted string values. */

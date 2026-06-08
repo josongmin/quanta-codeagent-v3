@@ -16,7 +16,7 @@ import {
   LANDLOCK_CLI_NETWORK_DEFERRED_MARKER,
   type LinuxSandboxBackend,
 } from "@/runtime/os-sandbox"
-import { logger } from "@/shared"
+import { gateOn, logger } from "@/shared"
 
 /**
  * Valid `QUANTA_SANDBOX` values that activate the OS-level sandbox. `default`,
@@ -73,7 +73,13 @@ export const buildCliOsSandbox = (
   }
 
   const profile = raw as ActiveProfile
-  const policy: OsSandboxPolicy = { profile }
+  // §12.6 (jun-08 long-tail) — Codex `exclude_slash_tmp` parity. Default-OFF:
+  // absent ⇒ `excludeTmpdir` omitted ⇒ the compiled Seatbelt profile keeps its
+  // baseline `/tmp` read-allow (byte-identical). `QUANTA_SANDBOX_EXCLUDE_TMPDIR`
+  // truthy ⇒ `/tmp` is dropped from the profile. Uses the lenient `gateOn` (a
+  // hardening preference, not a security kill-switch) per the bool-vocab SSOT.
+  const excludeTmpdir = gateOn(env, "QUANTA_SANDBOX_EXCLUDE_TMPDIR")
+  const policy: OsSandboxPolicy = { profile, ...(excludeTmpdir ? { excludeTmpdir: true } : {}) }
   const platform: NodeJS.Platform = deps.platform ?? process.platform
   const pathExists = deps.exists ?? existsSync
 

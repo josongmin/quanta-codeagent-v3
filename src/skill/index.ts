@@ -34,7 +34,13 @@
  *      `skillsActivatedFor(skills, changedPaths)` and act on the result.
  *      Declaring `paths:` has no runtime effect until a host does this.
  */
-export { MAX_GLOB_LEN, MAX_PATH_LEN, matchesAnyGlob, skillsActivatedFor } from "./activation"
+export {
+  implicitlyInvocableSkills,
+  MAX_GLOB_LEN,
+  MAX_PATH_LEN,
+  matchesAnyGlob,
+  skillsActivatedFor,
+} from "./activation"
 export type { AdminPolicy, AdminPolicyReader, LoadedAdminPolicy } from "./admin-policy"
 // ADR-0134 Phase C — admin policy + audit log + install enforcement.
 export {
@@ -102,8 +108,10 @@ export {
 // ADR-0457 — codex skill ECOSYSTEM bundled resources (agents/openai.yaml +
 // scripts/references/assets presence).
 export {
+  discoverSkillImplicitPolicy,
   discoverSkillResources,
   parseOpenaiYamlInterface,
+  parseOpenaiYamlPolicy,
   SKILL_RESOURCE_DIRS,
 } from "./skill-resources"
 export {

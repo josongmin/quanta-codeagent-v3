@@ -27,6 +27,10 @@ interface MemoryRow {
   embedding: Uint8Array | null
   superseded_by: string | null
   session_id: string | null
+  // §10.6 routing meta (forward-migrated; null on legacy rows).
+  task_group: string | null
+  applies_to_cwd: string | null
+  reuse_rule: string | null
 }
 
 const isKind = (v: string): v is MemoryKind => (MEMORY_KINDS as readonly string[]).includes(v)
@@ -44,6 +48,11 @@ const NEW_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["last_accessed_at", "INTEGER"],
   ["embedding", "BLOB"],
   ["superseded_by", "TEXT"],
+  // §10.6 routing meta — added on top of the long-term-memory schema; legacy
+  // dbs migrate transparently on open (null on pre-existing rows).
+  ["task_group", "TEXT"],
+  ["applies_to_cwd", "TEXT"],
+  ["reuse_rule", "TEXT"],
 ]
 
 /**
@@ -111,7 +120,10 @@ export class SqliteStore implements PersistentStorePort {
         last_accessed_at INTEGER,
         embedding BLOB,
         superseded_by TEXT,
-        session_id TEXT
+        session_id TEXT,
+        task_group TEXT,
+        applies_to_cwd TEXT,
+        reuse_rule TEXT
       )
     `)
     this.migrate()
@@ -122,10 +134,12 @@ export class SqliteStore implements PersistentStorePort {
     this.insertStmt = this.db.query(`
       INSERT INTO memories (
         id, kind, tier, text, tags, importance, created_at, updated_at,
-        access_count, last_accessed_at, embedding, superseded_by, session_id
+        access_count, last_accessed_at, embedding, superseded_by, session_id,
+        task_group, applies_to_cwd, reuse_rule
       ) VALUES (
         $id, $kind, $tier, $text, $tags, $importance, $created_at, $updated_at,
-        $access_count, $last_accessed_at, $embedding, $superseded_by, $session_id
+        $access_count, $last_accessed_at, $embedding, $superseded_by, $session_id,
+        $task_group, $applies_to_cwd, $reuse_rule
       )
       ON CONFLICT(id) DO UPDATE SET
         kind = excluded.kind,
@@ -139,7 +153,10 @@ export class SqliteStore implements PersistentStorePort {
         last_accessed_at = excluded.last_accessed_at,
         embedding = excluded.embedding,
         superseded_by = excluded.superseded_by,
-        session_id = excluded.session_id
+        session_id = excluded.session_id,
+        task_group = excluded.task_group,
+        applies_to_cwd = excluded.applies_to_cwd,
+        reuse_rule = excluded.reuse_rule
     `)
     this.selectAllStmt = this.db.query("SELECT * FROM memories")
     this.selectByIdStmt = this.db.query("SELECT * FROM memories WHERE id = ?")
@@ -185,6 +202,9 @@ export class SqliteStore implements PersistentStorePort {
         $embedding: n.embedding ? serializeVec(n.embedding) : null,
         $superseded_by: n.supersededBy ?? null,
         $session_id: n.sessionId ?? null,
+        $task_group: n.taskGroup ?? null,
+        $applies_to_cwd: n.appliesTo?.cwd ?? null,
+        $reuse_rule: n.reuseRule ?? null,
       })
     } catch (e) {
       const message = errMessage(e)
@@ -309,5 +329,8 @@ const rowToEntry = (row: MemoryRow): MemoryEntry => {
     ...(embedding !== undefined ? { embedding } : {}),
     ...(row.superseded_by !== null ? { supersededBy: row.superseded_by } : {}),
     ...(row.session_id !== null ? { sessionId: row.session_id } : {}),
+    ...(row.task_group !== null ? { taskGroup: row.task_group } : {}),
+    ...(row.applies_to_cwd !== null ? { appliesTo: { cwd: row.applies_to_cwd } } : {}),
+    ...(row.reuse_rule !== null ? { reuseRule: row.reuse_rule } : {}),
   }
 }

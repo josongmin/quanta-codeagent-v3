@@ -5,6 +5,18 @@
  * nothing imports this unless the host opts in behind `QUANTA_SIDE_AGENT`.
  */
 
+export {
+  backoffForAttempt,
+  type ChildProcessHandle,
+  createSupervisedProcessDaemon,
+  type DelayScheduler,
+  type ProcessForkPort,
+  type ProcessForkSpec,
+  type SideAgentIpcMessage,
+  type SupervisedDaemonStatus,
+  type SupervisedProcessDaemon,
+  type SupervisedProcessDaemonOpts,
+} from "./process"
 export { createSideAgentDaemonRegistry } from "./registry"
 export {
   type SideAgentDaemonOpts,

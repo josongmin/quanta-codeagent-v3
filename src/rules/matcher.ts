@@ -27,6 +27,7 @@
  * fall through.
  */
 
+import { matchArgvRule, tokenizeArgv } from "./argv"
 import type { MatchOutcome, Rule } from "./types"
 
 /** Internal fast path for callers that own rule lifecycle and can prepare
@@ -41,8 +42,17 @@ export const matchPreparedCommand = (
     return { kind: "no_match" }
   }
 
+  // §10.2 — lazily tokenize the command argv ONCE, only if at least one argv
+  // rule is present. A rule set with NO argv rules never tokenizes, so the
+  // byte-prefix hot path is byte-identical to before (zero new work).
+  let argv: readonly string[] | null = null
   for (const rule of preparedRules) {
-    if (matchesPrefix(normalised, rule.prefix)) {
+    if (rule.argv !== undefined) {
+      if (argv === null) argv = tokenizeArgv(command)
+      if (matchArgvRule(rule.argv, argv)) {
+        return { kind: "matched", rule }
+      }
+    } else if (matchesPrefix(normalised, rule.prefix)) {
       return { kind: "matched", rule }
     }
   }

@@ -65,17 +65,13 @@ export const compileSeatbeltProfile = (
   const extraReads = (policy.extraReadPaths ?? []).map((p) => resolvePath(p, workspace))
   const extraWrites = (policy.extraWritePaths ?? []).map((p) => resolvePath(p, workspace))
 
-  const lines: string[] = [
-    "(version 1)",
-    "(deny default)",
-    ";; subprocess + tty (codex-verbatim baseline)",
-    "(allow process-fork)",
-    "(allow ipc-posix-sem)",
-    "(allow pseudo-tty)",
-    '(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))',
-    "(allow user-preference-read)",
-    ";; system framework reads (always-on)",
-    "(allow file-read*",
+  // §12.6 (jun-08) — `/tmp` is part of the system-framework read block in the
+  // Codex-verbatim baseline. When `excludeTmpdir` is set we DROP that single
+  // literal so the sandbox cannot read `/tmp`; the block's closing `)` stays on
+  // the final literal regardless. DEFAULT-OFF: absent/false ⇒ the `/tmp` literal
+  // is emitted in its baseline position (byte-identical Codex parity, locked by
+  // the seatbelt-verbatim hellgate).
+  const systemFrameworkReads: string[] = [
     '  (subpath "/usr/lib")',
     '  (subpath "/usr/share")',
     '  (subpath "/Library/Apple")',
@@ -91,8 +87,21 @@ export const compileSeatbeltProfile = (
     '  (subpath "/private/var/db/timezone")',
     '  (subpath "/var/db")',
     '  (literal "/etc")',
-    '  (literal "/tmp")',
+    ...(policy.excludeTmpdir === true ? [] : ['  (literal "/tmp")']),
     '  (literal "/private/etc/localtime"))',
+  ]
+  const lines: string[] = [
+    "(version 1)",
+    "(deny default)",
+    ";; subprocess + tty (codex-verbatim baseline)",
+    "(allow process-fork)",
+    "(allow ipc-posix-sem)",
+    "(allow pseudo-tty)",
+    '(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))',
+    "(allow user-preference-read)",
+    ";; system framework reads (always-on)",
+    "(allow file-read*",
+    ...systemFrameworkReads,
   ]
 
   // Workspace + extras for read.

@@ -14,8 +14,8 @@
  */
 import type { Dirent } from "node:fs"
 import { readdir, readFile, stat } from "node:fs/promises"
-import { basename, join } from "node:path"
-import { errMessage } from "@/shared"
+import { basename, join, resolve, sep } from "node:path"
+import { errMessage, gateOn } from "@/shared"
 import {
   MCPRootSchema,
   type MCPServerSpec,
@@ -23,7 +23,10 @@ import {
   PLUGIN_MANIFEST_FILE,
   PLUGIN_MCP_FILE,
   PLUGIN_SKILLS_DIR,
+  type PluginAppsField,
+  type PluginHooksField,
   type PluginManifest,
+  type PluginPointerHooks,
   parsePluginManifest,
 } from "./plugin-manifest"
 
@@ -44,6 +47,10 @@ export interface LoadedPlugin {
   manifest: PluginManifest
   mcpServers?: Record<string, MCPServerSpec>
   skillEntries: PluginSkillEntry[]
+  /** §2.4 — resolved `hooks`/`apps` pointers. Present ONLY when the
+   *  `QUANTA_PLUGIN_POINTERS` gate is ON AND the manifest declared at least one
+   *  pointer. Absent (byte-identical) otherwise. */
+  pointers?: ResolvedPluginPointers
 }
 
 /** Lightweight discovery record (no manifest parse) — useful when the host
@@ -127,8 +134,17 @@ const collectSkillEntries = async (pluginDir: string): Promise<PluginSkillEntry[
 /** Load + validate one plugin root. Order: manifest (required) → mcp
  *  (optional) → skills enumeration. Errors are raised as
  *  {@link PluginManifestError} so the caller can react to cause without
- *  string parsing. */
-export const loadPluginManifest = async (pluginDir: string): Promise<LoadedPlugin> => {
+ *  string parsing.
+ *
+ *  `env` is OPTIONAL: pass the ambient env (the host passes `process.env`) to
+ *  enable §2.4 hooks/apps pointer RESOLUTION (gated by `QUANTA_PLUGIN_POINTERS`).
+ *  Omitted ⇒ no pointer resolution at all (`loaded.pointers` absent), so the
+ *  default call is byte-identical AND the slice never reads `process.env`
+ *  itself (slice-boundary guard). */
+export const loadPluginManifest = async (
+  pluginDir: string,
+  env?: Record<string, string | undefined>,
+): Promise<LoadedPlugin> => {
   const manifestPath = join(pluginDir, PLUGIN_DIR_NAME, PLUGIN_MANIFEST_FILE)
   const manifestRead = await readJson(manifestPath)
   if (!manifestRead.ok) throw manifestRead.err
@@ -173,6 +189,20 @@ export const loadPluginManifest = async (pluginDir: string): Promise<LoadedPlugi
   const skillEntries = await collectSkillEntries(pluginDir)
   const loaded: LoadedPlugin = { dir: pluginDir, manifest, skillEntries }
   if (mcpServers !== undefined) loaded.mcpServers = mcpServers
+  // §2.4 — resolve hooks/apps pointers ONLY when the caller passed `env` (host
+  // opt-in); gated within by `QUANTA_PLUGIN_POINTERS`. No env ⇒ no resolution
+  // (byte-identical; the slice never touches the ambient environment).
+  if (env !== undefined) {
+    const pointers = resolvePluginPointers(
+      pluginDir,
+      {
+        ...(manifest.hooks !== undefined ? { hooks: manifest.hooks } : {}),
+        ...(manifest.apps !== undefined ? { apps: manifest.apps } : {}),
+      },
+      env,
+    )
+    if (pointers !== undefined) loaded.pointers = pointers
+  }
   return loaded
 }
 
@@ -237,4 +267,88 @@ export const discoverPlugins = async (rootDir: string): Promise<DiscoveredPlugin
     return ba < bb ? -1 : ba > bb ? 1 : 0
   })
   return found
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// §2.4 — plugin manifest `hooks`/`apps` pointer RESOLUTION.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** The pointer fields a manifest MAY declare (subset of {@link PluginManifest}),
+ *  passed to {@link resolvePluginPointers}. */
+export interface PluginPointerFields {
+  readonly hooks?: PluginHooksField
+  readonly apps?: PluginAppsField
+}
+
+/** Resolved + escape-guarded pointers. `hooksPath` is set when the manifest
+ *  declared a STRING hooks pointer (resolved under the plugin dir); `hooksInline`
+ *  is set when it declared an INLINE config object. `appPaths` are the resolved
+ *  app folder pointers (escape-offending entries dropped). Each is OMITTED when
+ *  absent — `exactOptionalPropertyTypes`-clean. */
+export interface ResolvedPluginPointers {
+  readonly hooksPath?: string
+  readonly hooksInline?: PluginPointerHooks
+  readonly appPaths?: readonly string[]
+}
+
+/** Resolve `rel` under `baseDir` and return the absolute path ONLY when it stays
+ *  inside `baseDir` (no `../` escape, no absolute override). Returns undefined
+ *  for any out-of-tree / absolute pointer — a plugin must not point the host's
+ *  auto-loader at a file outside its own root (path-traversal guard). */
+const resolveUnder = (baseDir: string, rel: string): string | undefined => {
+  const base = resolve(baseDir)
+  const abs = resolve(base, rel)
+  // `abs` must be `base` itself or a descendant. The `+ sep` prevents a sibling
+  // prefix match (`/tmp/plugin` vs `/tmp/plugin-evil`).
+  if (abs === base) return abs
+  if (abs.startsWith(base + sep)) return abs
+  return undefined
+}
+
+/**
+ * §2.4 — resolve a plugin manifest's `hooks`/`apps` pointer fields against the
+ * plugin's root dir. PURE over its inputs except the gate read.
+ *
+ * DEFAULT-OFF: when `QUANTA_PLUGIN_POINTERS` is not gate-on, returns `undefined`
+ * — the host gets NOTHING to auto-load, so a manifest declaring pointers has no
+ * runtime effect (byte-identical to before this field existed). When ON it
+ * returns a {@link ResolvedPluginPointers} with each pointer resolved + escape-
+ * guarded; out-of-tree pointers are DROPPED (never throw — NO-THROW boundary).
+ *
+ * `env` is REQUIRED (no `process.env` default): the `@/skill` slice must not
+ * read the ambient environment itself (slice-boundary guard). The loader's
+ * `loadPluginManifest` passes the env it was given.
+ */
+export const resolvePluginPointers = (
+  pluginDir: string,
+  fields: PluginPointerFields,
+  env: Record<string, string | undefined>,
+): ResolvedPluginPointers | undefined => {
+  if (!gateOn(env, "QUANTA_PLUGIN_POINTERS")) return undefined
+  const out: {
+    hooksPath?: string
+    hooksInline?: PluginPointerHooks
+    appPaths?: readonly string[]
+  } = {}
+
+  if (typeof fields.hooks === "string") {
+    const p = resolveUnder(pluginDir, fields.hooks)
+    if (p !== undefined) out.hooksPath = p
+    // escape pointer ⇒ dropped (no hooksPath set)
+  } else if (fields.hooks !== undefined) {
+    out.hooksInline = fields.hooks
+  }
+
+  const appsRaw =
+    typeof fields.apps === "string"
+      ? [fields.apps]
+      : Array.isArray(fields.apps)
+        ? fields.apps
+        : []
+  const appPaths = appsRaw
+    .map((a) => resolveUnder(pluginDir, a))
+    .filter((p): p is string => p !== undefined)
+  if (appPaths.length > 0) out.appPaths = appPaths
+
+  return out
 }

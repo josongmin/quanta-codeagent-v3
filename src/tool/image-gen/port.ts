@@ -104,6 +104,28 @@ const DEFAULT_IMAGE_MODEL = "gpt-image-1"
 const mediaTypeFor = (format: ImageGenFormat): string =>
   format === "jpeg" ? "image/jpeg" : format === "webp" ? "image/webp" : "image/png"
 
+/** §5.2 — concrete gpt-image-1 sizes for each aspect ratio. The model only
+ *  supports a fixed size set (`1024x1024`, `1536x1024`, `1024x1536`, `auto`),
+ *  so non-square ratios map onto the nearest supported landscape/portrait size:
+ *  16:9 & 4:3 → landscape `1536x1024`; 9:16 & 3:4 → portrait `1024x1536`. */
+const ASPECT_TO_SIZE: Readonly<Record<Exclude<ImageAspectRatio, "auto">, string>> = {
+  "1:1": "1024x1024",
+  "16:9": "1536x1024",
+  "4:3": "1536x1024",
+  "9:16": "1024x1536",
+  "3:4": "1024x1536",
+}
+
+/** Resolve the effective provider `size`. An explicit `WIDTHxHEIGHT` in
+ *  `req.size` is AUTHORITATIVE; `aspectRatio` is consulted only when `size` is
+ *  `auto`. `aspectRatio:"auto"` (or absent) ⇒ `size` is returned untouched, so
+ *  a request that set neither yields `auto` exactly as before (byte-identical). */
+const effectiveSize = (req: ImageGenRequest): string => {
+  if (req.size !== "auto") return req.size
+  if (req.aspectRatio === "auto") return req.size
+  return ASPECT_TO_SIZE[req.aspectRatio]
+}
+
 /** Shape of the OpenAI images response we read (`data[].b64_json`). Narrow,
  *  defensive parse — anything else maps to a typed error. */
 interface OpenAiImagesResponse {
@@ -116,7 +138,9 @@ const generationsBody = (req: ImageGenRequest, model: string): Record<string, un
   model,
   prompt: req.prompt,
   n: req.n,
-  size: req.size,
+  // §5.2 — explicit `size` is authoritative; `aspectRatio` resolves only when
+  // `size` is `auto`. Neither set ⇒ `auto` exactly as before.
+  size: effectiveSize(req),
   quality: req.quality,
   output_format: req.format,
   // `background` only meaningful when the model supports transparency; sent
@@ -153,7 +177,8 @@ const buildEditInit = (
   form.set("model", model)
   form.set("prompt", req.prompt)
   form.set("n", String(req.n))
-  form.set("size", req.size)
+  // §5.2 — same size resolution as the generations path (aspectRatio→size).
+  form.set("size", effectiveSize(req))
   form.set("quality", req.quality)
   form.set("output_format", req.format)
   req.referenceImages.forEach((img, i) => {

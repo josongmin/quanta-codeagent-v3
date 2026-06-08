@@ -97,6 +97,25 @@ describe("git_branch_switch — dirtyAction byte-identity (default-OFF)", () => 
   })
 })
 
+describe("git_branch_switch — dirtyAction HITL tier (destructive escalation)", () => {
+  test("discard escalates to always-confirm (irreversible work loss)", () => {
+    const t = gitBranchSwitchTool(new FakeRunner(resolver({})))
+    expect(t.hitlTier?.({ branch: "feat", dirtyAction: "discard" })).toBe("always-confirm")
+  })
+
+  test("stash + commit-wip stay pre-approval-ok (recoverable)", () => {
+    const t = gitBranchSwitchTool(new FakeRunner(resolver({})))
+    expect(t.hitlTier?.({ branch: "feat", dirtyAction: "stash" })).toBe("pre-approval-ok")
+    expect(t.hitlTier?.({ branch: "feat", dirtyAction: "commit-wip" })).toBe("pre-approval-ok")
+  })
+
+  test("no dirtyAction stays pre-approval-ok (legacy byte-identity)", () => {
+    const t = gitBranchSwitchTool(new FakeRunner(resolver({})))
+    expect(t.hitlTier?.({ branch: "feat" })).toBe("pre-approval-ok")
+    expect(t.hitlTier?.({ branch: "feat", autoWip: true })).toBe("pre-approval-ok")
+  })
+})
+
 describe("git_branch_switch — dirtyAction schema", () => {
   test("accepts the three actions", () => {
     const t = gitBranchSwitchTool(new FakeRunner(resolver({})))

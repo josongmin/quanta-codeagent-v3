@@ -49,7 +49,9 @@ evidence:
     - src/agent/edit-repair-wire.ts
     - src/agent/dispatch.ts
     - src/agent/types.ts
-  adrs: [472]
+  # 472 = base edit-repair-loop; 495 = line-shift-tolerant lint delta
+  # (computeLintDeltaTolerant, extends 472 — CC 2.1.167 diagnostics line-tolerance).
+  adrs: [472, 495]
   tests:
     unit:
       - tests/unit/edit-repair-loop-hellgate.test.ts

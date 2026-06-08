@@ -5,6 +5,7 @@ import { withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
 import { DEFAULT_ENV_ALLOWLIST, scrubEnv } from "./sandbox"
 import { asScrubbedEnv, bunScrubbedSpawner } from "./scrubbed-spawn"
+import { buildBaseShellArgv, resolveWinShellMode } from "./shell-argv"
 import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
@@ -148,7 +149,28 @@ export const runShell = async (
   // The session-wide slot still runs on top of the per-call result so a
   // session policy that further constrains the call still applies. Order:
   //   per-call wrap → slot wrap → snapshot restore.
-  const baseArgv: ReadonlyArray<string> = ["bash", "-lc", command]
+  // P16 (jun-08 §P16) — platform-aware base shell argv. On every non-win32
+  // host the decision is BYTE-IDENTICAL to the legacy `["bash","-lc",command]`
+  // hardcode (no env read, no allocation change). On win32 the legacy code
+  // would spawn a nonexistent `bash` and fail with an opaque ENOENT; instead we
+  // surface an EXPLICIT typed `ShellResult` (exitCode 127 + actionable stderr)
+  // unless the operator opted into the cmd.exe fallback via QUANTA_WIN_SHELL=cmd.
+  // The env is read ONLY when `process.platform === "win32"` so the common path
+  // stays a pure pass-through.
+  const argvDecision = buildBaseShellArgv(
+    command,
+    process.platform,
+    process.platform === "win32" ? resolveWinShellMode() : "error",
+  )
+  if (argvDecision.kind === "error") {
+    // No-throw: a clear, deterministic failure result instead of a silent spawn
+    // error. Mirrors the os-sandbox no-throw contract (exitCode 127 = "cannot
+    // execute"). When an event observer is present we do NOT emit a synthetic
+    // `start`/`exit` pair (no process was spawned) — the caller reads the
+    // result shape, which is the same contract a non-zero exit carries.
+    return { stdout: "", stderr: argvDecision.reason, exitCode: 127, timedOut: false }
+  }
+  const baseArgv: ReadonlyArray<string> = argvDecision.argv
   const perCallWrap = options.perCallWrap
   // T08 (audit L8 M2) — track whether ANY wrap layer actually sandboxed the
   // spawn vs degraded to passthrough, so an `onSandboxStatus` observer learns

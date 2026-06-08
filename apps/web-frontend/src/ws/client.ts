@@ -28,6 +28,7 @@
 
 import { computeRetryDelayMs } from "./reconnect"
 import {
+  decodeCanvasFrame,
   decodeEventFrame,
   decodeObservabilityFrame,
   decodeRejectedFrame,
@@ -35,8 +36,10 @@ import {
   encodeCommandFrame,
   encodeConnectFrame,
   peekEnvelopeKind,
+  SESSION_PROTOCOL_VERSION,
 } from "./envelope"
 import type {
+  CanvasMessage,
   ConnectionState,
   ObservabilityMessage,
   SessionCommand,
@@ -72,6 +75,7 @@ export type EventHandler<TType extends SessionEventType = SessionEventType> = (
 export type ConnectionHandler = (state: ConnectionState) => void
 export type SnapshotHandler = (snapshot: SessionSnapshotLite) => void
 export type ObservabilityHandler = (message: ObservabilityMessage) => void
+export type CanvasHandler = (message: CanvasMessage) => void
 
 /**
  * Minimal interface SessionClient depends on — the global `WebSocket` ctor
@@ -113,6 +117,51 @@ const READYSTATE_OPEN = 1
 const HANDSHAKE_DISCOVERY_SESSION_ID = "ui-session"
 
 /* ------------------------------------------------------------------ */
+/* Heartbeat / keepalive (comms hardening).                            */
+/*                                                                     */
+/* An idle WS path carries no frames, so a reverse proxy / load        */
+/* balancer can silently drop the socket past its idle timeout without */
+/* either side noticing. We send an app-level `heartbeat` ping on a    */
+/* timer to keep the path warm; ANY inbound frame (the daemon's pong   */
+/* OR a normal event) proves the socket is alive and resets a liveness */
+/* deadline. If the deadline elapses with no frame, the socket is      */
+/* declared dead and we fall through to the existing reconnect path.   */
+/* ------------------------------------------------------------------ */
+
+/** How often the client puts a keepalive ping on the wire. 25s sits */
+/*  comfortably under the common 30–60s proxy idle timeout. */
+export const HEARTBEAT_INTERVAL_MS = 25_000
+
+/** After a ping, how long we wait for ANY frame before declaring the */
+/*  socket dead. Generous (10s) so a slow round-trip never false-trips. */
+export const HEARTBEAT_TIMEOUT_MS = 10_000
+
+/** Pre-encoded keepalive ping frame — the SAME flat control envelope the */
+/*  daemon answers with a `pong` (mirrors `encodeControlEnvelope` upstream */
+/*  for `kind:"heartbeat"`). */
+const HEARTBEAT_PING_FRAME = JSON.stringify({
+  version: SESSION_PROTOCOL_VERSION,
+  kind: "heartbeat",
+  phase: "ping",
+})
+
+/** Best-effort: return a heartbeat frame's `phase`, or null if `raw` is not a
+ *  heartbeat frame. NO-THROW — used to consume keepalive frames off the
+ *  receive path before the per-kind decoders run. */
+const peekHeartbeatPhase = (raw: string): "ping" | "pong" | null => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== "object") return null
+  const rec = parsed as Record<string, unknown>
+  if (rec.kind !== "heartbeat") return null
+  return rec.phase === "ping" || rec.phase === "pong" ? rec.phase : null
+}
+
+/* ------------------------------------------------------------------ */
 /* SessionClient                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -123,6 +172,7 @@ export class SessionClient {
   readonly #connectionHandlers = new Set<ConnectionHandler>()
   readonly #snapshotHandlers = new Set<SnapshotHandler>()
   readonly #observabilityHandlers = new Set<ObservabilityHandler>()
+  readonly #canvasHandlers = new Set<CanvasHandler>()
   readonly #wsCtor: WebSocketCtor
   readonly #setTimer: (cb: () => void, ms: number) => unknown
   readonly #clearTimer: (handle: unknown) => void
@@ -136,8 +186,22 @@ export class SessionClient {
   #state: ConnectionState = { kind: "closed" }
   /** Server-minted session id learned via connect-reject discovery or snapshot. */
   #sessionId: string | null = null
+  /**
+   * Highest `seq` observed across received events + snapshots — the resume
+   * cursor. `null` until the first seq-bearing frame arrives. On RECONNECT the
+   * handshake carries `resumeFromSeq = #lastSeq` so the daemon replays only the
+   * events the socket missed. It survives reconnects (never reset on close) so
+   * the gap can be computed; the daemon dedups by `eventId` on the client side.
+   */
+  #lastSeq: number | null = null
   #lastSnapshot: SessionSnapshotLite | null = null
   #lastObservability: ObservabilityMessage | null = null
+  /** Last canvas message, replayed to late `onCanvas` subscribers. */
+  #lastCanvas: CanvasMessage | null = null
+  /** Heartbeat timers (injectable seam). `#pingHandle` schedules the next */
+  /*  keepalive ping; `#livenessHandle` is the deadline armed after a ping. */
+  #pingHandle: unknown = null
+  #livenessHandle: unknown = null
   readonly #sessionIdHandlers = new Set<(id: string) => void>()
 
   constructor(options: SessionClientOptions = {}) {
@@ -201,6 +265,14 @@ export class SessionClient {
   /** Last server-minted session id, or `null` until the handshake settles. */
   get sessionId(): string | null {
     return this.#sessionId
+  }
+
+  /**
+   * Highest `seq` observed (events + snapshots), or `null` if nothing seq-bearing
+   * has arrived yet. This is the resume cursor sent on reconnect.
+   */
+  get lastSeq(): number | null {
+    return this.#lastSeq
   }
 
   /** Subscribe to sessionId discovery — fires once per learned id. */
@@ -291,6 +363,28 @@ export class SessionClient {
     }
   }
 
+  /**
+   * Subscribe to canvas channel frames (`tool.diff` / `context.usage`,
+   * ADR-0440). Mirrors {@link onObservability}: the last canvas message is
+   * replayed to a late subscriber so a freshly-mounted panel renders without
+   * waiting for the next frame. These frames ONLY arrive when the daemon's
+   * canvas sink is gated ON (`QUANTA_WEB_CANVAS=1`) — absent that, no frame is
+   * ever decoded and every subscriber stays idle (chat UI unchanged).
+   */
+  onCanvas(handler: CanvasHandler): () => void {
+    this.#canvasHandlers.add(handler)
+    if (this.#lastCanvas !== null) {
+      try {
+        handler(this.#lastCanvas)
+      } catch {
+        // swallow — surface to console via #log instead
+      }
+    }
+    return () => {
+      this.#canvasHandlers.delete(handler)
+    }
+  }
+
   onConnectionChange(handler: ConnectionHandler): () => void {
     this.#connectionHandlers.add(handler)
     // Replay current state so the subscriber renders immediately without
@@ -337,8 +431,14 @@ export class SessionClient {
       // is accepted. Until we know the canonical session id we send a
       // non-empty discovery sentinel; the daemon rejects it with the real
       // session id and we immediately retry with that value.
+      //
+      // Resume-on-reconnect: if this socket already knows the canonical
+      // session id AND we have observed a seq from a prior connection, send
+      // `resumeFromSeq` so the daemon replays only the events we missed during
+      // the drop. The FIRST connect (discovery sentinel, no seq yet) omits it
+      // ⇒ the daemon sends a full snapshot ⇒ byte-identical to the legacy path.
       try {
-        ws.send(encodeConnectFrame(this.#sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID))
+        ws.send(this.#buildConnectFrame())
       } catch (err) {
         this.#log("warn", `[SessionClient] connect frame failed: ${String(err)}`)
       }
@@ -370,6 +470,27 @@ export class SessionClient {
       )
       return
     }
+    // ANY inbound frame proves the socket is alive → reset the liveness
+    // deadline. The daemon's `pong` is the common case, but a normal event
+    // frame is equally valid evidence (and means we needn't wait on a pong).
+    this.#resetLiveness()
+    // A heartbeat frame is connection-level bookkeeping; the liveness reset
+    // above is its entire effect on the client. Consume it here so it never
+    // reaches the per-kind decoders below (which would log it as unrecognised).
+    const heartbeatPhase = peekHeartbeatPhase(data)
+    if (heartbeatPhase !== null) return
+    const canvas = decodeCanvasFrame(data)
+    if (canvas !== null) {
+      this.#lastCanvas = canvas
+      for (const handler of [...this.#canvasHandlers]) {
+        try {
+          handler(canvas)
+        } catch (err) {
+          this.#log("warn", `[SessionClient] canvas handler threw: ${String(err)}`)
+        }
+      }
+      return
+    }
     const rejected = decodeRejectedFrame(data)
     if (rejected !== null) {
       if (
@@ -381,7 +502,10 @@ export class SessionClient {
         this.#adoptSessionId(rejected.sessionId)
         if (this.#ws !== null && this.#ws.readyState === READYSTATE_OPEN) {
           try {
-            this.#ws.send(encodeConnectFrame(rejected.sessionId))
+            // Re-handshake with the canonical id. Carry the resume cursor if we
+            // already have one (a reconnect that re-discovers the id); the
+            // bootstrap discovery on a fresh session has no seq yet ⇒ omitted.
+            this.#ws.send(this.#buildConnectFrame(rejected.sessionId))
           } catch (err) {
             this.#log("warn", `[SessionClient] connect-retry failed: ${String(err)}`)
           }
@@ -401,6 +525,7 @@ export class SessionClient {
     const snapshot = decodeSnapshotFrame(data)
     if (snapshot !== null) {
       this.#lastSnapshot = snapshot
+      this.#trackSeq(snapshot.seq)
       if (this.#sessionId === null || this.#sessionId !== snapshot.sessionId) {
         this.#adoptSessionId(snapshot.sessionId)
       }
@@ -429,7 +554,13 @@ export class SessionClient {
     const event = decodeEventFrame(data)
     if (event === null) {
       const kind = peekEnvelopeKind(data)
-      if (kind !== "snapshot" && kind !== "rejected" && kind !== "observability") {
+      if (
+        kind !== "snapshot" &&
+        kind !== "rejected" &&
+        kind !== "observability" &&
+        kind !== "canvas" &&
+        kind !== "heartbeat"
+      ) {
         this.#log("warn", `[SessionClient] dropping unrecognised frame (kind=${String(kind)})`)
       }
       return
@@ -437,7 +568,14 @@ export class SessionClient {
     this.#fanoutEvent(event)
   }
 
+  /** Advance the resume cursor to the max seq seen — never lowers it. */
+  #trackSeq(seq: number): void {
+    if (!Number.isFinite(seq)) return
+    this.#lastSeq = this.#lastSeq === null ? seq : Math.max(this.#lastSeq, seq)
+  }
+
   #fanoutEvent(event: SessionEvent): void {
+    this.#trackSeq(event.seq)
     const typed = this.#eventHandlers.get(event.type)
     if (typed !== undefined) {
       for (const handler of [...typed]) {
@@ -481,6 +619,11 @@ export class SessionClient {
 
   #setState(next: ConnectionState): void {
     this.#state = next
+    // Keepalive runs ONLY while connected. Entering `connected` arms the ping
+    // timer; any other transition (connecting / disconnected / closed) tears
+    // it down so we never ping a dead socket nor leak a timer across reconnect.
+    if (next.kind === "connected") this.#startHeartbeat()
+    else this.#stopHeartbeat()
     for (const handler of [...this.#connectionHandlers]) {
       try {
         handler(next)
@@ -490,10 +633,103 @@ export class SessionClient {
     }
   }
 
+  /* ---------------- Heartbeat / keepalive ----------------------- */
+
+  /** Arm (or re-arm) the next keepalive ping. Idempotent — clears any pending
+   *  ping handle first so re-entry (e.g. a snapshot resync that re-sets the
+   *  `connected` state) never stacks two ping timers. */
+  #startHeartbeat(): void {
+    if (this.#pingHandle !== null) this.#clearTimer(this.#pingHandle)
+    this.#pingHandle = this.#setTimer(() => {
+      this.#pingHandle = null
+      this.#sendPing()
+    }, HEARTBEAT_INTERVAL_MS)
+  }
+
+  /** Send a keepalive ping and arm the liveness deadline. If the deadline fires
+   *  before ANY frame resets it (see {@link resetLiveness} in #handleMessage),
+   *  the socket is declared dead and we force the existing reconnect path. */
+  #sendPing(): void {
+    if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) return
+    try {
+      this.#ws.send(HEARTBEAT_PING_FRAME)
+    } catch (err) {
+      this.#log("warn", `[SessionClient] heartbeat ping failed: ${String(err)}`)
+    }
+    if (this.#livenessHandle !== null) this.#clearTimer(this.#livenessHandle)
+    this.#livenessHandle = this.#setTimer(() => {
+      this.#livenessHandle = null
+      this.#onLivenessTimeout()
+    }, HEARTBEAT_TIMEOUT_MS)
+  }
+
+  /** Any inbound frame proves the socket is alive: clear the liveness deadline
+   *  and schedule the next ping. No-op when no deadline is pending. */
+  #resetLiveness(): void {
+    if (this.#livenessHandle === null) return
+    this.#clearTimer(this.#livenessHandle)
+    this.#livenessHandle = null
+    // Liveness proven → schedule the next keepalive ping.
+    this.#startHeartbeat()
+  }
+
+  /** The liveness deadline elapsed with no frame → the socket is dead. We own
+   *  the reconnect here (single source): detach the dead socket's `onclose`
+   *  BEFORE closing it so its async close event cannot schedule a SECOND
+   *  reconnect (which would double-bump the attempt/backoff). Then close it and
+   *  drive the reconnect ourselves — matching how `disconnect()` self-drives. */
+  #onLivenessTimeout(): void {
+    this.#stopHeartbeat()
+    const ws = this.#ws
+    this.#ws = null
+    if (ws !== null) {
+      // Neutralise the socket's lifecycle callbacks so a late close/message
+      // from this dead socket cannot perturb the fresh reconnect.
+      ws.onclose = null
+      ws.onmessage = null
+      ws.onerror = null
+      try {
+        ws.close(4000, "heartbeat_timeout")
+      } catch {
+        // ignore — some engines throw closing a half-dead socket
+      }
+    }
+    if (this.#intentionallyClosed) return
+    this.#scheduleReconnect("heartbeat_timeout")
+  }
+
+  /** Stop all keepalive timers. Idempotent. */
+  #stopHeartbeat(): void {
+    if (this.#pingHandle !== null) {
+      this.#clearTimer(this.#pingHandle)
+      this.#pingHandle = null
+    }
+    if (this.#livenessHandle !== null) {
+      this.#clearTimer(this.#livenessHandle)
+      this.#livenessHandle = null
+    }
+  }
+
   #withAuthQuery(url: string, token: string | undefined): string {
     if (token === undefined || token.length === 0) return url
     const sep = url.includes("?") ? "&" : "?"
     return `${url}${sep}token=${encodeURIComponent(token)}`
+  }
+
+  /**
+   * Build the `connect` handshake frame. Carries `resumeFromSeq` only when we
+   * handshake with the canonical (server-minted) session id AND have a resume
+   * cursor — i.e. a reconnect after events were seen. The discovery-sentinel
+   * bootstrap (`#sessionId === null`) never resumes: the daemon rejects the
+   * sentinel before any replay, so resuming there is meaningless and would
+   * diverge from the byte-identical first-connect path.
+   */
+  #buildConnectFrame(explicitSessionId?: string): string {
+    const sessionId = explicitSessionId ?? this.#sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID
+    const isCanonical = sessionId !== HANDSHAKE_DISCOVERY_SESSION_ID
+    return isCanonical && this.#lastSeq !== null
+      ? encodeConnectFrame(sessionId, this.#lastSeq)
+      : encodeConnectFrame(sessionId)
   }
 
   #adoptSessionId(sessionId: string): void {
