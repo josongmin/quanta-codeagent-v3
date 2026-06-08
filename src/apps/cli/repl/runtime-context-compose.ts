@@ -1,8 +1,8 @@
 import * as readline from "node:readline/promises"
 import {
   createOnConfirmReviewerPort,
-  createWorktreeSlot,
   loadNamedAgents,
+  mintActiveWorktreeSlot,
   type NamedAgentResolver,
 } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
@@ -13,7 +13,7 @@ import { CircumventionTracker, type PermissionStore, type ToolAction } from "@/p
 import type { PendingApprovalView } from "@/protocol/session"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
-import { gateOn, runtimeConfig } from "@/shared"
+import { runtimeConfig } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
@@ -266,13 +266,11 @@ export const composeCliRuntimeContext = async (
   const namedAgentResolver =
     namedAgents !== undefined && namedAgents.size > 0 ? namedAgents : undefined
   // ticket-11 (P8 worktree) — mint the session-scoped active-worktree slot ONLY
-  // when `QUANTA_WORKTREE_TOOL` is on, carrying the immutable session repoRoot +
-  // the SESSION-RESOLVED jailed `boot.cwd`. Gate off ⇒ undefined ⇒ worktree tools
-  // unregistered + bash/edit cwd byte-identical. `boot.cwd` is the session jail
-  // root the edit-fence keeps absolute writes within — the slot NEVER widens it.
-  const activeWorktreeSlot = gateOn(args.envSource ?? process.env, "QUANTA_WORKTREE_TOOL")
-    ? createWorktreeSlot({ repoRoot: boot.cwd, sessionCwd: boot.cwd })
-    : undefined
+  // when `QUANTA_WORKTREE_TOOL` is on (see {@link mintActiveWorktreeSlot} in
+  // `@/agent`). Gate off ⇒ undefined ⇒ worktree tools unregistered + bash/edit
+  // cwd byte-identical (default-OFF). `boot.cwd` is the SESSION-RESOLVED jail root
+  // the edit-fence keeps absolute writes within — the slot NEVER widens it.
+  const activeWorktreeSlot = mintActiveWorktreeSlot(args.envSource ?? process.env, boot.cwd)
   const runtimeContext = await composeRuntimeBootstrapContext({
     ...buildBootstrapContextArgs({
       boot,

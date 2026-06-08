@@ -31,6 +31,28 @@ describe("color-palettes — getColorPalette", () => {
     }
   })
 
+  test("§P-2 prototype-chain keys ⇒ default (no Object.prototype leak)", () => {
+    // `key in PALETTES` walks the prototype chain, so 'constructor'/'__proto__'/
+    // 'toString'/'valueOf'/'hasOwnProperty' would resolve to Object.prototype
+    // members — NOT palettes (the contract: ALWAYS a usable palette, never a
+    // function/undefined). Each must fall back to `default`.
+    for (const proto of [
+      "constructor",
+      "__proto__",
+      "toString",
+      "valueOf",
+      "hasOwnProperty",
+      "isPrototypeOf",
+      "prototype",
+    ]) {
+      const p = getColorPalette(proto)
+      expect(p.id).toBe("default")
+      // Sanity: a real palette object (has the role keys), not a smuggled fn.
+      expect(typeof p).toBe("object")
+      expect(typeof p.primary).toBe("string")
+    }
+  })
+
   test("§P-3 generic themes (auto/light/dark/claude/none) ⇒ default", () => {
     for (const theme of ["auto", "light", "dark", "claude", "none"]) {
       expect(getColorPalette(theme).id).toBe("default")

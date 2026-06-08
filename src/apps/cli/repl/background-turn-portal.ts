@@ -1,0 +1,247 @@
+/**
+ * Ticket 18 (V1) — background-turn portal.
+ *
+ * The PURE state store behind Ctrl+B ("move running turn to background") and the
+ * `/background` slash. When a turn is detached, its live `body` promise + the
+ * turn's `AbortController` are handed here; the portal registers a 'running'
+ * entry, watches the promise to a terminal state, and exposes a READ-ONLY
+ * `view()` projection the slash renders. It NEVER re-enters the agent loop and
+ * imports NOTHING from `@/agent` — it is a passive observer.
+ *
+ * V1 scope (see ticket): keybinding + portal + read-only reattach. NOT V1:
+ *   - persistence across restart (V2),
+ *   - weave/live reattach that re-enters the turn (V3).
+ *   V1 `reattach` is print-only (buffer + result/error), never re-awaits the
+ *   body nor exposes the AbortController for mutation.
+ *
+ * The captured buffer is BOUNDED with a HEAD+TAIL window so a runaway stream can
+ * never OOM the surface: the first {@link BG_BUFFER_MAX_BYTES}/2 bytes and the
+ * last {@link BG_BUFFER_MAX_BYTES}/2 bytes are retained, with an `… +N KB elided …`
+ * marker for the dropped middle. Naive newest-only buffering would lose the head
+ * (the part that explains what the turn was doing).
+ *
+ * Slice posture: lives in the existing `@/apps/cli` slice (no new tsconfig
+ * path / fence). No `node:*`, no `@/...` value import — pure TS.
+ */
+
+/** 50 MiB ceiling on a single backgrounded turn's retained output. Named const
+ *  (no inlined magic number). The window stores HEAD + TAIL halves of this. */
+export const BG_BUFFER_MAX_BYTES = 50 * 1024 * 1024
+
+/** Terminal lifecycle of a backgrounded turn. */
+export type BackgroundTurnState = "running" | "done" | "failed" | "cancelled"
+
+/** A live registry entry. `appendOutput`/`readBuffer`/`bufferedBytes` are the
+ *  mutable seam the surface (turn stream tee) writes into; everything else is
+ *  observed by the read-only view. Generic over the body result `R` (the
+ *  surface's `RunOneTurnResult`-shaped payload) so no `@/agent` type leaks. */
+export interface BackgroundTurnEntry<R = unknown> {
+  readonly taskId: string
+  readonly label: string
+  state: BackgroundTurnState
+  readonly startedAt: number
+  readonly promise: Promise<R>
+  readonly abort: AbortController
+  result?: R
+  error?: unknown
+  /** Append a streamed-output chunk into the bounded HEAD+TAIL window. */
+  appendOutput(chunk: string): void
+  /** Render the bounded window (HEAD + elision marker + TAIL). */
+  readBuffer(): string
+  /** Bytes currently retained (<= {@link BG_BUFFER_MAX_BYTES}). */
+  bufferedBytes(): number
+}
+
+/** Args to {@link BackgroundTurnPortal.detach}. The `promise` is the SAME live
+ *  body promise the turn is still running (NOT re-awaited by the caller); the
+ *  `abort` is the turn's own controller (firing it cancels the background body). */
+export interface DetachArgs<R = unknown> {
+  readonly label: string
+  readonly promise: Promise<R>
+  readonly abort: AbortController
+}
+
+/** Read-only projection a `/background` reattach yields. Print-only: buffer +
+ *  result/error + a `running` flag. NO promise / AbortController exposure. */
+export interface BackgroundReattach<R = unknown> {
+  readonly taskId: string
+  readonly label: string
+  readonly state: BackgroundTurnState
+  readonly running: boolean
+  readonly buffer: string
+  readonly result?: R
+  readonly error?: unknown
+}
+
+/** A read-only row for the `/background list` table. */
+export interface BackgroundTurnRow {
+  readonly taskId: string
+  readonly label: string
+  readonly state: BackgroundTurnState
+  readonly startedAt: number
+  readonly bufferedBytes: number
+}
+
+/** The READ-ONLY surface threaded into `SlashContext.background`. It can list,
+ *  inspect, reattach (print-only) and cancel — but it cannot detach a new turn
+ *  nor re-enter the loop (those live on the full {@link BackgroundTurnPortal}). */
+export interface BackgroundPortalView {
+  list(): readonly BackgroundTurnRow[]
+  get(id: string): BackgroundTurnRow | undefined
+  /** Print-only reattach: the buffer + result/error. Does NOT re-enter the loop. */
+  reattach(id: string): BackgroundReattach | undefined
+  /** Fire the entry's AbortController (NO-THROW on unknown id). */
+  cancel(id: string): void
+}
+
+/** The full (write-capable) portal the surface owns. */
+export interface BackgroundTurnPortal {
+  detach<R>(args: DetachArgs<R>): string
+  list(): readonly BackgroundTurnEntry[]
+  get(id: string): BackgroundTurnEntry | undefined
+  reattach(id: string): BackgroundReattach | undefined
+  cancel(id: string): void
+  view(): BackgroundPortalView
+}
+
+/** Short, human-scannable task id (`task abcd`-style). Crypto-free (no `@/...`,
+ *  no `node:*`): a base36 slice of `Math.random` + a monotone counter so two
+ *  detaches in the same ms never collide. */
+const makeTaskId = (seq: number): string => {
+  const rand = Math.random().toString(36).slice(2, 6)
+  return `${rand}${seq.toString(36)}`
+}
+
+/** Project an entry to its read-only table row. */
+const toRow = (e: BackgroundTurnEntry): BackgroundTurnRow => ({
+  taskId: e.taskId,
+  label: e.label,
+  state: e.state,
+  startedAt: e.startedAt,
+  bufferedBytes: e.bufferedBytes(),
+})
+
+/** Build the bounded HEAD+TAIL output buffer for one entry. Retains at most
+ *  {@link BG_BUFFER_MAX_BYTES}: the first half as HEAD, the most-recent half as
+ *  a ring TAIL. `readBuffer` stitches them with an elision marker. NO-THROW. */
+const makeBoundedBuffer = (): {
+  append(chunk: string): void
+  read(): string
+  bytes(): number
+} => {
+  const HALF = Math.floor(BG_BUFFER_MAX_BYTES / 2)
+  let head = ""
+  let tail = ""
+  // Total bytes EVER appended — used to compute the elided middle for the marker.
+  let totalAppended = 0
+  return {
+    append(chunk: string): void {
+      if (chunk.length === 0) return
+      totalAppended += chunk.length
+      // Fill HEAD up to HALF first (the start of the turn never gets dropped).
+      if (head.length < HALF) {
+        const room = HALF - head.length
+        head += chunk.slice(0, room)
+        const overflow = chunk.slice(room)
+        if (overflow.length > 0) {
+          tail += overflow
+          if (tail.length > HALF) tail = tail.slice(tail.length - HALF)
+        }
+        return
+      }
+      // HEAD full ⇒ everything else rides the TAIL ring (newest HALF retained).
+      tail += chunk
+      if (tail.length > HALF) tail = tail.slice(tail.length - HALF)
+    },
+    read(): string {
+      const retained = head.length + tail.length
+      const elided = totalAppended - retained
+      if (elided <= 0) return head + tail
+      const kb = Math.round(elided / 1024)
+      return `${head}\n… +${kb} KB elided …\n${tail}`
+    },
+    bytes(): number {
+      return head.length + tail.length
+    },
+  }
+}
+
+/**
+ * Build a fresh portal. Each {@link detach} registers a 'running' entry and
+ * attaches a NO-THROW `.then/.catch` that swallows the body outcome into the
+ * entry's terminal state (`done`/`failed`/`cancelled`) — the original promise
+ * keeps running, owned now by the portal, and a rejection NEVER escapes as an
+ * unhandled rejection.
+ */
+export const createBackgroundTurnPortal = (): BackgroundTurnPortal => {
+  const entries = new Map<string, BackgroundTurnEntry>()
+  let seq = 0
+
+  const detach = <R>(args: DetachArgs<R>): string => {
+    seq += 1
+    const taskId = makeTaskId(seq)
+    const buffer = makeBoundedBuffer()
+    const entry: BackgroundTurnEntry<R> = {
+      taskId,
+      label: args.label,
+      state: "running",
+      startedAt: Date.now(),
+      promise: args.promise,
+      abort: args.abort,
+      appendOutput: (chunk) => buffer.append(chunk),
+      readBuffer: () => buffer.read(),
+      bufferedBytes: () => buffer.bytes(),
+    }
+    entries.set(taskId, entry as unknown as BackgroundTurnEntry)
+    // NO-THROW swallow: the body keeps running; we only OBSERVE its settlement.
+    args.promise
+      .then((r) => {
+        entry.state = "done"
+        entry.result = r
+      })
+      .catch((e: unknown) => {
+        // An AbortError means the user backgrounded then cancelled (the body
+        // unwound via its signal) — distinct from a genuine failure.
+        entry.state =
+          e instanceof Error && e.name === "AbortError" ? "cancelled" : "failed"
+        entry.error = e
+      })
+    return taskId
+  }
+
+  const get = (id: string): BackgroundTurnEntry | undefined => entries.get(id)
+
+  const reattach = (id: string): BackgroundReattach | undefined => {
+    const e = entries.get(id)
+    if (e === undefined) return undefined
+    return {
+      taskId: e.taskId,
+      label: e.label,
+      state: e.state,
+      running: e.state === "running",
+      buffer: e.readBuffer(),
+      ...(e.result !== undefined ? { result: e.result } : {}),
+      ...(e.error !== undefined ? { error: e.error } : {}),
+    }
+  }
+
+  const cancel = (id: string): void => {
+    const e = entries.get(id)
+    // NO-THROW on unknown id; abort() is idempotent on an already-aborted ctrl.
+    if (e !== undefined && !e.abort.signal.aborted) e.abort.abort()
+  }
+
+  const list = (): readonly BackgroundTurnEntry[] => [...entries.values()]
+
+  const view = (): BackgroundPortalView => ({
+    list: () => list().map(toRow),
+    get: (id) => {
+      const e = entries.get(id)
+      return e !== undefined ? toRow(e) : undefined
+    },
+    reattach,
+    cancel,
+  })
+
+  return { detach, list, get, reattach, cancel, view }
+}

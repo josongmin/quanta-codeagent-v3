@@ -10,6 +10,7 @@ import { escapeBoundary, runtimeConfig } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import { resolveEditBase } from "../worktree/cwd-override"
 import { isNotebook, renderNotebook } from "./ipynb"
 import { DEFAULT_OUTLINE_BUDGET, renderOutline } from "./outline"
 
@@ -291,9 +292,22 @@ const resolveReadOutcome = async (
   input: Input,
   ctx: ToolContext,
 ): Promise<ReadOutcome> => {
+  // ticket-11 (P8 worktree edit-fence) — resolve the effective FS target so READ
+  // is fenced to the worktree exactly like `edit`/`bash`. When a session worktree
+  // is active, a RELATIVE path resolves against the worktree dir; an ABSOLUTE
+  // path STILL jails to the SESSION root (the worktree is a relative-cwd
+  // override, NOT a trust-boundary redefinition). Absent worktree ⇒
+  // `{ path: input.path, base: ctx.cwd }` (byte-identical legacy). Recording the
+  // resolved `info.path` into `readFileState` (in `execute`) under the WORKTREE
+  // path is what keeps the stale-read guard sound: a later `edit` stats the SAME
+  // worktree path, so read/edit agree on file identity (pre-fix read recorded the
+  // SESSION path while edit stat'd the worktree path → guardWrite saw "unread").
+  const target = resolveEditBase(input.path, ctx.cwd, ctx.activeWorktree)
   // ENOENT classification: a missing file / jail escape becomes a TYPED failure
-  // (closes the absorb-#2 gap for read). `statFile` runs first.
-  const stat = await runFsStep(() => fs.statFile(input.path, ctx.cwd), input.path)
+  // (closes the absorb-#2 gap for read). `statFile` runs first. The error-display
+  // path stays `input.path` (what the model typed); the FS op uses the resolved
+  // target.path + target.base (worktree-aware path, session jail base).
+  const stat = await runFsStep(() => fs.statFile(target.path, target.base), input.path)
   if (stat.kind === "failure") return stat
   const info = stat.value
   if (info.isDirectory) {
@@ -318,7 +332,7 @@ const resolveReadOutcome = async (
   // textual file, so the BOM is consulted before the NUL check (pre-fix, UTF-16
   // text was wrongly rejected as binary). The byte read may throw on a TOCTOU
   // unlink / jail escape — classified the same way as `readFile`.
-  const headStep = await runFsStep(() => sniffHead(fs, input.path, ctx.cwd), input.path)
+  const headStep = await runFsStep(() => sniffHead(fs, target.path, target.base), input.path)
   if (headStep.kind === "failure") return headStep
   const cls = classifyEncoding(headStep.value)
   if (cls.kind === "binary") {
@@ -331,7 +345,7 @@ const resolveReadOutcome = async (
   // FsJail is re-checked inside the port and stays a permission_denied. Same
   // classifier so the typed mapping holds on TOCTOU.
   const read = await runFsStep(
-    () => readTextByEncoding(fs, input.path, ctx.cwd, info.size, cls.encoding),
+    () => readTextByEncoding(fs, target.path, target.base, info.size, cls.encoding),
     input.path,
   )
   if (read.kind === "failure") return read

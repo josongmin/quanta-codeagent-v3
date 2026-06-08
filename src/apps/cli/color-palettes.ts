@@ -224,7 +224,12 @@ export const COLOR_PALETTE_IDS: readonly ColorPaletteId[] = Object.freeze([
 export const getColorPalette = (theme: string | undefined): ColorPalette => {
   if (theme === undefined) return PALETTES.default
   const key = theme.trim().toLowerCase()
-  if (key in PALETTES) {
+  // `Object.hasOwn` (NOT `key in PALETTES`) — the `in` operator walks the
+  // prototype chain, so `constructor` / `__proto__` / `toString` / `valueOf` /
+  // `hasOwnProperty` would index Object.prototype members and return a function
+  // (or, for `prototype`, `undefined`), violating "always a usable palette,
+  // never throws". `hasOwn` only sees the registry's own keys.
+  if (Object.hasOwn(PALETTES, key)) {
     return PALETTES[key as ColorPaletteId]
   }
   return PALETTES.default

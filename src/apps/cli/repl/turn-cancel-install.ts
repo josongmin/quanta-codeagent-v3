@@ -30,6 +30,13 @@ export interface InstallTurnCancelDeps {
   /** Fired when the user types Ctrl+C (hard surface-wide exit ⇒ tear down
    *  the WHOLE REPL on the next loop iteration). */
   readonly onAbort: () => void
+  /** Ticket 18 (V1) — fired when the user types Ctrl+B to move the running turn
+   *  to the background (the body keeps streaming, owned by the portal; the REPL
+   *  returns to a fresh prompt). OPTIONAL + default-OFF: when absent the Ctrl+B
+   *  branch is SKIPPED entirely so the FSM is byte-identical (it falls through to
+   *  the Esc/idle branches exactly as before). Sits ABOVE the Esc branch and
+   *  BELOW Ctrl+C so a hard abort always wins. */
+  readonly onBackground?: () => void
 }
 
 /** Install a stdin keypress listener for the duration of one turn.
@@ -43,7 +50,7 @@ export interface InstallTurnCancelDeps {
  *  in `runRepl`, with the two abort sinks now explicit (`onCancel` / `onAbort`)
  *  rather than captured from the enclosing scope. */
 export const installTurnCancel = (deps: InstallTurnCancelDeps): { dispose: () => void } => {
-  const { statusBar, escWindowMs, onCancel, onAbort } = deps
+  const { statusBar, escWindowMs, onCancel, onAbort, onBackground } = deps
   const stdin = process.stdin
   if (stdin.isTTY !== true) return { dispose: (): void => undefined }
   let state: CancelFsmState = "idle"
@@ -55,6 +62,15 @@ export const installTurnCancel = (deps: InstallTurnCancelDeps): { dispose: () =>
       state = "ctrl-c"
       statusBar.transient("⛔ interrupted — exiting…", 1500)
       onAbort()
+      return
+    }
+    // Ticket 18 (V1) — Ctrl+B moves the running turn to the background. ABOVE
+    // the Esc branch, BELOW Ctrl+C (abort always wins). Default-OFF: when the
+    // host did NOT wire `onBackground`, this branch is skipped and the FSM falls
+    // through to the Esc/idle branches byte-identically.
+    if (key.ctrl === true && key.name === "b" && onBackground !== undefined) {
+      statusBar.transient("⏭ moved to background", 1500)
+      onBackground()
       return
     }
     if (key.name !== "escape") {

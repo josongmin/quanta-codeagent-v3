@@ -34,7 +34,9 @@ import {
   runStatusCommand,
   type StatusPayload,
   type StatusSpawner,
+  statusChildEnv,
   stripAnsi,
+  stripStatusAnsi,
 } from "../status-command-runner"
 
 // ── deterministic spawner harness ────────────────────────────────────────────
@@ -75,6 +77,28 @@ const fakeSpawner = (
     }
   }
   return { spawn, capturedStdin: () => stdinSeen, killed: () => wasKilled }
+}
+
+/** A TRULY dead child: `kill()` does NOTHING (does not resolve `exited`) and
+ *  stdout NEVER closes. Both `handle.exited` and `readAll(stdout)` hang forever,
+ *  so ONLY a wall-clock race can settle the runner (finding 6 — the old fake's
+ *  `kill()` resolved `exited`, masking the unbounded hang). */
+const deadSpawner = (): { spawn: StatusSpawner; killed: () => boolean } => {
+  let wasKilled = false
+  const spawn: StatusSpawner = () => ({
+    // A stream whose `start` enqueues nothing and never closes ⇒ read() pends.
+    stdout: new ReadableStream<Uint8Array>({
+      start() {
+        /* never enqueue, never close */
+      },
+    }),
+    // `exited` that NEVER resolves.
+    exited: new Promise<number>(() => {}),
+    kill: () => {
+      wasKilled = true // recorded, but deliberately does NOT settle anything
+    },
+  })
+  return { spawn, killed: () => wasKilled }
 }
 
 const ESC = String.fromCharCode(27)
@@ -147,6 +171,34 @@ describe("buildStatusPayload", () => {
     expect(JSON.stringify(p)).not.toContain("null")
   })
 
+  test("§B-3 non-finite numeric facts are OMITTED, never serialized as null", () => {
+    // JSON.stringify(NaN) / JSON.stringify(Infinity) both yield `null`, which
+    // breaks the documented "omit rather than null" invariant — a CC script
+    // branches on key presence and would mistake `null` for a real value.
+    const p = buildStatusPayload({
+      totalCostUsd: Number.NaN,
+      totalDurationMs: Number.POSITIVE_INFINITY,
+      totalApiDurationMs: Number.NEGATIVE_INFINITY,
+      contextWindow: Number.POSITIVE_INFINITY,
+    })
+    // The serialized payload must contain NO `null` at all …
+    expect(JSON.stringify(p)).not.toContain("null")
+    // … and the non-finite keys must be ABSENT (not present-null).
+    expect(p.cost).toBeUndefined() // every cost field was non-finite ⇒ dropped
+    expect(Object.keys(p)).not.toContain("context_window")
+  })
+
+  test("§B-3 a finite number survives alongside a non-finite sibling", () => {
+    const p = buildStatusPayload({
+      totalCostUsd: 0.5,
+      totalDurationMs: Number.NaN,
+      contextWindow: 1000,
+    })
+    expect(p.cost).toEqual({ total_cost_usd: 0.5 })
+    expect(p.context_window).toBe(1000)
+    expect(JSON.stringify(p)).not.toContain("null")
+  })
+
   test("§B-3b a partial sub-object keeps only the present keys", () => {
     const p = buildStatusPayload({ modelId: "m", totalCostUsd: 1 })
     expect(p.model).toEqual({ id: "m" })
@@ -154,20 +206,52 @@ describe("buildStatusPayload", () => {
     expect(p.model && "display_name" in p.model).toBe(false)
   })
 
-  test("§B-4 NO secrets — payload JSON has no token/key/secret material", () => {
-    // The view shape has no credential slot; even if a host passed token-ish
-    // strings into legit fields they'd be visible, but our fields never carry
-    // secrets. Assert the serialized payload contains none of the danger words
-    // for a fully-populated benign view.
-    const p = buildStatusPayload({
+  test("§B-4 NON-tautological: explicit secret fields are DROPPED (allowlist, not denylist)", () => {
+    // The previous §B-4 was tautological — benign input never contained the
+    // danger words, so "no secrets in output" was trivially true. Here we FEED
+    // explicit secret-shaped fields alongside the known ones (cast through `any`
+    // to bypass the typed view). If `buildStatusPayload` were a passthrough /
+    // denylist it would leak them; because it is an ALLOWLIST (copies ONLY named
+    // fields), every smuggled secret must be ABSENT from the serialized payload.
+    const hostile = {
+      // legit fields that SHOULD survive
       cwd: "/repo",
       modelId: "gpt-5",
       totalCostUsd: 0.1,
       contextWindow: 1000,
-    })
-    const json = JSON.stringify(p).toLowerCase()
-    for (const danger of ["api_key", "apikey", "bearer", "secret", "token", "password"]) {
-      expect(json).not.toContain(danger)
+      // smuggled credentials that MUST NOT survive
+      apiKey: "sk-SECRET",
+      ANTHROPIC_API_KEY: "sk-ant-LEAK",
+      OPENAI_API_KEY: "sk-openai-LEAK",
+      authorization: "Bearer xyz",
+      password: "hunter2",
+      token: "ghp_LEAKLEAK",
+      env: { AWS_SECRET_ACCESS_KEY: "leak", HOME: "/root" },
+    }
+    const p = buildStatusPayload(hostile as unknown as Parameters<typeof buildStatusPayload>[0])
+    const json = JSON.stringify(p)
+    // The legit allowlisted facts DID survive (proves we copied, not just nuked).
+    expect(p.cwd).toBe("/repo")
+    expect(p.model).toEqual({ id: "gpt-5" })
+    // EVERY smuggled secret value + key is absent.
+    for (const leak of [
+      "sk-SECRET",
+      "sk-ant-LEAK",
+      "sk-openai-LEAK",
+      "Bearer xyz",
+      "hunter2",
+      "ghp_LEAKLEAK",
+      "AWS_SECRET_ACCESS_KEY",
+      "apiKey",
+      "ANTHROPIC_API_KEY",
+      "authorization",
+      "password",
+    ]) {
+      expect(json).not.toContain(leak)
+    }
+    // And no `env` / token / apikey KEY made it into the payload object.
+    for (const key of ["apiKey", "ANTHROPIC_API_KEY", "authorization", "password", "token", "env"]) {
+      expect(Object.keys(p)).not.toContain(key)
     }
   })
 })
@@ -197,6 +281,67 @@ describe("formatStatusOutput (pure)", () => {
     const out = formatStatusOutput(colored, 4)
     expect(stripAnsi(out)).toBe("ABCD")
     expect(out.endsWith(`${ESC}[0m`)).toBe(true)
+  })
+
+  test("§F fits-under-width with an UNCLOSED SGR ⇒ reset appended (no bleed)", () => {
+    // An open background+fg SGR that fits under width must STILL be reset, or it
+    // bleeds color into the prompt printed below the status line.
+    const out = formatStatusOutput(`${ESC}[41;97mALERT`, 80)
+    expect(stripAnsi(out)).toBe("ALERT")
+    expect(out.endsWith(`${ESC}[0m`)).toBe(true)
+  })
+
+  test("§F already-reset line is NOT double-reset", () => {
+    const closed = `${ESC}[31mok${ESC}[0m`
+    expect(formatStatusOutput(closed, 80)).toBe(closed)
+  })
+
+  test("§F width<=0 with an unclosed SGR ⇒ reset appended (no bleed)", () => {
+    const out = formatStatusOutput(`${ESC}[41;97mNOWIDTH`, 0)
+    expect(stripAnsi(out)).toBe("NOWIDTH")
+    expect(out.endsWith(`${ESC}[0m`)).toBe(true)
+  })
+
+  test("§F plain text (no SGR) is never reset-padded", () => {
+    expect(formatStatusOutput("plain", 80)).toBe("plain")
+    expect(formatStatusOutput("plain", 0)).toBe("plain")
+  })
+
+  test("§F OSC-8 hyperlink fitting under width ⇒ terminated, no bare escape", () => {
+    // OSC-8 hyperlink: ESC ] 8 ; ; URL ST  TEXT  ESC ] 8 ; ; ST  (ST = ESC \).
+    const ST = `${ESC}\\`
+    const link = `${ESC}]8;;https://x${ST}LINK${ESC}]8;;${ST}`
+    const out = formatStatusOutput(link, 80)
+    // Visible width counts only LINK (4 cols), well under 80 ⇒ returned intact.
+    expect(out).not.toMatch(/\x1b\]$/) // no dangling bare OSC introducer
+    expect(out).not.toMatch(/\x1b\[$/) // no dangling bare CSI introducer
+    // The visible text survives.
+    expect(out.includes("LINK")).toBe(true)
+  })
+
+  test("§F truncation never leaves a bare/unterminated escape (OSC + CSI)", () => {
+    const ST = `${ESC}\\`
+    // An OSC-8 hyperlink wrapping a long label, plus trailing SGR color — cut at
+    // a width that lands INSIDE the link payload. Result must not end mid-escape.
+    const input = `${ESC}]8;;https://example.com${ST}${ESC}[31mABCDEFGHIJKLMNOP${ESC}[0m`
+    const out = formatStatusOutput(input, 5)
+    // Exactly `width` visible columns — measured OSC-aware (the SGR-only
+    // `stripAnsi` would miscount the hyperlink URL as visible text).
+    expect(stripStatusAnsi(out).length).toBe(5)
+    // No dangling escape introducer of any kind.
+    expect(out.endsWith(ESC)).toBe(false)
+    expect(out).not.toMatch(/\x1b\[$/)
+    expect(out).not.toMatch(/\x1b\]$/)
+    expect(out).not.toMatch(/\x1b\][^\x07\x1b]*$/) // no unterminated OSC tail
+  })
+
+  test("§F a truncated/incomplete CSI in input is not split mid-sequence", () => {
+    // Input ends with an incomplete CSI (no final letter). The tokenizer must
+    // consume it as one unit (or drop it) — never emit a half escape.
+    const input = `${ESC}[31mABCDEFGH${ESC}[3` // dangling `ESC[3`
+    const out = formatStatusOutput(input, 4)
+    expect(stripAnsi(out)).toBe("ABCD")
+    expect(out).not.toMatch(/\x1b\[3$/) // the dangling CSI must not leak out
   })
 })
 
@@ -236,6 +381,27 @@ describe("runStatusCommand — fake spawner", () => {
     expect(r.text).toBe("")
     expect(r.degraded).toBe(true)
     expect(h.killed()).toBe(true)
+  })
+
+  test("§R-5b wall-clock cap settles even when child NEVER closes/exits", async () => {
+    // The non-vacuous version of §R-5: a child whose `kill()` does NOT resolve
+    // `exited` and whose stdout NEVER closes. Without a wall-clock race the
+    // runner's `Promise.all` would hang past the 5s cap forever. A short injected
+    // `hardCapMs` proves the runner ALWAYS settles to {text:'', degraded:true}
+    // and kills the child — within the cap + slack.
+    const d = deadSpawner()
+    const start = Date.now()
+    const r = await runStatusCommand({ command: "x" }, samplePayload, {
+      spawn: d.spawn,
+      width: 80,
+      hardCapMs: 30,
+    })
+    const elapsed = Date.now() - start
+    expect(r.text).toBe("")
+    expect(r.degraded).toBe(true)
+    expect(d.killed()).toBe(true)
+    // Settled near the cap, NOT at the 5s hard cap and NOT forever.
+    expect(elapsed).toBeLessThan(2000)
   })
 
   test("§R-6 non-zero exit ⇒ degraded, but stdout surfaced", async () => {
@@ -322,5 +488,79 @@ describe("runStatusCommand — REAL subprocess (args-based, no shell)", () => {
     )
     expect(r.text).toBe("")
     expect(r.degraded).toBe(true)
+  })
+
+  test("§SEC(real) child does NOT inherit parent secrets (scrubEnv chokepoint)", async () => {
+    // FAITHFUL leak test: the secret must be present in the env of the process
+    // that calls `runStatusCommand` AT START (Bun snapshots env at spawn, so a
+    // runtime `process.env[K]=…` would NOT reach an inherit-all child — and would
+    // make this test vacuous). So we spawn a NESTED bun runner with the secret in
+    // ITS env, and have it invoke the real default spawner. The buggy version
+    // (no `env` → inherit-all) leaks 'sk-LEAK'; the scrubbed version prints "".
+    const driver = `
+      import { runStatusCommand } from ${JSON.stringify(`${import.meta.dir}/../status-command-runner`)}
+      const r = await runStatusCommand(
+        { command: ["sh", "-c", "printf '%s' \\"$MY_FAKE_SECRET\\""] },
+        { hook_event_name: "Status" },
+        { width: 8000 },
+      )
+      process.stdout.write("CHILDSAW:" + r.text)
+    `
+    const proc = Bun.spawn(["bun", "run", "-"], {
+      stdin: new TextEncoder().encode(driver),
+      stdout: "pipe",
+      stderr: "ignore",
+      env: { ...process.env, MY_FAKE_SECRET: "sk-LEAK" },
+    })
+    const out = await new Response(proc.stdout).text()
+    await proc.exited
+    expect(out).toContain("CHILDSAW:") // the nested runner actually ran
+    expect(out).not.toContain("sk-LEAK") // …and the secret never reached the grandchild
+  })
+
+  test("§SEC statusChildEnv carries only allowlisted keys, no secret names", () => {
+    // Unit-level proof the env is an ALLOWLIST (not a denylist): the returned
+    // record's keys are a subset of the shared allowlist, and obviously-secret
+    // names never appear even if present in the parent env.
+    const env = statusChildEnv()
+    const ALLOWED = new Set([
+      "PATH",
+      "HOME",
+      "LANG",
+      "LC_ALL",
+      "TZ",
+      "TERM",
+      "TMPDIR",
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "NO_PROXY",
+      "http_proxy",
+      "https_proxy",
+      "no_proxy",
+      "SSL_CERT_FILE",
+      "SSL_CERT_DIR",
+      "VIRTUAL_ENV",
+    ])
+    for (const k of Object.keys(env)) expect(ALLOWED.has(k)).toBe(true)
+    for (const danger of [
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "AWS_SECRET_ACCESS_KEY",
+      "GITHUB_TOKEN",
+    ]) {
+      expect(Object.keys(env)).not.toContain(danger)
+    }
+  })
+
+  test("§SEC(real) child KEEPS a minimal safe env (PATH survives)", async () => {
+    // Scrubbing must not nuke the safe baseline — PATH (and friends) is on the
+    // allowlist so the script can still find binaries.
+    const r = await runStatusCommand(
+      { command: ["sh", "-c", 'printf "%s" "$PATH"'] },
+      samplePayload,
+      { width: 8000 },
+    )
+    expect(r.degraded).toBe(false)
+    expect(r.text.length).toBeGreaterThan(0)
   })
 })

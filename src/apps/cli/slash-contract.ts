@@ -187,6 +187,14 @@ export interface SlashContext {
    *  the rest of the presence-gated panels). The wire maps `TaskRecord`
    *  → {@link AgentFleetRow}; this slot never imports `@/subagent` VALUES. */
   readonly agents?: (() => readonly AgentFleetRow[]) | undefined
+  /** Ticket 18 (V1) — READ-ONLY background-turn portal view. `/background`
+   *  lists / reattaches (print-only) / cancels detached turns. Present iff
+   *  `QUANTA_BG_TURN` is on AND the surface built a portal; absent ⇒
+   *  `/background` prints "not wired" + exit 0 (default-OFF byte-identical).
+   *  The view CANNOT detach a new turn nor re-enter the loop. */
+  readonly background?:
+    | import("./repl/background-turn-portal").BackgroundPortalView
+    | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

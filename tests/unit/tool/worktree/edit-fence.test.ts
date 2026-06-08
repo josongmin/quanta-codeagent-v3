@@ -19,6 +19,7 @@ import path from "node:path"
 import type { ActiveWorktree, ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { bashTool } from "@/tool/bash"
 import { editTool } from "@/tool/edit"
+import { readTool } from "@/tool/read"
 
 const dirs: string[] = []
 const makeDir = async (label: string): Promise<string> => {

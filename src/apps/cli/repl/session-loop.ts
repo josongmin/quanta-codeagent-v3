@@ -175,6 +175,13 @@ export interface RunSessionLoopDeps {
    *  path (byte-identical). `weave`/`interrupt` route through {@link handleInboundLine}
    *  (only effective when `conversationActions` is also present). */
   readonly inboundMode?: { current: InboundMode }
+  /** Ticket 18 (V1) — the background-turn portal (present iff `QUANTA_BG_TURN`).
+   *  When wired AND the WEAVE guard allows it, the INTERACTIVE turn passes
+   *  `onMovedToBackground` to `runOneTurn` so Ctrl+B detaches the running turn
+   *  into this portal (the body keeps streaming; the loop returns to a fresh
+   *  prompt). Absent ⇒ Ctrl+B is unwired ⇒ the turn path is byte-identical
+   *  (default-OFF). The one-shot path NEVER wires it (no prompt to return to). */
+  readonly backgroundPortal?: import("./background-turn-portal").BackgroundTurnPortal
 }
 
 /** §steer — UTF-8 byte ceiling for a single mid-turn inbound line (the §steer
@@ -371,6 +378,42 @@ const buildPromptPipelineNotifyDeps = (args: {
   ...(args.contextWarning !== undefined ? { contextWarning: args.contextWarning } : {}),
 })
 
+/** Ticket 18 (V1) — WEAVE GUARD. Decide whether the interactive turn should wire
+ *  the Ctrl+B `onMovedToBackground` sink. Pure predicate (no I/O) so it is unit-
+ *  testable in isolation.
+ *
+ *  Ctrl+B detaches the running turn — the body keeps streaming, and the loop
+ *  returns to a fresh prompt. That is INCOMPATIBLE with WEAVE mode, where a
+ *  mid-turn line is blended into the CURRENT turn (backgrounding would orphan the
+ *  live blend), and with an in-flight INTERRUPT (the surface is mid-resume of a
+ *  partial turn). So Ctrl+B is wired ONLY when:
+ *    - a portal exists (`QUANTA_BG_TURN`),
+ *    - the inbound mode is NOT `weave`, AND
+ *    - the conversation-action surface is absent OR idle (no interrupted turn).
+ *  Any other case ⇒ Ctrl+B is a no-op (the FSM branch is never wired) and the
+ *  surface prints "background disabled in weave mode" at press time. */
+const shouldWireBackground = (args: {
+  readonly portal: import("./background-turn-portal").BackgroundTurnPortal | undefined
+  readonly inboundMode: { current: InboundMode } | undefined
+  readonly conversationActions: ConversationActionSurface | undefined
+}): boolean => {
+  if (args.portal === undefined) return false
+  if (args.inboundMode?.current === "weave") return false
+  const ca = args.conversationActions
+  if (ca !== undefined && ca.activeTurnRef.current.isInterrupted) return false
+  return true
+}
+
+/** Ticket 18 (V1) — derive a short, single-line portal label from the prompt
+ *  head. Collapses whitespace + truncates so the `/background list` table stays
+ *  scannable (the full prompt is never the label). NO-THROW on empty input. */
+const BG_LABEL_MAX = 48
+const backgroundTurnLabel = (text: string): string => {
+  const oneLine = text.replace(/\s+/g, " ").trim()
+  if (oneLine.length === 0) return "(empty prompt)"
+  return oneLine.length > BG_LABEL_MAX ? `${oneLine.slice(0, BG_LABEL_MAX - 1)}…` : oneLine
+}
+
 const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome => {
   switch (outcome.reason) {
     case "completed":
@@ -422,6 +465,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     notify,
     notifyCwdBasename,
     contextWarning,
+    backgroundPortal,
   } = deps
   const {
     abort,
@@ -870,6 +914,18 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         if (next === null) break
         await renderAwayRecapIfReturned(awaySummary, wasIdle, surfaceState.history, abort.signal)
         const prompt = normalizeCliPromptInput(next)
+        // Ticket 18 (V1) — discoverable turn-start hint. Painted ONLY when the
+        // Ctrl+B detach is actually wired for THIS turn (portal present + WEAVE
+        // guard satisfied) so the affordance never advertises a no-op key.
+        if (
+          shouldWireBackground({
+            portal: backgroundPortal,
+            inboundMode: deps.inboundMode,
+            conversationActions: deps.conversationActions,
+          })
+        ) {
+          process.stderr.write("\x1b[2m· Ctrl+B background · Esc Esc cancel\x1b[0m\n")
+        }
         // #8 last-mile (jun-6) — the concurrent in-turn reader wraps the awaited
         // turn (no-op passthrough when capture is off ⇒ byte-identical). The
         // turn-boundary reader (`promptSource.next` above) has already resolved +
@@ -891,6 +947,47 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
                   images: prompt.images,
                   turnSignal,
                 }),
+              // Ticket 18 (V1) — Ctrl+B detach. Wired ONLY when the portal exists
+              // AND the WEAVE guard allows it (see `shouldWireBackground`): in
+              // weave / mid-interrupt the sink is omitted ⇒ Ctrl+B is a no-op and
+              // the FSM is byte-identical. On detach: register the LIVE body
+              // promise + the turn's AbortController with the portal; the body
+              // keeps streaming, the loop returns to a fresh prompt (the
+              // `out.backgrounded` skip below), and the portal fires the existing
+              // notify port on completion.
+              ...(shouldWireBackground({
+                portal: backgroundPortal,
+                inboundMode: deps.inboundMode,
+                conversationActions: deps.conversationActions,
+              })
+                ? {
+                    onMovedToBackground: (handle) => {
+                      const taskId = backgroundPortal?.detach({
+                        label: backgroundTurnLabel(prompt.text),
+                        promise: handle.body,
+                        abort: handle.turnAbort,
+                      })
+                      if (taskId !== undefined) {
+                        // SOTA++ UX: on-detach hint + a prompt-re-entry breadcrumb.
+                        process.stderr.write(
+                          `\x1b[2m⏭ moved to background — /background to manage\x1b[0m\n`,
+                        )
+                        process.stderr.write(
+                          `\x1b[2m↳ 1 turn running in background (task ${taskId})\x1b[0m\n`,
+                        )
+                        // REUSE the existing notify port for completion. No-throw:
+                        // both `then`/`catch` paths fire a single onTurnComplete.
+                        const fireDone = (ok: boolean): void =>
+                          notify?.onTurnComplete({
+                            durationMs: 0,
+                            ok,
+                            cwdBasename: `${notifyCwdBasename ?? ""} · background task ${taskId} done`,
+                          })
+                        handle.body.then(() => fireDone(true)).catch(() => fireDone(false))
+                      }
+                    },
+                  }
+                : {}),
             },
             {
               onAfterResult: (result) => {
@@ -916,6 +1013,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
             },
           ),
         )
+        // Ticket 18 (V1) — the turn was moved to the background (Ctrl+B). The
+        // portal now owns the live body promise; skip the history fold / notify
+        // / suggestion and return to `promptSource.next` for a FRESH prompt. V1
+        // does NOT fold a backgrounded turn into surface `history` (the SDK
+        // session is SSOT — documented limitation, not a bug).
+        if (out.backgrounded === true) continue
         process.stderr.write("\n")
         if (out.turnAborted || out.result === undefined) {
           lastTurnOutcome = "fail"

@@ -17,6 +17,7 @@
  * absolute-path writes jailed to the session, never re-jailed to the worktree.
  */
 
+import { gateOn } from "@/shared"
 import type { ActiveWorktree, WorktreeSlotHandle } from "@/tool"
 
 /** Build a fresh session-scoped worktree slot. Starts empty (no active
@@ -38,3 +39,20 @@ export const createWorktreeSlot = (args: {
     sessionCwd: args.sessionCwd,
   }
 }
+
+/** ticket-11 (P8 worktree) finding #7 — mint the session-scoped active-worktree
+ *  slot when (and only when) `QUANTA_WORKTREE_TOOL` is on. Pure (env + a cwd in,
+ *  slot-or-undefined out) so the comp-root gate is unit-testable without a full
+ *  session boot. The slot carries the SESSION-RESOLVED jailed `bootCwd` as BOTH
+ *  the immutable repoRoot AND the sessionCwd jail root — the edit-fence keeps
+ *  absolute writes within it and NEVER widens it. Gate off ⇒ undefined ⇒ worktree
+ *  tools unregistered + bash/edit cwd byte-identical (default-OFF). Lives in this
+ *  library slice (not the CLI comp-root) so it stays importable by tests without
+ *  crossing the `@/apps/cli` slice fence. */
+export const mintActiveWorktreeSlot = (
+  envSource: Readonly<Record<string, string | undefined>>,
+  bootCwd: string,
+): WorktreeSlotHandle | undefined =>
+  gateOn(envSource, "QUANTA_WORKTREE_TOOL")
+    ? createWorktreeSlot({ repoRoot: bootCwd, sessionCwd: bootCwd })
+    : undefined

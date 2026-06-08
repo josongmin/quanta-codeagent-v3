@@ -490,6 +490,17 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // + AgentConfig.codeCellDispatchFactory, QUANTA_CODE_MODE); PERMANENT entry so
   // plan-mode dispatch never trips UnknownToolError when a host registers it.
   code_cell: "write_filesystem",
+  // ticket-11 (P8 git-worktree agent tools) — caller-wire, registered only when
+  // `QUANTA_WORKTREE_TOOL` mints `AgentConfig.activeWorktreeSlot`. PERMANENT
+  // entries so plan-mode dispatch classifies (not crashes with UnknownToolError)
+  // when a host wires them. `enter_worktree` SPAWNS a `git worktree add` (shell-
+  // backed, same posture as `bash` — plan mode forbids); `exit_worktree` tears
+  // down the worktree + branch (`git worktree remove`/`branch -D`, git mutating,
+  // same posture as git_commit); `worktree_status` is a read-only render of the
+  // slot + a `git status --porcelain` count (plan-safe, null).
+  enter_worktree: "bash_mutating",
+  exit_worktree: "git_mutating",
+  worktree_status: null,
 })
 
 /** SINGLE SOURCE OF TRUTH for the "caller-wire" tool-name allowlist.
@@ -617,6 +628,13 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   // code-mode (RFC jun-6-code-mode, Phase 1) — DefaultToolPorts.codeMode +
   // AgentConfig.codeCellDispatchFactory (QUANTA_CODE_MODE).
   "code_cell",
+  // ticket-11 (P8 git-worktree agent tools) — caller-wire, gated on
+  // AgentConfig.activeWorktreeSlot (QUANTA_WORKTREE_TOOL). Not enumerable from
+  // the static `defaultTools` surface, so listed here so the orphan-direction
+  // drift check stays exact.
+  "enter_worktree",
+  "exit_worktree",
+  "worktree_status",
 ] as const)
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}

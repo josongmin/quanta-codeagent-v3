@@ -90,6 +90,28 @@ type StatusInput = z.infer<typeof statusSchema>
  *  re-sanitizes anyway. */
 const WORKTREE_ID = "agent-worktree"
 
+/** The fixed on-disk path + branch the session worktree always uses. The id is a
+ *  per-session CONSTANT (see {@link WORKTREE_ID}), so the path/branch are
+ *  deterministic — which is what makes the crash-reconcile below safe to do
+ *  unconditionally (we only ever touch OUR own fixed slot, never a stranger's). */
+const fixedWorktreePath = (repoRoot: string): string =>
+  `${repoRoot}/.quanta/worktrees/${WORKTREE_ID}`
+const FIXED_WORKTREE_BRANCH = `fork-${WORKTREE_ID}`
+
+/** Crash recovery: the slot is in-memory only, so a crash can leave OUR fixed
+ *  worktree (path + branch) registered on disk. A fresh session's
+ *  `git worktree add` then collides ("already used by worktree"). Because the id
+ *  is a per-session constant, the leftover is unambiguously OURS — best-effort
+ *  tear it down + prune git's stale registrations BEFORE creating, so a crashed
+ *  session is recoverable without a manual `git worktree prune`. Idempotent +
+ *  never throws: when nothing was left this is a pair of no-op git calls. */
+const reconcileLeftoverWorktree = async (repoRoot: string): Promise<void> => {
+  await removeWorktree(fixedWorktreePath(repoRoot), repoRoot, {
+    branch: FIXED_WORKTREE_BRANCH,
+  })
+  await runShell("git worktree prune", { cwd: repoRoot })
+}
+
 /** Resolve the repo's default branch ref for `branchFrom:"fresh"`. Prefers the
  *  remote HEAD symbolic ref (`origin/HEAD` → `origin/main`); falls back to
  *  `origin/main` then `origin/master`. Returns the FIRST ref that exists so a
@@ -186,6 +208,12 @@ export const enterWorktreeTool: Tool<EnterInput> = {
     }
     const branchFrom: BranchFrom = input.branchFrom ?? "head"
     const baseRef = branchFrom === "fresh" ? await resolveFreshBaseRef(repoRoot) : "HEAD"
+    // Crash recovery: the slot is in-memory only, so a prior crash can leave OUR
+    // fixed worktree on disk; the duplicate-guard above only checks the live
+    // slot. Best-effort reconcile the deterministic leftover (path + branch are a
+    // per-session constant, so it is unambiguously ours) before creating, so a
+    // collision ("already used by worktree") cannot wedge a fresh session.
+    await reconcileLeftoverWorktree(repoRoot)
     try {
       const wt = await createPersistentWorktree(WORKTREE_ID, repoRoot, { baseRef })
       const active: ActiveWorktree = {
@@ -217,8 +245,23 @@ export const enterWorktreeTool: Tool<EnterInput> = {
   },
 }
 
-/** `exit_worktree` — clear the slot + tear down (clean) or guard (dirty). */
-export const exitWorktreeTool: Tool<ExitInput> = {
+/** Injectable dependencies for {@link makeExitWorktreeTool}. The default is the
+ *  real `@/runtime` `removeWorktree`; tests inject a stub that returns `false`
+ *  to exercise the cleanup-FAILURE branch deterministically (a genuine
+ *  `git worktree remove` failure is hard to force, and "already gone" is treated
+ *  as success by the CORE). */
+export interface ExitWorktreeDeps {
+  readonly removeWorktree: typeof removeWorktree
+}
+
+const DEFAULT_EXIT_DEPS: ExitWorktreeDeps = { removeWorktree }
+
+/** Build `exit_worktree` over injectable cleanup deps. The exported
+ *  {@link exitWorktreeTool} is `makeExitWorktreeTool()` with the real remover, so
+ *  it is byte-identical to the pre-factory version. */
+export const makeExitWorktreeTool = (
+  deps: ExitWorktreeDeps = DEFAULT_EXIT_DEPS,
+): Tool<ExitInput> => ({
   name: "exit_worktree",
   description:
     "Exit the active worktree and restore the session working directory. If the " +
@@ -275,23 +318,40 @@ export const exitWorktreeTool: Tool<ExitInput> = {
       )
       return
     }
-    // Tear down the worktree + branch (force:true discards a dirty tree). The
-    // slot is cleared regardless so the session is never wedged "inside" a
-    // worktree that no longer exists.
-    const removed = await removeWorktree(active.worktreePath, active.repoRoot, {
+    // Tear down the worktree + branch (force:true discards a dirty tree).
+    const removed = await deps.removeWorktree(active.worktreePath, active.repoRoot, {
       branch: active.branch,
     })
+    // ticket-11 finding #4: a FAILED removal must NOT report ok:true + clear the
+    // slot — that leaves the EXACT wedging state (a registered worktree on disk +
+    // a session that thinks it exited). Surface a TYPED failure and KEEP the slot
+    // so the model can retry/inspect. Best-effort prune git's stale registrations
+    // first so the next enter's reconcile has a cleaner slate.
+    if (!removed) {
+      await runShell("git worktree prune", { cwd: active.repoRoot }).catch(() => undefined)
+      yield result(
+        false,
+        `exit_worktree: worktree cleanup FAILED — ${active.worktreePath} may still be registered. ` +
+          "The worktree is still active; retry exit_worktree, or remove it manually " +
+          `(git worktree remove --force ${active.worktreePath}).`,
+        { mode: "rejected", reason: "worktree_cleanup_failed" },
+      )
+      return
+    }
+    // Clean teardown: clear the slot so the session is never wedged "inside" a
+    // worktree that no longer exists.
     slot.clear()
-    const note = removed
-      ? `removed worktree ${active.worktreePath}`
-      : `warning: worktree cleanup reported failure (${active.worktreePath} may persist)`
     yield result(
       true,
-      `exited worktree (was on ${active.branch}). ${note}. ` +
+      `exited worktree (was on ${active.branch}). removed worktree ${active.worktreePath}. ` +
         "Relative bash/edit now run in the session working directory again.",
     )
   },
-}
+})
+
+/** `exit_worktree` — clear the slot + tear down (clean) or guard (dirty). The
+ *  default build uses the real `@/runtime` remover. */
+export const exitWorktreeTool: Tool<ExitInput> = makeExitWorktreeTool()
 
 /** `worktree_status` — report the current slot + uncommitted count. */
 export const worktreeStatusTool: Tool<StatusInput> = {

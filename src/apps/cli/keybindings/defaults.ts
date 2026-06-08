@@ -39,6 +39,10 @@ const ENTRIES: ReadonlyArray<readonly [KeySpec, KeyAction]> = [
   ["backspace", "delete-back"],
   ["delete", "delete-forward"],
   ["ctrl+x ctrl+e", "open-editor"],
+  // Ticket 18 (V1) — Ctrl+B = move running turn to background. ADVERTISING ONLY
+  // (the reader has no branch for it; the live binding is the per-turn cancel
+  // FSM). Listed so the default map + `/help` show the chord.
+  ["ctrl+b", "move-to-background"],
 ]
 
 export const DEFAULT_KEYBINDINGS: KeybindingMap = new Map(ENTRIES)

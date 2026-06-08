@@ -19,6 +19,13 @@ export interface RunOneTurnResult<R> {
    *  AND the outer abort was NOT also fired. Use this to distinguish "user
    *  cancelled this turn" from "the whole REPL is shutting down". */
   readonly turnAborted: boolean
+  /** Ticket 18 (V1) — true iff the user pressed Ctrl+B and the turn was MOVED to
+   *  the background. When set: `result` is `undefined`, `onAfterResult` was NOT
+   *  fired, the body was NOT cancelled (it keeps running, handed to the portal
+   *  via `onMovedToBackground`), and the host should `continue` the loop to a
+   *  fresh prompt (NOT fold history). Absent ⇒ the legacy synchronous turn path
+   *  ran (byte-identical default-OFF). */
+  readonly backgrounded?: boolean
 }
 
 /** Renderers + sinks the per-turn wrapper invokes. Each is OPTIONAL — when
@@ -62,6 +69,17 @@ export interface RunOneTurnDeps<R> {
    *  signal})`. Interactive path: `run({...deps, signal})` where `run` is
    *  the lambda passed by `runInteractive`'s `wrapTurn`. */
   readonly body: (turnSignal: AbortSignal) => Promise<R>
+  /** Ticket 18 (V1) — Ctrl+B detach handler. When wired, the runner installs a
+   *  `onBackground` sink on the cancel FSM and races the body against a
+   *  background-signal. If Ctrl+B wins, the runner hands the host the STILL-LIVE
+   *  body promise + the turn's AbortController (so the portal can observe/cancel
+   *  it) and returns `{ backgrounded:true, result:undefined }` WITHOUT firing
+   *  `onAfterResult` and WITHOUT aborting the body. Absent ⇒ no Ctrl+B sink is
+   *  wired and the turn runs the legacy synchronous path (byte-identical). */
+  readonly onMovedToBackground?: (handle: {
+    readonly body: Promise<R>
+    readonly turnAbort: AbortController
+  }) => void
   /** Optional surface-stream side-channel — currently unused by the wrapper
    *  itself (the indicator already tees via `TeeStream`), kept for forward
    *  compat with future per-turn renderers (e.g. progress audit). */
@@ -100,11 +118,25 @@ export const runOneTurn = async <R>(
   const { outerAbort, statusBar, turnIndicator, turnSummary, escWindowMs, body } = deps
   const turnAbort = new AbortController()
   const turnSignal = AbortSignal.any([outerAbort.signal, turnAbort.signal])
+  // Ticket 18 (V1) — background-signal promise. Resolves (with the sentinel)
+  // ONLY when the user presses Ctrl+B AND the host wired `onMovedToBackground`.
+  // When the handler is absent, `onBackground` is never installed on the FSM
+  // (so the Ctrl+B branch is skipped, byte-identical) and this promise never
+  // resolves — the race below degrades to a single `body(...)` await.
+  const BG = Symbol("backgrounded")
+  let signalBackground: (() => void) | undefined
+  const bgSignal = new Promise<typeof BG>((res) => {
+    signalBackground = () => res(BG)
+  })
   const cancel = installTurnCancel({
     statusBar,
     escWindowMs,
     onCancel: () => turnAbort.abort(),
     onAbort: () => outerAbort.abort(),
+    // Only wire the Ctrl+B sink when the host opted in; absent ⇒ FSM byte-identical.
+    ...(deps.onMovedToBackground !== undefined
+      ? { onBackground: () => signalBackground?.() }
+      : {}),
   })
   turnIndicator.start()
   const onAbortStopIndicator = (): void => turnIndicator.stop()
@@ -113,9 +145,26 @@ export const runOneTurn = async <R>(
   const startMs = Date.now()
   let result: R | undefined
   let turnAborted = false
+  let backgrounded = false
   try {
-    result = await body(turnSignal)
-    sinks.onAfterResult?.(result)
+    // Capture the live body promise ONCE so a Ctrl+B win can hand the SAME
+    // (still-running) promise to the portal without re-invoking `body`.
+    const bodyPromise = body(turnSignal)
+    const raced =
+      deps.onMovedToBackground !== undefined
+        ? await Promise.race([bodyPromise.then((r) => ({ r })), bgSignal])
+        : { r: await bodyPromise }
+    if (raced === BG) {
+      // Ctrl+B won the race: hand the LIVE body promise + the turn's abort
+      // controller to the host (portal). Do NOT await the body again, do NOT
+      // abort it (it keeps running), and do NOT fire onAfterResult.
+      backgrounded = true
+      result = undefined
+      deps.onMovedToBackground?.({ body: bodyPromise, turnAbort })
+    } else {
+      result = raced.r
+      sinks.onAfterResult?.(result)
+    }
   } catch (e) {
     // A turn-scoped abort is the user's intent; swallow the error.
     // Stop the indicator BEFORE the error transient so the status bar
@@ -135,5 +184,12 @@ export const runOneTurn = async <R>(
     // catches the error/abort path. Idempotent on a fresh collector.
     turnSummary.reset()
   }
-  return { result, durationMs: Date.now() - startMs, turnAborted }
+  return {
+    result,
+    durationMs: Date.now() - startMs,
+    turnAborted,
+    // Spread-by-presence: omit the flag entirely on the legacy path so the
+    // result shape is byte-identical when Ctrl+B was never wired/pressed.
+    ...(backgrounded ? { backgrounded: true } : {}),
+  }
 }

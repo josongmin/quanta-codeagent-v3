@@ -31,8 +31,10 @@
  * existing CLI slice — no new tsconfig path / slice fence needed.
  */
 
+import { scrubEnv } from "@/runtime"
+import { asScrubbedEnv, bunScrubbedSpawner } from "@/runtime/scrubbed-spawn"
 import { errMessage, logger } from "@/shared"
-import { stripAnsi, visibleWidth } from "@/ui/ui-helpers"
+import { stripAnsi } from "@/ui/ui-helpers"
 
 const log = logger.child({ caller: "statusline" })
 
@@ -132,6 +134,14 @@ export interface SessionStatusView {
  *  on key presence). */
 const defined = <T>(value: T | undefined): T | undefined => value
 
+/** Like {@link defined} but for NUMERIC facts: a non-finite number (NaN /
+ *  ±Infinity) is treated as ABSENT, because `JSON.stringify` serializes those as
+ *  `null` — which would break the documented "omit rather than null" invariant
+ *  (a CC script branches on key presence and would read `null` as a real value).
+ *  Returns `undefined` for non-finite (so `compact` drops the key). */
+const definedFinite = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isFinite(value) ? value : undefined
+
 /** Build a nested sub-object from defined entries; returns `undefined` if the
  *  sub-object would be empty (so the parent key is omitted entirely). */
 const compact = <T extends Record<string, unknown>>(obj: T): T | undefined => {
@@ -177,15 +187,15 @@ export const buildStatusPayload = (view: SessionStatusView): StatusPayload => {
   if (outputStyle !== undefined) payload.output_style = outputStyle
 
   const cost = compact({
-    total_cost_usd: defined(view.totalCostUsd),
-    total_duration_ms: defined(view.totalDurationMs),
-    total_api_duration_ms: defined(view.totalApiDurationMs),
-    total_lines_added: defined(view.totalLinesAdded),
-    total_lines_removed: defined(view.totalLinesRemoved),
+    total_cost_usd: definedFinite(view.totalCostUsd),
+    total_duration_ms: definedFinite(view.totalDurationMs),
+    total_api_duration_ms: definedFinite(view.totalApiDurationMs),
+    total_lines_added: definedFinite(view.totalLinesAdded),
+    total_lines_removed: definedFinite(view.totalLinesRemoved),
   })
   if (cost !== undefined) payload.cost = cost
 
-  if (view.contextWindow !== undefined) payload.context_window = view.contextWindow
+  if (definedFinite(view.contextWindow) !== undefined) payload.context_window = view.contextWindow
   if (view.exceeds200kTokens !== undefined) payload.exceeds_200k_tokens = view.exceeds200kTokens
   if (view.fastMode !== undefined) payload.fast_mode = view.fastMode
 
@@ -223,50 +233,108 @@ export const resolveRefreshIntervalMs = (raw: number | undefined): number | unde
   return Math.max(raw, MIN_REFRESH_INTERVAL_MS)
 }
 
+// ── ANSI tokenization + reset-correction (findings 3 & 4) ────────────────────
+const ESC = String.fromCharCode(27)
+const SGR_RESET = `${ESC}[0m`
+
+/** True iff the rendered line leaves an SGR style OPEN — it contains at least one
+ *  SGR sequence and does NOT already end with a reset. An open SGR bleeds color
+ *  into the prompt below, so the caller appends a reset. OSC (hyperlinks/title)
+ *  and cursor-move CSIs are self-terminating and paint no persistent color, so
+ *  they need no reset. */
+const hasOpenSgr = (s: string): boolean => {
+  const sgr = new RegExp(`${ESC}\\[[0-9;]*m`, "g")
+  return sgr.test(s) && !s.endsWith(SGR_RESET)
+}
+
+/** Append an SGR reset iff the line leaves a style open (idempotent — never
+ *  double-resets, never pads plain text). Applied on EVERY return path. */
+const withResetCorrection = (s: string): string => (hasOpenSgr(s) ? s + SGR_RESET : s)
+
+/** Consume a complete ANSI escape starting at index `i` of `s` (which begins
+ *  with ESC). Returns the end index (exclusive) of the whole sequence so the
+ *  caller slices `[i, end)` as one indivisible token and never cuts mid-escape:
+ *    - CSI  `ESC [ … <final 0x40-0x7E>` (SGR colors, cursor moves)
+ *    - OSC  `ESC ] … (BEL | ST)`        (hyperlinks `ESC]8;;URL`, window title)
+ *    - other `ESC <byte>` (covers the ST `ESC \\`) / a lone trailing ESC.
+ *  An UNTERMINATED sequence consumes to end-of-string so it is emitted whole or
+ *  dropped whole — never as a bare introducer. */
+const escapeSeqEnd = (s: string, i: number): number => {
+  const c = s[i + 1]
+  if (c === "[") {
+    let j = i + 2
+    while (j < s.length && !/[\x40-\x7e]/.test(s[j] ?? "")) j++
+    return j < s.length ? j + 1 : s.length // include final byte; else consume all
+  }
+  if (c === "]") {
+    let j = i + 2
+    while (j < s.length) {
+      if (s[j] === "\x07") return j + 1
+      if (s[j] === ESC && s[j + 1] === "\\") return j + 2
+      j++
+    }
+    return s.length // unterminated OSC ⇒ consume whole (never leak bare ESC])
+  }
+  return Math.min(i + 2, s.length)
+}
+
+/** Strip ALL ANSI escapes (CSI *and* OSC) to leave only visible text. The shared
+ *  `@/ui` `stripAnsi` is SGR-only (`ESC[…m`), so it MISCOUNTS a line carrying an
+ *  OSC hyperlink/title — leaving the URL in the "visible" width and cutting the
+ *  status line mid-sequence (finding 4). This OSC-aware strip is the runner's
+ *  width oracle. Exported so callers/tests measure rendered width consistently. */
+export const stripStatusAnsi = (s: string): string => {
+  let out = ""
+  let i = 0
+  while (i < s.length) {
+    if (s[i] === ESC) {
+      i = escapeSeqEnd(s, i) // skip the whole escape (zero visible width)
+      continue
+    }
+    out += s[i]
+    i += 1
+  }
+  return out
+}
+
+/** Visible columns of `s`, OSC-aware (counts neither CSI nor OSC). */
+export const statusVisibleWidth = (s: string): number => stripStatusAnsi(s).length
+
+/** Truncate `line` to `width` VISIBLE columns, consuming each ANSI escape (CSI
+ *  *and* OSC) as one indivisible token so a cut never splits a sequence. */
+const truncateToWidth = (line: string, width: number): string => {
+  let visible = 0
+  let out = ""
+  let i = 0
+  while (i < line.length && visible < width) {
+    if (line[i] === ESC) {
+      const end = escapeSeqEnd(line, i)
+      out += line.slice(i, end)
+      i = end
+      continue
+    }
+    out += line[i]
+    visible += 1
+    i += 1
+  }
+  return out
+}
+
 /**
  * Take the FIRST LINE of the command's stdout, leave ANSI intact, and truncate
- * to `width` VISIBLE columns (ANSI codes don't count toward width). When the
- * truncation cuts inside styled text, a trailing `\x1b[0m` reset is appended so
- * the surrounding prompt is never left colored (ANSI-reset correction). Pure.
- *
- * `width <= 0` / non-finite ⇒ no width truncation (the first line is returned
- * as-is). Exported for direct unit testing.
+ * to `width` VISIBLE columns. Reset-correction is applied on EVERY return path
+ * (fits / width<=0 / truncated) so an unclosed SGR never bleeds into the prompt.
+ * Pure. Exported for direct unit testing.
  */
 export const formatStatusOutput = (stdout: string, width: number): string => {
   // First line only — split on the first newline (CR/LF tolerant).
   const firstLine = stdout.split(/\r?\n/, 1)[0] ?? ""
-  if (!Number.isFinite(width) || width <= 0) return firstLine
-  if (visibleWidth(firstLine) <= width) return firstLine
-
-  // Walk the string, counting VISIBLE chars, skipping ANSI CSI sequences, until
-  // we hit `width` visible columns. Preserve every ANSI code seen so color
-  // is intact up to the cut.
-  let visible = 0
-  let out = ""
-  let i = 0
-  let sawAnsi = false
-  // CSI matcher: ESC '[' … 'm' — matches the canonical color-code shape.
-  const ESC = String.fromCharCode(27)
-  while (i < firstLine.length && visible < width) {
-    if (firstLine[i] === ESC && firstLine[i + 1] === "[") {
-      // Consume the full CSI sequence (up to and including the final letter).
-      let j = i + 2
-      while (j < firstLine.length && !/[a-zA-Z]/.test(firstLine[j] ?? "")) j++
-      out += firstLine.slice(i, j + 1)
-      sawAnsi = true
-      i = j + 1
-      continue
-    }
-    out += firstLine[i]
-    visible += 1
-    i += 1
-  }
-  // ANSI-reset correction: if we cut anywhere inside styled output, ensure the
-  // line ends reset so the prompt below isn't left colored.
-  if (sawAnsi && !out.endsWith(`${ESC}[0m`)) {
-    out += `${ESC}[0m`
-  }
-  return out
+  // No-truncation paths STILL get reset-correction (an unclosed SGR that "fits"
+  // bleeds into the prompt just as badly as a truncated one). OSC-aware width
+  // (NOT the SGR-only `visibleWidth`) so an OSC line isn't wrongly truncated.
+  if (!Number.isFinite(width) || width <= 0) return withResetCorrection(firstLine)
+  if (statusVisibleWidth(firstLine) <= width) return withResetCorrection(firstLine)
+  return withResetCorrection(truncateToWidth(firstLine, width))
 }
 
 /** Result of a status-command run. `text` is the rendered status line (possibly
@@ -289,16 +357,34 @@ export type StatusSpawner = (
   opts: { readonly stdin: Uint8Array; readonly cwd?: string | undefined },
 ) => StatusSpawnHandle
 
+/** The scrubbed env the status child receives. SECURITY (finding 5): a status
+ *  command is operator-authored, but it must NEVER inherit the parent's API keys
+ *  / tokens / secrets. We route through the SAME `scrubEnv` allowlist chokepoint
+ *  the command-hooks feature uses (`@/runtime` → `DEFAULT_ENV_ALLOWLIST`: PATH /
+ *  HOME / LANG / proxy vars only), so the leak is impossible by construction —
+ *  ONE source of truth, not a re-invented denylist. Exported for direct testing. */
+export const statusChildEnv = (): Record<string, string> => scrubEnv()
+
 /** Real Bun.spawn-backed spawner. Args-based (NO `shell:true`), pipes stdin from
  *  the provided bytes, captures stdout, ignores stderr (a status script's noise
- *  must never pollute the prompt). */
+ *  must never pollute the prompt). The child env is the SCRUBBED allowlist
+ *  ({@link statusChildEnv}) routed through the typed `spawnScrubbed` boundary —
+ *  a parent-secret leak would be a tsc error, not a runtime hazard. */
 const defaultSpawner: StatusSpawner = (argv, opts) => {
-  const proc = Bun.spawn([...argv], {
-    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
-    stdin: opts.stdin,
+  const proc = bunScrubbedSpawner([...argv], {
+    cwd: opts.cwd ?? process.cwd(),
+    env: asScrubbedEnv(statusChildEnv()),
     stdout: "pipe",
     stderr: "ignore",
-  })
+    // The payload bytes go on stdin (Bun.spawn accepts a Uint8Array directly).
+    // Passed via `extra` because the typed `stdin` slot only models the pipe
+    // MODE, not the byte source.
+    extra: { stdin: opts.stdin },
+  }) as {
+    stdout: ReadableStream<Uint8Array> | null
+    exited: Promise<number>
+    kill: () => void
+  }
   return {
     stdout: proc.stdout as ReadableStream<Uint8Array> | null,
     exited: proc.exited,
@@ -320,6 +406,11 @@ export interface RunStatusCommandOptions {
   readonly cwd?: string
   /** Test seam: override the spawner. */
   readonly spawn?: StatusSpawner
+  /** Test seam: override the ABSOLUTE wall-clock cap (ms). Defaults to
+   *  {@link HARD_CAP_MS}. The runner ALWAYS settles within this bound even if the
+   *  child never closes stdout / never exits (finding 6). Clamped to
+   *  `(0, HARD_CAP_MS]` — a test may shorten it but never extend past the cap. */
+  readonly hardCapMs?: number
 }
 
 /**
@@ -352,6 +443,16 @@ export const runStatusCommand = async (
 
   const width = opts.width ?? 0
   const timeoutMs = resolveTimeoutMs(undefined) // per-tick default, clamped to hard cap
+  // ABSOLUTE wall-clock bound (finding 6). The runner MUST settle within this
+  // even if the child never closes stdout AND never resolves `exited` — the
+  // `Promise.all` below would otherwise hang forever past the soft timeout (the
+  // soft timer only fires `kill()`, which a dead/uncooperative child ignores).
+  const hardCapMs = Math.min(
+    opts.hardCapMs !== undefined && Number.isFinite(opts.hardCapMs) && opts.hardCapMs > 0
+      ? opts.hardCapMs
+      : HARD_CAP_MS,
+    HARD_CAP_MS,
+  )
   const spawner = opts.spawn ?? defaultSpawner
   const stdinBytes = new TextEncoder().encode(`${JSON.stringify(payload)}\n`)
 
@@ -369,9 +470,29 @@ export const runStatusCommand = async (
     handle.kill()
   }, timeoutMs)
 
+  // The hard-cap watchdog: a wall-clock race so a child that never closes stdout
+  // / never exits can never wedge the prompt. On expiry it kills the child and
+  // resolves to the degraded sentinel — independent of whether the stream/exit
+  // promises ever settle.
+  const HARD_CAP = Symbol("statusline-hard-cap")
+  let capTimer: ReturnType<typeof setTimeout> | undefined
+  const capPromise = new Promise<typeof HARD_CAP>((resolve) => {
+    capTimer = setTimeout(() => {
+      handle.kill()
+      resolve(HARD_CAP)
+    }, hardCapMs)
+  })
+
   try {
     const stdoutPromise = handle.stdout ? readAll(handle.stdout) : Promise.resolve("")
-    const [stdout, exitCode] = await Promise.all([stdoutPromise, handle.exited])
+    const work = Promise.all([stdoutPromise, handle.exited] as const)
+    const raced = await Promise.race([work, capPromise])
+
+    if (raced === HARD_CAP) {
+      log.warn("statusLine command exceeded hard cap (never settled)", { hardCapMs })
+      return { text: "", degraded: true }
+    }
+    const [stdout, exitCode] = raced
 
     if (timedOut) {
       log.warn("statusLine command timed out", { timeoutMs })
@@ -389,6 +510,7 @@ export const runStatusCommand = async (
     return { text: "", degraded: true }
   } finally {
     clearTimeout(timer)
+    if (capTimer !== undefined) clearTimeout(capTimer)
   }
 }
 

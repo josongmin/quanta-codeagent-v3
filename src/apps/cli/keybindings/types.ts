@@ -31,6 +31,12 @@ export const KEY_ACTIONS = [
   "delete-back",
   "delete-forward",
   "open-editor",
+  // Ticket 18 (V1) — advertise the Ctrl+B "move running turn to background"
+  // intent. ADVERTISING ONLY: the actual detach lives in the per-turn cancel
+  // FSM (`turn-cancel-install.ts`), NOT in the raw-line reader's onKey chain
+  // (this action has no reader branch). Listed so `/help` + the keybindings
+  // config layer surface it as a bindable name.
+  "move-to-background",
 ] as const
 
 export type KeyAction = (typeof KEY_ACTIONS)[number]

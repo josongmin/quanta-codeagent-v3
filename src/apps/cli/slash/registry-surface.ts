@@ -26,6 +26,7 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { errMessage, logger, runtimeConfig } from "@/shared"
 import { renderAgentFleet } from "../agents-fleet-panel"
+import { backgroundCmd } from "../background-cmd"
 import { formatBranchesPanel } from "../branch-search-progress"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
@@ -856,6 +857,10 @@ export const buildSurfaceSlashCommands = (
   historyCmd,
   branchesCmd,
   agentsCmd,
+  // Ticket 18 (V1) — `/background` manages turns moved to the background (Ctrl+B).
+  // Always in the registry; the command itself prints "not wired" + exit 0 when
+  // `ctx.background` is absent (default-OFF byte-identical, parity with /agents).
+  backgroundCmd,
   forkCheckpointCmd,
   queueCmd,
   webCmd,

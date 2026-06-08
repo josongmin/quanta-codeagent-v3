@@ -76,6 +76,10 @@ import type { SegmentedUsageView } from "../status-line"
 import { createTextInbox, type TextInbox } from "../text-inbox"
 import type { VoiceLiveCtx } from "../voice-live-cmd"
 import type { CliFeatureConfig } from "./cli-feature-config"
+import {
+  type BackgroundTurnPortal,
+  createBackgroundTurnPortal,
+} from "./background-turn-portal"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import {
@@ -817,6 +821,14 @@ export const composeSurfaceWires = (
   const inboundMode: { current: InboundMode } = {
     current: parseInboundMode(envSource.QUANTA_INBOUND_MODE) ?? "queue",
   }
+  // Ticket 18 (V1) — background-turn portal. Env-gated `QUANTA_BG_TURN`: builds
+  // the pure portal that backs Ctrl+B (detach the running turn) + `/background`
+  // (manage detached turns). Absent ⇒ `undefined` ⇒ neither the loop's Ctrl+B
+  // sink nor the `/background` slot is wired (default-OFF byte-identical). Zero
+  // I/O at construction (pure registry).
+  const backgroundPortal = gateOn(envSource, "QUANTA_BG_TURN")
+    ? createBackgroundTurnPortal()
+    : undefined
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     granularRegistry,
     onPromptAssembled: promptAssembled.sink,

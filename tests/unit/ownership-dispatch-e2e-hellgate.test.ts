@@ -72,7 +72,11 @@ describe("§20.4 dispatch E2E — ownership gate fires in the real pipeline", ()
 
   test("DEFAULT-OFF: enforced:false ⇒ write outside owned RUNS (byte-identical)", async () => {
     const off = buildOwnershipPolicy({ owned: ["src"], cwd: "/repo", enforced: false })
-    const res = await dispatchTool(call("/repo/docs/x"), baseCfg(off ? { ownershipPolicy: off } : {}), perm)
+    const res = await dispatchTool(
+      call("/repo/docs/x"),
+      baseCfg(off ? { ownershipPolicy: off } : {}),
+      perm,
+    )
     expect(res.ok).toBe(true)
   })
 
