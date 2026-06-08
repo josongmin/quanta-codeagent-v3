@@ -68,7 +68,7 @@ const _assertToolRiskMirror: AssertEqual<ToolRiskMirror, ToolRisk> = true
 // collapse them into a single sentinel that documents the compile-time gate
 // and SUMS the remaining type-level checks into one runtime confirmation.
 describe("cross-slice mirror assertions (compile-time enforcement)", () => {
-  test("type-level `AssertEqual<A,B>` checks (3 pairs) compile if and only if mirrors agree", () => {
+  test("type-level `AssertEqual<A,B>` checks (4 pairs) compile if and only if mirrors agree", () => {
     // Each `_assert*` constant in this file is typed as `true | never`.
     // If a mirror diverges, the assignment from `= true` becomes a `never`
     // assignment and `tsc --noEmit` fails. This runtime line only confirms
@@ -80,6 +80,7 @@ describe("cross-slice mirror assertions (compile-time enforcement)", () => {
       _assertBlockerSurfaceMirror,
       _assertWorkingStateMirror,
       _assertWorkingStatePatchMirror,
-    ]).toEqual([true, true, true])
+      _assertToolRiskMirror,
+    ]).toEqual([true, true, true, true])
   })
 })

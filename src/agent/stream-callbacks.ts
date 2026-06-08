@@ -253,6 +253,10 @@ export const createStreamDispatcher = (
       mode: config.permission.mode,
       activeSkill,
       scopeReason: reason,
+      // `justification` is intentionally OMITTED: the model has no seam yet to
+      // attach a one-line rationale to a tool call, so the card's justification
+      // line stays empty (renders nothing). Wiring a model-supplied justification
+      // is a documented follow-up (ADR-0512 §UI/UX), not a silent gap.
       onConfirm: config.onConfirm,
       // ADR-0512 P3 — surface the INTERACTIVE escalation pair: a
       // `permission_escalation_requested` approval CARD (NOT a red error) fired

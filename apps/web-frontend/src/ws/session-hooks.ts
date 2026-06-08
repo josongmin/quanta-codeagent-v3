@@ -11,7 +11,6 @@
  */
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
-import type { SessionClient } from "./client"
 import type {
   ConnectionState,
   ImageBlock,
@@ -22,6 +21,7 @@ import type {
   SessionStateView,
   UiMessage,
 } from "../types/protocol"
+import type { SessionClient } from "./client"
 
 /**
  * `useConnectionState` — mirrors the client's connection state into React
@@ -108,21 +108,13 @@ export const initialTranscript: TranscriptState = {
   tokenUsage: ZERO_USAGE,
 }
 
-const appendTranscriptMessage = (
-  state: TranscriptState,
-  message: UiMessage,
-): TranscriptState => ({
+const appendTranscriptMessage = (state: TranscriptState, message: UiMessage): TranscriptState => ({
   ...state,
   messages: [...state.messages, message],
 })
 
-const assistantSignatureFromState = (
-  state: SessionStateView,
-): string | null => {
-  if (
-    typeof state.lastAssistantText !== "string" ||
-    state.lastAssistantText.length === 0
-  ) {
+const assistantSignatureFromState = (state: SessionStateView): string | null => {
+  if (typeof state.lastAssistantText !== "string" || state.lastAssistantText.length === 0) {
     return null
   }
   return `${String(state.messageCount)}:${state.lastAssistantText}`
@@ -170,9 +162,7 @@ const reconcileStreamingAssistant = (
   }
 }
 
-const pendingCompletionMessage = (
-  pending: PendingCompletion,
-): UiMessage => ({
+const pendingCompletionMessage = (pending: PendingCompletion): UiMessage => ({
   id: pending.eventId,
   role: "assistant",
   text: fallbackTextOf(pending),
@@ -232,8 +222,7 @@ const applySessionStateToTranscript = (
       }
     }
     const fallback = state.pendingCompletion ?? state.fallbackCompletion
-    const fallbackText =
-      fallback === null ? null : fallbackTextOf(fallback)
+    const fallbackText = fallback === null ? null : fallbackTextOf(fallback)
     const canRepairFallback =
       fallback !== null &&
       lastMessage?.role === "assistant" &&
@@ -292,9 +281,7 @@ const applySessionStateToTranscript = (
               ...lastMessage,
               text:
                 fallback.assistantText ??
-                (lastMessage.text.length > 0
-                  ? lastMessage.text
-                  : fallbackTextOf(fallback)),
+                (lastMessage.text.length > 0 ? lastMessage.text : fallbackTextOf(fallback)),
             },
           ],
         }
@@ -313,9 +300,8 @@ const applySessionStateToTranscript = (
   return state
 }
 
-const cloneImages = (
-  images: readonly ImageBlock[],
-): readonly ImageBlock[] => images.map((image) => ({ ...image }))
+const cloneImages = (images: readonly ImageBlock[]): readonly ImageBlock[] =>
+  images.map((image) => ({ ...image }))
 
 export const applySessionEventToTranscript = (
   state: TranscriptState,
@@ -357,15 +343,11 @@ export const applySessionEventToTranscript = (
       const nextUsage =
         event.tokenUsage !== undefined
           ? {
-              promptTokens:
-                state.tokenUsage.promptTokens + (event.tokenUsage.promptTokens ?? 0),
+              promptTokens: state.tokenUsage.promptTokens + (event.tokenUsage.promptTokens ?? 0),
               completionTokens:
-                state.tokenUsage.completionTokens +
-                (event.tokenUsage.completionTokens ?? 0),
-              totalTokens:
-                state.tokenUsage.totalTokens + (event.tokenUsage.totalTokens ?? 0),
-              costMicroUsd:
-                state.tokenUsage.costMicroUsd + (event.tokenUsage.costMicroUsd ?? 0),
+                state.tokenUsage.completionTokens + (event.tokenUsage.completionTokens ?? 0),
+              totalTokens: state.tokenUsage.totalTokens + (event.tokenUsage.totalTokens ?? 0),
+              costMicroUsd: state.tokenUsage.costMicroUsd + (event.tokenUsage.costMicroUsd ?? 0),
               turns: state.tokenUsage.turns + 1,
             }
           : state.tokenUsage
@@ -417,12 +399,7 @@ export const applySessionEventToTranscript = (
         },
       )
     case "session.state.updated":
-      return applySessionStateToTranscript(
-        state,
-        event.state,
-        ts,
-        event.eventId,
-      )
+      return applySessionStateToTranscript(state, event.state, ts, event.eventId)
     case "session.closed":
       return appendTranscriptMessage(state, {
         id: event.eventId,
@@ -481,7 +458,8 @@ const renderToolCompleted = (
   resultPreview: string | undefined,
   durationMs: number | undefined,
 ): string => {
-  const icon = outcome === "ok" ? "✓" : outcome === "denied" ? "🚫" : outcome === "timeout" ? "⏱" : "✗"
+  const icon =
+    outcome === "ok" ? "✓" : outcome === "denied" ? "🚫" : outcome === "timeout" ? "⏱" : "✗"
   const time = durationMs !== undefined ? ` · ${durationMs}ms` : ""
   const body = resultPreview !== undefined && resultPreview.length > 0 ? `  ${resultPreview}` : ""
   return `${icon} ${toolName}${time}${body}`
@@ -511,17 +489,9 @@ export const transcriptReducer = (
     case "session_event":
       return applySessionEventToTranscript(state, action.event)
     case "snapshot":
-      return applySessionStateToTranscript(
-        state,
-        action.snapshot.state,
-        action.receivedAt,
-      )
+      return applySessionStateToTranscript(state, action.snapshot.state, action.receivedAt)
     case "rejected":
-      return applyRejectedFrameToTranscript(
-        state,
-        action.frame,
-        action.timestamp,
-      )
+      return applyRejectedFrameToTranscript(state, action.frame, action.timestamp)
     case "client_message":
       return appendTranscriptMessage(state, {
         id: `client-${action.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
@@ -582,13 +552,8 @@ export const useSessionEvents = (
   modelSlug: string | null
   tokenUsage: CumulativeTokenUsage
 } => {
-  const [transcript, dispatch] = useReducer(
-    transcriptReducer,
-    initialTranscript,
-  )
-  const [sessionState, setSessionState] = useState<SessionStateView | null>(
-    null,
-  )
+  const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript)
+  const [sessionState, setSessionState] = useState<SessionStateView | null>(null)
 
   // Dedup set for SessionEvent.eventId — guards against the SAME event
   // arriving twice when hydration (HTTP replay of persisted events) overlaps
@@ -608,10 +573,7 @@ export const useSessionEvents = (
       }
     })
     const unsubSnapshots = client.onSnapshot((snapshot) => {
-      if (
-        activeSessionId !== null &&
-        activeSessionId !== snapshot.sessionId
-      ) {
+      if (activeSessionId !== null && activeSessionId !== snapshot.sessionId) {
         seenEventIdsRef.current = new Set()
         dispatch({ type: "reset" })
       }
@@ -642,17 +604,14 @@ export const useSessionEvents = (
     dispatch({ type: "reset" })
   }, [])
 
-  const appendClientMessage = useCallback(
-    (role: "system" | "error", text: string): void => {
-      dispatch({
-        type: "client_message",
-        role,
-        text,
-        timestamp: new Date().toISOString(),
-      })
-    },
-    [],
-  )
+  const appendClientMessage = useCallback((role: "system" | "error", text: string): void => {
+    dispatch({
+      type: "client_message",
+      role,
+      text,
+      timestamp: new Date().toISOString(),
+    })
+  }, [])
 
   return {
     messages: transcript.messages,
@@ -708,6 +667,33 @@ export const useSendTurn = (
   )
 }
 
+/**
+ * ADR-0512 P3 — sends an `approval.respond` command for a pending approval
+ * (the escalation card's 4 verbs collapse onto the protocol's approve/deny —
+ * see `EscalationCard`). Mirrors `useSendTurn`: a fresh `commandId` per send so
+ * the daemon dedupes at-least-once retries. No-op until the sessionId is known.
+ */
+export const useSendApprovalDecision = (
+  client: SessionClient,
+  sessionId: string | null,
+): ((approvalId: string, decision: "approve" | "deny") => void) => {
+  return useCallback(
+    (approvalId: string, decision: "approve" | "deny") => {
+      if (sessionId === null) return
+      const respond: SessionCommand = {
+        sessionId,
+        commandId: makeCommandId(),
+        issuedAt: new Date().toISOString(),
+        type: "approval.respond",
+        approvalId,
+        decision,
+      }
+      client.send(respond)
+    },
+    [client, sessionId],
+  )
+}
+
 const renderRejectedFrame = (frame: SessionRejectedFrame): string => {
   switch (frame.reason) {
     case "session_id_mismatch":
@@ -728,16 +714,11 @@ const makeCommandId = (): string => {
   // `uuid` npm dep entirely.
   if (
     typeof globalThis !== "undefined" &&
-    typeof (
-      globalThis as { crypto?: { randomUUID?: () => string } }
-    ).crypto?.randomUUID === "function"
+    typeof (globalThis as { crypto?: { randomUUID?: () => string } }).crypto?.randomUUID ===
+      "function"
   ) {
-    return (
-      globalThis as { crypto: { randomUUID: () => string } }
-    ).crypto.randomUUID()
+    return (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
   }
   // Fallback for headless / SSR / vitest-node where crypto isn't bound.
-  return `cmd-${Date.now().toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2, 10)}`
+  return `cmd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }

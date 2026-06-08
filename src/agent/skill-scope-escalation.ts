@@ -57,7 +57,16 @@ export interface EscalationResolution {
 }
 
 /** The 4 verbs offered on every escalation card (stable order — drives both the
- *  card buttons and the e2e contract). */
+ *  card buttons and the e2e contract).
+ *
+ *  KNOWN LIMITATION (audit-flagged, not a silent cap): `allow_once` is PRESENTED
+ *  but not yet distinctly RETURNABLE. The host touchpoint is `onConfirm`, whose
+ *  `ConfirmDecision` only carries `allow` / `deny` / `deny_and_steer` — it has no
+ *  once-vs-session bit. So an approval resolves to `allow_session` (widen) via
+ *  {@link resolutionOf} regardless of which approve button the surface drew. True
+ *  `allow_once` (dispatch this one call WITHOUT widening, re-ask next time) needs a
+ *  `ConfirmDecision` extension carrying the scope choice — tracked as follow-up. A
+ *  surface SHOULD therefore treat the two approve buttons as equivalent for now. */
 export const ESCALATION_OPTIONS: readonly EscalationOption[] = [
   "allow_once",
   "allow_session",

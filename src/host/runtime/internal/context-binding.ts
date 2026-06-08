@@ -783,6 +783,34 @@ const actionKeyOf = (
 const reasonOf = (action: ToolAction): PendingApprovalView["reason"] =>
   reasonCodeFor(inferReviewKind(action.tool, action.isReadOnly))
 
+/** ADR-0512 P3 — when a confirm is a skill-scope ESCALATION (`action.scopeContext`
+ *  present, set by `decideScopeEscalation`), project it onto the approval's
+ *  `scopeContext` so the web/IDE surface renders the rich "outside skill scope"
+ *  card (the CLI gets the same data via the `permission_escalation_requested`
+ *  stream event). `risk` is derived from the SAME `isReadOnly` predicate the
+ *  card and dispatch share (read-only ⇒ "read-only", else "mutating"), so the
+ *  card's risk and the dispatch decision can never disagree. A normal confirm
+ *  has no `scopeContext` ⇒ this returns `{}` ⇒ the field is omitted ⇒ the minted
+ *  approval is byte-identical to every pre-ADR-0512 approval. The model's
+ *  `justification` is forwarded only when the escalation carried one. */
+const escalationScopeFields = (action: ToolAction): Pick<PendingApprovalView, "scopeContext"> => {
+  const scope = action.scopeContext
+  if (scope === undefined) return {}
+  // `justification` is OPTIONAL on the escalation's `scopeContext` (Codex
+  // `on-request` rationale). The action carries it only when the escalation set
+  // it; forward it through when present so the card can render the row.
+  const justification = (scope as { justification?: string }).justification
+  return {
+    scopeContext: {
+      tool: action.tool,
+      activeSkill: scope.activeSkill,
+      reason: scope.reason,
+      risk: action.isReadOnly ? "read-only" : "mutating",
+      ...(justification !== undefined ? { justification } : {}),
+    },
+  }
+}
+
 const approvalPlaceholderOutcome = (messages: readonly Message[]): AgentOutcome => ({
   reason: "aborted",
   turns: 0,
@@ -822,6 +850,10 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       approvalId: crypto.randomUUID(),
       reason: reasonOf(action),
       requestedAt: new Date().toISOString(),
+      // ADR-0512 P3 — carry the skill-scope escalation context (if any) onto the
+      // approval so the web/IDE surface renders the rich card. Omitted for a
+      // normal confirm ⇒ byte-identical.
+      ...escalationScopeFields(action),
     }
     // A throwing shell extraction has no stable key; record the sentinel string
     // form only for diagnostics — it can never match a future lease.

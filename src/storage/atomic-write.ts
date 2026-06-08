@@ -34,7 +34,7 @@
  *  does not reach into `@/llm` for a 1-line wrapper. */
 
 import { createHash, randomBytes } from "node:crypto"
-import { copyFile, open, rename, unlink } from "node:fs/promises"
+import { chmod, copyFile, open, rename, stat, unlink } from "node:fs/promises"
 import { dirname } from "node:path"
 
 interface ErrnoLike {
@@ -120,20 +120,49 @@ export const defaultAtomicWriteSync: AtomicWriteSync = {
  *  - Any other rename failure: original untouched, temp remains on disk for
  *    operator recovery, error propagates.
  *
- *  Default-OFF byte-identical: the `edit`/`write` tools call this ONLY when
- *  the new `expected_hash` opt-in is present; absent that, they keep using
- *  the legacy `fs.writeFile` path. */
+ *  Mode preservation: when an ORIGINAL file already exists at `path`, its
+ *  permission bits are `stat`ed and re-applied (`chmod`) to the temp BEFORE the
+ *  rename so an existing `0o755` script does not silently drop to `0o644` (a
+ *  fresh temp inode is created with default perms). A NEW file (no original to
+ *  stat) keeps default perms — byte-identical to a plain create. Best-effort:
+ *  a chmod failure is swallowed.
+ *
+ *  ATOMIC-by-default: the `edit`/`write` tools route their commit through this
+ *  primitive whenever the port provides it (the hotter mutation path is now
+ *  crash-safe), falling back to `fs.writeFile` only for in-memory test fakes
+ *  that lack `writeFileAtomic`. The on-disk file CONTENT result is identical to
+ *  the old truncating write — only the write MECHANISM (temp+rename) and mode
+ *  preservation changed. */
 export const writeFileAtomic = async (
   path: string,
   content: string,
   sync: AtomicWriteSync = defaultAtomicWriteSync,
 ): Promise<void> => {
   const temp = `${path}.${TEMP_PREFIX}-${toHex(randomBytes(8))}`
+  // Capture the ORIGINAL final-path mode BEFORE writing the temp. The atomic
+  // commit creates a FRESH temp inode (default perms), so without re-applying
+  // the original's permission bits an existing `0o755` script silently drops to
+  // `0o644` across the temp+rename — the SAME regression already fixed in
+  // apply_patch's port. A NEW file (no original to stat ⇒ ENOENT) keeps default
+  // perms (mode left undefined ⇒ chmod skipped). Best-effort: a stat that
+  // throws for any other reason is swallowed (degrade to default perms).
+  let originalMode: number | undefined
+  try {
+    originalMode = (await stat(path)).mode
+  } catch {
+    // No original (new file) or stat unavailable ⇒ default perms, byte-identical
+    // to the pre-mode-preservation path for a brand-new file.
+  }
   // Phase A — write to temp, then FSYNC it. If either throws, the original is
   // untouched and the rename is skipped — no torn temp can be promoted.
   try {
     await Bun.write(temp, content)
     await sync.syncFile(temp)
+    // Carry the original mode onto the temp BEFORE the rename so the promoted
+    // inode keeps the source's permission bits. Best-effort — a chmod failure
+    // (or a platform that rejects it) degrades to default perms but never aborts
+    // the write (the bytes are the contract; mode preservation is the bonus).
+    if (originalMode !== undefined) await chmod(temp, originalMode).catch(() => undefined)
   } catch (e) {
     // Best-effort cleanup of any partial temp; swallow ENOENT.
     await unlink(temp).catch(() => undefined)

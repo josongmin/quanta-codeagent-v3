@@ -54,10 +54,30 @@ export interface SessionStateView {
   readonly lastOutcomeReason?: string
 }
 
+/**
+ * ADR-0512 P3 — skill-scope escalation context (mirrors `ApprovalScopeContext`
+ * in `src/protocol/session/snapshot.ts`). Present ONLY when an approval was
+ * raised because the model called a tool OUTSIDE the active skill's allowlist;
+ * the `EscalationCard` renders the rich yellow card from it. `risk` is the
+ * read-only-vs-mutating distinction (the daemon derives it from the action's
+ * `isReadOnly`). Absent ⇒ a plain approval (byte-identical pre-ADR-0512).
+ */
+export interface ApprovalScopeContext {
+  /** The out-of-scope tool the model called (the card's headline tool field). */
+  readonly tool: string
+  readonly activeSkill: string
+  readonly reason: string
+  /** The model's one-line rationale (Codex `on-request` justification). */
+  readonly justification?: string
+  readonly risk: "read-only" | "mutating"
+}
+
 export interface PendingApprovalView {
   readonly approvalId: string
   readonly reason: string
   readonly requestedAt: string
+  /** ADR-0512 P3 — present ONLY on a skill-scope escalation approval. */
+  readonly scopeContext?: ApprovalScopeContext
 }
 
 export interface ArtifactRef {
@@ -117,8 +137,7 @@ export interface TurnCancelCommand extends SessionCommandEnvelope<"turn.cancel">
  * Switch the session's identity/permission mode (mirrors upstream
  * `SessionIdentitySetCommand`). The UI does not emit this yet — it is mirrored
  * so the command contract stays member-for-member with the daemon. */
-export interface SessionIdentitySetCommand
-  extends SessionCommandEnvelope<"session.identity.set"> {
+export interface SessionIdentitySetCommand extends SessionCommandEnvelope<"session.identity.set"> {
   readonly mode: string
 }
 
@@ -247,8 +266,7 @@ export interface TurnLlmRequestEvent extends SessionEventEnvelope<"turn.llm.requ
  * mirrored so the contract guard and any future continuation UI stay in sync.
  * `phase` / `mode` / `reason` are narrowed to strings (upstream uses closed
  * `Responses*` enums the UI does not enumerate). */
-export interface TurnLlmContinuationEvent
-  extends SessionEventEnvelope<"turn.llm.continuation"> {
+export interface TurnLlmContinuationEvent extends SessionEventEnvelope<"turn.llm.continuation"> {
   readonly provider?: string
   readonly surfaceId: "openai-responses"
   readonly transportId: string

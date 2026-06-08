@@ -210,6 +210,31 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
     expect(frontendVersion).toBe(SESSION_PROTOCOL_VERSION)
   })
 
+  test("[adr-0512] approval scopeContext field mirrored canonical ↔ frontend (additive, type set unchanged)", () => {
+    // ADR-0512 P3 enriches the EXISTING `approval.requested` event with an
+    // OPTIONAL `scopeContext` field on `PendingApprovalView` (the escalation
+    // card payload). Adding a FIELD to an existing event interface must NOT add
+    // a new SESSION_EVENT_TYPE — so the member-set guards above stay green. Pin
+    // both: (a) the canonical type set still has exactly the legacy members
+    // (no `permission_escalation_*` event type leaked in), and (b) the
+    // `scopeContext` field literally appears in BOTH the canonical snapshot and
+    // the frontend mirror so the card's read of it can never silently break.
+    const canonical = new Set<string>(SESSION_EVENT_TYPES)
+    expect(canonical.has("approval.requested")).toBe(true)
+    // No NEW escalation event type — the enrichment is purely additive-field.
+    for (const t of canonical) {
+      expect(t.startsWith("permission_escalation")).toBe(false)
+    }
+    const canonicalSnapshot = readText(
+      join(REPO_ROOT, "src/protocol/session/snapshot.ts"),
+    )
+    const frontendProtocol = readText(FRONTEND_PROTOCOL_PATH)
+    for (const source of [canonicalSnapshot, frontendProtocol]) {
+      expect(source).toContain("scopeContext")
+      expect(source).toContain("activeSkill")
+    }
+  })
+
   test("[config] frontend CONFIG_WRITABLE_KEYS === daemon CONFIG_ALLOWED_KEYS (both directions)", () => {
     const frontendKeys = extractSetLiterals(
       readText(FRONTEND_SLASH_KNOBS_PATH),

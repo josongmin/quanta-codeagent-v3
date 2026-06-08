@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChatPanel } from "./components/ChatPanel"
 import { ConnectionUrlPill } from "./components/ConnectionUrlPill"
+import type { EscalationDecision } from "./components/EscalationCard"
 import { HeaderTitle } from "./components/HeaderTitle"
 import { HotkeyToast } from "./components/HotkeyToast"
 import { KnobsPanel } from "./components/KnobsPanel"
@@ -16,8 +17,8 @@ import {
 } from "./components/SlashPalette"
 import { StatusBar } from "./components/StatusBar"
 import { buildAuthSlashCommands } from "./components/slash-auth"
-import { buildLlmConfigSlashCommands, httpUrlFromWsUrl } from "./components/slash-llm-config"
 import type { KnobsEndpoint } from "./components/slash-knobs"
+import { buildLlmConfigSlashCommands, httpUrlFromWsUrl } from "./components/slash-llm-config"
 import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
@@ -34,9 +35,11 @@ import {
   type ObservabilityState,
   useObservabilityState,
 } from "./ws/observability-hooks"
+import { usePendingApprovals } from "./ws/pending-approvals"
 import {
   type CumulativeTokenUsage,
   useConnectionState,
+  useSendApprovalDecision,
   useSendTurn,
   useSessionEvents,
 } from "./ws/session-hooks"
@@ -236,6 +239,22 @@ export const App = (): JSX.Element => {
     return off
   }, [client])
   const sendTurn = useSendTurn(client, learnedSessionId)
+
+  // ADR-0512 P3 — live pending approvals (the escalation-card backing state).
+  // The daemon enriches a skill-scope escalation's `approval.requested` event
+  // with `scopeContext`; the card renders it and the user answers via
+  // `approval.respond`. Empty when no approval is pending ⇒ no card rendered.
+  const { approvals: pendingApprovals, dismiss: dismissApproval } = usePendingApprovals(client)
+  const sendApprovalDecision = useSendApprovalDecision(client, learnedSessionId)
+  const onApprovalDecision = useCallback(
+    (decision: EscalationDecision): void => {
+      sendApprovalDecision(decision.approvalId, decision.decision)
+      // Optimistic: drop the card immediately; the authoritative
+      // `approval.resolved` event then arrives and is a no-op for the dropped id.
+      dismissApproval(decision.approvalId)
+    },
+    [sendApprovalDecision, dismissApproval],
+  )
 
   const [draft, setDraft] = useState("")
   const [knobsPanelOpen, setKnobsPanelOpen] = useState(false)
@@ -600,15 +619,15 @@ export const App = (): JSX.Element => {
           onClearAllPendingImages={attachment.clear}
           sessionStatus={sessionState?.status ?? null}
           slashCommands={slashCommands}
+          pendingApprovals={pendingApprovals}
+          onApprovalDecision={onApprovalDecision}
         />
         {hasObservabilityData ? (
           <ObservabilityPane state={observability} usage={contextUsage} />
         ) : null}
       </div>
       <HotkeyToast />
-      {knobsPanelOpen ? (
-        <KnobsPanel endpoint={knobsEndpoint} onClose={closeKnobsPanel} />
-      ) : null}
+      {knobsPanelOpen ? <KnobsPanel endpoint={knobsEndpoint} onClose={closeKnobsPanel} /> : null}
     </div>
   )
 }

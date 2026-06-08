@@ -30,12 +30,21 @@ const staleWriteGuard = async (
   }
 }
 
-/** jun-6 tool-interrupt-behavior — commit the bytes inside the OPTIONAL critical
+/** ATOMIC-by-default commit (LANE 1) — route the write commit through the
+ *  port's crash-safe `writeFileAtomic` (temp+rename, mode-preserving) whenever
+ *  the port provides it, falling back to the plain truncating `fs.writeFile`
+ *  ONLY when the port lacks the atomic method (in-memory test fakes ⇒
+ *  byte-identical on-disk result). This makes the hottest mutation path
+ *  crash-safe: a throw mid-commit can never leave a torn / zero-length file
+ *  under the final name. The file CONTENT result is identical on every path;
+ *  only the write MECHANISM changed and an existing file's mode is preserved.
+ *
+ *  jun-6 tool-interrupt-behavior — the commit runs inside the OPTIONAL critical
  *  section so an in-flight ESC cannot tear a half-written file. `begin?.()` is
- *  undefined when the seam is unwired (the three OFF gates) ⇒ this is the same
- *  `fs.writeFile` call, byte-identical. The withheld abort (if any) is
- *  re-delivered at `end()` so the next phase boundary still aborts the turn.
- *  Extracted to keep `execute` under the biome cognitive-complexity cap. */
+ *  undefined when the seam is unwired (the three OFF gates) ⇒ no behaviour
+ *  change. The withheld abort (if any) is re-delivered at `end()` so the next
+ *  phase boundary still aborts the turn. Extracted to keep `execute` under the
+ *  biome cognitive-complexity cap. */
 const commitWrite = async (
   fs: FileSystemPort,
   ctx: ToolContext,
@@ -44,6 +53,10 @@ const commitWrite = async (
 ): Promise<void> => {
   const cs = ctx.criticalSection?.begin()
   try {
+    if (fs.writeFileAtomic !== undefined) {
+      await fs.writeFileAtomic(path, content, ctx.cwd)
+      return
+    }
     await fs.writeFile(path, content, ctx.cwd)
   } finally {
     cs?.end()

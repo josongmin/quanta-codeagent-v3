@@ -1,6 +1,6 @@
 # ADR-0512: skill 도구 스코핑 — 가용성(visibility) ⟂ 권한(permission) 2축 분리 + escalation UX
 
-- **상태**: Proposed (P0 즉시 구현 가능; P1~P3 단계적)
+- **상태**: Accepted — P0~P2 LANDED + P3 코어 LANDED (3R 적대 어딧 통과). 잔여 surface 후속은 아래 §구현 현황.
 - **날짜**: 2026-06-09
 - **슬라이스**: `@/agent/loop/skill-gate`(가용성 술어 확장) · `@/agent/loop/stream-consume`(send-time spec 필터) · `@/agent/stream-callbacks`(deny→ask 라우팅) · `@/stream`(NEW 이벤트 페어) · surface 렌더러(CLI/web/IDE). NEW 슬라이스 없음 — 전부 기존 seam 확장.
 - **게이트**: P0(nav-base carve-out)=**버그 픽스, 무게이트**. P1~P3(가용성 필터 + escalation)=`QUANTA_SKILL_SCOPE_V2`(`gateOnStrict`, default-OFF, byte-identical degrade).
@@ -150,3 +150,20 @@ surface 렌더러(CLI/web/IDE)는 이 이벤트를 **에러 슬롯이 아닌 승
 - **dispatch-time deny 유지하고 메시지만 부드럽게**: 근본(보이는데 막힘) 미해결 — 모델은 여전히 fumble하고 토큰 낭비. DROP.
 - **모든 read-only 도구를 navBase로**: 너무 광범위(read-only 네트워크/민감 도구 포함 위험). navBase는 프롬프트가 강제하는 탐색 사다리 + meta로 한정, 나머지 read-only는 L1 필터/L3 escalation 대상.
 - **specs를 세션 시작에 스킬별로 미리 필터**: 스킬은 턴 중간 활성화되므로 불가 — send-time 재계산이 유일 정답.
+
+## 구현 현황 (2026-06-09 — 3R 적대 어딧 후)
+
+LANDED + 3라운드 적대 어딧(보안/정확성/테스트품질 병렬)으로 경화. 실버그 3 + 동어반복 ratchet 1 + 커버리지 갭 다수 수정.
+
+- **P0 (무게이트, LANDED)**: `@/agent/exploration-ladder`(EXPLORATION_LADDER/READ_ONLY_EXPLORATION SSOT) + skill-gate `isAlwaysInScope`(nav-base, **정규화** META+ladder). `file_tree_summary skill-scoped` 버그 해소. drift ratchet은 **독립 리터럴 앵커**(`PROMPT_LADDER_LITERAL`)+프롬프트 regex 파싱으로 비동어반복(어딧 R1).
+- **empty-allowedTools = nav-base seal**(사용자 결정): `observe`가 declared `[]`(present)면 빈 scope arm→nav-base만 통과(briefing은 탐색 가능 + sealed는 ordinary 차단), absent면 무scope. jun-8 briefing-fix vs 옛 sealed-e2e 모순 해소.
+- **P1 (`QUANTA_SKILL_SCOPE_V2`, LANDED)**: `filterSpecsByScope`(=`gate.allow` 재사용 → 불변식#2 by-construction) @ stream-consume send-site, V2 게이트. 비활성/스킬없음 ⇒ SAME ref(byte-identical).
+- **P2 (LANDED)**: `decideScopeEscalation` tier×mode 라우팅(hand-off→hard_deny / bypass·acceptEdits→dispatch / always-confirm→자기게이트 위임 / none·pre-approval-ok→ask). 승인→`widenScope`(별도 `widened` Set, **same-skill re-observe 생존 / skill 변경 시 리셋** — 어딧 R1). 미등록 도구→deny 가드(어딧 R1). 보안경계는 onConfirm 미호출(non-escalatable). approved는 dispatchTool로 라우팅→HARD_DENY downstream 강제(보안 자동보장).
+- **P3 코어 (LANDED)**: 이벤트 `skill_scope_decision`(요약, blocked 포함 전 outcome) + `permission_escalation_requested`/`_resolved`(인터랙티브 페어, ask 경로만; 보안경계 미발화 hellgate). emit hooks(`onEscalationRequested`/`Resolved`) on decideScopeEscalation. stdout 승인 카드(YELLOW, 빨간에러 아님) + resolved 라인. jsonl-recorder: summary skip, pair durable. `scopeContext` on ToolAction. exhaustive sink + cross-slice `ToolRiskMirror` ratchet.
+- **테스트**: skill-gate / escalation / emit-hooks / drift / stdout-card 단위 + e2e(V2-OFF byte-identical / nav-base seal / ask·widen·페어 / L1 필터 onTurnStreamInput / declined / steered / blocked·요약 일관성). 3R 어딧이 불변식 #1-#4 전부 ratchet 확인.
+
+### 잔여 후속 (surface 통합 — P3+)
+- **`/state` visible-tools 노출**: `buildSkillScopeView`(`@/agent/loop/skill-scope-view`, 빌더+5단위테스트 LANDED) **미export·미배선**. (왜) "왜 이 도구가 없지"의 답을 UX가 직접 줘야 함(북극성=agent state 가시성). (ROI) 빌더 완성됨 → export+`/state` 1곳 배선만 남음, 저비용 고가시성.
+- **web/IDE 카드 렌더**: 페어 이벤트 stdout만 렌더(테스트됨). web/IDE는 default 처리(에러 아님, tsc green). (왜) 멀티-surface SSOT 약속. (ROI) 이벤트 계약 완성됨 → 각 surface 렌더러 case 추가, surface별 중간.
+- **모델 justification 시드**: 카드 `justification` 슬롯·렌더 존재하나 모델이 채울 seam 없어 항상 빈값. (왜) Codex on-request식 근거 표시. (ROI) tool-call에 rationale 첨부 메커니즘 필요, 중간-높음.
+- **`allow_once` 실동작**: 카드는 4버튼 제시하나 `ConfirmDecision`이 once/session 비트 없어 approve=allow_session(widen)로 귀결(코드에 KNOWN LIMITATION 명시). (왜) "한 번만" 승인 UX. (ROI) `ConfirmDecision` 확장(공유타입) 필요, 중간.

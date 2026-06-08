@@ -55,6 +55,7 @@ export {
   SESSION_EVENT_TYPES,
 } from "./events"
 export type {
+  ApprovalScopeContext,
   ArtifactRef,
   PendingApprovalView,
   SessionSnapshotLite,

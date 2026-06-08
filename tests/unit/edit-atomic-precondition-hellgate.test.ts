@@ -198,15 +198,19 @@ describe("ADR-0398 edit + expected_hash precondition", () => {
     expect(writes).toEqual([{ path, content: "const a = 2" }])
   })
 
-  test("default-OFF path on a port that DOES implement writeFileAtomic still uses legacy writeFile", async () => {
-    // Even when the port can do atomic, omitting expected_hash MUST keep
-    // the byte-identical legacy commit path (so the rollout is opt-in only).
+  test("ATOMIC-by-default: a port that implements writeFileAtomic routes EVERY edit through it (no expected_hash needed)", async () => {
+    // LANE 1 (ATOMIC-DEFAULT) — the atomicity is no longer gated on
+    // `expected_hash`. When the port provides `writeFileAtomic`, even a plain
+    // edit (no precondition) commits via the crash-safe temp+rename path. The
+    // on-disk CONTENT result is byte-identical to the old truncating write —
+    // only the write MECHANISM changed. Reverting commitEdit to default to
+    // `fs.writeFile` turns this RED.
     const path = "/in-mem/no-precond-with-atomic.txt"
     const { port, writes } = makeRecordingFullPort({ [path]: "const a = 1" })
     const tool = makeEditTool(port)
     const r = await run(tool, { path, old_string: "1", new_string: "2" }, "/in-mem")
     expect(r.ok).toBe(true)
-    expect(writes).toEqual([{ method: "writeFile", path, content: "const a = 2" }])
+    expect(writes).toEqual([{ method: "writeFileAtomic", path, content: "const a = 2" }])
   })
 })
 

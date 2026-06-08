@@ -1,9 +1,10 @@
-import { memo, useEffect, useRef, useState, type RefObject } from "react"
+import { memo, type RefObject, useEffect, useRef, useState } from "react"
 import type { PendingImageAttachment } from "../composer/image-attachment"
-import type { SessionStatus, UiMessage } from "../types/protocol"
+import type { PendingApprovalView, SessionStatus, UiMessage } from "../types/protocol"
+import { EscalationCard, type EscalationDecision } from "./EscalationCard"
 import { InputBar } from "./InputBar"
 import { MessageBubble } from "./MessageBubble"
-import { SlashPalette, type SlashCommand } from "./SlashPalette"
+import { type SlashCommand, SlashPalette } from "./SlashPalette"
 import { ThinkingIndicator } from "./ThinkingIndicator"
 
 export interface ChatPanelProps {
@@ -16,10 +17,7 @@ export interface ChatPanelProps {
   readonly onSubmit: (text: string) => void
   readonly pendingImages: readonly PendingImageAttachment[]
   readonly attachmentError: string | null
-  readonly onAttachImageFile: (
-    file: File,
-    source: "picker" | "paste",
-  ) => Promise<void> | void
+  readonly onAttachImageFile: (file: File, source: "picker" | "paste") => Promise<void> | void
   readonly onRemovePendingImage: (index: number) => void
   readonly onClearAllPendingImages: () => void
   /** Optional: pass `sessionState.status` so the thinking indicator can
@@ -28,6 +26,13 @@ export interface ChatPanelProps {
   /** Slash command catalogue. Provide via App.tsx; ChatPanel only forwards
    *  the array into the floating `SlashPalette` above InputBar. */
   readonly slashCommands?: readonly SlashCommand[]
+  /** ADR-0512 P3 — live pending approvals. A skill-scope escalation (carrying
+   *  `scopeContext`) renders the rich yellow `EscalationCard` above the input;
+   *  a plain approval renders the approve/deny affordance. Empty ⇒ no card. */
+  readonly pendingApprovals?: readonly PendingApprovalView[]
+  /** Handler for an approval decision (sends `approval.respond`). Required when
+   *  `pendingApprovals` is non-empty; the cards are not shown without it. */
+  readonly onApprovalDecision?: (decision: EscalationDecision) => void
 }
 
 interface TranscriptViewportProps {
@@ -51,6 +56,8 @@ export const ChatPanel = ({
   onClearAllPendingImages,
   sessionStatus,
   slashCommands,
+  pendingApprovals,
+  onApprovalDecision,
 }: ChatPanelProps): JSX.Element => {
   const [paletteDismissed, setPaletteDismissed] = useState(false)
   useEffect(() => {
@@ -64,6 +71,19 @@ export const ChatPanel = ({
         streamingMessageId={streamingMessageId ?? null}
         sessionStatus={sessionStatus ?? null}
       />
+      {pendingApprovals !== undefined &&
+      pendingApprovals.length > 0 &&
+      onApprovalDecision !== undefined ? (
+        <div className="flex flex-col gap-2 px-4 pb-2" data-testid="pending-approvals">
+          {pendingApprovals.map((approval) => (
+            <EscalationCard
+              key={approval.approvalId}
+              approval={approval}
+              onDecision={onApprovalDecision}
+            />
+          ))}
+        </div>
+      ) : null}
       {slashCommands !== undefined && slashCommands.length > 0 && !paletteDismissed ? (
         <div className="px-4">
           <SlashPalette
@@ -97,18 +117,12 @@ export const ChatPanel = ({
 }
 
 const TranscriptViewport = memo(
-  ({
-    messages,
-    streamingMessageId,
-    sessionStatus,
-  }: TranscriptViewportProps): JSX.Element => {
+  ({ messages, streamingMessageId, sessionStatus }: TranscriptViewportProps): JSX.Element => {
     // Keep transcript rendering isolated from `draft` changes so typing
     // does not retrigger markdown/code-block work for the whole history.
     const tail = messages[messages.length - 1]
     const isStreaming =
-      tail !== undefined &&
-      tail.role === "assistant" &&
-      tail.id === streamingMessageId
+      tail !== undefined && tail.role === "assistant" && tail.id === streamingMessageId
     const scrollRef = useRef<HTMLDivElement>(null)
     // Sticky-at-bottom: as soon as the user scrolls away from the bottom we
     // stop following the stream (they're reading earlier content). Resumes
@@ -138,8 +152,7 @@ const TranscriptViewport = memo(
         ref={scrollRef}
         onScroll={(ev) => {
           const el = ev.currentTarget
-          const distanceFromBottom =
-            el.scrollHeight - el.scrollTop - el.clientHeight
+          const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
           stickRef.current = distanceFromBottom <= 64
         }}
         className="scroll-fade-bottom flex-1 overflow-y-auto px-4 py-4"
@@ -151,18 +164,12 @@ const TranscriptViewport = memo(
           <ul className="flex flex-col gap-3">
             {messages.map((msg) => (
               <li key={msg.id}>
-                <MessageBubble
-                  message={msg}
-                  isStreaming={msg.id === streamingMessageId}
-                />
+                <MessageBubble message={msg} isStreaming={msg.id === streamingMessageId} />
               </li>
             ))}
           </ul>
         )}
-        <ThinkingIndicator
-          sessionStatus={sessionStatus}
-          isStreaming={isStreaming}
-        />
+        <ThinkingIndicator sessionStatus={sessionStatus} isStreaming={isStreaming} />
       </div>
     )
   },

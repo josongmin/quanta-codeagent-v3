@@ -47,6 +47,7 @@ import {
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
+import { guardWrite } from "./stale-read-guard"
 import type { FastApplyFallbackSeam, GitWriteGuard, Tool, ToolContext, ToolEvent } from "./types"
 
 /** Process-wide OTel-bound patch tracing port, injected into every `applyPatch`
@@ -82,7 +83,19 @@ export interface NodeFsLike {
   unlink(p: string): Promise<void>
   rename(from: string, to: string): Promise<void>
   mkdir(p: string, options: { recursive: true }): Promise<string | undefined>
-  stat(p: string): Promise<{ isFile(): boolean; isDirectory(): boolean; mode?: number }>
+  stat(p: string): Promise<{
+    isFile(): boolean
+    isDirectory(): boolean
+    mode?: number
+    /** OPTIONAL on-disk modification time in epoch milliseconds. PRESENT on the
+     *  real `node:fs/promises` (`Stats.mtimeMs`); the ADR-0474 stale-read-guard
+     *  parity (see {@link FsJailFileSystemPort.statTarget}) reads it to compare
+     *  against the recorded read-time mtime. ABSENT on an in-memory test fake ⇒
+     *  the guard treats the target as un-stat-able (see `statTarget`), which only
+     *  matters when `ctx.readFileState` is wired — the default-OFF path never
+     *  reaches it, so a fake without `mtimeMs` is byte-identical to today. */
+    mtimeMs?: number
+  }>
   /** OPTIONAL durability barrier. When present (real `node:fs/promises`) the
    *  atomic write `fsync`s the temp BYTES before the rename so a crash in the
    *  window between write and rename cannot promote a torn / zero-length temp
@@ -284,6 +297,40 @@ export class FsJailFileSystemPort implements PatchFileSystemPort {
       return false
     }
   }
+
+  /**
+   * ADR-0474 stale-read-guard parity — resolve `p` through the ONE jail
+   * ({@link assertInside}, the SAME chokepoint every other I/O method uses — NO
+   * second jail) and `stat` it via the SAME `this.fs.stat` primitive `exists`
+   * already calls, returning the resolved absolute path + its on-disk mtime.
+   *
+   * `{ exists: false }` when the target is absent (ENOENT ⇒ `stat` rejects): a
+   * file that is not there cannot be "stale relative to a prior read", so the
+   * caller treats it as not-stale (the missing-file case surfaces later as the
+   * applier's own typed error, unchanged). The `resolvedPath` is returned even
+   * on success so the caller can call `guardWrite` against the SAME canonical
+   * absolute path the `read` tool recorded (byte-for-byte path identity — the
+   * stale-read-guard compares paths verbatim, never normalising). Throws
+   * {@link FsJailViolationError} on a boundary breach (re-typed by
+   * `assertInside`) — a stale check must never resolve outside the jail.
+   */
+  async statTarget(
+    p: string,
+  ): Promise<{ exists: true; resolvedPath: string; mtimeMs: number } | { exists: false }> {
+    const resolved = this.assertInside(p)
+    let st: Awaited<ReturnType<NodeFsLike["stat"]>>
+    try {
+      st = await this.fs.stat(resolved)
+    } catch {
+      // ENOENT / unreadable ⇒ no on-disk baseline to compare; not stale.
+      return { exists: false }
+    }
+    // A fake `stat` that omits `mtimeMs` (in-memory test port) has no on-disk
+    // baseline either ⇒ treat as not-stale (this path is reached ONLY when the
+    // host wired `ctx.readFileState`; the default-OFF apply never gets here).
+    if (typeof st.mtimeMs !== "number") return { exists: false }
+    return { exists: true, resolvedPath: resolved, mtimeMs: st.mtimeMs }
+  }
 }
 
 const schema = z.object({
@@ -338,6 +385,70 @@ function guardPatchTargets(patch: Patch, guard: GitWriteGuard | undefined): Tool
 }
 
 /**
+ * ADR-0474 stale-read-guard parity for `apply_patch` — mirrors `edit`'s
+ * `editPreCommitDeny` (`src/tool/edit/index.ts`). `edit` blocks a write whose
+ * target was externally modified since the model last read it; `apply_patch` had
+ * NO such TOCTOU guard, so a V4A patch landed on bytes that drifted since the
+ * read (or only the anchor broke). This closes that gap by consulting the SAME
+ * `guardWrite(ctx.readFileState, path, mtimeMs)` the edit tool uses.
+ *
+ * Scope (which ops are staleness-checked) mirrors edit's "read-before-write" on
+ * an EXISTING target:
+ *
+ *   - `update` → `op.path` (the file being edited; also the rename SOURCE when
+ *                `moveTo` is present — the SOURCE is the file the model read).
+ *   - `delete` → `op.path` (the file being removed — the model read it to
+ *                decide it was obsolete).
+ *
+ * NOT checked (no prior-read baseline exists / target must not yet exist):
+ *   - `add`     → `op.path`   (a brand-new file has no read-time baseline; the
+ *                              guard's `unread ⇒ allow` posture covers it).
+ *   - `update`'s `moveTo` DESTINATION (a move destination must NOT exist; it has
+ *                              no read-time baseline either).
+ *
+ * HARD-STOP / no partial apply: the FIRST stale target (ops scanned in patch
+ * order — deterministic) returns the typed `rejected` / `stale_read` ToolEvent
+ * and the caller NEVER reaches `applyPatch`, so ZERO files are written. The
+ * model-facing `output` is the verbatim `StaleReadError.message` (the same
+ * "re-read first" guidance `edit` surfaces), and the typed failure shape
+ * (`{ mode: "rejected", reason: "stale_read" }`) is byte-identical to `edit`'s.
+ *
+ * DEFAULT-OFF / byte-identical: returns `null` immediately when
+ * `ctx.readFileState` is undefined (the host did not opt into the guard — see
+ * `staleReadGuardEnabled`), so the apply path is byte-identical to today.
+ * Path identity: `statTarget` resolves through the ONE jail and returns the
+ * canonical absolute path, and `guardWrite` is called against THAT — the same
+ * absolute path the `read` tool records, so the byte-for-byte comparison agrees.
+ */
+async function guardStaleTargets(
+  patch: Patch,
+  port: FsJailFileSystemPort,
+  ctx: ToolContext | undefined,
+): Promise<ToolEvent | null> {
+  const state = ctx?.readFileState
+  if (state === undefined) return null
+  for (const op of patch.ops) {
+    if (op.kind !== "update" && op.kind !== "delete") continue
+    const stat = await port.statTarget(op.path)
+    // Absent on disk (or no mtime baseline) ⇒ no prior-read staleness to assert;
+    // the applier surfaces its own typed error for a missing update/delete target.
+    if (!stat.exists) continue
+    const guard = guardWrite(state, stat.resolvedPath, stat.mtimeMs)
+    if (!guard.ok) {
+      return {
+        type: "result",
+        result: {
+          ok: false,
+          output: guard.error.message,
+          failure: { mode: "rejected", reason: "stale_read" },
+        },
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Format an `ApplyResult` into a deterministic single-string summary the
  * dispatch seam surfaces back to the model. The order is stable:
  * added → updated → moved → deleted. Empty categories are omitted.
@@ -375,15 +486,23 @@ function formatApplyResult(r: ApplyResult): string {
  */
 async function guardedParseAndApply(
   patchText: string,
-  port: PatchFileSystemPort,
+  port: FsJailFileSystemPort,
   guard: GitWriteGuard | undefined,
   ctx?: ToolContext,
-): Promise<{ guardDeny: ToolEvent } | { result: ApplyResult }> {
+): Promise<{ deny: ToolEvent } | { result: ApplyResult }> {
   // parsePatch throws PatchParseError on grammar violation — propagate.
   const patch = parsePatch(patchText)
   // Guard EVERY target BEFORE any filesystem mutation (hard-stop posture).
   const guardDeny = guardPatchTargets(patch, guard)
-  if (guardDeny) return { guardDeny }
+  if (guardDeny) return { deny: guardDeny }
+  // ADR-0474 stale-read-guard parity — block the patch if ANY existing target
+  // drifted since the model last read it, BEFORE any write (hard-stop, no partial
+  // apply). Default-OFF: `null` when `ctx.readFileState` is unwired ⇒ the apply
+  // path below is byte-identical to today. This runs AFTER the git-guard and
+  // BEFORE the critical-section commit — both pre-flight denies precede any FS
+  // mutation, so a denied patch is NEVER a partial write.
+  const staleDeny = await guardStaleTargets(patch, port, ctx)
+  if (staleDeny) return { deny: staleDeny }
   // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
   // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
   // on boundary breach — propagate. `PATCH_TRACE` injects the OTel binding.
@@ -416,7 +535,7 @@ async function guardedParseAndApply(
 async function tryFastApplyFallback(
   originalPatchText: string,
   originalError: unknown,
-  port: PatchFileSystemPort,
+  port: FsJailFileSystemPort,
   fallback: FastApplyFallbackSeam,
   signal: AbortSignal,
   guard: GitWriteGuard | undefined,
@@ -468,7 +587,10 @@ async function tryFastApplyFallback(
     // [F6] the retry commit is ALSO a multi-file FS mutation ⇒ same critical
     // section as the primary apply (parity; default-OFF when the seam is unwired).
     const applied = await guardedParseAndApply(attempt.newPatch, port, guard, ctx)
-    if ("guardDeny" in applied) return null
+    // A git-escape deny OR a stale-read deny on the re-emit is a non-rescue: the
+    // model cannot slip a guarded/stale target through the fallback ⇒ surface the
+    // ORIGINAL error (caller re-throws), never the retry's.
+    if ("deny" in applied) return null
     const { result } = applied
     return attempt.modelUsed !== undefined ? { result, modelUsed: attempt.modelUsed } : { result }
   } catch {
@@ -514,8 +636,8 @@ export const applyPatchTool: Tool<Input> = {
     const fallback = ctx.fastApplyFallback
     if (fallback === undefined) {
       const applied = await guardedParseAndApply(input.patch, port, guard, ctx)
-      if ("guardDeny" in applied) {
-        yield applied.guardDeny
+      if ("deny" in applied) {
+        yield applied.deny
         return
       }
       yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
@@ -528,8 +650,8 @@ export const applyPatchTool: Tool<Input> = {
     // failure semantics (ADR-0421).
     try {
       const applied = await guardedParseAndApply(input.patch, port, guard, ctx)
-      if ("guardDeny" in applied) {
-        yield applied.guardDeny
+      if ("deny" in applied) {
+        yield applied.deny
         return
       }
       yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }

@@ -592,6 +592,16 @@ function locateEofBlock(
  * Try to locate `oldBlock` at one fuzzy tier. Returns the unique match index,
  * `null` if zero matches at this tier (so caller can fall through), or throws
  * `PatchApplyError` on multi-match ambiguity.
+ *
+ * GAP A (ADR-0456 mirror of `@/tool/edit/fuzzy.ts#tryScoredCandidate`): on the
+ * TRIMMED tier, before throwing on a 2+-match ambiguity we run a deterministic
+ * scored-candidate decisive-best tie-break (see {@link decisiveScoredIndex}).
+ * If exactly one candidate window's verbatim-exact-line count STRICTLY beats
+ * every other, we apply there; a tie at the top keeps today's ambiguous throw
+ * (fail-closed). The EXACT tier is UNCHANGED — its 2+-match ambiguity always
+ * throws, because every exact window scores `oldBlock.length` (a guaranteed tie
+ * that the discriminator rejects anyway), so reusing it would never change the
+ * exact path while still risking a misapply; we keep it strictly off-limits.
  */
 function locateAtTier(
   workLines: string[],
@@ -605,6 +615,14 @@ function locateAtTier(
   const hits = findAllMatches(workLines, oldBlock, trimmed, floor)
   if (hits.length === 0) return null
   if (hits.length > 1) {
+    // ADR-0456 safety net — ONLY for the trimmed tier (the exact tier's
+    // multi-match is an unrecoverable verbatim tie). Recover the apply IFF a
+    // single candidate is the strict verbatim-exact best; otherwise fall through
+    // to the ambiguous throw, byte-identical to the pre-fix behaviour.
+    if (trimmed) {
+      const decisive = decisiveScoredIndex(workLines, oldBlock, hits)
+      if (decisive !== null) return decisive
+    }
     throw new PatchApplyError(
       `Ambiguous context — ${hits.length} ${tierLabel} matches for hunk; provide more context`,
       path,
@@ -613,6 +631,60 @@ function locateAtTier(
   }
   const idx = hits[0]
   return idx ?? null
+}
+
+/**
+ * Score one candidate window (starting at `start`) against `oldBlock`: the COUNT
+ * of positions where `workLines[start + k]` equals `oldBlock[k]` VERBATIM
+ * (character-for-character), NOT merely after trimming. This is a pure
+ * MEASUREMENT — an integer count of an observable property (how many lines the
+ * model typed byte-exactly) — with no tunable threshold, no decay, no ratio.
+ * Every candidate already matches `oldBlock` under the trimmed projection (that
+ * is why it is a hit); the verbatim count tie-breaks them by literal fidelity.
+ * Mirrors `@/tool/edit/fuzzy.ts#exactAnchorScore`.
+ */
+function verbatimScore(workLines: string[], oldBlock: string[], start: number): number {
+  let exact = 0
+  for (let k = 0; k < oldBlock.length; k++) {
+    if (workLines[start + k] === oldBlock[k]) exact++
+  }
+  return exact
+}
+
+/**
+ * GAP A — ADR-0456 decisive-best discriminator over the ambiguous trimmed-tier
+ * candidate start indices. Returns the UNIQUE index whose {@link verbatimScore}
+ * STRICTLY beats every other candidate's score; returns `null` when there is no
+ * strict winner (a tie at the maximum), preserving today's ambiguous-throw
+ * (fail-closed) behaviour. This is a strict-ordering discriminator, not a fudge
+ * threshold: the rule is "unique strict maximum or fail". The bias is
+ * deliberately toward the false-negative (fail, ask the model to retry) over the
+ * false-positive (apply to the wrong window), the cardinal sin. Identical bias
+ * and algorithm to `@/tool/edit/fuzzy.ts#tryScoredCandidate`.
+ */
+function decisiveScoredIndex(
+  workLines: string[],
+  oldBlock: string[],
+  hits: number[],
+): number | null {
+  if (hits.length < 2) return null
+  const scored = hits.map((start) => ({ start, score: verbatimScore(workLines, oldBlock, start) }))
+  let best = scored[0] as { start: number; score: number }
+  let runnerUp: { start: number; score: number } | undefined
+  for (const c of scored.slice(1)) {
+    if (c.score > best.score) {
+      runnerUp = best
+      best = c
+    } else if (runnerUp === undefined || c.score > runnerUp.score) {
+      runnerUp = c
+    }
+  }
+  // DECISIVE-best rule: the top score must STRICTLY beat the runner-up. A tie at
+  // the maximum (best.score === runnerUp.score) is NOT decisive ⇒ return null so
+  // the caller throws ambiguous (fail-closed). `runnerUp` is always defined here
+  // (hits.length >= 2), but the guard keeps the discriminator total.
+  if (runnerUp === undefined || best.score <= runnerUp.score) return null
+  return best.start
 }
 
 /** All indices >= `floor` where `oldBlock` matches in `workLines`. `floor` is

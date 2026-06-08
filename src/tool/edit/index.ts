@@ -351,14 +351,23 @@ const planEdit = async (
   return { kind: "ready", before: source, next: result.next, message: result.message }
 }
 
-/** ADR-0398 — route the commit through `writeFileAtomic` when the caller
- *  threaded `expected_hash` AND the port supports it; otherwise legacy
- *  `writeFile`. jun-6 tool-interrupt-behavior — the commit runs inside the
- *  OPTIONAL critical section (`ctx.criticalSection`) so an in-flight ESC cannot
- *  tear a half-written file; `begin?.()` is undefined when the seam is unwired
- *  (the three OFF gates) ⇒ byte-identical legacy path. The withheld abort (if
- *  any) is re-delivered at `end()` so the next phase boundary still aborts the
- *  turn. Extracted to keep `execute` flat. */
+/** ATOMIC-by-default commit (LANE 1) — route EVERY edit commit through the
+ *  port's `writeFileAtomic` (temp+rename, crash-safe, mode-preserving) whenever
+ *  the port provides it, NOT only when `expected_hash` was threaded. The plain
+ *  truncating `fs.writeFile` is the FALLBACK used only when the port lacks the
+ *  atomic method (in-memory test fakes) — there the on-disk result is
+ *  byte-identical. The atomicity is no longer gated on `expected_hash`:
+ *  `expected_hash` is ONLY the precondition check (already performed in
+ *  `planEdit`/`checkHashPrecondition`), not a switch for HOW the bytes land.
+ *  The on-disk file CONTENT is identical on every path; only the write
+ *  MECHANISM changed (now atomic) and an existing file's mode is preserved.
+ *
+ *  jun-6 tool-interrupt-behavior — the commit runs inside the OPTIONAL critical
+ *  section (`ctx.criticalSection`) so an in-flight ESC cannot tear a
+ *  half-written file; `begin?.()` is undefined when the seam is unwired (the
+ *  three OFF gates) ⇒ no behaviour change. The withheld abort (if any) is
+ *  re-delivered at `end()` so the next phase boundary still aborts the turn.
+ *  Extracted to keep `execute` flat. */
 const commitEdit = async (
   fs: FileSystemPort,
   ctx: ToolContext,
@@ -367,11 +376,10 @@ const commitEdit = async (
   // worktree never re-jails). Absent worktree ⇒ `{ input.path, ctx.cwd }`.
   target: { readonly path: string; readonly base: string },
   next: string,
-  expectedHash: string | undefined,
 ): Promise<void> => {
   const cs = ctx.criticalSection?.begin()
   try {
-    if (expectedHash !== undefined && fs.writeFileAtomic !== undefined) {
+    if (fs.writeFileAtomic !== undefined) {
       await fs.writeFileAtomic(target.path, next, target.base)
       return
     }
@@ -483,7 +491,10 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // jun-6 tool-interrupt-behavior — the commit runs inside the OPTIONAL
       // critical section (inside `commitEdit`) so an in-flight ESC cannot tear a
       // half-written file (no-op when the seam is unwired; byte-identical).
-      await commitEdit(fs, ctx, target, planned.next, input.expected_hash)
+      // ATOMIC-by-default (LANE 1): `commitEdit` routes through the port's
+      // crash-safe `writeFileAtomic` whenever available — no longer gated on
+      // `expected_hash` (which remains only the precondition gate in planEdit).
+      await commitEdit(fs, ctx, target, planned.next)
       // ADR-0440 — feed the before/after to the optional tool-diff sink so the
       // web-daemon emits a `tool.diff` canvas frame. Default-OFF: no-op unless
       // `ctx.toolDiff` + `ctx.toolCallId` are both wired (gate ON). No recompute

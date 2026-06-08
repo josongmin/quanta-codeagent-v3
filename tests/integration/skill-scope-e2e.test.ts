@@ -482,6 +482,11 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
       expect(res[0].decision).toBe("allow_session")
       expect(res[0].id).toBe(req?.type === "permission_escalation_requested" ? req.id : "")
     }
+    // …and the summary `skill_scope_decision` fires ALONGSIDE the pair for the
+    // SAME ask (consistency: pair = interactive seam, summary = timeline label).
+    const summaries = stream.events.filter((e) => e.type === "skill_scope_decision")
+    expect(summaries).toHaveLength(1) // 1st call only; 2nd was widened into scope
+    expect(summaries[0]?.type === "skill_scope_decision" ? summaries[0].decision : "").toBe("allowed")
   })
 
   test("hand-off-required tool is BLOCKED without asking; not dispatched; decision=blocked", async () => {
@@ -508,9 +513,14 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
     expect(outcome.reason).toBe("completed")
     expect(asked).toBe(false) // security boundary: never even asked
     expect(counts.destroyer).toBeUndefined() // never dispatched
-    // The hard-lock surfaces as a tool_result labeled "blocked" (NOT a card).
+    // The hard-lock surfaces as a tool_result labeled "blocked" (NOT a card)…
     const tr = stream.events.find((e) => e.type === "tool_result" && e.id === "x1")
     expect(tr?.type === "tool_result" ? tr.preview : "").toBe("skill-scoped: blocked")
+    // …AND a summary `skill_scope_decision` with decision "blocked" (the gray
+    // hard-lock timeline item — this MUST still fire even though no card does).
+    const summaries = stream.events.filter((e) => e.type === "skill_scope_decision")
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]?.type === "skill_scope_decision" ? summaries[0].decision : "").toBe("blocked")
     // ADR-0512 P3 security invariant (RED-on-injection): a hand-off-required tool
     // is NON-escalatable — it NEVER emits an interactive escalation request /
     // resolution. The card seam must not be reachable for a security boundary.
