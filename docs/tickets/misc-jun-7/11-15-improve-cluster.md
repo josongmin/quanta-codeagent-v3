@@ -16,7 +16,10 @@
 
 ---
 
-## 12 — §20.4 subagent FS owned/forbidden 강제화  · ROI 중-고 (보안)
+## 12 — §20.4 subagent FS owned/forbidden 강제화  · ✅ **DONE (jun-08)** · ROI 중-고 (보안)
+**구현완료:** NEW `src/agent/ownership-policy.ts`(`isPathAllowed`/`consultOwnershipPolicy`/`checkWriteEffects`/`buildOwnershipPolicy` — subtree containment, glob-free) + `@/storage` `canonicalizePath` export(symlink-safe 재사용) + dispatch gate(admissibility 후, `extractWriteEffects`+`checkWriteEffects`+deny, default-OFF) + `AgentConfig.ownershipPolicy` slot + knob `QUANTA_FS_OWNERSHIP_ENFORCE`(gateOnStrict, fail-closed) + `buildChildConfig` 조립. **핵심수정:** circumvention `canonicalizeEffectPath`는 lexical-only(symlink 미해소)라 `checkWriteEffects`가 effect를 같은 canonicalizer로 재정규화(symlink escape 방어; 안하면 /var↔/private/var로 우연일치하는 위험). **17 hellgate**(pure 13: owned/forbidden/empty/`..`/symlink/bash-sed e2e + dispatch e2e 4: 실 `dispatchTool`서 deny/run/default-off). 1639 regression 0fail, tsc0/biome0, build OK.
+
+> 이하 원안(참고):
 
 **Current (file:line):** `src/subagent/types.ts:73` `ownedSurfaces`/`forbiddenSurfaces`(loose string[], 미canonical). `agent/subagent-runner.ts:346` `buildSeedPrompt`서 **프롬프트 텍스트로만** 주입(advisory). dispatch 12-gate(`dispatch.ts`)에 ownership gate 0. write chokepoint=`storage/fs-jail-lib.ts:72`(symlink-aware canonical+`isPathInside`). bash `sed -i`/redirect는 write 도구 우회.
 **Design (default-OFF, fail-closed):** NEW `src/subagent/ownership-policy.ts` — `isPathAllowed(target, policy, cwd)`(forbidden 우선, owned 화이트리스트; fs-jail canonical+`..`/symlink 해소 재사용, glob=picomatch). `AgentConfig.ownershipPolicy{owned,forbidden,enforced}`(`buildChildConfig`서 req에서 조립, `enforced=runtimeConfig().fsOwnershipEnforce`). dispatch **새 게이트 9.5**(permission stack 후, mode policy 전): mutating FS 도구(write/edit/apply_patch/bash)의 target path 추출→non-owned/forbidden이면 typed deny. gate `QUANTA_FS_OWNERSHIP_ENFORCE`. **MVP**: bash는 enforced시 보수적 deny(fine-grained 파싱은 phase-2; circumvention-tracker와 교차).

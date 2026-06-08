@@ -55,7 +55,7 @@
 | # | 갭 | 현재(있는 것) | 미완(SOTA++로 닫을 것) | ROI |
 |---|---|---|---|---|
 | 11 | P8 worktree | host `withWorktree()`+`fork --worktree` | 에이전트 도구 `enter/exit_worktree`+Bash/Edit **edit-fence**(slot) | 고 |
-| 12 | §20.4 FS owned/forbidden | subagent에 **prompt 텍스트(advisory)** | dispatch **gate 9.5** 강제(canonical+symlink/`..`/bash, fail-closed) | 중-고(보안) |
+| 12 | §20.4 FS owned/forbidden | ✅ **DONE(jun-08)** — `ownership-policy.ts`+dispatch gate+knob `QUANTA_FS_OWNERSHIP_ENFORCE`+buildChildConfig; symlink-safe 재정규화(circumvention lexical-only 보완); 17 hellgate(pure+escape e2e+dispatch e2e), 1639 regression | 중-고(보안) |
 | 13 | §12.2 MITM header | secret값 redaction(drop) | pure `applyHeaderRules`(strip/set/rewrite, redaction 우선) | 중 |
 | 14 | §11.6 /model | set-by-id(`/sticky-model`) | `/effort` 미러 인터랙티브 피커(mode-implicit) | 저 |
 | 15 | §11.7 statusLine | 고정 usage bar | scriptable 명령(shell:false+5s cap)+색맹 팔레트(Okabe-Ito) | 저 |

@@ -330,6 +330,7 @@
   "rotating-cloud-credentials",
   "rules-matcher",
   "run-context-correlation",
+  "run-workflow",
   "runner-assemble-builders",
   "runner-multimodal-image",
   "runner-persist-turn",

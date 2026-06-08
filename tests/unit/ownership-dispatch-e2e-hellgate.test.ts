@@ -26,7 +26,12 @@ const writeTool = (): Tool => ({
   },
 })
 
-const call = (path: string): ToolUseBlock => ({ type: "tool_use", id: "c1", name: "write", input: { path } })
+const call = (path: string): ToolUseBlock => ({
+  type: "tool_use",
+  id: "c1",
+  name: "write",
+  input: { path },
+})
 
 const perm: PermissionContext = { mode: "acceptEdits" }
 const baseCfg = (over: Partial<AgentConfig> = {}): AgentConfig =>
@@ -42,7 +47,11 @@ const enforced = buildOwnershipPolicy({ owned: ["src"], cwd: "/repo", enforced: 
 
 describe("§20.4 dispatch E2E — ownership gate fires in the real pipeline", () => {
   test("ENFORCED: write OUTSIDE owned ⇒ HARD-DENIED at dispatch", async () => {
-    const res = await dispatchTool(call("/repo/docs/readme.md"), baseCfg({ ownershipPolicy: enforced }), perm)
+    const res = await dispatchTool(
+      call("/repo/docs/readme.md"),
+      baseCfg({ ownershipPolicy: enforced }),
+      perm,
+    )
     expect(res.ok).toBe(false)
     if (res.ok) throw new Error("expected deny")
     expect(res.preview).toBe("ownership-policy-denied")
@@ -51,7 +60,11 @@ describe("§20.4 dispatch E2E — ownership gate fires in the real pipeline", ()
   })
 
   test("ENFORCED: write INSIDE owned ⇒ RUNS", async () => {
-    const res = await dispatchTool(call("/repo/src/main.ts"), baseCfg({ ownershipPolicy: enforced }), perm)
+    const res = await dispatchTool(
+      call("/repo/src/main.ts"),
+      baseCfg({ ownershipPolicy: enforced }),
+      perm,
+    )
     expect(res.ok).toBe(true)
     if (!res.ok) throw new Error("expected run")
     expect(res.preview).toBe("wrote")
