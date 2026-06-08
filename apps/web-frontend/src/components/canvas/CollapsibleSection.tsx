@@ -53,7 +53,7 @@ export const CollapsibleSection = ({
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-xs hover:bg-white/5"
+        className="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-xs hover:bg-black/[0.05]"
       >
         <span
           aria-hidden="true"

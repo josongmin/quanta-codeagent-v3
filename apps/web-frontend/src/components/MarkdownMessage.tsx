@@ -72,7 +72,7 @@ export const MarkdownMessage = ({
               )
             }
             return (
-              <div className="my-2 overflow-hidden rounded-lg border border-line bg-surface-raised">
+              <div className="my-2 overflow-hidden rounded-lg border border-code-line bg-code">
                 <SyntaxHighlighter
                   language={match[1]}
                   style={tomorrow}

@@ -110,8 +110,8 @@ export const SlashPalette = ({
             void accept(cmd)
           }}
           className={cx(
-            "flex w-full items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-white/5",
-            idx === activeIdx && "bg-white/5",
+            "flex w-full items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-black/[0.05]",
+            idx === activeIdx && "bg-black/[0.05]",
           )}
         >
           <span className="font-mono text-sm font-medium text-ink">/{cmd.slug}</span>

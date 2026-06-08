@@ -592,16 +592,11 @@ describe.skipIf(!HAS_CHROME)("adversarial e2e — REAL chrome via cdp-adapter po
     expect(await waitForReport(hasScrolled)).toBe(true)
   })
 
-  // BUG (see realBugs / pressKey-enter-submit): `port.pressKey(h,"Enter")`
-  // dispatches `Input.dispatchKeyEvent` with only `{type,key:"Enter"}` — it omits
-  // `windowsVirtualKeyCode` (13) and `code` ("Enter"). Real Chrome will not
-  // synthesize the keypress that triggers IMPLICIT form submission without those
-  // fields, so the onsubmit handler never runs: no `submit=1` report and the
-  // title stays put. Verified against real chrome (title remained "form fixture",
-  // reports empty after a focused Enter). The behaviour is fixed by adding the
-  // virtual-key + code fields in cdp-adapter `pressKey`. Skipped so the file stays
-  // green; reported in realBugs. Clicking the submit button (test above) is the
-  // working public-port submit path.
+  // pressKey Enter must trigger IMPLICIT form submission: KEY_DESCRIPTORS gives
+  // Enter its windowsVirtualKeyCode(13)+nativeVirtualKeyCode(13)+code("Enter")+text
+  // ("\r") (cdp-adapter KEY_DESCRIPTORS/keyEventBase), so real Chrome synthesizes
+  // the keypress and the onsubmit handler fires (submit=1). Regression guard for
+  // the earlier inert-event bug where pressKey omitted the virtual-key/code fields.
   test("pressKey Enter on a focused form input triggers submit (Input.dispatchKeyEvent)", async () => {
     const h = need()
     if (h === null) return

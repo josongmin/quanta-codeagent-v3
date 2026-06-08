@@ -27,6 +27,12 @@ import { errMessage } from "@/shared"
  *  alpha-capable). Closed union — extending requires a port-version bump. */
 export type ImageGenFormat = "png" | "jpeg" | "webp"
 
+/** §5.2 (long-tail) — model-friendly output shape, independent of raw pixels.
+ *  A provider-agnostic intent the adapter maps onto its native size vocabulary
+ *  (the OpenAI adapter resolves it to a concrete `size`). `auto` ⇒ the provider
+ *  decides (byte-identical to omitting it). Closed union. */
+export type ImageAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "auto"
+
 /** One generated image: base64 bytes + the IANA media type they decode to. */
 export interface GeneratedImage {
   /** Base64-encoded image bytes, NO `data:` URI prefix. */
@@ -41,8 +47,15 @@ export interface GeneratedImage {
 export interface ImageGenRequest {
   readonly mode: "generate" | "edit"
   readonly prompt: string
-  /** `auto` or `WIDTHxHEIGHT`. The tool validates the literal before the call. */
+  /** `auto` or `WIDTHxHEIGHT`. The tool validates the literal before the call.
+   *  AUTHORITATIVE over {@link aspectRatio}: an explicit `WIDTHxHEIGHT` here is
+   *  used verbatim; the adapter only consults `aspectRatio` when `size` is
+   *  `auto`. */
   readonly size: string
+  /** §5.2 — model-friendly output shape. `auto` (default) ⇒ the adapter leaves
+   *  `size` untouched (byte-identical legacy). When `size` is `auto` and this is
+   *  a concrete ratio, the adapter resolves it to a provider-supported size. */
+  readonly aspectRatio: ImageAspectRatio
   readonly quality: "low" | "medium" | "high" | "auto"
   readonly n: number
   readonly format: ImageGenFormat

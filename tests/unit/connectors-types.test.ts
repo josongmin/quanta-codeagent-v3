@@ -18,41 +18,61 @@ import {
 } from "@/connectors"
 
 describe("connectors / types", () => {
-  test("UNIT-1: SupportedAuth closed union exhaustive switch", () => {
-    const all: ReadonlyArray<SupportedAuth> = ["oauth", "none"]
+  test("UNIT-1: SupportedAuth closed union exhaustive (widening = compile error)", () => {
+    // The `satisfies Record<SupportedAuth, true>` is the load-bearing guard:
+    // widening the union (e.g. adding "apikey") leaves this map non-exhaustive
+    // and fails `typecheck:tests`. The `default: never` arm catches the same
+    // drift inside the switch. The runtime count is DERIVED from the exhaustive
+    // map keys (not a hand-written literal), so it tracks the type, not itself.
+    const ALL = { oauth: true, none: true } satisfies Record<SupportedAuth, true>
     let seen = 0
-    for (const v of all) {
+    for (const v of Object.keys(ALL) as SupportedAuth[]) {
       switch (v) {
         case "oauth":
-          seen += 1
-          break
         case "none":
           seen += 1
           break
+        default: {
+          const _exhaustive: never = v
+          throw new Error(`unhandled SupportedAuth: ${_exhaustive}`)
+        }
       }
     }
-    expect(seen).toBe(2)
+    expect(seen).toBe(Object.keys(ALL).length)
   })
 
-  test("UNIT-2: RefreshOutcome closed union exhaustive switch", () => {
-    const all: ReadonlyArray<RefreshOutcome> = ["fresh", "cached-degraded", "cached-fresh"]
+  test("UNIT-2: RefreshOutcome closed union exhaustive (widening = compile error)", () => {
+    const ALL = {
+      fresh: true,
+      "cached-degraded": true,
+      "cached-fresh": true,
+    } satisfies Record<RefreshOutcome, true>
     let seen = 0
-    for (const v of all) {
+    for (const v of Object.keys(ALL) as RefreshOutcome[]) {
       switch (v) {
         case "fresh":
         case "cached-degraded":
         case "cached-fresh":
           seen += 1
           break
+        default: {
+          const _exhaustive: never = v
+          throw new Error(`unhandled RefreshOutcome: ${_exhaustive}`)
+        }
       }
     }
-    expect(seen).toBe(3)
+    expect(seen).toBe(Object.keys(ALL).length)
   })
 
-  test("UNIT-3: AvailabilityVerdict closed union exhaustive switch", () => {
-    const all: ReadonlyArray<AvailabilityVerdict> = ["ok", "dns-fail", "http-fail", "timeout"]
+  test("UNIT-3: AvailabilityVerdict closed union exhaustive (widening = compile error)", () => {
+    const ALL = {
+      ok: true,
+      "dns-fail": true,
+      "http-fail": true,
+      timeout: true,
+    } satisfies Record<AvailabilityVerdict, true>
     let seen = 0
-    for (const v of all) {
+    for (const v of Object.keys(ALL) as AvailabilityVerdict[]) {
       switch (v) {
         case "ok":
         case "dns-fail":
@@ -60,9 +80,13 @@ describe("connectors / types", () => {
         case "timeout":
           seen += 1
           break
+        default: {
+          const _exhaustive: never = v
+          throw new Error(`unhandled AvailabilityVerdict: ${_exhaustive}`)
+        }
       }
     }
-    expect(seen).toBe(4)
+    expect(seen).toBe(Object.keys(ALL).length)
   })
 
   test("UNIT-4: Connector requires id/displayName/host/auth", async () => {
@@ -81,7 +105,9 @@ describe("connectors / types", () => {
     expect(await reg.list()).toEqual([c])
   })
 
-  test("UNIT-5: Connector with auth=oauth carries issuer", () => {
+  test("UNIT-5: Connector with auth=oauth carries issuer", async () => {
+    // Route through the real in-memory registry (not a literal read-back) so a
+    // regression in get()/list() round-tripping the oauthIssuer field is caught.
     const c: Connector = {
       id: "github",
       displayName: "GitHub",
@@ -89,7 +115,10 @@ describe("connectors / types", () => {
       auth: "oauth",
       oauthIssuer: "https://github.com",
     }
-    expect(c.oauthIssuer).toBe("https://github.com")
+    const reg = createInMemoryConnectorRegistry([c])
+    const fetched = await reg.get("github")
+    expect(fetched).toEqual(c)
+    expect(fetched?.oauthIssuer).toBe("https://github.com")
   })
 
   test("UNIT-6: OAuthDiscoveryError preserves typed code arm", () => {

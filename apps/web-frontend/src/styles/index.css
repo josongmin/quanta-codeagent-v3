@@ -7,11 +7,11 @@ html, body, #root {
   height: 100%;
 }
 
-/* Codex-aligned base: sans prose body (mono reserved for code), app
-   surface bg, antialiasing. Components opt into `font-mono` where needed. */
+/* Codex-aligned base — LIGHT: sans prose body (mono reserved for code),
+   white app surface, antialiasing. Components opt into `font-mono` for code. */
 body {
-  background: #0f0f12; /* surface.DEFAULT */
-  color: #ededee;      /* ink.DEFAULT */
+  background: #ffffff; /* surface.DEFAULT */
+  color: #1c1c1f;      /* ink.DEFAULT */
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -21,19 +21,19 @@ body {
 /* Quiet, thin scrollbars (Codex/desktop feel) — not the chunky OS default. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3a3a43 transparent;
+  scrollbar-color: #d0d0d6 transparent;
 }
 *::-webkit-scrollbar { width: 9px; height: 9px; }
 *::-webkit-scrollbar-thumb {
-  background: #2a2a30;
+  background: #d7d7dc;
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
-*::-webkit-scrollbar-thumb:hover { background: #3a3a43; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: #b2b2ba; background-clip: content-box; }
 *::-webkit-scrollbar-track { background: transparent; }
 
-::selection { background: rgba(122, 162, 247, 0.28); } /* accent @ 28% */
+::selection { background: rgba(76, 110, 245, 0.18); } /* accent @ 18% */
 
 /* Bottom-anchored fade so long scroll regions don't hard-cut at the edge. */
 .scroll-fade-bottom {

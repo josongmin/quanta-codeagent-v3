@@ -536,6 +536,15 @@ export const App = (): JSX.Element => {
   const canvasSource: CanvasSource | null = null
   const contextUsage = useContextUsage(canvasSource)
 
+  // Codex-like: the observability sidebar stays OFF-screen until there's
+  // actually something to show. Empty (no runs / objective / approvals /
+  // usage) ⇒ the chat takes the full width instead of a permanent empty pane.
+  const hasObservabilityData =
+    observability.runs.length > 0 ||
+    observability.objective !== null ||
+    observability.approvals.length > 0 ||
+    contextUsage !== null
+
   return (
     <div className="flex h-full min-h-screen flex-col bg-surface text-ink">
       <SessionChrome
@@ -563,7 +572,9 @@ export const App = (): JSX.Element => {
           sessionStatus={sessionState?.status ?? null}
           slashCommands={slashCommands}
         />
-        <ObservabilityPane state={observability} usage={contextUsage} />
+        {hasObservabilityData ? (
+          <ObservabilityPane state={observability} usage={contextUsage} />
+        ) : null}
       </div>
       <HotkeyToast />
       {knobsPanelOpen ? (

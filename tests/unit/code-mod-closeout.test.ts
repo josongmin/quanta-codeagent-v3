@@ -72,22 +72,17 @@ describe("isCodeModificationSession", () => {
 })
 
 describe("CODE_MOD_CLOSEOUT_REMINDER", () => {
-  test("names the four surfaces (type / owner / wire / test)", () => {
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("type")
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("owner")
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("wire")
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("test")
-  })
+  // NOTE: the substring-keyword scans ("names the four surfaces" / "all four"
+  // stop-condition phrase) were removed as substring tautologies over this
+  // module's own constant. The constant's full content (four surface keywords
+  // + the "Stop only after all four surfaces are clean." line) is pinned
+  // by-identity via toBe(CODE_MOD_CLOSEOUT_REMINDER) in the routing tests of
+  // closeout-guard.test.ts and end-to-end through the real loop in
+  // sota-codex-full.test.ts:267 (which also re-checks the four keywords against
+  // text that actually reached the transcript). Identity catches any drift.
 
   test("is distinct from the legacy reminders (Phase 2 contract preserved)", () => {
     expect(CODE_MOD_CLOSEOUT_REMINDER).not.toBe(CLOSEOUT_REMINDER)
     expect(CODE_MOD_CLOSEOUT_REMINDER).not.toBe(CLOSEOUT_4RULE_REMINDER)
-  })
-
-  test("mentions all four surface keywords in stop-condition framing", () => {
-    // The reminder ends with a "Stop only after all four surfaces are clean"
-    // line — a regression guard so future edits don't drop the closing
-    // condition that anchors the model's finish behavior.
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toMatch(/all four/i)
   })
 })

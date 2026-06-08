@@ -8,6 +8,13 @@ import type { AgentConfig } from "../types"
 
 export const SKILL_META_TOOLS = new Set(["Skill", "ToolSearch"])
 
+/** Canonicalize a tool name for scope matching. Skill `allowed-tools` are
+ *  frequently authored Claude-style (`Read`, `Bash`, `Edit`) while quanta
+ *  dispatches lowercase (`read`, `bash`, `edit`); matching them under an
+ *  exact-string `Set.has` denied legitimately-permitted tools. Lowercasing
+ *  both sides closes the common Read/Bash/Write/Edit/Grep/Glob gap. */
+const normTool = (name: string): string => name.trim().toLowerCase()
+
 export const buildSkillGate = (
   allowlists: Map<string, string[]> | undefined,
   overrides: Map<string, SkillTurnOverride> | undefined,
@@ -18,7 +25,7 @@ export const buildSkillGate = (
   let active: Set<string> | undefined
   let activeOverride: SkillTurnOverride | undefined
   return {
-    allow: (name) => active === undefined || SKILL_META_TOOLS.has(name) || active.has(name),
+    allow: (name) => active === undefined || SKILL_META_TOOLS.has(name) || active.has(normTool(name)),
     observe: (name, input, ok) => {
       if (name !== "Skill" || !ok) return
       const raw =
@@ -27,7 +34,11 @@ export const buildSkillGate = (
           : undefined
       const skill = typeof raw === "string" ? raw.trim().replace(/^\//, "") : ""
       const allow = allowlists?.get(skill)
-      if (allow) active = new Set(allow)
+      // ONLY a NON-EMPTY allowlist scopes the agent. An empty `allowed-tools: []`
+      // is a tool-less / briefing skill (e.g. "repo onboarding") — it adds
+      // guidance, NOT a zero-tool jail. (Was `if (allow)`: `[]` is truthy, so it
+      // set `active` to an EMPTY Set and every subsequent tool was denied.)
+      if (allow !== undefined && allow.length > 0) active = new Set(allow.map(normTool))
       activeOverride = overrides?.get(skill)
     },
     activeOverride: () => activeOverride,

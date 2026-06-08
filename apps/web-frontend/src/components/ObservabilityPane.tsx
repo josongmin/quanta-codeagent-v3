@@ -123,7 +123,7 @@ const ObjectiveStatusBadge = ({ status }: { status: Objective["status"] }): JSX.
       ? "bg-err/15 text-err"
       : status === "completed"
         ? "bg-ok/15 text-ok"
-        : "bg-white/5 text-ink-secondary"
+        : "bg-black/[0.05] text-ink-secondary"
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}
@@ -228,7 +228,7 @@ const RunRow = memo(({ run, onRetryRun }: RunRowProps): JSX.Element => {
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-baseline justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-white/5"
+        className="flex w-full items-baseline justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-black/[0.05]"
       >
         <span className="truncate text-xs text-ink-secondary" title={run.title}>
           {run.title}
@@ -275,7 +275,7 @@ const RunRow = memo(({ run, onRetryRun }: RunRowProps): JSX.Element => {
             <button
               type="button"
               onClick={() => onRetryRun(run.id)}
-              className="mt-2 rounded-lg border border-line px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-white/5 hover:text-ink"
+              className="mt-2 rounded-lg border border-line px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-black/[0.05] hover:text-ink"
             >
               Retry
             </button>

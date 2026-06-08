@@ -15,7 +15,12 @@
 import type { GitDirectiveEmitter } from "../../agent/git-directives"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { mutate } from "./_shared"
-import { type GitBranchSwitchInput, type GitRunner, gitBranchSwitchInputSchema } from "./types"
+import {
+  type GitBranchSwitchInput,
+  type GitDirtyAction,
+  type GitRunner,
+  gitBranchSwitchInputSchema,
+} from "./types"
 
 /** ADR-0220 wire — caller-injected opts. Default-OMIT under
  *  `exactOptionalPropertyTypes`. When supplied, a successful switch with
@@ -29,8 +34,13 @@ export interface GitBranchSwitchToolOpts {
 
 const autoWipMessage = (): string => `wip: ${new Date().toISOString()}`
 
+/** Stash label for the §7.4 stash flow. Identifiable prefix so the user can
+ *  `git stash list | grep branch-switch` and `git stash pop` later. The ISO
+ *  timestamp disambiguates repeated stashes. */
+const stashLabel = (): string => `branch-switch wip: ${new Date().toISOString()}`
+
 const DIRTY_REJECTION =
-  "working tree is dirty; pass autoWip:true to create a wip checkpoint, or `git stash` first"
+  "working tree is dirty; pass dirtyAction:\"commit-wip\"|\"stash\"|\"discard\" (or autoWip:true) — or `git stash` first"
 
 /** True ⇒ `git status --porcelain` stdout contains any change line. The
  *  porcelain format emits one line per changed/untracked file; an empty

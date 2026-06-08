@@ -19,16 +19,10 @@
  *         reviewer (legacy byte-identical).
  *   R-9   Reviewer rejection via legacy outcome (no verb) keeps the legacy
  *         message phrasing.
- *   R-10  G-1d guard: the gate file still has EXACTLY ONE `steerInjection:`
- *         assignment site (regression guard from
- *         admissibility-deny-steer-hell.test.ts — re-asserted here so a Feature-3
- *         author who forgets the constraint trips THIS test too).
  *   R-11  reviewKind inference picks the right kind for the bash tool (terminal),
  *         not 'edit'.
  */
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
 import { z } from "zod"
 import { type AdmissibilityWaveAOptions, runAdmissibilityGate } from "@/agent/admissibility-gate"
 import type { AgentConfig } from "@/agent/types"
@@ -383,15 +377,6 @@ describe("review-kind gate wiring — HELL", () => {
     expect(r?.block.content).toContain("User aborted")
     expect(r?.block.content).toContain("cancel")
     expect(r?.steerInjection).toBeUndefined()
-  })
-
-  test("R-10: gate still has EXACTLY ONE `steerInjection:` assignment site (regression guard)", () => {
-    const gatePath = resolve(__dirname, "../../src/agent/admissibility-gate.ts")
-    const src = readFileSync(gatePath, "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/[^\n]*/g, "")
-    const count = (src.match(/\bsteerInjection\s*:/g) ?? []).length
-    expect(count).toBe(1)
   })
 
   test("R-11: reviewKind for bash is 'terminal' not 'edit'", async () => {

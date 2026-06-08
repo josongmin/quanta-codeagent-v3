@@ -36,14 +36,12 @@ describe("CLI repl thin-surface ownership hellgate", () => {
     expect(biome).toContain("Use the sanctioned runner-owned modules instead.")
   })
 
-  test("CLI runtime wiring does not mutate the SDK runtime context after bootstrap", () => {
-    const runtimeContextCompose = read("src/apps/cli/repl/runtime-context-compose.ts")
-    const surfaceCompose = read("src/apps/cli/repl/surface-compose.ts")
-    const sessionLoop = read("src/apps/cli/repl/session-loop.ts")
-
-    expect(runtimeContextCompose).not.toContain(".withAdmissibility(")
-    expect(surfaceCompose).not.toContain(".wrapRegistry(")
-    expect(surfaceCompose).not.toContain(".setGranularRegistry(")
-    expect(sessionLoop).not.toContain(".ensureAutomationEngine(")
-  })
+  // NOTE: removed TAUTOLOGICAL test "CLI runtime wiring does not mutate the SDK
+  // runtime context after bootstrap" (test-quality audit 2026-06-08, audit line
+  // 278). Its four not.toContain assertions negated method-call forms
+  // (.withAdmissibility(/.wrapRegistry(/.setGranularRegistry(/.ensureAutomationEngine()
+  // that exist nowhere in src/ (verified by grep) — always-green. They are also a
+  // strict duplicate of tests/unit/cli/runtime-sdk-cutover-hellgate.test.ts
+  // "cli setup and side-conversation seams..." (lines 81/85/86/94), which carries
+  // the identical assertions. No coverage lost.
 })

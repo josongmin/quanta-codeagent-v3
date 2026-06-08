@@ -22,14 +22,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type AgentEvent, JsonlRecorder, StdoutStream, type StreamPort } from "@/stream"
-
-class CapturingStream implements StreamPort {
-  events: AgentEvent[] = []
-  emit(event: AgentEvent): void {
-    this.events.push(event)
-  }
-}
+import { type AgentEvent, JsonlRecorder, StdoutStream } from "@/stream"
 
 describe("knobs_applied AgentEvent variant", () => {
   test("constructs with all required fields (compile-time contract)", () => {
@@ -102,22 +95,6 @@ describe("knobs_applied AgentEvent variant", () => {
       }
       void _event
     }
-  })
-})
-
-describe("CapturingStream forward", () => {
-  test("emit appends and preserves the event verbatim", () => {
-    const stream = new CapturingStream()
-    const event: AgentEvent = {
-      type: "knobs_applied",
-      surface: "bench",
-      knobs: { lsp: { value: true, source: "env" } },
-      preset: "agentless-full",
-      costMultiplier: 1,
-    }
-    stream.emit(event)
-    expect(stream.events.length).toBe(1)
-    expect(stream.events[0]).toBe(event)
   })
 })
 

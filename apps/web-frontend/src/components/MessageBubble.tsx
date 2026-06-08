@@ -134,7 +134,7 @@ const CopyButton = ({ text }: { readonly text: string }): JSX.Element => {
       onClick={onCopy}
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy"}
-      className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-tertiary opacity-0 transition focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 group-hover:opacity-100 hover:bg-white/5 hover:text-ink"
+      className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-tertiary opacity-0 transition focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 group-hover:opacity-100 hover:bg-black/[0.05] hover:text-ink"
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
     </button>

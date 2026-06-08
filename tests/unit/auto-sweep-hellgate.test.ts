@@ -654,9 +654,16 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
       walSizeThresholdBytes: -1,
     })
     await h.sweepNow()
-    // The counter emits regardless (delta 0) — what we pin here is that
-    // the sweep ran NO-THROW with the negative threshold (no exception
-    // escaped startAutoSweep + sweepNow).
+    // R2-audit fix (660): the prior `h.scheduled===true` was true for ANY
+    // sqlite sweep and never observed the negative-threshold rejection. Pin
+    // the real signal: a rejected (coerced-to-unset) threshold keeps the
+    // sweep PASSIVE-only, so the WAL-restart counter delta MUST stay 0 — a
+    // regression that forwarded -1 straight to the sqlite sweep would emit a
+    // non-zero restart delta and fail here.
+    const restartedRows = emitter.counters.filter(
+      (c) => c.name === "codex_r2.sweep.sqlite_wal_restarted",
+    )
+    expect(restartedRows.every((r) => r.delta === 0)).toBe(true)
     expect(h.scheduled).toBe(true)
     h.stop()
   })

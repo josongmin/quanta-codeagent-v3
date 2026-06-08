@@ -4,44 +4,47 @@ export default {
   darkMode: "class",
   theme: {
     extend: {
-      // Codex-aligned token scale (dark-first). Components should prefer these
-      // semantic names over raw `neutral-*` so the surface reads as one system.
-      // (raw Tailwind `neutral-*` still works for legacy spots mid-migration.)
+      // Codex-aligned token scale — LIGHT base (clean ChatGPT/Codex-desktop feel).
+      // Components use these semantic names; flipping these values reskins the app.
       colors: {
-        // surfaces — app → raised cards → overlay/dropdown → input field
+        // surfaces — app(white) → raised cards/sidebar(light gray) → overlay/input(white)
         surface: {
-          DEFAULT: "#0f0f12", // app background
-          raised: "#17171b", // panels / cards / sidebar
-          overlay: "#1e1e23", // dropdowns / menus / popovers
-          input: "#202026", // composer / input fields
+          DEFAULT: "#ffffff", // app background
+          raised: "#f7f7f8", // panels / cards / sidebar / user bubble
+          overlay: "#ffffff", // dropdowns / menus / modals (with shadow)
+          input: "#ffffff", // composer / inputs (border defines them)
         },
-        // hairlines
+        // hairlines (light gray)
         line: {
-          DEFAULT: "#2a2a30",
-          subtle: "#1f1f24",
-          strong: "#3a3a43",
+          DEFAULT: "#e7e7ea",
+          subtle: "#efeff1",
+          strong: "#d7d7dc",
         },
-        // text ramp
+        // text ramp (dark on light)
         ink: {
-          DEFAULT: "#ededee", // primary
-          secondary: "#9b9ba4", // labels / secondary
-          tertiary: "#6a6a73", // muted / captions
-          faint: "#50505a", // placeholder / disabled
+          DEFAULT: "#1c1c1f", // primary
+          secondary: "#666670", // labels / secondary
+          tertiary: "#8a8a94", // muted / captions
+          faint: "#b2b2ba", // placeholder / disabled
         },
-        // brand accent (kept from quanta)
+        // brand accent (deeper blue for contrast on white)
         accent: {
-          DEFAULT: "#7aa2f7",
-          muted: "#5d7fbf",
-          fg: "#0f0f12", // foreground ON accent (for solid buttons)
+          DEFAULT: "#4c6ef5",
+          muted: "#3b5bd9",
+          fg: "#ffffff", // text/icon ON a solid accent button
         },
-        // semantic (clean github-ish)
-        ok: "#3fb950",
-        warn: "#d29922",
-        err: "#f85149",
-        info: "#58a6ff",
+        // semantic (deeper for light-bg contrast)
+        ok: "#16a34a",
+        warn: "#d97706",
+        err: "#dc2626",
+        info: "#2563eb",
+        // fenced code blocks stay DARK on the light page (Codex-accurate snippets).
+        code: {
+          DEFAULT: "#0d1117",
+          line: "#21262d",
+        },
       },
       fontFamily: {
-        // prose body — system sans first (Codex/ChatGPT desktop feel)
         sans: [
           "-apple-system",
           "BlinkMacSystemFont",
@@ -67,8 +70,11 @@ export default {
         "2xs": "0.1875rem",
       },
       fontSize: {
-        // chat body — slightly larger than text-sm for readable prose
         chat: ["0.9375rem", { lineHeight: "1.6" }], // 15px / relaxed
+      },
+      boxShadow: {
+        // soft elevation for overlays/menus on a light surface
+        overlay: "0 8px 28px -6px rgba(20,20,30,0.16), 0 2px 8px -2px rgba(20,20,30,0.08)",
       },
       keyframes: {
         "fade-in": {

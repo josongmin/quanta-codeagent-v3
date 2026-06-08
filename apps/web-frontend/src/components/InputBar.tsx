@@ -167,7 +167,7 @@ export const InputBar = ({
               aria-label="Attach image"
               title="Attach image (or paste a screenshot)"
               className={cx(
-                "rounded-md p-1.5 text-ink-tertiary transition hover:bg-white/5 hover:text-ink",
+                "rounded-md p-1.5 text-ink-tertiary transition hover:bg-black/[0.05] hover:text-ink",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
                 "disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent",
               )}
@@ -175,7 +175,7 @@ export const InputBar = ({
               <ImageGlyph />
             </button>
             <span className="select-none text-[11px] text-ink-tertiary">
-              <span className="rounded bg-white/5 px-1 py-0.5 font-mono text-ink-secondary">
+              <span className="rounded bg-black/[0.05] px-1 py-0.5 font-mono text-ink-secondary">
                 /
               </span>{" "}
               for commands
@@ -274,7 +274,7 @@ const PendingAttachmentsPanel = memo(
                 <button
                   type="button"
                   onClick={onClearAllPendingImages}
-                  className="rounded-md px-1.5 py-0.5 text-xs text-ink-secondary transition hover:bg-white/5 hover:text-ink"
+                  className="rounded-md px-1.5 py-0.5 text-xs text-ink-secondary transition hover:bg-black/[0.05] hover:text-ink"
                 >
                   Clear all
                 </button>

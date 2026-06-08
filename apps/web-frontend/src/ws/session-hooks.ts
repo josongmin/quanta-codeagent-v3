@@ -459,6 +459,12 @@ export const applySessionEventToTranscript = (
         ),
         timestamp: ts,
       })
+    default:
+      // Forward-compat: an unknown / newly-added SessionEvent type must be a
+      // NO-OP, never corrupt the transcript. Falling through returned
+      // `undefined` here, which poisoned reducer state → the next
+      // `turn.output.delta` crashed on `state.streamingAssistant`.
+      return state
   }
 }
 
@@ -523,6 +529,10 @@ export const transcriptReducer = (
         text: action.text,
         timestamp: action.timestamp,
       })
+    default:
+      // Defensive: an unknown action type must never return undefined (which
+      // would poison the next reducer call). Keep current state.
+      return state
   }
 }
 

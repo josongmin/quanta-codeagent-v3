@@ -61,7 +61,7 @@ export const StatusBar = ({
           }}
           disabled={restarting}
           className={cx(
-            "rounded-lg border border-line px-3 py-1.5 text-sm text-ink transition hover:bg-white/5",
+            "rounded-lg border border-line px-3 py-1.5 text-sm text-ink transition hover:bg-black/[0.05]",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
             "disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent",
           )}

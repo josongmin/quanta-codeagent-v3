@@ -30,6 +30,7 @@ import { createToolChoiceTurnState } from "@/agent/tool-choice"
 import type { TurnSession, TurnState } from "@/agent/turn-context"
 import type { AgentConfig } from "@/agent/types"
 import { createWorkingMemory } from "@/memory"
+import { closeoutCriticKnob } from "@/runner/knobs/knobs/closeout-critic"
 import type { AgentEvent } from "@/stream"
 
 const ROOT = join(import.meta.dir, "../../..")
@@ -190,19 +191,26 @@ describe("closeout-critic hellgate — source fence", () => {
     expect(src).not.toContain("createSubagentRunner")
   })
 
-  test("helper never throws — every critic call is try/caught + converted to data", () => {
-    const src = read("src/agent/closeout-critic.ts")
-    expect(src).toContain("try {")
-    expect(src).toContain("catch")
-    expect(src).toContain("critic:unavailable")
-  })
+  // NOTE: "helper never throws" is covered behaviorally through the REAL symbol
+  // by the (c) describe block — THROWING critic ⇒ detail "critic:unavailable: …",
+  // SYNCHRONOUSLY-throwing poison adapter, and the timeout sentinel — each driving
+  // runCloseoutCritic. A source-grep for "try {"/"catch"/"critic:unavailable"
+  // proved nothing those don't (it would survive the catch being gutted), so it
+  // was removed as tautological.
 
   test("knob is default-OFF (QUANTA_CLOSEOUT_CRITIC, falsy ⇒ undefined)", () => {
-    const src = read("src/runner/knobs/knobs/closeout-critic.ts")
-    expect(src).toContain('envKey: "QUANTA_CLOSEOUT_CRITIC"')
-    expect(src).toContain("registerKnob(closeoutCriticKnob)")
-    // Falsy/garbage ⇒ undefined (no default ON).
-    expect(src).toMatch(/return TRUTHY\.has\(raw\) \? \{ enabled: true \} : undefined/)
+    // Invoke the REAL parser/knob object instead of grepping source — a
+    // regression in the parse logic or env key is then actually caught.
+    // (registry side-effect coverage lives in knobs-import-bundle.test.ts.)
+    expect(closeoutCriticKnob.envKey).toBe("QUANTA_CLOSEOUT_CRITIC")
+    // Falsy / absent / garbage ⇒ undefined (no default ON).
+    for (const off of [undefined, "", "0", "off", "false", "garbage"]) {
+      expect(closeoutCriticKnob.parse(off)).toBeUndefined()
+    }
+    // Truthy ⇒ enabled.
+    for (const on of ["1", "on", "true"]) {
+      expect(closeoutCriticKnob.parse(on)).toEqual({ enabled: true })
+    }
   })
 
   test("seam emits via the EXISTING recovery/closeout event (no new event type)", () => {

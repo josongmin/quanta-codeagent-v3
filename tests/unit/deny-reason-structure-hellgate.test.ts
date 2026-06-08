@@ -174,12 +174,12 @@ describe("hellgate — C6 content-prefix shape (knob-ON additive)", () => {
 })
 
 describe("hellgate — C6 default-OFF byte-identity (envelope shape)", () => {
-  test("knob-off failure envelope is byte-identical to today {mode, isReadonly}", () => {
-    // Simulate the gate's deny() result WITHOUT the knob: no denyReason key.
-    const envelopeOff = { mode: "permission_denied" as const, isReadonly: true }
-    expect(envelopeOff).toEqual({ mode: "permission_denied", isReadonly: true })
-    expect("denyReason" in envelopeOff).toBe(false)
-  })
+  // NOTE: the knob-OFF byte-identity case ({mode, isReadonly} only, no denyReason
+  // key) is proven against real production code by
+  // deny-reason-reachability-hellgate.test.ts:320-338 (deny_and_steer decline,
+  // knob-OFF) which drives runAdmissibilityGate. The former hand-built-literal
+  // smoke here was tautological (it restated a fixture, invoking no SUT) and was
+  // removed.
 
   test("knob-on attaches denyReason as a NEW optional key (no other field changes)", () => {
     const denyReason = structuredDenyReason({

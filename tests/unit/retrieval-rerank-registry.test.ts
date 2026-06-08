@@ -111,13 +111,26 @@ describe("createBm25SecondaryReranker", () => {
     expect(out[0]?.id).toBe("a")
   })
 
-  test("alpha clamps out-of-range to [0,1]", async () => {
+  test("alpha clamps out-of-range to [0,1] (observable ordering, not just no-throw)", async () => {
+    // alpha=-5 must clamp to 0 → bm25-driven ordering (rare term wins),
+    // identical to the alpha=0 case above. If the clamp is removed,
+    // fused = -5*first + 6*bm25 flips the ordering and this fails.
     const rLow = createBm25SecondaryReranker({ alpha: -5 })
+    const lowOut = await rLow.rerank({
+      query: "cat",
+      candidates: [c("doc-frequent", "the the the the", 0), c("doc-rare", "the cat sat on the mat", 0)],
+    })
+    expect(lowOut[0]?.id).toBe("doc-rare")
+
+    // alpha=99 must clamp to 1 → first-stage-driven ordering, identical to
+    // the alpha=1 case above. Without the clamp, fused = 99*first - 98*bm25
+    // changes the winner and this fails.
     const rHi = createBm25SecondaryReranker({ alpha: 99 })
-    // Both should rerank without error.
-    await rLow.rerank({ query: "q", candidates: [c("a", "x")] })
-    await rHi.rerank({ query: "q", candidates: [c("a", "x")] })
-    expect(true).toBe(true)
+    const hiOut = await rHi.rerank({
+      query: "matches query",
+      candidates: [c("a", "irrelevant", 10), c("b", "matches query exactly", 1)],
+    })
+    expect(hiOut[0]?.id).toBe("a")
   })
 
   test("limit truncates", async () => {

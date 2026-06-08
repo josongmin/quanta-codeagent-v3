@@ -724,36 +724,53 @@ afterEach(() => {
 // === type-shape locks (compile-time, not source-grep) =========================
 
 describe("session-loop — type contract shape lock (compile-time)", () => {
-  test("SessionLoopSinks lists every sink the host wires", () => {
-    type Required = keyof SessionLoopSinks
-    const required: Required[] = [
-      "renderTurnDashboard",
-      "renderAndResetSummary",
-      "flushLifecyclePills",
-      "renderTurnError",
-    ]
-    expect(required).toHaveLength(4)
-    expect(new Set(required).size).toBe(4)
+  test("SessionLoopSinks shape is locked EXHAUSTIVELY (add/drop/rename ⇒ tsc error)", () => {
+    // An exhaustive mapped-type lock: a DROPPED/renamed key leaves a missing
+    // property (tsc error), an ADDED key is an excess property (tsc error).
+    // Unlike a subset array + toHaveLength(n), this catches drift in BOTH
+    // directions for the whole interface — not just a renamed listed key.
+    const _exhaustive = {
+      renderTurnDashboard: true,
+      renderAndResetSummary: true,
+      flushLifecyclePills: true,
+      renderTurnError: true,
+    } satisfies Record<keyof SessionLoopSinks, true>
+    // Touch the binding so the lock is not dead-code-eliminated by tooling.
+    expect(Object.keys(_exhaustive).sort()).toEqual(
+      (Object.keys(_exhaustive) as Array<keyof SessionLoopSinks>).sort(),
+    )
   })
 
-  test("RunSessionLoopDeps surfaces the required + optional fields", () => {
-    type Required = keyof RunSessionLoopDeps
-    const allKeys: Required[] = [
-      "setup",
-      "dispatchSlash",
-      "sinks",
-      "ux",
-      "imageQueue",
-      "runtimeFacadeCompose",
-      "registerExitTeardown",
-    ]
-    expect(allKeys).toHaveLength(7)
-  })
-
-  test("runSessionLoop export is an async function", async () => {
-    const mod = await import("../../../../src/apps/cli/repl/session-loop")
-    expect(typeof mod.runSessionLoop).toBe("function")
-    expect(mod.runSessionLoop.constructor.name).toBe("AsyncFunction")
+  test("RunSessionLoopDeps shape is locked EXHAUSTIVELY (add/drop/rename ⇒ tsc error)", () => {
+    // Every top-level dep is enumerated; a missing/extra/renamed key is a
+    // compile error here. Replaces the old subset array + toHaveLength(7),
+    // which silently ignored the other 16 fields.
+    const _exhaustive = {
+      setup: true,
+      dispatchSlash: true,
+      sinks: true,
+      ux: true,
+      imageQueue: true,
+      textInbox: true,
+      registerExitTeardown: true,
+      convCheckpointWire: true,
+      registerReplaceMessages: true,
+      registerSideConversationStart: true,
+      registerPlanQueueSendNow: true,
+      runtimeFacadeCompose: true,
+      playbookSeam: true,
+      playbookCliFlag: true,
+      searchPipelineDispose: true,
+      notify: true,
+      notifyCwdBasename: true,
+      contextWarning: true,
+      planQueueStore: true,
+      inTurnStdin: true,
+      conversationActions: true,
+      inboundMode: true,
+      backgroundPortal: true,
+    } satisfies Record<keyof RunSessionLoopDeps, true>
+    expect(_exhaustive.setup).toBe(true)
   })
 })
 

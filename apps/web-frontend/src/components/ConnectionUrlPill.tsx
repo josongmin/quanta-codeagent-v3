@@ -302,14 +302,14 @@ export const ConnectionUrlPill = ({ url, token }: ConnectionUrlPillProps): JSX.E
                       "font-mono text-[11px] tracking-tight transition",
                       isCopied
                         ? "bg-ok/10 text-ok"
-                        : "text-ink-secondary hover:bg-white/5 hover:text-ink",
+                        : "text-ink-secondary hover:bg-black/[0.05] hover:text-ink",
                     )}
                   >
                     <span
                       className={cx(
                         "shrink-0 rounded px-1 py-px text-[9px] uppercase tracking-wider",
                         e.label === "loopback"
-                          ? "bg-white/5 text-ink-tertiary"
+                          ? "bg-black/[0.05] text-ink-tertiary"
                           : "bg-ok/15 text-ok",
                       )}
                     >

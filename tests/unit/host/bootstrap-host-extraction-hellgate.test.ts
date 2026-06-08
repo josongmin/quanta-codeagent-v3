@@ -279,8 +279,16 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
       "buildMcpSurfaceInfo",
       "buildIdleGuards",
     ]
-    expect(required).toHaveLength(20)
-    expect(new Set(required).size).toBe(20)
+    // derive-from-source: assert every spec-mandated key actually EXISTS on a
+    // real `SessionBootstrapDeps` value (the typed `makeFakeDeps()` fixture is
+    // annotated `SessionBootstrapDeps`, so it is the runtime witness of the
+    // production type). A rename/removal of any factory field in production
+    // surfaces here as a missing key — not a self-count of literals the test
+    // itself typed two lines above.
+    const realDeps = makeFakeDeps() as Record<string, unknown>
+    for (const key of required) {
+      expect(Object.hasOwn(realDeps, key as string)).toBe(true)
+    }
   })
 
   test("5b. None of the new factory fields are optional (`?:` would be a runtime hole)", () => {

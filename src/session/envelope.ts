@@ -71,6 +71,31 @@ export const SessionMetaRecordSchema = z
     git_sha: NonEmptyString.optional(),
     git_branch: NonEmptyString.optional(),
     git_origin_url: NonEmptyString.optional(),
+    /* ----------------------------------------------------------------- */
+    /* §8.2 (jun-08 long-tail) — Codex session-meta absorption.          */
+    /* ALL OPTIONAL: an absent field decodes/encodes byte-identically to */
+    /* a legacy record (a v1/v2 record minted before this ticket carries */
+    /* none of them ⇒ the `.strict()` schema still accepts it, and the   */
+    /* canonical encoder DROPS `undefined` props, so re-encoding a record */
+    /* that never set them is byte-for-byte the prior wire form).        */
+    /* ----------------------------------------------------------------- */
+    /** Human-friendly agent label shown in multi-agent UIs (Codex
+     *  `agent_nickname`). Cosmetic provenance; absent ⇒ unnamed. */
+    agent_nickname: NonEmptyString.optional(),
+    /** Names of tools that were dynamically added to THIS session (Codex
+     *  `dynamic_tools` — the persisted set; see §8.3 for the per-add
+     *  event record). Recorded at session open as a snapshot. */
+    dynamic_tools: z.array(NonEmptyString).optional(),
+    /** What spawned this session (Codex `originator` — e.g. "cli",
+     *  "vscode", "exec", an app id). Free-form provenance string. */
+    originator: NonEmptyString.optional(),
+    /** Where the conversation thread came from (Codex `thread_source` —
+     *  e.g. "new", "resumed", "forked", "subagent"). */
+    thread_source: NonEmptyString.optional(),
+    /** Provider transport that served the session (Codex `model_provider`
+     *  — e.g. "anthropic", "openai", "chatgpt-oauth"). The `model` field
+     *  above is the model id; this is the provider/transport. */
+    model_provider: NonEmptyString.optional(),
   })
   .strict()
 export type SessionMetaRecord = z.infer<typeof SessionMetaRecordSchema>
@@ -228,6 +253,38 @@ export const TurnContextRecordSchema = z
      *  on v2 records whose composition root opts out of the second layer
      *  (callers fall back to the single-layer model). */
     file_system_sandbox_policy: FileSystemSandboxPolicySchema.optional(),
+    /* ----------------------------------------------------------------- */
+    /* §8.1 (jun-08 long-tail) — 6 Codex turn_context fields absorbed.    */
+    /* ALL OPTIONAL: absent ⇒ byte-identical to a pre-ticket record (the */
+    /* canonical encoder drops `undefined` props; `.strict()` still      */
+    /* accepts records that never set them — see `SessionMetaRecord` note */
+    /* above). These mirror Codex's `turn_context` payload:              */
+    /*   thread/model/model_provider/service_tier/cwd/.../instruction_   */
+    /*   sources/approval_policy/approvals_reviewer/sandbox/...           */
+    /* ----------------------------------------------------------------- */
+    /** Developer/system instruction text injected for this turn (Codex
+     *  `developer_instructions` — distinct from `user_instructions`; the
+     *  developer/system layer, not the end-user prompt). */
+    developer_instructions: z.string().optional(),
+    /** Base/foundational instruction text (Codex `base_instructions` — the
+     *  built-in agent instructions before per-session overlays). */
+    base_instructions: z.string().optional(),
+    /** Tool names dynamically available on THIS turn (Codex `dynamic_tools`
+     *  on turn_context — the live turn's dynamic-tool set, vs the
+     *  session-meta snapshot). */
+    dynamic_tools: z.array(NonEmptyString).optional(),
+    /** Provider billing tier requested (Codex/Anthropic/OpenAI
+     *  `service_tier` — e.g. "auto", "standard_only", "priority",
+     *  "flex"). Free-form: each provider's vocabulary differs and evolves;
+     *  the envelope is a wire LOG, not the request validator. */
+    service_tier: NonEmptyString.optional(),
+    /** Provider transport that served this turn (Codex `model_provider`).
+     *  The `model` field is the model id; this is the provider. */
+    model_provider: NonEmptyString.optional(),
+    /** Reviewer identity for approval decisions (Codex `approvals_reviewer`
+     *  — who/what adjudicated tool-call approvals this turn; e.g. a user
+     *  id, "auto", or a delegated reviewer agent). */
+    approvals_reviewer: NonEmptyString.optional(),
   })
   .strict()
 export type TurnContextRecord = z.infer<typeof TurnContextRecordSchema>

@@ -177,6 +177,21 @@ export type GitComposePrInput = z.infer<typeof gitComposePrInputSchema>
  *  cannot escape the argv we hand to `git`. */
 const BRANCH_NAME_RE = /^(?!-)[A-Za-z0-9._/+-]{1,64}$/
 
+/** §7.4 3-WAY dirty-checkout action. When the working tree is dirty, the model
+ *  picks ONE of three ways to clear it before switching:
+ *    - `"commit-wip"`: stage all + a wip checkpoint commit (recoverable via the
+ *      reflog / `git log`). Equivalent to the legacy `autoWip:true` path.
+ *    - `"stash"`: `git stash push -u` (tracked + untracked saved; recover with
+ *      `git stash pop`). Non-destructive, reversible.
+ *    - `"discard"`: irreversibly drop tracked edits + untracked files
+ *      (`git checkout -- .` + `git clean -fd`). DESTRUCTIVE — no reflog entry
+ *      for working-tree edits.
+ *  ABSENT ⇒ byte-identical legacy: `autoWip:true` commits a wip checkpoint,
+ *  otherwise the dirty tree is rejected. When present, `dirtyAction` takes
+ *  precedence over `autoWip`. */
+export const gitDirtyActionSchema = z.enum(["commit-wip", "stash", "discard"])
+export type GitDirtyAction = z.infer<typeof gitDirtyActionSchema>
+
 export const gitBranchSwitchInputSchema = z.object({
   branch: z
     .string()
@@ -184,8 +199,14 @@ export const gitBranchSwitchInputSchema = z.object({
     .max(64)
     .regex(BRANCH_NAME_RE, "branch must match [A-Za-z0-9._/+-] (no leading '-')")
     .describe("Branch to switch to"),
-  /** True ⇒ when working tree is dirty, auto-create a wip commit first. */
+  /** True ⇒ when working tree is dirty, auto-create a wip commit first. Legacy
+   *  flag; superseded by `dirtyAction:"commit-wip"` when both are present. */
   autoWip: z.boolean().optional().describe("Auto-commit dirty tree as wip before switching"),
+  /** 3-way choice for a dirty tree (see {@link gitDirtyActionSchema}). When set,
+   *  takes precedence over `autoWip`. Absent ⇒ legacy autoWip-or-reject. */
+  dirtyAction: gitDirtyActionSchema
+    .optional()
+    .describe('Dirty-tree action: "commit-wip" | "stash" | "discard"'),
   /** True ⇒ create the branch (`git switch -c <branch>`). */
   create: z.boolean().optional().describe("Create the branch (-c)"),
 })

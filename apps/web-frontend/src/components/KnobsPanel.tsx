@@ -14,7 +14,7 @@
  *
  * Styling follows the Codex-aligned token system (DESIGN.md): a real modal
  * (`bg-surface-overlay` panel over a `bg-black/50` backdrop), `surface-input`
- * search field, `hover:bg-white/5` knob rows, mono env keys, uppercase-tracking
+ * search field, `hover:bg-black/[0.05]` knob rows, mono env keys, uppercase-tracking
  * section headers.
  */
 
@@ -165,7 +165,7 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
             onClick={onClose}
             aria-label="Close settings"
             title="Close (Esc)"
-            className="rounded-md p-1.5 text-ink-tertiary transition hover:bg-white/5 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50"
+            className="rounded-md p-1.5 text-ink-tertiary transition hover:bg-black/[0.05] hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50"
           >
             <CloseIcon />
           </button>
@@ -199,7 +199,7 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
               <button
                 type="button"
                 onClick={() => load()}
-                className="mt-2 rounded-md border border-line px-2 py-0.5 text-[11px] text-ink hover:bg-white/5"
+                className="mt-2 rounded-md border border-line px-2 py-0.5 text-[11px] text-ink hover:bg-black/[0.05]"
               >
                 Retry
               </button>
@@ -255,7 +255,7 @@ interface KnobRowProps {
 const SOURCE_TONE: Record<string, string> = {
   env: "bg-ok/15 text-ok",
   session: "bg-accent/20 text-accent",
-  default: "bg-white/5 text-ink-tertiary",
+  default: "bg-black/[0.05] text-ink-tertiary",
 }
 
 const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Element => {
@@ -263,7 +263,7 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
   const sourceTone = SOURCE_TONE[knob.source] ?? SOURCE_TONE.default
   return (
     <li
-      className="rounded-lg px-2.5 py-2 transition hover:bg-white/5"
+      className="rounded-lg px-2.5 py-2 transition hover:bg-black/[0.05]"
       data-testid={`knob-row-${knob.envKey}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -271,7 +271,7 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
           <div className="flex flex-wrap items-baseline gap-2">
             <code className="font-mono text-xs font-medium text-accent">{knob.envKey}</code>
             {knob.home.length > 0 ? (
-              <span className="rounded bg-white/5 px-1 py-0.5 text-[9px] uppercase tracking-wide text-ink-tertiary">
+              <span className="rounded bg-black/[0.05] px-1 py-0.5 text-[9px] uppercase tracking-wide text-ink-tertiary">
                 {knob.home}
               </span>
             ) : null}
@@ -314,7 +314,7 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
             />
           ) : (
             <span
-              className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-ink-tertiary"
+              className="rounded bg-black/[0.05] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-ink-tertiary"
               title={
                 knob.hotToggleable
                   ? "Not in the daemon's /config write allowlist"

@@ -90,48 +90,13 @@ describe("ADR-0076 Gap-2 — OpenAI adapter reasoning → thinking_delta", () =>
     ])
   })
 
-  test("when both reasoning and reasoning_content present, prefer reasoning (no double-count)", async () => {
-    const a = adapter([
-      chunk({ reasoning: "canonical", reasoning_content: "duplicate" }),
-      lastUsage(),
-    ])
-    const out = await collect(a.stream(baseInput()))
-    expect(out.filter((e) => e.type === "thinking_delta")).toEqual([
-      { type: "thinking_delta", text: "canonical" },
-    ])
-  })
-
-  test("no reasoning fields → zero thinking_delta emitted (byte-identical)", async () => {
-    const a = adapter([chunk({ content: "plain text" }), lastUsage()])
-    const out = await collect(a.stream(baseInput()))
-    expect(out.some((e) => e.type === "thinking_delta")).toBe(false)
-  })
-
-  test("OpenAI adapter NEVER emits signature_delta (opaque reasoning)", async () => {
-    const a = adapter([chunk({ reasoning: "thinking" }), chunk({ content: "answer" }), lastUsage()])
-    const out = await collect(a.stream(baseInput()))
-    expect(out.some((e) => e.type === "signature_delta")).toBe(false)
-  })
-
-  test("reasoning + content order: thinking_delta before text_delta on the same chunk", async () => {
-    const a = adapter([chunk({ reasoning: "R", content: "T" }), lastUsage()])
-    const out = await collect(a.stream(baseInput()))
-    const idxThinking = out.findIndex((e) => e.type === "thinking_delta")
-    const idxText = out.findIndex((e) => e.type === "text_delta")
-    expect(idxThinking).toBeGreaterThanOrEqual(0)
-    expect(idxText).toBeGreaterThan(idxThinking)
-  })
-
-  test("empty / null reasoning is dropped (no zero-length thinking_delta)", async () => {
-    const a = adapter([
-      chunk({ reasoning: "" }),
-      chunk({ reasoning: null }),
-      chunk({ content: "x" }),
-      lastUsage(),
-    ])
-    const out = await collect(a.stream(baseInput()))
-    expect(out.some((e) => e.type === "thinking_delta")).toBe(false)
-  })
+  // NOTE: duplicate base tests deleted — covered verbatim by the hell-gate superset
+  // (openai-thinking-hell.test.ts):
+  //   - "prefer reasoning (no double-count)"        ⇒ O-1 (line 157)
+  //   - "no reasoning fields → zero thinking_delta"  ⇒ O-4c (line 211)
+  //   - "NEVER emits signature_delta"                ⇒ O-2 family (line 90, 100-chunk strict superset)
+  //   - "reasoning before text_delta on same chunk"  ⇒ O-5 (line 221)
+  //   - "empty / null reasoning dropped"             ⇒ O-4 / O-4b (lines 195, 201)
 
   test("multi-turn carry-over: assistant ThinkingBlock is dropped from outgoing OpenAI messages", async () => {
     // OpenAI Chat Completions has no input shape for thinking blocks. The

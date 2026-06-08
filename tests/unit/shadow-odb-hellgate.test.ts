@@ -20,7 +20,7 @@
  * actual git config.
  */
 
-import { afterAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import {
   existsSync,
   promises as fs,
@@ -655,10 +655,8 @@ describe("cleanup (HELL-15)", () => {
     await mkSized("cccccccccccccccc", 4096, 1_000) // newest
 
     // Cap = 5000 bytes ⇒ must evict at least two of the 4k dirs.
-    const cleanupSpy = mock(evictLru)
-    const evicted = await cleanupSpy(base, 5000)
+    const evicted = await evictLru(base, 5000)
     expect(evicted).toBeGreaterThanOrEqual(2)
-    expect(cleanupSpy).toHaveBeenCalledTimes(1)
     // The newest must survive.
     const remaining = readdirSync(snapshotsRoot)
     expect(remaining).toContain("cccccccccccccccc")
@@ -670,10 +668,8 @@ describe("cleanup (HELL-15)", () => {
     const base = mkTmp("base-lru-noop")
     await fs.mkdir(join(base, "snapshots", "x"), { recursive: true })
     await fs.writeFile(join(base, "snapshots", "x", "f"), "abc", "utf8")
-    const cleanupSpy = mock(evictLru)
-    const evicted = await cleanupSpy(base, 1_000_000)
+    const evicted = await evictLru(base, 1_000_000)
     expect(evicted).toBe(0)
-    expect(cleanupSpy).toHaveBeenCalledTimes(1)
     // Dir survived.
     const remaining = readdirSync(join(base, "snapshots"))
     expect(remaining).toContain("x")
@@ -681,19 +677,15 @@ describe("cleanup (HELL-15)", () => {
 
   test("HELL-15c: cleanup against a missing snapshots dir is a no-op", async () => {
     const base = mkTmp("base-lru-missing")
-    const cleanupSpy = mock(evictLru)
-    const evicted = await cleanupSpy(base, 0)
+    const evicted = await evictLru(base, 0)
     expect(evicted).toBe(0)
-    expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 
   test("HELL-15d: cleanup exposed via the port (`.cleanup`)", async () => {
     const base = mkTmp("base-lru-port")
     const odb = defaultShadowOdb({ baseDir: base })
-    const cleanupSpy = mock(odb.cleanup.bind(odb))
     // No snapshots yet ⇒ 0.
-    expect(await cleanupSpy(DEFAULT_SHADOW_ODB_MAX_BYTES)).toBe(0)
-    expect(cleanupSpy).toHaveBeenCalledTimes(1)
+    expect(await odb.cleanup(DEFAULT_SHADOW_ODB_MAX_BYTES)).toBe(0)
   })
 })
 
