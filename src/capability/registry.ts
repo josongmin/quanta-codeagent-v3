@@ -45,15 +45,15 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = Object.freeze([
     // H14a image generation tool. Gate: QUANTA_IMAGE_GEN (runtime-config field
     // imageGen). Exposes the image_gen LLM tool.
     //
-    // RUNTIME-CONDITIONED: real exposure ALSO requires an image-provider API key
-    // (a NON-env runtime signal). So the env-only gate is an UPPER BOUND: the key
-    // can only NARROW it (real ⊆ predicted), never widen it. `runtimeConditioned`
-    // tells the consistency check to assert that upper-bound relation, not strict
-    // equality (the provider key is resolved at runtime, not from env gates).
+    // PURE-ENV (strict equality): the provider port is ALWAYS constructed when
+    // QUANTA_IMAGE_GEN is on, and the tool registers on `ports.imageGen !==
+    // undefined` — a MISSING provider key is a CALL-TIME `{kind:"no_key"}` outcome,
+    // NOT a registration condition. So the key never narrows tool EXPOSURE; the
+    // env gate is exactly the real exposure (same shape as office-authoring /
+    // artifact-store). (Earlier `runtimeConditioned` modeling was wrong — removed.)
     id: "image-gen",
     gate: { envKey: "QUANTA_IMAGE_GEN" },
     surfaces: { llmTool: true },
-    runtimeConditioned: true,
     describe: "Image generation tool (image_gen).",
   },
   {

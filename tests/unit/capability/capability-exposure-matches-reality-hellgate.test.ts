@@ -19,9 +19,10 @@
  * that exact case FAIL (asserted below via a local own-gate-only resolver that
  * stands in for the reverted code).
  *
- * For RUNTIME-CONDITIONED caps (image-gen) the env-only prediction is a
- * NECESSARY-not-sufficient UPPER BOUND: real exposure ⊆ predicted (a provider key
- * narrows it at runtime), so we assert the upper-bound relation, not equality.
+ * The other seed caps (image-gen / artifact-store / office-authoring) are PURE-ENV
+ * (no composite require): real exposure == the env gate, so resolveExposure is a
+ * strict equality with the own gate (image-gen's provider key is a call-time
+ * `no_key` outcome, NOT a registration condition — it never narrows exposure).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -138,42 +139,20 @@ describe("workflow capability ↔ REAL assembly (ADR-0503 P3 reality hellgate)",
   })
 })
 
-// ── RUNTIME-CONDITIONED: image-gen (env-only prediction is an UPPER BOUND) ──
+// ── PURE-ENV caps: image-gen / artifact-store / office-authoring (strict eq.) ──
+//
+// image-gen was previously (wrongly) modeled as `runtimeConditioned` (provider
+// key). But the key is a CALL-TIME `{kind:"no_key"}` outcome — the port is ALWAYS
+// constructed when the gate is on and the tool registers on `ports.imageGen !==
+// undefined`, so the key NEVER narrows EXPOSURE. Real exposure == the env gate,
+// exactly like artifact-store / office-authoring (verified in runtime-config.ts /
+// agent-arg-builder.ts: `gateOn(env, KEY)`).
 
-describe("runtimeConditioned capability ↔ reality upper bound (image-gen)", () => {
-  const cap = findCap("image-gen")
-
-  test("declared runtimeConditioned ⇒ env-only resolveExposure is a NECESSARY upper bound", () => {
-    // image-gen's REAL exposure ALSO needs a provider API key (a non-env runtime
-    // signal we cannot drive from env here). So the contract is real ⊆ predicted:
-    // the provider key can only NARROW the env-only prediction, never widen it.
-    expect(cap.runtimeConditioned).toBe(true)
-
-    // Gate OFF ⇒ predicted false ⇒ real MUST be false too (a require can't widen).
-    const off = { QUANTA_IMAGE_GEN: "0" }
-    applyEnv(off)
-    expect(resolveExposure(cap, "llmTool", off)).toBe(false)
-    // If predicted is false, real (⊆ predicted) is necessarily false — the
-    // upper-bound relation holds trivially on this row.
-
-    // Gate ON ⇒ predicted true = the UPPER BOUND; real exposure is true ONLY when
-    // a provider key is ALSO present at runtime (real ⊆ predicted). We assert the
-    // env-only prediction is the upper bound, not strict equality.
-    const on = { QUANTA_IMAGE_GEN: "1" }
-    applyEnv(on)
-    const predicted = resolveExposure(cap, "llmTool", on)
-    expect(predicted).toBe(true) // the necessary-not-sufficient upper bound
-  })
-})
-
-// ── PURE-ENV caps: artifact-store / office-authoring (strict equality) ──
-
-describe("pure-env capabilities ↔ env gate (strict equality, no composite/runtime cond.)", () => {
-  for (const id of ["artifact-store", "office-authoring"] as const) {
+describe("pure-env capabilities ↔ env gate (strict equality, no composite gate)", () => {
+  for (const id of ["image-gen", "artifact-store", "office-authoring"] as const) {
     const cap = findCap(id)
-    test(`${id}: no requires, not runtimeConditioned ⇒ resolveExposure === own gate`, () => {
+    test(`${id}: no requires ⇒ resolveExposure === own gate (env is fully sufficient)`, () => {
       expect(cap.requires).toBeUndefined()
-      expect(cap.runtimeConditioned).toBeUndefined()
       for (const v of ["1", "0", undefined] as const) {
         const env = { [cap.gate.envKey]: v }
         applyEnv(env)

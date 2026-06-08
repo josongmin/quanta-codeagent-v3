@@ -47,10 +47,19 @@ function* walk(dir: string): Generator<string> {
  *  contract — so the ceiling reflects PRODUCTION live-control debt, not noise:
  *   - the typed accessor's own default bag IS process.env;
  *   - bench / eval / batch HARNESSES read env to configure benchmark + eval runs
- *     (a test-harness concern, never a user-facing live-toggle setting).
+ *     (a test-harness concern, never a user-facing live-toggle setting);
+ *   - the reverse-MCP server entry's STRICT security gate (ticket-19): its
+ *     `gateOnStrict(env, "QUANTA_MCP_SERVER")` activation read is ON only for the
+ *     EXACT literal "1" (an RCE surface — accidental loose-truthy enable is the
+ *     hazard). The typed `readCliKnob(…, "bool")` accessor uses the LOOSE
+ *     `readBool` vocabulary (1/on/true/yes), so routing it would LOOSEN the
+ *     security gate — a regression, not a clean-up. Exempt the entry until a
+ *     strict-bool accessor kind exists (follow-up); the `_EXPOSE` string read in
+ *     the same composition-root entry rides along.
  *  A NEW production-slice raw read is NOT exempt — it still trips the ceiling. */
 const isExempt = (path: string): boolean =>
   path.endsWith("src/apps/cli/cli-knobs-accessor.ts") ||
+  path.endsWith("src/apps/cli/mcp-server-setup.ts") ||
   path.includes("/apps/bench/") ||
   path.includes("/runner/batch/eval/") ||
   path.includes("/apps/agent/eval/")

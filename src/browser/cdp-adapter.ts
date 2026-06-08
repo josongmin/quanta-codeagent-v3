@@ -160,6 +160,50 @@ const scrollByJs = (dx: number, dy: number): string =>
 const rectJs = (path: string): string =>
   `(() => { const el = ${resolveJs(path)}; if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 }; })()`
 
+// Full bounding rect + visibility (the same fold readJs(visible) uses) for the
+// model-facing bounding_box. Returns null when the ref's element is missing so
+// the adapter surfaces element-not-found rather than a junk zero-rect.
+const boxJs = (path: string): string =>
+  `(() => {
+    const el = ${resolveJs(path)};
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    const visible = !!(el.offsetParent || (cs.position === 'fixed' && cs.display !== 'none')) && cs.visibility !== 'hidden' && cs.display !== 'none' && (r.width > 0 || r.height > 0);
+    return { x: r.x, y: r.y, w: r.width, h: r.height, visible };
+  })()`
+
+// Cosmetic highlight: append ONE absolutely-positioned overlay div over the
+// element's viewport rect (outline only, NO fill, pointer-events:none so it
+// never intercepts clicks), removing any prior overlay first so a double-
+// highlight never leaks stacked divs, and self-removing after `durationMs`.
+// Mutates nothing on the page's own DOM. Returns false (→ element-not-found)
+// when the ref is stale. `color` is JSON.stringify-escaped at the call site.
+const HIGHLIGHT_OVERLAY_ID = "__quanta_highlight_overlay__"
+const highlightJs = (path: string, color: string, durationMs: number): string =>
+  `(() => {
+    const el = ${resolveJs(path)};
+    if (!el) return false;
+    const ID = ${JSON.stringify(HIGHLIGHT_OVERLAY_ID)};
+    const prior = document.getElementById(ID);
+    if (prior && prior.parentNode) prior.parentNode.removeChild(prior);
+    const r = el.getBoundingClientRect();
+    const o = document.createElement('div');
+    o.id = ID;
+    o.style.position = 'fixed';
+    o.style.left = r.x + 'px';
+    o.style.top = r.y + 'px';
+    o.style.width = r.width + 'px';
+    o.style.height = r.height + 'px';
+    o.style.outline = '3px solid ' + ${JSON.stringify(color)};
+    o.style.background = 'transparent';
+    o.style.pointerEvents = 'none';
+    o.style.zIndex = '2147483647';
+    document.body.appendChild(o);
+    setTimeout(() => { const n = document.getElementById(ID); if (n && n.parentNode) n.parentNode.removeChild(n); }, ${Number.isFinite(durationMs) ? Math.max(0, Math.floor(durationMs)) : 1500});
+    return true;
+  })()`
+
 // Read a precise property off the resolved element. Returns a tagged object so
 // the adapter can distinguish "element missing" (null) from a falsy-but-present
 // value (e.g. visible:false, empty text). text uses innerText (rendered text);

@@ -28,6 +28,7 @@ import {
   runShell,
   WorktreeForkError,
 } from "@/runtime"
+import { errMessage } from "@/shared"
 import type {
   ActiveWorktree,
   Tool,
@@ -207,7 +208,7 @@ export const enterWorktreeTool: Tool<EnterInput> = {
           "Relative bash/edit now run inside the worktree; absolute paths still jail to the session root.",
       )
     } catch (e) {
-      const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : String(e)
+      const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
       yield result(false, `enter_worktree: failed to create worktree — ${detail}`, {
         mode: "error",
         modelVisibleError: detail,

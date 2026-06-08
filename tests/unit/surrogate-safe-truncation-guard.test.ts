@@ -341,15 +341,22 @@ const findCapSliceSites = (file: string): CapSliceSite[] => {
   return out
 }
 
-/** ALLOWLIST 1 — HASH / OPAQUE-ID prefixes. The sliced value is a hex digest or
- *  an opaque ASCII id/sha; it is surrogate-free BY CONSTRUCTION, so a raw
- *  `.slice` can never split a pair. Matched by cap-const NAME (not file) so the
- *  carve-out is intent-scoped. */
+/** ALLOWLIST 1 — caps where a raw `.slice` can NEVER split a surrogate pair.
+ *  Two structural reasons qualify a cap-const NAME here (intent-scoped, not
+ *  file-scoped):
+ *   - HASH / OPAQUE-ID prefixes — the sliced value is a hex digest / opaque
+ *     ASCII id/sha, surrogate-free BY CONSTRUCTION; or
+ *   - ARRAY-LENGTH caps — the `.slice(0, CAP)` is on a `string[]` (it bounds the
+ *     NUMBER of whole elements, never cuts inside one), so it is not a string
+ *     truncation at all. The AST scan can't tell array from string receivers, so
+ *     these legit array caps are named here. */
 const ALLOW_HASH_ID_CAPS: ReadonlySet<string> = new Set([
   "WORKSPACE_HASH_PREFIX_LEN",
   "HASH_PREFIX_LEN",
   "SHORT_SHA_LEN",
   "SHORT_ID_LEN",
+  // array-length cap on git-porcelain lines (ticket-11 worktree dirty-exit list)
+  "UNCOMMITTED_LIST_CAP",
 ])
 
 /** ALLOWLIST 2 — BURN-DOWN. Pre-existing GENUINE text-truncation sites that

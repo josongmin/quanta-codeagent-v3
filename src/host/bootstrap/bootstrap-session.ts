@@ -238,11 +238,11 @@ const probeCapabilityConsistency = (env: NodeJS.ProcessEnv): void => {
   // real (throwable) registration predicate — see the SCAFFOLD note below.
   try {
     // ADR-0503 P3 — REAL composite check. `resolveExposure` now models the
-    // COMPOSITE gate (workflow also requires the default-ON parent QUANTA_SUBAGENT;
-    // image-gen is runtimeConditioned by a provider key), so it is NO LONGER a
-    // re-derivation of `gateOn(env, gate.envKey)`. This `legacyGateFor` is exactly
-    // that lone own-gate read — the pre-composite predictor each surface used to
-    // make in isolation — so when a composite require is OFF while the own gate is
+    // COMPOSITE gate (workflow also requires the default-ON parent QUANTA_SUBAGENT),
+    // so it is NO LONGER a re-derivation of `gateOn(env, gate.envKey)`. This
+    // `legacyGateFor` is exactly that lone own-gate read — the pre-composite
+    // predictor each surface used to make in isolation — so when a composite
+    // require is OFF while the own gate is
     // ON (e.g. QUANTA_WORKFLOW=1 + QUANTA_SUBAGENT=0) the resolver says NOT-exposed
     // while this lone read says exposed ⇒ `agrees === false` SURFACES the real
     // split-brain (observe-only). The CI declaration↔reality lock lives in

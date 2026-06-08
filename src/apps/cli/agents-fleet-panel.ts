@@ -14,6 +14,7 @@
  * discipline here so the renderer is portable and the wire stays type-only.
  */
 
+import { sliceWholeChars } from "@/shared"
 import { bold, cyan, dim, green, red, renderBox, visibleWidth, yellow } from "@/ui/ui-helpers"
 
 /** Structural mirror of `@/subagent`'s `TaskRecord` + the surfaced slice of
@@ -94,7 +95,7 @@ const resultCell = (r: AgentFleetRow): string => {
   const raw = r.result?.finalText ?? r.error ?? ""
   const firstLine = raw.split("\n")[0] ?? ""
   const truncated =
-    firstLine.length > FINAL_TEXT_MAX ? `${firstLine.slice(0, FINAL_TEXT_MAX)}…` : firstLine
+    firstLine.length > FINAL_TEXT_MAX ? `${sliceWholeChars(firstLine, FINAL_TEXT_MAX)}…` : firstLine
   const badge = r.result !== undefined ? ` ${dim(`(${r.result.turns}t)`)}` : ""
   return truncated.length === 0 ? badge.trimStart() : `${truncated}${badge}`
 }

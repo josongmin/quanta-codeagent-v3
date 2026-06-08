@@ -49,7 +49,7 @@ describe("§20.4 dispatch E2E — ownership gate fires in the real pipeline", ()
   test("ENFORCED: write OUTSIDE owned ⇒ HARD-DENIED at dispatch", async () => {
     const res = await dispatchTool(
       call("/repo/docs/readme.md"),
-      baseCfg({ ownershipPolicy: enforced }),
+      baseCfg(enforced ? { ownershipPolicy: enforced } : {}),
       perm,
     )
     expect(res.ok).toBe(false)
@@ -62,7 +62,7 @@ describe("§20.4 dispatch E2E — ownership gate fires in the real pipeline", ()
   test("ENFORCED: write INSIDE owned ⇒ RUNS", async () => {
     const res = await dispatchTool(
       call("/repo/src/main.ts"),
-      baseCfg({ ownershipPolicy: enforced }),
+      baseCfg(enforced ? { ownershipPolicy: enforced } : {}),
       perm,
     )
     expect(res.ok).toBe(true)
@@ -72,7 +72,7 @@ describe("§20.4 dispatch E2E — ownership gate fires in the real pipeline", ()
 
   test("DEFAULT-OFF: enforced:false ⇒ write outside owned RUNS (byte-identical)", async () => {
     const off = buildOwnershipPolicy({ owned: ["src"], cwd: "/repo", enforced: false })
-    const res = await dispatchTool(call("/repo/docs/x"), baseCfg({ ownershipPolicy: off }), perm)
+    const res = await dispatchTool(call("/repo/docs/x"), baseCfg(off ? { ownershipPolicy: off } : {}), perm)
     expect(res.ok).toBe(true)
   })
 

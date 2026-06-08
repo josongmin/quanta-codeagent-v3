@@ -712,6 +712,13 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "Hard-enforce subagent owned/forbidden FS surfaces at dispatch (§20.4).",
   },
   {
+    envKey: "QUANTA_WORKTREE_TOOL",
+    kind: "bool",
+    default: false,
+    group: "tool",
+    describe: "Agent worktree tools (enter/exit) + relative-cwd edit-fence (ticket-11, P8).",
+  },
+  {
     envKey: "QUANTA_API_KEY_HELPER",
     kind: "string",
     default: undefined,

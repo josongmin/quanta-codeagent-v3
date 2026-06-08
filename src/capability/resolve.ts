@@ -35,10 +35,6 @@ export const CAPABILITY_LAYER_ENV = "QUANTA_CAPABILITY_LAYER"
  * default-ON parent an UNSET gate predicts ON (matching the source) — a plain
  * `gateOn` would mispredict it as OFF. The own gate stays `gateOn` (default-OFF
  * opt-in, byte-identical to `readBool(.., false)`).
- *
- * For `runtimeConditioned` caps this remains the env-only prediction: a
- * NECESSARY-not-sufficient UPPER BOUND (real ⊆ predicted), since a non-env
- * runtime signal (e.g. a provider key) can only narrow it further.
  */
 export const resolveExposure = (
   cap: CapabilityDescriptor,

@@ -71,14 +71,4 @@ export interface CapabilityDescriptor {
    * matches the assembled exposure across the env matrix.
    */
   readonly requires?: readonly CapabilityRequire[]
-  /**
-   * `true` for caps whose REAL exposure ALSO depends on a NON-env runtime signal
-   * (e.g. image-gen needs a provider API key, decided at runtime — not from env
-   * gates alone). For these the env-only `resolveExposure` is a NECESSARY-not-
-   * sufficient UPPER BOUND: real exposure ⊆ predicted exposure (the runtime
-   * condition narrows it further). The consistency check uses this to assert the
-   * upper-bound relation rather than strict equality. Absent ⇒ env gates are
-   * fully sufficient (strict equality holds).
-   */
-  readonly runtimeConditioned?: boolean
 }

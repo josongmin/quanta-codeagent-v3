@@ -26,12 +26,14 @@
 
 import type { Result } from "@/shared"
 import type {
+  BoundingBox,
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
   ConsoleEntry,
   ConsoleOpts,
   DragTarget,
+  HighlightOpts,
   PageSnapshot,
   ReadOpts,
   ScrollOpts,
@@ -120,6 +122,25 @@ export interface BrowserPort {
     opts: ReadOpts,
     signal?: AbortSignal,
   ): Promise<Result<{ readonly value: string | boolean }, BrowserError>>
+  /** Resolve a `ref` to its element geometry — the full viewport rect + the
+   *  visibility fold. Turns the blind `mouseClickXY` escape hatch into a
+   *  precise ref→bounds→coordinate aim. Read-only (no DOM mutation). */
+  getBoundingBox(
+    h: BrowserHandle,
+    ref: string,
+    signal?: AbortSignal,
+  ): Promise<Result<BoundingBox, BrowserError>>
+  /** Paint a cosmetic outline overlay around the element a `ref` resolves to
+   *  (auto-removed after `opts.durationMs`). Purely visual — appends/removes one
+   *  `pointer-events:none` overlay div, never touches the page's own DOM — so it
+   *  is read-only and pairs naturally with `screenshot` to point a human/vision
+   *  model at "this element". */
+  highlight(
+    h: BrowserHandle,
+    ref: string,
+    opts?: HighlightOpts,
+    signal?: AbortSignal,
+  ): Promise<Result<void, BrowserError>>
   cdp(
     h: BrowserHandle,
     method: string,

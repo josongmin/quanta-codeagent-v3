@@ -25,6 +25,7 @@
  * without reaching into `@/tool`'s output-spill constants.
  */
 
+import { sliceWholeChars } from "@/shared"
 import { encodeMessage, type JsonRpcMessage, type JsonRpcResponse, LineReader } from "./jsonrpc"
 import { resolveOfferedVersion } from "./protocol-version"
 import type { ServerToolSpec, ToolCallPort, ToolListSource } from "./server-builder"
@@ -285,7 +286,7 @@ export class McpServer {
   private sendCallResult(id: number | string, out: { text: string; isError: boolean }): void {
     const text =
       out.text.length > MAX_RESULT_CHARS
-        ? `${out.text.slice(0, MAX_RESULT_CHARS)}\n…[truncated ${out.text.length - MAX_RESULT_CHARS} chars]`
+        ? `${sliceWholeChars(out.text, MAX_RESULT_CHARS)}\n…[truncated ${out.text.length - MAX_RESULT_CHARS} chars]`
         : out.text
     this.sendResult(id, { content: [{ type: "text", text }], isError: out.isError })
   }

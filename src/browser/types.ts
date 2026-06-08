@@ -90,6 +90,29 @@ export interface WaitOpts {
   readonly timeoutMs?: number
 }
 
+/** Element geometry in CSS viewport pixels — the full bounding rect (origin +
+ *  size) PLUS the same visibility fold `read(visible)` uses. Distinct from the
+ *  pre-existing internal center-point used to drive coordinate clicks: this is
+ *  the WHOLE rect, surfaced to the model so a `mouse_click_xy` escape hatch can
+ *  be aimed precisely (ref → bounds → exact coordinate). */
+export interface BoundingBox {
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+  readonly visible: boolean
+}
+
+/** Cosmetic highlight overlay options. Purely visual — `highlight` never mutates
+ *  the page's own DOM (it appends/removes one absolutely-positioned overlay div
+ *  with `pointer-events:none`), so it is read-only / no-HITL. */
+export interface HighlightOpts {
+  /** Outline color (CSS). Defaults to high-contrast magenta `#ff00ff`. */
+  readonly color?: string
+  /** Auto-remove delay in ms. Defaults to ~1500ms. */
+  readonly durationMs?: number
+}
+
 /** What `read` extracts from the resolved element. */
 export type ReadWhat = "text" | "attribute" | "visible"
 
