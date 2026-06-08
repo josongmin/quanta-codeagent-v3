@@ -44,7 +44,7 @@ Plugin = { plugin-contributed skills (<plugin>:<skill>) , MCP servers , app/UI c
 | 3 | mention-only, enabled-state 부재 | `loop-activation-hook.ts:281`(`mentions.length===0→EMPTY`); `PluginRegistryPort`=`lookup/list`만(plugin-discovery/types.ts:115); `enablePlugin` grep=0 | 03 |
 | 4 | 표면/knob 0 | `/plugins`·`QUANTA_PLUGIN` grep=0 | 06,07 |
 | 5 | capability→perm 미연결 | `manifest.interface.capabilities`는 선언만; `dispatch.ts`·`src/permission/`서 소비 0 | 05 |
-| 6 | ~~CLI 미배선~~ **정정**: partial flavor | `autoWirePluginActivation`은 `agent-config-assembler.ts:797`(공용 `assembleAgentConfig`, 인터랙티브 포함)서 **이미 호출**. docstring "apps/agent 전용"은 stale → "신규배선" 아니라 **EXTEND**(skillRegistry+session 주입) | 02,07 |
+| 6 | ~~CLI 미배선~~ **정정**: partial flavor | `autoWirePluginActivation`은 `agent-config-assembler.ts`(`autoWirePluginActivation` 콜사이트, ~:797–799 — 동시세션 편집으로 line 드리프트)(공용 `assembleAgentConfig`, 인터랙티브 포함)서 **이미 호출**. docstring "apps/agent 전용"은 stale → "신규배선" 아니라 **EXTEND**(skillRegistry+session 주입) | 02,07 |
 
 ## 🛑 코드레벨 검증서 발견한 함정/latent (착수 전 숙지)
 
@@ -55,6 +55,24 @@ Plugin = { plugin-contributed skills (<plugin>:<skill>) , MCP servers , app/UI c
 4. **plugin-origin tool 식별 lossy** — `composeServerId`의 `::`가 `mcpToolName` sanitize서 `_`로 붕괴(`a_b::c`↔`a::b_c` 충돌). 재파싱 금지 → minted tool명 forward-index. (티켓 05)
 5. **manifest 타입 2종** — agent-side `@/agent/plugin-discovery` `PluginManifest`(`.description?`) vs skill-side `@/skill/plugin-manifest` `interface.shortDescription`. routing-block/surface는 discovery 타입 소비(`@/agent`에 2번째 manifest 타입 도입 금지). (티켓 04/06)
 
+## 표면 토폴로지 (델타 기준 — "우리가 만들어놓은 것" 위에 뭘 더하나)
+
+**핵심: config 조립 chokepoint는 1개.** `agent-config-assembler.ts` `assembleAgentConfig`(`apps/agent/assemble.ts`는 얇은 래퍼)를 **모든 표면이 통과**:
+- CLI → `@/host/runtime`(`runtime-context-compose`→sdk/runtime→host/runtime) → `assembleAgentConfig`
+- web-daemon → `web-daemon/runtime-factory.ts`(`assembleAgentConfig({mode:"interactive"})`)
+- **IDE = `apps/agent/mode-presets/ide.ts`**(별도 앱 아님, 모드 프리셋) → `../assemble` `assembleAgentConfig`
+- headless/batch/ci-bot/daemon presets 동일
+
+→ `autoWirePluginActivation`이 이미 `agent-config-assembler.ts`(`autoWirePluginActivation` 콜사이트, ~:797–799 — 동시세션 편집으로 line 드리프트)에 사는 이유가 이것(전 표면 커버). **그러므로 코어(01~05) mint를 거기 올리면 plugin 스킬/MCP/routing/capability가 IDE 포함 전 표면 자동.** (이전 "07을 CLI comp-root서 mint"는 **틀림** → 공용 assembler로 정정.)
+
+**표면별로 따로 해야 하는 건 UX(`/plugins` 켜고끄기 UI)뿐:**
+| 표면 | config | `/plugins` 표면 | 델타 |
+|---|---|---|---|
+| CLI | 공용 assembler ✅ | `apps/cli/slash` 슬래시 레지스트리 | **티켓 06** |
+| web/IDE | 공용 assembler ✅ | `apps/web-frontend/SlashPalette.tsx` — CLI `BUILTINS`를 **클라이언트서 수동 미러**한 별개 카탈로그(서버 slash 프로토콜 out-of-scope) | **티켓 08(신규)** |
+
+코어는 공유, UX만 표면별 2벌. 이게 "기존 자산 위 델타"의 정확한 모양.
+
 ## 티켓 (ticket-unit)
 
 | # | 티켓 | gap | 종류 | 의존 |
@@ -64,8 +82,9 @@ Plugin = { plugin-contributed skills (<plugin>:<skill>) , MCP servers , app/UI c
 | 03 | `plugin-session/` enable-state + lifecycle(shutdownAll) | 3 | NEW slice | — |
 | 04 | routing-preference 레이어(`plugin-routing/` + prompt 소비) | 2 | NEW slice + EXTEND prompt | 03 |
 | 05 | capability→permission rail(`plugin-capability-policy.ts`) | 5 | NEW + dispatch gate | 03 |
-| 06 | `/plugins` 표면(list/enable/disable/status) | 4 | NEW surface 3파일 | 03 |
-| 07 | gate `QUANTA_PLUGIN_MODE` + comp-root mode 조립 + default-OFF e2e | 4,6 | knob + comp-root | 02,03,04,05,06 |
+| 06 | **CLI** `/plugins` 슬래시 표면(list/enable/disable/status) | 4 | NEW surface 3파일 | 03 |
+| 07 | gate `QUANTA_PLUGIN_MODE` + **공용 assembler mint**(전 표면) + default-OFF e2e | 4,6 | knob + `agent-config-assembler.ts` mint | 02,03,04,05 |
+| 08 | **web/IDE** `/plugins` 표면(`SlashPalette` 카탈로그 + enable/disable 클라/서버 프로토콜) | 4 | EXTEND web surface | 03,07 |
 
 상세는 각 `NN-*.md`. 전부 default-OFF·TDD red-first·slice-fence·≥3R 어딧.
 
@@ -73,7 +92,8 @@ Plugin = { plugin-contributed skills (<plugin>:<skill>) , MCP servers , app/UI c
 
 - **병렬 wave-A (독립 코어)**: 01(skill source) · 03(plugin-session) · 05(capability-policy pure) — 서로 무관, 동시.
 - **wave-B (코어 의존)**: 02(01 위) · 04(03 위) · 06(03 위) — wave-A green 후.
-- **wave-C (통합)**: 07(전부 위) — gate + comp-root + default-OFF byte-identity e2e + 최종 어딧.
+- **wave-C (통합·공용 mint)**: 07(02~05 위) — gate + **공용 assembler mint**(전 표면 코어 ON) + default-OFF byte-identity matrix(전 표면) + 어딧.
+- **wave-D (표면 UX)**: 08(07 위) — web/IDE `/plugins` UI. CLI(06)는 wave-B서 이미. **코어 ON 시점=wave-C라, IDE는 08 없이도 plugin 스킬/MCP/routing이 켜짐**(끄고켜는 UI만 08).
 
 ## ⚠️ 작업트리 주의
 

@@ -108,16 +108,25 @@ interface SessionState {
   activeTabId: string
 }
 
+/** A frozen sentinel returned ONLY if the (impossible) "tabs never empty"
+ *  invariant is ever violated. Its empty refMap makes a downstream ref-resolve
+ *  return null ⇒ the method surfaces `element-not-found` — keeping the no-throw
+ *  port contract AIRTIGHT (an internal-bug state degrades to a typed Err, never a
+ *  thrown TypeError escaping a Result-returning method). */
+const DEAD_TAB: TabState = {
+  targetId: "",
+  sessionId: "",
+  url: "",
+  title: "",
+  refMap: createRefMap(),
+}
+
 /** The active tab — the SSOT for refMap/url/title. The invariant (activeTabId
  *  always indexes a live tab, `tabs` never empty) is upheld by spawn/newTab/
- *  switchTab/closeTab, so the fallback only guards a true internal bug. */
-const activeTab = (s: SessionState): TabState => {
-  const direct = s.tabs.get(s.activeTabId)
-  if (direct !== undefined) return direct
-  const first = s.tabs.values().next().value
-  if (first === undefined) throw new Error("browser session has no tabs (invariant violation)")
-  return first
-}
+ *  switchTab/closeTab; the `?? DEAD_TAB` fallback is total + NO-THROW so even a
+ *  hypothetical future invariant break can never throw out of a port method. */
+const activeTab = (s: SessionState): TabState =>
+  s.tabs.get(s.activeTabId) ?? s.tabs.values().next().value ?? DEAD_TAB
 
 /** Resolve a switch/close argument: a CDP targetId (exact) OR a 0-based index
  *  over the open tabs (insertion order). Returns null ⇒ caller surfaces
@@ -1095,10 +1104,16 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       if (tab === null) {
         return err({ kind: "tab-not-found", id: idOrIndex, open: [...s.value.tabs.keys()] })
       }
-      // Route page calls to this tab + bring it to the foreground. After this,
-      // its OWN refMap is active — a ref from the prior tab fails closed.
+      // The CORRECTNESS-bearing mutation is useSessionId: it repoints every
+      // subsequent page request at this tab, and activeTabId repoints ref
+      // resolution at its OWN refMap (a prior-tab ref now fails closed). Both
+      // happen here, unconditionally.
       s.value.activeTabId = tab.targetId
       s.value.session.useSessionId(tab.sessionId)
+      // Target.activateTarget is COSMETIC (z-order foreground) — and a no-op
+      // under --headless=new. Intentionally best-effort + result UNCHECKED: a
+      // failure must NOT undo the routing switch above (which already succeeded),
+      // so switchTab still reports success.
       await s.value.session.request(
         "Target.activateTarget",
         { targetId: tab.targetId },

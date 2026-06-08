@@ -1,32 +1,23 @@
-import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
-const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
-
-describe("T5 CLI SDK parity", () => {
-  test("CLI runtime composition goes through the sdk runtime surface", () => {
-    const runtimeContext = read("src/apps/cli/repl/runtime-context-compose.ts")
-    const sessionSetup = read("src/apps/cli/repl/session-setup.ts")
-
-    expect(runtimeContext).toContain('from "@/sdk/runtime"')
-    expect(runtimeContext).toContain("composeRuntimeBootstrapContext")
-
-    expect(sessionSetup).toContain('from "@/sdk/runtime"')
-    expect(sessionSetup).not.toContain("sideConversationPort")
-  })
-
-  test("CLI session loop no longer reaches legacy runtime escape hatches", () => {
-    const sessionLoop = read("src/apps/cli/repl/session-loop.ts")
-
-    expect(sessionLoop).toContain('from "@/sdk/runtime"')
-    expect(sessionLoop).not.toContain("RuntimeSessionInternal")
-    expect(sessionLoop).not.toContain("__unsafePeekExecutionView")
-    expect(sessionLoop).not.toContain("__unsafeReplaceMessages")
-    expect(sessionLoop).not.toContain("createLegacyRunnerSessionHost(")
-    expect(sessionLoop).not.toContain("peekMessages(")
-    expect(sessionLoop).not.toContain("peekLastOutcome(")
-    expect(sessionLoop).not.toContain("replaceMessages(")
-  })
-})
+// NOTE: This file's two source-grep "parity" tests were removed as confirmed
+// DUPLICATE / LOC_STRUCTURE_BUDGET findings (test-quality audit 2026-06-08).
+//
+// They only readFileSync()'d production sources and asserted on import-literal
+// substrings (no behavior exercised). Every assertion is already covered by:
+//   - tests/unit/cli/runtime-sdk-cutover-hellgate.test.ts
+//       * "session-loop consumes sdk runtime, not runner interactive primitives"
+//         (lines 42-56) is a strict SUPERSET of the deleted
+//         "CLI session loop no longer reaches legacy runtime escape hatches"
+//         block (same session-loop.ts not.toContain set + @/sdk/runtime).
+//       * "cli setup and side-conversation seams..." (lines 67-102) covers the
+//         runtime-context-compose @/sdk/runtime + composeRuntimeBootstrapContext
+//         assertions and session-setup's not.toContain("sideConversationPort").
+//   - tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts
+//       * "CLI repl host uses the single runner compat owner..." re-asserts the
+//         runtime-context-compose @/sdk/runtime + composeRuntimeBootstrapContext
+//         contract.
+//   - biome noRestrictedImports (file-specific overrides) authoritatively pins
+//     the import-fence for these files (type-imports + all subpaths), which a
+//     toContain('from "@/sdk/runtime"') grep cannot.
+//
+// No new test added: this was redundant proxy coverage, not behavioral coverage.
+export {}
