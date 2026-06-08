@@ -492,7 +492,12 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       captureToolDiff(ctx, planned.before, planned.next, input.path)
       // file_history_rewind — record the post-edit bytes as a per-file version.
       // No-op when the sink is unwired (gate OFF ⇒ byte-identical legacy path).
-      captureFileHistory(ctx, input.path, planned.next)
+      // ticket-11 R4-5 finding #2: capture under the SAME `target.path` the write
+      // landed on — for a RELATIVE edit inside an active worktree that is the
+      // WORKTREE-resolved path, not the raw `input.path` (which the sink would
+      // re-jail under the SESSION root → a restore to the wrong file). With NO
+      // active worktree `target.path === input.path` (byte-identical legacy).
+      captureFileHistory(ctx, target.path, planned.next)
       yield { type: "result", result: { ok: true, output: `${input.path}: ${planned.message}` } }
     } catch (e) {
       if (e instanceof FsJailError) {

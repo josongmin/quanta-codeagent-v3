@@ -66,8 +66,14 @@ export interface SecretEgressConfig {
   readonly headerRules?: readonly HeaderRule[]
   /**
    * ticket-13 (§12.2) — cross-origin redirect hygiene flag (carried for shape
-   * parity with {@link import("./mitm").MitmConfig}). See `./header-rules`
-   * `shouldStripOnRedirect`. Absent/false ⇒ byte-identical.
+   * parity with {@link import("./mitm").MitmConfig}).
+   *
+   * CURRENTLY INERT — NO READER. This tunneling proxy does NOT follow 3xx
+   * redirects, so nothing reads this flag; setting it changes NOTHING (pinned
+   * inert in `tests/integration/header-rewrite-proxy-e2e.test.ts`). The pure
+   * `shouldStripOnRedirect` utility (see `./header-rules`) exists for a future
+   * redirect-following caller. Absent/false (and, today, `true` alike) ⇒
+   * byte-identical.
    */
   readonly crossOriginStrip?: boolean
 }

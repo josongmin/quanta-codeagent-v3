@@ -99,6 +99,7 @@ describe("BUILTINS table", () => {
       "/history",
       "/branches",
       "/agents",
+      "/background",
       "/fork-checkpoint",
       "/queue",
       "/web",

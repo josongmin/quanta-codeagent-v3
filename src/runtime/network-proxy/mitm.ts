@@ -63,12 +63,18 @@ export interface MitmConfig {
    */
   readonly headerRules?: readonly HeaderRule[]
   /**
-   * ticket-13 (§12.2) — cross-origin redirect HYGIENE (Claude Code IDE parity).
-   * When `true`, a redirect the proxy follows that crosses ORIGIN (scheme+host+
-   * port) drops `authorization`/`cookie`/`host` so an out-of-origin redirect can
-   * never leak the originating credentials. Absent/false ⇒ no redirect-strip
-   * (byte-identical). (The proxy does not yet auto-follow redirects on the MITM
-   * leg; carried here so the gated config has one shape across both transports.)
+   * ticket-13 (§12.2) — cross-origin redirect HYGIENE flag (Claude Code IDE
+   * parity). INTENT: when a redirect the proxy follows crosses ORIGIN (scheme+
+   * host+port) it would drop `authorization`/`cookie`/`host` so an out-of-origin
+   * redirect cannot leak the originating credentials.
+   *
+   * CURRENTLY INERT — NO READER. This is a CONNECT-tunneling / MITM proxy that does
+   * NOT auto-follow 3xx redirects on either leg, so there is no callsite that reads
+   * this flag; setting it changes NOTHING (pinned inert in the e2e). The pure
+   * `shouldStripOnRedirect` utility (see `./header-rules`) implements the decision
+   * for a FUTURE redirect-following caller. The field is carried here only so the
+   * gated config has ONE shape across both transports. Absent/false (and, today,
+   * `true` alike) ⇒ byte-identical.
    */
   readonly crossOriginStrip?: boolean
 }

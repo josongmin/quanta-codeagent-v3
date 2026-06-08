@@ -80,6 +80,43 @@ describe("model-adapter — current()", () => {
     const { adapter } = build()
     expect(adapter.current()).toBe("gpt-5")
   })
+
+  // ticket-14 REAL FIX #1 — the sticky store is ASYNC (get/set return promises)
+  // but current() is SYNC, so a `currentModel` getter reading the store can't
+  // reflect a set (it would return a Promise). The adapter keeps a per-mode SYNC
+  // SHADOW its own set() updates, so an in-surface set is visible to current()
+  // IMMEDIATELY — with NO host getter at all (the surface-compose wiring).
+  test("set is reflected by current() with NO host getter (sync shadow)", async () => {
+    // Build EXACTLY as surface-compose does: no `currentModel` getter supplied.
+    const { adapter } = build()
+    expect(adapter.current()).toBe("gpt-5") // boot anchor before any set
+    await adapter.set("gpt-4o")
+    expect(adapter.current()).toBe("gpt-4o") // sync shadow reflects the set
+  })
+
+  test("current() shadow keyed to active mode (no cross-mode leak)", async () => {
+    let mode: AgentMode = "default"
+    const store = inMemoryStickyModelStore()
+    const adapter = buildModelAdapter({
+      store,
+      bootModel: "gpt-5",
+      currentMode: () => mode,
+      candidateIds: ["gpt-5", "gpt-4o"],
+    })
+    // Set under `default` — only the default-mode shadow is populated.
+    await adapter.set("gpt-4o")
+    expect(adapter.current()).toBe("gpt-4o")
+    // Switch the active mode to `plan` — that key has no shadow ⇒ boot anchor,
+    // NOT the default-mode set (no cross-mode leak).
+    mode = "plan"
+    expect(adapter.current()).toBe("gpt-5")
+    // A set under `plan` populates only the plan shadow.
+    await adapter.set("gpt-4o")
+    expect(adapter.current()).toBe("gpt-4o")
+    // Back to default — its own earlier shadow is intact.
+    mode = "default"
+    expect(adapter.current()).toBe("gpt-4o")
+  })
 })
 
 describe("model-adapter — set() persists to the sticky store (mode-implicit)", () => {

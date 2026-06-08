@@ -16,6 +16,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { EffortLevel } from "@/agent"
+import { EFFORT_LEVELS } from "@/agent"
 import {
   ALL_REASONING_EFFORTS,
   type ModelEffortSupport,
@@ -179,6 +180,32 @@ describe("clampEffortForModel — Codex validateEffort mirror (SOTA++ CORE)", ()
     const res = clampEffortForModel("custom", "max", support)
     expect(res.clamped).toBe(true)
     expect(res.effort).toBe("medium")
+  })
+
+  // ticket-14 REAL FIX #3 — clampEffortForModel maps the provider-metadata
+  // `ReasoningEffort` slugs INTO the canonical `EffortLevel`. The cross-union
+  // drift guard is the WHOLE point of this file (see header): a slug that exists
+  // in `ReasoningEffort` but not `EffortLevel` must NEVER reach the caller. The
+  // old `as EffortLevel` casts defeated that — they silenced the compiler, so a
+  // dropped tier would slip through at runtime. The cast-replacement is a
+  // compile-checked Record keyed by ReasoningEffort, so this runtime membership
+  // assertion holds for EVERY support shape and tier the metadata can produce.
+  test("clamp output effort is ALWAYS a member of EFFORT_LEVELS", () => {
+    const efforts = EFFORT_LEVELS as readonly EffortLevel[]
+    const shapes: readonly (ModelEffortSupport | undefined)[] = [
+      undefined,
+      NON_REASONING,
+      REASONING,
+      { supportedEfforts: ["default", "low", "medium"], defaultEffort: "medium", reasoning: true },
+      { supportedEfforts: ["default"], defaultEffort: "default", reasoning: false },
+      { supportedEfforts: ALL_REASONING_EFFORTS, defaultEffort: "high", reasoning: true },
+    ]
+    for (const support of shapes) {
+      for (const lvl of efforts) {
+        const res = clampEffortForModel("m", lvl, support)
+        expect(efforts).toContain(res.effort)
+      }
+    }
   })
 })
 

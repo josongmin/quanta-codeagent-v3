@@ -291,7 +291,14 @@ const networkDispatchGuardFor = (req: AssembleRequest, policy: ModePolicy) => {
  *  `env` view (never `process.env`). */
 const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (!gateOn(env, "QUANTA_BROWSER_TOOL")) return
-  const slot = cfg as AgentConfig & { browser?: { port: BrowserPort; resolver?: DnsResolver } }
+  const slot = cfg as AgentConfig & {
+    browser?: {
+      port: BrowserPort
+      resolver?: DnsResolver
+      bounds?: boolean
+      highlight?: boolean
+    }
+  }
   if (slot.browser !== undefined) return // caller-override-precedence (ADR-0332)
   const port = createCdpBrowser({
     spawner: defaultProcessSpawner,
@@ -303,7 +310,15 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
   })
   // availability() double-gate: only wire when a chrome/chromium binary exists,
   // so the model is never offered tools that would fail with backend-missing.
-  if (port.availability() !== null) slot.browser = { port, resolver: nodeDnsResolver }
+  if (port.availability() !== null) {
+    // TICKET-24 — per-feature default-OFF sub-gates on top of QUANTA_BROWSER_TOOL.
+    slot.browser = {
+      port,
+      resolver: nodeDnsResolver,
+      bounds: gateOn(env, "QUANTA_BROWSER_BOUNDS"),
+      highlight: gateOn(env, "QUANTA_BROWSER_HIGHLIGHT"),
+    }
+  }
 }
 
 /** G1 (RFC jun-6-appgen-appshot) — env-gated appshot verify-loop wiring. Mutates

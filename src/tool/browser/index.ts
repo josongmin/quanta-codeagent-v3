@@ -25,8 +25,12 @@ import {
   consoleSchema,
   type DragInput,
   dragSchema,
+  type ElementBoundsInput,
+  elementBoundsSchema,
   type FillInput,
   fillSchema,
+  type HighlightInput,
+  highlightSchema,
   type MouseClickXyInput,
   mouseClickXySchema,
   type NavigateInput,
@@ -491,6 +495,62 @@ const readTool = (port: BrowserPort, session: BrowserSession): Tool =>
     },
   })
 
+// TICKET-24 Wave A — `browser_element_bounds`: resolve a snapshot ref to its
+// pixel rect. Turns the blind `browser_mouse_click_xy` escape hatch into a
+// precise ref→bounds→coordinate aim (e.g. canvas/drag offsets). Read-only.
+// Integer-rounded so a re-snapshot of the same element doesn't churn the echo.
+const boundsTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<ElementBoundsInput>({
+    name: "browser_element_bounds",
+    description:
+      "Get the pixel bounding box {x,y,w,h,visible} of an element by ref (from a prior browser_snapshot). Use before browser_mouse_click_xy when you have a ref but need exact coordinates (e.g. canvas/drag offsets).",
+    inputSchema: elementBoundsSchema,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => true,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(input: ElementBoundsInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.getBoundingBox(ens.handle, input.ref, ctx.signal)
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      const { x, y, w, h, visible } = r.value
+      const output = `${input.ref}: ${Math.round(x)},${Math.round(y)} ${Math.round(w)}×${Math.round(h)} visible=${visible}`
+      yield { type: "result", result: { ok: true, output } }
+    },
+  })
+
+// TICKET-24 Wave A — `browser_highlight`: paint a transient outline overlay over
+// an element (cosmetic, read-only, no-HITL). Pair with browser_screenshot to
+// visually confirm the agent is about to act on the right element.
+const highlightTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<HighlightInput>({
+    name: "browser_highlight",
+    description:
+      "Draw a transient outline overlay around an element by ref (cosmetic only — no page mutation). Pair with browser_screenshot to confirm you are about to act on the right element.",
+    inputSchema: highlightSchema,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => true,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(input: HighlightInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.highlight(
+        ens.handle,
+        input.ref,
+        {
+          ...(input.color !== undefined ? { color: input.color } : {}),
+          ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+        },
+        ctx.signal,
+      )
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      yield {
+        type: "result",
+        result: { ok: true, output: `highlighted ${input.ref} — pair with browser_screenshot to confirm` },
+      }
+    },
+  })
+
 export interface BrowserToolset {
   readonly tools: Tool[]
   /** Tear down the browser session. Register into the composition root's
@@ -503,6 +563,10 @@ export interface BrowserToolsetOpts {
    *  resolves to a private/loopback address (R1 audit [16]). The production wire
    *  passes a node-backed resolver; omit to keep literal-only classification. */
   readonly resolver?: DnsResolver
+  /** TICKET-24 — gate `browser_element_bounds` (QUANTA_BROWSER_BOUNDS). Default-OFF. */
+  readonly bounds?: boolean
+  /** TICKET-24 — gate `browser_highlight` (QUANTA_BROWSER_HIGHLIGHT). Default-OFF. */
+  readonly highlight?: boolean
 }
 
 /** Build the browser toolset over a wired `BrowserPort`. The 15 tools share ONE
@@ -529,6 +593,10 @@ export const createBrowserToolset = (
     waitTool(port, session),
     readTool(port, session),
   ]
+  // TICKET-24 Wave A — independent default-OFF gates; each tool appears ONLY
+  // when its flag is set, so the unflagged toolset is byte-identical to the 15.
+  if (opts.bounds === true) tools.push(boundsTool(port, session))
+  if (opts.highlight === true) tools.push(highlightTool(port, session))
   return { tools, dispose: () => session.dispose() }
 }
 

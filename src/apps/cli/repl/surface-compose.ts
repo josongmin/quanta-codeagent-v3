@@ -1,4 +1,10 @@
-import { type AgentMode, EFFORT_LEVELS, effortToTokenBudget, type WorkingState } from "@/agent"
+import {
+  type AgentMode,
+  EFFORT_LEVELS,
+  effortToTokenBudget,
+  resolveAgentMode,
+  type WorkingState,
+} from "@/agent"
 import {
   defaultGranularRegistry,
   type GranularRegistryPort,
@@ -22,6 +28,7 @@ import {
 } from "@/agent/plan-queue"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
+import type { StickyModelStore } from "@/agent/sticky-model"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import {
   type Message,
@@ -164,6 +171,50 @@ export const buildRetryCandidates = (
     if (port !== null) out.push({ id, port })
   }
   return out
+}
+
+/**
+ * Ticket 14 (§11.6) — build the `/model` picker adapter wire from the narrow
+ * slice the surface owns. Extracted from the inline compose IIFE so the
+ * mode-implicit SET binding is REGRESSION-TESTABLE in isolation (the inline
+ * version had no test driving `composeSurfaceWires`, so the `currentMode`
+ * fix could silently revert to `() => "default"` and stay green).
+ *
+ * Binds the SET to the SAME mode derivation the consume side reads (skill-gate
+ * `readStickyModelForMode` → `resolveAgentMode(config.mode, config.planMode)`;
+ * on this CLI surface `config.mode` is unset and `config.planMode === planMode`),
+ * so under `--plan` the SET lands on the `'plan'` key the loop will read (else
+ * `'default'`). Binding to the literal `"default"` (or the mode-cycle/posture
+ * store, which drives permissionMode not config.mode) would phantom under
+ * `--plan`. Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
+ *
+ * NO `currentModel` getter is supplied (residual, ticket-14 finding #2). The
+ * adapter's `current()` is SYNCHRONOUS, but the ONLY cross-session source of an
+ * effective model is the sticky store, whose entire port surface is ASYNC by
+ * contract (`get`/`set`/`load` return Promises — the fs-backed impl does disk
+ * IO) — and `runtimeContext` exposes no synchronous effective-model snapshot
+ * accessor. A store-reading getter could therefore only return a Promise, which
+ * a sync `current()` cannot use. So `current()` anchors to the boot model until
+ * the first IN-SESSION set (after which the adapter's own per-mode SYNC SHADOW
+ * reflects it). Cross-session reflection of a previously-persisted sticky model
+ * on a FRESH session would require a sync sticky-snapshot accessor that does not
+ * exist at this seam; faking it with the async store is intentionally NOT done.
+ */
+export const buildModelAdapterWire = (args: {
+  readonly stickyStore: { readonly store: StickyModelStore } | undefined
+  readonly bootModel: string
+  readonly planMode: boolean
+  readonly candidateIds: readonly string[]
+}): { modelAdapter?: SlashContext["model"] } => {
+  if (args.stickyStore === undefined) return {}
+  return {
+    modelAdapter: buildModelAdapter({
+      store: args.stickyStore.store,
+      bootModel: args.bootModel,
+      currentMode: () => resolveAgentMode(undefined, args.planMode),
+      candidateIds: args.candidateIds,
+    }),
+  }
 }
 
 /** `/retry-with` onEvent renderer — print the alternate model's streamed text
@@ -448,6 +499,12 @@ export interface ReplSurfaceWires {
    *  warning to this so NO second token heuristic is introduced. Returns
    *  `undefined` before the first turn. */
   readonly contextUsageView: ContextUsageHolder["view"]
+  /** Ticket 18 (V1) — the background-turn portal (present iff `QUANTA_BG_TURN`).
+   *  Threaded into the session loop's `backgroundPortal` dep so Ctrl+B can detach
+   *  the running INTERACTIVE turn into it; the READ-ONLY `.view()` is wired into
+   *  the `/background` slot above. Absent ⇒ Ctrl+B + `/background` are unwired
+   *  (default-OFF byte-identical). */
+  readonly backgroundPortal?: BackgroundTurnPortal
 }
 
 /** Project the legacy + ADR-0291 ReplSlashCtx slots onto the
@@ -513,6 +570,10 @@ const buildSurfaceDispatch = (args: {
    *  sticky-model store the loop reads. Present iff a sticky store was wired;
    *  absent ⇒ `/model` prints "not wired in this surface" (default-OFF). */
   readonly modelAdapter?: SlashContext["model"]
+  /** Ticket 18 (§V1) — READ-ONLY background-turn portal view for `/background`.
+   *  Present iff `QUANTA_BG_TURN` is on; absent ⇒ slot omitted ⇒ `/background`
+   *  prints "not wired" (default-OFF byte-identical). */
+  readonly background?: SlashContext["background"]
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -574,6 +635,9 @@ const buildSurfaceDispatch = (args: {
         : {}),
       // `/inbound` mode ref (always present in the REPL — seeded queue).
       inboundMode: args.inboundMode,
+      // Ticket 18 (§V1) — `/background` read-only portal view. Present only when
+      // QUANTA_BG_TURN is on; absent ⇒ slot omitted ⇒ "not wired" (default-OFF).
+      ...(args.background !== undefined ? { background: args.background } : {}),
     }
     await runSlashCommand(input, ctx)
     return true
@@ -1085,6 +1149,9 @@ export const composeSurfaceWires = (
     ...(voiceLive !== undefined ? { voiceLive } : {}),
     ...(memorySlot !== undefined ? { memory: memorySlot } : {}),
     ...(dreamSlot !== undefined ? { dream: dreamSlot } : {}),
+    // Ticket 18 (§V1) — thread the READ-ONLY portal view into `/background`.
+    // Absent ⇒ slot omitted ⇒ "not wired" (default-OFF byte-identical).
+    ...(backgroundPortal !== undefined ? { background: backgroundPortal.view() } : {}),
     planQueue: planQueueStore,
     workingState: () => workingStateGet?.(),
     retry: () =>
@@ -1105,21 +1172,15 @@ export const composeSurfaceWires = (
     inboundMode,
     // Ticket 14 (§11.6) — build the `/model` picker adapter over the SAME sticky
     // store the loop's consume side reads (so a SET is observed by the loop), with
-    // the boot model + retry candidates as the selectable id set. Mode-implicit:
-    // binds the SET to the "default" posture (a precise per-posture getter is a
-    // follow-up). Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
-    ...((): { modelAdapter?: SlashContext["model"] } => {
-      const modelStore = setup.runtimeContext.stickyModelStore()
-      if (modelStore === undefined) return {}
-      return {
-        modelAdapter: buildModelAdapter({
-          store: modelStore.store,
-          bootModel: setup.model,
-          currentMode: () => "default",
-          candidateIds: [...new Set([setup.model, ...retryCandidates.map((c) => c.id)])],
-        }),
-      }
-    })(),
+    // the boot model + retry candidates as the selectable id set. The mode-implicit
+    // SET binding lives in `buildModelAdapterWire` (regression-pinned there).
+    // Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
+    ...buildModelAdapterWire({
+      stickyStore: setup.runtimeContext.stickyModelStore(),
+      bootModel: setup.model,
+      planMode: setup.planMode,
+      candidateIds: [...new Set([setup.model, ...retryCandidates.map((c) => c.id)])],
+    }),
   })
 
   return {
@@ -1148,6 +1209,10 @@ export const composeSurfaceWires = (
     // status-line / `/context` use (no new heuristic). Returns `undefined`
     // before the first turn.
     contextUsageView: () => contextUsageHolder.view(),
+    // Ticket 18 (V1) — the background-turn portal (present iff QUANTA_BG_TURN).
+    // Threaded to the session loop for the Ctrl+B detach (its `.view()` is wired
+    // into `/background` above). Spread by-presence so default-OFF omits it.
+    ...(backgroundPortal !== undefined ? { backgroundPortal } : {}),
   }
 }
 

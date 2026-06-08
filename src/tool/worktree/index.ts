@@ -104,12 +104,22 @@ const FIXED_WORKTREE_BRANCH = `fork-${WORKTREE_ID}`
  *  is a per-session constant, the leftover is unambiguously OURS — best-effort
  *  tear it down + prune git's stale registrations BEFORE creating, so a crashed
  *  session is recoverable without a manual `git worktree prune`. Idempotent +
- *  never throws: when nothing was left this is a pair of no-op git calls. */
-const reconcileLeftoverWorktree = async (repoRoot: string): Promise<void> => {
+ *  never throws: when nothing was left this is a pair of no-op git calls.
+ *
+ *  R4-5 finding #5: the leftover may carry UNCOMMITTED crash work that this
+ *  `--force` reconcile silently discards. We CAPTURE that file list (best-effort,
+ *  before the remove) and RETURN it so `enter` can SURFACE what was dropped — the
+ *  discard still happens (the path is deterministically ours), but it is no longer
+ *  silent. `uncommittedList` already degrades to `[]` when no leftover exists (the
+ *  common no-op case) or its dir is gone, so this adds ZERO behavior on the happy
+ *  path. */
+const reconcileLeftoverWorktree = async (repoRoot: string): Promise<readonly string[]> => {
+  const discarded = await uncommittedList(fixedWorktreePath(repoRoot))
   await removeWorktree(fixedWorktreePath(repoRoot), repoRoot, {
     branch: FIXED_WORKTREE_BRANCH,
   })
   await runShell("git worktree prune", { cwd: repoRoot })
+  return discarded
 }
 
 /** Resolve the repo's default branch ref for `branchFrom:"fresh"`. Prefers the
@@ -133,25 +143,44 @@ const resolveFreshBaseRef = async (repoRoot: string): Promise<string> => {
 
 /** Count uncommitted entries (tracked diff + untracked) in a worktree via
  *  `git status --porcelain`. A non-zero exit (not a git tree) ⇒ `undefined` so
- *  the caller can surface "unknown" rather than a misleading 0. */
+ *  the caller can surface "unknown" rather than a misleading 0.
+ *
+ *  R4-5 finding #1: `runShell` (Bun.spawn) THROWS — not just non-zero-exits —
+ *  when the worktree cwd has VANISHED (external rm / crash that removed the dir
+ *  but not the in-memory slot). Catch the throw and degrade to `undefined`
+ *  (honoring the "unknown" contract above) so the throw cannot escape
+ *  `execute()` and wedge the slot. The dirty-exit guard then treats a
+ *  missing-dir as not-dirty and lets exit proceed to the idempotent
+ *  `removeWorktree` (which clears the slot). */
 const uncommittedCount = async (worktreePath: string): Promise<number | undefined> => {
-  const r = await runShell("git status --porcelain", { cwd: worktreePath })
-  if (r.exitCode !== 0) return undefined
-  const lines = r.stdout.split("\n").filter((l) => l.trim().length > 0)
-  return lines.length
+  try {
+    const r = await runShell("git status --porcelain", { cwd: worktreePath })
+    if (r.exitCode !== 0) return undefined
+    const lines = r.stdout.split("\n").filter((l) => l.trim().length > 0)
+    return lines.length
+  } catch {
+    // Worktree cwd is gone (spawn ENOENT) — "unknown", never a wedge.
+    return undefined
+  }
 }
 
 /** The uncommitted file list (porcelain lines) for the dirty-exit guard's
- *  listing. Capped so a pathological tree cannot balloon the tool result. */
+ *  listing. Capped so a pathological tree cannot balloon the tool result. A
+ *  vanished worktree dir (runShell throw) ⇒ `[]` — same R4-5 finding #1 rule as
+ *  {@link uncommittedCount}: never let the throw escape and wedge the slot. */
 const UNCOMMITTED_LIST_CAP = 50
 const uncommittedList = async (worktreePath: string): Promise<readonly string[]> => {
-  const r = await runShell("git status --porcelain", { cwd: worktreePath })
-  if (r.exitCode !== 0) return []
-  return r.stdout
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .slice(0, UNCOMMITTED_LIST_CAP)
+  try {
+    const r = await runShell("git status --porcelain", { cwd: worktreePath })
+    if (r.exitCode !== 0) return []
+    return r.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+      .slice(0, UNCOMMITTED_LIST_CAP)
+  } catch {
+    return []
+  }
 }
 
 const notWired = (tool: string): ToolEvent => ({
@@ -212,8 +241,10 @@ export const enterWorktreeTool: Tool<EnterInput> = {
     // fixed worktree on disk; the duplicate-guard above only checks the live
     // slot. Best-effort reconcile the deterministic leftover (path + branch are a
     // per-session constant, so it is unambiguously ours) before creating, so a
-    // collision ("already used by worktree") cannot wedge a fresh session.
-    await reconcileLeftoverWorktree(repoRoot)
+    // collision ("already used by worktree") cannot wedge a fresh session. R4-5
+    // finding #5: capture any UNCOMMITTED crash-leftover work the `--force`
+    // reconcile discards so it can be surfaced (not silently dropped).
+    const discarded = await reconcileLeftoverWorktree(repoRoot)
     try {
       const wt = await createPersistentWorktree(WORKTREE_ID, repoRoot, { baseRef })
       const active: ActiveWorktree = {
@@ -230,10 +261,21 @@ export const enterWorktreeTool: Tool<EnterInput> = {
         branchFrom,
       }
       slot.set(active)
+      // R4-5 finding #5: if the crash-leftover reconcile force-discarded
+      // uncommitted work, SURFACE it (a non-fatal notice — enter still succeeds)
+      // so the dropped work is visible rather than silently lost. Empty on the
+      // common path (no leftover) ⇒ byte-identical message.
+      const discardedNotice =
+        discarded.length > 0
+          ? `\nNOTE: a crash-leftover worktree at the fixed path was reconciled — ${discarded.length} ` +
+            "uncommitted change(s) in it were DISCARDED:\n" +
+            discarded.map((f) => `  ${f}`).join("\n")
+          : ""
       yield result(
         true,
         `entered worktree ${wt.worktreePath} on branch ${wt.branch} (branchFrom=${branchFrom}, base=${baseRef}). ` +
-          "Relative bash/edit now run inside the worktree; absolute paths still jail to the session root.",
+          "Relative bash/edit now run inside the worktree; absolute paths still jail to the session root." +
+          discardedNotice,
       )
     } catch (e) {
       const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
@@ -255,6 +297,32 @@ export interface ExitWorktreeDeps {
 }
 
 const DEFAULT_EXIT_DEPS: ExitWorktreeDeps = { removeWorktree }
+
+/** The dirty-exit guard (CC force:true mirror): when a throwaway worktree has
+ *  uncommitted changes and `force` is not set, refuse to discard and LIST the
+ *  files so the model can commit/inspect rather than lose work silently. Returns
+ *  the typed refusal {@link ToolEvent}, or `null` when exit may proceed (clean,
+ *  or `force:true`). Extracted so the `execute` generator stays under the lint
+ *  cognitive-complexity gate. */
+const buildDirtyExitGuard = async (
+  worktreePath: string,
+  force: boolean,
+): Promise<ToolEvent | null> => {
+  const count = await uncommittedCount(worktreePath)
+  const dirty = count !== undefined && count > 0
+  if (!dirty || force) return null
+  const files = await uncommittedList(worktreePath)
+  const more =
+    count !== undefined && count > files.length ? `\n…and ${count - files.length} more` : ""
+  return result(
+    false,
+    `exit_worktree: ${count} uncommitted change(s) in the worktree — refusing to discard. ` +
+      "Commit them, or pass force:true to discard:\n" +
+      files.map((f) => `  ${f}`).join("\n") +
+      more,
+    { mode: "rejected", reason: "worktree_dirty" },
+  )
+}
 
 /** Build `exit_worktree` over injectable cleanup deps. The exported
  *  {@link exitWorktreeTool} is `makeExitWorktreeTool()` with the real remover, so
@@ -299,23 +367,9 @@ export const makeExitWorktreeTool = (
       )
       return
     }
-    const force = input.force ?? false
-    const count = await uncommittedCount(active.worktreePath)
-    const dirty = count !== undefined && count > 0
-    // Dirty-exit guard (CC force:true mirror): refuse to discard uncommitted work
-    // and LIST it so the model can commit/inspect rather than lose it silently.
-    if (dirty && !force) {
-      const files = await uncommittedList(active.worktreePath)
-      const more =
-        count !== undefined && count > files.length ? `\n…and ${count - files.length} more` : ""
-      yield result(
-        false,
-        `exit_worktree: ${count} uncommitted change(s) in the worktree — refusing to discard. ` +
-          "Commit them, or pass force:true to discard:\n" +
-          files.map((f) => `  ${f}`).join("\n") +
-          more,
-        { mode: "rejected", reason: "worktree_dirty" },
-      )
+    const dirtyGuard = await buildDirtyExitGuard(active.worktreePath, input.force ?? false)
+    if (dirtyGuard !== null) {
+      yield dirtyGuard
       return
     }
     // Tear down the worktree + branch (force:true discards a dirty tree).

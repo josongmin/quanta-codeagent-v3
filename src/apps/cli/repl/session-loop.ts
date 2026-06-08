@@ -11,7 +11,7 @@ import type {
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
-import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
+import { errMessage, gateOnStrict, logger, runtimeConfig, sliceWholeChars } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-summary-wire"
@@ -390,9 +390,10 @@ const buildPromptPipelineNotifyDeps = (args: {
  *    - a portal exists (`QUANTA_BG_TURN`),
  *    - the inbound mode is NOT `weave`, AND
  *    - the conversation-action surface is absent OR idle (no interrupted turn).
- *  Any other case ⇒ Ctrl+B is a no-op (the FSM branch is never wired) and the
- *  surface prints "background disabled in weave mode" at press time. */
-const shouldWireBackground = (args: {
+ *  Any other case ⇒ Ctrl+B is a silent no-op: `onBackground` is never passed to
+ *  the cancel FSM, so the keypress falls through unhandled (no detach, no status
+ *  line) — the turn keeps running exactly as if the key were unbound. */
+export const shouldWireBackground = (args: {
   readonly portal: import("./background-turn-portal").BackgroundTurnPortal | undefined
   readonly inboundMode: { current: InboundMode } | undefined
   readonly conversationActions: ConversationActionSurface | undefined
@@ -411,7 +412,7 @@ const BG_LABEL_MAX = 48
 const backgroundTurnLabel = (text: string): string => {
   const oneLine = text.replace(/\s+/g, " ").trim()
   if (oneLine.length === 0) return "(empty prompt)"
-  return oneLine.length > BG_LABEL_MAX ? `${oneLine.slice(0, BG_LABEL_MAX - 1)}…` : oneLine
+  return oneLine.length > BG_LABEL_MAX ? `${sliceWholeChars(oneLine, BG_LABEL_MAX - 1)}…` : oneLine
 }
 
 const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome => {

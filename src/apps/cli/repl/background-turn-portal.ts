@@ -21,8 +21,10 @@
  * (the part that explains what the turn was doing).
  *
  * Slice posture: lives in the existing `@/apps/cli` slice (no new tsconfig
- * path / fence). No `node:*`, no `@/...` value import — pure TS.
+ * path / fence). Only `node:crypto` (the task-id mint) — no `@/...` value import.
  */
+
+import { randomBytes } from "node:crypto"
 
 /** 50 MiB ceiling on a single backgrounded turn's retained output. Named const
  *  (no inlined magic number). The window stores HEAD + TAIL halves of this. */
@@ -104,11 +106,11 @@ export interface BackgroundTurnPortal {
   view(): BackgroundPortalView
 }
 
-/** Short, human-scannable task id (`task abcd`-style). Crypto-free (no `@/...`,
- *  no `node:*`): a base36 slice of `Math.random` + a monotone counter so two
- *  detaches in the same ms never collide. */
+/** Short, human-scannable task id (`task abcd`-style): a 4-hex `randomBytes`
+ *  slice + a monotone counter so two detaches in the same ms never collide.
+ *  `randomBytes` (not `Math.random`) per the repo's no-weak-rng id-mint rule. */
 const makeTaskId = (seq: number): string => {
-  const rand = Math.random().toString(36).slice(2, 6)
+  const rand = randomBytes(2).toString("hex")
   return `${rand}${seq.toString(36)}`
 }
 
@@ -202,8 +204,7 @@ export const createBackgroundTurnPortal = (): BackgroundTurnPortal => {
       .catch((e: unknown) => {
         // An AbortError means the user backgrounded then cancelled (the body
         // unwound via its signal) — distinct from a genuine failure.
-        entry.state =
-          e instanceof Error && e.name === "AbortError" ? "cancelled" : "failed"
+        entry.state = e instanceof Error && e.name === "AbortError" ? "cancelled" : "failed"
         entry.error = e
       })
     return taskId

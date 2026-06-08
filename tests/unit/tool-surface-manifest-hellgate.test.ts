@@ -24,6 +24,7 @@ import {
   GATED_TOOLS,
   seedEnvVarsForSurface,
   type Tool,
+  TOOL_SURFACES,
 } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
 import { subagentMailboxTools } from "@/tool/subagent-mailbox"
@@ -175,5 +176,33 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
     expect(off).not.toContain("coverage_check")
     const on = buildDefaultTools({ coverageCheck: true }).map((t) => t.name)
     expect(on).toContain("coverage_check")
+  })
+})
+
+describe("tool-surface manifest — worktree group is CLI-honest (R4-5 finding #3)", () => {
+  // The worktree slot (`AgentConfig.activeWorktreeSlot`) is MINTED at exactly ONE
+  // call site — `mintActiveWorktreeSlot` in the CLI repl runtime-context. So the
+  // worktree tools are reachable ONLY on the CLI surface; advertising them as
+  // `opt-in` on bench/web/ide/headless claimed a capability those surfaces never
+  // deliver (a 4-surface false-parity). The manifest must list the worktree group
+  // as CLI-only so it does not over-promise.
+  const worktreeEntry = () => {
+    const e = GATED_TOOLS.find((x) => x.name === "enter_worktree")
+    if (e === undefined) throw new Error("manifest has no enter_worktree entry")
+    return e
+  }
+
+  test("the worktree group advertises availability on the CLI surface ONLY", () => {
+    const e = worktreeEntry()
+    // The EXPLICIT per-surface availability map names exactly `cli` — the single
+    // surface that mints the slot. (Omitted surfaces inherit `opt-in` in the
+    // resolver, but the manifest must not assert the others as deliverable.)
+    expect(Object.keys(e.default)).toEqual(["cli"])
+    expect(e.default.cli).toBe("opt-in")
+    // The non-CLI surfaces are NOT explicitly advertised (no mint site there).
+    for (const s of TOOL_SURFACES) {
+      if (s === "cli") continue
+      expect(e.default[s]).toBeUndefined()
+    }
   })
 })

@@ -123,6 +123,8 @@ const RULES: readonly Rule[] = [
       "apps/cli/doctor/default-probes.ts":
         "Surface adapter (RFC jun-6-doctor-selfcheck §5) — the `/doctor` probe wiring legitimately reads `process.env` to REPORT environment health (BYOK key presence, dead-knob conditions); the pure check-registry leaf (registry.ts/render.ts) stays env-free and sees only the injected probe shape. Same surface-ambient posture as status-pills.ts.",
       "apps/cli/mcp-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
+      "apps/cli/mcp-server-setup.ts":
+        "Reverse-MCP server composition root (ticket-19) — the `quanta mcp` sub-command entry reads its STRICT activation gate (QUANTA_MCP_SERVER) + the EXPOSE list at bootstrap, same CLI-entry posture as mcp-cmd.ts; the assembled server + tool ports downstream stay env-free.",
       "apps/cli/memory-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/repl.ts":
         "REPL composition root — same posture as apps/cli/internal.ts (CLI feature-flag bootstrap).",
@@ -139,6 +141,8 @@ const RULES: readonly Rule[] = [
         "THE designated CLI knob env reader (ADR-0503 P4) — env DI fallback to process.env is its contract; also exempt in the no-raw-process-env ratchet.",
       "apps/cli/status-flash-config.ts":
         "Surface status-flash config — env DI fallback at TTY composition.",
+      "apps/cli/slash-commands-capabilities.ts":
+        "Diagnostic command (/capabilities, /caps) — intentionally reads the LIVE process.env to REPORT each capability's gate state via gateOn(env, …); display-only, never a feature read. Same surface-ambient posture as doctor/default-probes.ts.",
       "apps/cli/status-pills.ts":
         "Surface presentation read (same posture as shell-stream-painter / auth-ui).",
       "apps/cli/web-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",

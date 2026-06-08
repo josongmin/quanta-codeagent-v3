@@ -41,12 +41,14 @@ import { isCdpMethodAllowed } from "./cdp-allowlist"
 import type { BrowserPort } from "./port"
 import { buildSnapshot, createRefMap, type RefMap } from "./snapshot"
 import type {
+  BoundingBox,
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
   ConsoleEntry,
   ConsoleOpts,
   DragTarget,
+  HighlightOpts,
   PageSnapshot,
   ReadOpts,
   ScrollOpts,
@@ -774,6 +776,60 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       const path = s.value.refMap.resolve(ref)
       if (path === null) return err({ kind: "element-not-found", ref })
       const r = await evalValue(s.value, clickJs(path), signal)
+      if (!r.ok) return r
+      if (r.value === false) return err({ kind: "element-not-found", ref })
+      return ok(undefined)
+    },
+
+    // TICKET-24 Wave A — element bounding box. Resolve the ref FIRST (refMap,
+    // synchronous): an unknown ref fails closed with ZERO Runtime.evaluate. A
+    // resolved-but-vanished element ⇒ element-not-found (boxJs returns null); a
+    // malformed page value (non-numeric rect) ⇒ cdp-error (never a NaN box).
+    async getBoundingBox(
+      h: BrowserHandle,
+      ref: string,
+      signal?: AbortSignal,
+    ): Promise<Result<BoundingBox, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const path = s.value.refMap.resolve(ref)
+      if (path === null) return err({ kind: "element-not-found", ref })
+      const r = await evalValue(s.value, boxJs(path), signal)
+      if (!r.ok) return r
+      const v = r.value as
+        | { x?: unknown; y?: unknown; w?: unknown; h?: unknown; visible?: unknown }
+        | null
+      if (v === null) return err({ kind: "element-not-found", ref })
+      if (
+        typeof v.x !== "number" ||
+        typeof v.y !== "number" ||
+        typeof v.w !== "number" ||
+        typeof v.h !== "number" ||
+        typeof v.visible !== "boolean"
+      ) {
+        return err({ kind: "cdp-error", detail: "bounding box returned a malformed value" })
+      }
+      return ok({ x: v.x, y: v.y, w: v.w, h: v.h, visible: v.visible })
+    },
+
+    // TICKET-24 Wave A — cosmetic overlay highlight (read-only; mutates nothing
+    // on the page's own DOM). `color` is JSON.stringify-escaped inside highlightJs
+    // (injection-safe). false ⇒ element-not-found (ref stale). Auto-removes.
+    async highlight(
+      h: BrowserHandle,
+      ref: string,
+      opts?: HighlightOpts,
+      signal?: AbortSignal,
+    ): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const path = s.value.refMap.resolve(ref)
+      if (path === null) return err({ kind: "element-not-found", ref })
+      const r = await evalValue(
+        s.value,
+        highlightJs(path, opts?.color ?? "#ff00ff", opts?.durationMs ?? 1500),
+        signal,
+      )
       if (!r.ok) return r
       if (r.value === false) return err({ kind: "element-not-found", ref })
       return ok(undefined)

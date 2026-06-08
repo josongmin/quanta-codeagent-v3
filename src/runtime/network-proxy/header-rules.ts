@@ -24,14 +24,35 @@
  *     sensitive credential header ({@link FORBIDDEN_INJECT}) is SILENTLY IGNORED
  *     (+ an audit `fired:false` entry) so an operator misconfig cannot inject an
  *     `authorization`/`cookie`/… value. This is a SEPARATE layer from redaction.
+ *   - **FORBIDDEN-FRAMING GUARD** (request-smuggling / domain-fronting defense): a
+ *     `set`/`append` targeting a framing/routing header ({@link FORBIDDEN_FRAMING}:
+ *     `transfer-encoding`/`content-length`/`host`/`connection`/…) is SILENTLY
+ *     IGNORED (+ `fired:false` audit `forbidden-framing`). These rules run BEFORE
+ *     the proxy re-frames the request on its own upstream connection, so allowing
+ *     them would let a rule re-inject a conflicting length/encoding (smuggling) or
+ *     forge the Host (domain-fronting) past that fix. `strip`/`rewrite` of an
+ *     already-present framing header stays allowed (mirrors the inject op-policy).
  *   - **CASE-INSENSITIVE**: header names are matched/normalized lowercase (HTTP
  *     header names are case-insensitive; node:http already lowercases).
  *   - **MALFORMED → SILENT-IGNORE**: a value-requiring op (`set`/`append`/
  *     `rewrite`) with no `value` is dropped (audit `fired:false`), never throws.
+ *   - **NO-THROW NAME/VALUE VALIDATION (DoS guard)**: an unvalidated header NAME or
+ *     VALUE would flow into the caller's `http.request()`/`https.request()` and
+ *     throw SYNCHRONOUSLY inside a void-invoked async (`mitmForwardUpstream`),
+ *     producing an unhandled rejection + a hung client. So BEFORE a rule mutates
+ *     the map we validate the NAME (RFC7230 token / tchar — node's
+ *     `validateHeaderName`, applied to EVERY op including `strip`) and the VALUE
+ *     (no CR/LF/NUL — node's `validateHeaderValue`). Reusing node's OWN validators
+ *     means we refuse EXACTLY what `http.request` would reject (no over/under-
+ *     rejection). ANY violation ⇒ the rule is REFUSED as `malformed` (audit
+ *     `fired:false`, the value is NEVER recorded), the header map is left UNTOUCHED
+ *     + forwardable, and we NEVER throw.
  *
  * PURE / NO-THROW / NO I/O. The audit log is RETURNED to the caller (which appends
  * it to the proxy's existing in-memory log), not emitted here.
  */
+
+import { validateHeaderName, validateHeaderValue } from "node:http"
 
 /** A header map as the proxy carries it (node:http `IncomingHttpHeaders` shape):
  *  lowercase names → a single value or a multi-value array. */
@@ -69,7 +90,7 @@ export interface HeaderRuleAudit {
   /** True iff the rule actually mutated the header map. */
   readonly fired: boolean
   /** Why a rule did NOT fire (only present when `fired` is false). */
-  readonly refused?: "malformed" | "forbidden-inject" | "absent"
+  readonly refused?: "malformed" | "forbidden-inject" | "forbidden-framing" | "absent"
 }
 
 /** The result of applying a rule list: the (possibly new) header map + the audit
@@ -97,6 +118,39 @@ export const FORBIDDEN_INJECT: ReadonlySet<string> = new Set([
   "proxy-authenticate",
 ])
 
+/**
+ * SSOT — FRAMING / ROUTING headers a `set`/`append` rule may NEVER INJECT.
+ *
+ * SECURITY RATIONALE (request-smuggling + domain-fronting): the proxy
+ * re-originates the buffered request over its OWN upstream connection and applies
+ * a framing-fix (recompute `content-length`, force `connection: close`, drop
+ * hop-by-hop headers) AFTER these rules run. If an operator rule could `set` or
+ * `append` one of these headers it would land on the wire AFTER that fix:
+ *   - re-injecting a conflicting `transfer-encoding` / `content-length` desyncs the
+ *     proxy↔upstream framing → CL.TE / TE.TE REQUEST SMUGGLING.
+ *   - forging/overwriting `host` (or the `connection`/`keep-alive`/`proxy-
+ *     connection`/`te`/`upgrade` hop-by-hop set) re-routes the request to a
+ *     different vhost behind the same TLS SNI → DOMAIN-FRONTING, or smuggles a
+ *     protocol-upgrade past the framing-fix.
+ * The {@link FORBIDDEN_INJECT} credential guard does NOT cover these, so a
+ * misconfig (or a hostile rule list) could otherwise slip them through.
+ *
+ * Op-policy MIRRORS {@link FORBIDDEN_INJECT}: only `set`/`append` (INJECTION) are
+ * refused — `strip` / `rewrite` of an ALREADY-PRESENT framing header is a
+ * legitimate hardening move (e.g. rewrite `connection: keep-alive` → `close`) and
+ * stays allowed. Lowercase, the canonical match form.
+ */
+export const FORBIDDEN_FRAMING: ReadonlySet<string> = new Set([
+  "transfer-encoding",
+  "content-length",
+  "host",
+  "connection",
+  "proxy-connection",
+  "keep-alive",
+  "te",
+  "upgrade",
+])
+
 /** Headers stripped when a redirect crosses ORIGIN (scheme+host+port). Mirrors
  *  Claude Code IDE's cross-origin token-strip — a redirect that leaves the origin
  *  must NOT carry the originating credentials/host onward (token-leak defense). */
@@ -108,6 +162,37 @@ const norm = (name: string): string => name.trim().toLowerCase()
 /** A value-requiring op with a usable (non-undefined) value? */
 const hasValue = (rule: HeaderRule): rule is HeaderRule & { value: string } =>
   typeof rule.value === "string"
+
+/**
+ * Is `name` a header name `http.request` would ACCEPT (RFC7230 token / tchar)?
+ * Delegates to node's OWN `validateHeaderName` (wrapped — it THROWS on a bad
+ * name) so we refuse EXACTLY what the downstream request would reject. An empty
+ * string (e.g. an all-whitespace name after `norm`) is rejected too. NO-THROW.
+ */
+const isLegalHeaderName = (name: string): boolean => {
+  if (name.length === 0) return false
+  try {
+    validateHeaderName(name)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Is `value` a header value `http.request` would ACCEPT (no CR/LF/NUL)? Delegates
+ * to node's OWN `validateHeaderValue` (wrapped — it THROWS on an illegal value).
+ * Reusing node's validator means no over/under-rejection vs the real request.
+ * NO-THROW.
+ */
+const isLegalHeaderValue = (name: string, value: string): boolean => {
+  try {
+    validateHeaderValue(name, value)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Merge `value` as an ADDITIONAL value onto whatever `existing` holds (append
  *  semantics — keep prior values, build a multi-value array). PURE. */
@@ -134,6 +219,13 @@ const applyOneRule = (out: MutableHeaders, rule: HeaderRule, index: number): Hea
     refused: why,
   })
 
+  // NO-THROW NAME validation (DoS guard) — applies to EVERY op, INCLUDING strip:
+  // an illegal name (tab/space/parens/colon/NUL, or an all-whitespace → empty
+  // name) would make the caller's http.request() throw synchronously. We refuse
+  // it as malformed BEFORE touching the map. `headerName` is the trimmed +
+  // lowercased form we would actually write/delete, so it is what we validate.
+  if (!isLegalHeaderName(headerName)) return refused("malformed")
+
   if (rule.op === "strip") {
     if (!present) return refused("absent")
     delete out[headerName]
@@ -141,9 +233,19 @@ const applyOneRule = (out: MutableHeaders, rule: HeaderRule, index: number): Hea
   }
   // set / append / rewrite all REQUIRE a value.
   if (!hasValue(rule)) return refused("malformed")
+  // NO-THROW VALUE validation (DoS / header-injection guard): a CR/LF/NUL in the
+  // value would let an operator literal smuggle an extra header (or crash the
+  // request). Refuse as malformed — the value is NEVER recorded in the audit.
+  if (!isLegalHeaderValue(headerName, rule.value)) return refused("malformed")
   // FORBIDDEN-INJECT GUARD: set/append must not FORGE a credential header.
   if ((rule.op === "set" || rule.op === "append") && FORBIDDEN_INJECT.has(headerName)) {
     return refused("forbidden-inject")
+  }
+  // FORBIDDEN-FRAMING GUARD: set/append must not RE-INJECT a framing/routing header
+  // AFTER the proxy's framing-fix (request-smuggling + domain-fronting defense).
+  // strip/rewrite of an already-present framing header stays allowed (see SSOT).
+  if ((rule.op === "set" || rule.op === "append") && FORBIDDEN_FRAMING.has(headerName)) {
+    return refused("forbidden-framing")
   }
   // rewrite: replace ONLY when already present; never create.
   if (rule.op === "rewrite" && !present) return refused("absent")

@@ -82,14 +82,26 @@ const fakeSpawner = (
 /** A TRULY dead child: `kill()` does NOTHING (does not resolve `exited`) and
  *  stdout NEVER closes. Both `handle.exited` and `readAll(stdout)` hang forever,
  *  so ONLY a wall-clock race can settle the runner (finding 6 — the old fake's
- *  `kill()` resolved `exited`, masking the unbounded hang). */
-const deadSpawner = (): { spawn: StatusSpawner; killed: () => boolean } => {
+ *  `kill()` resolved `exited`, masking the unbounded hang).
+ *  Also records whether the stdout stream's `cancel()` ran — R4-5 finding 2: the
+ *  hard-cap return path must RELEASE the orphaned reader, not leak the lock. */
+const deadSpawner = (): {
+  spawn: StatusSpawner
+  killed: () => boolean
+  streamCancelled: () => boolean
+} => {
   let wasKilled = false
+  let wasCancelled = false
   const spawn: StatusSpawner = () => ({
     // A stream whose `start` enqueues nothing and never closes ⇒ read() pends.
+    // `cancel()` flips a flag so the test can assert the reader was released
+    // (cancel() releases the lock) on the hard-cap return path.
     stdout: new ReadableStream<Uint8Array>({
       start() {
         /* never enqueue, never close */
+      },
+      cancel() {
+        wasCancelled = true
       },
     }),
     // `exited` that NEVER resolves.
@@ -98,7 +110,7 @@ const deadSpawner = (): { spawn: StatusSpawner; killed: () => boolean } => {
       wasKilled = true // recorded, but deliberately does NOT settle anything
     },
   })
-  return { spawn, killed: () => wasKilled }
+  return { spawn, killed: () => wasKilled, streamCancelled: () => wasCancelled }
 }
 
 const ESC = String.fromCharCode(27)
@@ -250,7 +262,14 @@ describe("buildStatusPayload", () => {
       expect(json).not.toContain(leak)
     }
     // And no `env` / token / apikey KEY made it into the payload object.
-    for (const key of ["apiKey", "ANTHROPIC_API_KEY", "authorization", "password", "token", "env"]) {
+    for (const key of [
+      "apiKey",
+      "ANTHROPIC_API_KEY",
+      "authorization",
+      "password",
+      "token",
+      "env",
+    ]) {
       expect(Object.keys(p)).not.toContain(key)
     }
   })
@@ -313,8 +332,10 @@ describe("formatStatusOutput (pure)", () => {
     const link = `${ESC}]8;;https://x${ST}LINK${ESC}]8;;${ST}`
     const out = formatStatusOutput(link, 80)
     // Visible width counts only LINK (4 cols), well under 80 ⇒ returned intact.
-    expect(out).not.toMatch(/\x1b\]$/) // no dangling bare OSC introducer
-    expect(out).not.toMatch(/\x1b\[$/) // no dangling bare CSI introducer
+    // (String checks, not regex literals — the codebase forbids control chars in
+    // regex source; ESC is a runtime value here.)
+    expect(out.endsWith(`${ESC}]`)).toBe(false) // no dangling bare OSC introducer
+    expect(out.endsWith(`${ESC}[`)).toBe(false) // no dangling bare CSI introducer
     // The visible text survives.
     expect(out.includes("LINK")).toBe(true)
   })
@@ -328,11 +349,40 @@ describe("formatStatusOutput (pure)", () => {
     // Exactly `width` visible columns — measured OSC-aware (the SGR-only
     // `stripAnsi` would miscount the hyperlink URL as visible text).
     expect(stripStatusAnsi(out).length).toBe(5)
-    // No dangling escape introducer of any kind.
+    // No dangling escape introducer of any kind, and the OSC sequence that DID
+    // make it out is fully terminated (a lone ESC, `ESC[`, or `ESC]` at the end
+    // would be an unterminated escape bleeding into the prompt).
     expect(out.endsWith(ESC)).toBe(false)
-    expect(out).not.toMatch(/\x1b\[$/)
-    expect(out).not.toMatch(/\x1b\]$/)
-    expect(out).not.toMatch(/\x1b\][^\x07\x1b]*$/) // no unterminated OSC tail
+    expect(out.endsWith(`${ESC}[`)).toBe(false)
+    expect(out.endsWith(`${ESC}]`)).toBe(false)
+    // The OSC that survives must be terminated by ST (ESC \) — find the last OSC
+    // introducer and assert an ST appears after it.
+    const lastOsc = out.lastIndexOf(`${ESC}]`)
+    if (lastOsc >= 0) {
+      expect(out.indexOf(ST, lastOsc) >= 0).toBe(true)
+    }
+  })
+
+  test("§F truncation INSIDE an OSC-8 label closes the hyperlink (no open bleed)", () => {
+    // R4-5 finding 1: the reset-correction path only closed SGR, NOT a stateful
+    // OSC-8 hyperlink. A cut INSIDE the link label leaves the hyperlink OPEN, so
+    // the clickable region bleeds into the prompt printed below the status line.
+    const ST = `${ESC}\\`
+    const open = `${ESC}]8;;https://x${ST}` // OSC-8 OPEN (URL set, no close)
+    const close = `${ESC}]8;;${ST}` // OSC-8 CLOSE (empty URL)
+    const input = `${open}LONG-LABEL${close}`
+    const out = formatStatusOutput(input, 4)
+    // Exactly `width` visible columns (OSC-aware: the URL is zero-width).
+    expect(stripStatusAnsi(out).length).toBe(4)
+    // The cut landed inside the label, dropping the trailing `close`. The output
+    // MUST be hyperlink-balanced: it ends with an OSC-8 close and leaves no
+    // dangling OSC-8 open.
+    expect(out.endsWith(close)).toBe(true)
+    // Exactly ONE OSC-8 open and ONE OSC-8 close survive (balanced).
+    const opens = out.split(open).length - 1
+    const closes = out.split(close).length - 1
+    expect(opens).toBe(1)
+    expect(closes).toBe(1)
   })
 
   test("§F a truncated/incomplete CSI in input is not split mid-sequence", () => {
@@ -341,7 +391,7 @@ describe("formatStatusOutput (pure)", () => {
     const input = `${ESC}[31mABCDEFGH${ESC}[3` // dangling `ESC[3`
     const out = formatStatusOutput(input, 4)
     expect(stripAnsi(out)).toBe("ABCD")
-    expect(out).not.toMatch(/\x1b\[3$/) // the dangling CSI must not leak out
+    expect(out.endsWith(`${ESC}[3`)).toBe(false) // the dangling CSI must not leak out
   })
 })
 
@@ -402,6 +452,10 @@ describe("runStatusCommand — fake spawner", () => {
     expect(d.killed()).toBe(true)
     // Settled near the cap, NOT at the 5s hard cap and NOT forever.
     expect(elapsed).toBeLessThan(2000)
+    // R4-5 finding 2: the orphaned stdout reader must be RELEASED on the
+    // hard-cap return — otherwise the readAll() promise + the reader-lock leak.
+    // cancel() releases the lock; assert it ran.
+    expect(d.streamCancelled()).toBe(true)
   })
 
   test("§R-6 non-zero exit ⇒ degraded, but stdout surfaced", async () => {

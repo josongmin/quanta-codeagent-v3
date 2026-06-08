@@ -5,8 +5,12 @@
  * `/model` picker consumes:
  *   - `current()`       — the active sticky model for the CURRENT mode, falling
  *                         back to the boot model when no per-mode entry is set.
- *                         Read FRESH each call (the loop reads the same on-disk
- *                         store), so a `/model` set is reflected immediately.
+ *                         Backed by a per-mode SYNC SHADOW this adapter's own
+ *                         `set()` updates, so an in-surface `/model` set is
+ *                         reflected IMMEDIATELY (the sticky store is ASYNC, so a
+ *                         store-reading getter could only return a Promise — a
+ *                         sync getter cannot read it). The shadow is keyed to the
+ *                         mode the set targeted, so it never leaks across modes.
  *   - `candidates()`    — the selectable ids (boot model + retry candidates),
  *                         each enriched with render metadata from the
  *                         provider-metadata SSOT (window/output/recommended/hint).
@@ -28,7 +32,6 @@
 import type { AgentMode } from "@/agent"
 import type { StickyModelStore } from "@/agent/sticky-model"
 import {
-  MODEL_CONTEXT_WINDOWS,
   type ModelEffortSupport,
   resolveModelEffortSupport,
   resolveModelWindow,
@@ -88,9 +91,14 @@ const deriveHint = (id: string): string | undefined => {
  *  - `candidateIds`  — selectable ids (boot model + retry candidates), deduped.
  *  - `currentModel`  — OPTIONAL getter for the effective model the NEXT turn will
  *                      run (the host already resolves this per turn via the
- *                      sticky resolver). When supplied it is the `current()`
- *                      value (so the no-arg list marks the REAL active model);
- *                      absent ⇒ the boot model is the anchor.
+ *                      sticky resolver). When supplied it WINS for `current()` (so
+ *                      the no-arg list marks the REAL active model the host
+ *                      resolved). Absent ⇒ `current()` falls back to the per-mode
+ *                      SYNC SHADOW (set by this adapter's own `set()`), then the
+ *                      boot model. The shadow is what makes an in-surface set
+ *                      visible WITHOUT a host getter (the surface-compose wiring):
+ *                      the sticky store is async, so a store-reading getter would
+ *                      return a Promise — a sync `current()` cannot use it.
  */
 export const buildModelAdapter = (args: {
   readonly store: StickyModelStore
@@ -100,6 +108,11 @@ export const buildModelAdapter = (args: {
   readonly currentModel?: () => string
 }): ModelAdapter => {
   const ids = [...new Set([args.bootModel, ...args.candidateIds].filter((s) => s.length > 0))]
+  // Per-mode SYNC shadow of the last in-surface set. The async sticky store IS
+  // the durable source of truth (and the loop's consume side reads it); this
+  // shadow is purely so a SYNC `current()` reflects a SET this surface just made,
+  // keyed to the mode it targeted (no cross-mode leak).
+  const shadow = new Map<AgentMode, string>()
   const lineMeta = (id: string): ModelLineMeta => {
     const window = resolveModelWindow(id)
     const hint = deriveHint(id)
@@ -114,7 +127,7 @@ export const buildModelAdapter = (args: {
     }
   }
   return {
-    current: () => args.currentModel?.() ?? args.bootModel,
+    current: () => args.currentModel?.() ?? shadow.get(args.currentMode()) ?? args.bootModel,
     candidates: () => ids.map(lineMeta),
     set: async (id: string): Promise<ModelSetOutcome> => {
       const mode = args.currentMode()
@@ -125,13 +138,14 @@ export const buildModelAdapter = (args: {
         return { kind: "write-error", message: "modelId must be non-empty" }
       }
       const res = await args.store.set({ mode, modelId: id })
-      if (res.ok) return "ok"
+      if (res.ok) {
+        // Reflect the set in the sync shadow for the mode it targeted, so a
+        // following `current()` (no host getter) sees it immediately.
+        shadow.set(mode, id)
+        return "ok"
+      }
       return { kind: "write-error", message: res.error.message }
     },
     effortSupport: (id: string): ModelEffortSupport | undefined => resolveModelEffortSupport(id),
   }
 }
-
-/** Re-export for the host wire to reach the catalog ids when building
- *  `candidateIds` (full model table, not just retry candidates). */
-export const ALL_CATALOG_MODEL_IDS: readonly string[] = Object.keys(MODEL_CONTEXT_WINDOWS)

@@ -24,7 +24,7 @@
  */
 
 import type { EffortLevel } from "@/agent"
-import type { ModelEffortSupport } from "@/llm/provider-metadata"
+import type { ModelEffortSupport, ReasoningEffort } from "@/llm/provider-metadata"
 
 /**
  * The structural metadata a single candidate line renders from. Every field
@@ -125,6 +125,28 @@ export interface EffortClampResult {
 }
 
 /**
+ * Compile-checked unification of the provider-metadata `ReasoningEffort` slugs
+ * into the canonical `@/agent` `EffortLevel`. This is the drift-guard the file
+ * header promises: a `Record<ReasoningEffort, EffortLevel>` is EXHAUSTIVE (TS
+ * requires an entry for every slug) AND value-typed (each value must be a real
+ * `EffortLevel`). So removing a tier from one union but not the other is a
+ * COMPILE error here — replacing the former `as EffortLevel` casts that silently
+ * accepted ANY slug (defeating the guard). `toEffortLevel` reads through this
+ * map, making `clampEffortForModel`'s output PROVABLY an `EffortLevel`.
+ */
+const REASONING_EFFORT_TO_LEVEL: Record<ReasoningEffort, EffortLevel> = {
+  default: "default",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  max: "max",
+}
+
+/** Map a provider-metadata effort slug to the canonical `EffortLevel` via the
+ *  compile-checked table (no `as` cast). */
+const toEffortLevel = (e: ReasoningEffort): EffortLevel => REASONING_EFFORT_TO_LEVEL[e]
+
+/**
  * SOTA++ CORE (plan §14, Codex `validateEffort` mirror). Reconcile the session
  * reasoning-effort with a newly-picked model's supported set:
  *
@@ -148,9 +170,11 @@ export const clampEffortForModel = (
 ): EffortClampResult => {
   // Unknown model → conservative all-supported. No metadata ⇒ no mismatch.
   if (support === undefined) return { effort: currentEffort, clamped: false }
-  const supported = support.supportedEfforts as readonly EffortLevel[]
+  // Map the metadata slugs to canonical EffortLevel through the compile-checked
+  // table (no `as` cast — a dropped/renamed tier is a build error).
+  const supported = support.supportedEfforts.map(toEffortLevel)
   if (supported.includes(currentEffort)) return { effort: currentEffort, clamped: false }
-  const fallback = support.defaultEffort as EffortLevel
+  const fallback = toEffortLevel(support.defaultEffort)
   return {
     effort: fallback,
     clamped: true,

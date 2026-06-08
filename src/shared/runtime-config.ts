@@ -1281,9 +1281,20 @@ export interface RuntimeConfig {
    *  DOUBLE-gated default-OFF: `undefined` UNLESS `QUANTA_STATUS_LINE` is on
    *  (gateOn vocab) AND `QUANTA_STATUS_LINE_CONFIG` is a JSON object carrying a
    *  usable `command`. Absent ⇒ the fixed `formatContextUsage` status line is
-   *  the only render (byte-identical). When set, the CLI REPL runs the
+   *  the only render (byte-identical).
+   *  SEAM (validated, not yet composed at the render root): the runner
+   *  (`apps/cli/status-command-runner.ts` `runStatusCommand`), the payload
+   *  assembler (`buildStatusPayload`), and the palette SSOT (`getColorPalette`)
+   *  all exist and are unit-tested (args-based spawn / CC `Status` JSON on stdin /
+   *  ANSI-aware first-line truncation), but NO production code reads this field at
+   *  the REPL status-render call-site to invoke the command per status tick yet.
+   *  Until that auto-render composition lands (a deliberate follow-up), this
+   *  field has zero production consumers and statusLineConfig has NO production
+   *  render effect — byte-identical even when ON, because the field is unread at
+   *  the render root. Intended end state: when ON the CLI REPL runs the
    *  operator-authored command per status tick (args-based spawn, NO shell, CC
-   *  `Status` JSON on stdin) and renders its first stdout line. */
+   *  `Status` JSON on stdin) and renders its first stdout line in place of the
+   *  fixed line. */
   readonly statusLineConfig: StatusLineConfig | undefined
 }
 

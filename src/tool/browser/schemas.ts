@@ -88,3 +88,17 @@ export const readSchema = z.object({
   attr: z.string().optional().describe("attribute name (required when what=attribute)"),
 })
 export type ReadInput = z.infer<typeof readSchema>
+
+// TICKET-24 Wave A — element bounding box + cosmetic highlight (default-OFF,
+// gated at the toolset layer by QUANTA_BROWSER_BOUNDS / QUANTA_BROWSER_HIGHLIGHT).
+export const elementBoundsSchema = z.object({
+  ref: z.string().describe("element ref from a prior browser_snapshot (e.g. e7)"),
+})
+export type ElementBoundsInput = z.infer<typeof elementBoundsSchema>
+
+export const highlightSchema = z.object({
+  ref: z.string().describe("element ref from a prior browser_snapshot (e.g. e7)"),
+  color: z.string().optional().describe("CSS outline color (default high-contrast magenta)"),
+  durationMs: z.number().finite().optional().describe("auto-remove after N ms (default 1500)"),
+})
+export type HighlightInput = z.infer<typeof highlightSchema>

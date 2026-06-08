@@ -236,20 +236,69 @@ export const resolveRefreshIntervalMs = (raw: number | undefined): number | unde
 // ── ANSI tokenization + reset-correction (findings 3 & 4) ────────────────────
 const ESC = String.fromCharCode(27)
 const SGR_RESET = `${ESC}[0m`
+const ST = `${ESC}\\` // String Terminator (the OSC terminator alongside BEL)
+
+/** OSC-8 hyperlink CLOSE: `ESC ] 8 ; ; ST` (empty URL ⇒ ends the clickable
+ *  region). We emit ST-terminated (not BEL) since ST is the modern form and any
+ *  terminal that understood the open understands this close. */
+const OSC8_CLOSE = `${ESC}]8;;${ST}`
 
 /** True iff the rendered line leaves an SGR style OPEN — it contains at least one
  *  SGR sequence and does NOT already end with a reset. An open SGR bleeds color
- *  into the prompt below, so the caller appends a reset. OSC (hyperlinks/title)
- *  and cursor-move CSIs are self-terminating and paint no persistent color, so
- *  they need no reset. */
+ *  into the prompt below, so the caller appends a reset. OSC (title) and
+ *  cursor-move CSIs are self-terminating and paint no persistent color, so they
+ *  need no reset. OSC-8 hyperlinks ARE stateful, though — handled separately by
+ *  {@link hasOpenHyperlink}. */
 const hasOpenSgr = (s: string): boolean => {
   const sgr = new RegExp(`${ESC}\\[[0-9;]*m`, "g")
   return sgr.test(s) && !s.endsWith(SGR_RESET)
 }
 
-/** Append an SGR reset iff the line leaves a style open (idempotent — never
- *  double-resets, never pads plain text). Applied on EVERY return path. */
-const withResetCorrection = (s: string): string => (hasOpenSgr(s) ? s + SGR_RESET : s)
+/** True iff `s` leaves an OSC-8 hyperlink OPEN — the LAST OSC-8 sequence in `s`
+ *  set a NON-EMPTY URL (`ESC]8;;<url>` with url ≠ "") and is not followed by a
+ *  close (`ESC]8;;`). An open OSC-8 hyperlink is STATEFUL: a truncation inside
+ *  the clickable label drops the close and bleeds the clickable region into the
+ *  prompt below. We walk every OSC-8 introducer and track the URL of the last
+ *  one — non-empty ⇒ open, empty ⇒ closed. Other OSC kinds (title, etc.) are
+ *  ignored (they paint no persistent clickable state). */
+const hasOpenHyperlink = (s: string): boolean => {
+  const OSC8_INTRO = `${ESC}]8;` // `ESC ] 8 ;`
+  let open = false
+  let from = 0
+  while (true) {
+    const idx = s.indexOf(OSC8_INTRO, from)
+    if (idx < 0) break
+    // The OSC-8 params end at the FIRST `;` after `ESC]8;` (i.e. `ESC]8;<params>;<url>`).
+    const semi = s.indexOf(";", idx + OSC8_INTRO.length)
+    if (semi < 0) {
+      // Malformed/truncated OSC-8 introducer with no URL separator — treat as
+      // not establishing a new open (the prior state stands).
+      from = idx + OSC8_INTRO.length
+      continue
+    }
+    // URL runs from just after that `;` to the sequence terminator (BEL or ST).
+    const urlStart = semi + 1
+    const bel = s.indexOf(BEL, urlStart)
+    const st = s.indexOf(ST, urlStart)
+    const ends = [bel, st].filter((n) => n >= 0)
+    const urlEnd = ends.length > 0 ? Math.min(...ends) : s.length
+    const url = s.slice(urlStart, urlEnd)
+    open = url.length > 0 // non-empty URL ⇒ link opened; empty ⇒ link closed
+    from = urlEnd
+  }
+  return open
+}
+
+/** Append an SGR reset iff the line leaves a style open, AND an OSC-8 close iff
+ *  the line leaves a hyperlink open (idempotent — never double-resets, never
+ *  pads plain text). Applied on EVERY return path so neither an unclosed SGR nor
+ *  an unclosed OSC-8 hyperlink bleeds into the prompt. */
+const withResetCorrection = (s: string): string => {
+  let out = s
+  if (hasOpenSgr(out)) out += SGR_RESET
+  if (hasOpenHyperlink(out)) out += OSC8_CLOSE
+  return out
+}
 
 /** Consume a complete ANSI escape starting at index `i` of `s` (which begins
  *  with ESC). Returns the end index (exclusive) of the whole sequence so the
@@ -259,23 +308,33 @@ const withResetCorrection = (s: string): string => (hasOpenSgr(s) ? s + SGR_RESE
  *    - other `ESC <byte>` (covers the ST `ESC \\`) / a lone trailing ESC.
  *  An UNTERMINATED sequence consumes to end-of-string so it is emitted whole or
  *  dropped whole — never as a bare introducer. */
+const CSI_FINAL = /[\x40-\x7e]/ // CSI terminator byte range 0x40–0x7E
+const BEL = "\x07" // OSC terminator (alternative to ST)
+
+/** End index (exclusive) of a CSI escape whose introducer `ESC[` starts at `i`. */
+const csiEnd = (s: string, i: number): number => {
+  let j = i + 2
+  while (j < s.length && !CSI_FINAL.test(s[j] ?? "")) j++
+  return j < s.length ? j + 1 : s.length // include final byte; else consume all
+}
+
+/** End index (exclusive) of an OSC escape whose introducer `ESC]` starts at `i`.
+ *  Terminated by BEL or ST (`ESC \`); unterminated ⇒ consume to end-of-string. */
+const oscEnd = (s: string, i: number): number => {
+  let j = i + 2
+  while (j < s.length) {
+    if (s[j] === BEL) return j + 1
+    if (s[j] === ESC && s[j + 1] === "\\") return j + 2
+    j++
+  }
+  return s.length // unterminated OSC ⇒ consume whole (never leak bare ESC])
+}
+
 const escapeSeqEnd = (s: string, i: number): number => {
   const c = s[i + 1]
-  if (c === "[") {
-    let j = i + 2
-    while (j < s.length && !/[\x40-\x7e]/.test(s[j] ?? "")) j++
-    return j < s.length ? j + 1 : s.length // include final byte; else consume all
-  }
-  if (c === "]") {
-    let j = i + 2
-    while (j < s.length) {
-      if (s[j] === "\x07") return j + 1
-      if (s[j] === ESC && s[j + 1] === "\\") return j + 2
-      j++
-    }
-    return s.length // unterminated OSC ⇒ consume whole (never leak bare ESC])
-  }
-  return Math.min(i + 2, s.length)
+  if (c === "[") return csiEnd(s, i)
+  if (c === "]") return oscEnd(s, i)
+  return Math.min(i + 2, s.length) // other ESC<byte> / lone trailing ESC
 }
 
 /** Strip ALL ANSI escapes (CSI *and* OSC) to leave only visible text. The shared
@@ -351,6 +410,15 @@ export interface StatusSpawnHandle {
   readonly stdout: ReadableStream<Uint8Array> | null
   readonly exited: Promise<number>
   kill(): void
+}
+
+/** The structural subset of a default byte-stream reader the runner uses. Typed
+ *  structurally so it is invariant to the `ReadableStream` impl (`stream/web` vs
+ *  DOM) the tsconfig resolves; both expose `read()`/`releaseLock()`/`cancel()`. */
+interface StatusStreamReader {
+  read(): Promise<{ done: boolean; value?: Uint8Array | undefined }>
+  releaseLock(): void
+  cancel(reason?: unknown): Promise<void>
 }
 export type StatusSpawner = (
   argv: readonly string[],
@@ -483,19 +551,54 @@ export const runStatusCommand = async (
     }, hardCapMs)
   })
 
+  // Own the reader at THIS scope so the hard-cap branch (and the `finally`) can
+  // cancel it — finding (R4-5 #2): on the hard-cap return the `readAll` promise
+  // never settles, so without an explicit cancel the reader-lock + the pending
+  // `read()` promise leak (and a no-op `kill()` never closes the stream).
+  // `reader.cancel()` releases the lock, signals the stream's `cancel()`, and
+  // unblocks any pending `read()`.
+  const reader: StatusStreamReader | undefined = handle.stdout?.getReader() as
+    | StatusStreamReader
+    | undefined
+  // Track whether `readAll` already released the lock via its normal-drain path
+  // (`done`). Once released the reader is DETACHED, and calling `.cancel()` on a
+  // detached reader throws `ERR_INVALID_STATE` synchronously — so we only cancel
+  // a STILL-ATTACHED reader (the orphaned / pending case finding #2 is about).
+  let readerReleased = false
+  // Best-effort cancel of the stdout reader; never throws (a status line must
+  // not break the REPL). Idempotent — a no-op once the reader has drained/
+  // released. `cancel()` releases the lock and resolves a pending `read()`.
+  const cancelReader = (): void => {
+    if (reader === undefined || readerReleased) return
+    readerReleased = true
+    try {
+      // `cancel()` returns a promise; swallow both a sync throw and an async
+      // rejection so a raced detach can never surface as an unhandled error.
+      reader.cancel().catch(() => {})
+    } catch {
+      // best-effort (already detached / unsupported)
+    }
+  }
   try {
-    const stdoutPromise = handle.stdout ? readAll(handle.stdout) : Promise.resolve("")
+    const stdoutPromise = reader
+      ? readAll(reader, () => {
+          readerReleased = true
+        })
+      : Promise.resolve("")
     const work = Promise.all([stdoutPromise, handle.exited] as const)
     const raced = await Promise.race([work, capPromise])
 
     if (raced === HARD_CAP) {
       log.warn("statusLine command exceeded hard cap (never settled)", { hardCapMs })
+      // Release the orphaned reader (lock + pending read) — see cancelReader.
+      cancelReader()
       return { text: "", degraded: true }
     }
     const [stdout, exitCode] = raced
 
     if (timedOut) {
       log.warn("statusLine command timed out", { timeoutMs })
+      cancelReader()
       return { text: "", degraded: true }
     }
     const text = formatStatusOutput(stdout, width)
@@ -507,6 +610,7 @@ export const runStatusCommand = async (
     return { text, degraded: false }
   } catch (err) {
     log.warn("statusLine command errored", { error: errMessage(err) })
+    cancelReader()
     return { text: "", degraded: true }
   } finally {
     clearTimeout(timer)
@@ -514,9 +618,19 @@ export const runStatusCommand = async (
   }
 }
 
-/** Drain a byte stream to a UTF-8 string. */
-const readAll = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
-  const reader = stream.getReader()
+/** Drain an already-acquired byte-stream reader to a UTF-8 string. The caller
+ *  OWNS the reader (so it can `cancel()` on a hard-cap / timeout to release the
+ *  lock and unblock a pending `read()`); we release the lock on normal drain and
+ *  signal that release via `onReleased` so the owner skips a (now-illegal) cancel
+ *  of the detached reader. */
+const readAll = async (
+  // Structural subset of a default stream reader — only the members we use. Typed
+  // structurally (not the lib `ReadableStreamDefaultReader`) so it matches
+  // whichever `ReadableStream` impl (`stream/web` vs DOM) the tsconfig resolves,
+  // whose `getReader()` overloads otherwise widen `value` to `ArrayBufferView`.
+  reader: StatusStreamReader,
+  onReleased?: () => void,
+): Promise<string> => {
   const chunks: Uint8Array[] = []
   try {
     while (true) {
@@ -525,7 +639,14 @@ const readAll = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
       if (value && value.byteLength > 0) chunks.push(value)
     }
   } finally {
-    reader.releaseLock()
+    // Releasing a lock already released by `cancel()` is a no-op/throws on some
+    // impls — guard it so a raced cancel never surfaces as an error.
+    try {
+      reader.releaseLock()
+    } catch {
+      // already released (e.g. via cancel) — fine
+    }
+    onReleased?.()
   }
   let total = 0
   for (const c of chunks) total += c.byteLength

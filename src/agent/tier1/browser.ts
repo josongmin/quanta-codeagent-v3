@@ -20,7 +20,13 @@ import type { AgentConfig } from "../types"
 
 /** Narrow structural slot the composition root appends onto `AgentConfig`. */
 interface BrowserConfigSlot {
-  browser?: { readonly port: BrowserPort; readonly resolver?: DnsResolver }
+  browser?: {
+    readonly port: BrowserPort
+    readonly resolver?: DnsResolver
+    /** TICKET-24 — per-feature default-OFF gates (QUANTA_BROWSER_BOUNDS/_HIGHLIGHT). */
+    readonly bounds?: boolean
+    readonly highlight?: boolean
+  }
 }
 
 const EMPTY: BrowserToolset = { tools: [], dispose: async () => {} }
@@ -29,8 +35,9 @@ const EMPTY: BrowserToolset = { tools: [], dispose: async () => {} }
 export const buildBrowserBlock = (config: AgentConfig): BrowserToolset => {
   const slot = (config as AgentConfig & BrowserConfigSlot).browser
   if (slot?.port === undefined) return EMPTY
-  return createBrowserToolset(
-    slot.port,
-    slot.resolver !== undefined ? { resolver: slot.resolver } : {},
-  )
+  return createBrowserToolset(slot.port, {
+    ...(slot.resolver !== undefined ? { resolver: slot.resolver } : {}),
+    ...(slot.bounds === true ? { bounds: true } : {}),
+    ...(slot.highlight === true ? { highlight: true } : {}),
+  })
 }

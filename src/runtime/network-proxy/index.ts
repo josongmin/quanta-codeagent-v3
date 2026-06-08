@@ -21,6 +21,7 @@ export {
   type ApplyHeaderRulesResult,
   applyHeaderRules,
   CROSS_ORIGIN_STRIP_HEADERS,
+  FORBIDDEN_FRAMING,
   FORBIDDEN_INJECT,
   type HeaderRule,
   type HeaderRuleAudit,

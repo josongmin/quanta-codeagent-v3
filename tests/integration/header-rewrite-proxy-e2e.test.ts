@@ -232,6 +232,43 @@ describe("header-rewrite e2e — REDACTION beats rewrite", () => {
   })
 })
 
+describe("header-rewrite e2e — redaction runs FIRST, rule acts on the post-redaction map", () => {
+  test("declared secret in X-Token + {x-token,set,'operator-literal'} ⇒ origin sees the literal, NOT the secret", async () => {
+    receivedHeaders = []
+    receivedBodies = []
+    const proxy = new LoopbackEgressProxy(
+      {
+        enabled: true,
+        allowlist: [HOST],
+        secretEgress: egress({
+          declared: [DECLARED],
+          mode: "redact",
+          // Redaction DROPS the leaking x-token header FIRST; THEN this `set`
+          // (a CREATE, not a rewrite) recreates it with an operator literal. The
+          // origin must therefore see the literal and NEVER the declared secret —
+          // proving the rule runs on the post-redaction header map.
+          headerRules: [{ name: "x-token", op: "set", value: "operator-literal" }],
+        }),
+      },
+      hermetic(),
+    )
+    const { port } = await proxy.listen()
+    try {
+      const res = await proxyPost(port, `http://${HOST}/hook`, "clean=body", [
+        `X-Token: ${DECLARED}`,
+      ])
+      expect(res.status).toBe(200)
+      const got = receivedHeaders[0] ?? {}
+      // The operator's CREATE landed on the post-redaction map …
+      expect(got["x-token"]).toBe("operator-literal")
+      // … and the declared secret never reached upstream in any header value.
+      expect(JSON.stringify(got).includes(DECLARED)).toBe(false)
+    } finally {
+      await proxy.close()
+    }
+  })
+})
+
 describe("header-rewrite e2e — mutation audit log is value-redacted", () => {
   test("a fired set rule logs index/name/op/fired/host but NEVER the value", async () => {
     const proxy = new LoopbackEgressProxy(
@@ -257,6 +294,49 @@ describe("header-rewrite e2e — mutation audit log is value-redacted", () => {
     } finally {
       await proxy.close()
     }
+  })
+})
+
+describe("header-rewrite e2e — crossOriginStrip is INERT (no reader, pins the no-op)", () => {
+  // crossOriginStrip rides on SecretEgressConfig/MitmConfig for SHAPE PARITY only
+  // — this tunneling proxy does NOT follow 3xx redirects, so there is no callsite
+  // that reads it (the pure `shouldStripOnRedirect` helper exists for a future
+  // redirect-following caller). This pin asserts the field is a genuine NO-OP:
+  // forwarding the SAME request with crossOriginStrip:true must produce headers at
+  // the origin that are BYTE-IDENTICAL to forwarding it with the field ABSENT.
+  const forwardHeadersWith = async (
+    over: Partial<SecretEgressConfig>,
+  ): Promise<IncomingMessage["headers"]> => {
+    receivedHeaders = []
+    const proxy = new LoopbackEgressProxy(
+      { enabled: true, allowlist: [HOST], secretEgress: egress(over) },
+      hermetic(),
+    )
+    const { port } = await proxy.listen()
+    try {
+      const res = await proxyPost(port, `http://${HOST}/hook`, "hello=world", [
+        "Authorization: Bearer keep",
+        "Cookie: sid=keep",
+        "X-Keep: yes",
+      ])
+      expect(res.status).toBe(200)
+      return receivedHeaders[0] ?? {}
+    } finally {
+      await proxy.close()
+    }
+  }
+
+  test("crossOriginStrip:true forwards BYTE-IDENTICAL headers vs absent (inert no-op)", async () => {
+    const absent = await forwardHeadersWith({})
+    const withStrip = await forwardHeadersWith({ crossOriginStrip: true })
+    // The origin sees exactly the same header map either way — the flag changed
+    // nothing (it is never read on the tunneling path; no 3xx is followed).
+    expect(withStrip).toEqual(absent)
+    // Spell out the cross-origin-sensitive headers it would strip IF it were wired:
+    // they survive UNCHANGED, proving the field is inert.
+    expect(withStrip.authorization).toBe("Bearer keep")
+    expect(withStrip.cookie).toBe("sid=keep")
+    expect(withStrip["x-keep"]).toBe("yes")
   })
 })
 
@@ -314,6 +394,9 @@ const httpsThroughProxy = (
   proxyPort: number,
   mitmCaPem: string,
   body: string,
+  // Extra request header line sent over the MITM-terminated TLS leg. Defaults to
+  // the X-Trace header the strip/default-OFF cases assert on.
+  extraHeaderLine = "X-Trace: leaky",
 ): Promise<{ status: number; body: string; err?: string }> =>
   new Promise((resolve) => {
     const ctrl = netConnect(proxyPort, "127.0.0.1", () => {
@@ -336,7 +419,7 @@ const httpsThroughProxy = (
         const tls = tlsConnect({ socket: ctrl, servername: HOST, ca: [mitmCaPem] }, () => {
           const len = Buffer.byteLength(body)
           tls.write(
-            `POST /hook HTTP/1.1\r\nHost: ${HOST}\r\nX-Trace: leaky\r\nContent-Length: ${len}\r\nConnection: close\r\n\r\n${body}`,
+            `POST /hook HTTP/1.1\r\nHost: ${HOST}\r\n${extraHeaderLine}\r\nContent-Length: ${len}\r\nConnection: close\r\n\r\n${body}`,
           )
         })
         let resp = ""
@@ -407,6 +490,42 @@ describe("header-rewrite e2e — MITM (real TLS) reaches the origin", () => {
       expect(got["x-source"]).toBe("quanta-mitm") // set
       // The MITM header-rule mutation is in the value-free audit log too.
       expect(proxy.headerRuleLog().some((e) => e.headerName === "x-source" && e.fired)).toBe(true)
+    } finally {
+      await proxy.close()
+    }
+  })
+
+  test("MITM REDACTION beats rewrite: declared secret in X-Token + rewrite on x-token ⇒ origin sees NEITHER", async () => {
+    tlsReceivedHeaders = []
+    // Mirror the plaintext 'REDACTION beats rewrite' over the hand-duplicated
+    // mitmForwardUpstream order path (redaction → header-rules). The secret rides
+    // in X-Token; redaction drops that header FIRST; the rewrite (only-if-present)
+    // can NOT revive it; so the HTTPS origin sees neither the secret nor the rule value.
+    const mitm = mitmConfig({
+      secretEgress: egress({ declared: [DECLARED], mode: "redact" }),
+      headerRules: [{ name: "x-token", op: "rewrite", value: "should-not-appear" }],
+    })
+    const proxy = new LoopbackEgressProxy(
+      { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
+      {
+        dial: toTlsOrigin(),
+        resolvePeerHost: publicPeer,
+        upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
+      },
+    )
+    const { port } = await proxy.listen()
+    try {
+      const res = await httpsThroughProxy(
+        port,
+        mitm.certAuthority.caCertPem(),
+        "clean=body",
+        `X-Token: ${DECLARED}`,
+      )
+      expect(res.status).toBe(200)
+      const got = tlsReceivedHeaders[0] ?? {}
+      expect(got["x-token"]).toBeUndefined() // dropped by redaction, rewrite could not revive
+      expect(got["x-token"]).not.toBe("should-not-appear")
+      expect(JSON.stringify(got).includes(DECLARED)).toBe(false)
     } finally {
       await proxy.close()
     }

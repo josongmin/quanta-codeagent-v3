@@ -144,4 +144,86 @@ describe("edit edit-fence", () => {
     expect(await readFile(abs, "utf8")).toBe("abs-edited\n")
     expect(existsSync(path.join(worktree, "abs.txt"))).toBe(false)
   })
+
+  // ── ticket-11 finding #5: the HEADLINE jail invariant ───────────────────────
+  // The whole point of the edit-fence is that a worktree is a relative-cwd
+  // OVERRIDE, NOT a trust-boundary widening. A RELATIVE path that uses `../`×N to
+  // climb OUT of the SESSION jail (the worktree is a SUBDIR of the session, so a
+  // relative path joined onto the worktree must STILL be jail-checked against the
+  // session root) must be REFUSED, and the out-of-jail victim must be byte-
+  // identical. Pre-fix the suite only covered in-jail relative writes.
+  test("active worktree ⇒ a RELATIVE '../'×N escape OUT of the session jail is REFUSED", async () => {
+    const { session, worktree } = await makeSessionWithWorktree("edit-escape-rel")
+    // A SIBLING tmpdir OUTSIDE the session jail holds the victim.
+    const victimDir = await makeDir("edit-victim-rel")
+    const victim = path.join(victimDir, "victim.txt")
+    await writeFile(victim, "VICTIM_UNTOUCHED\n")
+    // Build the relative climb FROM the worktree dir to the victim. The worktree
+    // is `<session>/.quanta/worktrees/wt`, so this necessarily passes through (and
+    // past) the session root — the jail must reject it.
+    const rel = path.relative(worktree, victim)
+    expect(rel.startsWith("..")).toBe(true) // sanity: it really does climb out
+    const r = await drain(
+      editTool,
+      { path: rel, old_string: "VICTIM_UNTOUCHED", new_string: "PWNED" },
+      ctx(session, activeFor(session, worktree)),
+    )
+    expect(r.ok).toBe(false)
+    // The victim outside the session jail is byte-identical (no partial write).
+    expect(await readFile(victim, "utf8")).toBe("VICTIM_UNTOUCHED\n")
+  })
+
+  test("active worktree ⇒ an ABSOLUTE path OUTSIDE the session jail is REFUSED", async () => {
+    const { session, worktree } = await makeSessionWithWorktree("edit-escape-abs")
+    const victimDir = await makeDir("edit-victim-abs")
+    const victim = path.join(victimDir, "victim.txt")
+    await writeFile(victim, "VICTIM_UNTOUCHED\n")
+    // An ABSOLUTE path outside the session jail jails to the SESSION root (the
+    // worktree NEVER widens the absolute trust boundary) → refused.
+    const r = await drain(
+      editTool,
+      { path: victim, old_string: "VICTIM_UNTOUCHED", new_string: "PWNED" },
+      ctx(session, activeFor(session, worktree)),
+    )
+    expect(r.ok).toBe(false)
+    expect(await readFile(victim, "utf8")).toBe("VICTIM_UNTOUCHED\n")
+  })
+})
+
+describe("read edit-fence", () => {
+  test("DEFAULT-OFF: no active worktree ⇒ read resolves against the session cwd", async () => {
+    const session = await makeDir("read-off")
+    await writeFile(path.join(session, "r.txt"), "session-only\n")
+    const r = await drain(readTool, { path: "r.txt" }, ctx(session))
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("session-only")
+  })
+
+  // ticket-11 finding #3: read MUST be fenced to the worktree like edit/bash.
+  // Pre-fix `read` resolved against `ctx.cwd` (session) while edit/bash used
+  // `ctx.activeWorktree` → a RELATIVE read returned the SESSION copy while a
+  // RELATIVE edit touched the WORKTREE copy (divergence + stale-read bypass).
+  // The SAME relative filename exists in BOTH dirs with DIFFERENT content; the
+  // read must return the WORKTREE copy.
+  test("active worktree ⇒ a RELATIVE read returns the WORKTREE copy (not session)", async () => {
+    const { session, worktree } = await makeSessionWithWorktree("read-on")
+    await writeFile(path.join(session, "foo.ts"), "SESSION_A\n")
+    await writeFile(path.join(worktree, "foo.ts"), "WORKTREE_B\n")
+    const r = await drain(readTool, { path: "foo.ts" }, ctx(session, activeFor(session, worktree)))
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("WORKTREE_B")
+    expect(r.output).not.toContain("SESSION_A")
+  })
+
+  // RED-ON-INJECTION mirror: an ABSOLUTE read STILL jails to the SESSION root,
+  // never re-based onto the worktree (the worktree is a relative-cwd override).
+  test("active worktree ⇒ an ABSOLUTE read STILL targets the SESSION jail", async () => {
+    const { session, worktree } = await makeSessionWithWorktree("read-abs")
+    await writeFile(path.join(session, "abs-r.txt"), "abs-session\n")
+    const abs = path.join(session, "abs-r.txt")
+    const r = await drain(readTool, { path: abs }, ctx(session, activeFor(session, worktree)))
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("abs-session")
+    expect(existsSync(path.join(worktree, "abs-r.txt"))).toBe(false)
+  })
 })

@@ -18,7 +18,7 @@
 
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, rmSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -26,6 +26,7 @@ import type { ActiveWorktree, ToolContext, ToolEvent, ToolResult, WorktreeSlotHa
 import {
   enterWorktreeTool,
   exitWorktreeTool,
+  makeExitWorktreeTool,
   WORKTREE_TOOL_NAMES,
   worktreeStatusTool,
 } from "@/tool/worktree"
@@ -194,6 +195,43 @@ describe("B. enter_worktree", () => {
     expect(existsSync(slot.current()?.worktreePath ?? "")).toBe(true)
   })
 
+  // ── ticket-11 finding #6: branchFrom:'fresh' resolves origin/<default> ───────
+  // Exercises `resolveFreshBaseRef` end-to-end (dead from the suite before this):
+  // with a bare `origin` whose default branch is AHEAD of local HEAD, a
+  // branchFrom:'fresh' enter must base the worktree on origin/<default>, NOT the
+  // (behind) local HEAD.
+  test("branchFrom:fresh bases the worktree on origin/<default>, not local HEAD", async () => {
+    const git = (args: string[], cwd = repo) => execFileSync("git", args, { cwd }).toString().trim()
+    const localHead = git(["rev-parse", "HEAD"])
+    // Bare origin from the repo's current state, wired as `origin` + origin/HEAD.
+    const origin = await mkdtemp(path.join(tmpdir(), "wt-origin-"))
+    tmpRepos.push(origin)
+    execFileSync("git", ["clone", "-q", "--bare", repo, origin])
+    git(["remote", "add", "origin", origin])
+    // Advance origin's default branch ONE commit AHEAD of local HEAD, then point
+    // origin/HEAD at it so resolveFreshBaseRef's symbolic-ref lookup resolves.
+    await writeFile(path.join(repo, "ahead.txt"), "ahead-of-local\n")
+    git(["add", "ahead.txt"])
+    git(["commit", "-q", "-m", "ahead"])
+    const aheadCommit = git(["rev-parse", "HEAD"])
+    git(["push", "-q", "origin", "main"])
+    // Move LOCAL HEAD back to the original commit (local is now BEHIND origin).
+    git(["reset", "-q", "--hard", localHead])
+    git(["fetch", "-q", "origin"])
+    execFileSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], {
+      cwd: repo,
+    })
+    expect(git(["rev-parse", "HEAD"])).toBe(localHead) // local really is behind
+
+    const r = await drain(enterWorktreeTool, { branchFrom: "fresh" }, ctx(slot))
+    expect(r.ok).toBe(true)
+    const wtPath = slot.current()?.worktreePath ?? ""
+    const wtTip = git(["rev-parse", "HEAD"], wtPath)
+    // The worktree was forked from origin/main (ahead), NOT local HEAD (behind).
+    expect(wtTip).toBe(aheadCommit)
+    expect(wtTip).not.toBe(localHead)
+  })
+
   test('duplicate enter without exit ⇒ error ("exit first")', async () => {
     await drain(enterWorktreeTool, {}, ctx(slot))
     const r = await drain(enterWorktreeTool, {}, ctx(slot))
@@ -208,6 +246,31 @@ describe("B. enter_worktree", () => {
     expect(r.failure).toEqual({ mode: "rejected", reason: "not_wired" })
   })
 
+  // ── ticket-11 finding #2: crash-recovery reconcile ──────────────────────────
+  // The fixed-id worktree (`agent-worktree` / branch `fork-agent-worktree`) can
+  // be left on disk by a crash (the slot is in-memory only, so the
+  // duplicate-guard does NOT see it). A fresh session then collides on
+  // `git worktree add` ("already used by worktree"). enter must best-effort
+  // reconcile the leftover at the fixed path/branch first, so a crashed session
+  // is recoverable WITHOUT manual `git worktree prune`.
+  test("recovers from a LEFTOVER worktree at the fixed path/branch (crash reconcile)", async () => {
+    const fixedPath = path.join(repo, ".quanta", "worktrees", "agent-worktree")
+    // Simulate the post-crash leftover: a real worktree registered at the exact
+    // fixed path + branch the agent tool will try to (re)create.
+    execFileSync(
+      "git",
+      ["worktree", "add", "--no-track", "-B", "fork-agent-worktree", "--", fixedPath, "HEAD"],
+      { cwd: repo },
+    )
+    expect(existsSync(fixedPath)).toBe(true)
+    // Fresh slot (the crashed session's in-memory slot is gone): the
+    // duplicate-guard sees an EMPTY slot, so enter proceeds to createPersistent.
+    const r = await drain(enterWorktreeTool, {}, ctx(slot))
+    expect(r.ok).toBe(true)
+    expect(slot.current()?.worktreePath).toBe(fixedPath)
+    expect(existsSync(fixedPath)).toBe(true)
+  })
+
   test("non-git repoRoot ⇒ typed not_a_git_repo failure", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "wt-nogit-"))
     tmpRepos.push(dir)
@@ -215,6 +278,28 @@ describe("B. enter_worktree", () => {
     const r = await drain(enterWorktreeTool, {}, ctx(s))
     expect(r.ok).toBe(false)
     expect(r.failure).toEqual({ mode: "rejected", reason: "not_a_git_repo" })
+  })
+
+  // ── ticket-11 R4-5 finding #5: a crash-leftover's uncommitted work is force- ──
+  // discarded by the reconcile. The discard still happens (the leftover path is
+  // OURS, deterministically), but it must NOT be SILENT — enter surfaces the
+  // discarded file list so the operator can see what crash-leftover work was
+  // dropped (observability, not a refusal — a fresh enter must still succeed).
+  test("reconcile of a DIRTY crash-leftover surfaces the discarded files in the enter result", async () => {
+    const fixedPath = path.join(repo, ".quanta", "worktrees", "agent-worktree")
+    // Crash leftover: a real worktree at the fixed path with UNCOMMITTED work.
+    execFileSync(
+      "git",
+      ["worktree", "add", "--no-track", "-B", "fork-agent-worktree", "--", fixedPath, "HEAD"],
+      { cwd: repo },
+    )
+    await writeFile(path.join(fixedPath, "crash-leftover.txt"), "uncommitted crash work\n")
+    const r = await drain(enterWorktreeTool, {}, ctx(slot))
+    // Fresh enter still SUCCEEDS (reconcile + recreate), but the discarded work is
+    // now VISIBLE — not silently dropped.
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("crash-leftover.txt")
+    expect(r.output.toLowerCase()).toContain("discard")
   })
 })
 
@@ -289,6 +374,59 @@ describe("C. exit_worktree", () => {
     expect(r.ok).toBe(false)
     expect(r.failure).toEqual({ mode: "rejected", reason: "not_wired" })
   })
+
+  // ── ticket-11 finding #4: removeWorktree failure must surface a TYPED failure ──
+  // Pre-fix, exit cleared the slot + reported ok:true even when removeWorktree
+  // returned false — leaving the EXACT wedging state (a registered worktree on
+  // disk + a fresh session that collides). The remove FAILURE must yield ok:false
+  // {mode:'rejected', reason:'worktree_cleanup_failed'} and NOT silently clear+ok.
+  test("removeWorktree FAILURE ⇒ ok:false typed worktree_cleanup_failed (no silent clear)", async () => {
+    // Inject a clean (CLEAN-exit path) worktree but force the remover to fail.
+    const failingExit = makeExitWorktreeTool({
+      removeWorktree: async () => false,
+    })
+    await drain(enterWorktreeTool, {}, ctx(slot))
+    const wtPath = slot.current()?.worktreePath ?? ""
+    const r = await drain(failingExit, {}, ctx(slot))
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "rejected", reason: "worktree_cleanup_failed" })
+    // The slot is NOT cleared (the session is still "inside" the worktree, so it
+    // can retry) and the on-disk worktree still exists (injected remover no-op'd).
+    expect(slot.current()).toBeDefined()
+    expect(existsSync(wtPath)).toBe(true)
+  })
+
+  test("default exit tool uses the real removeWorktree (factory default is the CORE)", async () => {
+    // The exported `exitWorktreeTool` must equal a factory build with no override
+    // — i.e. the default remover IS the real `@/runtime` removeWorktree, so the
+    // clean-exit path still removes the worktree for real.
+    await drain(enterWorktreeTool, {}, ctx(slot))
+    const wtPath = slot.current()?.worktreePath ?? ""
+    const r = await drain(makeExitWorktreeTool(), {}, ctx(slot))
+    expect(r.ok).toBe(true)
+    expect(existsSync(wtPath)).toBe(false)
+  })
+
+  // ── ticket-11 R4-5 finding #1: a VANISHED worktree dir must not wedge the slot ──
+  // `runShell` (Bun.spawn) THROWS when cwd does not exist. uncommittedCount /
+  // uncommittedList only degrade on a non-zero exit, never on a throw → the throw
+  // escapes execute(), the slot is never cleared, and the session is PERMANENTLY
+  // wedged "inside" a worktree that no longer exists (the R1-3 cleanup-failed
+  // branch is unreachable — the throw precedes removeWorktree). After the fix the
+  // missing dir reads as "not dirty" and exit proceeds to the idempotent
+  // removeWorktree + clears the slot.
+  test("exit_worktree with the worktree DIR VANISHED ⇒ no throw, slot cleared (ok:true)", async () => {
+    await drain(enterWorktreeTool, {}, ctx(slot))
+    const wtPath = slot.current()?.worktreePath ?? ""
+    expect(wtPath.length).toBeGreaterThan(0)
+    // The active worktree dir disappears out from under us (external rm / a crash
+    // that removed the dir but not the in-memory slot).
+    rmSync(wtPath, { recursive: true, force: true })
+    expect(existsSync(wtPath)).toBe(false)
+    const r = await drain(exitWorktreeTool, {}, ctx(slot)) // must NOT throw
+    expect(r.ok).toBe(true)
+    expect(slot.current()).toBeUndefined() // slot cleared — session not wedged
+  })
 })
 
 /* ------------------------------------------------------------------ */
@@ -336,5 +474,19 @@ describe("D. worktree_status", () => {
 
   test("WORKTREE_TOOL_NAMES is the 3 tool names in stable order", () => {
     expect(WORKTREE_TOOL_NAMES).toEqual(["enter_worktree", "exit_worktree", "worktree_status"])
+  })
+
+  // ── ticket-11 R4-5 finding #1: status over a VANISHED worktree dir ───────────
+  // Same root cause as the exit case: `git status --porcelain` via runShell THROWS
+  // when the worktree cwd is gone. status must degrade to the existing
+  // count===undefined ⇒ "unknown" branch instead of letting the throw escape.
+  test("worktree_status with the worktree DIR VANISHED ⇒ no throw, 'unknown' count", async () => {
+    await drain(enterWorktreeTool, {}, ctx(slot))
+    const wtPath = slot.current()?.worktreePath ?? ""
+    rmSync(wtPath, { recursive: true, force: true })
+    expect(existsSync(wtPath)).toBe(false)
+    const r = await drain(worktreeStatusTool, {}, ctx(slot)) // must NOT throw
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("uncommitted changes: unknown")
   })
 })

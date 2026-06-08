@@ -98,6 +98,21 @@ const discoverKnobs = (src: string): readonly string[] => {
 const RUNTIME_CONFIG_TEXT = readFileSync(RUNTIME_CONFIG_SRC, "utf8")
 const DISCOVERED_KNOBS = discoverKnobs(RUNTIME_CONFIG_TEXT)
 
+/** Knobs whose controlled RuntimeConfig field is DOUBLE-GATED — it only leaves
+ *  its default when ≥2 env vars are set TOGETHER, so the single-knob auto-probe
+ *  (one var at a time, every other QUANTA_* stripped) can never flip it and the
+ *  knob looks like a "dead read". Each is mapped to the field it co-gates; that
+ *  field's default-OFF value is asserted DIRECTLY in the test below (so the
+ *  guarantee still holds — it just can't be reached by the generic probe). Keep
+ *  this set MINIMAL: only genuinely multi-var-gated knobs belong here. */
+const DOUBLE_GATED_OFF: Readonly<Record<string, string>> = {
+  // ticket-15 (§11.7): `statusLine` is `undefined` UNLESS BOTH the master gate
+  // QUANTA_STATUS_LINE (gateOn vocab) AND a valid QUANTA_STATUS_LINE_CONFIG JSON
+  // object (with a "command") are set — see runtime-config.ts parseStatusLine.
+  QUANTA_STATUS_LINE: "statusLine",
+  QUANTA_STATUS_LINE_CONFIG: "statusLine",
+}
+
 // ---------------------------------------------------------------------------
 // Mechanism 2 — REFLECTION via probing env over the public runtimeConfig seam.
 // ---------------------------------------------------------------------------
@@ -335,9 +350,16 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     // terminal io for the (expected, harmless) probe noise; restore after.
     const savedIo = getTerminalIo()
     setTerminalIo({ stdout: () => {}, stderr: () => {} })
+    // Double-gated knobs are unreachable by the single-knob probe; verify their
+    // co-gated field defaults OFF DIRECTLY, then exclude them from the probe loop.
+    for (const field of new Set(Object.values(DOUBLE_GATED_OFF))) {
+      expect(isOffValue(baseline[field])).toBe(true)
+    }
+    const probedKnobs = DISCOVERED_KNOBS.filter((k) => !(k in DOUBLE_GATED_OFF))
+
     const verdicts: KnobVerdict[] = []
     try {
-      for (const knob of DISCOVERED_KNOBS) {
+      for (const knob of probedKnobs) {
         const { field, defaultValue } = reflectKnob(knob, baseline)
         verdicts.push(classifyKnob(knob, field, defaultValue, NON_FALSY_DEFAULT_ALLOWLIST))
       }
@@ -359,7 +381,7 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     // COVERAGE CROSS-CHECK: every discovered knob is either auto-proven or
     // allowlisted — no third "uncovered" bucket by construction.
     const covered = new Set([...autoProven, ...allowlistUsed])
-    const uncovered = DISCOVERED_KNOBS.filter((k) => !covered.has(k))
+    const uncovered = probedKnobs.filter((k) => !covered.has(k))
     expect({ violations, uncovered }).toEqual({ violations: [], uncovered: [] })
   })
 

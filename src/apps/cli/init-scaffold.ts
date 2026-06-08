@@ -31,6 +31,7 @@
  * outcome, never a throw out of `run`.
  */
 
+import { exec } from "node:child_process"
 import { existsSync } from "node:fs"
 import { readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
@@ -296,6 +297,34 @@ const resolveTarget = (cwd: string): { file: string; path: string; exists: boole
 
 const defaultWrite = (path: string, data: string): Promise<void> => writeFile(path, data, "utf8")
 
+/** Default `rg --files` shell for the LIVE surface (tests inject their own canned
+ *  shell). Runs the scan command in `cwd` via node's `exec`, best-effort with a
+ *  5s cap + bounded buffer. NEVER throws: a non-zero exit (rg returns 1 on no
+ *  matches) or a timeout resolves to a typed result the scanner treats as "no
+ *  map" — `/init` then degrades to a scaffold without the Directory tree. */
+const defaultRepoMapShell: RepoMapShell = (cmd, opts) =>
+  new Promise((resolve) => {
+    exec(
+      cmd,
+      {
+        cwd: opts.cwd,
+        timeout: 5000,
+        maxBuffer: 16 * 1024 * 1024,
+        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      },
+      (error, stdout) => {
+        const timedOut = error !== null && (error as { killed?: boolean }).killed === true
+        const exitCode =
+          error !== null && typeof (error as { code?: unknown }).code === "number"
+            ? (error as { code: number }).code
+            : error !== null
+              ? 1
+              : 0
+        resolve({ stdout: stdout ?? "", exitCode, timedOut })
+      },
+    )
+  })
+
 /** Assemble the full scaffold for `cwd` (detect commands + scan map + render). */
 const assembleScaffold = async (cwd: string, shell: RepoMapShell | undefined): Promise<string> => {
   const [cmds, repoMap] = await Promise.all([
@@ -414,6 +443,9 @@ const runWrite = async (
  */
 export const buildInitCmd = (deps: InitCmdDeps = {}): SlashCommand => {
   const write = deps.write ?? defaultWrite
+  // Live surface (no injected shell) ⇒ scan the repo with the node-backed rg
+  // shell; tests inject a canned shell and are unaffected.
+  const shell = deps.shell ?? defaultRepoMapShell
   return {
     name: "/init",
     describe:
@@ -426,9 +458,9 @@ export const buildInitCmd = (deps: InitCmdDeps = {}): SlashCommand => {
         return 1
       }
       const target = resolveTarget(ctx.cwd)
-      if (dryRun) return runDryRun(ctx, target, deps.shell)
+      if (dryRun) return runDryRun(ctx, target, shell)
       if (target.exists && !force) return runRefuse(ctx, target)
-      return runWrite(ctx, target, deps.shell, write)
+      return runWrite(ctx, target, shell, write)
     },
   }
 }

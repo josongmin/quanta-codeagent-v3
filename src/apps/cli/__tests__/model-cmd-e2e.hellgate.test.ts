@@ -1,12 +1,11 @@
 /**
  * Hellgate — `/model` command e2e + drift-guard (ticket 14, §11.6).
  *
- * ⚠️ pendingIntegration: these cases drive the COMMAND through the real
+ * REGISTERED + GREEN: these cases drive the COMMAND through the real
  * `runSlashCommand` dispatcher, which resolves names against the assembled
- * `BUILTINS`. They are RED until the orchestrator registers `modelCmd` in
- * `src/apps/cli/slash/registry-surface.ts` (the integration snippet). The
- * "not-wired degrade" case is GREEN now (it only needs the cmd to be reachable);
- * the rest go GREEN on registration — no command-body change needed.
+ * `BUILTINS`. `modelCmd` IS registered in `src/apps/cli/slash/registry-surface.ts`
+ * (SURFACE layer), so they exercise the live registered command end-to-end —
+ * no command-body change needed.
  *
  * Coverage:
  *   - no-arg list ⇒ current model MARKED `*` + every candidate rendered + hint;
@@ -23,8 +22,11 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { EffortLevel } from "@/agent"
+import { createEffortStore, EFFORT_LEVELS } from "@/agent"
+import { inMemoryStickyModelStore } from "@/agent/sticky-model"
 import type { ModelEffortSupport } from "@/llm/provider-metadata"
 import { ALL_REASONING_EFFORTS } from "@/llm/provider-metadata"
+import { buildModelAdapter } from "../repl/ctx-adapters/model-adapter"
 import { modelCmd } from "../slash/model-cmd"
 import type { ModelLineMeta } from "../slash/model-picker"
 import { SURFACE_SLASH_COMMANDS } from "../slash/registry-surface"
@@ -184,7 +186,7 @@ describe("/model command body — direct invocation (GREEN now)", () => {
   })
 })
 
-describe("/model command e2e (pendingIntegration — needs registry registration)", () => {
+describe("/model command e2e (registered command, via runSlashCommand)", () => {
   test("no-arg ⇒ current model MARKED + candidates + hint line", async () => {
     const h = buildHarness({ initialModel: "gpt-5" })
     const code = await runSlashCommand("/model", h.ctx)
@@ -285,7 +287,7 @@ describe("/model command e2e (pendingIntegration — needs registry registration
   })
 })
 
-describe("/model slash drift-guard (pendingIntegration — needs registration)", () => {
+describe("/model slash drift-guard (registered exactly once in SURFACE layer)", () => {
   test("`/model` registered exactly once across BUILTINS", () => {
     const names = BUILTINS.map((c) => c.name)
     expect(names.filter((n) => n === "/model").length).toBe(1)
@@ -301,5 +303,91 @@ describe("/model slash drift-guard (pendingIntegration — needs registration)",
     expect(typeof cmd?.describe).toBe("string")
     expect(typeof cmd?.run).toBe("function")
     expect(typeof cmd?.complete).toBe("function")
+  })
+})
+
+// ticket-14 REAL FIX #1+#2 — a REAL `buildModelAdapter` over an in-memory sticky
+// store, mode-bound to `plan` (the derivation surface-compose now uses under
+// --plan: resolveAgentMode(undefined, true) === 'plan'). This exercises the host
+// wiring end-to-end: the SET must write the PLAN key (REAL FIX #2 — not the
+// literal "default" the old IIFE bound, which the consume side never reads under
+// --plan), and current() must reflect the set via the SYNC SHADOW (REAL FIX #1 —
+// no `currentModel` host getter is supplied, exactly as surface-compose builds it,
+// so a store read could only return a Promise).
+describe("/model real adapter under --plan (buildModelAdapter + real effort)", () => {
+  const buildPlanHarness = () => {
+    const store = inMemoryStickyModelStore()
+    // No `currentModel` getter — surface-compose does NOT supply one.
+    const modelAdapter = buildModelAdapter({
+      store,
+      bootModel: "gpt-5",
+      candidateIds: ["gpt-5", "gpt-4o"],
+      currentMode: () => "plan", // resolveAgentMode(undefined, /*planMode*/ true)
+    })
+    const effortStore = createEffortStore("high")
+    let stdout = ""
+    let stderr = ""
+    const ctx: SlashContext = {
+      out: (s) => {
+        stdout += s
+      },
+      err: (s) => {
+        stderr += s
+      },
+      cwd: "/tmp",
+      model: modelAdapter,
+      effort: {
+        get: () => effortStore.get(),
+        set: (lvl) => effortStore.set(lvl),
+        levels: EFFORT_LEVELS as readonly EffortLevel[],
+        budgetTokens: () => undefined,
+      },
+    }
+    return {
+      ctx,
+      store,
+      effortStore,
+      modelAdapter,
+      get stdout() {
+        return stdout
+      },
+      get stderr() {
+        return stderr
+      },
+    }
+  }
+
+  test("set under --plan writes the plan key + current() reflects it", async () => {
+    const h = buildPlanHarness()
+    expect(h.modelAdapter.current()).toBe("gpt-5") // boot anchor
+    const code = await runSlashCommand("/model gpt-4o", h.ctx)
+    expect(code).toBe(0)
+    // REAL FIX #2 — the SET landed on the PLAN key (the consume side reads it
+    // under --plan), NOT a literal "default" key.
+    expect(await h.store.get({ mode: "plan" })).toBe("gpt-4o")
+    expect(await h.store.get({ mode: "default" })).toBeUndefined()
+    // REAL FIX #1 — current() reflects the set immediately via the sync shadow.
+    expect(h.modelAdapter.current()).toBe("gpt-4o")
+  })
+
+  test("no-arg list after a --plan set MARKS the new model", async () => {
+    const h = buildPlanHarness()
+    await runSlashCommand("/model gpt-4o", h.ctx)
+    const code = await runSlashCommand("/model", h.ctx)
+    expect(code).toBe(0)
+    const starLines = h.stdout.split("\n").filter((l) => l.trimStart().startsWith("*"))
+    // Exactly one marked row, and it is the newly-set model (not the boot model).
+    expect(starLines.length).toBe(1)
+    expect(starLines[0]).toContain("gpt-4o")
+  })
+
+  test("set under --plan still clamps the global effort", async () => {
+    const h = buildPlanHarness()
+    expect(h.effortStore.get()).toBe("high")
+    // gpt-4o is non-reasoning ⇒ 'high' unsupported ⇒ clamp to 'default'.
+    const code = await runSlashCommand("/model gpt-4o", h.ctx)
+    expect(code).toBe(0)
+    expect(h.effortStore.get()).toBe("default")
+    expect(h.stdout).toContain("not supported by gpt-4o")
   })
 })

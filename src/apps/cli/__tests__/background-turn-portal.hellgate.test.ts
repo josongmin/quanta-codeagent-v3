@@ -24,10 +24,34 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { backgroundCmd } from "../background-cmd"
 import {
   BG_BUFFER_MAX_BYTES,
   createBackgroundTurnPortal,
 } from "../repl/background-turn-portal"
+import type { SlashContext } from "../slash-contract"
+
+/** Collect a slash command's stdout/stderr for assertions. */
+const runBg = async (
+  args: readonly string[],
+  background: SlashContext["background"],
+  now = 10_000,
+): Promise<{ code: number; out: string; err: string }> => {
+  let out = ""
+  let err = ""
+  const code = await backgroundCmd.run(args, {
+    out: (s) => {
+      out += s
+    },
+    err: (s) => {
+      err += s
+    },
+    cwd: "/tmp",
+    now: () => now,
+    ...(background !== undefined ? { background } : {}),
+  } as SlashContext)
+  return { code, out, err }
+}
 
 /** Resolve once the portal entry has reached a settled state (the detach
  *  `.then/.catch` runs on a microtask after the body promise settles). */
@@ -198,5 +222,66 @@ describe("background-turn-portal — read-only view()", () => {
     })
     portal.view().cancel(id)
     expect(abort.signal.aborted).toBe(true)
+  })
+})
+
+describe("/background command — surface", () => {
+  test("absent ctx.background ⇒ 'not wired' + exit 0 (default-OFF)", async () => {
+    const r = await runBg(["list"], undefined)
+    expect(r.code).toBe(0)
+    expect(r.out).toContain("not wired")
+  })
+
+  test("list ⇒ shows the detached task id + label (running pill)", async () => {
+    const portal = createBackgroundTurnPortal()
+    portal.detach({ label: "fix the bug", promise: new Promise(() => {}), abort: new AbortController() })
+    const r = await runBg(["list"], portal.view())
+    expect(r.code).toBe(0)
+    expect(r.out).toContain("fix the bug")
+    expect(r.out.toLowerCase()).toContain("running")
+  })
+
+  test("list (default, no subcommand) ⇒ same as 'list'", async () => {
+    const portal = createBackgroundTurnPortal()
+    const r = await runBg([], portal.view())
+    expect(r.code).toBe(0)
+    expect(r.out.toLowerCase()).toContain("no background turns")
+  })
+
+  test("reattach <id> ⇒ prints buffer; running ⇒ 'still streaming' note (READ-ONLY)", async () => {
+    const portal = createBackgroundTurnPortal()
+    const id = portal.detach({
+      label: "streaming task",
+      promise: new Promise(() => {}),
+      abort: new AbortController(),
+    })
+    portal.get(id)?.appendOutput("partial output so far")
+    const r = await runBg(["reattach", id], portal.view())
+    expect(r.code).toBe(0)
+    expect(r.out).toContain("partial output so far")
+    expect(r.out.toLowerCase()).toContain("still streaming")
+  })
+
+  test("reattach <unknown> ⇒ exit 1 + 'unknown task'", async () => {
+    const portal = createBackgroundTurnPortal()
+    const r = await runBg(["reattach", "nope"], portal.view())
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("unknown task")
+  })
+
+  test("cancel <id> ⇒ aborts the entry + exit 0", async () => {
+    const portal = createBackgroundTurnPortal()
+    const abort = new AbortController()
+    const id = portal.detach({ label: "x", promise: new Promise(() => {}), abort })
+    const r = await runBg(["cancel", id], portal.view())
+    expect(r.code).toBe(0)
+    expect(abort.signal.aborted).toBe(true)
+  })
+
+  test("unknown subcommand ⇒ exit 1", async () => {
+    const portal = createBackgroundTurnPortal()
+    const r = await runBg(["frobnicate"], portal.view())
+    expect(r.code).toBe(1)
+    expect(r.err.toLowerCase()).toContain("unknown subcommand")
   })
 })

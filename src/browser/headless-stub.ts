@@ -16,6 +16,7 @@ import { isCdpMethodAllowed } from "./cdp-allowlist"
 import type { BrowserPort } from "./port"
 import { buildSnapshot, createRefMap, type RefMap } from "./snapshot"
 import type {
+  BoundingBox,
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
@@ -23,6 +24,7 @@ import type {
   ConsoleOpts,
   DomModel,
   DomNode,
+  HighlightOpts,
   PageSnapshot,
   ReadOpts,
   TypeOpts,
@@ -148,6 +150,28 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
       const s = live(h)
       if (!s.ok) return s
       if (signal?.aborted === true) return err({ kind: "cancelled" })
+      if (s.value.refMap.resolve(ref) === null) return err({ kind: "element-not-found", ref })
+      return ok(undefined)
+    },
+
+    // TICKET-24 Wave A — deterministic bbox/highlight for the stub-backed port.
+    async getBoundingBox(
+      h: BrowserHandle,
+      ref: string,
+    ): Promise<Result<BoundingBox, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      if (s.value.refMap.resolve(ref) === null) return err({ kind: "element-not-found", ref })
+      return ok({ x: 10, y: 20, w: 100, h: 40, visible: true })
+    },
+
+    async highlight(
+      h: BrowserHandle,
+      ref: string,
+      _opts?: HighlightOpts,
+    ): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
       if (s.value.refMap.resolve(ref) === null) return err({ kind: "element-not-found", ref })
       return ok(undefined)
     },

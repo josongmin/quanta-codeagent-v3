@@ -24,9 +24,10 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { errMessage, logger, runtimeConfig } from "@/shared"
+import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
 import { renderAgentFleet } from "../agents-fleet-panel"
 import { backgroundCmd } from "../background-cmd"
+import { buildInitCmd } from "../init-scaffold"
 import { formatBranchesPanel } from "../branch-search-progress"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
@@ -861,6 +862,11 @@ export const buildSurfaceSlashCommands = (
   // Always in the registry; the command itself prints "not wired" + exit 0 when
   // `ctx.background` is absent (default-OFF byte-identical, parity with /agents).
   backgroundCmd,
+  // Ticket 16 — `/init` scaffolds AGENTS.md/CLAUDE.md from the repo. GATED (it
+  // WRITES to cwd): present ONLY when QUANTA_INIT_SLASH=on, so default-OFF it is
+  // absent from the registry entirely (byte-identical; the /init SKILL still owns
+  // the bare verb). The @/runner repo-map import lives inside init-scaffold.ts.
+  ...(gateOn(process.env, "QUANTA_INIT_SLASH") ? [buildInitCmd()] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,

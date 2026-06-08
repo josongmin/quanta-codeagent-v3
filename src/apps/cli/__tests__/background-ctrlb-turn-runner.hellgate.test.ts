@@ -28,6 +28,9 @@ import { describe, expect, mock, test } from "bun:test"
 import type { StatusBar } from "../status-bar"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
+import { createBackgroundTurnPortal } from "../repl/background-turn-portal"
+import type { ConversationActionSurface } from "../repl/conversation-action-surface"
+import { shouldWireBackground } from "../repl/session-loop"
 import { installTurnCancel } from "../repl/turn-cancel-install"
 import { runOneTurn } from "../repl/turn-runner"
 
@@ -232,5 +235,66 @@ describe("(C) DEFAULT-OFF byte-identity — no onMovedToBackground wired", () =>
     expect(out.result).toEqual({ value: 7 })
     expect(out.backgrounded ?? false).toBe(false)
     expect(onAfterResult).toHaveBeenCalledTimes(1)
+  })
+})
+
+const idleConvActions = (interrupted: boolean): ConversationActionSurface =>
+  ({
+    activeTurnRef: { current: { currentTurn: null, isInterrupted: interrupted } },
+  }) as unknown as ConversationActionSurface
+
+describe("(D) WEAVE guard — shouldWireBackground", () => {
+  test("portal present + queue mode + no conv actions ⇒ WIRED", () => {
+    const portal = createBackgroundTurnPortal()
+    expect(
+      shouldWireBackground({
+        portal,
+        inboundMode: { current: "queue" },
+        conversationActions: undefined,
+      }),
+    ).toBe(true)
+  })
+
+  test("inboundMode 'weave' ⇒ NOT wired (background disabled in weave mode)", () => {
+    const portal = createBackgroundTurnPortal()
+    expect(
+      shouldWireBackground({
+        portal,
+        inboundMode: { current: "weave" },
+        conversationActions: undefined,
+      }),
+    ).toBe(false)
+  })
+
+  test("inboundMode 'queue' ⇒ WIRED even with an idle conversation-action surface", () => {
+    const portal = createBackgroundTurnPortal()
+    expect(
+      shouldWireBackground({
+        portal,
+        inboundMode: { current: "queue" },
+        conversationActions: idleConvActions(false),
+      }),
+    ).toBe(true)
+  })
+
+  test("mid-interrupt conversation-action surface ⇒ NOT wired", () => {
+    const portal = createBackgroundTurnPortal()
+    expect(
+      shouldWireBackground({
+        portal,
+        inboundMode: { current: "queue" },
+        conversationActions: idleConvActions(true),
+      }),
+    ).toBe(false)
+  })
+
+  test("portal absent ⇒ NOT wired (default-OFF)", () => {
+    expect(
+      shouldWireBackground({
+        portal: undefined,
+        inboundMode: { current: "queue" },
+        conversationActions: undefined,
+      }),
+    ).toBe(false)
   })
 })

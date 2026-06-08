@@ -24,8 +24,9 @@
 
 import { describe, expect, test } from "bun:test"
 import { type FileInfo, type FileSystemPort, FsJailError } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import type { ActiveWorktree, Tool, ToolContext, ToolEvent } from "@/tool"
 import { buildDefaultTools } from "@/tool"
+import { makeEditTool } from "@/tool/edit"
 import { captureFileHistory } from "@/tool/file-history/capture"
 import { createFileHistorySink } from "@/tool/file-history/sink"
 import { createFileHistoryStore } from "@/tool/file-history/store"
@@ -446,5 +447,67 @@ describe("file_history_rewind — default-OFF byte-identity", () => {
     expect(() =>
       captureFileHistory(ctx({ fileHistory: hostileSink }), "src/a.ts", "x"),
     ).not.toThrow()
+  })
+})
+
+// ── ticket-11 R4-5 finding #2: capture under an active worktree ──────────────
+// The edit LANDS at `resolveEditBase(...).path` (the WORKTREE-resolved path for a
+// relative edit), but capture passed the RAW `input.path`, which the sink then
+// jails under `ctx.cwd` (the SESSION root) — so a later restore writes the WRONG
+// file (the session-root sibling, not the worktree file that was edited). The
+// capture key MUST equal the worktree-resolved path the write used.
+describe("file_history_rewind — capture key under an active worktree (finding #2)", () => {
+  const SESSION = "/repo"
+  const WT = "/repo/.quanta/worktrees/wt" // a subdir of the session jail
+  const active: ActiveWorktree = {
+    worktreePath: WT,
+    branch: "fork-wt",
+    isPersistent: false,
+    repoRoot: SESSION,
+    branchFrom: "head",
+  }
+
+  test("a RELATIVE edit under an active worktree records under the WORKTREE path, not the session path", async () => {
+    const { port } = recordingFs()
+    // Seed the file at the WORKTREE-resolved path (where a relative edit lands).
+    await port.writeFile(`${WT}/rel.txt`, "before\n", SESSION)
+    const store = createFileHistoryStore({ now })
+    const sink = createFileHistorySink(store)
+    const c: ToolContext = {
+      cwd: SESSION,
+      signal: new AbortController().signal,
+      fileHistory: sink,
+      activeWorktree: active,
+    }
+    const tool = makeEditTool(port)
+    const r = await run(tool, { path: "rel.txt", old_string: "before", new_string: "after" }, c)
+    expect(r.ok).toBe(true)
+    // The capture must key under the WORKTREE-resolved absolute path — the SAME
+    // file the write touched. Today it keys under the SESSION-root sibling (RED).
+    expect(store.list(`${WT}/rel.txt`).map((v) => v.content)).toEqual(["after\n"])
+    // And it must NOT have recorded under the session-root sibling (the bug).
+    expect(store.list(`${SESSION}/rel.txt`)).toEqual([])
+  })
+
+  test("default-OFF: NO active worktree ⇒ capture keys under the session path (unchanged)", async () => {
+    const { port } = recordingFs()
+    // No worktree ⇒ the edit reads/writes the RAW relative path key (target.path
+    // is the unmodified `input.path`); the sink then jails it under the session.
+    await port.writeFile("rel.txt", "before\n", SESSION)
+    const store = createFileHistoryStore({ now })
+    const sink = createFileHistorySink(store)
+    const c: ToolContext = {
+      cwd: SESSION,
+      signal: new AbortController().signal,
+      fileHistory: sink,
+      // no activeWorktree
+    }
+    const r = await run(
+      makeEditTool(port),
+      { path: "rel.txt", old_string: "before", new_string: "after" },
+      c,
+    )
+    expect(r.ok).toBe(true)
+    expect(store.list(`${SESSION}/rel.txt`).map((v) => v.content)).toEqual(["after\n"])
   })
 })
