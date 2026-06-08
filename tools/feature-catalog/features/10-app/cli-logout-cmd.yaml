@@ -33,7 +33,7 @@ evidence:
   adrs: [94]
   tests:
     unit:
-      - tests/unit/auth/login-status-cmd.test.ts
+      - tests/unit/cli/login-status-cmd.test.ts
     integration: []
     contract: []
 knobs: []

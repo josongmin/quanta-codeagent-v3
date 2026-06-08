@@ -88,6 +88,15 @@ export interface PrepareResponsesContinuationRequestArgs {
   /** Reasoning effort — env-derived (`QUANTA_REASONING_EFFORT`) at the
    *  composition root, threaded through as plain config. Omitted ⇒ default. */
   readonly reasoningEffort?: string
+  /** Reasoning summary request (`QUANTA_REASONING_SUMMARY`, bool). Threaded into
+   *  BOTH the full + resume-tail `buildResponsesBody` calls so the resume body
+   *  carries the same `reasoning.summary` and the request fingerprint stays
+   *  consistent. Default-OFF ⇒ byte-identical. Body-only knob. */
+  readonly reasoningSummary?: boolean
+  /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`,
+   *  `low|medium|high`). Threaded into BOTH body builds as `text.verbosity`.
+   *  Omitted / out-of-set ⇒ no `text` field (byte-identical). Body-only knob. */
+  readonly reasoningVerbosity?: string
   /** H15 reasoning carry-over gate (`QUANTA_REASONING_CARRYOVER`). Default-OFF
    *  / omitted ⇒ byte-identical: no re-emit, no `include`, nothing read from
    *  {@link reasoningCarryoverStore}. OpenAI-Responses ONLY. */
@@ -235,6 +244,10 @@ export const prepareResponsesContinuationRequest = (
     ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
     ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
     ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
+    ...(args.reasoningSummary === true ? { reasoningSummary: true } : {}),
+    ...(args.reasoningVerbosity !== undefined
+      ? { reasoningVerbosity: args.reasoningVerbosity }
+      : {}),
     ...carryoverOpts,
     store: false,
   })
@@ -342,6 +355,10 @@ export const prepareResponsesContinuationRequest = (
       ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
       ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
       ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
+      ...(args.reasoningSummary === true ? { reasoningSummary: true } : {}),
+      ...(args.reasoningVerbosity !== undefined
+        ? { reasoningVerbosity: args.reasoningVerbosity }
+        : {}),
       store: false,
     }),
     fullBody,

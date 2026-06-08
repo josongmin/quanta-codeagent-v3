@@ -83,6 +83,7 @@ import {
   buildUserInputBlock,
   buildWebSearchBlock,
   buildWorkingStateBlock,
+  buildWorktreeBlock,
 } from "./tier1"
 import type { AgentConfig } from "./types"
 import type { WorkingStateSession } from "./working-state"
@@ -250,6 +251,13 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // --- Working state (Codex memory L3) -----------------------------------
   const ws = buildWorkingStateBlock(config)
   if (ws !== undefined) extraTools.push(ws.tool)
+
+  // --- Worktree agent tools (ticket-11, P8) ------------------------------
+  // default-OFF: EMPTY unless the composition root wired a session-scoped
+  // `activeWorktreeSlot` (which it does ONLY when QUANTA_WORKTREE_TOOL is on).
+  // enter/exit/status register together; bash/edit read the slot's value via the
+  // dispatch-threaded `ToolContext.activeWorktree` (the relative-cwd edit-fence).
+  extraTools.push(...buildWorktreeBlock(config))
 
   // --- Plan-exit tool (ADR-0086) -----------------------------------------
   const planExitTool = buildPlanExitBlock(config)

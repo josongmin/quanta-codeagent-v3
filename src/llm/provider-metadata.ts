@@ -190,6 +190,152 @@ export const resolveModelWindow = (model: string): ModelWindow | undefined => {
   return undefined
 }
 
+// ── Ticket 14 (§11.6) — per-model reasoning-effort support SSOT ──────────────
+//
+// The model↔effort coupling gap (Codex `validateEffort`, plan §14 [CORE]): our
+// `/model` and `/effort` slashes are independent, so a user can pick a non-
+// reasoning model (e.g. `gpt-4o`) while a high reasoning-effort tier is still
+// pinned — an incoherent setting the provider silently ignores. This table is
+// the SSOT the `/model` picker consults to CLAMP the effort tier into the
+// picked model's supported set (see `clampEffortForModel` in
+// `apps/cli/slash/model-picker.ts`).
+//
+// Plane-clean leaf: this module imports ONLY `provider-types` and must NOT
+// import `@/agent` (which would create an `@/agent → @/llm → @/agent` cycle —
+// `@/agent` already imports `@/llm`). The canonical effort vocabulary is
+// `@/agent`'s `EffortLevel`; we mirror it here as a LOCAL structural union with
+// a compile-time drift guard against the slug list, so adding a tier to one
+// without the other is a build error in the picker (where both unify).
+
+/**
+ * The reasoning-effort tiers a model may support. Structural mirror of
+ * `@/agent`'s `EffortLevel` (kept local to preserve this leaf's no-cross-slice
+ * invariant). The picker (`model-picker.ts`) imports the canonical `EffortLevel`
+ * and assigns these values to it, which is the unification point where any drift
+ * surfaces as a type error.
+ */
+export type ReasoningEffort = "default" | "low" | "medium" | "high" | "max"
+
+/** All five tiers, for the "reasoning model supports everything" default. */
+export const ALL_REASONING_EFFORTS: readonly ReasoningEffort[] = [
+  "default",
+  "low",
+  "medium",
+  "high",
+  "max",
+]
+
+/**
+ * Reasoning-effort metadata for a single model id.
+ *  - `supportedEfforts` — the tiers the model accepts. A non-reasoning model
+ *    supports ONLY `"default"` (no thinking budget); a reasoning model supports
+ *    all five. The `/model` picker clamps the session effort INTO this set.
+ *  - `defaultEffort`   — the tier to clamp to when the current effort is not in
+ *    `supportedEfforts`. MUST be a member of `supportedEfforts`.
+ *  - `reasoning`       — convenience flag: does the model do extended reasoning
+ *    at all (used for the capability hint in `formatModelLine`).
+ */
+export interface ModelEffortSupport {
+  readonly supportedEfforts: readonly ReasoningEffort[]
+  readonly defaultEffort: ReasoningEffort
+  readonly reasoning: boolean
+}
+
+/** Reasoning models accept every tier; their natural default is the provider
+ *  default (no forced budget). */
+const REASONING_ALL: ModelEffortSupport = {
+  supportedEfforts: ALL_REASONING_EFFORTS,
+  defaultEffort: "default",
+  reasoning: true,
+}
+
+/** Non-reasoning models (no extended thinking) accept ONLY `"default"`; any
+ *  higher tier is meaningless and gets clamped back to `"default"`. */
+const NON_REASONING: ModelEffortSupport = {
+  supportedEfforts: ["default"],
+  defaultEffort: "default",
+  reasoning: false,
+}
+
+/**
+ * Model id → {@link ModelEffortSupport}. Keyed by the EXACT slug, parallel to
+ * {@link MODEL_CONTEXT_WINDOWS}. An un-tabled model resolves to `undefined`
+ * (see {@link resolveModelEffortSupport}) which the picker treats as the
+ * CONSERVATIVE "all supported — never clamp, never invent a mismatch" fallback
+ * (plan §14 risk note). Reasoning families: Anthropic Claude (extended
+ * thinking), OpenAI GPT-5 + o-series. Non-reasoning: GPT-4o family + Claude 3.5
+ * Haiku (no extended-thinking budget).
+ */
+export const MODEL_EFFORT_SUPPORT: Record<string, ModelEffortSupport> = {
+  // ── Anthropic (extended thinking ⇒ reasoning) ──
+  "claude-opus-4-6": REASONING_ALL,
+  "claude-opus-4-8": REASONING_ALL,
+  "claude-opus-4": REASONING_ALL,
+  "claude-sonnet-4-6": REASONING_ALL,
+  "claude-sonnet-4-5": REASONING_ALL,
+  "claude-sonnet-4": REASONING_ALL,
+  "claude-3-7-sonnet": REASONING_ALL,
+  "claude-haiku-4-5": REASONING_ALL,
+  "claude-sonnet-4-6-1m": REASONING_ALL,
+  "claude-sonnet-4-5-1m": REASONING_ALL,
+  // Claude 3.5 family — no extended-thinking budget ⇒ non-reasoning.
+  "claude-3-5-sonnet": NON_REASONING,
+  "claude-3-5-haiku": NON_REASONING,
+  // ── OpenAI GPT-5 family (reasoning) ──
+  "gpt-5": REASONING_ALL,
+  "gpt-5-mini": REASONING_ALL,
+  "gpt-5-nano": REASONING_ALL,
+  "gpt-5-pro": REASONING_ALL,
+  "gpt-5-codex": REASONING_ALL,
+  // ── OpenAI o-series reasoning ──
+  o1: REASONING_ALL,
+  "o3-mini": REASONING_ALL,
+  // ── OpenAI GPT-4o (chat, no reasoning effort) ──
+  "gpt-4o": NON_REASONING,
+  "gpt-4o-mini": NON_REASONING,
+}
+
+/**
+ * Provider-FAMILY fallback for effort support, keyed by a substring of the
+ * model id — parallel to {@link MODEL_FAMILY_FALLBACKS}. Handles dated/suffixed
+ * slugs (`gpt-5-2026…`, `claude-opus-4-8-20260101`) without a table edit. Order
+ * matters (first match wins); the non-reasoning needles (`gpt-4o`, `3-5`) are
+ * listed BEFORE the broad reasoning families so a `claude-3-5-haiku-2024…` slug
+ * does not get mis-classified reasoning by the broad `claude` needle.
+ */
+const MODEL_EFFORT_FAMILY_FALLBACKS: ReadonlyArray<readonly [string, ModelEffortSupport]> = [
+  ["gpt-4o", NON_REASONING],
+  ["claude-3-5", NON_REASONING],
+  ["gpt-5", REASONING_ALL],
+  ["o1", REASONING_ALL],
+  ["o3", REASONING_ALL],
+  ["claude-3-7", REASONING_ALL],
+  ["claude-opus", REASONING_ALL],
+  ["claude-sonnet", REASONING_ALL],
+  ["claude-haiku", REASONING_ALL],
+]
+
+/**
+ * Resolve a model id to its {@link ModelEffortSupport}. Precedence mirrors
+ * {@link resolveModelWindow}:
+ *   1. EXACT id in {@link MODEL_EFFORT_SUPPORT};
+ *   2. provider-FAMILY fallback (substring match);
+ *   3. `undefined` — UNKNOWN model. The picker treats `undefined` as the
+ *      conservative "all efforts supported, never clamp" case so an un-tabled
+ *      model NEVER invents a spurious mismatch (plan §14 risk note).
+ *
+ * Pure leaf — no I/O, no globals. Empty string ⇒ `undefined` (no family match).
+ */
+export const resolveModelEffortSupport = (model: string): ModelEffortSupport | undefined => {
+  if (model === "") return undefined
+  const exact = MODEL_EFFORT_SUPPORT[model]
+  if (exact !== undefined) return exact
+  for (const [needle, support] of MODEL_EFFORT_FAMILY_FALLBACKS) {
+    if (model.includes(needle)) return support
+  }
+  return undefined
+}
+
 /** The closed set of spellings we accept as a truthy boolean env value. We
  *  accept the four the user community uses and reject everything else —
  *  including the empty string, `"0"`, `"false"`, and arbitrary numbers (`"2"`

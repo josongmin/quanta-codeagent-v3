@@ -417,3 +417,8 @@ export {
   type WorkingStatePatch,
   type WorkingStateSession,
 } from "./working-state"
+// ticket-11 (P8) — session-scoped active-worktree slot factory. The comp-root
+// mints ONE per session (behind QUANTA_WORKTREE_TOOL) and threads it onto
+// `AgentConfig.activeWorktreeSlot`; the dispatch seam projects it onto the
+// worktree tools + the bash/edit edit-fence.
+export { createWorktreeSlot } from "./worktree-slot"

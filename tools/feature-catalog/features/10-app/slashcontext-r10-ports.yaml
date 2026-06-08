@@ -40,10 +40,10 @@ evidence:
   tests:
     unit:
       - tests/unit/cli/cost-panel.test.ts
-      - tests/unit/plan-panel.test.ts
-      - tests/unit/working-state-panel.test.ts
-      - tests/unit/history-cmd.test.ts
-      - tests/unit/branch-search-progress.test.ts
+      - tests/unit/cli/plan-panel.test.ts
+      - tests/unit/cli/working-state-panel.test.ts
+      - tests/unit/cli/history-cmd.test.ts
+      - tests/unit/cli/branch-search-progress.test.ts
       - tests/unit/slash-commands.test.ts
     integration: []
     contract: []

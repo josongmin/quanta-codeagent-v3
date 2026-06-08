@@ -2,11 +2,13 @@
 
 export {
   type CappedResourceRead,
+  parseCompletionResult,
   parsePromptGet,
   parsePromptList,
   parseResourceList,
   parseResourceRead,
   parseResourceReadCapped,
+  parseResourceTemplateList,
   RESOURCE_READ_MAX_CONTENT_CHARS,
   resourceContentChars,
 } from "./codec"
@@ -27,6 +29,9 @@ export {
   routeResourceNotification,
 } from "./notifications"
 export type {
+  McpCompletionArgument,
+  McpCompletionRef,
+  McpCompletionResult,
   McpPrompt,
   McpPromptArgument,
   McpPromptMessage,
@@ -34,6 +39,7 @@ export type {
   McpResource,
   McpResourceContent,
   McpResourceFailure,
+  McpResourceTemplate,
   McpResult,
   McpRoot,
   RootsProviderPort,

@@ -94,6 +94,12 @@ export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
   readonly serviceTier?: string
   /** Reasoning effort — env-derived at the composition root and passed in. */
   readonly reasoningEffort?: string
+  /** Reasoning summary request (`QUANTA_REASONING_SUMMARY`) — env-derived at the
+   *  composition root. True ⇒ `reasoning.summary:"auto"` on the body. */
+  readonly reasoningSummary?: boolean
+  /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`) — env-derived at
+   *  the composition root. Threaded onto the body as `text.verbosity`. */
+  readonly reasoningVerbosity?: string
   /** H15 — o-series reasoning carry-over (`QUANTA_REASONING_CARRYOVER`). Absent/
    *  false ⇒ byte-identical (thinking dropped, no re-emit). */
   readonly reasoningCarryover?: boolean
@@ -126,6 +132,8 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly serviceTier: string | undefined
   private readonly reasoningEffort: string | undefined
+  private readonly reasoningSummary: boolean
+  private readonly reasoningVerbosity: string | undefined
   /** H15 — per-session reasoning carry-over: flag + ONE store for the adapter's
    *  lifetime (off ⇒ undefined ⇒ byte-identical). */
   private readonly reasoningCarryover: boolean
@@ -141,6 +149,8 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     this.serviceTier = config.serviceTier
     this.reasoningEffort = config.reasoningEffort
+    this.reasoningSummary = config.reasoningSummary === true
+    this.reasoningVerbosity = config.reasoningVerbosity
     this.reasoningCarryover = config.reasoningCarryover === true
     this.reasoningCarryoverStore = this.reasoningCarryover
       ? defaultResponsesReasoningCarryoverStore()
@@ -337,6 +347,10 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         ...(this.maxTokens !== undefined ? { maxOutputTokens: this.maxTokens } : {}),
         ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
         ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
+        ...(this.reasoningSummary ? { reasoningSummary: true } : {}),
+        ...(this.reasoningVerbosity !== undefined
+          ? { reasoningVerbosity: this.reasoningVerbosity }
+          : {}),
         ...(continuationStore !== undefined ? { continuationStore } : {}),
         ...carryover,
       })

@@ -12,6 +12,7 @@
  * the fail-closed policy enum; the I/O lives in `loopback-proxy.ts`.
  */
 
+import type { HeaderRule } from "./header-rules"
 import type { CertAuthority } from "./mitm-cert"
 import type { SecretEgressConfig } from "./secret-egress"
 
@@ -54,4 +55,20 @@ export interface MitmConfig {
    * default — no-heuristics rule; the composition root supplies a measured value).
    */
   readonly handshakeTimeoutMs: number
+  /**
+   * ticket-13 (§12.2) — operator-authored OUTBOUND header-rewrite rules, applied
+   * AFTER the secret-egress redaction pass (so redaction always wins) just before
+   * the proxy re-originates upstream over its OWN TLS connection. Absent/empty ⇒
+   * the forwarded headers are byte-identical to today. See `./header-rules`.
+   */
+  readonly headerRules?: readonly HeaderRule[]
+  /**
+   * ticket-13 (§12.2) — cross-origin redirect HYGIENE (Claude Code IDE parity).
+   * When `true`, a redirect the proxy follows that crosses ORIGIN (scheme+host+
+   * port) drops `authorization`/`cookie`/`host` so an out-of-origin redirect can
+   * never leak the originating credentials. Absent/false ⇒ no redirect-strip
+   * (byte-identical). (The proxy does not yet auto-follow redirects on the MITM
+   * leg; carried here so the gated config has one shape across both transports.)
+   */
+  readonly crossOriginStrip?: boolean
 }

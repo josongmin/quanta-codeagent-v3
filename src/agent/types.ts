@@ -841,6 +841,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  per session so reads recorded by `read` are visible to `write`/`edit` of the
    *  same session. Absent ⇒ no tracking, no guard (byte-identical default-OFF). */
   readFileState?: import("@/tool/stale-read-guard").ReadFileState
+  /** ticket-11 (P8 git-worktree agent tools) — OPTIONAL session-scoped active-
+   *  worktree slot. The composition root mints ONE mutable holder per session
+   *  (carrying the immutable session `repoRoot` / `sessionCwd`) ONLY when
+   *  `QUANTA_WORKTREE_TOOL` is on; the `enter`/`exit`/`worktree_status` tools are
+   *  registered alongside it and read+mutate it through `ToolContext.worktreeSlot`,
+   *  while `bash`/`edit` read its current value through `ToolContext.activeWorktree`
+   *  (the relative-cwd override / edit-fence). Absent ⇒ the worktree tools are NOT
+   *  registered and `bash`/`edit` cwd is byte-identical to today (default-OFF).
+   *  Duck-typed via the canonical `@/tool` declaration so `@/agent` need not
+   *  redeclare the handle shape. */
+  activeWorktreeSlot?: import("@/tool").WorktreeSlotHandle
   /** ADR-0182 — OPTIONAL prompt-cache observer. When the host wires one (gate
    *  `QUANTA_PROMPT_CACHE_STATUS`), `emitUsage` records each completion's
    *  cache-read / cache-creation token buckets into it, and the SAME instance
@@ -2338,6 +2349,10 @@ export type FeaturesConfig = Pick<
   | "effortClassifier"
   | "fastApplyFallback"
   | "fastApplyMerge"
+  // ─── ticket-11 (P8 git-worktree agent tools) ───
+  // Present ⇒ features.ts registers the enter/exit/worktree_status tools over the
+  // session-scoped slot. Absent ⇒ the tools are not registered (default-OFF).
+  | "activeWorktreeSlot"
 >
 
 /** Narrow contract for per-turn prompt / context assembly (the loop's

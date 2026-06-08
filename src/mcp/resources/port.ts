@@ -41,6 +41,49 @@ export interface McpResourceContent {
   readonly blob?: string
 }
 
+// --- resource templates (TICKET-20, outbound) ------------------------------
+
+/** One entry from `resources/templates/list`. The required field is
+ *  `uriTemplate` (an RFC 6570 URI Template, e.g. `file:///logs/{name}.log`) —
+ *  NOT a concrete `uri`. The rest are the same optional descriptors as
+ *  {@link McpResource}. Folds under the server's `resources` capability (a
+ *  template list is just a parameterized resource list), so it is refused
+ *  locally with `unsupported` when the server omits `resources`. */
+export interface McpResourceTemplate {
+  readonly uriTemplate: string
+  readonly name?: string
+  readonly description?: string
+  readonly mimeType?: string
+}
+
+// --- completion (TICKET-20, outbound) --------------------------------------
+
+/** What a `completion/complete` request is completing FOR. A discriminated
+ *  union so callers branch type-safely without string-matching: either a
+ *  prompt argument (`ref/prompt` + the prompt `name`) or a resource-template
+ *  argument (`ref/resource` + the template `uri`). Mirrors the MCP spec
+ *  `PromptReference | ResourceReference`. */
+export type McpCompletionRef =
+  | { readonly type: "ref/prompt"; readonly name: string }
+  | { readonly type: "ref/resource"; readonly uri: string }
+
+/** The argument currently being completed — its `name` and the partial `value`
+ *  typed so far. */
+export interface McpCompletionArgument {
+  readonly name: string
+  readonly value: string
+}
+
+/** Typed `completion/complete` result. `values` is the (possibly EMPTY — empty
+ *  is a first-class OK, the server simply has no suggestion) candidate list.
+ *  `total`/`hasMore` are the optional pagination hints the server returns
+ *  alongside, carried through so a UI can render "showing 10 of 240". */
+export interface McpCompletionResult {
+  readonly values: ReadonlyArray<string>
+  readonly total?: number
+  readonly hasMore?: boolean
+}
+
 // --- prompts ---------------------------------------------------------------
 
 /** A declared argument for a prompt template (from `prompts/list`). */

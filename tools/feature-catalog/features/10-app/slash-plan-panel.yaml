@@ -34,7 +34,7 @@ evidence:
   adrs: []
   tests:
     unit:
-      - tests/unit/plan-panel.test.ts
+      - tests/unit/cli/plan-panel.test.ts
       - tests/unit/slash-commands.test.ts
     integration: []
     contract: []

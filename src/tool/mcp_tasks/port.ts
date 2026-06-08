@@ -17,6 +17,12 @@ export interface TasksTaskInfo {
   readonly state: TasksTaskState
   readonly title?: string
   readonly progress?: number
+  /** Mirror of `McpTaskInfo.ttlMs` — server TTL in MILLISECONDS (lockstep). */
+  readonly ttlMs?: number
+  /** Mirror of `McpTaskInfo.pollIntervalMs` — poll cadence in MILLISECONDS. */
+  readonly pollIntervalMs?: number
+  /** Mirror of `McpTaskInfo.relatedTaskIds` — sibling task ids (self excluded). */
+  readonly relatedTaskIds?: ReadonlyArray<string>
 }
 
 export interface TasksListPage {

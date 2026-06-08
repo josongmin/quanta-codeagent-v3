@@ -25,6 +25,12 @@ interface OpenAIResponsesConfig extends AdapterStreamTimeoutConfig {
   serviceTier?: string
   /** Reasoning effort — env-derived at the composition root and passed in. */
   reasoningEffort?: string
+  /** Reasoning summary request (`QUANTA_REASONING_SUMMARY`) — env-derived at the
+   *  composition root. When true ⇒ `reasoning.summary:"auto"` on the body. */
+  reasoningSummary?: boolean
+  /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`) — env-derived at
+   *  the composition root. Threaded onto the body as `text.verbosity`. */
+  reasoningVerbosity?: string
   /** H15 — when true, capture each turn's reasoning `encrypted_content` and
    *  re-emit it on the next turn's input (ZDR-compatible o-series carry-over).
    *  Env-derived at the composition root (`QUANTA_REASONING_CARRYOVER`); absent/
@@ -49,6 +55,8 @@ export class OpenAIResponsesAdapter implements LLMPort {
   private readonly continuationStore: ResponsesContinuationStore
   private readonly serviceTier: string | undefined
   private readonly reasoningEffort: string | undefined
+  private readonly reasoningSummary: boolean
+  private readonly reasoningVerbosity: string | undefined
   /** H15 — per-session carry-over: the flag + ONE store held for the adapter's
    *  lifetime so reasoning captured on turn N is available as turn N+1's input.
    *  Only allocated/consulted when the gate is on (off ⇒ byte-identical). */
@@ -65,6 +73,8 @@ export class OpenAIResponsesAdapter implements LLMPort {
     this.continuationStore = config.continuationStore ?? defaultResponsesContinuationStore()
     this.serviceTier = config.serviceTier
     this.reasoningEffort = config.reasoningEffort
+    this.reasoningSummary = config.reasoningSummary === true
+    this.reasoningVerbosity = config.reasoningVerbosity
     this.reasoningCarryover = config.reasoningCarryover === true
     this.reasoningCarryoverStore = this.reasoningCarryover
       ? defaultResponsesReasoningCarryoverStore()
@@ -95,6 +105,10 @@ export class OpenAIResponsesAdapter implements LLMPort {
         continuationStore,
         ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
         ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
+        ...(this.reasoningSummary ? { reasoningSummary: true } : {}),
+        ...(this.reasoningVerbosity !== undefined
+          ? { reasoningVerbosity: this.reasoningVerbosity }
+          : {}),
         ...carryover,
       }),
       fetchImpl: this.fetchImpl,

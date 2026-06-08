@@ -833,6 +833,21 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "Render the bottom input lane for mid-turn keystrokes (TTY only).",
   },
   {
+    envKey: "QUANTA_STATUS_LINE",
+    kind: "bool",
+    default: false,
+    group: "ui",
+    describe: "Scriptable statusLine master gate (ticket-15, §11.7).",
+  },
+  {
+    envKey: "QUANTA_STATUS_LINE_CONFIG",
+    kind: "string",
+    default: undefined,
+    group: "ui",
+    describe:
+      "Scriptable statusLine config JSON ({command,padding?,refreshInterval?,hideVimModeIndicator?}).",
+  },
+  {
     envKey: "QUANTA_MANAGED_SETTINGS_PATH",
     kind: "string",
     default: undefined,

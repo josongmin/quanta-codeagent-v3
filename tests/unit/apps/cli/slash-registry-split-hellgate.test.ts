@@ -26,7 +26,6 @@ import { BUILTINS } from "../../../../src/apps/cli/slash-commands"
 const repoRoot = join(import.meta.dir, "../../../..")
 const readSrc = (rel: string): string => readFileSync(join(repoRoot, rel), "utf8")
 
-
 describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {
   test("CASE-1: registry-surface.ts does NOT import @/agent (any subpath)", () => {
     const src = readSrc("src/apps/cli/slash/registry-surface.ts")

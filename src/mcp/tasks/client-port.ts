@@ -50,6 +50,31 @@ const asState = (v: unknown): TaskState | null =>
     ? (v as TaskState)
     : null
 
+/** Accept only a finite POSITIVE number for a `*Ms` field. A hostile server
+ *  cannot inject a negative interval (busy-spin / negative ttl), a NaN/Infinity,
+ *  zero, or a string-encoded number — all of those map to `undefined` so the
+ *  field is OMITTED (the byte-identity guard). The poller additionally
+ *  floors/ceils the surviving value. */
+const asFinitePositive = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined
+
+/** Sanitize a `relatedTaskIds` array: keep nonempty strings only, drop the
+ *  owning task's own id (circular-link guard), de-dupe preserving order.
+ *  Returns `undefined` (→ field OMITTED) when nothing survives. */
+const asTaskIdList = (v: unknown, selfId: string): ReadonlyArray<string> | undefined => {
+  if (!Array.isArray(v)) return undefined
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const e of v) {
+    if (typeof e !== "string" || e.length === 0) continue
+    if (e === selfId) continue // circular guard
+    if (seen.has(e)) continue
+    seen.add(e)
+    out.push(e)
+  }
+  return out.length > 0 ? out : undefined
+}
+
 /** Parse one raw task entry. The server may name the state field `state` or
  *  `status`; both are accepted. Returns `null` when the entry lacks a usable
  *  id or state (caller drops it). */
@@ -62,11 +87,19 @@ const parseInfo = (raw: unknown): McpTaskInfo | null => {
   if (state === null) return null
   const title = asString(rec.title)
   const progress = typeof rec.progress === "number" ? rec.progress : undefined
+  // TICKET-21 additive fields. Canonical `*Ms` keys win; the unit-less aliases
+  // (`ttl` / `pollInterval`) are accepted for servers that emit the bare name.
+  const ttlMs = asFinitePositive(rec.ttlMs ?? rec.ttl)
+  const pollIntervalMs = asFinitePositive(rec.pollIntervalMs ?? rec.pollInterval)
+  const relatedTaskIds = asTaskIdList(rec.relatedTaskIds, taskId)
   return {
     taskId,
     state,
     ...(title !== undefined ? { title } : {}),
     ...(progress !== undefined ? { progress } : {}),
+    ...(ttlMs !== undefined ? { ttlMs } : {}),
+    ...(pollIntervalMs !== undefined ? { pollIntervalMs } : {}),
+    ...(relatedTaskIds !== undefined ? { relatedTaskIds } : {}),
   }
 }
 

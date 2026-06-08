@@ -9,6 +9,7 @@
  *  prompting (no IO performed). NaN / Infinity inputs surface as
  *  `reason: "invalid-input"` (the second-time-around path of the retry). */
 
+import { spawn } from "node:child_process"
 import type { ElicitationFailureReason, ElicitationPrompter, ElicitationResult } from "./port"
 import {
   type BooleanRequest,
@@ -18,6 +19,7 @@ import {
   type NumberRequest,
   type SingleSelectEnumRequest,
   type StringRequest,
+  type UrlRequest,
   validateBoolean,
   validateInteger,
   validateNumber,
@@ -29,6 +31,31 @@ import {
 export interface CliPrompterIO {
   write(s: string): void
   read(signal: AbortSignal): Promise<string | null>
+}
+
+/** TICKET-22 — the default system browser opener for the URL variant.
+ *
+ *  MIRRORS (does not import — the OAuth opener is private to `@/auth`) the
+ *  system-open idiom in `src/auth/chatgpt-oauth/browser-flow.ts`: `open` on
+ *  darwin, `cmd /c start` on win32, `xdg-open` elsewhere, spawned detached and
+ *  unref'd so the child outlives this process and we never block on the
+ *  browser. Fire-and-forget: a spawn failure is SWALLOWED (no throw escapes)
+ *  because the elicitation succeeds the moment the user said "yes" — the
+ *  browser launch is best-effort, not part of the result contract.
+ *
+ *  Injected as a seam (`cliPrompter(io, opener)`) per the surface model: a
+ *  Tauri/Web surface owns its own navigation (`WebviewWindow` / `location.href`)
+ *  and passes its own opener; tests pass a capturing opener. */
+const defaultOpener = (url: string): void => {
+  const platform = process.platform
+  const cmd = platform === "darwin" ? "open" : platform === "win32" ? "cmd" : "xdg-open"
+  const args = platform === "win32" ? ["/c", "start", "", url] : [url]
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: "ignore" })
+    child.unref()
+  } catch {
+    // best-effort: a failed browser launch must not fail the elicitation.
+  }
 }
 
 const renderOptions = (options: ReadonlyArray<string>): string =>
@@ -93,7 +120,10 @@ const matchMultiEnum = (
   return { ok: true, value: selected }
 }
 
-export const cliPrompter = (io: CliPrompterIO): ElicitationPrompter => ({
+export const cliPrompter = (
+  io: CliPrompterIO,
+  opener: (url: string) => void = defaultOpener,
+): ElicitationPrompter => ({
   async promptString(req: StringRequest, signal?: AbortSignal) {
     const s = signal ?? new AbortController().signal
     io.write(`${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}: `)
@@ -142,5 +172,22 @@ export const cliPrompter = (io: CliPrompterIO): ElicitationPrompter => ({
       `${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}\n${renderOptions(req.options)}\n> `,
     )
     return withRetry<string>(io, s, (raw) => matchEnum(req.options, raw))
+  },
+  async promptUrl(req: UrlRequest, signal?: AbortSignal) {
+    const s = signal ?? new AbortController().signal
+    // Render the FULL url on its OWN line (phishing safety — the user sees the
+    // exact destination, not a truncated/styled label), then confirm.
+    io.write(
+      `${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}\n${req.url}\nOpen in browser? (y/n): `,
+    )
+    const confirm = await withRetry<boolean>(io, s, validateBoolean)
+    if (!confirm.ok) return confirm // cancelled / validation-error pass through
+    if (!confirm.value) return fail<string>("cancelled") // declined → cancelled
+    try {
+      opener(req.url) // fire-and-forget — never await the browser
+    } catch {
+      // a failed launch must not fail the elicitation (user already said yes).
+    }
+    return { ok: true, value: req.url }
   },
 })

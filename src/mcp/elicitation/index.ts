@@ -23,4 +23,6 @@ export {
   type StringRequest,
   singleSelectEnumRequestSchema,
   stringRequestSchema,
+  type UrlRequest,
+  urlRequestSchema,
 } from "./schemas"

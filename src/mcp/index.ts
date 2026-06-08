@@ -26,6 +26,9 @@ export {
   type ElicitationResult,
   headlessRejecter,
   type LeaseContext,
+  // TICKET-22 — URL elicitation variant (hellgates import these from `@/mcp`).
+  type UrlRequest,
+  urlRequestSchema,
 } from "./elicitation"
 export { headlessOAuthRejecter, type McpOAuthProviderPort } from "./oauth"
 export {
@@ -60,6 +63,9 @@ export {
   isResourceNotificationMethod,
   isRootsMethod,
   MCP_ROOTS_LIST_METHOD,
+  type McpCompletionArgument,
+  type McpCompletionRef,
+  type McpCompletionResult,
   type McpPrompt,
   type McpPromptArgument,
   type McpPromptMessage,
@@ -69,9 +75,12 @@ export {
   type McpResourceFailure,
   type McpResourceNotification,
   type McpResourceObserver,
+  type McpResourceTemplate,
   type McpResult,
   type McpRoot,
   PROMPT_LIST_CHANGED_METHOD,
+  parseCompletionResult,
+  parseResourceTemplateList,
   RESOURCE_LIST_CHANGED_METHOD,
   RESOURCE_UPDATED_METHOD,
   type RootsListResponse,
@@ -93,6 +102,20 @@ export {
   type SamplingOutcome,
   type SamplingResponse,
 } from "./sampling"
+export { MAX_RESULT_CHARS, McpServer, type McpServerCtorOptions } from "./server"
+// TICKET-19 reverse-MCP — quanta AS an MCP server (the inverse of the client).
+// `McpServer` is the inbound JSON-RPC dispatcher; `buildMcpServer` is the pure
+// read-only-whitelist security boundary. The real `dispatchTool` + registry are
+// bound at the composition root (`src/apps/cli/mcp-server-setup.ts`); these
+// exports take DUCK-TYPED ports so the `@/mcp` slice never imports `@/agent`.
+export {
+  buildMcpServer,
+  DEFAULT_PAGE_SIZE,
+  type McpServerOptions,
+  type ServerToolSpec,
+  type ToolCallPort,
+  type ToolListSource,
+} from "./server-builder"
 export {
   clientTasksPort,
   DefaultTaskStore,

@@ -15,6 +15,7 @@ import type {
   NumberRequest,
   SingleSelectEnumRequest,
   StringRequest,
+  UrlRequest,
 } from "./schemas"
 
 export type ElicitationFailureReason =
@@ -42,4 +43,9 @@ export interface ElicitationPrompter {
     req: SingleSelectEnumRequest,
     signal?: AbortSignal,
   ): Promise<ElicitationResult<string>>
+  /** TICKET-22 — the URL variant: render `req.url`, confirm, and (on yes) open
+   *  it in the user's browser. The resolved `value` is the opened url, keeping
+   *  the `{action:'accept', content:{value}}` envelope symmetric with the other
+   *  six string-valued prompts. */
+  promptUrl(req: UrlRequest, signal?: AbortSignal): Promise<ElicitationResult<string>>
 }

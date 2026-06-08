@@ -10,12 +10,12 @@
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
-import { CONFIG_ALLOWED_KEYS } from "@/apps/web-daemon/server"
 import {
   buildWebKnobCatalog,
   resolveCatalogValues,
   webSafeKnobValue,
 } from "@/apps/web-daemon/knob-catalog-wire"
+import { CONFIG_ALLOWED_KEYS, configKeyWriteRejection } from "@/apps/web-daemon/server"
 import { isSessionForbidden } from "@/shared"
 
 describe("GET /api/knobs never leaks custom string values (ADR-0503 security)", () => {
@@ -73,5 +73,30 @@ describe("POST /config write-allowlist never overlaps the security carve-out (R2
     // handleConfigPost ALSO rejects isSessionForbidden(key) at runtime (belt+suspenders).
     const overlap = [...CONFIG_ALLOWED_KEYS].filter((k) => isSessionForbidden(k))
     expect(overlap).toEqual([])
+  })
+
+  test("configKeyWriteRejection: benign allowlisted ⇒ null; unknown ⇒ 400; forbidden-if-allowlisted ⇒ 403", () => {
+    // benign writable knob ⇒ allowed
+    expect(configKeyWriteRejection("QUANTA_FAST")).toBeNull()
+    // not in the closed allowlist ⇒ 400 unknown_key
+    expect(configKeyWriteRejection("QUANTA_TOTALLY_UNKNOWN_KEY")).toEqual({
+      status: 400,
+      error: "unknown_key",
+    })
+    // DEFENSE-IN-DEPTH (the 403 branch, normally unreachable while the sets are
+    // disjoint): simulate a future mis-edit that wrongly allowlists a strict knob
+    // → the writer MUST still 403 it. Red-on-injection: drop the isSessionForbidden
+    // check in configKeyWriteRejection and this returns null (writable) → fails.
+    const forbidden = "QUANTA_CODE_MODE"
+    expect(isSessionForbidden(forbidden)).toBe(true)
+    CONFIG_ALLOWED_KEYS.add(forbidden)
+    try {
+      expect(configKeyWriteRejection(forbidden)).toEqual({
+        status: 403,
+        error: "forbidden_security_knob",
+      })
+    } finally {
+      CONFIG_ALLOWED_KEYS.delete(forbidden)
+    }
   })
 })

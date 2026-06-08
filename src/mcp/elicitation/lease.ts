@@ -43,6 +43,7 @@ import type {
   NumberRequest,
   SingleSelectEnumRequest,
   StringRequest,
+  UrlRequest,
 } from "./schemas"
 
 /** Derive the logical lease key for a request. Two requests that coalesce MUST
@@ -122,6 +123,8 @@ export class ElicitationLeasePool {
         this.coalesce(composeKey(ctx, req), () => this.inner.promptMultiEnum(req, signal)),
       promptSingleEnum: (req: SingleSelectEnumRequest, signal?: AbortSignal) =>
         this.coalesce(composeKey(ctx, req), () => this.inner.promptSingleEnum(req, signal)),
+      promptUrl: (req: UrlRequest, signal?: AbortSignal) =>
+        this.coalesce(composeKey(ctx, req), () => this.inner.promptUrl(req, signal)),
     }
   }
 }

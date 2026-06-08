@@ -16,7 +16,7 @@
  * resolver against the legacy per-surface gate and NEVER mutates behavior.
  */
 
-import { gateOn, gateOnStrict } from "@/shared"
+import { gateOn, gateOnStrict, readBool } from "@/shared"
 import type { CapabilityDescriptor, Surface } from "./descriptor"
 
 /** The master env gate for the whole capability layer. */
@@ -24,7 +24,21 @@ export const CAPABILITY_LAYER_ENV = "QUANTA_CAPABILITY_LAYER"
 
 /**
  * Is `cap` exposed on `surface`? True IFF the capability declares the surface
- * (surfaces[surface] === true) AND its env gate is on. Pure (env injected).
+ * (surfaces[surface] === true) AND its own env gate is on AND EVERY composite
+ * `requires` gate is truthy. Pure (env injected).
+ *
+ * COMPOSITE GATE. The REAL llmTool exposure is composite — e.g. workflow's
+ * `run_workflow` is `enabled && (QUANTA_WORKFLOW ?? false)` where `enabled` is
+ * the default-ON parent QUANTA_SUBAGENT gate. So `resolveExposure` ANDs the own
+ * gate with each `cap.requires` entry. Each require is read with the SAME default
+ * the real assembly uses (`readBool(env[envKey], r.defaultOn)`), so for a
+ * default-ON parent an UNSET gate predicts ON (matching the source) — a plain
+ * `gateOn` would mispredict it as OFF. The own gate stays `gateOn` (default-OFF
+ * opt-in, byte-identical to `readBool(.., false)`).
+ *
+ * For `runtimeConditioned` caps this remains the env-only prediction: a
+ * NECESSARY-not-sufficient UPPER BOUND (real ⊆ predicted), since a non-env
+ * runtime signal (e.g. a provider key) can only narrow it further.
  */
 export const resolveExposure = (
   cap: CapabilityDescriptor,
@@ -34,7 +48,12 @@ export const resolveExposure = (
   // BOTH conditions required — dropping the surface check is the split-brain bug
   // the e2e hellgate fences (red-on-injection).
   if (cap.surfaces[surface] !== true) return false
-  return gateOn(env, cap.gate.envKey)
+  if (!gateOn(env, cap.gate.envKey)) return false
+  // COMPOSITE: every additional gate must ALSO pass, read with the real
+  // assembly's default (default-ON parents predict ON when unset). Dropping this
+  // is the workflow split-brain (QUANTA_WORKFLOW=1 + QUANTA_SUBAGENT=0) the
+  // reality hellgate fences (red-on-injection).
+  return (cap.requires ?? []).every((r) => readBool(env[r.envKey], r.defaultOn))
 }
 
 /** Result of the consistency probe (only produced when the master gate is on). */

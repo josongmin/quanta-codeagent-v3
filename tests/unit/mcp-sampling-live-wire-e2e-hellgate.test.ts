@@ -109,6 +109,7 @@ const consentFactory = (answer: boolean): ElicitationPrompterFactory => {
     promptEnum: reject,
     promptMultiEnum: reject,
     promptSingleEnum: reject,
+    promptUrl: reject,
   }
   return (_serverId: string) => prompter
 }

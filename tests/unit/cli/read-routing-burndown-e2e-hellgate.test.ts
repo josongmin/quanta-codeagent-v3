@@ -84,7 +84,9 @@ describe("read-routing burn-down e2e (ADR-0503 P4)", () => {
       for (const v of cases) {
         const env: NodeJS.ProcessEnv = cleanEnv()
         if (v !== undefined) env[key] = v
-        expect(disabledViaAccessor(key, env)).toBe(gateDisabled(env as Record<string, string | undefined>, key))
+        expect(disabledViaAccessor(key, env)).toBe(
+          gateDisabled(env as Record<string, string | undefined>, key),
+        )
       }
     }
   })

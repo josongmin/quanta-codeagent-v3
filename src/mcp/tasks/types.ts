@@ -22,6 +22,20 @@ export interface McpTaskInfo {
   readonly title?: string
   /** Server-provided 0..1 progress ratio; omitted when unknown. */
   readonly progress?: number
+  /** Server-advertised time-to-live in MILLISECONDS (unit in the name to kill
+   *  the s-vs-ms bug class). When present, the poller stops after `ttlMs` of
+   *  wall time and returns the LAST observed info (not null) so the model can
+   *  read the final state + related ids. Omitted ⇒ no TTL (poll to terminal). */
+  readonly ttlMs?: number
+  /** Server-advertised poll cadence in MILLISECONDS — how often the model should
+   *  re-probe this task. Overrides the caller/default cadence (floored + ceiled
+   *  by the poller so a hostile value cannot busy-spin or stall). Omitted ⇒ the
+   *  caller-supplied / default cadence applies. */
+  readonly pollIntervalMs?: number
+  /** Sibling task ids the model may want to poll/cancel together (an actionable
+   *  affordance — e.g. a fan-out batch). Self-id is excluded by the codec
+   *  (circular guard). Omitted (not `[]`) when the server advertises none. */
+  readonly relatedTaskIds?: ReadonlyArray<string>
 }
 
 /** Paginated list response from `tasks/list`. `nextCursor` omitted when the

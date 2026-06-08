@@ -5,16 +5,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadSession, runAgent, saveSession } from "@/agent"
 import type { Message } from "@/llm"
-import {
-  cfg,
-  ev,
-  isPathLikeToken,
-  RecordingStream,
-  ScriptedLLM,
-  text,
-  toolUse,
-  withTimeout,
-} from "./_harness"
+// Import the REAL `isPathLikeToken` (re-exported from
+// `src/runner/orchestrate/resume-fsm.ts`) rather than the mirrored copy in the
+// harness, so a regression in the production heuristic is actually caught here.
+import { isPathLikeToken } from "@/runner/orchestrate"
+import { cfg, ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
 
 /**
  * End-to-end coverage of CLI session resume (ADR for `--state` / `--resume` in

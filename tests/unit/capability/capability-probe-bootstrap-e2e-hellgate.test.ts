@@ -24,14 +24,14 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { gateOn } from "@/shared"
 import {
   allCapabilities,
   type CapabilityDescriptor,
-  type Surface,
   resolveExposure,
   runCapabilityProbe,
+  type Surface,
 } from "@/capability"
+import { gateOn } from "@/shared"
 
 // The injected legacy gate the bootstrap uses for the seed registry (llmTool
 // caps): the tool's own env gate. Mirrors probeCapabilityConsistency.

@@ -7,12 +7,14 @@
  *  in `client.ts` but with full no-throw parsing instead of a blind cast. */
 
 import type {
+  McpCompletionResult,
   McpPrompt,
   McpPromptArgument,
   McpPromptMessage,
   McpPromptResult,
   McpResource,
   McpResourceContent,
+  McpResourceTemplate,
 } from "./port"
 
 const asRecord = (v: unknown): Record<string, unknown> | null =>
@@ -58,6 +60,58 @@ export const parseResourceList = (result: unknown): McpResource[] | null => {
     out.push({ uri, ...withOptionalStrings(r, ["name", "mimeType", "description"]) })
   }
   return out
+}
+
+/** TICKET-20 — Parse a `resources/templates/list` result →
+ *  `McpResourceTemplate[]`, or null if `resourceTemplates` is not an array.
+ *  Entries WITHOUT a string `uriTemplate` (the spec's required field, RFC 6570)
+ *  are dropped — an all-malformed list therefore yields `[]` (a valid, if
+ *  empty, result), NOT a `malformed` failure. Reuses {@link withOptionalStrings}
+ *  for the descriptor fields and the same `PARSE_MAX_LIST_ENTRIES` DoS bound as
+ *  the other list parsers. */
+export const parseResourceTemplateList = (result: unknown): McpResourceTemplate[] | null => {
+  const rec = asRecord(result)
+  if (rec === null) return null
+  const raw = rec.resourceTemplates
+  if (!Array.isArray(raw)) return null
+  const out: McpResourceTemplate[] = []
+  for (const item of raw) {
+    if (out.length >= PARSE_MAX_LIST_ENTRIES) break // DoS bound — stop retaining
+    const r = asRecord(item)
+    if (r === null) continue
+    const uriTemplate = str(r.uriTemplate)
+    if (uriTemplate === undefined) continue
+    out.push({ uriTemplate, ...withOptionalStrings(r, ["name", "description", "mimeType"]) })
+  }
+  return out
+}
+
+/** TICKET-20 — Parse a `completion/complete` result → {@link McpCompletionResult}.
+ *  Navigates `result.completion.{values[], total?, hasMore?}`:
+ *   - `result.completion` not an object → null (typed `malformed` upstream);
+ *   - `values` defaults to `[]` and is filtered to STRINGS only (defensive
+ *     narrowing), capped at `PARSE_MAX_LIST_ENTRIES`. An EMPTY `values:[]` is a
+ *     VALID, non-null result (the server simply has no suggestion);
+ *   - `total`/`hasMore` are carried through only when the right primitive type. */
+export const parseCompletionResult = (result: unknown): McpCompletionResult | null => {
+  const rec = asRecord(result)
+  if (rec === null) return null
+  const completion = asRecord(rec.completion)
+  if (completion === null) return null // completion-not-object ⇒ malformed
+  const rawValues = completion.values
+  const values: string[] = []
+  if (Array.isArray(rawValues)) {
+    for (const v of rawValues) {
+      if (values.length >= PARSE_MAX_LIST_ENTRIES) break // DoS bound
+      const s = str(v)
+      if (s !== undefined) values.push(s)
+    }
+  }
+  return {
+    values,
+    ...(typeof completion.total === "number" ? { total: completion.total } : {}),
+    ...(typeof completion.hasMore === "boolean" ? { hasMore: completion.hasMore } : {}),
+  }
 }
 
 /** Parse a `resources/read` result → `McpResourceContent[]`, or null if

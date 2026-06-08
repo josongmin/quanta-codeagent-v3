@@ -24,7 +24,7 @@ evidence:
   tests:
     unit:
       - tests/unit/working-state.test.ts
-      - tests/unit/working-state-panel.test.ts
+      - tests/unit/cli/working-state-panel.test.ts
       - tests/unit/update-working-state.test.ts
     integration: []
     contract: []

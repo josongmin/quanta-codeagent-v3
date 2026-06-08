@@ -17,7 +17,14 @@ const MAX_OUTPUT = 50_000
 const renderInfo = (t: TasksTaskInfo): string => {
   const titlePart = t.title !== undefined ? `  ${t.title}` : ""
   const progressPart = t.progress !== undefined ? `  ${Math.round(t.progress * 100)}%` : ""
-  return `  - ${t.taskId}  [${t.state}]${titlePart}${progressPart}`
+  // TICKET-21 affordance: surface sibling task ids the model can poll/cancel
+  // together. ONLY when present → absent keeps the line byte-identical (the
+  // existing toEqual list-render tests stay green).
+  const relPart =
+    t.relatedTaskIds !== undefined && t.relatedTaskIds.length > 0
+      ? `  → rel: ${t.relatedTaskIds.join(", ")}`
+      : ""
+  return `  - ${t.taskId}  [${t.state}]${titlePart}${progressPart}${relPart}`
 }
 
 const truncate = (s: string): string =>

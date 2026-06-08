@@ -56,7 +56,7 @@ evidence:
   tests:
     unit:
       - tests/unit/prompt-suggestion-hellgate.test.ts
-      - tests/unit/prompt-suggestion-wire-hellgate.test.ts
+      - tests/unit/cli/prompt-suggestion-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

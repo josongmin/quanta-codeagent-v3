@@ -44,6 +44,8 @@ import { defaultImageWritePort, type ImageWritePort } from "./store"
 export const IMAGE_GEN_MAX_BYTES = 8 * 1024 * 1024
 /** Max images per call (provider `n`). Mirrors the OpenAI images `n` ceiling. */
 export const IMAGE_GEN_MAX_N = 10
+/** §5.2 — cap on `referenceImagePaths` (bounds the per-call FS reads + payload). */
+export const IMAGE_GEN_MAX_REFS = 8
 /** Max versioned siblings probed before giving up (`-v2`..`-v{CAP}`). */
 const VERSION_PROBE_CAP = 1000
 const PROMPT_MAX = 32_000
@@ -93,6 +95,18 @@ export const imageGenInputSchema = z.object({
     .min(1)
     .optional()
     .describe("For mode:edit — path to the image to edit (FS-jailed, read as the edit target)"),
+  // §5.2 (long-tail) — MULTIPLE reference images for `mode:edit`. The provider
+  // port already accepts a `referenceImages[]` list; this surfaces it to the
+  // model. Merged with the singular `referenceImagePath` (de-duped, order
+  // preserved). Absent ⇒ the singular path alone (byte-identical legacy).
+  referenceImagePaths: z
+    .array(z.string().min(1))
+    .max(IMAGE_GEN_MAX_REFS)
+    .optional()
+    .describe(
+      `For mode:edit — up to ${IMAGE_GEN_MAX_REFS} reference images (FS-jailed); ` +
+        "merged with referenceImagePath, de-duped",
+    ),
   inlinePreview: z
     .boolean()
     .optional()
@@ -374,12 +388,21 @@ const collectReferences = async (
   data: ImageGenInput,
   cwd: string,
 ): Promise<{ kind: "ok"; refs: GeneratedImage[] } | { kind: "fail"; result: ToolResult }> => {
-  if ((data.mode ?? "generate") !== "edit" || data.referenceImagePath === undefined) {
-    return { kind: "ok", refs: [] }
+  if ((data.mode ?? "generate") !== "edit") return { kind: "ok", refs: [] }
+  // §5.2 — merge the singular path + the plural list (order preserved, de-duped).
+  const seen = new Set<string>()
+  const paths = [
+    ...(data.referenceImagePath !== undefined ? [data.referenceImagePath] : []),
+    ...(data.referenceImagePaths ?? []),
+  ].filter((p) => (seen.has(p) ? false : (seen.add(p), true)))
+  if (paths.length === 0) return { kind: "ok", refs: [] }
+  const refs: GeneratedImage[] = []
+  for (const p of paths) {
+    const ref = await loadReference(p, cwd) // sequential: each goes through the FS jail
+    if (ref.kind === "fail") return ref
+    refs.push(ref.image)
   }
-  const ref = await loadReference(data.referenceImagePath, cwd)
-  if (ref.kind === "fail") return ref
-  return { kind: "ok", refs: [ref.image] }
+  return { kind: "ok", refs }
 }
 
 /** Call the provider, catching a throwing port at the boundary. */
@@ -469,8 +492,12 @@ const runImageGen = async (
   if (!parsed.success) return errResult(`invalid input: ${parsed.error.message}`)
   if (ctx.signal.aborted) return errResult("aborted before start")
   const data = parsed.data
-  if ((data.mode ?? "generate") === "edit" && data.referenceImagePath === undefined) {
-    return errResult("mode:edit requires referenceImagePath", {
+  if (
+    (data.mode ?? "generate") === "edit" &&
+    data.referenceImagePath === undefined &&
+    (data.referenceImagePaths === undefined || data.referenceImagePaths.length === 0)
+  ) {
+    return errResult("mode:edit requires referenceImagePath or referenceImagePaths", {
       mode: "rejected",
       reason: "missing_reference",
     })

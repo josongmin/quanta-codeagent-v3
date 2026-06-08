@@ -33,7 +33,14 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runCompare } from "@/../src/apps/eval/compare"
@@ -111,6 +118,51 @@ const seedScenariosRoot = (): string => {
   mkdirSync(join(root, usecase), { recursive: true })
   writeFileSync(join(root, usecase, "smoke.json"), JSON.stringify(scenarioFile()))
   return root
+}
+
+/**
+ * Install an executable shim named `binName` onto a fresh tmp dir, prepend
+ * that dir to `$PATH`, run `fn`, then restore `$PATH` + return the captured
+ * argv.
+ *
+ * Why a PATH shim instead of a mirrored-spec dummy? The previous tests built
+ * a *separate* `CliAgentAdapter` re-typing cursor's flags by hand, so dropping
+ * `--force` in the REAL `buildCursorAdapter` (cursor.ts) was NOT caught. There
+ * is no spawner-injection seam on `CliAgentAdapter` (it imports `spawn`
+ * directly), so we instead make the REAL binary name resolve — on `$PATH` — to
+ * an argv-echoing shim. This drives the REAL builder end-to-end: real `bin`,
+ * real `buildArgv` closure, real spawn path through `cli-base`. The shim prints
+ * each received arg on its own stdout line, so the produced argv lands in the
+ * adapter's `transcript` and we assert the actual contract flags are present.
+ */
+const withArgvCapturingShim = async (
+  binName: string,
+  fn: () => Promise<CompareRunResult>,
+): Promise<{ result: CompareRunResult; argv: string[] }> => {
+  const shimDir = mkdtempSync(join(tmpdir(), `quanta-compare-shim-${binName}-`))
+  const shimPath = join(shimDir, binName)
+  // `--version` (the availability probe) must exit 0 so `available()` passes;
+  // for the real run we echo every arg on its own line and exit 0.
+  writeFileSync(
+    shimPath,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "--version" ]; then echo "shim 0.0.0"; exit 0; fi',
+      'for a in "$@"; do printf "%s\\n" "$a"; done',
+      "exit 0",
+      "",
+    ].join("\n"),
+  )
+  chmodSync(shimPath, 0o755)
+  const prevPath = process.env.PATH
+  process.env.PATH = `${shimDir}${":"}${prevPath ?? ""}`
+  try {
+    const result = await fn()
+    const argv = result.transcript.split("\n").filter((line) => line.length > 0)
+    return { result, argv }
+  } finally {
+    process.env.PATH = prevPath
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -246,62 +298,32 @@ describe("Tier-4 compare — hellgate: argv flag pinning (regression)", () => {
   // The flag set is a CONTRACT with each vendor CLI. A future refactor that
   // accidentally drops `--force` (cursor) or `--yes-always` (aider) would
   // silently re-introduce hangs in CI; pin them.
-  test("cursor argv contains -p prompt + --output-format text + --force", () => {
-    const adapter = buildCursorAdapter()
-    // Reach through the public name + reconstruct argv via a synthetic spec
-    // by inspecting the adapter's effect: we instead drive a spec directly
-    // because adapter.spec is private. Since we can't read the spec, we use
-    // a known-bad bin and inspect the failureReason which echoes argv.
-    // Simpler: build a fresh CliAgentAdapter mirroring cursor's spec and
-    // assert its produced argv shape.
-    const argvSeen: string[] = []
-    const dummy = new CliAgentAdapter({
-      name: "cursor",
-      bin: "cursor-agent",
-      versionArgs: ["--version"],
-      buildArgv: (s) => {
-        const argv = ["-p", s.prompt, "--output-format", "text", "--force"]
-        argvSeen.push(...argv)
-        return { argv }
-      },
-      timeoutMs: DEFAULT_RUN_TIMEOUT_MS,
-    })
-    expect(dummy.name).toBe(adapter.name)
-    // Drive buildArgv by calling runOne with a missing bin — buildArgv runs
-    // before spawn so argvSeen gets populated.
-    return dummy.runOne(scenarioFile()).then((r) => {
-      expect(r.exitOk).toBe(false) // bin won't actually run in CI
-      expect(argvSeen).toContain("-p")
-      expect(argvSeen).toContain("--output-format")
-      expect(argvSeen).toContain("text")
-      expect(argvSeen).toContain("--force")
-      expect(argvSeen).toContain(scenarioFile().prompt)
-    })
+  test("REAL cursor adapter produces argv with -p prompt + --output-format text + --force", async () => {
+    // Drive the REAL buildCursorAdapter() (cursor.ts) — NOT a hand-mirrored
+    // dummy. The shim makes `cursor-agent` resolve on $PATH to an argv-echoing
+    // script, so the argv the REAL `buildArgv` closure produces is captured
+    // via the transcript. Dropping `--force` in cursor.ts now fails this test.
+    const { result, argv } = await withArgvCapturingShim("cursor-agent", () =>
+      buildCursorAdapter().runOne(scenarioFile()),
+    )
+    expect(result.exitOk).toBe(true) // shim exits 0
+    expect(argv).toContain("-p")
+    expect(argv).toContain("--output-format")
+    expect(argv).toContain("text")
+    expect(argv).toContain("--force")
+    expect(argv).toContain(scenarioFile().prompt)
+    // `-p` must immediately precede the prompt (positional one-shot form).
+    expect(argv[argv.indexOf("-p") + 1]).toBe(scenarioFile().prompt)
   })
 
-  test("aider argv contains --message + --yes-always + --no-auto-commits + --no-git + --no-stream + --no-pretty + --no-show-model-warnings", async () => {
-    const argvSeen: string[] = []
-    const dummy = new CliAgentAdapter({
-      name: "aider",
-      bin: "aider",
-      versionArgs: ["--version"],
-      buildArgv: (s) => {
-        const argv = [
-          "--message",
-          s.prompt,
-          "--yes-always",
-          "--no-auto-commits",
-          "--no-git",
-          "--no-stream",
-          "--no-pretty",
-          "--no-show-model-warnings",
-        ]
-        argvSeen.push(...argv)
-        return { argv }
-      },
-    })
-    const r = await dummy.runOne(scenarioFile())
-    expect(r.exitOk).toBe(false) // aider not present in CI
+  test("REAL aider adapter produces argv with --message + --yes-always + --no-auto-commits + --no-git + --no-stream + --no-pretty + --no-show-model-warnings", async () => {
+    // Drive the REAL buildAiderAdapter() (aider.ts) through the PATH shim so
+    // the actual produced argv — not a re-typed copy — is asserted. Dropping
+    // `--yes-always` (or any pinned flag) in aider.ts now fails this test.
+    const { result, argv } = await withArgvCapturingShim("aider", () =>
+      buildAiderAdapter().runOne(scenarioFile()),
+    )
+    expect(result.exitOk).toBe(true) // shim exits 0
     const expectedFlags = [
       "--message",
       "--yes-always",
@@ -312,8 +334,11 @@ describe("Tier-4 compare — hellgate: argv flag pinning (regression)", () => {
       "--no-show-model-warnings",
     ]
     for (const flag of expectedFlags) {
-      expect(argvSeen).toContain(flag)
+      expect(argv).toContain(flag)
     }
+    expect(argv).toContain(scenarioFile().prompt)
+    // `--message` must immediately precede the prompt.
+    expect(argv[argv.indexOf("--message") + 1]).toBe(scenarioFile().prompt)
   })
 
   test("real cursor adapter constructs correctly + has documented name", () => {

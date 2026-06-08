@@ -17,4 +17,8 @@ export const headlessRejecter: ElicitationPrompter = {
   promptEnum: async () => deny<string>(),
   promptMultiEnum: async () => deny<ReadonlyArray<string>>(),
   promptSingleEnum: async () => deny<string>(),
+  // TICKET-22 — the URL variant denies like every other prompt in a headless
+  // session. Critically, this NEVER spawns a browser process: the safe default
+  // is a typed denial, not a surprise `open`/`xdg-open`.
+  promptUrl: async () => deny<string>(),
 }

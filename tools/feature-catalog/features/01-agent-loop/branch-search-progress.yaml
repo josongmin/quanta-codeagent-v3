@@ -33,7 +33,7 @@ evidence:
   tests:
     unit:
       - tests/unit/branch-search-anchor-hellgate.test.ts
-      - tests/unit/branch-search-progress.test.ts
+      - tests/unit/cli/branch-search-progress.test.ts
       - tests/unit/branch-search-minimal-change-hellgate.test.ts
     integration: []
     contract: []

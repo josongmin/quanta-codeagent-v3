@@ -20,9 +20,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { gateOn } from "@/shared"
 import type { CapabilityDescriptor, Surface } from "@/capability"
 import { probeExposureConsistency, resolveExposure } from "@/capability"
+import { gateOn } from "@/shared"
 
 const cap: CapabilityDescriptor = {
   id: "split-brain-cap",
@@ -89,8 +89,11 @@ describe("capability exposure e2e (ADR-0503 P3 hellgate)", () => {
     // The fence: a gate-only resolver (ignores surfaces[surface]) would report a
     // non-exposed surface as exposed when the gate is on — the split-brain bug.
     const env = { QUANTA_SPLIT_BRAIN_CAP: "1" }
-    const looseResolve = (c: CapabilityDescriptor, _s: Surface, e: Record<string, string | undefined>) =>
-      gateOn(e, c.gate.envKey) // BUG: ignores the surface flag
+    const looseResolve = (
+      c: CapabilityDescriptor,
+      _s: Surface,
+      e: Record<string, string | undefined>,
+    ) => gateOn(e, c.gate.envKey) // BUG: ignores the surface flag
     // The correct resolver says slash=false; the loose one says slash=true.
     expect(resolveExposure(cap, "slash", env)).toBe(false)
     expect(looseResolve(cap, "slash", env)).toBe(true)

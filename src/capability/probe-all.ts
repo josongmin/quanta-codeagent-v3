@@ -19,6 +19,11 @@
  * runner never reads `process.env` and never decides what "legacy" means for a
  * surface, so it stays testable and the caller owns the surface-specific gate
  * semantics (for `llmTool` caps the legacy gate is `gateOn(env, cap.gate.envKey)`).
+ *
+ * `resolveExposure` is now the COMPOSITE prediction (own gate AND every
+ * `requires` gate), so for a composite cap the resolved side can DISAGREE with
+ * the lone own-gate legacy read — that disagreement is the REAL split-brain the
+ * sweep exists to surface (e.g. QUANTA_WORKFLOW=1 + QUANTA_SUBAGENT=0).
  */
 
 import { gateOnStrict } from "@/shared"

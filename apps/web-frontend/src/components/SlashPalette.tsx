@@ -433,6 +433,12 @@ export const buildDefaultSlashCommands = (deps: {
       },
     },
     { slug: "permission",    description: "Permission store explainer",                action: prefill("permission") },
+    {
+      slug: "capabilities",
+      aliases: ["caps"],
+      description: "Show capability layer — gates + per-surface exposure",
+      action: prefill("capabilities"),
+    },
   ]
   allCommands.push(...commands)
   return commands

@@ -25,15 +25,12 @@
  */
 import { describe, expect, test } from "bun:test"
 import {
-  type UnifiedKnob,
-  buildKnobCatalog,
-} from "../../../src/apps/cli/knob-catalog-wire"
-import {
+  auditEnvTableDrift,
   ENV_TABLE,
   type EnvRow,
-  auditEnvTableDrift,
   renderHelp,
 } from "../../../src/apps/cli/help-render"
+import { buildKnobCatalog, type UnifiedKnob } from "../../../src/apps/cli/knob-catalog-wire"
 import { BUILTINS } from "../../../src/apps/cli/slash-commands"
 import { stripAnsi } from "../../../src/ui/ui-helpers"
 

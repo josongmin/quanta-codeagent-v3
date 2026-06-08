@@ -116,15 +116,6 @@ export const PAUSED_REASON_DOCS: Readonly<Record<PausedReason, string>> = Object
   unknown_blocking: "Caller-supplied blocking reason that is not yet named.",
 })
 
-/** Serializable snapshot for restart-resume. */
-interface LegacyFollowUpQueueSnapshot {
-  readonly version: 1
-  readonly threads: ReadonlyArray<{
-    readonly threadId: string
-    readonly entries: readonly FollowUp[]
-  }>
-}
-
 export interface FollowUpQueueSnapshot {
   readonly version: 2
   readonly maxPerThread: number

@@ -18,6 +18,16 @@ export {
   exfilScoutingEnabled,
 } from "./exfil-scouting-gate"
 export {
+  type ApplyHeaderRulesResult,
+  applyHeaderRules,
+  CROSS_ORIGIN_STRIP_HEADERS,
+  FORBIDDEN_INJECT,
+  type HeaderRule,
+  type HeaderRuleAudit,
+  type MutableHeaders,
+  shouldStripOnRedirect,
+} from "./header-rules"
+export {
   type EgressProxyContext,
   type EgressProxyDeps,
   withEgressProxy,

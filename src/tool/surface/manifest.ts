@@ -396,6 +396,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Opt-in — registered only when an automation engine is wired.",
   },
   {
+    name: "enter_worktree",
+    group: ["exit_worktree", "worktree_status"],
+    origin: "@/tool/worktree worktreeTools",
+    gate: {
+      kind: "config-slot",
+      slot: "AgentConfig.activeWorktreeSlot",
+      env: "QUANTA_WORKTREE_TOOL",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    note: "ticket-11 (P8) — git-worktree AGENT tools (CC EnterWorktree/ExitWorktree camp). Opt-in (QUANTA_WORKTREE_TOOL=1) AND registered only when the composition root wires a session-scoped activeWorktreeSlot. enter creates/enters a worktree (branchFrom head|fresh) + sets the slot; exit tears it down (dirty ⇒ force:true required, lists uncommitted) + clears it; status reports the slot. While active, RELATIVE bash/edit run inside the worktree; ABSOLUTE paths STILL jail to the session root (relative-cwd override, NOT a trust-boundary redefinition). Default-OFF every surface: slot absent ⇒ tools unregistered ⇒ bash/edit cwd byte-identical.",
+  },
+  {
     name: "poll_deferred",
     origin: "@/tool poll_deferred",
     gate: { kind: "env-flag", env: "QUANTA_ASYNC_TOOLS" },

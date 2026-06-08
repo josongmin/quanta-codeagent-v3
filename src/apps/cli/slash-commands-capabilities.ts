@@ -26,19 +26,18 @@
  */
 
 import {
-  type CapabilityDescriptor,
-  CAPABILITY_LAYER_ENV,
-  type Surface,
   allCapabilities,
+  CAPABILITY_LAYER_ENV,
+  type CapabilityDescriptor,
   resolveExposure,
+  type Surface,
 } from "@/capability"
 import { gateOn } from "@/shared"
 import type { SlashCommand, SlashCompletionHint, SlashContext } from "./slash-contract"
 
 const SUBCOMMANDS = ["list", "find", "help"] as const
 type Subcommand = (typeof SUBCOMMANDS)[number]
-const isSubcommand = (s: string): s is Subcommand =>
-  (SUBCOMMANDS as readonly string[]).includes(s)
+const isSubcommand = (s: string): s is Subcommand => (SUBCOMMANDS as readonly string[]).includes(s)
 
 /** Surfaces rendered in the exposure grid, in column order. */
 const SURFACES: readonly Surface[] = ["llmTool", "slash", "skill", "hook", "thinClient"]

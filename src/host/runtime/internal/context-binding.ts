@@ -227,6 +227,14 @@ type RuntimeBootstrapOverlay = {
    *  `AssembleRequestPartial`. Absent ⇒ slot omitted (default-OFF,
    *  byte-identical: no named agent ever resolves). */
   readonly namedAgentResolver?: AgentConfig["namedAgentResolver"]
+  /** ticket-11 (P8 git-worktree agent tools) — session-scoped active-worktree
+   *  slot. When set (the comp-root mints ONE per session behind
+   *  `QUANTA_WORKTREE_TOOL`), the base carries `activeWorktreeSlot` so features.ts
+   *  registers the enter/exit/worktree_status tools AND the dispatch seam projects
+   *  the slot's current value onto the bash/edit relative-cwd edit-fence. Absent ⇒
+   *  slot omitted (default-OFF, byte-identical: tools unregistered, bash/edit cwd
+   *  unchanged). */
+  readonly activeWorktreeSlot?: AgentConfig["activeWorktreeSlot"]
 }
 
 interface RuntimeBootstrapHelpers {
@@ -488,6 +496,10 @@ const buildBootstrapBaseShape = (
     // F2 (round-2) — lift the host-wired named-agent resolver onto the base so
     // the per-turn `assembleAgentConfig` spread carries it to the SubagentRunner.
     ...whenDefined("namedAgentResolver", args.overlay?.namedAgentResolver),
+    // ticket-11 (P8) — lift the session-scoped active-worktree slot onto the base
+    // so features.ts registers the worktree tools and the dispatch seam projects
+    // the slot value onto the bash/edit edit-fence. Absent ⇒ omitted (default-OFF).
+    ...whenDefined("activeWorktreeSlot", args.overlay?.activeWorktreeSlot),
     ...whenDefined("sessionConfigPort", args.boot.sessionConfigPort),
     // jun-6 (RFC jun-6-ai-session-title) — spread the AI titler ONLY when the
     // surface built it (knob on + cheap model). Absent ⇒ slot omitted ⇒ the

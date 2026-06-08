@@ -25,9 +25,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { CLI_KNOBS } from "@/apps/cli/cli-knobs"
 import { CAPABILITIES } from "@/capability"
 import type { CapabilityDescriptor } from "@/capability/descriptor"
-import { CLI_KNOBS } from "@/apps/cli/cli-knobs"
 import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
 import { entryToolNames, GATED_TOOLS, type ToolSurfaceEntry } from "@/tool"
 import { loadFeaturesStrict } from "../../../tools/feature-catalog/schema"
@@ -86,11 +86,12 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
         `capability "${cap.id}" gate "${cap.gate.envKey}" has NO matching manifest entry ` +
           `(split-brain: the capability would resolve differently than the real tool gate)`,
       ).toBeGreaterThan(0)
-      // every matched manifest entry's env is literally the capability env (tautological
-      // by construction, but asserts the projection did not silently coerce).
-      for (const e of entries) {
-        expect(gateEnv(e)).toBe(cap.gate.envKey)
-      }
+      // NOTE: a per-entry `expect(gateEnv(e)).toBe(cap.gate.envKey)` loop was removed
+      // here — `entries` is `GATED_TOOLS.filter(e => gateEnv(e) === cap.gate.envKey)`, so
+      // that assertion re-derived the filter predicate and compared a value to itself
+      // (tautological, zero production code exercised). The projection-exactness it
+      // claimed to guard is genuinely covered by the red-on-injection test below
+      // ("mismatched manifest env is rejected by axis B", lines using gateEnv(wfEntry)).
     }
   })
 
@@ -109,6 +110,8 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
   })
 
   // ── Axis D: fc `capability:` references resolve; reverse coverage flagged ───
+  // 30s: loadFeaturesStrict() parses the WHOLE feature-catalog (cold ~21s) — the
+  // default 5s budget cold-times-out under load (flake). Explicit, not heuristic.
   test("D — every fc capability: ref resolves to a real capability id (no dangling ref)", async () => {
     const features = await loadFeaturesStrict()
     const capIds = new Set(CAPABILITIES.map((c) => c.id))
@@ -119,17 +122,16 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
         dangling.push(`${feature.id} → capability:"${feature.capability}"`)
       }
     }
-    expect(dangling, `fc entries reference non-existent capability ids: ${dangling.join(", ")}`).toEqual(
-      [],
-    )
-  })
+    expect(
+      dangling,
+      `fc entries reference non-existent capability ids: ${dangling.join(", ")}`,
+    ).toEqual([])
+  }, 30000)
 
   test("D-reverse — every capability is referenced by ≥1 fc entry (FLAG, not fail)", async () => {
     const features = await loadFeaturesStrict()
     const referenced = new Set(
-      features
-        .map(({ feature }) => feature.capability)
-        .filter((c): c is string => c !== undefined),
+      features.map(({ feature }) => feature.capability).filter((c): c is string => c !== undefined),
     )
     const unreferenced = CAPABILITIES.map((c) => c.id).filter((id) => !referenced.has(id))
     if (unreferenced.length > 0) {
@@ -143,7 +145,7 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
     // The 4 seeded caps (workflow/artifact-store/image-gen/office-authoring) are all
     // linked, so today this is empty — assert that as a forward ratchet.
     expect(unreferenced).toEqual([])
-  })
+  }, 30000)
 
   // ── RED-ON-INJECTION: the ratchet has teeth ────────────────────────────────
   describe("red-on-injection — the ratchet rejects a broken capability", () => {

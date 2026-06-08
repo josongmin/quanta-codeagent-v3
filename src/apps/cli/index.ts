@@ -207,6 +207,23 @@ const main = async (): Promise<void> => {
     process.exit(code)
   }
 
+  // TICKET-19 — `quanta mcp-server` reverse-MCP subcommand (quanta AS an MCP
+  // server over stdio). SECURITY/RCE surface: gated on `QUANTA_MCP_SERVER=1`
+  // (strict `=== '1'`); unset ⇒ the command exits 64 and assembles NOTHING
+  // (default-OFF byte-identical — a bare `quanta` run never reaches this). The
+  // composition root (`mcp-server-setup.ts`) is the ONLY place `@/agent` +
+  // `@/mcp` meet; dynamic import keeps the heavy agent assembly off the common
+  // startup path. Mirrors the `batch` route: `--help` short-circuits before any
+  // assembly, and SIGINT/SIGTERM abort the stdin pump cleanly.
+  if (process.argv[2] === "mcp-server") {
+    const mcpArgv = process.argv.slice(3)
+    const { runMcpServerCmd } = await import("./mcp-server-setup")
+    // `--help` and the gate-off path return BEFORE assembly (no API key needed),
+    // so no AbortController / signal handlers are wired for them. The command
+    // owns its own SIGINT/SIGTERM handling around the stdin pump.
+    process.exit(await runMcpServerCmd(mcpArgv))
+  }
+
   // Tier-2 absorption #2-1: built-in slash commands short-circuit BEFORE any
   // LLM / session plumbing. The gate matches only `/<letter>...` so legacy
   // path-mode resume arguments and bare `--flag` invocations still fall

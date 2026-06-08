@@ -28,6 +28,12 @@ import { isIP, connect as netConnect, type Socket } from "node:net"
 import { classifyHost } from "@/shared/net/ssrf"
 import { NetworkPolicyAmendment } from "./amendment"
 import { decideEgress, type EgressDecision } from "./decision"
+import {
+  applyHeaderRules,
+  type HeaderRule,
+  type HeaderRuleAudit,
+  type MutableHeaders,
+} from "./header-rules"
 import type { MitmConfig } from "./mitm"
 import type { MitmTlsChannel, OpenMitmChannel, ParsedTlsRequest } from "./mitm-channel"
 import { openBunMitmChannel } from "./mitm-channel-bun"
@@ -129,6 +135,11 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   readonly amendments: NetworkPolicyAmendment
   private readonly server: Server
   private readonly log: DecisionLogEntry[] = []
+  /** ticket-13 (§12.2) — append-only audit of every outbound header-rewrite rule
+   *  that FIRED (or was refused). The VALUE is never recorded (see
+   *  {@link HeaderRuleAudit}); each entry carries the rule index / header name /
+   *  op / fired flag + a `host` for which upstream this mutation applied to. */
+  private readonly hdrLog: (HeaderRuleAudit & { readonly host: string })[] = []
   private bound: ProxyAddress | null = null
   private readonly now: () => number
 
@@ -218,6 +229,32 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
 
   decisionLog(): readonly DecisionLogEntry[] {
     return this.log
+  }
+
+  /** ticket-13 (§12.2) — the outbound header-rewrite mutation audit (value-free).
+   *  Append-only; the proxy never mutates a prior entry. Empty when no header
+   *  rules are configured (default-OFF) or none fired. */
+  headerRuleLog(): readonly (HeaderRuleAudit & { readonly host: string })[] {
+    return this.hdrLog
+  }
+
+  /**
+   * ticket-13 (§12.2) — apply the operator's outbound header-rewrite rules to an
+   * ALREADY-REDACTED header map (so secret-egress redaction always wins — this
+   * runs strictly AFTER the `dropHeaderValues` filter at both callsites). Records
+   * each rule's value-free audit entry against `host`. When `rules` is absent /
+   * empty the SAME object is returned by reference (byte-identical) and nothing is
+   * logged. PURE delegation to {@link applyHeaderRules}; this method only threads
+   * the audit into the proxy's in-memory log.
+   */
+  private applyOutboundHeaderRules(
+    host: string,
+    headers: MutableHeaders,
+    rules: readonly HeaderRule[] | undefined,
+  ): MutableHeaders {
+    const { headers: out, audit } = applyHeaderRules(headers, rules)
+    for (const entry of audit) this.hdrLog.push(Object.freeze({ ...entry, host }))
+    return out
   }
 
   close(): Promise<void> {
@@ -412,7 +449,7 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   ): void {
     const dialed = this.dial(target.host, target.port)
     const bodyBuf = Buffer.from(body, "utf8")
-    const headers: Record<string, string | string[]> = {}
+    let headers: Record<string, string | string[]> = {}
     for (const [name, value] of Object.entries(req.headers)) {
       if (value === undefined) continue
       // Drop a header whose value carried a redacted declared secret.
@@ -425,6 +462,14 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     delete headers["transfer-encoding"]
     if (req.method !== "GET" && req.method !== "HEAD")
       headers["content-length"] = String(bodyBuf.length)
+    // ticket-13 (§12.2): apply operator header-rewrite rules AFTER redaction (so a
+    // dropped/redacted header can NEVER be revived by a rule). Default-OFF ⇒
+    // `headers` is returned unchanged (byte-identical).
+    headers = this.applyOutboundHeaderRules(
+      target.host,
+      headers,
+      this.config.secretEgress?.headerRules,
+    )
     const upstream = httpRequest(
       {
         host: dialed.host,
@@ -626,7 +671,7 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     dropHeaderValues: readonly string[],
   ): void {
     const dialed = this.dial(host, port)
-    const headers: Record<string, string | string[]> = {}
+    let headers: Record<string, string | string[]> = {}
     for (const [name, value] of Object.entries(parsed.headers)) {
       if (value === undefined) continue
       const flat = Array.isArray(value) ? value.join(" ") : value
@@ -636,6 +681,11 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     delete headers["transfer-encoding"]
     if (parsed.method !== "GET" && parsed.method !== "HEAD")
       headers["content-length"] = String(body.length)
+    // ticket-13 (§12.2): apply operator header-rewrite rules AFTER redaction (so a
+    // dropped/redacted header can NEVER be revived by a rule). Default-OFF ⇒
+    // byte-identical. The MITM path reuses the SAME pure transform as the
+    // plaintext path (one definition, two transports).
+    headers = this.applyOutboundHeaderRules(host, headers, this.config.mitm?.headerRules)
 
     const upstream = httpsRequestOverTls(
       {

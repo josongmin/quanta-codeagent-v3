@@ -26,7 +26,7 @@ evidence:
     - src/llm/factory.ts
   adrs: [59, 94]
   tests:
-    unit: [tests/unit/slash-commands.test.ts, tests/unit/auth/login-status-cmd.test.ts, tests/unit/auth/auth-ui.test.ts]
+    unit: [tests/unit/slash-commands.test.ts, tests/unit/cli/login-status-cmd.test.ts, tests/unit/auth/auth-ui.test.ts]
     integration: []
     contract: []
 knobs:

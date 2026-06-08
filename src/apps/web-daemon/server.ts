@@ -310,8 +310,27 @@ export const CONFIG_ALLOWED_KEYS = new Set([
   "QUANTA_SERVICE_TIER",
   "QUANTA_MODEL",
   "QUANTA_REASONING_EFFORT",
+  "QUANTA_REASONING_SUMMARY",
+  "QUANTA_REASONING_VERBOSITY",
 ])
 const CONFIG_VALUE_PATTERN = /^[A-Za-z0-9_.:-]{0,64}$/
+
+/**
+ * Pure per-key write-rejection for POST /config. Returns the rejection
+ * {status,error} or null if the key MAY be written. Extracted (and exported) so
+ * the security branches have direct teeth — esp. the defense-in-depth 403 that is
+ * otherwise unreachable while CONFIG_ALLOWED_KEYS ∩ SESSION_FORBIDDEN = ∅.
+ *   - not in the closed allowlist            → 400 unknown_key
+ *   - allowlisted BUT a strict-security knob → 403 forbidden_security_knob
+ *     (this HTTP writer mutates process.env directly, bypassing the
+ *      setKnobOverride chokepoint, so it MUST re-honor the carve-out even if a
+ *      forbidden knob is ever wrongly added to the allowlist).
+ */
+export const configKeyWriteRejection = (key: string): { status: number; error: string } | null => {
+  if (!CONFIG_ALLOWED_KEYS.has(key)) return { status: 400, error: "unknown_key" }
+  if (isSessionForbidden(key)) return { status: 403, error: "forbidden_security_knob" }
+  return null
+}
 
 const handleConfigPost = async (req: Request): Promise<Response> => {
   let body: unknown
@@ -326,15 +345,9 @@ const handleConfigPost = async (req: Request): Promise<Response> => {
   const entries = body as Record<string, unknown>
   const applied: Record<string, string | null> = {}
   for (const [key, raw] of Object.entries(entries)) {
-    if (!CONFIG_ALLOWED_KEYS.has(key)) {
-      return jsonResponse(400, { error: "unknown_key", key })
-    }
-    // Defense-in-depth: this HTTP writer mutates process.env DIRECTLY (bypassing
-    // the `setKnobOverride` chokepoint), so it must ALSO honor the security
-    // carve-out — never let an authed POST arm a strict-security knob (code-mode/
-    // fs-jail/tls-mitm/...) even if one is ever added to CONFIG_ALLOWED_KEYS.
-    if (isSessionForbidden(key)) {
-      return jsonResponse(403, { error: "forbidden_security_knob", key })
+    const rejection = configKeyWriteRejection(key)
+    if (rejection) {
+      return jsonResponse(rejection.status, { error: rejection.error, key })
     }
     if (raw === null || raw === "") {
       delete process.env[key]

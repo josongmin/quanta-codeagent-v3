@@ -89,6 +89,7 @@ const spyPrompter = (
       promptEnum: ret,
       promptMultiEnum: async () => result as unknown as ElicitationResult<ReadonlyArray<string>>,
       promptSingleEnum: ret,
+      promptUrl: ret,
     },
   }
 }
@@ -249,6 +250,52 @@ describe("elicitation response envelope mapping", () => {
   })
 })
 
+describe("inbound elicitation/promptUrl (ticket-22)", () => {
+  it("valid url request → accept envelope (content keys on 'value')", async () => {
+    const { prompter } = spyPrompter({ ok: true, value: "https://example.com" })
+    const r = await routeElicitation(prompter, "elicitation/promptUrl", {
+      prompt: "Open?",
+      url: "https://example.com",
+    })
+    expect(r).toEqual({ action: "accept", content: { value: "https://example.com" } })
+  })
+
+  it("cancelled url prompt → cancel", async () => {
+    const { prompter } = spyPrompter({ ok: false, reason: "cancelled" })
+    const r = await routeElicitation(prompter, "elicitation/promptUrl", {
+      prompt: "Open?",
+      url: "https://example.com",
+    })
+    expect(r).toEqual({ action: "cancel" })
+  })
+
+  it("headless-denied url prompt → decline (never throws/drops)", async () => {
+    const { prompter } = spyPrompter({ ok: false, reason: "headless-denied" })
+    const r = await routeElicitation(prompter, "elicitation/promptUrl", {
+      prompt: "Open?",
+      url: "https://example.com",
+    })
+    expect(r).toEqual({ action: "decline" })
+  })
+
+  it("malformed url request (non-http scheme) → decline, prompter never reached", async () => {
+    const { prompter, calls } = spyPrompter({ ok: true, value: "x" })
+    const r = await routeElicitation(prompter, "elicitation/promptUrl", {
+      prompt: "Open?",
+      url: "javascript:alert(1)", // SECURITY: schema rejects non-http(s)
+    })
+    expect(r).toEqual({ action: "decline" })
+    expect(calls()).toBe(0)
+  })
+
+  it("missing url field → decline (schema rejects, never throws)", async () => {
+    const { prompter, calls } = spyPrompter({ ok: true, value: "x" })
+    const r = await routeElicitation(prompter, "elicitation/promptUrl", { prompt: "Open?" })
+    expect(r).toEqual({ action: "decline" })
+    expect(calls()).toBe(0)
+  })
+})
+
 describe("ElicitationLeasePool single-flight (Track C, GOAL 2)", () => {
   /** A prompter whose call we can hold open until released, to force overlap. */
   const gatedPrompter = (): {
@@ -276,6 +323,7 @@ describe("ElicitationLeasePool single-flight (Track C, GOAL 2)", () => {
         promptEnum: gated,
         promptMultiEnum: async () => ({ ok: true, value: [] }),
         promptSingleEnum: gated,
+        promptUrl: gated,
       },
     }
   }

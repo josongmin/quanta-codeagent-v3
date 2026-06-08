@@ -149,6 +149,10 @@ export type ReplSlashCtx = Partial<{
    *  renderer's structural view, or undefined when no turn has assembled a
    *  prompt yet. Absent ⇒ `/context` falls back to the legacy placeholder. */
   contextUsage: () => import("../status-line").SegmentedUsageView | undefined
+  /** Ticket 17 `/agents` — live subagent fleet getter. Read each invocation so
+   *  the panel reflects the CURRENT registry. Absent ⇒ `/agents` prints "not
+   *  wired in this surface". */
+  agents: () => readonly import("../agents-fleet-panel").AgentFleetRow[]
 }>
 
 export interface BuildReplSlashCtxArgs {
@@ -160,6 +164,11 @@ export interface BuildReplSlashCtxArgs {
   costPanel: CostPanel | undefined
   planStore: PlanStore | undefined
   branchProgress: BranchProgressTracker | undefined
+  /** Ticket 17 `/agents` — the session's lifecycle subagent registry. The
+   *  surface threads `setup.lifecycleTaskRegistry`; absent/omitted ⇒ the `agents`
+   *  ctx slot is omitted and `/agents` prints "not wired" (default-OFF
+   *  byte-identical). Optional so existing call sites/tests need no change. */
+  taskRegistry?: import("@/subagent").TaskRegistry | undefined
   /** Returns the live transcript reference so slash surfaces never read a
    *  stale `history` binding. */
   getHistory: () => readonly Message[]
@@ -372,6 +381,26 @@ const spreadNewSlots = (s: NewSlotAdapters): Partial<ReplSlashCtx> => ({
   ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
 })
 
+/** Project a `@/subagent` TaskRecord into the surface's structural
+ *  {@link import("../agents-fleet-panel").AgentFleetRow} — drops the heavy
+ *  `result.messages`, carries the optional fields with presence-spread
+ *  (exactOptionalPropertyTypes). Keeps the panel decoupled from `@/subagent`
+ *  internals (the surface owns the mapping seam). */
+const toAgentFleetRow = (
+  r: import("@/subagent").TaskRecord,
+): import("../agents-fleet-panel").AgentFleetRow => ({
+  id: r.id,
+  description: r.description,
+  status: r.status,
+  startedAt: r.startedAt,
+  ...(r.agentType !== undefined ? { agentType: r.agentType } : {}),
+  ...(r.endedAt !== undefined ? { endedAt: r.endedAt } : {}),
+  ...(r.error !== undefined ? { error: r.error } : {}),
+  ...(r.result !== undefined
+    ? { result: { ok: r.result.ok, finalText: r.result.finalText, turns: r.result.turns } }
+    : {}),
+})
+
 /** Compose the REPL-owned slash adapters into one explicit surface object. */
 export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
   const {
@@ -395,6 +424,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     replay,
     effort,
     contextUsage,
+    taskRegistry,
   } = args
   const newSlots = buildNewSlotAdapters(args)
   return {
@@ -436,6 +466,11 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // Track D — `/context` live segmented usage. Absent upstream getter ⇒ slot
     // omitted (default-OFF byte-identical; `/context` keeps its fallback).
     ...(contextUsage !== undefined ? { contextUsage } : {}),
+    // Ticket 17 — `/agents` live fleet getter, read each invocation off the
+    // session registry. Absent registry ⇒ slot omitted ⇒ `/agents` "not wired".
+    ...(taskRegistry !== undefined
+      ? { agents: () => taskRegistry.list().map(toAgentFleetRow) }
+      : {}),
     // ADR-0291 — 8 new slots; each gated by presence so omitting an
     // upstream port produces a byte-identical "not wired" projection.
     ...spreadNewSlots(newSlots),
@@ -460,6 +495,7 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.replay !== undefined ? { replay: s.replay } : {}),
   ...(s.effort !== undefined ? { effort: s.effort } : {}),
   ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
+  ...(s.agents !== undefined ? { agents: s.agents } : {}),
 })
 
 /** Project the ADR-0291 slots. 1:1 spread; presence-gated for

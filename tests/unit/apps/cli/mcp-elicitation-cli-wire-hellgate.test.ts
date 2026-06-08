@@ -114,6 +114,7 @@ const acceptingPrompter = (answer: string): ElicitationPrompter => {
     promptEnum: () => ok(answer),
     promptMultiEnum: () => ok([answer]),
     promptSingleEnum: () => ok(answer),
+    promptUrl: () => ok(answer),
   }
 }
 

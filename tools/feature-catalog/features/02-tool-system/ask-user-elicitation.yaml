@@ -31,7 +31,7 @@ evidence:
   tests:
     unit:
       - tests/unit/ask-user-hellgate.test.ts
-      - tests/unit/ask-user-cli-wire-hellgate.test.ts
+      - tests/unit/cli/ask-user-cli-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

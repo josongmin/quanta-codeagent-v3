@@ -33,6 +33,26 @@ export interface CapabilitySurfaces {
   readonly thinClient?: boolean
 }
 
+/**
+ * An ADDITIONAL env gate a capability's real exposure ALSO depends on (a
+ * COMPOSITE gate). `envKey` is the gate; `defaultOn` mirrors the REAL assembly's
+ * default for that gate so the prediction matches reality byte-for-byte:
+ *   - `defaultOn: false` ⇒ `gateOn(env, envKey)` semantics (default-OFF opt-in).
+ *   - `defaultOn: true`  ⇒ `readBool(env[envKey], true)` semantics (default-ON,
+ *     i.e. UNSET / "" / unrecognized ⇒ ON; only a falsy token disables).
+ * (e.g. workflow's `run_workflow` tool is registered only when BOTH its own gate
+ * QUANTA_WORKFLOW AND the parent subagent gate QUANTA_SUBAGENT [default-ON] are
+ * truthy — `enabled && (QUANTA_WORKFLOW ?? false)` in apps/cli/internal.ts.)
+ */
+export interface CapabilityRequire {
+  /** The additional env gate that must ALSO be truthy for exposure. */
+  readonly envKey: `QUANTA_${string}`
+  /** The REAL assembly default for this gate — mirror it so the env-only
+   *  prediction agrees with the assembled exposure (NOT an opinion: it is what
+   *  the source `readCliKnob(envKey,"bool") ?? <default>` resolves to). */
+  readonly defaultOn: boolean
+}
+
 /** A single cross-surface capability declaration. */
 export interface CapabilityDescriptor {
   /** Stable identifier (e.g. "workflow", "artifact-store"). */
@@ -43,4 +63,22 @@ export interface CapabilityDescriptor {
   readonly surfaces: CapabilitySurfaces
   /** Human-readable one-liner (catalog / discoverability). */
   readonly describe: string
+  /**
+   * ADDITIONAL env gates that must ALSO be truthy for the REAL exposure — the
+   * COMPOSITE gate. Absent ⇒ no extra gate (the lone `gate.envKey` decides), so
+   * caps without a composite gate stay byte-identical. Each entry carries the
+   * real assembly default (see {@link CapabilityRequire}) so the prediction
+   * matches the assembled exposure across the env matrix.
+   */
+  readonly requires?: readonly CapabilityRequire[]
+  /**
+   * `true` for caps whose REAL exposure ALSO depends on a NON-env runtime signal
+   * (e.g. image-gen needs a provider API key, decided at runtime — not from env
+   * gates alone). For these the env-only `resolveExposure` is a NECESSARY-not-
+   * sufficient UPPER BOUND: real exposure ⊆ predicted exposure (the runtime
+   * condition narrows it further). The consistency check uses this to assert the
+   * upper-bound relation rather than strict equality. Absent ⇒ env gates are
+   * fully sufficient (strict equality holds).
+   */
+  readonly runtimeConditioned?: boolean
 }

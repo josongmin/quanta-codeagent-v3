@@ -41,7 +41,7 @@ evidence:
   tests:
     unit:
       - tests/unit/env-probe-hellgate.test.ts
-      - tests/unit/env-probe-wire-hellgate.test.ts
+      - tests/unit/cli/env-probe-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

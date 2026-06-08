@@ -417,6 +417,78 @@ export interface ToolContext {
    *  (not a port) because it is a pure data snapshot the dispatch seam already
    *  holds (`config.registry`); no behavior crosses the seam. */
   codeCellSurface?: readonly string[]
+  /** ticket-11 (P8 git-worktree agent tools) — OPTIONAL active-worktree VALUE.
+   *  The session-scoped worktree slot's CURRENT value, projected by the dispatch
+   *  seam from `AgentConfig.activeWorktreeSlot.current()`. When present, the
+   *  shell-class (`bash`) and `edit` tools override their relative-resolution base
+   *  with `worktreePath` so a RELATIVE write/command lands inside the worktree.
+   *
+   *  INVARIANT (NOT a trust-boundary redefinition): the worktree is a RELATIVE-cwd
+   *  override ONLY. An ABSOLUTE path is STILL jailed to the SESSION jailRoot
+   *  (`ctx.cwd`), never re-jailed to the worktree — `resolveEditBase` /
+   *  `cwd = ctx.activeWorktree?.worktreePath ?? ctx.cwd` keep the session jail for
+   *  absolute paths. ABSENT (gate OFF / no active worktree) ⇒ omitted ⇒ both tools
+   *  use `ctx.cwd` exactly as today (byte-identical default-OFF). Duck-typed
+   *  (structural mirror of `ActiveWorktree` in `@/tool/worktree`) so `@/tool/types`
+   *  stays a leaf — same discipline as {@link FileHistorySink}. */
+  activeWorktree?: ActiveWorktree
+  /** ticket-11 (P8 git-worktree agent tools) — OPTIONAL mutable worktree-slot
+   *  handle. The `enter_worktree` / `exit_worktree` / `worktree_status` tools read
+   *  + mutate the SESSION-scoped slot through this seam: `enter` sets the slot
+   *  (after creating/entering the worktree), `exit` clears it, `status` reads it.
+   *  The dispatch seam wires the concrete session-scoped handle from
+   *  `AgentConfig.activeWorktreeSlot` ONLY when `QUANTA_WORKTREE_TOOL` is on AND
+   *  the host opted in (the worktree tools are REGISTERED only then). ABSENT ⇒ the
+   *  tools yield a typed `not_wired` failure (belt-and-braces — they are not
+   *  registered without the slot). The handle also carries the immutable session
+   *  `repoRoot` / `sessionCwd` so the tools never re-derive a jail boundary.
+   *  Duck-typed (structural mirror of `WorktreeSlotHandle` in `@/tool/worktree`)
+   *  so `@/tool/types` stays a leaf — same discipline as {@link FileHistorySink}. */
+  worktreeSlot?: WorktreeSlotHandle
+}
+
+/** ticket-11 — duck-typed mirror of the ACTIVE-worktree value the worktree tools
+ *  set on the session slot. Read by the `bash`/`edit` tools as the relative-cwd
+ *  override (see {@link ToolContext.activeWorktree}). The session producer
+ *  (`@/agent`) sets a structurally-equal value; a renamed/removed field is caught
+ *  by the consumer-side test in `tests/unit/tool/worktree/*` (which CAN see both
+ *  slices). */
+export interface ActiveWorktree {
+  /** Absolute path of the worktree the relative-cwd override points at. */
+  readonly worktreePath: string
+  /** Branch the worktree is checked out on. */
+  readonly branch: string
+  /** True ⇒ a PERSISTENT worktree (NOT auto-removed on exit; the operator owns
+   *  lifecycle). False ⇒ a THROWAWAY worktree (auto-removed on clean exit). */
+  readonly isPersistent: boolean
+  /** Repo root the worktree belongs to (the session repo). */
+  readonly repoRoot: string
+  /** Where the worktree branched from: `"head"` (current HEAD) or `"fresh"`
+   *  (origin/<default>). Recorded so `worktree_status` can surface it. */
+  readonly branchFrom: "fresh" | "head"
+}
+
+/** ticket-11 — duck-typed mutable worktree-slot handle injected via
+ *  {@link ToolContext.worktreeSlot}. The worktree tools (`enter`/`exit`/`status`)
+ *  are the ONLY mutators; the slot is session-scoped (one per session) so a worktree
+ *  entered in one turn is visible to `bash`/`edit` in later turns of the same
+ *  session. Kept HERE so the `@/tool` slice stays a leaf (the `@/agent` composition
+ *  root builds the concrete session-scoped holder). NO-THROW on the pure
+ *  accessors; `set`/`clear` are synchronous (the async git work happens in the
+ *  tool BEFORE it calls `set`). */
+export interface WorktreeSlotHandle {
+  /** Current active worktree, or `undefined` when none is entered. */
+  current(): ActiveWorktree | undefined
+  /** Record the entered worktree as the session's active one. Replaces any
+   *  prior value (the tool refuses a duplicate enter BEFORE calling this). */
+  set(value: ActiveWorktree): void
+  /** Clear the active worktree (called by `exit_worktree` after teardown). */
+  clear(): void
+  /** Immutable session repo root (the git repo the session runs in). */
+  readonly repoRoot: string
+  /** Immutable session cwd — the SESSION jail root. Absolute paths in `bash`/
+   *  `edit` jail to THIS, never to the worktree (the trust-boundary invariant). */
+  readonly sessionCwd: string
 }
 
 /** code-mode (RFC jun-6-code-mode, Phase 1) — duck-typed mirror of

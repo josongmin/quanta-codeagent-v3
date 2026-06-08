@@ -858,6 +858,26 @@ const buildToolContext = (args: {
       if (budget === undefined || max === undefined) return {}
       return { writeBudget: bindWriteBudgetTurn(budget, config.run?.turn ?? 0, max) }
     })(),
+    // ticket-11 (P8 git-worktree agent tools) — thread BOTH worktree seams from
+    // the session-scoped slot. `worktreeSlot` is the mutable handle the
+    // enter/exit/status tools read+mutate; `activeWorktree` is the slot's CURRENT
+    // value, surfaced for the bash/edit relative-cwd override (the edit-fence).
+    // ABSENT (gate OFF / non-wiring host) ⇒ both omitted ⇒ the worktree tools
+    // yield a typed not_wired failure (and are not registered anyway) AND bash/edit
+    // cwd is `ctx.cwd` exactly as today (byte-identical default-OFF). The current
+    // value is projected here so a worktree entered in an earlier turn is visible
+    // to bash/edit in this turn.
+    ...(config.activeWorktreeSlot !== undefined
+      ? {
+          worktreeSlot: config.activeWorktreeSlot,
+          ...(():
+            | { activeWorktree: NonNullable<ToolContext["activeWorktree"]> }
+            | Record<string, never> => {
+            const cur = config.activeWorktreeSlot.current()
+            return cur !== undefined ? { activeWorktree: cur } : {}
+          })(),
+        }
+      : {}),
   }
 }
 

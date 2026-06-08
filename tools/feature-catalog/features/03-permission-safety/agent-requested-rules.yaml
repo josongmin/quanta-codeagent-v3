@@ -36,7 +36,7 @@ evidence:
   tests:
     unit:
       - tests/unit/agent-requested-rules-hellgate.test.ts
-      - tests/unit/fetch-rules-hellgate.test.ts
+      - tests/unit/cli/fetch-rules-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

@@ -76,6 +76,31 @@ export const singleSelectEnumRequestSchema = z.object({
 })
 export type SingleSelectEnumRequest = z.infer<typeof singleSelectEnumRequestSchema>
 
+/** TICKET-22 — the URL elicitation variant. A server can ask the client to
+ *  open a URL (e.g. an OAuth consent page, a dashboard) in the user's browser.
+ *
+ *  SECURITY: the `url` is restricted to the `http:`/`https:` schemes. `file:`,
+ *  `javascript:`, and `data:` URLs are REJECTED at the schema boundary — a
+ *  malicious/buggy server must never be able to drive the client into opening a
+ *  local file, executing inline script, or rendering an inline document. The
+ *  refinement parses with the WHATWG `URL` constructor (catching the throw) so
+ *  garbage strings are rejected too. */
+const isHttpUrl = (v: string): boolean => {
+  try {
+    const u = new URL(v)
+    return u.protocol === "http:" || u.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
+export const urlRequestSchema = z.object({
+  prompt: z.string().min(1),
+  title: z.string().min(1).optional(),
+  url: z.string().refine(isHttpUrl, { message: "invalid url (http/https only)" }),
+})
+export type UrlRequest = z.infer<typeof urlRequestSchema>
+
 /** Validators for the answer side (used by the cli-prompter retry loop). */
 export const validateString = (
   req: StringRequest,
@@ -123,6 +148,17 @@ export const validateBoolean = (raw: string): { ok: true; value: boolean } | { o
   if (lower === "n" || lower === "no" || lower === "false" || lower === "0")
     return { ok: true, value: false }
   return { ok: false }
+}
+
+/** TICKET-22 — answer-side validator for the URL variant: the value is the
+ *  server-supplied `req.url` itself (the user's answer is the yes/no on the
+ *  separate `Open in browser?` confirm, not a free-typed URL). Mirrors
+ *  {@link validateString}'s `{ok}` shape and re-asserts the http/https scheme
+ *  guard so the security invariant holds even if a caller hand-builds a
+ *  `UrlRequest` without going through {@link urlRequestSchema}. */
+export const validateUrl = (req: UrlRequest): { ok: true; value: string } | { ok: false } => {
+  if (!isHttpUrl(req.url)) return { ok: false }
+  return { ok: true, value: req.url }
 }
 
 /** Re-export the finite helpers for tests that need to assert NaN rejection

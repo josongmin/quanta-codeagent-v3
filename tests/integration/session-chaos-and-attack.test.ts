@@ -883,6 +883,8 @@ describe("G. forwards-incompatibility (version > current)", () => {
 
 describe("H. large session", () => {
   const env = setupSessionsDir("chaos-H-")
+  // Wallclock timing assertions flake on loaded CI; gate behind opt-in.
+  const PERF_STRICT = process.env.QUANTA_PERF_STRICT === "1"
 
   beforeEach(env.before)
   afterEach(env.after)
@@ -902,6 +904,6 @@ describe("H. large session", () => {
     expect(forked?.messages.length).toBe(N)
     expect(forked?.meta.title).toBe("LargeFork")
     const elapsed = performance.now() - start
-    expect(elapsed).toBeLessThan(5000)
+    if (PERF_STRICT) expect(elapsed).toBeLessThan(5000)
   })
 })

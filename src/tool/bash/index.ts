@@ -19,6 +19,7 @@ import type {
   ToolFailure,
   ToolResultEvidence,
 } from "../types"
+import { resolveBashCwd } from "../worktree/cwd-override"
 import { getBashPerCallSandboxFactory } from "./per-call-factory"
 import { getBashSandboxEscalationHandler } from "./sandbox-escalation-wire"
 
@@ -492,12 +493,16 @@ const runShellWithEscalation = async (
   ctx: ToolContext,
   input: Input,
   perCallPort: ReturnType<ReturnType<typeof getBashPerCallSandboxFactory>> | undefined,
+  // ticket-11 — the EFFECTIVE spawn cwd: the active worktree dir when a session
+  // worktree is entered, else `ctx.cwd` (byte-identical legacy). Computed once in
+  // `bashExecute` so the escalation re-run uses the SAME cwd.
+  cwd: string,
 ): Promise<{ readonly result: EscalatableShellResult; readonly note?: string }> => {
   const wrapOutcome: PerCallWrapOutcome = { sandboxApplied: false }
   // Build the runShell options ONCE so an approved unsandboxed re-run can
   // re-spawn the BYTE-SAME command with the per-call wrap REMOVED.
   const baseShellOpts = {
-    cwd: ctx.cwd,
+    cwd,
     signal: ctx.signal,
     ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}),
     ...(ctx.onShellEvent ? { onShellEvent: ctx.onShellEvent } : {}),
@@ -515,7 +520,7 @@ const runShellWithEscalation = async (
 
   return maybeEscalate(r, {
     command: cmd,
-    cwd: ctx.cwd,
+    cwd,
     sandboxApplied: wrapOutcome.sandboxApplied,
     timedOut: r.timedOut,
     ...(ctx.agentLabel !== undefined ? { agentLabel: ctx.agentLabel } : {}),
@@ -577,6 +582,13 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   const mode: "read" | "write" = input.mode ?? "write"
   const shown = cmd.length > CMD_PREVIEW ? `${cmd.slice(0, CMD_PREVIEW)}…` : cmd
 
+  // ticket-11 (P8 worktree edit-fence) — when a session worktree is active, the
+  // shell spawns INSIDE the worktree directory so a RELATIVE command sees the
+  // worktree's files. ABSENT (gate OFF / no active worktree) ⇒ `ctx.cwd`
+  // unchanged (byte-identical). This is the spawn process cwd ONLY — the FS jail
+  // governing read/write/edit is unaffected here (those tools jail themselves).
+  const effectiveCwd = resolveBashCwd(ctx.cwd, ctx.activeWorktree)
+
   // ADR-0296 — when the caller opts into `timeout_behavior: "background"`,
   // delegate to the bg-registry path. The default `"kill"` falls through to
   // the legacy `runShell` branch BYTE-IDENTICALLY.
@@ -587,7 +599,7 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
       shown,
       input.timeout_ms ?? DEFAULT_BG_TIMEOUT_MS,
       ctx.signal,
-      ctx.cwd,
+      effectiveCwd,
     )
     return
   }
@@ -607,7 +619,7 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // optional observer / snapshot / proxy / local-env seams) AND offer the
   // user-gated sandbox-block escalation when a `mode="read"` sandboxed call
   // exits nonzero. The helper keeps `bashExecute` under the complexity cap.
-  const escalated = await runShellWithEscalation(cmd, ctx, input, perCallPort)
+  const escalated = await runShellWithEscalation(cmd, ctx, input, perCallPort, effectiveCwd)
 
   const { status, body } = formatRunBody(escalated.result)
   const escalationNote = escalated.note

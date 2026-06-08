@@ -39,7 +39,7 @@ evidence:
   adrs: ["docs/decisions/0279-automation-engine-wire.md", 215, 240]
   tests:
     unit:
-      - tests/unit/scheduler/automation-wire-hellgate.test.ts
+      - tests/unit/cli/automation-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

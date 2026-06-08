@@ -79,6 +79,7 @@ const fakeConsent = (
       promptEnum: reject,
       promptMultiEnum: reject,
       promptSingleEnum: reject,
+      promptUrl: reject,
     },
   }
 }
@@ -225,6 +226,7 @@ describe("ADR-0470 handler — total (no-throw) contract", () => {
       promptEnum: async () => ({ ok: false, reason: "cancelled" }),
       promptMultiEnum: async () => ({ ok: false, reason: "cancelled" }),
       promptSingleEnum: async () => ({ ok: false, reason: "cancelled" }),
+      promptUrl: async () => ({ ok: false, reason: "cancelled" }),
     }
     const handler = createLlmSamplingHandler({ llm, consent: prompter })
     const outcome = await handler.createMessage(req)

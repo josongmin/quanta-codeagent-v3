@@ -6,6 +6,7 @@ import { gitWriteGuardDeny } from "../git-write-guard-result"
 import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
 import type { Tool, ToolContext, ToolEvent, ToolFailure } from "../types"
+import { resolveEditBase } from "../worktree/cwd-override"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
 import { type LineRange, lineCount, validateLineRanges } from "./line-range"
@@ -292,12 +293,16 @@ const planEdit = async (
   fs: FileSystemPort,
   input: Input,
   ctx: ToolContext,
+  // ticket-11 — the resolved {path,base} the worktree edit-fence produced. The
+  // FS read/commit use `target.path`/`target.base`; the model-facing messages
+  // keep `input.path` (the raw path the model typed). Absent worktree ⇒
+  // `{ path: input.path, base: ctx.cwd }` (byte-identical legacy).
+  target: { readonly path: string; readonly base: string },
 ): Promise<
   | { kind: "ready"; before: string; next: string; message: string }
   | { kind: "failure"; result: { ok: false; output: string; failure: ToolFailure } }
 > => {
-  const cwd = ctx.cwd
-  const source = await fs.readFile(input.path, cwd)
+  const source = await fs.readFile(target.path, target.base)
   const preconditionFailure = checkHashPrecondition(source, input.path, input.expected_hash)
   if (preconditionFailure !== null) return { kind: "failure", result: preconditionFailure }
   // H12 — validate caller-supplied line ranges BEFORE matching. A malformed
@@ -357,17 +362,20 @@ const planEdit = async (
 const commitEdit = async (
   fs: FileSystemPort,
   ctx: ToolContext,
-  path: string,
+  // ticket-11 — resolved write target: `path` is the worktree-resolved path,
+  // `base` is the SESSION jail root (absolute paths stay session-jailed; the
+  // worktree never re-jails). Absent worktree ⇒ `{ input.path, ctx.cwd }`.
+  target: { readonly path: string; readonly base: string },
   next: string,
   expectedHash: string | undefined,
 ): Promise<void> => {
   const cs = ctx.criticalSection?.begin()
   try {
     if (expectedHash !== undefined && fs.writeFileAtomic !== undefined) {
-      await fs.writeFileAtomic(path, next, ctx.cwd)
+      await fs.writeFileAtomic(target.path, next, target.base)
       return
     }
-    await fs.writeFile(path, next, ctx.cwd)
+    await fs.writeFile(target.path, next, target.base)
   } finally {
     cs?.end()
   }
@@ -387,10 +395,11 @@ const editStaticDeny = (path: string, ctx: ToolContext): ToolEvent | null =>
 const editPreCommitDeny = async (
   fs: FileSystemPort,
   ctx: ToolContext,
-  path: string,
+  // ticket-11 — resolved target (worktree-aware path + session jail base).
+  target: { readonly path: string; readonly base: string },
 ): Promise<ToolEvent | null> => {
   if (ctx.readFileState !== undefined) {
-    const cur = await fs.statFile(path, ctx.cwd)
+    const cur = await fs.statFile(target.path, target.base)
     const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
     if (!guard.ok) {
       return {
@@ -446,11 +455,19 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       yield staticDeny
       return
     }
+    // ticket-11 (P8 worktree edit-fence) — resolve the effective FS target. When
+    // a session worktree is active, a RELATIVE path resolves against the worktree
+    // dir; an ABSOLUTE path STILL jails to the SESSION root (the worktree is a
+    // relative-cwd override, NOT a trust-boundary redefinition). Absent worktree ⇒
+    // `{ path: input.path, base: ctx.cwd }` (byte-identical legacy). The
+    // git-write/glob static denies above ran on `input.path` (the raw pattern the
+    // model typed) — correct, those are path-shape matchers, not FS resolution.
+    const target = resolveEditBase(input.path, ctx.cwd, ctx.activeWorktree)
     // Resolve relative paths against the session cwd, not process.cwd().
     // The jail check fires in readFile() (and again in writeFile()) BEFORE
     // any write, so a denied path is NEVER a partial write.
     try {
-      const planned = await planEdit(fs, input, ctx)
+      const planned = await planEdit(fs, input, ctx, target)
       if (planned.kind === "failure") {
         yield { type: "result", result: planned.result }
         return
@@ -458,7 +475,7 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // ADR-0474 stale-read-guard + jun-6 exfil-rail (a) per-turn write-budget,
       // both AFTER planning and BEFORE the commit (a deny is never a partial
       // write). Default-OFF ⇒ `null` ⇒ byte-identical.
-      const preCommitDeny = await editPreCommitDeny(fs, ctx, input.path)
+      const preCommitDeny = await editPreCommitDeny(fs, ctx, target)
       if (preCommitDeny) {
         yield preCommitDeny
         return
@@ -466,7 +483,7 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // jun-6 tool-interrupt-behavior — the commit runs inside the OPTIONAL
       // critical section (inside `commitEdit`) so an in-flight ESC cannot tear a
       // half-written file (no-op when the seam is unwired; byte-identical).
-      await commitEdit(fs, ctx, input.path, planned.next, input.expected_hash)
+      await commitEdit(fs, ctx, target, planned.next, input.expected_hash)
       // ADR-0440 — feed the before/after to the optional tool-diff sink so the
       // web-daemon emits a `tool.diff` canvas frame. Default-OFF: no-op unless
       // `ctx.toolDiff` + `ctx.toolCallId` are both wired (gate ON). No recompute

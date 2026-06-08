@@ -81,6 +81,12 @@ export interface CreateLLMOptions {
   /** Reasoning effort (Responses surface). When omitted, derived from
    *  `QUANTA_REASONING_EFFORT`. */
   reasoningEffort?: string
+  /** Reasoning summary request (Responses surface). When omitted, derived from
+   *  `QUANTA_REASONING_SUMMARY` (bool). True ⇒ `reasoning.summary:"auto"`. */
+  reasoningSummary?: boolean
+  /** Reasoning output verbosity (Responses surface). When omitted, derived from
+   *  `QUANTA_REASONING_VERBOSITY` (`low|medium|high`). Maps to `text.verbosity`. */
+  reasoningVerbosity?: string
   /** ChatGPT-OAuth body debug logging. When omitted, derived from
    *  `QUANTA_DEBUG_OAUTH === "1"`. */
   debugOAuth?: boolean
@@ -132,10 +138,13 @@ const ADAPTER_REGISTRY: Record<
     // resolved HERE (composition root) and threaded in as plain adapter config.
     const serviceTier = resolveServiceTier(opts, env)
     const reasoningEffort = resolveReasoningEffort(opts, env)
+    const reasoningVerbosity = resolveReasoningVerbosity(opts, env)
     return new OpenAIResponsesAdapter({
       ...shared,
       ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(resolveReasoningSummary(opts, env) ? { reasoningSummary: true } : {}),
+      ...(reasoningVerbosity !== undefined ? { reasoningVerbosity } : {}),
       ...(resolveReasoningCarryover(env) ? { reasoningCarryover: true } : {}),
     })
   },
@@ -181,12 +190,15 @@ const ADAPTER_REGISTRY: Record<
   "chatgpt-oauth": (_apiKey, model, _opts, env) => {
     const serviceTier = resolveServiceTier(_opts, env)
     const reasoningEffort = resolveReasoningEffort(_opts, env)
+    const reasoningVerbosity = resolveReasoningVerbosity(_opts, env)
     return new ChatGPTOAuthAdapter({
       model,
       env,
       debugOAuth: resolveDebugOAuth(_opts, env),
       ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(resolveReasoningSummary(_opts, env) ? { reasoningSummary: true } : {}),
+      ...(reasoningVerbosity !== undefined ? { reasoningVerbosity } : {}),
       ...(resolveReasoningCarryover(env) ? { reasoningCarryover: true } : {}),
       ...(_opts.maxTokens !== undefined ? { maxTokens: _opts.maxTokens } : {}),
       ...(_opts.streamFirstChunkMs !== undefined
@@ -225,6 +237,22 @@ export const resolveServiceTier = (
  *  closed value set — here we just forward the raw string. */
 const resolveReasoningEffort = (opts: CreateLLMOptions, env: EnvLikeDecl): string | undefined =>
   opts.reasoningEffort ?? env.QUANTA_REASONING_EFFORT
+
+/** Composition-root resolution of the reasoning-summary request
+ *  (`QUANTA_REASONING_SUMMARY`, bool). Explicit option wins; otherwise the
+ *  broadened gate vocabulary `{1,on,true,yes}`. Default-OFF ⇒ false ⇒ no
+ *  `reasoning.summary` (byte-identical). */
+export const resolveReasoningSummary = (opts: CreateLLMOptions, env: EnvLikeDecl): boolean =>
+  opts.reasoningSummary ?? gateOn(env, "QUANTA_REASONING_SUMMARY")
+
+/** Composition-root resolution of the reasoning output verbosity
+ *  (`QUANTA_REASONING_VERBOSITY`, enum `low|medium|high`). Explicit option wins;
+ *  otherwise the raw env string — the wire normalizes the closed value set (an
+ *  out-of-set value is dropped there, never reaching the body). */
+export const resolveReasoningVerbosity = (
+  opts: CreateLLMOptions,
+  env: EnvLikeDecl,
+): string | undefined => opts.reasoningVerbosity ?? env.QUANTA_REASONING_VERBOSITY
 
 /** H15 — composition-root resolution of o-series reasoning carry-over
  *  (`QUANTA_REASONING_CARRYOVER`). Default-OFF: unset ⇒ false ⇒ the Responses

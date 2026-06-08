@@ -120,10 +120,23 @@ export interface BuildResponsesBodyOptions {
    *  root and threaded in as plain config — this wire never reads process.env
    *  (slice-boundary invariant). Omitted ⇒ no `service_tier` field (default). */
   readonly serviceTier?: string
-  /** Reasoning effort (`"minimal" | "low" | "medium" | "high"`). Env-derived
-   *  (`QUANTA_REASONING_EFFORT`) but resolved at the composition root and passed
-   *  in. Omitted ⇒ no `reasoning` field (default). */
+  /** Reasoning effort (`"minimal" | "low" | "medium" | "high" | "xhigh"`).
+   *  Env-derived (`QUANTA_REASONING_EFFORT`) but resolved at the composition
+   *  root and passed in. Omitted ⇒ no `effort` inside `reasoning` (default). */
   readonly reasoningEffort?: string
+  /** Reasoning-summary request (`QUANTA_REASONING_SUMMARY`, bool). When true,
+   *  `reasoning.summary: "auto"` is added so the model streams a human-readable
+   *  reasoning summary (`response.reasoning_summary_text.delta` — already mapped
+   *  to `thinking_delta`). STANDALONE: the `reasoning` object is emitted when
+   *  EITHER an effort OR summary is requested, so summary works even with no
+   *  effort knob. Default-OFF ⇒ no `summary` key (byte-identical). */
+  readonly reasoningSummary?: boolean
+  /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`,
+   *  `"low" | "medium" | "high"`). The wire shape is `text: { verbosity }` — a
+   *  TOP-LEVEL sibling of `reasoning`/`input`, NOT a flat `verbosity` key (which
+   *  the API silently ignores). Omitted / out-of-set ⇒ no `text` field, so the
+   *  API resolves its own default verbosity (no default pinned here). */
+  readonly reasoningVerbosity?: string
   /**
    * H15 reasoning carry-over re-emit gate (`QUANTA_REASONING_CARRYOVER`,
    * OpenAI-Responses ONLY). Resolved at the composition root and threaded in as
@@ -279,13 +292,36 @@ const normalizeResponsesServiceTier = (value: string | undefined): string | unde
   value !== undefined && value.length > 0 ? value : undefined
 
 /** Normalize a caller-supplied reasoning-effort value to the closed
- *  `minimal | low | medium | high` set (case-insensitive). Anything else ⇒
- *  omitted. Env derivation (`QUANTA_REASONING_EFFORT`) happens at the
+ *  `minimal | low | medium | high | xhigh` set (case-insensitive). Anything
+ *  else ⇒ omitted. `xhigh` is a forward-compat extra-effort tier some Responses
+ *  models expose; it is an opaque pass-through here — this normalizer stays the
+ *  CLOSED-SET SSOT so an out-of-set value (`ultra`, typo) never reaches the wire
+ *  and 400s. Env derivation (`QUANTA_REASONING_EFFORT`) happens at the
  *  composition root; this wire never reads process.env. */
-const normalizeResponsesReasoningEffort = (value: string | undefined): string | undefined => {
+export const normalizeResponsesReasoningEffort = (
+  value: string | undefined,
+): string | undefined => {
   const effort = value?.toLowerCase()
-  return effort === "minimal" || effort === "low" || effort === "medium" || effort === "high"
+  return effort === "minimal" ||
+    effort === "low" ||
+    effort === "medium" ||
+    effort === "high" ||
+    effort === "xhigh"
     ? effort
+    : undefined
+}
+
+/** Normalize a caller-supplied reasoning `text.verbosity` value to the closed
+ *  `low | medium | high` set (case-insensitive). Anything else (incl. undefined
+ *  / empty) ⇒ omitted, so the API resolves its OWN default verbosity rather than
+ *  us pinning one. Env derivation (`QUANTA_REASONING_VERBOSITY`) happens at the
+ *  composition root; this wire never reads process.env. */
+export const normalizeResponsesReasoningVerbosity = (
+  value: string | undefined,
+): string | undefined => {
+  const verbosity = value?.toLowerCase()
+  return verbosity === "low" || verbosity === "medium" || verbosity === "high"
+    ? verbosity
     : undefined
 }
 
@@ -315,6 +351,21 @@ export const buildResponsesBody = (
   })()
   const serviceTier = normalizeResponsesServiceTier(options.serviceTier)
   const reasoningEffort = normalizeResponsesReasoningEffort(options.reasoningEffort)
+  const reasoningSummary = options.reasoningSummary === true
+  const verbosity = normalizeResponsesReasoningVerbosity(options.reasoningVerbosity)
+  // The `reasoning` object co-locates effort + summary. It is emitted iff EITHER
+  // is requested (summary is standalone — gating it on effort alone would drop
+  // the summary stream when no effort knob is set). Default-OFF byte-identity:
+  // when both are absent `reasoning` is `null` and the spread below adds NO key
+  // — and when ONLY an effort is set the object is `{effort}`, exactly today's
+  // shape (no stray `summary` key leaks in).
+  const reasoning =
+    reasoningEffort !== undefined || reasoningSummary
+      ? {
+          ...(reasoningEffort !== undefined ? { effort: reasoningEffort } : {}),
+          ...(reasoningSummary ? { summary: "auto" as const } : {}),
+        }
+      : null
   const toolChoice = toResponsesToolChoice(
     input.toolChoice,
     input.tools.map((tool) => tool.name),
@@ -340,7 +391,15 @@ export const buildResponsesBody = (
       ? { prompt_cache_retention: input.promptCacheRetention }
       : {}),
     ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
-    ...(reasoningEffort !== undefined ? { reasoning: { effort: reasoningEffort } } : {}),
+    // `reasoning` carries `{ effort?, summary? }`. Emitted only when non-empty
+    // (effort OR summary requested); absent ⇒ no `reasoning` key (byte-identical
+    // when both knobs are off — and an effort-only call keeps its legacy
+    // `{ effort }` shape exactly).
+    ...(reasoning !== null ? { reasoning } : {}),
+    // Verbosity is a TOP-LEVEL `text: { verbosity }` sibling (NOT a flat
+    // `verbosity` key — that is silently ignored by the API). Independent of
+    // `reasoning`. Omitted / out-of-set ⇒ no `text` key (API default verbosity).
+    ...(verbosity !== undefined ? { text: { verbosity } } : {}),
     // H15 — request encrypted reasoning back ONLY when we are actually
     // re-emitting prior reasoning items (carry-over on + non-empty). The
     // `include` field is the body-level SSOT for "echo reasoning.encrypted_content"

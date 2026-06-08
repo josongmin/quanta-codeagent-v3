@@ -33,6 +33,7 @@
  */
 
 import type { SecretFinding, SecretScanner } from "@/security/secret-detection"
+import type { HeaderRule } from "./header-rules"
 
 /** The two egress verbs. `deny` blocks the whole request (403); `redact` masks
  *  the matched secret spans and forwards the rest. */
@@ -56,6 +57,19 @@ export interface SecretEgressConfig {
    *  forwarded UNSCANNED with a logged warning — never blocked-by-truncation.
    *  REQUIRED knob (no hardcoded default — no-heuristics rule). */
   readonly maxBodyBytes: number
+  /**
+   * ticket-13 (§12.2) — operator-authored OUTBOUND header-rewrite rules for the
+   * PLAINTEXT-HTTP path, applied AFTER this slice's redaction (so a redacted/
+   * dropped header can never be revived by a rule). Absent/empty ⇒ the forwarded
+   * headers are byte-identical to today. See `./header-rules`.
+   */
+  readonly headerRules?: readonly HeaderRule[]
+  /**
+   * ticket-13 (§12.2) — cross-origin redirect hygiene flag (carried for shape
+   * parity with {@link import("./mitm").MitmConfig}). See `./header-rules`
+   * `shouldStripOnRedirect`. Absent/false ⇒ byte-identical.
+   */
+  readonly crossOriginStrip?: boolean
 }
 
 /** One declared-secret exact-match hit (the zero-FP path). */

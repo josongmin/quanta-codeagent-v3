@@ -19,6 +19,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ConsolidatorHookInput,
+  type Phase2AutoTriggerInput,
   runMemoryConsolidatorHook,
   runMemoryPhase2AutoTrigger,
 } from "@/agent/memory-consolidator-hook"
@@ -80,9 +81,12 @@ describe("background Phase 2 dispatch — logger no-throw (C-2)", () => {
       const port = {
         consolidate: async () => ({ memoryMd: "m", rawMemoriesMd: "r", memorySummaryMd: "s" }),
       }
-      // biome-ignore lint/suspicious/noExplicitAny: structural port stubs — this
-      // test only exercises the no-throw boundary, not the phase2 contract.
-      const phase2 = { enabled: true, port, store, writer } as any
+      // Structural port stubs — this test only exercises the no-throw boundary,
+      // not the full phase2 contract, so the duck-typed stubs are cast through
+      // unknown to the input shape (not `any`, which would disable all checks).
+      const phase2 = { enabled: true, port, store, writer } as unknown as NonNullable<
+        Phase2AutoTriggerInput["phase2"]
+      >
       const out = await runMemoryPhase2AutoTrigger({ phase2 }, boom)
       expect(out.kind === "scheduled" || out.kind === "skipped").toBe(true)
       // Let the queued microtask + its promise chain settle.

@@ -5,7 +5,7 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { backendErrorEvent, callPort } from "./no-throw"
-import type { TasksHandle, TasksTaskResult } from "./port"
+import type { TasksHandle, TasksTaskInfo, TasksTaskResult } from "./port"
 
 export const getTaskInputSchema = z.object({
   taskId: z.string().min(1, "taskId is required"),
@@ -22,6 +22,25 @@ const renderTerminal = (r: Exclude<TasksTaskResult, { state: "not-ready" }>): st
     default:
       return "cancelled"
   }
+}
+
+/** TICKET-21 — render the optional ttl/poll/related metadata as a trailing
+ *  suffix. Each piece appears ONLY when the server advertised it; with NONE of
+ *  the three the suffix is the empty string → the render is byte-identical to
+ *  the legacy output (the existing line-exact tests stay green).
+ *
+ *  `ttlMs` is the server's advertised remaining budget (a one-shot getInfo has
+ *  no elapsed clock to subtract), surfaced human-relative as "~Nms left".
+ *  `relatedTaskIds` is an actionable affordance: the sibling ids the model can
+ *  poll / cancel together. */
+const renderMeta = (info: TasksTaskInfo): string => {
+  const parts: string[] = []
+  if (info.ttlMs !== undefined) parts.push(`ttl: ~${info.ttlMs}ms left`)
+  if (info.pollIntervalMs !== undefined) parts.push(`poll: ~${info.pollIntervalMs}ms`)
+  if (info.relatedTaskIds !== undefined && info.relatedTaskIds.length > 0) {
+    parts.push(`related: ${info.relatedTaskIds.join(", ")} — poll/cancel together`)
+  }
+  return parts.length > 0 ? `\n${parts.join("  ·  ")}` : ""
 }
 
 export const getMcpTaskTool = (port: TasksHandle): Tool<GetTaskInput> => ({
@@ -69,14 +88,18 @@ export const getMcpTaskTool = (port: TasksHandle): Tool<GetTaskInput> => ({
       return
     }
     const result = resultCall.value
+    const meta = renderMeta(info)
     if (result.state === "not-ready") {
       yield {
         type: "result",
-        result: { ok: true, output: `not-ready: ${taskId} [${info.state}]` },
+        result: { ok: true, output: `not-ready: ${taskId} [${info.state}]${meta}` },
       }
       return
     }
     const payload = renderTerminal(result)
-    yield { type: "result", result: { ok: true, output: `${taskId} [${info.state}]\n${payload}` } }
+    yield {
+      type: "result",
+      result: { ok: true, output: `${taskId} [${info.state}]\n${payload}${meta}` },
+    }
   },
 })

@@ -18,9 +18,19 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = Object.freeze([
     // §25.1 declarative multi-agent workflow. Gate: QUANTA_WORKFLOW
     // (apps/cli/cli-knobs.ts + manifest config-slot subagent.enableWorkflow).
     // LLM tool only (`run_workflow`); it is not a slash/skill/hook surface.
+    //
+    // COMPOSITE gate (verified in apps/cli/internal.ts buildSubagentConfig):
+    //   const enabled = readCliKnob("QUANTA_SUBAGENT","bool") ?? true   // default-ON
+    //   const enableWorkflow = enabled && (readCliKnob("QUANTA_WORKFLOW","bool") ?? false)
+    // ⇒ `run_workflow` is registered IFF the parent subagent gate QUANTA_SUBAGENT
+    // (default-ON) AND QUANTA_WORKFLOW are both truthy. So a lone QUANTA_WORKFLOW=1
+    // with QUANTA_SUBAGENT=0 is NOT exposed — the split-brain the env-only gate
+    // mispredicted. `requires` carries QUANTA_SUBAGENT with defaultOn:true so the
+    // prediction mirrors the default-ON `readBool(env[..], true)` semantics.
     id: "workflow",
     gate: { envKey: "QUANTA_WORKFLOW" },
     surfaces: { llmTool: true },
+    requires: [{ envKey: "QUANTA_SUBAGENT", defaultOn: true }],
     describe: "LLM-authored declarative multi-agent workflow (run_workflow tool).",
   },
   {
@@ -34,9 +44,16 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = Object.freeze([
   {
     // H14a image generation tool. Gate: QUANTA_IMAGE_GEN (runtime-config field
     // imageGen). Exposes the image_gen LLM tool.
+    //
+    // RUNTIME-CONDITIONED: real exposure ALSO requires an image-provider API key
+    // (a NON-env runtime signal). So the env-only gate is an UPPER BOUND: the key
+    // can only NARROW it (real ⊆ predicted), never widen it. `runtimeConditioned`
+    // tells the consistency check to assert that upper-bound relation, not strict
+    // equality (the provider key is resolved at runtime, not from env gates).
     id: "image-gen",
     gate: { envKey: "QUANTA_IMAGE_GEN" },
     surfaces: { llmTool: true },
+    runtimeConditioned: true,
     describe: "Image generation tool (image_gen).",
   },
   {

@@ -228,6 +228,65 @@ describe("Elicitation — empty options (HELL-E-11)", () => {
   })
 })
 
+describe("Elicitation — URL variant (HELL-E-13, ticket-22)", () => {
+  test("'y' → opener called ONCE with the url and {ok:true, value:url}", async () => {
+    const io = scriptedIO(["y"])
+    const opened: string[] = []
+    const r = await cliPrompter(io, (u) => opened.push(u)).promptUrl({
+      prompt: "Open the dashboard?",
+      url: "https://example.com/dash",
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) throw new Error("unreachable")
+    expect(r.value).toBe("https://example.com/dash")
+    // opener fired exactly once with the url.
+    expect(opened).toEqual(["https://example.com/dash"])
+    // The FULL url is rendered on its own line (phishing safety).
+    expect(io.written.some((w) => w.includes("https://example.com/dash"))).toBe(true)
+    expect(io.written.some((w) => w.toLowerCase().includes("open in browser"))).toBe(true)
+  })
+
+  test("'n' → cancelled and opener NOT called", async () => {
+    const io = scriptedIO(["n"])
+    const opened: string[] = []
+    const r = await cliPrompter(io, (u) => opened.push(u)).promptUrl({
+      prompt: "Open?",
+      url: "https://example.com",
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error("unreachable")
+    expect(r.reason).toBe("cancelled")
+    expect(opened).toEqual([])
+  })
+
+  test("aborted signal → cancelled, opener NOT called", async () => {
+    const io = scriptedIO([])
+    const opened: string[] = []
+    const ac = new AbortController()
+    ac.abort()
+    const r = await cliPrompter(io, (u) => opened.push(u)).promptUrl(
+      { prompt: "Open?", url: "https://example.com" },
+      ac.signal,
+    )
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error("unreachable")
+    expect(r.reason).toBe("cancelled")
+    expect(opened).toEqual([])
+  })
+
+  test("opener that throws is swallowed — still {ok:true, value:url} (no throw escapes)", async () => {
+    const io = scriptedIO(["y"])
+    const r = await cliPrompter(io, () => {
+      throw new Error("spawn blew up")
+    }).promptUrl({ prompt: "Open?", url: "https://example.com" })
+    // The browser launch is fire-and-forget — a failure to spawn must NOT
+    // fail the elicitation result.
+    expect(r.ok).toBe(true)
+    if (!r.ok) throw new Error("unreachable")
+    expect(r.value).toBe("https://example.com")
+  })
+})
+
 describe("Elicitation — Number/Integer non-finite (HELL-E-12)", () => {
   test("Number rejects NaN", async () => {
     const io = scriptedIO(["NaN", "NaN"])

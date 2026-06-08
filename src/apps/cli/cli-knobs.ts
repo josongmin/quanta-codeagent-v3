@@ -613,6 +613,26 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     describe: "MCP crash auto-restart (opt-in).",
     readSite: "internal.ts",
   },
+  // ── TICKET-19 reverse-MCP server (quanta AS an MCP server). RCE surface, so
+  //    QUANTA_MCP_SERVER is a STRICT gate (=== '1'); the EXPOSE list only widens
+  //    the tools/list surface — every call still passes the permission gate.
+  {
+    envKey: "QUANTA_MCP_SERVER",
+    kind: "bool",
+    default: false,
+    group: "mcp",
+    describe: "Expose quanta AS an MCP server over stdio (strict =1; RCE surface, read-only by default).",
+    readSite: "mcp-server-setup.ts",
+  },
+  {
+    envKey: "QUANTA_MCP_SERVER_EXPOSE",
+    kind: "string",
+    default: "",
+    group: "mcp",
+    describe:
+      "Comma list of extra tools the reverse-MCP server exposes (validated against the registry; each call is still permission-gated).",
+    readSite: "mcp-server-setup.ts",
+  },
   {
     envKey: "QUANTA_COMPACT_BREAKER",
     kind: "bool",

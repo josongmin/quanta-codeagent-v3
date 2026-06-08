@@ -17,7 +17,13 @@ import {
   resolveOfferedVersion,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "./protocol-version"
-import type { McpPrompt } from "./resources"
+import type {
+  McpCompletionArgument,
+  McpCompletionRef,
+  McpCompletionResult,
+  McpPrompt,
+  McpResourceTemplate,
+} from "./resources"
 import {
   isResourceNotificationMethod,
   isRootsMethod,
@@ -26,10 +32,12 @@ import {
   type McpResourceContent,
   type McpResourceObserver,
   type McpResult,
+  parseCompletionResult,
   parsePromptGet,
   parsePromptList,
   parseResourceList,
   parseResourceReadCapped,
+  parseResourceTemplateList,
   RESOURCE_READ_MAX_CONTENT_CHARS,
   type RootsProviderPort,
   routeResourceNotification,
@@ -664,6 +672,15 @@ export class McpClient {
     return caps !== null && asRecord(caps.prompts) !== null
   }
 
+  /** TICKET-20 — does the connected server advertise `completions`? An
+   *  outbound `completion/complete` is refused locally (typed `unsupported`)
+   *  unless this is true, so we never emit a request the server answers with a
+   *  raw `-32601`. */
+  serverSupportsCompletions(): boolean {
+    const caps = this.serverCapabilities
+    return caps !== null && asRecord(caps.completions) !== null
+  }
+
   /** ADR-0431 — dispatch a single outbound JSON-RPC request and return the raw
    *  `result`. Mirrors the inbound elicitation router but for client→server
    *  calls: it goes through the same correlated `request`/timeout/pending core
@@ -842,6 +859,36 @@ export class McpClient {
     }
     const params = args === undefined ? { name } : { name, arguments: args }
     return this.typedRequest("prompts/get", params, parsePromptGet)
+  }
+
+  /** TICKET-20 — `resources/templates/list` → typed `McpResourceTemplate[]`
+   *  (RFC 6570 `uriTemplate` entries). Folds under the server's `resources`
+   *  capability (a template list is a parameterized resource list); refused
+   *  locally with `unsupported` when the server omits `resources` (no raw
+   *  `-32601` round-trip). A malformed response → `malformed`; an all-malformed
+   *  list → `ok` with `[]`. Never throws. */
+  async listResourceTemplates(): Promise<McpResult<McpResourceTemplate[]>> {
+    if (!this.serverSupportsResources()) {
+      return unsupported("resources", this.config.name)
+    }
+    return this.typedRequest("resources/templates/list", {}, parseResourceTemplateList)
+  }
+
+  /** TICKET-20 — `completion/complete` → typed {@link McpCompletionResult}.
+   *  Capability-gated on the SERVER's `completions` capability: refused locally
+   *  with `unsupported` (no `completion/complete` frame ever put on the wire)
+   *  when the server didn't advertise it. `ref` is a discriminated union
+   *  ({@link McpCompletionRef}) so callers branch type-safely. An EMPTY
+   *  `values:[]` is a first-class OK; a malformed completion → `malformed`.
+   *  Never throws. */
+  async complete(
+    ref: McpCompletionRef,
+    argument: McpCompletionArgument,
+  ): Promise<McpResult<McpCompletionResult>> {
+    if (!this.serverSupportsCompletions()) {
+      return unsupported("completions", this.config.name)
+    }
+    return this.typedRequest("completion/complete", { ref, argument }, parseCompletionResult)
   }
 
   /** Shared no-throw request+parse core for the typed resource/prompt methods.

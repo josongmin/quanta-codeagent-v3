@@ -1,5 +1,10 @@
 import * as readline from "node:readline/promises"
-import { createOnConfirmReviewerPort, loadNamedAgents, type NamedAgentResolver } from "@/agent"
+import {
+  createOnConfirmReviewerPort,
+  createWorktreeSlot,
+  loadNamedAgents,
+  type NamedAgentResolver,
+} from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
@@ -8,8 +13,9 @@ import { CircumventionTracker, type PermissionStore, type ToolAction } from "@/p
 import type { PendingApprovalView } from "@/protocol/session"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
-import { runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfig } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
+import type { WorktreeSlotHandle } from "@/tool"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
@@ -96,6 +102,12 @@ const buildBootstrapContextArgs = (args: {
    *  Threaded onto the overlay so the per-turn AgentConfig carries it. Absent ⇒
    *  no `.quanta/agents` (or load fault) ⇒ overlay slot omitted (byte-identical). */
   readonly namedAgentResolver?: NamedAgentResolver
+  /** ticket-11 (P8 worktree) — session-scoped active-worktree slot, minted at the
+   *  comp-root ONLY when `QUANTA_WORKTREE_TOOL` is on. Threaded onto the overlay so
+   *  the per-turn AgentConfig carries it; features.ts registers the worktree tools
+   *  over it and dispatch projects its value onto the bash/edit edit-fence. Absent
+   *  ⇒ tools unregistered + cwd byte-identical (default-OFF). */
+  readonly activeWorktreeSlot?: WorktreeSlotHandle
 }): Parameters<typeof composeRuntimeBootstrapContext>[0] => {
   const {
     boot,
@@ -110,6 +122,7 @@ const buildBootstrapContextArgs = (args: {
     autoReview,
     env,
     namedAgentResolver,
+    activeWorktreeSlot,
   } = args
   // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` (this
   // surface builds its base via the host overlay, not `applyKnobs`). Absent /
@@ -142,6 +155,10 @@ const buildBootstrapContextArgs = (args: {
       // a non-empty `.quanta/agents` registry. Absent ⇒ slot omitted ⇒ the
       // per-turn AgentConfig has no resolver (default-OFF byte-identical).
       ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
+      // ticket-11 (P8 worktree) — overlay the session-scoped slot when
+      // QUANTA_WORKTREE_TOOL minted one. Absent ⇒ slot omitted ⇒ worktree tools
+      // unregistered + bash/edit cwd byte-identical (default-OFF).
+      ...(activeWorktreeSlot !== undefined ? { activeWorktreeSlot } : {}),
     },
   }
 }
@@ -248,6 +265,14 @@ export const composeCliRuntimeContext = async (
   const namedAgents = await loadNamedAgents(boot.cwd).catch(() => undefined)
   const namedAgentResolver =
     namedAgents !== undefined && namedAgents.size > 0 ? namedAgents : undefined
+  // ticket-11 (P8 worktree) — mint the session-scoped active-worktree slot ONLY
+  // when `QUANTA_WORKTREE_TOOL` is on, carrying the immutable session repoRoot +
+  // the SESSION-RESOLVED jailed `boot.cwd`. Gate off ⇒ undefined ⇒ worktree tools
+  // unregistered + bash/edit cwd byte-identical. `boot.cwd` is the session jail
+  // root the edit-fence keeps absolute writes within — the slot NEVER widens it.
+  const activeWorktreeSlot = gateOn(args.envSource ?? process.env, "QUANTA_WORKTREE_TOOL")
+    ? createWorktreeSlot({ repoRoot: boot.cwd, sessionCwd: boot.cwd })
+    : undefined
   const runtimeContext = await composeRuntimeBootstrapContext({
     ...buildBootstrapContextArgs({
       boot,
@@ -262,6 +287,7 @@ export const composeCliRuntimeContext = async (
       autoReview,
       env: args.envSource ?? process.env,
       ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
+      ...(activeWorktreeSlot !== undefined ? { activeWorktreeSlot } : {}),
     }),
     ...(args.convStore !== undefined || args.responsesStore !== undefined
       ? {

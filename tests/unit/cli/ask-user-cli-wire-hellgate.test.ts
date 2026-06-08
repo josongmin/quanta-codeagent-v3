@@ -31,6 +31,7 @@ const fakePrompter = (calls: string[]): ElicitationPrompter => {
     promptEnum: (r) => (calls.push("enum"), ok(r.options[0] as string)),
     promptMultiEnum: (r) => (calls.push("multiEnum"), ok([r.options[0] as string])),
     promptSingleEnum: () => (calls.push("singleEnum"), ok("x")),
+    promptUrl: (r) => (calls.push("url"), ok(r.url)),
   }
 }
 

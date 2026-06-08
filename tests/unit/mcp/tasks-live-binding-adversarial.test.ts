@@ -26,6 +26,8 @@ import { loadMcpTools } from "@/agent"
 import { clientTasksPort, McpClient } from "@/mcp"
 import type { JsonRpcMessage } from "@/mcp/jsonrpc"
 import type { McpTransport, McpTransportMessageHandler } from "@/mcp/transports/port"
+import type { TasksHandle, TasksTaskInfo, TasksTaskResult } from "@/tool/mcp_tasks"
+import { getMcpTaskTool, listMcpTasksTool } from "@/tool/mcp_tasks"
 
 // --- scripted transport -----------------------------------------------------
 
@@ -508,5 +510,195 @@ describe("cancel → getResult race resolves deterministically", () => {
     expect(await port.getResult("t")).toEqual({ state: "cancelled" })
     await port.cancel("t") // idempotent on terminal: empty result ⇒ ok again
     await client.stop()
+  })
+})
+
+// === 8. TICKET-21 codec: ttlMs / pollIntervalMs / relatedTaskIds ============
+//
+// The 3 new optional fields are capability-free additive fields: when the
+// server omits them, the parsed info is BYTE-IDENTICAL to the legacy shape.
+// The codec sanitizes every field (a hostile server cannot inject a negative
+// interval, a NaN ttl, a string ms, or a circular self-link).
+
+describe("codec: optional ttlMs / pollIntervalMs / relatedTaskIds (sanitized + omitted)", () => {
+  test("BYTE-IDENTITY — getInfo with NONE of the 3 fields ⇒ exactly {taskId,state}", async () => {
+    // RED-ON-INJECTION anchor: if the codec ever sets ttlMs:undefined (or any of
+    // the new keys unconditionally), this exact toEqual breaks.
+    const { client } = await startedClient((method) =>
+      method === "tasks/getInfo" ? ok({ taskId: "t", state: "pending" }) : ok({}),
+    )
+    const info = await clientTasksPort(client).getInfo("t")
+    expect(info).toEqual({ taskId: "t", state: "pending" })
+    // `toEqual` ignores `undefined`-valued keys, so also assert the keys are
+    // literally ABSENT — a codec that set `ttlMs:undefined` would slip past the
+    // toEqual above but is caught here (conditional-spread guarantee).
+    expect(Object.keys(info ?? {}).sort()).toEqual(["state", "taskId"])
+    await client.stop()
+  })
+
+  test("happy: ttlMs/pollIntervalMs/relatedTaskIds carry through verbatim (+ alias keys)", async () => {
+    const { client } = await startedClient((method) =>
+      method === "tasks/getInfo"
+        ? ok({
+            taskId: "t",
+            state: "in_progress",
+            ttl: 480, // alias of ttlMs
+            pollInterval: 50, // alias of pollIntervalMs
+            relatedTaskIds: ["a", "b"],
+          })
+        : ok({}),
+    )
+    expect(await clientTasksPort(client).getInfo("t")).toEqual({
+      taskId: "t",
+      state: "in_progress",
+      ttlMs: 480,
+      pollIntervalMs: 50,
+      relatedTaskIds: ["a", "b"],
+    })
+    await client.stop()
+  })
+
+  test("canonical keys (ttlMs/pollIntervalMs) win + coexist with title/progress", async () => {
+    const { client } = await startedClient((method) =>
+      method === "tasks/getInfo"
+        ? ok({
+            taskId: "t",
+            state: "in_progress",
+            title: "build",
+            progress: 0.5,
+            ttlMs: 1000,
+            pollIntervalMs: 25,
+          })
+        : ok({}),
+    )
+    expect(await clientTasksPort(client).getInfo("t")).toEqual({
+      taskId: "t",
+      state: "in_progress",
+      title: "build",
+      progress: 0.5,
+      ttlMs: 1000,
+      pollIntervalMs: 25,
+    })
+    await client.stop()
+  })
+
+  test("EDGE never-throw: non-finite/non-positive/string ms ⇒ field OMITTED", async () => {
+    const hostileShapes: Record<string, unknown>[] = [
+      { taskId: "t", state: "pending", ttlMs: -5, pollIntervalMs: -5 },
+      { taskId: "t", state: "pending", ttlMs: 0, pollIntervalMs: 0 },
+      { taskId: "t", state: "pending", ttlMs: Number.NaN, pollIntervalMs: Number.NaN },
+      { taskId: "t", state: "pending", ttlMs: Number.POSITIVE_INFINITY },
+      { taskId: "t", state: "pending", ttlMs: "50", pollIntervalMs: "50" }, // string, not number
+      { taskId: "t", state: "pending", ttl: null, pollInterval: {} },
+    ]
+    for (const shape of hostileShapes) {
+      const { client } = await startedClient((method) =>
+        method === "tasks/getInfo" ? ok(shape) : ok({}),
+      )
+      // Every hostile ms value is dropped ⇒ back to the byte-identical shape.
+      expect(await clientTasksPort(client).getInfo("t")).toEqual({ taskId: "t", state: "pending" })
+      await client.stop()
+    }
+  })
+
+  test("EDGE relatedTaskIds: self-id dropped (circular guard), non-strings dropped, deduped", async () => {
+    const { client } = await startedClient((method) =>
+      method === "tasks/getInfo"
+        ? ok({
+            taskId: "self",
+            state: "pending",
+            relatedTaskIds: ["a", "self", 5, "", "b", null, "a", "b"],
+          })
+        : ok({}),
+    )
+    // self removed (circular), non-strings + empty removed, de-duped, order kept.
+    expect(await clientTasksPort(client).getInfo("self")).toEqual({
+      taskId: "self",
+      state: "pending",
+      relatedTaskIds: ["a", "b"],
+    })
+    await client.stop()
+  })
+
+  test("EDGE relatedTaskIds: empty / all-invalid / non-array ⇒ field OMITTED", async () => {
+    const shapes: Record<string, unknown>[] = [
+      { taskId: "t", state: "pending", relatedTaskIds: [] },
+      { taskId: "t", state: "pending", relatedTaskIds: ["t", 1, null] }, // all drop (self+nonstr)
+      { taskId: "t", state: "pending", relatedTaskIds: "not-an-array" },
+      { taskId: "t", state: "pending", relatedTaskIds: 42 },
+    ]
+    for (const shape of shapes) {
+      const { client } = await startedClient((method) =>
+        method === "tasks/getInfo" ? ok(shape) : ok({}),
+      )
+      expect(await clientTasksPort(client).getInfo("t")).toEqual({ taskId: "t", state: "pending" })
+      await client.stop()
+    }
+  })
+})
+
+// === 9. TICKET-21 render: list affordance + get_task TTL/related surfacing ===
+//
+// Render the model-facing tools directly (no CLI). `runTool` drains the tool's
+// async generator and returns the final `result.output` string.
+
+const runTool = async (
+  tool: ReturnType<typeof listMcpTasksTool> | ReturnType<typeof getMcpTaskTool>,
+  input: unknown,
+): Promise<string> => {
+  const ctx = { cwd: process.cwd(), signal: new AbortController().signal }
+  let out = ""
+  for await (const ev of tool.execute(input as never, ctx as never)) {
+    if (ev.type === "result") out = String(ev.result.output ?? "")
+  }
+  return out
+}
+
+const stubHandle = (info: TasksTaskInfo, result?: TasksTaskResult): TasksHandle => ({
+  async list() {
+    return { ok: true, page: { tasks: [info] } }
+  },
+  async getInfo() {
+    return info
+  },
+  async getResult() {
+    return result ?? { state: "not-ready" }
+  },
+  async cancel() {
+    return { ok: true }
+  },
+})
+
+describe("render: relatedTaskIds affordance (list) + ttl/pollInterval/related (get)", () => {
+  test("list shows '→ rel:' ONLY when relatedTaskIds present", async () => {
+    const withRel = stubHandle({ taskId: "x", state: "in_progress", relatedTaskIds: ["a", "b"] })
+    const outRel = await runTool(listMcpTasksTool(withRel), {})
+    expect(outRel).toContain("→ rel: a, b")
+
+    // BYTE-IDENTITY: absent relatedTaskIds ⇒ the legacy single-line render.
+    const noRel = stubHandle({ taskId: "x", state: "in_progress" })
+    const outNo = await runTool(listMcpTasksTool(noRel), {})
+    expect(outNo).not.toContain("→ rel")
+    expect(outNo).toBe("1 task:\n  - x  [in_progress]")
+  })
+
+  test("get_task surfaces ttl-remaining + pollInterval + related when present", async () => {
+    const handle = stubHandle({
+      taskId: "j",
+      state: "in_progress",
+      ttlMs: 480,
+      pollIntervalMs: 50,
+      relatedTaskIds: ["a", "b"],
+    })
+    const out = await runTool(getMcpTaskTool(handle), { taskId: "j" })
+    expect(out).toMatch(/ttl: ~\d+ms left/)
+    expect(out).toContain("poll: ~50ms")
+    expect(out).toContain("related: a, b")
+  })
+
+  test("get_task BYTE-IDENTITY: none of the 3 fields ⇒ legacy not-ready line only", async () => {
+    const handle = stubHandle({ taskId: "j", state: "in_progress" })
+    const out = await runTool(getMcpTaskTool(handle), { taskId: "j" })
+    expect(out).toBe("not-ready: j [in_progress]")
   })
 })

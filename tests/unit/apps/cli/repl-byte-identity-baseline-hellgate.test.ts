@@ -19,11 +19,10 @@ let originalWrite: typeof process.stderr.write
 beforeEach(() => {
   writes = []
   originalWrite = process.stderr.write.bind(process.stderr)
-  // biome-ignore lint/suspicious/noExplicitAny: stderr swap for capture
   process.stderr.write = ((s: string) => {
     writes.push(s)
     return true
-  }) as any
+  }) as typeof process.stderr.write
 })
 afterEach(() => {
   process.stderr.write = originalWrite

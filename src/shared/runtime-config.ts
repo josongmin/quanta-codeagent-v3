@@ -38,7 +38,7 @@
  */
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
-import { gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
+import { gateDisabledStrict, gateOn, gateOnStrict, isTruthyToken } from "./env-flag"
 import { knobOverrideCount, knobOverrides, knobOverridesVersion } from "./knob-overrides"
 import { writeStderr } from "./terminal-io"
 
@@ -148,6 +148,76 @@ const parseStringList = (raw: string | undefined): readonly string[] => {
     if (t.length > 0) parts.push(t)
   }
   return Object.freeze(parts)
+}
+
+/** ticket-15 (§11.7) — operator-authored scriptable statusLine config (Claude
+ *  Code `statusLine{}` shape: CC settings schema:737). The `type` is implicitly
+ *  `"command"`; only `command` is required. Carried as plain data; the CLI
+ *  surface (`status-command-runner.ts`) interprets it. Declared HERE (not
+ *  imported from `@/apps/cli`) to keep `@/shared` a leaf — the runner's own
+ *  `StatusLineConfig` is structurally assignable to this. */
+export interface StatusLineConfig {
+  /** The command argv — a string (whitespace-split, no shell) or an array
+   *  (verbatim, the robust form). */
+  readonly command: string | readonly string[]
+  /** Left padding (spaces) the host renderer prepends. */
+  readonly padding?: number
+  /** Extra polling cadence (ms) BEYOND event-driven refresh (CC: min 1s). */
+  readonly refreshInterval?: number
+  /** Suppress the vim-mode indicator segment (CC parity). */
+  readonly hideVimModeIndicator?: boolean
+}
+
+/** Parse the scriptable-statusLine config from env. DOUBLE-gated, default-OFF:
+ *  returns `undefined` (byte-identical — the fixed `formatContextUsage` status
+ *  line stays the only render) UNLESS the master gate `QUANTA_STATUS_LINE` is on
+ *  (gateOn vocab) AND `QUANTA_STATUS_LINE_CONFIG` parses to a JSON object with a
+ *  usable `command`. Any defect (gate off / absent / malformed JSON / no
+ *  command) ⇒ `undefined` + a single stderr warn on a malformed-but-present
+ *  config (so an operator typo is visible, never silently swallowed). The
+ *  command is OPERATOR-AUTHORED (hook trust tier); the runner spawns it
+ *  args-based (NO shell). */
+const parseStatusLineConfig = (
+  gateRaw: string | undefined,
+  raw: string | undefined,
+): StatusLineConfig | undefined => {
+  if (!isTruthyToken(gateRaw)) return undefined
+  if (raw === undefined || raw.trim().length === 0) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    stderrWarn(`ignoring malformed QUANTA_STATUS_LINE_CONFIG (not JSON) — statusLine disabled`)
+    return undefined
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    stderrWarn(`ignoring QUANTA_STATUS_LINE_CONFIG — must be a JSON object — statusLine disabled`)
+    return undefined
+  }
+  const obj = parsed as Record<string, unknown>
+  const command = obj["command"]
+  const commandOk =
+    (typeof command === "string" && command.trim().length > 0) ||
+    (Array.isArray(command) && command.length > 0 && command.every((c) => typeof c === "string"))
+  if (!commandOk) {
+    stderrWarn(
+      `ignoring QUANTA_STATUS_LINE_CONFIG — "command" must be a non-empty string or string[] — statusLine disabled`,
+    )
+    return undefined
+  }
+  const cfg: { -readonly [K in keyof StatusLineConfig]: StatusLineConfig[K] } = {
+    command: command as string | readonly string[],
+  }
+  if (typeof obj["padding"] === "number" && Number.isFinite(obj["padding"])) {
+    cfg.padding = obj["padding"]
+  }
+  if (typeof obj["refreshInterval"] === "number" && Number.isFinite(obj["refreshInterval"])) {
+    cfg.refreshInterval = obj["refreshInterval"]
+  }
+  if (typeof obj["hideVimModeIndicator"] === "boolean") {
+    cfg.hideVimModeIndicator = obj["hideVimModeIndicator"]
+  }
+  return Object.freeze(cfg)
 }
 
 const parseSessionListFormat = (raw: string | undefined): "rich" | "plain" | undefined => {
@@ -1207,6 +1277,14 @@ export interface RuntimeConfig {
    *  opt-in; it NEVER auto-trusts cwd. No effect unless {@link centralConfig}
    *  is on. */
   readonly trustedPaths: string | undefined
+  /** ticket-15 (§11.7) — scriptable statusLine config (CC `statusLine{}` shape).
+   *  DOUBLE-gated default-OFF: `undefined` UNLESS `QUANTA_STATUS_LINE` is on
+   *  (gateOn vocab) AND `QUANTA_STATUS_LINE_CONFIG` is a JSON object carrying a
+   *  usable `command`. Absent ⇒ the fixed `formatContextUsage` status line is
+   *  the only render (byte-identical). When set, the CLI REPL runs the
+   *  operator-authored command per status tick (args-based spawn, NO shell, CC
+   *  `Status` JSON on stdin) and renders its first stdout line. */
+  readonly statusLineConfig: StatusLineConfig | undefined
 }
 
 /** jun-6 — default watchdog cap (ms) for a `block`-tool critical section. The
@@ -1661,6 +1739,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // default). EXPLICIT CI opt-in; never auto-trusts cwd. No effect unless
     // centralConfig is on.
     trustedPaths: stringOrUndef(env["QUANTA_TRUSTED_PATHS"]),
+    // ticket-15 (§11.7) — DOUBLE-gated default-OFF scriptable statusLine config.
+    // `undefined` unless QUANTA_STATUS_LINE is on AND QUANTA_STATUS_LINE_CONFIG
+    // is a valid JSON object with a usable `command` (byte-identical otherwise —
+    // the fixed formatContextUsage status line stays the sole render).
+    statusLineConfig: parseStatusLineConfig(
+      env["QUANTA_STATUS_LINE"],
+      env["QUANTA_STATUS_LINE_CONFIG"],
+    ),
   })
 }
 

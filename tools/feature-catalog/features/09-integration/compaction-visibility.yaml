@@ -49,16 +49,12 @@ evidence:
   code:
     - src/agent/recovery-reason/types.ts
     - src/agent/recovery-reason/index.ts
-    - src/agent/microcompact/types.ts
-    - src/agent/microcompact/compactor.ts
-    - src/agent/microcompact/index.ts
     - src/agent/hooks.ts
     - src/agent/compaction.ts
   adrs: [409]
   tests:
     unit:
       - tests/unit/recovery-reason-hellgate.test.ts
-      - tests/unit/microcompact-hellgate.test.ts
       - tests/unit/compaction-post-event-hellgate.test.ts
       - tests/unit/compaction.test.ts
       - tests/unit/compaction-precompact.test.ts

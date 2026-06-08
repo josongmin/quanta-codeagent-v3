@@ -491,6 +491,7 @@ export {
   subagentPollTool,
 } from "./subagent-bg"
 export type {
+  ActiveWorktree,
   BlockerSurface,
   CodeCellDispatchSeam,
   CriticalSectionHandle,
@@ -530,6 +531,7 @@ export type {
   WorkingStateHandle,
   WorkingStatePatch,
   WorkingStateSnapshot,
+  WorktreeSlotHandle,
 } from "./types"
 export { createUpdateWorkingStateTool } from "./update-working-state"
 // `web_*` cluster (ADR-0127): `web_fetch` (always-on, factory binds
@@ -557,6 +559,17 @@ export {
   webSearchInputSchema,
   webSearchTool,
 } from "./web"
+// ticket-11 (P8) — git-worktree AGENT tools (default-OFF, gate
+// `QUANTA_WORKTREE_TOOL` + session-scoped slot). The 3 tools (enter/exit/status)
+// + the names list + the cwd-override helpers the bash/edit tools consume.
+export {
+  enterWorktreeTool,
+  exitWorktreeTool,
+  WORKTREE_TOOL_NAMES,
+  worktreeStatusTool,
+  worktreeTools,
+} from "./worktree"
+export { resolveBashCwd, resolveEditBase } from "./worktree/cwd-override"
 
 /**
  * STRUCTURAL CONTRACT: composition roots (`src/apps/**`) MUST call

@@ -42,10 +42,7 @@ const buildHarness = (): Harness => {
 }
 
 // Snapshot the env keys we mutate so each test starts clean.
-const TOUCHED = [
-  "QUANTA_CAPABILITY_LAYER",
-  ...allCapabilities().map((c) => c.gate.envKey),
-]
+const TOUCHED = ["QUANTA_CAPABILITY_LAYER", ...allCapabilities().map((c) => c.gate.envKey)]
 let saved: Record<string, string | undefined> = {}
 beforeEach(() => {
   saved = {}

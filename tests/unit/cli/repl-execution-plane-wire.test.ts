@@ -106,6 +106,7 @@ describe("session execution plane", () => {
       stream: (input: StreamInput): AsyncIterable<StreamEvent> => ({
         async *[Symbol.asyncIterator]() {
           seen.push(input)
+          yield* []
         },
       }),
     }

@@ -1,4 +1,5 @@
 import type { ThinClientRoute } from "@/shared"
+import type { AgentFleetRow } from "./agents-fleet-panel"
 import type { DebugCmdState } from "./debug-cmd"
 import type { IdleMonitor } from "./idle-monitor"
 import type { RetryWithSessionState } from "./retry-with"
@@ -123,6 +124,31 @@ export interface SlashContext {
         readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
       }
     | undefined
+  /** Ticket 14 (§11.6) — `/model` interactive picker wire. `current()` is the
+   *  active sticky model for the CURRENT mode (or the boot model); `candidates()`
+   *  are the selectable models each with their render metadata (window/output/
+   *  recommended/hint — any field may be absent, the picker degrades); `set(id)`
+   *  persists via the SAME sticky-model set path the loop reads (current mode is
+   *  bound by the adapter, mode-implicit); `effortSupport(id)` resolves the
+   *  picked model's reasoning-effort metadata so the command can clamp the
+   *  session effort (Codex `validateEffort`). Absent ⇒ `/model` prints "not
+   *  wired in this surface" (byte-identical). */
+  readonly model?:
+    | {
+        readonly current: () => string
+        readonly candidates: () => readonly import("./slash/model-picker").ModelLineMeta[]
+        readonly set: (
+          id: string,
+        ) => Promise<
+          | "ok"
+          | { readonly kind: "invalid-mode"; readonly known: readonly string[] }
+          | { readonly kind: "write-error"; readonly message: string }
+        >
+        readonly effortSupport: (
+          id: string,
+        ) => import("@/llm/provider-metadata").ModelEffortSupport | undefined
+      }
+    | undefined
   /** C3 (jun-4-brief-mode RFC) — brief-mode session-posture wire. `get` returns
    *  the current brief state; `set` mutates the surface-owned brief store AND
    *  repaints any chrome (status pills). ORTHOGONAL to {@link effort} — both can
@@ -154,6 +180,13 @@ export interface SlashContext {
    *  interrupt). `/inbound` reads/sets `.current`; the session loop reads it per
    *  mid-turn line. Absent ⇒ `/inbound` prints "not wired". */
   readonly inboundMode?: { current: import("@/agent/inbound-mode").InboundMode } | undefined
+  /** Ticket 17 `/agents` — live subagent fleet snapshot. A getter (read each
+   *  invocation so `/agents` reflects the CURRENT registry, not a boot-time
+   *  copy) returning the structural rows the renderer consumes. Absent ⇒
+   *  `/agents` prints "not wired in this surface" + exit 0 (byte-identical to
+   *  the rest of the presence-gated panels). The wire maps `TaskRecord`
+   *  → {@link AgentFleetRow}; this slot never imports `@/subagent` VALUES. */
+  readonly agents?: (() => readonly AgentFleetRow[]) | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

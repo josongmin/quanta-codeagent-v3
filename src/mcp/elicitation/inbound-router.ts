@@ -42,6 +42,7 @@ import {
   numberRequestSchema,
   singleSelectEnumRequestSchema,
   stringRequestSchema,
+  urlRequestSchema,
 } from "./schemas"
 
 /** MCP spec method that asks the client to elicit input from the user. */
@@ -211,6 +212,13 @@ const handleInternal = async (
       return req.success
         ? toResponse(await prompter.promptSingleEnum(req.data, signal), null)
         : DECLINE
+    }
+    case "promptUrl": {
+      // TICKET-22 — SECURITY: the schema's http/https refinement rejects
+      // file:/javascript:/data: here, so a malformed url declines BEFORE the
+      // prompter (and thus before any opener) is ever reached.
+      const req = urlRequestSchema.safeParse(params)
+      return req.success ? toResponse(await prompter.promptUrl(req.data, signal), null) : DECLINE
     }
     default:
       // Unknown internal sub-method → decline (well-defined, not dropped).

@@ -1,0 +1,59 @@
+id: cli-slash-capabilities
+title: CLI `/capabilities` (alias `/caps`) — capability-layer operator view
+section: 2
+subsystem: CLI surface — capability inspector
+order: 24
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on:
+  - built-in-slash-commands
+config_refs:
+  env: ["QUANTA_CAPABILITY_LAYER"]
+purpose: |
+  `/capabilities` (alias `/caps`) — operator-facing READ-ONLY surface over
+  the cross-surface capability layer (`@/capability`). The capability layer
+  is the single SSOT mapping each gated feature to (a) the env gate that
+  arms it and (b) the invocation surfaces it exposes on (llmTool / slash /
+  skill / hook / thinClient). `resolveExposure(cap, surface, env)` is the
+  one place a capability's per-surface exposure is decided; this command
+  renders that resolution so the otherwise-invisible split-brain surface
+  matrix is discoverable.
+
+  Subcommands:
+    - `/capabilities` | `/capabilities list` (default) — full table: id,
+      describe, gate (envKey + current on/off), and a per-surface exposure
+      grid (✓ exposed / ✗ declared-but-off / – not-declared).
+    - `/capabilities find <q>` — filter by id / describe / gate envKey.
+    - `/capabilities help` — family summary.
+
+  Mirrors the `/knobs` slash contract (`SlashCommand`, `ctx.out`/`ctx.err`,
+  completion adapter). DISPLAYS only — never mutates env, gates, or the
+  registry. The master gate (`QUANTA_CAPABILITY_LAYER`) state is shown at
+  the top; when OFF the resolver is probe-only and the grid reflects what
+  the unified resolver WOULD decide.
+evidence:
+  code:
+    - src/apps/cli/slash-commands-capabilities.ts
+    - src/apps/cli/slash/registry-app.ts
+    - src/capability/registry.ts
+    - src/capability/resolve.ts
+  adrs: [503]
+  tests:
+    unit:
+      - tests/unit/cli/slash-commands-capabilities.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Read-only by construction — there is no write path. The 3-axis
+  consistency ratchet (`tests/unit/capability/capability-axis-consistency-hellgate.test.ts`)
+  guards that the underlying capability gates match the manifest GATED_TOOLS
+  gates; this command surfaces that same resolution to the operator. The web
+  surface mirror lands via the SlashPalette `capabilities` entry.

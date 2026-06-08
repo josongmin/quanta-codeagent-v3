@@ -39,7 +39,7 @@ evidence:
   tests:
     unit:
       - tests/unit/observability-ndjson-introspection-hellgate.test.ts
-      - tests/unit/ndjson-wire-hellgate.test.ts
+      - tests/unit/cli/ndjson-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

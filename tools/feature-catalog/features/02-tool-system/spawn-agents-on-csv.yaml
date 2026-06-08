@@ -39,7 +39,7 @@ evidence:
       - tests/unit/agent-batch-jobs-hellgate.test.ts
       - tests/unit/batch-jobs-sqlite-store-hellgate.test.ts
       - tests/unit/spawn-agents-csv-hellgate.test.ts
-      - tests/unit/batch-cmd-resume-hellgate.test.ts
+      - tests/unit/cli/batch-cmd-resume-hellgate.test.ts
       - tests/unit/report-job-result-hellgate.test.ts
     integration: []
     contract: []

@@ -4,10 +4,10 @@ import { type SessionState, updateSessionState } from "../../../../src/apps/cli/
 
 // Stub LLM port — never called; just satisfies the type slot.
 const stubLlm: LLMPort = {
-  // biome-ignore lint/suspicious/noExplicitAny: stub port for type slot only
-  stream: (() => {
+  stream: async function* (): AsyncIterable<never> {
+    yield* [] // valid empty generator; the throw below only fires if it is ever iterated
     throw new Error("not used in shape tests")
-  }) as any,
+  },
 }
 
 const baseState = (overrides: Partial<SessionState> = {}): SessionState => ({

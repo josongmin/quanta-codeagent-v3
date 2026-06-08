@@ -102,6 +102,7 @@ const consentOf = (answer: ElicitationResult<boolean>): ElicitationPrompter => {
     promptEnum: reject,
     promptMultiEnum: reject,
     promptSingleEnum: reject,
+    promptUrl: reject,
   }
 }
 

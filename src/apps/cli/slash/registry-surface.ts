@@ -25,6 +25,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { errMessage, logger, runtimeConfig } from "@/shared"
+import { renderAgentFleet } from "../agents-fleet-panel"
 import { formatBranchesPanel } from "../branch-search-progress"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
@@ -48,9 +49,18 @@ import { formatSegmentedUsage } from "../status-line"
 import { runVoiceLiveCmd } from "../voice-live-cmd"
 import { webCmd } from "../web-cmd"
 import { renderWorkingStatePanel } from "../working-state-panel"
+import { modelCmd } from "./model-cmd"
 import { runSkillsRender } from "./render-helpers"
 
-const VALID_THEMES = ["auto", "light", "dark", "claude", "none"] as const
+const VALID_THEMES = [
+  "auto",
+  "light",
+  "dark",
+  "claude",
+  "none",
+  "light-daltonized",
+  "dark-daltonized",
+] as const
 type Theme = (typeof VALID_THEMES)[number]
 const THEME_SET: ReadonlySet<string> = new Set<string>(VALID_THEMES)
 const isTheme = (s: string): s is Theme => THEME_SET.has(s)
@@ -162,7 +172,7 @@ const usageCmd: SlashCommand = {
 
 const colorCmd: SlashCommand = {
   name: "/color",
-  describe: "Get or set color theme (auto|light|dark|claude|none)",
+  describe: "Get or set color theme (auto|light|dark|claude|none|light-daltonized|dark-daltonized)",
   async run(args, ctx) {
     const path = prefsFilePath(ctx)
     const prefs = await readPrefs(path)
@@ -414,6 +424,48 @@ const branchesCmd: SlashCommand = {
     }
     const state = ctx.branchSearch()
     ctx.out(`${formatBranchesPanel(state)}\n`)
+    return 0
+  },
+}
+
+/** `/agents` (Ticket 17, §11.2) — live subagent fleet view. Reads the session
+ *  TaskRegistry (via `ctx.agents`, threaded from `setup.lifecycleTaskRegistry`)
+ *  and renders an ID/Status/Type/Age/Result table — running-first, then settled
+ *  by recency. `--format table|json|tree` and `--all` (don't collapse settled).
+ *  Pure render (`renderAgentFleet`); the clock is injected via `ctx.now` so the
+ *  output is deterministic under test. Absent slot ⇒ "not wired" + exit 0
+ *  (default-OFF byte-identical). Closes the agent-state observability north-star
+ *  for the fleet of background subagents. */
+const agentsCmd: SlashCommand = {
+  name: "/agents",
+  describe: "Live subagent fleet (ID/status/type/age/result). Flags: --format table|json|tree, --all",
+  category: "loop",
+  async run(args, ctx) {
+    if (ctx.agents === undefined) {
+      ctx.out("/agents: not wired in this surface\n")
+      return 0
+    }
+    let format: "table" | "json" | "tree" = "table"
+    let all = false
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]
+      if (a === "--all") {
+        all = true
+      } else if (a === "--format") {
+        const v = args[i + 1]
+        i += 1
+        if (v !== "table" && v !== "json" && v !== "tree") {
+          ctx.err(`/agents: --format must be table|json|tree (got ${v ?? "<nothing>"})\n`)
+          return 1
+        }
+        format = v
+      } else {
+        ctx.err(`/agents: unknown argument '${a}' (try --format <table|json|tree> or --all)\n`)
+        return 1
+      }
+    }
+    const now = ctx.now?.() ?? Date.now()
+    ctx.out(`${renderAgentFleet(ctx.agents(), { format, now, all })}\n`)
     return 0
   },
 }
@@ -803,6 +855,7 @@ export const buildSurfaceSlashCommands = (
   workingStateCmd,
   historyCmd,
   branchesCmd,
+  agentsCmd,
   forkCheckpointCmd,
   queueCmd,
   webCmd,
@@ -813,6 +866,7 @@ export const buildSurfaceSlashCommands = (
   profileCmd,
   identityCmd,
   stickyModelCmd,
+  modelCmd,
   focusChainCmd,
   effortCmd,
   briefCmd,

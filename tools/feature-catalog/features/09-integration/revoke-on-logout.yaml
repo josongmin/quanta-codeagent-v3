@@ -63,7 +63,7 @@ evidence:
   adrs: [94]
   tests:
     unit:
-      - tests/unit/token-revoke-on-logout-hellgate.test.ts
+      - tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
 knobs:
   - name: QUANTA_OAUTH_REVOKE_ON_LOGOUT
     default: 'undefined'

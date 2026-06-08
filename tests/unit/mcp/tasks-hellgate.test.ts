@@ -169,4 +169,115 @@ describe("McpTasksPort + DefaultTaskStore (HELL-T)", () => {
     const res = await pollTask(port, "t", { signal: ac.signal, intervalMs: 5 })
     expect(res?.state).toBe("completed")
   })
+
+  // === TICKET-21: server-driven cadence + TTL (injected clock, recorded wait) ==
+  // No real timers, no wall-clock thresholds: `now` is injected and `wait` is
+  // recorded so the cadence/TTL assertions are exact, not timing-flaky.
+
+  test("HELL-T-cadence: server-advertised pollIntervalMs overrides the default", async () => {
+    // The task carries pollIntervalMs:50 → the poller must sleep 50, not the
+    // 200ms default, and not the opts.intervalMs fallback.
+    const store = new DefaultTaskStore()
+    store.upsert(mk("c", "in_progress", { pollIntervalMs: 50 }))
+    const port = defaultTasksPort(store)
+    const slept: number[] = []
+    const ac = new AbortController()
+    // Terminalize after the first sleep is recorded so the loop exits.
+    const pending = pollTask(port, "c", {
+      signal: ac.signal,
+      intervalMs: 200,
+      wait: async (ms) => {
+        slept.push(ms)
+        store.upsert(mk("c", "completed"), { state: "completed", output: "ok" })
+      },
+    })
+    const res = await pending
+    expect(res?.state).toBe("completed")
+    expect(slept).toEqual([50])
+  })
+
+  test("HELL-T-cadence-floor: pollIntervalMs:0 is clamped to the floor (no busy-spin)", async () => {
+    // A hostile/buggy server advertising 0 must NOT make the poller busy-spin.
+    const store = new DefaultTaskStore()
+    store.upsert(mk("z", "in_progress", { pollIntervalMs: 0 }))
+    const port = defaultTasksPort(store)
+    const slept: number[] = []
+    const ac = new AbortController()
+    await pollTask(port, "z", {
+      signal: ac.signal,
+      wait: async (ms) => {
+        slept.push(ms)
+        store.upsert(mk("z", "completed"), { state: "completed", output: "ok" })
+      },
+    })
+    expect(slept.length).toBe(1)
+    expect(slept[0]).toBeGreaterThanOrEqual(1) // floored, never 0
+  })
+
+  test("HELL-T-cadence-ceiling: an absurd pollIntervalMs is clamped to the ceiling", async () => {
+    // A server that stalls the model for hours is clamped to a documented upper
+    // bound (robustness, not a tuning heuristic).
+    const store = new DefaultTaskStore()
+    store.upsert(mk("hi", "in_progress", { pollIntervalMs: 60 * 60 * 1000 }))
+    const port = defaultTasksPort(store)
+    const slept: number[] = []
+    const ac = new AbortController()
+    await pollTask(port, "hi", {
+      signal: ac.signal,
+      wait: async (ms) => {
+        slept.push(ms)
+        store.upsert(mk("hi", "completed"), { state: "completed", output: "ok" })
+      },
+    })
+    expect(slept.length).toBe(1)
+    expect(slept[0]).toBeLessThan(60 * 60 * 1000) // clamped below the absurd value
+  })
+
+  test("HELL-T-ttl: ttlMs expiry returns the LAST observed (non-terminal) info, not null", async () => {
+    // A never-terminal task with ttlMs:500. With an injected clock that jumps
+    // past 500, the poller returns the last observed info (so the model can see
+    // the final state + related ids) — distinguishable from abort (null).
+    const store = new DefaultTaskStore()
+    store.upsert(mk("ttl", "in_progress", { ttlMs: 500, relatedTaskIds: ["sib"] }))
+    const port = defaultTasksPort(store)
+    let t = 0
+    const ac = new AbortController()
+    const res = await pollTask(port, "ttl", {
+      signal: ac.signal,
+      now: () => t,
+      // Each wait advances the clock past the TTL window.
+      wait: async () => {
+        t += 600
+      },
+    })
+    expect(res).not.toBeNull()
+    expect(res?.state).toBe("in_progress") // last observed, NOT a terminal flip
+    expect(res?.relatedTaskIds).toEqual(["sib"])
+  })
+
+  test("HELL-T-ttl-absent: no ttlMs ⇒ never expires (byte-identical to legacy poll)", async () => {
+    // Absent TTL must NOT introduce an expiry path: the loop runs to terminal.
+    const store = new DefaultTaskStore()
+    store.upsert(mk("n", "in_progress"))
+    const port = defaultTasksPort(store)
+    let t = 0
+    const ac = new AbortController()
+    const res = await pollTask(port, "n", {
+      signal: ac.signal,
+      now: () => t,
+      wait: async () => {
+        t += 10_000_000 // huge clock jump must not matter without ttlMs
+        store.upsert(mk("n", "completed"), { state: "completed", output: "done" })
+      },
+    })
+    expect(res?.state).toBe("completed")
+  })
+
+  test("HELL-T-related: relatedTaskIds round-trips through getInfo verbatim", async () => {
+    const store = new DefaultTaskStore()
+    store.upsert(mk("r", "in_progress", { relatedTaskIds: ["a", "b"] }))
+    const port = defaultTasksPort(store)
+    const info = await port.getInfo("r")
+    expect(info).toEqual({ taskId: "r", state: "in_progress", relatedTaskIds: ["a", "b"] })
+  })
 })

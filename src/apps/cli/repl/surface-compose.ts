@@ -92,6 +92,7 @@ import {
 import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
 import { buildSkillsCallback } from "./skills-surface"
+import { buildModelAdapter } from "./ctx-adapters/model-adapter"
 import {
   buildReplSlashCtx,
   projectSlashCtx,
@@ -504,6 +505,10 @@ const buildSurfaceDispatch = (args: {
    *  reads/sets it (the SAME ref the session loop reads per mid-turn line).
    *  Always present (the REPL seeds it `queue`). */
   readonly inboundMode: { current: InboundMode }
+  /** Ticket 14 (§11.6) — `/model` interactive-picker adapter over the SAME
+   *  sticky-model store the loop reads. Present iff a sticky store was wired;
+   *  absent ⇒ `/model` prints "not wired in this surface" (default-OFF). */
+  readonly modelAdapter?: SlashContext["model"]
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -526,6 +531,9 @@ const buildSurfaceDispatch = (args: {
       // ADR-0292/0294 augmentations: spread by presence so absence omits the
       // slot entirely (default-OFF byte-identical under
       // exactOptionalPropertyTypes).
+      // Ticket 14 (§11.6) — `/model` picker adapter. Absent ⇒ slot omitted ⇒
+      // the command prints "not wired" (parity with /sticky-model default-OFF).
+      ...(args.modelAdapter !== undefined ? { model: args.modelAdapter } : {}),
       ...(args.convCheckpointSlot !== undefined ? { convCheckpoint: args.convCheckpointSlot } : {}),
       sessionIo: args.sessionIo,
       // Live `/context` seam (Track D): when present, `/context` renders the
@@ -936,6 +944,9 @@ export const composeSurfaceWires = (
     costPanel: setup.costPanel,
     planStore: setup.planStore,
     branchProgress: setup.branchProgress,
+    // Ticket 17 `/agents` — thread the session's lifecycle subagent registry
+    // (already in hand for the lifecycle pills) so `/agents` reads live tasks.
+    taskRegistry: setup.lifecycleTaskRegistry,
     getHistory: () => state.history,
     startSideConversation: async (args) => {
       if (sideConversationStart === undefined) {
@@ -1080,6 +1091,23 @@ export const composeSurfaceWires = (
     ...(shadowOdb !== undefined ? { shadowOdb } : {}),
     ...(conversationActions !== undefined ? { conversationActions } : {}),
     inboundMode,
+    // Ticket 14 (§11.6) — build the `/model` picker adapter over the SAME sticky
+    // store the loop's consume side reads (so a SET is observed by the loop), with
+    // the boot model + retry candidates as the selectable id set. Mode-implicit:
+    // binds the SET to the "default" posture (a precise per-posture getter is a
+    // follow-up). Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
+    ...((): { modelAdapter?: SlashContext["model"] } => {
+      const modelStore = setup.runtimeContext.stickyModelStore()
+      if (modelStore === undefined) return {}
+      return {
+        modelAdapter: buildModelAdapter({
+          store: modelStore.store,
+          bootModel: setup.model,
+          currentMode: () => "default",
+          candidateIds: [...new Set([setup.model, ...retryCandidates.map((c) => c.id)])],
+        }),
+      }
+    })(),
   })
 
   return {
