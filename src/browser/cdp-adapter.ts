@@ -52,6 +52,7 @@ import type {
   PageSnapshot,
   ReadOpts,
   ScrollOpts,
+  TabInfo,
   TypeOpts,
   WaitOpts,
 } from "./types"
@@ -82,14 +83,54 @@ export interface CdpBrowserDeps {
   readonly endpointTimeoutMs?: number
 }
 
+/** TICKET-24 Wave B — one open tab. The `refMap` is PER-TAB so a ref minted on
+ *  tab A fails closed when tab B is active (same invariant a navigation enforces).
+ *  `sessionId` is the flat-protocol page session the single {@link CdpSession}
+ *  routes to when this tab is active (via `useSessionId`) or per-request. */
+interface TabState {
+  readonly targetId: string
+  readonly sessionId: string
+  url: string
+  title: string
+  readonly refMap: RefMap
+}
+
 interface SessionState {
   closed: boolean
-  url: string
   readonly proc: SpawnedProcess
   readonly session: CdpSession
   readonly profileDir: string
-  readonly refMap: RefMap
   readonly console: ConsoleBuffer
+  /** Open tabs keyed by targetId. ALWAYS non-empty (spawn adds one; closeTab
+   *  refuses the last). */
+  readonly tabs: Map<string, TabState>
+  /** The tab subsequent ref-resolving ops act on; indexes a live entry in `tabs`. */
+  activeTabId: string
+}
+
+/** The active tab — the SSOT for refMap/url/title. The invariant (activeTabId
+ *  always indexes a live tab, `tabs` never empty) is upheld by spawn/newTab/
+ *  switchTab/closeTab, so the fallback only guards a true internal bug. */
+const activeTab = (s: SessionState): TabState => {
+  const direct = s.tabs.get(s.activeTabId)
+  if (direct !== undefined) return direct
+  const first = s.tabs.values().next().value
+  if (first === undefined) throw new Error("browser session has no tabs (invariant violation)")
+  return first
+}
+
+/** Resolve a switch/close argument: a CDP targetId (exact) OR a 0-based index
+ *  over the open tabs (insertion order). Returns null ⇒ caller surfaces
+ *  `tab-not-found` with the open ids. */
+const resolveTab = (s: SessionState, idOrIndex: string): TabState | null => {
+  const direct = s.tabs.get(idOrIndex)
+  if (direct !== undefined) return direct
+  if (/^\d+$/.test(idOrIndex)) {
+    const arr = [...s.tabs.values()]
+    const i = Number(idOrIndex)
+    if (i >= 0 && i < arr.length) return arr[i] ?? null
+  }
+  return null
 }
 
 const pathIndices = (path: string): number[] =>
@@ -313,7 +354,7 @@ const evalAction = async (
   signal: AbortSignal | undefined,
   evalFn: EvalFn,
 ): Promise<Result<void, BrowserError>> => {
-  const path = s.refMap.resolve(ref)
+  const path = activeTab(s).refMap.resolve(ref)
   if (path === null) return err({ kind: "element-not-found", ref })
   const r = await evalFn(s, buildJs(path), signal)
   if (!r.ok) return r
@@ -328,7 +369,7 @@ const refPoint = async (
   signal: AbortSignal | undefined,
   evalFn: EvalFn,
 ): Promise<Result<Pt, BrowserError>> => {
-  const path = s.refMap.resolve(ref)
+  const path = activeTab(s).refMap.resolve(ref)
   if (path === null) return err({ kind: "element-not-found", ref })
   const r = await evalFn(s, rectJs(path), signal)
   if (!r.ok) return r
@@ -468,6 +509,9 @@ export const resolveChromeBinary = (
 interface BringUp {
   readonly session: CdpSession
   readonly console: ConsoleBuffer
+  /** The first tab's CDP target + flat-protocol page session (TICKET-24 Wave B). */
+  readonly targetId: string
+  readonly sessionId: string
 }
 
 // Subscribe the persistent console/error/log streams into the ring buffer, plus
@@ -584,7 +628,7 @@ const connectAndEnable = async (
   // capture failure leaves the buffer empty but the page still drives.
   const consoleBuffer = createConsoleBuffer()
   await installPageObservers(session, consoleBuffer, opts)
-  return ok({ session, console: consoleBuffer })
+  return ok({ session, console: consoleBuffer, targetId, sessionId })
 }
 
 export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
@@ -672,14 +716,23 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
           return brought
         }
         const session = brought.value.session
+        // TICKET-24 Wave B — the bring-up's page becomes tab #1 (active). Its
+        // refMap is the per-tab SSOT; further tabs each get their own.
+        const tab0: TabState = {
+          targetId: brought.value.targetId,
+          sessionId: brought.value.sessionId,
+          url: "about:blank",
+          title: "",
+          refMap: createRefMap(),
+        }
         const state: SessionState = {
           closed: false,
-          url: "about:blank",
           proc,
           session,
           profileDir,
-          refMap: createRefMap(),
           console: brought.value.console,
+          tabs: new Map([[tab0.targetId, tab0]]),
+          activeTabId: tab0.targetId,
         }
         sessions.set(id, state)
         // R3 audit [1][7]: observe BOTH death modes → mark the SessionState closed
@@ -741,12 +794,15 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       // until a fresh snapshot mints refs against the new DOM — even if the load
       // event below times out. (Structural fix: refs are bound to the snapshot
       // that minted them, not to prose telling the model to re-snapshot.)
-      s.value.refMap.invalidate()
+      const tab = activeTab(s.value)
+      tab.refMap.invalidate()
       const loaded = await loadedP
       if (!loaded.ok) return loaded
-      s.value.url = url
+      tab.url = url
       const title = await evalValue(s.value, "document.title", signal)
-      return ok({ title: title.ok && typeof title.value === "string" ? title.value : "" })
+      const titleText = title.ok && typeof title.value === "string" ? title.value : ""
+      tab.title = titleText
+      return ok({ title: titleText })
     },
 
     async snapshot(
@@ -762,8 +818,10 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       if (!model.ok) {
         return err({ kind: "cdp-error", detail: "snapshot collection returned a malformed model" })
       }
-      const yaml = buildSnapshot(model.value, s.value.refMap)
-      return ok({ yaml, url: s.value.url, title: model.value.title })
+      const tab = activeTab(s.value)
+      const yaml = buildSnapshot(model.value, tab.refMap)
+      tab.title = model.value.title
+      return ok({ yaml, url: tab.url, title: model.value.title })
     },
 
     async click(
@@ -773,7 +831,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
     ): Promise<Result<void, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
-      const path = s.value.refMap.resolve(ref)
+      const path = activeTab(s.value).refMap.resolve(ref)
       if (path === null) return err({ kind: "element-not-found", ref })
       const r = await evalValue(s.value, clickJs(path), signal)
       if (!r.ok) return r
@@ -792,7 +850,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
     ): Promise<Result<BoundingBox, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
-      const path = s.value.refMap.resolve(ref)
+      const path = activeTab(s.value).refMap.resolve(ref)
       if (path === null) return err({ kind: "element-not-found", ref })
       const r = await evalValue(s.value, boxJs(path), signal)
       if (!r.ok) return r
@@ -823,7 +881,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
     ): Promise<Result<void, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
-      const path = s.value.refMap.resolve(ref)
+      const path = activeTab(s.value).refMap.resolve(ref)
       if (path === null) return err({ kind: "element-not-found", ref })
       const r = await evalValue(
         s.value,
@@ -843,7 +901,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
     ): Promise<Result<void, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
-      const path = s.value.refMap.resolve(ref)
+      const path = activeTab(s.value).refMap.resolve(ref)
       if (path === null) return err({ kind: "element-not-found", ref })
       const r = await evalValue(s.value, typeJs(path, text, opts?.clear === true), opts?.signal)
       if (!r.ok) return r
@@ -963,7 +1021,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
     async read(h: BrowserHandle, ref: string, opts: ReadOpts, signal?: AbortSignal) {
       const s = live(h)
       if (!s.ok) return s
-      const path = s.value.refMap.resolve(ref)
+      const path = activeTab(s.value).refMap.resolve(ref)
       if (path === null) return err({ kind: "element-not-found", ref })
       const r = await evalValue(s.value, readJs(path, opts.what, opts.attr), signal)
       if (!r.ok) return r
@@ -972,6 +1030,136 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       const v = wrapped.value
       if (typeof v === "string" || typeof v === "boolean") return ok({ value: v })
       return err({ kind: "cdp-error", detail: "read returned a non-primitive value" })
+    },
+
+    // ── TICKET-24 Wave B — multi-tab. The single CdpSession multiplexes: every
+    //    Target.* call is BROWSER-LEVEL (sessionId:null), page calls route to the
+    //    active tab (useSessionId). Each tab owns its refMap (ref isolation).
+    async newTab(
+      h: BrowserHandle,
+      url?: string,
+      signal?: AbortSignal,
+    ): Promise<Result<TabInfo, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const sig = signal ? { signal } : {}
+      const targetUrl = url ?? "about:blank"
+      const created = await s.value.session.request(
+        "Target.createTarget",
+        { url: targetUrl },
+        { sessionId: null, ...sig },
+      )
+      if (!created.ok) return created
+      const targetId = (created.value as { targetId?: unknown }).targetId
+      if (typeof targetId !== "string") {
+        return err({ kind: "cdp-error", detail: "Target.createTarget returned no targetId" })
+      }
+      const attached = await s.value.session.request(
+        "Target.attachToTarget",
+        { targetId, flatten: true },
+        { sessionId: null, ...sig },
+      )
+      if (!attached.ok) return attached
+      const sessionId = (attached.value as { sessionId?: unknown }).sessionId
+      if (typeof sessionId !== "string") {
+        return err({ kind: "cdp-error", detail: "Target.attachToTarget returned no sessionId" })
+      }
+      await s.value.session.request("Page.enable", undefined, { sessionId, ...sig })
+      // SECURITY parity with bring-up: deny downloads on EVERY tab. A failure must
+      // not leave an unguarded download surface — tear the tab down + fail.
+      const dl = await s.value.session.request(
+        "Page.setDownloadBehavior",
+        { behavior: "deny" },
+        { sessionId, ...sig },
+      )
+      if (!dl.ok) {
+        void s.value.session.request("Target.closeTarget", { targetId }, { sessionId: null })
+        return err({ kind: "cdp-error", detail: "Page.setDownloadBehavior(deny) failed for new tab" })
+      }
+      // Best-effort: enable console producers so the tab's logs flow once active.
+      await s.value.session.request("Runtime.enable", undefined, { sessionId, ...sig })
+      const tab: TabState = { targetId, sessionId, url: targetUrl, title: "", refMap: createRefMap() }
+      s.value.tabs.set(targetId, tab)
+      // newTab does NOT auto-foreground — active stays put; the model switchTabs.
+      return ok({ id: targetId, url: tab.url, title: tab.title, active: false })
+    },
+
+    async switchTab(
+      h: BrowserHandle,
+      idOrIndex: string,
+      signal?: AbortSignal,
+    ): Promise<Result<TabInfo, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const tab = resolveTab(s.value, idOrIndex)
+      if (tab === null) {
+        return err({ kind: "tab-not-found", id: idOrIndex, open: [...s.value.tabs.keys()] })
+      }
+      // Route page calls to this tab + bring it to the foreground. After this,
+      // its OWN refMap is active — a ref from the prior tab fails closed.
+      s.value.activeTabId = tab.targetId
+      s.value.session.useSessionId(tab.sessionId)
+      await s.value.session.request(
+        "Target.activateTarget",
+        { targetId: tab.targetId },
+        { sessionId: null, ...(signal ? { signal } : {}) },
+      )
+      return ok({ id: tab.targetId, url: tab.url, title: tab.title, active: true })
+    },
+
+    async closeTab(
+      h: BrowserHandle,
+      idOrIndex: string,
+      signal?: AbortSignal,
+    ): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const tab = resolveTab(s.value, idOrIndex)
+      if (tab === null) {
+        return err({ kind: "tab-not-found", id: idOrIndex, open: [...s.value.tabs.keys()] })
+      }
+      if (s.value.tabs.size === 1) {
+        return err({ kind: "cdp-error", detail: "cannot close the last tab — close the browser instead" })
+      }
+      const closed = await s.value.session.request(
+        "Target.closeTarget",
+        { targetId: tab.targetId },
+        { sessionId: null, ...(signal ? { signal } : {}) },
+      )
+      if (!closed.ok) return closed
+      s.value.tabs.delete(tab.targetId)
+      // Closed the active tab ⇒ reassign active to a remaining tab + route to it.
+      if (s.value.activeTabId === tab.targetId) {
+        const next = s.value.tabs.values().next().value
+        if (next !== undefined) {
+          s.value.activeTabId = next.targetId
+          s.value.session.useSessionId(next.sessionId)
+        }
+      }
+      return ok(undefined)
+    },
+
+    async listTabs(
+      h: BrowserHandle,
+      signal?: AbortSignal,
+    ): Promise<Result<readonly TabInfo[], BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const out: TabInfo[] = []
+      for (const tab of s.value.tabs.values()) {
+        // Best-effort LIVE title per tab (routed to that tab's session). Falls
+        // back to the stored title on any failure. Page-controlled string →
+        // guarded at the tool layer before the model sees it.
+        const t = await s.value.session.request(
+          "Runtime.evaluate",
+          { expression: "document.title", returnByValue: true },
+          { sessionId: tab.sessionId, ...(signal ? { signal } : {}) },
+        )
+        const v = t.ok ? (t.value as { result?: { value?: unknown } }).result?.value : undefined
+        const title = typeof v === "string" ? v : tab.title
+        out.push({ id: tab.targetId, url: tab.url, title, active: s.value.activeTabId === tab.targetId })
+      }
+      return ok(out)
     },
 
     async cdp(

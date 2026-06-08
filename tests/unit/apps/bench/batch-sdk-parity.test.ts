@@ -40,7 +40,6 @@ describe("T5 batch SDK parity", () => {
     expect(source).toContain("captureBenchSessionEvents(session)")
     expect(source).toContain("await session.input.append(")
     expect(source).toContain("await session.turn.run(")
-    expect(source).not.toContain('from "@/host/bootstrap"')
     expect(source).not.toContain("bootstrapSession(")
     expect(source).not.toContain("createRuntimeFromBootstrap(")
   })

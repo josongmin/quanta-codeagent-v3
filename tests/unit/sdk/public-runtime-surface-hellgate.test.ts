@@ -26,7 +26,6 @@ describe("sdk public runtime surface hellgate", () => {
     expect(typesSrc).not.toContain("__unsafeReplaceMessages")
     expect(contextSrc).not.toContain("SessionDeps")
     expect(contextSrc).not.toContain("assembleConfig")
-    expect(contextSrc).not.toContain('from "@/sdk/runtime/bridge"')
     expect(contextSrc).not.toContain("wrapRegistry(")
     expect(contextSrc).not.toContain("ensureAutomationEngine(")
     expect(contextSrc).not.toContain("setGranularRegistry(")

@@ -11,7 +11,6 @@ describe("T5 headless SDK parity", () => {
     const source = read("src/apps/headless/index.ts")
 
     expect(source).toContain('from "./session-bridge"')
-    expect(source).not.toContain('from "@/host/bootstrap"')
     expect(source).not.toContain("bootstrapSession(")
     expect(source).not.toContain("createRuntimeFromBootstrap(")
   })

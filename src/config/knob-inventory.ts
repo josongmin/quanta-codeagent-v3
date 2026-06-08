@@ -111,6 +111,15 @@ const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
+    envKey: "QUANTA_BROWSER_TABS",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "browser_tab_* tools — multi-tab (new/switch/close/list, per-tab refMap) (ticket-24 Wave B; opt-in, needs QUANTA_BROWSER_TOOL).",
+    readSite: "host/runtime/agent-config-assembler.ts",
+  },
+  {
     envKey: "QUANTA_INIT_SLASH",
     kind: "bool",
     default: false,

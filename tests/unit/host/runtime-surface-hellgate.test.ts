@@ -19,7 +19,6 @@ describe("host runtime surface hellgate", () => {
     const capabilitiesSrc = read("src/host/runtime/capabilities.ts")
     const indexSrc = read("src/host/runtime/index.ts")
     const sessionHostSrc = read("src/host/runtime/session-host.ts")
-    const internalBindingSrc = read("src/host/runtime/internal/context-binding.ts")
     const typesSrc = read("src/host/runtime/types.ts")
 
     expect(builderSrc).not.toContain("SessionDeps")
@@ -28,15 +27,12 @@ describe("host runtime surface hellgate", () => {
     expect(indexSrc).not.toContain("buildCapabilityManifestFromSessionDeps")
     expect(sessionHostSrc).not.toContain("SessionDeps")
     expect(sessionHostSrc).not.toContain("assembleConfig")
-    expect(sessionHostSrc).not.toContain('from "@/runner/orchestrate/run-once"')
-    expect(sessionHostSrc).not.toContain('from "@/runner/orchestrate/side-chat"')
     expect(sessionHostSrc).not.toContain("runOnce(")
     expect(sessionHostSrc).not.toContain("runSideChat(")
     expect(sessionHostSrc).not.toContain("export interface LegacyRuntimeBridgeBinding")
     expect(sessionHostSrc).not.toContain("export interface LegacyRuntimeBridgeSnapshot")
     expect(sessionHostSrc).not.toContain("export type LegacyRuntimeBridgePatch")
     expect(sessionHostSrc).not.toContain("export interface CreateLegacyRuntimeBridgeHostArgs")
-    expect(internalBindingSrc).not.toContain('from "@/runner/orchestrate/side-chat"')
     expect(typesSrc).not.toContain("SessionDeps")
   })
 

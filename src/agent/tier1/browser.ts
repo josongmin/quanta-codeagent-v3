@@ -23,9 +23,10 @@ interface BrowserConfigSlot {
   browser?: {
     readonly port: BrowserPort
     readonly resolver?: DnsResolver
-    /** TICKET-24 — per-feature default-OFF gates (QUANTA_BROWSER_BOUNDS/_HIGHLIGHT). */
+    /** TICKET-24 — per-feature default-OFF gates (QUANTA_BROWSER_BOUNDS/_HIGHLIGHT/_TABS). */
     readonly bounds?: boolean
     readonly highlight?: boolean
+    readonly tabs?: boolean
   }
 }
 
@@ -39,5 +40,6 @@ export const buildBrowserBlock = (config: AgentConfig): BrowserToolset => {
     ...(slot.resolver !== undefined ? { resolver: slot.resolver } : {}),
     ...(slot.bounds === true ? { bounds: true } : {}),
     ...(slot.highlight === true ? { highlight: true } : {}),
+    ...(slot.tabs === true ? { tabs: true } : {}),
   })
 }

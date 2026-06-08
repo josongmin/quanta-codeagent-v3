@@ -42,9 +42,8 @@ describe("CLI runtime SDK cutover source gates", () => {
   test("session-loop consumes sdk runtime, not runner interactive primitives", () => {
     const src = readSource("src/apps/cli/repl/session-loop.ts")
     expect(src).toContain('from "@/sdk/runtime"')
-    expect(src).not.toContain('from "@/sdk/runtime/bridge"')
-    expect(src).not.toContain('from "@/sdk/runtime/compat"')
-    expect(src).not.toContain('from "@/runner"')
+    // import-fences (@/sdk/runtime/bridge, @/sdk/runtime/compat, @/runner) migrated
+    // to biome noRestrictedImports (file-specific override for session-loop.ts).
     expect(src).not.toContain("runInteractive(")
     expect(src).not.toContain("runOnce(")
     expect(src).not.toContain("RuntimeSessionInternal")
@@ -59,14 +58,13 @@ describe("CLI runtime SDK cutover source gates", () => {
   test("prompt pipeline and external queue stop importing runner PromptSource types", () => {
     const pipeline = readSource("src/apps/cli/repl/prompt-pipeline.ts")
     const queue = readSource("src/apps/cli/repl/external-prompt-queue.ts")
-    expect(pipeline).not.toContain('from "@/runner"')
-    expect(queue).not.toContain('from "@/runner"')
+    // @/runner import-fences migrated to biome noRestrictedImports (file-specific
+    // overrides for prompt-pipeline.ts + external-prompt-queue.ts).
     expect(pipeline).toContain('from "./prompt-types"')
     expect(queue).toContain('from "./prompt-types"')
   })
 
   test("cli setup and side-conversation seams avoid old runner barrels in the main path", () => {
-    const repl = readSource("src/apps/cli/repl.ts")
     const runtimeContext = readSource("src/apps/cli/repl/runtime-context-compose.ts")
     const sdkContext = readSource("src/sdk/runtime/context.ts")
     const surface = readSource("src/apps/cli/repl/surface-compose.ts")
@@ -74,15 +72,11 @@ describe("CLI runtime SDK cutover source gates", () => {
     const setup = readSource("src/apps/cli/repl/session-setup.ts")
     const internal = readSource("src/apps/cli/internal.ts")
 
-    expect(repl).not.toContain('from "@/host/runtime/session-host"')
-    expect(repl).not.toContain('from "@/runner"')
-    expect(repl).not.toContain('from "@/runner/session-execution-plane"')
+    // repl.ts import-fences (@/host/runtime/session-host, @/runner, @/runner/session-execution-plane) migrated to biome noRestrictedImports (see biome.json).
 
     expect(runtimeContext).toContain('from "@/sdk/runtime"')
     expect(runtimeContext).toContain("composeRuntimeBootstrapContext")
-    expect(runtimeContext).not.toContain('from "@/sdk/runtime/bridge"')
-    expect(runtimeContext).not.toContain('from "@/runner/assemble/config"')
-    expect(runtimeContext).not.toContain('from "@/runner/session-memory-auto"')
+    // runtime-context-compose.ts import-fences (@/sdk/runtime/bridge, @/runner/assemble/config, @/runner/session-memory-auto) migrated to biome noRestrictedImports (see biome.json).
     expect(runtimeContext).not.toContain("RuntimeSessionDeps")
     expect(runtimeContext).not.toContain(".withAdmissibility(")
 
@@ -93,15 +87,14 @@ describe("CLI runtime SDK cutover source gates", () => {
 
     expect(sdkContext).not.toContain("RuntimeSessionDeps")
     expect(sdkContext).not.toContain("CreateRuntimeFacadeFromSessionDepsArgs")
-    expect(sdkContext).not.toContain('from "@/sdk/runtime/bridge"')
+    // sdk/runtime/context.ts import-fence (@/sdk/runtime/bridge) migrated to biome noRestrictedImports (see biome.json).
     expect(sdkContext).not.toContain("createRuntimeFacadeFromSessionDeps")
     expect(sdkContext).not.toContain("export interface RuntimeBridgeState")
 
     expect(sessionLoop).not.toContain(".ensureAutomationEngine(")
 
     expect(setup).not.toContain("sideConversationPort")
-    expect(setup).not.toContain('from "@/host/runtime/session-host"')
-    expect(setup).not.toContain('from "@/runner/assemble/config"')
+    // session-setup.ts import-fences (@/host/runtime/session-host, @/runner/assemble/config) migrated to biome noRestrictedImports (see biome.json).
 
     expect(internal).not.toContain('export type { SessionDeps } from "@/runner/assemble/config"')
     expect(internal).not.toContain("export { assembleConfig")

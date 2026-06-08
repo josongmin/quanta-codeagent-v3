@@ -168,7 +168,8 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
   test("CASE 2b: public headless entry keeps bootstrap/runtime compat behind a local adapter", () => {
     const source = readFileSync(join(HEADLESS_DIR, "index.ts"), "utf8")
     expect(source).toContain('from "./session-bridge"')
-    expect(source).not.toContain('from "@/host/bootstrap"')
+    // CASE 2b: src/apps/headless/index.ts `from "@/host/bootstrap"` import-fence
+    // migrated to biome noRestrictedImports (see biome.json).
     expect(source).not.toContain("createRuntimeFromBootstrap(")
     expect(source).not.toContain("bootstrapSession(")
   })

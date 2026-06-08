@@ -303,6 +303,16 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "TICKET-24 — transient cosmetic outline overlay by snapshot ref (no page mutation; pair with browser_screenshot to confirm targeting). Read-only / no-HITL. Triple-gate: QUANTA_BROWSER_TOOL=on + chrome present + QUANTA_BROWSER_HIGHLIGHT=on. Off ⇒ tool absent, byte-identical.",
   },
   {
+    name: "browser_tab_list",
+    group: ["browser_tab_new", "browser_tab_switch", "browser_tab_close"],
+    origin: "@/agent/tier1/browser (CDP)",
+    gate: { kind: "resource", resource: "chrome/chromium on PATH", env: "QUANTA_BROWSER_TABS" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "exec",
+    adr: "0427",
+    note: "TICKET-24 Wave B — multi-tab (new/switch/close/list). One CdpSession multiplexes by per-request sessionId; each tab owns its refMap so a ref minted on one tab fails closed on another. Downloads denied on every tab. Triple-gate: QUANTA_BROWSER_TOOL=on + chrome present + QUANTA_BROWSER_TABS=on. Off ⇒ tools absent, byte-identical.",
+  },
+  {
     name: "web_search",
     origin: "@/agent/tier1/web-search",
     gate: { kind: "resource", resource: "BRAVE_SEARCH_API_KEY | QUANTA_WEB_SEARCH_DUCKDUCKGO=1" },

@@ -27,6 +27,7 @@ import type {
   HighlightOpts,
   PageSnapshot,
   ReadOpts,
+  TabInfo,
   TypeOpts,
   WaitOpts,
 } from "./types"
@@ -52,15 +53,40 @@ export interface HeadlessBrowserOpts {
   readonly presentSelectors?: ReadonlySet<string>
 }
 
+/** TICKET-24 Wave B — deterministic stub tab (own refMap ⇒ ref isolation). */
+interface StubTab {
+  readonly id: string
+  url: string
+  title: string
+  refMap: RefMap
+}
+
 interface SessionState {
   closed: boolean
+  /** The ACTIVE tab's url (mirror; saved back into its {@link StubTab} on switch). */
   url: string
-  readonly refMap: RefMap
+  /** The ACTIVE tab's refMap (mirror; swapped on switch). Mutable so switchTab can
+   *  repoint ref resolution to another tab — the ref-isolation invariant. */
+  refMap: RefMap
   consoleEntries: ConsoleEntry[]
   consoleDropped: number
+  /** TICKET-24 Wave B — open tabs (ALWAYS non-empty) + the active id. */
+  tabs: StubTab[]
+  activeTabId: string
 }
 
 const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+/** Resolve a switch/close arg: a stub tab id (exact) OR a 0-based index. */
+const resolveStubTab = (s: SessionState, idOrIndex: string): StubTab | null => {
+  const direct = s.tabs.find((t) => t.id === idOrIndex)
+  if (direct !== undefined) return direct
+  if (/^\d+$/.test(idOrIndex)) {
+    const i = Number(idOrIndex)
+    if (i >= 0 && i < s.tabs.length) return s.tabs[i] ?? null
+  }
+  return null
+}
 
 /** Find the DomNode whose backendPath a ref resolves to (stub-side `read`). */
 const findNode = (node: DomNode, backendPath: string): DomNode | null => {
@@ -104,12 +130,15 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
     async spawn(_opts?: BrowserStartOpts): Promise<Result<BrowserHandle, BrowserError>> {
       seq += 1
       const id = `headless-${seq}`
+      const tab0: StubTab = { id: `${id}-tab-1`, url: "about:blank", title: "", refMap: createRefMap() }
       sessions.set(id, {
         closed: false,
         url: "about:blank",
-        refMap: createRefMap(),
+        refMap: tab0.refMap,
         consoleEntries: [...(opts.consoleEntries ?? [])],
         consoleDropped: opts.consoleDropped ?? 0,
+        tabs: [tab0],
+        activeTabId: tab0.id,
       })
       return ok({ id, backend: "headless" })
     },
@@ -273,6 +302,74 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
       if (rOpts.what === "text") return ok({ value: node.name })
       if (rOpts.what === "visible") return ok({ value: true })
       return ok({ value: nodeAttr(node, rOpts.attr ?? "") })
+    },
+
+    // ── TICKET-24 Wave B — deterministic multi-tab (per-tab refMap = isolation).
+    async newTab(h: BrowserHandle, url?: string): Promise<Result<TabInfo, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const tab: StubTab = {
+        id: `${h.id}-tab-${s.value.tabs.length + 1}`,
+        url: url ?? "about:blank",
+        title: "",
+        refMap: createRefMap(),
+      }
+      s.value.tabs.push(tab)
+      return ok({ id: tab.id, url: tab.url, title: tab.title, active: false })
+    },
+
+    async switchTab(h: BrowserHandle, idOrIndex: string): Promise<Result<TabInfo, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const tab = resolveStubTab(s.value, idOrIndex)
+      if (tab === null) {
+        return err({ kind: "tab-not-found", id: idOrIndex, open: s.value.tabs.map((t) => t.id) })
+      }
+      // Save the active tab's live url, then make `tab` active (swap refMap+url) —
+      // a ref minted on the prior tab now fails closed (its refMap is inactive).
+      const cur = s.value.tabs.find((t) => t.id === s.value.activeTabId)
+      if (cur !== undefined) cur.url = s.value.url
+      s.value.activeTabId = tab.id
+      s.value.refMap = tab.refMap
+      s.value.url = tab.url
+      return ok({ id: tab.id, url: tab.url, title: tab.title, active: true })
+    },
+
+    async closeTab(h: BrowserHandle, idOrIndex: string): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const tab = resolveStubTab(s.value, idOrIndex)
+      if (tab === null) {
+        return err({ kind: "tab-not-found", id: idOrIndex, open: s.value.tabs.map((t) => t.id) })
+      }
+      if (s.value.tabs.length === 1) {
+        return err({ kind: "cdp-error", detail: "cannot close the last tab — close the browser instead" })
+      }
+      s.value.tabs = s.value.tabs.filter((t) => t.id !== tab.id)
+      if (s.value.activeTabId === tab.id) {
+        const next = s.value.tabs[0]
+        if (next !== undefined) {
+          s.value.activeTabId = next.id
+          s.value.refMap = next.refMap
+          s.value.url = next.url
+        }
+      }
+      return ok(undefined)
+    },
+
+    async listTabs(h: BrowserHandle): Promise<Result<readonly TabInfo[], BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      const cur = s.value.tabs.find((t) => t.id === s.value.activeTabId)
+      if (cur !== undefined) cur.url = s.value.url
+      return ok(
+        s.value.tabs.map((t) => ({
+          id: t.id,
+          url: t.url,
+          title: t.title,
+          active: t.id === s.value.activeTabId,
+        })),
+      )
     },
 
     async cdp(h: BrowserHandle, method: string): Promise<Result<unknown, BrowserError>> {

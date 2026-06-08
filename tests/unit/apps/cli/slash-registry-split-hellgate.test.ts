@@ -27,25 +27,10 @@ const repoRoot = join(import.meta.dir, "../../../..")
 const readSrc = (rel: string): string => readFileSync(join(repoRoot, rel), "utf8")
 
 describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {
-  test("CASE-1: registry-surface.ts does NOT import @/agent (any subpath)", () => {
-    const src = readSrc("src/apps/cli/slash/registry-surface.ts")
-    expect(src).not.toMatch(/from\s+["']@\/agent(?:\/[^"']+)?["']/)
-  })
-
-  test("CASE-2: registry-surface.ts does NOT import @/llm (any subpath)", () => {
-    const src = readSrc("src/apps/cli/slash/registry-surface.ts")
-    expect(src).not.toMatch(/from\s+["']@\/llm(?:\/[^"']+)?["']/)
-  })
-
-  test("CASE-3: registry-surface.ts does NOT import @/runner (any subpath)", () => {
-    const src = readSrc("src/apps/cli/slash/registry-surface.ts")
-    expect(src).not.toMatch(/from\s+["']@\/runner(?:\/[^"']+)?["']/)
-  })
-
-  test("CASE-4: registry-surface.ts does NOT import @/host (any subpath)", () => {
-    const src = readSrc("src/apps/cli/slash/registry-surface.ts")
-    expect(src).not.toMatch(/from\s+["']@\/host(?:\/[^"']+)?["']/)
-  })
+  // CASE-1: registry-surface.ts @/agent import-fence migrated to biome noRestrictedImports (see biome.json).
+  // CASE-2: registry-surface.ts @/llm import-fence migrated to biome noRestrictedImports (see biome.json).
+  // CASE-3: registry-surface.ts @/runner import-fence migrated to biome noRestrictedImports (see biome.json).
+  // CASE-4: registry-surface.ts @/host import-fence migrated to biome noRestrictedImports (see biome.json).
 
   // NOTE: CASE-5 used to assert slash-commands.ts is < 200 LOC. Removed — the
   // post-split structure is enforced by the import-fence cases above + the

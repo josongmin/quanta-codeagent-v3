@@ -18,6 +18,13 @@ import type { CdpConnection, Scheduler } from "./ports"
 export interface CdpRequestOpts {
   readonly timeoutMs?: number
   readonly signal?: AbortSignal
+  /** Multi-tab routing override (flat protocol). `string` ⇒ route THIS request to
+   *  that page session (a specific tab). `null` ⇒ send BROWSER-LEVEL (no
+   *  sessionId — for `Target.*` domain calls issued AFTER a page session is
+   *  active, e.g. opening/closing a second tab). Omitted ⇒ the active
+   *  {@link CdpSession.useSessionId} page session (back-compat: every existing
+   *  caller omits it, so its envelope is byte-identical). */
+  readonly sessionId?: string | null
 }
 
 export interface CdpSession {
@@ -236,7 +243,11 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
         pending.set(id, armed.settle)
         try {
           const envelope: Record<string, unknown> = { id, method, params: params ?? {} }
-          if (pageSessionId !== null) envelope.sessionId = pageSessionId
+          // Per-request routing: an explicit `sessionId` (a specific tab) wins;
+          // explicit `null` forces a browser-level call (no sessionId); omitted ⇒
+          // the active page session (back-compat — envelope byte-identical).
+          const sid = opts?.sessionId === undefined ? pageSessionId : opts.sessionId
+          if (sid !== null) envelope.sessionId = sid
           deps.conn.send(JSON.stringify(envelope))
         } catch (e) {
           armed.settle(err({ kind: "cdp-error", detail: errMessage(e) }))

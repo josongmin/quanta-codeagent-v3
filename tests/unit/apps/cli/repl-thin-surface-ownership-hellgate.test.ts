@@ -14,19 +14,12 @@ describe("CLI repl thin-surface ownership hellgate", () => {
   })
 
   test("CLI repl host uses the single runner compat owner instead of raw compat primitives", () => {
-    const repl = read("src/apps/cli/repl.ts")
-    expect(repl).not.toContain('from "@/host/runtime/session-host"')
-    expect(repl).not.toContain('from "@/runner"')
-    expect(repl).not.toContain('from "@/runner/session-execution-plane"')
-    expect(repl).not.toContain("./repl/execution-plane-wire")
+    // src/apps/cli/repl.ts import-fences (@/host/runtime/session-host, @/runner, @/runner/session-execution-plane, **/execution-plane-wire) migrated to biome noRestrictedImports (see biome.json).
 
     const deps = read("src/apps/cli/repl/runtime-context-compose.ts")
     expect(deps).toContain('from "@/sdk/runtime"')
     expect(deps).toContain("composeRuntimeBootstrapContext")
-    expect(deps).not.toContain('from "@/sdk/runtime/bridge"')
-    expect(deps).not.toContain('from "@/runner/assemble/config"')
-    expect(deps).not.toContain('from "@/runner/session-memory-auto"')
-    expect(deps).not.toContain("./session-memory-auto")
+    // runtime-context-compose.ts import-fences (@/sdk/runtime/bridge, @/runner/assemble/config, @/runner/session-memory-auto, **/session-memory-auto) migrated to biome noRestrictedImports (see biome.json).
 
     const setup = read("src/apps/cli/repl/session-setup.ts")
     expect(setup).not.toContain("buildLegacySideConversationPort")

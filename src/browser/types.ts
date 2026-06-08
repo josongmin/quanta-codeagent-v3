@@ -36,6 +36,19 @@ export type BrowserError =
   | { readonly kind: "timeout"; readonly ms: number }
   | { readonly kind: "cancelled" }
   | { readonly kind: "closed" }
+  // TICKET-24 Wave B (tabs) — switch/close named an id (or index) with no live
+  // tab. `open` lists the currently-open tab ids so the model self-corrects in
+  // one turn.
+  | { readonly kind: "tab-not-found"; readonly id: string; readonly open: readonly string[] }
+
+/** TICKET-24 Wave B — one open tab. `id` is the CDP targetId (the switch/close
+ *  handle); `active` marks the tab subsequent ref-resolving ops act on. */
+export interface TabInfo {
+  readonly id: string
+  readonly url: string
+  readonly title: string
+  readonly active: boolean
+}
 
 export interface BrowserStartOpts {
   // The adapter always launches `--headless=new`; a headed mode + its flag are

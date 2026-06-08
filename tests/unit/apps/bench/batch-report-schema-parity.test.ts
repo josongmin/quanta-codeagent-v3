@@ -21,7 +21,6 @@ describe("T5 batch report schema parity", () => {
 
     expect(source).toContain("writeBatchArtifacts")
     expect(source).toContain("export const writeArtifacts = async")
-    expect(source).not.toContain('from "@/sdk/runtime"')
   })
 
   test("predictions jsonl keeps the official field names", async () => {

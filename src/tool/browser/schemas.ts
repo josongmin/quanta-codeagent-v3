@@ -102,3 +102,22 @@ export const highlightSchema = z.object({
   durationMs: z.number().finite().optional().describe("auto-remove after N ms (default 1500)"),
 })
 export type HighlightInput = z.infer<typeof highlightSchema>
+
+// TICKET-24 Wave B — multi-tab (default-OFF, gated by QUANTA_BROWSER_TABS).
+// tab_new opens about:blank (no url param) so navigation — and its SSRF guard —
+// stays in browser_navigate alone; switch to the new tab, then navigate it.
+export const tabNewSchema = z.object({})
+export type TabNewInput = z.infer<typeof tabNewSchema>
+
+export const tabSwitchSchema = z.object({
+  tab: z.string().describe("tab id (from browser_tab_list) OR a 0-based index"),
+})
+export type TabSwitchInput = z.infer<typeof tabSwitchSchema>
+
+export const tabCloseSchema = z.object({
+  tab: z.string().describe("tab id (from browser_tab_list) OR a 0-based index"),
+})
+export type TabCloseInput = z.infer<typeof tabCloseSchema>
+
+export const tabListSchema = z.object({})
+export type TabListInput = z.infer<typeof tabListSchema>

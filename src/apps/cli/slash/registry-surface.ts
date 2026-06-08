@@ -24,17 +24,18 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 import { renderAgentFleet } from "../agents-fleet-panel"
 import { backgroundCmd } from "../background-cmd"
-import { buildInitCmd } from "../init-scaffold"
 import { formatBranchesPanel } from "../branch-search-progress"
+import { readCliKnob } from "../cli-knobs-accessor"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
 import { forkCheckpointCmd } from "../fork-checkpoint-cmd"
 import { runHelpRender } from "../help-render"
 import { historyCmd } from "../history-cmd"
 import { parseSnoozeDuration } from "../idle-monitor"
+import { buildInitCmd } from "../init-scaffold"
 import { inspectCmd } from "../inspect-cmd"
 import { loginCmd } from "../login-cmd"
 import { buildLogoutCmd } from "../logout-cmd"
@@ -440,7 +441,8 @@ const branchesCmd: SlashCommand = {
  *  for the fleet of background subagents. */
 const agentsCmd: SlashCommand = {
   name: "/agents",
-  describe: "Live subagent fleet (ID/status/type/age/result). Flags: --format table|json|tree, --all",
+  describe:
+    "Live subagent fleet (ID/status/type/age/result). Flags: --format table|json|tree, --all",
   category: "loop",
   async run(args, ctx) {
     if (ctx.agents === undefined) {
@@ -866,7 +868,7 @@ export const buildSurfaceSlashCommands = (
   // WRITES to cwd): present ONLY when QUANTA_INIT_SLASH=on, so default-OFF it is
   // absent from the registry entirely (byte-identical; the /init SKILL still owns
   // the bare verb). The @/runner repo-map import lives inside init-scaffold.ts.
-  ...(gateOn(process.env, "QUANTA_INIT_SLASH") ? [buildInitCmd()] : []),
+  ...((readCliKnob("QUANTA_INIT_SLASH", "bool") ?? false) ? [buildInitCmd()] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,

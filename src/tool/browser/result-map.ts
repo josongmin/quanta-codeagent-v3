@@ -78,6 +78,14 @@ export const mapBrowserError = (e: BrowserError): ToolResult => {
         output: "browser session is closed",
         failure: { mode: "error", modelVisibleError: "closed" },
       }
+    case "tab-not-found":
+      // `id` is model-supplied; defang. Echo the open tab ids so the model
+      // self-corrects in one turn (TICKET-24 Wave B).
+      return {
+        ok: false,
+        output: `no such tab "${guardPageText(e.id)}" — open tabs: ${e.open.map((t) => guardPageText(t)).join(", ") || "(none)"}`,
+        failure: { mode: "not_found" },
+      }
     default: {
       const _exhaustive: never = e
       return {

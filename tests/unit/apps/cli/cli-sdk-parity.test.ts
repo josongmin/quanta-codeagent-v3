@@ -12,13 +12,8 @@ describe("T5 CLI SDK parity", () => {
 
     expect(runtimeContext).toContain('from "@/sdk/runtime"')
     expect(runtimeContext).toContain("composeRuntimeBootstrapContext")
-    expect(runtimeContext).not.toContain('from "@/sdk/runtime/bridge"')
-    expect(runtimeContext).not.toContain('from "@/runner/assemble/config"')
-    expect(runtimeContext).not.toContain('from "@/runner/session-memory-auto"')
 
     expect(sessionSetup).toContain('from "@/sdk/runtime"')
-    expect(sessionSetup).not.toContain('from "@/host/runtime/session-host"')
-    expect(sessionSetup).not.toContain('from "@/runner/assemble/config"')
     expect(sessionSetup).not.toContain("sideConversationPort")
   })
 

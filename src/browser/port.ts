@@ -38,6 +38,7 @@ import type {
   ReadOpts,
   ScrollOpts,
   SnapshotOpts,
+  TabInfo,
   TypeOpts,
   WaitOpts,
 } from "./types"
@@ -147,5 +148,32 @@ export interface BrowserPort {
     params?: Readonly<Record<string, unknown>>,
     signal?: AbortSignal,
   ): Promise<Result<unknown, BrowserError>>
+  // ── TICKET-24 Wave B — multi-tab. Each tab owns its OWN refMap, so a ref
+  //    minted on one tab fails closed on another (same fail-closed invariant as a
+  //    navigation). All ref-resolving ops act on the ACTIVE tab.
+  /** Open a new tab (foreground stays on the current tab; call `switchTab` to act
+   *  on it). `url` loads it (default about:blank). Downloads are denied on every
+   *  tab (security parity with bring-up). */
+  newTab(
+    h: BrowserHandle,
+    url?: string,
+    signal?: AbortSignal,
+  ): Promise<Result<TabInfo, BrowserError>>
+  /** Make `idOrIndex` (a tab id OR a 0-based index) the active tab — subsequent
+   *  ref-resolving ops route to it. Refs are PER-TAB: re-snapshot after switching. */
+  switchTab(
+    h: BrowserHandle,
+    idOrIndex: string,
+    signal?: AbortSignal,
+  ): Promise<Result<TabInfo, BrowserError>>
+  /** Close a tab. Closing the active tab reassigns the active to another open
+   *  tab. Refuses to close the last remaining tab (close the browser instead). */
+  closeTab(
+    h: BrowserHandle,
+    idOrIndex: string,
+    signal?: AbortSignal,
+  ): Promise<Result<void, BrowserError>>
+  /** List open tabs (active flag + live title). */
+  listTabs(h: BrowserHandle, signal?: AbortSignal): Promise<Result<readonly TabInfo[], BrowserError>>
   close(h: BrowserHandle): Promise<Result<void, BrowserError>>
 }

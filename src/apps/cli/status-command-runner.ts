@@ -574,7 +574,9 @@ export const runStatusCommand = async (
     try {
       // `cancel()` returns a promise; swallow both a sync throw and an async
       // rejection so a raced detach can never surface as an unhandled error.
-      reader.cancel().catch(() => {})
+      reader.cancel().catch(() => {
+        /* best-effort: ignore an async cancel rejection from a raced detach */
+      })
     } catch {
       // best-effort (already detached / unsupported)
     }

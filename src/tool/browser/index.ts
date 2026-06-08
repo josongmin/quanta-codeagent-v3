@@ -45,6 +45,14 @@ import {
   scrollSchema,
   selectOptionSchema,
   snapshotSchema,
+  type TabCloseInput,
+  tabCloseSchema,
+  type TabListInput,
+  tabListSchema,
+  type TabNewInput,
+  tabNewSchema,
+  type TabSwitchInput,
+  tabSwitchSchema,
   type TypeInput,
   typeSchema,
   type WaitInput,
@@ -551,6 +559,97 @@ const highlightTool = (port: BrowserPort, session: BrowserSession): Tool =>
     },
   })
 
+// ── TICKET-24 Wave B — multi-tab tools. Each tab has its OWN refMap, so refs are
+//    per-tab: after browser_tab_switch the model must re-snapshot. Tab titles are
+//    page-controlled ⇒ guardPageText before the model sees them.
+const tabNewTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<TabNewInput>({
+    name: "browser_tab_new",
+    description:
+      "Open a new browser tab (blank). It does NOT become active — call browser_tab_switch to act on it, then browser_navigate to load a page. See browser_tab_list.",
+    inputSchema: tabNewSchema,
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(_input: TabNewInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.newTab(ens.handle, undefined, ctx.signal)
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      yield {
+        type: "result",
+        result: {
+          ok: true,
+          output: `opened tab ${r.value.id} (inactive) — browser_tab_switch ${r.value.id} to use it`,
+        },
+      }
+    },
+  })
+
+const tabSwitchTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<TabSwitchInput>({
+    name: "browser_tab_switch",
+    description:
+      "Make a tab active (by id from browser_tab_list, or a 0-based index). Refs are PER-TAB: take a fresh browser_snapshot after switching — refs from the previous tab no longer resolve.",
+    inputSchema: tabSwitchSchema,
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    hitlTier: () => "always-confirm",
+    async *execute(input: TabSwitchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.switchTab(ens.handle, input.tab, ctx.signal)
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      const label = guardPageText(r.value.title) || r.value.url
+      yield {
+        type: "result",
+        result: {
+          ok: true,
+          output: `switched to tab ${r.value.id} (${label}) — refs are per-tab, re-snapshot before acting`,
+        },
+      }
+    },
+  })
+
+const tabCloseTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<TabCloseInput>({
+    name: "browser_tab_close",
+    description:
+      "Close a tab (by id or 0-based index). Closing the active tab makes another tab active. The last remaining tab cannot be closed (close the browser instead).",
+    inputSchema: tabCloseSchema,
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    hitlTier: () => "always-confirm",
+    async *execute(input: TabCloseInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.closeTab(ens.handle, input.tab, ctx.signal)
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      yield { type: "result", result: { ok: true, output: `closed tab ${input.tab}` } }
+    },
+  })
+
+const tabListTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<TabListInput>({
+    name: "browser_tab_list",
+    description: "List open browser tabs — index, id, url, title, and which is active (*).",
+    inputSchema: tabListSchema,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => true,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(_input: TabListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.listTabs(ens.handle, ctx.signal)
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      const lines = r.value.map(
+        (t, i) =>
+          `[${i}]${t.active ? "*" : " "} ${t.id}  ${t.url}  ${JSON.stringify(guardPageText(t.title))}`,
+      )
+      yield { type: "result", result: { ok: true, output: lines.join("\n") || "(no tabs)" } }
+    },
+  })
+
 export interface BrowserToolset {
   readonly tools: Tool[]
   /** Tear down the browser session. Register into the composition root's
@@ -567,6 +666,8 @@ export interface BrowserToolsetOpts {
   readonly bounds?: boolean
   /** TICKET-24 — gate `browser_highlight` (QUANTA_BROWSER_HIGHLIGHT). Default-OFF. */
   readonly highlight?: boolean
+  /** TICKET-24 Wave B — gate the 4 `browser_tab_*` tools (QUANTA_BROWSER_TABS). Default-OFF. */
+  readonly tabs?: boolean
 }
 
 /** Build the browser toolset over a wired `BrowserPort`. The 15 tools share ONE
@@ -597,6 +698,14 @@ export const createBrowserToolset = (
   // when its flag is set, so the unflagged toolset is byte-identical to the 15.
   if (opts.bounds === true) tools.push(boundsTool(port, session))
   if (opts.highlight === true) tools.push(highlightTool(port, session))
+  if (opts.tabs === true) {
+    tools.push(
+      tabListTool(port, session),
+      tabNewTool(port, session),
+      tabSwitchTool(port, session),
+      tabCloseTool(port, session),
+    )
+  }
   return { tools, dispose: () => session.dispose() }
 }
 
