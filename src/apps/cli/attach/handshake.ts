@@ -34,9 +34,7 @@ export interface AttachHandshake {
   readonly sessionId: string | undefined
   /** True once a snapshot has settled the handshake (commands may now flow). */
   readonly ready: boolean
-  /** Highest seq observed (resume cursor); `undefined` until a seq-bearing frame. */
-  readonly lastSeq: number | undefined
-  /** Build the FIRST connect frame (discovery sentinel, no resume cursor). */
+  /** Build the FIRST connect frame (discovery sentinel). */
   initialConnect(): SessionTransportMessage
   /**
    * Feed an inbound transport message. Returns a `connect` frame to SEND when
@@ -45,27 +43,23 @@ export interface AttachHandshake {
   onMessage(message: SessionTransportMessage): SessionTransportMessage | undefined
 }
 
-const connectFrame = (sessionId: string, resumeFromSeq?: number): SessionTransportMessage => ({
+const connectFrame = (sessionId: string): SessionTransportMessage => ({
   kind: "connect",
   sessionId,
-  ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
 })
 
 export const createAttachHandshake = (): AttachHandshake => {
   let sessionId: string | undefined
   let ready = false
-  let lastSeq: number | undefined
 
-  const trackSeq = (seq: number): void => {
-    if (!Number.isFinite(seq)) return
-    lastSeq = lastSeq === undefined ? seq : Math.max(lastSeq, seq)
-  }
-
-  /** Re-handshake frame: carry the resume cursor only on a reconnect where we
-   *  already know the canonical id AND have seen a seq (matches the frontend —
-   *  the discovery bootstrap never resumes). */
-  const reHandshake = (id: string): SessionTransportMessage =>
-    lastSeq !== undefined ? connectFrame(id, lastSeq) : connectFrame(id)
+  // NOTE (v1 scope): this slice has NO reconnect/resume path. A joining client
+  // performs the discovery→adopt dance ONCE; a daemon-initiated close exits the
+  // CLI cleanly (see attach-client.ts close/error listeners) rather than
+  // silently re-dialing. The frontend's resume-cursor (`resumeFromSeq`) is
+  // therefore deliberately omitted — both the initial AND the re-handshake
+  // (id-adoption) connect frames are bare. If a future seam adds reconnect, it
+  // would track the highest observed seq here and seed `resumeFromSeq` on the
+  // re-dial; until that path exists, tracking it would be misleading dead code.
 
   return {
     get sessionId() {
@@ -73,9 +67,6 @@ export const createAttachHandshake = (): AttachHandshake => {
     },
     get ready() {
       return ready
-    },
-    get lastSeq() {
-      return lastSeq
     },
     initialConnect() {
       return connectFrame(sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID)
@@ -93,22 +84,19 @@ export const createAttachHandshake = (): AttachHandshake => {
             sessionId !== message.sessionId
           ) {
             sessionId = message.sessionId
-            return reHandshake(sessionId)
+            // Re-handshake to the canonical id — bare (no resume cursor; the
+            // discovery bootstrap never resumes and there is no reconnect path).
+            return connectFrame(sessionId)
           }
           return undefined
         }
         case "snapshot": {
-          trackSeq(message.snapshot.seq)
           // A server may answer the discovery connect with a snapshot directly
           // (no reject) — adopt the id from the snapshot in that case.
           if (sessionId === undefined || sessionId !== message.snapshot.sessionId) {
             sessionId = message.snapshot.sessionId
           }
           ready = true
-          return undefined
-        }
-        case "event": {
-          trackSeq(message.event.seq)
           return undefined
         }
         default:

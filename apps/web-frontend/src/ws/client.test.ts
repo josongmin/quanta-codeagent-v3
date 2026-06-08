@@ -554,6 +554,41 @@ describe("SessionClient", () => {
     expect(parseConnectResumeFromSeq(h.fakes[1]?.sent[0])).toBe(9)
   })
 
+  it("resumes with resumeFromSeq:0 when the only seen seq is the bootstrap seq 0", () => {
+    const h = buildHarness()
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+    // The bootstrap snapshot lands at seq 0 — a REAL cursor, not "nothing seen".
+    h.fakes[0]?._simulateMessage(encodeSnapshotFrameAtSeq("srv-1", 0))
+    expect(h.client.lastSeq).toBe(0)
+
+    // Reconnect: the resume gate is `lastSeq !== null`, NOT truthiness — so seq 0
+    // must still be carried (dropping it would replay from scratch / double-render).
+    h.fakes[0]?._simulateClose(1006, "abnormal")
+    h.runNextTimer()
+    h.fakes[1]?._simulateOpen()
+
+    expectConnectFrame(h.fakes[1]?.sent[0], "srv-1")
+    expect(parseConnectResumeFromSeq(h.fakes[1]?.sent[0])).toBe(0)
+  })
+
+  it("a low-seq snapshot does NOT lower the tracked high-water seq (monotonic resume cursor)", () => {
+    const h = buildHarness()
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+    // Events drive the cursor to 9.
+    h.fakes[0]?._simulateMessage(encodeEventFrame(7))
+    h.fakes[0]?._simulateMessage(encodeEventFrame(9))
+    expect(h.client.lastSeq).toBe(9)
+
+    // A late/stale SNAPSHOT carrying a LOWER seq (4) must not lower the cursor —
+    // otherwise the next reconnect would resume from 4 and re-deliver 5..9.
+    h.fakes[0]?._simulateMessage(encodeSnapshotFrameAtSeq("srv-1", 4))
+    expect(h.client.lastSeq).toBe(9)
+  })
+
   it("reconnect without any seen events omits resumeFromSeq (clean full snapshot)", () => {
     const h = buildHarness()
     h.client.connect({ url: "ws://localhost/x" })
@@ -566,6 +601,44 @@ describe("SessionClient", () => {
 
     expectConnectFrame(h.fakes[1]?.sent[0], "srv-1")
     expect(parseConnectResumeFromSeq(h.fakes[1]?.sent[0])).toBeUndefined()
+  })
+
+  it("reaches connected on a resume that replays EVENTS only (no snapshot)", () => {
+    const h = buildHarness()
+    // First connect: full handshake → snapshot drives `connected` and a seq.
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+    h.fakes[0]?._simulateMessage(encodeSnapshotFrameAtSeq("srv-1", 5))
+    h.fakes[0]?._simulateMessage(encodeEventFrame(7))
+    expect(h.client.state.kind).toBe("connected")
+
+    // Drop the socket; the reconnect handshake carries resumeFromSeq.
+    h.fakes[0]?._simulateClose(1006, "abnormal")
+    h.runNextTimer()
+    expect(h.fakes).toHaveLength(2)
+    h.fakes[1]?._simulateOpen()
+    // After re-open the client is back in `connecting` (handshake pending).
+    expect(h.client.state.kind).toBe("connecting")
+
+    // The daemon replays MISSED EVENTS with NO snapshot (events-only resume).
+    h.fakes[1]?._simulateMessage(encodeEventFrame(8))
+
+    // The first resumed event proves the handshake settled → `connected`.
+    // Without this the composer stays frozen and `send()` drops commands.
+    expect(h.client.state.kind).toBe("connected")
+
+    // And sending now actually puts a command on the wire (composer unfrozen).
+    const beforeSend = h.fakes[1]?.sent.length ?? 0
+    h.client.send({
+      sessionId: "srv-1",
+      commandId: "c-resume",
+      issuedAt: "2026-05-26T00:00:00.000Z",
+      type: "turn.run",
+    })
+    const after = h.fakes[1]?.sent ?? []
+    expect(after.length).toBe(beforeSend + 1)
+    expect(sentKind(after[after.length - 1])).toBe("command")
   })
 
   it("surfaces command rejections to rejection subscribers", () => {
@@ -625,9 +698,22 @@ describe("SessionClient", () => {
     expect(h.hasTimerOfMs(500)).toBe(true)
   })
 
-  it("a pong before the deadline keeps the socket alive (no reconnect)", () => {
+  it("a pong before the deadline keeps the socket alive AND is consumed (not mis-routed)", () => {
     const h = buildHarness()
+    // Register the per-kind handlers a pong must NEVER reach: a heartbeat is
+    // connection-level bookkeeping, its ONLY effect is the liveness reset.
+    const events: string[] = []
+    const snapshots: string[] = []
+    const observability: string[] = []
+    const canvas: string[] = []
+    h.client.onAny((ev) => events.push(ev.type))
+    h.client.onSnapshot((s) => snapshots.push(s.sessionId))
+    h.client.onObservability((m) => observability.push(m.kind))
+    h.client.onCanvas((m) => canvas.push(m.kind))
     connectToReady(h)
+    // connectToReady delivers a snapshot → drain that expected fanout so the
+    // post-pong assertions measure ONLY what the pong did.
+    snapshots.length = 0
     h.runTimerOfMs(HEARTBEAT_INTERVAL_MS)
     expect(h.hasTimerOfMs(HEARTBEAT_TIMEOUT_MS)).toBe(true)
 
@@ -637,6 +723,12 @@ describe("SessionClient", () => {
     )
     expect(h.hasTimerOfMs(HEARTBEAT_TIMEOUT_MS)).toBe(false)
     expect(h.client.state.kind).toBe("connected")
+    // The pong was CONSUMED as bookkeeping — it must not fan out as an event,
+    // snapshot, observability, or canvas message.
+    expect(events).toEqual([])
+    expect(snapshots).toEqual([])
+    expect(observability).toEqual([])
+    expect(canvas).toEqual([])
   })
 
   it("any inbound frame (not just a pong) resets the liveness deadline", () => {
@@ -647,6 +739,22 @@ describe("SessionClient", () => {
 
     // A normal event frame proves the socket is alive — the deadline clears.
     h.fakes[0]?._simulateMessage(encodeEventFrame(3))
+    expect(h.hasTimerOfMs(HEARTBEAT_TIMEOUT_MS)).toBe(false)
+    expect(h.client.state.kind).toBe("connected")
+  })
+
+  it("a binary (non-text) inbound frame resets the liveness deadline (ANY frame keeps alive)", () => {
+    const h = buildHarness()
+    connectToReady(h)
+    // Fire the ping → arm the liveness deadline.
+    h.runTimerOfMs(HEARTBEAT_INTERVAL_MS)
+    expect(h.hasTimerOfMs(HEARTBEAT_TIMEOUT_MS)).toBe(true)
+
+    // A binary frame (e.g. an ArrayBuffer the client can't decode) is STILL
+    // proof the socket carries traffic — it must reset the deadline, not be
+    // dropped before liveness is acknowledged. The invariant is "ANY inbound
+    // frame keeps alive", binary or text.
+    h.fakes[0]?._simulateMessage(new ArrayBuffer(8))
     expect(h.hasTimerOfMs(HEARTBEAT_TIMEOUT_MS)).toBe(false)
     expect(h.client.state.kind).toBe("connected")
   })
@@ -700,6 +808,33 @@ describe("SessionClient", () => {
     )
 
     expect(usageTotals).toEqual([10])
+  })
+
+  it("replays the last canvas frame to a late onCanvas subscriber", () => {
+    const h = buildHarness()
+    const seen: string[] = []
+
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    // A canvas frame arrives BEFORE any subscriber is attached.
+    h.fakes[0]?._simulateMessage(
+      JSON.stringify({
+        version: "canvas.v1",
+        kind: "canvas",
+        payload: {
+          kind: "context.usage",
+          segments: [{ id: "system", tokens: 10 }],
+          total: 10,
+          max: 100,
+          emittedAt: 9,
+        },
+      }),
+    )
+    // A freshly-mounted panel subscribes late — it must render the last frame
+    // immediately (mirrors onObservability replay), not wait for the next one.
+    h.client.onCanvas((msg) => seen.push(msg.kind))
+
+    expect(seen).toEqual(["context.usage"])
   })
 
   it("does NOT log a canvas frame as an unrecognised dropped frame", () => {

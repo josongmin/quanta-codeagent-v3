@@ -41,6 +41,8 @@ const EVENT_TYPES: readonly SessionEventType[] = [
   "tool.completed",
   "tool.invoked",
   "turn.completed",
+  "turn.llm.continuation",
+  "turn.llm.request",
   "turn.output.delta",
   "turn.failed",
   "turn.started",

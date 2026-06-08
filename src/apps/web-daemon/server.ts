@@ -20,6 +20,7 @@ import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import {
   encodeSessionTransportMessage,
   type SessionTransport,
+  type SessionTransportMessage,
   tryDecodeSessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
 } from "@/ipc/session"
@@ -578,6 +579,40 @@ const WEB_DAEMON_REPLAY_WINDOW = 128
 export const HEARTBEAT_INTERVAL_MS = 25_000
 const HEARTBEAT_PONG_FRAME = encodeSessionTransportMessage({ kind: "heartbeat", phase: "pong" })
 
+/** Minimal `ws.send`-only surface the heartbeat reply writes to. */
+interface HeartbeatSendable {
+  send(data: string | Uint8Array): unknown
+}
+
+/**
+ * Pure heartbeat short-circuit. Returns `true` when `decoded` is a heartbeat
+ * frame the message pump should consume (a `ping` is answered with a `pong`; a
+ * `pong` — or our own reply — is terminal and never forwarded), `false` when
+ * the frame is NOT a heartbeat and must fall through to the session bridge.
+ *
+ * NO-THROW: a `ws.send` on a closing/dead socket can throw — we swallow it so a
+ * hostile socket never crashes the message pump (the close callback evicts the
+ * dead peer). Extracted + exported so this guard has direct test teeth:
+ * removing the try/catch leaves the e2e tests green, so it needs a unit that
+ * injects a throwing `ws` and asserts the NO-THROW + `true` consume contract.
+ */
+export const replyToHeartbeat = (
+  ws: HeartbeatSendable,
+  decoded: SessionTransportMessage | undefined,
+): boolean => {
+  if (decoded?.kind !== "heartbeat") return false
+  if (decoded.phase === "ping") {
+    try {
+      ws.send(HEARTBEAT_PONG_FRAME)
+    } catch {
+      // Dead socket — the close callback evicts it; swallow so a bad send never
+      // crashes the message pump.
+    }
+  }
+  // A `pong` (or our own reply) is terminal: consumed, never forwarded.
+  return true
+}
+
 /**
  * Multi-client shared-session mode (v2):
  *   - The daemon creates ONE session at boot via `runtime.createSession`.
@@ -857,18 +892,10 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // frame) falls through to the adapter exactly as before.
         if (typeof raw === "string") {
           const decoded = tryDecodeSessionTransportMessage(raw)
-          if (decoded?.kind === "heartbeat") {
-            if (decoded.phase === "ping") {
-              try {
-                ws.send(HEARTBEAT_PONG_FRAME)
-              } catch {
-                // Dead socket — the close callback evicts it; swallow so a
-                // bad send never crashes the message pump.
-              }
-            }
-            // A `pong` (or our own reply) is terminal: never forwarded.
-            return
-          }
+          // A heartbeat is consumed here (pong reply / terminal) so the bridge
+          // never sees it — its 5-kind contract is unchanged. Any non-heartbeat
+          // frame falls through to the adapter exactly as before.
+          if (replyToHeartbeat(ws, decoded)) return
         }
         ws.data.adapter?.pushMessage(raw)
       },

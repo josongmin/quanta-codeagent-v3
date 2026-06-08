@@ -6,9 +6,11 @@ import type {
   SessionStateView,
 } from "../types/protocol"
 import {
+  applyDedupedEvent,
   applyRejectedFrameToTranscript,
   applySessionEventToTranscript,
   initialTranscript,
+  markEventSeen,
   transcriptReducer,
 } from "./session-hooks"
 
@@ -337,6 +339,36 @@ describe("session-hooks transcript projection", () => {
         timestamp: "2026-05-26T13:00:02.000Z",
       },
     ])
+  })
+
+  it("dedups a replayed+live overlap: the same eventId twice renders one message", () => {
+    // Mirrors the hook's `seenEventIdsRef`: an event the daemon persisted is
+    // replayed via HTTP hydration AND may also arrive as a live WS frame. The
+    // dedup gate must apply it exactly once.
+    const seen = new Set<string>()
+    let state = initialTranscript
+
+    const started = turnStartedEvent("hello")
+    const first = applyDedupedEvent(state, seen, started)
+    expect(first.applied).toBe(true)
+    state = first.state
+
+    // The SAME event (identical eventId) arrives again — must be a no-op.
+    const dup = applyDedupedEvent(state, seen, started)
+    expect(dup.applied).toBe(false)
+    state = dup.state
+
+    expect(state.messages).toHaveLength(1)
+    expect(state.messages[0]?.id).toBe("turn-1")
+  })
+
+  it("markEventSeen returns true only on first sight of an eventId", () => {
+    const seen = new Set<string>()
+    expect(markEventSeen(seen, "e1")).toBe(true)
+    expect(markEventSeen(seen, "e1")).toBe(false)
+    expect(markEventSeen(seen, "e2")).toBe(true)
+    expect(seen.has("e1")).toBe(true)
+    expect(seen.has("e2")).toBe(true)
   })
 
   it("renders rejected command frames as error transcript rows", () => {

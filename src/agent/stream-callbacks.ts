@@ -53,7 +53,7 @@ import { inferToolTier } from "@/permission"
 import type { RedactionHit } from "@/security"
 import { runtimeConfig } from "@/shared"
 import { dispatchTool } from "./dispatch"
-import { decideScopeEscalation } from "./skill-scope-escalation"
+import { decideScopeEscalation, type ScopeVerdict } from "./skill-scope-escalation"
 import type { DispatchOutcome, InProgressIndicator, StreamingCall } from "./streaming-dispatch"
 import type { TurnSession, TurnState } from "./turn-context"
 import type { AgentConfig } from "./types"
@@ -164,6 +164,48 @@ const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut =
 const scopeReasonFor = (tool: string, skill: string): string =>
   `Tool "${tool}" is outside the active skill "${skill}" (not in its allowed-tools).`
 
+/** Operator-facing label for the `skill_scope_decision` timeline event. */
+const scopeDecisionLabel = (
+  kind: ScopeVerdict["kind"],
+): "allowed" | "declined" | "steered" | "blocked" =>
+  kind === "dispatch"
+    ? "allowed"
+    : kind === "hard_deny"
+      ? "blocked"
+      : kind === "deny_and_steer"
+        ? "steered"
+        : "declined"
+
+/** Map an escalation verdict to a short-circuit tool_result, or `null` to fall
+ *  through to normal dispatch (`dispatch` verdict). Extracted so the dispatch
+ *  closure stays under biome's cognitive-complexity cap. */
+const scopeOutcome = (
+  verdict: ScopeVerdict,
+  callId: string,
+  reason: string,
+): StreamDispatchOut | null => {
+  switch (verdict.kind) {
+    case "dispatch":
+      return null
+    case "hard_deny":
+      return scopeDeny(
+        callId,
+        `${reason} It is a hand-off-required action and cannot be granted mid-skill. ` +
+          "Use a permitted tool or exit the skill.",
+        "skill-scoped: blocked",
+      )
+    case "deny":
+      return scopeDeny(callId, `Declined: ${reason} Use a tool the skill permits.`, "skill-scoped: declined")
+    case "deny_and_steer":
+      return scopeDeny(callId, `Declined: ${reason} ${verdict.steer}`, "skill-scoped: steered")
+    default: {
+      // Exhaustiveness: `ScopeVerdict` is closed; a new kind fails to compile.
+      const _never: never = verdict
+      return _never
+    }
+  }
+}
+
 /**
  * Build the {@link StreamCallbacks} record `streamingTurn` consumes off the
  * loop's stream seam. Pure: the returned closures capture the supplied
@@ -196,44 +238,63 @@ export const createStreamDispatcher = (
     if (!runtimeConfig().skillScopeV2) return skillScopeDeny(call)
     const activeSkill = skillGate.activeSkillName() ?? "active skill"
     const tool = config.registry.get(call.name)
-    const tier = tool !== undefined ? inferToolTier(tool, call.input) : "always-confirm"
+    // An unregistered tool is a malformed/hallucinated call — never escalate or
+    // widen scope for a tool that does not exist; deny it as out-of-scope (audit
+    // finding). Registered tools resolve their effective tier.
+    if (tool === undefined) return skillScopeDeny(call)
+    const tier = inferToolTier(tool, call.input)
     const reason = scopeReasonFor(call.name, activeSkill)
+    const isReadOnly = config.registry.isReadOnly(call.name)
     const verdict = await decideScopeEscalation({
       tool: call.name,
       input: call.input,
-      isReadOnly: config.registry.isReadOnly(call.name),
+      isReadOnly,
       tier,
+      mode: config.permission.mode,
       activeSkill,
       scopeReason: reason,
       onConfirm: config.onConfirm,
+      // ADR-0512 P3 — surface the INTERACTIVE escalation pair: a
+      // `permission_escalation_requested` approval CARD (NOT a red error) fired
+      // EXACTLY on the ask path, then a `permission_escalation_resolved` when the
+      // user decides. These hooks are NEVER invoked for a hand-off-required
+      // security boundary (it hard-denies upstream WITHOUT asking), so the card
+      // seam is structurally unreachable for a security tool.
+      onEscalationRequested: (req) =>
+        config.stream.emit({
+          type: "permission_escalation_requested",
+          id: req.id,
+          tool: req.tool,
+          risk: req.risk,
+          activeSkill: req.activeSkill,
+          reason: req.reason,
+          ...(req.justification !== undefined ? { justification: req.justification } : {}),
+          options: req.options,
+        }),
+      onEscalationResolved: (res) =>
+        config.stream.emit({
+          type: "permission_escalation_resolved",
+          id: res.id,
+          decision: res.decision,
+        }),
     })
-    switch (verdict.kind) {
-      case "dispatch":
-        // Approved — widen scope so the SAME tool is not re-asked, then fall
-        // through to normal dispatch (the tool's own permission gate still runs).
-        skillGate.widenScope(call.name)
-        return null
-      case "hard_deny":
-        return scopeDeny(
-          call.id,
-          `${reason} It is a hand-off-required action and cannot be granted mid-skill. ` +
-            "Use a permitted tool or exit the skill.",
-          "skill-scoped: blocked",
-        )
-      case "deny":
-        return scopeDeny(
-          call.id,
-          `Declined: ${reason} Use a tool the skill permits.`,
-          "skill-scoped: declined",
-        )
-      case "deny_and_steer":
-        return scopeDeny(call.id, `Declined: ${reason} ${verdict.steer}`, "skill-scoped: steered")
-      default: {
-        // Exhaustiveness: `ScopeVerdict` is closed; a new kind fails to compile.
-        const _never: never = verdict
-        return _never
-      }
-    }
+    // ADR-0512 — surface the outcome as a DISTINCT timeline item (not a red tool
+    // error) so a UI renders an "outside skill scope" card / lock. (The P3
+    // escalation pair above is the INTERACTIVE seam; this is the post-decision
+    // summary line — `blocked` is the gray hard-lock for hand-off-required.)
+    config.stream.emit({
+      type: "skill_scope_decision",
+      id: call.id,
+      tool: call.name,
+      activeSkill,
+      reason,
+      isReadOnly,
+      decision: scopeDecisionLabel(verdict.kind),
+    })
+    // Approved ⇒ widen scope so the SAME tool is not re-asked, then fall through
+    // to normal dispatch (the tool's own permission gate still runs downstream).
+    if (verdict.kind === "dispatch") skillGate.widenScope(call.name)
+    return scopeOutcome(verdict, call.id, reason)
   }
 
   const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {

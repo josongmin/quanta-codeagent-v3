@@ -31,8 +31,10 @@ import type {
   WorkingState as AgentWorkingState,
   WorkingStatePatch as AgentWorkingStatePatch,
 } from "@/agent"
+import type { ToolRiskMirror } from "@/stream"
 import type {
   BlockerSurface as ToolBlockerSurface,
+  ToolRisk,
   WorkingStatePatch as ToolWorkingStatePatch,
   WorkingStateSnapshot as ToolWorkingStateSnapshot,
 } from "@/tool"
@@ -52,6 +54,11 @@ const _assertWorkingStateMirror: AssertEqual<AgentWorkingState, ToolWorkingState
 // Patch shape mirror — same drift surface, separate type so spelled out.
 const _assertWorkingStatePatchMirror: AssertEqual<AgentWorkingStatePatch, ToolWorkingStatePatch> =
   true
+// ADR-0512 P3 — `ToolRiskMirror` (@/stream, for the escalation-card `risk` field)
+// is a DUPLICATED definition of `ToolRisk` (@/tool/surface/manifest); slice
+// isolation forbids @/stream importing @/tool. Pin them so a new risk class on
+// either side fails the typecheck here (not silently on the card).
+const _assertToolRiskMirror: AssertEqual<ToolRiskMirror, ToolRisk> = true
 
 // W1-B audit fix: the real guarantee here is COMPILE-TIME (the `_assert*`
 // constants above fail to type-check if any mirror pair diverges, blocking

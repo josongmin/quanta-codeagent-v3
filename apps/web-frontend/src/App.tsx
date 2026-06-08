@@ -21,10 +21,19 @@ import type { KnobsEndpoint } from "./components/slash-knobs"
 import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
-import type { ConnectionState, SessionEvent, SessionStateView } from "./types/protocol"
+import type {
+  ConnectionState,
+  ContextUsageMessage,
+  SessionEvent,
+  SessionStateView,
+} from "./types/protocol"
 import { type CanvasSource, useContextUsage } from "./ws/canvas-hooks"
 import { SessionClient } from "./ws/client"
-import { type ObservabilitySource, useObservabilityState } from "./ws/observability-hooks"
+import {
+  type ObservabilitySource,
+  type ObservabilityState,
+  useObservabilityState,
+} from "./ws/observability-hooks"
 import {
   type CumulativeTokenUsage,
   useConnectionState,
@@ -166,6 +175,22 @@ const resolveConnectionConfig = async (): Promise<{ url: string; token?: string 
     getEnv("VITE_QUANTA_AUTH_TOKEN"),
   )
 }
+
+/**
+ * Auto-hide gate for the observability sidebar (Codex-like): the pane stays
+ * off-screen until there is something to show. Pure + exported so the
+ * byte-identical "no canvas ⇒ pane hidden" invariant is unit-testable without a
+ * React renderer (the test env is `node`, no DOM). Returns `true` when ANY of
+ * runs / objective / approvals / context-usage is present.
+ */
+export const computeHasObservabilityData = (
+  observability: ObservabilityState,
+  contextUsage: ContextUsageMessage | null,
+): boolean =>
+  observability.runs.length > 0 ||
+  observability.objective !== null ||
+  observability.approvals.length > 0 ||
+  contextUsage !== null
 
 const buildSlashContextSnapshot = (args: {
   readonly modelSlug: string | null
@@ -528,11 +553,14 @@ export const App = (): JSX.Element => {
 
   // ADR-0448 (RFC-10): mount point for the rich context-usage breakdown,
   // backed by the canvas WS channel. Mirrors `observabilitySource` above —
-  // wraps `client.onCanvas` so the `tool.diff` / `context.usage` frames the
-  // daemon emits when gated ON (`QUANTA_WEB_CANVAS=1`) feed `useContextUsage`
-  // / `useToolDiffs` and light up the `UsageBreakdownPanel`. Default-OFF: when
-  // the daemon sends no canvas frames the source never fires, `contextUsage`
-  // stays `null`, and the panel renders nothing (chat UI byte-identical).
+  // wraps `client.onCanvas`. TODAY only `context.usage` frames are CONSUMED
+  // here (`useContextUsage` → the `ObservabilityPane`'s usage breakdown). The
+  // `tool.diff` decode is wired end-to-end in `client.ts`/`canvas-hooks.ts`
+  // (`useToolDiffs`), but the `DiffPanel` is not mounted yet — that surface is
+  // DEFERRED, so tool.diff frames decode and drop here. Default-OFF: when the
+  // daemon sends no canvas frames (no `QUANTA_WEB_CANVAS=1`) the source never
+  // fires, `contextUsage` stays `null`, and the pane renders nothing (chat UI
+  // byte-identical).
   const canvasSource = useMemo<CanvasSource>(
     () => ({
       subscribe: (handler) => client.onCanvas(handler),
@@ -544,11 +572,7 @@ export const App = (): JSX.Element => {
   // Codex-like: the observability sidebar stays OFF-screen until there's
   // actually something to show. Empty (no runs / objective / approvals /
   // usage) ⇒ the chat takes the full width instead of a permanent empty pane.
-  const hasObservabilityData =
-    observability.runs.length > 0 ||
-    observability.objective !== null ||
-    observability.approvals.length > 0 ||
-    contextUsage !== null
+  const hasObservabilityData = computeHasObservabilityData(observability, contextUsage)
 
   return (
     <div className="flex h-full min-h-screen flex-col bg-surface text-ink">

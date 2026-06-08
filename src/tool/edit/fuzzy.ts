@@ -78,6 +78,27 @@ type StrategyResult =
   | { kind: "ambiguous"; outcome: EditOutcome }
   | { kind: "none" }
 
+/** F3 — reduce a span set to NON-OVERLAPPING windows via deterministic greedy
+ *  left-to-right interval selection: sort by start ascending, accept a span only
+ *  if its `start >= the end of the last accepted span`, skip every overlapper.
+ *  This mirrors the exact `source.split(old)` then re-join semantics, which never
+ *  re-scans inside a just-consumed match (line-level analog of `"aaa".split("aa")`
+ *  → one match, not two overlapping ones). Pure interval selection — no heuristic,
+ *  no threshold. With distinct/separated windows it returns the input unchanged
+ *  (every span already starts at/after the previous end), so the legitimate
+ *  multi-replace path is byte-identical. */
+const selectNonOverlapping = (spans: LineSpan[]): LineSpan[] => {
+  const accepted: LineSpan[] = []
+  let lastEnd = Number.NEGATIVE_INFINITY
+  for (const span of [...spans].sort((a, b) => a.start - b.start)) {
+    if (span.start >= lastEnd) {
+      accepted.push(span)
+      lastEnd = span.end
+    }
+  }
+  return accepted
+}
+
 /** Apply a set of line-window matches, honouring uniqueness rules. */
 const applyWindows = (
   source: string,
@@ -98,14 +119,18 @@ const applyWindows = (
     }
   }
   const lines = splitLines(source)
-  const targets = replaceAll ? spans : [spans[0] as LineSpan]
+  // Under replace_all, findLineWindows can surface SELF-OVERLAPPING windows
+  // (e.g. needle ["a","a"] in ["a","a","a"] → {0,2} AND {1,3}). Splicing each
+  // independently corrupts/drops the leftover line; reduce to non-overlapping
+  // windows first (F3), mirroring split/join's inherently non-overlapping reps.
+  const targets = replaceAll ? selectNonOverlapping(spans) : [spans[0] as LineSpan]
   // Splice from the bottom so earlier indices stay valid.
   const ordered = [...targets].sort((a, b) => b.start - a.start)
   let next = lines
   for (const span of ordered) {
     next = spliceLines(next, span, newString)
   }
-  const count = replaceAll ? spans.length : 1
+  const count = replaceAll ? targets.length : 1
   return {
     kind: "matched",
     outcome: {

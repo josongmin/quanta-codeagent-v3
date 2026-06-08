@@ -108,6 +108,25 @@ const extractSetLiterals = (source: string, constName: string): Set<string> => {
 }
 
 /**
+ * Extract the string-literal members of an ARRAY const:
+ * `const NAME[: type] = [ "A", "B", … ]`. Used for the frontend `EVENT_TYPES`
+ * decode gate in `envelope.ts` (a SECOND, runtime mirror of the event-type set
+ * distinct from the `SessionEvent` union in `protocol.ts`). The gate is what
+ * `decodeEventFrame` consults; if it drifts below the canonical set the daemon
+ * can emit an event the client silently drops (frame AND seq lost).
+ */
+const extractArrayLiterals = (source: string, constName: string): Set<string> => {
+  const re = new RegExp(`${constName}[^=]*=\\s*\\[([\\s\\S]*?)\\]`)
+  const match = re.exec(source)
+  if (match === null) {
+    throw new Error(`could not locate \`${constName} = [ … ]\` array literal`)
+  }
+  const literals = new Set<string>()
+  for (const m of match[1].matchAll(/"([^"]+)"/g)) literals.add(m[1])
+  return literals
+}
+
+/**
  * Extract a single string-literal const value:
  * `export const NAME = "literal" as const`.
  */
@@ -138,6 +157,29 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
       expect(frontendEvents.has(t)).toBe(true)
     }
     for (const t of frontendEvents) {
+      expect(canonical.has(t)).toBe(true)
+    }
+  })
+
+  test("[decode-gate] frontend envelope.ts EVENT_TYPES === SESSION_EVENT_TYPES (both directions)", () => {
+    // The `SessionEvent` union (asserted above) is the TYPE-level mirror.
+    // `EVENT_TYPES` in envelope.ts is the RUNTIME decode gate: `decodeEventFrame`
+    // returns null for any `type` not in this array, and the client then DROPS
+    // the frame (losing its seq, breaking resume). A past drift kept the union
+    // in sync but let this array fall behind — so the daemon's `turn.llm.request`
+    // / `turn.llm.continuation` events were silently dropped. Pin both directions.
+    const gateTypes = extractArrayLiterals(
+      readText(FRONTEND_ENVELOPE_PATH),
+      "EVENT_TYPES",
+    )
+    const canonical = new Set<string>(SESSION_EVENT_TYPES)
+
+    expect([...gateTypes].sort()).toEqual([...canonical].sort())
+
+    for (const t of canonical) {
+      expect(gateTypes.has(t)).toBe(true)
+    }
+    for (const t of gateTypes) {
       expect(canonical.has(t)).toBe(true)
     }
   })

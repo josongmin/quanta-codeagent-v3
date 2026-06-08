@@ -1,4 +1,8 @@
 import { errMessage } from "@/shared"
+// EOL detection/splitting lives in `@/shared/eol` (SSOT) so `@/patch` does NOT
+// reach into `@/tool/edit` (slice fence). A parity ratchet test asserts this
+// `detectEol` stays byte-identical to the edit slice's so the two cannot drift.
+import { detectEol, type EolStyle, joinWithEol, splitEolAware } from "@/shared/eol"
 // V4A apply_patch — AST → filesystem side effects.
 //
 // `applyPatch(patch, fs)` is pure w.r.t. the host filesystem: all I/O goes
@@ -92,8 +96,17 @@ export async function applyPatch(
   }
   const buffered: PatchObservation[] = []
   const plans: OpPlan[] = []
+  // F2: a virtual-FS overlay that accumulates the effect of EARLIER ops in this
+  // SAME patch (added/deleted/moved/updated paths + their planned content). Each
+  // op validates + reads against the overlay — NOT raw disk — so e.g.
+  // "delete A"+"add A" and "add A"+"update A" succeed, while a genuine two-ops-
+  // write-the-same-final-path collision (e.g. "move A→B"+"add B") is a typed
+  // PatchApplyError instead of a silent commit-phase clobber.
+  const overlay = new PatchOverlay(fs)
   for (const op of patch.ops) {
-    plans.push(await planOp(op, fs, result, (event) => buffered.push(event)))
+    const plan = await planOp(op, overlay, result, (event) => buffered.push(event))
+    overlay.applyPlan(plan)
+    plans.push(plan)
   }
 
   // ── Phase 2: COMMIT ──────────────────────────────────────────────────────
@@ -134,6 +147,82 @@ type OpPlan =
       next: string
     }
 
+/** The subset of {@link PatchFileSystemPort} the PLAN phase needs: it only ever
+ *  reads (no mutation happens until COMMIT). {@link PatchOverlay} implements it
+ *  over the real port + an in-memory diff of prior planned ops. */
+interface PatchReadPort {
+  readFile(path: string): Promise<string>
+  exists(path: string): Promise<boolean>
+}
+
+/**
+ * F2 — a virtual-FS overlay layered over the real {@link PatchFileSystemPort},
+ * for the PLAN phase only. It accumulates the EFFECT of earlier ops in the same
+ * patch so each op validates + reads against the patch's evolving state, not
+ * raw disk (Codex applies ops against an evolving in-memory model). This makes
+ * intra-patch sequences correct:
+ *   - "delete A"+"add A" succeeds (add sees A virtually gone),
+ *   - "add A"+"update A" succeeds (update reads A's planned content),
+ * while a genuine collision (two ops producing the SAME final path, e.g.
+ * "move A→B"+"add B") is rejected at plan time by the per-op existence check —
+ * a typed {@link PatchApplyError}, never a silent commit-phase clobber.
+ *
+ * Reads are still side-effect-free: the COMMIT phase replays the unchanged
+ * {@link commitPlan} against the real port. The overlay never touches disk.
+ */
+class PatchOverlay implements PatchReadPort {
+  /** path → planned content for paths this patch CREATES or REWRITES. */
+  private readonly present = new Map<string, string>()
+  /** paths this patch REMOVES (deleted, or the source side of a move). A path in
+   *  `present` AND `removed` is treated as present (a later add/rewrite wins). */
+  private readonly removed = new Set<string>()
+
+  constructor(private readonly disk: PatchReadPort) {}
+
+  async exists(path: string): Promise<boolean> {
+    if (this.present.has(path)) return true
+    if (this.removed.has(path)) return false
+    return this.disk.exists(path)
+  }
+
+  async readFile(path: string): Promise<string> {
+    const virtual = this.present.get(path)
+    if (virtual !== undefined) return virtual
+    if (this.removed.has(path)) {
+      // A path the patch already removed cannot be read back. (planUpdate guards
+      // this with an exists() check first, so this is defence-in-depth.)
+      throw new PatchApplyError("Update File target does not exist", path)
+    }
+    return this.disk.readFile(path)
+  }
+
+  /** Fold one fully-planned op's effect into the overlay so SUBSEQUENT ops see
+   *  the patch's evolving virtual state. */
+  applyPlan(plan: OpPlan): void {
+    switch (plan.kind) {
+      case "add":
+        this.present.set(plan.path, plan.content)
+        this.removed.delete(plan.path)
+        return
+      case "delete":
+        this.present.delete(plan.path)
+        this.removed.add(plan.path)
+        return
+      case "update":
+        this.present.set(plan.path, plan.next)
+        this.removed.delete(plan.path)
+        return
+      case "move":
+        // The source is gone; the destination now holds the edited content.
+        this.present.delete(plan.path)
+        this.removed.add(plan.path)
+        this.present.set(plan.moveTo, plan.next)
+        this.removed.delete(plan.moveTo)
+        return
+    }
+  }
+}
+
 /** Replay journaled inverse actions newest-first to restore the pre-commit
  *  on-disk state. Inverse-action failures are swallowed: rollback is
  *  best-effort and must never mask the original error that triggered it. */
@@ -154,7 +243,7 @@ async function rollback(journal: Array<() => Promise<void>>): Promise<void> {
  *  whole patch commits. Each branch performs full pre-flight validation. */
 async function planOp(
   op: PatchOp,
-  fs: PatchFileSystemPort,
+  fs: PatchReadPort,
   result: ApplyResult,
   buffer: PatchObserver,
 ): Promise<OpPlan> {
@@ -175,31 +264,43 @@ async function commitPlan(
   fs: PatchFileSystemPort,
   journal: Array<() => Promise<void>>,
 ): Promise<void> {
+  // F5 — TRANSACTIONAL: every inverse action is journaled BEFORE the mutating
+  // call it undoes. A port whose write/delete/rename PARTIALLY mutates the disk
+  // and THEN throws mid-effect would, under the old journal-AFTER-write ordering,
+  // leave that step un-journaled and therefore unrecoverable by rollback. The
+  // restore content is already captured during planning, so the inverse closure
+  // is available pre-write. Inverse actions are best-effort (rollback swallows
+  // their throws), so an inverse for a write that never actually landed (the
+  // file is absent) must NOT itself throw — hence the existence-guarded delete.
   switch (plan.kind) {
     case "add": {
+      journal.push(async () => {
+        if (await fs.exists(plan.path)) await fs.deleteFile(plan.path)
+      })
       await fs.writeFile(plan.path, plan.content)
-      journal.push(() => fs.deleteFile(plan.path))
       return
     }
     case "delete": {
-      await fs.deleteFile(plan.path)
       journal.push(() => fs.writeFile(plan.path, plan.original))
+      await fs.deleteFile(plan.path)
       return
     }
     case "update": {
-      await fs.writeFile(plan.path, plan.next)
       journal.push(() => fs.writeFile(plan.path, plan.original))
+      await fs.writeFile(plan.path, plan.next)
       return
     }
     case "move": {
       // Apply the edit in place on the source, then atomically rename to the
-      // destination. We journal the rename-undo BEFORE invoking renameFile:
-      // a port whose rename leaks the destination then fails mid-flight (the
-      // write-then-throw hazard) must still have its destination reaped. The
-      // undo deletes the destination if present and restores the source so the
-      // companion write-undo can return it to its original content.
-      await fs.writeFile(plan.path, plan.next)
+      // destination. Both inverse actions are journaled BEFORE their mutating
+      // call: the source-restore before the in-place write, and the rename-undo
+      // before renameFile. A port whose write leaks the edited source then fails
+      // (the write-then-throw hazard) is undone by the source-restore; a rename
+      // that leaks the destination then fails has its destination reaped. The
+      // rename-undo restores the source if the rename already removed it, so the
+      // companion source-restore can then return it to its original content.
       journal.push(() => fs.writeFile(plan.path, plan.original))
+      await fs.writeFile(plan.path, plan.next)
       journal.push(async () => {
         if (await fs.exists(plan.moveTo)) await fs.deleteFile(plan.moveTo)
         if (!(await fs.exists(plan.path))) await fs.writeFile(plan.path, plan.next)
@@ -212,7 +313,7 @@ async function commitPlan(
 
 async function planAdd(
   op: Extract<PatchOp, { kind: "add" }>,
-  fs: PatchFileSystemPort,
+  fs: PatchReadPort,
   result: ApplyResult,
   buffer: PatchObserver,
 ): Promise<OpPlan> {
@@ -231,7 +332,7 @@ async function planAdd(
 
 async function planDelete(
   op: Extract<PatchOp, { kind: "delete" }>,
-  fs: PatchFileSystemPort,
+  fs: PatchReadPort,
   result: ApplyResult,
   buffer: PatchObserver,
 ): Promise<OpPlan> {
@@ -247,7 +348,7 @@ async function planDelete(
 
 async function planUpdate(
   op: Extract<PatchOp, { kind: "update" }>,
-  fs: PatchFileSystemPort,
+  fs: PatchReadPort,
   result: ApplyResult,
   buffer: PatchObserver,
 ): Promise<OpPlan> {
@@ -261,7 +362,7 @@ async function planUpdate(
   const original = await fs.readFile(op.path)
   // Apply all hunks against an in-memory line array. We track lines (not
   // characters) because V4A is line-oriented.
-  const { lines: workLines, trailingNewline } = splitLines(original)
+  const { lines: workLines, trailingNewline, eol } = splitLines(original)
 
   // The op category emitted alongside each hunk's fuzzy tier: a `moveTo`
   // update becomes the `"move"` category in telemetry so dashboards can
@@ -274,7 +375,7 @@ async function planUpdate(
     buffer({ op: hunkOp, fuzzyMatchTier: tier })
   }
 
-  const next = joinLines(workLines, trailingNewline)
+  const next = joinLines(workLines, trailingNewline, eol)
 
   if (op.moveTo !== undefined) {
     result.filesMoved.push([op.path, op.moveTo])
@@ -551,18 +652,38 @@ function matchesAt(
 }
 
 /**
- * Split file content into lines. Preserves whether the file ended with a
- * trailing newline so we can faithfully reassemble. We do NOT keep an empty
- * trailing-array element — `trailingNewline` carries that information.
+ * Split file content into lines (F1). EOL-aware: detects the file's dominant
+ * terminator (CRLF vs LF — SSOT in `@/shared/eol`) and splits EOL-agnostically
+ * (`/\r?\n/`) so each work line is stored WITHOUT its trailing `\r`. Because the
+ * parser also strips trailing `\r` from patch lines, the EXACT match tier now
+ * lines up on a CRLF file (a strict improvement — telemetry reports `"exact"`
+ * not `"whitespace"`) instead of every CRLF hunk degrading to the trimmed tier
+ * and re-emitting LF (mixed-EOL corruption).
+ *
+ * Preserves whether the file ended with a trailing newline so we can faithfully
+ * reassemble. We do NOT keep an empty trailing-array element — `trailingNewline`
+ * carries that information — and the detected `eol` is returned so {@link
+ * joinLines} re-appends the file's native terminator.
  */
-function splitLines(content: string): { lines: string[]; trailingNewline: boolean } {
-  if (content.length === 0) return { lines: [], trailingNewline: false }
+function splitLines(content: string): {
+  lines: string[]
+  trailingNewline: boolean
+  eol: EolStyle
+} {
+  const eol = detectEol(content)
+  if (content.length === 0) return { lines: [], trailingNewline: false, eol }
+  // A trailing terminator is any final `\n` (LF) or `\r\n` (CRLF). Strip the
+  // ACTUAL trailing terminator (not the detected dominant one) so a mixed-EOL
+  // file whose last line ends in a lone `\n` is not over-sliced.
   const trailingNewline = content.endsWith("\n")
-  const body = trailingNewline ? content.slice(0, -1) : content
-  return { lines: body.split("\n"), trailingNewline }
+  const trailingLen = content.endsWith("\r\n") ? 2 : trailingNewline ? 1 : 0
+  const body = trailingLen > 0 ? content.slice(0, -trailingLen) : content
+  return { lines: splitEolAware(body), trailingNewline, eol }
 }
 
-function joinLines(lines: string[], trailingNewline: boolean): string {
-  const joined = lines.join("\n")
-  return trailingNewline ? `${joined}\n` : joined
+/** Rejoin work lines with the file's native EOL and re-append the trailing
+ *  terminator (also native) when the original file had one. */
+function joinLines(lines: string[], trailingNewline: boolean, eol: EolStyle): string {
+  const joined = joinWithEol(lines, eol)
+  return trailingNewline ? `${joined}${eol}` : joined
 }

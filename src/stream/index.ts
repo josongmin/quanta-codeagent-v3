@@ -22,10 +22,12 @@ export {
 export type { StreamPort } from "./ports"
 export type {
   AgentEvent,
+  EscalationOption,
   PlanDeltaKindMirror,
   PlanDeltaReadonlyMirror,
   PlanReadonlyMirror,
   RetentionPolicy,
   TodoReadonlyMirror,
   TodoStatusMirror,
+  ToolRiskMirror,
 } from "./types"

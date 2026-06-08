@@ -537,6 +537,35 @@ export const transcriptReducer = (
 }
 
 /**
+ * Dedup gate over a `Set<eventId>`: returns `true` (and records the id) the
+ * FIRST time an eventId is seen, `false` on every repeat. This is the exact
+ * guard `useSessionEvents` applies before dispatching — extracted so the
+ * "replayed + live overlap never double-renders" invariant is testable without
+ * a React renderer (the test env is `node`, no DOM). Mutates `seen`.
+ */
+export const markEventSeen = (seen: Set<string>, eventId: string): boolean => {
+  if (seen.has(eventId)) return false
+  seen.add(eventId)
+  return true
+}
+
+/**
+ * Dedup gate + transcript projection for a single inbound event. Composes
+ * {@link markEventSeen} with the reducer so the overlap invariant can be
+ * exercised end-to-end in a node test: feeding the SAME eventId twice yields
+ * exactly one message. `applied` reports whether the reducer ran (so a caller
+ * can mirror side-effects like `setSessionState` only on first sight).
+ */
+export const applyDedupedEvent = (
+  state: TranscriptState,
+  seen: Set<string>,
+  event: SessionEvent,
+): { state: TranscriptState; applied: boolean } => {
+  if (!markEventSeen(seen, event.eventId)) return { state, applied: false }
+  return { state: applySessionEventToTranscript(state, event), applied: true }
+}
+
+/**
  * `useSessionEvents` — translates a stream of `SessionEvent`s into a
  * growing `UiMessage[]` chat transcript. Also returns the latest
  * `SessionStateView` snapshot (or `null` until the first
@@ -570,8 +599,9 @@ export const useSessionEvents = (
   useEffect(() => {
     let activeSessionId: string | null = null
     const unsubEvents = client.onAny((event: SessionEvent) => {
-      if (seenEventIdsRef.current.has(event.eventId)) return
-      seenEventIdsRef.current.add(event.eventId)
+      // Dedup against any HTTP-hydration replay that overlaps live WS frames —
+      // first sight applies, repeats are ignored (see {@link markEventSeen}).
+      if (!markEventSeen(seenEventIdsRef.current, event.eventId)) return
       dispatch({ type: "session_event", event })
       if (event.type === "session.state.updated") {
         setSessionState(event.state)

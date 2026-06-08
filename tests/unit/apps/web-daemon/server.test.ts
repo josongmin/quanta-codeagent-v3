@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { main } from "@/apps/web-daemon"
+import { HEARTBEAT_INTERVAL_MS, replyToHeartbeat } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { SessionTransportMessage } from "@/ipc/session"
 import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "@/ipc/session"
@@ -392,10 +393,11 @@ describe("web daemon end-to-end", () => {
 
     // The daemon must pass an explicit, bounded replayWindow so a reconnecting
     // client's resume replay is capped (no unbounded history) and resumes older
-    // than the window fall back to a full snapshot. Today it passes undefined.
+    // than the window fall back to a full snapshot. Pin the EXACT documented
+    // bound (`WEB_DAEMON_REPLAY_WINDOW = 128`) so a drift in either direction is
+    // caught — a bare `>0` lets the contract silently change.
     expect(bag.attachTransportCalls).toBe(1)
-    expect(typeof bag.lastAttachReplayWindow).toBe("number")
-    expect(bag.lastAttachReplayWindow).toBeGreaterThan(0)
+    expect(bag.lastAttachReplayWindow).toBe(128)
 
     ws.close()
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -533,5 +535,66 @@ describe("web daemon end-to-end", () => {
 
     ws.close()
     await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+})
+
+describe("replyToHeartbeat (pure heartbeat short-circuit)", () => {
+  // Finding #5a — give the heartbeat try/catch direct teeth. The e2e pong test
+  // above stays green even if the try/catch is removed, so the NO-THROW guard
+  // is unprotected. Inject a throwing `ws` and assert the helper still consumes
+  // the ping (returns true) WITHOUT propagating the send failure.
+  test("a ping is consumed (returns true) and NO-THROW even when ws.send throws", () => {
+    const ws = {
+      send: () => {
+        throw new Error("socket closing")
+      },
+    }
+    let consumed: boolean | undefined
+    expect(() => {
+      consumed = replyToHeartbeat(ws, { kind: "heartbeat", phase: "ping" })
+    }).not.toThrow()
+    expect(consumed).toBe(true)
+  })
+
+  test("a ping is answered with exactly one pong frame on a healthy socket", () => {
+    const sent: string[] = []
+    const ws = {
+      send: (data: string | Uint8Array) => {
+        sent.push(typeof data === "string" ? data : new TextDecoder().decode(data))
+      },
+    }
+    expect(replyToHeartbeat(ws, { kind: "heartbeat", phase: "ping" })).toBe(true)
+    expect(sent).toHaveLength(1)
+    const decoded = tryDecodeSessionTransportMessage(sent[0] ?? "")
+    expect(decoded).toEqual({ kind: "heartbeat", phase: "pong" })
+  })
+
+  test("a pong is terminal — consumed (returns true) with NO reply", () => {
+    const sent: string[] = []
+    const ws = { send: (d: string | Uint8Array) => void sent.push(String(d)) }
+    // Our own reply / a peer pong must not be echoed back (no ping-pong loop).
+    expect(replyToHeartbeat(ws, { kind: "heartbeat", phase: "pong" })).toBe(true)
+    expect(sent).toHaveLength(0)
+  })
+
+  test("a non-heartbeat frame is NOT consumed (returns false → falls through to the bridge)", () => {
+    const sent: string[] = []
+    const ws = { send: (d: string | Uint8Array) => void sent.push(String(d)) }
+    expect(replyToHeartbeat(ws, { kind: "connect", sessionId: "s" })).toBe(false)
+    expect(replyToHeartbeat(ws, undefined)).toBe(false)
+    expect(sent).toHaveLength(0)
+  })
+})
+
+describe("HEARTBEAT_INTERVAL_MS contract", () => {
+  // Finding #5b — the daemon's keepalive interval is hand-duplicated with the
+  // frontend literal (apps/web-frontend/src/ws/client.ts) and never asserted
+  // equal. Pin the documented value here so a drift in the daemon const is
+  // caught. NOTE: the frontend mirror MUST equal this same 25000; a shared
+  // const is not feasible without crossing the bun/vite build boundary
+  // (server.ts pulls in `bun`/node:os/SQLite the Vite bundle can't load), so
+  // the contract is pinned on each side against the documented literal.
+  test("equals the documented 25000 keepalive interval", () => {
+    expect(HEARTBEAT_INTERVAL_MS).toBe(25_000)
   })
 })

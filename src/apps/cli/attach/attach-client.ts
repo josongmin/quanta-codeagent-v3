@@ -9,11 +9,16 @@
  * `turn.run` (`./commands`), and prompts y/N on `approval.requested`.
  *
  * It REUSES the shared transport infra (`@/ipc/session`) — `createSession
- * TransportClient` over `wrapWebSocketLikeAsSessionTransport` (resume cursor
- * tracking included) — and never re-implements the codec. The discovery→adopt
- * loop that the browser `SessionClient` owns is reproduced here in the pure
- * `./handshake` driver, because the transport client deliberately stays
- * transport-only.
+ * TransportClient` over `wrapWebSocketLikeAsSessionTransport` — and never
+ * re-implements the codec. The discovery→adopt loop that the browser
+ * `SessionClient` owns is reproduced here in the pure `./handshake` driver,
+ * because the transport client deliberately stays transport-only.
+ *
+ * v1 scope: this is a SINGLE-CONNECTION client — there is NO reconnect/resume
+ * path. A daemon-initiated socket close/error (or a `session.closed` event)
+ * tears the client down cleanly (resolve `done`, stop the read loop, print a
+ * one-line banner) rather than silently re-dialing; the handshake therefore
+ * carries no resume cursor.
  *
  * Default-OFF: nothing here runs unless the `attach` subcommand is invoked, so
  * the in-process REPL path is byte-identical when not attaching.
@@ -106,16 +111,20 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
   const socket = new Ctor(withAuthQuery(opts.url, opts.token))
   const transport: SessionTransport = wrapWebSocketLikeAsSessionTransport(socket)
   const handshake: AttachHandshake = createAttachHandshake()
-  // The transport client carries the resume cursor across reconnects; we seed
-  // its sessionId with the discovery sentinel and re-create command sessionIds
-  // off the adopted canonical id (the client only validates command.sessionId
-  // against its own seed, so we send commands directly through the transport).
+  // We seed the transport client's sessionId with the discovery sentinel and
+  // send commands straight through the transport carrying the adopted canonical
+  // id (the client only validates command.sessionId against its own seed, so we
+  // bypass that by sending directly). No reconnect/resume cursor in v1 — see the
+  // module doc; a daemon-initiated close exits cleanly instead of re-dialing.
   const client = createSessionTransportClient({
     transport,
     sessionId: HANDSHAKE_DISCOVERY_SESSION_ID,
   })
 
   let closed = false
+  // Latched true once any send is observed to fail (dead socket) so the read
+  // loop stops accepting further input instead of silently dropping lines.
+  let sendBroken = false
   let resolveDone: (() => void) | undefined
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve
@@ -134,12 +143,22 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
   const handleEvent = (event: SessionEvent): void => {
     const chunk = renderSessionEvent(event)
     if (chunk.length > 0) opts.write(chunk)
+    // The daemon told us the shared session is gone — the render already
+    // printed the "[session closed by daemon]" banner; now actually tear the
+    // client down (stop the read loop, close the socket, resolve `done`) rather
+    // than leaving the CLI attached to a dead session. (audit finding #2)
+    if (event.type === "session.closed") {
+      void disconnect()
+      return
+    }
     if (event.type === "approval.requested") {
       const approvalId = event.approval.approvalId
       const reason = event.approval.reason
       const sid = handshake.sessionId
       if (sid === undefined) return
       approvalChain = approvalChain.then(async () => {
+        // A throwing/garbage prompter fail-safes to a literal "n" so the
+        // approval is DENIED, never approved and never left hanging. (#5)
         const answer = await opts.promptApproval(reason).catch(() => "n")
         await sendCommand(
           buildApprovalRespondCommand({
@@ -182,8 +201,9 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     if (closed) return
     closed = true
     const sid = handshake.sessionId
-    if (sid !== undefined) {
-      // Best-effort cancel of any in-flight turn before we drop the socket.
+    // Skip the best-effort `turn.cancel` when the socket is already broken/
+    // closing — a send on a dead socket only throws (it's swallowed anyway).
+    if (sid !== undefined && !sendBroken && socket.readyState !== 3 /* CLOSED */) {
       await sendCommand({
         sessionId: sid,
         commandId: newCommandId(),
@@ -195,6 +215,32 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     await client.close().catch(() => undefined)
     resolveDone?.()
   }
+
+  // Single teardown path for an INVOLUNTARY end of the session (daemon dropped
+  // the socket, fired an error, or sent `session.closed`). Prints a one-line
+  // banner so the operator isn't left staring at a silently-dead prompt, then
+  // routes through `close()` (idempotent) to stop the read loop + resolve
+  // `done`. (audit findings #1, #2)
+  let disconnectBannerPrinted = false
+  const disconnect = (banner?: string): Promise<void> => {
+    if (closed) return Promise.resolve()
+    if (banner !== undefined && !disconnectBannerPrinted) {
+      disconnectBannerPrinted = true
+      opts.write(banner)
+    }
+    return close()
+  }
+
+  // Daemon-initiated socket close / error MUST end the read loop and resolve
+  // `done`; without these listeners the CLI hangs forever waiting on a dead
+  // socket. `wrapWebSocketLikeAsSessionTransport` only listens for "message",
+  // so we own the close/error wiring here. (audit finding #1)
+  socket.addEventListener("close", () => {
+    void disconnect("\n[disconnected from daemon]\n")
+  })
+  socket.addEventListener("error", () => {
+    void disconnect("\n[disconnected from daemon (connection error)]\n")
+  })
 
   // stdin read loop — each line becomes input.append + turn.run, but only once
   // the handshake is READY (so commands carry the canonical id the daemon
@@ -212,7 +258,7 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
   const readLoop = async (): Promise<void> => {
     try {
       for await (const line of opts.stdin) {
-        if (closed) break
+        if (closed || sendBroken) break
         const ready = await waitForReady()
         if (!ready) break
         const sid = handshake.sessionId
@@ -223,9 +269,23 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
           newCommandId,
           issuedAt,
         })
+        let failed = false
         for (const cmd of cmds) {
-          await sendCommand(cmd).catch(() => undefined)
+          try {
+            await sendCommand(cmd)
+          } catch {
+            // Defense-in-depth (audit finding #3): a send that THROWS after the
+            // socket died must not vanish silently — the user typed a line and
+            // it went nowhere. Surface it + stop accepting further input (the
+            // close/error listeners normally fire too, but a send can race
+            // ahead of them). Latch `sendBroken` so the loop drains and exits.
+            sendBroken = true
+            failed = true
+            opts.write("\n[disconnected from daemon (send failed)]\n")
+            break
+          }
         }
+        if (failed) break
       }
     } finally {
       await close()

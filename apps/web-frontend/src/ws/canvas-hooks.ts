@@ -24,6 +24,21 @@ export interface CanvasSource {
 }
 
 /* ------------------------------------------------------------------ */
+/* Per-kind narrowing — the SINGLE filter both hooks route on.         */
+/*                                                                     */
+/* Exported (and load-bearing: the hooks below call these) so the      */
+/* routing predicate is unit-tested directly instead of re-implemented */
+/* inline in the test. A canvas channel multiplexes `tool.diff` and    */
+/* `context.usage`; each hook consumes exactly one kind.               */
+/* ------------------------------------------------------------------ */
+
+export const isToolDiffMessage = (msg: CanvasMessage): msg is ToolDiffMessage =>
+  msg.kind === "tool.diff"
+
+export const isContextUsageMessage = (msg: CanvasMessage): msg is ContextUsageMessage =>
+  msg.kind === "context.usage"
+
+/* ------------------------------------------------------------------ */
 /* Tool diffs — Map<toolCallId, ToolDiffMessage>                       */
 /* ------------------------------------------------------------------ */
 
@@ -49,7 +64,7 @@ export const useToolDiffs = (source: CanvasSource | null): ReadonlyMap<string, T
   useEffect(() => {
     if (source === null) return
     return source.subscribe((msg) => {
-      if (msg.kind === "tool.diff") dispatch({ type: "message", msg })
+      if (isToolDiffMessage(msg)) dispatch({ type: "message", msg })
     })
   }, [source])
   return state
@@ -64,7 +79,7 @@ export const useContextUsage = (source: CanvasSource | null): ContextUsageMessag
   useEffect(() => {
     if (source === null) return
     return source.subscribe((msg) => {
-      if (msg.kind === "context.usage") setUsage(msg)
+      if (isContextUsageMessage(msg)) setUsage(msg)
     })
   }, [source])
   return usage

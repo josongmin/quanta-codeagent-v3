@@ -6,6 +6,10 @@ const DIM = "\x1b[2m"
 const CYAN = "\x1b[36m"
 const RED = "\x1b[31m"
 const GREEN = "\x1b[32m"
+// ADR-0512 P3 — the escalation APPROVAL card is YELLOW (an ask, NOT a red
+// error). The gray hard-lock (hand-off-required) is rendered by the existing
+// `skill_scope_decision` `⊘ … (blocked)` line, never as a card.
+const YELLOW = "\x1b[33m"
 const RESET = "\x1b[0m"
 
 /** Optional hook that rewrites the assistant text stream as it goes to
@@ -236,6 +240,23 @@ export class StdoutStream implements StreamPort {
       case "item_updated":
       case "item_completed":
         break
+      // ADR-0512 — render a skill-scope decision as a plain (non-error) hint line
+      // so the operator sees it was a scope outcome, NOT a tool crash. A
+      // `blocked` outcome is the gray HARD-LOCK (hand-off-required security
+      // boundary — never a card).
+      case "skill_scope_decision":
+        this.write(`  ⊘ ${event.tool} — outside skill "${event.activeSkill}" (${event.decision})\n`)
+        break
+      // ADR-0512 P3 — render the interactive escalation as a YELLOW approval
+      // CARD (the ADR's headline: "스코프 밖"을 빨간 에러로 그리지 말고 승인 카드로).
+      // NOT a red error. The card shows the tool / risk / why / model
+      // justification / the 4 options.
+      case "permission_escalation_requested":
+        this.write(renderEscalationCard(event))
+        break
+      case "permission_escalation_resolved":
+        this.write(`${DIM}  ↳ escalation ${event.id}: ${event.decision}${RESET}\n`)
+        break
       default: {
         // Exhaustiveness guard: a new AgentEvent variant must be handled
         // explicitly rather than silently rendered (or crashing) here.
@@ -269,6 +290,26 @@ const renderInterrupted = (event: Extract<AgentEvent, { type: "interrupted" }>):
  *  running — this is not a finish trigger. */
 const renderSubagentCancel = (event: Extract<AgentEvent, { type: "subagent_cancel" }>): string =>
   `${DIM}✂ subagent ${event.subagentId} (${event.outcome}, via ${event.source})${RESET}\n`
+
+/** ADR-0512 P3 — the interactive escalation APPROVAL card. YELLOW (an ask, not
+ *  a red error). Shows which tool + its risk (read-only vs mutating) + WHY it is
+ *  out of scope + the model's one-line justification + the 4 decision options.
+ *  This is the headline UX of ADR-0512: an out-of-scope tool is a permission
+ *  prompt, not a crash. (A hand-off-required hard-lock never reaches this — it
+ *  is denied upstream and shown as the gray `⊘ … (blocked)` line.) */
+const renderEscalationCard = (
+  event: Extract<AgentEvent, { type: "permission_escalation_requested" }>,
+): string => {
+  const head = `${YELLOW}┌─ 승인 필요 — '${event.activeSkill}' 범위 밖 도구 요청 ─${RESET}`
+  const toolLine = `${YELLOW}│${RESET} 도구  ${CYAN}${event.tool}${RESET}   위험  ${event.risk}`
+  const reasonLine = `${YELLOW}│${RESET} 이유  ${oneLine(redactStr(event.reason))}`
+  const justLine =
+    event.justification !== undefined && event.justification !== ""
+      ? `${YELLOW}│${RESET} 근거  ${oneLine(redactStr(event.justification))}\n`
+      : ""
+  const optsLine = `${YELLOW}│${RESET} ${event.options.map((o) => `[ ${o} ]`).join("  ")}`
+  return `${head}\n${toolLine}\n${reasonLine}\n${justLine}${optsLine}\n${YELLOW}└─${RESET}\n`
+}
 
 /** ADR-0048: render the `in_progress` heartbeat one-liner, appending the
  *  optional percentage + status when the provider carried them. Extracted from

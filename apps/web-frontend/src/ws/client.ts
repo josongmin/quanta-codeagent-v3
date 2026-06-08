@@ -194,6 +194,19 @@ export class SessionClient {
    * the gap can be computed; the daemon dedups by `eventId` on the client side.
    */
   #lastSeq: number | null = null
+  /**
+   * True between a RESUME handshake (a reconnect that carries `resumeFromSeq`)
+   * and the first inbound frame that proves the handshake settled. On a resume
+   * the daemon may reply with REPLAYED EVENTS ONLY (no snapshot) when the
+   * resume cursor is still inside its replay window — and only a snapshot flips
+   * us to `connected`. Without this flag an events-only resume would leave the
+   * client stuck in `connecting`: the composer frozen, every command dropped by
+   * `send()`'s `state.kind !== "connected"` guard. When set, the first resumed
+   * event (or a snapshot, whichever lands first) promotes us to `connected`.
+   * The FIRST connect (snapshot-driven, no `resumeFromSeq`) never sets it, so
+   * that path stays byte-identical.
+   */
+  #resuming = false
   #lastSnapshot: SessionSnapshotLite | null = null
   #lastObservability: ObservabilityMessage | null = null
   /** Last canvas message, replayed to late `onCanvas` subscribers. */
@@ -462,6 +475,13 @@ export class SessionClient {
   }
 
   #handleMessage(raw: unknown): void {
+    // ANY inbound frame proves the socket is alive → reset the liveness
+    // deadline. The daemon's `pong` is the common case, but a normal event
+    // frame is equally valid evidence (and means we needn't wait on a pong).
+    // This MUST run before the binary-drop early return below: a non-text
+    // frame the client can't decode is still traffic on the wire and must not
+    // false-trip the deadline ("ANY inbound frame keeps alive").
+    this.#resetLiveness()
     const data = typeof raw === "string" ? raw : null
     if (data === null) {
       this.#log(
@@ -470,10 +490,6 @@ export class SessionClient {
       )
       return
     }
-    // ANY inbound frame proves the socket is alive → reset the liveness
-    // deadline. The daemon's `pong` is the common case, but a normal event
-    // frame is equally valid evidence (and means we needn't wait on a pong).
-    this.#resetLiveness()
     // A heartbeat frame is connection-level bookkeeping; the liveness reset
     // above is its entire effect on the client. Consume it here so it never
     // reaches the per-kind decoders below (which would log it as unrecognised).
@@ -529,6 +545,10 @@ export class SessionClient {
       if (this.#sessionId === null || this.#sessionId !== snapshot.sessionId) {
         this.#adoptSessionId(snapshot.sessionId)
       }
+      // A snapshot settles the handshake on either path (first-connect OR the
+      // resume fallback where the daemon sent a full snapshot). Clear the
+      // resume flag so a later event doesn't redundantly re-promote state.
+      this.#resuming = false
       this.#setState({ kind: "connected" })
       for (const handler of [...this.#snapshotHandlers]) {
         try {
@@ -564,6 +584,15 @@ export class SessionClient {
         this.#log("warn", `[SessionClient] dropping unrecognised frame (kind=${String(kind)})`)
       }
       return
+    }
+    // Events-only resume: the daemon replayed missed events without a snapshot.
+    // The first such event proves the resume handshake settled → flip to
+    // `connected` so the composer unfreezes and `send()` stops dropping
+    // commands. Snapshot-driven first-connect already flipped above, so this
+    // is a no-op there (flag never set).
+    if (this.#resuming) {
+      this.#resuming = false
+      this.#setState({ kind: "connected" })
     }
     this.#fanoutEvent(event)
   }
@@ -727,9 +756,14 @@ export class SessionClient {
   #buildConnectFrame(explicitSessionId?: string): string {
     const sessionId = explicitSessionId ?? this.#sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID
     const isCanonical = sessionId !== HANDSHAKE_DISCOVERY_SESSION_ID
-    return isCanonical && this.#lastSeq !== null
-      ? encodeConnectFrame(sessionId, this.#lastSeq)
-      : encodeConnectFrame(sessionId)
+    if (isCanonical && this.#lastSeq !== null) {
+      // This is a RESUME handshake: the daemon may reply with events-only (no
+      // snapshot). Arm the resume flag so the first inbound event promotes us
+      // to `connected` even when no snapshot arrives (see {@link #resuming}).
+      this.#resuming = true
+      return encodeConnectFrame(sessionId, this.#lastSeq)
+    }
+    return encodeConnectFrame(sessionId)
   }
 
   #adoptSessionId(sessionId: string): void {

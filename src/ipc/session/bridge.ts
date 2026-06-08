@@ -68,6 +68,17 @@ export const planSessionReplay = ({
   if (resumeFromSeq < snapshot.seq) {
     return { snapshot, tail: retainedTail }
   }
+  // Ahead-of-tip guard (daemon restart / seq reset). After a restart the
+  // in-memory seq resets (kernel state seq:0) but a reconnecting client's
+  // resumeFromSeq is still the OLD high-water mark — i.e. ahead of everything
+  // the bridge now holds. Without this guard the resume arm below filters the
+  // tail down to events with `seq > resumeFromSeq` (none), so the client gets
+  // an empty events-only plan and is stuck with nothing. Fall back to a full
+  // snapshot exactly like the behind-the-window case so the client resets.
+  const tip = retainedTail.at(-1)?.seq ?? snapshot.seq
+  if (resumeFromSeq > tip) {
+    return { snapshot, tail: retainedTail }
+  }
   const oldestTailSeq = retainedTail[0]?.seq
   if (oldestTailSeq !== undefined && resumeFromSeq < oldestTailSeq - 1) {
     return { snapshot, tail: retainedTail }
@@ -372,7 +383,13 @@ export const createSessionTransportBridge = (
       const messages = toEventMessages(events)
       await Promise.all(
         [...peers]
-          .filter((peer) => !peer.closed)
+          // Gate the live event fan-out on `peer.connected` — mirror the command
+          // gate so a peer that has NOT completed its `connect` handshake never
+          // receives a pre-handshake stray event (it gets its state via the
+          // snapshot/replay path when its `connect` arrives, where the event is
+          // already reflected in the retained tail). Already-connected peers
+          // still receive every live event (fan-out unchanged for them).
+          .filter((peer) => !peer.closed && peer.connected)
           .map((peer) => sendMessages(peer.transport, messages)),
       )
     },

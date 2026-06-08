@@ -25,6 +25,7 @@
 // both unambiguous attacks rejected before any resolve. No heuristics, no
 // fallback, no graceful skip — every violation throws.
 
+import { randomBytes } from "node:crypto"
 import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { z } from "zod"
@@ -81,12 +82,55 @@ export interface NodeFsLike {
   unlink(p: string): Promise<void>
   rename(from: string, to: string): Promise<void>
   mkdir(p: string, options: { recursive: true }): Promise<string | undefined>
-  stat(p: string): Promise<{ isFile(): boolean; isDirectory(): boolean }>
+  stat(p: string): Promise<{ isFile(): boolean; isDirectory(): boolean; mode?: number }>
+  /** OPTIONAL durability barrier. When present (real `node:fs/promises`) the
+   *  atomic write `fsync`s the temp BYTES before the rename so a crash in the
+   *  window between write and rename cannot promote a torn / zero-length temp
+   *  under the final name. ABSENT on an in-memory test fake ⇒ the atomic write
+   *  DEGRADES GRACEFULLY (temp + rename still hold; only the on-disk durability
+   *  flush is skipped, which a fake has no concept of anyway). Best-effort: a
+   *  rejection is swallowed (some platforms reject an fsync on the handle). */
+  fsync?(p: string): Promise<void>
+  /** OPTIONAL mode setter. When present (real `node:fs/promises`) the atomic
+   *  write re-applies the ORIGINAL file's permission bits to the temp BEFORE the
+   *  rename, so editing an existing `0o755` script does not silently drop it to
+   *  `0o644` (a fresh temp inode is created with default perms). ABSENT on an
+   *  in-memory fake ⇒ skipped (a fake has no mode concept); best-effort — a
+   *  rejection is swallowed. */
+  chmod?(p: string, mode: number): Promise<void>
 }
 
 interface PortOptions {
   jailRoot: string
   fs?: NodeFsLike
+}
+
+/** Real `node:fs/promises`-backed {@link NodeFsLike}. `node:fs/promises` has no
+ *  path-form `fsync` (it requires a file handle), so we supply one that opens
+ *  the temp `r+`, `sync()`s, and closes — the SAME durability barrier
+ *  `@/storage/atomic-write.ts`'s `defaultAtomicWriteSync.syncFile` uses. The
+ *  rest of the surface forwards straight to `node:fs/promises`. Built ONCE and
+ *  shared; the production port uses this when no `fs` is injected so the atomic
+ *  write gets a real flush, while an in-memory test fake (no `fsync`) degrades
+ *  gracefully. */
+const defaultNodeFs: NodeFsLike = {
+  readFile: (p, encoding) => nodeFs.readFile(p, encoding),
+  writeFile: (p, content, encoding) => nodeFs.writeFile(p, content, encoding),
+  unlink: (p) => nodeFs.unlink(p),
+  rename: (from, to) => nodeFs.rename(from, to),
+  mkdir: (p, options) => nodeFs.mkdir(p, options),
+  stat: (p) => nodeFs.stat(p),
+  chmod: (p, mode) => nodeFs.chmod(p, mode),
+  fsync: async (p) => {
+    // Open r+ and flush bytes to stable storage; best-effort close. Mirrors
+    // `defaultAtomicWriteSync.syncFile` in `@/storage/atomic-write.ts`.
+    const handle = await nodeFs.open(p, "r+")
+    try {
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+  },
 }
 
 /**
@@ -123,7 +167,7 @@ export class FsJailFileSystemPort implements PatchFileSystemPort {
       throw new Error(`FsJailFileSystemPort requires an absolute jailRoot, got '${opts.jailRoot}'`)
     }
     this.jailRoot = opts.jailRoot
-    this.fs = opts.fs ?? (nodeFs as unknown as NodeFsLike)
+    this.fs = opts.fs ?? defaultNodeFs
   }
 
   /** Resolve `target` against the jail root and verify it stays inside, by
@@ -161,7 +205,62 @@ export class FsJailFileSystemPort implements PatchFileSystemPort {
     const resolved = this.assertInside(p)
     // The parent of an in-jail path is in-jail by construction; mkdir it.
     await this.fs.mkdir(path.dirname(resolved), { recursive: true })
-    await this.fs.writeFile(resolved, content, "utf8")
+    // [F4] ATOMIC single-file write — temp + rename (SOTA++, mirrors
+    // `@/storage/atomic-write.ts` and Codex/CC). A plain `writeFile(resolved)`
+    // truncates-then-writes the FINAL path: a crash/throw mid-write tears the
+    // committed file (a reader — or a later op in the SAME patch — observes a
+    // zero-length / partial file). Instead:
+    //   1. write `content` to a unique sibling `<resolved>.quanta-tmp-<hex>`
+    //      (8 crypto-random bytes keep concurrent writes non-colliding),
+    //   2. `fsync` the temp BYTES when the injected fs offers it (the real
+    //      port does; an in-memory fake omits it ⇒ graceful degrade — best-
+    //      effort, a flush rejection is swallowed),
+    //   3. `rename(temp, resolved)` — POSIX-atomic on the same filesystem.
+    // The FINAL path is NEVER touched until the atomic rename, so a failure
+    // before/at the rename leaves the original byte-identical. On a rename
+    // failure we best-effort `unlink` the temp and rethrow the ORIGINAL error.
+    // [F4 follow-up] PRESERVE the original file's permission bits across the
+    // temp+rename. A fresh temp inode is created with default perms, so without
+    // this an existing `0o755` script silently drops to `0o644` on edit (a real
+    // regression the pre-atomic direct write did NOT have). A brand-new file has
+    // no original ⇒ perms stay default (byte-identical to the pre-atomic write).
+    let originalMode: number | undefined
+    try {
+      const st = await this.fs.stat(resolved)
+      originalMode = typeof st.mode === "number" ? st.mode : undefined
+    } catch {
+      // No existing file (ENOENT) ⇒ nothing to preserve; keep default perms.
+    }
+    const temp = `${resolved}.quanta-tmp-${randomBytes(8).toString("hex")}`
+    try {
+      await this.fs.writeFile(temp, content, "utf8")
+      // Durability barrier — flush temp bytes before promoting. Best-effort:
+      // absent on a fake (degrade), and a real-port rejection is swallowed
+      // (some platforms reject an fsync on the handle; the rename still wins).
+      if (this.fs.fsync !== undefined) {
+        await this.fs.fsync(temp).catch(() => undefined)
+      }
+      // Carry the original mode onto the temp BEFORE the rename so the promoted
+      // file lands with the right perms atomically (best-effort: a fake without
+      // `chmod`, or a platform that rejects it, degrades to default perms).
+      if (originalMode !== undefined && this.fs.chmod !== undefined) {
+        await this.fs.chmod(temp, originalMode).catch(() => undefined)
+      }
+    } catch (e) {
+      // Temp write/flush failed BEFORE any rename ⇒ the original is untouched.
+      // Clean up the partial temp (swallow ENOENT) and rethrow the real error.
+      await this.fs.unlink(temp).catch(() => undefined)
+      throw e
+    }
+    try {
+      await this.fs.rename(temp, resolved)
+    } catch (e) {
+      // Atomic commit failed ⇒ the original at `resolved` was never touched
+      // (rename is the only step that does). Remove the orphaned temp and
+      // rethrow so the apply pipeline surfaces the failure unchanged.
+      await this.fs.unlink(temp).catch(() => undefined)
+      throw e
+    }
   }
 
   async deleteFile(p: string): Promise<void> {
@@ -278,6 +377,7 @@ async function guardedParseAndApply(
   patchText: string,
   port: PatchFileSystemPort,
   guard: GitWriteGuard | undefined,
+  ctx?: ToolContext,
 ): Promise<{ guardDeny: ToolEvent } | { result: ApplyResult }> {
   // parsePatch throws PatchParseError on grammar violation — propagate.
   const patch = parsePatch(patchText)
@@ -287,7 +387,21 @@ async function guardedParseAndApply(
   // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
   // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
   // on boundary breach — propagate. `PATCH_TRACE` injects the OTel binding.
-  return { result: await applyPatch(patch, port, undefined, PATCH_TRACE) }
+  //
+  // [F6] jun-6 tool-interrupt-behavior — parity with `edit`/`write`'s
+  // `commitEdit`. The COMMIT (a MULTI-FILE FS mutation) runs inside the OPTIONAL
+  // critical section so an in-flight ESC cannot tear a half-applied patch.
+  // `begin?.()` is undefined when the seam is unwired (the three OFF gates) ⇒
+  // byte-identical legacy path. The withheld abort (if any) is re-delivered at
+  // `end()` (the dispatch impl re-checks the turn signal there), so the tool's
+  // next `signal.aborted` check post-commit sees it. The section scopes the
+  // FS-mutating window ONLY — parse + git-guard above never write.
+  const cs = ctx?.criticalSection?.begin()
+  try {
+    return { result: await applyPatch(patch, port, undefined, PATCH_TRACE) }
+  } finally {
+    cs?.end()
+  }
 }
 
 /**
@@ -306,6 +420,7 @@ async function tryFastApplyFallback(
   fallback: FastApplyFallbackSeam,
   signal: AbortSignal,
   guard: GitWriteGuard | undefined,
+  ctx: ToolContext,
 ): Promise<{ result: ApplyResult; modelUsed?: string } | null> {
   const errorKind = classifyFastApplyError(originalError)
   // FsJailViolationError + any non-patch error are not re-emittable — a model
@@ -350,7 +465,9 @@ async function tryFastApplyFallback(
   // MUST NOT be able to slip a `.git/hooks/**` target through the fallback. A
   // guarded re-emit is treated as a non-rescue (return null ⇒ original error).
   try {
-    const applied = await guardedParseAndApply(attempt.newPatch, port, guard)
+    // [F6] the retry commit is ALSO a multi-file FS mutation ⇒ same critical
+    // section as the primary apply (parity; default-OFF when the seam is unwired).
+    const applied = await guardedParseAndApply(attempt.newPatch, port, guard, ctx)
     if ("guardDeny" in applied) return null
     const { result } = applied
     return attempt.modelUsed !== undefined ? { result, modelUsed: attempt.modelUsed } : { result }
@@ -371,6 +488,15 @@ export const applyPatchTool: Tool<Input> = {
   // HITL secure-by-default: a V4A patch is a multi-file workspace mutation
   // — pre-approval covers it (same posture as `write`/`edit`/`scripted_replace`).
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
+  // [F6] jun-6 tool-interrupt-behavior — PARITY with `edit`/`write`. A V4A patch
+  // writes MULTIPLE files: an ESC mid-commit can leave a half-applied patch.
+  // Declare `"block"` so the dispatch abort-router WITHHOLDS the turn abort ONLY
+  // while the commit window (inside `guardedParseAndApply`) is open, then force-
+  // delivers it at `end()`. Default-OFF / byte-identical unless the host wired
+  // `ctx.criticalSection` AND the `QUANTA_TOOL_INTERRUPT_BLOCK` knob is on
+  // (see ToolInterruptPolicy) — absent the seam, `begin?.()` is undefined ⇒
+  // `block` degrades to `cancel`.
+  interruptBehavior: (): "block" => "block",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const port = new FsJailFileSystemPort({ jailRoot: ctx.cwd })
@@ -387,7 +513,7 @@ export const applyPatchTool: Tool<Input> = {
     // the pre-ADR-0421 contract (NO catch, NO fallback attempt).
     const fallback = ctx.fastApplyFallback
     if (fallback === undefined) {
-      const applied = await guardedParseAndApply(input.patch, port, guard)
+      const applied = await guardedParseAndApply(input.patch, port, guard, ctx)
       if ("guardDeny" in applied) {
         yield applied.guardDeny
         return
@@ -401,7 +527,7 @@ export const applyPatchTool: Tool<Input> = {
     // the ORIGINAL typed error (NOT the retry's) so callers see unchanged
     // failure semantics (ADR-0421).
     try {
-      const applied = await guardedParseAndApply(input.patch, port, guard)
+      const applied = await guardedParseAndApply(input.patch, port, guard, ctx)
       if ("guardDeny" in applied) {
         yield applied.guardDeny
         return
@@ -415,6 +541,7 @@ export const applyPatchTool: Tool<Input> = {
         fallback,
         ctx.signal,
         guard,
+        ctx,
       )
       if (rescued === null) throw err
       const note =

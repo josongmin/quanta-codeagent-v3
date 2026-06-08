@@ -34,14 +34,28 @@ describe("buildSkillGate — tool-scope matching", () => {
     expect(g.allow("agent")).toBe(true)
   })
 
-  test("empty allowed-tools (briefing skill) must NOT jail the agent", () => {
+  test("ADR-0512: empty allowed-tools SEALS to nav-base (read-only), not a zero-tool jail", () => {
     const g = mkGate({ "repo-onboarding": [] })
     g.observe("Skill", { name: "repo-onboarding" }, true)
-    // A tool-less/briefing skill adds guidance, not a zero-tool jail.
-    expect(g.allow("read")).toBe(true)
+    // A briefing/onboarding skill can still ORIENT and READ (nav-base) — it is
+    // NOT jailed to nothing (jun-8 bug). But ordinary/mutating tools ARE denied.
+    expect(g.allow("read")).toBe(true) // nav-base
+    expect(g.allow("file_tree_summary")).toBe(true) // nav-base
+    expect(g.allow("grep")).toBe(true) // nav-base
+    expect(g.allow("bash")).toBe(false) // ordinary ⇒ denied by the seal
+    expect(g.allow("agent")).toBe(false) // ordinary ⇒ denied by the seal
+    expect(g.allow("write")).toBe(false) // mutating ⇒ denied by the seal
+    expect(g.allow("Skill")).toBe(true) // meta always allowed
+  })
+
+  test("ADR-0512: ABSENT allowed-tools (skill not in map) arms no scope — everything allowed", () => {
+    // Distinct from declared-empty `[]`: a skill with NO `allowed-tools:` key
+    // contributes no allowlist entry, so observing it arms nothing.
+    const g = mkGate({ reader: ["Read"] })
+    g.observe("Skill", { name: "briefing-no-decl" }, true) // not in the map
     expect(g.allow("bash")).toBe(true)
+    expect(g.allow("write")).toBe(true)
     expect(g.allow("agent")).toBe(true)
-    expect(g.allow("file_tree_summary")).toBe(true)
   })
 
   test("Claude-style capitalized allowed-tools match quanta lowercase names", () => {
@@ -119,6 +133,28 @@ describe("ADR-0512 L3: activeSkillName + widenScope", () => {
     const g = mkGate({ reader: ["Read"] })
     g.widenScope("edit") // never observed a skill
     expect(g.allow("edit")).toBe(true) // unscoped ⇒ everything allowed anyway
+  })
+
+  test("widened scope SURVIVES a re-observe of the SAME skill (approval not revoked)", () => {
+    // Audit finding: re-observe rebuilds `active` from the allowlist; a separate
+    // `widened` set must keep the user-approved tool admitted.
+    const g = mkGate({ reader: ["Read"] })
+    g.observe("Skill", { name: "reader" }, true)
+    g.widenScope("edit")
+    expect(g.allow("edit")).toBe(true)
+    g.observe("Skill", { name: "reader" }, true) // re-invoke SAME skill
+    expect(g.allow("edit")).toBe(true) // still approved — not wiped
+  })
+
+  test("widened scope is RESET when a DIFFERENT skill is observed (fresh scope)", () => {
+    const g = mkGate({ reader: ["Read"], writer: ["Write"] })
+    g.observe("Skill", { name: "reader" }, true)
+    g.widenScope("edit")
+    expect(g.allow("edit")).toBe(true)
+    g.observe("Skill", { name: "writer" }, true) // switch skills
+    expect(g.allow("edit")).toBe(false) // widening did NOT leak across skills
+    expect(g.allow("write")).toBe(true) // new skill's allowlist
+    expect(g.activeSkillName()).toBe("writer")
   })
 })
 

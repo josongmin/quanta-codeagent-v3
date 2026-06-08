@@ -51,6 +51,56 @@ describe("attach handshake (discovery → adopt canonical sessionId)", () => {
     expect(hs.ready).toBe(false)
   })
 
+  // finding #7: this slice has NO reconnect path (a daemon-initiated close now
+  // exits the CLI cleanly — see attach-client.test.ts #1). The old "resume
+  // cursor / across reconnects" lastSeq machinery implied a capability that was
+  // never wired and never consumed. The cursor is removed; these tests pin that
+  // (a) the re-handshake after id-adoption carries NO resume cursor even after
+  // events have streamed, and (b) the handshake no longer advertises a `lastSeq`.
+  test("the re-handshake never carries a resume cursor (no reconnect/resume in v1)", () => {
+    const hs = createAttachHandshake()
+    hs.initialConnect()
+    // Some events stream by (seq 3, 4) — in a reconnect design these would seed
+    // a resume cursor. Here there is no reconnect, so they must NOT.
+    hs.onMessage({
+      kind: "snapshot",
+      snapshot: {
+        sessionId: "sess-9",
+        revision: 1,
+        seq: 3,
+        state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0 },
+        capabilities: {
+          approvals: "none",
+          tools: false,
+          memory: false,
+          artifacts: false,
+          subagents: false,
+          automation: false,
+          shellSnapshot: false,
+          transport: "websocket",
+        },
+        pendingApproval: null,
+        openArtifacts: [],
+      },
+    })
+    // A (hypothetical) second connect-reject — the re-handshake frame it emits
+    // must still be a BARE connect (no resumeFromSeq), proving the dead cursor
+    // is gone.
+    const reaction = hs.onMessage({
+      kind: "rejected",
+      sessionId: "sess-10",
+      target: "connect",
+      reason: "session_id_mismatch",
+    })
+    expect(reaction?.kind).toBe("connect")
+    if (reaction?.kind !== "connect") throw new Error("narrow")
+    expect(reaction.resumeFromSeq).toBeUndefined()
+    // The misleading public cursor field is removed — it no longer exists on the
+    // type (this cast goes through `unknown` precisely because `lastSeq` is gone
+    // from `AttachHandshake`) and is undefined at runtime.
+    expect((hs as unknown as Record<string, unknown>).lastSeq).toBeUndefined()
+  })
+
   test("a COMMAND-target rejected frame does not change the adopted id or re-handshake", () => {
     const hs = createAttachHandshake()
     hs.initialConnect()
@@ -332,5 +382,38 @@ describe("attach stdin-line → command builders", () => {
       issuedAt: "t",
     })
     expect(ambiguous.decision).toBe("deny")
+  })
+
+  // Strengthened (jun-09 audit, finding #4): the prior test never asserted that
+  // a SPELLED-OUT affirmative ("yes") approves, and had NO "non-empty garbage ⇒
+  // deny" case — so it was broadening-vacuous (a builder that always denied, or
+  // always approved on "y" but ignored "yes", would still pass). These cases
+  // pin BOTH directions of the fail-safe contract: only the two literal
+  // affirmatives approve; everything else (including plausible-looking words
+  // like "sure") denies.
+  test("approval fail-safe: only literal y/yes approve; non-empty garbage denies", () => {
+    const decide = (answer: string): "approve" | "deny" =>
+      buildApprovalRespondCommand({
+        sessionId: "s1",
+        approvalId: "ap1",
+        answer,
+        commandId: "c",
+        issuedAt: "t",
+      }).decision
+
+    // Affirmatives — the ONLY two answers that may approve.
+    expect(decide("yes")).toBe("approve")
+    expect(decide("y")).toBe("approve")
+    expect(decide("YES")).toBe("approve") // case-insensitive
+    expect(decide("  y  ")).toBe("approve") // trimmed
+
+    // Non-empty garbage that is NOT a literal affirmative must fail-safe to deny
+    // (a dangerous op awaiting confirmation is denied unless explicitly approved).
+    expect(decide("sure")).toBe("deny")
+    expect(decide("yep")).toBe("deny")
+    expect(decide("ok")).toBe("deny")
+    expect(decide("yeah")).toBe("deny")
+    expect(decide("")).toBe("deny")
+    expect(decide("n")).toBe("deny")
   })
 })

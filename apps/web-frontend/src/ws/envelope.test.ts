@@ -141,6 +141,51 @@ describe("decodeEventFrame", () => {
     })
   })
 
+  it("accepts turn.llm.request event envelopes (decode gate covers the LLM lifecycle)", () => {
+    // Regression for the decode-gate drift: `turn.llm.request` is a canonical
+    // event the daemon emits. When EVENT_TYPES missed it, decodeEventFrame
+    // returned null → the client dropped the frame AND its seq (breaking resume).
+    const raw = JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "event",
+      payload: {
+        eventId: "llm-req-1",
+        seq: 6,
+        revision: 2,
+        emittedAt: "2026-05-26T00:00:00.000Z",
+        type: "turn.llm.request",
+        model: "gpt-5",
+        provider: "openai",
+      },
+    })
+    const decoded = decodeEventFrame(raw)
+    expect(decoded).not.toBeNull()
+    expect(decoded?.type).toBe("turn.llm.request")
+    expect(decoded?.seq).toBe(6)
+  })
+
+  it("accepts turn.llm.continuation event envelopes (decode gate covers the LLM lifecycle)", () => {
+    const raw = JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "event",
+      payload: {
+        eventId: "llm-cont-1",
+        seq: 7,
+        revision: 2,
+        emittedAt: "2026-05-26T00:00:00.000Z",
+        type: "turn.llm.continuation",
+        surfaceId: "openai-responses",
+        transportId: "responses",
+        phase: "resume",
+        mode: "stream",
+        reason: "incomplete",
+      },
+    })
+    const decoded = decodeEventFrame(raw)
+    expect(decoded).not.toBeNull()
+    expect(decoded?.type).toBe("turn.llm.continuation")
+  })
+
   it("returns null for a non-string input (Blob / ArrayBuffer placeholder)", () => {
     expect(decodeEventFrame(123)).toBeNull()
     expect(decodeEventFrame(null)).toBeNull()
@@ -510,5 +555,44 @@ describe("decodeCanvasFrame", () => {
         }),
       ),
     ).toBeNull()
+  })
+
+  it("returns null when the version field is empty (empty-version branch)", () => {
+    // An empty version string is as untrustworthy as a missing one — a v? emitter
+    // read with the v1 schema would mis-render. Distinct from the version-MISMATCH
+    // branch already covered above.
+    const raw = JSON.stringify({
+      version: "",
+      kind: "canvas",
+      payload: { kind: "context.usage", segments: [], total: 1, max: 10, emittedAt: 1 },
+    })
+    expect(decodeCanvasFrame(raw)).toBeNull()
+  })
+
+  it("returns null when the version field is missing entirely", () => {
+    const raw = JSON.stringify({
+      kind: "canvas",
+      payload: { kind: "context.usage", segments: [], total: 1, max: 10, emittedAt: 1 },
+    })
+    expect(decodeCanvasFrame(raw)).toBeNull()
+  })
+
+  it("returns null for a context.usage payload that fails the per-kind shape guard", () => {
+    // `segments` non-array / `total` non-number → isContextUsageShape false.
+    const raw = JSON.stringify({
+      version: CANVAS_PROTOCOL_VERSION,
+      kind: "canvas",
+      payload: { kind: "context.usage", segments: "nope", total: "x", max: 10, emittedAt: 1 },
+    })
+    expect(decodeCanvasFrame(raw)).toBeNull()
+  })
+
+  it("returns null when emittedAt is missing (shared canvas-message guard)", () => {
+    const raw = JSON.stringify({
+      version: CANVAS_PROTOCOL_VERSION,
+      kind: "canvas",
+      payload: { kind: "context.usage", segments: [], total: 1, max: 10 },
+    })
+    expect(decodeCanvasFrame(raw)).toBeNull()
   })
 })

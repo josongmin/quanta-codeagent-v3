@@ -106,6 +106,11 @@ export class JsonlRecorder implements StreamPort {
       event.type === "item_completed"
     )
       return
+    // ADR-0512 — skill-scope decision is a transient render-only signal (see the
+    // `RecordedEventType` exclusion); the out-of-scope outcome is already in the
+    // tool_result / recovery trajectory (and the DURABLE escalation pair is
+    // recorded separately below), so the recorder skips this summary line.
+    if (event.type === "skill_scope_decision") return
     if (this.written >= this.maxLines) {
       this.handleCap()
       return
@@ -271,7 +276,16 @@ export class JsonlRecorder implements StreamPort {
 // invariant honest rather than mapping it to a kind that is never written.
 type RecordedEventType = Exclude<
   AgentEvent["type"],
-  "output_progress" | "ratelimit_snapshot" | "item_started" | "item_updated" | "item_completed"
+  // ADR-0512 `skill_scope_decision` is a transient render-only summary (like the
+  // item-lifecycle events) — the out-of-scope outcome is already captured by the
+  // tool_result trajectory line (and the DURABLE `permission_escalation_*` pair
+  // IS recorded), so this summary carries no separate payload.
+  | "output_progress"
+  | "ratelimit_snapshot"
+  | "item_started"
+  | "item_updated"
+  | "item_completed"
+  | "skill_scope_decision"
 >
 type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
 
@@ -320,6 +334,14 @@ const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {
   plan_snapshot: "recovery",
   plan_user_input_requested: "recovery",
   plan_user_input_resolved: "recovery",
+  // ADR-0512 P3 — the interactive escalation pair rides the `recovery` family
+  // for the SAME reason as the plan/control-op events (a same-turn observation
+  // checkpoint, no new TrajectoryKind). Unlike the transient
+  // `skill_scope_decision` render-hint (SKIPPED), this pair is DURABLE audit
+  // state — a Codex-style auditable permission request + its resolution — so it
+  // IS recorded. Greppable via the `reason` discriminant in `dataOf`.
+  permission_escalation_requested: "recovery",
+  permission_escalation_resolved: "recovery",
   mode_changed: "recovery",
   // ADR-0102 turn-diff cluster: rides the existing `recovery` family for
   // the same reason as the plan/control-op events (same-turn observation
@@ -441,6 +463,23 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
       return planUserInputRequestedData(e)
     case "plan_user_input_resolved":
       return planUserInputResolvedData(e)
+    case "permission_escalation_requested":
+      // ADR-0512 P3 — auditable permission request. Optional `justification`
+      // is conditionally spread so the recorded JSON is byte-exact (no
+      // `undefined` field). `reason:"escalation_requested"` keeps the line
+      // greppable apart from other recovery-kind events.
+      return {
+        reason: "escalation_requested",
+        id: e.id,
+        tool: e.tool,
+        risk: e.risk,
+        activeSkill: e.activeSkill,
+        scopeReason: e.reason,
+        options: [...e.options],
+        ...(e.justification !== undefined ? { justification: e.justification } : {}),
+      }
+    case "permission_escalation_resolved":
+      return { reason: "escalation_resolved", id: e.id, decision: e.decision }
     case "mode_changed":
       return modeChangedData(e)
     case "turn_diff_updated":

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
-import type { ContextUsageMessage, ToolDiffMessage } from "../types/protocol"
-import { type CanvasSource, toolDiffsReducer } from "./canvas-hooks"
+import type { CanvasMessage, ContextUsageMessage, ToolDiffMessage } from "../types/protocol"
+import {
+  type CanvasSource,
+  isContextUsageMessage,
+  isToolDiffMessage,
+  toolDiffsReducer,
+} from "./canvas-hooks"
 
 const diff = (toolCallId: string, additions: number): ToolDiffMessage => ({
   kind: "tool.diff",
@@ -9,6 +14,33 @@ const diff = (toolCallId: string, additions: number): ToolDiffMessage => ({
   additions,
   deletions: 0,
   emittedAt: 0,
+})
+
+const usageMsg = (total: number): ContextUsageMessage => ({
+  kind: "context.usage",
+  segments: [],
+  total,
+  max: 100,
+  emittedAt: 0,
+})
+
+// The kind-filter the hooks route on is now a SINGLE exported predicate (was
+// re-implemented inline in this test). Test the load-bearing helper directly so
+// a drift in the routing narrows here, not in a copy.
+describe("canvas kind filters", () => {
+  it("isToolDiffMessage narrows tool.diff only", () => {
+    const td: CanvasMessage = diff("t1", 1)
+    const cu: CanvasMessage = usageMsg(5)
+    expect(isToolDiffMessage(td)).toBe(true)
+    expect(isToolDiffMessage(cu)).toBe(false)
+  })
+
+  it("isContextUsageMessage narrows context.usage only", () => {
+    const td: CanvasMessage = diff("t1", 1)
+    const cu: CanvasMessage = usageMsg(5)
+    expect(isContextUsageMessage(cu)).toBe(true)
+    expect(isContextUsageMessage(td)).toBe(false)
+  })
 })
 
 describe("toolDiffsReducer", () => {
@@ -55,9 +87,9 @@ describe("CanvasSource routing", () => {
 
   it("routes tool.diff to the diff reducer and ignores usage frames there", () => {
     const { source, emit } = makeSource()
-    let state = new Map<string, ToolDiffMessage>()
+    let state: ReadonlyMap<string, ToolDiffMessage> = new Map<string, ToolDiffMessage>()
     const off = source.subscribe((msg) => {
-      if (msg.kind === "tool.diff") state = toolDiffsReducer(state, { type: "message", msg })
+      if (isToolDiffMessage(msg)) state = toolDiffsReducer(state, { type: "message", msg })
     })
     const usage: ContextUsageMessage = {
       kind: "context.usage",
@@ -77,7 +109,7 @@ describe("CanvasSource routing", () => {
     const { source, emit } = makeSource()
     let latest: ContextUsageMessage | null = null
     source.subscribe((msg) => {
-      if (msg.kind === "context.usage") latest = msg
+      if (isContextUsageMessage(msg)) latest = msg
     })
     emit({ kind: "context.usage", segments: [], total: 1, max: 10, emittedAt: 1 })
     emit({ kind: "context.usage", segments: [], total: 2, max: 10, emittedAt: 2 })

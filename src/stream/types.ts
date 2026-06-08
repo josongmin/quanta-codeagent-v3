@@ -33,6 +33,28 @@ export type SurfaceMirror = "bench" | "cli" | "agent-batch" | "agent-interactive
  *  `@/agent/plan/types.ts`. Closed-union; no other value is valid. */
 export type TodoStatusMirror = "pending" | "in_progress" | "completed" | "cancelled" | "blocked"
 
+/**
+ * ADR-0512 P3 — coarse risk class shown on the escalation card. STRUCTURAL
+ * MIRROR of `ToolRisk` in `@/tool/surface/manifest.ts`: slice isolation
+ * (RFC §3.1) forbids `@/stream` importing `@/tool`, so we duplicate the closed
+ * union here and pin the two together in `tests/unit/cross-slice-mirrors.test.ts`
+ * (a `tsc --noEmit` drift guard fires if either side adds a member). The card
+ * itself only DISTINGUISHES read-only-vs-mutating per the ADR mock, but we mirror
+ * the full union so the event contract is `risk: ToolRisk`-faithful.
+ */
+export type ToolRiskMirror =
+  | "read-only"
+  | "mutating"
+  | "exec"
+  | "network"
+  | "spawns-subagent"
+  | "meta"
+
+/** ADR-0512 P3 — the 4 verbs offered on the escalation approval card. 1:1 with
+ *  the surface's resolution decision; `allow_session` widens the skill scope so
+ *  the SAME tool is not re-asked (prompt-fatigue guard). */
+export type EscalationOption = "allow_once" | "allow_session" | "deny" | "deny_and_steer"
+
 /** Single todo entry inside a plan — mirrors `TodoReadonly` in
  *  `@/agent/plan/types.ts`. */
 export interface TodoReadonlyMirror {
@@ -141,6 +163,51 @@ export type AgentEvent =
       stderrTail?: string
       exitCode?: number
       fullLogPath?: string
+    }
+  // ADR-0512 — a tool call OUTSIDE the active skill's allowlist (skill-scope v2),
+  // surfaced as a DISTINCT timeline item so a surface renders an "outside skill
+  // scope" card / lock — NOT a red tool error. `decision` is the escalation
+  // outcome; `reason` + `isReadOnly` drive the card. `id` is the tool-call id
+  // (correlates with the `tool_call` that triggered it). The `blocked` decision
+  // is the gray HARD-LOCK (hand-off-required security boundary). Emitted ONLY when
+  // `QUANTA_SKILL_SCOPE_V2` is on (v2 OFF ⇒ no emit, byte-identical legacy).
+  | {
+      type: "skill_scope_decision"
+      id: string
+      tool: string
+      activeSkill: string
+      reason: string
+      isReadOnly: boolean
+      decision: "allowed" | "declined" | "steered" | "blocked"
+    }
+  // ADR-0512 P3 — the INTERACTIVE escalation pair (mirrors the `plan_user_input`
+  // pair above). When skill-scope v2 is ON and a tool OUTSIDE the active skill's
+  // allowlist is called, the surface must render an APPROVAL CARD — NOT a red
+  // `✕ skill-scoped` error. `permission_escalation_requested` fires when (and
+  // only when) the path actually ASKS the user: it carries everything the card
+  // needs (which `tool`, its `risk` read-only-vs-mutating, the `activeSkill`,
+  // the human `reason`, the model's one-line `justification`, and the 4
+  // `options`). `permission_escalation_resolved` fires after the user decides.
+  // SECURITY INVARIANT (hellgate): a `hand-off-required` security-boundary tool
+  // is NON-escalatable — it hard-denies WITHOUT ever emitting a request (the
+  // card seam is unreachable for a security boundary). Emitted ONLY when
+  // `QUANTA_SKILL_SCOPE_V2` is on (v2 OFF ⇒ ADR-0011 flat deny, no emit,
+  // byte-identical legacy). `id` correlates the pair with the triggering
+  // `tool_call`.
+  | {
+      type: "permission_escalation_requested"
+      id: string
+      tool: string
+      risk: ToolRiskMirror
+      activeSkill: string
+      reason: string
+      justification?: string
+      options: readonly EscalationOption[]
+    }
+  | {
+      type: "permission_escalation_resolved"
+      id: string
+      decision: EscalationOption
     }
   // RFC-0002 §5.2 `recovery` — backoff/compact/nudge/empty/malformed traces.
   | { type: "recovery"; reason: string; detail?: string }
