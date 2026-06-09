@@ -1,5 +1,5 @@
 /**
- * §4.3 — the PRODUCTION side-agent CHILD worker (the module a forked
+ * §4.3 / D1 — the PRODUCTION side-agent CHILD worker (the module a forked
  * side-agent process boots). Launched by `nodeProcessForkPort.fork(modulePath)`
  * and supervised by `createSupervisedProcessDaemon` (fork → ready → charter →
  * finding(s) → shutdown, with crash-respawn on an unexpected exit).
@@ -11,42 +11,35 @@
  *   - parent → child  `{ kind: "shutdown" }`                      — graceful drain + exit(0)
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * HONESTY DISCLOSURE — WHAT THIS CHILD ACTUALLY DOES (read before trusting it):
+ * WHAT THIS CHILD DOES (D1): on a `charter` it runs a REAL LLM-backed bounded
+ * subagent pass when an LLM source is available, DEGRADING to a deterministic
+ * bounded pass otherwise (so the OS machinery + back-compat hold with no creds).
  *
- * This worker runs a REAL but DETERMINISTIC bounded pass per charter — it does
- * NOT (yet) drive a full LLM-backed agent loop inside the child. Concretely, on
- * a `charter` it performs genuine, hermetic work:
- *   1. confirms it is executing in the FORKED child OS process (reports its pid),
- *   2. confirms it inherited the parent's environment (the channel by which a
- *      real child would receive model/provider/credentials) by counting the
- *      env keys it can see and noting whether a model/provider hint is present,
- *   3. echoes the charter task + the per-wake turn budget it was handed.
- * It posts that as a structured `finding`, then waits for `shutdown` to exit(0).
+ *   - LLM pass (the swap point, now TAKEN): when the inherited env carries the
+ *     hermetic replay cassette (`QUANTA_SIDE_AGENT_LLM_REPLAY`) OR real model
+ *     credentials (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / a model hint), the
+ *     child DYNAMICALLY imports the TS composition root
+ *     `./worker-charter-runner.ts` (`runCharterPassLLM`) and drives a real
+ *     read-biased subagent loop over the charter, mapping `finalText` → finding.
+ *     Dynamic `.ts` + `@/…` import works under the bun `execPath` that
+ *     `child_process.fork` selects (verified empirically); on a node execPath or
+ *     any import/assembly failure the child DEGRADES (below).
  *
- * WHY deterministic, not full-LLM (and what the follow-up is):
- *   Driving a real agent pass requires an assembled `AgentConfig` — an `LLMPort`
- *   built from credentials, a tool registry, a permission gate, a system prompt,
- *   and the full `runAgent`/`buildSessionFeatures` host bootstrap. None of that
- *   exists inside a bare forked child; assembling it standalone from env is a
- *   large host-bootstrap surface that cannot be wired+verified safely within this
- *   task (no keys / hermetic test env here). Rather than fake an agent loop, the
- *   child does the most real bounded action it can. The single, well-marked swap
- *   point for the LLM path is {@link runCharterPass}: replace the deterministic
- *   body with `assembleAgentConfig(...)` + `createSubagentRunner(...)` driven over
- *   the inherited env (the parent already forks `{...process.env, ...spec.env}`,
- *   so credentials are present), mapping the runner's `finalText` to the finding
- *   `summary`/`detail` exactly as `subagentRunnerToSidePass` does in-process.
+ *   - DETERMINISTIC pass (the degrade / no-LLM default): a genuine, hermetic
+ *     bounded action — confirms the forked child's pid, the inherited env key
+ *     count, the charter task + turn budget — posted as a `finding`. This is the
+ *     byte-identical legacy behavior when no LLM source is present, so the
+ *     existing OS-fork e2e (which forks WITHOUT replay/creds) stays green.
  *
  * IN-PROCESS PARITY: the in-process backer (`subagentRunnerToSidePass` in
- * `@/agent/side-agent-runner`) DOES run a real read-biased subagent pass per wake.
- * This process backer's per-wake intelligence is the deterministic pass above
- * until that swap point is taken. The OS-process machinery (fork, IPC,
- * supervision, crash-respawn, the multi-daemon registry) is fully real either way.
+ * `@/agent/side-agent-runner`) runs the SAME read-biased subagent pass per wake;
+ * the LLM path here reuses that exact mapping via `runCharterPassLLM`.
  *
- * RUNTIME REQUIREMENT: this is a plain `.mjs` (no `@/…` path aliases, no TS), so
- * it is executable by EITHER the bun OR node `execPath` that `child_process.fork`
- * selects — no tsconfig path-resolver dependency. Keep it dependency-free for
- * that reason; do not add `@/…` imports here.
+ * RUNTIME REQUIREMENT: this file stays a plain `.mjs` with NO top-level `@/…`
+ * imports so it boots under EITHER the bun OR node `execPath` that
+ * `child_process.fork` selects. The `@/…`-bearing TS runner is reached only via a
+ * GUARDED dynamic `import()` inside the LLM branch; any resolver failure (e.g. a
+ * node execPath without the tsconfig path-resolver) is caught and degrades.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -56,14 +49,45 @@ const send = (msg) => {
 }
 
 /**
- * Run ONE bounded pass for `charter` and return a finding `{summary, detail?}`,
- * or `null` when the pass found nothing to report.
- *
- * THIS is the LLM swap point (see header). Today: a deterministic pass that does
- * real, hermetic work (process/env/charter introspection). The pass is bounded —
- * it does no I/O beyond reading `process` state and returns synchronously.
+ * Does the inherited env make a REAL LLM pass viable? True when the hermetic
+ * replay cassette is wired OR real model credentials / a model hint are present.
+ * When false, the child runs the deterministic pass (byte-identical legacy).
  */
-const runCharterPass = (charter) => {
+const llmPassViable = () => {
+  const env = process.env
+  if (
+    typeof env.QUANTA_SIDE_AGENT_LLM_REPLAY === "string" &&
+    env.QUANTA_SIDE_AGENT_LLM_REPLAY.length > 0
+  ) {
+    return true
+  }
+  return Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY)
+}
+
+/**
+ * Run the REAL LLM-backed pass by dynamically importing the TS composition root.
+ * Returns the finding, or `null` (nothing found / could not run). NEVER throws —
+ * an import/assembly failure resolves `null` so the caller degrades. The dynamic
+ * import is INSIDE this guarded async fn (not top-level) so the `.mjs` keeps
+ * booting under any execPath; only the LLM branch reaches `@/…` TS.
+ */
+const runCharterPassLLM = async (charter) => {
+  try {
+    const mod = await import("./worker-charter-runner.ts")
+    return await mod.runCharterPassLLM(charter, process.env)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Run ONE DETERMINISTIC bounded pass for `charter` (the degrade / no-LLM path).
+ * Returns a finding `{summary, detail?}`, or `null` when nothing to report. The
+ * pass is bounded — it does no I/O beyond reading `process` state and returns
+ * synchronously. `degraded` (optional) notes WHY the LLM path was not taken so
+ * the finding is honest about what produced it.
+ */
+const runCharterPass = (charter, degraded) => {
   const task = typeof charter?.task === "string" ? charter.task : ""
   const maxTurns = typeof charter?.maxTurnsPerWake === "number" ? charter.maxTurnsPerWake : 0
   if (task.trim().length === 0) return null
@@ -75,26 +99,57 @@ const runCharterPass = (charter) => {
   const hasModelHint = typeof model === "string" && model.length > 0
 
   const summary = `side-agent process pass: ${task}`.slice(0, 200)
+  const note =
+    degraded !== undefined
+      ? `note: deterministic bounded pass (LLM path unavailable: ${degraded}); see worker-entry.mjs header.`
+      : "note: deterministic bounded pass (no LLM call); see worker-entry.mjs header for the LLM swap point."
   const detail = [
     `pid=${pid} (forked child OS process)`,
     `maxTurnsPerWake=${maxTurns}`,
     `inheritedEnvKeys=${envKeyCount}`,
     `modelHint=${hasModelHint ? model : "(none in env)"}`,
-    "note: deterministic bounded pass (no LLM call); see worker-entry.mjs header for the LLM swap point.",
+    note,
   ].join("\n")
   return { summary, detail }
 }
 
+/** Send a finding over IPC (omitting `detail` when absent), or nothing on null. */
+const emitFinding = (finding) => {
+  if (finding === null || finding === undefined) return
+  send(
+    finding.detail !== undefined
+      ? { kind: "finding", summary: finding.summary, detail: finding.detail }
+      : { kind: "finding", summary: finding.summary },
+  )
+}
+
+/**
+ * Handle a `charter`: take the REAL LLM-backed pass when viable, DEGRADING to the
+ * deterministic pass when no LLM source is present OR the LLM pass could not run
+ * / found nothing. Async so the dynamic-import LLM path can be awaited; errors
+ * inside the LLM path resolve `null` (handled in `runCharterPassLLM`) and fall
+ * through to the deterministic degrade — NEVER throwing into the supervisor.
+ */
+const handleCharter = async (charter) => {
+  if (llmPassViable()) {
+    const llmFinding = await runCharterPassLLM(charter)
+    if (llmFinding !== null && llmFinding !== undefined) {
+      emitFinding(llmFinding)
+      return
+    }
+    // LLM path was viable but produced nothing (miss / empty / import failure) ⇒
+    // degrade so the wake still reports honestly rather than going silent.
+    emitFinding(runCharterPass(charter, "pass returned no finding"))
+    return
+  }
+  emitFinding(runCharterPass(charter))
+}
+
 process.on("message", (msg) => {
   if (msg && msg.kind === "charter") {
-    const finding = runCharterPass(msg)
-    if (finding !== null) {
-      send(
-        finding.detail !== undefined
-          ? { kind: "finding", summary: finding.summary, detail: finding.detail }
-          : { kind: "finding", summary: finding.summary },
-      )
-    }
+    // Fire-and-forget: the supervisor's protocol is push-on-finding; we await
+    // internally and never let a rejection escape (handleCharter is no-throw).
+    void handleCharter(msg)
     return
   }
   if (msg && msg.kind === "shutdown") {

@@ -12,11 +12,14 @@ import {
   type SessionMeta,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
-// ADR-0528 — the runner-level wiring module under test (does not exist yet → RED).
+// ADR-0528 — the runner-level wiring module under test.
 import {
   bootstrapCrashResumeOffers,
   withCrashResumeMarker,
 } from "../../src/runner/orchestrate/crash-resume-wire"
+// The LIVE turn chokepoint every surface funnels through (the wiring site).
+import { runSessionTurn } from "../../src/runner/orchestrate/session-turn-driver"
+import type { RuntimeSession } from "@/sdk/runtime"
 
 /**
  * ADR-0528 CROWN JEWEL (live wiring) — the §13.2 module (ADR-0525) is built but
@@ -122,6 +125,63 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
     expect(offers.length).toBe(1)
     expect(offers[0]?.summary).toContain("interrupted mid-turn")
     expect(offers[0]?.resumeMessage).toContain("the interrupted task")
+  })
+
+  test("LIVE PATH: runSessionTurn (the real chokepoint) auto-marks mid-turn + clears after — severing the bracket goes RED", async () => {
+    await seed("live1")
+    let markerDuringTurn: unknown
+    // Minimal fake RuntimeSession exercising the exact methods runSessionTurn
+    // touches: input.append → turn.run (one clean turn, no approval).
+    const fakeSession = {
+      input: { append: async () => undefined },
+      turn: {
+        run: async () => {
+          // Mid-turn: a SIGKILL right now must be recoverable ⇒ marker on disk.
+          markerDuringTurn = (await loadSessionById("live1"))?.meta.interruptedTurn
+          return { turn: { messages: [], outcome: { reason: "completed" } } }
+        },
+      },
+      approval: { respond: async () => undefined },
+    } as unknown as RuntimeSession
+
+    const res = await runSessionTurn({
+      session: fakeSession,
+      resolveApproval: async () => "approve",
+      text: "live crash-resume task",
+      turnSignal: new AbortController().signal,
+      sessionId: "live1",
+    })
+    expect(res.outcome.reason).toBe("completed")
+    // The marker was LIVE during the turn (mark-at-start through the real driver):
+    expect((markerDuringTurn as { userText?: string })?.userText).toBe("live crash-resume task")
+    expect((markerDuringTurn as { reason?: string })?.reason).toBe("in-progress")
+    // ...and cleared once the turn resolved (process survived):
+    expect((await loadSessionById("live1"))?.meta.interruptedTurn).toBeUndefined()
+  })
+
+  test("LIVE PATH default-OFF: gate absent ⇒ runSessionTurn writes no marker", async () => {
+    delete process.env[CRASH_RESUME_GATE]
+    __resetRuntimeConfig()
+    await seed("live2")
+    let markerDuringTurn: unknown = "sentinel"
+    const fakeSession = {
+      input: { append: async () => undefined },
+      turn: {
+        run: async () => {
+          markerDuringTurn = (await loadSessionById("live2"))?.meta.interruptedTurn
+          return { turn: { messages: [], outcome: { reason: "completed" } } }
+        },
+      },
+      approval: { respond: async () => undefined },
+    } as unknown as RuntimeSession
+    await runSessionTurn({
+      session: fakeSession,
+      resolveApproval: async () => "approve",
+      text: "x",
+      turnSignal: new AbortController().signal,
+      sessionId: "live2",
+    })
+    expect(markerDuringTurn).toBeUndefined()
   })
 
   test("DEFAULT-OFF: gate absent ⇒ withCrashResumeMarker writes NO marker (byte-identical)", async () => {

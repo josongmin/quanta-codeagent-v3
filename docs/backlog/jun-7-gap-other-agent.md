@@ -72,7 +72,7 @@
 >
 > **🟠 정직성 정정 (gap 아님, 단 over-claim 표기 유지):** §26.2/26.3 기본 embedder = FNV-hash bag-of-words(semantic 아님) + "8 embedder"는 4 real+stub. 기능은 동작하나 "semantic" 라벨 over-claim — 본문 그대로 둠.
 >
-> **🟦 jun-09 추가 흡수 후보 → `§27` (결정 대기):** 코퍼스 2026-06-01 refresh 신규 surface(Codex 3390/Cursor 3.5.33) + CC settings 123필드 field-diff로 발견한 **연동 안 된 후보 ~19개**를 §27에 결정대기 테이블로 적재(N1-N8 신규 · E1-E11 강화 · §27.3 저ROI토글 · §27.4 defer). 각 행 `결정` 칸=⬜미정/✅흡수/⏸defer/❌skip. throttle로 Codex/Desktop webview content-diff는 부분만 — 추가 패스 TODO(§27.5).
+> **🟦 jun-09 추가 흡수 후보 → `§27` + 별도 결정보드:** 코퍼스 2026-06-01 refresh 신규 surface(Codex 3390/Cursor 3.5.33) + CC settings 123필드 field-diff + Codex symbol덤프로 발견한 **연동 안 된 후보 27개**(N1-N13 신규 · E1-E14 강화)를 §27에 적재. **남은것만 모은 라이브 결정보드 = [jun-09-remaining-absorption-candidates.md](jun-09-remaining-absorption-candidates.md)** (각 행 `결정` 칸=⬜미정/✅흡수/⏸defer/❌skip). throttle로 Codex/Desktop webview content-diff는 부분만 — 3바퀴 워크플로우 `competitor-absorption-r3` 결과로 보강 예정(§27.5 / remaining-doc §F).
 
 | # | GAP | 카테고리 | 비용 | 임팩트 |
 |---|---|---|---|---|

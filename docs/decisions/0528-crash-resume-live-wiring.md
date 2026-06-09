@@ -2,7 +2,7 @@
 
 - **상태**: Proposed
 - **날짜**: 2026-06-09
-- **슬라이스**: 배선만(NEW 슬라이스 없음) — `@/agent/loop/turn-iteration`(turn-start mark + interrupt mirror + clean-end clear) · `@/agent/loop/turn-loop`(완료-경계 clear) · `@/apps/cli/repl`(bootstrap: detect→offer→prompt→re-inject). 스트리밍 partial은 `@/agent/loop/stream-consume` seam 1곳.
+- **슬라이스**: NEW `@/runner/orchestrate/crash-resume-wire`(higher-order `withCrashResumeMarker` 가드 + `bootstrapCrashResumeOffers`) · `@/runner/orchestrate/session-turn-driver`(`runSessionTurn` 단일 chokepoint 브래킷) · 콜러 2곳 sessionId 전달(`@/apps/cli/repl/session-loop`·`@/apps/headless`) · `@/apps/cli/repl`(bootstrap: detect→offer→prompt→re-inject). (초안의 `@/agent/loop` 직접배선은 fence+dead-path로 폐기 — 위 구현메모.)
 - **게이트**: `QUANTA_CRASH_RESUME`(ADR-0525가 정의, default-OFF) 재사용 + 신규 `QUANTA_CRASH_RESUME_PARTIAL`(L3 스트리밍 partial 갱신, default-OFF).
 - **관련**:
   - 승급 대상: **ADR-0525**(crash-resume 모듈 mark/clear/detect/offer/message + §13.2 승급경로 정의 — "현재 unwired (built-but-not-wired)" 명시). 본 ADR이 그 승급경로 ①②를 구현.
@@ -24,25 +24,22 @@ ADR-0525가 crash-resume 영속 레이어(`src/session/crash-resume.ts`)를 **�
 
 ## Decision
 
-### L1 — 턴-경계 마커 (mark at start · clear at clean end · mirror at interrupt)
+### L1 — 턴-경계 마커 (single-chokepoint bracket: mark at start · clear on resolve)
+
+> **구현 메모(jun-09, 3R 어딧 후 정정):** 초안은 `@/agent/loop` 3곳(turn-iteration turn_start/finish_aborted + turn-loop)에 마커를 박으려 했으나, `@/agent`는 `@/session` fence로 마커를 쓸 수 없고(슬라이스 경계), 더 결정적으로 — **3R 어딧이 그 경로(`runOnce`)가 라이브 콜러 0인 dead-path임을 mutation으로 적발**. 실제 모든 표면(CLI interactive·one-shot·headless)이 통과하는 **단일 turn chokepoint = `runSessionTurn`**(`@/runner/orchestrate/session-turn-driver.ts`)에 higher-order 가드 `withCrashResumeMarker`로 배선한다(runner층은 @/session+loop 둘 다 import 가능).
 
 ```
-turn-loop.ts:65  for (turn = 1 .. maxTurns)
-  └ turn-iteration.ts:123  turn_start hook
-        ├─[NEW] markSessionInterrupted(sessionId, {userText, partial:"", reason:"in-progress", at:clock()})
-        │        userText = latestUserTextFromWm(wm).  gate OFF ⇒ 즉시 no-op(0525 계약).
-        ├ ... 스트리밍 ...
-        └ turn-iteration.ts:59  finish_aborted(인터럽트)
-              ├ interruptedTurnBuffer.capture(...)          ← 기존 in-process
-              └─[NEW] markSessionInterrupted(sessionId, captureInterruptedTurn(...))  ← 디스크 mirror(partial 포함)
-  └ 정상 종료(finish/완료 카테고리, turn-loop/entry.ts)
-        └─[NEW] clearSessionInterrupted(sessionId)
+runSessionTurn(args.sessionId 있을 때):
+  withCrashResumeMarker({ sessionId, userText: text, env }, async () => {
+      markSessionInterrupted(...reason:"in-progress", partial:"", at:now)  ← BEFORE 턴 body
+      await session.input.append(text); for(;;) session.turn.run(...)       ← 턴 body
+  } finally { clearSessionInterrupted(sessionId) })                          ← 턴 resolve 시
 ```
 
-- **turn START**: `turn_start` hook 직후 마커 박음 — userText는 이미 wm에 있어 task-intent durability가 가장 빠르고 단순. clock 주입(0525 계약).
-- **clean turn END**: 루프가 정상 종료(error/aborted 아님)할 때 clear. 동일 sessionId.
-- **interrupt mirror**: `finish_aborted` 분기서 in-process capture와 **같은 자리** 디스크 mirror — clean interrupt 직후 크래시해도 partial 포함 마커가 남는다.
-- 비용: gate ON일 때 turn당 +1 snapshot save(시작) + 1(종료). **gate OFF ⇒ 0 write/0 read(byte-identical)**.
+- **mark at start**: 턴 body 실행 전 `in-progress` 마커. userText=`args.text`. **턴 전체(스트리밍·인터럽트 포함) 동안 마커가 라이브** → 그 사이 SIGKILL/OOM이면 task-intent 복구.
+- **clear on resolve**: `finally` — body가 정상/throw 어느 쪽이든 여기 도달하면 **프로세스 생존** = 크래시 아님 ⇒ clear. 오직 하드 프로세스사(死)만 마커를 남긴다(정확한 크래시 의미).
+- **interrupt-mirror(rich partial)는 P0가 아니라 L3/P2로 접음**: clean interrupt 직후 크래시 윈도우의 *partial* 보존은 스트리밍 partial(L3) 작업과 같은 메커니즘(outcome-aware 보존 + partial flush)이라 거기서 함께. mark-at-start가 이미 task-intent는 그 윈도우에도 커버.
+- 비용: gate ON·sessionId 있을 때 turn당 +1 mark save + 1 clear save. **gate OFF OR sessionId 없음 ⇒ 0 write/0 read(byte-identical)**.
 
 ### L2 — 재시작 detection + operator offer (bootstrap 배선)
 
@@ -69,7 +66,7 @@ turn-loop.ts:65  for (turn = 1 .. maxTurns)
 
 ## 단계
 
-- **P0 (L1+L2, gate `QUANTA_CRASH_RESUME`)**: turn-경계 mark/clear + interrupt mirror + bootstrap detect→offer→prompt→re-inject. ~4파일 배선. TDD: `crash-resume-hellgate`(0525가 이미 보유)를 **LIVE 경로**로 확장 — interrupt→persist→CRASH(프로세스 시뮬)→restart→detect→offer→resume 풀경계 + headless-skip + clear-on-resume + clear⊇mark stale-가드. red-first.
+- **P0 (L1+L2, gate `QUANTA_CRASH_RESUME`)**: `runSessionTurn` 단일 chokepoint 브래킷(mark-at-start/clear-on-resolve) + bootstrap detect→offer→prompt→re-inject. TDD: `crash-resume-wire-hellgate`가 **실 `runSessionTurn`을 fake RuntimeSession으로 구동**(브래킷 끊으면 RED) + default-OFF byte-identity. (interrupt-mirror rich-partial은 L3/P2로 이동.)
 - **P1 (operator UX)**: offer를 surface-agnostic 이벤트로(`/state` 배지 + web/IDE 카드). north-star(crash 후 "뭐 하다 멈췄나") 노출.
 - **P2 (L3, gate `QUANTA_CRASH_RESUME_PARTIAL`)**: 이벤트-구동 partial flush + flush-policy 포트 + 매직넘버-금지 ratchet.
 
