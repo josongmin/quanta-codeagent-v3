@@ -51,6 +51,7 @@ import {
   useConnectionState,
   useSendApprovalDecision,
   useSendCancel,
+  useSendPermissionMode,
   useSendTurn,
   useSessionEvents,
 } from "./ws/session-hooks"
@@ -108,6 +109,7 @@ interface SessionChromeProps {
   readonly tokenUsage: CumulativeTokenUsage
   readonly canRestartDaemon: boolean
   readonly onCancel?: () => void
+  readonly onSetPermission?: (mode: string) => void
 }
 
 const getEnv = (key: "VITE_QUANTA_WS_URL" | "VITE_QUANTA_AUTH_TOKEN"): string | undefined => {
@@ -267,6 +269,7 @@ export const App = (): JSX.Element => {
   const { approvals: pendingApprovals, dismiss: dismissApproval } = usePendingApprovals(client)
   const sendApprovalDecision = useSendApprovalDecision(client, learnedSessionId)
   const sendCancel = useSendCancel(client, learnedSessionId)
+  const onSetPermission = useSendPermissionMode(client, learnedSessionId)
   const onApprovalDecision = useCallback(
     (decision: EscalationDecision): void => {
       // Determine escalation-ness BEFORE the optimistic dismiss removes the
@@ -724,6 +727,7 @@ export const App = (): JSX.Element => {
         tokenUsage={tokenUsage}
         canRestartDaemon={canRestartDaemon}
         onCancel={sendCancel}
+        onSetPermission={onSetPermission}
       />
       <div className="flex min-h-0 flex-1 flex-row">
         <ChatPanel
@@ -782,6 +786,7 @@ const SessionChrome = memo(
     tokenUsage,
     canRestartDaemon,
     onCancel,
+    onSetPermission,
   }: SessionChromeProps): JSX.Element => {
     return (
       <>
@@ -803,7 +808,10 @@ const SessionChrome = memo(
               connected={connection.kind === "connected"}
             />
             <TokenCounter usage={tokenUsage} />
-            <ModeBadge state={sessionState} />
+            <ModeBadge
+              state={sessionState}
+              {...(onSetPermission !== undefined ? { onSetPermission } : {})}
+            />
             <StatusBar
               connection={connection}
               sessionStatus={sessionState?.status ?? null}

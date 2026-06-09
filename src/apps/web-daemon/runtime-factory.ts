@@ -194,7 +194,21 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
   return async (): Promise<ObservableRuntimeFacade> => {
     const cwd = process.cwd()
     const abort = new AbortController()
-    const permission: PermissionContext = { mode: "default" }
+    // ADR-0211/web — a LIVE getter/setter proxy over a mutable cell (the exact
+    // shape `bootstrap-session.ts` builds). The per-turn permission gate reads
+    // `permission.mode` fresh each turn, so `host.setPermissionMode` (→
+    // `session.permission.set`) is honored mid-session WITHOUT rebuilding the
+    // session. A fixed scalar (the old `{ mode: "default" }`) made web mode
+    // switching a lying control; this makes it real.
+    let permMode: PermissionContext["mode"] = "default"
+    const permission: PermissionContext = {
+      get mode() {
+        return permMode
+      },
+      set mode(next) {
+        permMode = next
+      },
+    }
     // Default-ON (env-disablable) capability blocks — same truth table as the
     // CLI (`internal.ts`), so the web/tauri surface gets subagent fan-out + the
     // skill catalogue/auto-trigger by default. `QUANTA_SUBAGENT=0` /

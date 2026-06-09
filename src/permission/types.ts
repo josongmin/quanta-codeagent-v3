@@ -47,6 +47,17 @@ export type { HITLTier }
  *  Absent `classify` port ⇒ "auto" degrades safely to "ask". */
 export type PermissionMode = "default" | "acceptEdits" | "bypass" | "auto"
 
+/** SSOT for the closed {@link PermissionMode} set — the order mirrors the type.
+ *  Surfaces that accept an operator-supplied mode (e.g. the web
+ *  `session.permission.set` verb) MUST validate against this via
+ *  {@link isPermissionMode} so an unknown string never reaches the gate
+ *  (`modePolicy[mode]` would be `undefined`). */
+export const ALL_PERMISSION_MODES = ["default", "acceptEdits", "bypass", "auto"] as const
+
+/** Fail-closed guard: is `v` a known {@link PermissionMode}? */
+export const isPermissionMode = (v: unknown): v is PermissionMode =>
+  typeof v === "string" && (ALL_PERMISSION_MODES as readonly string[]).includes(v)
+
 export interface PermissionContext {
   mode: PermissionMode
   /** Optional injected intelligence port for "auto" mode. The permission

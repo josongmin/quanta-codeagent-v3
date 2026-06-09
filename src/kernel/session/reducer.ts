@@ -138,6 +138,27 @@ export const reduceSessionCommand = (
         ],
       }
     }
+    case "session.permission.set": {
+      const nextState = withRevision({
+        ...state,
+        permissionMode: command.mode,
+      })
+      return {
+        state: nextState,
+        hostAction: { kind: "none" },
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            seq: state.seq + 1,
+            revision: nextState.revision,
+            emittedAt,
+            causedByCommandId: command.commandId,
+            type: "session.state.updated",
+            state: toSessionStateView(nextState),
+          },
+        ],
+      }
+    }
     case "session.transcript.replace": {
       if (state.status === "running" || state.pendingApproval !== null) {
         throw new SessionProtocolValidationError("transcript_replace_unavailable")

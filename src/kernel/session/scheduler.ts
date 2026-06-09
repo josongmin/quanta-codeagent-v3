@@ -844,6 +844,9 @@ export const dispatchSessionCommand = async (
       case "session.tool_profile.set":
         await ctx.host.setToolProfile?.(command.profile)
         return { state: nextState, events: immediateEvents }
+      case "session.permission.set":
+        await ctx.host.setPermissionMode?.(command.mode)
+        return { state: nextState, events: immediateEvents }
       case "session.transcript.replace":
         return {
           state: nextState,

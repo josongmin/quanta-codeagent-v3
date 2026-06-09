@@ -30,8 +30,8 @@
 
 | # | 후보 | 출처 | quanta 현재 | 강화점 | ROI | effort | conf | 결정 |
 |---|---|---|---|---|---|---|---|---|
-| E1 | managed-only 엔터프라이즈 락다운 | CC `allowManaged{Hooks,McpServers,PermissionRules}Only`·`strictPluginOnlyCustomization` | central-config+trust(ADR-0497) | 관리자 managed-only 강제 | 중(ent) | M | 高 | 🟡 **CORE 이미존재 + sub LANDED(jun-09)** — perms/hooks managed-only는 ADR-0497로 **이미 있음**(types.ts:53-71). **MCP managed-only(`allowManagedMcpServersOnly`)는 jun-09 추가**(merge.ts, test). 남음: `strictPluginOnlyCustomization` + MCP enforcement consumer-wiring |
-| E2 | MCP denylist + marketplace 거버넌스 | CC `deniedMcpServers`·`blockedMarketplaces` | allowed/enabled만 | denylist + 거버넌스 | 저-중 | S-M | 高 | 🟢 **RESOLVE LANDED (jun-09)** — `config/merge.ts`에 `deniedServers`(deny-wins, tightening-untrusted) + `mcpDeniedServers` resolved (5+35 test, tsc 클린). ⚠️ **enforcement는 consumer-wiring 대기**(아래 §C: 기존 §12.4 mcpEnabledServers도 launcher 미소비=built-not-wired). marketplace 거버넌스는 별도 미착수 |
+| E1 | managed-only 엔터프라이즈 락다운 | CC `allowManaged{Hooks,McpServers,PermissionRules}Only`·`strictPluginOnlyCustomization` | central-config+trust(ADR-0497) | 관리자 managed-only 강제 | 중(ent) | M | 高 | 🟡 **CORE 이미존재 + sub LANDED(jun-09)** — perms/hooks managed-only는 ADR-0497로 **이미 있음**(types.ts:53-71). **MCP managed-only(`allowManagedMcpServersOnly`)는 jun-09 추가**(merge.ts, test). MCP enforcement는 jun-10 LIVE(E2 행 참조). 남음: `strictPluginOnlyCustomization`만 |
+| E2 | MCP denylist + marketplace 거버넌스 | CC `deniedMcpServers`·`blockedMarketplaces` | allowed/enabled만 | denylist + 거버넌스 | 저-중 | S-M | 高 | ✅ **LIVE (jun-10)** — resolve(merge)+loader 파싱(`deniedServers`/`allowManagedMcpServersOnly`)+**enforcement 배선 완료**: `resolveMcpLaunchPolicy`(비인터랙티브 trust, fail-soft)+`filterMcpServersByPolicy`(pure)+`readMcpConfig` 정책 적용+`loadFeatures` 주입. e2e 6(gate-OFF byte-identical/denylist+slog/trusted allowlist/untrusted deny생존/managed-only/no-cliff)+merge 5+filter 5. **§12.4 built-not-wired도 같이 해소**(mcpEnabledServers 최초 실소비). marketplace 거버넌스는 별도 미착수 |
 | E3 | `/rewind` 체크포인트 복원 슬래시 | CC `/rewind` | ~~slash UX 없음~~ | ~~타임라인 복원~~ | 중 | S | 高 | ❌ **FALSE-GAP (jun-09 재검증)** — `/rewind`+`/rewind-tool` **이미 존재**(`rewind-cmd.ts`, `QUANTA_REWIND` gate, 3-way restore files/task/both, ADR-0203/0205). audit 누락 |
 | E4 | `/goal` 목표 추적 슬래시 | CC `/goal` | objective 시스템 있음, slash 없음 | objective set/show/clear slash | 저 | S | 高 | ⬜ |
 | E5 | cursor-agent-worker startup prewarm | Cursor `cursor-agent-worker` | side-agent/attach-daemon 유사 | startup 상시대기 background agent prewarm | 중 | M | 中 | ⬜ rec:daemon 중복확인 |
@@ -49,9 +49,9 @@
 
 | 항목 | 상태 | 근거 |
 |---|---|---|
-| NotebookEdit (P17, §16.5) | ⏸ defer | ipynb write 도구 부재; 노트북 유저층 확인 시 |
+| NotebookEdit (P17, §16.5) | ✅ **LANDED (jun-09, W6)** | `notebook_edit` 도구(str_replace/insert/delete, FS-jail atomic, `QUANTA_NOTEBOOK_EDIT`) — §F W6 행 참조. 라이브커널 실행만 별도 defer |
 | Windows `bash -lc` (P16, §17.2) | ⏸ defer | darwin서 테스트 불가, 플랫폼 수요 대기 |
-| crash-RESUME interrupted-turn 마커 (§13.2) | 🟡 built-not-wired | same-turn interrupt-restore는 LANDED; 영속 마커만 미배선 |
+| crash-RESUME interrupted-turn 마커 (§13.2) | 🟡 built-not-wired | same-turn interrupt-restore는 LANDED; 영속 마커만 미배선. **§12.4 MCP는 jun-10 LIVE로 해소**(같은 inert 클래스의 첫 배선) |
 | Codex computer-use (matured) | ⏸ RFC-defer | 최고 보안표면, Tauri/desktop-only |
 | Mantle SDK 어댑터 | ❌ blocked | `@anthropic-ai/mantle-sdk` 미발행(외부) |
 | jun-8-ide-plugin 플랜 (`/plugins` 표면 등 티켓 01-08) | 📐 design | 인프라 reuse✅, 티켓 미구현 — forward 작업(닫힌 백로그 아님) |
@@ -64,10 +64,27 @@ CC UI 토글: `showThinkingSummaries`·`showTurnDuration`·`showMessageTimestamp
 
 > **🔴 false-gap 정정:** audit "rec:흡수" 6개 중 **N4 /doctor·E3 /rewind = 이미 존재**, **N9 undo = file_history_rewind로 커버**, **N7 personality = pickPersona/Identity로 부분커버**. 코드검증 없이 흡수권장한 게 틀림(false-parity 함정 재현 — [[jun-07-gap-other-agent-audit]] 교훈). **빌드 전 반드시 broad-grep 검증.**
 
-**✅ 랜딩:** N1 언어 자동감지 (jun-09).
+**✅ 랜딩:** N1 언어 자동감지 (jun-09) · W6 notebook_edit (jun-09) · MCP 거버넌스 LIVE (jun-10, ADR-0530) · **W5 DAP 디버거 `debug_inspect` (jun-10, ADR-0531)**.
 
-**진짜 남은 빌드 타겟 (재검증 통과):**
-1. **W5 DAP 디버거 도구군** — 진짜 부재, 고유가치, **L(큰 새 도구패밀리)** — 집중 슬라이스 필요
+**🟥 DROP:** DXT launcher 배선 — `.dxt` 소비처(discovery 경로)가 src 전무라 배선하려면 안 쓰는 포맷의 discovery까지 새로 지어야 함(투기적). built-not-wired지만 살릴 소비자 없음 → 정직 스킵.
+
+**🔚 jun-10 CLOSEOUT — 마퀴 갭 전부 완결, 나머지는 저ROI tail (빌드 전 검증 결과):**
+
+실질가치 큰 비-inert 갭은 모두 랜딩됨(N1·W6·MCP거버넌스·W5 DAP). 남은 후보는 broad-grep 검증 결과 **저ROI거나 quanta 모델 불일치** — build-for-build's-sake 회피, 사용자가 ROI 보고 선택할 항목으로 (기능)+(왜)+(ROI) 정리:
+
+| 후보 | (기능) | (왜/현재상태) | (ROI) |
+|---|---|---|---|
+| E6 claudeMdExcludes | 메모리/contract 로드 제외 globs | glob-rules가 **이미** per-file 64KiB + 256파일 cap으로 bloat 보호; quanta는 단일 contract 모델(계층적 다중 CLAUDE.md auto-discovery 부재)이라 exclude 전제 약함 | **저** — 보호는 cap으로 이미 존재 |
+| E1 strictPluginOnlyCustomization | 플러그인 커스터마이징 managed-only 잠금 | perms/hooks/MCP managed-only는 완료(ADR-0497/0530), plugin-customization 표면 게이팅 의존 | **저(엔터프라이즈 니치)** |
+| N5 /catch-up | 세션간 변경요약 슬래시 | dream/cross-session-trigger·session-memory-auto 머신리 존재, 슬래시 surface만 부재 | **중-저** — 기존 위 얇은 surface |
+| E4 /goal | objective set/show/clear 슬래시 | objective 시스템 존재(agent-config-assembler), /goal 슬래시 부재 | **중-저** — 북극성(상태가시성) 정렬되나 thin |
+| N11 chronicle | 세션 행적 연대기 | `agent/working-state.ts`+`memory/working.ts`+away-summary와 **중과반복** | **저** — 기존 세션저널류와 겹침 |
+| N8 gzip·N10 js_repl | 요청압축·JS REPL | provider-acceptance/exec 리스크 | **defer(리스크)** |
+
+→ **이 tail은 사용자 지목 시 개별 풀사이클**. 무지목 빌드는 저가치 중복개발이라 보류.
+
+**✅ 랜딩 완료 타겟:**
+1. ✅ ~~**W5 DAP 디버거 도구군**~~ — **LANDED (jun-10, ADR-0531)**: `debug_inspect`(launch→첫 breakpoint→stack/scope/vars 1샷), DAP codec/client/driver/port 4층, 25 test, default-OFF+always-confirm. continue/step-across-calls는 후속
 2. **W6 Jupyter 셀 편집/실행** — ipynb READ만 있음, EDIT/EXECUTE 부재. **편집(str_replace_cell/add/delete)은 bounded**(=NotebookEdit P17 defer 해소), 라이브커널 실행은 L
 3. **N11 chronicle** — 세션 저널, agent-state observability 북극성 정렬 (M)
 4. **E1 managed-only 락다운** — 엔터프라이즈 central-config 확장 (M)
@@ -86,7 +103,7 @@ CC UI 토글: `showThinkingSummaries`·`showTurnDuration`·`showMessageTimestamp
 | W2 | 확장 코드서명 인증서체인 검증 | new | claude-desktop signed/self-signed/unsigned + x509 chain | absent — `verifySignature/x509/codeSign` grep 0 (plugin-isolation/skill) | 중 | L | 高 | ⬜ rec:보안가치 |
 | W3 | org-스코프 확장 allow/blocklist + can_install (원격+TTL) | enh | claude-desktop 원격 org allowlist + 암호화캐시 TTL | shallow — `marketplace-policy.ts`는 정적 exact-match만(fetch/remote/TTL 없음) | 중 | M | 高 | ⬜ |
 | W4 | @-멘션 라이브 외부UI 윈도우→스크린샷 | new | claude-desktop 멀티모달 컨텍스트 주입 | absent — 멘션리졸버는 file/symbol/skill/plugin/folder만 | 저 | L | 中 | ⬜ |
-| W5 | **DAP 디버거 제어 도구군** | new | CC-IDE `set_breakpoint/step/evaluate/get_stack_trace/get_variables/get_scopes/continue/pause` | absent — `breakpoint/stack_trace/step_over` grep 0, `src/tool/debug*` 없음 | 중 | L | 高 | ⬜ rec:고유가치 |
+| W5 | **DAP 디버거 제어 도구군** | new | CC-IDE `set_breakpoint/step/evaluate/get_stack_trace/get_variables/get_scopes/continue/pause` | ~~absent~~ | 중 | L | 高 | ✅ **LANDED (jun-10, ADR-0531)** — `src/tool/debug/` (codec/client/inspect-driver/port) + `debug_inspect` 도구(launch→첫 breakpoint→stack/scope/vars/eval 1샷). default-OFF `QUANTA_DEBUG_TOOLS`, always-confirm(코드실행). 25 test. continue/step-across-calls 후속 |
 | W6 | **Jupyter 셀 도구**(편집/실행) | new | CC-IDE `execute_cell/get_cells/add_cell/str_replace_cell` | shallow — ipynb READ만, EDIT/EXECUTE 불가 | 중 | L | 高 | ✅ **LANDED (jun-09)** — `notebook_edit` 도구 완성: core(editNotebook 12 test) + wrapper(FS-jail R/W·atomic·NEVER-throws) + git-write-guard 보강 + manifest GATED `QUANTA_NOTEBOOK_EDIT`(drift 라쳇 통과) + knob trio + registry(DefaultToolPorts.notebookEdit) + e2e hellgate(6) + fc. src tsc 클린. **NotebookEdit P17 defer 해소.** 라이브커널 실행=별도 L defer |
 | W7 | workspace python venv/conda auto-activation | enh | CC-IDE 도구실행 전 `VIRTUAL_ENV`+PATH prepend | ⚠️ **possibly-present** — `VIRTUAL_ENV` grep 히트(local-env selection?) — 재검증 필요 | 저 | S | 低 | ⬜ rec:기존 local-env와 중복확인 |
 | W8 | agent-authored 인터랙티브 canvas (.canvas.tsx) | enh | Cursor `cursor/canvas` authoring SDK | shallow — quanta canvas는 read-ONLY(`tool.diff`/`context.usage` 렌더만), 작성 불가 | 중 | L | 高 | ⬜ |
@@ -108,7 +125,7 @@ CC UI 토글: `showThinkingSummaries`·`showTurnDuration`·`showMessageTimestamp
 
 1. **FALSE-GAP (이미 LIVE 구현)** — 6건: N4 `/doctor`·E3 `/rewind`·N9 `undo`(=file_history_rewind)·N7 personality(=`persona.ts` ADR-0068)·E1 perms/hooks managed-only(ADR-0497). 코드검증 없이 "흡수권장"한 게 false-parity 함정.
 2. **BUILT-NOT-WIRED (resolve/core만, consumer 미배선 = inert)** — 확인된 것:
-   - **§12.4 central-config `mcpEnabledServers`** — `config/merge.ts`가 resolve하지만 **MCP launcher(`readMcpConfig`→`loadFeatures`)가 안 읽음**. 백로그 "LANDED" 주장이 inert. (내 E2 denylist도 이 layer 위 → 같이 inert.)
+   - ~~**§12.4 central-config `mcpEnabledServers`** — launcher 미소비 inert~~ → ✅ **jun-10 LIVE 배선 완료**(`resolveMcpLaunchPolicy`+`filterMcpServersByPolicy`+`readMcpConfig`/`loadFeatures`; e2e 6). inert→LIVE 패턴의 첫 적용.
    - **DXT loader (`launchDxt`/`validateDxt`)** — 정의·export만, **호출 0**. plugin-discovery/launcher가 안 씀. (W1 DXT-호환성을 여기 지으면 또 inert.)
 
 **결론 — 진짜 SOTA++ 다음 작업 우선순위 재정의:**

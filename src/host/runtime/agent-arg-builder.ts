@@ -855,6 +855,10 @@ const buildGatedToolPorts = (
     // tool menu byte-identical unless QUANTA_NOTEBOOK_EDIT === "1". Pure editor
     // over the shared FS jail; boolean flag (no adapter to construct).
     ...(cfg.notebookEdit ? { notebookEdit: true } : {}),
+    // W5 (DAP) — gated `debug_inspect` debugger tool. Default-OFF: tool menu
+    // byte-identical unless QUANTA_DEBUG_TOOLS === "1". Boolean flag — the tool
+    // owns the real spawn port; high-risk (always-confirm tier).
+    ...(cfg.debugTools ? { debugTools: true } : {}),
     // C2 — gated communicate_update tool. Default-OFF: tool menu byte-identical
     // unless QUANTA_PROGRESS_UPDATE === "1". Boolean port — the tool reads its
     // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from

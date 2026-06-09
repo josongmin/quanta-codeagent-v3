@@ -11,6 +11,7 @@ import type {
   SessionCommand,
   SessionEvent,
   SessionIdentitySetCommand,
+  SessionPermissionSetCommand,
   SessionSnapshotLite,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
@@ -86,6 +87,13 @@ export interface RuntimeSession {
     set(
       profile: string,
       meta?: Partial<Omit<SessionToolProfileSetCommand, "sessionId" | "type" | "profile">>,
+      options?: SessionDispatchOptions,
+    ): Promise<SessionDispatchResult>
+  }
+  readonly permission: {
+    set(
+      mode: string,
+      meta?: Partial<Omit<SessionPermissionSetCommand, "sessionId" | "type" | "mode">>,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }

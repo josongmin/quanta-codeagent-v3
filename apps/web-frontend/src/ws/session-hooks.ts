@@ -766,6 +766,30 @@ export const useSendApprovalDecision = (
 }
 
 /**
+ * Sends `session.permission.set` — switches the live permission mode (default /
+ * acceptEdits / bypass / auto). The daemon wires `permission.mode` as a live
+ * getter/setter, so the next turn's gate honors the switch (real, not a
+ * display-only echo). A fresh `commandId` per send; no-op until sessionId known.
+ */
+export const useSendPermissionMode = (
+  client: SessionClient,
+  sessionId: string | null,
+): ((mode: string) => void) =>
+  useCallback(
+    (mode: string) => {
+      if (sessionId === null) return
+      client.send({
+        sessionId,
+        commandId: makeCommandId(),
+        issuedAt: new Date().toISOString(),
+        type: "session.permission.set",
+        mode,
+      } as SessionCommand)
+    },
+    [client, sessionId],
+  )
+
+/**
  * Sends a `turn.cancel` command for the in-flight turn. Mirrors `useSendTurn`:
  * a fresh `commandId` per send so the daemon dedupes at-least-once retries.
  * No-op until the sessionId is known. The kernel performs the abort (see

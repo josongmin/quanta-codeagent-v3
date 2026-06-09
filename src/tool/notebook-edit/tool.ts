@@ -13,8 +13,10 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
 import { errMessage } from "@/shared"
-import { globWriteGuardEvent } from "../_shared/exfil-rail-guards"
+import { globWriteGuardEvent, writeBudgetEvent } from "../_shared/exfil-rail-guards"
+import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
+import { guardWrite } from "../stale-read-guard"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { editNotebook, type NotebookEditOp } from "./index"
 
@@ -113,6 +115,35 @@ export const makeNotebookEditTool = (fs: FileSystemPort = defaultFileSystemPort)
       yield err(`notebook_edit: ${edited.reason}`)
       return
     }
+    // ADR-0474 stale-read guard (EDIT PARITY): refuse to write over a notebook
+    // that changed since the model last read it. Default-OFF seam — absent
+    // `readFileState` ⇒ byte-identical. A stat fault falls through (the read
+    // above already succeeded; the guard is best-effort like edit's).
+    if (ctx.readFileState !== undefined) {
+      try {
+        const cur = await fs.statFile(input.path, ctx.cwd)
+        const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
+        if (!guard.ok) {
+          yield {
+            type: "result",
+            result: {
+              ok: false,
+              output: guard.error.message,
+              failure: { mode: "rejected", reason: "stale_read" },
+            },
+          }
+          return
+        }
+      } catch {
+        // stat fault — proceed (read already proved the file exists).
+      }
+    }
+    // jun-6 exfil-rail — per-turn write budget (EDIT PARITY). Default-OFF ⇒ null.
+    const budget = writeBudgetEvent(ctx)
+    if (budget !== null) {
+      yield budget
+      return
+    }
     try {
       if (fs.writeFileAtomic !== undefined) await fs.writeFileAtomic(input.path, edited.json, ctx.cwd)
       else await fs.writeFile(input.path, edited.json, ctx.cwd)
@@ -120,6 +151,10 @@ export const makeNotebookEditTool = (fs: FileSystemPort = defaultFileSystemPort)
       yield err(`write failed: ${errMessage(e)}`)
       return
     }
+    // file_history capture (EDIT PARITY) — records the post-write content so
+    // `file_history_rewind` / `/rewind-tool` can restore a notebook edit exactly
+    // like an `edit`. No-throw; absent sink ⇒ no-op.
+    captureFileHistory(ctx, input.path, edited.json)
     yield { type: "result", result: { ok: true, output: `notebook_edit: ${edited.summary} in ${input.path}` } }
   },
 })

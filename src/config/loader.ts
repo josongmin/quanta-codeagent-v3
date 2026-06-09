@@ -21,6 +21,7 @@ import type {
   HookGroupSetting,
   HooksSettings,
   LayerSecurity,
+  McpSettings,
   PermissionSettings,
   SettingsLayer,
   SettingsLayerName,
@@ -147,8 +148,20 @@ export const parseSettingsLayer = (text: string): SettingsLayer | undefined => {
     if (Object.keys(h).length > 0) hooks = h
   }
 
-  const mcpServers = mcpRaw === undefined ? undefined : asStringArray(mcpRaw.enabledServers)
-  const mcp = mcpServers === undefined ? undefined : { enabledServers: mcpServers }
+  let mcp: McpSettings | undefined
+  if (mcpRaw !== undefined) {
+    const m: { -readonly [K in keyof McpSettings]: McpSettings[K] } = {}
+    const enabledServers = asStringArray(mcpRaw.enabledServers)
+    if (enabledServers !== undefined) m.enabledServers = enabledServers
+    // E2 — denylist (tightening; enforced by the launch-policy filter).
+    const deniedServers = asStringArray(mcpRaw.deniedServers)
+    if (deniedServers !== undefined) m.deniedServers = deniedServers
+    // E1-sub — managed-non-overridable MCP (mirrors allowManagedHooksOnly).
+    const allowManagedMcpServersOnly = asBoolean(mcpRaw.allowManagedMcpServersOnly)
+    if (allowManagedMcpServersOnly !== undefined)
+      m.allowManagedMcpServersOnly = allowManagedMcpServersOnly
+    if (Object.keys(m).length > 0) mcp = m
+  }
 
   const model = asString(root.model)
 

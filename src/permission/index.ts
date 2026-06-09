@@ -362,6 +362,8 @@ export type {
 export {
   type ActionAssessment,
   ALL_ASSESSMENT_KINDS,
+  ALL_PERMISSION_MODES,
   type AssessmentEscalation,
   type AssessmentKind,
+  isPermissionMode,
 } from "./types"

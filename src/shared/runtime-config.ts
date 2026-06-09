@@ -391,6 +391,12 @@ export interface RuntimeConfig {
    *  When true, the cell editor (str_replace/insert/delete on `.ipynb`) is
    *  appended, writing through the same FS jail `edit`/`write` use. */
   readonly notebookEdit: boolean
+  /** W5 (DAP) `debug_inspect` debugger tool gate (`QUANTA_DEBUG_TOOLS`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ host sets NO `DefaultToolPorts.debugTools`,
+   *  tool not registered (byte-identical menu). When true, `debug_inspect` (run
+   *  under a DAP adapter, stop at first breakpoint, report stack + variables) is
+   *  appended — high-risk (executes the program), always-confirm tier. */
+  readonly debugTools: boolean
   /** H15 (jun-3-misc §3) reasoning carry-over gate (`QUANTA_REASONING_CARRYOVER`).
    *  OpenAI-Responses / o-series ONLY (the ChatGPT-OAuth subscription path).
    *  Strict opt-in (`=== "1"`). Default false ⇒ the responses-wire path is
@@ -1427,6 +1433,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     officeAuthoring: gateOn(env, "QUANTA_OFFICE_AUTHORING"),
     // W6 — strict opt-in. Default false ⇒ no notebook_edit tool (byte-identical).
     notebookEdit: gateOn(env, "QUANTA_NOTEBOOK_EDIT"),
+    debugTools: gateOn(env, "QUANTA_DEBUG_TOOLS"),
     // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
     // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
     reasoningCarryover: gateOn(env, "QUANTA_REASONING_CARRYOVER"),

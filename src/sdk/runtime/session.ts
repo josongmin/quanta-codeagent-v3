@@ -18,6 +18,7 @@ import type {
   SessionCommand,
   SessionEvent,
   SessionIdentitySetCommand,
+  SessionPermissionSetCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnRunCommand,
@@ -201,6 +202,16 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     ...commandMeta(meta),
   })
 
+  const buildPermissionSet = (
+    mode: string,
+    meta: Partial<Omit<SessionPermissionSetCommand, "sessionId" | "type" | "mode">> | undefined,
+  ): SessionPermissionSetCommand => ({
+    sessionId,
+    type: "session.permission.set",
+    mode,
+    ...commandMeta(meta),
+  })
+
   const buildApprovalRespond = (
     approvalId: string,
     decision: "approve" | "deny",
@@ -287,6 +298,9 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     },
     identity: {
       set: async (mode, meta, options) => dispatch(buildIdentitySet(mode, meta), options),
+    },
+    permission: {
+      set: async (mode, meta, options) => dispatch(buildPermissionSet(mode, meta), options),
     },
     toolProfile: {
       set: async (profile, meta, options) => dispatch(buildToolProfileSet(profile, meta), options),

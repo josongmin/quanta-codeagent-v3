@@ -1,6 +1,18 @@
 import { spawn as spawnChild } from "node:child_process"
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { join as joinPath } from "node:path"
+import {
+  canonicalizeTrustedPaths,
+  filterMcpServersByPolicy,
+  type McpLaunchPolicy,
+  mergeDiskLayers,
+  osManagedSettingsPath,
+  parseSettingSources,
+  readDiskLayers,
+  type TrustRecord,
+  TrustStore,
+} from "@/config"
 import type { ElicitationPrompterFactory, SamplingWiringInput } from "@/agent"
 import {
   type AgentConfig,
@@ -1000,7 +1012,19 @@ const pluginSpecToServerConfig = (
 export const readMcpConfig = async (
   slog: StructuredLogger,
   envSource: NodeJS.ProcessEnv = process.env,
+  // §12.4 LIVE-wire — central-config MCP launch policy (E2 denylist + E1-sub
+  // managed-only enforcement). `undefined` ⇒ no filtering (legacy byte-identical:
+  // the gate-OFF path and the no-policy-configured path both pass undefined).
+  policy?: McpLaunchPolicy,
 ): Promise<McpServerConfig[]> => {
+  // Observable governance: every dropped server is slog'd — never a silent
+  // disappearance the operator can't diagnose.
+  const applyPolicy = (servers: McpServerConfig[]): McpServerConfig[] => {
+    if (policy === undefined) return servers
+    const { kept, dropped } = filterMcpServersByPolicy(servers, policy)
+    for (const d of dropped) slog.warn("mcp.governance.dropped", { server: d.name, reason: d.reason })
+    return [...kept]
+  }
   const path = resolveMcpConfigPath(envSource)
   if (!path) return []
   try {
@@ -1008,12 +1032,14 @@ export const readMcpConfig = async (
     const parsed = JSON.parse(raw) as unknown
     const pluginStyle = MCPRootSchema.safeParse(parsed)
     if (pluginStyle.success) {
-      return Object.entries(pluginStyle.data.mcpServers).map(([name, spec]) =>
-        pluginSpecToServerConfig(name, spec),
+      return applyPolicy(
+        Object.entries(pluginStyle.data.mcpServers).map(([name, spec]) =>
+          pluginSpecToServerConfig(name, spec),
+        ),
       )
     }
     const legacy = parsed as { servers?: McpServerConfig[] }
-    if (Array.isArray(legacy.servers)) return legacy.servers
+    if (Array.isArray(legacy.servers)) return applyPolicy(legacy.servers)
     slog.warn("mcp.config.error", {
       path,
       error: "expected {servers:[...]} or {mcpServers:{...}}",
@@ -1022,6 +1048,89 @@ export const readMcpConfig = async (
   } catch (e) {
     slog.warn("mcp.config.error", { path, error: (e as Error).message })
     return []
+  }
+}
+
+/** §12.4 LIVE-wire — resolve the central-config MCP launch policy at the CLI
+ *  composition root. NON-INTERACTIVE mirror of the hooks path in
+ *  `apps/agent/index.ts#resolveCommandHookBindings` (same trust inputs:
+ *  `~/.quanta/trust.json` + `QUANTA_TRUSTED_PATHS`; NO trust prompt — MCP load
+ *  must never block boot on stdin; the hooks path owns interactive elevation).
+ *
+ *  Returns `undefined` (⇒ no filtering, legacy byte-identical) when:
+ *    - `runtimeConfig().centralConfig` is OFF (strict default-OFF), or
+ *    - resolution succeeded but NO layer configured `mcp.enabledServers` /
+ *      `mcp.deniedServers` (avoids the behavior cliff: enabling central-config
+ *      without MCP policy keeps existing `.mcp.json` servers untouched), or
+ *    - resolution faulted (FAIL-SOFT availability: a corrupt local settings
+ *      file must not kill every MCP server; the fault is slog'd). */
+export const resolveMcpLaunchPolicy = async (
+  slog: StructuredLogger,
+  envSource: NodeJS.ProcessEnv = process.env,
+): Promise<McpLaunchPolicy | undefined> => {
+  const rc = runtimeConfig()
+  if (!rc.centralConfig) return undefined
+  try {
+    let realCwd: string
+    try {
+      realCwd = await realpath(process.cwd())
+    } catch {
+      realCwd = process.cwd()
+    }
+    const userConfigDir = rc.centralConfigDir ?? joinPath(homedir(), ".quanta")
+    // Read-only trust persistence: `save` is a no-op — this path NEVER grants
+    // trust (no prompt), it only honors grants the hooks flow / user persisted.
+    const trustFile = joinPath(userConfigDir, "trust.json")
+    const store = await TrustStore.load({
+      load: async () => {
+        try {
+          const text = await readFile(trustFile, "utf8")
+          const parsed = JSON.parse(text) as unknown
+          return typeof parsed === "object" && parsed !== null
+            ? (parsed as Record<string, TrustRecord>)
+            : undefined
+        } catch {
+          return undefined
+        }
+      },
+      save: async () => {},
+    })
+    const trustedFromEnv = canonicalizeTrustedPaths(
+      (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
+    )
+    const trusted = store.isTrusted(realCwd) || trustedFromEnv.has(realCwd)
+    const layers = await readDiskLayers({
+      cwd: realCwd,
+      userConfigDir,
+      managedPath: osManagedSettingsPath(
+        process.platform,
+        rc.managedSettingsPath,
+        envSource.PROGRAMDATA,
+      ),
+      trusted,
+      sources: parseSettingSources(rc.centralConfigSources),
+      read: async (p: string) => {
+        try {
+          return await readFile(p, "utf8")
+        } catch {
+          // ENOENT/EACCES/… ⇒ layer absent (fail-soft, same posture as the
+          // hooks path's fsReadText).
+          return undefined
+        }
+      },
+      warn: (m: string) => slog.warn("mcp.governance.layer", { warn: m }),
+    })
+    const resolved = mergeDiskLayers(layers, trusted)
+    if (resolved.mcpEnabledServers.length === 0 && resolved.mcpDeniedServers.length === 0) {
+      return undefined
+    }
+    return {
+      enabledServers: resolved.mcpEnabledServers,
+      deniedServers: resolved.mcpDeniedServers,
+    }
+  } catch (e) {
+    slog.warn("mcp.governance.resolve_failed", { error: (e as Error).message })
+    return undefined
   }
 }
 
@@ -1314,7 +1423,10 @@ export const loadFeatures = async (
   const metrics = readCliKnob("QUANTA_METRICS", "bool") ? new Metrics() : undefined
   const state = statePath()
   const resume = resumePath()
-  const mcpConfigs = await readMcpConfig(slog)
+  // §12.4 LIVE-wire — the central-config MCP launch policy (E2 denylist +
+  // E1-sub managed-only) now actually gates which `.mcp.json` servers launch.
+  // Gate OFF / no policy configured / resolve fault ⇒ undefined ⇒ byte-identical.
+  const mcpConfigs = await readMcpConfig(slog, process.env, await resolveMcpLaunchPolicy(slog))
   // Track C — interactive MCP elicitation prompter. Built only when an
   // interactive CLI prompt seam is available (TTY stdin); headless / piped
   // runs get `undefined` so each McpClient keeps its headlessRejecter default

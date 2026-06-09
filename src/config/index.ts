@@ -24,6 +24,8 @@ import { EMPTY_RESOLVED } from "./types"
 export type { LayerPaths, ReadTextPort, WarnSink } from "./loader"
 export { parseSettingsLayer, readLayers } from "./loader"
 export { osManagedSettingsPath } from "./managed-path"
+export type { McpFilterResult, McpLaunchPolicy } from "./mcp-governance"
+export { filterMcpServersByPolicy } from "./mcp-governance"
 export { mergeSettings } from "./merge"
 export type { TrustPersistencePort, TrustRecord } from "./trust-store"
 export {

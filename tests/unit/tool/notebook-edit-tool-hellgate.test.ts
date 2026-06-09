@@ -121,4 +121,44 @@ describe("notebook_edit tool — FS-jail wrapper hellgate", () => {
     expect(r.ok).toBe(false)
     expect(writes).toHaveLength(0)
   })
+
+  test("EDIT-PARITY: stale-read guard rejects a write over a changed-since-read notebook, NO write", async () => {
+    const { port, writes } = makePort({ "/repo/nb.ipynb": NB })
+    const staleCtx = {
+      cwd: "/repo",
+      signal: new AbortController().signal,
+      readFileState: {
+        checkFresh: () => ({ kind: "stale", recordedMtimeMs: 1, currentMtimeMs: 2 }),
+      },
+    } as unknown as ToolContext
+    let last: ToolResult | undefined
+    const tool = makeNotebookEditTool(port)
+    for await (const ev of tool.execute(
+      { path: "nb.ipynb", mode: "delete", cell: 0 } as never,
+      staleCtx,
+    ) as AsyncIterable<ToolEvent>)
+      if (ev.type === "result") last = ev.result
+    expect(last?.ok).toBe(false)
+    expect(writes).toHaveLength(0) // refused BEFORE any write
+  })
+
+  test("EDIT-PARITY: a successful edit records into the file-history sink (rewindable)", async () => {
+    const { port } = makePort({ "/repo/nb.ipynb": NB })
+    const recorded: { path: string; cwd: string; content: string }[] = []
+    const histCtx = {
+      cwd: "/repo",
+      signal: new AbortController().signal,
+      fileHistory: { record: (e: { path: string; cwd: string; content: string }) => recorded.push(e) },
+    } as unknown as ToolContext
+    let last: ToolResult | undefined
+    const tool = makeNotebookEditTool(port)
+    for await (const ev of tool.execute(
+      { path: "nb.ipynb", mode: "delete", cell: 1 } as never,
+      histCtx,
+    ) as AsyncIterable<ToolEvent>)
+      if (ev.type === "result") last = ev.result
+    expect(last?.ok).toBe(true)
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]?.path).toBe("nb.ipynb")
+  })
 })

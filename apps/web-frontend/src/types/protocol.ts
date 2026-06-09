@@ -151,6 +151,15 @@ export interface SessionToolProfileSetCommand
 }
 
 /**
+ * Switch the session PERMISSION mode mid-session (mirrors upstream
+ * `SessionPermissionSetCommand`). EMITTED by the ModeBadge permission lever —
+ * honored live by the daemon's next-turn gate. */
+export interface SessionPermissionSetCommand
+  extends SessionCommandEnvelope<"session.permission.set"> {
+  readonly mode: string
+}
+
+/**
  * Replace the session transcript (mirrors upstream
  * `SessionTranscriptReplaceCommand`). Upstream carries a `readonly Message[]`;
  * narrowed to `unknown[]` here since the UI does not construct or send it. */
@@ -184,6 +193,7 @@ export type SessionCommand =
   | TurnCancelCommand
   | SessionIdentitySetCommand
   | SessionToolProfileSetCommand
+  | SessionPermissionSetCommand
   | SessionTranscriptReplaceCommand
   | ApprovalRespondCommand
 

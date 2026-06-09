@@ -163,6 +163,9 @@ export interface SessionHost {
   }): Promise<void> | void
   setIdentityMode?(mode: string): Promise<void> | void
   setToolProfile?(profile: string): Promise<void> | void
+  /** Switch the session permission mode mid-session. Honored live by the next
+   *  turn's gate when the surface wired a getter/setter `permission.mode`. */
+  setPermissionMode?(mode: string): Promise<void> | void
   startSideConversation?(
     args: SessionHostSideConversationArgs,
   ): Promise<SessionHostSideConversationResult>

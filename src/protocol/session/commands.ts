@@ -26,6 +26,14 @@ export interface SessionToolProfileSetCommand
   readonly profile: string
 }
 
+/** Switch the session PERMISSION mode mid-session (default / acceptEdits /
+ *  bypass / auto). Honored LIVE by the next turn's gate when the host wired a
+ *  getter/setter `permission.mode` (web daemon / bootstrap). */
+export interface SessionPermissionSetCommand
+  extends SessionCommandEnvelope<"session.permission.set"> {
+  readonly mode: string
+}
+
 export interface SessionTranscriptReplaceCommand
   extends SessionCommandEnvelope<"session.transcript.replace"> {
   readonly messages: readonly Message[]
@@ -53,12 +61,14 @@ export type SessionCommand =
   | SessionIdentitySetCommand
   | SessionTranscriptReplaceCommand
   | SessionToolProfileSetCommand
+  | SessionPermissionSetCommand
   | ApprovalRespondCommand
 
 export const SESSION_COMMAND_TYPES = [
   "approval.respond",
   "input.append",
   "session.identity.set",
+  "session.permission.set",
   "session.transcript.replace",
   "session.tool_profile.set",
   "turn.cancel",

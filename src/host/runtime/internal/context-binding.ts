@@ -12,7 +12,7 @@ import type {
 } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message, ResponsesContinuationStore } from "@/llm"
 import type { CrossSessionDreamTrigger } from "@/memory"
-import { inferReviewKind, reasonCodeFor, type ToolAction } from "@/permission"
+import { inferReviewKind, isPermissionMode, reasonCodeFor, type ToolAction } from "@/permission"
 import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
 import { wireInteractiveKnobs } from "@/runner/assemble"
 import type {
@@ -1346,6 +1346,19 @@ const createRuntimeSessionHost = (args: {
     },
     setToolProfile: async (profile) => {
       args.options.boot?.toolProfileState?.set(profile as never)
+    },
+    setPermissionMode: async (mode) => {
+      // Fail-closed: only a KNOWN PermissionMode reaches the gate. An unknown
+      // string would make `modePolicy[mode]` undefined downstream, so we ignore
+      // it (keep the current mode) rather than poison the gate.
+      if (!isPermissionMode(mode)) return
+      // Mutate the session's permission context in place. When the surface wired
+      // a LIVE getter/setter proxy for `permission.mode` (web daemon /
+      // bootstrap), the per-turn gate reads the new value on the NEXT turn — a
+      // real mid-session switch, not a display-only echo. On a plain
+      // `PermissionContext` the property is writable too, so this is a safe
+      // no-surprise assignment.
+      base.permission.mode = mode
     },
     startSideConversation: async (
       sideArgs: SessionHostSideConversationArgs,

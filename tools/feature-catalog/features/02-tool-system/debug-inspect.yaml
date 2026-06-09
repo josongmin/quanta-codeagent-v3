@@ -1,0 +1,50 @@
+id: debug-inspect
+title: debug_inspect — DAP debugger tool (run under adapter, stop at breakpoint, report stack+vars) (W5)
+section: 2
+subsystem: tool-system
+order: 60
+maturity: L3
+status: opt-in
+ui_surfaces: [cli, web]
+monitoring: "tool_result output (stopped location / call stack / locals / evaluated expr), or ok:false on spawn/protocol/timeout fault"
+modes: [n-a]
+configurable: "QUANTA_DEBUG_TOOLS (strict opt-in) → DefaultToolPorts.debugTools"
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude-code", "high-risk", "default-off", "code-execution"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "DefaultToolPorts.debugTools conditional registration in src/tool/index.ts; gated by cfg.debugTools in host/runtime/agent-arg-builder.ts (same seam as notebook_edit/officeAuthoring)"
+    web: "rides the agent-arg-builder composition the daemon-backed session uses (identical to notebook_edit wiring)"
+purpose: |
+  The marquee genuinely-new (non-inert) absorption from the CC IDE debugger
+  tool family. quanta had zero runtime-state inspection beyond print debugging.
+  `debug_inspect` runs a program under a Debug Adapter Protocol adapter
+  (debugpy for adapter:'python'; explicit adapterCommand for others), stops at
+  the FIRST breakpoint, and reports the call stack + local variables (and an
+  optional evaluated expression). One self-contained call (launch → stop →
+  inspect → terminate); continue/step-across-calls is a documented follow-up.
+
+  Layers (src/tool/debug/): dap-codec (byte-accurate Content-Length framing,
+  multibyte-safe, malformed-resync, NEVER-throws) · dap-client (out-of-order
+  response correlation by request_seq; success:false RESOLVES not rejects) ·
+  inspect-driver (canonical DAP launch handshake; event waiters armed before
+  the first request; every wait timeout- AND abort-guarded) · port (Bun.spawn
+  seam, closed-port DI so tools test against a scripted fake adapter).
+
+  HIGH RISK: launching the adapter EXECUTES the user's program (arbitrary
+  code), so the tool is always-confirm (every call needs approval, like bash)
+  AND default-OFF. NEVER throws — a spawn/protocol/timeout fault collapses to
+  ok:false. Turn-abort tears the session down immediately (no lingering process
+  to the stop timeout).
+verified_real: "2026-06-10 — spawned real debugpy 1.8.21, debugged a real python program: stopped at breakpoint, reported true locals (total=10/n=5/acc=[0..4]) + evaluated total+100⇒110. Caught & fixed a launch-sequencing DEADLOCK the fake adapter masked (real debugpy defers the launch response until after configurationDone)."
+tests:
+  - tests/unit/tool/debug/dap-codec.test.ts
+  - tests/unit/tool/debug/dap-client.test.ts
+  - tests/unit/tool/debug/dap-inspect-driver-hellgate.test.ts
+  - tests/unit/tool/debug/debug-inspect-tool-e2e-hellgate.test.ts
+  - tests/unit/tool/debug/debugpy-real-e2e.test.ts  # real debugpy (auto-skip if absent)

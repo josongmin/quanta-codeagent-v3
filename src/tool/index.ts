@@ -33,6 +33,7 @@ import { makeDocxWriteTool, makePptxWriteTool, makeXlsxWriteTool } from "./docum
 import { editTool, makeEditTool } from "./edit"
 import { type FetchRulesPort, fetchRulesTool } from "./fetch-rules"
 import { type FileHistoryStore, makeFileHistoryRewindTool } from "./file-history"
+import { makeDebugInspectTool } from "./debug/tool"
 import { makeNotebookEditTool } from "./notebook-edit/tool"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
@@ -650,6 +651,11 @@ export interface DefaultToolPorts {
    *  uses). Host sets this iff `QUANTA_NOTEBOOK_EDIT` is on; absent ⇒ tool not
    *  registered (byte-identical default menu). No port — the editor is pure. */
   notebookEdit?: boolean
+  /** W5 (DAP) — when set, append `debug_inspect` (run a program under a Debug
+   *  Adapter Protocol adapter, stop at the first breakpoint, report stack +
+   *  variables). Host sets this iff `QUANTA_DEBUG_TOOLS` is on; absent ⇒ tool
+   *  not registered (byte-identical). High-risk (executes user code). */
+  debugTools?: boolean
   /** C1 — when set, append the artifact (Canvas) read/manage tools
    *  (`artifact_list` / `artifact_get` / `artifact_destroy`) bound to the
    *  session artifact registry. Absent ⇒ tools NOT registered (byte-identical).
@@ -900,6 +906,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // SAME jailed FS port `edit`/`write` use (pure core, atomic write-back).
   if (ports.notebookEdit === true) {
     base.push(makeNotebookEditTool(ports.fs ?? defaultFileSystemPort) as Tool)
+  }
+  // W5 (DAP) — conditional `debug_inspect` registration. Absent ⇒ NOT registered
+  // (byte-identical). Present ⇒ the DAP debugger bound to the real spawn port
+  // (high-risk: executes the program under a debug adapter, always-confirm tier).
+  if (ports.debugTools === true) {
+    base.push(makeDebugInspectTool() as Tool)
   }
   // CLUSTER D #5 — conditional registration of permission_propose_pattern. Absent
   // port ⇒ default set is byte-identical (the model never sees the tool). Present

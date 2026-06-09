@@ -1480,6 +1480,15 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
+    envKey: "QUANTA_DEBUG_TOOLS",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "debug_inspect tool — run a program under a DAP adapter, stop at first breakpoint, report stack+vars (W5, opt-in, high-risk).",
+    readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
     envKey: "QUANTA_SHADOW",
     kind: "bool",
     default: false,

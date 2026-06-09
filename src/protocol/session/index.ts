@@ -15,6 +15,7 @@ export type {
   SessionCommandEnvelope,
   SessionCommandType,
   SessionIdentitySetCommand,
+  SessionPermissionSetCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
