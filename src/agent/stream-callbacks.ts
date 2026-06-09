@@ -206,7 +206,11 @@ const scopeOutcome = (
         "skill-scoped: blocked",
       )
     case "deny":
-      return scopeDeny(callId, `Declined: ${reason} Use a tool the skill permits.`, "skill-scoped: declined")
+      return scopeDeny(
+        callId,
+        `Declined: ${reason} Use a tool the skill permits.`,
+        "skill-scoped: declined",
+      )
     case "deny_and_steer":
       return scopeDeny(callId, `Declined: ${reason} ${verdict.steer}`, "skill-scoped: steered")
     default: {

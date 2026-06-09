@@ -103,6 +103,73 @@ describe("EscalationCard", () => {
       approvalId: "appr-9",
       decision: "approve",
       option: "allow_session",
+      scope: "session",
     })
+  })
+
+  // ADR-0512 P3 (jun-9 100-point) — the 4 verbs must be GENUINELY distinct on the
+  // wire, not display-only: allow_once carries scope:"once" (no widen),
+  // allow_session scope:"session" (widen), deny_and_steer carries the steer text.
+  it("maps allow_once → scope:'once' and allow_session → scope:'session' (genuinely distinct)", () => {
+    const { escalationDecisionFor } = EscalationCard as unknown as {
+      escalationDecisionFor: (
+        v: string,
+        steer?: string,
+      ) => { decision: "approve" | "deny"; option: string; scope?: string; steer?: string }
+    }
+    expect(escalationDecisionFor("allow_once")).toMatchObject({
+      decision: "approve",
+      scope: "once",
+    })
+    expect(escalationDecisionFor("allow_session")).toMatchObject({
+      decision: "approve",
+      scope: "session",
+    })
+    expect(escalationDecisionFor("deny")).toMatchObject({ decision: "deny" })
+    expect(escalationDecisionFor("deny_and_steer", "use grep")).toMatchObject({
+      decision: "deny",
+      steer: "use grep",
+    })
+  })
+
+  it("buildDecisionHandler threads scope for allow_once", () => {
+    const onDecision = vi.fn()
+    const { buildDecisionHandler } = EscalationCard as unknown as {
+      buildDecisionHandler: (
+        approvalId: string,
+        onDecision: (d: {
+          approvalId: string
+          decision: "approve" | "deny"
+          option: string
+          scope?: string
+        }) => void,
+      ) => (option: string) => void
+    }
+    buildDecisionHandler("appr-1", onDecision)("allow_once")
+    expect(onDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: "appr-1", decision: "approve", scope: "once" }),
+    )
+  })
+
+  it("the deny_and_steer button reveals a steer text input in the rich card", () => {
+    const markup = renderToStaticMarkup(
+      <EscalationCard
+        approval={{
+          approvalId: "appr-2",
+          reason: "esc",
+          scopeContext: {
+            tool: "edit",
+            activeSkill: "reader",
+            reason: "out of scope",
+            risk: "mutating",
+          },
+        }}
+        onDecision={() => {}}
+      />,
+    )
+    // The steer affordance is present in the rich card (a textarea the user fills
+    // before sending a deny_and_steer). Pinned so the button can never again be a
+    // no-op that silently drops the steer.
+    expect(markup).toContain("textarea")
   })
 })

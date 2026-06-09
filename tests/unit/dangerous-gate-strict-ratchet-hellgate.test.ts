@@ -175,9 +175,9 @@ const DANGEROUS_GATES: ReadonlyArray<DangerousGate> = [
   },
   {
     literal: "QUANTA_STALE_READ_GUARD",
-    kind: "on",
+    kind: "disable",
     aliases: ["STALE_READ_GUARD_ENV"],
-    why: "fs-safety: arms the stale-read guard (blocks edits to files mutated since last read)",
+    why: "fs-safety-disable: the stale-read guard is now DEFAULT-ON (Claude-parity SOTA++ upgrade); only the deliberate `=off` kill-switch (gateDisabledStrict, like the fs-jail) tears down its TOCTOU clobber protection",
   },
   {
     literal: "QUANTA_FS_JAIL",

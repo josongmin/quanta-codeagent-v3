@@ -332,6 +332,51 @@ describe("GAP7 audit R2: concurrency-safe item claim (no double-dispatch)", () =
     for (const [, n] of dispatches) expect(n).toBe(1) // NO double-dispatch
     expect([...dispatches.keys()].sort()).toEqual([0, 1, 2, 3]) // every row ran
   })
+
+  test("HELL-CLAIM-DRAIN: a runner that SKIPPED every claim must NOT finalize `completed` while the sibling still owns running items", async () => {
+    const store = new InMemoryJobStore()
+    const N = 3
+    let claimed = 0
+    let allClaimedResolve = (): void => {}
+    const allClaimed = new Promise<void>((r) => {
+      allClaimedResolve = r
+    })
+    // A gated dispatch: each call PARKS until released, so the claiming runner
+    // holds its items `running` long enough for the sibling to observe them.
+    const gates: Array<() => void> = []
+    const gatedDispatch: RowDispatchPort = () =>
+      new Promise((resolve) => {
+        gates.push(() => resolve(ok<RowDispatchResult>({ value: { ok: true } })))
+        claimed += 1
+        if (claimed === N) allClaimedResolve()
+      })
+    const mk = () =>
+      new BatchJobRunner({ store, dispatch: gatedDispatch, clock: makeClock(), newId: makeIdGen() })
+    const submitted = await mk().submit(
+      spec([{ a: "0" }, { a: "1" }, { a: "2" }], { poolSize: N }),
+    )
+    if (!submitted.ok) throw new Error("unreachable")
+
+    // Runner A claims + dispatches ALL rows, then parks on the gate (rows `running`).
+    const aPromise = mk().runToEnd(submitted.value)
+    await allClaimed
+
+    // Runner B sees every item `running` (claimed by A) ⇒ no claimable work ⇒ its
+    // pump drains. It must NOT declare the WHOLE JOB completed — A still owns the
+    // in-flight items. (Bug: B finalized `completed` prematurely.)
+    const bSnap = await mk().runToEnd(submitted.value)
+    expect(bSnap.ok).toBe(true)
+    if (!bSnap.ok) throw new Error("unreachable")
+    expect(bSnap.value.job.status).not.toBe("completed")
+
+    // Release A ⇒ the OWNER finalizes once its items are truly terminal.
+    for (const g of gates) g()
+    const aSnap = await aPromise
+    expect(aSnap.ok).toBe(true)
+    if (!aSnap.ok) throw new Error("unreachable")
+    expect(aSnap.value.job.status).toBe("completed")
+    expect(aSnap.value.items.every((i) => i.status === "done")).toBe(true)
+  })
 })
 
 describe("output schema enforcement", () => {

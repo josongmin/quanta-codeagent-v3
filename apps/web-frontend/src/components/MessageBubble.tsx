@@ -27,6 +27,10 @@ const MessageBubbleInner = ({
   const role = message.role
   const isUser = role === "user"
   const isNotice = role === "system" || role === "error"
+  // An image-only user bubble hugs the attachment (`w-fit`) instead of
+  // stretching the full row — a wide empty block around a small image reads
+  // as a layout bug.
+  const isImageOnly = hasImages && message.text.length === 0
 
   const body =
     message.text.length > 0 ? (
@@ -75,7 +79,12 @@ const MessageBubbleInner = ({
         ) : null}
       </div>
       {isUser ? (
-        <div className="mt-1.5 rounded-2xl border border-line-subtle bg-surface-raised px-4 py-3 text-ink">
+        <div
+          className={cx(
+            "mt-1.5 rounded-2xl border border-line-subtle bg-surface-raised px-4 py-3 text-ink",
+            isImageOnly && "w-fit max-w-[80%]",
+          )}
+        >
           {images}
           {body}
         </div>

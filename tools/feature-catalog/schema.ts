@@ -18,6 +18,42 @@ export const LifecycleStage = z.enum(["proposed", "active", "deprecated", "sunse
 export const UiSurface = z.enum(["cli", "web", "ide", "tauri", "api", "none", "n-a"])
 export const IntegrationStatus = z.enum(["integrated", "partial", "planned", "none", "n-a"])
 export const ConfigStatus = z.enum(["integrated", "partial", "planned", "static", "none", "n-a"])
+
+// SOTA Tier-5 — per-surface integration with code-grounded EVIDENCE.
+//
+// Orthogonal to `ui_surfaces` (bare *intended*-surface tags that this audit
+// found to be ~unreliable: only ~13/933 list web while the web app surfaces
+// far more, and several [cli] tags are "accidentally right" because the web
+// slash stubs do not actually execute). `surface_integration` records, PER
+// SURFACE, the AUDITED wiring status + the file:line proof — so the question
+// "is feature X actually wired into the CLI / the web app?" is answerable from
+// the catalog instead of re-greping the tree. See README §"surface_integration".
+//
+//   full    — produced/handled on this surface AND a user-visible affordance
+//   partial — produced/handled but weak/incomplete render or control
+//   missing — neither (e.g. dropped at the web event-bridge default arm)
+//   na      — not applicable to this surface
+//   unknown — not yet audited (default; the populate sweep fills these)
+//
+// method:  audited (a human/agent opened the files) | derived (computed from a
+//          code SSOT e.g. the toSessionHostTurnEvent whitelist) | unverified.
+// The drift ratchet (tests/unit/feature-catalog-surface-integration.test.ts)
+// requires evidence text whenever status ∈ {full,partial,missing}.
+export const SurfaceStatus = z.enum(["full", "partial", "missing", "na", "unknown"])
+export const SurfaceMethod = z.enum(["audited", "derived", "unverified"])
+export const SurfaceIntegrationSchema = z
+  .object({
+    cli: SurfaceStatus.default("unknown"),
+    web: SurfaceStatus.default("unknown"),
+    evidence: z
+      .object({ cli: z.string().default(""), web: z.string().default("") })
+      .partial()
+      .default({}),
+    method: SurfaceMethod.default("unverified"),
+    verified: z.string().optional(),
+  })
+  .default({ cli: "unknown", web: "unknown", evidence: {}, method: "unverified" })
+
 export const RunMode = z.enum([
   "interactive",
   "headless",
@@ -67,6 +103,8 @@ export const FeatureSchema = z.object({
     })
     .partial()
     .default({}),
+  // SOTA Tier-5 — audited per-surface (CLI / web) integration + evidence.
+  surface_integration: SurfaceIntegrationSchema,
   purpose: z.string().min(1),
   evidence: z
     .object({

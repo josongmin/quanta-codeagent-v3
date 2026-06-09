@@ -185,6 +185,21 @@ export class BatchJobRunner {
       return ok({ job, items })
     }
 
+    // `drained` means "no work THIS runner could claim remains" — NOT "the whole
+    // job is done". A concurrent runner over the SAME store may still own items
+    // it CLAIMED (status `running`) that this runner skipped. Only finalize
+    // `completed` when EVERY item is actually terminal; otherwise leave the job
+    // `running` for the owner to finalize, and return the in-progress snapshot —
+    // declaring `completed` here would mark the job done while siblings are mid-
+    // flight. (A re-list fault falls through to finalize, preserving old behavior
+    // when we cannot tell.)
+    const itemsRes = await this.deps.store.listItems(jobId)
+    if (
+      itemsRes.ok &&
+      itemsRes.value.some((i) => i.status === "pending" || i.status === "running")
+    ) {
+      return this.snapshot(jobId)
+    }
     await this.finalize(job, "completed")
     const snap = await this.snapshot(jobId)
     return snap

@@ -248,7 +248,12 @@ export const App = (): JSX.Element => {
   const sendApprovalDecision = useSendApprovalDecision(client, learnedSessionId)
   const onApprovalDecision = useCallback(
     (decision: EscalationDecision): void => {
-      sendApprovalDecision(decision.approvalId, decision.decision)
+      // ADR-0512 P3 — thread the escalation's once/session scope + steer so
+      // allow_once (no widen) and deny_and_steer (corrective steer) take effect.
+      sendApprovalDecision(decision.approvalId, decision.decision, {
+        ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
+        ...(decision.steer !== undefined ? { steer: decision.steer } : {}),
+      })
       // Optimistic: drop the card immediately; the authoritative
       // `approval.resolved` event then arrives and is a no-op for the dropped id.
       dismissApproval(decision.approvalId)

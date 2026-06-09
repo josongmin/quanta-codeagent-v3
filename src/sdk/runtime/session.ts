@@ -212,6 +212,11 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     type: "approval.respond",
     approvalId,
     decision,
+    // ADR-0512 P3 — `commandMeta` only forwards envelope fields (commandId /
+    // issuedAt / expectedRevision); the escalation's scope/steer must be
+    // forwarded explicitly so the once/session + steer verbs reach the host.
+    ...(meta?.scope !== undefined ? { scope: meta.scope } : {}),
+    ...(meta?.steer !== undefined ? { steer: meta.steer } : {}),
     ...commandMeta(meta),
   })
 

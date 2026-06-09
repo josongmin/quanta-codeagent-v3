@@ -225,7 +225,21 @@ const decodePhase = async (
       DOWNSAMPLE_MAX_DIM,
       signal,
     )
-    if (out.kind === "ok") return { kind: "ok", bytes: out.bytes, mediaType: out.mediaType }
+    if (out.kind === "ok") {
+      // Re-enforce the BYTE cap on the codec output. `downsample` caps the
+      // longest EDGE (sips `-Z`), NOT the byte size — a dense/noisy image can
+      // fit the edge bound yet still exceed MAX_IMAGE_BYTES, and forwarding it
+      // would defeat the very cap the downsample exists to honor.
+      if (out.bytes.length <= MAX_IMAGE_BYTES)
+        return { kind: "ok", bytes: out.bytes, mediaType: out.mediaType }
+      return {
+        kind: "fail",
+        result: errResult(
+          `image too large: ${bytes.length} bytes (cap ${MAX_IMAGE_BYTES}); downsample still over cap: ${out.bytes.length} bytes`,
+          { mode: "error", modelVisibleError: "image_over_cap" },
+        ),
+      }
+    }
     return {
       kind: "fail",
       result: errResult(

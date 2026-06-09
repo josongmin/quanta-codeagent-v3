@@ -27,11 +27,23 @@ type SessionTurnPayload = NonNullable<SessionDispatchResult["turn"]>
 /** The pending-approval view carried on a turn payload when the gate asks. */
 type PendingApproval = NonNullable<SessionTurnPayload["approvalRequest"]>
 
+/** ADR-0512 P3 — the operator's decision. A bare `"approve"`/`"deny"` is the
+ *  legacy 2-verb form (still accepted, byte-identical). A skill-scope escalation
+ *  surface may instead return the RICH form so the once/session SCOPE and the
+ *  corrective STEER reach the host: `{decision:"approve", scope:"once"}` ⇒
+ *  allow_once (dispatch WITHOUT widening); `{decision:"deny", steer}` ⇒
+ *  deny_and_steer (a recoverable decline carrying the steer). */
+export type ApprovalDecisionResult =
+  | "approve"
+  | "deny"
+  | { readonly decision: "approve"; readonly scope?: "once" | "session" }
+  | { readonly decision: "deny"; readonly steer?: string }
+
 /** Host-injected approval resolver — mirrors the CLI's `setup.approvalPrompt`.
  *  Receives the pending approval and returns the operator decision. The surface
  *  owns the prompt UX (TTY prompt / Web modal / headless auto-policy); the
  *  driver only awaits the decision. */
-export type ApprovalResolver = (approval: PendingApproval) => Promise<"approve" | "deny">
+export type ApprovalResolver = (approval: PendingApproval) => Promise<ApprovalDecisionResult>
 
 /** Normalized turn-completion result (the SDK envelope dropped). `outcome` is
  *  the full {@link AgentOutcome} (additive — host surfaces that only need the
@@ -77,11 +89,27 @@ const resolvePendingApproval = async (
   approval: PendingApproval,
   turnSignal: AbortSignal,
 ): Promise<void> => {
-  const decision = await resolveApproval(approval)
-  await session.approval.respond(approval.approvalId, decision, undefined, {
-    signal: turnSignal,
-  })
-  if (decision === "deny") {
+  const raw = await resolveApproval(approval)
+  const norm: { decision: "approve" | "deny"; scope?: "once" | "session"; steer?: string } =
+    typeof raw === "string" ? { decision: raw } : raw
+  // ADR-0512 P3 — forward the escalation's once/session scope + corrective steer
+  // so the host lease carries the operator's rich decision. Empty ⇒ `undefined`
+  // meta, byte-identical to the legacy 2-verb respond.
+  const meta = {
+    ...(norm.scope !== undefined ? { scope: norm.scope } : {}),
+    ...(norm.steer !== undefined ? { steer: norm.steer } : {}),
+  }
+  await session.approval.respond(
+    approval.approvalId,
+    norm.decision,
+    Object.keys(meta).length > 0 ? meta : undefined,
+    { signal: turnSignal },
+  )
+  // A NORMAL approval deny aborts the turn (byte-identical legacy). An ESCALATION
+  // deny (the approval carries `scopeContext`) is RECOVERABLE: the loop re-runs,
+  // claims the deny lease, and the model receives a `skill-scoped: declined` /
+  // `steered` tool_result — so we do NOT throw, letting the loop continue.
+  if (norm.decision === "deny" && approval.scopeContext === undefined) {
     throw new Error(`runtime session approval denied (${approval.reason})`)
   }
 }

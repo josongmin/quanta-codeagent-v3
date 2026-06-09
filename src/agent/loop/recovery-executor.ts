@@ -20,7 +20,7 @@ import { stripOrphanToolUse } from "../turn-closeout"
 import type { TurnSession, TurnState } from "../turn-context"
 import { emitCompactionEvent } from "./compaction-wire"
 import { resetEffortClassifier } from "./context-assembler"
-import { emitRecovery, objectiveBudgetExhausted } from "./emit-helpers"
+import { emitRecovery, objectiveBudgetExhausted, resolveWindowModel } from "./emit-helpers"
 import { sleep } from "./sleep"
 import type { StreamSuccess, TurnResult } from "./types"
 
@@ -82,8 +82,14 @@ export const applyNonSuccessRecoveryAction = async (
           // a window is known; explicit override wins). The hard-drop fallback
           // stops shedding as soon as the transcript would re-fit, so it never
           // drops more than necessary. Omitted limit ⇒ the fallback drops to
-          // the floor (forward progress guaranteed).
-          targetTokens: resolveCompactionLimitTokens(config.compaction?.thresholdTokens),
+          // the floor (forward progress guaranteed). The model id MUST be passed
+          // (mirrors compaction-wire's proactive path) — without it the target
+          // silently collapses to the 120k legacy floor and over-sheds on a
+          // large-window model.
+          targetTokens: resolveCompactionLimitTokens(
+            config.compaction?.thresholdTokens,
+            resolveWindowModel(config.llm),
+          ),
         })
       : await reactiveCompact({ messages: snapshot, llm: summarizerLlm, system: ctxSystem })
   if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }

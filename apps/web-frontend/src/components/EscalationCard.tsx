@@ -14,7 +14,7 @@
  * affordance: the surface is byte-identical to every pre-ADR-0512 approval.
  */
 
-import { memo } from "react"
+import { memo, useState } from "react"
 import type { ApprovalScopeContext } from "../types/protocol"
 
 /** The minimal approval shape the card consumes — a subset of
@@ -26,15 +26,19 @@ export interface EscalationApproval {
   readonly scopeContext?: ApprovalScopeContext
 }
 
-/** The session protocol decision verb sent back via `approval.respond`. The 4
- *  escalation OPTIONS collapse onto this 2-verb wire (ADR-0076 `ConfirmDecision`
- *  carries no once-vs-session bit — both approve buttons widen scope; both deny
- *  buttons decline). The `option` is retained so a future protocol extension can
- *  distinguish once-vs-session / steer without re-plumbing the surface. */
+/** The session protocol decision sent back via `approval.respond`. ADR-0512 P3
+ *  (jun-9) — the 4 escalation OPTIONS are now GENUINELY distinct on the wire:
+ *  `decision` is the approve/deny verb, `scope` carries once-vs-session for an
+ *  approve (`allow_once` ⇒ "once", no widen), and `steer` carries the corrective
+ *  message for `deny_and_steer`. The host lease honours all three. */
 export interface EscalationDecision {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
   readonly option: EscalationOption
+  /** once-vs-session for an approve (allow_once ⇒ "once"). Absent on a deny. */
+  readonly scope?: "once" | "session"
+  /** corrective steer for deny_and_steer. Absent otherwise. */
+  readonly steer?: string
 }
 
 export type EscalationOption = "allow_once" | "allow_session" | "deny" | "deny_and_steer"
@@ -55,22 +59,28 @@ const ESCALATION_BUTTONS: readonly EscalationButton[] = [
   { option: "deny_and_steer", label: "Deny + steer", tone: "deny" },
 ]
 
-/** Pure verb→decision map: the two approve buttons widen scope (`approve`); the
- *  two deny buttons decline (`deny`). Exposed for the unit contract. */
+/** Pure verb→decision map (ADR-0512 P3): the two approve buttons map to
+ *  `approve` carrying `scope` (allow_once ⇒ "once" / allow_session ⇒ "session");
+ *  the two deny buttons map to `deny`, and `deny_and_steer` carries the operator's
+ *  `steer` text. Exposed for the unit contract. */
 const escalationDecisionFor = (
   option: EscalationOption,
-): { decision: "approve" | "deny"; option: EscalationOption } => ({
-  decision: option === "allow_once" || option === "allow_session" ? "approve" : "deny",
-  option,
-})
+  steer?: string,
+): { decision: "approve" | "deny"; option: EscalationOption; scope?: "once" | "session"; steer?: string } => {
+  if (option === "allow_once") return { decision: "approve", option, scope: "once" }
+  if (option === "allow_session") return { decision: "approve", option, scope: "session" }
+  if (option === "deny_and_steer" && steer !== undefined && steer.trim().length > 0) {
+    return { decision: "deny", option, steer: steer.trim() }
+  }
+  return { decision: "deny", option }
+}
 
 /** Pure click-builder so the verb→`approval.respond` wiring is testable in a
  *  node env without a DOM. */
 const buildDecisionHandler =
   (approvalId: string, onDecision: (d: EscalationDecision) => void) =>
-  (option: EscalationOption): void => {
-    const { decision } = escalationDecisionFor(option)
-    onDecision({ approvalId, decision, option })
+  (option: EscalationOption, steer?: string): void => {
+    onDecision({ approvalId, ...escalationDecisionFor(option, steer) })
   }
 
 export interface EscalationCardProps {
@@ -126,6 +136,7 @@ const PlainApproval = memo(
 )
 
 const EscalationCardImpl = ({ approval, onDecision }: EscalationCardProps): JSX.Element => {
+  const [steer, setSteer] = useState("")
   const scope = approval.scopeContext
   if (scope === undefined) {
     return <PlainApproval approval={approval} onDecision={onDecision} />
@@ -164,12 +175,23 @@ const EscalationCardImpl = ({ approval, onDecision }: EscalationCardProps): JSX.
           </div>
         ) : null}
       </dl>
-      <div className="mt-2.5 flex flex-wrap gap-2">
+      {/* ADR-0512 P3 — the steer box: filled before a `deny_and_steer` so the
+          corrective message reaches the model (the "Deny + steer" button reads
+          it). Empty ⇒ the button is a plain deny. */}
+      <textarea
+        value={steer}
+        onChange={(e) => setSteer(e.target.value)}
+        placeholder="(선택) 대신 무엇을 하라고 안내할지 — Deny + steer 용"
+        rows={2}
+        aria-label="steer message"
+        className="mt-2.5 w-full resize-none rounded-lg border border-line bg-surface-input px-2 py-1.5 text-[11px] text-ink placeholder:text-ink-faint focus-visible:border-accent/50 focus-visible:outline-none"
+      />
+      <div className="mt-2 flex flex-wrap gap-2">
         {ESCALATION_BUTTONS.map((btn) => (
           <button
             key={btn.option}
             type="button"
-            onClick={() => handle(btn.option)}
+            onClick={() => handle(btn.option, btn.option === "deny_and_steer" ? steer : undefined)}
             className={
               btn.tone === "approve"
                 ? "rounded-lg bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-fg hover:bg-accent-muted"

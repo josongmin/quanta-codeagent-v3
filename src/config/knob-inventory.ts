@@ -266,10 +266,10 @@ const HOST: readonly KnobInventoryEntry[] = [
   {
     envKey: "QUANTA_STALE_READ_GUARD",
     kind: "bool",
-    default: false,
+    default: true,
     group: "host-gate",
     home: "runtime-config",
-    describe: "Stale-read freshness guard (write-blocking).",
+    describe: "Stale-read freshness guard (write-blocking); DEFAULT-ON, set =off to disable.",
     readSite: "host/runtime/agent-config-assembler.ts",
   },
   {

@@ -9,6 +9,14 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
 configurable: integrated
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/agent/plan/stream-mirror.ts projects all 6 plan events; stdout/timeline render them; /plan + /edit-plan executed in src/apps/cli/slash/*"
+    web: "every plan_* event (plan_created/updated/snapshot/user_input_requested/resolved) + mode_changed is dropped at the only AgentEvent→web bridge context-binding.ts:1061 default arm; SlashPalette.tsx:405 /plan is a prefill() stub sent to the LLM as plain text, not executed; zero plan_* consumer anywhere in apps/web-frontend"
 config_refs:
   env: ["QUANTA_PLAN"]
   cli: ["--plan"]

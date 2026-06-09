@@ -1116,6 +1116,77 @@ async function cmdReachability(argv: string[]): Promise<void> {
   if (strict && offenders.length > 0) process.exit(1)
 }
 
+// `bun fc surface [--gap web|cli|any] [--audited] [--id <substr>] [--json]`
+// Report per-surface (CLI/web) integration coverage from `surface_integration`.
+// The "거기서 확인" affordance: answer "is X wired into CLI / the web app?" and
+// "what's the web-gap backlog?" from the catalog instead of re-greping the tree.
+async function cmdSurface(argv: string[]): Promise<void> {
+  const features = (await loadFeaturesStrict(FEATURES_DIR)).map((l) => l.feature)
+  let gap: string | null = null
+  let onlyAudited = false
+  let idFilter: string | null = null
+  let asJson = false
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === "--gap") gap = argv[++i] ?? null
+    else if (a === "--audited") onlyAudited = true
+    else if (a === "--id") idFilter = argv[++i] ?? null
+    else if (a === "--json") asJson = true
+  }
+  const rows = features
+    .filter((f) => (idFilter ? f.id.includes(idFilter) : true))
+    .filter((f) => (onlyAudited ? f.surface_integration.method !== "unverified" : true))
+  const audited = rows.filter((f) => f.surface_integration.method !== "unverified")
+  const tally = (key: "cli" | "web"): Record<string, number> => {
+    const t: Record<string, number> = { full: 0, partial: 0, missing: 0, na: 0, unknown: 0 }
+    for (const f of rows) t[f.surface_integration[key]] = (t[f.surface_integration[key]] ?? 0) + 1
+    return t
+  }
+  const isGap = (f: Feature): boolean => {
+    const si = f.surface_integration
+    const bad = (s: string): boolean => s === "missing" || s === "partial"
+    if (gap === "web") return bad(si.web)
+    if (gap === "cli") return bad(si.cli)
+    if (gap === "any") return bad(si.web) || bad(si.cli)
+    return false
+  }
+  if (asJson) {
+    console.log(
+      JSON.stringify(
+        {
+          total: rows.length,
+          audited: audited.length,
+          cli: tally("cli"),
+          web: tally("web"),
+          gaps: gap ? rows.filter(isGap).map((f) => ({ id: f.id, ...f.surface_integration })) : [],
+        },
+        null,
+        2,
+      ),
+    )
+    return
+  }
+  console.log(
+    `surface_integration coverage — ${audited.length}/${rows.length} audited (${
+      rows.length - audited.length
+    } unverified)`,
+  )
+  console.log(`  cli: ${JSON.stringify(tally("cli"))}`)
+  console.log(`  web: ${JSON.stringify(tally("web"))}`)
+  if (gap !== null) {
+    const g = rows.filter(isGap)
+    console.log(`\n${gap}-gap features (${g.length}):`)
+    for (const f of g) {
+      const si = f.surface_integration
+      console.log(`  [cli=${si.cli} web=${si.web}] ${f.id}`)
+      const e = gap === "cli" ? si.evidence?.cli : si.evidence?.web
+      if (e !== undefined && e.length > 0) {
+        console.log(`      ${e.replace(/\s+/g, " ").slice(0, 160)}`)
+      }
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2)
   const cmd = argv[0]
@@ -1174,6 +1245,9 @@ async function main(): Promise<void> {
       return
     case "test-audit":
       await cmdTestAudit(rest)
+      return
+    case "surface":
+      await cmdSurface(rest)
       return
     case undefined:
     case "-h":

@@ -63,6 +63,15 @@ const okPort = (calls: { n: number }): ImageDownsamplePort => ({
 const unablePort: ImageDownsamplePort = {
   downsample: async () => ({ kind: "unable", reason: "codec missing" }),
 }
+// A codec that "succeeds" (longest-edge capped) but whose OUTPUT is STILL over
+// the byte cap — e.g. a 2048² noise image whose edges fit but bytes don't.
+const okButOverCapPort: ImageDownsamplePort = {
+  downsample: async (_b, mediaType) => ({
+    kind: "ok",
+    bytes: makePng(MAX_IMAGE_BYTES + 512),
+    mediaType,
+  }),
+}
 
 describe("read_image downsample wiring", () => {
   test("port ABSENT ⇒ oversized image rejected (byte-identical default-OFF)", async () => {
@@ -88,6 +97,12 @@ describe("read_image downsample wiring", () => {
 
   test("port returns 'unable' ⇒ falls back to over-cap rejection (no throw)", async () => {
     const r = await runResult(makeReadImageTool(unablePort), "big.png")
+    expect(r.ok).toBe(false)
+    expect(overCap(r)).toBe(true)
+  })
+
+  test("port returns ok but output STILL over cap ⇒ rejected (byte cap re-enforced)", async () => {
+    const r = await runResult(makeReadImageTool(okButOverCapPort), "big.png")
     expect(r.ok).toBe(false)
     expect(overCap(r)).toBe(true)
   })

@@ -129,12 +129,7 @@ export interface SessionStatusView {
   readonly thinkingEnabled?: boolean
 }
 
-/** Include a field only when it is defined (drops `undefined` keys so the JSON
- *  payload OMITS them rather than serializing `null`/absent — CC scripts branch
- *  on key presence). */
-const defined = <T>(value: T | undefined): T | undefined => value
-
-/** Like {@link defined} but for NUMERIC facts: a non-finite number (NaN /
+/** Drop NUMERIC facts that are non-finite: a non-finite number (NaN /
  *  ±Infinity) is treated as ABSENT, because `JSON.stringify` serializes those as
  *  `null` — which would break the documented "omit rather than null" invariant
  *  (a CC script branches on key presence and would read `null` as a real value).
@@ -170,20 +165,20 @@ export const buildStatusPayload = (view: SessionStatusView): StatusPayload => {
   if (view.transcriptPath !== undefined) payload.transcript_path = view.transcriptPath
   if (view.cwd !== undefined) payload.cwd = view.cwd
 
-  const model = compact({ id: defined(view.modelId), display_name: defined(view.modelDisplayName) })
+  const model = compact({ id: view.modelId, display_name: view.modelDisplayName })
   if (model !== undefined) payload.model = model
 
   const workspace = compact({
-    current_dir: defined(view.currentDir),
-    project_dir: defined(view.projectDir),
-    added_dirs: defined(view.addedDirs),
-    git_worktree: defined(view.gitWorktree),
+    current_dir: view.currentDir,
+    project_dir: view.projectDir,
+    added_dirs: view.addedDirs,
+    git_worktree: view.gitWorktree,
   })
   if (workspace !== undefined) payload.workspace = workspace
 
   if (view.version !== undefined) payload.version = view.version
 
-  const outputStyle = compact({ name: defined(view.outputStyleName) })
+  const outputStyle = compact({ name: view.outputStyleName })
   if (outputStyle !== undefined) payload.output_style = outputStyle
 
   const cost = compact({
@@ -199,10 +194,10 @@ export const buildStatusPayload = (view: SessionStatusView): StatusPayload => {
   if (view.exceeds200kTokens !== undefined) payload.exceeds_200k_tokens = view.exceeds200kTokens
   if (view.fastMode !== undefined) payload.fast_mode = view.fastMode
 
-  const effort = compact({ level: defined(view.effortLevel) })
+  const effort = compact({ level: view.effortLevel })
   if (effort !== undefined) payload.effort = effort
 
-  const thinking = compact({ enabled: defined(view.thinkingEnabled) })
+  const thinking = compact({ enabled: view.thinkingEnabled })
   if (thinking !== undefined) payload.thinking = thinking
 
   return payload as unknown as StatusPayload

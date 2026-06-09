@@ -963,6 +963,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
               })
                 ? {
                     onMovedToBackground: (handle) => {
+                      // Wall-clock start of the backgrounded run, so completion
+                      // reports the REAL elapsed time (not a fabricated 0).
+                      const bgStart = Date.now()
                       const taskId = backgroundPortal?.detach({
                         label: backgroundTurnLabel(prompt.text),
                         promise: handle.body,
@@ -980,7 +983,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
                         // both `then`/`catch` paths fire a single onTurnComplete.
                         const fireDone = (ok: boolean): void =>
                           notify?.onTurnComplete({
-                            durationMs: 0,
+                            durationMs: Math.max(0, Date.now() - bgStart),
                             ok,
                             cwdBasename: `${notifyCwdBasename ?? ""} · background task ${taskId} done`,
                           })

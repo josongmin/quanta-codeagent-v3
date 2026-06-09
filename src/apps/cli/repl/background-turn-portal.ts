@@ -126,12 +126,36 @@ const toRow = (e: BackgroundTurnEntry): BackgroundTurnRow => ({
 /** Build the bounded HEAD+TAIL output buffer for one entry. Retains at most
  *  {@link BG_BUFFER_MAX_BYTES}: the first half as HEAD, the most-recent half as
  *  a ring TAIL. `readBuffer` stitches them with an elision marker. NO-THROW. */
-const makeBoundedBuffer = (): {
+/** UTF-8 byte length — the buffer cap is specified in BYTES, not UTF-16 units. */
+const utf8Len = (s: string): number => Buffer.byteLength(s, "utf8")
+
+/** Keep the LAST `maxBytes` UTF-8 bytes of `s`. Buffer decode replaces a
+ *  multibyte sequence split at the cut with U+FFFD instead of emitting a lone
+ *  surrogate, so the result is always well-formed (no split surrogate pair). */
+const keepLastBytes = (s: string, maxBytes: number): string => {
+  const buf = Buffer.from(s, "utf8")
+  return buf.length <= maxBytes ? s : buf.subarray(buf.length - maxBytes).toString("utf8")
+}
+
+/** Split `s` after the FIRST `maxBytes` UTF-8 bytes ⇒ `{ head, rest }`. Both
+ *  sides are well-formed; a char straddling the cut decodes to U+FFFD per side. */
+const splitAtBytes = (s: string, maxBytes: number): { head: string; rest: string } => {
+  const buf = Buffer.from(s, "utf8")
+  if (buf.length <= maxBytes) return { head: s, rest: "" }
+  return {
+    head: buf.subarray(0, maxBytes).toString("utf8"),
+    rest: buf.subarray(maxBytes).toString("utf8"),
+  }
+}
+
+export const makeBoundedBuffer = (
+  maxBytes: number = BG_BUFFER_MAX_BYTES,
+): {
   append(chunk: string): void
   read(): string
   bytes(): number
 } => {
-  const HALF = Math.floor(BG_BUFFER_MAX_BYTES / 2)
+  const HALF = Math.floor(maxBytes / 2)
   let head = ""
   let tail = ""
   // Total bytes EVER appended — used to compute the elided middle for the marker.
@@ -139,31 +163,28 @@ const makeBoundedBuffer = (): {
   return {
     append(chunk: string): void {
       if (chunk.length === 0) return
-      totalAppended += chunk.length
+      totalAppended += utf8Len(chunk)
       // Fill HEAD up to HALF first (the start of the turn never gets dropped).
-      if (head.length < HALF) {
-        const room = HALF - head.length
-        head += chunk.slice(0, room)
-        const overflow = chunk.slice(room)
-        if (overflow.length > 0) {
-          tail += overflow
-          if (tail.length > HALF) tail = tail.slice(tail.length - HALF)
-        }
+      // All accounting + slicing is in UTF-8 BYTES (surrogate-safe), matching
+      // the byte cap the buffer advertises.
+      if (utf8Len(head) < HALF) {
+        const { head: take, rest: overflow } = splitAtBytes(chunk, HALF - utf8Len(head))
+        head += take
+        if (overflow.length > 0) tail = keepLastBytes(tail + overflow, HALF)
         return
       }
       // HEAD full ⇒ everything else rides the TAIL ring (newest HALF retained).
-      tail += chunk
-      if (tail.length > HALF) tail = tail.slice(tail.length - HALF)
+      tail = keepLastBytes(tail + chunk, HALF)
     },
     read(): string {
-      const retained = head.length + tail.length
+      const retained = utf8Len(head) + utf8Len(tail)
       const elided = totalAppended - retained
       if (elided <= 0) return head + tail
       const kb = Math.round(elided / 1024)
       return `${head}\n… +${kb} KB elided …\n${tail}`
     },
     bytes(): number {
-      return head.length + tail.length
+      return utf8Len(head) + utf8Len(tail)
     },
   }
 }

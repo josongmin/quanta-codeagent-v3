@@ -10,6 +10,7 @@ import type { ImageBlock, LLMPort, Message, ResponsesContinuationStore } from "@
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
+import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
@@ -146,7 +147,7 @@ export interface SessionSetupResult {
    *  land on a clean screen. Absent ⇒ no tee allocated (byte-identical
    *  default-OFF). */
   readonly timelinePanel: TimelinePanel | undefined
-  readonly approvalPrompt: (approval: PendingApprovalView) => Promise<"approve" | "deny">
+  readonly approvalPrompt: (approval: PendingApprovalView) => Promise<ApprovalDecisionResult>
   readonly runtimeContext: RuntimeContext
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined

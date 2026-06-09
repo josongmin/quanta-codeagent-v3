@@ -34,6 +34,16 @@ export interface SessionTranscriptReplaceCommand
 export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval.respond"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
+  /** ADR-0512 P3 — once-vs-session scope for an `approve` of a skill-scope
+   *  ESCALATION approval: `once` ⇒ dispatch this call WITHOUT widening the skill
+   *  scope (re-asked next time); `session`/absent ⇒ widen for the session. Only
+   *  meaningful on an escalation approval (carries `scopeContext`); ignored on a
+   *  normal approval ⇒ byte-identical. */
+  readonly scope?: "once" | "session"
+  /** ADR-0512 P3 — corrective steer for a `deny` of a skill-scope ESCALATION
+   *  (the `deny_and_steer` verb): a non-empty message telling the model what to
+   *  do instead. Absent ⇒ a plain decline. Ignored on a normal approval. */
+  readonly steer?: string
 }
 
 export type SessionCommand =

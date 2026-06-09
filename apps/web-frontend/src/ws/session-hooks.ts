@@ -676,9 +676,17 @@ export const useSendTurn = (
 export const useSendApprovalDecision = (
   client: SessionClient,
   sessionId: string | null,
-): ((approvalId: string, decision: "approve" | "deny") => void) => {
+): ((
+  approvalId: string,
+  decision: "approve" | "deny",
+  opts?: { readonly scope?: "once" | "session"; readonly steer?: string },
+) => void) => {
   return useCallback(
-    (approvalId: string, decision: "approve" | "deny") => {
+    (
+      approvalId: string,
+      decision: "approve" | "deny",
+      opts?: { readonly scope?: "once" | "session"; readonly steer?: string },
+    ) => {
       if (sessionId === null) return
       const respond: SessionCommand = {
         sessionId,
@@ -687,6 +695,11 @@ export const useSendApprovalDecision = (
         type: "approval.respond",
         approvalId,
         decision,
+        // ADR-0512 P3 — carry the escalation's once/session scope + corrective
+        // steer so allow_once (no widen) and deny_and_steer reach the host. Both
+        // omitted on a normal approval ⇒ byte-identical command.
+        ...(opts?.scope !== undefined ? { scope: opts.scope } : {}),
+        ...(opts?.steer !== undefined ? { steer: opts.steer } : {}),
       }
       client.send(respond)
     },

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+import * as compaction from "@/agent/compaction"
 import { estimateTokens, runAgent } from "@/agent"
 import type { Message } from "@/llm"
 import { LLMError } from "@/shared"
@@ -93,5 +94,57 @@ describe("§13.3 — drop-oldest salvage through runAgent", () => {
     // post-salvage completion) — proving the loop resumed past the salvage seam
     // rather than aborting at the reactive fail-fast.
     expect(llm.calls).toBe(3)
+  })
+
+  // A ScriptedLLM whose model id IS in the provider-window registry, so the
+  // recovery path's compaction target is DERIVABLE from the model window (and
+  // therefore differs from the 120k legacy floor).
+  class OpusScriptedLLM extends ScriptedLLM {
+    override readonly model = "claude-opus-4-8"
+  }
+
+  test("HELL-DROP-MODEL: recovery hard-drop target is MODEL-DERIVED, not the fixed floor", async () => {
+    // Teeth: with a known model the model-derived target MUST differ from the
+    // model-omitted floor — otherwise this test can't tell a model-passed call
+    // from a buggy model-omitted one.
+    const withModel = compaction.resolveCompactionLimitTokens(undefined, "claude-opus-4-8")
+    const floor = compaction.resolveCompactionLimitTokens(undefined)
+    expect(withModel).not.toBe(floor)
+
+    const captured: number[] = []
+    const spy = spyOn(compaction, "dropOldestSalvage").mockImplementation(async (input) => {
+      captured.push(input.targetTokens ?? -1)
+      return { ok: true, messages: input.messages.slice(-1), summaryTokens: 0 }
+    })
+    try {
+      // PTL throw routes the turn to `compact` ⇒ the dropOldestSalvage seam fires
+      // and records the target it was handed. The loop outcome is irrelevant —
+      // the capture happens at the call, before any downstream step.
+      const llm = new OpusScriptedLLM([
+        thr(new LLMError("400 prompt is too long for this model")),
+        ev(text("done")),
+      ])
+      const stream = new RecordingStream()
+      await withTimeout(
+        runAgent(
+          cfg({
+            llm,
+            stream,
+            messages: buildHistory(),
+            maxTurns: 3,
+            compactionBreaker: { disabled: true },
+            // Opt-in salvage, NO explicit thresholdTokens ⇒ the target MUST be
+            // model-derived (the bug omitted the model arg ⇒ fell to the floor).
+            compaction: { dropOldestSalvage: true },
+          }),
+        ),
+        15_000,
+        "drop-salvage-model",
+      )
+      expect(captured.length).toBeGreaterThan(0)
+      expect(captured[0]).toBe(withModel)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

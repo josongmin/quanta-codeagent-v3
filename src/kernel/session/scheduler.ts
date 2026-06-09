@@ -828,6 +828,11 @@ export const dispatchSessionCommand = async (
         await ctx.host.resolveApproval?.({
           approvalId: command.approvalId,
           decision: command.decision,
+          // ADR-0512 P3 — forward the escalation's once/session scope + steer so
+          // the host lease carries the operator's rich decision. Both absent on a
+          // normal approval ⇒ byte-identical grant.
+          ...(command.scope !== undefined ? { scope: command.scope } : {}),
+          ...(command.steer !== undefined ? { steer: command.steer } : {}),
         })
         return { state: nextState, events: immediateEvents }
       case "turn.run":

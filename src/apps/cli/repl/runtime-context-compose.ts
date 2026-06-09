@@ -11,6 +11,7 @@ import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { ResponsesContinuationStore } from "@/llm"
 import { CircumventionTracker, type PermissionStore, type ToolAction } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
+import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
 import { runtimeConfig } from "@/shared"
@@ -49,7 +50,40 @@ const buildCliOnConfirm =
 
 const buildCliApprovalPrompt =
   (deps: { readonly idleMonitor: IdleMonitor; readonly rejectCounter: RejectCounter }) =>
-  async (approval: PendingApprovalView): Promise<"approve" | "deny"> => {
+  async (approval: PendingApprovalView): Promise<ApprovalDecisionResult> => {
+    // ADR-0512 P3 — a skill-scope ESCALATION approval (carries `scopeContext`)
+    // offers the FULL 4-verb prompt so allow_once (no widen) and deny_and_steer
+    // (corrective steer) are genuinely reachable on the CLI — matching the yellow
+    // escalation card. A NORMAL approval keeps the byte-identical `[y/N]` prompt.
+    const scope = approval.scopeContext
+    if (scope !== undefined) {
+      process.stderr.write(
+        `Skill '${scope.activeSkill}' scope — tool '${scope.tool}' is out of scope.\n` +
+          `  reason: ${scope.reason}\n` +
+          (scope.justification !== undefined ? `  rationale: ${scope.justification}\n` : ""),
+      )
+      const ans = (
+        await askLine("Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ")
+      )
+        .trim()
+        .toLowerCase()
+      deps.idleMonitor.markActive()
+      if (ans === "o") {
+        deps.rejectCounter.recordAccept()
+        return { decision: "approve", scope: "once" }
+      }
+      if (ans === "s") {
+        deps.rejectCounter.recordAccept()
+        return { decision: "approve", scope: "session" }
+      }
+      if (ans === "t") {
+        const steer = (await askLine("Steer (what to do instead): ")).trim()
+        deps.rejectCounter.recordDeny()
+        return steer.length > 0 ? { decision: "deny", steer } : { decision: "deny" }
+      }
+      deps.rejectCounter.recordDeny()
+      return { decision: "deny" }
+    }
     process.stderr.write(`Approval required: ${approval.reason}\n`)
     const ans = await askLine("Approve pending action? [y/N] ")
     const accepted = ans.trim().toLowerCase() === "y"
@@ -70,7 +104,7 @@ export interface ComposeCliRuntimeContextArgs {
 }
 
 export interface CliRuntimeContextBindings {
-  readonly approvalPrompt: (approval: PendingApprovalView) => Promise<"approve" | "deny">
+  readonly approvalPrompt: (approval: PendingApprovalView) => Promise<ApprovalDecisionResult>
   readonly runtimeContext: RuntimeContext
 }
 

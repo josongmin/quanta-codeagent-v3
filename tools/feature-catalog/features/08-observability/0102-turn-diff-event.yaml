@@ -9,6 +9,14 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
+surface_integration:
+  cli: partial
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/agent/turn-diff/index.ts — emitter shipped; loop-wire via ADR-0110 helpers; rendered/persisted by jsonl-recorder + stdout (no live turn-diff panel)"
+    web: "components built+tested (apps/web-frontend/src/components/canvas/DiffView.tsx + DiffPanel.tsx + SplitDiffView.tsx + DiffStats.tsx) but NOT mounted — App.tsx:578 says DiffPanel DEFERRED so tool.diff frames decode then drop; the turn_diff_updated AgentEvent itself is dropped at context-binding.ts:1061 default arm"
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [agentevent, git-branch-name-schema-guard, git-runner-cancellation-signal, jsonl-cumulative-retention, plan-mode]

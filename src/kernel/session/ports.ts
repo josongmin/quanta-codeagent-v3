@@ -141,6 +141,13 @@ export interface SessionHost {
   resolveApproval?(args: {
     readonly approvalId: string
     readonly decision: "approve" | "deny"
+    /** ADR-0512 P3 — once-vs-session scope for an `approve` of a skill-scope
+     *  escalation (`once` ⇒ dispatch WITHOUT widening). Absent ⇒ session/widen
+     *  (or N/A for a normal approval). */
+    readonly scope?: "once" | "session"
+    /** ADR-0512 P3 — corrective steer for a `deny` of a skill-scope escalation
+     *  (`deny_and_steer`). Absent ⇒ a plain decline. */
+    readonly steer?: string
   }): Promise<void> | void
   setIdentityMode?(mode: string): Promise<void> | void
   setToolProfile?(profile: string): Promise<void> | void

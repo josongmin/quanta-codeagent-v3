@@ -52,10 +52,14 @@ const resolveMaxBytes = (raw: number | undefined): number =>
 
 const VALID_SUBS: ReadonlySet<string> = new Set<GitSubcommand>(["status", "diff", "log"])
 
-/** Truncate to `maxBytes` on a LINE boundary, appending the marker. Pure. */
+/** Truncate to `maxBytes` UTF-8 BYTES on a LINE boundary, appending the marker.
+ *  The cap is specified in bytes, so measuring/slicing must be byte-based — a
+ *  UTF-16 code-unit slice would over-run the cap on multibyte git output and
+ *  could split a surrogate pair. Buffer decode replaces a multibyte sequence
+ *  split at the byte cut with U+FFFD, so the result is always well-formed. Pure. */
 const truncate = (text: string, maxBytes: number): string => {
-  if (text.length <= maxBytes) return text
-  const slice = text.slice(0, maxBytes)
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text
+  const slice = Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8")
   const lastNl = slice.lastIndexOf("\n")
   const body = lastNl > 0 ? slice.slice(0, lastNl) : slice
   return `${body}\n${GIT_TRUNCATION_MARKER}`

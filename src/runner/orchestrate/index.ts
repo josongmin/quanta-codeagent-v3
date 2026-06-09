@@ -26,6 +26,7 @@ export { persistTurn } from "./persist-turn"
 export type { ResolveResumeInput, ResumeResolution } from "./resume-fsm"
 export { defaultUntitled, isPathLikeToken, resolveResume } from "./resume-fsm"
 export type {
+  ApprovalDecisionResult,
   ApprovalResolver,
   RunSessionTurnArgs,
   SessionTurnResult,

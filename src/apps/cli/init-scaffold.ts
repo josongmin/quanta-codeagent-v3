@@ -390,17 +390,19 @@ const runDryRun = async (
  *  refusal is the SOTA++ helpful seam: size + section count + exact re-run
  *  commands + the skill pointer (which preserves human prose). */
 const runRefuse = async (ctx: SlashContext, target: InitTarget): Promise<number> => {
-  let size = 0
-  let sections = 0
+  let meta = "size unknown"
   try {
     const [st, body] = await Promise.all([stat(target.path), readFile(target.path, "utf8")])
-    size = st.size
-    sections = countSections(body)
+    const sections = countSections(body)
+    // Honest metadata only when the read SUCCEEDED — a stat/read fault must not
+    // be reported as a real "0 B, 0 sections" (which would tell the user their
+    // existing file is empty when it may be large). The refusal stands either way.
+    meta = `${humanSize(st.size)}, ${sections} section${sections === 1 ? "" : "s"}`
   } catch {
-    // best-effort metadata — refusal stands regardless.
+    // best-effort metadata — refusal stands regardless of the read fault.
   }
   ctx.err(
-    `/init: ${target.file} exists (${humanSize(size)}, ${sections} section${sections === 1 ? "" : "s"}). ` +
+    `/init: ${target.file} exists (${meta}). ` +
       `Re-run \`/init --force\` to overwrite (human sections lost), ` +
       `or \`/init --dry-run\` to preview, ` +
       `or ask "refresh CLAUDE.md" for the skill (preserves human prose).\n`,

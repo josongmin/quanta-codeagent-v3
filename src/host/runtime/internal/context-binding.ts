@@ -1,4 +1,5 @@
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
+import type { ConfirmDecision } from "@/agent/confirm-decision"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { wireOptionalAgentPorts } from "@/agent/optional-ports"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
@@ -763,6 +764,13 @@ interface PendingRuntimeApprovalRecord {
 interface RuntimeApprovalLease {
   readonly approvalId: string
   readonly actionKey: string
+  /** ADR-0512 P3 — the operator's RICH decision, set ONLY when the resolved
+   *  approval was a skill-scope escalation (`scopeContext` present). When set,
+   *  `claimLease` returns it verbatim so the loop's `decideScopeEscalation`
+   *  honours `allow_once` (scope:"once" ⇒ no widen) / `deny_and_steer` (steer).
+   *  Absent on a NORMAL approval ⇒ `claimLease` returns bare `true`
+   *  (byte-identical to the pre-ADR-0512 grant). */
+  readonly decision?: ConfirmDecision
 }
 
 /** Sentinel returned by {@link actionKeyOf} when shell extraction throws. A
@@ -835,12 +843,17 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
    *  the second mints its own approval rather than racing the first (audit L5
    *  M-3). A `SHELL_EXTRACT_FAILED` action key never matches any lease ⇒ it
    *  always re-prompts (fail closed). */
-  const claimLease = (actionKey: string | typeof SHELL_EXTRACT_FAILED): boolean => {
+  const claimLease = (
+    actionKey: string | typeof SHELL_EXTRACT_FAILED,
+  ): false | true | ConfirmDecision => {
     if (actionKey === SHELL_EXTRACT_FAILED) return false
     for (const [approvalId, lease] of leases) {
       if (lease.actionKey === actionKey) {
         leases.delete(approvalId)
-        return true
+        // ADR-0512 P3 — an ESCALATION lease carries the operator's rich decision
+        // (allow_once / deny_and_steer); return it so the loop honours scope/steer.
+        // A NORMAL lease has none ⇒ bare `true` (byte-identical grant).
+        return lease.decision ?? true
       }
     }
     return false
@@ -848,7 +861,8 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
 
   const onConfirm: NonNullable<AgentConfig["onConfirm"]> = async (action) => {
     const actionKey = actionKeyOf(base.registry, action)
-    if (claimLease(actionKey)) return true
+    const leased = claimLease(actionKey)
+    if (leased !== false) return leased
 
     const approval: PendingApprovalView = {
       approvalId: crypto.randomUUID(),
@@ -899,13 +913,42 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         for (const approvalId of pendingAtEntry) pending.delete(approvalId)
       }
     },
-    resolveApproval: (approvalId: string, decision: "approve" | "deny"): void => {
+    resolveApproval: (
+      approvalId: string,
+      decision: "approve" | "deny",
+      opts?: { readonly scope?: "once" | "session"; readonly steer?: string },
+    ): void => {
       const record = pending.get(approvalId)
       if (record === undefined) return
       pending.delete(approvalId)
+      // ADR-0512 P3 — an ESCALATION approval (the minted approval carried
+      // `scopeContext`) resolves to a RICH `ConfirmDecision` so the surface's
+      // 4-verb card is genuinely reachable: `allow_once` (scope:"once" ⇒ the
+      // re-run dispatches WITHOUT widening), `deny_and_steer` (a RECOVERABLE
+      // decline carrying the operator's corrective steer). A NORMAL approval has
+      // no `scopeContext` ⇒ approve mints a plain `true` grant + deny mints NO
+      // lease (the turn aborts), BYTE-IDENTICAL to the pre-ADR-0512 path.
+      const isEscalation = record.approval.scopeContext !== undefined
       if (decision === "approve") {
-        leases.set(approvalId, { approvalId, actionKey: record.actionKey })
+        const leaseDecision: ConfirmDecision | undefined = isEscalation
+          ? { decision: "allow", ...(opts?.scope !== undefined ? { scope: opts.scope } : {}) }
+          : undefined
+        leases.set(approvalId, {
+          approvalId,
+          actionKey: record.actionKey,
+          ...(leaseDecision !== undefined ? { decision: leaseDecision } : {}),
+        })
+        return
       }
+      // decision === "deny". A normal deny sets no lease (unchanged). An
+      // escalation deny sets a RECOVERABLE deny lease so the re-run produces the
+      // `skill-scoped: declined`/`steered` tool_result (not a turn abort).
+      if (!isEscalation) return
+      const denyDecision: ConfirmDecision =
+        opts?.steer !== undefined && opts.steer.trim().length > 0
+          ? { decision: "deny_and_steer", steer: opts.steer }
+          : { decision: "deny" }
+      leases.set(approvalId, { approvalId, actionKey: record.actionKey, decision: denyDecision })
     },
     /** Test seam — never call in production. Exposes the live lease ledger so
      *  hellgates can assert turn-scoping without reaching into the closure. */
@@ -1275,8 +1318,14 @@ const createRuntimeSessionHost = (args: {
       )
       return toSessionHostTurnResult(result)
     },
-    resolveApproval: async ({ approvalId, decision }) => {
-      approvalProtocol.resolveApproval(approvalId, decision)
+    resolveApproval: async ({ approvalId, decision, scope, steer }) => {
+      // ADR-0512 P3 — forward the escalation's once/session scope + corrective
+      // steer so the lease can carry the operator's rich decision. Both are
+      // `undefined` for a normal approval ⇒ byte-identical grant.
+      approvalProtocol.resolveApproval(approvalId, decision, {
+        ...(scope !== undefined ? { scope } : {}),
+        ...(steer !== undefined ? { steer } : {}),
+      })
     },
     setIdentityMode: async (mode) => {
       args.options.boot?.identityModeState?.set(mode as never)

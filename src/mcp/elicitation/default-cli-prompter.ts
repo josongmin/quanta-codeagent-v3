@@ -24,6 +24,7 @@ import {
   validateInteger,
   validateNumber,
   validateString,
+  validateUrl,
 } from "./schemas"
 
 /** Pluggable IO. `read` resolves with a single trimmed line; `null` signals
@@ -175,6 +176,12 @@ export const cliPrompter = (
   },
   async promptUrl(req: UrlRequest, signal?: AbortSignal) {
     const s = signal ?? new AbortController().signal
+    // DEFENSE-IN-DEPTH: the schema (`urlRequestSchema`) already rejects non-
+    // http(s) urls, but a caller that hands us a directly-built `UrlRequest`
+    // bypasses it — so re-assert the http/https invariant HERE before ever
+    // rendering or opening. A `file:`/`javascript:`/`data:` url must never reach
+    // the system opener.
+    if (!validateUrl(req).ok) return fail<string>("invalid-input")
     // Render the FULL url on its OWN line (phishing safety — the user sees the
     // exact destination, not a truncated/styled label), then confirm.
     io.write(

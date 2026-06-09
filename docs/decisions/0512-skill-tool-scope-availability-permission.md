@@ -162,8 +162,11 @@ LANDED + 3라운드 적대 어딧(보안/정확성/테스트품질 병렬)으로
 - **P3 코어 (LANDED)**: 이벤트 `skill_scope_decision`(요약, blocked 포함 전 outcome) + `permission_escalation_requested`/`_resolved`(인터랙티브 페어, ask 경로만; 보안경계 미발화 hellgate). emit hooks(`onEscalationRequested`/`Resolved`) on decideScopeEscalation. stdout 승인 카드(YELLOW, 빨간에러 아님) + resolved 라인. jsonl-recorder: summary skip, pair durable. `scopeContext` on ToolAction. exhaustive sink + cross-slice `ToolRiskMirror` ratchet.
 - **테스트**: skill-gate / escalation / emit-hooks / drift / stdout-card 단위 + e2e(V2-OFF byte-identical / nav-base seal / ask·widen·페어 / L1 필터 onTurnStreamInput / declined / steered / blocked·요약 일관성). 3R 어딧이 불변식 #1-#4 전부 ratchet 확인.
 
-### 잔여 후속 (surface 통합 — P3+)
-- **`/state` visible-tools 노출**: `buildSkillScopeView`(`@/agent/loop/skill-scope-view`, 빌더+5단위테스트 LANDED) **미export·미배선**. (왜) "왜 이 도구가 없지"의 답을 UX가 직접 줘야 함(북극성=agent state 가시성). (ROI) 빌더 완성됨 → export+`/state` 1곳 배선만 남음, 저비용 고가시성.
-- **web/IDE 카드 렌더**: 페어 이벤트 stdout만 렌더(테스트됨). web/IDE는 default 처리(에러 아님, tsc green). (왜) 멀티-surface SSOT 약속. (ROI) 이벤트 계약 완성됨 → 각 surface 렌더러 case 추가, surface별 중간.
-- **모델 justification 시드**: 카드 `justification` 슬롯·렌더 존재하나 모델이 채울 seam 없어 항상 빈값. (왜) Codex on-request식 근거 표시. (ROI) tool-call에 rationale 첨부 메커니즘 필요, 중간-높음.
-- **`allow_once` 실동작**: 카드는 4버튼 제시하나 `ConfirmDecision`이 once/session 비트 없어 approve=allow_session(widen)로 귀결(코드에 KNOWN LIMITATION 명시). (왜) "한 번만" 승인 UX. (ROI) `ConfirmDecision` 확장(공유타입) 필요, 중간.
+### surface 통합 (P3+ — 전부 LANDED, 2026-06-09 2차 wave)
+4 후속을 구조적으로 마감 + 시나리오마다 헬게이트 e2e:
+- **`/state` visible-tools**: LANDED. loop `onSkillScopeReady`(session-bootstrap, v2-gated)→`buildSkillScopeView(skillGate, specs)` 발행 → surface-compose `skillScopeGet` 캡처(workingState 패턴 미러) → `/state` 핸들러가 `renderSkillScopePanel`. 헬게이트 `state-skill-scope-e2e.hellgate`(실 `runSlashCommand`).
+- **web/IDE 카드(백엔드)**: LANDED. CLI는 stream 이벤트로 카드 그리고, web/IDE는 `onConfirm`→`PendingApprovalView`(별도 approval 채널)로 가는데 `escalationScopeFields(action)`가 `action.scopeContext`(activeSkill/reason/risk/justification)를 enrich → kernel `approval.requested` 세션이벤트로 브라우저 도달. protocol-drift 테스트가 "새 이벤트타입 금지, scopeContext enrich가 정설"로 핀. 헬게이트 `approval-scope-context-bridge`. **남은 건 브라우저/IDE JS의 픽셀 렌더(리포 밖)** — 계약은 완성.
+- **모델 justification 시드**: LANDED. 모델이 out-of-scope 도구 직전 스트리밍한 prose를 `deriveJustification`(trim+tail-cap)으로 캡처 → escalation `justification`으로 → CLI 이벤트 + `action.scopeContext.justification`(web bridge) 양쪽 전달. `pendingAssistantText` 누산기(턴 dispatch마다 리셋). 헬게이트 e2e(prose→event+bridge).
+- **`allow_once` 실동작**: LANDED. `ConfirmDecision` allow arm에 `scope?: "once"|"session"` 추가(normalizeConfirm 보존, 부재⇒session=legacy byte-identical), `ScopeVerdict.dispatch`에 `widen` 플래그, `resolutionOf`가 once→`allow_once`. `allow_once`는 **dispatch하되 widen 안 함**→다음 호출 재질문. 헬게이트 e2e(재질문 2회 검증).
+
+검증: 슬라이스 9파일 150/0, 광역 agent+stream+permission+apps+integration 2723/0, biome 신규코드 clean(pre-existing complexity 2건 제외), tsc 신규 0(14 잔여=무관 사전부채).

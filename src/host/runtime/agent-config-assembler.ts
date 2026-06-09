@@ -534,10 +534,12 @@ const maybeWirePromptCacheObserver = (cfg: AgentConfig, env: AssemblerEnv): void
   cfg.promptCacheObserver = defaultPromptCacheObserver()
 }
 
-/** ADR-0474 — mint ONE per-session `ReadFileState` when the stale-read-guard is
- *  opted in (`QUANTA_STALE_READ_GUARD=1`), so `read` records mtimes that
- *  `write`/`edit` of the same session consult. Caller-override-safe; absent gate
- *  ⇒ slot stays unset ⇒ no tracking, no guard (byte-identical default-OFF). */
+/** ADR-0474 (+ default-ON upgrade) — mint ONE per-session `ReadFileState` so
+ *  `read` records mtimes that `write`/`edit`/`apply_patch` of the same session
+ *  consult (TOCTOU clobber protection). DEFAULT-ON safety control: minted unless
+ *  the operator sets the explicit kill-switch `QUANTA_STALE_READ_GUARD=off`
+ *  (mirrors the fs-jail posture). Caller-override-safe; `=off` ⇒ slot stays unset
+ *  ⇒ no tracking, no guard (byte-identical legacy path). */
 const maybeWireReadFileState = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (!staleReadGuardEnabled(env)) return
   if (cfg.readFileState !== undefined) return

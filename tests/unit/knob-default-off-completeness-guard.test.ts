@@ -109,8 +109,8 @@ const DOUBLE_GATED_OFF: Readonly<Record<string, string>> = {
   // ticket-15 (§11.7): `statusLine` is `undefined` UNLESS BOTH the master gate
   // QUANTA_STATUS_LINE (gateOn vocab) AND a valid QUANTA_STATUS_LINE_CONFIG JSON
   // object (with a "command") are set — see runtime-config.ts parseStatusLine.
-  QUANTA_STATUS_LINE: "statusLine",
-  QUANTA_STATUS_LINE_CONFIG: "statusLine",
+  QUANTA_STATUS_LINE: "statusLineConfig",
+  QUANTA_STATUS_LINE_CONFIG: "statusLineConfig",
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +353,10 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     // Double-gated knobs are unreachable by the single-knob probe; verify their
     // co-gated field defaults OFF DIRECTLY, then exclude them from the probe loop.
     for (const field of new Set(Object.values(DOUBLE_GATED_OFF))) {
+      // The mapped field name must be a REAL RuntimeConfig key — a typo'd name
+      // makes `baseline[field]` `undefined`, which `isOffValue` accepts
+      // unconditionally, silently turning this whole guard into a tautology.
+      expect(field in baseline).toBe(true)
       expect(isOffValue(baseline[field])).toBe(true)
     }
     const probedKnobs = DISCOVERED_KNOBS.filter((k) => !(k in DOUBLE_GATED_OFF))

@@ -33,18 +33,26 @@ import {
 
 const ON = { [STALE_READ_GUARD_ENV]: "1" } as const
 
-describe("gate (default-OFF)", () => {
-  test("exactly '1' opts in", () => {
-    expect(staleReadGuardEnabled(ON)).toBe(true)
+describe("gate (DEFAULT-ON, =off kill-switch — SOTA++ upgrade)", () => {
+  test("unset (default) ⇒ ON", () => {
+    expect(staleReadGuardEnabled({})).toBe(true)
   })
+  test("exact 'off' ⇒ OFF (the only kill-switch)", () => {
+    expect(staleReadGuardEnabled({ [STALE_READ_GUARD_ENV]: "off" })).toBe(false)
+  })
+  // A safety control is NOT silently disabled by a stray falsy token — only the
+  // deliberate `=off` tears it down (mirrors the filesystem-jail posture).
   test.each<Readonly<Record<string, string | undefined>>>([
+    ON,
     {},
     { [STALE_READ_GUARD_ENV]: "0" },
+    { [STALE_READ_GUARD_ENV]: "false" },
+    { [STALE_READ_GUARD_ENV]: "no" },
     { [STALE_READ_GUARD_ENV]: "true" },
     { [STALE_READ_GUARD_ENV]: "on" },
     { [STALE_READ_GUARD_ENV]: "" },
-  ])("any non-'1' value stays OFF: %p", (env) => {
-    expect(staleReadGuardEnabled(env)).toBe(false)
+  ])("any value other than exactly 'off' stays ON: %p", (env) => {
+    expect(staleReadGuardEnabled(env)).toBe(true)
   })
 })
 
