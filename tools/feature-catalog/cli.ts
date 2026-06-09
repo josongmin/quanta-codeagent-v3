@@ -31,7 +31,6 @@ import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lin
 import { computeReachability, computeSymbolReachability } from "./reachability"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
 import {
-  computeAxisScores,
   computeGrade,
   computeJudgment,
   type Feature,

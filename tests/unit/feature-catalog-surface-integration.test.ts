@@ -109,10 +109,7 @@ describe("surface_integration — web reachability SSOT anchor", () => {
   ].sort()
 
   test("SI-20: toSessionHostTurnEvent maps exactly the known 6 event tags", () => {
-    const src = readFileSync(
-      join(REPO, "src/host/runtime/internal/context-binding.ts"),
-      "utf8",
-    )
+    const src = readFileSync(join(REPO, "src/host/runtime/internal/context-binding.ts"), "utf8")
     const start = src.indexOf("const toSessionHostTurnEvent")
     expect(start).toBeGreaterThan(-1)
     // slice to the next top-level `const ` declaration after the function

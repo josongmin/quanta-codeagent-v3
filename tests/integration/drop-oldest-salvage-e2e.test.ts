@@ -3,7 +3,7 @@ import * as compaction from "@/agent/compaction"
 import { estimateTokens, runAgent } from "@/agent"
 import type { Message } from "@/llm"
 import { LLMError } from "@/shared"
-import { cfg, ev, RecordingStream, ScriptedLLM, text, thr, withTimeout } from "./_harness"
+import { cfg, ev, RecordingStream, ScriptedLLM, type Step, text, thr, withTimeout } from "./_harness"
 
 /**
  * §13.3 (jun-08 long-tail) — DROP-OLDEST salvage driven through the REAL
@@ -98,9 +98,12 @@ describe("§13.3 — drop-oldest salvage through runAgent", () => {
 
   // A ScriptedLLM whose model id IS in the provider-window registry, so the
   // recovery path's compaction target is DERIVABLE from the model window (and
-  // therefore differs from the 120k legacy floor).
-  class OpusScriptedLLM extends ScriptedLLM {
-    override readonly model = "claude-opus-4-8"
+  // therefore differs from the 120k legacy floor). `model` is a readonly literal
+  // on the harness type; cast to a writable view to retarget it for this case.
+  const opusLlm = (steps: Step[]): ScriptedLLM => {
+    const llm = new ScriptedLLM(steps)
+    ;(llm as { model: string }).model = "claude-opus-4-8"
+    return llm
   }
 
   test("HELL-DROP-MODEL: recovery hard-drop target is MODEL-DERIVED, not the fixed floor", async () => {
@@ -114,13 +117,19 @@ describe("§13.3 — drop-oldest salvage through runAgent", () => {
     const captured: number[] = []
     const spy = spyOn(compaction, "dropOldestSalvage").mockImplementation(async (input) => {
       captured.push(input.targetTokens ?? -1)
-      return { ok: true, messages: input.messages.slice(-1), summaryTokens: 0 }
+      return {
+        ok: true,
+        messages: input.messages.slice(-1),
+        summaryTokens: 0,
+        droppedRounds: 0,
+        strategy: "reactive",
+      }
     })
     try {
       // PTL throw routes the turn to `compact` ⇒ the dropOldestSalvage seam fires
       // and records the target it was handed. The loop outcome is irrelevant —
       // the capture happens at the call, before any downstream step.
-      const llm = new OpusScriptedLLM([
+      const llm = opusLlm([
         thr(new LLMError("400 prompt is too long for this model")),
         ev(text("done")),
       ])

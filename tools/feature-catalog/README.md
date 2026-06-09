@@ -149,6 +149,26 @@ round-trip 단언: `parseYaml(stringifyYaml(x))` 가 스키마-형식 객체에 
 | `query` | `key:value ...` (AND 결합) | label/owner/section/maturity/depends/lifecycle/grade/ui/monitoring/mode/configurable 필터 |
 | `gates` | `--strict` | maturity-promotion-gate 감사. `--strict` 면 위반 시 exit 1 |
 | `graph` | `--section N` `--id X` `--depth N` | `depends_on` DAG 를 DOT 로 stdout. `--id` 는 ancestor+descendant subgraph |
+| `surface` | `--gap web\|cli\|any` `--audited` `--id X` `--json` | `surface_integration` 의 CLI/web 통합 coverage + gap 백로그 리포트 |
+
+## surface_integration — CLI/web 통합 트래킹 (증거 포함)
+
+`ui_surfaces` 는 *의도된* surface 태그일 뿐이라 신뢰할 수 없다 (2026-06-09 어딧: 933 중 ~13개만 web 표기인데 실제 웹앱은 훨씬 많이 노출, 일부 `[cli]` 는 웹 슬래시 stub 이 실행 안 돼서 "우연히" 맞음). `surface_integration` 은 이를 **surface별 AUDITED 상태 + file:line 증거** 로 대체한다. **"X 가 CLI/웹앱에 실제로 배선됐나?"를 트리 re-grep 없이 카탈로그에서 답한다.**
+
+```yaml
+surface_integration:
+  cli: full          # full | partial | missing | na | unknown
+  web: missing       # 좌동
+  method: audited    # audited(사람/에이전트가 파일 열어봄) | derived(코드 SSOT서 계산) | unverified(기본)
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/...:NN — 무엇이 렌더/제어하는지"
+    web: "dropped at context-binding.ts:1061 default arm — 왜 missing 인지"
+```
+
+- 미기입 feature 는 `unknown/unverified` 기본값 (byte-identical, 레거시 무영향).
+- **Ratchet** (`tests/unit/feature-catalog-surface-integration.test.ts`): ① `audited/derived` 면 full/partial/missing 상태에 evidence 필수(맨주장 금지) ② surface_integration 이 `missing/na` 인데 ui_surfaces 가 그 surface 를 present 로 주장하면 fail(레거시는 lag 허용, 단방향) ③ **웹 도달성 SSOT 핀**: 유일 AgentEvent→web 브리지 `toSessionHostTurnEvent`(context-binding.ts) 가 정확히 6개 이벤트만 매핑함을 고정 — 누가 웹 브리지 넓히면 CI red 로 web 재어딧 강제.
+- 대량 채우기: `tools/feature-catalog/surface-populate.workflow.js` (disjoint 배치 병렬 + 3대 병목 ground-truth 박음).
 
 ## 채점 (`grade`)
 
