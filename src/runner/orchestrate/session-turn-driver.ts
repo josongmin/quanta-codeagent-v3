@@ -21,6 +21,7 @@
 import type { AgentOutcome } from "@/agent"
 import type { ImageBlock, Message } from "@/llm"
 import type { RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
+import { withCrashResumeMarker } from "./crash-resume-wire"
 
 /** The SDK turn payload (the non-undefined `turn` of a dispatch result). */
 type SessionTurnPayload = NonNullable<SessionDispatchResult["turn"]>
@@ -68,6 +69,11 @@ export interface RunSessionTurnArgs {
    *  `permissionModeState` from its slash-local mode-cycle store (§3.1
    *  state-authority). Absent ⇒ byte-identical no-op. */
   readonly beforeTurn?: () => void
+  /** ADR-0528 — the DURABLE session id (id-mode). When present, this single
+   *  live turn chokepoint is bracketed with a crash-resume marker so a process
+   *  death mid-turn is recoverable on restart. Absent (ephemeral/headless-fake
+   *  session) OR gate off ⇒ byte-identical no-op. */
+  readonly sessionId?: string
 }
 
 const requireTurnPayload = (result: SessionDispatchResult): SessionTurnPayload => {
@@ -122,15 +128,25 @@ const resolvePendingApproval = async (
  * exactly ONCE.
  */
 export const runSessionTurn = async (args: RunSessionTurnArgs): Promise<SessionTurnResult> => {
-  const { session, resolveApproval, text, images, turnSignal, beforeTurn } = args
-  beforeTurn?.()
-  const imgs = images ?? []
-  await session.input.append(text, imgs.length > 0 ? { images: imgs } : undefined, {
-    signal: turnSignal,
-  })
-  for (;;) {
-    const turn = requireTurnPayload(await session.turn.run(undefined, { signal: turnSignal }))
-    if (turn.approvalRequest === undefined) return completeRuntimeTurn(turn)
-    await resolvePendingApproval(session, resolveApproval, turn.approvalRequest, turnSignal)
+  const { session, resolveApproval, text, images, turnSignal, beforeTurn, sessionId } = args
+  const body = async (): Promise<SessionTurnResult> => {
+    beforeTurn?.()
+    const imgs = images ?? []
+    await session.input.append(text, imgs.length > 0 ? { images: imgs } : undefined, {
+      signal: turnSignal,
+    })
+    for (;;) {
+      const turn = requireTurnPayload(await session.turn.run(undefined, { signal: turnSignal }))
+      if (turn.approvalRequest === undefined) return completeRuntimeTurn(turn)
+      await resolvePendingApproval(session, resolveApproval, turn.approvalRequest, turnSignal)
+    }
   }
+  // ADR-0528 — crash-resume LIVE wiring at the SINGLE turn chokepoint every
+  // surface (CLI interactive + one-shot + headless) funnels through. Mark the
+  // turn in-progress before it runs, clear when it resolves (reaching here ⇒ the
+  // process survived; only a hard crash leaves the marker). Gate-gated + only
+  // when a durable `sessionId` is known ⇒ byte-identical otherwise.
+  return sessionId !== undefined
+    ? withCrashResumeMarker({ sessionId, userText: text, env: process.env }, body)
+    : body()
 }

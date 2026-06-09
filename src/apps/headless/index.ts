@@ -188,6 +188,9 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
       resolveApproval: async () => "approve",
       text: input.prompt,
       turnSignal: bridge.boot.abort.signal,
+      // ADR-0528 — crash-resume marker (gate-gated; no-op for the headless-fake
+      // ephemeral session whose id is not persisted to the store).
+      sessionId: bridge.boot.sessionId,
     })
     const outcome = turnResult.outcome
     const snapshot = await bridge.session.snapshot()

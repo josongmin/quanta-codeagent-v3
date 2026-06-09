@@ -752,6 +752,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       text: args.text,
       images,
       turnSignal: args.turnSignal,
+      // ADR-0528 — crash-resume marker for the durable (id-mode) session;
+      // gate-gated + no-op when the session id is absent/ephemeral.
+      ...(setup.sessionId !== undefined ? { sessionId: setup.sessionId } : {}),
       // host concern — absent cycle ⇒ no hook ⇒ byte-identical.
       ...(modeCycle !== undefined
         ? {
