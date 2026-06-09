@@ -73,8 +73,17 @@ export interface HooksSettings {
 
 /** MCP block — server launchers (arbitrary-binary exec). Trust-gated. */
 export interface McpSettings {
-  /** Project-local MCP server ids the repo wants enabled. */
+  /** Project-local MCP server ids the repo wants enabled. LOOSENING (dropped
+   *  for an untrusted repo; blocked by `allowManagedMcpServersOnly`). */
   readonly enabledServers?: readonly string[]
+  /** E2 (CC `deniedMcpServers`) — server ids to FORBID. TIGHTENING: removes
+   *  from the enabled set (deny wins) and applies EVEN for an untrusted repo
+   *  layer (§4.c — narrowing is always safe). */
+  readonly deniedServers?: readonly string[]
+  /** E1-sub (CC `allowManagedMcpServersOnly`) — when set in the MANAGED layer,
+   *  ONLY managed-layer enabledServers apply (user/project/local cannot add),
+   *  even for a trusted repo. Mirrors `allowManagedHooksOnly`. */
+  readonly allowManagedMcpServersOnly?: boolean
 }
 
 /** The SECURITY-load-bearing band of a layer (§4.c). For a repo layer, its
@@ -110,8 +119,12 @@ export interface ResolvedSettings {
   }
   /** Final command-hook groups (EventName → groups) after the same gating. */
   readonly hooks: Readonly<Record<string, readonly HookGroupSetting[]>>
-  /** Final enabled MCP server ids after gating. */
+  /** Final enabled MCP server ids after gating (enabled minus denied). */
   readonly mcpEnabledServers: readonly string[]
+  /** E2 — resolved MCP denylist (union across layers; tightening, never gated).
+   *  Exposed for operator visibility + so a launcher can refuse a server that
+   *  is denied even if some other path tried to enable it. */
+  readonly mcpDeniedServers: readonly string[]
   /** Benign merged model id, if any layer set one. */
   readonly model: string | undefined
   /** Provenance: which repo layers had capability grants DROPPED for untrust
@@ -127,6 +140,7 @@ export const EMPTY_RESOLVED: ResolvedSettings = {
   permissions: { allow: [], deny: [], ask: [] },
   hooks: {},
   mcpEnabledServers: [],
+  mcpDeniedServers: [],
   model: undefined,
   droppedForUntrust: [],
 }

@@ -39,6 +39,7 @@ import {
   resolveCatalogValues,
   webSafeKnobValue,
 } from "./knob-catalog-wire"
+import { renderReadout } from "./readout"
 import {
   createObservabilityEmitter,
   type ObservabilityEmitterHandle,
@@ -931,6 +932,24 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
           }),
         }))
         return jsonResponse(200, { total: catalog.size, groups: grouped })
+      }
+      // Phase 1 (jun-9-cli-web-parity ticket 05) — OUT-OF-BAND read-only readouts.
+      // `GET /readout/:name` reads the live session snapshot (lease-free — no WS
+      // single-writer contention, so it works WHILE the agent is mid-turn,
+      // exactly when you want to look) and returns the rendered text. Same bearer
+      // auth as the other routes. Unknown name ⇒ 404 (typo); recognized-but-
+      // pending host accessor ⇒ 200 with a graceful "not wired" body.
+      {
+        const readoutMatch = url.pathname.match(/^\/readout\/([a-z-]+)$/)
+        if (readoutMatch !== null && req.method === "GET") {
+          const denied = requireAuth(url, req)
+          if (denied !== null) return denied
+          const name = readoutMatch[1] as string
+          return sharedSession.snapshot().then((snap) => {
+            const result = renderReadout(name, snap)
+            return jsonResponse(result.isError ? 404 : 200, result)
+          })
+        }
       }
       {
         const eventsMatch = url.pathname.match(/^\/threads\/([^/]+)\/events$/)

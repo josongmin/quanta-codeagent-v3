@@ -30,8 +30,8 @@
 
 | # | 후보 | 출처 | quanta 현재 | 강화점 | ROI | effort | conf | 결정 |
 |---|---|---|---|---|---|---|---|---|
-| E1 | managed-only 엔터프라이즈 락다운 | CC `allowManaged{Hooks,McpServers,PermissionRules}Only`·`strictPluginOnlyCustomization` | central-config+trust(ADR-0497) | 관리자가 managed 레이어만 강제(유저 loosening 차단) | 중(ent) | M | 高 | ⬜ rec:흡수 |
-| E2 | MCP denylist + marketplace 거버넌스 | CC `deniedMcpServers`·`blockedMarketplaces`·`strictKnownMarketplaces` | allowed/enabled만 | denylist + known/blocked marketplace 정책 | 저-중 | S-M | 高 | ⬜ |
+| E1 | managed-only 엔터프라이즈 락다운 | CC `allowManaged{Hooks,McpServers,PermissionRules}Only`·`strictPluginOnlyCustomization` | central-config+trust(ADR-0497) | 관리자 managed-only 강제 | 중(ent) | M | 高 | 🟡 **CORE 이미존재 + sub LANDED(jun-09)** — perms/hooks managed-only는 ADR-0497로 **이미 있음**(types.ts:53-71). **MCP managed-only(`allowManagedMcpServersOnly`)는 jun-09 추가**(merge.ts, test). 남음: `strictPluginOnlyCustomization` + MCP enforcement consumer-wiring |
+| E2 | MCP denylist + marketplace 거버넌스 | CC `deniedMcpServers`·`blockedMarketplaces` | allowed/enabled만 | denylist + 거버넌스 | 저-중 | S-M | 高 | 🟢 **RESOLVE LANDED (jun-09)** — `config/merge.ts`에 `deniedServers`(deny-wins, tightening-untrusted) + `mcpDeniedServers` resolved (5+35 test, tsc 클린). ⚠️ **enforcement는 consumer-wiring 대기**(아래 §C: 기존 §12.4 mcpEnabledServers도 launcher 미소비=built-not-wired). marketplace 거버넌스는 별도 미착수 |
 | E3 | `/rewind` 체크포인트 복원 슬래시 | CC `/rewind` | ~~slash UX 없음~~ | ~~타임라인 복원~~ | 중 | S | 高 | ❌ **FALSE-GAP (jun-09 재검증)** — `/rewind`+`/rewind-tool` **이미 존재**(`rewind-cmd.ts`, `QUANTA_REWIND` gate, 3-way restore files/task/both, ADR-0203/0205). audit 누락 |
 | E4 | `/goal` 목표 추적 슬래시 | CC `/goal` | objective 시스템 있음, slash 없음 | objective set/show/clear slash | 저 | S | 高 | ⬜ |
 | E5 | cursor-agent-worker startup prewarm | Cursor `cursor-agent-worker` | side-agent/attach-daemon 유사 | startup 상시대기 background agent prewarm | 중 | M | 中 | ⬜ rec:daemon 중복확인 |
@@ -101,3 +101,19 @@ CC UI 토글: `showThinkingSummaries`·`showTurnDuration`·`showMessageTimestamp
 > - **N2 collaboration-mode = signal-level 확인됨**: webview `app-server-manager-signals`서 `collaborationMode`·`handoff`/`handoffId`·`pendingRequestCount` 식별 → 메커니즘 = **턴 핸드오프 + 펜딩요청 큐**(quanta의 `handoff`=provider retry routing과 무관). conf 中→中-高.
 > - **N3 appgen / N12 telepathy = 여전히 미확정**(minified webview/symbol 레벨만, 깊은 동작 미해독).
 > - **TODO(throttle 해제 시):** `competitor-absorption-r3` 재개(`resumeFromRunId: wf_68d59202-771` — 성공한 cursor/cc-ide/desktop finder는 캐시재사용) 또는 Codex webview/codex-rs를 메인루프서 직접 content-read.
+
+## §H 🔴 메타발견 (jun-09) — "흡수"의 진짜 갭은 신규 흡수가 아니라 BUILT-NOT-WIRED 배선
+
+빌드 전 broad-grep 재검증을 슬라이스마다 돌린 결과, 이 코퍼스(2026-06-01)는 jun-05~09 작업으로 **이미 ~95% 흡수**돼 있고, audit "신규 후보"의 대부분이 둘 중 하나였다:
+
+1. **FALSE-GAP (이미 LIVE 구현)** — 6건: N4 `/doctor`·E3 `/rewind`·N9 `undo`(=file_history_rewind)·N7 personality(=`persona.ts` ADR-0068)·E1 perms/hooks managed-only(ADR-0497). 코드검증 없이 "흡수권장"한 게 false-parity 함정.
+2. **BUILT-NOT-WIRED (resolve/core만, consumer 미배선 = inert)** — 확인된 것:
+   - **§12.4 central-config `mcpEnabledServers`** — `config/merge.ts`가 resolve하지만 **MCP launcher(`readMcpConfig`→`loadFeatures`)가 안 읽음**. 백로그 "LANDED" 주장이 inert. (내 E2 denylist도 이 layer 위 → 같이 inert.)
+   - **DXT loader (`launchDxt`/`validateDxt`)** — 정의·export만, **호출 0**. plugin-discovery/launcher가 안 씀. (W1 DXT-호환성을 여기 지으면 또 inert.)
+
+**결론 — 진짜 SOTA++ 다음 작업 우선순위 재정의:**
+- (A) **inert→LIVE 배선** (높은 ROI, 이미 만든 것 살림): §12.4 MCP enabled/denied를 `loadFeatures`의 readMcpConfig 소비에 연결(central-config resolve+trust 필요) · DXT launcher를 plugin load 경로에 배선.
+- (B) **진짜 신규 LIVE 빌드**: W5 DAP 디버거 도구군(유일한 큰 비-inert 신규, 전용 집중 필요).
+- (C) **그만 흡수**: 남은 audit 후보(N8 gzip risky·N10 js_repl exec-risk·N13 저·W2/W3 plugin보안)는 저ROI/risk — inert layer 위 추가 금지.
+
+**교훈(메모리화):** "경쟁사 흡수" 더 파기 전에 **기존 흡수분이 LIVE인지(consumer 배선) 먼저 grep**. resolve/core 존재 ≠ 기능 LIVE. [[jun-09-integration-audit-3round]] §13.2 built-not-wired 패턴의 반복.

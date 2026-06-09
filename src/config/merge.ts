@@ -56,6 +56,7 @@ export const mergeSettings = (
   const managed = layers.managed
   const managedPermsOnly = managed?.security?.permissions?.allowManagedPermissionRulesOnly === true
   const managedHooksOnly = managed?.security?.hooks?.allowManagedHooksOnly === true
+  const managedMcpOnly = managed?.security?.mcp?.allowManagedMcpServersOnly === true
 
   const allow: string[] = []
   const deny: string[] = []
@@ -68,6 +69,7 @@ export const mergeSettings = (
   // assignment. A null-proto object makes every event name a safe own-key.
   const hooks: Record<string, HookGroupSetting[]> = Object.create(null)
   const mcpEnabled: string[] = []
+  const mcpDenied: string[] = []
   let model: string | undefined
   const droppedForUntrust: SettingsLayerName[] = []
 
@@ -116,6 +118,7 @@ export const mergeSettings = (
     //    cannot contribute allow/ask/hooks. Managed itself still applies. ──
     const permsBlocked = managedPermsOnly && !managedLayer
     const hooksBlocked = managedHooksOnly && !managedLayer
+    const mcpBlocked = managedMcpOnly && !managedLayer
 
     // ── permission allow/ask — LOOSENING ──
     if (sec.permissions?.allow !== undefined && sec.permissions.allow.length > 0) {
@@ -139,10 +142,15 @@ export const mergeSettings = (
       }
     }
 
-    // ── mcp server launchers — LOOSENING ──
+    // ── mcp server launchers — LOOSENING (enabled) ──
     if (sec.mcp?.enabledServers !== undefined && sec.mcp.enabledServers.length > 0) {
       if (dropLoosening) droppedHere = true
-      else mcpEnabled.push(...sec.mcp.enabledServers)
+      else if (!mcpBlocked) mcpEnabled.push(...sec.mcp.enabledServers)
+    }
+    // ── mcp denylist — TIGHTENING: never trust-gated, never managed-blocked
+    //    (a deny narrows the boundary; like permission `deny` it always applies). ──
+    if (sec.mcp?.deniedServers !== undefined && sec.mcp.deniedServers.length > 0) {
+      mcpDenied.push(...sec.mcp.deniedServers)
     }
 
     if (droppedHere) droppedForUntrust.push(layerName)
@@ -153,10 +161,15 @@ export const mergeSettings = (
   const allowFinal = uniq(allow).filter((rule) => !denySet.has(rule))
   const askFinal = uniq(ask).filter((rule) => !denySet.has(rule))
 
+  // MCP denylist wins over enable (defense-in-depth, mirrors permission deny).
+  const mcpDenySet = new Set(mcpDenied)
+  const mcpEnabledFinal = uniq(mcpEnabled).filter((s) => !mcpDenySet.has(s))
+
   return {
     permissions: { allow: allowFinal, deny: uniq(deny), ask: askFinal },
     hooks,
-    mcpEnabledServers: uniq(mcpEnabled),
+    mcpEnabledServers: mcpEnabledFinal,
+    mcpDeniedServers: uniq(mcpDenied),
     model,
     droppedForUntrust,
   }

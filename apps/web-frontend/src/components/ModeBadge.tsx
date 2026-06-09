@@ -10,6 +10,14 @@ export interface ModeBadgeProps {
  * tool profile) as small pills in the header so the user can see at a
  * glance what posture the turn will run under. Absent state ⇒ render
  * nothing (the StatusBar already covers the connection-level surface).
+ *
+ * READ-ONLY by design: the web daemon's runtime (`createRuntimeFromAgentConfigBase`)
+ * bakes identity / tool-profile / permission into the AgentConfig at session
+ * creation and does NOT thread the per-turn mode-state mechanism the CLI
+ * bootstrap has — so there is no honored mid-session switch to offer here. A
+ * switcher would update the state echo but the engine would ignore it (a lying
+ * control). Making these interactive requires wiring the bootstrap mode-states
+ * into the web daemon first.
  */
 export const ModeBadge = ({ state }: ModeBadgeProps): JSX.Element | null => {
   if (state === null) return null

@@ -31,6 +31,15 @@ MODEL := env_var_or_default("MODEL", "gpt-5-mini")
 WEB_PORT := env_var_or_default("WEB_PORT", "4096")
 WEB_BIND := env_var_or_default("WEB_BIND", "127.0.0.1")
 WEB_DIR := "apps/web-frontend"
+# Rich live-state panels (default ON for `just daemon`/`web-up`): the agent-state
+# (plan / mode / tool-progress), observability (runs / approvals), and canvas
+# (context-usage / file-diffs) push channels. The frontend auto-hides each pane
+# until it has data, so an idle session stays clean. Code default stays OFF
+# (byte-identical / tests unaffected) — this only flips them ON for local runs.
+# Disable any one with e.g. `WEB_AGENT_STATE=0 just web-up`.
+WEB_AGENT_STATE := env_var_or_default("WEB_AGENT_STATE", "on")
+WEB_OBSERVABILITY := env_var_or_default("WEB_OBSERVABILITY", "on")
+WEB_CANVAS := env_var_or_default("WEB_CANVAS", "on")
 
 # Default recipe: show the recipe list.
 default:
@@ -70,7 +79,7 @@ cli-attach *args="ws://127.0.0.1:4096/":
 # http://localhost:{{WEB_PORT}} after `just web-build` (or just use `just web-up`).
 # Override port/bind: `WEB_PORT=5000 WEB_BIND=0.0.0.0 just daemon`.
 daemon *args:
-    QUANTA_WEB_PORT={{WEB_PORT}} QUANTA_WEB_BIND={{WEB_BIND}} {{BUN}} run src/apps/web-daemon/index.ts {{args}}
+    QUANTA_WEB_PORT={{WEB_PORT}} QUANTA_WEB_BIND={{WEB_BIND}} QUANTA_WEB_AGENT_STATE={{WEB_AGENT_STATE}} QUANTA_OBSERVABILITY={{WEB_OBSERVABILITY}} QUANTA_WEB_CANVAS={{WEB_CANVAS}} {{BUN}} run src/apps/web-daemon/index.ts {{args}}
 
 # Build the web frontend (Vite → apps/web-frontend/dist). Skips the tsc gate
 # (a pre-existing test-only type error blocks `bun run build`); use `just web-typecheck`.

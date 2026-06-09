@@ -25,6 +25,7 @@ import { StatusBar } from "./components/StatusBar"
 import { buildAuthSlashCommands } from "./components/slash-auth"
 import type { KnobsEndpoint } from "./components/slash-knobs"
 import { buildLlmConfigSlashCommands, httpUrlFromWsUrl } from "./components/slash-llm-config"
+import { buildReadoutSlashCommands, READOUT_SLUGS } from "./components/slash-readout"
 import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
@@ -574,7 +575,24 @@ export const App = (): JSX.Element => {
     }
     const llmCommands = buildLlmConfigSlashCommands(sharedEndpoint)
     const authCommands = buildAuthSlashCommands(sharedEndpoint)
-    return [...base, ...llmCommands, ...authCommands]
+    // Phase 1 (jun-9-cli-web-parity ticket 05) — the read-only readouts fetch
+    // GET /readout/:name (out-of-band, lease-free) and append the text to the
+    // transcript. They REPLACE the old prefill stubs for these slugs:
+    // `resolveSlashCommand` is first-match, so the prefill rows must be filtered
+    // out of `base` or they'd shadow the live readout.
+    const readoutCommands = buildReadoutSlashCommands({
+      httpUrl: httpUrlFromWsUrl(resolvedConnection.url),
+      ...(resolvedConnection.token !== undefined ? { token: resolvedConnection.token } : {}),
+      appendSystem: (text: string): void => {
+        appendClientMessage("system", text)
+      },
+      onError: (msg: string): void => {
+        appendClientMessage("error", msg)
+      },
+    })
+    const readoutSlugs = new Set<string>(READOUT_SLUGS)
+    const baseMinusReadouts = base.filter((c) => !readoutSlugs.has(c.slug))
+    return [...baseMinusReadouts, ...llmCommands, ...authCommands, ...readoutCommands]
   }, [
     resetTranscript,
     focusImageAttachment,
