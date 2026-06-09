@@ -62,14 +62,14 @@ win32 + QUANTA_WIN_SHELL=auto:
 
 - ladder·dialect-classify·quote·deny-rule을 **전부 순수 함수**로: 입력 = `(command, platform, probeResult, winShell, dialect)`. process.platform/which/spawn 주입.
 - darwin서 `platform:"win32"` + fake probe(`{bash:null, pwsh:"C:\\...ps.exe", cmd:"..."}`)로 **전 ladder 분기 + dialect deny-rule + quoting을 unit-test**.
-- 실제 win32 spawn만 미검증 — **플랫폼 본질적 한계**라 정직히 문서화(`@platform-untested` 마커). 단 **전 결정로직은 순수-테스트로 봉인**(coverage fence: win32 분기의 모든 decision이 테스트 커버됨, 미커버 시 ratchet RED).
+- 실제 win32 spawn만 미검증 — **플랫폼 본질적 한계**라 정직히 문서화(`@platform-untested` 마커). 단 **전 결정로직은 순수-테스트로 검증**: win32 분기의 모든 decision(ladder 4분기·dialect 태그·discoverShells fallback·explicit bash/pwsh argv·error 경로)이 `shell-discovery-ladder-hellgate`로 커버됨(mutation으로 teeth 확인). (자동 coverage-fence ratchet은 후속 — 현재는 hellgate가 봉인.)
 
 ## 아키텍처 불변식 (ratchet)
 
 1. **비-win32 byte-identity**: `platform !== "win32"` ⇒ `["bash","-lc",cmd]` 그대로, env 미read, allocation 불변(P16 보장 유지). 
 2. **default `error` 유지**: gate 미설정/오타 ⇒ loud-refuse(P16). `auto`/`pwsh`/`cmd`는 명시 opt-in.
 3. **보안 단조성**: dialect 추가가 HARD_DENY를 절대 loose화 못 함 — cross-dialect hellgate로 증명. POSIX 외 불명확 ⇒ LLM 승급(fail-closed).
-4. **win32 결정로직 100% 순수-테스트**: spawn 외 모든 분기가 darwin서 검증됨. coverage fence ratchet.
+4. **win32 결정로직 순수-테스트 봉인**: spawn 외 모든 분기가 darwin서 `shell-discovery-ladder-hellgate`로 mutation-검증됨(자동 coverage-fence ratchet은 후속 강화 항목 — 현재는 hellgate가 그 역할).
 
 ## 단계
 

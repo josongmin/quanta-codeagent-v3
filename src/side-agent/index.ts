@@ -17,6 +17,10 @@ export {
   type SupervisedProcessDaemon,
   type SupervisedProcessDaemonOpts,
 } from "./process"
+export {
+  createProcessSideAgentDaemonRegistry,
+  type ProcessSideAgentRegistryOpts,
+} from "./process-registry"
 export { createSideAgentDaemonRegistry } from "./registry"
 export {
   type SideAgentDaemonOpts,

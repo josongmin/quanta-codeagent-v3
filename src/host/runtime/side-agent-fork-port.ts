@@ -17,12 +17,26 @@
  */
 
 import { type ChildProcess, fork as nodeFork } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import type {
   ChildProcessHandle,
   ProcessForkPort,
   ProcessForkSpec,
   SideAgentIpcMessage,
 } from "@/side-agent"
+
+/**
+ * Absolute path to the PRODUCTION side-agent child worker module
+ * (`@/side-agent/worker-entry.mjs`) the process-backed registry forks. Resolved
+ * relative to THIS module (the host composition root that knows on-disk layout)
+ * so `@/side-agent` stays plane-clean and never needs its own filesystem path.
+ *
+ * The worker is a dependency-free `.mjs` (no `@/…` aliases) so it runs under the
+ * bun OR node `execPath` that `child_process.fork` selects without a tsconfig
+ * path-resolver.
+ */
+export const sideAgentWorkerModulePath = (): string =>
+  fileURLToPath(new URL("../../side-agent/worker-entry.mjs", import.meta.url))
 
 /** Wrap a live `ChildProcess` as a {@link ChildProcessHandle}. NO-THROW —
  *  `send`/`kill` on a dead child are swallowed (the supervisor's `onExit` is the

@@ -26,7 +26,17 @@
  * the query-string and the subprotocol arm via the `auth` shape.
  */
 
-import { computeRetryDelayMs } from "./reconnect"
+import type {
+  AgentStateMessage,
+  CanvasMessage,
+  ConnectionState,
+  ObservabilityMessage,
+  SessionCommand,
+  SessionEvent,
+  SessionEventType,
+  SessionRejectedFrame,
+  SessionSnapshotLite,
+} from "../types/protocol"
 import {
   decodeAgentStateFrame,
   decodeCanvasFrame,
@@ -39,17 +49,7 @@ import {
   peekEnvelopeKind,
   SESSION_PROTOCOL_VERSION,
 } from "./envelope"
-import type {
-  AgentStateMessage,
-  CanvasMessage,
-  ConnectionState,
-  ObservabilityMessage,
-  SessionCommand,
-  SessionEvent,
-  SessionEventType,
-  SessionRejectedFrame,
-  SessionSnapshotLite,
-} from "../types/protocol"
+import { computeRetryDelayMs } from "./reconnect"
 
 /* ------------------------------------------------------------------ */
 /* Public types                                                        */
@@ -176,6 +176,7 @@ export class SessionClient {
   readonly #snapshotHandlers = new Set<SnapshotHandler>()
   readonly #observabilityHandlers = new Set<ObservabilityHandler>()
   readonly #canvasHandlers = new Set<CanvasHandler>()
+  readonly #agentStateHandlers = new Set<AgentStateHandler>()
   readonly #wsCtor: WebSocketCtor
   readonly #setTimer: (cb: () => void, ms: number) => unknown
   readonly #clearTimer: (handle: unknown) => void
@@ -214,6 +215,8 @@ export class SessionClient {
   #lastObservability: ObservabilityMessage | null = null
   /** Last canvas message, replayed to late `onCanvas` subscribers. */
   #lastCanvas: CanvasMessage | null = null
+  /** Last agent-state message, replayed to late `onAgentState` subscribers. */
+  #lastAgentState: AgentStateMessage | null = null
   /** Heartbeat timers (injectable seam). `#pingHandle` schedules the next */
   /*  keepalive ping; `#livenessHandle` is the deadline armed after a ping. */
   #pingHandle: unknown = null
@@ -401,6 +404,30 @@ export class SessionClient {
     }
   }
 
+  /**
+   * Subscribe to agent-state channel frames (`plan.*` / `mode.changed` /
+   * `tool.progress` / `context.compacted` / `ratelimit.snapshot`,
+   * QUANTA_WEB_AGENT_STATE). Mirrors {@link onCanvas}: the last agent-state
+   * message is replayed to a late subscriber so a freshly-mounted panel renders
+   * without waiting for the next frame. These frames ONLY arrive when the
+   * daemon's agent-state sink is gated ON (`QUANTA_WEB_AGENT_STATE=1`) — absent
+   * that, no frame is ever decoded and every subscriber stays idle (chat UI
+   * unchanged).
+   */
+  onAgentState(handler: AgentStateHandler): () => void {
+    this.#agentStateHandlers.add(handler)
+    if (this.#lastAgentState !== null) {
+      try {
+        handler(this.#lastAgentState)
+      } catch {
+        // swallow — surface to console via #log instead
+      }
+    }
+    return () => {
+      this.#agentStateHandlers.delete(handler)
+    }
+  }
+
   onConnectionChange(handler: ConnectionHandler): () => void {
     this.#connectionHandlers.add(handler)
     // Replay current state so the subscriber renders immediately without
@@ -514,6 +541,21 @@ export class SessionClient {
       }
       return
     }
+    const agentState = decodeAgentStateFrame(data)
+    if (agentState !== null) {
+      this.#lastAgentState = agentState
+      // A replayed agent-state frame likewise settles an events-only resume
+      // (mirrors the canvas branch above).
+      this.#settleResume()
+      for (const handler of [...this.#agentStateHandlers]) {
+        try {
+          handler(agentState)
+        } catch (err) {
+          this.#log("warn", `[SessionClient] agent-state handler threw: ${String(err)}`)
+        }
+      }
+      return
+    }
     const rejected = decodeRejectedFrame(data)
     if (rejected !== null) {
       if (
@@ -588,6 +630,7 @@ export class SessionClient {
         kind !== "rejected" &&
         kind !== "observability" &&
         kind !== "canvas" &&
+        kind !== "agentState" &&
         kind !== "heartbeat"
       ) {
         this.#log("warn", `[SessionClient] dropping unrecognised frame (kind=${String(kind)})`)

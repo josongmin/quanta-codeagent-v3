@@ -90,6 +90,7 @@ import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { gateOn, runtimeConfig } from "@/shared"
+import { createProcessSideAgentDaemonRegistry } from "@/side-agent"
 import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -104,6 +105,7 @@ import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
 import { maybeWireBashSandboxEscalation } from "./sandbox-escalation-wire"
+import { nodeProcessForkPort, sideAgentWorkerModulePath } from "./side-agent-fork-port"
 
 /** Minimal env view this assembler reads. The surface owns the actual
  *  `process.env` global read (allowed in `src/apps/**`) and threads this view
@@ -494,23 +496,55 @@ const parseWriteBudgetMax = (raw: string | undefined): number | undefined => {
 }
 
 /** N1 — mint the live side-agent daemon registry when opted in
- *  (`QUANTA_SIDE_AGENT=1`). Bridges the pure `@/side-agent` supervise loop to the
- *  real substrate via `wireSideAgentDaemons` (`@/agent/side-agent-runner`): the
- *  ADR-0130 subagent runner (one bounded read-biased pass per wake) + the
- *  ADR-0416 mailbox (findings push) + real timers/clock. The returned registry
- *  structurally satisfies `AgentConfig.sideAgentDaemons`, so `buildSideAgentBlock`
- *  exposes `side_agent_*` over it. Runs AFTER `maybeWireMailbox` so it reuses the
- *  session mailbox when present. Caller-override-safe; absent gate ⇒ slot unset ⇒
- *  no daemons, no tools (byte-identical default-OFF).
+ *  (`QUANTA_SIDE_AGENT=1`). Two interchangeable backers (both satisfy
+ *  `SideAgentDaemonRegistry`/`SideAgentDaemonPort`, so the `side_agent_*` tools
+ *  see the same surface):
  *
- *  Budget note: this mints a DEDICATED subagent runner for daemon passes; sharing
- *  the foreground subagent block's runner (one budget) is a follow-up — functionally
- *  the dedicated runner still honors the per-pass `maxTurns` + the registry's
- *  `maxConcurrent` guard. */
+ *    - DEFAULT (in-process): `wireSideAgentDaemons` (`@/agent/side-agent-runner`)
+ *      bridges the pure `@/side-agent` supervise loop to the real substrate — the
+ *      ADR-0130 subagent runner (one bounded read-biased pass per wake) + the
+ *      ADR-0416 mailbox (findings push) + real timers/clock. Runs the daemon on
+ *      the MAIN thread.
+ *    - §4.3 (`QUANTA_SIDE_AGENT_PROCESS` ALSO on): `createProcessSideAgentDaemonRegistry`
+ *      (`@/side-agent`) backs EACH daemon with a SUPERVISED FORKED CHILD over
+ *      `nodeProcessForkPort` + the production worker (`worker-entry.mjs`) — fork /
+ *      IPC / crash-respawn, in a separate OS process. (See the worker header for
+ *      exactly what the child does today vs the LLM follow-up.)
+ *
+ *  The returned registry structurally satisfies `AgentConfig.sideAgentDaemons`, so
+ *  `buildSideAgentBlock` exposes `side_agent_*` over it. Runs AFTER
+ *  `maybeWireMailbox` so the in-process path reuses the session mailbox when
+ *  present. Caller-override-safe; absent `QUANTA_SIDE_AGENT` ⇒ slot unset ⇒ no
+ *  daemons, no tools (byte-identical default-OFF). `QUANTA_SIDE_AGENT_PROCESS`
+ *  unset ⇒ the EXACT legacy in-process path (byte-identical).
+ *
+ *  Budget note: the in-process backer mints a DEDICATED subagent runner for daemon
+ *  passes; sharing the foreground subagent block's runner (one budget) is a
+ *  follow-up — functionally the dedicated runner still honors the per-pass
+ *  `maxTurns` + the registry's `maxConcurrent` guard. */
 const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (!gateOn(env, "QUANTA_SIDE_AGENT")) return
   const slot = cfg as AgentConfig & { sideAgentDaemons?: unknown }
   if (slot.sideAgentDaemons !== undefined) return
+  // §4.3 — OS-PROCESS backer selection. When `QUANTA_SIDE_AGENT_PROCESS` is ALSO
+  // on, back each daemon with a SUPERVISED FORKED CHILD (the process registry)
+  // instead of the in-process supervise loop. The two backers are interchangeable
+  // (both satisfy `SideAgentDaemonRegistry`/`SideAgentDaemonPort`), so the
+  // `side_agent_*` tools are byte-identical from the model's view. Gate OFF ⇒ the
+  // EXACT legacy in-process path below (byte-identical default).
+  if (runtimeConfig().sideAgentProcess) {
+    cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({
+      fork: nodeProcessForkPort,
+      scheduler: {
+        schedule: (fn, ms) => setTimeout(fn, ms),
+        cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+      },
+      now: () => Date.now(),
+      workerModulePath: sideAgentWorkerModulePath(),
+      cwd: cfg.cwd,
+    })
+    return
+  }
   const mailbox = (cfg as AgentConfig & { subagentMailbox?: MailboxPort }).subagentMailbox
   cfg.sideAgentDaemons = wireSideAgentDaemons({
     runner: createSubagentRunner(cfg),

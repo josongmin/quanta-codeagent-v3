@@ -89,4 +89,22 @@ describe("computeHasObservabilityData (sidebar auto-hide gate)", () => {
     }
     expect(computeHasObservabilityData(state, null)).toBe(true)
   })
+
+  it("returns true when the canvas channel produced a tool diff", () => {
+    // `hasDiffs=true` opens the pane so the DiffPanel column is not collapsed.
+    expect(computeHasObservabilityData(emptyObservability, null, true)).toBe(true)
+  })
+
+  it("returns true when the agent-state channel carries a plan / axis (QUANTA_WEB_AGENT_STATE)", () => {
+    // `hasAgentState=true` (a live plan OR mode/tool-progress/compaction/
+    // ratelimit/plan-prompt) opens the sidebar so the agent-state column is not
+    // rendered into a collapsed pane.
+    expect(computeHasObservabilityData(emptyObservability, null, false, true)).toBe(true)
+  })
+
+  it("stays hidden when ONLY the default-OFF flags are false (byte-identical)", () => {
+    // Both new opt-in flags default false ⇒ existing callers are byte-identical:
+    // an empty observability state + no usage + no diffs + no agent-state ⇒ hidden.
+    expect(computeHasObservabilityData(emptyObservability, null, false, false)).toBe(false)
+  })
 })

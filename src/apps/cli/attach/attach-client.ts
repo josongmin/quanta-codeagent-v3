@@ -160,15 +160,26 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
         // A throwing/garbage prompter fail-safes to a literal "n" so the
         // approval is DENIED, never approved and never left hanging. (#5)
         const answer = await opts.promptApproval(reason).catch(() => "n")
-        await sendCommand(
-          buildApprovalRespondCommand({
+        const respond = buildApprovalRespondCommand({
+          sessionId: sid,
+          approvalId,
+          answer,
+          commandId: newCommandId(),
+          issuedAt: issuedAt(),
+        })
+        await sendCommand(respond).catch(() => undefined)
+        // ADR-0512 P3 — the kernel does NOT auto-continue a resolved approval: a
+        // fresh `turn.run` is what claims the grant and re-dispatches the
+        // approved tool. So on APPROVE, re-run the suspended turn (a bare
+        // `turn.run`, no `input.append`). A deny aborts ⇒ no continuation.
+        if (respond.decision === "approve") {
+          await sendCommand({
             sessionId: sid,
-            approvalId,
-            answer,
             commandId: newCommandId(),
             issuedAt: issuedAt(),
-          }),
-        ).catch(() => undefined)
+            type: "turn.run",
+          }).catch(() => undefined)
+        }
       })
     }
   }

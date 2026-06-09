@@ -313,7 +313,11 @@ describe("T5 approval flow cli", () => {
     expect(sessionLoop).toContain("driveSessionTurn")
     expect(sessionLoop).toContain("setup.approvalPrompt")
     expect(driver).toContain("session.approval.respond")
-    expect(driver).toContain('if (decision === "deny")')
+    // ADR-0512 P3 — the deny-throw is now escalation-AWARE: a NORMAL approval
+    // deny still aborts the turn, but an ESCALATION deny (the approval carries
+    // `scopeContext`) is recoverable (the loop re-runs into a `skill-scoped`
+    // decline), so the throw is gated on `scopeContext === undefined`.
+    expect(driver).toContain('norm.decision === "deny" && approval.scopeContext === undefined')
     expect(sdkTypes).toContain("readonly approval:")
     expect(sdkTypes).toContain('decision: "approve" | "deny"')
   })

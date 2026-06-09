@@ -1049,3 +1049,18 @@ CC UI 토글: `showThinkingSummaries`·`showTurnDuration`·`showMessageTimestamp
 | E11 | granular hook 포인트 | Cursor hooks `beforeContext`·`beforeMCPExecution` (quanta `beforeReadFile`/PreToolUse는 있음) | context-assembly 전 / MCP 실행 전 전용 hook 없음 | hook taxonomy에 `PreContext`·`PreMcpExecution` 추가 | 저 | M | 中 | ⬜ |
 
 > **§27.6 확인법:** 전부 `grep -riE '<심볼>' src/`로 quanta 부재 확인(jun-09). 이미 있음(재보고 안 함): `generate/use_memories`·network policy amendment(`proposedNetworkPolicy`)·`approvals_reviewer`·`beforeReadFile` hook.
+
+## §27.7 novel Codex 도구/기능 (codex-rs 0.135 symbol 덤프, jun-09 3차) — 전부 quanta 부재
+
+| # | 후보 | 출처 (codex-rs symbol) | quanta gap | 흡수 메커니즘 | ROI | effort | conf | 결정 |
+|---|---|---|---|---|---|---|---|---|
+| N9 | `undo` 도구 (액션 되돌리기) | codex `undo` tool (tool list: `collab memory_tool telepathy codex_hooks undo`) | `undo`/`revertLast` grep 0 | 직전 mutating 액션(edit/write/patch) 되돌리는 1급 도구 (file_history 위 일반화) | 중 | S-M | 高 | ⬜ rec:흡수(file_history_rewind 위에 얇게) |
+| N10 | `js_repl` 도구 | codex `js_repl`/`js_repl_tool` | `js_repl`/`jsRepl` grep 0 | 세션 영속 JS REPL(code-mode와 별개, 빠른 계산/탐색) | 저-중 | M | 高 | ⬜ |
+| N11 | `chronicle` 세션 저널 | codex `chronicle` (config + tool, "now with `/memories` chronicle child_agents_md") | grep 0 | 세션 행적 연대기(journal) — 무엇을/왜 했는지 시간순 기록(메모리와 별개) | 중 | M | 中 | ⬜ rec:agent-state observability 북극성과 정렬 |
+| N12 | `telepathy` 에이전트간 도구 | codex `telepathy` tool | grep 0 | 에이전트간 공유 컨텍스트/상태 push("mind-read") — quanta broadcast 위 확장? | 저 | M | 低(정체 미확정) | ⬜ rec:content-diff 후 |
+| N13 | web_search 3-state (live/cached/disabled) | codex `[features].web_search` = live\|cached\|disabled | quanta web search 있으나 cached 모드 없음 | 캐시된 검색결과 재사용(비용/속도) | 저 | S-M | 高 | ⬜ |
+| E12 | per-agent usage-hint text | codex `root_agent_usage_hint_text`/`subagent_usage_hint_text`/`usage_hint_enabled` | grep 0 | root vs subagent에 다른 사용힌트 주입(프롬프트 톤) | 저 | S | 高 | ⬜ |
+| E13 | `child_agents_md` (서브에이전트 AGENTS.md) | codex `child_agents_md` | quanta AGENTS.md 있으나 child 전용 분리 미확인 | 서브에이전트에 별도 instruction 파일 | 저 | S | 中 | ⬜ |
+| E14 | apply_patch streaming events | codex `apply_patch_streaming_events`/`apply_patch_freeform` | quanta V4A apply_patch 있으나 streaming-event 미확인 | 패치 적용 진행 streaming(대형 패치 UX) | 저 | M | 中 | ⬜ |
+
+> **§27.7 노트:** symbol 덤프 기반이라 N12(telepathy)/E13/E14는 정체 confidence 中-低 — 실 메커니즘은 codex-rs 소스 content-diff 추가 패스 필요(throttle 해제 시, §27.5 TODO). N9(undo)·N11(chronicle)·E12가 quanta 북극성(agent-state observability)과 정렬도 높음.

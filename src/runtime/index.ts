@@ -49,9 +49,12 @@ export {
 export { runShell } from "./shell"
 export {
   buildBaseShellArgv,
+  discoverShells,
   POSIX_SHELL_ARGV,
   resolveWinShellMode,
   type ShellArgvDecision,
+  type ShellDialect,
+  type ShellProbe,
   type WinShellMode,
 } from "./shell-argv"
 export {

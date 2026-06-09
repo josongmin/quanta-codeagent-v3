@@ -670,30 +670,26 @@ export interface RuntimeConfig {
    *  named-agent name, and REJECTS an unknown type (Claude-Code
    *  `subagent_type_miss` parity). */
   readonly subagentTypedKind: boolean
-  /** §4.3 — side-agent OS-process daemon V1 (`QUANTA_SIDE_AGENT_PROCESS`). Opt-in.
-   *  Default false ⇒ the side-agent registry runs IN-PROCESS (byte-identical).
-   *  SEAM (validated CORE, not yet composed at the live root): the fork/supervise/
-   *  respawn pieces all exist and are unit + e2e tested — the OS adapter
-   *  (`nodeProcessForkPort`, `@/host/runtime/side-agent-fork-port`), the supervisor
-   *  (`createSupervisedProcessDaemon`, `@/side-agent/process`: fork → run → crash →
-   *  exponential-backoff respawn → give-up), driven over a REAL forked child in
-   *  `tests/integration/side-agent-process-os-fork-e2e.test.ts`. But the live root
-   *  `maybeWireSideAgent` (`@/host/runtime/agent-config-assembler`) NEVER reads this
-   *  field: it always builds the IN-PROCESS `SideAgentDaemonRegistry`, and the
-   *  process supervisor cannot back `AgentConfig.sideAgentDaemons` as-is for TWO
-   *  reasons — (a) there is NO production worker entrypoint to fork (the ONLY module
-   *  implementing the `ready`/`charter`/`finding`/`shutdown` IPC protocol is the
-   *  test fixture `tests/fixtures/side-agent-worker.mjs`), and (b) `sideAgentDaemons`
-   *  requires the multi-daemon REGISTRY shape (`spawn`/`list`/`findings`/`stop`) that
-   *  the `side_agent_*` tools are exposed over, whereas `SupervisedProcessDaemon` is
-   *  a SINGLE-child `start`/`stop`/`status` supervisor — the "OS daemon MANAGER
-   *  (multi-daemon registry over processes)" is the slice's own EXPLICITLY-DEFERRED
-   *  V1 non-goal (see `@/side-agent/process` header). Consequence: this field has
-   *  ZERO production consumers — it is byte-identical even when ON, because the
-   *  assembler is unread at the wiring call-site (the registry runs in-process
-   *  regardless). V1 core only — NOT a launchctl/systemd manager. Intended end
-   *  state: a production child entrypoint + a process-backed registry adapter, then
-   *  `maybeWireSideAgent` selects the fork port under this gate. */
+  /** §4.3 — LIVE side-agent OS-PROCESS backer selector (`QUANTA_SIDE_AGENT_PROCESS`).
+   *  Opt-in, and REQUIRES the master gate `QUANTA_SIDE_AGENT` (it only chooses the
+   *  backer once side-agents are enabled). Default false ⇒ the side-agent registry
+   *  runs IN-PROCESS (the daemon's per-wake pass on the MAIN thread), byte-identical.
+   *  When ON (and `QUANTA_SIDE_AGENT` on), the live root `maybeWireSideAgent`
+   *  (`@/host/runtime/agent-config-assembler`) reads THIS field and mints the
+   *  PROCESS-backed registry (`createProcessSideAgentDaemonRegistry`, `@/side-agent`)
+   *  instead of the in-process one: each daemon is a SUPERVISED FORKED CHILD over
+   *  `nodeProcessForkPort` running the production worker
+   *  (`@/side-agent/worker-entry.mjs`) — fork → ready → charter → finding(s) →
+   *  shutdown, with exponential-backoff crash-respawn (`createSupervisedProcessDaemon`,
+   *  `@/side-agent/process`). The process registry satisfies the SAME
+   *  `SideAgentDaemonRegistry`/`SideAgentDaemonPort` shape the `side_agent_*` tools
+   *  consume, so the tool surface is unchanged. Driven over a REAL forked child in
+   *  `tests/integration/side-agent-process-os-fork-e2e.test.ts` and selected at the
+   *  live root in `tests/unit/side-agent-assembler-process-wire-hellgate.test.ts`.
+   *  Worker note: the child runs a REAL but DETERMINISTIC bounded pass today (no LLM
+   *  call) — see the `worker-entry.mjs` header for exactly what it does and the
+   *  single swap point for a full LLM-backed child loop. V1 core only — NOT a
+   *  launchctl/systemd manager. */
   readonly sideAgentProcess: boolean
   /** N2 — MCP connector discovery (`QUANTA_MCP_CONNECTORS`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ no discovery port, the `mcp_connector_*` tools

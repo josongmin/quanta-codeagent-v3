@@ -7,8 +7,15 @@
 
 import { describe, expect, test } from "bun:test"
 import { fileURLToPath } from "node:url"
-import { nodeProcessForkPort } from "../../src/host/runtime/side-agent-fork-port"
-import { createSupervisedProcessDaemon } from "../../src/side-agent"
+import {
+  nodeProcessForkPort,
+  sideAgentWorkerModulePath,
+} from "../../src/host/runtime/side-agent-fork-port"
+import {
+  createProcessSideAgentDaemonRegistry,
+  createSupervisedProcessDaemon,
+  type SideAgentSpec,
+} from "../../src/side-agent"
 
 const WORKER = fileURLToPath(new URL("../fixtures/side-agent-worker.mjs", import.meta.url))
 
@@ -78,4 +85,53 @@ describe("§4.3 OS-fork e2e — real child process IPC", () => {
     // The first fork's pid was real.
     expect(typeof firstPid).toBe("number")
   }, 10000)
+})
+
+describe("§4.3 OS-fork e2e — PRODUCTION worker via the process REGISTRY", () => {
+  const intervalSpec = (over: Partial<SideAgentSpec> = {}): SideAgentSpec => ({
+    task: "audit the dependency tree",
+    trigger: { kind: "interval", everyMs: 60_000 },
+    maxWakes: 1,
+    maxTurnsPerWake: 3,
+    ...over,
+  })
+
+  test("registry forks the real production worker ⇒ a real finding crosses IPC", async () => {
+    // End-to-end over the REAL fork port + the REAL production worker module
+    // (`worker-entry.mjs`) the host wires — registry → supervisor → fork → worker.
+    const reg = createProcessSideAgentDaemonRegistry({
+      fork: nodeProcessForkPort,
+      scheduler: realScheduler,
+      now: () => Date.now(),
+      workerModulePath: sideAgentWorkerModulePath(),
+    })
+    const id = reg.spawn(intervalSpec())
+
+    const got = await waitFor(() => reg.findings().length > 0)
+    expect(got).toBe(true)
+    const finding = reg.findings()[0]
+    expect(finding?.daemonId).toBe(id)
+    // The worker's deterministic pass posts a signature finding derived from the
+    // charter (proves the task + turn budget crossed the IPC boundary and the
+    // child did real, hermetic work in a separate process).
+    expect(finding?.summary).toContain("audit the dependency tree")
+    expect(finding?.detail).toContain("forked child OS process")
+
+    // list() reflects a running, real daemon.
+    const snap = reg.list()[0]
+    expect(snap?.status).toBe("running")
+    expect(snap?.wakesDone).toBeGreaterThanOrEqual(1)
+
+    // Stop ⇒ the real child exits (no leaked OS process).
+    expect(reg.stop(id)).toBe(true)
+    await waitFor(() => reg.list()[0]?.status === "stopped", 2000)
+    expect(reg.list()[0]?.status).toBe("stopped")
+  }, 12000)
+
+  test("the production worker module path resolves to a real, forkable file", () => {
+    const path = sideAgentWorkerModulePath()
+    expect(path.endsWith("worker-entry.mjs")).toBe(true)
+    // The path is absolute (fork requires it).
+    expect(path.startsWith("/")).toBe(true)
+  })
 })

@@ -16,9 +16,16 @@
  */
 
 import { memo, useState } from "react"
-import type { ApprovalRequest, ContextUsageMessage, Objective, RunEntry } from "../types/protocol"
+import type {
+  ApprovalRequest,
+  ContextUsageMessage,
+  Objective,
+  RunEntry,
+  ToolDiffMessage,
+} from "../types/protocol"
 import { type ObservabilityState, splitRunsByStatus } from "../ws/observability-hooks"
 import { UsageBreakdownPanel } from "./canvas/UsageBreakdownPanel"
+import { DiffPanel } from "./DiffPanel"
 
 export interface ObservabilityPaneProps {
   readonly state: ObservabilityState
@@ -31,6 +38,11 @@ export interface ObservabilityPaneProps {
    *  mounts at the top of the pane. Absent / `null` ⇒ nothing renders
    *  (default-OFF — the pane is byte-unchanged when the canvas channel is OFF). */
   readonly usage?: ContextUsageMessage | null
+  /** ADR-0440: the latest `tool.diff` frame per `toolCallId` from the canvas
+   *  channel (`useToolDiffs`). When present + non-empty, a `DiffPanel` mounts
+   *  per captured tool mutation. Absent / empty ⇒ nothing renders (default-OFF
+   *  — the pane is byte-unchanged when the canvas channel is OFF). */
+  readonly diffs?: ReadonlyMap<string, ToolDiffMessage> | null
 }
 
 /* shared card + section-label primitives (Codex-aligned tokens) */
@@ -42,7 +54,7 @@ const LABEL = "text-[11px] font-semibold uppercase tracking-wide text-ink-tertia
 /* ------------------------------------------------------------------ */
 
 export const ObservabilityPane = memo(
-  ({ state, onRetryRun, usage }: ObservabilityPaneProps): JSX.Element => {
+  ({ state, onRetryRun, usage, diffs }: ObservabilityPaneProps): JSX.Element => {
     const { running, waiting, completed } = splitRunsByStatus(state.runs)
     return (
       <aside
@@ -52,6 +64,7 @@ export const ObservabilityPane = memo(
       >
         <UsageBreakdownPanel usage={usage ?? null} />
         <ObjectiveCard objective={state.objective} />
+        <DiffsSection diffs={diffs ?? null} />
         <ApprovalsList approvals={state.approvals} />
         <RunColumn title="Running" runs={running} tone="emerald" />
         <RunColumn title="Waiting" runs={waiting} tone="amber" />
@@ -62,6 +75,27 @@ export const ObservabilityPane = memo(
           {...(onRetryRun !== undefined ? { onRetryRun } : {})}
         />
       </aside>
+    )
+  },
+)
+
+/* ------------------------------------------------------------------ */
+/* Tool diffs (ADR-0440)                                               */
+/* ------------------------------------------------------------------ */
+
+/** Renders one `DiffPanel` per captured tool mutation (latest-wins per
+ *  `toolCallId`, insertion-ordered). Empty / null ⇒ renders nothing (the
+ *  canvas channel is OFF or no mutation has been captured yet). */
+const DiffsSection = memo(
+  ({ diffs }: { diffs: ReadonlyMap<string, ToolDiffMessage> | null }): JSX.Element | null => {
+    if (diffs === null || diffs.size === 0) return null
+    return (
+      <section className="flex flex-col gap-2" data-testid="diffs-section">
+        <span className={LABEL}>Diffs</span>
+        {[...diffs.values()].map((diff) => (
+          <DiffPanel key={diff.toolCallId} diff={diff} />
+        ))}
+      </section>
     )
   },
 )
@@ -240,7 +274,8 @@ const RunRow = memo(({ run, onRetryRun }: RunRowProps): JSX.Element => {
       {open ? (
         <div className="border-t border-line-subtle px-2 py-1.5 text-[11px] text-ink-secondary">
           <div>
-            <span className="text-ink-tertiary">id:</span> <span className="font-mono">{run.id}</span>
+            <span className="text-ink-tertiary">id:</span>{" "}
+            <span className="font-mono">{run.id}</span>
           </div>
           {run.waitingOn !== undefined ? (
             <div>

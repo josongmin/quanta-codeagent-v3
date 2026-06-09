@@ -19,14 +19,17 @@ import { buildBaseShellArgv, resolveWinShellMode } from "@/runtime"
 import { runShell } from "@/runtime"
 
 describe("P16 — buildBaseShellArgv (pure)", () => {
-  test("non-win32 is byte-identical to the legacy hardcode (every platform, every winShell mode)", () => {
+  test("non-win32 is byte-identical to the legacy hardcode (every platform, EVERY winShell mode incl. ADR-0529 auto/bash/pwsh)", () => {
     const platforms: NodeJS.Platform[] = ["darwin", "linux", "freebsd", "openbsd", "sunos", "aix"]
+    // ADR-0529 invariant #1: `platform !== "win32"` ⇒ ["bash","-lc",cmd] REGARDLESS
+    // of QUANTA_WIN_SHELL — must hold for the NEW modes too, not just error/cmd.
     for (const p of platforms) {
-      for (const mode of ["error", "cmd"] as const) {
+      for (const mode of ["error", "cmd", "auto", "bash", "pwsh"] as const) {
         const d = buildBaseShellArgv("echo hi", p, mode)
         expect(d.kind).toBe("argv")
         // The winShell mode must be IGNORED off win32.
         expect(d.kind === "argv" && d.argv).toEqual(["bash", "-lc", "echo hi"])
+        expect(d.kind === "argv" && d.dialect).toBe("posix")
       }
     }
   })

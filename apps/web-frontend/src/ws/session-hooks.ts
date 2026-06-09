@@ -689,6 +689,19 @@ export const useSendTurn = (
 }
 
 /**
+ * ADR-0512 P3 — whether to RE-RUN the suspended turn after resolving an
+ * approval. The kernel does not auto-continue: a resolved approval mints/clears
+ * a lease, and a fresh `turn.run` is what claims it and re-dispatches the pending
+ * tool. So `approve` (the tool must run) and an ESCALATION `deny` (the loop emits
+ * the recoverable `skill-scoped` decline) both continue; a NORMAL `deny` aborts
+ * the turn — re-running would just re-ask the same approval forever.
+ */
+export const shouldContinueAfterApproval = (
+  decision: "approve" | "deny",
+  isEscalation: boolean,
+): boolean => decision === "approve" || isEscalation
+
+/**
  * ADR-0512 P3 — sends an `approval.respond` command for a pending approval
  * (the escalation card's 4 verbs collapse onto the protocol's approve/deny —
  * see `EscalationCard`). Mirrors `useSendTurn`: a fresh `commandId` per send so
@@ -700,19 +713,31 @@ export const useSendApprovalDecision = (
 ): ((
   approvalId: string,
   decision: "approve" | "deny",
-  opts?: { readonly scope?: "once" | "session"; readonly steer?: string },
+  opts?: {
+    readonly scope?: "once" | "session"
+    readonly steer?: string
+    /** ADR-0512 P3 — after responding, send a bare `turn.run` to RE-RUN the
+     *  suspended turn (the kernel does not auto-continue). See
+     *  {@link shouldContinueAfterApproval}. */
+    readonly continueTurn?: boolean
+  },
 ) => void) => {
   return useCallback(
     (
       approvalId: string,
       decision: "approve" | "deny",
-      opts?: { readonly scope?: "once" | "session"; readonly steer?: string },
+      opts?: {
+        readonly scope?: "once" | "session"
+        readonly steer?: string
+        readonly continueTurn?: boolean
+      },
     ) => {
       if (sessionId === null) return
+      const now = new Date().toISOString()
       const respond: SessionCommand = {
         sessionId,
         commandId: makeCommandId(),
-        issuedAt: new Date().toISOString(),
+        issuedAt: now,
         type: "approval.respond",
         approvalId,
         decision,
@@ -723,6 +748,18 @@ export const useSendApprovalDecision = (
         ...(opts?.steer !== undefined ? { steer: opts.steer } : {}),
       }
       client.send(respond)
+      // ADR-0512 P3 — re-run the suspended turn so the lease is claimed and the
+      // approved tool dispatches (or the escalation decline tool_result is
+      // produced). A bare `turn.run` with NO `input.append` continues the turn
+      // from the existing transcript — the same primitive the CLI driver loops.
+      if (opts?.continueTurn === true) {
+        client.send({
+          sessionId,
+          commandId: makeCommandId(),
+          issuedAt: now,
+          type: "turn.run",
+        } as SessionCommand)
+      }
     },
     [client, sessionId],
   )

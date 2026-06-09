@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AgentStatePanel, agentStateHasContent } from "./components/AgentStatePanel"
 import { ChatPanel } from "./components/ChatPanel"
 import { ConnectionUrlPill } from "./components/ConnectionUrlPill"
 import type { EscalationDecision } from "./components/EscalationCard"
@@ -7,6 +8,7 @@ import { HotkeyToast } from "./components/HotkeyToast"
 import { KnobsPanel } from "./components/KnobsPanel"
 import { ModeBadge } from "./components/ModeBadge"
 import { ObservabilityPane } from "./components/ObservabilityPane"
+import { PlanPanel } from "./components/PlanPanel"
 import { PortBadge } from "./components/PortBadge"
 import {
   buildDefaultSlashCommands,
@@ -28,7 +30,8 @@ import type {
   SessionEvent,
   SessionStateView,
 } from "./types/protocol"
-import { type CanvasSource, useContextUsage } from "./ws/canvas-hooks"
+import { type AgentStateSource, useAgentState } from "./ws/agent-state-hooks"
+import { type CanvasSource, useContextUsage, useToolDiffs } from "./ws/canvas-hooks"
 import { SessionClient } from "./ws/client"
 import {
   type ObservabilitySource,
@@ -38,6 +41,7 @@ import {
 import { usePendingApprovals } from "./ws/pending-approvals"
 import {
   type CumulativeTokenUsage,
+  shouldContinueAfterApproval,
   useConnectionState,
   useSendApprovalDecision,
   useSendTurn,
@@ -189,11 +193,19 @@ const resolveConnectionConfig = async (): Promise<{ url: string; token?: string 
 export const computeHasObservabilityData = (
   observability: ObservabilityState,
   contextUsage: ContextUsageMessage | null,
+  hasDiffs = false,
+  /** QUANTA_WEB_AGENT_STATE — true when the agent-state channel carries a live
+   *  plan OR any agent-state axis (mode / tool-progress / compaction / ratelimit
+   *  / plan-prompt). Opens the sidebar so the agent-state column is not rendered
+   *  into a collapsed pane. Default `false` keeps existing callers byte-identical. */
+  hasAgentState = false,
 ): boolean =>
   observability.runs.length > 0 ||
   observability.objective !== null ||
   observability.approvals.length > 0 ||
-  contextUsage !== null
+  contextUsage !== null ||
+  hasDiffs ||
+  hasAgentState
 
 const buildSlashContextSnapshot = (args: {
   readonly modelSlug: string | null
@@ -248,17 +260,25 @@ export const App = (): JSX.Element => {
   const sendApprovalDecision = useSendApprovalDecision(client, learnedSessionId)
   const onApprovalDecision = useCallback(
     (decision: EscalationDecision): void => {
+      // Determine escalation-ness BEFORE the optimistic dismiss removes the
+      // approval from the live set — an escalation carries `scopeContext`.
+      const isEscalation =
+        pendingApprovals.find((a) => a.approvalId === decision.approvalId)?.scopeContext !==
+        undefined
       // ADR-0512 P3 — thread the escalation's once/session scope + steer so
-      // allow_once (no widen) and deny_and_steer (corrective steer) take effect.
+      // allow_once (no widen) and deny_and_steer (corrective steer) take effect,
+      // and RE-RUN the suspended turn (the kernel does not auto-continue) so the
+      // approved tool actually dispatches / the recoverable decline is produced.
       sendApprovalDecision(decision.approvalId, decision.decision, {
         ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
         ...(decision.steer !== undefined ? { steer: decision.steer } : {}),
+        continueTurn: shouldContinueAfterApproval(decision.decision, isEscalation),
       })
       // Optimistic: drop the card immediately; the authoritative
       // `approval.resolved` event then arrives and is a no-op for the dropped id.
       dismissApproval(decision.approvalId)
     },
-    [sendApprovalDecision, dismissApproval],
+    [pendingApprovals, sendApprovalDecision, dismissApproval],
   )
 
   const [draft, setDraft] = useState("")
@@ -575,16 +595,15 @@ export const App = (): JSX.Element => {
   )
   const observability = useObservabilityState(observabilitySource)
 
-  // ADR-0448 (RFC-10): mount point for the rich context-usage breakdown,
-  // backed by the canvas WS channel. Mirrors `observabilitySource` above —
-  // wraps `client.onCanvas`. TODAY only `context.usage` frames are CONSUMED
-  // here (`useContextUsage` → the `ObservabilityPane`'s usage breakdown). The
-  // `tool.diff` decode is wired end-to-end in `client.ts`/`canvas-hooks.ts`
-  // (`useToolDiffs`), but the `DiffPanel` is not mounted yet — that surface is
-  // DEFERRED, so tool.diff frames decode and drop here. Default-OFF: when the
-  // daemon sends no canvas frames (no `QUANTA_WEB_CANVAS=1`) the source never
-  // fires, `contextUsage` stays `null`, and the pane renders nothing (chat UI
-  // byte-identical).
+  // ADR-0448 (RFC-10): mount point for the rich context-usage breakdown +
+  // (ADR-0440) the per-tool DiffPanels, both backed by the canvas WS channel.
+  // Mirrors `observabilitySource` above — wraps `client.onCanvas`. Both
+  // `context.usage` frames (`useContextUsage` → the `ObservabilityPane`'s usage
+  // breakdown) AND `tool.diff` frames (`useToolDiffs` → the pane's `DiffsSection`
+  // → mounted `DiffPanel`s) are now CONSUMED here. Default-OFF: when the daemon
+  // sends no canvas frames (no `QUANTA_WEB_CANVAS=1`) the source never fires,
+  // `contextUsage` stays `null` + `toolDiffs` stays empty, and the pane renders
+  // nothing (chat UI byte-identical).
   const canvasSource = useMemo<CanvasSource>(
     () => ({
       subscribe: (handler) => client.onCanvas(handler),
@@ -592,11 +611,36 @@ export const App = (): JSX.Element => {
     [client],
   )
   const contextUsage = useContextUsage(canvasSource)
+  const toolDiffs = useToolDiffs(canvasSource)
 
-  // Codex-like: the observability sidebar stays OFF-screen until there's
-  // actually something to show. Empty (no runs / objective / approvals /
-  // usage) ⇒ the chat takes the full width instead of a permanent empty pane.
-  const hasObservabilityData = computeHasObservabilityData(observability, contextUsage)
+  // QUANTA_WEB_AGENT_STATE — the out-of-band agent-state channel (the 9 events
+  // the in-band session protocol DROPS: plan.* / mode.changed / tool.progress /
+  // context.compacted / ratelimit.snapshot). Mirrors `canvasSource` above —
+  // wraps `client.onAgentState`. With the daemon gate OFF (no
+  // `QUANTA_WEB_AGENT_STATE=1`) no `agentState` frame ever decodes, the source
+  // never fires, and `agentState` stays the EMPTY view ⇒ `PlanPanel` +
+  // `AgentStatePanel` both self-hide (chat UI byte-identical, default-OFF).
+  const agentStateSource = useMemo<AgentStateSource>(
+    () => ({
+      subscribe: (handler) => client.onAgentState(handler),
+    }),
+    [client],
+  )
+  const agentState = useAgentState(agentStateSource)
+
+  // Codex-like: the sidebar stays OFF-screen until there's actually something to
+  // show. Empty (no runs / objective / approvals / usage / diffs / agent-state)
+  // ⇒ the chat takes the full width instead of a permanent empty pane. A live
+  // plan OR any agent-state axis (mode / tool-progress / compaction / ratelimit /
+  // plan-prompt) ALSO opens the sidebar so the agent-state column is never
+  // rendered into a collapsed pane.
+  const hasAgentState = agentState.plan !== null || agentStateHasContent(agentState)
+  const hasObservabilityData = computeHasObservabilityData(
+    observability,
+    contextUsage,
+    toolDiffs.size > 0,
+    hasAgentState,
+  )
 
   return (
     <div className="flex h-full min-h-screen flex-col bg-surface text-ink">
@@ -628,7 +672,26 @@ export const App = (): JSX.Element => {
           onApprovalDecision={onApprovalDecision}
         />
         {hasObservabilityData ? (
-          <ObservabilityPane state={observability} usage={contextUsage} />
+          <>
+            {/* QUANTA_WEB_AGENT_STATE — the agent-state axes the in-band session
+                protocol drops (plan / mode / tool-progress / compaction /
+                ratelimit). Its own narrow column LEFT of the observability pane.
+                Both panels self-hide on the empty view, so when the daemon gate
+                is OFF they render nothing — and the column is suppressed entirely
+                unless there is a plan or some agent-state axis to show (chat
+                byte-identical). */}
+            {hasAgentState ? (
+              <aside
+                aria-label="agent state"
+                data-testid="agent-state-column"
+                className="flex w-72 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-line-subtle bg-surface-raised px-3 py-4"
+              >
+                <PlanPanel plan={agentState.plan} />
+                <AgentStatePanel state={agentState} />
+              </aside>
+            ) : null}
+            <ObservabilityPane state={observability} usage={contextUsage} diffs={toolDiffs} />
+          </>
         ) : null}
       </div>
       <HotkeyToast />

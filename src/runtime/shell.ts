@@ -5,7 +5,7 @@ import { withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
 import { DEFAULT_ENV_ALLOWLIST, scrubEnv } from "./sandbox"
 import { asScrubbedEnv, bunScrubbedSpawner } from "./scrubbed-spawn"
-import { buildBaseShellArgv, resolveWinShellMode } from "./shell-argv"
+import { buildBaseShellArgv, discoverShells, resolveWinShellMode } from "./shell-argv"
 import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
@@ -157,10 +157,15 @@ export const runShell = async (
   // unless the operator opted into the cmd.exe fallback via QUANTA_WIN_SHELL=cmd.
   // The env is read ONLY when `process.platform === "win32"` so the common path
   // stays a pure pass-through.
+  const winMode = process.platform === "win32" ? resolveWinShellMode() : "error"
+  // ADR-0529 — only the `auto` ladder needs a PATH probe; discover shells lazily
+  // ONLY on win32+auto (every other path, incl. all non-win32, never spawns a
+  // `which` — byte-identical to P16). `bash`/`pwsh`/`cmd` modes pick directly.
   const argvDecision = buildBaseShellArgv(
     command,
     process.platform,
-    process.platform === "win32" ? resolveWinShellMode() : "error",
+    winMode,
+    winMode === "auto" ? discoverShells() : undefined,
   )
   if (argvDecision.kind === "error") {
     // No-throw: a clear, deterministic failure result instead of a silent spawn

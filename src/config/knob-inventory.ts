@@ -888,16 +888,19 @@ const DAEMON: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/sandbox-wire.ts",
   },
   {
-    // P16 (jun-08 long-tail) — win32 shell selection. Default `error`: refuse
+    // P16 (jun-08) → ADR-0529 — win32 shell selection. Default `error`: refuse
     // to spawn a nonexistent `bash` on Windows and surface a typed error
-    // instead of a silent ENOENT. `cmd` opts into the cmd.exe fallback. No
-    // effect off win32 (the env is not even read there).
+    // instead of a silent ENOENT. `auto` walks a POSIX-first discovery ladder
+    // (Git-Bash/WSL → PowerShell → cmd.exe); `bash`/`pwsh`/`cmd` pick one
+    // explicitly. No effect off win32 (the env is not even read there).
     envKey: "QUANTA_WIN_SHELL",
     kind: "enum",
     default: "error",
     group: "sandbox",
     home: "runtime-config",
-    describe: "win32 shell fallback mode: 'error' (refuse, default) or 'cmd' (cmd.exe).",
+    describe:
+      "win32 shell mode: 'error' (refuse, default) | 'auto' (POSIX-first ladder " +
+      "bash→pwsh→cmd) | 'bash' | 'pwsh' | 'cmd'.",
     readSite: "runtime/shell-argv.ts",
   },
   {
