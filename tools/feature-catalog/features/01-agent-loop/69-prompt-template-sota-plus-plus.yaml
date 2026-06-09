@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "4 prompt strengthening sections feed the CLI loop's system prompt"
+    web: "pure internal prompt-only intervention (prompt.ts / prompt-sections.ts); prompt content is not a UI affordance"
 purpose: |
   Codex base prompt (L26/L213-214/L217/L471) + Claude Code 1.7196.3 systemPromptSectionCache
   side-by-side 감사로 식별한 4개 갭을 닫음. (1) Internal-vocabulary 차폐 — turn_id / runtime /

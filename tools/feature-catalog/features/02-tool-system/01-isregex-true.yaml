@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [read-write-edit, typed-tool-failure-modes, tool-output-schema-factory, fsjailerror, git-review-diff]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "scripted_replace tool reachable from CLI entry, diff-preview wired"
+    web: "scripted_replace runs in web-daemon; invocation+result render as tool.invoked/tool.completed in session-hooks.ts:420-438"
 purpose: 신규 default 도구. 리터럴 기본 / isRegex:true 정규식 / count 캡 / FS-jail / atomic write.
 evidence:
   code:

@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [context-usage-breakdown]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/context-warning.ts stderr-TTY preamble; reachable from CLI entry"
+    web: "CLI stderr-TTY warning preamble; no web render, not reachable from web-daemon"
 purpose: |
   A one-line warning surfaced near the prompt BEFORE auto-compaction fires,
   computed from the SAME retained token count the /context breakdown uses (no new

@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:session", "tier:adapter"]
 depends_on: [session-git-fingerprint, session-index-store]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; pure serialize/import primitive plus FS adapter"
+    web: "pure SessionExportEnvelope serialize/import primitive, no UI affordance"
 purpose: |
   Versioned wire-stable `SessionExportEnvelope` (v1) + pure serialize/import
   primitives + FS adapter helpers. Carries SavedSession + optional sidecar

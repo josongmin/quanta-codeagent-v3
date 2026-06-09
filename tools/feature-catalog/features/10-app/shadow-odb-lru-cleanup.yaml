@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [shadow-tools-trio, snapshot-slash-cmd, slash-snapshot]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "host-invoked disk-budget housekeeping seam for the shadow ODB; no user-facing CLI affordance"
+    web: "pure internal LRU eviction housekeeping primitive, no UI affordance on any surface"
 purpose: |
   Bounded-disk policy for the shadow git ODB (ADR-0108). Sums the on-disk
   size of each per-workspace shadow directory under

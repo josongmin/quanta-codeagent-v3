@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [git-runner-cancellation-signal, git-branch-name-schema-guard, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_log read-only tool with US-separator format, runs in CLI."
+    web: "Agent tool — rendered log (hash/author/date/subject) shows in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   `git_log` 도구가 commit 라인을 머신 파싱할 때 TAB(`\x09`) 대신 ASCII Unit
   Separator(`\x1f`, US_SEP)를 필드 구분자로 쓴다 — commit subject와 author name에

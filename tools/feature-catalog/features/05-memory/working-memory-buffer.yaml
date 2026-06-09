@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [memory-vector-math, memory-dedup-planner, memory-eviction-planner, sqlite-persistent-store, embedder-port]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "in-session message buffer (append/snapshot/clear), internal agent-loop library, no CLI affordance"
+    web: "pure internal buffer primitive, no UI affordance"
 purpose: |
   L1 in-session message buffer used by the agent loop to hold the live turn
   transcript. Distinct from L2 long-term memory: working memory is never

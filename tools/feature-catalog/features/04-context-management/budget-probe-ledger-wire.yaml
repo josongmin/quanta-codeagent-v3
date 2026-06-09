@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, default-off, slice:retrieval]
 depends_on: [search-pipeline-composer, budget-ledger]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure retrieval budget-probe factory primitive, default-OFF, deliberate_hold, no caller on any surface."
+    web: "Pure internal port/probe with no UI affordance on any surface."
 purpose: |
   Closes the deferred wire that ADR-0265's `budgetAwarePipeline` left
   open: a `BudgetProbe` factory that bridges `defaultBudgetLedger()`

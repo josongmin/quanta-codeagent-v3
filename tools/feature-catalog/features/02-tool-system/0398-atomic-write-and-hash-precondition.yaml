@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [edit-tool, storage-fs-jail]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "storage atomic-write adapter + edit expected_hash stale-precondition reachable from CLI import graph"
+    web: "Enhancement to the edit tool; the edit tool_call/tool_result render as the generic tool card and a stale_precondition typed failure surfaces in the result preview (session-hooks.ts:420-435). The atomic-write itself is internal but the user-visible value rides the edit tool surface."
 purpose: |
   storage/atomic-write.ts(신규 leaf) — 2-phase temp+rename adapter
   (writeFileAtomic). EXDEV → copyFile+unlink fallback; non-EXDEV rename

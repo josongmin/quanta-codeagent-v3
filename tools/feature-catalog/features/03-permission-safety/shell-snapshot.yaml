@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [disclaimer-shell-wrapper]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ShellSnapshotPort capture/restore/prune slice (src/runtime/shell-snapshot/index.ts)"
+    web: "pure internal port, not yet wired (synthesis sites 0); no user-visible affordance on any surface"
 purpose: |
   Codex의 `~/.codex/shell_snapshots/{thread}.{ns}.sh` (~90KB) 패턴
   흡수 — 매 턴 진입 시 사용자 shell 환경(typeset/declare params,

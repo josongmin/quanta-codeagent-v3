@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/status-pills.ts top-line pill bar; reachable from CLI entry"
+    web: "CLI-only terminal chrome (Mode/Workspace/Sandbox/Skills/Rules pills); not reachable from web-daemon, no web render"
 purpose: |
   CLI chrome top-line "pill" composer — 초기 4-pill (Mode / Workspace /
   Sandbox / Skills) → 5-pill (with Rules) 확장. 각 pill은 개별 OFF 가능

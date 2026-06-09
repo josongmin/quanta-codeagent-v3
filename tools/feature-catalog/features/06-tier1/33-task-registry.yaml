@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [subagent-6-tools]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "buildSubagentBlock renders pendingIds() lifecycle pill; task_output/task_stop observe and token-gated cancel in the CLI"
+    web: "spawned subagent tasks appear read-only in ObservabilityPane RunColumn (RunKind subagent), but RunRow exposes no task_stop/cancel control"
 purpose: |
   In-memory registry of background subagent tasks (v2's `taskRegistry` shape).
   Agent tool registers a task here when launched in background mode and

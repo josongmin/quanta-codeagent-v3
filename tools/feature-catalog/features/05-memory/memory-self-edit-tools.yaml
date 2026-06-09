@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [memorysearch-write-update, codex-2-phase-consolidator]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "memory_search/write/update registered as first-class agent tools on CLI; derived 4/4 holds"
+    web: "agent tools dispatch as tool_call/tool_result events which the web bridge maps to tool.invoked/tool.completed and renders in session-hooks tool display"
 purpose: |
   Three first-class agent tools letting the model search, write, and
   revise its own durable memory mid-session. Plane-clean — imports only

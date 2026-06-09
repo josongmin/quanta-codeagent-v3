@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["resilience", "absorbed:anthropic", "surface:core"]
 depends_on: [retry-error-classification]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "proactive backoff + ratelimit_snapshot notice run in CLI loop (gated QUANTA_RATELIMIT_PROACTIVE)"
+    web: "user-facing mechanism is the transient ratelimit_snapshot AgentEvent notice, which is not one of the 6 bridged events and is dropped at context-binding.ts:1105 default arm"
 purpose: |
   Today quanta is purely REACTIVE to rate limits: B3 (`parseRetryAfterMs`,
   `src/shared/errors.ts`) parses the `retry-after` family ONLY at the error

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "typed error enum + retry-router policy (port/classifier); pure internal classification, no CLI affordance"
+    web: "pure internal error-classification policy, no user-visible UI affordance on any surface"
 purpose: |
   Codex 16-arm typed enum 흡수 + 5-action retry routing. 분류:
   contextWindowExceeded / usageLimitExceeded / cyberPolicy / httpConnectionFailed

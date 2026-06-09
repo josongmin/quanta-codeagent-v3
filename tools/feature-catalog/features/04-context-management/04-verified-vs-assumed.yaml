@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core]
 depends_on: [fallback-kinds-policy, llm-factory, model-swap-retry, response-in-progress, mode-repo-rules-active-skills-working-state-memory-hints]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Compaction summary prompt hardening; runs in CLI prompt path."
+    web: "Pure internal prompt content (model-facing); no user-visible surface affordance."
 purpose: 압축 프롬프트 verified-vs-assumed 강화
 evidence:
   code:

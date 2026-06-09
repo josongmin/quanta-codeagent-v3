@@ -13,6 +13,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, probe-trajectory-parse]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bun run probe --funnel analyzer under src/apps/probe; not in interactive CLI import graph (keep derived missing)."
+    web: "Probe --funnel report is a standalone CLI view; code does not run in web-daemon and has no browser surface."
 purpose: |
   NON-authoritative analyzer that scores a trajectory's adherence to the
   `localize-fault` skill's 3-stage funnel:

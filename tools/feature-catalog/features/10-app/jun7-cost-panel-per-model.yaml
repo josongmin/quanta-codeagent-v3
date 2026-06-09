@@ -14,6 +14,14 @@ labels: ["surface:cli", "absorbed:claude"]
 depends_on: [slash-cost-panel]
 config_refs:
   env: ["QUANTA_COST_PANEL"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Per-model breakdown appended to CLI /cost detailed box (cost-panel.ts); reachable from CLI entry."
+    web: "The per-model By model box is the CLI /cost panel; the web TokenCounter renders cumulative tokens+cost only, with no per-model breakdown."
 purpose: |
   Extends the cumulative cost panel with per-model attribution. Each turn's
   tokens + cost are bucketed by the model active at that turn (a closure-held

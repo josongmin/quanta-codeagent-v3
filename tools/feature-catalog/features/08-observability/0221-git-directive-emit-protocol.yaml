@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "observability-primitive", "default-off"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Phase-guarded git-directive emitter writes wire lines to stdout/stderr sink in CLI."
+    web: "Directive emit rides a stdout/stderr sink with no web handler; not one of the 6 bridged events and no SlashPalette executor."
 purpose: |
   Codex-style `::git-*` 5-directive emit protocol with a HARD phase guard:
   directives (create-branch / stage / commit / push / create-pr) may be

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 depends_on: [speculative-branch-search, branch-search-isolate-symlink-safe, branch-search-verifier-suite, branch-search-progress, branch-search-minimal-change]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; pure scorer/selectors for branch search"
+    web: "pure internal scorer (DEFAULT_WEIGHTS + argmax/minimal-change selectors); pure functions, no UI affordance"
 purpose: |
   Pure scorer + selector. Given verifier signals, fold to a 0..1 total and
   pick winner. Deterministic for a fixed signal set (non-determinism lives

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, slash-permission-inspect, slash-working-state-panel]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /memory, src/apps/cli/memory-cmd.ts reachable from CLI entry"
+    web: "B2 prefill stub: SlashPalette.tsx memory slug is prefill(memory), does not execute; MemorySlashState port not supplied to web"
 purpose: |
   Browse / recall / delete the durable memory store from the REPL. Subcommand-
   style surface: `/memory` (recent 10 by recency), `/memory list [--tier=…]`

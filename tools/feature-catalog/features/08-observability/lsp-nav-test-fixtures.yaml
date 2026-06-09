@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure test fixture helpers (no describe/test), ui_surfaces n-a, no CLI affordance"
+    web: "pure test-infra helper module, no UI affordance on any surface"
 purpose: |
   `tests/unit/lsp-nav-fixtures.ts` 는 lsp_nav 9 개 per-tool 테스트 슬라이스
   (definition · type-definition · references · implementation · hover ·

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [connector-token-rotation, connectors-rest-registry, oauth-dynamic-discovery, oauth-dynamic-registration]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; prober reachable in CLI build"
+    web: "pure internal DNS/HEAD availability probe port with LRU cache; no UI affordance on any surface"
 purpose: |
   `createAvailabilityProber({fetchPort, dnsPort, clockPort, lruSize?,
   lruTtlMs?, headTimeoutMs?})` — per-host availability probe with LRU cache.

@@ -14,6 +14,14 @@ labels: ["surface:cli", "absorbed:claude"]
 depends_on: [slash-registry-split]
 config_refs:
   env: ["QUANTA_VERSION", "QUANTA_COMMIT", "QUANTA_REPO_URL"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/version /release-notes /bug registered in APP_SLASH_COMMANDS, rendered to terminal"
+    web: "CLI-only text slash commands; SlashPalette server-routed commands are prefill stubs (B2), no backing web handler"
 purpose: |
   Three read-only, additive operator slash commands. `/version` prints the
   resolved CLI version (env QUANTA_VERSION > package.json > "unknown"), the

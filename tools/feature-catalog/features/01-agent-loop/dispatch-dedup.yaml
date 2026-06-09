@@ -15,6 +15,14 @@ labels: [surface:core, tier:core]
 depends_on: [agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, secret-redaction-content-plane, 183-safety-net-green]
 config_refs:
   env: ["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure deterministic dedup state machine, no I/O; synthetic observation short-circuit, no CLI affordance"
+    web: "pure internal dedup state machine, no user-visible UI affordance on any surface"
 purpose: |
   Bench Type F("Verify-Loop Stuck on Env") 구조적 fix — 동일 (tool name + canonical
   args) 호출이 sliding window 안에서 중복으로 들어오면 dispatch 전에 차단하고 synthetic

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [assemble-config, mcp-client-jsonrpc, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "MCP stdio JSON-RPC bridge wired in the CLI (src/mcp/client.ts, apps/cli/internal.ts); passthrough tools invokable."
+    web: "Bridged mcp__ passthrough tool invocations surface via tool_call -> tool.invoked / tool_result -> tool.completed (context-binding.ts:1079-1096) in the web tool display."
 purpose: 'stdio JSON-RPC + passthrough 도구 브리지 . runAgent e2e(, 3 tests): 모의 MCP 서버를 .mjs 서브프로세스로 spawn → loadMcpTools로 브리지 → ScriptedLLM이 mcp__mock__alpha/boom tool_use 발사 → 풀 runAgent → tool_result event → 루프 continue + 두 번째 LLM 호출.'
 evidence:
   code:

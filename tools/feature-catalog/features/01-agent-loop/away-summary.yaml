@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:claude", "surface:cli", "tier:core", "default-off"]
 depends_on: [agent]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "wired via src/apps/cli/repl/away-summary-wire.ts, CLI renders the recap text on AFK return"
+    web: "recap is a CLI repl render (deliberate_hold lists CLI render of kind ok text); not an event in the 6-event web bridge, never reaches the browser"
 purpose: |
   When the user steps away from an in-progress session and returns, generate a
   tiny recap so they re-orient without re-reading the transcript (Claude Code

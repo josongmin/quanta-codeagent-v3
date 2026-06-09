@@ -13,6 +13,14 @@ owners: ["@songmin"]
 labels: ["absorbed:codex", "surface:tool", "tier:tool-system"]
 config_refs:
   env: [QUANTA_BROWSER_TOOL]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "17/17 evidence files reachable from CLI; navigate/collect tools registered"
+    web: "agent-callable navigate/collect tools render as tool.invoked/tool.completed in session-hooks.ts (name + args preview + result preview)"
 purpose: |
   Agent-callable browser automation over the Chrome DevTools Protocol (CDP).
   A pure `@/browser` slice (port + CDP adapter + headless stub + console/DOM

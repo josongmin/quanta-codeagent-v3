@@ -14,6 +14,14 @@ labels: ["surface:core", "observability-primitive"]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 config_refs:
   env: ["QUANTA_LLM_PROVIDER", "QUANTA_MODEL", "QUANTA_SMOKE_LIVE", "QUANTA_SMOKE_MODEL"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: bun run smoke battery is a dev/test CLI affordance"
+    web: "recorded-trajectory test battery (dev tooling); no browser-facing affordance"
 purpose: |
   실제 agent loop + 실제 도구를 돌리되 LLM은 녹화된 trajectory를 replay
   (tier-0, deterministic, $0)하거나 옵트인 live(tier-1) 호출하는 end-to-end

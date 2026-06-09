@@ -22,6 +22,14 @@ config_refs:
     - apiKeyHelper
     - apiKeyHelperTtlMs
     - apiKeyHelperLegacyVendor
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "composition-root credential mint resolved in CLI bootstrap (cliBuildLlm to resolveVendorApiKey), env-knob driven"
+    web: "pure internal credential-resolution seam; credential knobs are deliberately excluded from the served knob catalog, no browser affordance"
 purpose: |
   Extends the H7 `CredentialSource.mintApiKey()` (already hardened — TTL cache,
   single-flight, empty-stdout guard, trust gate, no-leak) to feed the LEGACY

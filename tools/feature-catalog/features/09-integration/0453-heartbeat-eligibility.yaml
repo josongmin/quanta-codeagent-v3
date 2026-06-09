@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [scheduler-runtime]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; evaluator wired into scheduler tick + reactor self-wake in CLI"
+    web: "pure total eligibility evaluator (policy projection, no clock/UI); a gate consulted before background autorun, no user-visible affordance"
 purpose: |
   A PURE, TOTAL eligibility evaluator consulted by BOTH background autorun
   paths before they fire:

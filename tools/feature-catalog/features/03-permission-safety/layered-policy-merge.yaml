@@ -19,6 +19,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["absorbed:codex", "absorbed:cursor", "surface:cli", "security-touched"]
 depends_on: [hitl-4-tier-gate]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure layered struct-merge engine + permission context derive driven by env knobs on CLI"
+    web: "pure internal policy-merge engine with override metadata; no dedicated user-visible render on any surface (only changes a permission decision)"
 purpose: |
   Pure layered struct-merge engine + the permission-domain wiring that consumes
   it. Absorbs Codex `ConfigLayer / ConfigLayerSource / MergeStrategy /

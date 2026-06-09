@@ -23,6 +23,14 @@ config_refs:
     - ANTHROPIC_FOUNDRY_BASE_URL
     - ANTHROPIC_API_KEY
     - OPENAI_API_KEY
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "provider precedence resolver runs at CLI LLM factory wiring"
+    web: "pure internal provider-resolution primitive (env precedence ladder, ui_surfaces n-a), no UI affordance"
 purpose: |
   `resolveProviderWithRouter(input)` is the 7-layer precedence ladder that picks the
   active `LlmProvider` from explicit caller arg + `CLAUDE_CODE_USE_*` (claude-cli

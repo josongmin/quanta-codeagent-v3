@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [subagent-typed-port, agent-delegation-runner]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "synchronous delegate tool registered as extraTool via SessionDeps.delegation, runs in CLI loop with HITL always-confirm"
+    web: "renders as generic tool.invoked/completed (mapped) plus EscalationCard for the always-confirm approval, but no dedicated delegation affordance and default-OFF host-opt-in"
 purpose: |
   quanta엔 이미 background subagent(subagent_fork/poll/await, ADR-0140)와
   6-tool(spawn_agent 등)이 있다. 이건 **동기** delegation 도구 — 부모가

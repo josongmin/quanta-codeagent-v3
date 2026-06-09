@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "adr:0263", "default-off"]
 depends_on: [retrieval-commit-embedder, retrieval-multi-vendor-embedding]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "embedding cache port + adapters in retrieval import graph"
+    web: "pure content-hash embedding cache codec, ui_surfaces n-a, no UI affordance"
 purpose: |
   Idempotent embed cache keyed by `hash(text) + ":" + modelTag` so a
   provider/model swap automatically invalidates every stale entry

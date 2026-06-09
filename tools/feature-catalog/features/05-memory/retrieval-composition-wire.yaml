@@ -16,6 +16,14 @@ depends_on:
   - retrieval-hybrid-query
   - retrieval-commit-embedder
   - retrieval-multi-vendor-embedding
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "buildRetrievalStackCore + bridges + QUANTA_RETRIEVAL_HYBRID env knob wired at CLI/agent entry; derived 6/7 holds"
+    web: "pure composition-root wire (env-gated stack assembly + memory/localize bridges); affects recall ranking under the hood, no user-visible affordance on any surface"
 purpose: |
   Composition-root wire for the ADR-0159 retrieval stack. The 5 retrieval
   axes (rerank registry / chunk-bucket / commit-embedder / multi-vendor

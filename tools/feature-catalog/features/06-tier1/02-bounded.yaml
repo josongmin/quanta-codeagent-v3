@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, tier:1]
 depends_on: [agent, agent-tool-shape, subagent-6-tools, task-registry, quantasubagent-maxdepth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "maxDepth recursion bound on subagent dispatch via QUANTA_SUBAGENT_MAX_DEPTH, runs in CLI"
+    web: "pure internal recursion-limit policy fence, no user-visible UI affordance"
 purpose: |
   서브에이전트 다단계 재귀를 `maxDepth` (default 3)로 hard-bound. 자식 호출
   마다 `req.depth = parentDepth + 1`이 전파되고, `req.depth > maxDepth`인

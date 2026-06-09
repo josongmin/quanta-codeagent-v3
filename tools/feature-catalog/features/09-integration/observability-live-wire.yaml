@@ -15,6 +15,14 @@ depends_on:
   - observability-wire
   - run-ledger-attribution
   - observability-ui-pane
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Observability wire lives in apps/agent + web-daemon entries (resolveObservabilitySlots/ObservableRuntimeFacade); 0/3 evidence reachable from the interactive CLI entry."
+    web: "Live ports (RunLedger/Objective/Approval) feed the web-only ObservabilityPane; web-daemon/index.ts buildObservabilityPorts + ObservableRuntimeFacade wired (apps/web-daemon/index.ts:143)."
 purpose: |
   Closes the three Wave-3 deliberate-holds so observability goes live.
 

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: [auto-approval-reviewer, branch-only-guard, color-policy-resolver, default-acceptedits-bypass-auto, git-c]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/diff-preview.ts renders ANSI unified diff in the terminal; reachable from CLI."
+    web: "CLI ANSI terminal render; web DiffPanel is NOT mounted (App.tsx:578) so this diff never reaches the browser."
 purpose: |
   4개 변경-도구(`write` / `edit` / `apply_patch` / `scripted_replace`) 분기를
   단일 `renderActionDiff()`로 통일 — before/after 텍스트 페어를 line-LCS

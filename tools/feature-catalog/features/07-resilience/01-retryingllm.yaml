@@ -14,6 +14,14 @@ labels: [surface:core, resilience-primitive]
 depends_on: [runner-assemble-builders, assemble-config, fallback-kinds-policy, llm-factory, model-swap-retry]
 config_refs:
   env: [QUANTA_COMPACT_BREAKER, QUANTA_COMPACT_BREAKER_PROACTIVE_MAX, QUANTA_COMPACT_BREAKER_REACTIVE_MAX, QUANTA_COMPACT_MODEL, QUANTA_COMPACT_PROVIDER, QUANTA_MODEL_FALLBACK]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "RetryingLLM LLMPort decorator (pre-stream backoff) in the assembled chain; reachable from CLI entry"
+    web: "pure resilience-primitive decorator, no user-visible affordance on any surface"
 purpose: |
   RetryingLLM (`src/agent/retry.ts`) — LLMPort 데코레이터. transient pre-stream
   실패(network/server_error/overloaded/rate_limit)에만 bounded backoff로

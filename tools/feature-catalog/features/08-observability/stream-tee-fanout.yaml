@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [agentevent, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, jsonl-cumulative-retention]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure fan-out StreamPort with no IO, ui_surfaces n-a; an internal composition primitive."
+    web: "Pure internal StreamPort fan-out primitive; no user-visible affordance on any surface."
 purpose: |
   Pure fan-out `StreamPort`. Forwards every `AgentEvent` to every wrapped
   port in order. In NON-STRICT mode (default — product / session) one

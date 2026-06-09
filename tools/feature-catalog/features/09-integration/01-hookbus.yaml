@@ -15,6 +15,14 @@ labels: ["surface:ipc"]
 depends_on: [secret-redaction-content-plane, agent-loop-branch-hardening, plan-mode, response-in-progress, mode-repo-rules-active-skills-working-state-memory-hints]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "In-process HookBus mechanism runs in the CLI loop (src/agent/hooks.ts, dispatch.ts)."
+    web: "Control-plane policy infrastructure with no browser affordance; hook lifecycle events (pre_compact, subagent_start/_stop, post_tool_use_failure) are not rendered and are not in the 6-event bridge."
 purpose: |
   In-process HookBus — 9 이벤트(session_start / session_end / turn_start /
   pre_tool_use / post_tool_use / **post_tool_use_failure** / **pre_compact** /

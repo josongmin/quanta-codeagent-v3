@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [permission-policy-engine, permission-store-json, harddeny-readonly-short-circuit, per-host-agent-mode, per-thread-permissions]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "static destructive-git argv matchers run before tool dispatch reachable from CLI; ui_surfaces cli but is a backstop deny rule"
+    web: "pure HARD_DENY argv-pattern backstop (policy-rules.ts), internal fail-closed deny with no user-visible UI affordance on any surface"
 purpose: |
   HARD_DENY_RULES extension covering workflow-destructive git argv shapes
   that prompt-level posture (ADR-0099) cannot guarantee — forced-history

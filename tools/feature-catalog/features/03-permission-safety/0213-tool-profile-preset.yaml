@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:zed, absorbed:codex, surface:core, tier:core]
 depends_on: [permission-hook-ordering, awf-tool-matcher]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 5/5 evidence files reachable from CLI entry"
+    web: "internal tool-profile port plus presets/resolver; CLI wire (--tool-profile + /profile) deferred per notes, so no user-visible affordance on any surface yet"
 purpose: |
   Zed의 named "tool profile" mode 3종 (Write/Ask/Minimal) + Codex agent_role enum (explorer/
   worker/none) 패턴 흡수. v3는 fine-grained 조각 (ADR-0046 permission stack / ADR-0055 HITL

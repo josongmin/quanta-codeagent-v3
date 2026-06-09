@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [chatgpt-oauth-provider]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI loopback callback (cli-callback.ts http://localhost:port/auth/callback) reachable from CLI auth flow"
+    web: "pure surface-agnostic port seam plus a CLI-only loopback impl; the Web provider body (web-callback.ts) is deliberately unbuilt per the deliberate_hold, so no web affordance ships here"
 purpose: |
   ChatGPT-OAuth 콜백 수신을 surface-agnostic port로 추상화 — `OAuthCallbackProvider`
   인터페이스는 redirect_uri 빌드 + 콜백 대기(promise) + state 검증을 한 계약으로 본다.

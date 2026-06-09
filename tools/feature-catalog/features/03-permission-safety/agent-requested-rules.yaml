@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:cursor"]
 depends_on: [glob-rules-auto-inject]
 config_refs:
   env: ["QUANTA_FETCH_RULES"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "fetch_rules tool + CLI lazy-load injects requestable-rule index behind QUANTA_FETCH_RULES; ui_surfaces cli; modes interactive/ide"
+    web: "fetch_rules is a model-facing tool; its invocation could ride tool.invoked but the CLI wire (fetch-rules-wire.ts) is CLI-only and there is no web wiring of the rule index — no browser affordance"
 purpose: |
   Cursor's "agent-requested" rules: a description-only rule (no globs, not
   always-apply) the model pulls in on demand by matching its task against the rule's

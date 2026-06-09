@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:mcp-spec"]
 depends_on: [mcp-client, mcp-bridge]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; transport port wired into MCP client in the CLI"
+    web: "pure internal transport abstraction (stdio/http-sse carrier behind McpTransport interface); no UI affordance on any surface"
 purpose: |
   client.ts core(request/dispatch/pending/timeout)는 불변. stdio 4곳
   (start/send/pumpStdout/stop)을 transport port 뒤로 분리 — `McpTransport`

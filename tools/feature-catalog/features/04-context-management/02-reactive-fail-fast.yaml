@@ -12,6 +12,14 @@ configurable: integrated
 owners: ['@songmin']
 labels: [surface:core]
 depends_on: [plan-mode, response-in-progress, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, effort-5-tier]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reactive-compaction fail-fast policy, pure internal control, no direct CLI affordance"
+    web: "pure internal compaction fail-fast policy, no UI affordance"
 purpose: reactive fail-fast
 evidence:
   code:

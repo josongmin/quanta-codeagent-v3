@@ -20,13 +20,16 @@ describe("KnobsPanel", () => {
     expect(html).toContain('data-testid="knobs-loading"')
   })
 
-  it("renders an error notice when there is no endpoint", () => {
+  it("renders the 'Not connected' error notice synchronously when there is no endpoint", () => {
     const html = renderToStaticMarkup(<KnobsPanel endpoint={null} onClose={() => undefined} />)
-    // Synchronous initial render shows loading; the effect that sets the
-    // "Not connected" error runs after mount which static render skips — so
-    // assert the dialog + search affordances are present regardless.
-    expect(html).toContain('data-testid="knobs-panel"')
-    expect(html).toContain('aria-label="Filter knobs"')
+    // endpoint===null is known at render time (no fetch needed), so the error
+    // state must show on FIRST paint — NOT a flash of loading that only an
+    // unrun effect would correct. This is the endpoint-specific assertion the
+    // prior version lacked (it asserted only panel/filter, identical to the
+    // connected case).
+    expect(html).toContain('data-testid="knobs-error"')
+    expect(html).toContain("Not connected")
+    expect(html).not.toContain('data-testid="knobs-loading"')
   })
 
   it("includes the search box and close control", () => {

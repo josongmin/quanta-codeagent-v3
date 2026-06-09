@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "discipline:cleanup", "no-heuristics"]
 depends_on: [repl-interactive-surface, multimodal-image-input, shell-output-delta-streaming, slashctx-6-ports-wire-completion, abort-signal-compose]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "STATUS_FLASH config, banner strings, silent-catch telemetry all in src/apps/cli/repl.ts visible in the CLI REPL surface."
+    web: "Pure CLI repl.ts internal cleanup (flash durations, banners, sandbox-mode cast); these UX flashes/banners are terminal-only and have no apps/web-frontend equivalent, so nothing reaches the browser."
 purpose: |
   Closes 7 audit findings on `src/apps/cli/repl.ts` without splitting the
   larger God-class:

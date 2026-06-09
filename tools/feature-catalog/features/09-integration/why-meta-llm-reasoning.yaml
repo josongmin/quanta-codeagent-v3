@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:observability"]
 depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, inspect-cmd-toolcall-expand, llm-factory]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/why slash command renders a meta-LLM reasoning panel in the CLI REPL (ui_surfaces cli, surface:cli)"
+    web: "CLI-only REPL slash command; SlashPalette Server-routed entries are prefill stubs that do not execute and there is no web handler (bottleneck B2)"
 purpose: |
   ADR-0239가 `/debug` runtime tracer (single-line per-event)를 깔고 ADR-0267이
   decision-emit을 widen해서 모든 게이트가 session JSONL에 decision envelope을

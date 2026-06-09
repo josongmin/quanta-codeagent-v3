@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [isconcurrencysafe]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "1/1 evidence file reachable from CLI; Bun.Glob file enumeration tool"
+    web: "agent-callable glob renders as tool.invoked/tool.completed in session-hooks.ts"
 purpose: |
   Read-only file enumeration via `Bun.Glob.scan`. Optional `path` (base
   directory) is jail-validated via `@/storage.resolveJailed` BEFORE the scan —

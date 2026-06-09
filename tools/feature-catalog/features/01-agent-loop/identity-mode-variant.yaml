@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, absorbed:claude, absorbed:codex, surface:core]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "per-mode system-prompt identity lines spliced into buildSystemPrompt; internal prompt assembly, no CLI affordance"
+    web: "pure internal prompt-assembly slot, no user-visible UI affordance on any surface"
 purpose: |
   Cursor + Claude + Codex 3-vendor 강신호 흡수. quanta 단일 "You are
   Quanta..." 시스템 prompt를 mode (default/plan/review/audit/onboarding)

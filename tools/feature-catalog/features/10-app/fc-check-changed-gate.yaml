@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:tooling"]
 depends_on: [feature-catalog-tool]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "PR-time CI gate command (bun fc check-changed); pure decision logic, no interactive surface."
+    web: "Pure CI gate tooling, no UI affordance on any surface."
 purpose: |
   `bun fc check-changed <base-ref>` — PR diff 를 git name-status 로 읽어
   ADDED 된 `src/**/*.ts` 파일이 어떤 fc YAML 의 `evidence.code` 에도 등장

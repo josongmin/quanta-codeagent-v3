@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: [secret-redaction-content-plane]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "opt-out gate with CLI affordance: normalizeRedactionConfig startup-throw when disabled-without-ack plus per-turn system-reminder banner"
+    web: "config-validation policy gate; the banner is a content-plane system-reminder, not a bridged event or web card, so no browser UI affordance"
 purpose: |
   Default-ON gate that enforces the secret-redaction invariant. Disabling at
   the host level requires an explicit `acknowledgedRisk` string — a non-empty

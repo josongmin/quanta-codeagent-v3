@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
 depends_on: [errors-helper-fix, runtime-config-ssot, byte-stable-string-comparator, src-shared-logger-ts, plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "assertNever guard used throughout CLI import graph (loop, demuxer, adapters)."
+    web: "Pure internal compile-time exhaustiveness guard primitive, no UI affordance on any surface."
 purpose: |
   Exhaustiveness guard for `switch` / `if-else` chains over a closed
   union / enum. Placing `assertNever(x, label)` in the `default` branch

@@ -14,6 +14,14 @@ labels: ["surface:cli"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
 config_refs:
   env: ["QUANTA_PROVIDER", "QUANTA_SANDBOX"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure no-deps .env bootstrap loader at process start; no user-visible affordance"
+    web: "pure internal env-loader primitive, no UI affordance on any surface"
 purpose: |
   Tiny no-dependency `.env` loader (`loadEnvFiles(files)`). Both CLI
   surfaces (`src/apps/cli/index.ts` and `src/apps/agent/index.ts`)

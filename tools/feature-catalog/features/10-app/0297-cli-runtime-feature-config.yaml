@@ -19,6 +19,14 @@ owners: ["@songmin"]
 labels: ["surface:cli", "tier:2", "adr-0297", "refactor"]
 depends_on:
   - cli-bootstrap-host-extraction
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CliFeatureConfig resolved at CLI session start (src/apps/cli/repl.ts) feeding REPL factories; reachable from CLI entry."
+    web: "Surface-level CLI env-config record consumed only by CLI REPL factories; web frontend builds its own config and never imports this CLI slice."
 purpose: |
   Consolidates the scatter of inline `process.env` / `isTTY` reads across
   the CLI REPL surface (lifecycle pills, cost panel, branch progress,

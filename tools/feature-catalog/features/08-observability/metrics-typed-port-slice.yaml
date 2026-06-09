@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [metrics-registry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "typed MetricsRegistry/MetricSink primitive reachable in CLI"
+    web: "pure closed-port in-memory metrics primitive, no UI affordance on any surface"
 purpose: |
   Closed-port metrics primitive: `MetricsRegistry` + `MetricSink` pair
   with three KIND-committed shapes (counter / histogram / gauge) and a

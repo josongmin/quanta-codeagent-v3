@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex", "held-promotion"]
 depends_on: [memory-fence-cleanup, memory-outcome-enum, phase1-stage1-store, phase2-promotion-gate, codex-2-phase-consolidator]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3-file atomic writer invoked by Phase 2 consolidator on CLI; derived 4/5 holds"
+    web: "pure on-disk writer primitive (temp-then-rename + git commit); output is files under ~/.quanta, ui_surfaces n-a; no UI affordance"
 purpose: |
   Owns the on-disk side of the Phase 2 cross-session consolidator. Three
   user-visible markdown files (MEMORY.md / raw_memories.md /

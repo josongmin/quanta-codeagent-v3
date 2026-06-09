@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude-code"]
 depends_on: [external-agent-import, portable-session-v1]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Translator feeds the CLI session import verb; 3/3 evidence reachable from CLI entry import graph."
+    web: "User-facing import mechanism is CLI-only; no web import verb (B3-absent) and @/migration not reachable from web-daemon; does not reach the browser."
 purpose: |
   `SessionTranslator` adapter that parses a Claude Code session transcript at
   `~/.claude/projects/<slug>/<id>.jsonl` into v3 `Message[]`. Each line is a

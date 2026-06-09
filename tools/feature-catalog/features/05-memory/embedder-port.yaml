@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [sqlite-persistent-store, memory-dedup-planner]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: EmbedderPort + OpenAI/Null/Caching impls reachable from CLI entry"
+    web: "pure internal embedding-provider port (src/memory/ports.ts, src/agent/memory-embedder.ts) — pluggable seam for recall vectors, no UI affordance on any surface"
 purpose: |
   The memory slice owns the structural EmbedderPort interface (so it stays
   free of any LLM-provider import per slice-isolation), while concrete

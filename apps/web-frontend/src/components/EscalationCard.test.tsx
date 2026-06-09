@@ -151,7 +151,7 @@ describe("EscalationCard", () => {
     )
   })
 
-  it("the deny_and_steer button reveals a steer text input in the rich card", () => {
+  it("the deny_and_steer button reveals a steer input AND carries the typed steer into the decision", () => {
     const markup = renderToStaticMarkup(
       <EscalationCard
         approval={{
@@ -167,9 +167,26 @@ describe("EscalationCard", () => {
         onDecision={() => {}}
       />,
     )
-    // The steer affordance is present in the rich card (a textarea the user fills
-    // before sending a deny_and_steer). Pinned so the button can never again be a
-    // no-op that silently drops the steer.
+    // (a) The steer affordance is structurally present (a textarea to type into).
     expect(markup).toContain("textarea")
+    // (b) The REAL anti-"silently drops the steer" guard: the exported decision
+    //     seam the button calls carries the typed steer into a deny_and_steer
+    //     decision (trimmed), and DROPS an empty/whitespace steer. Static render
+    //     can't drive the click, so this pins the pure seam the button invokes
+    //     — `toContain("textarea")` alone never proved the steer is read.
+    const { escalationDecisionFor } = EscalationCard as unknown as {
+      escalationDecisionFor: (
+        option: string,
+        steer?: string,
+      ) => { decision: "approve" | "deny"; option: string; steer?: string }
+    }
+    expect(escalationDecisionFor("deny_and_steer", "go fix src/x.ts")).toEqual({
+      decision: "deny",
+      option: "deny_and_steer",
+      steer: "go fix src/x.ts",
+    })
+    expect(escalationDecisionFor("deny_and_steer", "  go fix  ").steer).toBe("go fix") // trimmed
+    expect(escalationDecisionFor("deny_and_steer", "   ").steer).toBeUndefined() // whitespace dropped
+    expect(escalationDecisionFor("deny_and_steer", undefined).steer).toBeUndefined()
   })
 })

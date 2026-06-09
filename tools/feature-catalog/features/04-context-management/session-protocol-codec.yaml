@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "surface-agnostic session protocol command/event/snapshot codec in import graph"
+    web: "pure internal wire-protocol codec/library (versioned envelopes + validation), no user-visible affordance"
 purpose: |
   `src/protocol/session/` — the canonical, surface-agnostic wire protocol that
   the IPC session transport and the web-daemon WS surface speak (one JSON

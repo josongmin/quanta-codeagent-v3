@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [runrepairrounds]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: pure repair seed-message builder under src/apps/bench, not in interactive CLI graph"
+    web: "pure seed-message + diff-truncation builder internal to the repair-round loop, no standalone user-visible affordance on any surface"
 purpose: |
   Pure seed-message builder for the b2 repair-round orchestrator (RFC §16,
   ADR-0014). Given the running cumulative diff and the latest validator

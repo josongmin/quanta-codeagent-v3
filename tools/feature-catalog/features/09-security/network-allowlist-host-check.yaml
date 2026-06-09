@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: [sandbox-policy, bash-timeout-cap, escalating-kill, os-sandbox-wire, guarded-spawn]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure propositional stateless boolean host-allowlist check for ci-bot mode (caller decides); a library, no CLI affordance"
+    web: "pure internal propositional policy check, no UI affordance on any surface"
 purpose: |
   Pure propositional check answering "is this URL/host on the allowlist?"
   for the ci-bot mode network lever (`network: { kind: "allowlist"; hosts:

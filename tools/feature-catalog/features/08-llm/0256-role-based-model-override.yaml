@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:roo, surface:core, tier:core]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "role-to-model resolver reachable from CLI (in-memory, no surface wire)"
+    web: "pure internal in-memory resolver primitive ({role to modelId} override), no UI affordance on any surface"
 purpose: |
   Roo Code orchestrator의 "역할별 모델 선택" 패턴 흡수. plan-writer는 deep-reasoning model
   (o1/claude-opus), executor는 fast minimal-diff (claude-haiku/gpt-5-mini), reviewer/explorer 동.

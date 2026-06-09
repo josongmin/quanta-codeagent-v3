@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [debug-blame-skills-trio]
 config_refs:
   env: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure in-memory capture-and-list primitive (src/agent/debug-trace-autofix.ts), default-OFF, ui_surfaces n-a, no wired caller."
+    web: "Pure internal queue primitive, no slash or UI affordance on any surface."
 purpose: |
   순수 in-memory capture-and-list primitive. `debug-trace` skill (ADR-0181)이
   생성하는 `{file:line, hypothesis, proposed-fix}` ranked envelope를 typed

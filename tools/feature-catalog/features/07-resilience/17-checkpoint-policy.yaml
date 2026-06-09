@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:codex", "absorbed:cursor"]
 depends_on: [effect-channel, agent-loop-branch-hardening, agent-types-split, cap-enforcer, cfg-fourrule-true]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal auto-checkpoint anchor policy (EffectChannel wrap), no user affordance"
+    web: "pure internal ShadowOdb checkpoint-anchor policy, no UI affordance"
 purpose: |
   Cline / Hermes / Codex / Cursor의 auto-checkpoint 패턴을 closed enum 4-arm
   으로 표면화 — `off`(byte-identical 기본) / `per_tool`(모든 tool-use 전,

@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex"]
 depends_on: [agent-loop-core]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; per-spawn fork_turns tool input + redaction core"
+    web: "internal per-spawn tool parameter (selectForkTurns/redact/composeForkedPrompt) affecting child prompt; no distinct browser UI affordance"
 purpose: |
   The `agent` spawn gains a `fork_turns` input (none[default] | all | N): a child
   inherits the parent's recent conversation instead of starting cold (Codex

@@ -14,6 +14,14 @@ labels: ["surface:ipc"]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 config_refs:
   env: ["QUANTA_LSP_TOOLS"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "agent-side LSP bridge routes lsp_* nav tools by extension; reachable from CLI entry (lsp_* tools run in CLI)"
+    web: "lsp_* nav tool calls surface only via the generic tool.invoked/tool.completed render in apps/web-frontend session-hooks; no dedicated nav UI and the diagnostics channel rides a non-bridged event"
 purpose: |
   Agent 슬라이스가 LSP 어댑터(TypescriptAdapter / PyrightAdapter)와 만나는 단일
   bridge — 파일 확장자 → adapter 라우팅 + lsp-nav 도구(definition/references/hover/

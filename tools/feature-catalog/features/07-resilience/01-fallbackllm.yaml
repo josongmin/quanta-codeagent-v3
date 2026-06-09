@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core, resilience-primitive]
 depends_on: [agent-loop-branch-hardening, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "FallbackLLM LLMPort decorator in the assembled chain; reachable from CLI entry"
+    web: "pure resilience-primitive decorator, no user-visible affordance on any surface"
 purpose: |
   `FallbackLLM` (`src/llm/fallback.ts`) — LLMPort 데코레이터. 우선순위
   순서의 provider 리스트를 받아, 현재 provider가 fallback-trigger 에러

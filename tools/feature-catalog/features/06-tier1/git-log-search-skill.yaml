@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [ctk-git-skills-bundle]
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; git-log-search system skill, slash-wirable"
+    web: "skill slash invocation (/git-log-search) is CLI-only; SlashPalette prefill stub (B2), no web skill handler"
 purpose: |
   사용자가 "when did X get added"/"who wrote this"/"find commits matching Y"/
   "code archaeology"/"git history search"라고 물을 때 git 히스토리를 4개 검색

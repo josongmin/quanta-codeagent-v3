@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:cline", "default-off"]
 depends_on: [per-tool-checkpoint-granularity]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 4/4 evidence files reachable from CLI entry (rewind-tool-cmd.ts)"
+    web: "user mechanism is the /rewind-tool slash; in web SlashPalette.tsx:421 it is a prefill stub (B2) and there is no rewind/restore SessionCommand verb (B3) so it never reaches the browser"
 purpose: |
   Cline UX 흡수 — 같은 tag로 두 면 (workspace files + conversation) 을
   직교 3-way 로 surface. `ThreeWayRestorePort` (`restoreFiles` / `restoreTask`

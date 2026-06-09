@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-synthetic-generator, eval-synthetic-scenario-schema, eval-tier1-synthetic, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "eval Tier-1 LLM-as-judge; derived 0/5 reachable from interactive CLI entry"
+    web: "eval-harness internal judge primitive, no web UI affordance"
 purpose: |
   Scenario rubric + 캡쳐된 transcript를 받아 judge LLM에 per-item pass/fail을
   요청, weighted score(default weight=1) 계산. ERROR SURFACE CONTRACT

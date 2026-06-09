@@ -16,6 +16,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["absorbed:claude-code", "absorbed:codex", "surface:integration", "tier:adapter"]
 depends_on: [migration-detector, session-store-save-load]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "session import <provider> CLI verb; 10/10 evidence reachable from CLI entry import graph; interactive + headless."
+    web: "User value rides the CLI import verb; protocol.ts SessionCommand has no import/resume verb (B3) and @/migration not reachable from web-daemon; never reaches the browser."
 purpose: |
   `session import <provider>` ingests a competitor coding-agent install and makes
   it a first-class quanta session. ADR-0430 closes the `persisted_sessions=0` gap

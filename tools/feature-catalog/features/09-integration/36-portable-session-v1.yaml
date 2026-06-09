@@ -13,6 +13,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [session-jsonl-envelope, session-root-provider-port, session-sanitize-id, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure internal export/import schema + typed ImportError union (src/ipc/session-export.ts/session-import.ts); ui_surfaces api; not wired into any entry, no CLI affordance."
+    web: "Pure internal session round-trip schema/validator; no browser affordance and not reachable from web-daemon."
 purpose: |
   Portable session schema v1 (snake_case wire) for round-tripping a saved
   session across surfaces. `exportSession(sessionId)` writes

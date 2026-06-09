@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [model-swap-retry, built-in-slash-commands, chatgpt-oauth-provider, cli-help-discovery-render, cli-slash-help]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/retry-with re-streams the prior turn against an alternate model with transcript surgery in the CLI"
+    web: "needs a re-stream/transcript-rewrite session verb absent from protocol.ts SessionCommand (B3); no web handler"
 purpose: |
   CLI surface that wires `resolveRetryModel` + `streamWithModel`
   (`src/llm/model-swap.ts`, ADR-0065) into a session-time slash command:

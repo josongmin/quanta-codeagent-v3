@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core, resilience-primitive]
 depends_on: [budget-events-union, budget-meter]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure types (BudgetDials/Caps/ExhaustionPolicy), no I/O, no user affordance"
+    web: "pure type/schema definitions, no UI affordance"
 purpose: |
   16-field BudgetDials shape (maxTurns / maxWallClockMs / maxModelCalls /
   maxToolCalls / maxShellCommands / maxTestRuns / maxInputTokens / maxOutput

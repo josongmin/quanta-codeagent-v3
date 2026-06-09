@@ -15,6 +15,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
 depends_on: [runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "JSON-per-line stderr logger reachable from CLI; operator log sink."
+    web: "Pure machine-consumable log sink primitive (src/observability/logger.ts), stderr-only; no browser affordance."
 purpose: |
   JSON-per-line logger for machine-consumable observability — distinct from
   `@/shared`'s human-shaped `logger`. Emits one `JSON.stringify(LogRecord)`

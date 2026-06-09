@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:claude-cc-cli", "surface:tool", "tier:tier1"]
 depends_on: [role-model-override, model-swap-retry]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "6/6 reachable; advisor tool env-flipped by QUANTA_ADVISOR_MODEL"
+    web: "advisor consult is an ordinary tool call -> renders as tool.invoked/completed card (name + args/result preview) via the bridged tool_call/tool_result events"
 purpose: |
   Agent-callable PURE consult: the model deliberately asks a STRONGER /
   DIFFERENT model for a SECOND OPINION mid-loop and gets the analysis back

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-schema-additive, eval-five-tier]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "eval JSONL ResultStore I/O; derived 0/3 reachable from interactive CLI entry"
+    web: "pure internal eval storage I/O primitive, no UI affordance on any surface"
 purpose: |
   Tier-agnostic JSONL store. 한 runId당 하나의 파일 (`<dir>/<runId>.jsonl`) —
   tier 간 isolation + 단순 diff. Schema validation은 `schema.ts`, aggregation은

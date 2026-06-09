@@ -15,6 +15,14 @@ owners: ["@songmin"]
 labels: ["adr-0170", "tier:1", "observability", "coverage"]
 depends_on:
   - code-coverage
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; AST adapter behind the ADR-0165 CoverageSource port"
+    web: "pure AST coverage adapter behind the port (no own tool surface), no UI affordance"
 purpose: |
   AST-walked sibling to ADR-0165's V8 keyword-regex heuristic. Uses the
   typescript compiler API (`ts.createSourceFile` + `ts.forEachChild`)

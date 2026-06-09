@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-five-tier]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: trajectory replay/classify/freeze under src/apps/eval, CLI-only"
+    web: "real-session trajectory replay runs in eval CLI app, not reachable from web-daemon; no web affordance"
 purpose: |
   Tier-4 of the 6-tier eval stack (umbrella id: `eval-five-tier`). Operates on
   REAL session transcripts (not synthetic, not public bench) — `source.ts`

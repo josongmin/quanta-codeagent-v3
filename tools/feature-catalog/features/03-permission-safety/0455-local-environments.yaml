@@ -19,6 +19,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [network-egress-proxy, localsandbox]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runMain resolveLocalEnvSelection threads localEnv onto AgentConfig; activated via QUANTA_LOCAL_ENV + .quanta/environment.toml from CLI; ui_surfaces cli"
+    web: "declared-env selection is a CLI/config-file mechanism with no web render; no SessionCommand verb and no event bridges env switching to browser (B1/B3)"
 purpose: |
   프로젝트가 `.quanta/environment.toml` (또는 Codex-compat
   `.codex/environments/environment.toml`)에 named dev environment를 DECLARE하면,

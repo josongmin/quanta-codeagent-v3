@@ -12,6 +12,14 @@ configurable: n-a
 owners: ['@songmin']
 labels: [surface:cli]
 depends_on: [gitdiff, git-read-trio, git-branch-name-schema-guard, git-log-us-separator, git-mutating-tools]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_init first-class tool + runner reachable from CLI import graph"
+    web: "Model-invokable git tool; tool_call/tool_result render as the generic tool.invoked/completed card (session-hooks.ts:420-435)."
 purpose: 45 tests
 evidence:
   code:

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [read-write-edit, typed-tool-failure-modes, tool-output-schema-factory, fsjailerror, git-review-diff]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "providerFromEnv env factory + buildDefaultTools registration reachable from CLI import graph"
+    web: "Pure composition-root wiring (env-driven provider factory + MUTATING_TOOL_TABLE/buildDefaultTools registration); the visible affordance is owned by the doc-tools/web-search features, this has no UI of its own."
 purpose: |
   Surgical 2-part wire-up closing seams deliberately left open by ADR-0127
   / 0133 / 0137.

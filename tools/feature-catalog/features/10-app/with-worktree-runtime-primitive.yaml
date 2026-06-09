@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [worktree-fork-primitive]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure internal runtime HOF (withWorktree) consumed by subagent-runner and tool/worktree plumbing; a git-worktree isolation library function, not a user-facing CLI affordance."
+    web: "Pure internal git-worktree isolation primitive, no UI affordance on any surface."
 purpose: |
   Runtime HOF that runs `fn` inside a throwaway git worktree at
   `<repoRoot>/.claude/worktrees/agent-<id>` on branch `worktree-<id>` and

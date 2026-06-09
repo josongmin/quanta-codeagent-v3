@@ -70,22 +70,28 @@ describe("surface_integration — invariants (ratchet)", () => {
     expect(offenders).toEqual([])
   })
 
-  // Teeth #2 — no POSITIVE contradiction with the legacy ui_surfaces tag.
-  // surface_integration is the new SSOT; ui_surfaces is allowed to LAG (a
-  // full/partial surface need not yet be tagged — the migration sweep fixes
-  // that). But it must never CONTRADICT: if we audited a surface as
-  // missing/na, the legacy tag must not still claim that surface is present.
-  test("SI-11: missing/na surface must not be claimed present by ui_surfaces", () => {
+  // Teeth #2 — no POSITIVE contradiction with the legacy ui_surfaces tag on the
+  // WEB axis, for AUDITED entries only. Fires on web="missing" (not "na"):
+  //   web=missing = "the web app SHOULD render it but doesn't" → genuinely
+  //                 contradicts a ui_surfaces tag claiming web/tauri (a real
+  //                 overclaim — the teeth this audit exists to keep).
+  //   web=na      = "not a web UI feature" (pure backend primitive) →
+  //                 compatible with a loose legacy tag; not a contradiction.
+  // The CLI axis is intentionally NOT hard-checked here: the legacy [cli] tag
+  // means "ships in a command-line surface" broadly (incl. the eval/bench/probe
+  // apps), whereas this audit's cli status is specific to the INTERACTIVE CLI
+  // (src/apps/cli) — so an eval/bench/probe feature is honestly cli=missing for
+  // the interactive CLI yet legitimately tagged [cli]. That definitional gap is
+  // surfaced advisorily by `bun fc surface`, not failed in CI. `derived` entries
+  // are exempt (mechanical baseline; disagreements are a migration signal).
+  test("SI-11: audited web=missing must not be claimed present by ui_surfaces", () => {
     const offenders: string[] = []
     for (const { feature: f } of features) {
       const si = f.surface_integration
-      if (si.method === "unverified") continue
+      if (si.method !== "audited") continue
       const tags = new Set(f.ui_surfaces)
-      if ((si.cli === "missing" || si.cli === "na") && tags.has("cli")) {
-        offenders.push(`${f.id}: si.cli=${si.cli} but ui_surfaces has cli`)
-      }
-      if ((si.web === "missing" || si.web === "na") && (tags.has("web") || tags.has("tauri"))) {
-        offenders.push(`${f.id}: si.web=${si.web} but ui_surfaces has web/tauri`)
+      if (si.web === "missing" && (tags.has("web") || tags.has("tauri"))) {
+        offenders.push(`${f.id}: si.web=missing but ui_surfaces has web/tauri`)
       }
     }
     expect(offenders).toEqual([])

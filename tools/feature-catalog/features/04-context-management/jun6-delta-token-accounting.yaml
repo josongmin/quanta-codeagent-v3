@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [token-estimator-chars-quarter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "O(1) incremental token counter wired at composition root, reachable from CLI"
+    web: "pure perf memoization with byte-identical output and no event, ui_surfaces n-a, no UI affordance"
 purpose: |
   루프가 압축 threshold 게이트 입력으로 working-memory 전체를 `estimateTokens` 로 매 턴
   여러 번 재스캔(O(n))하던 것을, append-mostly 트랜스크립트의 tail 변화만 증분 반영하는

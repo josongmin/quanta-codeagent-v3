@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [git-log-search-skill]
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; debug-trace/explain-stack-trace/blame-section system skills"
+    web: "skill slash invocation is CLI-only; SlashPalette is prefill stubs (B2), no dedicated web skill affordance"
 purpose: |
   세 개의 워크플로 형태 시스템 스킬을 한 번에 흡수 — 모두 prompt-only,
   새 도구 추가 없음, 사용자가 query를 좁히며 반복 iterate 하는 narrative

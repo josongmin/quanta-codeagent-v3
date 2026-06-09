@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, tier:1]
 depends_on: [agent, agent-tool-shape, subagent-6-tools, task-registry, tier1-subagent-block]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_SUBAGENT / QUANTA_SUBAGENT_MAX_DEPTH env gates enable+cap the subagent surface from the CLI"
+    web: "env gates not among the 6 web-writable CONFIG keys in KnobsPanel; subagent runs only appear read-only in RunColumn, no enable/depth control"
 purpose: |
   서브에이전트 기본-OFF 게이트 + git worktree 격리 + 재귀 한도 (`_MAX_DEPTH`,
   default 3). CLI surface는 `QUANTA_SUBAGENT` 세트로 enable, `QUANTA_SUBAGENT_MAX_DEPTH`

@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code"]
 depends_on: [shadow-checkpoint-policy, verify-checkpoint-bridge]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "message-level rewind/resume exposed in CLI agent loop"
+    web: "rewindToMessage needs a resume/rewind verb absent from protocol.ts SessionCommand (B3), so it does not reach the browser"
 purpose: |
   Per-message conversation checkpoint — 같은 session 내에서 특정 message id로
   rewind + restart. AgentLoop이 destructive tool dispatch 전후로 checkpoint를

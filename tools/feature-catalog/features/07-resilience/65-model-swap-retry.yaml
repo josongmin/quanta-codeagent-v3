@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [streamreset, agent-loop-branch-hardening, chatgpt-oauth-provider, fallback-kinds-policy, response-in-progress]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "retry-with-different-model via src/apps/cli/retry-with.ts + slash-commands.ts in CLI"
+    web: "no retry verb in protocol.ts SessionCommand (B3); SlashPalette has no retry handler (B2 prefill stub)"
 purpose: |
   v0.dev SubmitRetryBotMessage{messageId, retryModelId} 흡수 — 특정 turn을 의도적으로
   다른 모델로 재실행(불만족 응답 재시도, opus→max 자동 에스컬레이션). resolveRetryModel

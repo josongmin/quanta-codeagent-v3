@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, default-off, slice:retrieval]
 depends_on: [search-pipeline-composer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Workspace scanner/chunker/delta-tracker populating a SemanticIndex, default-OFF (QUANTA_INDEX); reachable from CLI entry."
+    web: "Pure internal retrieval primitive (backend scanner); no user-visible surface affordance."
 purpose: |
   Populates a SearchPipeline's underlying SemanticIndex / lexical store
   by walking the workspace, chunking files, and tracking deltas. Closed

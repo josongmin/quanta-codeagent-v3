@@ -15,6 +15,14 @@ owners: ["@songmin"]
 labels: ["adr-0238", "tier:1", "shell-snapshot"]
 depends_on:
   - shell-snapshot
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Bun spawner + size-prune + session-start prune reachable from CLI import graph"
+    web: "Pure runtime primitive (shell-env snapshot capture + disk size-budget prune behind ShellSnapshotPort); no UI affordance, only shapes runShell env state."
 purpose: |
   Production wire for ADR-0204's shell-snapshot primitive + ADR-0235's
   `runShell` prefix integration. Adds `bun-spawner.ts` (production

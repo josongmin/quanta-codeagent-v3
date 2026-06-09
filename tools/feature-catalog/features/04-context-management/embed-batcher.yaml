@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "adr:0264", "adr:0254"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure retrieval batcher primitive, wire-shape only, ui_surfaces n-a, no production caller."
+    web: "Pure internal coalesce/dedupe primitive, no UI affordance on any surface."
 purpose: |
   Wrap any `embed(texts): Promise<vectors>` underlying with a closed-port
   batcher that fixes three failure modes of the single-text caller API:

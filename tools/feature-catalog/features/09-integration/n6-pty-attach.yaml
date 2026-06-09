@@ -14,6 +14,14 @@ depends_on: ["quantamcpconfig"]
 config_refs:
   env: ["QUANTA_PTY_ATTACH"]
   runtime: ["ptyAttach"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "6 pty_* model-facing tools reachable in CLI loop"
+    web: "agent calls to the 6 pty_* tools render as tool cards via bridged tool_call/tool_result events in session-hooks.ts"
 purpose: |
   N6 (§7, RFC docs/plans/jun-4-pty-attach.md). quanta could spawn shells
   (one-shot `bash`, `bash` background, the subagent 6-tool pipe router) but had

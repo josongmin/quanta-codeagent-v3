@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex", "absorbed:cursor"]
 depends_on: [glob-rules]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /rules + status pill, src/apps/cli/rules-cmd.ts reachable from CLI entry"
+    web: "/rules absent from SlashPalette.tsx; rule pill rides CLI status-pills row, no web render"
 purpose: |
   Codex `repo-local-rule-ingestion-audit.md` (AGENTS.md pattern) inspired
   surface for the CLI: surfaces the COUNT + IDENTITY of repo-local rule files

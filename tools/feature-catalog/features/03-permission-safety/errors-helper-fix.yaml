@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [secret-redaction-content-plane, plan-mode, agent-loop-branch-hardening, codex-2-phase-consolidator, ide-context-provider-seam]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "errMessage shared helper used across all CLI catch blocks"
+    web: "pure internal shared error-formatting helper, no UI affordance on any surface"
 purpose: |
   `errMessage(e)` 의 self-recursion 회귀 fix — 2026-05-23 mass migration 이
   over-eager find/replace 로 본문을 `errMessage(e)` 로 바꿔 무한 재귀 → 모든

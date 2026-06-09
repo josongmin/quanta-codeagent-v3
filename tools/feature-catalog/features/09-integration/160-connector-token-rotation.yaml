@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [connector-availability-probe, connectors-rest-registry, oauth-dynamic-discovery, oauth-dynamic-registration]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; rotator reachable in CLI build (Phase 1, unwired adapter)"
+    web: "pure internal per-connector token rotation port with in-flight mutex; no UI affordance"
 purpose: |
   `createTokenRotator({tokenStore, clockPort})` — per-connector token rotation
   layer. `rotate(connectorId, refresh)` runs the caller-supplied refresh

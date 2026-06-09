@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-pyright-adapter, lsp-client-base]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "TypescriptAdapter contributes argv + JS/TS/JSX/TSX languageId map on LspClient base; reachable from CLI entry"
+    web: "pure internal per-language LSP adapter (ui_surfaces n-a) — no UI affordance on any surface"
 purpose: |
   Per-language adapter on top of `LspClient` base for
   `typescript-language-server` over stdio. Two contributions only — the rest

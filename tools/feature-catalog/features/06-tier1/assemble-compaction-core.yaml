@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [compactionbreaker]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; surface-agnostic assembler the CLI boots through"
+    web: "pure internal config assembler (compaction breaker + summarizer LLM factory); no browser UI affordance — builders run on the web-daemon backend invisibly"
 purpose: |
   Two surface-agnostic compaction assemblers (ADR-0011 Tier-0 safety
   hardening + dedicated summarizer model):

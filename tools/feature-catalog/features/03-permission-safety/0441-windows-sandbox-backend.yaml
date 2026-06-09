@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:runtime, tier:adapter, security-touched]
 depends_on: [os-sandbox-port-router, sandbox-policy, landlock-degraded-passthrough]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "OS-sandbox windows policy compiler + native boundary, reachable from CLI shell-spawn path; ui_surfaces n-a"
+    web: "pure runtime OS-sandbox backend (compileWindowsSandboxSpec + native broker), no user-visible UI affordance on any surface; default-OFF passthrough"
 purpose: |
   Closes the Windows surface-parity gap in the OS sandbox. Before ADR-0441,
   win32 had NO branch and NO type-union arm — agent shells ran fully

@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on:
   - codex-r2-system-prompt-cache-and-audit
   - codex-r2-composition-install-and-registry
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Cache/registry metric decorators are no-throw wrapping ports reachable from CLI."
+    web: "Pure internal telemetry decorators (emit hit/miss/eviction counters to a metric port), no UI affordance on any surface."
 purpose: |
   Two NO-THROW wrapping decorators emit hit/miss/eviction counters as
   the ADR-0326 system-prompt cache + ADR-0345/0348 session-resource

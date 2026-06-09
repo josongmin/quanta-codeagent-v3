@@ -19,6 +19,14 @@ labels: ["surface:cli", "tier:1", "adr-0301", "default-off"]
 depends_on:
   - playbook-trigger-cli-bind
   - surface-composition-wire-r1
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Threads --playbook-trigger boolean through 5 CLI layers (apps/agent + apps/cli/repl); reachable from CLI."
+    web: "CLI-only flag echo; the flag is not exposed via any web command/POST /config (B2/B3), never reaches the browser."
 purpose: |
   Closes the ADR-0293 last-mile gap. ADR-0293 added the `--playbook-trigger`
   boolean to the unified-agent CLI parser AND built

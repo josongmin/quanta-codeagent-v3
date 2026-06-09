@@ -13,6 +13,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [sandbox-policy, seatbelt-profile-compiler, landlock-degraded-passthrough, os-sandbox-port-router, landlock-phase2]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "apps/cli/sandbox-wire.ts resolves QUANTA_SANDBOX at boot and installs the shell-sandbox slot (src/apps/cli/index.ts)"
+    web: "sandbox confinement is invisible enforcement with no rendered event; only QUANTA_SANDBOX appears as a read-only KnobsPanel row, no active/degrade status surfaced to browser"
 purpose: |
   `defaultOsSandbox()` (macOS Seatbelt + Linux Landlock stub + Windows
   passthrough) is wired into the bash spawn path via a module-level

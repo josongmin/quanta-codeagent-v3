@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [consolidator-session-hook, memory-md-atomic-writer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "SQLite Stage1StorePort owns stage1_outputs + watermark tables on CLI; derived 4/4 holds"
+    web: "pure SQLite storage adapter primitive; no UI affordance, ui_surfaces is cli-only data layer with nothing rendered to browser"
 purpose: |
   SQLite-backed `Stage1StorePort` implementation owning the
   `stage1_outputs` + `consolidate_watermark` tables that record per-thread

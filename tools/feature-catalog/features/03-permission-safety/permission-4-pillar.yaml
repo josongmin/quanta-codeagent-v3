@@ -9,6 +9,14 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [permission-policy-engine, permission-store-json, harddeny-readonly-short-circuit, per-host-agent-mode, per-thread-permissions]
 configurable: static
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "PermissionProfile struct + inferX projection helpers used by policy engine (src/permission/policy.ts)"
+    web: "pure internal policy projection (configurable static); no user-visible affordance on any surface"
 purpose: |
   **Codex `Permission.{approval, network, sandbox, control.managed}` 4-pillar 흡수.**
   v1에서는 approval / sandbox / control 3-pillar 정도였고 network는 명시적 분리

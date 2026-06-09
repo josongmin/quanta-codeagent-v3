@@ -114,6 +114,24 @@ describe("§13.1 session store health — aggregate corruption", () => {
     expect(r.verdict).toBe("corrupt")
   })
 
+  test("an INVALID session filename (leading dash) is REPORTED, never thrown (NEVER-throws contract)", async () => {
+    await saveSessionById(mkMeta("good"), {
+      reason: "completed",
+      turns: 1,
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })
+    // A file whose derived id fails session-id validation (leading "-", which
+    // `sessionFilePath` rejects with SessionIdError). The health check must
+    // surface it as a bad entry, NOT let the path-builder throw escape.
+    writeFileSync(join(dir, "-evil.json"), '{"meta":{"id":"x"},"messages":[]}')
+    const r = await checkSessionStoreHealth()
+    expect(r.total).toBe(2)
+    expect(r.ok).toBe(1) // the good one still loads
+    expect(r.corrupt + r.unreadable).toBeGreaterThanOrEqual(1) // the bad one is reported
+    const bad = r.files.find((f) => f.id === "-evil")
+    expect(bad?.status === "corrupt" || bad?.status === "unreadable").toBe(true)
+  })
+
   test("buildRecoveryGuidance is pure and names concrete next steps", () => {
     const g = buildRecoveryGuidance({
       root: "/r",

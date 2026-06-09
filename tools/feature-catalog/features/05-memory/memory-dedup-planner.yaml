@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [memory-eviction-planner]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure near-duplicate planner reachable from CLI consolidation pipeline; derived 3/3 holds"
+    web: "pure internal planner (returns candidate ids); ui_surfaces n-a; no user-visible affordance on any surface"
 purpose: |
   Before saving a new memory entry the store asks: does an equivalent entry
   already exist? Pure planner that surfaces candidate matches via two

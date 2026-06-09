@@ -17,6 +17,14 @@ depends_on:
   - headless-second-consumer
   - agent-config-assembler
   - agent-cli-args-parser
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure internal composition/governance refactor (ADR-0303 ratchet) that relocates turn-driver hoist + cli to agent launcher + external-prompt-queue below src/apps; notes say it tracks CODE relocations the ratchet protects, no user-facing CLI command of its own."
+    web: "Pure internal surface-governance refactor, no UI affordance on any surface; surface-agnostic runtime plumbing (runSessionTurn/ExternalPromptQueue), not a browser-renderable feature."
 purpose: |
   Later §3.1 thin-surface increment (jun-04, commit 00f0bfb6) on top of the
   ADR-0303 ratchet: relocate reusable runtime + launcher semantics BELOW

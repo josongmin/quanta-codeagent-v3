@@ -15,6 +15,14 @@ depends_on: ["git-directive-emit-protocol"]
 config_refs:
   env: ["QUANTA_PASSIVE_VCS"]
   runtime: ["passiveVcs"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bash post-exec hook emits classified VcsEvent onto CLI AgentEvent stream"
+    web: "emitted as a recovery event (reason vcs_event) which is dropped at context-binding.ts default arm (B1)"
 purpose: |
   H6 (jun-3-misc §3). Closes the raw-stdout blind spot of
   `src/git/directive-emit/parser.ts`, which only reads quanta's OWN emitted

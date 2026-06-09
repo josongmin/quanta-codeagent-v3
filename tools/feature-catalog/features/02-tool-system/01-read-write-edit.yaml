@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli]
 depends_on: [typed-tool-failure-modes, bash-tool-hitl-tier, edit-fuzzy-ladder, test-runner-tool, diagnostics-tool]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "core tool family (read/write/edit/bash/grep/glob/localize/diagnostics/test_runner) reachable from CLI entry"
+    web: "these tools run in web-daemon; each invocation+text result renders as tool.invoked/tool.completed in session-hooks.ts:420-438"
 purpose: |
   Aggregate L5 marker for the primitive tool family covering 9 core tools —
   read, write, edit, bash, grep, glob, localize, diagnostics, test_runner.

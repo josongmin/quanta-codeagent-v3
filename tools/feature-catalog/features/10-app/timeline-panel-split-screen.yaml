@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:observability"]
 depends_on: [debug-tracer-decision-event, cli-status-bar]
 config_refs:
   env: ["QUANTA_TIMELINE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "DECSTBM split-screen live AgentEvent timeline panel in src/apps/cli/timeline-panel.ts wired from repl.ts via QUANTA_TIMELINE; reachable from CLI entry."
+    web: "Terminal-only ANSI DECSTBM split-screen panel; this specific render has no apps/web-frontend equivalent and AgentEvent variants it renders are mostly dropped at the 6-event web bridge (context-binding.ts:1052), so it never reaches the browser."
 purpose: |
   ADR-0239 debug-tracer가 stderr에 단일-line per-event를 dump하는 방식은
   scrollback에 묻혀버려서 high-rate session에서 한눈에 trajectory를 보기

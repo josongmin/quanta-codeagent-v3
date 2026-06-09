@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex"]
 depends_on: [pdf-read-tool, def-tool-registry]
 config_refs:
   env: ["QUANTA_IMAGE_DOWNSAMPLE"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal codec port (decode/resize/encode of over-cap images inside read_image), no distinct affordance; read_image is the user-facing tool"
+    web: "pure internal codec port, no distinct UI affordance; the downsample is invisible behavior of read_image"
 purpose: |
   Instead of hard-rejecting images over MAX_IMAGE_BYTES (5 MB), downsample them so
   large screenshots stay usable (Codex parity). Decision is split from execution:

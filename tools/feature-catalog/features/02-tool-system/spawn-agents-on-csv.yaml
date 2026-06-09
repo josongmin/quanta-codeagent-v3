@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex"]
 depends_on: [agent-loop-core]
 config_refs:
   env: ["QUANTA_SPAWN_AGENTS_CSV"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "spawn_agents_on_csv LLM tool reachable from CLI (QUANTA_SPAWN_AGENTS_CSV)."
+    web: "LLM-callable tool; tool_call/tool_result render as tool.invoked/tool.completed; per-row subagent fan-out also surfaces in the web-only RunColumn."
 purpose: |
   Make the ADR-0463 batch-jobs domain agent-callable + production-grade. The agent
   hands a CSV + a shared instruction; `spawn_agents_on_csv` fans ONE subagent per

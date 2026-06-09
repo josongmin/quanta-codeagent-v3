@@ -12,6 +12,14 @@ configurable: planned
 owners: ["@songmin"]
 labels: ["surface:cli", "integration:github", "scaffold"]
 depends_on: [github-actions-trigger-adapter]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: port-only scaffold, createWebhookEventSource throws NOT_IMPLEMENTED, not CLI-wired"
+    web: "Tier-1 webhook host scaffold (HMAC verify only); no browser affordance and no live host"
 purpose: |
   Tier 1 self-hosted webhook receiver port-only scaffold. Defines the seam
   for HMAC-SHA256 X-Hub-Signature-256 verification (constant-time compare,

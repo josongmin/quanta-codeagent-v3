@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:2", "adr-0305", "refactor", "cleanup"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Refactor of CLI session-command call sites in src/apps/cli/repl.ts (shim removal); reachable from CLI entry."
+    web: "Internal CLI refactor of session-command wiring; no browser affordance and SessionCommand carries no session-op verb (B3)."
 purpose: |
   Removes `src/apps/cli/session-commands.ts` (the Phase-3 shim wrapping
   `runSessionCommand` from `@/runner/session-ops` with `cliImportHandler`

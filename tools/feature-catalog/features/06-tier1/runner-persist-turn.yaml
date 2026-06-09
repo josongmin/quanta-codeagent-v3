@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [prompt-source-payload-widening, runner-run-interactive, assemble-config, repl-code-smell-cleanup, runner-resume-fsm]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "per-turn save plumbing behind --state/--resume; reachable from CLI entry"
+    web: "pure internal per-turn save primitive, no user-visible affordance on any surface"
 purpose: |
   CLI REPL `turn` 클로저의 inline save 블록을 surface 무관 슬라이스로 verbatim
   추출. 두 개의 독립 default-OFF 저장 경로를 하나의 진입점으로 묶는다:

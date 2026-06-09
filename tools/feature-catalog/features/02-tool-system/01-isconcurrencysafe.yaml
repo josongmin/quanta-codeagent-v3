@@ -14,6 +14,14 @@ labels: [surface:cli]
 depends_on: [model-swap-retry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, fallback-kinds-policy]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "per-input concurrency flag used by streaming-dispatch in CLI"
+    web: "pure dispatch/batching primitive; ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: per-input isConcurrencySafe 동시성 배칭
 evidence:
   code:

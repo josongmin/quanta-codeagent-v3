@@ -14,6 +14,14 @@ labels: ["surface:ipc"]
 depends_on: [plugin-isolated-spawner, plugin-host-wrapper, plugin-lifecycle-manager, assert-never-exhaustiveness, byte-stable-string-comparator]
 config_refs:
   env: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal DXT manifest Zod loader + launchDxt spawn helper; surface:ipc, no UI affordance"
+    web: "pure internal manifest validator/loader, no UI affordance on any surface"
 purpose: |
   Strict Zod schema for `.dxt` manifest (faithful Claude Desktop subset):
   name (kebab/snake), version, entry (relative-only, path-traversal rejected),

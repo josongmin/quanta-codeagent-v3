@@ -15,6 +15,14 @@ labels: ["surface:cli", "category:orchestration", "default-off"]
 depends_on: []
 config_refs:
   env: ["QUANTA_WORKFLOW"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "run_workflow LLM tool reachable from CLI (QUANTA_WORKFLOW)."
+    web: "LLM-callable tool; tool_call/tool_result map through the bridge to tool.invoked/tool.completed; spawned subagent runs also surface in the web-only RunColumn (ObservabilityPane)."
 purpose: |
   §25.1 LLM-authored DECLARATIVE multi-agent workflow (the `run_workflow` tool).
   The model emits a JSON `WorkflowSpec` (phases · steps seq/parallel · forEach

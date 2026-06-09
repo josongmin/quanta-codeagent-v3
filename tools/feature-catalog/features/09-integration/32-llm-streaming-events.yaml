@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [response-in-progress]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal SSE/WS envelope decoder (parseSseFrame/decodeWsEvent); surface:core, no UI affordance"
+    web: "pure internal wire decoder/codec, no UI affordance on any surface"
 purpose: |
   Wire-level decoders for streaming envelopes emerging from OpenAI Responses
   API v2 (HTTP `text/event-stream` + `wss://chatgpt.com/backend-api/codex/

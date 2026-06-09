@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:cursor"]
 depends_on: [document-image-fsjail-unify]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "5/5 reachable; artifact_register/list/get/destroy tools default-OFF"
+    web: "the four artifact tools are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
 purpose: |
   Cursor `agent.v1.Canvas{Register, GetUrl, Destroy}` 흡수 — 생성축(H14 image_gen /
   xlsx_write / docx_write / pptx_write)이 만든 NON-code 바이너리를 transcript와 분리해

@@ -44,6 +44,14 @@ config_refs:
     - identityModeVariant
     - playbookTrigger
     - automationEngine
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "11 optional AgentConfig slots wired via CLI flags and /profile//identity//focus-chain slash commands in the agent composition root"
+    web: "CLI flags + slash-command wiring; SlashPalette stubs do not execute (B2) and the flags have no web config surface"
 purpose: |
   Wire 11 SOTA++ slices (ADR-0203/0211/0212/0213/0215/0218/0219/0224/0225/0226 +
   ADR-0203 inline-trigger watcher) into the agent composition root. Each lands

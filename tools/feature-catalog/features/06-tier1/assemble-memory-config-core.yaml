@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [assemble-store-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; memory-tuning block composer"
+    web: "pure internal memory-config composer (buildMemoryConfigCore/parseRecallTiers); no user-visible browser affordance"
 purpose: |
   Surface-agnostic memory-config assembly. Two distinct helpers:
   (1) `parseRecallTiers` — pure parser for raw

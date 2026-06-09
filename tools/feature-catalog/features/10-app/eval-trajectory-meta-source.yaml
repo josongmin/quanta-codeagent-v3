@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-five-tier]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Fixture I/O primitive (read/load/freeze sidecar); ui_surfaces=[n-a]; pure internal library with no CLI affordance."
+    web: "Pure internal fixture I/O layer, no UI affordance on any surface."
 purpose: |
   Tier 3 trajectory 실측 데이터 I/O 레이어. `EvalMeta` 사이드카
   (`<jsonl>.meta.json`)가 "어떤 prompt가 이 trajectory를 만들었나"의 권위

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, category:permission, security, security-touched, default-off, absorbed:claude]
 depends_on: [auto-mode-classifier, deny-reason-surfacing]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure overlay composer splices operator rules into classifier prompt behind QUANTA_AUTO_MODE_RULES reachable from CLI; ui_surfaces n-a"
+    web: "pure prompt-overlay composer with untrusted-source fence (default-OFF byte-identical), internal classifier-prompt primitive with no UI affordance on any surface"
 purpose: |
   AFK auto-mode 분류기(`CLASSIFIER_SYSTEM_PROMPT`, frozen 상수)에 operator 가 자신의
   `allow`/`soft_deny`/`hard_deny`/`environment` 룰을 레이어링하는 pure overlay

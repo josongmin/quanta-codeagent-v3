@@ -13,6 +13,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [codex-2-phase-consolidator, phase1-stage1-store, memory-fence-cleanup, phase2-promotion-gate, memory-md-atomic-writer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "4-state enum column + migration in CLI consolidate schema; derived 4/4 holds"
+    web: "pure internal data-model enum + DB column + telemetry key; not rendered on any surface, no UI affordance"
 purpose: |
   Codex memory corpus(R4+R6) production 분포 (partial 75% / success 15% /
   uncertain 10% / fail 1%)를 4-state fixed-set enum으로 흡수. 기존 memory

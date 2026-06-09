@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [lsp-nav-rpc, applyworkspaceedit-2phase-atomic, lsp-rename-apply-tool]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "lsp_rename_apply model-callable tool gated by QUANTA_LSP_TOOLS=full, RPC+atomic apply runs in CLI loop"
+    web: "renders as generic tool.invoked/completed, but the WorkspaceEdit rename diff needs DiffView which is NOT mounted, so no diff affordance"
 purpose: |
   ADR-0141 `RenameApplyPort` + `lsp_rename_apply` 도구는 만들어져 있었으나
   RPC/어댑터/등록 3 legs 누락. 이 ADR에서 채움. (1) base.ts에 textDocument/

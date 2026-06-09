@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:cursor"]
 depends_on: [def-tool-registry]
 config_refs:
   env: ["QUANTA_REFLECT"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "LLM-callable reflect tool reachable from CLI agent loop."
+    web: "An LLM-callable tool; its tool_call/tool_result ride the 6-event bridge and render as tool.invoked/tool.completed in apps/web-frontend/src/ws/session-hooks.ts."
 purpose: |
   A reflect tool so a stuck agent steps back and re-plans mid-turn. Input REQUIRES
   both `situation` and `next_steps` (the DIFFERENT plan) — next_steps is the forcing

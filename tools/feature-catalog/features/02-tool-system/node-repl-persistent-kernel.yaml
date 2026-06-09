@@ -14,6 +14,14 @@ labels: [absorbed:codex, surface:cli, default-off, slice-primitive]
 depends_on: []
 config_refs:
   env: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived 0/6 reachable, default-OFF closed-port kernel primitive, tool wiring is deliberate_hold, no composition root wires it; keep derived missing"
+    web: "pure internal slice primitive (per-session node subprocess kernel), no tool surface wired and no UI affordance"
 purpose: |
   Codex `~/.codex/node_repl/active_execs/{execId}.json` 패턴 흡수의 slice
   primitive — 한 세션 동안 살아 있는 `node -i` 서브프로세스를 유지해서

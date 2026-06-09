@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [model-swap-retry, fallback-kinds-policy, llm-factory, response-in-progress, assert-never-exhaustiveness]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "estimateTokens heuristic feeds compaction threshold gate in CLI"
+    web: "pure internal token-estimation heuristic (ui_surfaces n-a), no UI affordance"
 purpose: |
   Threshold 게이트(`compactIfNeeded` / reactive drop-ratio guard) 입력으로 사용되는
   `estimateTokens(messages)` 휴리스틱. `blockChars` 는 ContentBlock 변종별로 분기 —

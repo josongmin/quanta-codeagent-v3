@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [agent-dispatch-core, agent-loop-branch-hardening, secret-redaction-content-plane, 183-safety-net-green, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "review/audit mode dispatch block + prompt notice injection via QUANTA_PLAN, runs in CLI"
+    web: "mode selection has no web affordance (web POST /config sets only model/effort); mode_changed rides dropped event at context-binding.ts:1104"
 purpose: |
   review/audit 모드 — dispatch에서 mutating 차단 + 프롬프트에 REVIEW_NOTICE/AUDIT_NOTICE 주입.
   별도 도구 없음. runAgent e2e 5 tests: plan/review/audit 각각 mutating tool dispatch 차단

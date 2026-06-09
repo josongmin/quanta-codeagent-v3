@@ -15,6 +15,14 @@ labels: [surface:core, tier:core]
 depends_on: [secret-redaction-content-plane, plan-mode, durable-state-belongs-in-workspace-files, response-in-progress, retry-error-classification]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "typed refusal StopReason reachable from CLI entry; AgentOutcome carries rationale"
+    web: "refusal surfaces only via the generic error path (extractTurnErrorMessage at context-binding.ts:1049 sets errorMessage); the typed refusal-vs-failure distinction and rationale field are not separately rendered — collapsed to a thin error string"
 purpose: |
   Replaces the lossy generic-error supersession of provider-side refusals
   with a typed StopReason variant. extractRefusalRationale lifts the rationale

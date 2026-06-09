@@ -498,6 +498,10 @@ export class SessionClient {
     const canvas = decodeCanvasFrame(data)
     if (canvas !== null) {
       this.#lastCanvas = canvas
+      // A replayed canvas frame proves the resume handshake settled (see
+      // {@link #settleResume}) — otherwise an events-only resume that leads with
+      // a canvas frame would stay stuck in `connecting`.
+      this.#settleResume()
       for (const handler of [...this.#canvasHandlers]) {
         try {
           handler(canvas)
@@ -562,6 +566,8 @@ export class SessionClient {
     const observability = decodeObservabilityFrame(data)
     if (observability !== null) {
       this.#lastObservability = observability
+      // A replayed observability frame likewise settles an events-only resume.
+      this.#settleResume()
       for (const handler of [...this.#observabilityHandlers]) {
         try {
           handler(observability)
@@ -586,15 +592,21 @@ export class SessionClient {
       return
     }
     // Events-only resume: the daemon replayed missed events without a snapshot.
-    // The first such event proves the resume handshake settled → flip to
-    // `connected` so the composer unfreezes and `send()` stops dropping
-    // commands. Snapshot-driven first-connect already flipped above, so this
-    // is a no-op there (flag never set).
+    // The first replayed frame proves the resume handshake settled → flip to
+    // `connected` so the composer unfreezes and `send()` stops dropping commands.
+    this.#settleResume()
+    this.#fanoutEvent(event)
+  }
+
+  /** Settle an events-only resume: ANY replayed data frame (event / canvas /
+   *  observability) proves the handshake completed, so flip `connecting` →
+   *  `connected`. Snapshot-driven first-connect already flips inline (flag never
+   *  set), and a re-connect rejection re-handshakes WITHOUT settling. Idempotent. */
+  #settleResume(): void {
     if (this.#resuming) {
       this.#resuming = false
       this.#setState({ kind: "connected" })
     }
-    this.#fanoutEvent(event)
   }
 
   /** Advance the resume cursor to the max seq seen — never lowers it. */

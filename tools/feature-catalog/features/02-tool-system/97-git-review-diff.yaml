@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
 depends_on: [gitdiff, git-read-trio, git-runner-cancellation-signal, git-branch-name-schema-guard, git-mutating-tools]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_review_diff tool spawning isolated reviewer sub-agent, runs in CLI."
+    web: "Agent tool — reviewer findings return as a single tool result rendered in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   Extracts `git diff base...head` (default `origin/main...HEAD`) and hands it
   to an ISOLATED sub-agent reviewer (depth+1, read-only tool registry filtered

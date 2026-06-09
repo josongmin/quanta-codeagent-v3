@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [identity-mode-variant]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal identity minter (round-robin nickname pool plus role enum), ui_surfaces n-a, default-OFF, no host wires it; no CLI affordance"
+    web: "pure internal primitive for transcript label and policy routing, no user-visible affordance"
 purpose: |
   Codex `core/src/config/agent_roles.rs`의 nickname_candidates 39-entry 풀과
   `agent_role` enum (explorer/worker/none) 흡수. quanta 서브에이전트에 stable

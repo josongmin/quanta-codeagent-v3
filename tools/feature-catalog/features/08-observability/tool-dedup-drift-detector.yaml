@@ -15,6 +15,14 @@ labels: ["surface:observability", "tier:wrap", "absorbed:cursor"]
 depends_on: [metrics-registry, metrics-typed-port-slice]
 config_refs:
   env: []
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: construction-time drift detector not wired into interactive CLI"
+    web: "emits operator log + metric counter only; no browser render and not in the 6-event context-binding bridge"
 purpose: |
   ADR-0183 박은 construction-time drift detector. `defaultToolCallCache({
   checkRecommendedDrift: true })` 가 caller 의 `perToolTtlMs` 와 audited

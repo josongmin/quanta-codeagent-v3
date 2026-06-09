@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [effort-5-tier, repo-rules-tree, agent-config-assembler, assert-never-exhaustiveness, batch-aggregate-exit-code]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: pure argv parser, consumed by apps/agent/index.ts not interactive CLI graph"
+    web: "pure argv-to-typed-config parser, no I/O and no UI affordance on any surface"
 purpose: |
   `parseAgentArgs(readonly string[])` — pure argv → typed `AgentArgs`
   discriminated by `mode` (`interactive | headless | batch | ci-bot |

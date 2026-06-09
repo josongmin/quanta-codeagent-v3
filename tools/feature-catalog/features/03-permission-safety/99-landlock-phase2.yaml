@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:cursor", "surface:runtime", "tier:adapter"]
 depends_on: [landlock-degraded-passthrough, seatbelt-profile-compiler, os-sandbox-port-router, sandbox-policy, os-sandbox-wire]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bubblewrap shell-out OS-sandbox backend reachable from CLI shell-spawn path; ui_surfaces n-a"
+    web: "pure Linux OS-sandbox backend (compileBubblewrapArgs), runtime spawn-wrapper with no user-visible UI affordance on any surface"
 purpose: |
   Linux OS-level sandbox via `bwrap` (bubblewrap) shell-out. Phase 1 stub
   (ADR-0136) replaced with real Linux backend matching the macOS Seatbelt

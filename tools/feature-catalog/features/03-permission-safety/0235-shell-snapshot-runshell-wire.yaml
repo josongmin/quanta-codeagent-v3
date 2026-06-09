@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex", "security-touched", "default-off"]
 depends_on: [shell-snapshot]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 3/3 evidence files reachable from CLI entry"
+    web: "pure internal runShell option fold (env source-snapshot wire); no user-visible affordance on any surface"
 purpose: |
   Wave 3 wire — ADR-0204 의 ShellSnapshotPort (capture/restore/prune
   leaf 슬라이스) 를 `runShell` 의 옵션 fold 로 연결. host 가

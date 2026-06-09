@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [cli-diff-preview]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Same src/apps/cli/diff-preview.ts; adds @@ hunk headers to the CLI ANSI render."
+    web: "CLI-only ANSI render; web DiffPanel unmounted (App.tsx:578), hunk headers never reach the browser."
 purpose: |
   Adds `@@ -A,B +C,D @@` hunk headers + old/new line-number gutters to the ANSI
   diff preview (was +/- prefix only). Groups changes into hunks with git-standard

@@ -11,6 +11,14 @@ modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ColorPolicyResolver caches ANSI color state for the CLI/REPL terminal renderer"
+    web: "pure ANSI color-policy cache helper, no user-visible browser affordance"
 purpose: |
   Encapsulates the ANSI color-policy cache so multiple surfaces (CLI, REPL,
   Tauri renderer, parallel test harness) can keep isolated state instead of

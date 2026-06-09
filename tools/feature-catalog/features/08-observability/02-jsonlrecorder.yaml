@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
 depends_on: [agentevent, assemble-config, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Append-only JSONL trajectory sink runs in CLI backend."
+    web: "Pure internal append-only JSONL sink/codec, no UI affordance on any surface."
 purpose: |
   `JsonlRecorder` — append-only JSON-Lines sink for the trajectory event stream.
   One AgentEvent ⇒ one JSON object per line (newline-framed, never partial)

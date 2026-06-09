@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [cross-slice-mirror, deferred-tool-registry, dockersandbox, evidence-toolresultevidence, git-review-diff]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "6 gh tools registered (ci-bot + opt-in interactive); reachable from CLI"
+    web: "agent-callable gh_pr_view/gh_issue_view/etc render as tool.invoked/tool.completed in session-hooks.ts"
 purpose: |
   Single slice that wraps the `gh` binary as 6 typed tools — `gh_pr_view`,
   `gh_issue_view`, `gh_pr_comment`, `gh_pr_create`, `gh_check_status`,

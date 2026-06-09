@@ -14,6 +14,14 @@ labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [repl-code-smell-cleanup, runner-assemble-builders, cli-export-2026-05-21-l2-l3, repl-interactive-surface, slashctx-6-ports-wire-completion]
 config_refs:
   env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_MCP_CONFIG", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/repl.ts and siblings reachable from CLI entry; this is an internal CLI REPL code-structure refactor (orphan prune)"
+    web: "pure internal CLI code-structure refactor, no distinct user-visible affordance on any surface"
 purpose: |
   **Status truth-up (Slice B, 2026-05-25):** the 21-module split landed at
   commit `acb8d187` was NEVER wired into `src/apps/cli/repl.ts`. Verified by

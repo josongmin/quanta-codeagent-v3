@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure AbortError-to-exit-130 mapping in mode-preset wrapper; POSIX exit-code policy, no interactive affordance"
+    web: "pure exit-code policy primitive, no UI affordance on any surface"
 purpose: |
   The interactive mode-preset wraps `runRepl()` in a try/catch that converts
   a thrown abort (either `err.name === "AbortError"` OR `err.code ===

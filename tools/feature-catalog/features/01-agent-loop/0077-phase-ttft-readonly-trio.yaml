@@ -15,6 +15,14 @@ labels: [surface:core, tier:core]
 depends_on: [agent-types-split, plan-mode, secret-redaction-content-plane, agent-loop-branch-hardening, response-in-progress]
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "phase/TTFT/readonly-deny-steer planes reachable from CLI entry import graph"
+    web: "phase marker is byte-identical internal data tag; TTFT is OTel-only (gen_ai.response.time_to_first_token_ms span attr), not web-rendered; readonly deny-steer is permission-internal — none reach the browser"
 purpose: |
   하나의 PR로 3개의 직교 신호를 흡수 — 각각 다른 plane(data / observability /
   control)에서 누락된 declared 답을 구조적으로 확보. 모든 의사결정이 producer가

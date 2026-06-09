@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched, tier:core]
 depends_on: [read-write-edit, fsjailerror]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal safety guard/fence on the read tool (rejects FIFO/device/binary before read), no distinct affordance; read is the user-facing tool"
+    web: "pure internal safety fence on read, no distinct UI affordance on any surface"
 purpose: |
   The `read` tool rejects targets that would hang the loop or dump unbounded
   output BEFORE opening them (B5 guard). A named pipe (FIFO) BLOCKS forever when

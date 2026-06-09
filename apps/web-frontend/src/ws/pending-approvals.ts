@@ -29,6 +29,16 @@ export const initialPendingApprovals: PendingApprovalsState = { approvals: [] }
  * `approval.resolved` removes the matching id. Every other event is a no-op and
  * returns the SAME reference (so a consumer's memo / effect does not churn).
  */
+/** Remove the approval with `approvalId`, returning the SAME reference when
+ *  nothing matched (so memos/effects don't churn). Pure. */
+const removeApproval = (
+  state: PendingApprovalsState,
+  approvalId: string,
+): PendingApprovalsState => {
+  const next = state.approvals.filter((a) => a.approvalId !== approvalId)
+  return next.length === state.approvals.length ? state : { approvals: next }
+}
+
 export const applyApprovalEvent = (
   state: PendingApprovalsState,
   event: SessionEvent,
@@ -40,8 +50,7 @@ export const applyApprovalEvent = (
     return { approvals: [...state.approvals, event.approval] }
   }
   if (event.type === "approval.resolved") {
-    const next = state.approvals.filter((a) => a.approvalId !== event.approvalId)
-    return next.length === state.approvals.length ? state : { approvals: next }
+    return removeApproval(state, event.approvalId)
   }
   return state
 }
@@ -59,15 +68,10 @@ const pendingApprovalsReducer = (
     case "event":
       return applyApprovalEvent(state, action.event)
     case "drop":
-      return applyApprovalEvent(state, {
-        eventId: `local-drop-${action.approvalId}`,
-        seq: 0,
-        revision: 0,
-        emittedAt: new Date().toISOString(),
-        type: "approval.resolved",
-        approvalId: action.approvalId,
-        decision: "approve",
-      })
+      // Optimistic local removal. Mirrors the `approval.resolved` fold WITHOUT
+      // fabricating a synthetic event (the old path set dead seq/revision/decision
+      // fields and called `new Date()`, making this reducer impure).
+      return removeApproval(state, action.approvalId)
     case "reset":
       return initialPendingApprovals
     default:

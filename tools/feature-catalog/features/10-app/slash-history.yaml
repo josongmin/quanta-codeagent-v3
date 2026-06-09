@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, model-swap-retry, slash-permission-inspect]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /history panel, src/apps/cli/history-cmd.ts reachable from CLI entry"
+    web: "CLI-only panel riding SlashContext.history port the web daemon never supplies; /history not present in SlashPalette.tsx; turn breadcrumb data has no web render"
 purpose: |
   Compact scannable summary of the live session so the operator can answer
   "what did I just do?" without scrolling. Four subcommands: `/history` (last N

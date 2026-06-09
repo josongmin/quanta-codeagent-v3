@@ -212,6 +212,13 @@ const scrollByJs = (dx: number, dy: number): string =>
 const rectJs = (path: string): string =>
   `(() => { const el = ${resolveJs(path)}; if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 }; })()`
 
+// SINGLE SOURCE for the "is this element visible" fold (JS source injected into
+// the page). Assumes `el`, `cs` (= getComputedStyle(el)) and `r` (=
+// el.getBoundingClientRect()) are in scope. Shared by boxJs + readJs so the two
+// can never drift on what "visible" means.
+const VISIBLE_FOLD_JS =
+  "!!(el.offsetParent || (cs.position === 'fixed' && cs.display !== 'none')) && cs.visibility !== 'hidden' && cs.display !== 'none' && (r.width > 0 || r.height > 0)"
+
 // Full bounding rect + visibility (the same fold readJs(visible) uses) for the
 // model-facing bounding_box. Returns null when the ref's element is missing so
 // the adapter surfaces element-not-found rather than a junk zero-rect.
@@ -221,7 +228,7 @@ const boxJs = (path: string): string =>
     if (!el) return null;
     const cs = getComputedStyle(el);
     const r = el.getBoundingClientRect();
-    const visible = !!(el.offsetParent || (cs.position === 'fixed' && cs.display !== 'none')) && cs.visibility !== 'hidden' && cs.display !== 'none' && (r.width > 0 || r.height > 0);
+    const visible = ${VISIBLE_FOLD_JS};
     return { x: r.x, y: r.y, w: r.width, h: r.height, visible };
   })()`
 
@@ -272,7 +279,7 @@ const readJs = (path: string, what: string, attr: string | undefined): string =>
     if (what === 'attribute') { const v = el.getAttribute(${a}); return { value: v === null ? '' : v }; }
     const cs = getComputedStyle(el);
     const r = el.getBoundingClientRect();
-    const vis = !!(el.offsetParent || (cs.position === 'fixed' && cs.display !== 'none')) && cs.visibility !== 'hidden' && cs.display !== 'none' && (r.width > 0 || r.height > 0);
+    const vis = ${VISIBLE_FOLD_JS};
     return { value: vis };
   })()`
 }

@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: 9/9 evidence reachable from CLI entry; @-dropdown in CLI input"
+    web: "@-mention dropdown is a CLI raw-line-reader/repl input UX (src/apps/cli/at-autocomplete); web composer has no equivalent and the code does not run in web-daemon"
 purpose: |
   Typing `@` at a valid left-boundary opens a kind-grouped candidate dropdown
   (file / symbol / skill / plugin / app); ↑↓ select, Tab/Enter accept (splice the

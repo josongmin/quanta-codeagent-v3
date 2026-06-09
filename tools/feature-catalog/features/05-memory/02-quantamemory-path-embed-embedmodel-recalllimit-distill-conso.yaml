@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, absorbed:codex]
 depends_on: [memory-self-edit-tools, embedder-port]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: QUANTA_MEMORY_* knob assembly reachable from CLI entry"
+    web: "QUANTA_MEMORY_* knobs are read-broad in KnobsPanel (GET /api/knobs) but NOT in the 6 CONFIG_ALLOWED_KEYS writable set — visible read-only, cannot be set from the browser where CLI can"
 purpose: |
   메모리 서브시스템 surface knob 집합 `QUANTA_MEMORY_*` (PATH / EMBED /
   EMBED_MODEL / RECALL_LIMIT / DISTILL / CONSOLIDATE / SELF_EDIT /

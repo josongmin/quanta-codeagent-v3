@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-7-scope-tiering, skill-registry-precedence, quantaskillsdir, skill-admin-enforcement, skill-audit-log]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "discoverSkills calls the parser and dispatch calls assertAllowedTool when QUANTA_SKILLS_DIR active in the CLI"
+    web: "pure SKILL.md schema parser/classifier loader, no browser affordance"
 purpose: |
   SKILL.md frontmatter 6-필드 strict schema (name/description/userInvocable/allowedTools/category/stability).
   category로 skill(LLM-callable) vs extension(시스템 전용) 분기. hand-roll YAML splitter — js-yaml 의존 0.

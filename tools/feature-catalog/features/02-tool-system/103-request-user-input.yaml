@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [plan-mode]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3/4 evidence files reachable from CLI; dispatch routes via ToolContext.requestUserInput port"
+    web: "blocking HITL question surfaces through the userInputPort to the CLI/IDE decider, not via approval.respond; no request_user_input rendering in apps/web-frontend and no B1 event for it"
 purpose: |
   Sister tool of `request_plan_exit`. Lets the model ask the operator a
   question and block on a typed reply when it cannot infer the decision

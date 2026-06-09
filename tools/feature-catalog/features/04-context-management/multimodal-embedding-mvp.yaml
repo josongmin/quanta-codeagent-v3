@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:voyage, absorbed:clip, surface:core]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure retrieval MultiModalEmbedder port + adapters, default-OFF, no composition root imports the registry."
+    web: "Pure internal embedding port/adapters, no UI affordance on any surface."
 purpose: |
   Direct path from a binary blob (image / audio) to a retrieval embedding
   vector. Sibling-extension of ADR-0261 (text-only Embedder + 8 vendor

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [bench-corpus-loader, assert-never-exhaustiveness, bench-observe-non-agent-evidence, byte-stable-string-comparator, errors-helper-fix]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: official Python grader integration under src/apps/bench, not in interactive CLI graph"
+    web: "Python SWE-bench harness verifier spawns from the bench CLI app, not reachable from web-daemon; no browser affordance"
 purpose: |
   The documented swebench-seam, now real. Given a `swebench.verified`
   Instance and the unified diff the agent produced, writes an official

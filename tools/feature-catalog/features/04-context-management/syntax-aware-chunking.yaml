@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [category:retrieval, category:read, default-off, slice:retrieval]
 depends_on: [codebase-indexer, read-tool]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "tree-sitter chunker + read outline mode reachable in CLI graph, knob-gated"
+    web: "internal indexer chunker plus a read-tool mode; no dedicated web component, output rides generic tool-result preview only"
 purpose: |
   ONE `CodeParserPort` (WASM tree-sitter, `web-tree-sitter` runtime + the
   `tree-sitter-wasms` grammar `.wasm` set) powers TWO default-OFF features

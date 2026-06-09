@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:cli]
 depends_on: [bench-eval-driver, bench-repair-context-builder, bench-corpus-loader, bench-eval-env-prep, bench-observe-non-agent-evidence]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI bench entry; bench repair-round git snapshot helper"
+    web: "pure bench git-snapshot primitive, no UI affordance"
 purpose: '외부 repair 라운드 : 에이전트 자신의 verify cmd 재실행으로 라운드별 게이팅, hidden 필드 미참조 — 단일 withGitSnapshot/continue-from-patched-tree. 실측 2/5(40%) vs 3/5 baseline — negative delta, opt-in 권장 --repair-rounds <int> / ()'
 evidence:
   code:

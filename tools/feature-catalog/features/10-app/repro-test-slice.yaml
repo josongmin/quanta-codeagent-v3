@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [bench-eval-driver, bench-repair-context-builder, runrepairrounds, bench-eval-env-prep, bench-python-swebench]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bench reproduction-test pipeline gated by QUANTA_BENCH_REPRO_TEST (ui_surfaces n-a); internal eval infra, no user-facing CLI affordance"
+    web: "internal benchmark eval pipeline, no UI affordance on any surface"
 purpose: |
   Agentless paper §3.3.1 absorption: drive the LLM K times to synthesise
   self-contained Python repro scripts that print one of three sentinels

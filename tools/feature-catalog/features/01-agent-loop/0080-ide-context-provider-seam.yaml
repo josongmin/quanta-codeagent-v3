@@ -15,6 +15,14 @@ labels: [surface:core, tier:1]
 depends_on: [agent-types-split, plan-mode, mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, secret-redaction-content-plane]
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "IDE-context provider seam reachable from CLI entry; FileSystemIdeContextProvider reads .quanta/ide-context.json"
+    web: "host-to-agent IDE-state injection seam; the web frontend is not an IDE host and provides no ide-context source; backend-only, no browser affordance"
 purpose: |
   IDE host (VS Code extension, MCP IDE bridge 등) 가 turn-by-turn 에디터 상태를
   모델에 보낼 수 있는 단일 진입점. 신규 `src/agent/ide-context.ts` 의 닫힌 shape

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, held-promotion]
 depends_on: [migration-importer-credential-read-ban, runtime-config-ssot, web-fetch-search, persona-slot]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "doc-only ADR SSOT (evidence.code empty), yaml already declares cli na; no runtime affordance"
+    web: "doc-only negative-invariants convention SSOT, no code and no UI affordance on any surface"
 purpose: |
   Single ADR documenting 12 patterns from Codex/Claude Desktop audit that v3
   deliberately does NOT adopt — paired SSOT for the "흡수 안 함" half of every

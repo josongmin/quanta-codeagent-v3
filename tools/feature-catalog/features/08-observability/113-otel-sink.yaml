@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:opentelemetry", "surface:observability", "tier:adapter"]
 depends_on: [metrics-typed-port-slice, agentrecorder, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "MetricSink OTel adapter is a closed-port DI module reachable from CLI."
+    web: "Pure internal metric-sink adapter (MeterProvider codec, default-OFF DI), no UI affordance on any surface."
 purpose: |
   Closed-port `MetricSink` adapter wrapping `@opentelemetry/api` MeterProvider.
   Maps our 3-arm MetricKind (counter/histogram/gauge) to OTel instruments

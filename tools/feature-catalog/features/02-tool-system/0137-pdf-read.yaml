@@ -14,6 +14,14 @@ labels: [surface:cli]
 depends_on: [document-image-fsjail-unify, document-tools-csv-ndjson, fallback-kinds-policy, fsjailerror, llm-factory]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pdf_read tool reachable from CLI entry import graph"
+    web: "tool.invoked/tool.completed render the call but the ToolResult.documents DocumentBlock is composed into the next request and never rendered visually in the browser (no tool-document render)"
 purpose: |
   PDF reader that ships ZERO client-side text-extraction dependency. Every
   other modern agent (Cursor / Codex / Cline) pulls `pdf-parse` / `pdfjs`

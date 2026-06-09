@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [assemble-config, runner-run-interactive, repl-code-smell-cleanup, runner-multimodal-image, abort-signal-compose]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Layer-2 PromptSource/PromptPayload type widening reachable in CLI runner"
+    web: "pure internal type-widening port (surface-agnostic prompt union), no UI affordance"
 purpose: |
   Layer-2 `@/runner`가 surface (CLI raw-mode / Web WebSocket / Tauri IPC)에
   의존하지 않도록 노출한 `PromptSource` 포트 + `PromptPayload` back-compat union.

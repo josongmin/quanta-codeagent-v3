@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli]
 depends_on: [edit, edit-fuzzy-ladder, edit-fuzzy-scored-recovery, typed-tool-failure-modes]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "edit tool input field, runs in CLI loop"
+    web: "edit tool invocation + line_ranges arg + result render via tool.invoked/tool.completed (session-hooks.ts), bridged at context-binding.ts tool_call/tool_result arms"
 purpose: |
   Optional `line_ranges: [{start, end}]` field on the `edit` tool input —
   1-indexed, inclusive on BOTH ends (Cursor `LineRange{start_line_number,

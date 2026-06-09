@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe, lsp-bridge]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Model-callable read-only diagnostics tool; runs in CLI loop."
+    web: "Agent tool — invocation + diagnostics result render in browser via tool.invoked/tool.completed (session-hooks.ts renderToolInvoked/renderToolCompleted), backed by mapped tool_call/tool_result events (context-binding.ts:1079-1096)."
 purpose: |
   Surfaces language-server errors/warnings for one file. Slice isolation
   (RFC §3.1, biome-enforced): `@/tool` MUST NOT import `@/lsp` — so this file

@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [runner-assemble-builders, plan-mode, assemble-config, repl-code-smell-cleanup, assemble-compaction-core]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI repl wires a stderr work-summary sink under QUANTA_METRICS; prints turn work line."
+    web: "User value is the per-turn work summary printed to CLI stderr sink; no bridged event and no web render (the bridge maps only usage, not workMetrics)."
 purpose: |
   v0.dev workMetrics 흡수 — turn별 diffMap(파일당 +추가/-삭제 줄), agentActions,
   linesRead, 토큰 in/out + estimatedCostUsd를 순수 집계. parseNumstat(git diff

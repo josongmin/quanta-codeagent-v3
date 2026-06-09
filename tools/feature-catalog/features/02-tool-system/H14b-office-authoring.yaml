@@ -16,6 +16,14 @@ depends_on: [image-gen, tool-surface-manifest]
 config_refs:
   env: ["QUANTA_OFFICE_AUTHORING"]
   runtime: ["officeAuthoring"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "13/13 reachable; xlsx_write/docx_write tools default-OFF"
+    web: "xlsx_write/docx_write are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
 purpose: |
   Opens a NEW tool category alongside H14a image_gen: GENERATING real binary
   Office files. Until now `src/tool/document/` was `*-read.ts` only (csv/yaml/

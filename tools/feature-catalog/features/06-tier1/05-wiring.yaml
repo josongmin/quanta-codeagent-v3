@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-7-scope-tiering, skill-admin-enforcement, skill-audit-log, skill-registry-precedence, quantaskillsdir]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "internal buildSkillFeatures activation/suggestion-narrowing builder (changedPaths conditional); no distinct affordance, identity when unset"
+    web: "internal skill-activation builder, no UI; the Skill tool surface is unchanged and rendering-agnostic"
 purpose: |
   paths: 조건부 활성 — skillsActivatedFor/skillToolAllowlist 호스트 API 노출. AgentConfig.skills.changedPaths?: string[]
   옵셔널 필드 — set 시 buildSkillFeatures가 unconditional 스킬 + paths: 매칭 스킬로 per-turn suggestion inventory

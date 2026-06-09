@@ -21,6 +21,14 @@ config_refs:
     - "QUANTA_LANCE_BASE_URL"
     - "QUANTA_LANCE_TABLE"
     - "QUANTA_QDRANT_COLLECTION"
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: search-index backend + embedder/store registry reachable from CLI entry"
+    web: "pure internal semantic-index backend (real embedder + pluggable vector store, src/runner/assemble/search-index-backend.ts) — env-knob-configured indexing infra, no user-visible affordance on any surface"
 purpose: |
   startIndexer가 더 이상 placeholder hashEmbed(64-d FNV)만 쓰지 않는다 —
   ADR-0261 embedder 레지스트리(createEmbedderFromEnv: openai/voyage/cohere/

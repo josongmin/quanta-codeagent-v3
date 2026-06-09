@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
 depends_on: [shadow-tools-trio, task-registry]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "5/5 evidence reachable from CLI entry; first-class agent tools"
+    web: "subagent_fork/poll/await invocations render via the 6-event bridge tool_call/tool_result (tool.invoked/completed cards in apps/web-frontend/src/ws/session-hooks.ts)"
 purpose: |
   Three first-class tools wrapping a `BackgroundSubagentSchedulerPort` so the
   parent loop can fork a non-blocking subagent, poll its status without

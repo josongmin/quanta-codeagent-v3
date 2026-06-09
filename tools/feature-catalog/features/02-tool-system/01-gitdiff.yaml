@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [absorbed:codex, surface:cli]
 depends_on: [git-runner-cancellation-signal, git-branch-name-schema-guard, assemble-config, cross-slice-mirror, deferred-tool-registry]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_diff/status/log/blame tools reachable from CLI entry"
+    web: "read-only git tools run in web-daemon; invocation+text result render as tool.invoked/tool.completed in session-hooks.ts:420-438"
 purpose: git_diff/git_status/git_log/git_blame — read-only·concurrency-safe·GitRunner 주입, mutating은 bash 잔류
 evidence:
   code:

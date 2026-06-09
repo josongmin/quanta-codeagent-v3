@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "prompt-touched", "absorbed:codex", "absorbed:claude"]
 depends_on: [prompt-system-build, bash-tool, edit-tool, write-tool]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "tool-describe steering and prompt few-shots feed the CLI loop's prompt build"
+    web: "pure internal prompt/tool-describe steering text (prompt-body.ts); prompt content is not a UI affordance"
 purpose: |
   Codex 0.131.0-alpha.9 SHELL.md + Claude Code 2.1.138 tools/{Bash,Edit,Write}.ts
   + Cursor 3.2.16 tool-choice-discipline 3-벤더 수렴 기반 prompt steering. bash

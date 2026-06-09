@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "wire:phase2", "default-off"]
 depends_on: [stage1-store-agent-port, multi-source-rules-vendor-detector]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: stage1-store SELECT consume + vendor glob wire reachable from CLI entry"
+    web: "pure internal wire — Phase1 stage1-store SELECT consumption + vendor-rule glob splice (src/agent/memory/stage1-store, src/rules/vendor-detector); default-OFF backend plumbing, no UI affordance on any surface"
 purpose: |
   Wave 3 wire — (a) ADR-0207/0216 stage1 store 의 SELECT 측면을 Phase 2
   consumer 가 실제로 소비 (이전엔 INSERT 만 wire, SELECT 는 dormant);

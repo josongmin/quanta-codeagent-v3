@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, response-in-progress, src-agent-working-state-ts]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reactiveCompact recovery squeeze runs inside the agent loop on PTL error"
+    web: "pure internal compaction primitive; context_compacted has no event surface and would be B1-dropped"
 purpose: |
   Proactive `compactIfNeeded` 가 `DEFAULT_KEEP_TURNS=6` 으로 부드럽게 줄이는 반면,
   `reactiveCompact` 는 loop 이 이미 "prompt is too long" API 에러를 맞은 뒤 호출되는

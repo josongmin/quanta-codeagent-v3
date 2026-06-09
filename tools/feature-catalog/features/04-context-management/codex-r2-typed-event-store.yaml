@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Closed-port 8-variant typed event store parallel to working memory + in-memory adapter; ui_surfaces n-a, reachable from CLI entry."
+    web: "Pure internal typed-event store primitive (additive side-channel, never mutates wm); no user-visible surface affordance."
 purpose: |
   Closed-port typed event store that sits PARALLEL to the working memory
   message buffer. ADR-0320 ships the 5-variant foundation

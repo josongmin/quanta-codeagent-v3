@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:cli, security-touched, held-promotion]
 depends_on: [trust-scope-wire-up]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "file-backed persistent grant store consulted by gate to short-circuit ask-flow reachable from CLI; ui_surfaces n-a"
+    web: "pure persistent grant-store primitive (cascade + TTL) injected by caller, no UI affordance on any surface"
 purpose: |
   L3→L4 promotion of `trust-scope-wire-up`. File-backed persistent grant
   store consulted by the admissibility gate to short-circuit the legacy

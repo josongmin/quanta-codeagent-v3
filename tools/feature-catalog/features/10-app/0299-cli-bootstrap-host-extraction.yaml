@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:host", "tier:2", "adr-0299", "refactor"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; bootstrapSession moved to surface-agnostic host layer"
+    web: "pure host-extraction refactor, no UI affordance"
 purpose: |
   Moves the per-session bootstrap (`bootstrapSession` from
   `src/apps/cli/repl/session-bootstrap.ts`, 332 LOC) out of the CLI

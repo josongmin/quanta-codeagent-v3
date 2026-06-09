@@ -12,6 +12,14 @@ configurable: n-a
 owners: ['@songmin']
 labels: [surface:core, absorbed:codex]
 depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "WorkingState L3 naming-alignment primitive in CLI graph"
+    web: "pure internal naming-alignment primitive; web working-state slash is a B2 prefill stub, ObjectiveCard does not render WorkingState"
 purpose: Codex 5-layer 명명 정렬 — L1 system/cache prefix · L2 turn context · L3 WorkingState · L4 long-term store · L5 artifact files. 명명만 정합
 evidence:
   code:

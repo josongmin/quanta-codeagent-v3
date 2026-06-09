@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, cross-slice-mirror, deferred-tool-registry, dockersandbox]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Default model-callable Stage-1 topology tool in CLI."
+    web: "Agent tool — tree-summary result renders in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), mapped tool_call/tool_result (context-binding.ts:1079-1096)."
 purpose: |
   depth-bounded·.gitignore 준수 디렉터리 트리 + per-directory 파일 수를 반환하는
   default tool. 모델이 파일을 고르기 전 repo 모듈 레이아웃을 파악하는 Stage-1

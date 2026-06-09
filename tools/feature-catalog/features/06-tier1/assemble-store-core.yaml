@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [runner-assemble-builders, assemble-config, runner-resume-fsm, assemble-compaction-core, assemble-llm-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; store/embedder factories the CLI wires"
+    web: "pure internal store/embedder factory (buildStoreCore/buildEmbedderCore); no browser UI affordance"
 purpose: |
   Two surface-agnostic factories that produce the long-term memory store and
   the semantic embedder, both default-OFF (plain runs unchanged):

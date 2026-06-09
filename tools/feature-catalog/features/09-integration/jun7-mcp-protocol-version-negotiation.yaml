@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:cursor", "absorbed:codex", "absorbed:claude"]
 depends_on: [mcp-transport-port-and-http-sse, mcp-client]
 config_refs:
   env: ["QUANTA_MCP_PROTOCOL_MAX"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "protocol-version SSOT + negotiation in client.start() runs on the CLI MCP load path"
+    web: "pure internal protocol handshake / version-negotiation primitive — no user-visible affordance on any surface"
 purpose: |
   Replaces the single fixed (triplicated) `PROTOCOL_VERSION = "2025-06-18"`
   literal with a newest-first SSOT + a downgrade-safe negotiation seam, closing

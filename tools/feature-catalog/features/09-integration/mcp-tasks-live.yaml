@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:rmcp-0.15", "surface:integration", "tier:adapter", "default-off"]
 depends_on: [01-quantamcpconfig]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "live tasks/* binding registers the 3 mcp_tasks tools, reachable in CLI loop"
+    web: "agent calls to the registered mcp_tasks tools render as tool cards (tool_call/tool_result bridged at context-binding.ts) in the web session view"
 purpose: |
   Live `McpTasksPort` over a started `McpClient`. `clientTasksPort(client)`
   dispatches the four rmcp 0.15 `tasks/*` JSON-RPC requests through

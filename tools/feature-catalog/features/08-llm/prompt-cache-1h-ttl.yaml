@@ -17,6 +17,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:anthropic, cost-optimization, surface:core, tier:core]
 depends_on: [cache-control-audit]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "cacheTtl resolved at CLI factory from QUANTA_PROMPT_CACHE_TTL, stamps ttl on the codec cache_control"
+    web: "pure internal codec cache-control field stamping (cost optimization); no user-visible affordance on any surface"
 purpose: |
   quanta는 Anthropic prompt-cache breakpoint를 `cache_control: { type: "ephemeral" }`
   로만 마킹하는데(NO `ttl`), Anthropic은 이를 default 5분 TTL로 취급한다. 긴 interactive/

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "production-wired"]
 depends_on: [find-boundary-orphan-safe, session-rewind-fork, runner-resume-fsm]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "transcript reconcile runs on CLI resume/fork/rewind paths (store + resume-fsm)"
+    web: "pure internal transcript-repair primitive (dangling tool_use/tool_result reconciliation), ui_surfaces n-a, no UI affordance"
 purpose: |
   `reconcileToolPairing(messages)` repairs dangling `tool_use`↔`tool_result`
   pairs in a transcript RE-LOADED from disk (session resume, fork, checkpoint

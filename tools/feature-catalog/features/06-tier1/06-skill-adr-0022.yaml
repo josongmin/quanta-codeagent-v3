@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [agent-types-split, skill-7-scope-tiering, skill-admin-enforcement, skill-audit-log, skill-registry-precedence]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "renderActiveSkillsCatalogue injects Active skills block into the system prompt for every CLI turn"
+    web: "pure prompt-injection internal (changes model context only); no browser affordance"
 purpose: |
   Skill 트리거 규칙 (ADR-0022) — session start 시 inventory cache, per-turn reminder에
   `## Active skills` 블록 + 4 rule (explicit $name mention OR description match → mandatory /

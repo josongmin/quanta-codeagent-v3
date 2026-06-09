@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure system-prompt section renderer in prompt assembly, reachable from CLI"
+    web: "pure prompt-block renderer, no user-visible affordance on any surface"
 purpose: |
   Pure 렌더링 모듈. `fourSectionPreset(input)` 은 `base + project_md + session_ctx +
   user_append` 4-튜플에서 whitespace-only 입력을 자동 collapse — 결과는 항상 1..4

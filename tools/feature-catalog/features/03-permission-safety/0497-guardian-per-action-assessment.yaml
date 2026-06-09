@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, category:permission, security, security-touched, default-off, absorbed:codex]
 depends_on: [reviewer-3tier, deny-and-steer-verb, review-kind-matrix, deny-reason-surfacing]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "guardian per-action typed assessor wired into reviewer dispatch reachable from CLI; QUANTA_GUARDIAN_ASSESSOR opt-in; ui_surfaces n-a but is reviewer-facing"
+    web: "richer 7-kind assessment (allow_with_edit/deny_and_steer/escalate) collapses to ApprovalDecision approve|deny on the wire (protocol.ts:164); steer/edit fidelity dropped, no web render of typed verdict"
 purpose: |
   quanta guardian/reviewer 가 BINARY (approve|deny) 인 한계를 닫는 ADR-0497. Codex
   0.135 의 per-action assessor (`GuardianAssessmentEvent` 11-field + `ReviewDecision`

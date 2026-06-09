@@ -16,6 +16,14 @@ config_refs:
   env: [QUANTA_READ_DEDUP]
   runtime: [readDedup]
   cli: [QUANTA_READ_DEDUP]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal token-dedup optimization on the read tool (range+mtime short-circuit), no distinct affordance; read is the user-facing tool"
+    web: "pure internal token-dedup optimization on read, no distinct UI affordance on any surface"
 purpose: |
   In an iterative agent loop the model frequently re-reads the SAME file at the
   SAME window (e.g. re-checking a function after an unrelated edit elsewhere).

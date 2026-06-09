@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [otel-attribute-vocab, metrics-typed-port-slice]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "narrow metric ports emit across 4 slices in CLI run"
+    web: "pure OTel metric emission into collector via narrow ports, no UI affordance on any surface"
 purpose: |
   4 새 슬라이스 (error-routing / shell-snapshot / git-directives / stream-timeout)
   의 OTel metric 발화 unify. 슬라이스 fence 보존: 각 슬라이스에 narrow

@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:observability", "absorbed:cursor", "absorbed:claud
 depends_on: [agentevent, jsonlrecorder]
 config_refs:
   env: ["QUANTA_DEBUG"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "stderr debug-tracer + /debug slash run in CLI repl"
+    web: "AgentEvent.decision dropped at context-binding.ts default arm; /debug is a CLI-only SlashPalette prefill stub (B1+B2)"
 purpose: |
   CLI에서 "왜 이 도구 호출이 deny / ask / allow 됐는지" 실시간으로 보는 surface.
   pre-dispatch 게이트 스택 (permission / rule / hook / cap / jail / budget)은

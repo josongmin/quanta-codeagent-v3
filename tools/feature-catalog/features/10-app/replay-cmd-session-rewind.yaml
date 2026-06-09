@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:observability"]
 depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, inspect-cmd-toolcall-expand, jsonlrecorder]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/replay slash command time-travel-paints session JSONL to terminal (src/apps/cli/replay-cmd.ts)"
+    web: "CLI-only slash command; SlashPalette server-routed commands are prefill stubs (B2), no web handler"
 purpose: |
   `/inspect`는 단일 tool-call에 대한 사후 zoom이고 `/debug`는 *live stream*
   이라 retroactive하게는 못 봄 (ring buffer 없음). 사용자가 자주 묻는 또

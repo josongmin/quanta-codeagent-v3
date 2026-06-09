@@ -7,6 +7,14 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 depends_on: [plan-mode, secret-redaction-content-plane, response-in-progress, codex-2-phase-consolidator, ide-context-provider-seam]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "HookEvent variants fire in src/agent/loop.ts / compaction.ts / subagent-runner.ts; reachable from CLI entry import graph"
+    web: "pure internal hook-bus lifecycle primitive (user_prompt_submit / pre_compact / subagent_stop) — no browser affordance on any surface; not bridged because it is not a UI feature"
 purpose: |
   Three additional HookEvent variants S5 surfaces (pre_compact +
   subagent_stop already shipped via ADR-0133; user_prompt_submit is the

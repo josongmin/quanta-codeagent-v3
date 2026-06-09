@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off"]
 depends_on: [subagent-mailbox]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "registers the subagent_read_messages LLM tool (same default-OFF slot) callable in the CLI loop"
+    web: "user value is an LLM tool call which renders as tool.invoked/tool.completed via the bridged tool_call/tool_result events"
 purpose: |
   Closes the ADR-0416 read deferral: adds the LLM-facing READ surface so a
   running agent can POLL its own inbox for messages other agents sent it (or

@@ -15,6 +15,14 @@ labels: ["surface:cli", "observability-primitive", "default-off"]
 depends_on: [context-usage-metrics]
 config_refs:
   env: ["QUANTA_RATELIMIT_NOTICE", "QUANTA_RATELIMIT_PROACTIVE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ratelimit_snapshot painted to CLI status-bar transient via notice port"
+    web: "ratelimit_snapshot dropped at context-binding.ts default arm; render is CLI status-bar only (B1)"
 purpose: |
   jun-6 account-ratelimit-snapshot 슬라이스(src/llm/ratelimit-snapshot/: parse.ts·notice.ts·
   policy.ts·store.ts)는 provider의 LIVE quota meter(anthropic-ratelimit-* / x-ratelimit-*)를

@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [document-image-fsjail-unify, document-tools-csv-ndjson, fsjailerror, pdf-read-tool, cross-slice-mirror]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "yaml_read tool reachable from CLI entry import graph"
+    web: "reader runs in web-daemon and returns JSON-stringified parsed text as the result, shown in the tool.completed resultPreview in session-hooks.ts:427-438"
 purpose: |
   First-class YAML reader closing the de-facto config-file gap left by
   ADR-0133's csv/ndjson slice. Single pure-TS dep (`yaml@2.x`, ~50 KB),

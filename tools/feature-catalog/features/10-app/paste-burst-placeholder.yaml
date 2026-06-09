@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "raw-line reader coalesces large paste echo in the CLI readline pipeline (raw-line-reader.ts)"
+    web: "terminal readline-only input behavior; the browser has its own input box and never uses the raw-line reader, so the paste-burst echo does not reach the web"
 purpose: |
   Codex-style large-paste coalescing in the raw-line reader. A SINGLE keypress
   whose `str` carries ≥ `minChars` chars (a bracketed paste arrives as ONE

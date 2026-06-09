@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [branch-only-guard, run-mode-expansion-ide-daemon, budget-events-union, budget-dials-types, budget-meter]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure compile-time TS assertion plus runtime ModePolicy matrix guard; no user-facing CLI affordance"
+    web: "pure internal type/policy guard (narrowMode + assertModeMatrix), no UI affordance on any surface"
 purpose: |
   Compile-time + runtime defense against cast-corrupted ModePolicy values.
   `narrowMode<M>(mode, policy)` is a TS assertion function — after the call

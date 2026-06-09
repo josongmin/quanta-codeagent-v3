@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [objective-tools]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "registers the subagent_send_message LLM tool (default-OFF slot) callable in the CLI loop"
+    web: "user value is an LLM tool call which renders as tool.invoked/tool.completed via the bridged tool_call/tool_result events"
 purpose: |
   Inter-agent mailbox so quanta subagents can coordinate WITHOUT teardown —
   Codex `multi_agents_v2.send_message(agent_id, msg)` parity. quanta subagents

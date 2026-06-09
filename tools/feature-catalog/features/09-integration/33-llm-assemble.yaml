@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [agent-loop-branch-hardening, fallback-kinds-policy, llm-stream-timeout, message-id-rewind, model-swap-retry]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal stream-to-Message fold (assembleFromEvents + thinking accumulation); surface:core, no UI affordance"
+    web: "pure internal stream assembler; assembled text reaches web via assistant_text but the assembler itself has no UI affordance"
 purpose: |
   Single SSOT for folding a `StreamEvent` iterator into one `AssembledTurn`
   ({message, stopReason}). Three explicit fold rules: (1) `text_delta`

@@ -14,6 +14,14 @@ labels: ["surface:tooling", "absorbed:codex"]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 config_refs:
   env: ["QUANTA_GIT_SHA", "QUANTA_GIT_TOOLS", "QUANTA_MEMORY_PATH", "QUANTA_PRICING_VERSION", "QUANTA_SESSIONS_DIR", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR", "QUANTA_TOOL_OUTPUT_SPILL_KEEP"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "build-time catalog renderer invoked via bun fc build (render.ts loadProse)"
+    web: "pure feature-catalog build tooling that blends prose into docs MD; no user-visible affordance on any runtime surface"
 purpose: |
   Rendered `docs/10.feature-catalog.md` 의 두 가지 비-YAML 섹션 — (a)
   intro/머리말 (성숙도 5단계 척도, RFC/ADR refs, slice-isolation 원칙),

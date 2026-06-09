@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [git-read-trio]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "normalizeRef leading-dash defense inside gh tools; runs in CLI gh path"
+    web: "pure internal security validation guard (rejects bad PR identifiers before argv); no UI affordance of its own"
 purpose: |
   Mirrors the `git diff`/`git log` leading-dash defense in the gh slice for the
   POSITIONAL PR/issue identifier argument to `gh <pr|issue|pr_checks> <id>`. A

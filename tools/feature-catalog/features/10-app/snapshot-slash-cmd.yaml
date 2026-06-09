@@ -14,6 +14,14 @@ labels: ["surface:cli", "absorbed:claude-code"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, slash-permission-inspect, slash-working-state-panel]
 config_refs:
   env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /snapshot, src/apps/cli/snapshot-cmd.ts reachable from CLI entry"
+    web: "/snapshot absent from SlashPalette.tsx; restore/rewind/diff needs a B3-absent SessionCommand verb; ctx.shadowOdb port not web-supplied"
 purpose: |
   ShadowOdb 포트 + 3개 `shadow_*` 도구를 CLI에 surface하여 사용자가 모델을
   거치지 않고 워크스페이스 스냅샷을 browse/preview/restore 할 수 있게 하는

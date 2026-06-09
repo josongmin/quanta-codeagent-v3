@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "default-off"]
 depends_on: [approval-state-machine, objective-store, run-ledger, admissibility-gate]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from CLI; HITL reviewer escalation prompt runs in CLI (ui_surfaces cli/tauri)"
+    web: "default-OFF attribution wire; when host injects ports its ApprovalRequest reaches the web-only ObservabilityPane (ApprovalsList/ObjectiveCard.blockers/RunColumn.waiting) via the ADR-0408 observability-emitter, not the B1 bridge; reviewer decision collapses to 2-verb approve/deny on the web approval card"
 purpose: |
   Closed-port adapter (`createApprovalGate({ approvalSM?, now? })`) that wraps
   `ApprovalStateMachinePort.request` + `settle` around a host-supplied HITL

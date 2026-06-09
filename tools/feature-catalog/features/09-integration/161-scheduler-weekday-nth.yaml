@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-rrule, scheduler-runtime]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal RFC5545 BYDAY ordinal DSL parser (parseWeekday/nthWeekdayOfMonth); no UI affordance"
+    web: "pure internal date-DSL parser, no UI affordance on any surface"
 purpose: |
   `parseWeekday` / `serializeWeekday` / `nthWeekdayOfMonth` /
   `allOccurrencesInMonth` implement the RFC 5545 BYDAY ordinal grammar

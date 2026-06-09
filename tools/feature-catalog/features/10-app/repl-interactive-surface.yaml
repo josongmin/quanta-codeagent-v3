@@ -15,6 +15,14 @@ depends_on: [slashctx-6-ports-wire-completion, cli-export-2026-05-21-l2-l3, repl
 config_refs:
   env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_PREFS_HOME", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
   env: ["QUANTA_COST_PANEL", "QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_PREFS_HOME", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "the interactive readline REPL is the default CLI surface (src/apps/cli/repl.ts) with in-REPL slash routing"
+    web: "the terminal REPL surface does not exist in the browser; the web app is a separate apps/web-frontend surface, not this readline loop"
 purpose: |
   `quanta` (인자 없는) 호출 시 진입하는 readline 기반 인터랙티브 REPL — 연속 대화,
   per-turn agent run, /skills / /reload-skills / /retry-with / /login / /status 등

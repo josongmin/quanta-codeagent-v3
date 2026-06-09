@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:1]
 depends_on: [skill-adr-0022, agent-loop-branch-hardening, cap-enforcer, cfg-fourrule-true, codex-2-phase-consolidator]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "9-builder SRP split of features.ts composer; pure refactor, no CLI affordance"
+    web: "pure internal builder-composer refactor, no user-visible UI affordance on any surface"
 purpose: |
   `src/agent/features.ts` (393 LOC of SessionFeatures 합성 GodFn) 을 9 개
   per-subsystem builder + composer 로 분해. 각 builder 는 ONE optional config

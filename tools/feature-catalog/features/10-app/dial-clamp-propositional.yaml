@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:cli]
 depends_on: [budget-events-union, budget-meter, assert-never-exhaustiveness, budget-dials-types, byte-stable-string-comparator]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure clampDials function applied to budget dials in the run-mode pipeline"
+    web: "pure propositional dial-clamping function, no user-visible affordance on any surface"
 purpose: |
   Pure function `clampDials(dials, caps, onClamp?)` — for each of 16 dial
   fields, returns `min(requested, cap)` when both present; emits a

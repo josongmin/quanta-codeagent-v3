@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex", "production-wired"]
 depends_on:
   - codex-r2-mention-injection-pipeline
   - codex-r2-composition-install-and-registry
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "prepareTurnContext loop hook resolving plugin activation from mentions + assemble.ts auto-wire; ui_surfaces n-a, reachable from CLI entry."
+    web: "Pure internal per-turn loop hook (plugin activation + activeSkills union); no user-visible surface affordance."
 purpose: |
   Closes the gap between ADR-0340 `cfg.activatePlugins` slot (per-session
   closure) and the per-turn invocation. ADR-0346 ships

@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:claude, surface:cli, category:llm, default-off]
 depends_on: [session-effort-wire]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_ADAPTIVE_THINKING reshapes the Anthropic thinking wire field via skill-gate/codec in CLI"
+    web: "pure internal wire-shaper for the thinking field (adaptive vs manual budget); no user-visible affordance on any surface"
 purpose: |
   quanta가 Anthropic extended-thinking을 manual-only로 보냄: effort/classifier가 token 예산을 계산해
   `thinking:{type:"enabled", budget_tokens:N}`를 Messages wire에 박음 (`skill-gate.ts`

@@ -23,6 +23,14 @@ config_refs:
     - QUANTA_MEMORY_SELF_EDIT
     - QUANTA_MEMORY_THRESHOLD
     - QUANTA_MEMORY_MIN_USAGE
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: buildMemoryForSession factory reachable from CLI entry"
+    web: "pure internal session-bootstrap factory (src/runner/assemble/memory-factory.ts) that resolves store/config/auto-trigger slots — a wiring default-flip, no UI affordance on any surface"
 purpose: |
   Flip memory learning from default-OFF to default-ON via one canonical
   surface-agnostic factory buildMemoryForSession(env, override?) that resolves

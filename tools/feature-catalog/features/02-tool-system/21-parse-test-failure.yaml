@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Default model-callable Stage-3 log-parsing tool in CLI."
+    web: "Agent tool — file:line extraction result renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   raw 테스트/빌드 출력에서 file:line 위치를 프레임워크 무관하게 추출하는 default
   tool (pytest/jest/vitest/bun-test/go-test/cargo-test + generic path:line:col).

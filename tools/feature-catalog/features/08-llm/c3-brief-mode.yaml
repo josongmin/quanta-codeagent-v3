@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:claude, surface:cli, tier:core]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/brief slash + QUANTA_BRIEF + set_brief control-op mutate brief store in CLI REPL"
+    web: "QUANTA_BRIEF is NOT in CONFIG_ALLOWED_KEYS (read-only in KnobsPanel, no write); CLI /brief is a B2 prefill stub; set_brief control-op rides no bridged event. User value does not reach the browser"
 purpose: |
   Claude Code 2.1.150 `briefTranscript`/`tengu_brief_mode_toggled` 흡수의 **model-facing
   절반** (C3, docs/plans/jun-4-brief-mode.md). Claude의 brief는 render-primary(transcript

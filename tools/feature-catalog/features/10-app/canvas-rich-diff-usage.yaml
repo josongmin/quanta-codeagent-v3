@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:web"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "web-only canvas layer; no CLI affordance"
+    web: "evidence.code IS web-frontend; UsageBreakdownPanel mounted in ObservabilityPane.tsx:53 fed contextUsage but degrades to null/'?' until 06 wires client.onCanvas, and SplitDiffView decodes then drops (DiffPanel unmounted, App.tsx:583) — built-but-thin/degraded render"
 purpose: |
   The rich web-canvas layer ADR-0440 (RFC-06) deferred: a side-by-side/split
   DiffView with collapsible hunks (06 was inline-only) + Swatch + CollapsibleSection

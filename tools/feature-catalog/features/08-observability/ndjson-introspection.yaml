@@ -12,6 +12,14 @@ configurable: partial
 owners: ['@songmin']
 labels: ['absorbed:cursor', 'surface:observability', 'tier:port', 'default-off']
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: pure encode/buffer/sink core reachable from CLI; composition-root wire is the introspection affordance"
+    web: "NDJSON firehose to an external monitor; no browser render and not in toSessionHostTurnEvent (context-binding.ts) bridge"
 purpose: |
   Pure half of Cursor's `cursor-ndjson-ingest`: stream the live agent event
   firehose (tool start/stop, LLM deltas, permission decisions, subagent forks)

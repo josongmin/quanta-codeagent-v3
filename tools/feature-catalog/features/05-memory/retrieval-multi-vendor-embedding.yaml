@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "adr:0159"]
 depends_on: [retrieval-rerank-registry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "embedding port adapters (EmbeddingPort seam), pure library internal with no CLI affordance"
+    web: "pure internal port/codec primitive, no UI affordance"
 purpose: |
   Generic seam over every embedding provider. Each concrete adapter
   lives in src/retrieval/embedders/<vendor>.ts and implements

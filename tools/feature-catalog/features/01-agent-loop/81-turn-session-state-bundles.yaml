@@ -15,6 +15,14 @@ labels: [surface:core, tier:core]
 depends_on: [secret-redaction-content-plane, plan-mode, turncontextinput-mode-reporules-workingstate-activeskills, codex-2-phase-consolidator, durable-state-belongs-in-workspace-files]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "type-only parameter-bundling refactor (TurnSession/TurnState), runtime-erased; no CLI affordance"
+    web: "pure internal parameter-bundle refactor, no user-visible UI affordance on any surface"
 purpose: |
   `runTurn`/`streamConsume`/`applyAction`이 17-20 positional parameter로 자란 부채를
   두 readonly 번들로 정리 (R2-B P1). `TurnSession` — session-lifetime resources

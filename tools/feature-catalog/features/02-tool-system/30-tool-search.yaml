@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [skill-admin-enforcement, skill-audit-log, skill-7-scope-tiering, skill-registry-precedence, assemble-config]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ToolSearch deferred-tool catalog search exposed as a model tool in CLI."
+    web: "Agent tool — search/select result renders in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), mapped tool_call/tool_result (context-binding.ts:1079-1096)."
 purpose: |
   Deferred-tool catalog search exposed as a Tool. Two modes: (1) `select:<name>
   [,<name>...]` direct lookup by name — restores schema for explicit deferred

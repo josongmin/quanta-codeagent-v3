@@ -15,6 +15,14 @@ owners: ["@songmin"]
 labels: ["surface:cli", "tier:2", "adr-0304", "refactor"]
 depends_on:
   - repl-slash-ctx-mega-wire
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; SideConversationPort leak-closure refactor"
+    web: "pure port-extraction refactor (closes a CLI engine-internal import leak), no UI affordance"
 purpose: |
   Closes the engine-internal leak in the CLI slash-surface where
   `buildReplSlashCtx` imported `assembleConfig` + `SessionDeps` from

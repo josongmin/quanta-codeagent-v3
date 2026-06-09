@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "integration:github"]
 depends_on: [github-actions-trigger-adapter, pr-output-sink-redaction]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure trigger-phrase matcher library (substring/regex predicate); no standalone CLI affordance"
+    web: "pure internal matcher predicate, no UI affordance on any surface"
 purpose: |
   Pure trigger-phrase matcher. Pulled out of the actions adapter so the
   matching policy can be tested in isolation against adversarial bodies

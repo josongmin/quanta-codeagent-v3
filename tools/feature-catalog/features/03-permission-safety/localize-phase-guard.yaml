@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:cli]
 depends_on: [secret-redaction-content-plane, agent-types-split, plan-mode, agent-loop-branch-hardening, ide-context-provider-seam]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "dispatch-seam guard blocks mutating tools during first N turns with a reminder on CLI"
+    web: "the block surfaces as a reminder/tool-error returned to the model; only the bridged tool_result error preview reaches the browser, with no dedicated localize-phase affordance"
 purpose: |
   Pure deterministic policy at the dispatch seam: during the first N turns of
   a run, mutating tools (`edit`, `write`, `scripted_replace`) are blocked with

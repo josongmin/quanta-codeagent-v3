@@ -16,6 +16,14 @@ labels: ["surface:cli", "tier:2", "adr-0302", "default-off"]
 depends_on:
   - repl-slash-ctx-mega-wire
   - identity-mode-variant
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Adds /identity mid-session system-prompt rebuild seams (src/apps/cli/repl/system-prompt-rebuilder.ts) reachable from CLI entry."
+    web: "CLI-only /identity slash seam; mode_changed event is dropped at context-binding.ts default arm (B1) and the slash itself is a SlashPalette stub (B2) — no browser affordance."
 purpose: |
   ADR-0291 wired ctx.identity = {get,set,list}. Today set("plan")
   mutates the active mode cell, but the LLM keeps seeing the OLD

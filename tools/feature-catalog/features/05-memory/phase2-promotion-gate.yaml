@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [codex-2-phase-consolidator, memory-outcome-enum, phase1-stage1-store, memory-fence-cleanup, memory-md-atomic-writer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure selectForPhase2Promotion gate in CLI consolidate pipeline; derived 3/3 holds"
+    web: "pure deterministic selection function (filter/score/sort/cap); no UI affordance, ui_surfaces is a CLI-side pipeline decision"
 purpose: |
   Codex production stat 10% promotion rate를 selectForPhase2Promotion(entries,
   {sampleRate?}) 로 흡수. PURE function — clock/RNG/I/O 없음, deterministic.

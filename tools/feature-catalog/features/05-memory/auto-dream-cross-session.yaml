@@ -16,6 +16,14 @@ telemetry_keys:
   - auto_dream.fired
   - auto_dream.completed
   - auto_dream.skipped
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: cross-session dream trigger + /dream slash reachable from CLI entry; session host fires onSessionEnd"
+    web: "auto fire runs in the web-daemon backend (context-binding close) but emits no bridged event; the manual /dream slash is a CLI command with no web handler (SlashPalette server-routed stub, B2) and needs no B3 verb — user value never reaches the browser"
 purpose: |
   Cross-SESSION memory consolidation glue ("auto-dream"). Sits ON TOP of the
   existing session-end consolidate pipeline (ADR-0068 `runPhase2`, ADR-0281

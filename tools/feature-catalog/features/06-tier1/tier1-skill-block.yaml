@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [agent-features-tier1]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "buildSkillBlock registers Skill/ToolSearch tools and the suggestion inventory; reachable from CLI entry"
+    web: "pure internal Tier-1 builder/registration; the skills it wires render only when invoked as generic tool cards, the block itself has no direct UI affordance"
 purpose: |
   Per-subsystem Tier-1 builder that materializes the entire SKILL block off a
   single `config.skills` config field, returning `undefined` for byte-identical

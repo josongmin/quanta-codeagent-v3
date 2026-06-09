@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:2"]
 depends_on: [model-swap-retry, repl-interactive-surface, built-in-slash-commands, plan-mode, repl-code-smell-cleanup]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "REPL composer wires 5 ports onto slashCtx, src/apps/cli/repl.ts reachable from CLI entry"
+    web: "pure CLI REPL (runRepl) composition wiring; no web-daemon equivalent threads these ports to the browser"
 purpose: |
   Closes the Tier-2 SlashContext deferred-wire gap by threading 5 of the 6 R10
   surface ports from the REPL composer (`runRepl`) onto the live

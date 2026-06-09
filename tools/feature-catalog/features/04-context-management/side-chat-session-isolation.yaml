@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:claude, surface:core]
 depends_on: [conversation-checkpoint-store]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "SideChatManager port + default-impl primitive, default-OFF; /sidechat slash + LLM reply explicitly deferred, no composition root wires it."
+    web: "Pure internal lifecycle primitive, no surfaced slash or UI affordance on any surface."
 purpose: |
   Claude Desktop `LocalSessions.{startSideChat, sendSideChatMessage,
   stopSideChat}` 흡수 — 부모 세션 컨텍스트를 보호하면서 임시 보조 대화를

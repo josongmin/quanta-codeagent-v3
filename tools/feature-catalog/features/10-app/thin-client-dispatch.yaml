@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:claude"]
 depends_on: [slash-command-registry]
 config_refs:
   env: ["QUANTA_THIN_CLIENT_DISPATCH"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "thin-client route resolver reachable from CLI dispatch import graph"
+    web: "pure internal gate-aware route resolver + NO-THROW parser primitive; no distinct browser-rendered affordance of its own"
 purpose: |
   A slash-command/skill carries an optional thinClientDispatch route tag so the SAME
   command, defined once, runs correctly across surfaces: local (thin client runs it),

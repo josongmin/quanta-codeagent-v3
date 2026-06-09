@@ -14,6 +14,14 @@ labels: [absorbed:agentless, surface:core]
 depends_on: [bench-eval-driver, bench-repair-context-builder, runrepairrounds, bench-eval-env-prep, bench-python-swebench]
 config_refs:
   env: ["QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure issue-hint extractors consumed by bench/driver, reachable from CLI"
+    web: "pure deterministic extractors composing an LLM prompt block, ui_surfaces n-a, no UI affordance"
 purpose: |
   Pure deterministic extractors that scan an issue/problem-statement string
   and surface a structured `IssueHint` (files, errors, code fences,

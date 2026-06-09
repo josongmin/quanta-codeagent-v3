@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "gh_pr_open tool, runs in CLI loop"
+    web: "gh_pr_open tool invocation + PR-open result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms (the create-pr directive event is not the user-facing path)"
 purpose: |
   The seam joining git_compose_pr (authors prose, opens nothing) and gh_pr_create
   (opens from an existing title/body). One atomic tool: resolve branch NAMES

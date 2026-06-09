@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [auto-approval-reviewer, branch-only-guard, default-acceptedits-bypass-auto, fallback-kinds-policy, git-c]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "LLM-backed auto-mode ClassifierPort consulted as last permission fallback reachable from CLI; ui_surfaces n-a"
+    web: "pure LLM classifier port (single round-trip, schema enforcement) injected behind the gate, internal decision primitive with no UI affordance on any surface"
 purpose: |
   HITL-AUTO 모드의 LLM 분류기 — 권한 결정을 사람 대신 자동으로 내리는 mode에서
   "이 action이 safe/dangerous/needs-review 중 어느 카테고리인가" 를 LLM round-trip

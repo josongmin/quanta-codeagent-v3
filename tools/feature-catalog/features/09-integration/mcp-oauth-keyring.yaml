@@ -15,6 +15,14 @@ depends_on: [mcp-http-oauth]
 config_refs:
   env: [QUANTA_MCP_OAUTH_KEYRING]
   runtime: [mcpOAuthKeyring]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "composeTokenStore(keyring, file) injected into the H18 OAuth token store at the CLI composition root"
+    web: "pure internal secret-at-rest storage backend (yaml states not an agent-callable surface, no tool/manifest change) — no UI affordance on any surface"
 purpose: |
   Harden H18 (`mcp-http-oauth`) credential STORAGE: an OPTIONAL `KeyringPort`
   (closed-port, injected exec — NOT a hard-coded `child_process`) so MCP OAuth

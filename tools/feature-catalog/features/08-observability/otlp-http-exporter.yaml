@@ -18,6 +18,14 @@ config_refs:
     - QUANTA_OTEL_SERVICE_NAME
     - QUANTA_OTEL_BATCH_SIZE
     - QUANTA_OTEL_FLUSH_MS
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: leaf exporter primitive not wired into the interactive CLI"
+    web: "pure internal OTLP/JSON exporter library posting spans/metrics to an external collector; no UI affordance on any surface"
 purpose: |
   in-tree OTel scaffold (`metrics/otel-sink.ts`, `tracing/otel-tracer.ts`,
   `tracing/w3c-propagator.ts`)는 in-process surface (counter / histogram /

@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:cursor, absorbed:cline, absorbed:roo, absorbed:aider, absorbed:windsurf, surface:core, default-off]
 depends_on: [loadreporules-cwd]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "5-vendor rule detector port reachable from CLI rules import graph"
+    web: "pure rule-ingestion port feeding prompt assembly, default-OFF, no UI affordance"
 purpose: |
   6-vendor 자동 감지: .cursor/rules/*.mdc + .clinerules(file|dir) +
   .roo/rules-{mode}/*.md + .aider.conf.yml + CONVENTIONS.md + .windsurfrules +

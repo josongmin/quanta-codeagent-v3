@@ -17,6 +17,14 @@ depends_on:
   - codex-r2-mention-injection-pipeline
   - codex-r2-compaction-event-emit
   - codex-r2-system-prompt-cache-and-audit
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "composition-root wire helper + session-keyed resource registry runs in CLI assemble path"
+    web: "pure internal composition wire + process-local resource registry; ui_surfaces n-a, no browser-visible affordance on any surface"
 purpose: |
   Two cross-cutting wires for the Codex-r2 absorption sprint. ADR-0332
   `installCodexR2Wires(cfg, deps)` populates the 6 AgentConfig wire slots

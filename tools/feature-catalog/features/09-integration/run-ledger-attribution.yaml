@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off"]
 depends_on: [run-ledger, hookbus]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "matcher/subscriber reachable from CLI entry (subscription itself a CLI follow-up)"
+    web: "in the web-daemon the subscriber IS wired to post_tool_use (runtime-factory.ts:152), populating runLedger which the observability-emitter projects into the web-only RunColumn (Running/Waiting/Completed)"
 purpose: |
   Wave-2 wiring for the wave-1 Run Ledger (ADR-0395). `@/agent/run-ledger` is
   a pure store; this slice plugs INTO the in-process `HookBus`

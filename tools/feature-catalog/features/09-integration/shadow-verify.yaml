@@ -12,6 +12,14 @@ configurable: none
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Wave-1 closed port contract + DI runner only, no LLM tool, not wired into the loop (ui_surfaces none); pure orchestration primitive with no CLI affordance"
+    web: "pure internal port/runner over injected fakes, nothing wired, no UI affordance on any surface"
 purpose: |
   Multi-file edits change UX more by PRE-APPLY VERIFICATION than by the proposal
   itself. Closed ShadowVerifyPort + DI runner that: opens an isolated SCRATCH

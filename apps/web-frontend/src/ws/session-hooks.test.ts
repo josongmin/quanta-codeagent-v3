@@ -181,6 +181,31 @@ describe("session-hooks transcript projection", () => {
     ])
   })
 
+  it("REGRESSION: an unknown/forward-compat event type is a NO-OP that never poisons reducer state", () => {
+    let state = applySessionEventToTranscript(initialTranscript, turnStartedEvent("hello"))
+    state = applySessionEventToTranscript(state, turnOutputDeltaEvent("hi "))
+    const before = state
+
+    // A newly-added SessionEvent type the frontend does not recognize yet. The
+    // default arm MUST return the same state (no-op) — the original bug fell
+    // through to `undefined`, poisoning the reducer so the next delta crashed on
+    // `state.streamingAssistant`.
+    const unknownEvent = {
+      type: "turn.some.future.kind",
+      eventId: "future-1",
+      emittedAt: "2026-05-26T13:00:03.000Z",
+      seq: 99,
+      revision: 0,
+    } as unknown as SessionEvent
+    state = applySessionEventToTranscript(state, unknownEvent)
+    expect(state).toBe(before) // exact same reference: pure no-op, never undefined
+
+    // The next REAL delta must still project without crashing.
+    state = applySessionEventToTranscript(state, turnOutputDeltaEvent("there"))
+    expect(state).toBeDefined()
+    expect(state.messages.at(-1)?.text).toBe("hi there")
+  })
+
   it("uses snapshot.streamingAssistantText to repair the live assistant row mid-turn", () => {
     let state = initialTranscript
     state = applySessionEventToTranscript(state, turnStartedEvent("hello"))

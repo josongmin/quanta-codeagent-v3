@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude, surface:core]
 depends_on: []
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived 0/7 reachable, ui_surfaces n-a, RadarStore engine plus port plus adapters built but UI integration is deliberate_hold (CLI banner / desktop panel follow-up); keep derived missing"
+    web: "background proposal queue has a planned UI affordance (desktop panel) but it is unbuilt; no web component renders RadarCards and no event bridges them, does not reach the browser"
 purpose: |
   Claude Desktop CoworkRadar 흡수 (MVP scope) — background에서 task
   suggestion을 active proposal로 큐잉. 8-field RadarCard (id/kind/title/

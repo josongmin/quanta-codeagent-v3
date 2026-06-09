@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off"]
 depends_on: [automation-engine, automation-engine-wire]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; automation_update tool + REPL banner run in CLI"
+    web: "automation_update is a model-facing defineTool; its calls render via tool.invoked/tool.completed in session-hooks.ts (banner is CLI-stderr-only but the tool is the primary affordance)"
 purpose: |
   Two thin operator-facing slices on top of ADR-0279:
 

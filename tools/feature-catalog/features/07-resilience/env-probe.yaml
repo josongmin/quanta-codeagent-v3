@@ -12,6 +12,14 @@ configurable: none
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "default-off", "cursor-absorption"]
 depends_on: [assert-never-exhaustiveness]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "probe wired at src/apps/cli/repl/env-probe-wire.ts, reachable from cli entry"
+    web: "StartupWarning[] folded into agent context but no AgentEvent bridge to browser; warnings never reach the web frontend"
 purpose: |
   Faithful absorption of Cursor's CloudAgentStartupWarning /
   CloudAgentStartupWarningType + CloudSetupBlocker. At session start the agent

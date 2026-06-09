@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [runner-assemble-builders, assemble-config, prompt-source-payload-widening, runner-run-interactive, runner-persist-turn]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runner Layer-2 orchestration reachable from CLI entry import graph"
+    web: "pure internal surface-agnostic orchestration engine (assemble/orchestrate/session-ops); no user-visible browser affordance of its own; frontend does not import @/runner"
 purpose: |
   `src/runner/` 슬라이스 — CLI/Web/Tauri/Codex/Claude 어느 표면에서도 동일하게 호출 가능한
   Layer-2 오케스트레이션 모듈. 3 sub-slice 배럴: `assemble/` (8 builder: llm/store/memory/

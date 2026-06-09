@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [stop-category-matrix]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure discriminated-union event data for trajectory recording, no user affordance"
+    web: "pure internal event-shape union, no UI affordance"
 purpose: |
   Discriminated-union event shapes for trajectory recording. BudgetTickEvent
   (kind + delta + cumulative observed after tick) emitted at every meter

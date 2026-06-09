@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure data-only mustBlock/mustAllow test corpus, ui_surfaces n-a, no CLI affordance"
+    web: "pure adversarial test fixture catalog, no UI affordance on any surface"
 purpose: |
   `tests/unit/permission-rules.fixtures.ts` 는 `src/permission/policy.ts`
   의 `HARD_DENY_RULES` 카탈로그를 적대(mustBlock) + 회피-방지(mustAllow)

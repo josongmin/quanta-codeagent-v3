@@ -17,6 +17,14 @@ config_refs:
     - CLAUDE_CODE_USE_VERTEX
     - ANTHROPIC_VERTEX_BASE_URL
     - GOOGLE_APPLICATION_CREDENTIALS
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Vertex transport adapter usable from CLI LLM registry"
+    web: "pure internal cloud transport adapter (GCP Vertex projects/loc endpoint, ui_surfaces n-a), no UI affordance"
 purpose: |
   `VertexProviderAdapter` routes Anthropic Messages API calls through GCP Vertex AI's
   region-scoped endpoint (`projects/{gcpProjectId}/locations/{gcpLocation}/...`) via

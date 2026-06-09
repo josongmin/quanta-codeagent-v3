@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:bench]
 depends_on: [bench-corpus-loader, bench-observe-non-agent-evidence, assert-never-exhaustiveness, bench-best-of-n-sampler, byte-stable-string-comparator]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_BENCH_TIMEOUT_MS env knob read by bench harness via runtime-config; reachable from CLI"
+    web: "pure internal bench env knob, no user-visible UI affordance on any surface"
 purpose: 'Bench 실행 노브: —'
 evidence:
   code:

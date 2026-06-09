@@ -14,6 +14,14 @@ labels: ["surface:core", "auth", "github", "adr-0163"]
 depends_on: [oauth-refresh-lock]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "lock-protected GitHub token rotation runs in CLI auth lifecycle"
+    web: "pure internal auth lifecycle primitive (mid-session GH token rotation, ui_surfaces n-a), no UI affordance"
 purpose: |
   `rotateGitHubToken({current, clientId, clientSecret, httpPort, clockPort,
   lockPort, holderId, rotateAfterMs?, lockTtlMs?, endpointBase?})` rotates a

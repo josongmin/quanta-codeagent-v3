@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:claude", "absorbed:cursor", "surface:core", "tier:core"]
 depends_on: [agent, guarded-spawn, subagent-model-override]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; named-agent registry + role system prompt fold into spawn in CLI"
+    web: "internal spawn-config/system-prompt specialization (named-agent resolver folds system/tools/model into child); no user-visible affordance of its own on any surface"
 purpose: |
   A forked subagent can run with its OWN role identity instead of always inheriting
   `parent.system` (§20.1) AND a repo's `.quanta/agents/*.md` named-agent definitions

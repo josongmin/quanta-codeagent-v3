@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:cursor", "absorbed:codex", "surface:cli", "tier:resilience", "default-off"]
 depends_on: [agent, shared]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in CLI agent loop (dispatch.ts edit-repair seam, gated QUANTA_EDIT_REPAIR_LOOP)"
+    web: "pure internal edit-quality loop (lint-delta multiset diff + bounded fast-model repair); the repair is invisible-by-design and emits no dedicated web-rendered event, no distinct UI affordance"
 purpose: |
   After a model edit (edit/write/apply_patch), compute the diagnostics the edit
   INTRODUCED (post − pre, never the file's pre-existing lint debt) and attach

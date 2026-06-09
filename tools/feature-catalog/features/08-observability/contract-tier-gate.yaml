@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: integrated
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "contract-tier test skip-vs-fail guard; pure test infra, no CLI affordance"
+    web: "pure test-tier gate infra, no UI affordance on any surface"
 purpose: |
   Contract-tier 테스트는 실제 외부 프로세스(Docker daemon, typescript-/pyright-
   language-server)와 통신하므로 환경 가용성이 다르다. `tests/contract/_guard.ts`

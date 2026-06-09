@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:cursor", "security-touched", "default-off"]
 depends_on: [os-sandbox-port-router]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 6/6 evidence files reachable from CLI entry"
+    web: "internal per-call OS sandbox seam; the mode field is a tool-input arg the model sets, not a UI control; no browser affordance"
 purpose: |
   Cursor 3.2 패턴 흡수 — bash tool 입력에 closed-enum `mode: "read"|"write"`
   (OPTIONAL, default "write"). `mode="read"` 일 때 호출당 OS sandbox

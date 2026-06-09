@@ -12,6 +12,14 @@ configurable: n-a
 owners: ['@songmin']
 labels: [surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, spill-evidence-fulllogpath-round-5]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "zod input validation to recoverable tool_result (registry/factory) reachable from CLI import graph"
+    web: "Pure internal dispatch validation primitive that converts bad input to an error tool_result; ui_surfaces n-a, no UI affordance of its own."
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
 evidence:
   code:

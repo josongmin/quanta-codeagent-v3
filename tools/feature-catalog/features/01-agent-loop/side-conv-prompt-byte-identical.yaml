@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [side-conv-dispatch-router, side-conversation-seam, fallback-kinds-policy, llm-factory, model-swap-retry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; frozen prompt constants reachable in CLI"
+    web: "pure frozen prompt constants (no imports, no runtime, no flags); internal byte-identity invariant with no UI affordance"
 purpose: |
   Three frozen constants implementing the byte-identical prompt invariant
   for the side-conversation seam. `SIDE_CONVERSATION_PROMPT_BASE` is the

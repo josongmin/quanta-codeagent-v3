@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:cli, held-promotion]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure forward-compat helper + GitBudget type, barrel-re-exported only; NO git tool imports/calls it (unwired scaffolding per yaml) so no CLI affordance either"
+    web: "pure internal budget primitive, unwired scaffolding, no UI affordance on any surface"
 purpose: |
   Closed-port typed budget interface + pure `applyBudget` helper that derives
   an AbortSignal carrying a deadline for long-running git invocations. Five

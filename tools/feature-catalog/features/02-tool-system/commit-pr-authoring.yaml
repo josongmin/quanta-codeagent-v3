@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:codex-yeet", "absorbed:cursor-compose", "surface:tool", "tier:tier1"]
 depends_on: [git-read-trio, advisor-consult-tool]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3/3 reachable; git_compose_commit/git_compose_pr tools behind QUANTA_COMPOSE_AUTHORING"
+    web: "both compose tools are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
 purpose: |
   Two READ-ONLY authoring tools that close the diff→prose gap (the Codex `yeet`
   / Cursor compose pattern). `git_compose_commit` reads the STAGED diff and

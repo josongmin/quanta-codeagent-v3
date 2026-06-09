@@ -14,6 +14,14 @@ labels: [surface:core, tier:core]
 depends_on: [model-swap-retry, bench-eval-driver, bench-repair-context-builder, fallback-kinds-policy, llm-factory]
 config_refs:
   env: [QUANTA_BENCH_LOCALIZE_PHASE, QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "types.ts cohesion split (re-export preserved, byte-identical); no CLI affordance"
+    web: "pure internal type-module split, no user-visible UI affordance on any surface"
 purpose: |
   `src/agent/types.ts` (875 LOC) 의 cohesion split — 응집도 높은 4 묶음을
   `src/agent/types/` 하위 모듈로 분리하고 root `types.ts` 는 re-export 보존

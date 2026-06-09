@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [os-sandbox-port-router]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "macOS SBPL profile compiler/parity lock used by os-sandbox (src/runtime/os-sandbox/seatbelt.ts)"
+    web: "pure internal SBPL profile codec/policy (ui_surfaces n-a); no user-visible affordance on any surface"
 purpose: |
   Codex 강신호 — macOS Seatbelt SBPL profile을 verbatim parity로 잠금
   (3 profile: read-only / workspace-write / workspace-write-net). parity

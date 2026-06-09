@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
 depends_on: [gitdiff, git-read-trio, git-runner-cancellation-signal, git-branch-name-schema-guard, git-mutating-tools]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_upstream_check read-only tool (7th gitTools read-only), runs in CLI."
+    web: "Agent tool — ahead/behind + pull-suggestion result renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   v0.dev chat=branch upstreamChanges 흡수 — fetch 없이(네트워크·index 무변경) 이미
   가져온 remote-tracking ref 대비 ahead/behind를 보고. rev-parse @{upstream}로 upstream

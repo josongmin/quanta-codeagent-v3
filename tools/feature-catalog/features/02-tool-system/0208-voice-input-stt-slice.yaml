@@ -14,6 +14,14 @@ labels: [absorbed:4-vendor, surface:cli, default-off]
 depends_on: [plan-queue]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/voice CLI slash + recorder/transcriber ports reachable from CLI import graph (voice-cmd.ts)"
+    web: "CLI-only /voice slash with no web handler; grep of apps/web-frontend shows no voice surface, so it cannot execute in the browser (B2 SlashPalette stubs do not run)."
 purpose: |
   S3 voice slice — 4-vendor convergence absorption (Claude `/voice` Deepgram,
   Aider `/voice` Whisper, Windsurf voice input, Codex realtime WebRTC).

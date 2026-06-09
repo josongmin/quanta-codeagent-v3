@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "static policy-stack text baked into buildSystemPrompt, pure internal, no direct CLI affordance"
+    web: "pure internal system-prompt policy text, no UI affordance"
 purpose: 8-layer 정책 인덱스 + FACT/INFERENCE/UNKNOWN claim ladder + 트러스트 ladder + 5축 예산 + 정직성 4 rule + 8 task-kind reporting shape + VerificationCloseout scaffold. buildSystemPrompt에 정적 박힘 — 캐시 prefix byte-stable 보존
 evidence:
   code:

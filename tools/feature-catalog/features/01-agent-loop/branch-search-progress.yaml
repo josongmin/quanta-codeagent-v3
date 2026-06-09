@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core, default-off, tier:core]
 depends_on: [branch-search-isolate-symlink-safe, branch-search-pure-scorer, branch-search-verifier-suite, shadow-odb-port, shadow-odb-rewind]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure progress-line formatter for BranchTraceEvent rendered in CLI; closed-port anchor"
+    web: "progress line rides branch-search trace events which are dropped at context-binding.ts default arm; CLI-only display formatter"
 purpose: |
   Two leaf modules that complete the speculative branch-search slice.
   (1) `BranchSearchAnchor` — closed port wiring the Shadow git ODB

@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:claude-code"]
 depends_on: [llm-stream-timeout, errors-helper-fix, fallback-kinds-policy, llm-factory, skill-discover]
 config_refs:
   env: ["QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal Anthropic beta-header gating + 30MB skill-size cap; surface:core, no UI affordance"
+    web: "pure internal header config + size-guard, no UI affordance on any surface"
 purpose: 'AnthropicConfig.betaHeaders?: readonly string[] — joined into `anthropic-beta` header at SDK client level (defaultHeaders). Empty / undefined ⇒ byte-identical to today. Skills-2025-10-02 / oauth-2025-04-20 / environments-2025-11-01 채널 게이팅. + MAX_SKILL_SIZE_BYTES = 30 MB hard cap in src/skill/discover.ts — 초과 파일은 console.warn 로그 + skip (discriminated union SkillSizeCheck { ok | reason: "too-large" | "stat-failed" }).'
 evidence:
   code:

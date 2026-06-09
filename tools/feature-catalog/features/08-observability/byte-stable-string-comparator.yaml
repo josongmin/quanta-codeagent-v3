@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
 depends_on: [errors-helper-fix, runtime-config-ssot, assert-never-exhaustiveness, session-jsonl-envelope, session-root-provider-port]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "byteCompare comparator used in sort callbacks across the CLI import graph."
+    web: "Pure internal deterministic-ordering primitive, no UI affordance on any surface."
 purpose: |
   Byte-stable string comparator for deterministic ordering. Unlike
   `String.prototype.localeCompare`, the result does NOT depend on the

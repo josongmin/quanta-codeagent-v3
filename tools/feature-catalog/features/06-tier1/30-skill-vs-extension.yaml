@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-md-frontmatter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "host calls classify + assertAllowedTool before dispatching any tool while a skill is active in the CLI"
+    web: "pure routing/permission classifier consuming parsed frontmatter, no UI on any surface"
 purpose: |
   `SkillFrontmatter.category` is the SSOT for whether an entry is auto-
   triggerable by the model (`skill`) or system-level only (`extension`).

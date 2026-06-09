@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "update_working_state meta-tool plus dedicated CLI working-state-panel.ts render."
+    web: "Tool invocation/result render in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), but the dedicated scratchpad panel (src/apps/cli/working-state-panel.ts) is CLI-only — no web panel render, so the structured scratchpad surface is partial."
 purpose: |
   모델이 free-form per-task 스크래치패드(owner shortlist / hypothesis / blockers /
   deferred validation / next-step queue)를 유지하는 메타도구. 각 필드는 delta가 아닌

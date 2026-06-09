@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex", "production-wired"]
 depends_on:
   - codex-r2-composition-install-and-registry
   - codex-r2-disk-persistence-and-env-swap
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/session-registry stats inspector slash + auto-sweep wired in src/apps/cli/session-registry-cmd.ts + slash/registry-app.ts"
+    web: "inspector value is the /session-registry stats CLI slash; web SlashPalette is a prefill stub (B2), no web inspector render"
 purpose: |
   Three-ADR closeout that takes ADR-0348 jsonl + ADR-0361 sqlite adapters
   from "exists" to "operator-ready". ADR-0367 adds

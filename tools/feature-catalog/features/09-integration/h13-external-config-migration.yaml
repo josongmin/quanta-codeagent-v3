@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:1"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI startup detect/import flow via emitConfigMigrationNotice (QUANTA_MIGRATE_CONFIG); 8/8 evidence reachable from CLI entry import graph."
+    web: "Startup config-migration notice is a CLI stderr seam only; no web affordance, @/migration not reachable from web-daemon; never reaches the browser."
 purpose: |
   Startup detect-and-import of competitor (Claude Code / Cursor) CONFIG
   artifacts into quanta's format. Mirrors Codex's `external_agent_config.rs`

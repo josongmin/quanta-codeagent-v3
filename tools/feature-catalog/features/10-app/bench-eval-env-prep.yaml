@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [bench-corpus-loader, bench-eval-driver, dockersandbox, localsandbox, network-allowlist-host-check]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: bench per-instance env prep, ui_surfaces n-a, not in interactive CLI graph"
+    web: "env-prep produces the env_prep_failed verdict surfaced in the bench CLI report, not reachable from web-daemon; no browser affordance"
 purpose: |
   Per-instance env prep — the structural fix for Type-F (verify-loop
   stuck on env). When the instance carries `setupCmd`, run it INSIDE

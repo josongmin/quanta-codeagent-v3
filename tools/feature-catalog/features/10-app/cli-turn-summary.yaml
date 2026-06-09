@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [memory-recall-citation]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/turn-summary.ts renders turn-end box; reachable from CLI entry"
+    web: "CLI-only box panel; rides recovery/context_compacted events dropped at context-binding.ts:1061 default arm (B1); no web render"
 purpose: |
   Turn-end "summary box" panel — 한 턴 종료 시 다음을 한 박스에 모아 출력:
   (1) tools row (도구 호출/결과 카운트 + 실패 카운트),

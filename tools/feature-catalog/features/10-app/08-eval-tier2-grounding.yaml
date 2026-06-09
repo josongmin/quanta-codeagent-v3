@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-five-tier, eval-taxonomy-tree, prompt-cache-observability]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: grounding tier under src/apps/eval plus CI workflow, CLI-only"
+    web: "grounding structured probe + live-gate workflow runs in eval CLI app and GitHub Actions, not in web-daemon; no browser surface"
 purpose: |
   Tier-2 of the 6-tier eval stack (umbrella id: `eval-five-tier`). Measures
   fail-closed conversational grounding, not prose quality: a controlled probe

@@ -16,6 +16,14 @@ depends_on:
   - runtime-config-ssot
 config_refs:
   env: ["QUANTA_LOG_LEVEL", "QUANTA_BG_COMPACTION"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "5/5 reachable; full /knobs family set/reset/preset/save over the whole registry"
+    web: "KnobsPanel reads the same catalog broadly via GET /api/knobs but WRITE is limited to the 6 CONFIG_ALLOWED_KEYS; arbitrary /knobs set is CLI-only (read-broad/write-narrow)"
 purpose: |
   `/knobs` live-control — the operator surface for the unified knob control
   plane (P3/P4). Four pillars:

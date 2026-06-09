@@ -7,6 +7,14 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 depends_on: [assert-never-exhaustiveness, awf-tool-matcher, byte-stable-string-comparator, errors-helper-fix, llm-cost-emit-sink]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "HookBus handler-count + payload-byte caps active in CLI hook bus (src/agent/hooks.ts)"
+    web: "pure internal DoS brake on the HookBus (cap + truncation); no user-visible affordance on any surface"
 purpose: |
   Two structural DoS brakes for the HookBus surface. (1) Per-event handler
   cap (default 64) — registering a 65th handler throws

@@ -12,6 +12,14 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "costUsd null-proto TABLE guard compiled into pricing path used by CLI."
+    web: "Pure internal correctness/security guard (prototype-pollution NaN block), no UI affordance on any surface."
 purpose: |
   `costUsd(model, ...)`의 model 인자는 untrusted 외부 문자열. 가격 TABLE이 평범한
   object literal이면 `TABLE["constructor"]` / `["toString"]` / `["__proto__"]` /

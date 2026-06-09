@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [permission-store-json, git-destructive-hard-deny, permission-inspect-5axis, permission-scope-4-tier, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "propositional protected-branch check consulted by ci-bot mode presets reachable from CLI; ui_surfaces cli; modes ci-bot"
+    web: "pure ci-bot git-write guard predicate (no FS/shell), internal mode-gate primitive with no UI affordance on any surface"
 purpose: |
   Propositional check on a shell command — is this operation forbidden by the
   `gitWrite: { kind: "branch-only"; protectedBranches: string[] }` lever?

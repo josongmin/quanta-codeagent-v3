@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [subagent-bg-tools-trio, agent, agent-loop-branch-hardening, agent-tool-shape, agent-types-split]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "background subagent scheduler with fork/await trio, runs in CLI loop"
+    web: "background turn-taking value depends on subagent progress/await which rides dropped progress events (context-binding.ts:1104) and needs a B3-absent background/await verb; SessionCommand has only input/turn/approval"
 purpose: |
   Scheduler that runs a subagent fork in the background so the parent loop
   continues turn-taking while the subagent works. Pairs with a wait/await

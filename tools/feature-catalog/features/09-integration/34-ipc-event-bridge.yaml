@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [portable-session-v1, slice-ipc-bridge]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure internal surface-agnostic pub/sub + closed BridgePayload envelope union (src/ipc/event-bridge.ts); ui_surfaces api; no CLI affordance, not wired into any entry."
+    web: "Pure internal IPC protocol primitive (closed WireEnvelope union); no browser affordance; not the @/ipc/session codec the web-daemon actually uses."
 purpose: |
   Surface-agnostic event bridge connecting multiple surfaces (CLI / Web /
   Tauri / future remote-control daemons) to a single logical agent session.

@@ -14,6 +14,14 @@ labels: ["surface:ipc"]
 config_refs:
   env: [MCP_USE_ISOLATED_SPAWN]
 depends_on: [mcp-tool-bridge, plugin-isolated-spawner]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal MCP spawn-path swap (IsolatedMcpClient over a process-isolation port); surface:ipc, no user-visible affordance"
+    web: "pure internal IPC spawn primitive, no browser affordance"
 purpose: |
   Mirror public API of legacy `McpClient` (start / listTools / callTool /
   stop) but delegates spawn to `IsolatedProcessSpawnerPort` (+ PluginHost

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:web", "default-off"]
 depends_on: [observability-ui-pane, observability-ws-sink, context-usage-metrics]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: diff math + usage breakdown share src/runner/diff-ops and CLI diff-preview path"
+    web: "context.usage half renders via useContextUsage in ObservabilityPane, but DiffView/DiffPanel is NOT mounted (App.tsx:578-587) so tool.diff decodes then drops — split partial"
 purpose: |
   Render-side React components for the web/Tauri surface mirroring Cursor's
   cursor/canvas SDK prop shapes (DiffViewProps / UsageBarProps / colorPalette),

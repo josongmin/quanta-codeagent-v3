@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [slice-auth-chatgpt-oauth, refresh-coordinator, token-store-atomic, built-in-slash-commands, slashctx-6-ports-wire-completion]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/login and /status CLI slash commands (src/apps/cli/login-cmd.ts, status-cmd.ts)."
+    web: "Real web handlers: web-daemon /auth/login /auth/logout /auth/status (apps/web-daemon/auth-routes.ts) plus frontend slash-auth.ts; model selection via POST /config (QUANTA_MODEL)."
 purpose: |
   ChatGPT Plus/Pro/Team 구독 계정으로 모델 호출 — BYOK(OPENAI_API_KEY) 없이 OAuth 토큰을
   사용해 `https://chatgpt.com/backend-api/codex/responses`로 호출. BYOK provider와 형제로

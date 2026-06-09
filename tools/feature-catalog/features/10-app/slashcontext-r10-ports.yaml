@@ -14,6 +14,14 @@ labels: ["surface:cli"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, agent-loop-branch-hardening, llm-error-taxonomy]
 config_refs:
   env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "SlashContext R10 ports interface in src/apps/cli/slash-commands.ts reachable from CLI entry"
+    web: "CLI-only SlashContext surface seam (cost/plan/workingState/history/branchSearch); the web frontend supplies none of these ports, so every R10 panel they feed is absent in browser"
 purpose: |
   R10 extends the `SlashContext` interface in `src/apps/cli/slash-commands.ts`
   with FIVE optional surface ports — one per R10 panel that needs live session

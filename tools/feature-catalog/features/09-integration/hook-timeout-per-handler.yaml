@@ -7,6 +7,14 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 depends_on: [assert-never-exhaustiveness, awf-tool-matcher, byte-stable-string-comparator, errors-helper-fix, llm-cost-emit-sink]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "per-handler timeout race in src/agent/hooks.ts runs in the CLI agent loop"
+    web: "pure internal hook-bus hardening primitive (Promise.race timeout slot) — no user-visible affordance on any surface"
 purpose: |
   Per-handler timeout race for the HookBus emit chain. A stuck handler used to
   block the agent loop forever (P0); S5 adds an opt-in race against

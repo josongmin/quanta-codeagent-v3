@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on: [codex-r2-typed-event-store]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Emits compaction_event variant from both compaction call-sites into a typed-event store via AgentConfig slot; ui_surfaces n-a, reachable from CLI entry."
+    web: "Pure internal typed-history observability emit (additive side-channel); no user-visible surface affordance."
 purpose: |
   Codex `Compaction / ContextCompaction / CompactionTrigger` ResponseItem
   parity in quanta. ADR-0324 added `compaction_event` as the 6th variant

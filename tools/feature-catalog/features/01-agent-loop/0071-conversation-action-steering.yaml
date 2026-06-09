@@ -15,6 +15,14 @@ labels: [absorbed:cursor, surface:core, tier:core]
 depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, mid-turn-steering, src-agent-working-state-ts]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in CLI via src/apps/cli/repl/conversation-action-surface.ts"
+    web: "typed 5-arm action layer (cancel_subagent/summarize/resume) needs B3-absent SessionCommand verbs; protocol.ts has only turn.cancel (whole-turn), and response_queued style control events drop at context-binding.ts:1104 default arm"
 purpose: |
   Cursor ConversationAction oneof 흡수 — 기존 단일 free-text SteerRequest 위에 5-arm 타입드
   액션 레이어를 PURE + ADDITIVE + DEFAULT-OFF로 적층. ConversationAction = user_message{prepend[]}

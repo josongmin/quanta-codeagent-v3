@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-client-base, lsp-expansion-4-tools, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure LspPort adapter layer (src/lsp/ports.ts, adapters/base.ts), ui_surfaces n-a; an internal port primitive beneath the lsp_nav tools."
+    web: "Pure internal LSP port/adapter primitive; no UI affordance on any surface (the lsp_definition tool layer is the user-facing surface)."
 purpose: 'LspPort에 8 RPC 추가: definition/references/hover/typeDefinition/implementation/documentSymbol/workspaceSymbol/prepareRename. capability 부재는 null로 graceful surface'
 evidence:
   code:

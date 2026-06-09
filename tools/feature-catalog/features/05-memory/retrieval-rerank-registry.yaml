@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "adr:0159"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reranker port + registry strategies, closed-by-default internal library, no CLI affordance"
+    web: "pure internal registry primitive, no UI affordance"
 purpose: |
   Closed-by-default registry for second-stage rerankers over any candidate
   list (BM25 hits / embedding hits / external sources). The RerankPort port

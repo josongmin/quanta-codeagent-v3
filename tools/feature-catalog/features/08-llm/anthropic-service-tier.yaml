@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:claude"]
 depends_on: [llm-factory]
 config_refs:
   env: ["QUANTA_SERVICE_TIER", "QUANTA_FAST"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_SERVICE_TIER/QUANTA_FAST resolved at CLI composition root, threaded to codec"
+    web: "QUANTA_SERVICE_TIER and QUANTA_FAST are both in CONFIG_ALLOWED_KEYS; web /fast /standard /flex slash commands write them via real POST /config (slash-llm-config.ts) and KnobsPanel can write SERVICE_TIER"
 purpose: |
   Send the Anthropic `service_tier` so a run can opt into priority capacity or pin
   standard-only. `resolveServiceTier` resolves the intent at the composition root

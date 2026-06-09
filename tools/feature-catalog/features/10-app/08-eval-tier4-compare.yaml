@@ -13,6 +13,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
 depends_on: [eval-five-tier]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: A/B pairwise compare adapters under src/apps/eval, CLI-only"
+    web: "cross-CLI pairwise judge spawns external CLIs from the eval app, not in web-daemon; no browser surface"
 purpose: |
   Tier-5 of the 6-tier eval stack (umbrella id: `eval-five-tier`). The only
   tier that runs TWO agents on the same prompt and asks an LLM judge to

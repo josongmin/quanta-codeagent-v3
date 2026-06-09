@@ -14,6 +14,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude"]
 depends_on: [team-dag-coordination, team-broker-coordination]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_TEAM_IDLE knob-gated side-agent fan-in barrier wired into the side-agent registry/daemon supervise loop"
+    web: "idle beacons/barrier are backend side-agent coordination; no bridged AgentEvent and no web affordance reaches the browser (dropped at context-binding.ts default arm)"
 purpose: |
   Claude --agent-teams의 team-idle 배리어 흡수. 리더가 "전원 끝났나"를 폴링하는 대신
   fan-in 배리어로 await. 각 멤버가 turn-end에 idle beacon emit, 리더는 teamIdle(전원

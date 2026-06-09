@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [cli-status-bar]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/turn-indicator.ts reachable from CLI entry; CLI-only ANSI spinner plus elapsed plus token counter via StreamPort tee, TTY auto-OFF"
+    web: "CLI ANSI indicator component, not rendered in browser; web has its own TokenCounter off the usage event, this CLI spinner does not reach the web"
 purpose: |
   LLM 대기 중 spinner + elapsed seconds + live token counter(input/output 누적) 표시.
   StreamPort tee 패턴으로 구현 — streaming-dispatch 본체 무수정, 새 StreamPort 어댑터가

@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:repl", "closeout"]
 depends_on: [cli-repl-solid-split, repl-mcp-surface-wire]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Dead-code prune of src/apps/cli/repl/ orphan tree plus KEEP of mcp-surface-wire seam; repl.ts stays the live CLI God-class."
+    web: "Pure dead-code closeout/prune task with no user-facing affordance on any surface; not a UI feature."
 purpose: |
   Closeout of the 21-module orphan tree under `src/apps/cli/repl/` created by
   commit `acb8d187` (2026-05-24 "split GodClass into SOLID modules v2,

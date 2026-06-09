@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [bench-eval-env-prep, bench-repair-context-builder, bench-corpus-loader, bench-python-swebench, runrepairrounds]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "single-instance bench eval driver (sandbox+agent+verdict+diff) run by bench harness in headless/batch"
+    web: "pure internal bench per-instance orchestration, no browser affordance"
 purpose: |
   Top-level orchestration for a SINGLE SWE-bench-style instance. The ONLY
   place that ties the eval sub-slice together:

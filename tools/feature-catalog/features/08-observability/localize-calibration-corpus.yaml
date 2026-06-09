@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "localize recall@K/MRR calibration corpus; offline measurement instrument, no CLI affordance"
+    web: "pure offline calibration measurement instrument, no UI affordance on any surface"
 purpose: |
   `src/tool/localize/` 의 ranking 알고리즘 변경이 실제로 도움이 됐는가를
   "vibes" 가 아닌 데이터로 답하기 위한 empirical calibration. unit-test

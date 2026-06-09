@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:n-a, surface:cli]
 depends_on: [session-envelope-encoder]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/session export and /session import slash commands wired in CLI REPL via sessionIo store"
+    web: "CLI-only slash; SlashPalette Server-routed commands are prefill stubs that do not execute (B2) and there is no web export/import handler"
 purpose: |
   ADR-0294 — `/session export <id>` + `/session import <path>` 슬래시 명령으로
   ADR-0157 (`src/session/import-export.ts` + `import-export-fs.ts`) 의 순수

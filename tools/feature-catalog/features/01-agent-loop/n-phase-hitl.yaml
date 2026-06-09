@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, tier:core]
 depends_on: [plan-exit-three-way, plan-exit-flow]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived 0/4 reachable, AgentConfig wire deliberately held; closed NPhaseDriver state machine not wired into CLI"
+    web: "approvals web surface is the 2-verb EscalationCard/PlainApproval; this N-phase per-phase feedback gate is unwired and rides no web command verb, does not reach the browser"
 purpose: |
   Cursor AiProjectService(8)의 N-phase 상태머신(init→clarify→plan→feedback
   →breakdown→...) 패턴 흡수. ADR-0063 plan-exit 3-way를 N-phase 시퀀스 + per-phase

@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 depends_on: [speculative-branch-search, branch-search-verifier-suite, branch-search-pure-scorer, branch-search-minimal-change, branch-search-progress]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; Isolator port impls for branch search"
+    web: "pure internal tmpdir/worktree isolators with symlink-safe cleanup; no browser UI affordance"
 purpose: |
   Two `Isolator` port implementations for the speculative branch search.
   `tmpdirIsolator` uses `mkdtemp` + `cp -r` excluding `.git` and

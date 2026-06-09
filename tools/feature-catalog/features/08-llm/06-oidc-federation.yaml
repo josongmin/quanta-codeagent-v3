@@ -17,6 +17,14 @@ config_refs:
     - ANTHROPIC_IDENTITY_TOKEN_FILE
     - ANTHROPIC_FEDERATION_RULE_ID
     - ANTHROPIC_ORGANIZATION_ID
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "OIDC token-exchange runs in CLI auth path (file to access token)"
+    web: "pure internal auth primitive (workload-identity JWT exchange, ui_surfaces n-a), no UI affordance"
 purpose: |
   `OidcFederationExchanger.exchangeToken({identityTokenFile, federationRuleId,
   orgId})` reads a workload-identity JWT from disk (Kubernetes SA projection /

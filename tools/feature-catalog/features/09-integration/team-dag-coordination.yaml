@@ -14,6 +14,14 @@ labels: ["surface:core"]
 depends_on: [subagent-mailbox]
 config_refs:
   env: [QUANTA_TEAM_DAG]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_TEAM_DAG knob-gated spawn_batch dependency ordering wired into run-batch.ts, CLI-observable"
+    web: "dependency-ordering is backend orchestration over spawn_batch; the DAG state rides no bridged event and has no web card (RunColumn shows runs but not dependency edges), dropped at context-binding.ts default arm"
 purpose: |
   Capability A of multi-agent coordination (plan docs/plans/
   multiagent-coordination.md §2.A) — a task dependency DAG so subagent fan-out

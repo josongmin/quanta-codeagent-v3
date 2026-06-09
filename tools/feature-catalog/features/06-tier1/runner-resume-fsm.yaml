@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [cli-resume-state-machine]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "resolveResume FSM driven by --resume/--new-session argv; reachable from CLI entry"
+    web: "pure internal startup state-machine primitive; protocol.ts has no resume/fork verb so it has no web affordance to surface"
 purpose: |
   `--resume <token>` / `--new-session` startup state 결정을 surface 무관 슬라이스로
   격리. argv/env 직접 읽기 ZERO — 모든 입력이 `ResolveResumeInput` 으로 명시되어

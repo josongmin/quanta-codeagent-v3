@@ -40,6 +40,7 @@ import {
   SECTION_SLUGS,
   validateInvariants,
 } from "./schema"
+import { applyAuditedVerdicts, deriveSurfaceIntegration } from "./surface-derive"
 import { formatTestAuditReport, runTestAuditFromDisk } from "./test-audit"
 import { parseYaml, stringifyYaml } from "./yaml"
 
@@ -1186,6 +1187,40 @@ async function cmdSurface(argv: string[]): Promise<void> {
   }
 }
 
+// `bun fc surface-derive [--write]` — MECHANICALLY fill surface_integration for
+// every feature from per-surface import reachability (no LLM). Dry-run by
+// default; --write applies. Skips features that already carry a block.
+async function cmdSurfaceDerive(argv: string[]): Promise<void> {
+  const write = argv.includes("--write")
+  const rows = await deriveSurfaceIntegration({ write })
+  const filled = rows.filter((r) => !r.skipped)
+  const tally = (k: "cli" | "web"): Record<string, number> => {
+    const t: Record<string, number> = {}
+    for (const r of filled) t[r[k]] = (t[r[k]] ?? 0) + 1
+    return t
+  }
+  console.log(`surface-derive ${write ? "(WROTE)" : "(dry-run — pass --write to apply)"}`)
+  console.log(
+    `  ${filled.length} derived · ${rows.length - filled.length} skipped (already have a block)`,
+  )
+  console.log(`  cli: ${JSON.stringify(tally("cli"))}`)
+  console.log(`  web: ${JSON.stringify(tally("web"))}`)
+}
+
+// `bun fc surface-apply <verdicts.json>` — apply LLM-audited verdicts
+// (method:audited) over the derived baseline via the single trusted writer.
+async function cmdSurfaceApply(argv: string[]): Promise<void> {
+  const file = argv[0]
+  if (file === undefined) {
+    console.error("usage: bun fc surface-apply <verdicts.json>")
+    process.exit(2)
+  }
+  const verdicts = JSON.parse(await readFile(file, "utf8"))
+  const { applied, skipped } = await applyAuditedVerdicts(verdicts)
+  console.log(`surface-apply: ${applied} audited block(s) written · ${skipped.length} skipped`)
+  for (const s of skipped.slice(0, 25)) console.log(`  skip: ${s}`)
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2)
   const cmd = argv[0]
@@ -1247,6 +1282,12 @@ async function main(): Promise<void> {
       return
     case "surface":
       await cmdSurface(rest)
+      return
+    case "surface-derive":
+      await cmdSurfaceDerive(rest)
+      return
+    case "surface-apply":
+      await cmdSurfaceApply(rest)
       return
     case undefined:
     case "-h":

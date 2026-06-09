@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "default-off"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "auto-title port built in CLI composition root (internal.ts/repl.ts) and fired once by runSessionStartSequence on turn 1, writing SessionMeta.title via renameSession"
+    web: "port wired only into CLI bootstrap, not web-daemon; no session-title event in the 6-event bridge or observability protocol so no title reaches the browser"
 purpose: |
   Opt-in, cheap-model, fire-and-forget session titler (RFC
   `docs/plans/jun-6-ai-session-title.md`). On the FIRST turn only, an opted-in

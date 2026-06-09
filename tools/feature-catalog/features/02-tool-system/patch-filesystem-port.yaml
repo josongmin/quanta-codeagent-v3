@@ -15,6 +15,14 @@ labels: [absorbed:codex, surface:cli]
 depends_on: [apply-patch-v4a]
 config_refs:
   env: ["QUANTA_FS_JAIL"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal FS-port abstraction injected into applyPatch (read/write/delete/rename/exists seam), no affordance; apply_patch is the user-facing tool"
+    web: "pure internal IO-port abstraction, no UI affordance on any surface"
 purpose: |
   Patch-specific FS port (read / write / delete / rename / exists) injected
   into the V4A `applyPatch` so the applier stays pure-functional w.r.t. the

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [post-denial-precedence, per-host-agent-mode, runtime-config-ssot, per-thread-permissions]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_HOME env override consumed via runtimeConfig SSOT by permission-store/bench/prefs paths"
+    web: "pure cross-cutting path env override, no UI affordance on any surface"
 purpose: |
   Single env override that relocates every Quanta-owned persistent path —
   permission-state, bench corpus/artifacts, prefs fallback parent, and other

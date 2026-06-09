@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "1/1 reachable; recovery rung inside the edit tool fuzzy ladder"
+    web: "pure internal fuzzy-match recovery rung (ui_surfaces n-a), an additive scoring discriminator with no user-visible affordance"
 purpose: |
   A final safety-net rung on the fuzzy ladder's AMBIGUOUS path (which fails today):
   score each candidate window by exactAnchorScore = count of lines matching the

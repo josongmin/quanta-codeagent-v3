@@ -15,6 +15,14 @@ labels: [absorbed:cursor, surface:cli, security-touched]
 depends_on: [typed-tool-failure-modes, agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, read-image]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "gitWriteProtectReason guard wired into write/edit/dispatch in the CLI agent."
+    web: "Static deny of .git/.vscode writes; a blocked write surfaces as a tool_result ok:false (permission_denied) rendering as tool.completed outcome:error in web, but no distinct security affordance."
 purpose: |
   Cursor cursorsandbox의 Seatbelt write-deny-regex를 surface-agnostic 정적 detector로
   흡수 — .git/hooks·.git/config·.vscode write는 곧 임의 코드 실행(git/에디터가 auto-run)

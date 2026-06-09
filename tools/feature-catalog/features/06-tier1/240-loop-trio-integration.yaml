@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "closes:deliberate-hold"]
 depends_on: ["auto-background-stuck-detector", "automation-engine", "identity-mode-variant", composition-root-mega-wire-2026-05-25]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "auto-background onAccept, automation tickScheduler setInterval, and architect/editor per-turn prompt notices all run in the CLI loop"
+    web: "auto-bg propose/accept is a CLI prompt affordance; mode/notice events drop at context-binding.ts:1104 default arm (B1) — none reach the browser"
 purpose: |
   Closes 3 of 11 ADR-0236 mega-wire deliberate_holds. (A) auto-background
   propose `onAccept` callback wires to `BackgroundSubagentScheduler.fork`

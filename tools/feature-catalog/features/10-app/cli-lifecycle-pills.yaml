@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [queued-follow-ups, cli-status-pills]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/lifecycle-pills.ts reachable from CLI entry; terminal pill chrome"
+    web: "CLI-only terminal chrome (subagent/follow-up/MCP pills); not reachable from web-daemon, no web render"
 purpose: |
   Top-line status-pills(`cli-status-pills`)과 직교한 3개 lifecycle pill:
   (1) `subagent` (활성 sub-agent 개수 + worker nickname),

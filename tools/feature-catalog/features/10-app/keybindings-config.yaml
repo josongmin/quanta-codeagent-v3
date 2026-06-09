@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Loads ~/.quanta/keybindings.json and remaps keys in CLI raw-line-reader; reachable from CLI import graph."
+    web: "CLI raw-line-reader keypress remap; no browser keybinding layer and no protocol verb."
 purpose: |
   Loads ~/.quanta/keybindings.json (same dir as knobs.json), merges over a default
   key→action map (closed 14-action enum), and remaps keys in the raw-line-reader

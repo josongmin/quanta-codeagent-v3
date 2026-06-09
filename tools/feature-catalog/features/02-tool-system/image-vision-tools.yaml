@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [read-image, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "read_image/read_image_url tools, run in CLI loop"
+    web: "read_image/read_image_url tool invocations + results render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   Three modules that compose the vision-input slice. (1) `read_image`
   (ADR-0126) reads an image file from disk, magic-byte-sniffs the media

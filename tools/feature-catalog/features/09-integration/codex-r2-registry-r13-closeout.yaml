@@ -15,6 +15,14 @@ depends_on:
   - codex-r2-registry-retention-and-inspector
   - codex-r2-observability-decorators
   - codex-r2-multi-process-flock
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/session-registry evict/help slash + sweep telemetry wired into CLI ops surface"
+    web: "operator value is the /session-registry CLI slash; web SlashPalette routes are prefill stubs (B2), telemetry rides no bridged event"
 purpose: |
   6-ADR R13 closeout — every gap from R12's follow-up list landed TDD-strict
   (each hellgate case authored RED-first, GREEN-confirmed, REFACTOR-pinned).

@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [scheduler-model-reroute, scheduler-rrule, scheduler-runtime, scheduler-weekday-nth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; lifecycle helpers + JSONL store run in CLI scheduler"
+    web: "pure internal 4-arm lifecycle transition helpers + append-only JSONL store; no UI affordance"
 purpose: |
   4-arm closed lifecycle (`active` / `paused` / `deleted` / `error`) +
   pure transition helpers (`createAutomation` / `transitionStatus` /

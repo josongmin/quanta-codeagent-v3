@@ -12,6 +12,14 @@ configurable: integrated
 owners: ['@songmin']
 labels: [surface:cli]
 depends_on: [bench-repair-context-builder]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Bench eval batch driver (src/apps/bench/eval/repair/) invoked via the bench CLI; runs as a batch CLI mode, not via the interactive REPL import graph."
+    web: "Bench-only repair loop; no browser affordance and no event crosses the web bridge."
 purpose: |
   Pure-policy bench-repair loop SSOT: `runRepairRounds` orchestrates N rounds of
   (apply → `validate` → `buildRepairContext` → re-prompt) inside ONE sandbox so

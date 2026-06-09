@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:devin, surface:core, tier:core]
 depends_on: [user-authored-playbook-frontmatter]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure leaf generator (spec to bun:test fixture text), ui_surfaces n-a, no I/O, caller owns FS write; no CLI affordance, not wired"
+    web: "pure internal code generator primitive, no UI affordance on any surface"
 purpose: |
   Devin Playbook의 `spec` 필드 흡수 — spec → bun:test fixture text 1개를
   생성하는 작고 닫힌 포트. quanta 는 ADR-0203 에서 `successCriteria[]` 와

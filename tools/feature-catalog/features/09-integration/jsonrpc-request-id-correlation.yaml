@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [jsonrpc-codec]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure branded RequestId type + deterministic seedable id generator; shared/jsonrpc library primitive, no surface affordance."
+    web: "Pure internal id-correlation primitive; no browser affordance and not reachable from web surface."
 purpose: |
   Branded `RequestId` type plus a deterministic, seedable id generator for
   JSON-RPC correlation. No `Math.random()` and no `Date.now()` feed id

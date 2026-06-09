@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:cline", "absorbed:cursor", "absorbed:codex", "default-off"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 4/4 evidence files reachable from CLI entry (incl per-tool-checkpoint-wire.ts)"
+    web: "internal checkpoint-granularity policy primitive (surface:core); no UI affordance on any surface"
 purpose: |
   ADR-0121의 4-arm trigger mode와 직교하는 GRANULARITY 축 추가
   (`"turn" | "tool" | "skill"`). 기존 per-turn dedup는 Cline의 매-tool-call

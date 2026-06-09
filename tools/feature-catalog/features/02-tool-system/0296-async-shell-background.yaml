@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, async-tool, security-touched]
 depends_on: [bash-timeout-cap, bash-tool-hitl-tier, typed-tool-failure-modes]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bash timeout_behavior=background + bash_await + bash_kill tools reachable from CLI import graph"
+    web: "bash_await/bash_kill are model-invokable tools and the background placeholder is returned as bash tool output text; all ride the bridged tool_call/tool_result events and render as the generic tool card (session-hooks.ts:420-435)."
 purpose: |
   Cursor 3.2 `TimeoutBehavior.BACKGROUND` 패턴 흡수. `bash` schema에
   `timeout_behavior: z.enum(["kill","background"]).optional()` 추가

@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Probe failure-triage hypothesis function under src/apps/probe; runs via bun run probe, not in interactive CLI graph (keep derived missing)."
+    web: "Probe inspector output (hypothesis) is a standalone CLI affordance; code does not run in web-daemon and has no browser surface."
 purpose: |
   Reads a `TrajectoryEvent[]` and returns a HYPOTHESIS describing the
   likely failure class:

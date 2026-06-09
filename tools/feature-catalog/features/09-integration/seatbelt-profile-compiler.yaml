@@ -12,6 +12,14 @@ configurable: partial
 owners: ['@songmin']
 labels: [surface:core, absorbed:codex]
 depends_on: [landlock-degraded-passthrough]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure SBPL text compiler (no I/O), ui_surfaces n-a, no UI affordance"
+    web: "pure internal SandboxPolicy-to-SBPL codec, no UI affordance on any surface"
 purpose: |
   Pure compiler from a `SandboxPolicy` to a Seatbelt (SBPL) profile text
   suitable for `sandbox-exec -p '<text>'`. No I/O. Mirrors the Codex

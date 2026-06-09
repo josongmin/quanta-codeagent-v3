@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-audit-log]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "agent-callable skill_create tool registered in tier1 buildSkillBlock; reachable from CLI entry"
+    web: "backend tool runs identically on web and its call/result render as a generic tool.invoked/tool.completed card (session-hooks.ts), but there is no dedicated skill-creation UI and it is default-OFF behind QUANTA_SKILL_CREATOR"
 purpose: |
   jun-6 Codex skill-creator parity. The `skill_create` tool lets the MODEL author
   a new skill (previously the ecosystem could only DISCOVER + INVOKE + read bundled

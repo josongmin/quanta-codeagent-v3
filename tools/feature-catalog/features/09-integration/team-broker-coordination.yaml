@@ -14,6 +14,14 @@ labels: ["surface:core"]
 depends_on: [subagent-mailbox]
 config_refs:
   env: [QUANTA_TEAM_BROKER]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_TEAM_BROKER knob-gated leader-mediated escalation wired into admissibility-gate, CLI-observable"
+    web: "escalation rides the in-process mailbox round-trip + leader onConfirm; no bridged AgentEvent and no web card surfaces the broker decision to the browser (dropped at context-binding.ts default arm)"
 purpose: |
   Capability B of multi-agent coordination (plan docs/plans/
   multiagent-coordination.md §2.B) — a leader-mediated permission escalation

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [tool-search]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "localize-fault system skill/tool runs in CLI loop"
+    web: "localize is an LLM-facing tool/skill; its call/result render via tool.invoked/tool.completed (session-hooks.ts:420,427)"
 purpose: |
   Stage-1 candidate generator in the file→function→edit funnel. Replaces flat
   term-count scoring with BM25-lite IDF weighting (rare term outranks common

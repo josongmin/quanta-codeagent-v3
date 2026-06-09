@@ -14,6 +14,14 @@ labels: ["surface:tooling"]
 depends_on: [fc-check-changed-gate, assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine]
 config_refs:
   env: ["QUANTA_VERIFY_GUARD"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bun fc meta CLI (build/validate/list/audit/lint) reachable from CLI entry; real command surface."
+    web: "Standalone meta CLI tool; code does not run in web-daemon and has no browser affordance."
 purpose: |
   Feature catalog의 단일 진실 원천 (SSOT) 도구. 모든 feature는
   `tools/feature-catalog/features/<section>/*.yaml` 한 파일로 표현되고,

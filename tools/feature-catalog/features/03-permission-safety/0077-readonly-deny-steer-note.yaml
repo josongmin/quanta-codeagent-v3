@@ -15,6 +15,14 @@ labels: [surface:cli]
 depends_on: [turn-timing-anchors, llm-assemble, phase-ttft-readonly-trio]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "buildDenySteerMessage appends READONLY_DENY_STEER_NOTE in the CLI admissibility-gate deny path."
+    web: "Pure internal string-append refinement to the model-facing steer message; no distinct UI affordance on any surface (the note is folded into the deny/steer envelope, not independently rendered)."
 purpose: |
   Plane-C of the `phase-ttft-readonly-trio` umbrella (ADR-0077) — the
   control-plane sibling of Plane-A (phase marker, surfaced via

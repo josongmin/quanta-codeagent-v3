@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 depends_on: [speculative-branch-search, branch-search-verifier-suite, branch-search-pure-scorer, branch-search-isolate-symlink-safe, agent-loop-branch-hardening]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "branch-search verifier/selector + CLI onProgress progress formatter, runs in CLI"
+    web: "feature user value is the progress surface (onProgress) which rides progress_update / dropped events at context-binding.ts:1104; the minimal-change bias itself is internal scoring with no web affordance"
 purpose: |
   Verifier and selector that bias the speculative branch search toward
   smaller patches. patchSizeVerifier attaches a patch_size signal to each

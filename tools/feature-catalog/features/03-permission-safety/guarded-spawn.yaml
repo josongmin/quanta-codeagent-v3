@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [bash-timeout-cap, sandbox-policy, escalating-kill, disclaimer-shell-wrapper, dockersandbox]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "RAII child-process lifecycle guard wrapping every spawn site in CLI"
+    web: "pure internal process-lifecycle primitive, ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: |
   Spawn site (runShell의 observer/buffered path, LocalSandbox.run, DockerSandbox.run)
   마다 자식 프로세스의 생애를 관리하는 RAII-style guard. WHY: 각 site가 같은 cleanup

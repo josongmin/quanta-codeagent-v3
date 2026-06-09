@@ -135,6 +135,53 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
     expect(withDetail?.data.detail).toBe("ctx 92% full")
   })
 
+  test("ADR-0512 P3: escalation pair serializes auditable fields; justification is conditional (no undefined key)", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({
+      type: "permission_escalation_requested",
+      id: "esc-edit-1",
+      tool: "edit",
+      risk: "mutating",
+      activeSkill: "localize-fault",
+      reason: "localize-fault is a read-only skill",
+      justification: "fix the bug at src/foo.ts:42",
+      options: ["allow_once", "allow_session", "deny", "deny_and_steer"],
+    })
+    rec.emit({
+      type: "permission_escalation_requested",
+      id: "esc-read-2",
+      tool: "read",
+      risk: "read-only",
+      activeSkill: "localize-fault",
+      reason: "ladder tool",
+      options: ["allow_once", "deny"],
+      // NO justification ⇒ the key must be OMITTED, not serialized as undefined.
+    })
+    rec.emit({ type: "permission_escalation_resolved", id: "esc-edit-1", decision: "allow_session" })
+    rec.close()
+
+    const [req1, req2, res] = readLines(path)
+    // requested (with justification)
+    expect(req1?.kind).toBe("recovery") // rides the recovery family (greppable via reason)
+    expect(req1?.data.reason).toBe("escalation_requested")
+    expect(req1?.data.id).toBe("esc-edit-1")
+    expect(req1?.data.tool).toBe("edit")
+    expect(req1?.data.risk).toBe("mutating")
+    expect(req1?.data.activeSkill).toBe("localize-fault")
+    expect(req1?.data.scopeReason).toBe("localize-fault is a read-only skill")
+    expect(req1?.data.options).toEqual(["allow_once", "allow_session", "deny", "deny_and_steer"])
+    expect(req1?.data.justification).toBe("fix the bug at src/foo.ts:42")
+    // requested (no justification) ⇒ key omitted entirely
+    expect(req2?.data.justification).toBeUndefined()
+    expect("justification" in (req2?.data ?? {})).toBe(false)
+    // resolved
+    expect(res?.kind).toBe("recovery")
+    expect(res?.data.reason).toBe("escalation_resolved")
+    expect(res?.data.id).toBe("esc-edit-1")
+    expect(res?.data.decision).toBe("allow_session")
+  })
+
   test("llm_request maps to kind:llm_request with data {model}", () => {
     const path = join(dir, "i1.0.jsonl")
     const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })

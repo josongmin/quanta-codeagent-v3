@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off", "ports-only"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "advisory effort-classifier port present in CLI AgentConfig slot"
+    web: "pure internal advisory classifier (ports-only, slot inert/unwired per deliberate_hold); recommendation rides no rendered event and surfacing is a future wire, no UI affordance on any surface"
 purpose: |
   Session-scoped advisory classifier (`createEffortClassifier`) that watches
   user prompts for "think harder" style keywords and accumulates per-tool

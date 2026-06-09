@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "RunLedger store/port reachable from CLI entry import graph"
+    web: "runLedger.list() is read by the observability-emitter and rendered in the web-only RunColumn (Running/Waiting/Completed) of the ObservabilityPane"
 purpose: |
   ONE state model + closed `RunLedgerPort` + in-memory store so a single
   surface can render Running / Waiting / Completed across ALL long-running

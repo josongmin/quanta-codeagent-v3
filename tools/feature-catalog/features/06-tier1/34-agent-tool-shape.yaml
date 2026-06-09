@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
 depends_on: [subagent-6-tools, task-registry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "closed input schema for the parent agent tool (task_kind/result_shape/continue_from/checkpoint) validated on every CLI agent tool call"
+    web: "pure agent-tool input schema/contract, no browser affordance"
 purpose: |
   Closed input schema for the parent's `agent` tool — six Codex Round-3
   absorption fields beyond `prompt`/`agent_type`/`tools`/`background`/

@@ -160,8 +160,9 @@ describe("HELLGATE CDP adapter — multi-tab (Wave B)", () => {
     const attach = sends.find((s) => s.method === "Target.attachToTarget")
     expect(create?.sessionId).toBeUndefined() // browser-level (sessionId:null)
     expect(attach?.sessionId).toBeUndefined()
-    // …while a page op on the active tab DID carry the active session (s1).
-    expect(evalsWithSession(sends, "s1").length).toBeGreaterThanOrEqual(0)
+    // (The contrasting claim — page ops DO carry the active session — is proven
+    // with teeth in TABS-03 via switchTab; the prior `…length >= 0` assertion
+    // here was vacuous, since this scenario issues no s1 page op at all.)
   })
 
   test("TABS-03: after switchTab, page ops route to the switched tab's sessionId", async () => {

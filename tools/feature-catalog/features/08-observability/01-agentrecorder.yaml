@@ -15,6 +15,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "in-proc counter/timer registry feeding the CLI cost dashboard (QUANTA_METRICS) in internal.ts"
+    web: "pure in-proc metrics counter registry; no browser rendering of the recorder itself, no user-visible web affordance"
 purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
 evidence:
   code:

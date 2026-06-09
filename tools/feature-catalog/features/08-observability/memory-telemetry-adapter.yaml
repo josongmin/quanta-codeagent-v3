@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:adapter", "absorbed:opentelemetry"]
 depends_on: [memory-telemetry-port, otel-sink]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "adapter wires MemoryTelemetryPort onto MetricsRegistry in CLI"
+    web: "pure port-to-registry adapter (default-OFF, no call site), no UI affordance on any surface"
 purpose: |
   Production binding of `MemoryTelemetryPort` (from @/memory) onto the
   typed `MetricsRegistry` port (from @/observability/metrics). Lives in

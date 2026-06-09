@@ -14,6 +14,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex", "tier:core"]
 depends_on: [queued-follow-ups, plan-queue, built-in-slash-commands]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /queue per-msg mutators, src/apps/cli/queue-cmd.ts reachable from CLI entry"
+    web: "/queue absent from SlashPalette.tsx; mutate verbs need a B3-absent SessionCommand verb (no queue/retry/edit/sendNow); ctx.planQueue not web-supplied"
 purpose: |
   Codex Desktop composer parity: each queued follow-up gets 4 per-msg
   mutators (retry / edit / delete / sendNow) over a `/queue` slash.

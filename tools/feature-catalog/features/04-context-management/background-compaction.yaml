@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:claude", "absorbed:codex", "surface:cli", "tier:core", "default-off"]
 depends_on: [agent]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Cancellable background summarize + 2-phase install, gated by QUANTA_BG_COMPACTION; wired on the live loop, reachable from CLI entry."
+    web: "Pure internal context-management optimization (invisible background summarize); no user-visible surface affordance and its gating knob is not web-writable."
 purpose: |
   When the live transcript is APPROACHING (not yet at) the context-window ceiling,
   start a CANCELLABLE summarize() as a background promise while the turn keeps

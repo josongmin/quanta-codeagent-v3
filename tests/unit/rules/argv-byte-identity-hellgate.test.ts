@@ -42,7 +42,7 @@ describe("§10.2 byte-identity — legacy docs untouched", () => {
       "deny git push --force",
       "allow ls",
       "allow echo # not a comment",
-      "deny rm -rf /tmp/scratch".replace("deny", "allow"),
+      "allow rm -rf /tmp/scratch",
     ])
   })
 

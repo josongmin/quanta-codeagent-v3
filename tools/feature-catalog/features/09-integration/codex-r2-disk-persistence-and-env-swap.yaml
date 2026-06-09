@@ -13,6 +13,14 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on:
   - codex-r2-composition-install-and-registry
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "env-gated jsonl disk-persistence backend for the session registry, reachable from CLI"
+    web: "pure internal persistence backend (env-var swap, jsonl adapter, GC); ui_surfaces n-a, no UI affordance on any surface"
 purpose: |
   Three-ADR persistence band for ADR-0345 session-resource-registry.
   ADR-0348 ships the jsonl-backed adapter (per-session

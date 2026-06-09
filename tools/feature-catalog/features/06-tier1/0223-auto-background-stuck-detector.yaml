@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 depends_on: [subagent-background-wire]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "REPL execution-plane wires accept to BackgroundSubagentScheduler.fork; >2s nudge + Esc/Enter prompt is a CLI affordance"
+    web: "the stuck-proposal nudge is a progress_update/propose event dropped at context-binding.ts:1104 default arm; no web nudge"
 purpose: |
   Claude Code SOTA absorption: when a long-running tool exec sits >2 s with
   no progress, the UX automatically surfaces "move this to background?" and

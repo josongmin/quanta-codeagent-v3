@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, tier:1]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, git-runner-cancellation-signal, runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_conflict_inspect read-only tier-1 tool, runs in CLI."
+    web: "Agent tool — structured conflict list renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   Surfaces the pure conflict parser (`./conflict-parser`) as a typed first-class
   git tool so the `fix-merge-conflicts` skill (and any future loop consumer)

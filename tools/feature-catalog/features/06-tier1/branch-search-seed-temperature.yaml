@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core, tier:1, absorbed:agentless]
 depends_on: [branch-search-isolate-symlink-safe, branch-search-pure-scorer, branch-search-verifier-suite, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; buildSeeds record factory"
+    web: "pure internal seed/temperature diversifier (buildSeeds); ui_surfaces n-a, no browser affordance"
 purpose: |
   `buildSeeds(N, base, modelCandidates?)` — builds N `BranchSeed` records
   for parallel candidate proposal. Implements TWO Agentless techniques:

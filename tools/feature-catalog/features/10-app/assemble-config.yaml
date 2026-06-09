@@ -14,6 +14,14 @@ labels: ["surface:cli"]
 depends_on: [runner-assemble-builders, prompt-source-payload-widening, effort-5-tier, fallback-kinds-policy, llm-factory]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "assembleConfig composer used by run-once/side-chat to build AgentConfig in the CLI runner"
+    web: "pure surface-agnostic type-safe composer primitive, no user-visible affordance"
 purpose: |
   Pure type-safe composer that turns already-built collaborators
   (`SessionDeps`: llm / registry / stream / permission / store / embedder /

@@ -15,6 +15,14 @@ depends_on: [office-authoring, tool-surface-manifest]
 config_refs:
   env: ["QUANTA_OFFICE_AUTHORING"]
   runtime: ["officeAuthoring"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "7/7 reachable; pptx_write/pptx_read tools (write default-OFF, read BASE)"
+    web: "pptx_write/pptx_read are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
 purpose: |
   Completes the Office authoring trio (xlsx + docx + PPTX) flagged as the scoped
   follow-up in office-authoring (H14b). `pptx_write` builds a real PowerPoint

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:aider", "absorbed:codex", "closes:deliberate-hold"]
 depends_on: ["user-authored-playbook-frontmatter", "queued-followup-per-msg-mutators", "git-directive-emit-protocol"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "dispatchPlaybook enqueues /play follow-up via planQueueSink and git directives publish on stage/push/create-pr success paths in the CLI loop"
+    web: "/play is a SlashPalette server-routed prefill stub (B2) and queue enqueue has no SessionCommand verb (B3); never executes in the browser"
 purpose: |
   Closes ADR-0203 inline-trigger dispatch gap + ADR-0221's remaining
   3-of-5 directive kinds. (A) `dispatchPlaybook` canonical sink resolves

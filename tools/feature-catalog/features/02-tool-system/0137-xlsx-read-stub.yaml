@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [document-image-fsjail-unify, document-tools-csv-ndjson, pdf-read-tool, cross-slice-mirror, deferred-tool-registry]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "xlsx_read/docx_read tools reachable from CLI entry import graph"
+    web: "readers run in web-daemon and return parsed cells/paragraph TEXT as the result, shown verbatim in the tool.completed resultPreview in session-hooks.ts:427-438"
 purpose: |
   REAL `xlsx_read` + `docx_read` document readers. jun-04 resolved the ADR-0138
   deps blocker WITHOUT a dependency: `node:zlib.inflateRawSync` (via the H14b

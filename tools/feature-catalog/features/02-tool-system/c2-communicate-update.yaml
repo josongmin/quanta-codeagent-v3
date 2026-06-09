@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:0", "absorbed:cursor"]
 depends_on: [agentevent, assert-never-exhaustiveness]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "8/8 reachable; communicate_update tool + stdout status-line render wired"
+    web: "user value (status pill / agent subtitle) rides the progress_update AgentEvent which is dropped at context-binding.ts default arm; Tauri render is an explicit P3 follow-up"
 purpose: |
   Cursor 3.5.33 `agent.v1.CommunicateUpdateArgs` 흡수 — 모델이 턴을 끝내지 않고
   MID-TURN에 구조화 진행상태를 보고하는 read-only 채널. 기존 free-text 내레이션

@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on:
   - codex-r2-composition-install-and-registry
   - codex-r2-disk-persistence-and-env-swap
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "sqlite-backed session registry adapter behind the closed port, reachable from CLI"
+    web: "pure internal sqlite persistence backend (default-off, ui_surfaces n-a); no user-visible affordance on any surface"
 purpose: |
   Sibling SQLite backend for the ADR-0345
   `SessionResourceRegistry` port. Layered architecture: in-process

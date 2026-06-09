@@ -14,6 +14,14 @@ labels: ["surface:core", "default-off", "absorbed:cursor", "absorbed:codex"]
 depends_on: [codex-2-phase-consolidator, stage1-store-agent-port, consolidator-session-hook]
 config_refs:
   env: [QUANTA_MEMORY_AUTO, QUANTA_MEMORY_THRESHOLD, QUANTA_MEMORY_MIN_USAGE]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: MemoryAutoTrigger port + default-trigger reachable from CLI entry"
+    web: "pure internal session-end promotion pipeline (src/memory/auto-trigger/, default-OFF) — Phase1 distill to Phase2 promote scoring, no UI affordance on any surface"
 purpose: |
   Closes the cross-session knowledge gap by wiring session-end Phase 1
   distill → stage1 store → similarity-based Phase 2 promotion under a

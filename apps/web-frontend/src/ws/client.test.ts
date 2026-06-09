@@ -554,6 +554,27 @@ describe("SessionClient", () => {
     expect(parseConnectResumeFromSeq(h.fakes[1]?.sent[0])).toBe(9)
   })
 
+  it("RESUME-STUCK: an observability frame during events-only resume settles to connected (not stuck in connecting)", () => {
+    const h = buildHarness()
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+    h.fakes[0]?._simulateMessage(encodeSnapshotFrameAtSeq("srv-1", 5)) // arm a resume cursor
+    h.fakes[0]?._simulateMessage(encodeEventFrame(7))
+
+    // Drop the socket and reconnect ⇒ a RESUME handshake (#resuming = true).
+    h.fakes[0]?._simulateClose(1006, "abnormal")
+    h.runNextTimer()
+    h.fakes[1]?._simulateOpen()
+    expect(h.client.state.kind).toBe("connecting")
+
+    // The daemon replays an OBSERVABILITY frame BEFORE any event frame. This
+    // still proves the resume handshake settled, so the client must flip to
+    // `connected` (composer unfreezes) — not stay stuck in `connecting`.
+    h.fakes[1]?._simulateMessage(encodeObservabilityFrame())
+    expect(h.client.state.kind).toBe("connected")
+  })
+
   it("resumes with resumeFromSeq:0 when the only seen seq is the bootstrap seq 0", () => {
     const h = buildHarness()
     h.client.connect({ url: "ws://localhost/x" })

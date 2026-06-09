@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep: test-only governance ratchet, zero production code, no CLI affordance"
+    web: "pure test-time Tarjan SCC guard, no runtime feature surface or UI on any surface"
 purpose: |
   `src/agent/*.ts` 의 value-level import cycle 은 의도적으로 허용 (cross-edge 값이
   function-body 안에서만 평가됨). 그러나 누군가가 cycle-edge 의 imported symbol 을

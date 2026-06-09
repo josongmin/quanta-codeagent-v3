@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [cross-slice-mirror, agent-loop-branch-hardening, agent-types-split, cap-enforcer, cfg-fourrule-true]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: update_working_state zod caps reachable from CLI entry"
+    web: "pure internal input-validation cap (per-string MAX_STR / empty-patch refusal in src/tool/update-working-state.ts) — schema guard, no UI affordance on any surface"
 purpose: "Per-string 캡 + empty-patch refine (R3/FU5): MAX_STR=500 / MAX_HYPOTHESIS=2000(zod .max()로 10 MB hypothesis-flood 차단). 모든 필드 omitted call → \"omit the tool call instead\" 명시 거절, turn-budget 낭비 방지"
 evidence:
   code:

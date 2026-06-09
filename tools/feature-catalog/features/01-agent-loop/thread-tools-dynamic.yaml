@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; per-thread tool registry primitive reachable in CLI"
+    web: "pure internal per-thread ThreadToolRegistry primitive (default-OFF, plane-clean leaf), ui_surfaces n-a; no UI affordance on any surface"
 purpose: |
   Codex thread-scope dynamic tool 등록 + MCP server별 namespace + lazy
   factory 흡수. ThreadToolRegistry (register/list/resolve/evict/evictNamespace)

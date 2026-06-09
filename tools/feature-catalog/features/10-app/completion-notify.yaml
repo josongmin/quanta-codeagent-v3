@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/notify OSC-title/bell adapter wired into repl session-loop; reachable from CLI entry"
+    web: "CLI terminal OSC-title/bell, TTY-gated; no browser notification path, not reachable from web-daemon"
 purpose: |
   A closed-port NotificationPort + OSC-title/bell adapter: on turn completion (slow
   turns only — reuses the existing durationMs) and on idle-awaiting-input, write an

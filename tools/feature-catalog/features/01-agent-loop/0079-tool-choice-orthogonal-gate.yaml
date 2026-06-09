@@ -15,6 +15,14 @@ labels: [surface:core, tier:core]
 depends_on: [llm-factory, fallback-kinds-policy, llm-stream-timeout, model-swap-retry, response-in-progress]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "resolveToolChoice is a pure pre-call control function (no IO/clock/env/registry) gating the tool_choice wire field; no CLI or any user-visible affordance"
+    web: "pure internal pre-call control primitive (tool_choice forcing), no UI affordance on any surface"
 purpose: |
   사전 호출 평면(pre-call plane)으로 모델의 tool_use 선택 자유도를 게이트.
   admissibility-gate(사후/post-call)와 직교(orthogonal): 두 평면이 같은 tool_use 경계의

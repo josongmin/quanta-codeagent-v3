@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, security-touched]
 depends_on: [git-write-protection, branch-only-guard, network-allowlist-host-check]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3-detector pre-flight admissibility composer (port); pure security plumbing, ui_surfaces n-a, no CLI affordance"
+    web: "pure internal guard composer, no user-visible UI affordance on any surface"
 purpose: |
   Cursor 강신호 — 3 pure detector (gitWriteProtectReason, decideBranchOnly,
   isHostAllowed) SHIP됐는데 dispatch seam 미배선이던 갭. DispatchGuard

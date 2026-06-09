@@ -185,14 +185,31 @@ export const checkSessionStoreHealth = async (): Promise<StoreHealthReport> => {
   const activeFiles = await listJson(root)
   const archivedFiles = await listJson(archivedDir)
 
+  // Build the path + classify under a guard: an on-disk filename whose derived
+  // id fails session-id validation (leading "-", control byte, …) makes
+  // `sessionFilePath`/`archivedFilePath` THROW SessionIdError. This function's
+  // contract is NEVER throws — so surface such a file as `corrupt` (an entry the
+  // operator must act on) instead of letting the path-builder crash the scan.
+  const classifyFile = async (
+    id: string,
+    buildPath: (id: string) => string,
+    archived: boolean,
+  ): Promise<SessionFileHealth> => {
+    let path: string
+    try {
+      path = buildPath(id)
+    } catch (e) {
+      return { id, path: id, archived, status: "corrupt", detail: `invalid session id: ${errMessage(e)}` }
+    }
+    return classifyOne(id, path, archived)
+  }
+
   const files: SessionFileHealth[] = []
   for (const f of activeFiles) {
-    const id = idFromFile(f)
-    files.push(await classifyOne(id, sessionFilePath(id), false))
+    files.push(await classifyFile(idFromFile(f), sessionFilePath, false))
   }
   for (const f of archivedFiles) {
-    const id = idFromFile(f)
-    files.push(await classifyOne(id, archivedFilePath(id), true))
+    files.push(await classifyFile(idFromFile(f), archivedFilePath, true))
   }
 
   const ok = files.filter((f) => f.status === "ok").length

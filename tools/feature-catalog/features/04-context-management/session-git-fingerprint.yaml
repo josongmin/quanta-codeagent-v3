@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: [session-jsonl-envelope]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git fingerprint capture onto SessionMeta in CLI graph"
+    web: "pure internal metadata capture (ui_surfaces n-a), no UI affordance"
 purpose: |
   Captures the three-field git fingerprint (HEAD sha / branch / origin URL)
   onto `SessionMeta` so replay / trajectory / reproducibility surfaces know

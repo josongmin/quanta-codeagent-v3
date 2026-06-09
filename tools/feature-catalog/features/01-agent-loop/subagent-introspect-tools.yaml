@@ -11,6 +11,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:codex", "surface:tool", "tier:tier1"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; list_agents/followup_task tier-1 tools wired when introspect/followup gates on"
+    web: "list_agents/followup_task surface in the browser as tool.invoked/tool.completed cards via the bridge; the rich wake/interrupt/progress signals ride B1-dropped subagent events so the render is thin"
 purpose: |
   Two Codex multi_agents_v2 tools absorbed. list_agents — read-only,
   concurrency-safe enumeration over TaskRegistry.list() (snapshot copy); 4-status

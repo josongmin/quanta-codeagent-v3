@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:wrap"]
 depends_on: [instrument-wrap, metrics-typed-port-slice, otel-sink, budget-ledger, instrument-shadow-tool-routing]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "PlanQueue/Budget/LSP metric wraps not reachable from cli interactive entry"
+    web: "metrics emitted to OTel backend plus SLO doc, never to the quanta web frontend"
 purpose: |
   Final closeout for 24-metric recipe coverage: 3 additional typed wraps
   (PlanQueueStore enqueue/drain/clear; BudgetLedger record + breach surfacing;

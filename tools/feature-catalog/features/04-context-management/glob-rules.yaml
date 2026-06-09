@@ -15,6 +15,14 @@ labels: [absorbed:cursor, surface:core]
 depends_on: [hook-updated-input]
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "glob-matched rule auto-injection into prompt per turn, reachable from CLI loop"
+    web: "pure prompt-injection of file-scoped rules, no rendered affordance on any surface"
 purpose: |
   Cursor의 4 rule kind 중 2개 (alwaysApply + glob-matched)를 흡수 — 모델이 요청 없이
   프롬프트에 자동 주입되는 file-scoped 룰. `.cursor/rules/*.mdc` 와 `.quanta/rules/*.mdc`

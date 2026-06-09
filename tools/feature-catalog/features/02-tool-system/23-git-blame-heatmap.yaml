@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [git-runner-cancellation-signal, assert-never-exhaustiveness, byte-stable-string-comparator, cross-slice-mirror, deferred-tool-registry]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_blame_heatmap read-only tool registered in gitTools(), runs in CLI."
+    web: "Agent tool — per-author ownership result renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   한 파일 또는 라인 범위의 per-author 라인 소유권 분포를 반환하는 git tool. 누가
   이 코드를 아는지(Stage-1 ownership) fault-localization·리뷰어 지목 신호. gitTools()에

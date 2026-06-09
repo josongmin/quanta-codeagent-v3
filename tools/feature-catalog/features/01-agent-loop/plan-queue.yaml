@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, held-promotion, tier:core]
 depends_on: [mid-turn-steering, queued-follow-ups]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; /queue SlashCommand + defaultPlanQueueStore wired in repl surface-compose"
+    web: "user mechanism is the /queue slash command (SlashPalette server-routed is a prefill stub per B2) and needs a B3-absent queue verb on SessionCommand; not reachable in browser"
 purpose: |
   Pure in-memory queue of follow-up user inputs captured WHILE a turn is in
   progress, replayed when the turn ends. Codex's unique `queued-follow-ups`

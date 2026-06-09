@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [plan-mode]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; plan-exit dispatch reachable from CLI"
+    web: "plan-exit user value rides plan_* / mode_changed AgentEvents which hit the default arm at context-binding.ts:1105 and are dropped; the orchestrator never reaches the browser"
 purpose: |
   Plan-exit three-way (approved/rejected/changes_requested)의 셋 평면을 잇는 pure async
   orchestrator. 이미 shipped된 3개 조각 — plan-exit decision (62-plan-exit-three-way),

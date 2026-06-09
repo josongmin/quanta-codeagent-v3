@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, retrieval]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Reranker port + vendor adapters importable; default identity pass-through"
+    web: "pure internal port, unwired (deliberate_hold, no composition root), no UI affordance"
 purpose: |
   ADR-0159 의 `RerankPort` family (identity / bm25-secondary / tier-aware / RRF)
   은 PURE 전략 4종 — query-aware 채점이 아니라 caller 의 기존 score 를 reorder

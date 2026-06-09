@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, idle-monitor-snooze, slash-permission-inspect]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/branches slash command plus StatusBar transient render of branch-search progress (src/apps/cli/branch-search-progress.ts)"
+    web: "rides the typed BranchTraceEvent stream which is not one of the 6 bridged events, dropped at context-binding.ts:1104 default arm; slash itself is B2-stubbed"
 purpose: |
   Live progress visualization for catalog 대6 speculative branch search
   (ADR-0084 / Agentless N-best verifier-prover). Without a sticky indicator the

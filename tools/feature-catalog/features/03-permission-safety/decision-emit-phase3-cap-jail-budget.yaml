@@ -14,6 +14,14 @@ labels: ["surface:permission", "tier:observability", "phase:3"]
 depends_on: [decision-emit-phase2-admissibility, debug-tracer-decision-event]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "emits cap/jail/budget decision events to debug-tracer/JSONL recorder under QUANTA_DEBUG in CLI"
+    web: "rides the decision AgentEvent which is dropped at context-binding.ts:1104 default arm (not one of the 6 bridged events)"
 purpose: |
   ADR-0267 Phase 2는 `runAdmissibilityGate` *내부* 3개 게이트 (permission /
   rule / hook)만 wire함. cap / jail / budget 게이트는 admissibility call graph

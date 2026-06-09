@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:bench]
 depends_on: [bench-python-swebench]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "uvx python shim used by bench harness, headless/batch CLI surface"
+    web: "pure bench-harness shell shim (surface:bench, headless/batch only); no user-visible affordance on any interactive surface"
 purpose: |
   Thin shell shim that satisfies the bench harness's
   `QUANTA_SWEBENCH_PYTHON_BIN` contract without polluting the user's

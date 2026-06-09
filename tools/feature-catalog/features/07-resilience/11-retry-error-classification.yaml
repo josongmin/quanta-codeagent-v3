@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [llm-factory, llm-stream-timeout, fallback-kinds-policy, errors-helper-fix, model-swap-retry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "classifyLLMError marker/kind taxonomy driving retry/skip/PTL routing; reachable from CLI entry"
+    web: "pure internal error-classifier primitive, no user-visible affordance on any surface"
 purpose: |
   `classifyLLMError`는 두 입력 — (1) 메시지 substring 매칭(RETRYABLE_MARKERS:
   429/5xx/timeout/ECONNRESET/overloaded/rate-limit/temporarily/try-again,

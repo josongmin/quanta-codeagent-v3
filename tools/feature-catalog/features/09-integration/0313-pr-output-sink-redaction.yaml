@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "integration:github"]
 depends_on: [pii-redaction-scanner, secret-detection-scanner, github-actions-trigger-adapter]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: PR comment output sink not wired into interactive CLI"
+    web: "backend PR-comment sink with redaction marker; no browser affordance"
 purpose: |
   Closed-port sink for every outgoing PR comment / review / issue reply
   the agent produces. `createPrOutputSink({ redactPort, ... })` is a

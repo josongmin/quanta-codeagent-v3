@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, codex-2-phase-consolidator, cross-slice-mirror, durable-state-belongs-in-workspace-files]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "injected clock port for the date line in CLI turn context"
+    web: "pure internal clock port for replay determinism, no UI affordance"
 purpose: |
   Per-turn dynamic block 의 `Today's date is YYYY-MM-DD.` 라인이 매 턴 wall-clock
   을 빨아들이면 prompt 가 매일 drift 해 byte-identical replay invariant 가 깨진다.

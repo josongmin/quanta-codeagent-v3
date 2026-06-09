@@ -16,6 +16,14 @@ labels: ["adr-0182", "tier:1", "observability", "prompt-cache"]
 depends_on:
   - budget-ledger
   - metrics-typed-port-slice
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; observer plus prompt_cache_status agent tool"
+    web: "prompt_cache_status is an agent-invocable tool so its invocation renders as a tool.invoked/tool.completed card via the bridged tool_call/tool_result events; no dedicated cache hit-rate panel renders"
 purpose: |
   Typed observer slice (`src/observability/prompt-cache/`) for the
   Anthropic Messages API `cache_control:{type:"ephemeral"}` mechanic.

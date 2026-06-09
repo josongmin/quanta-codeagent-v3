@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, kind:tool-factory]
 depends_on: [deferred-result-registry-production, tool-output-schema-factory]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "defineToolAsync wrapper + poll_deferred tool + dispatch envelope reachable from CLI import graph"
+    web: "poll_deferred is a model-invokable tool; its tool_call/tool_result (and the deferred-handle envelope embedded in tool output text) render as the generic tool.invoked/completed card (session-hooks.ts:420-435)."
 purpose: |
   Three-piece async-tool seam built on ADR-0286 registry:
 

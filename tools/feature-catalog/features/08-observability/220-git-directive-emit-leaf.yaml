@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "observability-primitive", "default-off"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git-directive serializer/parser leaf reachable from CLI import graph."
+    web: "Pure internal wire/serdes leaf (alpha-sorted JSON serializer/parser), no UI affordance on any surface."
 purpose: |
   Codex 의 `::git-*` 5-directive 와이어 포맷을 직렬화/역직렬화 하는 leaf
   슬라이스. canonical alpha-sorted JSON 으로 byte-deterministic. ADR-0221

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core]
 depends_on: [refusal-stop-reason]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; stop_reason router reachable in CLI recovery FSM"
+    web: "pure internal stop_reason classification policy (closed-port router in recovery FSM), ui_surfaces n-a; no user-visible affordance on any surface"
 purpose: |
   Cursor 3.2.16 흡수 — provider `stop_reason` 8-arm vocabulary 전체
   (end_turn/tool_use/max_tokens/refusal/pause_turn/error/content_filtered/

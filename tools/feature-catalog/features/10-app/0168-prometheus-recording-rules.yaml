@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0168", "tier:1", "observability", "slo"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure config artifact (docs/observability/recording-rules.yaml PromQL); no CLI affordance."
+    web: "Pure Prometheus recording-rules config, no UI affordance on any surface."
 purpose: |
   `docs/observability/recording-rules.yaml` with two groups:
   `quanta.slo.error_rate` (6 SLIs × 4 windows = 24 rules producing

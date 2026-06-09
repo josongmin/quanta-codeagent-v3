@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:repl", "absorbed:codex"]
 depends_on: [cli-repl-solid-split]
 config_refs:
   env: ["QUANTA_MULTILINE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Implements runner.PromptSource port for the CLI REPL with in-REPL slash short-circuit (tryRunReplSlash) in src/apps/cli/repl.ts."
+    web: "CLI REPL prompt-reader and slash routing adapter; slash commands do not execute in apps/web-frontend SlashPalette (B2) and the web has its own input.append verb, so this adapter never runs in the browser."
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because
   this module implements the `runner.PromptSource` port for the CLI surface and

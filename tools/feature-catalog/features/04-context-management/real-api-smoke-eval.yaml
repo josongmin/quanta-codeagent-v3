@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, retrieval, eval]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Eval-tier real-API smoke battery under tests/eval, no src code, manual bun test only."
+    web: "Pure test/eval battery, no UI affordance on any surface."
 purpose: |
   Phase 7 retrieval hellgate suite (ADR-0261 / ADR-0262) 는 전부 injected
   fake fetch — vendor (OpenAI / Voyage / Cohere / Ollama) 가 응답 shape /

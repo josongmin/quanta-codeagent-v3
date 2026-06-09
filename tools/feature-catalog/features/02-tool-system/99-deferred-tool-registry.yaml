@@ -14,6 +14,14 @@ labels: [absorbed:codex, surface:cli]
 depends_on: [tool-output-schema-factory, tool-search]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3/3 reachable; underpins defineTool supportsDeferredResults flag"
+    web: "pure in-memory type-surface registry, deliberately NO scheduler wired into the loop, no UI affordance on any surface"
 purpose: |
   Typed seam for tools that need to return a provisional placeholder plus a
   `DeferredHandle`, with the final `ToolResult` produced out-of-band and parked

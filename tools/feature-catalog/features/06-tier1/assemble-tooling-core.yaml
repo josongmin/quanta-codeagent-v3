@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [assemble-config]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; ToolRegistry composition the CLI builds the run from"
+    web: "pure internal ToolRegistry composer (buildToolingCore); no user-visible browser affordance"
 purpose: |
   Surface-agnostic assembly of the per-run `ToolRegistry` + the aggregated
   `Tooling` record. Substantial logic beyond plumbing:

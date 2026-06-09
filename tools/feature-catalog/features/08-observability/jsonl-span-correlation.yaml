@@ -13,6 +13,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 depends_on: [otel-span-tree]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "deterministic span ids written by JsonlRecorder in CLI"
+    web: "pure internal span-id derivation primitive in the recorder, no UI affordance"
 purpose: |
   Deterministic span-id derivation inside the JsonlRecorder so the
   recorded trajectory is golden-testable with no randomness. The scheme:

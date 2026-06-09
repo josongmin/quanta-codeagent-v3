@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:cline", "default-off"]
 depends_on: [conversation-checkpoint-store]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure in-memory GranularRegistryPort (record/restore/list/clear); ui_surfaces n-a, deliberate_hold defers all consumer wiring (hook + /rewind-tool arm). No CLI affordance either."
+    web: "Pure internal checkpoint store primitive, no UI affordance on any surface."
 purpose: |
   ADR-0124 `ConversationCheckpointStore` 의 files+task sibling — pure
   in-memory `GranularRegistryPort` (`record/restore/list/clear`) storing

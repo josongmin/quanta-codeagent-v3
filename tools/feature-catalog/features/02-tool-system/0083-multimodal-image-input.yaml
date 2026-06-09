@@ -15,6 +15,14 @@ depends_on: [llm-factory, model-swap-retry, fallback-kinds-policy, llm-stream-ti
 config_refs:
   env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
   env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI --image flag and /image follow-up via cli image-loader"
+    web: "image INPUT is a first-class web affordance — useSendTurn carries images and turn.started.images renders in session-hooks.ts:319 (paste + hotkey capture)"
 purpose: |
   ContentBlock에 ImageBlock 추가 — 스크린샷·다이어그램 입력. 두 어댑터가 각자 native
   형태로 직렬화: Anthropic {type:image, source:{base64}}, OpenAI content-array

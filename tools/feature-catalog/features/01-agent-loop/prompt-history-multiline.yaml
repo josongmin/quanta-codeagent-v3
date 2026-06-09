@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, model-swap-retry, multimodal-image-input]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; CLI raw-line-reader REPL history/multiline input UX"
+    web: "CLI-only raw-line-reader input affordance (purpose states headless/Web surface unaffected); browser has its own input box, this REPL UX never reaches it"
 purpose: |
   REPL 입력 UX 강화 — bash 스타일 ↑/↓ history navigation + Ctrl+R reverse-i-search +
   heredoc 멀티라인 입력. history는 disk-persistent(파일 경로 env override). multiline은

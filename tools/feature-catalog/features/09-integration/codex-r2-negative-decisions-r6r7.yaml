@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "negative-decision"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Documentation-only negative-decision ADRs (code mutation 0, evidence.code empty); no runtime affordance on any surface."
+    web: "Pure documented-deferral ADR pair; no UI affordance on any surface."
 purpose: |
   Two ADRs documenting deliberate NON-implementation with re-open triggers
   and impl sketches. ADR-0343 (per-turn image retry rebuild): fact-find

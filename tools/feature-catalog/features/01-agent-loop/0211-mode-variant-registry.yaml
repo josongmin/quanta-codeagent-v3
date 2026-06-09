@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, absorbed:claude, absorbed:codex, surface:core, tier:core]
 depends_on: [persona-slot, sectioned-system-prompt]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "system-prompt variant registry feeds the CLI loop's prompt build"
+    web: "pure internal system-prompt builder seam/registry (system-prompt/port.ts); prompt text is not a UI affordance"
 purpose: |
   3-vendor (Cursor / Claude Code / Codex) 시스템 프롬프트의 mode-별 identity line 흡수.
   ADR-0198 identity 슬라이스 위에 SystemPromptVariantRegistry 포트를 신설 — 6 mode (default/

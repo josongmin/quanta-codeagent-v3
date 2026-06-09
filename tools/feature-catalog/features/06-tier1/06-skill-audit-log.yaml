@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-admin-enforcement]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "append-only JSONL audit primitive; ui_surfaces none + deliberate_hold no install/remove command writes it"
+    web: "pure internal audit-log primitive, no UI on any surface"
 purpose: |
   Append-only JSONL at `<repo>/.quanta/audit/skill-install.log`. 6 event type (admin_install /
   admin_remove / admin_attempt_disable / banned_install_blocked / policy_load / policy_violation).

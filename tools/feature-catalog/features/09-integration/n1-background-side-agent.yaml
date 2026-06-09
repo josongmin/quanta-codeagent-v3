@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude"]
 depends_on: [0145-background-subagent, subagent-mailbox-transport]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "side_agent_spawn/_list/_stop/_findings model-facing tools reachable in CLI loop"
+    web: "agent calls to the side_agent_* tools render as tool cards via the bridged tool_call/tool_result events in session-hooks.ts"
 purpose: |
   Claude `tengu_bg_agent_action`(24 occ, 최고신호) 흡수 — 메인루프 안 막고 모니터링/
   정리/주기점검 돌리는 PERSISTENT 백그라운드 데몬 에이전트. one-shot subagent-bg(ADR-0130)

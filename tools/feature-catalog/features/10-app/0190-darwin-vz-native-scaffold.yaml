@@ -15,6 +15,14 @@ owners: ["@songmin"]
 labels: ["adr-0190", "tier:2", "sandbox", "darwin"]
 depends_on:
   - linux-sandbox-native-impl
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "napi-rs native scaffold + typed adapter (crates/darwin-vz-helper + skybridge registry); pure internal sandbox primitive, no CLI affordance."
+    web: "Native VZ binding scaffold (deliberate_hold, fake-binding only), pure internal primitive with no UI affordance on any surface."
 purpose: |
   napi-rs Cargo workspace member (`crates/darwin-vz-helper/`) — typed
   surface + 20-case fake-binding hellgate + TS adapter

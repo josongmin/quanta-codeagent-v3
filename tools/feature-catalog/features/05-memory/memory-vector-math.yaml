@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [memory-dedup-planner, embedder-port, memory-eviction-planner, tier, sqlite-persistent-store]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure cosine/dot/serde used by adapters and ranking on CLI; derived 5/5 holds"
+    web: "pure vector math + Float32 serde primitive; no scoring or UI, no user-visible affordance"
 purpose: |
   Pure vector math + (de)serialization for semantic recall. Zero deps:
   a Float32 little-endian buffer is the on-disk form (the SQLite

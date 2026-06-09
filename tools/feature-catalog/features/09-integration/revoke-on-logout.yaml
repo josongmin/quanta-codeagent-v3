@@ -15,6 +15,14 @@ depends_on: [chatgpt-oauth-provider, refresh-coordinator, token-store-atomic]
 config_refs:
   env: [QUANTA_OAUTH_REVOKE_ON_LOGOUT]
   runtime: [oauthRevokeOnLogout]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "wired only through the CLI logout-cmd.ts (LogoutDeps.revokeOnLogout) reachable from CLI entry"
+    web: "the web /auth/logout route (auth-routes.ts:139) calls deleteToken only and never invokes revokeRefreshToken — the revoke behavior is CLI-only and does not reach the browser logout"
 purpose: |
   Close a credential-lifetime hole at `/logout` (jun-6 RFC). Today logout deletes
   ONLY the local token file (`deleteToken` → `unlink`); the server-side refresh

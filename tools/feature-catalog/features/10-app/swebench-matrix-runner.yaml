@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [llm-cost-emit-sink, memory-telemetry-adapter, otel-span-tree]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bun run tools/swebench-matrix.ts bench meta-tool (surface:bench); env-overlay composer, not a CLI app affordance."
+    web: "Pure bench experiment runner that sweeps env conditions and emits JSONL/markdown; no user-visible UI affordance on any surface."
 purpose: |
   `bun run tools/swebench-matrix.ts` — SWE-bench-shape 데이터셋(기본
   `tests/smoke/swebench/picks.jsonl`)을 3축 ON/OFF 조건 매트릭스로 sweep

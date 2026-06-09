@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, response-in-progress, src-agent-working-state-ts]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "compaction boundary helper reachable from CLI loop import graph"
+    web: "pure stateless boundary-calc function inside compaction, no UI affordance"
 purpose: |
   `findBoundary(messages, keepTurns)` 는 압축에서 가장 미묘한 invariant 를 보존한다 —
   Anthropic 은 suffix 안에 `tool_result` 가 있는데 짝지어진 `tool_use` 가 summarized

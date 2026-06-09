@@ -15,6 +15,14 @@ depends_on: [image-gen, c1-artifact-canvas-store, browser-automation]
 config_refs:
   env: ["QUANTA_APPSHOT"]
   runtime: ["appshot"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "appshot_verify tool, runs in CLI loop"
+    web: "appshot_verify tool invocation + result render via tool.invoked/tool.completed; the deferred share/live-preview pane is Tauri-desktop-bound not the browser frontend"
 purpose: |
   G1 Phase 1 — the CLOSED generation→verification cycle quanta never had. quanta
   already owned both ends in SEPARATE slices that were never joined: a binary-

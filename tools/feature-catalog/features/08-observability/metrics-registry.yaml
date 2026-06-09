@@ -15,6 +15,14 @@ labels: [surface:core, observability-primitive]
 depends_on: [work-metrics]
 config_refs:
   env: [QUANTA_LOG_LEVEL]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "in-process metrics registry backs CLI observability surfaces"
+    web: "pure in-memory counter/gauge/timer store with no exporter, no UI affordance on any surface"
 purpose: |
   Dependency-free in-process metrics registry that backs every downstream
   observability surface — the AgentRecorder, the shell-exec OTel observer,

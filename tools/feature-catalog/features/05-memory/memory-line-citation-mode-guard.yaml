@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:codex", "surface:memory", "tier:agent"]
 depends_on: [01-memorysearch-write-update, 0082-memory-citation-surface]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "three env-gated axes wired through resolveMemoryConfigFromEnv into memoryTools on CLI; derived 7/8 holds"
+    web: "line citations append to memory_search results which render via tool.completed result preview; per-thread mode + budget write-guard are env-knob/CLI-only and not the 6 CONFIG_ALLOWED_KEYS, so config side does not reach browser"
 purpose: |
   Three INDEPENDENT, default-OFF axes folded into `MemoryToolsDeps` on the
   `memoryTools(deps)` seam (Codex `codex_memories_extension`):

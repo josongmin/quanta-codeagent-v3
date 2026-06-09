@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on:
   - codex-r2-typed-event-store
   - codex-r2-mention-injection-pipeline
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "plugin discovery + MCP launcher + skill extension + app catalog substrate, reachable from CLI"
+    web: "pure internal plugin/MCP/app-catalog substrate (ui_surfaces n-a); no browser render affordance on any surface"
 purpose: |
   5-ADR plugin substrate. ADR-0336 ships 3 slices: plugin-discovery
   (`.codex-plugin/plugin.json` parser + fs scan + in-memory registry),

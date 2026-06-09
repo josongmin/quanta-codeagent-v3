@@ -15,6 +15,14 @@ owners: ["@songmin"]
 labels: ["adr-0167", "tier:1", "plan-queue", "observability"]
 depends_on:
   - plan-queue
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "EnqueueResult plus plan_queue.enqueue.collapsed.total counter wired into instrumentPlanQueue (observability/metrics)"
+    web: "pure internal observability counter, not an AgentEvent and no browser render"
 purpose: |
   Closes the ADR-0161 follow-up gap: PlanQueueStore previously returned
   just a string id from `enqueue` — when ADR-0128's dedup rule collapsed

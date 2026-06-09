@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "tier:integration", "default-off", "absorbed:agent-config", "wired"]
 depends_on: [skill]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "wired into the CLI agent loop (per-turn reconcile, QUANTA_SKILL_MCP_DEPS gate) auto-attaching MCP servers, changing the CLI tool surface"
+    web: "backend MCP-attach plumbing on skill activation; no browser affordance of its own (attached tools render as tool calls but the dependency-link mechanism has no UI)"
 purpose: |
   A skill declares the MCP servers it needs; when the skill is active and the
   gate is ON, the harness auto-attaches the deduped set. Today

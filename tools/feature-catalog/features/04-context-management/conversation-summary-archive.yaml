@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core]
 depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, response-in-progress, src-agent-working-state-ts]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "per-compaction summary log appended in loop, reachable from CLI"
+    web: "pure append-only summary store; its only publish path is context_compacted which is dropped at context-binding.ts:1104 default arm; nothing renders it"
 purpose: |
   Cursor compactor 의 `summaries[]` 모방. 각 compaction 직후 `appendSummary` 로
   `ConversationSummaryEntry{fromTurnId, toTurnId, summary, ts, tokens}` 한 entry 를

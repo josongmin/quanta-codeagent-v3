@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "security-touched"]
 depends_on: [gh-arg-injection-guard, gh-pr-open-author-and-ship]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "gh_pr_resolve_thread tool, runs in CLI loop"
+    web: "gh_pr_resolve_thread tool invocation + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool_call/tool_result arms"
 purpose: |
   The write that closes the review loop. GitHub exposes thread resolution ONLY
   via GraphQL (resolveReviewThread(input:{threadId})) — no `gh pr` subcommand —

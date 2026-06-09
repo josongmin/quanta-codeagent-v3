@@ -13,6 +13,14 @@ owners: ["@songmin"]
 labels: ["surface:core", "default-off", "wire"]
 depends_on:
   - fast-apply-fallback
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "apply-patch fast-apply fallback wire (ToolContext.fastApplyFallback) into src/tool/apply-patch.ts"
+    web: "pure internal apply-patch retry wiring; the only trace is an appended string on the already-bridged tool_result, no distinct UI affordance"
 purpose: |
   Wires the ADR-0417 `FastApplyFallbackPort` (previously a pure port with no
   consumer) into the `apply_patch` tool. When a V4A patch FAILS to apply, the

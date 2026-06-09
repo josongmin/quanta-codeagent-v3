@@ -14,6 +14,14 @@ labels: [surface:cli]
 depends_on: [fallback-kinds-policy, image-vision-tools, llm-factory, model-swap-retry, response-in-progress]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "read_image tool + composer helper reachable from CLI entry"
+    web: "tool.invoked/tool.completed render the call but the ToolResult.images payload is injected into the next provider request and is never visually rendered in the browser (no tool-media render; only user-input turn.started.images render)"
 purpose: |
   read_image tool that loads a local image, verifies the format via a magic-
   byte SSOT (cannot be spoofed by extension), and surfaces the image through

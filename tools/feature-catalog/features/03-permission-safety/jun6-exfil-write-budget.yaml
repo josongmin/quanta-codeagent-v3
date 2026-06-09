@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, security, security-touched, absorbed:claude]
 depends_on: [untrusted-source-envelope, typed-tool-failure-modes, agent-dispatch-core]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "per-turn write budget rejects over-cap write/edit on CLI dispatch"
+    web: "the budget-exceeded rejection surfaces only as a generic tool.completed error preview via the bridged tool_result event; no dedicated budget affordance"
 purpose: |
   prompt-injection 후 "다수의 작은 write 로 조금씩 유출(drip-exfil)" shape 를 막는
   deterministic non-LLM rail(RFC jun-6-exfil-egress-rails (a), Claude CLI exfil-rail 흡수).

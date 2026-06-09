@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-synthetic-generator, eval-synthetic-judge, eval-tier1-synthetic, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "eval Scenario JSON schema + parser; derived 0/5 reachable from interactive CLI entry"
+    web: "pure internal schema/parser primitive, no UI affordance on any surface"
 purpose: |
   Tier 1 합성 시나리오 schema (`scenarios/<usecase-id>/<scenario-id>.json`).
   Schema version 1, additive — 새 optional 필드 추가는 backward-compat,

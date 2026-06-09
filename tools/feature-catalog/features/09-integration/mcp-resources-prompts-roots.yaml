@@ -15,6 +15,14 @@ depends_on: [mcp-sampling-handler, mcp-tasks-capability]
 config_refs:
   env: [QUANTA_MCP_ROOTS, QUANTA_MCP_CAPS]
   runtime: [mcpRoots]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "typed resources/prompts/roots client methods + inbound roots/list handler reachable from CLI entry MCP load"
+    web: "pure internal typed MCP protocol-client method families (capability-gated no-throw McpResult / inbound roots provider) — no user-visible affordance on any surface"
 purpose: |
   H19 (jun-3-misc §3) — TYPED MCP client methods for the `resources/*`,
   `prompts/*`, and `roots/*` method families so the model can use server-exposed

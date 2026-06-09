@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [auto-mode-classifier]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "layered on-disk config loader + per-project trust gate reachable from CLI; QUANTA_CENTRAL_CONFIG; ui_surfaces n-a"
+    web: "pure config-loader + trust-store policy primitive (file IO injected at composition root), no user-visible UI affordance on any surface"
 purpose: |
   신규 @/config 슬라이스 — Claude/Codex 형상의 layered on-disk config loader
   (managed > user > project > local) + per-project **trust gate**. layered file

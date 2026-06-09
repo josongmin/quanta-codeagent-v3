@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [git-runner-cancellation-signal, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-branch-name-schema-guard]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "6/6 evidence reachable from CLI entry; read-only git tool"
+    web: "git_moved_code is an ordinary tool call -> renders as tool.invoked/completed card via the bridged tool_call/tool_result events"
 purpose: |
   Surfaces the pure moved-code classifier (ADR-0109 — normalize + similarity
   + parse-unified-diff) as a typed first-class git tool so the

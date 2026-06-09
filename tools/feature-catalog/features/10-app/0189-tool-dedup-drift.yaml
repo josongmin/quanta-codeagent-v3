@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0189", "tier:1", "observability", "drift"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Internal observability instrument emitting an operator-log verdict + machine counter; no interactive CLI affordance."
+    web: "Pure internal drift detector/metric counter, no user-visible UI affordance on any surface."
 purpose: |
   Closes ADR-0179's follow-up gap — caller `perToolTtlMs` is compared at
   cache construction against the audited `RECOMMENDED_PER_TOOL_TTL_MS`

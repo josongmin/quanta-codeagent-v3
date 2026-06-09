@@ -11,6 +11,14 @@ modes: [headless]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, audit, governance]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "static numeric-literal inventory/audit artifact (ui_surfaces n-a), no runtime CLI affordance"
+    web: "governance audit table, not a runtime feature; no UI affordance on any surface"
 purpose: |
   Audit of every NUMERIC LITERAL ≥ 3 digits across src/apps/cli/*.ts in
   service of the user MEMORY rule "no-heuristics-only-validated"

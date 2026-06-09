@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on: [codex-r2-typed-event-store]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Detector + buildPersistentInjectionMessages + buildTurnContext seam splicing context-update envelopes into the per-turn prompt; ui_surfaces n-a, reachable from CLI entry."
+    web: "Pure internal prompt-injection wire (model-facing context-update); no user-visible surface affordance."
 purpose: |
   Three-layer wire from state-diff producer to the model's per-turn view.
   ADR-0321 detector + buildPersistentInjectionMessages emit

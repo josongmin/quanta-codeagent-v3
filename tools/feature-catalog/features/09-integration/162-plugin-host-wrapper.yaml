@@ -14,6 +14,14 @@ labels: ["surface:ipc"]
 depends_on: [plugin-isolated-spawner, plugin-dxt-loader, plugin-lifecycle-manager, assert-never-exhaustiveness, byte-stable-string-comparator]
 config_refs:
   env: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal JSON-RPC 2.0 wrapper over an isolated-process port; surface:ipc, no UI affordance"
+    web: "pure internal protocol wrapper, no browser affordance"
 purpose: |
   Protocol-agnostic JSON-RPC 2.0 wrapper over `IsolatedProcess` (closed port).
   `call(method, params, {timeoutMs, signal})` → typed Promise, per-call

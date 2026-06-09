@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [git-runner-env-determinism, git-budget]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "AbortSignal propagation into spawned git child on cancel; runs in CLI git runner"
+    web: "pure internal cancellation seam (kills git child on abort, unhooks listener in finally); no user-visible affordance of its own"
 purpose: |
   Distinct axis from the runner's wall-clock timeout (ADR-0105) and from
   `GitBudget`'s deadline (ADR-0107): an optional caller-supplied `AbortSignal`

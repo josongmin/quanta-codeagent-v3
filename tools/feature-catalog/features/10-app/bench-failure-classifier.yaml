@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [probe-failure-triage]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: bench post-run classifier under src/apps/bench, not in interactive CLI graph"
+    web: "2-axis failure classifier surfaces in the operator console + bench-report.json (CLI), not reachable from web-daemon; no browser affordance"
 purpose: |
   Classifies an `InstanceResult` for the operator console + `bench-report
   .json`. Two-axis schema (covering + non-exclusive):

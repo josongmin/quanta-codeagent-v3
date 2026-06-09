@@ -20,6 +20,14 @@ depends_on:
   - slash-registry-split
   - thin-surface-headless-core
   - repl-host-slim-down
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Headless surface (src/apps/headless/) is a portability-proof second consumer driving the host core with fake deps/LLM; no interactive CLI or user affordance."
+    web: "Architecture portability proof with fake deps, pure internal validation harness, no user-visible UI affordance on any surface."
 purpose: |
   Validates the host-layer SSOT by adding a SECOND surface
   (`src/apps/headless/`) that drives the SAME `bootstrapSession` +

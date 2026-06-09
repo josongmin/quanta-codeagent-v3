@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:anthropic-sdk", "surface:llm", "tier:adapter"]
 depends_on: [llm-stream-timeout, agent-loop-branch-hardening, fallback-kinds-policy, llm-adapter-bedrock, llm-adapter-foundry]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal LLM transport adapters (Bedrock/Vertex real stream); surface:llm tier:adapter, no UI affordance"
+    web: "pure internal provider adapter; model output reaches web via assistant_text but the adapter itself has no UI affordance"
 purpose: |
   Real streaming impls for Bedrock + Vertex adapters via `@anthropic-ai/bedrock-sdk`
   + `@anthropic-ai/vertex-sdk` (Phase 1 was typed-throw stubs). DI `clientFactory`

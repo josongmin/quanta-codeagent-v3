@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [objective-first-class]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "objective_set/_update/_get model-facing tools reachable in CLI loop"
+    web: "agent calls render as tool cards (bridged tool_call/tool_result) AND the resulting objective renders in the web-only ObjectiveCard via observability-emitter (objective.get)"
 purpose: |
   Three LLM-facing tools wired to the ADR-0394 `ObjectivePort` so the agent
   itself can declare its objective, surface blockers, and list next actions —

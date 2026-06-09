@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:claude-task-budget", "surface:context", "tier:hint"]
 depends_on: [token-estimator-chars-quarter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "soft token budget renders advisory system-reminder line in CLI loop"
+    web: "pure internal model-facing system-reminder line; not user-visible on any surface"
 purpose: |
   SOFT, model-facing token budget — the quanta mirror of Claude's
   `task_budget: { type: "tokens", total: N }`. When the operator sets a budget

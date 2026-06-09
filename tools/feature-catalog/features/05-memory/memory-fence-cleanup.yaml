@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "held-promotion"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, codex-2-phase-consolidator, errors-helper-fix, memory-md-atomic-writer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "slice-fence hygiene / dead-stub deletion present in CLI build graph; derived 2/2 holds"
+    web: "pure internal slice-boundary fence (biome lint + static-scan test); no runtime UI affordance"
 purpose: |
   Slice S9 Part A — delete the orphan `REMOVE-ME (verify biome fence)`
   stub at `src/memory/consolidate/phase2-llm.ts:30-40`:

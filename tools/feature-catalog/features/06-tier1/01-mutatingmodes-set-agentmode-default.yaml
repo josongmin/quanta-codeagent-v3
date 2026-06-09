@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [assemble-config, auto-approval-reviewer, branch-only-guard, default-acceptedits-bypass-auto, git-c]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "plan/review/audit mode via QUANTA_PLAN/--plan, admissibility gate runs in CLI"
+    web: "mode selection has no web affordance; web POST /config sets only model/effort, mode_changed event is dropped at context-binding.ts:1104 default arm"
 purpose: |
   AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을
   positive set(`MUTATING_MODES = Set<AgentMode>(["default"])`)으로 표현하는

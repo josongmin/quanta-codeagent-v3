@@ -15,6 +15,14 @@ labels: [absorbed:claude-code, surface:cli, security-touched]
 depends_on: [183-safety-net-green, agent-loop-branch-hardening, agent-dispatch-core, deny-and-steer-verb, hitl-4-tier-gate]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Persistent trust-scope registry wired into @/permission and the CLI ask-branch (host onConfirm grant gesture)."
+    web: "Grant memory gates the approval path that renders (approval.requested EscalationCard), but there is no web grant gesture; the yaml flags Tauri always-allow buttons as out-of-scope, so the persistence operates invisibly with only the gated approval card rendering."
 purpose: |
   TrustScope enum(always_allow | project | workspace | session | once_only | deny)을 위한
   registry + admissibility-gate 단일 wire-up. ask-branch는 onConfirm 직전에

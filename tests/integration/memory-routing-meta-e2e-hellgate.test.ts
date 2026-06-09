@@ -167,20 +167,19 @@ describe("§10.6 recall weighting — live recallContext seam (env-gated)", () =
     bare.close()
   })
 
-  test("routing ON ⇒ here-scoped memory is reinforced ABOVE the foreign peer", async () => {
+  test("routing ON ⇒ both scopes are recalled and reinforced (here-FIRST ordering asserted in the next test)", async () => {
     const store = freshStore()
     await seedTwoScopes(store)
-    // recallContext reinforces returned entries (access bump). The here-scoped
-    // entry, weighted up by routing, gets the higher post-recall importance.
     const block = await recallBlock(store, { QUANTA_MEMORY_ROUTING: "1" })
     expect(block).not.toBeNull()
-    // Verify the reinforcement landed on the HERE entry harder: after recall,
-    // the here-scoped entry's accessCount/importance bumped. Both are recalled
-    // (limit 5), so instead assert ranking via the citation seam.
+    // Both entries are within the recall limit, so BOTH get an access bump. This
+    // only pins that routing-on recall still returns + reinforces both scopes —
+    // it does NOT assert the "here above there" ordering (the title used to claim
+    // that but never checked it). Routing weights RANKING, not the persisted
+    // access count, so the real here-FIRST ordering is asserted via the onPlaced
+    // capture in the next test.
     const here = await store.get("a-here")
     const there = await store.get("z-there")
-    // both recalled+reinforced, but routing does not change reinforcement count
-    // here — assert ordering through a dedicated onPlaced capture instead.
     expect(here?.accessCount).toBeGreaterThanOrEqual(1)
     expect(there?.accessCount).toBeGreaterThanOrEqual(1)
     store.close()

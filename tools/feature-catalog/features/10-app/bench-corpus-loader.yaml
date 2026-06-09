@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [byte-stable-string-comparator, assert-never-exhaustiveness, bench-cache-pathspec-ssot, bench-observe-non-agent-evidence, errors-helper-fix]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: bench corpus adapter under src/apps/bench, not in interactive CLI graph"
+    web: "corpus loader feeds the bench CLI run (Instance[] + count), not reachable from web-daemon; no browser affordance"
 purpose: |
   Adapter that turns a `QUANTA_SWEBENCH_CORPUS_ROOT` directory into an
   `Instance[]` for the bench runner. Detects TWO layouts and degrades

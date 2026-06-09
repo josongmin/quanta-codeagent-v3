@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "prompt-touched"]
 depends_on: [prompt-system-build, parsePorcelainV2, turn-context-input]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "buildDynamicContext platform/shell/git/pkg-mgr block; runs in CLI prompt assembly."
+    web: "Pure internal per-turn prompt-assembly content (what the model sees); no user-visible surface affordance."
 purpose: |
   buildDynamicContext에 platform(os/arch/version) + shell(SHELL env) +
   git-status(parsePorcelainV2 결과 압축 한 줄) + pkg-mgr(lock 파일 감지

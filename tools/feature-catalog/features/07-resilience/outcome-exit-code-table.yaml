@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [batch-aggregate-exit-code, agent-cli-args-parser]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure exitCodeForOutcome function plus SIGINT lifecycle wrapper; POSIX exit-code table, no interactive affordance"
+    web: "pure exit-code policy primitive, no UI affordance on any surface"
 purpose: |
   `exitCodeForOutcome(outcome)` is the PURE function that pins the canonical
   AgentOutcome→POSIX exit-code table (the ONLY policy `apps/agent/run.ts` owns):

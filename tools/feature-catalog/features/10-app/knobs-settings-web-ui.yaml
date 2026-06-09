@@ -20,6 +20,14 @@ config_refs:
     - QUANTA_SERVICE_TIER
     - QUANTA_MODEL
     - QUANTA_REASONING_EFFORT
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Web surface code (KnobsPanel/slash-knobs/web-daemon); not wired into interactive CLI (CLI parity tracked by cli-slash-knobs-live-control)."
+    web: "KnobsPanel mounted at App.tsx:635, opened via real openKnobsPanel SlashPalette handler; GET /api/knobs read + POST /config write of the allowed keys."
 purpose: |
   Settings panel for the web surface — the browser-side parity of the CLI
   `/knobs` operator surface. `KnobsPanel.tsx` renders the daemon's knob

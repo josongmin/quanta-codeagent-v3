@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core, tier:core]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure deterministic circuit-breaker state machine; never touches transcript/LLM/UI, no CLI affordance"
+    web: "pure internal breaker state machine, no user-visible UI affordance on any surface"
 purpose: |
   Pure deterministic state machine that mirrors Claude Code v2's two
   compaction guards: (1) rapid-refill breaker — when the context refills to

@@ -15,6 +15,14 @@ labels: [surface:core, tier:core]
 depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "the turn for-loop in loop.ts is the internal turn state machine, no user-visible affordance"
+    web: "pure internal turn-loop state machine, no UI affordance on any surface"
 purpose: 단일 turn 루프 (`for (let turn = 1; turn <= cfg.maxTurns; turn++)` in loop.ts), FSM weight 없음 — 각 턴 = 1 LLM 스트림 + 도구 디스패치, transient backoff retry는 maxTurns 카운터 소비하지 않음.
 evidence:
   code:

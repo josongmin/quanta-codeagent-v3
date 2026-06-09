@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [landlock-degraded-passthrough, seatbelt-profile-compiler]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure platform-aware sandbox backend router (OsSandbox port), ui_surfaces n-a, no UI affordance"
+    web: "pure internal runtime port deciding which sandbox compiler runs, no UI affordance on any surface"
 purpose: |
   Closed-port DI surface `OsSandbox { spawn, availability }` and its
   production default `defaultOsSandbox(cfg)`. Picks the right backend

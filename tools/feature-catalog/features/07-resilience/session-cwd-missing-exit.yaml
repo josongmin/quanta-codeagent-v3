@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, runner-persist-turn]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "resume-path guard wired through src/apps/cli/index.ts main catch, reachable from cli entry"
+    web: "resume is a B3-absent web verb (protocol.ts has no resume); the diagnostic is a CLI stderr line that never reaches the browser"
 purpose: |
   HIGH-4 fail-loud guard for the resume path. When `--resume <id>` lands on
   a session whose recorded cwd no longer exists on disk (worktree removed

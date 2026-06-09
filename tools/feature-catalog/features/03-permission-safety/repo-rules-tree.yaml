@@ -14,6 +14,14 @@ labels: [absorbed:codex, surface:cli]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, secret-redaction-content-plane, glob-rules, hookbus, build-turn-context]
 config_refs:
   env: ["QUANTA_PILL_RULES", "QUANTA_RULE_INDICATOR"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "AGENTS.md/CLAUDE.md tree walk injected into per-turn system reminder (src/agent/repo-rules.ts)"
+    web: "auto-injected prompt context (ui_surfaces n-a); no user-visible affordance on any surface"
 purpose: |
   Repo가 ship하는 운영 contract (canonical 커맨드 경로, fail-closed posture,
   patch discipline, "no heuristics" 등)를 top-level 마크다운(`AGENTS.md`,

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off"]
 depends_on: [automation-engine, scheduler-runtime]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; assembleAutomation runs in the CLI/agent composition root"
+    web: "pure internal composition-root wire (env to AutomationEngineSlot); no user-visible browser affordance, fires ride B1-dropped scheduler events"
 purpose: |
   `assembleAutomation(env, deps)` — the single composition-root helper
   that wires `AutomationEnginePort` + `tickScheduler` + a handler closure

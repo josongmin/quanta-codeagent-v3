@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Trust-and-inputs static system-prompt section, pure internal text, no direct CLI affordance"
+    web: "pure internal system-prompt section, no UI affordance"
 purpose: 강화 "Trust and inputs"
 evidence:
   code:

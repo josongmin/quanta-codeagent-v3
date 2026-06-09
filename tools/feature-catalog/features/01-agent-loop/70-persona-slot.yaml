@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [repl-code-smell-cleanup, runner-assemble-builders, cli-export-2026-05-21-l2-l3, repl-interactive-surface, slashctx-6-ports-wire-completion]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_PERSONA env plus REPL /persona select the persona in the CLI loop"
+    web: "persona is a @/runner/knobs registered knob so it appears read-only in the web KnobsPanel via buildWebKnobCatalog/GET /api/knobs, but is not among the 6 CONFIG_ALLOWED_KEYS writable keys"
 purpose: |
   Codex Desktop base_instructions의 `{{ personality }}` Handlebars 슬롯 흡수. 3-arm 닫힌
   enum PersonaKind = default | friendly | pragmatic. `default`는 빈 본문(byte-identical

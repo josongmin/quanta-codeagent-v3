@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:windsurf, surface:core, tier:core, default-off]
 depends_on: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived 0/4 reachable, default-OFF pure string-to-string template expander, host must import directly; keep derived missing"
+    web: "pure internal template-literal expander library (jinja2-style variable substitution), no UI affordance on any surface"
 purpose: |
   Windsurf workflow `.windsurf/workflows/<name>.md`의 jinja2-style `{{ name }}`
   치환을 흡수. ADR-0203의 `!macro` (1-pass, no-recursion) expander는 Devin

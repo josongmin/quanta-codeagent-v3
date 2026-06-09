@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
 depends_on: [mcp-connector-discovery]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "4 mcp_* resource/prompt model-facing tools reachable in CLI loop"
+    web: "agent calls to the 4 mcp resource/prompt tools render as tool cards via bridged tool_call/tool_result events"
 purpose: |
   H19(LANDED)이 준 `McpClient`의 typed no-throw `listResources`/`readResource`/
   `listPrompts`/`getPrompt` (resources/* + prompts/* method 패밀리) 위에 얹는

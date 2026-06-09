@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "adr:0159"]
 depends_on: [retrieval-rerank-registry, retrieval-multi-vendor-embedding]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure retrieval orchestration funnel (RRF fusion over injected source callbacks); no CLI command or tool affordance, library internal"
+    web: "pure internal orchestration primitive, no UI affordance on any surface"
 purpose: |
   Pure orchestration over 4 axes. Stages:
     1. Run the source(s) the query type asks for

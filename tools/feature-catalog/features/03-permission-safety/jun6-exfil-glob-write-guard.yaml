@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, security, security-touched, absorbed:claude]
 depends_on: [git-write-protection, typed-tool-failure-modes, agent-dispatch-core]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "write/edit reject glob path via typed rejected outcome on CLI dispatch"
+    web: "the typed deny surfaces only as a generic tool.completed error preview via the bridged tool_result event; no dedicated exfil-guard affordance"
 purpose: |
   write/edit 가 glob/wildcard path(`src/**/*.ts`, `a/*.js`, `{a,b}.txt`)를
   리터럴 파일명으로 받아 이상한 단일파일을 만들거나 jail 에러로 떨어지던 fan-out 벡터를

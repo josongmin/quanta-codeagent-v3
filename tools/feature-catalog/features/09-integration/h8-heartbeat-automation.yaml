@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [scheduler-automation-lifecycle, scheduler-runtime, scheduler-model-reroute, per-thread-permissions]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "thread-attached heartbeat automation wired via src/apps/cli/repl/heartbeat-binder.ts host enqueue binding"
+    web: "scheduled-agent management is CLI-only; SessionCommand has no schedule/background verb (B3) and no web slash handler exists; web heartbeat frame is unrelated connection keepalive"
 purpose: |
   Codex automation `kind: cron | heartbeat` 흡수. 기존 automation은 cron(thread-
   detached, fresh fire)뿐이었음. heartbeat는 기존 대화 THREAD에 붙어 매 fire를 그

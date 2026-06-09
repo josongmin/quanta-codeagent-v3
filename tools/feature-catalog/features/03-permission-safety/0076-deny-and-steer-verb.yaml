@@ -15,6 +15,14 @@ labels: [surface:cli, held-promotion]
 depends_on: [agent-loop-branch-hardening, refusal-stop-reason, llm-assemble]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "deny_and_steer ConfirmDecision verb wired into the CLI admissibility-gate/dispatch."
+    web: "The web EscalationCard maps the deny_and_steer verb (apps/web-frontend/src/components/EscalationCard.tsx) and protocol.ts ApprovalRespondCommand carries the steer field, so the host-redirect verb fully reaches the browser approval card."
 purpose: |
   Gap-4 of the `agent-loop-branch-hardening` umbrella (ADR-0076). Adds a
   third verb to host confirmation — beyond `allow` / `deny`, the host can

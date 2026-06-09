@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [assert-never-exhaustiveness, awf-tool-matcher, byte-stable-string-comparator, errors-helper-fix, llm-cost-emit-sink]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure pre_tool_use updatedInput return-shape policy (src/agent/hooks.ts), ui_surfaces n-a; an internal hook channel."
+    web: "Pure internal hook argument-rewrite policy primitive; no user-visible affordance on any surface."
 purpose: |
   Third return shape on pre_tool_use hooks (beyond allow / deny): an
   updatedInput payload that REWRITES the tool's arguments before dispatch.

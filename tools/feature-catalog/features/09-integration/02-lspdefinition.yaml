@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:ipc]
 depends_on: [lsp-expansion-4-tools, assemble-config, lsp-bridge, lsp-nav-tool-slice, lsp-real-adapters]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "8 real registered LLM nav tools lsp_definition/_references/... (src/tool/lsp_nav/index.ts), invokable in the CLI loop."
+    web: "LLM tool invocations surface via the bridged tool_call -> tool.invoked / tool_result -> tool.completed (context-binding.ts:1079-1096) rendered in the web tool display."
 purpose: 8 도구 lsp_definition/_references/_hover/_type_definition/_implementation/_document_symbol/_workspace_symbol/_rename_preview — 1-based human coords, nullLspNavProvider 기본, structural mirror 타입으로 slice 격리
 evidence:
   code:

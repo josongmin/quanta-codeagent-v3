@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor"]
 depends_on: [plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; pure DAG validation functions for plan mutations"
+    web: "pure internal validator (validateDag/findCycle/topologicalSort); no I/O, no UI affordance"
 purpose: |
   Three pure exports operating on a `Readonly<Record<string, TodoItem>>`
   graph. `validateDag` is the full-plan validator that returns the first

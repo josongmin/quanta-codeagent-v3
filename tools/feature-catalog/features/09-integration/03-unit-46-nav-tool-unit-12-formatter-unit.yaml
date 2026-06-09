@@ -12,6 +12,14 @@ configurable: partial
 owners: ['@songmin']
 labels: [surface:core]
 depends_on: [lsp-nav-tool-slice, lsp-expansion-4-tools, lspdefinition, cross-slice-mirror, deferred-tool-registry]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; lsp_nav tools run in CLI"
+    web: "lsp_nav defineTool family is model-facing; invocations render via tool.invoked/tool.completed (name + args/result preview) in session-hooks.ts"
 purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit
 evidence:
   code:

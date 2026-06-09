@@ -12,6 +12,14 @@ configurable: none
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal port + in-memory store, explicitly unwired (deliberate_hold, ui_surfaces none); no producer, no UI affordance"
+    web: "pure internal state-model substrate; observability-emitter can read pending() but no producer exists yet, so it is a primitive with no UI affordance"
 purpose: |
   Closed port + in-memory store for HITL approval / clarification / escalation
   requests. quanta already has the *mechanism* for stopping the agent and

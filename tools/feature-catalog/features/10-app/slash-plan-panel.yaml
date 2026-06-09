@@ -14,6 +14,14 @@ labels: ["surface:cli", "absorbed:codex"]
 depends_on: [plan-mode]
 config_refs:
   env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /plan panel, src/apps/cli/plan-panel.ts reachable from CLI entry"
+    web: "B2 prefill stub: SlashPalette.tsx plan slug is prefill(plan), does not execute; plan_ events also B1-dropped at context-binding.ts default arm; planSnapshot port not web-supplied"
 purpose: |
   Codex + Claude plan-mode TUI panel — renders the live `Plan` (via
   `PlanStore.current` snapshot) as a compact boxed panel: ordered todo list with

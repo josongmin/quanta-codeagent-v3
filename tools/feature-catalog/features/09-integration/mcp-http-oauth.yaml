@@ -15,6 +15,14 @@ depends_on: [mcp-sampling-handler, connectors-oauth-discovery]
 config_refs:
   env: [QUANTA_MCP_OAUTH]
   runtime: [mcpOAuth]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "resolveMcpOAuthProvider (src/apps/cli/internal.ts) wires the connectors-backed PKCE provider into every McpClient on the CLI load path"
+    web: "auth flow is CLI/OS-browser-driven loopback+PKCE with no apps/web-frontend component; the manual /mcp login is a CLI REPL command (SlashPalette prefill-stub per B2) — no quanta-web affordance"
 purpose: |
   Wire the EXISTING `@/connectors` OAuth-discovery suite (RFC 8414
   `.well-known/oauth-authorization-server` + OIDC fallback, RFC 7591 dynamic

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, security, security-touched, absorbed:claude]
 depends_on: [network-egress-proxy, auto-mode-classifier]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "advisory ScoutingSignal over deny-log + taxonomy prompt line on CLI"
+    web: "advisory signal is a pure seam (host-binding surfacing is a noted follow-up, not wired) and the taxonomy line is appended to the LLM prompt; nothing reaches the browser via a bridged event"
 purpose: |
   비할당(allowlist 부재) 엔드포인트들(webhook sink, file-share, DNS resolver)을 연쇄
   탐침하는 시퀀스를 "exfil 준비"로 탐지(RFC jun-6-exfil-egress-rails (c), Claude CLI

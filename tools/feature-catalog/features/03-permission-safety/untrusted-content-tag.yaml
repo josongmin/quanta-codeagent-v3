@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, loadreporules-cwd, mode-notice-block, trust-and-inputs]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "structural prompt-injection defang invariant (embedUntrusted), pure content-plane primitive, no CLI affordance"
+    web: "pure internal prompt-assembly defang invariant, no UI affordance"
 purpose: |
   Per-turn 프롬프트가 untrusted fragment (파일 경로, IDE selection text, diagnostics,
   memory aggregate, rule body)를 named tag block 안에 넣을 때 — `<system-reminder>` 나

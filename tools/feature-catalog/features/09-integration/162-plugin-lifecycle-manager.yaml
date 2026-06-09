@@ -14,6 +14,14 @@ labels: ["surface:ipc"]
 depends_on: [plugin-isolated-spawner, plugin-host-wrapper, plugin-dxt-loader, assert-never-exhaustiveness, byte-stable-string-comparator]
 config_refs:
   env: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal plugin state-machine (auto-restart + heartbeat); surface:ipc, no UI affordance"
+    web: "pure internal lifecycle/liveness primitive, no browser affordance"
 purpose: |
   State machine `idle → starting → running ↔ restarting → dead/stopped`.
   Rolling-window restart counter (default max 3 / 60s); on budget exhaustion

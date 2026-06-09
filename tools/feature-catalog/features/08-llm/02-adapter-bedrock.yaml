@@ -20,6 +20,14 @@ config_refs:
     - AWS_SECRET_ACCESS_KEY
     - AWS_SESSION_TOKEN
     - AWS_REGION
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Bedrock transport adapter usable from CLI LLM registry"
+    web: "pure internal cloud transport adapter (SigV4 Bedrock endpoint, ui_surfaces n-a), no UI affordance"
 purpose: |
   `BedrockProviderAdapter` routes Anthropic Messages API calls through AWS Bedrock's
   SigV4-signed endpoint via the optional `@anthropic-ai/bedrock-sdk` (lazy import —

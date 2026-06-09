@@ -12,6 +12,14 @@ configurable: n-a
 owners: ['@songmin']
 labels: [surface:core]
 depends_on: [llm-distill, memory-dedup-planner, memory-self-edit-tools, working-memory-buffer, codex-2-phase-consolidator]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: memory tier types/ranking reachable from CLI entry"
+    web: "pure internal recall-ranking primitive (src/memory/ranking.ts, types.ts) — tier weighting in hybrid recall, no UI affordance on any surface"
 purpose: tier+kind, 하이브리드 회상, tier 가중
 evidence:
   code:

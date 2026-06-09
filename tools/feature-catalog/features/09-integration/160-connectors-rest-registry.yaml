@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [connector-availability-probe, connector-token-rotation, oauth-dynamic-discovery, oauth-dynamic-registration]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; registry reachable in CLI build (additive, unwired into dispatch)"
+    web: "pure internal connector REST catalog registry with cache; no UI affordance, not even tool-dispatch wired"
 purpose: |
   Dynamic connector catalog backed by `GET {baseUrl}/connectors`. Replaces the
   hand-curated static stdio MCP list with a server-driven registry. 24h

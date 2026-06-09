@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [reactor-trigger-source]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: injectSimulatedTurn + /babysit reachable from CLI under QUANTA_PROACTIVE_REACTOR"
+    web: "injects via AgentLoopPort; no SessionCommand resume/wake verb (B3) and ReactorSelfWakeEvent not bridged (B1)"
 purpose: |
   `injectSimulatedTurn` hands a `ProactiveTrigger` to a closed
   `AgentLoopPort` after THREE hard guards (evaluated in order; the order

@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, tier:1]
 depends_on: [agent-tool-shape, subagent-6-tools, quantasubagent-maxdepth, task-registry, tier1-subagent-block]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "agent/Task LLM-facing tool registered via QUANTA_SUBAGENT, runs in CLI loop"
+    web: "agent is an LLM-facing tool; its call/result render via tool.invoked/tool.completed (session-hooks.ts:420,427); sub-thread task_output progress rides dropped events but the tool display itself reaches the browser"
 purpose: |
   `agent` 도구(=Task) — 부모 loop가 자식 runAgent를 fork해 sub-thread로
   실행. 부모는 자식의 `task_output` 채널을 통해 progress를 받고,

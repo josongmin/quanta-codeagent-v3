@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "audit-closeout", "discipline"]
 depends_on: [compaction-visibility, run-ledger-attribution]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Audit fixes + ratchet tests live in the codebase; loop.ts touched is reachable."
+    web: "Pure internal audit-closeout findings + structural ratchet tests, no UI affordance on any surface."
 purpose: |
   Waves 1-5 observability stack(ADR-0394~0421) end-to-end live 도달 후
   3-round adversarial 감사. R1: correctness/lifecycle/coverage/hygiene 4 lens

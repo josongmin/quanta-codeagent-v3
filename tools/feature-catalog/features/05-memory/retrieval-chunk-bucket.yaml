@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "adr:0159"]
 depends_on: [retrieval-rerank-registry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "token-bucket re-chunker primitive reachable in CLI retrieval assemble; derived 4/4 holds"
+    web: "pure re-chunker library (4 buckets + overlap); ui_surfaces n-a; no UI affordance on any surface"
 purpose: |
   Split a long text into fixed-size token chunks with sliding-window
   overlap so downstream context windows can ingest big documents without

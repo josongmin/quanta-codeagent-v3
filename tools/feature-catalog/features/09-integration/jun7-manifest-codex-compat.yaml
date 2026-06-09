@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:codex", "default-off", "adr-0499"]
 depends_on: []
 config_refs:
   env: ["QUANTA_MANIFEST_COMPAT"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "manifest-compat normalizer + relaxed schemas run during skill/plugin discover on the CLI load path"
+    web: "pure internal schema normalizer / parser (ui_surfaces n-a) — no UI affordance on any surface"
 purpose: |
   quanta claims "Faithful absorption of the Codex plugin layout" but its strict
   Zod schemas EMPIRICALLY REJECT the real Codex 0.135 artifacts in

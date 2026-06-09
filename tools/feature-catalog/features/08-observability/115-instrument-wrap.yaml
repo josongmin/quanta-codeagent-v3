@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:wrap"]
 depends_on: [metrics-typed-port-slice, otel-sink, instrument-extra-and-helper, background-subagent, budget-ledger]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "metric instrument wrap helpers not reachable from cli interactive entry"
+    web: "metrics emitted to OTel/Prometheus plus Grafana dashboard, never to the quanta web frontend"
 purpose: |
   Closes the loop from ADR-0158 recipe (24-metric table) to actual end-to-end
   monitoring: (a) `instrumentLlmProvider` + `instrumentSubagentScheduler` +

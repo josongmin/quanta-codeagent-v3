@@ -15,6 +15,14 @@ owners: ["@songmin"]
 labels: ["adr-0193", "tier:2", "sandbox", "linux"]
 depends_on:
   - os-sandbox-port-router
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; native landlock sandbox impl plus TS adapter"
+    web: "pure native sandbox impl (Rust landlock/seccomp), no UI affordance"
 purpose: |
   Fills the Rust function bodies stubbed by ADR-0175's Phase 3 scaffold.
   `crates/linux-sandbox-native/src/policy.rs` builds

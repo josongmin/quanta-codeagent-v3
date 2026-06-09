@@ -16,6 +16,14 @@ config_refs:
   env:
     - CLAUDE_CODE_USE_FOUNDRY
     - ANTHROPIC_FOUNDRY_BASE_URL
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Foundry real-stream adapter usable from CLI LLM registry"
+    web: "pure internal cloud transport adapter (Azure AI Foundry, ui_surfaces n-a), no UI affordance"
 purpose: |
   `FoundryProviderAdapter` is a REAL streaming adapter (ADR-0172 superseded the
   ADR-0163 typed-stub once Anthropic published `@anthropic-ai/foundry-sdk@0.2.3`,

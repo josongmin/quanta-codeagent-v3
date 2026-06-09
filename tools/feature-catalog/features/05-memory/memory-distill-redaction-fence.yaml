@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched", "held-promotion"]
 depends_on: [secret-redaction-content-plane]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "redaction fence runs in the distill input path on CLI; derived 3/3 holds"
+    web: "pure structural redaction invariant on distill input; no UI affordance, ui_surfaces n-a"
 purpose: |
   Third application point of the content-plane redaction invariant — the
   transcript handed to the LLM distiller (`distillSession`) is run through

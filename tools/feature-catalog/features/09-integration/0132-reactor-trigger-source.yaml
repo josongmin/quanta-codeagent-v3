@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [reactor-self-wake]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: CI/PR-comment trigger sources reachable from CLI reactor path"
+    web: "backend gh-poll adapters feeding ProactiveTrigger; no browser affordance, ProactiveTrigger not bridged (B1)"
 purpose: |
   Closed-port trigger sources that turn external signals into typed
   `ProactiveTrigger` records. Two adapters land in this slice:

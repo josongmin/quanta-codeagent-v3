@@ -15,6 +15,14 @@ labels: [absorbed:codex, surface:cli, tier:1]
 depends_on: [agent-dispatch-core, secret-redaction-content-plane, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, 183-safety-net-green]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ToolContext.depth subagent-depth propagation reachable from CLI import graph"
+    web: "Pure internal dispatch context primitive (subagent depth propagation); no UI affordance, only feeds internal telemetry quanta.tool.call.status."
 purpose: subagent 깊이 ToolContext.depth 전파
 evidence:
   code:

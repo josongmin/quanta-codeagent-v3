@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:1", "default-off", "closes:adr-0203-gap"]
 depends_on: ["user-authored-playbook-frontmatter", "playbook-auto-dispatch-git-directive-completion"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "--playbook-trigger flag + QUANTA_PLAYBOOK_TRIGGER env build FS watcher wire in apps/cli/repl; reachable from CLI."
+    web: "CLI-flag/env-only watcher; no POST /config key (not in CONFIG_ALLOWED_KEYS) and no web handler (B2) reach the browser."
 purpose: |
   Closes ADR-0203/0240's last unwired hop: the `AgentConfig.playbookTrigger`
   slot is now reachable via `--playbook-trigger` flag OR

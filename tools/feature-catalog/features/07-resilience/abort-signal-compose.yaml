@@ -15,6 +15,14 @@ depends_on: [git-runner-cancellation-signal, turn-cancel-keys]
 config_refs:
   env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
   env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure AbortSignal.any cancellation-composition framework primitive, no user affordance"
+    web: "pure internal cancellation-signal composition primitive, no UI affordance"
 purpose: |
   Framework-level cancellation-composition primitive: `AbortSignal.any([outer,
   turn])` fuses two independent controllers (surface-level outer abort

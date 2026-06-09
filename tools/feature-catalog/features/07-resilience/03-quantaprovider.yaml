@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_PROVIDER + QUANTA_MODEL dual-provider knob with .env hydrate in src/apps/cli; reachable from CLI."
+    web: "QUANTA_PROVIDER + QUANTA_MODEL are read-visible in KnobsPanel (knob-inventory); QUANTA_MODEL is writable via POST /config + model selector, but QUANTA_PROVIDER itself is read-only (not in CONFIG_ALLOWED_KEYS)."
 purpose: |
   Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는
   OpenAI-호환 endpoint) 중 활성 백엔드를 고르고, `QUANTA_MODEL`로 모델 id를

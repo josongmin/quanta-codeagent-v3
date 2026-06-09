@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [cr2-fu3-exhaustiveness-gate, edit, typed-tool-failure-modes, cross-slice-mirror, deferred-tool-registry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "applyFuzzyEdit pure matcher inside the edit tool; reachable from CLI edit path"
+    web: "pure internal string-matching primitive (no I/O, no schema) inside edit; no UI affordance of its own, the edit tool-call display is what is visible"
 purpose: |
   `edit` tool's fuzzy matcher: 3-rung conservative strategy ladder. (1) exact
   delegates to `applyExactEdit` (no duplication). (2) whitespace-flexible:

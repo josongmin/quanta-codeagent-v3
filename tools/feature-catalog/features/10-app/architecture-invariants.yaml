@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep: biome + slice-boundary test guard, no runtime surface"
+    web: "static lint + runtime slice-boundary invariant guard, no user-visible affordance on any surface"
 purpose: |
   4 신규 슬라이스 (@/runner, @/ipc, @/ui, @/auth) × 10 invariants = 20+ enforced guard.
   정적 (biome.json `src/runner/**` + `src/ipc/**` override) + 런타임 (slice-boundary test)

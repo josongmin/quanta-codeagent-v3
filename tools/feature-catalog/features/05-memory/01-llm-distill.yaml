@@ -12,6 +12,14 @@ configurable: n-a
 owners: ['@songmin']
 labels: [surface:core, absorbed:codex]
 depends_on: [codex-2-phase-consolidator, consolidator-session-hook, memory-eviction-planner, memory-dedup-planner]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "session-end LLM distill / consolidate runs in CLI background"
+    web: "pure internal background knowledge-processing axis, no user-visible affordance on any surface"
 purpose: |
   세션 종료 시 LLM distill (provider 미주입 / 호출 실패 시 휴리스틱 폴백),
   pre-save dedup 후보 발견 시 LLM이 merge/supersede 중재, 정주기 eviction

@@ -14,6 +14,14 @@ labels: ["surface:core", "ux-touched", "tier:1"]
 depends_on: [subagent-tier1, skills-tier1, agent-loop-cli]
 config_refs:
   env: ["QUANTA_SUBAGENT", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "parseEnvFlag default-ON for subagent + skills in apps/cli/internal.ts; reachable from CLI."
+    web: "web-daemon runtime-factory.ts:184-217 builds subagent + skills config (default-ON) for web/tauri; subagent runs render in web-only RunColumn (ObservabilityPane), skills inject into prompt."
 purpose: |
   RFC §1.2 default-OFF byte-identical 원칙의 **의도적 예외**. Codex/Claude
   Code/Cursor 모두 subagent + skills를 default로 켠다 — quanta가 default

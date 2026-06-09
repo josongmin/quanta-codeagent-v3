@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, slash-permission-inspect, slash-working-state-panel]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /mcp explorer, src/apps/cli/mcp-cmd.ts reachable from CLI entry"
+    web: "B2 prefill stub: SlashPalette.tsx mcp slug is prefill(mcp), does not execute; no web McpSurfaceInfo supplied; never reaches browser"
 purpose: |
   Read-only MCP runtime explorer. Four subcommands: `/mcp` (list servers + tool
   count + status), `/mcp tools` (every bridged tool across all servers),

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "discovery-time frontmatter parser feeding argument-hint/short-description into the CLI skill listing; reachable from CLI entry"
+    web: "pure internal frontmatter/resource parser; no web skill-listing UI consumes it"
 purpose: |
   Absorbs codex's skill ECOSYSTEM frontmatter+resources (quanta's skill CORE —
   7-scope/playbook/ReDoS-glob/admin — was already ahead). All ADDITIVE/optional:

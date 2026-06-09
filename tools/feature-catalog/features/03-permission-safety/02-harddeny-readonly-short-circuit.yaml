@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:cli, security-touched]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 2/2 evidence files reachable from CLI entry"
+    web: "pure internal classifier short-circuit logic in the permission engine; no user-visible affordance on any surface"
 purpose: HARD_DENY 선행 / readonly short-circuit
 evidence:
   code:

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: [mcp-client, mcp-elicitation-prompter]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "dispatch routes inbound elicitation/create to the CLI TTY-gated prompter + lease pool; reachable from CLI entry"
+    web: "interactive elicitation prompt is CLI-TTY only; web-daemon non-TTY path falls to headlessRejecter (decline) and no web-frontend prompter component exists"
 purpose: |
   The 2026-06-01 gap audit found MCP elicitation was DEAD: the ElicitationPrompter
   port/schemas existed (ADR-0197) and full-negotiator advertised elicitation:{} to the

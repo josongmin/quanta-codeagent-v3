@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0171", "tier:1", "security", "pii"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 5/5 evidence files reachable from CLI entry"
+    web: "pure internal hexagonal PII scanner port plus pattern/Luhn/composite; no UI affordance on any surface"
 purpose: |
   Hexagonal `src/security/pii-redaction/` slice covering the OTHER half
   of agent-content safety — human identifiers (email, phone, SSN, credit

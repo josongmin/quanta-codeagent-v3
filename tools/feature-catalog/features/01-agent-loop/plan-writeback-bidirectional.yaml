@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:devin, absorbed:cursor, absorbed:roo, absorbed:claude-code, surface:core, tier:core]
 depends_on: [user-authored-playbook-frontmatter]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived 0/4 reachable, ui_surfaces n-a, default-OFF closed-port side-queue (recordFinding/getUpdates/clearUpdates), host wires nothing; keep derived missing"
+    web: "pure internal closed-port finding side-queue, default-OFF, no UI affordance; does not mutate plan or emit any web event"
 purpose: |
   Devin playbook 실행 중 skill 이 발견한 finding (discovery / blocker /
   opportunity) 을 plan 객체에 직접 mutate 하지 않고 사이드 큐에 typed 로

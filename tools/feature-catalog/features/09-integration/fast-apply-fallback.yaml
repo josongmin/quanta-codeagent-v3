@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off", "ports-only"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "fast-apply fallback port wired into apply_patch under QUANTA_FAST_APPLY=on (apply-patch.ts:315)"
+    web: "pure internal apply-patch recovery mechanism; no distinct UI affordance (the recovery note rides the already-counted tool_result), not a UI feature"
 purpose: |
   When `apply_patch` rejects a V4A patch (anchor drift / generic apply error /
   parse error), `createFastApplyFallback` makes ONE focused side-conversation

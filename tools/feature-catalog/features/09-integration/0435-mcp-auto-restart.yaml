@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [quantamcpconfig]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; reconnect supervisor wired in apps/cli/internal.ts"
+    web: "internal crash-detection/auto-restart resilience primitive; the restart is invisible and emits no bridged event, no UI affordance"
 purpose: |
   Detects an MCP server crash (transport/process exit) and auto-restarts it —
   re-spawn → re-`initialize` → re-`tools/list` — swapping the live client behind

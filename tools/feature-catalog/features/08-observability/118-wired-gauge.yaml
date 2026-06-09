@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:helper"]
 depends_on: [instrument-wrap, instrument-extra-and-helper, instrument-shadow-tool-routing, background-subagent, budget-ledger]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "emitWiredGauge flag on withFullObservability runs at composition in CLI."
+    web: "Pure internal meta-metric (PromQL/Grafana wiring-health gauge), no quanta UI affordance on any surface."
 purpose: |
   Opt-in `emitWiredGauge` flag on `withFullObservability` emits one
   `observability.wired.total{slice}` gauge per `ObservabilityBag` key (7 total)

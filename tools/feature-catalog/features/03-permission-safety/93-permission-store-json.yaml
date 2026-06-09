@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [per-host-agent-mode, per-thread-permissions, post-denial-precedence, quanta-home-meta-root, runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "atomic JSON permission-state persistence engine consulted by gate reachable from CLI; QUANTA_PERMISSION_STATE; ui_surfaces n-a"
+    web: "pure file-backed persistence primitive (atomic write + debounced flush), no UI affordance on any surface"
 purpose: |
   File-backed JSON store for per-thread permissions, per-host agent modes,
   and post-denial precedence records. Single file at

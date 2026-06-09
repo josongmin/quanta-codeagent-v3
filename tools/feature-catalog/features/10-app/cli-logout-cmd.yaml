@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [chatgpt-oauth-provider, built-in-slash-commands, cli-help-discovery-render, cli-slash-help, model-swap-retry]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/logout slash destroys the on-disk ChatGPT-OAuth token bundle in the CLI"
+    web: "logout is a web auth affordance: slash-auth.ts executes POST /auth/logout to handleAuthLogout which deletes the token bundle (same user value, mirrored)"
 purpose: |
   Slash command that destroys the ChatGPT-OAuth token bundle written by
   `/login --chatgpt`. Idempotent: when there is no token to begin with the

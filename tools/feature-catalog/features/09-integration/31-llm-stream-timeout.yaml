@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-factory]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal AsyncIterable stream-timeout decorator (firstChunk/idle deadlines); surface:core, no UI affordance"
+    web: "pure internal silence-hang guard decorator, no UI affordance on any surface"
 purpose: |
   AsyncIterable decorator wrapping a raw provider stream and racing each
   `next()` against two independent deadlines — `firstChunkMs` (default 60s,

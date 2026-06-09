@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_VERIFY_GUARD env toggle gates the verify-guard in the CLI loop"
+    web: "internal loop guard; QUANTA_VERIFY_GUARD lives only in cli-knobs.ts which knob-catalog-wire.ts explicitly excludes from buildWebKnobCatalog, so not in the web KnobsPanel"
 purpose: / (기본 OFF)
 evidence:
   code:

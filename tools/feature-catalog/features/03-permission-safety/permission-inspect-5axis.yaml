@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [permission-store-json, permission-policy-engine, per-host-agent-mode, per-thread-permissions, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "stateless 5-axis inspector backing /permission explain slash (src/permission/inspect.ts)"
+    web: "user mechanism is a CLI slash facade; web SlashPalette commands are prefill stubs (B2) with no real handler, output rides no rendered event"
 purpose: |
   Slash-command 표면(`/permission explain <tool>`)을 위한 stateless inspector. 동일
   슬라이스의 `inspector.ts`(store-기반, per-thread "지금 어떻게 결정될까")와 보완:

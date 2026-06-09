@@ -14,6 +14,14 @@ labels: [surface:cli]
 depends_on: [read-write-edit]
 config_refs:
   env: ["QUANTA_IPYNB_OUTPUTS"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3/3 evidence files reachable from CLI; read routes .ipynb through renderNotebook"
+    web: "read is an agent-callable tool; its notebook-aware result surfaces via tool.completed resultPreview in session-hooks.ts"
 purpose: |
   `read` treats a `.ipynb` as opaque UTF-8 today: it line-numbers the raw
   nbformat JSON — array-of-strings `source`, `execution_count`/`id`/`metadata`

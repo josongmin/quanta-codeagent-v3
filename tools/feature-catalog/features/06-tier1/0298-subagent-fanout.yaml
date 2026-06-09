@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:cursor, tier:1, surface:core]
 depends_on: [subagent-6-tools, subagent-background-wire, create-stream-dispatcher]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "isConcurrencySafe=true flips streaming-dispatch barrier so N agent calls fan out in parallel in the CLI loop"
+    web: "pure internal dispatch-concurrency primitive (parallel_worker flag functional ZERO); no UI control; runs only show read-only in RunColumn"
 purpose: |
   Cursor 3.2 `is_parallel_worker:true` 패턴을 흡수하여 단일 assistant 메시지에
   `agent` 도구 호출 N개를 emit 했을 때 streaming-dispatch barrier 가 자동으로

@@ -14,6 +14,14 @@ labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
 depends_on: [eval-schema-additive, 2026-05-21]
 config_refs:
   env: ["QUANTA_CLASSIFIER_MODEL", "QUANTA_JUDGE_MODEL", "QUANTA_MODEL"]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: bun run eval CLI stack, not in interactive CLI import graph"
+    web: "eval app (src/apps/eval) is a CLI/CI quality stack; does not run in web-daemon and renders nothing in the browser"
 purpose: |
   `bun run eval` — taxonomy(12 major/~120 leaf) 기반 6-tier 로컬 검증 스택.
   Tier 0 audit(정적 grep 커버리지 매트릭스) / Tier 1 synthetic(LLM-judge 시나리오 run) /

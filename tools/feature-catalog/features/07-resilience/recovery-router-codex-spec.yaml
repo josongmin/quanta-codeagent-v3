@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:codex", "surface:core", "default-off", "resilience-primitive"]
 depends_on: [llm-error-taxonomy, retry-error-classification, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "router seam present in CLI LLM retry path (opt-in, not yet wired)"
+    web: "pure internal routing table (16-kind onto 6-action RecoveryAction), default-OFF unwired seam, no UI affordance"
 purpose: |
   Closed-port + Codex-spec routing table (ADR-0214) collapsing the 16-kind
   `LLMErrorKind` onto a closed 6-action `RecoveryAction` envelope —

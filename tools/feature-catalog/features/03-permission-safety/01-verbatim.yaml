@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:cli]
 depends_on: [auto-approval-reviewer, branch-only-guard, default-acceptedits-bypass-auto, fallback-kinds-policy, git-c]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 2/2 evidence files reachable from CLI entry"
+    web: "internal auto-mode LLM threat classifier (src/permission/classifier.ts); no user-visible affordance on any surface, only feeds approval decisions"
 purpose: verbatim 위협프롬프트, 2-stage+1h캐시, denial-limit 3/20, AFK sticky
 evidence:
   code:

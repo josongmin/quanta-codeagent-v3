@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "held-promotion"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, multimodal-image-input, slashctx-6-ports-wire-completion, llm-factory]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/image add/list/clear CLI slash queue feeds multimodal PromptPayload; reachable from CLI entry"
+    web: "the user value (send image to the model) reaches the browser fully via the web composer image-attachment subsystem (composer/image-attachment.ts) wired through input.append images[] to the LLM adapter (protocol.ts ImageBlock)"
 purpose: |
   PromptPayload 타입을 backward-compat하게 widening — 기존 string 페이로드
   경로는 무변경, 새 코드는 `{ text, images[] }` 구조를 받을 수 있다.

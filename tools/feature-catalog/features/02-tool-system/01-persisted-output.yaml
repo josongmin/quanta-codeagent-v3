@@ -14,6 +14,14 @@ labels: [surface:cli]
 depends_on: [tool-registry, spill-evidence-fulllogpath-round-5, tool-output-schema-factory, assert-never-exhaustiveness, byte-stable-string-comparator]
 config_refs:
   env: [QUANTA_TOOL_OUTPUT_MAX, QUANTA_TOOL_OUTPUT_SPILL_KEEP]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "output-spill + GC in tool registry result path"
+    web: "pure internal result cap + disk-spill primitive; ui_surfaces n-a, no user-visible affordance"
 purpose: <persisted-output> 스필 + GC
 evidence:
   code:

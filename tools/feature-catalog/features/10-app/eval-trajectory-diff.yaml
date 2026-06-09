@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-tier3-trajectory, eval-trajectory-meta-source, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Internal LCS projection comparator feeding replay verdict; not in interactive CLI graph (keep derived missing)."
+    web: "Pure deterministic comparator over event kinds, no direct UI affordance on any surface."
 purpose: |
   두 `TrajectoryEvent` 스트림을 PROJECTION 기반으로 비교 (raw equality 아님).
   설계 결정 (each = contract):

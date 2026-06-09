@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 depends_on: [model-swap-retry, fallback-kinds-policy, llm-factory, response-in-progress, assemble-compaction-core]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/side slash + sideChat isolated loop; reachable from CLI entry"
+    web: "CLI-only /side slash with no web handler (SlashPalette stubs do not execute, B2); no web render path for side-chat results"
 purpose: |
   Claude Code A9 패턴 흡수: 메인 history를 오염시키지 않는 격리 agent loop. /side 슬래시
   + sideChat() 진입점이 별도 SessionWriter로 분기, 메인 envelope는 무수정. 도구는

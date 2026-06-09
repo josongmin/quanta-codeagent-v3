@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core]
 depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "env-selected embedder/vectorstore provider registry reachable from CLI import graph"
+    web: "pure internal retrieval provider-swap seam (env-driven ports), no user-visible affordance on any surface"
 purpose: |
   Provider-swap seam for both retrieval axes (embedder + vector store) with
   closed-port contracts and env-driven selection. `QUANTA_EMBED_PROVIDER ∈

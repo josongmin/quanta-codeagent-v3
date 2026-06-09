@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [git-upstream-check]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "git_blame/git_diff/git_status tools, run in CLI loop"
+    web: "git read tool invocations + results render via tool.invoked/tool.completed; bridged at context-binding.ts tool_call/tool_result arms"
 purpose: |
   Three first-class read-only git tools sharing the injectable `GitRunner`
   port (so tests stub `git` without spawning). (1) `git_blame` — porcelain

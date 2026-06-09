@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "new LLMErrorKind registered in retry FATAL and fallback ELIGIBLE sets on CLI"
+    web: "pure internal error-classification vocabulary entry, ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: |
   ADR-0094 Phase-1 chatgpt-oauth stub adapter 가 호출 시 매번 throw 하는 deliberate
   stub state 를 위해 새 LLMErrorKind 추가: `not_implemented`. Retry 정책에서

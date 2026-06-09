@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:observability"]
 depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, decision-emit-phase3-cap-jail-budget, jsonlrecorder]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/inspect slash command renders the 4-section tool-call panel to the terminal (src/apps/cli/inspect-cmd.ts)"
+    web: "CLI-only post-hoc slash panel painted to terminal; SlashPalette server-routed commands are prefill stubs (B2), no web handler"
 purpose: |
   Phase 1 debug-tracer는 *live stream*만 stderr로 흘리고 ring buffer 같은
   것이 없어서 `/debug` 켜기 전에 fire한 event는 retroactive 못 봄 (Codex /

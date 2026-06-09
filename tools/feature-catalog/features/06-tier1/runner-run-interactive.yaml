@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [prompt-source-payload-widening, assemble-config, repl-code-smell-cleanup, abort-signal-compose, on-session-minted-port]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI REPL driver (prompt-pipeline + turn-runner + session-loop, raw-line-reader, Esc-Esc); reachable from CLI entry"
+    web: "pure CLI REPL driver primitive; the web daemon uses its own session loop, no browser affordance"
 purpose: |
   옛 `runInteractive` 단일 helper는 제거됐지만, surface-agnostic REPL driver
   계약 자체는 유지된다. 현재 live path는

@@ -15,6 +15,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:session, observability-primitive]
 depends_on: [jsonlrecorder, runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Real CLI affordance via /session-registry cleanup --transcripts (src/apps/cli/session-registry-cmd.ts)."
+    web: "CLI-only slash command; no web-daemon handler and no SessionCommand verb (B2/B3). SlashPalette server-routed entries are prefill stubs that do not execute."
 purpose: |
   Wires the existing `applyRetention` cumulative-bytes sliding window
   (`src/stream/adapters/jsonl-retention.ts`) over the per-session `<id>.jsonl`

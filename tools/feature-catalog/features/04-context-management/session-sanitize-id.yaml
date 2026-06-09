@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [session-index-store, session-jsonl-envelope, session-root-provider-port, session-envelope-encoder, assert-never-exhaustiveness]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "session id path-component validator on all path constructors"
+    web: "pure internal filesystem-safety guard, no UI affordance"
 purpose: |
   Hardened id validator enforcing that a session id is safe to use as a single
   filesystem path component under `sessionsRoot()`. Rejects (with typed

@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, tier:1]
 depends_on: [skill-7-scope-tiering, skill-registry-precedence, skill-admin-enforcement, skill-audit-log, skill-md-frontmatter]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Skill tool registered via QUANTA_SKILLS_DIR discovery, runs in CLI"
+    web: "Skill is an LLM-facing tool; its call/result render via tool.invoked/tool.completed (session-hooks.ts:420,427); the env-gated discovery config is CLI-only but the tool display reaches the browser"
 purpose: |
   frontmatter 발견 → 본문 컨텍스트 주입. CLI surface는 `QUANTA_SKILLS_DIR`
   세트 시 `buildSkillsConfigCore` → `buildSkillBlock` → `discoverSkills` 흐름으로

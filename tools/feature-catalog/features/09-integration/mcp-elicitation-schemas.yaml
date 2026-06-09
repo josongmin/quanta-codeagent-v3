@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, absorbed:claude, absorbed:codex, surface:cli]
 depends_on: [mcp-tasks-capability]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "defaultCliPrompter wires the 7-schema elicitation into the REPL; reachable from CLI entry"
+    web: "interactive prompt is the CLI/REPL prompter only; web-daemon has no TTY so headlessRejecter declines, and no web-frontend elicitation prompt component exists — user-facing mechanism does not reach the browser"
 purpose: |
   rmcp 0.15 Elicitation 7-schema 흡수 — typed user input prompt:
   String / Number / Integer / Boolean / Enum / MultiSelectEnum /

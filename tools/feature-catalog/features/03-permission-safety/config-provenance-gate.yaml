@@ -13,6 +13,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:core", "security-touched", "default-on"]
 depends_on: [agent]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure pre-merge provenance filter reachable from CLI permission merge path"
+    web: "pure internal config-merge filter; drop record is RETURNED never emitted, ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: |
   SECURITY 🔴. The layered config merge (src/permission/policy-layers/index.ts)
   ranks team-admin > per-repo > per-user > default and, under source-precedence,

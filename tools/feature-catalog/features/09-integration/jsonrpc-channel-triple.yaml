@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [jsonrpc-envelope, jsonrpc-codec, jsonrpc-request-id-correlation, assert-never-exhaustiveness, byte-stable-string-comparator]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure protocol naming convention generator (channelTriple/parseChannelKind); shared/jsonrpc library, no surface affordance, not wired into any entry."
+    web: "Pure internal JSON-RPC channel-naming primitive; no browser affordance and jsonrpc slice not reachable from web surface."
 purpose: |
   Codex-pattern channel-triple generator. Every async method has THREE
   related channel names derived from a single base — `channelTriple("agent.run")`

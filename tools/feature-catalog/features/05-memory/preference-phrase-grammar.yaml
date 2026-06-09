@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [codex-2-phase-consolidator, memory-outcome-enum, phase1-stage1-store, memory-fence-cleanup, memory-md-atomic-writer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure parsePreferenceSignal grammar + lint in CLI consolidate pipeline; derived 3/3 holds"
+    web: "pure parser/grammar + warning-only lint primitive; ui_surfaces n-a; no user-visible affordance"
 purpose: |
   Codex memory의 feedback-type 메모리 body 컨벤션 흡수 — 자유형 paraphrase
   대신 4-field 구조화 grammar:

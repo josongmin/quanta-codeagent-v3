@@ -15,6 +15,14 @@ labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "submission op envelope models host->agent input for the CLI loop"
+    web: "pure internal typed input envelope and legacy adapter (submission.ts); not a UI affordance, control-ops are accepted-and-ignored"
 purpose: |
   Codex `Submission { id; op }` / `Op` discriminated union 흡수. host→agent 입력을
   6-variant 닫힌 union으로 모델링: user_input / user_input_with_turn_context /

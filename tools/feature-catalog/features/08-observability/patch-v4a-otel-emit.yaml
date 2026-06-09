@@ -15,6 +15,14 @@ labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 depends_on: [apply-patch-v4a, patch-filesystem-port, assert-never-exhaustiveness, built-in-slash-commands, byte-stable-string-comparator]
 config_refs:
   env: ["QUANTA_FS_JAIL"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "PatchObserver emits op/tier scalars to OTel in CLI apply_patch"
+    web: "pure OTel attribute emit at patch apply site, no UI affordance on any surface"
 purpose: |
   `quanta.patch.op` (`add | update | delete | move`) + `quanta.patch.
   fuzzy_match_tier` (`exact | whitespace | fuzzy`) + `fuzzy_matched`

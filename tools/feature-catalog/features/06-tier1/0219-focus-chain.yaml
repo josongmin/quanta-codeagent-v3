@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cline"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure in-memory todo re-injection state machine, ui_surfaces n-a, default-OFF host-opt-in; spliced into prompt, no CLI affordance"
+    web: "internal prompt-splicing primitive, no UI; nothing reaches the browser"
 purpose: |
   Cline absorption: every N turns (default 6) auto-splice the current todo
   list into the next prompt as a `## Focus Chain — Todos` markdown block so a

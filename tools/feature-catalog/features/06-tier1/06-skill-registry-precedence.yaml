@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-7-scope-tiering, quantaskillsdir, skill-admin-enforcement, skill-audit-log, skill-discover]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ui_surfaces none + deliberate_hold: buildSkillsConfigCore takes single dir and does NOT call the 7-source registry — not wired into CLI"
+    web: "pure internal registry/precedence resolver, no UI on any surface"
 purpose: |
   `buildSkillRegistry({ repoRoot, homeDir, orgConfigDir, systemSkillsDir })` — 7-source 병렬
   discovery 후 고정 precedence (admin > repo > team > user > personal > system > builtIn) 적용.

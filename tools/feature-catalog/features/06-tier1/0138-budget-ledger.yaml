@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "security-touched"]
 depends_on: [conversation-checkpoint, plan-queue]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "budget_status read-only tool + /cost slash, runs in CLI"
+    web: "budget_status is an LLM-facing tool so its snapshot renders via tool.completed (session-hooks.ts:427), but the BudgetBreach circuit-breaker event has no web render and /cost slash is a SlashPalette prefill stub (B2); thin tool-result render only"
 purpose: |
   Closed-port primitive that hardens the failure mode Cline's `$50 in one
   afternoon` retry-loop incident exposed: no programmatic cross-run budget

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:port", "absorbed:opentelemetry", "security-touched"]
 depends_on: [memory-distill-redaction-fence]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "inverted-dependency telemetry seam wired in CLI memory slice; derived 4/4 holds"
+    web: "pure structural telemetry port (counts/latencies/outcome enums only); anti-leak seam, no UI affordance, ui_surfaces n-a"
 purpose: |
   Structural port that lets the @/memory slice emit phase1 (per-thread
   distill), phase2 (global consolidator), and recall (rank) telemetry

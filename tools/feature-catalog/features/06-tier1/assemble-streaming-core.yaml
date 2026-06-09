@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [runner-assemble-builders, assemble-config, runner-resume-fsm, assemble-compaction-core, assemble-llm-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; StdoutStream + JsonlRecorder tee wiring"
+    web: "pure internal streaming/observe-dir assembler (StdoutStream + JsonlRecorder TeeStream); no browser UI affordance"
 purpose: |
   Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
   Default OFF: no `observeDir` ⇒ plain `StdoutStream` + no `RunContext`

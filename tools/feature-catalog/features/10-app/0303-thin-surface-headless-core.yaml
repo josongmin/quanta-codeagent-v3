@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:2", "adr-0303", "governance", "ratchet"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Architecture invariant enforced by a surface-coupling ratchet test (tests/unit/surface-coupling-ratchet.test.ts); pure governance rule, no CLI affordance."
+    web: "Pure import-graph governance ratchet, no user-visible UI affordance on any surface."
 purpose: |
   Codifies the "thin surface, headless core" architecture invariant: the
   CLI surface owns prompt UX + slash dispatch only; turn execution lives

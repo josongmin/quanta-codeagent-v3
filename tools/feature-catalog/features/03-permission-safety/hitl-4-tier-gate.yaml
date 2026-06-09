@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [183-safety-net-green, agent-loop-branch-hardening, assert-never-exhaustiveness, auto-approval-reviewer, branch-only-guard]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "HITL 4-tier registry + onHandoff callback wired on CLI dispatch"
+    web: "approvals render via EscalationCard/PlainApproval but decision collapses to approve|deny only, dropping the 4-tier handoff fidelity; HandoffRequiredEvent onHandoff callback is a CLI-only seam"
 purpose: 'ADR-0020 HITL 어휘 위에 annotation registry(빌트인 + ~/.quanta/hitl-overrides.json 운영자 override)와 typed HandoffRequiredEvent UI seam을 얹는다. one-way ratchet으로 override는 tier escalate만 가능; hand-off-required는 절대 downgrade되지 않는다. AgentConfig.onHandoff 콜백으로 deny 메시지 파싱 없이 구조화된 이벤트 수신.'
 evidence:
   code:

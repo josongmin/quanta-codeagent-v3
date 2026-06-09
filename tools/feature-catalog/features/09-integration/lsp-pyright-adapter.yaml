@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-typescript-adapter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "PyrightAdapter contributes argv + languageId on top of LspClient base; reachable from CLI entry"
+    web: "pure internal per-language LSP adapter (ui_surfaces n-a) — no UI affordance on any surface"
 purpose: |
   Per-language adapter on top of `LspClient` base for `pyright-langserver`
   over stdio. Minimal contribution surface — only the launch argv default

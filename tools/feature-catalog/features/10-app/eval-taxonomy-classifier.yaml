@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-taxonomy-tree, eval-five-tier, fallback-kinds-policy, llm-factory, model-swap-retry]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "eval taxonomy classifier primitive; derived 0/5 reachable from interactive CLI entry (eval classify is eval-CLI surface)"
+    web: "eval-harness internal classification primitive, no web UI affordance"
 purpose: |
   Pure classification primitive `(LLMPort, query) → ClassifyResult`. System
   prompt가 모든 leaf id + label + 대표 example을 enumerate하고, 모델은 단일

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:devin", "slice:playbook"]
 depends_on: [user-authored-playbook-frontmatter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; leaf slice reachable but dormant (no host wire)"
+    web: "pure internal NestedPlaybookExecutor primitive (closed port + cycle detector), no host wires it, ui_surfaces n-a; no UI affordance on any surface"
 purpose: |
   ADR-0203의 macro 1-pass invariant 위에 직교적으로 추가되는 슬라이스 —
   procedure-level "playbook A가 playbook B를 호출 + 결과 변환" 패턴을

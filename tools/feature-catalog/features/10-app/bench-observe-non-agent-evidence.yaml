@@ -14,6 +14,14 @@ labels: ["surface:bench"]
 depends_on: [assemble-config, assert-never-exhaustiveness, bench-corpus-loader, bench-eval-driver, bench-repair-context-builder]
 config_refs:
   env: ["QUANTA_BENCH_BRANCH_SEARCH", "QUANTA_BENCH_ISSUE_HINT", "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_BENCH_LSP", "QUANTA_BENCH_REPRO_TEST", "QUANTA_BENCH_SKILLS", "QUANTA_BENCH_SUBAGENT", "QUANTA_LSP_TOOLS", "QUANTA_OBSERVE_DIR", "QUANTA_SKILLS_DIR", "QUANTA_SUBAGENT", "QUANTA_SWEBENCH_PYTHON"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: 1/4 evidence reachable from CLI entry; bench trajectory evidence emitter"
+    web: "emits sandbox/patch_generated/verify trajectory JSONL that are explicitly NOT AgentEvents and bypass the recorder; cannot flow through the 6-event web bridge (context-binding.ts toSessionHostTurnEvent), dropped before browser"
 purpose: |
   Bench is the producer of *non-agent* trajectory evidence: `sandbox`
   events, `patch_generated`, `verify` (pre/post-verify outcomes). The

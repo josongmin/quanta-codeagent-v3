@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-stream-timeout, llm-error-taxonomy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "shared adapter helpers (stream-timeout resolve / tool-input parse / usage spread) run inside the Anthropic+OpenAI adapters on the CLI path"
+    web: "pure internal LLM-adapter helper library (ui_surfaces n-a, modes n-a) — no user-visible affordance on any surface"
 purpose: |
   The Anthropic and OpenAI adapters previously duplicated ~90% of three
   frames; this module factors them as plain functions (composition over

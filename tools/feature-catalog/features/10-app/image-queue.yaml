@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [prompt-source-payload-widening]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI REPL /image add FIFO drained by PromptSource.next; reachable from CLI import graph."
+    web: "CLI REPL-owned queue; the web image input (paste+hotkey, session-hooks) is a separate web mechanism and does not use this REPL queue."
 purpose: |
   REPL surface가 소유하는 in-memory FIFO. 사용자가 `/image add <path>` 슬래시로
   `ImageBlock` (base64 + mediaType, `loadImageBlock`이 검증한)을 큐에 enqueue,

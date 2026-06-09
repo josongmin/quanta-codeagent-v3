@@ -14,6 +14,14 @@ labels: [absorbed:claude-code, surface:core]
 depends_on: [session-index-store, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runner-session-ops]
 config_refs:
   env: ["QUANTA_SESSION_LIST_FORMAT", "QUANTA_SESSION_LIST_MAX"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "quanta session rewind subcommand truncates transcript to message id"
+    web: "needs a B3-absent rewind verb; protocol.ts SessionCommand has only input.append/turn.run/turn.cancel/approval.respond"
 purpose: |
   Claude Desktop 1.7196.3의 transcript 단위 rewind UX 흡수 — Message.id?: string opt-in 필드를
   src/llm/types.ts에 추가(byte-identical default-OFF: 기존 세션 파일은 id 없이 load/save,

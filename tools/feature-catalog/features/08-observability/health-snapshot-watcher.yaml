@@ -15,6 +15,14 @@ labels: [surface:core, observability-primitive]
 depends_on: [metrics-registry]
 config_refs:
   env: []
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "health.json watcher not reachable from cli interactive entry (composition-root opt-in)"
+    web: "writes ~/.quanta/health.json for K8s/operator file-scraping, never rendered in the quanta web frontend"
 purpose: |
   ADR-0180 writes `~/.quanta/health.json` once at composition time. Operators
   scraping the file on a long-running daemon (K8s livenessProbe periodSeconds:

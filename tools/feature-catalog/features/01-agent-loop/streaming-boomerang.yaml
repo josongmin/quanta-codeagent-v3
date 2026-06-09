@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:roo, surface:core, tier:core, default-off]
 depends_on: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived 0/4 reachable, ui_surfaces n-a, default-OFF AsyncIterable subagent-chunk port, loop 0 touch; keep derived missing"
+    web: "pure internal AsyncIterable streaming primitive; subagent progress chunks ride tool_progress/progress_update class events dropped at context-binding.ts default arm, plus the port itself is unwired"
 purpose: |
   Roo Boomerang/Orchestrator의 streaming 분기 흡수 (ADR-0218 result-only sibling).
   부모가 child subagent의 progress chunk를 점진적으로 consume하는 AsyncIterable

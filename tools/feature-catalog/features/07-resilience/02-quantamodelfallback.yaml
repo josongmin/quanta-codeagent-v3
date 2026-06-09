@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, resilience-primitive]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_MODEL_FALLBACK env knob assembling the retry-inner/fallback-outer chain; reachable from CLI entry"
+    web: "pure config/resilience wiring; not one of the 6 web-writable CONFIG_ALLOWED_KEYS and has no UI affordance"
 purpose: ', retry-inner/fallback-outer'
 evidence:
   code:

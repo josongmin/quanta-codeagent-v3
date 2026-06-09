@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-taxonomy-classifier, eval-taxonomy-tree]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "eval taxonomy code->markdown renderer; derived 0/1 reachable from interactive CLI entry"
+    web: "pure internal doc-render generator primitive, no UI affordance on any surface"
 purpose: |
   `TAXONOMY` 배열을 `docs/analysis/may-21-coding-agent-query-usecase.md` §1
   포맷(major별 `중분류 | 소분류 | 트리거 | 커버 | 담당 | 검증` 테이블)으로

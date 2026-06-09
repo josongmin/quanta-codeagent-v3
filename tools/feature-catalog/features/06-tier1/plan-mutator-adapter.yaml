@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; PlanStore to PlanMutator by-value shape adapter"
+    web: "pure internal slice-boundary by-value translation adapter; no UI affordance"
 purpose: |
   The producer-side `PlanStore` returns `PlanResult<PlanDelta>` (rich
   shape: full Plan snapshot + typed delta). The duck-typed consumer-side

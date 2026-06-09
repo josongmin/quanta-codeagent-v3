@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, test-hygiene, hellgate]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CI hygiene meta-hellgate + pretest purge; no user CLI affordance"
+    web: "pure CI test-hygiene gate, no UI affordance on any surface"
 purpose: |
   Prevent stale `.test.js` TypeScript-emit artifacts from polluting `tests/`.
   Symptom: a legacy build step or worktree pollution leaves `.test.js` next to

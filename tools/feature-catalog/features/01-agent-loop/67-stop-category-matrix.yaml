@@ -13,6 +13,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core, tier:core]
 depends_on: [agent-types-split, plan-mode, secret-redaction-content-plane, build-turn-context, durable-state-belongs-in-workspace-files]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "StopCategory matrix attaches structured stop reasons in the CLI loop finish()"
+    web: "internal stop-reason classification add-on (stop-category.ts); no decision/stop event in the 6-event bridge, nothing rendered"
 purpose: |
   Cursor stop_category 흡수 — 레거시 4-element StopReason을 보완하는 3-layer 구조적 정지
   사유: kind(completed|max_turns|interrupted|failed|needs_user_approval) + 닫힌

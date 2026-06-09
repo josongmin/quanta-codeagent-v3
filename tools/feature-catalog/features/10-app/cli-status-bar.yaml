@@ -11,6 +11,14 @@ modes: [interactive]
 configurable: static
 owners: ['@songmin']
 labels: [surface:cli, absorbed:cursor]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src/apps/cli/status-bar.ts DECSTBM scroll-region; reachable from CLI entry"
+    web: "CLI terminal-only chrome (ANSI scroll-region mutation); no browser equivalent"
 purpose: |
   Vim-style fixed bottom status bar implemented via ANSI DECSTBM
   (`CSI <top>;<bottom>r`). The terminal's scroll region is constrained to

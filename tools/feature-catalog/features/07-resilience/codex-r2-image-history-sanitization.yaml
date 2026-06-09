@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "production-wired"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "internal invalid_image sanitize-and-retry LLM decorator, transparent recovery, no user affordance"
+    web: "pure internal image-history sanitize-and-retry pipeline, no rendered affordance (image input is a separate feature)"
 purpose: |
   4-ADR pipeline closing Codex `turn.rs:363-381` (invalid image →
   in-place wm mutation → retry). ADR-0323 ships `HistorySanitizationPort`

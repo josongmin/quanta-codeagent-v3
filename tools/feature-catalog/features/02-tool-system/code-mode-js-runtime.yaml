@@ -21,6 +21,14 @@ config_refs:
     - QUANTA_CODE_MODE_MAX_CALLS
     - QUANTA_CODE_MODE_OUTPUT_CAP
   runtime: ["codeMode", "codeModeOnly", "codeModeMemBytes", "codeModeTimeoutMs", "codeModeMaxCalls", "codeModeOutputCap"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "18/19 reachable; code_cell tool LIVE behind QUANTA_CODE_MODE"
+    web: "code_cell is an ordinary tool call -> renders as tool.invoked/completed card via the bridged tool_call/tool_result events (cell-lifecycle stream events remain a CLI follow-up)"
 purpose: |
   code-mode (Phase 1-3, LIVE jun-07) — invert the one-tool-per-LLM-turn dispatch model. The model
   authors a small JS PROGRAM (a "code cell") that calls tools as ordinary async

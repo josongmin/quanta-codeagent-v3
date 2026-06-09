@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [fsjailerror, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "8/8 reachable; FS-jail chokepoint unifying the document/image readers"
+    web: "pure internal security primitive (resolveJailedDoc containment chokepoint); the readers show as tool calls but this feature itself is a jail unification with no UI affordance"
 purpose: |
   Pre-S7, every file-reading tool rolled its own `resolveXxxPath` —
   `resolveImagePath` (`src/tool/image/read.ts`), `resolveCsvPath`

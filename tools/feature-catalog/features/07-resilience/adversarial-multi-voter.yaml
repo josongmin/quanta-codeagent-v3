@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:resilience", "tier:1", "absorbed:agentless", "absorbed:claude-init-verifiers"]
 depends_on: [speculative-branch-search]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "default-off verification quorum runs inside branch_search, knob QUANTA_MULTI_VOTER reachable in CLI"
+    web: "internal verification quorum feeding an additive branch-search scorer signal, no rendered affordance"
 purpose: |
   후보 fix/claim을 N개 독립 refute-biased 보터(각자 LLMPort)로 검증 → quorum 규칙으로
   단일 verdict 집계. 보터는 "반증하라 + 불확실하면 FAIL" 시스템 프롬프트로 편향되고,

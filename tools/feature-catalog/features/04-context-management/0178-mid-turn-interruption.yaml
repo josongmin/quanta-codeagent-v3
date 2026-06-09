@@ -15,6 +15,14 @@ owners: ["@songmin"]
 labels: ["adr-0178", "tier:1", "plan-queue", "interruption"]
 depends_on:
   - plan-queue
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI raw-mode mid-turn capture wire over PlanQueueStore; reachable from CLI entry."
+    web: "Captured lines ride externalPromptQueue/response_queued; no protocol.ts queue/turn verb (B3) and no web handler reach the browser."
 purpose: |
   Capture facade that maps the CLI "user submitted while streaming"
   signal onto ADR-0128's PlanQueueStore. 3-arm closed `InterruptionMode`

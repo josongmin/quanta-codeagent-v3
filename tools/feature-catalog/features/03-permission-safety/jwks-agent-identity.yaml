@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off", "absorbed:codex", "tier:security"]
 depends_on: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived 0/5 reachable, ui_surfaces empty, default-OFF verify-only JWKS client, dispatch/loop/agent all uninjected; keep derived missing"
+    web: "pure internal security primitive (JWKS fetch/cache/verify with Web Crypto), no UI affordance on any surface"
 purpose: |
   Codex agent-task 등록 패턴 흡수의 verify-only foundation. 외부 dispatcher가
   발급한 JWT를 remote JWKS endpoint로 검증한다. `src/security/jwks-identity/`

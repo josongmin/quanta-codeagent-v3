@@ -15,6 +15,14 @@ depends_on: [llm-multicloud-provider-router]
 config_refs:
   env:
     - CLAUDE_CODE_USE_MANTLE
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Mantle stream-skeleton adapter present in CLI LLM registry (SDK unpublished)"
+    web: "pure internal cloud transport adapter stub (blocked on unpublished SDK, ui_surfaces n-a), no UI affordance"
 purpose: |
   `MantleProviderAdapter` is a REAL stream skeleton (ADR-0172 superseded the
   ADR-0163 typed-stub): same 4-part shipped-adapter structure as Bedrock/Vertex/

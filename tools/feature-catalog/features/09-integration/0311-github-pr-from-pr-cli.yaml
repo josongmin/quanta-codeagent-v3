@@ -19,6 +19,14 @@ depends_on:
   - mention-filter-trust-scope
   - secret-redaction-content-plane
   - reactor-trigger-source
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: from-pr CLI sub-command not yet registered in the CLI dispatcher"
+    web: "CLI sub-command; SlashPalette web routes are prefill stubs (B2) and there is no web handler"
 purpose: |
   User-facing CLI entry for the Tier 0 PR webhook bot path. Runs ONE cycle
   end-to-end:

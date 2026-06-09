@@ -14,6 +14,14 @@ labels: [surface:cli]
 depends_on: [tool-registry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ToolResult.evidence type field used across tool registry"
+    web: "pure type-surface guard replacing duck-typed extra-prop smuggling; ui_surfaces n-a, no user-visible affordance"
 purpose: 'evidence?: ToolResultEvidence — 이전 duck-typed extra-prop smuggling을 타입 surface로 대체. stdErr vs stderr casing drift가 더 이상 tsc를 못 빠져나감.'
 evidence:
   code:

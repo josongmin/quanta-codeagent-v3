@@ -16,6 +16,14 @@ depends_on: [phase1-stage1-store, memory-outcome-enum, phase2-auto-trigger-wire,
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_MEMORY_SUBDIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 2-phase consolidator (runPhase1/runPhase2) reachable from CLI entry"
+    web: "session-end distill + cross-session synthesizer writes git-tracked markdown server-side; runs in the web-daemon backend but emits no bridged event (consolidator outcome rides an error AgentEvent only on failure — error is bridged but the success/distilled value never reaches the browser); no consolidation UI"
 purpose: |
   Codex memory model의 2-phase distill+consolidator 흡수 — 기존 SOTA++ hybrid recall
   (ADR-0008, embedding+lexical+tag+freshness+tier+reinforcement)이 메우지 못한 두 구조적

@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion, tier:1]
 depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "1/1 evidence file reachable from CLI; dispatch routes via ToolContext.requestPlanExit port"
+    web: "plan-exit 3-way outcome surfaces through planExitPort to the CLI/IDE decider; /plan in SlashPalette.tsx is a prefill stub (B2) and no plan-exit handler exists in apps/web-frontend"
 purpose: |
   Model-driven exit from plan mode mirroring Claude Code's `ExitPlanMode`.
   When the agent has assembled a plan and is ready to act, it calls this

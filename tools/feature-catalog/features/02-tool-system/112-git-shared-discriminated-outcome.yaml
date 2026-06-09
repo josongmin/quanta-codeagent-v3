@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, git-branch-name-schema-guard, git-runner-cancellation-signal]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure slice-internal boundary helper (safeRun/mutate discriminated outcome); no user-facing affordance on any surface."
+    web: "Pure internal git-slice boundary helper, no UI affordance."
 purpose: |
   Slice-internal helpers (`safeRun` + `mutate`) that normalize the spawn
   boundary into a tagged discriminated union — every git tool's `execute()`

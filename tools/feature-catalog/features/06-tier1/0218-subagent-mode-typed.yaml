@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:roo", "absorbed:devin", "absorbed:codex", "absorbed:cursor"]
 depends_on: [background-subagent, agent-tool-shape]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure DelegationPort/mode-registry/boomerang primitive, ui_surfaces n-a, default-OFF host-opt-in slot, no CLI affordance"
+    web: "pure internal delegation port/registry, no browser affordance on any surface; not an AgentEvent the bridge maps"
 purpose: |
   Parent → child mode-typed handoff with isolated context. 4-vendor convergence
   (Roo Boomerang/Orchestrator, Devin sub-task delegation, Codex

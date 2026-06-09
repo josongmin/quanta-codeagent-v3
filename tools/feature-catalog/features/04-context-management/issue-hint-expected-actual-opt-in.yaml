@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core, default-off]
 depends_on: [issue-hint-extraction]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "opt-in E/A phrase extractor consumed by bench driver, reachable from CLI"
+    web: "pure deterministic text extractor for bench localization, no UI affordance"
 purpose: |
   OPT-IN sentence-bounded extractor for inline expected/actual phrasing in
   issue bodies (keywords: expected / expect / actual / actually / got /

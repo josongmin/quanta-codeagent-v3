@@ -23,6 +23,14 @@ depends_on:
   - conv-checkpoint-auto-record
   - playbook-trigger-cli-bind
   - session-export-import-slash
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Wires the ADR-0291..0294 slash families through composeSurfaceWires in src/apps/cli/repl/surface-compose.ts; reachable from CLI entry, knob-gated."
+    web: "CLI REPL composition-root wire for slash commands (/rewind-conv, /profile, /session); SlashPalette server-routed stubs (B2) and absent fork/rewind verbs (B3) keep it out of the browser."
 purpose: |
   Closes the REPL composition root for the 4 sibling tracks landed in
   the prior round (ADR-0291/0292/0293/0294). Each track shipped its

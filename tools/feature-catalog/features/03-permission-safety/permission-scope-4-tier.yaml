@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [permission-profile-2-layer, permission-store-json, permission-4-pillar, special-path-resolver, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "strongerScope precedence helper used by two-layer manager (src/permission/two-layer-manager.ts)"
+    web: "pure internal RBAC precedence helper (configurable static); no user-visible affordance on any surface"
 purpose: |
   **Codex `Scope.{user, project, managed, open}` 4-tier RBAC 흡수.** Skill scope
   ([[0134-skill-scope-tiering]])의 7-tier보다 단순 — permission은 admin enforce

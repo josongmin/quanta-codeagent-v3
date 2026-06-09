@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, category:sandbox, security, security-touched, default-off, absorbed:codex]
 depends_on: [os-sandbox, post-denial-precedence, hitl-tier-registry, typed-tool-failure-modes]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "sandbox-block detect + HITL escape-hatch escalation loop wired on CLI bash hot path"
+    web: "the onConfirm escape-hatch can route to the EscalationCard approve|deny path but the sandbox-blocked classification, re-run argv and escalation context ride dropped events; only the collapsed confirm reaches the browser"
 purpose: |
   OS sandbox 가 syscall 을 BLOCK 했을 때(=sandbox 가 제대로 작동) 와 일반 명령
   실패를 구분하지 못하던 갭(`SandboxedSpawnResult` 에 denialReason 없음 → block 이

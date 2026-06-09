@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "monitoring n-a; pure system-prompt section content (git posture ban-list) in prompt.ts, no user-visible affordance"
+    web: "pure internal system-prompt policy text, no UI affordance on any surface"
 purpose: |
   System-prompt section that establishes default-NO mutation posture for git in
   the model's instructions. Free read-only inspection (status/log/diff/blame/

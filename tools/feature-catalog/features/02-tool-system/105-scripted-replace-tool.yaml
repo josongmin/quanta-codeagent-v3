@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, cross-slice-mirror, deferred-tool-registry, errors-helper-fix]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "4/4 evidence files reachable from CLI; registered in defaultTools"
+    web: "agent-callable scripted_replace edit-sibling renders as tool.invoked/tool.completed in session-hooks.ts"
 purpose: |
   Codex `tool-routing-and-triggering.md` absorption — "patch is for local +
   stable context; scripted replace is for duplicated blocks, bulk substitution,

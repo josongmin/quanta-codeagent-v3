@@ -14,6 +14,14 @@ labels: ["surface:core"]
 depends_on: [subagent-mailbox, team-broker-coordination, team-idle-barrier-coordination]
 config_refs:
   env: [QUANTA_TEAM_PEER_MSG]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "team_create/team_delete tools + auto-delivered peer inbox reachable in CLI loop"
+    web: "team_create/team_delete tool calls render as tool cards (and subagent runs appear in RunColumn), but the core auto-delivery injects peer mail as an internal role:user message with no distinct web event, so the messaging substance does not reach the browser"
 purpose: |
   The THREE genuine deltas over quanta's EXISTING peer-messaging substrate
   (RFC docs/plans/jun-6-peer-teammate-messaging.md). quanta ALREADY has the hard

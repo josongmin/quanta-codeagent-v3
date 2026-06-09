@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:claude-code"]
 depends_on: [repl-code-smell-cleanup, runner-assemble-builders, cli-export-2026-05-21-l2-l3, plan-mode, repl-interactive-surface]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "renderDashboardText printed to CLI stderr at turn end when QUANTA_METRICS is active (repl.ts)"
+    web: "the cost/cache dashboard (byTool, p50/p95, stopReasons, shell rollup) has a CLI stderr render but no web mount; its render is CLI-only and does not reach the browser"
 purpose: |
   MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·
   turns·toolCalls(byTool)·stopReasons·latency(p50/p95)·shell rollup 집계. 새 수집 0

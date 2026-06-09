@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:claude", "absorbed:codex", "surface:cli", "tier:core", "default-off"]
 depends_on: [tool, storage]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "All five integration points wired into the CLI agent (assembler/dispatch/read/write/edit/bash)."
+    web: "Backend guard; a blocked clobbering edit surfaces as a tool_result ok:false (re-read message) which renders as tool.completed outcome:error in web, but the post-bash re-read system-reminder rides no web event and there is no distinct affordance."
 purpose: |
   When the agent reads a file then the file is changed on disk by something
   outside the agent (a concurrent process, a git checkout, a formatter the agent

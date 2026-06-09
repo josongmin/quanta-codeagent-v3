@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: [secret-redaction-content-plane, sensitivity-classifier]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "PII branch wired into dispatch.applyRedaction (default-OFF config.redaction.pii), running in the CLI dispatch path"
+    web: "content-plane PII masking fence spliced after secret redaction; no browser UI affordance of its own"
 purpose: |
   PII 모듈(`src/security/pii-redaction/`)은 sync + masking(redactText)이라
   ADR-0078 sync masking 슬롯에 drop-in 가능(secret-detection 신모듈은

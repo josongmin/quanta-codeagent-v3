@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; TodoStatus transition predicate + frozen table"
+    web: "pure internal frozen lookup table + isValidTransition predicate; no UI affordance"
 purpose: |
   Closed `TodoStatus` transition matrix as a frozen lookup table + pure
   predicate. The mutations layer consults `isValidTransition(from, to)`

@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "security-touched"]
 depends_on: [gh-arg-injection-guard]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "gh_pr_edit_labels tool, runs in CLI loop"
+    web: "gh_pr_edit_labels tool invocation + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool_call/tool_result arms"
 purpose: |
   A thin MUTATING wrapper over `gh pr edit <pr> --add-label <l> --remove-label
   <l>`. quanta's gh tools READ labels (gh issue view --json …,labels) but had no

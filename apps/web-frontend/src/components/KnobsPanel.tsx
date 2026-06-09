@@ -46,9 +46,16 @@ type LoadState =
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "ready"; readonly data: KnobsResponse }
 
+const NOT_CONNECTED_MSG = "Not connected to the daemon yet."
+
 export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element => {
   const [query, setQuery] = useState("")
-  const [state, setState] = useState<LoadState>({ kind: "idle" })
+  // `endpoint === null` is known at render time (no fetch needed), so start in
+  // the error state for first paint — otherwise the panel flashes "Loading…"
+  // until the load effect runs (and a server/static render never corrects it).
+  const [state, setState] = useState<LoadState>(() =>
+    endpoint === null ? { kind: "error", message: NOT_CONNECTED_MSG } : { kind: "idle" },
+  )
   /** Optimistic per-row pending / error state keyed by envKey. */
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(new Set())
@@ -56,7 +63,7 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
   const load = useCallback(
     (signal?: AbortSignal): void => {
       if (endpoint === null) {
-        setState({ kind: "error", message: "Not connected to the daemon yet." })
+        setState({ kind: "error", message: NOT_CONNECTED_MSG })
         return
       }
       setState({ kind: "loading" })

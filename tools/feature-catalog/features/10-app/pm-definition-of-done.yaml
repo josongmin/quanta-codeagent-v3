@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:tooling"]
 depends_on: [feature-catalog-tool]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Definition-of-Done checker meta-tool (tools/pm); pure judge + CI reporting, no interactive surface."
+    web: "Pure process/CI tooling, no UI affordance on any surface."
 purpose: |
   tools/pm is the EXECUTABLE Definition of Done — the process home that makes one
   rule impossible to forget: a feature is "done" only when ALL THREE ship

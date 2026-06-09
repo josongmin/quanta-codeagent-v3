@@ -13,6 +13,14 @@ owners: ["@songmin"]
 labels: ["adr-0317", "surface:desktop", "tier:scaffold", "darwin"]
 depends_on:
   - thin-surface-headless-core
+surface_integration:
+  cli: na
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Tauri desktop shell, not a CLI feature (ui_surfaces tauri)"
+    web: "IS the desktop surface that hosts the web-frontend SPA and injects window.__QUANTA_CONFIG__ for the React app, but L2 scaffold never cargo-build-verified, zero tests, signing/notarization deferred (ADR-0317 negative invariants) — present but unverified, not shipping-wired"
 purpose: |
   macOS-only Tauri 2.x desktop wrapper (`apps/tauri-shell/`) that hosts the
   web-frontend SPA, spawns the bun `quanta-web-daemon` and Swift

@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
 depends_on: [turn-diff-event, agentevent, git-branch-name-schema-guard, git-runner-cancellation-signal, jsonl-cumulative-retention]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Per-turn diff state machine reachable from CLI loop wiring."
+    web: "Emits turn_diff_updated AgentEvent which is dropped at context-binding.ts:1104 default arm; DiffPanel is also unmounted (App.tsx:578)."
 purpose: |
   Stateful per-session adapter orchestrating the
   `captureTurnStart / computeTurnDiff / buildTurnDiffEvent` trio from

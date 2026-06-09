@@ -15,6 +15,14 @@ labels: [absorbed:claude-code, absorbed:cursor, surface:cli]
 depends_on: [reviewer-3tier, 183-safety-net-green, agent-loop-branch-hardening, cross-slice-mirror, agent-dispatch-core]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ReviewKind matrix + verb legality wired into admissibility-gate reviewAndDecide reachable from CLI; ui_surfaces n-a"
+    web: "pure permission-typing matrix (inferReviewKind + isDecisionLegalFor), internal gate primitive with no UI affordance on any surface"
 purpose: |
   Cursor approval gate의 타입드 매트릭스 흡수 — quanta 권한 레이어에 "무엇을 리뷰하는가" 축
   추가. HITLTier(ADR-0020 — 행위 risk 형상)와 ReviewerTier(ADR-0029 — 누가 결정)와 직교.

@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:claude, surface:cli, security-touched]
 depends_on: [read-write-edit, fsjailerror, tool-output-schema-factory]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "grep tool flag surface, runs in CLI loop"
+    web: "grep tool invocation + args + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   grep 도구에 ripgrep flag surface 추가 — context lines (-A/-B/-C),
   output_mode (content | files_with_matches=-l | count=-c), case-insensitive (-i),

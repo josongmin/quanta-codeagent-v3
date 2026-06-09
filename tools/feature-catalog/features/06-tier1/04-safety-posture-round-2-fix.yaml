@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core, tier:1]
 depends_on: [agent, agent-tool-shape, quantasubagent-maxdepth, subagent-6-tools, task-registry]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "buildChildConfig propagates parent mode/verifyGuard/closeoutGuard/hitl caps to child — pure internal config-propagation policy, no affordance"
+    web: "internal safety-posture inheritance policy, no user-visible surface anywhere"
 purpose: |
   Safety-posture 전파 — buildChildConfig가 부모의 mode/verifyGuard/closeoutGuard/hitl를 옵셔널 spread로
   자식에 전파. 이전엔 자식이 default mode로 붕괴 가능 → review-posture 부모가 mutating 자식을 spawn할

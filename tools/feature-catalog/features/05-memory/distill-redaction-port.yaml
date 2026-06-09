@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched", "held-promotion"]
 depends_on: [memory-distill-redaction-fence]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: consolidator redaction port reachable from CLI entry"
+    web: "pure internal redaction seam (s:string)=>string at the consolidator boundary (src/agent/memory-consolidator-hook.ts) — security fence, no UI affordance on any surface"
 purpose: |
   Abstracted redaction seam at the consolidator boundary: `consolidator.redact?:
   (s:string) => string` on `ConsolidatorHookInput`. Each rollout message's

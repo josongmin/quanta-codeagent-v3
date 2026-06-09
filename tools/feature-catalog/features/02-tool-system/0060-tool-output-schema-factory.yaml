@@ -15,6 +15,14 @@ labels: [absorbed:v0, surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, secret-redaction-content-plane]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "defineTool factory reachable from CLI entry; ui_surfaces cli"
+    web: "pure internal tool-factory plumbing (outputSchema/toModelOutput/deferred/streaming-input callbacks); no user-visible affordance on any surface"
 purpose: |
   v0.dev createProviderToolFactoryWithOutputSchema 흡수 — Tool에 4개 OPTIONAL 능력
   추가: outputSchema(결과 Zod 검증, 불일치 시 ok:false retry-지시), toModelOutput(모델용

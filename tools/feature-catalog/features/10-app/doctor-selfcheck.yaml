@@ -14,6 +14,14 @@ labels: ["surface:cli", "diagnostic", "read-only", "closed-port-di"]
 config_refs:
   env: [QUANTA_DOCTOR]
   cli: ["--json"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/doctor slash command runs in CLI REPL via APP_SLASH_COMMANDS registry (src/apps/cli/doctor)"
+    web: "CLI-only slash command; SlashPalette server-routed commands are prefill stubs (B2) and there is no POST/config-backed web handler, so /doctor never reaches the browser"
 purpose: |
   `/doctor` is a read-only startup self-check that aggregates the scattered
   `/status` (auth), `/mcp` (servers), `runtimeConfig()` (config), terminal,

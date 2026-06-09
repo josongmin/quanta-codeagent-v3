@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-runtime, scheduler-weekday-nth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; parseRRule/serializeRRule run in CLI scheduler"
+    web: "pure internal RFC 5545 RRULE parser/serializer primitive; no UI affordance on any surface"
 purpose: |
   `parseRRule(s)` / `serializeRRule(rule)` implement a strict RFC 5545
   §3.3.10 BASIC RECUR rule subset (`FREQ=DAILY|WEEKLY|MONTHLY` + optional

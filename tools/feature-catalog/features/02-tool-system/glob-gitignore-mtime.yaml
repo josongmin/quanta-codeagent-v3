@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [glob-tool]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "glob tool engine, runs in CLI loop"
+    web: "glob tool invocation + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   P25 engine swap for the `glob` tool: enumeration moved from `Bun.Glob.scan`
   to `rg --files` (run with `cwd: base`, no path arg → paths are emitted

@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure correlation struct threaded via AgentConfig.run, ui_surfaces n-a, no CLI affordance"
+    web: "pure run-graph correlation primitive struct, no UI affordance on any surface"
 purpose: |
   Correlation context threaded through an agent run (RFC-0002 §5.1). Carries
   `runId` (required) + optional `instanceId` / `attempt` / `turn` / `toolUseId`

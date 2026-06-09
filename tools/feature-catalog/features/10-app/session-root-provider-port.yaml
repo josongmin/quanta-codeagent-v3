@@ -14,6 +14,14 @@ labels: ["surface:cli"]
 depends_on: [session-index-store, session-jsonl-envelope, session-sanitize-id, session-envelope-encoder, assemble-config]
 config_refs:
   env: ["QUANTA_MEMORY_PATH", "QUANTA_SESSIONS_DIR"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure DIP port abstraction (SessionRootProvider) injected at the session slice; no user-facing CLI affordance"
+    web: "pure internal multi-tenant rooting port, no UI affordance on any surface"
 purpose: |
   Inverts the legacy process-wide `sessionsRoot()` resolver so multi-tenant
   surfaces (Web / Tauri daemon) can supply per-tenant rooting strategies

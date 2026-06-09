@@ -14,6 +14,14 @@ labels: ["surface:permission", "tier:observability", "phase:2"]
 depends_on: [debug-tracer-decision-event, harddeny-readonly-short-circuit, hitl-4-tier-gate, prefix-rule-dsl]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "emits decision events to debug-tracer/JSONL recorder under QUANTA_DEBUG in CLI"
+    web: "rides the decision AgentEvent which is dropped at context-binding.ts:1104 default arm (not one of the 6 bridged events)"
 purpose: |
   ADR-0239 Phase 1은 `decision` AgentEvent variant + debug-tracer consumer만
   깔았고 *production code는 아직 emit하지 않는 상태*였음. 이 슬라이스는

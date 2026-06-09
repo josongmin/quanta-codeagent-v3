@@ -14,6 +14,14 @@ labels: ["surface:core", "resilience-primitive"]
 depends_on: [feature-catalog-tool, agent-cli-args-parser, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
 config_refs:
   env: ["QUANTA_BENCH_LSP", "QUANTA_BENCH_SKILLS", "QUANTA_BENCH_SUBAGENT", "QUANTA_BENCH_TIMEOUT_MS", "QUANTA_MODEL", "QUANTA_OBSERVE_DIR", "QUANTA_REPAIR_ROUNDS", "QUANTA_RUN_ID", "QUANTA_SWEBENCH_CACHE_LEVEL", "QUANTA_SWEBENCH_CLEAN", "QUANTA_SWEBENCH_CORPUS_ROOT", "QUANTA_SWEBENCH_DATASET", "QUANTA_SWEBENCH_DATASET_NAME", "QUANTA_SWEBENCH_FORCE_REBUILD", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PYTHON", "QUANTA_SWEBENCH_PYTHON_BIN", "QUANTA_SWEBENCH_REPO_BASE_URL"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure import.meta.main entrypoint-isolation guard, test-safety primitive, no user affordance"
+    web: "pure internal CLI-entry guard, no UI affordance"
 purpose: |
   CLI entry 모듈은 `if (import.meta.main) { ... }` 가드 뒤에서만 production
   main을 실행한다. Bun은 `import.meta.main`을 *프로세스 진입 파일*에서만 true로

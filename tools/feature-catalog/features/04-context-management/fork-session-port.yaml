@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:claude, absorbed:cursor, surface:core]
 depends_on: [conversation-checkpoint-store]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/fork-checkpoint slash command + ForkSessionPort reachable from CLI"
+    web: "CLI-only slash command; SlashPalette routed commands are prefill stubs (B2) and protocol.ts SessionCommand has no fork/rewind verb (B3)"
 purpose: |
   ADR-0201 의 base `SessionForker` 를 둘러싸는 RICHER `ForkSessionPort` —
   Claude `/fork` + Cursor session-fork 가 노출하는 4-axis UX 흡수:

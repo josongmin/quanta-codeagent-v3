@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core]
 depends_on: [plan-mode, response-in-progress, runner-assemble-builders, effort-5-tier, fallback-kinds-policy]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "compaction thrash circuit-breaker policy, pure internal control, no direct CLI affordance"
+    web: "pure internal compaction circuit-breaker policy, no UI affordance"
 purpose: CompactionBreaker 4-사이트, thrash abort [_*]
 evidence:
   code:

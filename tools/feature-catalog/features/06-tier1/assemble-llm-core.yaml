@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [runner-assemble-builders, llm-assemble]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; LLM-stack assembler the CLI composes the loop from"
+    web: "pure internal LLM-stack factory (buildLLMCore/composeLLMCore/parseFallbackModels); no browser UI affordance of its own"
 purpose: |
   Surface-agnostic LLM assembly family that hides three distinct concerns
   behind typed inputs (no `process.env` / `process.argv` reads — the surface

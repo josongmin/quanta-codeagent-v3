@@ -15,6 +15,14 @@ labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 depends_on: [permission-store-json, per-host-agent-mode, per-thread-permissions, post-denial-precedence, quanta-home-meta-root]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "permission decision-site OTel recorder seam wired in CLI"
+    web: "pure OTel emit at permission decision site (default-OFF), no UI affordance on any surface"
 purpose: |
   ADR-0029 reviewer 3-tier + ADR-0046 stack-axis + post-denial vocabulary
   (`quanta.permission.*` 12 키)가 vocabulary.ts에 선언만 있고 실제 emit

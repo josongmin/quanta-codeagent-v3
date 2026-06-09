@@ -14,6 +14,14 @@ labels: ["surface:cli", "tier:repl"]
 depends_on: [cli-repl-solid-split]
 config_refs:
   env: ["QUANTA_MCP_CONFIG"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Translator feeding the /mcp slash command surface in src/apps/cli/repl/mcp-surface-wire.ts, reachable from CLI entry."
+    web: "Feeds the CLI /mcp slash command only; SlashPalette server-routed commands are prefill stubs (B2) and there is no web handler nor MCP-surface render in apps/web-frontend, so it never reaches the browser."
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because
   this module is the ONLY translator between live CLI MCP wiring

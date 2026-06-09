@@ -17,6 +17,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core, tier:core, provider:openai-responses]
 depends_on: [reasoning-carryover, structured-output-mode]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure LLMPort adapter + continuation/resume store; ui_surfaces n-a, no CLI UI affordance"
+    web: "pure internal LLMPort adapter and continuation store, no user-visible affordance on any surface"
 purpose: |
   `OpenAIResponsesAdapter` (`src/llm/adapters/openai-responses.ts`) — the
   `LLMPort` implementation for OpenAI's `/v1/responses` streaming surface

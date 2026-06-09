@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [objective-first-class, objective-tools]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "budget gate + objective_get render reachable in CLI loop"
+    web: "the objective (incl status) reaches the web-only ObjectiveCard via observability-emitter (objective.get), but the budget ratio/enforcement is mostly loop-internal continuation suppression; the card renders goal/blockers/next-actions, budget render is thin"
 purpose: |
   Makes the ADR-0394 `ObjectiveBudget` (maxTokens / maxTurns) a HARD GATE
   instead of stored-but-never-read informational state. Before H17 the budget

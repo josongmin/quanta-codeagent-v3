@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:aider", "absorbed:claude-code"]
 depends_on: [built-in-slash-commands, web-fetch-search]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slashes /web /paste /edit-plan /edit-message, src/apps/cli/web-cmd.ts etc reachable from CLI entry"
+    web: "absent from SlashPalette.tsx; inherently terminal mechanism (EDITOR spawn + OS pbpaste/xclip); TextInbox/PlanEditPort not web-wired"
 purpose: |
   Four-slash absorption batch. /web <url> + /paste deliver out-of-band
   content (URL fetch / clipboard) through a single-shot TextInbox the

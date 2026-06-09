@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Line-buffer FSM inline-ANSI painter over the CLI assistant stream (src/apps/cli/markdown-painter.ts); runs in CLI stdout adapter."
+    web: "CLI-terminal-only ANSI painter; the web frontend renders assistant text via its own session-hooks stream rendering and never runs the ANSI painter, so the affordance does not reach the browser."
 purpose: |
   assistant 텍스트 스트림(델타 청크)을 라인 단위 유한상태머신으로 흘려
   inline ANSI 컬러를 입히는 painter. 상태: header(`#`+`##`+`###`) /

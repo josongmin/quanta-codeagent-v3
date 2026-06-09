@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:devin", "absorbed:windsurf", "absorbed:aider", "absorbed:cody", "absorbed:codex"]
 depends_on: [skill-md-frontmatter, repo-rules-tree, skill-7-scope-tiering, engineering-skills-bundle]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "playbook frontmatter parser/validator/dispatcher leaf slice, reachable in CLI import graph"
+    web: "dormant leaf parser primitive (0 host wiring; slash surface is an explicit follow-up), no UI affordance on any surface yet"
 purpose: |
   ADR-0040의 strict 6-field SKILL.md frontmatter 위에 author-facing
   procedural 슬롯 4개 + inline trigger 1개를 추가하는 누적 슬라이스.

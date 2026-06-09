@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, absorbed:claude, absorbed:codex, surface:core]
 depends_on: [mcp-client-jsonrpc]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3 model-facing tools (list_mcp_tasks/get_mcp_task/cancel_mcp_task) reachable from CLI loop"
+    web: "the 3 caller-wired mcp_tasks tools render as tool.invoked/tool.completed cards in session-hooks.ts via the bridged tool_call/tool_result events; the negotiator core is internal but the user-facing mechanism is the tool calls"
 purpose: |
   Cursor + Claude + Codex 3-vendor 강신호 — rmcp 0.15 표준 MCP Tasks
   capability 흡수. 4 method: tasks/list (cursor pagination) / tasks/getInfo

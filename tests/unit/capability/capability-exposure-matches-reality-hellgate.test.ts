@@ -28,7 +28,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { __resetCliKnobOverrides } from "@/apps/cli/cli-knobs-accessor"
 import { allCapabilities, type CapabilityDescriptor, resolveExposure } from "@/capability"
-import { gateOn } from "@/shared"
+import { __resetRuntimeConfig, gateOn, runtimeConfig } from "@/shared"
 // REAL assembly under test — the actual internal.ts subagent/workflow-enable path.
 import { buildSubagentConfig } from "../../../src/apps/cli/internal"
 
@@ -47,6 +47,7 @@ beforeEach(() => {
   saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]))
   for (const k of ENV_KEYS) delete process.env[k]
   __resetCliKnobOverrides() // no live /knobs overrides leak into the read path
+  __resetRuntimeConfig() // re-parse runtimeConfig() from the matrix env per row
 })
 afterEach(() => {
   for (const [k, v] of saved) {
@@ -54,6 +55,7 @@ afterEach(() => {
     else process.env[k] = v
   }
   __resetCliKnobOverrides()
+  __resetRuntimeConfig()
 })
 
 /** Apply an env-matrix row to process.env (undefined ⇒ leave unset). */
@@ -148,16 +150,33 @@ describe("workflow capability ↔ REAL assembly (ADR-0503 P3 reality hellgate)",
 // exactly like artifact-store / office-authoring (verified in runtime-config.ts /
 // agent-arg-builder.ts: `gateOn(env, KEY)`).
 
-describe("pure-env capabilities ↔ env gate (strict equality, no composite gate)", () => {
+describe("pure-env capabilities ↔ REAL runtimeConfig field the assembler branches on", () => {
+  // The REAL exposure of each pure-env tool is the runtimeConfig() boolean that
+  // agent-arg-builder.ts branches on to wire the port (`cfg.imageGen` →
+  // `ports.imageGen`, `cfg.officeAuthoring` → `{officeAuthoring:true}`,
+  // `cfg.artifactStore`). Crucially, that field's env-key is declared
+  // INDEPENDENTLY in runtime-config.ts (a hardcoded "QUANTA_*" literal), while
+  // resolveExposure reads the cap registry's `gate.envKey`. Comparing the two
+  // locks declaration↔reality across those two independent sources — NOT a
+  // re-read of the SAME `gateOn(env, cap.gate.envKey)` the prediction already
+  // computes (which would be tautological, the bug the old version had).
+  const REAL_FIELD: Record<string, () => boolean> = {
+    "image-gen": () => runtimeConfig().imageGen,
+    "artifact-store": () => runtimeConfig().artifactStore,
+    "office-authoring": () => runtimeConfig().officeAuthoring,
+  }
   for (const id of ["image-gen", "artifact-store", "office-authoring"] as const) {
     const cap = findCap(id)
-    test(`${id}: no requires ⇒ resolveExposure === own gate (env is fully sufficient)`, () => {
-      expect(cap.requires).toBeUndefined()
+    test(`${id}: resolveExposure === the real runtimeConfig field across {on,off,unset}`, () => {
+      expect(cap.requires).toBeUndefined() // registry-drift teeth: a require would change the model
       for (const v of ["1", "0", undefined] as const) {
         const env = { [cap.gate.envKey]: v }
         applyEnv(env)
-        // Pure env caps: prediction is exactly the own-gate read (gateOn vocab).
-        expect(resolveExposure(cap, "llmTool", env)).toBe(gateOn(env, cap.gate.envKey))
+        __resetRuntimeConfig()
+        // RHS reads the production config object the assembler consumes; if the
+        // cap's gate.envKey ever drifts from runtime-config's literal, these
+        // diverge and the gate goes RED.
+        expect(resolveExposure(cap, "llmTool", env)).toBe(REAL_FIELD[id]?.() ?? false)
       }
     })
   }

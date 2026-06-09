@@ -18,6 +18,14 @@ owners: ["@songmin"]
 labels: ["adr-0315", "surface:web", "tier:1"]
 depends_on:
   - slice-ipc-bridge
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Daemon-only process booted via bun run web:daemon; not reachable from the interactive CLI entry (correctly derived missing)."
+    web: "This IS the web surface backend — Bun.serve WS daemon (src/apps/web-daemon/) publishing RuntimeSession to the browser frontend; the web app connects to it."
 purpose: |
   Default-OFF bun process that publishes the existing `@/sdk/runtime`
   `RuntimeFacade` over WebSocket using the wire format already established

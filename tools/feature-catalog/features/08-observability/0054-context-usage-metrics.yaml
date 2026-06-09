@@ -15,6 +15,14 @@ labels: ["surface:core", "observability-primitive"]
 depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "status-line.ts 20-cell bar formatter + recorder.tokensUsed fan-out rendered in CLI status line"
+    web: "the token-usage user value reaches the browser via the bridged usage event rendered by TokenCounter (cumulative tokens + cost) in session-hooks.ts"
 purpose: |
   Claude Desktop 1.7196.3의 getContextUsage IPC sidebar 노출 흡수 — v3는 estimateTokens / provider
   usage StreamEvent로 내부 계산 중이었으나 어떤 surface도 user-facing 표시 없음. (1)

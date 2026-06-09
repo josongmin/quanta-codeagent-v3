@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [persisted-output]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "core per-loop registry composing every tool; runs in CLI dispatch seam"
+    web: "pure internal infrastructure (schema projection, isReadOnly, output-schema enforcement, capToolOutput/spill); no UI affordance of its own on any surface"
 purpose: |
   Central per-loop registry composing every built-in and ported tool into the
   surface the dispatch seam consumes. Owns: `has` / `get` lookups, `specs()`

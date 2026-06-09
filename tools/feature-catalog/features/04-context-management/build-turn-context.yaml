@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [glob-rules]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "buildTurnContext SSOT assembling system + per-turn dynamic blocks; runs in CLI prompt path."
+    web: "Pure internal prompt-assembly function; no user-visible surface affordance."
 purpose: |
   `buildTurnContext(input)` → `{system: SystemBlock[], messages: Message[]}` 한 호출로
   static system prefix(`buildSystemPrompt` 또는 caller 주입)와 per-turn dynamic 블록을

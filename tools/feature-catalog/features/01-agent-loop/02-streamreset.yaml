@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:core, tier:core]
 depends_on: [fallback-kinds-policy, model-swap-retry, response-in-progress, agent-loop-branch-hardening, assert-never-exhaustiveness]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "streaming-dispatch tombstone runs in the CLI loop"
+    web: "pure internal streaming tombstone/fallback codec (streaming-dispatch.ts); no UI affordance on any surface"
 purpose: stream_reset tombstone
 evidence:
   code:

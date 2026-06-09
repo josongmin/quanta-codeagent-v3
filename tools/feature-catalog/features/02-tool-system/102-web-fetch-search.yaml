@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, security-touched, held-promotion]
 depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "3/3 evidence files reachable from CLI; web_fetch always-on, web_search provider-gated"
+    web: "agent-callable web_fetch/web_search render as tool.invoked/tool.completed in session-hooks.ts"
 purpose: |
   Two read-only web tools delivered as a single slice. (1) `web_fetch` —
   fetch an HTTPS URL and return the body (HTML→Markdown); always-on, no

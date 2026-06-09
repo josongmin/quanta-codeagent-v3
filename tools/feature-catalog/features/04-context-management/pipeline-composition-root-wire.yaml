@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, default-off, slice:retrieval, slice:apps-agent, slice:tool]
 depends_on: [search-pipeline-composer]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "assemblePipeline(env) + search_codebase tool registered into base registry when wired, reachable from CLI"
+    web: "user-visible value is the model-facing search_codebase tool; its invocation surfaces via tool_call/tool_result mapped to tool.invoked/tool.completed (session-hooks.ts), fully rendered in the web stream"
 purpose: |
   `assemblePipeline(env)` reads `QUANTA_PIPELINE` (closed 6-arm enum:
   `none` | `lexical-only` | `semantic-only` | `parallel-rrf` |

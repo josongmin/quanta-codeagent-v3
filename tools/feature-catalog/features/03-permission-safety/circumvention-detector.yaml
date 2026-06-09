@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, category:permission, security, security-touched, default-off, absorbed:claude]
 depends_on: [auto-mode-classifier, deny-reason-surfacing]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CircumventionTracker remembers soft-denied write effects and threads advisory into classifier prompt behind QUANTA_CIRCUMVENT_DETECT reachable from CLI; ui_surfaces n-a"
+    web: "pure denied-effect memory primitive feeding the classifier prompt (advisory-first), internal gate primitive with no UI affordance on any surface"
 purpose: |
   실제 AFK 바이패스를 닫음: write-to-X 가 tool A(`Edit`/`Write`/`MultiEdit`)로
   SOFT-deny 됐을 때, 조작된 에이전트가 동일 EFFECT 를 다른 tool B(`bash` `echo > X`/

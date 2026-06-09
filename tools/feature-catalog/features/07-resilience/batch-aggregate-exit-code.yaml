@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [outcome-exit-code-table]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure corpus exit-code aggregator function mapping to process.exit; no interactive CLI affordance"
+    web: "pure POSIX exit-code policy primitive, no UI affordance on any surface"
 purpose: |
   Corpus-level exit-code aggregator for batch mode. `computeExitCode(results)`
   returns 0 iff EVERY instance resolved cleanly (passed AND verdict NOT in

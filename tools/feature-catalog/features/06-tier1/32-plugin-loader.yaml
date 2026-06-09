@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [plugin-manifest]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ui_surfaces none + deliberate_hold: loadPluginManifest/discoverPlugins production-ready but host CLI/Web wiring missing — no registration call path"
+    web: "pure manifest loader + tree walker, no UI on any surface"
 purpose: |
   Two contracts behind the plugin manifest. (1) `loadPluginManifest(pluginDir)`
   reads + validates a single plugin root: FAILS LOUDLY when the manifest

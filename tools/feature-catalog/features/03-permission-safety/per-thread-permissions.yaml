@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [agent-types-split, permission-store-json, agent-loop-branch-hardening, per-host-agent-mode, plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "thread-level permission override consulted in admissibility-gate (src/agent/admissibility-gate.ts)"
+    web: "pure internal permission precedence primitive (ui_surfaces n-a), resolved silently; no UI affordance on any surface"
 purpose: |
   **Thread-level override** — 특정 sessionId(스레드)에 대해 sandboxPolicy +
   approvalPolicy + approvalsReviewer를 명시 지정한다. 한 스레드는 read-only,

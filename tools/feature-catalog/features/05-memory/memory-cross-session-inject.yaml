@@ -14,6 +14,14 @@ labels: ["surface:core", "default-off", "absorbed:cursor", "absorbed:codex"]
 depends_on: [memory-auto-trigger, stage1-store-agent-port]
 config_refs:
   env: [QUANTA_MEMORY_AUTO]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: CrossSessionInjector + prompt-section render reachable from CLI entry"
+    web: "pure internal session-start prompt injector (src/memory/cross-session/) — emits a system-prompt MemorySystemBlock server-side, no user-visible affordance on any surface"
 purpose: |
   Read path for ADR-0281: at session start, `CrossSessionInjector.
   selectForInject({maxBytes})` reads the stage1 store, filters to

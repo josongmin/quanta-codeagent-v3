@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [migration-import-log-busy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Internal SHA-256 fingerprint + wasAlreadyImported dedup helper consumed by the CLI import flow; 2/2 evidence reachable from CLI entry import graph."
+    web: "Pure internal dedup/fingerprint primitive (ui_surfaces n-a); no user-visible affordance on any surface."
 purpose: |
   Content-addressed fingerprint of a session transcript file so a re-run
   does not re-import an unchanged session. `contentSha256(jsonlPath)` is

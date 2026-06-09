@@ -14,6 +14,14 @@ labels: [surface:cli, security-touched]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, auto-approval-reviewer]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "HITL 4-tier classifier wired into CLI dispatch (always-confirm/hand-off/pre-approval/none)."
+    web: "The always-confirm tier drives the approval pause that renders as approval.requested -> EscalationCard/PlainApproval on web, but tier fidelity collapses (hand-off-required vs always-confirm not distinguished; tier not web-settable)."
 purpose: HITLTier = hand-off-required | always-confirm | pre-approval-ok | none. Tool.hitlTier?(input) duck-typed mirror in @/tool/types; bashHitlTier로 curl/wget/gh api/git push/git fetch ...
 evidence:
   code:

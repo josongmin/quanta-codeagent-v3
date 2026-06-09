@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI REPL raw-mode keypress install (src/apps/cli/repl/turn-cancel-install.ts), reachable from cli entry"
+    web: "CLI-only TTY raw-mode keypress gesture; the cancel verb on the web (turn.cancel) is a separate path and this keypress install never runs in the web-daemon"
 purpose: |
   CLI REPL의 cancellation 2-tier gesture wiring: (1) **Ctrl+C** → outer
   AbortController.abort() (hard exit, surface-scoped) + transient "interrupted"

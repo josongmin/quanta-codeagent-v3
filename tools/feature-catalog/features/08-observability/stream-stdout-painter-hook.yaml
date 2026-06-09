@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [agentevent, jsonl-cumulative-retention, plan-mode, pre-compact-hitl, queued-follow-ups]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Human-readable stdout ANSI renderer wired into the CLI surface (src/apps/cli/markdown-painter.ts)."
+    web: "CLI-only terminal renderer; the feature itself states the Web surface wires undefined and skips the painter. Web assistant text rides the separate assistant_text bridge, not this painter."
 purpose: |
   Human-readable `StreamPort` adapter that renders `AgentEvent` to
   stdout: assistant text inline, tool calls / progress / results /

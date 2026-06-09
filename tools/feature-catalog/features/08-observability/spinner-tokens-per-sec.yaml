@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: live tok/s segment in src/apps/cli/turn-indicator.ts streaming spinner"
+    web: "slope/spinner is CLI-terminal-only; web TokenCounter shows cumulative tokens+cost, not the live rate, and the rate ride is not bridged"
 purpose: |
   The streaming spinner appends a live output `tok/s` rate so the user sees flow
   vs stall (was cumulative counts only). Rate = slope over a trailing ring of the

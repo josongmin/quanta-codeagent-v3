@@ -14,6 +14,14 @@ labels: ["surface:core", "adr:0273", "default-off", "leaf-slice"]
 depends_on:
   - model-tag-versioning
   - embed-cache
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure retrieval invalidator-registrar primitive, default-OFF, never called by any composition root."
+    web: "Pure internal registrar seam, no UI affordance on any surface."
 purpose: |
   Wrap the ADR-0266 ModelTag invalidator's callback registry with a
   single registrar that stages a cache + a store and attaches them as

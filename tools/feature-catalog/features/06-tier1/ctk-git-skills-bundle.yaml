@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [engineering-skills-bundle]
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; system skills discoverable + slash-wirable"
+    web: "skill-invocation affordance is CLI/slash-only; /babysit etc not present and SlashPalette commands are prefill stubs (B2) — no web skill handler/panel"
 purpose: |
   ADR-0102 Phase AS absorption batch — 8 highest-ROI Cursor CTK git-task
   prompts shipped as bundled system skills. Each skill is SKILL.md (frontmatter

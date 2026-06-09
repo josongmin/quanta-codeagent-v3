@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: [network-allowlist-host-check, sandbox-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; dispatch-guard wired via assembleAgentConfig"
+    web: "pure dispatch-guard egress policy, no UI affordance; own notes say status-line/approval surfacing is an unbuilt follow-up"
 purpose: |
   Closes the "defined-but-not-enforced" hole found in the 2026-06-01 gap audit:
   network-allowlist-host-check shipped a pure host-check, NetworkPolicy/NetworkLever

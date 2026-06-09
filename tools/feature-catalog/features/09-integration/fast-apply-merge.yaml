@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off", "ports-only", "security-gated"]
 depends_on: ["fast-apply-fallback"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "model-based fast-apply MERGE rung in the edit ladder (src/tool/edit/index.ts), gated by QUANTA_FAST_APPLY_MERGE"
+    web: "pure internal edit-apply recovery rung; merge flows through the normal gated commit + ToolDiffSink, no distinct browser affordance, not a UI feature"
 purpose: |
   A NEW closed `FastApplyPort` (merge direction) sibling to the existing V4A
   re-emit `FastApplyFallbackPort`. Where re-emit re-authors a patch that must

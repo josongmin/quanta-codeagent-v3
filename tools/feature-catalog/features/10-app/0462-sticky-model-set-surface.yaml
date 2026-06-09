@@ -14,6 +14,14 @@ labels: ["surface:core", "absorbed:cline", "absorbed:roo", "adr-0462"]
 depends_on: [sticky-model-per-mode, sticky-model-loop-consume]
 config_refs:
   cli: ['/sticky-model', '--sticky-model']
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI /sticky-model slash command registered in registry-surface; runs in REPL"
+    web: "CLI slash command; SlashPalette server-routed prefill stub does not execute (B2) and no model-set web handler exists"
 purpose: |
   The SET half of sticky-model: a `/sticky-model <mode> <modelId>` slash command
   that writes the per-mode preference the CONSUME side (agent loop, ADR-0462)

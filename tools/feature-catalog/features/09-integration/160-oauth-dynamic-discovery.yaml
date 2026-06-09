@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [connector-availability-probe, connector-token-rotation, connectors-rest-registry, oauth-dynamic-registration]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; discoverOAuthEndpoints reachable in CLI build"
+    web: "pure internal RFC 8414 endpoint discovery library function; no UI affordance on any surface"
 purpose: |
   `discoverOAuthEndpoints(issuer, fetchPort)` — RFC 8414 §3 well-known
   authorization-server discovery + OIDC openid-configuration fallback on 404.

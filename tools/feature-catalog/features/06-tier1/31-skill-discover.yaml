@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [anthropic-beta-and-skill-size-cap]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "discoverSkills walks QUANTA_SKILLS_DIR with checkSkillSize guard during CLI session startup (src/apps/cli/internal.ts)"
+    web: "pure discovery loader + size-cap guard, ui_surfaces n-a, no browser affordance"
 purpose: |
   Walk `QUANTA_SKILLS_DIR` (or per-project skills/) and emit `Skill[]` —
   reads each candidate's frontmatter via the lenient `parseFrontmatter`,

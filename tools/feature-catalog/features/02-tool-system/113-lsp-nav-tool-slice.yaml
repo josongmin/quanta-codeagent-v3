@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [diagnostics-tool, lsp-bridge]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "8 model-callable LSP navigation tools wired in CLI."
+    web: "Agent tools — each invocation + nav result preview render in browser via tool.invoked/tool.completed (session-hooks.ts:420-466), mapped tool_call/tool_result (context-binding.ts:1079-1096)."
 purpose: |
   Eight navigation tools fronted by an injected `LspNavProvider` (same
   slice-isolation pattern as `diagnostics` — `@/tool` MUST NOT import

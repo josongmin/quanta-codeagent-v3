@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:tauri", "platform:macos"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Swift native sidecar binary for the Tauri shell; not a CLI affordance"
+    web: "Tauri native-shell sidecar (ScreenCaptureKit/Vision), not browser web-frontend; no web affordance"
 purpose: |
   Tiny Swift CLI binary at native/screen-ocr/ that the Tauri shell (Worker D)
   spawns as a sidecar to feed quanta two host-desktop signals: (1) the list of

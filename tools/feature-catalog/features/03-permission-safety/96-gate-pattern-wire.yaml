@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
 depends_on: [review-kind-matrix, reviewer-3tier, cross-slice-mirror, permission-remember-patterns]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "autoPassByPatterns predicate wired into admissibility-gate cascade reachable from CLI; ui_surfaces n-a"
+    web: "pure pattern-grant cascade predicate (synthesizes config_allowed decision), internal gate primitive with no UI affordance on any surface"
 purpose: |
   Pure module the admissibility-gate calls into to decide whether a pending
   action's `rememberPatterns` are ALREADY fully covered by the session's

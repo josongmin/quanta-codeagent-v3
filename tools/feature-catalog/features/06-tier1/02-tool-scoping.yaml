@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-7-scope-tiering, skill-registry-precedence, skill-admin-enforcement, skill-audit-log, quantaskillsdir]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "allowedTools enforcement boundary during skill activation, runs in CLI loop"
+    web: "pure internal permission policy fence (positive-set tool gate), no user-visible UI affordance"
 purpose: |
   활성 스킬의 `allowedTools` 프론트매터를 LOAD-BEARING 권한 경계로 강제 —
   스킬이 활성화된 동안 그 set에 없는 도구는 호출이 차단된다 (deny

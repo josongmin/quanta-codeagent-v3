@@ -13,6 +13,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [scheduler-automation-lifecycle, scheduler-rrule, scheduler-runtime, scheduler-weekday-nth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; chooseModel runs in CLI scheduler tick"
+    web: "pure internal model-selection decision logic (preference/fallback chain probe); no UI affordance"
 purpose: |
   `chooseModel({preference, fallbacks, availability})` probes
   `[preference, ...fallbacks]` in order against the injected

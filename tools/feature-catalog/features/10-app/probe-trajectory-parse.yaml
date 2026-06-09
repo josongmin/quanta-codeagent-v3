@@ -13,6 +13,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, probe-funnel-adherence]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure deterministic JSONL/run-dir loader (forward-compat, never throws) under src/apps/probe; internal adapter, not in interactive CLI graph."
+    web: "Pure internal parser/loader primitive, no UI affordance on any surface."
 purpose: |
   Pure deterministic loader for the trajectory JSONL + bench run-dir
   conventions. Trajectory JSONL is the single source of truth (RFC §3

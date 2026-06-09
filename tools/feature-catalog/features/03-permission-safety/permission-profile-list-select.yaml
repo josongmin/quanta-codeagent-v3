@@ -14,6 +14,14 @@ labels: [absorbed:codex, surface:cli, tier:leaf, security-touched]
 depends_on: [trust-scope-wire-up]
 config_refs:
   env: ["QUANTA_PROFILES_DIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "List/Select verbs + on-disk user profiles reachable from CLI (src/permission/profile-list-select.ts)"
+    web: "List/Select user mechanism is CLI/programmatic with no web verb; QUANTA_PROFILES_DIR only a redacted read-only KnobsPanel row"
 purpose: |
   Codex `PermissionProfile{List/Select/Apply/Resolve}` absorption. The existing
   `named-profiles.ts` registry shipped Resolve (`resolveProfileByName`) + Apply

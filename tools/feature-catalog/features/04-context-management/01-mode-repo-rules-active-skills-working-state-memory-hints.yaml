@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [absorbed:cursor, surface:core, tier:1]
 depends_on: [glob-rules]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reminder-block ordering invariant in buildDynamicContext, pure internal prompt-assembly, no direct CLI affordance"
+    web: "pure internal prompt-section ordering, no UI affordance"
 purpose: 'Reminder block 순서 (buildDynamicContext): today-date+cwd → mode-notice → repo-rules → glob-rules(.cursor/.quanta per-turn select) → active-skills → working-state → memory-hints → hook injectAfterSystem tail. 통합 e2e가 순서 invariant를 pin.'
 evidence:
   code:

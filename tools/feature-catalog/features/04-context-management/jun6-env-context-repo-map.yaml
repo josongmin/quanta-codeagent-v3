@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "prompt-touched", "absorbed:codex-0.135"]
 depends_on: [env-build-dynamic-context, file-tree-summary]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bounded repo-map rendered into the env prompt block on turn 0, reachable from CLI"
+    web: "pure prompt-block content injected into system context, no user-visible affordance on any surface"
 purpose: |
   Codex 0.135 prepends a bounded directory tree at session start so the model is
   oriented without spending the first 1-2 tool calls on file_tree_summary / ls.

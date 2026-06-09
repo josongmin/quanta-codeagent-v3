@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:wrap"]
 depends_on: [metrics-typed-port-slice, otel-sink, isregex-true, promise-race, shadow-odb-port]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ShadowOdb/Tool metric wraps not reachable from cli interactive entry"
+    web: "metrics routed to AlertManager/Grafana provisioning, never to the quanta web frontend"
 purpose: |
   Closes 24-metric recipe coverage gap from ADR-0159: ShadowOdb 5-method wrap
   (`shadow.checkpoint.*` / `shadow.rewind.*{target}` / `shadow.diff.*{kind}` /

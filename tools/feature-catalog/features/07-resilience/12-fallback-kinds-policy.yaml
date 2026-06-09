@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [streamreset, agent-loop-branch-hardening, response-in-progress, llm-assemble, llm-factory]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal LLMErrorKind policy set that triggers transparent provider swap; no CLI affordance"
+    web: "pure internal fallback-trigger policy set, no UI affordance; swap is transparent"
 purpose: |
   Provider 교체를 trigger하는 LLMErrorKind 집합을 정책으로 박음 —
   `overloaded`(529), `server_error`(non-529 5xx), `network`(ECONNRESET/EPIPE/

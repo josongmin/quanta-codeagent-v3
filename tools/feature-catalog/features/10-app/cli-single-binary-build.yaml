@@ -14,6 +14,14 @@ labels: ["surface:cli"]
 depends_on: [ctk-git-skills-bundle, engineering-skills-bundle, repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion]
 config_refs:
   env: ["QUANTA_SANDBOX", "QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "bun build --compile produces dist/agent single binary via package.json build script"
+    web: "pure build/distribution tooling, no user-visible runtime affordance on any surface"
 purpose: |
   `bun run build` produces a single self-contained executable at
   `dist/agent` via `bun build --compile --minify src/apps/cli/index.ts`.

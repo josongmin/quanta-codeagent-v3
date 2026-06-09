@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:core]
 depends_on: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "/effort slash + QUANTA_EFFORT EffortStore runs in CLI REPL (slash-commands.ts)"
+    web: "feature knob QUANTA_EFFORT (Anthropic session thinking-budget) is NOT in CONFIG_ALLOWED_KEYS so KnobsPanel shows it read-only with no write; the web /effort slash writes QUANTA_REASONING_EFFORT (a different OpenAI knob), and the CLI /effort is a B2 prefill stub. Read-visible only, no web write of this feature's knob."
 purpose: |
   Codex `/model` 패턴 흡수: 모델 옆 reasoning effort tier를 런타임에 swap. v3는 5-tier
   (`default | low | medium | high | max`) + token 예산 매핑이 leaf로 이미 존재(`src/agent/effort.ts`)

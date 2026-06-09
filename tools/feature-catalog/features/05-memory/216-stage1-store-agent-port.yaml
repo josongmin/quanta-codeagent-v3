@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [phase1-stage1-store, consolidator-session-hook]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: Stage1StorePortV2 agent-side adapters reachable from CLI entry"
+    web: "pure internal persistence port (4-verb stage1-outputs seam, src/agent/memory/stage1-store/port.ts) — no UI affordance on any surface"
 purpose: |
   Agent-side seam for persisting Phase 1 `stage1_outputs` rows. Closes the
   R1 false-positive where the SQL INSERT was wired in source (`runPhase1`

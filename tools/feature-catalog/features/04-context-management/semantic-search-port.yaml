@@ -14,6 +14,14 @@ labels: [absorbed:cline, absorbed:cursor, surface:core, default-off, slice-primi
 depends_on: []
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "SemanticIndex/Embedder slice primitive reachable in CLI graph"
+    web: "pure internal slice primitive (ui_surfaces n-a), no consumer wires it, no UI affordance"
 purpose: |
   Cline / Cursor `CLIENT_SIDE_TOOL_V2_SEMANTIC_SEARCH_FULL` 패턴 흡수의 slice
   primitive — 워크스페이스 코퍼스를 in-memory index로 묶고 쿼리 임베딩 대비

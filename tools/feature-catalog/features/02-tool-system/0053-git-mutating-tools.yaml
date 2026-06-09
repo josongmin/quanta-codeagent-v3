@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full; git_commit/git_branch_switch first-class mutating tools reachable in CLI"
+    web: "the git tools surface as tool.invoked/tool.completed in the browser and the always-confirm HITL triggers an EscalationCard; but the 4-tier hitlTier collapses to the 2-verb approve/deny web approval"
 purpose: |
   Claude Desktop 1.7196.3의 commitWipForBranchSwitch 패턴 흡수 — git push/commit/checkout을
   bash 통과 + always-confirm 일괄 게이팅하던 구조에서 도구 단위로 1급화. (1) git_commit({

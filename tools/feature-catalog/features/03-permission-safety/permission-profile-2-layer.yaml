@@ -9,6 +9,14 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [permission-scope-4-tier, permission-4-pillar, special-path-resolver]
 configurable: static
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "AND-condition filesystem access-check primitive (src/permission/access-check.ts)"
+    web: "pure internal access-decision primitive (configurable static); no user-visible affordance on any surface"
 purpose: |
   **Codex `turn_context.permission_profile.file_system` + `file_system_sandbox_policy`
   의 2-layer 모델 흡수.** 동일 schema (`path.type: special/path`, `access: read/write`)

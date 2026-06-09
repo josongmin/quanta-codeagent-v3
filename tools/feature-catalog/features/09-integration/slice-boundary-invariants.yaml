@@ -6,6 +6,14 @@ order: 20
 maturity: L4
 status: new
 owners: ["@songmin"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Architecture-enforcement slice-boundary runtime guard tests + biome.json; pure structural policy, no runtime affordance on any surface."
+    web: "Pure architecture-invariant guard (lint + test); no UI affordance on any surface."
 purpose: |
   Each library slice now has a `<slice>-slice-boundary.test.ts` runtime
   guard enforcing 10 invariants (surface isolation, per-slice deny-list,

@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli, default-off, tier:1]
 depends_on: [git-conflict-inspect]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "1/2 reachable as a default-OFF library; nobody in the loop imports it today"
+    web: "pure typed merge-conflict parser library (string in, typed result out), no tool/UI affordance on any surface"
 purpose: |
   Pure typed-and-tested git merge-conflict parser shared by skills and tools
   that need to programmatically inspect merge conflicts. Input is the entire

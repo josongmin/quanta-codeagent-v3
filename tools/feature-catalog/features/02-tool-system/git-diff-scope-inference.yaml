@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal prompt-hint projector (diffToScopes injects a scope HINT into commit author system prompt), ui_surfaces n-a, no standalone affordance"
+    web: "pure internal prompt-hint projector, no UI affordance on any surface"
 purpose: |
   diffToScopes(diff) — a pure, deterministic scope inferer: the scope is the first
   directory segment under a recognized source root (src/|packages/|apps/, requiring

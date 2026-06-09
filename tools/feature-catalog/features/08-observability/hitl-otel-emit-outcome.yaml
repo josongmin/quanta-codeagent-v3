@@ -15,6 +15,14 @@ labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 depends_on: [183-safety-net-green, agent-loop-branch-hardening, agent-dispatch-core, deny-and-steer-verb, hitl-4-tier-gate]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "OTel attrs emitted at HITL gate site in CLI run"
+    web: "pure OTel attribute emit into span sink, no user-visible affordance on any surface"
 purpose: |
   `quanta.hitl.tier_resolved` + `registry_escalated` + `handoff_emitted` 3개
   키가 vocabulary 에 있고 helper 도 있었지만 zero call-site 였던 갭을

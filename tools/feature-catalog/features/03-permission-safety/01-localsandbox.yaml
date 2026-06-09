@@ -12,6 +12,14 @@ configurable: static
 owners: ['@songmin']
 labels: [surface:cli, security-touched]
 depends_on: [sandbox-policy, bash-timeout-cap, escalating-kill, guarded-spawn, os-sandbox-wire]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: runs in CLI (src/runtime/sandbox.ts reachable from CLI entry)"
+    web: "pure internal runtime sandbox wrapper around server-side shell; no browser affordance of its own (user sees only tool.completed); not a UI feature"
 purpose: LocalSandbox
 evidence:
   code:

@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [permission-store-json, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert, git-destructive-hard-deny, per-host-agent-mode, per-thread-permissions]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "auto-approval streak ledger raises a user review prompt every N auto-grants reachable from CLI; ui_surfaces cli"
+    web: "the periodic review-prompt user value rides a prompt event not in the 6-event bridge (dropped at context-binding.ts:1105 default arm); no web render of the streak prompt"
 purpose: |
   **Codex `automaticApprovalReview.actionSummary` 흡수.** 매 N (default 10) 연속
   auto-approval 마다 사용자에게 review prompt — "이 정책 OK?" 확인. 사용자가

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-rrule, scheduler-weekday-nth]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure internal scheduler orchestration (tickOnce/start/stop reusing enqueueUserMessage); ui_surfaces n-a, no user-visible CLI affordance"
+    web: "pure internal backend tick loop, no web affordance; scheduled prompts ride enqueueUserMessage not any web event and there is no scheduler pane in apps/web-frontend"
 purpose: |
   `createSchedulerRuntime({store, availability, clock, env, agentLoop,
   workspace, sink?, tickIntervalMs?})` composes all the scheduler ports

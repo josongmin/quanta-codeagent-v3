@@ -11,6 +11,14 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "held-promotion"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "memoryCitations provenance accumulated onto AgentOutcome in CLI loop"
+    web: "pure internal provenance data field on AgentOutcome; grep confirms no web-frontend reference, not surfaced to browser"
 purpose: |
   Surface "which record was placed in this run's prompt window, where, with what
   score". Provenance signal (placement = citation), NOT a heuristic scan of the

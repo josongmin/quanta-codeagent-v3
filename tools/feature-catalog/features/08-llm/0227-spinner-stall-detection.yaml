@@ -15,6 +15,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core, tier:core, adr-0227]
 depends_on: [llm-stream-timeout]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "stall detector port + onChunk wire run in CLI stream path (sink/panel deferred)"
+    web: "pure internal soft-signal detector port; sink seam unbuilt on every surface and the would-be spinner-stalled event is not bridged, ui_surfaces n-a, no UI affordance"
 purpose: |
   Claude Code CLI의 `tengu_spinner_stalled_ui` + `tengu_spinner_stall_cleared` 텔레메트리
   쌍 흡수. ADR-0200 stream-idle-timeout이 60s/120s 후 hard abort만 제공하던 갭을 메운다 —

@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "integration:github", "default-off"]
 depends_on: [reactor-trigger-source, pii-redaction-scanner, mention-filter-trust-scope]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "keep derived: GITHUB_EVENT_PATH event source not wired into interactive CLI"
+    web: "daemon/ci-bot GH event normalizer; no browser affordance and no web verb"
 purpose: |
   Tier 0 GitHub Actions adapter — reads `GITHUB_EVENT_PATH` JSON once per
   workflow run, normalizes 6 event kinds (issue_comment / pull_request /

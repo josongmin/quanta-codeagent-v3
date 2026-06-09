@@ -18,6 +18,14 @@ depends_on:
   - approval-state-machine
   - shadow-verify
   - shadow-verify-adapters
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "wireObservability runs at the composition root reachable from CLI entry"
+    web: "drives the web-ONLY ObservabilityPane (ObjectiveCard/RunColumn/ApprovalsList); the web-daemon runtime-factory.ts:152 wires the hookBus and the observability-emitter projects objective/runLedger/approvalSM into observability.snapshot frames the pane renders"
 purpose: |
   Wave-1 + Wave-2 shipped four pure typed observability ports — `Objective`
   (ADR-0394), `RunLedger` (ADR-0395), `ApprovalStateMachine` (ADR-0403), and

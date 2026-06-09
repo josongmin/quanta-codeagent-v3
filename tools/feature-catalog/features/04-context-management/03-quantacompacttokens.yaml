@@ -14,6 +14,14 @@ config_refs:
 owners: ['@songmin']
 labels: [surface:core]
 depends_on: [runner-assemble-builders, assemble-config, fallback-kinds-policy, llm-factory, model-swap-retry]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "QUANTA_COMPACT_TOKENS env knob parsed by runtime-config + consumed by compaction loop; reachable from CLI entry."
+    web: "KnobsPanel reads broadly via GET /api/knobs so the knob can be displayed, but QUANTA_COMPACT_TOKENS is NOT in CONFIG_WRITABLE_KEYS (server.ts:314) so it renders read-only where CLI can set it; backend honors the value."
 purpose: QUANTA_COMPACT_TOKENS env knob — proactive compaction token threshold; parsed by runtime-config + consumed by compaction loop.
 evidence:
   code:

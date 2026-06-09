@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [lsp-nav-tool-slice, lsp-bridge, lspport]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "lsp_incoming_calls/lsp_outgoing_calls tools, run in CLI loop"
+    web: "lsp call-hierarchy tool invocations + results render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   Two new read-only nav tools answering the refactorer's core question — "if I
   change this function's signature, what calls it (and breaks), and what does it

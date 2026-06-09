@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 depends_on: [snapshot-slash-cmd]
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "LLM-path system skill triggered by rewind keyword in the agent loop; reachable from CLI entry"
+    web: "Backend runs the agent loop on web too and its shadow_* tool calls render as tool.invoked/tool.completed cards (session-hooks.ts), but there is no web /rewind slash and the skill itself plus its decision events are invisible; default-OFF on shadowOdb"
 purpose: |
   사용자가 "rewind" / "undo" / "rollback" / "go back" / "revert changes"라고
   말할 때 워크스페이스를 이전 shadow snapshot으로 복원하는 시스템 스킬.

@@ -14,6 +14,14 @@ labels: ["surface:core", "tier:1"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, distill-redaction-port, errors-helper-fix, fallback-kinds-policy]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ToolSearch model-callable tool wired every session, lexical ranking runs in the CLI loop"
+    web: "internal tool-search ranking-quality tweak, no distinct browser affordance (just a model-callable tool)"
 purpose: ToolSearch — 어휘 카탈로그 검색(스키마 반환). createToolSearchTool로 매 에이전트 세션에 배선됨(L3). server-side deferral 아님(정직히 기술).
 evidence:
   code:

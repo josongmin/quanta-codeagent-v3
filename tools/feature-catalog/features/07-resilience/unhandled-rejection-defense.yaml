@@ -14,6 +14,14 @@ labels: ["surface:core", "resilience-primitive"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
 config_refs:
   env: ["QUANTA_SANDBOX"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "process.on unhandledRejection log-never-exit handler; pure process-level safety net, no interactive affordance"
+    web: "pure process-level safety net, no UI affordance on any surface"
 purpose: |
   R-Phase4 P3-1 defense-in-depth handler for promise rejections that escape
   the agent loop's `try/catch` boundaries (background MCP cleanup, off-loop

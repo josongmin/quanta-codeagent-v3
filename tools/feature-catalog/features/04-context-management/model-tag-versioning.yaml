@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "adr:0266", "default-off"]
 depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure retrieval ModelTag codec/invalidator primitive, default-OFF, no consumer registers a callback."
+    web: "Pure internal codec/invalidator, no UI affordance on any surface."
 purpose: |
   Tag every stored embedding with its producing model identity (provider /
   model / version / dim) using a canonical, round-trippable string form

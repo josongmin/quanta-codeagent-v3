@@ -15,6 +15,14 @@ labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [named-permission-profiles, permission-4-pillar]
 config_refs:
   env: [QUANTA_PERMISSION_PROFILES_JSON]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: 4/5 evidence files reachable from CLI entry"
+    web: "pure internal env-configured profile-inheritance resolver (QUANTA_PERMISSION_PROFILES_JSON, startup-only); no UI affordance on any surface"
 purpose: |
   ADR-0438 — 3개 고정 named profile(restricted/default/trusted)을 합성 가능한
   extends 그래프로 확장. 새 leaf `profile-inheritance.ts`의 순수·전역(total)·무 I/O

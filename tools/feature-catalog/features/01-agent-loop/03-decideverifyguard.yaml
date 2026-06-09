@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [tool-choice-orthogonal-gate, conversation-checkpoint, fallback-kinds-policy, guard-chain, llm-factory]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "ui_surfaces n-a; pure decision policy function decideVerifyGuard with no CLI affordance"
+    web: "pure internal policy (verify-guard.ts); ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: 순수정책 decideVerifyGuard
 evidence:
   code:

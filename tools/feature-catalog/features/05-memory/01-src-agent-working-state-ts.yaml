@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [cross-slice-mirror, codex-2-phase-consolidator, durable-state-belongs-in-workspace-files, glob-rules, l3-workingstate]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: working-state store + update_working_state tool reachable from CLI entry; CLI has a working-state panel (tests/unit/cli/working-state-panel.test.ts)"
+    web: "update_working_state is a real tool so its calls show as generic tool cards (bridged tool_call/tool_result); but the dedicated working-state panel is CLI-only and the state object itself rides no bridged event — web sees only the tool invocation, not the rendered state"
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
 evidence:
   code:

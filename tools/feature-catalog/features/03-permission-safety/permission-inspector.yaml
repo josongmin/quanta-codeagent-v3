@@ -14,6 +14,14 @@ labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [183-safety-net-green, agent-loop-branch-hardening, per-thread-permissions, permission-store-json, agent-dispatch-core]
 config_refs:
   env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "read-only decision-trace port reachable from CLI (src/permission/inspector.ts)"
+    web: "read-only programmatic port whose surface wiring is an explicitly separate track (ui_surfaces n-a); no rendered UI affordance on any surface yet"
 purpose: |
   Read-only programmatic surface — given an action, *어떤* permission layer가 *왜*
   허락/거부했는지 결정 trace 를 반환. `quanta permission inspect <action>` CLI /

@@ -12,6 +12,14 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [migration-content-dedup-fingerprint]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Internal import-log persistence (sidecar lock + atomic rename) backing the CLI import verb; 2/2 evidence reachable from CLI entry import graph."
+    web: "Pure internal persistence primitive (sidecar lock + busy-error); no user-visible affordance on any surface."
 purpose: |
   Persistence for the external-agent import log, mirroring Codex's
   `external_agent_session_imports.json`. Default path is

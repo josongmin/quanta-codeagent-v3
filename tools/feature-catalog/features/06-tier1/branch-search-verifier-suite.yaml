@@ -12,6 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 depends_on: [speculative-branch-search, branch-search-isolate-symlink-safe, branch-search-pure-scorer, branch-search-progress, branch-search-minimal-change]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived: reachable from CLI entry; tsc/test/lint/lsp_diag verifiers + combineVerifiers"
+    web: "pure internal Verifier impls bound to runShell; no browser UI affordance"
 purpose: |
   Concrete `Verifier` implementations bound to `@/runtime/shell#runShell`
   (env-scrubbed, timeout-bounded). Each verifier is READ-ONLY w.r.t. the

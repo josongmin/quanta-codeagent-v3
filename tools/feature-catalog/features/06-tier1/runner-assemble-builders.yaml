@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [effort-5-tier, repo-rules-tree, assemble-config, assemble-llm-core, assemble-compaction-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "per-collaborator builder family wired into CLI buildTooling; reachable from CLI entry"
+    web: "pure internal collaborator-composition builders, no user-visible affordance on any surface"
 purpose: |
   `apps/cli/internal.ts#buildTooling` 의 단일 GodFn (env 읽기 + collaborator
   생성 + 레지스트리 와이어링 한 곳) 을 9 개 per-subsystem builder + 1 composer

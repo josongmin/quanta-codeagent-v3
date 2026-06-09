@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [absorbed:cline, absorbed:roo, surface:core, adr-0462]
 depends_on: [sticky-model-per-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "loop consume site resolves sticky model in CLI streamConsume (set-surface deferred)"
+    web: "pure internal loop model-resolution wire (skill over sticky over default precedence in loop.ts), no UI affordance; set-surface deferred"
 purpose: |
   ADR-0212 shipped the sticky `{mode → modelId}` store + precedence resolver but
   left it a DEAD SEAM — nothing in the agent loop read it, so per-mode model

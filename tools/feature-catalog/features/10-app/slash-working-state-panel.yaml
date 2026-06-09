@@ -14,6 +14,14 @@ labels: ["surface:cli"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, agent-loop-branch-hardening, llm-error-taxonomy]
 config_refs:
   env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "CLI slash /state + /working-state, src/apps/cli/working-state-panel.ts reachable from CLI entry"
+    web: "B2 prefill stubs: SlashPalette.tsx state and working-state slugs are prefill(), do not execute; workingState port not web-supplied (web-only ObjectiveCard is a separate feature)"
 purpose: |
   Surface-only renderer for catalog 대5 L4 `WorkingState` — the per-session L3
   scratchpad (owner shortlist, hypothesis, blockers, next steps, deferred

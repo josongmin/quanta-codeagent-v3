@@ -21,6 +21,14 @@ labels: ["surface:core", "absorbed:claude", "security-touched", "default-off"]
 depends_on:
   - hookbus
   - hook-updated-input
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "derived full kept; installCommandHooksIntoBase wired at agent composition root in CLI"
+    web: "disk-configured shell executor on HookBus events; runs invisibly on the backend, ui_surfaces n-a, no browser affordance"
 purpose: |
   Adds the missing executor for Claude Code's settings.json#hooks model: a
   closed-port CommandHookRunner that, on a matching HookBus event, runs the

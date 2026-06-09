@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:web"]
 depends_on: [run-ledger, objective-first-class, approval-state-machine]
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Web/tauri-only pane (ObservabilityPane); 0/5 evidence reachable from CLI entry — no CLI rendering of Running/Waiting/Completed/Objective/Approvals."
+    web: "ObservabilityPane mounted App.tsx:631 with useObservabilityState hook; RunColumn/ObjectiveCard/ApprovalsList are the web-only affordances fed by observability.snapshot/delta WS messages."
 purpose: |
   Render the three Wave-1/2 long-running-work state machines (RunLedger /
   Objective / Approval state machine) in a SEPARATE pane alongside the chat

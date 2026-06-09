@@ -14,6 +14,14 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, security-touched, default-off]
 depends_on: [tool-output-schema-factory, typed-tool-failure-modes, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "FsJailError path-escape jail wired into read/write/edit via storage service in the CLI (QUANTA_FS_JAIL)."
+    web: "A jail-violating path yields a tool_result ok:false (file not created), rendering as tool.completed outcome:error in web; backend guard with only a thin denial render."
 purpose: FsJailError — assertPathInWorkspace/assertPathInsideBaseDir로 baseDir 밖 경로 escape 차단. state.ts 같은 no-baseDir 콜러는 pre-jail back-compat 유지 옵트아웃, cross-repo 작업).
 evidence:
   code:

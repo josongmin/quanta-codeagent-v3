@@ -15,6 +15,14 @@ labels: [surface:core, tier:core]
 depends_on: [secret-redaction-content-plane, plan-mode, turncontextinput-mode-reporules-workingstate-activeskills, durable-state-belongs-in-workspace-files, safe]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "byte-identical stream-callback factory extraction; pure refactor, no CLI affordance"
+    web: "pure internal factory extraction, no user-visible UI affordance on any surface"
 purpose: |
   `streamingTurn`이 loop의 stream seam에서 소비하는 `StreamCallbacks` 레코드 생성
   로직을 loop.ts inline 본문에서 `stream-callbacks.ts#createStreamDispatcher` 로

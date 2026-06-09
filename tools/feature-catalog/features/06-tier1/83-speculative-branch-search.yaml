@@ -12,6 +12,14 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor", "absorbed:agentless"]
 depends_on: [branch-search-verifier-suite, branch-search-isolate-symlink-safe, branch-search-pure-scorer, response-in-progress, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "branch_search tool runs the N-best verifier-prover in the CLI loop; winner diff applied by caller"
+    web: "model-invoked tool bridges as a generic tool.invoked/tool.completed card (one of the 6 events), but candidate/scoring/winner view is not rendered and losers are OTel-only"
 purpose: |
   하드 edit를 N개 후보로 격리 워크스페이스에서 병렬 시도 → 닫힌 Verifier 포트(tsc/test/
   lint/lsp_diag)로 채점 → 순수 Scorer 가중합 + Selector argmax로 winner 선택. 메인 루프는

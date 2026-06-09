@@ -14,6 +14,14 @@ labels: ["surface:bench"]
 depends_on: [2026-05-21]
 config_refs:
   env: ["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "cache-pathspec SSOT consumed by bench patch sanitizer and failure-classifier"
+    web: "pure internal bench pathspec SSOT, no UI affordance on any surface"
 purpose: |
   Single source of truth for build/cache-shaped path exclusions across
   the bench harness. The bench runner previously captured patches with

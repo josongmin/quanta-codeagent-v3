@@ -15,6 +15,14 @@ labels: [absorbed:cursor, surface:cli]
 depends_on: [secret-redaction-content-plane, tool-output-schema-factory, read-image, cross-slice-mirror, deferred-tool-registry]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Pure internal ToolResult.failure discriminated-union result shape (consumed by the model/prompt-rules); no distinct user-facing affordance."
+    web: "Pure internal typed-failure result shape; web tool.completed carries only the coarse ok/error outcome + resultPreview, the 6-mode discriminant is a model-facing primitive with no UI affordance."
 purpose: |
   Cursor EditResult/ShellResult의 discriminated failure union 흡수 — 기존 ok:false 도구 결과의
   output 문자열을 모델이 정규식으로 재파싱하던 부담을 닫힌 enum으로 대체. ToolResult.failure?:

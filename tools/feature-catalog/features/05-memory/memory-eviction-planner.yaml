@@ -12,6 +12,14 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [memory-dedup-planner]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "pure eviction planner runs in CLI consolidation sweep; derived 3/3 holds"
+    web: "pure internal planner (returns ids to delete/decay); ui_surfaces n-a; no surface affordance"
 purpose: |
   Periodic full-store sweep that bounds each memory tier (semantic / episodic),
   prunes ancient superseded rows, and decays long-archived low-value memories.
