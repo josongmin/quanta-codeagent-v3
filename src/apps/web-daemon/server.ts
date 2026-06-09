@@ -50,6 +50,7 @@ import {
   type SessionRegistry,
 } from "./session-registry"
 import type { WebDaemonConfig, WebDaemonHandle, WebDaemonHealth } from "./types"
+import type { WebUserInputPortHandle } from "./web-user-input-port"
 import {
   type BunServerWebSocketLike,
   type BunWebSocketAdapter,
@@ -304,6 +305,21 @@ export interface AgentStateSource {
  */
 export interface AgentStatePorts {
   readonly source: AgentStateSource
+}
+
+/**
+ * QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port bundle handed to the
+ * server. Lets an inbound `planInputAnswer` frame resolve a paused agent's
+ * `request_user_input` prompt (`handle.resolve`) and `handle.cancelAll()` every
+ * pending request on disconnect so a pending resolver never leaks (the agent's
+ * `await` never hangs past the socket). Shared across the daemon's connections
+ * (the inbound port lives on the single facade). Optional: the `index.ts`
+ * composition root only passes it when the facade exposes the inbound port. Gate
+ * OFF ⇒ `index.ts` never builds this ⇒ the tool was never registered ⇒ no answer
+ * can arrive (byte-identical).
+ */
+export interface UserInputPorts {
+  readonly handle: WebUserInputPortHandle
 }
 
 /**
@@ -736,6 +752,44 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    * `QUANTA_WEB_AGENT_STATE=1`.
    */
   readonly agentStatePorts?: AgentStatePorts
+  /**
+   * QUANTA_WEB_AGENT_STATE — optional OUT-OF-BAND INBOUND port bundle. Gate
+   * OFF ⇒ absent ⇒ no inbound `planInputAnswer` frame can resolve anything (and
+   * the `request_user_input` tool was never registered, byte-identical). The
+   * composition root (`./index.ts`) populates it only when
+   * `QUANTA_WEB_AGENT_STATE=1`.
+   */
+  readonly userInputPorts?: UserInputPorts
+}
+
+/**
+ * QUANTA_WEB_AGENT_STATE — peek an inbound text frame for an OUT-OF-BAND
+ * `planInputAnswer` (the mirror of the agent-state OUTBOUND frame). Returns the
+ * `{promptId, decision, text}` triple when the frame is a well-formed answer,
+ * else `null` (so the frame falls through to the session bridge unchanged).
+ *
+ * NO-THROW: a non-JSON / non-matching frame returns `null` rather than throwing.
+ * This is NOT a `SessionCommand` — it never reaches the kernel reducer.
+ */
+const peekPlanInputAnswer = (
+  raw: string,
+): { promptId: string; decision: "answer" | "cancelled"; text: string } | null => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null
+  const obj = parsed as Record<string, unknown>
+  if (obj.kind !== "planInputAnswer") return null
+  if (typeof obj.promptId !== "string") return null
+  const decision = obj.decision === "answer" ? "answer" : "cancelled"
+  return {
+    promptId: obj.promptId,
+    decision,
+    text: typeof obj.text === "string" ? obj.text : "",
+  }
 }
 
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
@@ -985,6 +1039,24 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
           // never sees it — its 5-kind contract is unchanged. Any non-heartbeat
           // frame falls through to the adapter exactly as before.
           if (replyToHeartbeat(ws, decoded)) return
+          // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND answer frame
+          // (mirror of the agent-state OUTBOUND channel). Peek BEFORE the
+          // session bridge: a `planInputAnswer` resolves a paused agent's
+          // `request_user_input` prompt and is CONSUMED here (NOT a
+          // `SessionCommand`, never reaches the kernel reducer). Gate OFF ⇒
+          // `userInputPorts` absent ⇒ the resolve is a no-op (and the tool was
+          // never registered, byte-identical). A frame that is not an answer
+          // falls through to the adapter exactly as before.
+          const answer = peekPlanInputAnswer(raw)
+          if (answer !== null) {
+            config.userInputPorts?.handle.resolve(
+              answer.promptId,
+              answer.decision === "answer"
+                ? { decision: "answer", text: answer.text }
+                : { decision: "cancelled" },
+            )
+            return
+          }
         }
         ws.data.adapter?.pushMessage(raw)
       },
@@ -1002,6 +1074,20 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // before evicting so no frame targets a dead socket.
         ws.data.agentState?.detach()
         ws.data.agentState = undefined
+        // QUANTA_WEB_AGENT_STATE — cancel every pending `request_user_input` so
+        // a paused agent's `await` settles with `{decision:"cancelled"}` instead
+        // of hanging forever for an answer this (now-dead) socket can never
+        // deliver. The inbound port is SHARED across connections, so this
+        // resolves ALL pending requests — for the v1 shared-session daemon there
+        // is one logical client, so a disconnect means no one can answer.
+        // RESIDUAL EDGE: a turn-abort WITHOUT a socket disconnect leaves the
+        // resolver lingering until the NEXT close or answer (the close path is
+        // the only cancel trigger; an in-band turn cancel does not reach here).
+        try {
+          config.userInputPorts?.handle.cancelAll()
+        } catch {
+          // NO-THROW: a cancel must never break socket teardown / eviction.
+        }
         await registry.evict(ws)
       },
     },

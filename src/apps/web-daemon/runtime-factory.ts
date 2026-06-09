@@ -38,6 +38,7 @@ import {
   createCanvasToolDiffSource,
 } from "./canvas-tool-diff-source"
 import { type CanvasUsageSourceHandle, createCanvasUsageSource } from "./canvas-usage-source"
+import { createWebUserInputPort, type WebUserInputPortHandle } from "./web-user-input-port"
 
 /**
  * ADR-0415 — `RuntimeFacade` widened with the four read-only observability
@@ -73,6 +74,15 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * `agentState` frames, byte-identical).
    */
   readonly agentState?: AgentStateSourceHandle
+  /**
+   * QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port (mirror of the
+   * agent-state OUTBOUND tap). When present, `AgentConfig.userInputPort` is
+   * wired so the `request_user_input` tool is registered + a paused agent can be
+   * answered from the browser. Minted on the SAME gate as the agent-state source
+   * (you can only answer a prompt you can see). Gate OFF ⇒ undefined ⇒ the tool
+   * is not registered ⇒ the agent cannot ask on web (byte-identical).
+   */
+  readonly userInput?: WebUserInputPortHandle
 }
 
 /**
@@ -218,6 +228,17 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     const agentState = gateOn(env, "QUANTA_WEB_AGENT_STATE")
       ? createAgentStateSource()
       : undefined
+    // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port (mirror of the
+    // agent-state OUTBOUND tap). Minted ONLY when the agent-state source exists
+    // (same gate): a request/resolve frame rides the same agent-state channel,
+    // and you can only answer a prompt you can see. Its `capture` feeds the
+    // agent-state sink so the request + the resolve are forwarded to the
+    // browser. Gate OFF ⇒ undefined ⇒ `userInputPort` absent ⇒ the
+    // `request_user_input` tool is NOT registered (byte-identical).
+    const userInput =
+      agentState !== undefined
+        ? createWebUserInputPort({ capture: (ev) => agentState.sink.capture(ev) })
+        : undefined
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),
@@ -233,6 +254,10 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       ...(canvasUsage !== undefined ? { onPromptAssembled: canvasUsage.sink } : {}),
       ...(canvasToolDiff !== undefined ? { onToolDiff: canvasToolDiff.sink } : {}),
       ...(agentState !== undefined ? { onAgentState: agentState.sink } : {}),
+      // QUANTA_WEB_AGENT_STATE — wire the inbound port so the agent can ask on
+      // web (the tool registers iff this is present). Absent ⇒ tool not
+      // registered (byte-identical).
+      ...(userInput !== undefined ? { userInputPort: userInput.port } : {}),
       ...observabilitySlots(observability),
     }
     const turnAssembler = buildInteractiveTurnAssembler()
@@ -269,6 +294,15 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     if (agentState !== undefined) {
       Object.defineProperty(facade, "agentState", {
         get: () => agentState,
+        enumerable: true,
+      })
+    }
+    // QUANTA_WEB_AGENT_STATE — expose the inbound port so the daemon's server
+    // can `resolve(promptId, …)` an inbound answer frame + `cancelAll()` on
+    // disconnect. Gate OFF ⇒ undefined ⇒ no port (byte-identical).
+    if (userInput !== undefined) {
+      Object.defineProperty(facade, "userInput", {
+        get: () => userInput,
         enumerable: true,
       })
     }

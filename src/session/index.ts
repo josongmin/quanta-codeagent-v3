@@ -125,7 +125,9 @@ export {
   buildCrashResumeOffer,
   clearSessionInterrupted,
   CRASH_RESUME_GATE,
+  CRASH_RESUME_PARTIAL_GATE,
   crashResumeEnabled,
+  crashResumePartialEnabled,
   detectInterruptedSessions,
   markSessionInterrupted,
 } from "./crash-resume"

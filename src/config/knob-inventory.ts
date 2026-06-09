@@ -1462,6 +1462,15 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "tool/surface/manifest.ts",
   },
   {
+    envKey: "QUANTA_LANG_DETECT",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Assistant language auto-detect — inject 'respond in <lang>' notice (opt-in).",
+    readSite: "agent/loop/context-assembler.ts",
+  },
+  {
     envKey: "QUANTA_SHADOW",
     kind: "bool",
     default: false,

@@ -28,6 +28,7 @@ import {
   type CanvasPorts,
   type ObservabilityPorts,
   startWebDaemon,
+  type UserInputPorts,
 } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
@@ -150,6 +151,22 @@ const buildAgentStatePorts = (
 }
 
 /**
+ * QUANTA_WEB_AGENT_STATE — project the live facade's OUT-OF-BAND INBOUND port
+ * (the user-input answer/cancel handle) into the per-connection bundle the
+ * server uses to resolve a `planInputAnswer` frame + `cancelAll()` on
+ * disconnect. Returns `undefined` when the facade is absent (gate OFF) or
+ * carries no inbound port (`QUANTA_WEB_AGENT_STATE !== "1"`), so the server has
+ * nothing to resolve into (and the tool was never registered ⇒ byte-identical).
+ */
+const buildUserInputPorts = (
+  facade: ObservableRuntimeFacade | undefined,
+): UserInputPorts | undefined => {
+  if (facade === undefined) return undefined
+  if (facade.userInput === undefined) return undefined
+  return { handle: facade.userInput }
+}
+
+/**
  * Boot the daemon. Accepts an optional override so test code (and a future
  * composition root) can inject a real `runtimeFactory` without parsing env.
  *
@@ -174,10 +191,16 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // undefined ⇒ the server attaches no agent-state sink (byte-identical legacy).
   const agentStatePorts = buildAgentStatePorts(observableFacade)
 
+  // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port (answer/cancel handle).
+  // Gate OFF ⇒ undefined ⇒ the server has no port to resolve into AND the tool
+  // was never registered (byte-identical legacy).
+  const userInputPorts = buildUserInputPorts(observableFacade)
+
   const config: WebDaemonConfig & {
     observabilityPorts?: ObservabilityPorts
     canvasPorts?: CanvasPorts
     agentStatePorts?: AgentStatePorts
+    userInputPorts?: UserInputPorts
   } = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
@@ -190,6 +213,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     ...(observabilityPorts !== undefined ? { observabilityPorts } : {}),
     ...(canvasPorts !== undefined ? { canvasPorts } : {}),
     ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),
+    ...(userInputPorts !== undefined ? { userInputPorts } : {}),
   }
 
   // Port-collision fallback: if the requested port is taken (EADDRINUSE

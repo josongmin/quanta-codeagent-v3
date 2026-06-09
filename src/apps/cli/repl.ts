@@ -9,8 +9,8 @@ import {
 import { defaultResponsesContinuationStore } from "@/llm"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
-import { bootstrapCrashResumeOffers } from "@/runner/orchestrate"
-import { crashResumeEnabled, listSessions } from "@/session"
+import { bootstrapCrashResumeOffers, selectCrashResumeReinject } from "@/runner/orchestrate"
+import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
@@ -310,23 +310,37 @@ export const runRepl = async (): Promise<void> => {
       cwd: setup.cwd,
       contextUsageView: wires.contextUsageView,
     })
-    // ADR-0528 L2 — surface a crash-resume offer at startup so a session that
-    // died mid-turn is VISIBLE on restart (north-star: "what was I doing"). Gate
-    // FIRST so a gate-off / one-shot / non-TTY launch never even lists sessions
-    // (byte-identical). The operator resumes via `--resume <id>`; auto-prompt +
-    // task re-injection is the P1 surface refinement.
+    // ADR-0528 L2 — crash-resume on restart. Gate FIRST so a gate-off / one-shot
+    // / non-TTY launch never even lists sessions (byte-identical). The CURRENT
+    // session's OWN mid-turn crash ⇒ prompt to AUTO re-inject its task as turn-1
+    // (e.g. `quanta --resume X` where X crashed); OTHER interrupted sessions ⇒
+    // surface-only (resume via `--resume <id>`). A stranger's task is NEVER
+    // injected into the current session (selectCrashResumeReinject fence).
+    let crashResumeSeeds: readonly string[] | undefined
     if (
       setup.argPrompt === undefined &&
       process.stderr.isTTY === true &&
       crashResumeEnabled(process.env)
     ) {
-      const offers = await bootstrapCrashResumeOffers(await listSessions({ includeArchived: false }), {
-        env: process.env,
-      })
-      const top = offers[0]
-      if (top !== undefined) {
+      const offers = await bootstrapCrashResumeOffers(
+        await listSessions({ includeArchived: false }),
+        { env: process.env },
+      )
+      const { own, others } = selectCrashResumeReinject(offers, setup.sessionId)
+      if (own !== undefined) {
+        process.stderr.write(`\x1b[2m⏮ ${own.summary}\x1b[0m\n`)
+        const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+        const ans = (await rl.question("Resume this interrupted task? (y/N) ")).trim().toLowerCase()
+        rl.close()
+        if (ans === "y" || ans === "yes") {
+          crashResumeSeeds = [own.resumeMessage]
+          await clearSessionInterrupted(own.sessionId, { env: process.env })
+        }
+      }
+      const otherTop = others[0]
+      if (otherTop !== undefined) {
         process.stderr.write(
-          `\x1b[2m⏮ ${top.summary} — \`quanta --resume ${top.sessionId}\` to continue\x1b[0m\n`,
+          `\x1b[2m⏮ ${otherTop.summary} — \`quanta --resume ${otherTop.sessionId}\`\x1b[0m\n`,
         )
       }
     }
@@ -344,6 +358,8 @@ export const runRepl = async (): Promise<void> => {
         // #8 (jun-6) — host binds stdin for the in-turn reader (only consumed
         // when QUANTA_MIDTURN_CAPTURE=1; the loop/reader slice never poke stdin).
         inTurnStdin: process.stdin,
+        // ADR-0528 L2 — accepted crash-resume task seeded as the first turn.
+        ...(crashResumeSeeds !== undefined ? { seedPrompts: crashResumeSeeds } : {}),
       }),
     )
   } finally {

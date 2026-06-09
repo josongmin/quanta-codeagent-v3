@@ -51,6 +51,10 @@ export const buildSessionLoopOptions = async (deps: {
    *  the loop's `inTurnStdin` slot; only consumed when `QUANTA_MIDTURN_CAPTURE=1`
    *  (the loop short-circuits otherwise ⇒ default-OFF byte-identical). */
   inTurnStdin?: import("./in-turn-reader").InTurnReaderStdin
+  /** ADR-0528 L2 — prompts the host re-injects as the first turn(s) (accepted
+   *  crash-resume `resumeMessage`). Threaded onto the loop's `seedPrompts` slot;
+   *  absent/empty ⇒ byte-identical. */
+  seedPrompts?: readonly string[]
 }): Promise<SessionLoopArgs> => {
   const { setup, surfaceState, wires, rfc09, featureCfg, env } = deps
   return {
@@ -75,6 +79,9 @@ export const buildSessionLoopOptions = async (deps: {
     // #8 last-mile (jun-6) — the stdin source for the in-turn reader (host-
     // injected; default-OFF unless the capture knob is set). Spread by-presence.
     ...(deps.inTurnStdin !== undefined ? { inTurnStdin: deps.inTurnStdin } : {}),
+    ...(deps.seedPrompts !== undefined && deps.seedPrompts.length > 0
+      ? { seedPrompts: deps.seedPrompts }
+      : {}),
     // §steer — inbound delivery: the conversation-action surface (weave/interrupt
     // sinks + activeTurnRef) + the session-mutable mode ref. Spread by-presence
     // so the queue-default / surface-absent path stays byte-identical.

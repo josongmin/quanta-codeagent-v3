@@ -117,5 +117,43 @@ describe("AgentStatePanel", () => {
     // PASSIVE: no interactive answer affordance (no input / submit button).
     expect(markup).not.toContain("<textarea")
     expect(markup).not.toContain("<button")
+    // The interactive answer wrapper is absent without `onAnswer`.
+    expect(markup).not.toContain('data-testid="agent-state-plan-answer"')
+  })
+
+  // INTERACTIVE: with `onAnswer` the card grows a text input + Submit/Cancel so a
+  // WEB user can close the loop. (The passive byte-identical case is above.)
+  it("renders the ANSWER affordance (input + Submit/Cancel) when onAnswer is provided", () => {
+    const markup = renderToStaticMarkup(
+      <AgentStatePanel
+        state={view({ planPrompt: planPrompt("Pick a strategy") })}
+        onAnswer={() => {}}
+      />,
+    )
+    expect(markup).toContain('data-testid="agent-state-plan-prompt"')
+    expect(markup).toContain("Waiting on you")
+    expect(markup).toContain("Pick a strategy")
+    // The interactive affordance is present.
+    expect(markup).toContain('data-testid="agent-state-plan-answer"')
+    expect(markup).toContain('data-testid="agent-state-plan-input"')
+    expect(markup).toContain('data-testid="agent-state-plan-submit"')
+    expect(markup).toContain('data-testid="agent-state-plan-cancel"')
+    expect(markup).toContain("<textarea")
+    expect(markup).toContain("Submit")
+    expect(markup).toContain("Cancel")
+  })
+
+  it("renders a choice button per offered choice in the ANSWER affordance", () => {
+    const markup = renderToStaticMarkup(
+      <AgentStatePanel
+        state={view({ planPrompt: planPrompt("Pick one", ["red", "blue"]) })}
+        onAnswer={() => {}}
+      />,
+    )
+    // Each choice becomes a clickable button (not a passive <li>).
+    const choiceButtons = markup.split('data-testid="agent-state-plan-choice"').length - 1
+    expect(choiceButtons).toBe(2)
+    expect(markup).toContain("red")
+    expect(markup).toContain("blue")
   })
 })

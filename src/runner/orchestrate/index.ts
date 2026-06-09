@@ -21,7 +21,12 @@
  */
 
 export type { CrashResumeMarkerArgs } from "./crash-resume-wire"
-export { bootstrapCrashResumeOffers, withCrashResumeMarker } from "./crash-resume-wire"
+export {
+  attachCrashResumePartial,
+  bootstrapCrashResumeOffers,
+  selectCrashResumeReinject,
+  withCrashResumeMarker,
+} from "./crash-resume-wire"
 export { ExternalPromptQueue } from "./external-prompt-queue"
 export type { PersistTurnInput } from "./persist-turn"
 export { persistTurn } from "./persist-turn"

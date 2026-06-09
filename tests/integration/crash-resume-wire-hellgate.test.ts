@@ -20,6 +20,10 @@ import {
 // The LIVE turn chokepoint every surface funnels through (the wiring site).
 import { runSessionTurn } from "../../src/runner/orchestrate/session-turn-driver"
 import type { RuntimeSession } from "@/sdk/runtime"
+// ADR-0528 L2 auto-reinject seam.
+import { selectCrashResumeReinject } from "../../src/runner/orchestrate/crash-resume-wire"
+import { ExternalPromptQueue } from "../../src/runner/orchestrate/external-prompt-queue"
+import type { CrashResumeOffer } from "@/session"
 
 /**
  * ADR-0528 CROWN JEWEL (live wiring) — the §13.2 module (ADR-0525) is built but
@@ -182,6 +186,33 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
       sessionId: "live2",
     })
     expect(markerDuringTurn).toBeUndefined()
+  })
+
+  test("L2 auto-reinject: ONLY the current session's interrupt is a reinject candidate (no stranger-task injection)", () => {
+    const mk = (id: string): CrashResumeOffer => ({
+      sessionId: id,
+      title: `T-${id}`,
+      summary: `s-${id}`,
+      resumeMessage: `resume ${id}`,
+    })
+    const offers = [mk("cur"), mk("other1"), mk("other2")]
+    const r = selectCrashResumeReinject(offers, "cur")
+    expect(r.own?.sessionId).toBe("cur")
+    expect(r.own?.resumeMessage).toBe("resume cur")
+    expect(r.others.map((o) => o.sessionId)).toEqual(["other1", "other2"])
+    // FENCE: a fresh/new session (id not among offers) auto-reinjects NOTHING —
+    // a stranger session's task must never be seeded into the current session.
+    expect(selectCrashResumeReinject(offers, "fresh-id").own).toBeUndefined()
+    expect(selectCrashResumeReinject(offers, "fresh-id").others.length).toBe(3)
+    expect(selectCrashResumeReinject(offers, undefined).own).toBeUndefined()
+  })
+
+  test("L2 auto-reinject: a seeded prompt is delivered IMMEDIATELY (wins the loop's prompt-source race ⇒ runs as turn-1)", async () => {
+    const q = new ExternalPromptQueue<string>()
+    q.push("resume the interrupted task")
+    // `next()` resolves without any stdin — the seed is already queued, so in the
+    // loop's `Promise.race([rawLineReader, queue.next()])` the seed wins.
+    expect(await q.next()).toBe("resume the interrupted task")
   })
 
   test("DEFAULT-OFF: gate absent ⇒ withCrashResumeMarker writes NO marker (byte-identical)", async () => {

@@ -21,7 +21,7 @@
 import type { AgentOutcome } from "@/agent"
 import type { ImageBlock, Message } from "@/llm"
 import type { RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
-import { withCrashResumeMarker } from "./crash-resume-wire"
+import { attachCrashResumePartial, withCrashResumeMarker } from "./crash-resume-wire"
 
 /** The SDK turn payload (the non-undefined `turn` of a dispatch result). */
 type SessionTurnPayload = NonNullable<SessionDispatchResult["turn"]>
@@ -146,7 +146,14 @@ export const runSessionTurn = async (args: RunSessionTurnArgs): Promise<SessionT
   // turn in-progress before it runs, clear when it resolves (reaching here ⇒ the
   // process survived; only a hard crash leaves the marker). Gate-gated + only
   // when a durable `sessionId` is known ⇒ byte-identical otherwise.
-  return sessionId !== undefined
-    ? withCrashResumeMarker({ sessionId, userText: text, env: process.env }, body)
-    : body()
+  if (sessionId === undefined) return body()
+  const markerArgs = { sessionId, userText: text, env: process.env }
+  // ADR-0528 L3 (P2) — keep the marker's partial FRESH during the turn by
+  // subscribing to the session stream (no-op unless QUANTA_CRASH_RESUME_PARTIAL).
+  const detachPartial = attachCrashResumePartial(session, markerArgs)
+  try {
+    return await withCrashResumeMarker(markerArgs, body)
+  } finally {
+    detachPartial()
+  }
 }

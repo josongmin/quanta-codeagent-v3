@@ -92,6 +92,12 @@ export interface RunSessionLoopDeps {
    *  user's literal text in the very next turn. Absent ⇒ pipeline behaves
    *  byte-identically (no drain, no preamble). */
   readonly textInbox?: import("../text-inbox").TextInbox
+  /** ADR-0528 L2 (auto-reinject) — prompts seeded into the live
+   *  `ExternalPromptQueue` BEFORE the interactive loop starts, so they win the
+   *  prompt-source race and run as the FIRST turn(s). The host uses it to
+   *  re-inject an accepted crash-resume `offer.resumeMessage`. Absent/empty ⇒
+   *  no push, byte-identical. Interactive-only (one-shot ignores it). */
+  readonly seedPrompts?: readonly string[]
   /** Optional once-only `process.once('exit', ...)` registrar — keeps the
    *  loop from coupling to the process module directly so tests can stub it. */
   readonly registerExitTeardown?: (cb: () => void) => void
@@ -490,6 +496,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     history,
   }
   const externalPromptQueue = new ExternalPromptQueue()
+  // ADR-0528 L2 (auto-reinject) — seed prompts BEFORE the interactive loop's
+  // prompt-source race begins, so each wins immediately and runs as the first
+  // turn(s) (the host re-injects an accepted crash-resume `resumeMessage`).
+  // Empty/absent ⇒ no push (byte-identical). One-shot branch never reads the
+  // queue, so a seed there would be inert — host only seeds interactive.
+  for (const seed of deps.seedPrompts ?? []) externalPromptQueue.push(seed)
   // H8 last-mile (ADR-0480) — the heartbeat thread-resume binder. A heartbeat
   // fire (scheduler `enqueueUserMessage(message, { targetThreadId, ... })`)
   // routes through the binder so the TARGET thread is resumed under its

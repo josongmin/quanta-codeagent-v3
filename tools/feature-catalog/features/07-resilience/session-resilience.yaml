@@ -13,13 +13,13 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "built-not-wired"]
 depends_on: [session-cwd-missing-exit, conversation-checkpoint]
 surface_integration:
-  cli: partial
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ADR-0528 LIVE wiring (crash-resume): `@/runner/orchestrate/crash-resume-wire` `withCrashResumeMarker` brackets the SINGLE live turn chokepoint `runSessionTurn` (src/runner/orchestrate/session-turn-driver.ts) — both CLI (session-loop.ts) + headless pass `sessionId`, so a real turn marks-in-progress/clears-on-resolve (markers survive only a hard process death). `bootstrapCrashResumeOffers` is called at repl.ts startup (gate-first, TTY-only) to surface the offer + `--resume`. (P1: auto-prompt+re-inject needs an interactive first-input seam.) A 3R adversarial audit caught the draft's dead-path (`runOnce`) wiring and forced the correction. store-health (§13.1) remains export-only / via `/doctor` follow-up."
-    web: "no web verb; session resilience is a host/CLI restart-boundary concern with no browser affordance (offer→web card is ADR-0528 P1)."
+    cli: "ADR-0528 LIVE wiring (crash-resume), end-to-end. L1: `@/runner/orchestrate/crash-resume-wire` `withCrashResumeMarker` brackets the SINGLE live turn chokepoint `runSessionTurn` (src/runner/orchestrate/session-turn-driver.ts) — both CLI (session-loop.ts) + headless pass `sessionId`, so a real turn marks-in-progress/clears-on-resolve (markers survive only a hard process death). L2: repl.ts startup (gate-first, TTY-only) calls `bootstrapCrashResumeOffers` + `selectCrashResumeReinject(offers, setup.sessionId)` → the CURRENT session's OWN crash auto-re-injects its `resumeMessage` as turn-1 via the loop's new `seedPrompts`→`externalPromptQueue` seam (wins the prompt-source race) + clears; OTHER sessions surface-only (`--resume`). A stranger's task is NEVER injected (selectCrashResumeReinject fence, tested). A 3R adversarial audit caught the draft's dead-path (`runOnce`) wiring and forced the correction. (L3 partial-freshness = ADR-0528 P2, separate gate QUANTA_CRASH_RESUME_PARTIAL.) store-health (§13.1) remains export-only / via `/doctor` follow-up."
+    web: "no web verb; session resilience is a host/CLI restart-boundary concern with no browser affordance (offer→web card consumes the same event, ADR-0528 surface follow-up)."
 purpose: |
   Two leaf durability/diagnostic modules in the `@/session` slice that sit on
   top of the existing snapshot store (no new on-disk file, no sqlite).

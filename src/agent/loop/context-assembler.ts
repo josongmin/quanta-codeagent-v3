@@ -10,6 +10,7 @@ import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import type { ConversationSummaryArchive } from "../conversation-summary-archive"
 import type { HookPromptInject } from "../hooks"
 import { renderIdeContext } from "../ide-context"
+import { buildLanguageHint } from "../language-detect"
 import {
   augmentActiveSkillsWithPlugin,
   reconcileSkillMcpDepsForTurn,
@@ -278,10 +279,16 @@ export const prepareTurnContext = async (
   const augmentedSkills = augmentActiveSkillsWithPlugin(activeSkills, pluginActivation)
   await reconcileSkillMcpDepsForTurn(config, augmentedSkills)
   const taskBudgetForTurn = resolveTaskBudgetForTurn(config, taskSpend)
+  // N1 — assistant language auto-detect (default-OFF `QUANTA_LANG_DETECT`). Reuse
+  // the latest-user-text helper (already computed for plugin activation above);
+  // `buildLanguageHint` returns undefined when the gate is off / English /
+  // ambiguous, so the prompt stays byte-identical.
+  const languageHint = buildLanguageHint(latestUserTextFromWm(wm), runtimeConfig().langDetect)
   const ctx = buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
     planMode: config.planMode ?? false,
+    ...(languageHint !== undefined ? { languageHint } : {}),
     system: config.system,
     ...(config.sessionCtx !== undefined ? { sessionCtx: config.sessionCtx } : {}),
     ...(config.mode !== undefined ? { mode: config.mode } : {}),

@@ -48,6 +48,17 @@ export const CRASH_RESUME_GATE = "QUANTA_CRASH_RESUME"
 export const crashResumeEnabled = (env?: Record<string, string | undefined>): boolean =>
   env !== undefined && gateOn(env, CRASH_RESUME_GATE)
 
+/** Env-gate for the L3 streaming-partial-freshness layer (ADR-0528 P2). */
+export const CRASH_RESUME_PARTIAL_GATE = "QUANTA_CRASH_RESUME_PARTIAL"
+
+/** True iff the partial-freshness layer is armed. STRICT SUPERSET of
+ *  {@link crashResumeEnabled}: partial-flushing only makes sense ON TOP of the
+ *  base marker layer (the flush UPDATES the marker the base layer writes), so
+ *  BOTH gates must be on. Default-OFF; absent env ⇒ off (fail-safe). */
+export const crashResumePartialEnabled = (
+  env?: Record<string, string | undefined>,
+): boolean => crashResumeEnabled(env) && env !== undefined && gateOn(env, CRASH_RESUME_PARTIAL_GATE)
+
 /**
  * Persist an interrupted-turn marker onto a session's snapshot so a restart can
  * detect + offer to resume it. Best-effort + NEVER throws: a store failure is

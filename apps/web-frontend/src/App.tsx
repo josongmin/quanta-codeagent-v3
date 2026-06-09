@@ -1,5 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AgentStatePanel, agentStateHasContent } from "./components/AgentStatePanel"
+import {
+  AgentStatePanel,
+  agentStateHasContent,
+  type PlanInputAnswer,
+} from "./components/AgentStatePanel"
 import { ChatPanel } from "./components/ChatPanel"
 import { ConnectionUrlPill } from "./components/ConnectionUrlPill"
 import type { EscalationDecision } from "./components/EscalationCard"
@@ -25,6 +29,7 @@ import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
 import type {
+  AgentStateMessage,
   ConnectionState,
   ContextUsageMessage,
   SessionEvent,
@@ -623,13 +628,59 @@ export const App = (): JSX.Element => {
   // `QUANTA_WEB_AGENT_STATE=1`) no `agentState` frame ever decodes, the source
   // never fires, and `agentState` stays the EMPTY view ⇒ `PlanPanel` +
   // `AgentStatePanel` both self-hide (chat UI byte-identical, default-OFF).
-  const agentStateSource = useMemo<AgentStateSource>(
-    () => ({
-      subscribe: (handler) => client.onAgentState(handler),
-    }),
-    [client],
+  // A fan-out hub over `client.onAgentState`: the hook subscribes here, and
+  // `inject` lets the App push a SYNTHETIC frame (the optimistic `plan.input.
+  // resolved` after answering) into the SAME fold path so the prompt card clears
+  // instantly — the daemon's real resolve frame arrives moments later and is an
+  // idempotent no-op (the reducer ignores a resolve whose promptId no longer
+  // matches an outstanding prompt).
+  const agentStateHub = useMemo(() => {
+    const handlers = new Set<(msg: AgentStateMessage) => void>()
+    let detachClient: (() => void) | null = null
+    const source: AgentStateSource = {
+      subscribe: (handler) => {
+        handlers.add(handler)
+        // Lazily bridge the client on the first subscriber.
+        if (detachClient === null) {
+          detachClient = client.onAgentState((msg) => {
+            for (const h of [...handlers]) h(msg)
+          })
+        }
+        return () => {
+          handlers.delete(handler)
+        }
+      },
+    }
+    const inject = (msg: AgentStateMessage): void => {
+      for (const h of [...handlers]) h(msg)
+    }
+    return { source, inject }
+  }, [client])
+  const agentState = useAgentState(agentStateHub.source)
+
+  // QUANTA_WEB_AGENT_STATE — close the OUT-OF-BAND INBOUND loop: a WEB user
+  // answers (or cancels) the paused agent's `request_user_input` prompt. Sends
+  // the raw `planInputAnswer` frame (NOT a SessionCommand) + optimistically
+  // clears the prompt card via a synthetic resolve so the UI does not wait on the
+  // round-trip.
+  const onPlanInputAnswer = useCallback(
+    (promptId: string, outcome: PlanInputAnswer) => {
+      client.sendPlanInputAnswer(promptId, outcome)
+      const emittedAt = Date.now()
+      agentStateHub.inject(
+        outcome.decision === "answer"
+          ? {
+              kind: "plan.input.resolved",
+              promptId,
+              decision: "answer",
+              text: outcome.text,
+              emittedAt,
+            }
+          : { kind: "plan.input.resolved", promptId, decision: "cancelled", emittedAt },
+      )
+    },
+    [client, agentStateHub],
   )
-  const agentState = useAgentState(agentStateSource)
 
   // Codex-like: the sidebar stays OFF-screen until there's actually something to
   // show. Empty (no runs / objective / approvals / usage / diffs / agent-state)
@@ -691,7 +742,7 @@ export const App = (): JSX.Element => {
                 className="flex w-72 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-line-subtle bg-surface-raised px-3 py-4"
               >
                 <PlanPanel plan={agentState.plan} />
-                <AgentStatePanel state={agentState} />
+                <AgentStatePanel state={agentState} onAnswer={onPlanInputAnswer} />
               </aside>
             ) : null}
             <ObservabilityPane state={observability} usage={contextUsage} diffs={toolDiffs} />

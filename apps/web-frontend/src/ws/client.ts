@@ -281,6 +281,36 @@ export class SessionClient {
     this.#ws.send(encodeCommandFrame(command))
   }
 
+  /**
+   * QUANTA_WEB_AGENT_STATE — answer (or cancel) a paused agent's
+   * `request_user_input` prompt over the OUT-OF-BAND INBOUND channel (the mirror
+   * of the agent-state OUTBOUND frames). This is NOT a `SessionCommand` — it
+   * rides a raw JSON frame the daemon peeks BEFORE the session bridge, so the
+   * kernel reducer never sees it. No-op if the socket is not open (the agent
+   * will be cancelled by the daemon's `cancelAll()` on the eventual close).
+   */
+  sendPlanInputAnswer(
+    promptId: string,
+    outcome: { decision: "answer"; text: string } | { decision: "cancelled" },
+  ): void {
+    if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) {
+      this.#log(
+        "warn",
+        `[SessionClient] dropping planInputAnswer promptId=${promptId} — socket not open`,
+      )
+      return
+    }
+    const frame =
+      outcome.decision === "answer"
+        ? { kind: "planInputAnswer", promptId, decision: "answer", text: outcome.text }
+        : { kind: "planInputAnswer", promptId, decision: "cancelled" }
+    try {
+      this.#ws.send(JSON.stringify(frame))
+    } catch (err) {
+      this.#log("warn", `[SessionClient] planInputAnswer send failed: ${String(err)}`)
+    }
+  }
+
   /** Last server-minted session id, or `null` until the handshake settles. */
   get sessionId(): string | null {
     return this.#sessionId

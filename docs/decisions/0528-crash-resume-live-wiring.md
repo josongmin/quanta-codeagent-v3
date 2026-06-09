@@ -43,8 +43,10 @@ runSessionTurn(args.sessionId 있을 때):
 
 ### L2 — 재시작 detection + operator offer (bootstrap 배선)
 
-- **P0(detect + surface)**: `repl.ts` startup(`runSessionLoop` 직전)에서 `bootstrapCrashResumeOffers(listSessions({includeArchived:false}), {env})` → most-recent offer를 stderr에 노출(`⏮ Session "X" was interrupted mid-turn: <task> — quanta --resume <id>`). **gate FIRST**(`crashResumeEnabled(env)`) + interactive + TTY 한정 ⇒ gate-off/one-shot/non-TTY는 listSessions조차 안 부름(byte-identical). north-star "뭐 하다 멈췄나"를 재시작 즉시 보이게 + 기존 `--resume`로 이어감.
-- **P1(auto-prompt + re-inject)**: TTY 프롬프트(`confirmTrust`류/ADR-0494) → accept 시 세션 로드 + `offer.resumeMessage`를 `role:"user"` 첫 턴 주입(control-poll resume 경로 동형) + `clearSessionInterrupted`(consume). 이건 interactive **첫-입력 seam**이 필요(현 `runSessionLoop`은 argPrompt=one-shot 전용) — 그 입력흐름 통합과 함께 P1. headless/CI never-block 유지.
+- **detect + 분류** (gate FIRST + interactive + TTY ⇒ gate-off/one-shot/non-TTY는 listSessions조차 안 부름, byte-identical): `bootstrapCrashResumeOffers` → `selectCrashResumeReinject(offers, setup.sessionId)`로 **현재 세션의 OWN-interrupt vs OTHERS** 분리.
+- **OWN(현재 세션이 그 interrupt의 주인) ⇒ auto-reinject**: TTY readline `(y/N)` → accept 시 `offer.resumeMessage`를 **`seedPrompts`로 loop에 주입** → `externalPromptQueue.push`가 prompt-source race를 즉시 이겨 **turn-1로 task 재개** + `clearSessionInterrupted`(consume). **correctness fence: stranger 세션의 task는 절대 현재 세션에 주입 안 됨**(`selectCrashResumeReinject` own=현재id 매칭만).
+- **OTHERS(다른 중단 세션) ⇒ surface-only**: `⏮ … — quanta --resume <id>` 노출(부팅 prompt 폭탄 방지, most-recent 1개).
+- seam: `runSessionLoop`에 `seedPrompts` 옵션 신설(큐 생성 직후 push) — `buildSessionLoopOptions`→repl 배선. headless/CI never-block.
 
 ### L3 — 스트리밍 partial 신선도 (SOTA++, 별도 게이트 `QUANTA_CRASH_RESUME_PARTIAL`)
 
@@ -64,11 +66,11 @@ runSessionTurn(args.sessionId 있을 때):
 
 ## 단계
 
-- **P0 (✅ LANDED jun-09, gate `QUANTA_CRASH_RESUME`)**: L1 `runSessionTurn` 단일 chokepoint 브래킷(mark-at-start/clear-on-resolve, 2 콜러 sessionId 전달) + L2-detect bootstrap startup surface(stderr offer + `--resume`). TDD: `crash-resume-wire-hellgate`가 **실 `runSessionTurn`을 fake RuntimeSession으로 구동**(브래킷 끊으면 RED) + default-OFF byte-identity. **3R 어딧이 초안의 dead-path(`runOnce`) 배선 적발→실 chokepoint로 정정.**
-- **P1 (operator UX)**: L2 auto-prompt+re-inject(interactive 첫-입력 seam 필요) + offer를 surface-agnostic 이벤트로(`/state` 배지 + web/IDE 카드). north-star 노출.
-- **P2 (L3, gate `QUANTA_CRASH_RESUME_PARTIAL`)**: 이벤트-구동 partial flush + interrupt 시 rich-partial 보존(outcome-aware) + flush-policy 포트 + 매직넘버-금지 ratchet.
+- **P0+P1 (✅ LANDED jun-09, gate `QUANTA_CRASH_RESUME`)**: L1 `runSessionTurn` 단일 chokepoint 브래킷(mark-at-start/clear-on-resolve, 2 콜러 sessionId 전달) + L2 detect→분류(own/others)→**OWN auto-reinject(seedPrompts→queue→turn-1)** + OTHERS surface. TDD: `crash-resume-wire-hellgate`가 ① 실 `runSessionTurn` fake-RuntimeSession 구동(브래킷 끊으면 RED) ② `selectCrashResumeReinject` stranger-fence ③ seed-queue 즉시전달 ④ default-OFF byte-identity. **3R 어딧이 초안의 dead-path(`runOnce`) 배선 적발→실 chokepoint로 정정.**
+- **P2 (L3, gate `QUANTA_CRASH_RESUME_PARTIAL`)**: 이벤트-구동 partial flush + interrupt 시 rich-partial 보존(outcome-aware) + flush-policy 포트 + 매직넘버-금지 ratchet. (잔여 — 기능: 크래시 시 *진행분*까지 복구 / 왜: 현재 P0는 task-intent만 / ROI 저: 스트리밍 훅 필요 + 마진value)
+- **잔여 surface(P1+)**: offer를 surface-agnostic 이벤트로(`/state` 배지 + web/IDE 카드) — CLI는 stderr로 됐고 web/IDE 카드는 동일 이벤트 소비.
 
-각 단계 독립 PR. P0이 단독으로 "크래시 후 끊긴 작업이 재시작에 마커로 남고 보임"을 라이브화(이어받기 auto-reinject는 P1).
+P0+P1이 "크래시→재시작→OWN이면 task 자동 재개 / OTHERS면 노출"을 라이브화. partial 신선도(L3)만 P2.
 
 ## Default posture / 안전성
 

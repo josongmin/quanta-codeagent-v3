@@ -364,6 +364,12 @@ export interface RuntimeConfig {
    *  spot of `src/git/directive-emit/` (which only reads quanta's own
    *  `::git-*` lines). */
   readonly passiveVcs: boolean
+  /** N1 assistant language auto-detect gate (`QUANTA_LANG_DETECT`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ buildDynamicContext pushes NO language
+   *  notice (byte-identical prompt). When true, a high-confidence non-English
+   *  Unicode-script detection on the latest user message injects a per-turn
+   *  "respond in <lang>" notice (English/ambiguous ⇒ still byte-identical). */
+  readonly langDetect: boolean
   /** H14a image_gen tool gate (`QUANTA_IMAGE_GEN`). Strict opt-in (`=== "1"`).
    *  Default false ⇒ the composition root wires NO `DefaultToolPorts.imageGen`
    *  port, so the `image_gen` tool is NOT registered (byte-identical default
@@ -1406,6 +1412,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // H6 — strict `=== "1"` opt-in. Default false ⇒ the bash post-exec hook
     // classifies nothing and touches no sink (byte-identical).
     passiveVcs: gateOn(env, "QUANTA_PASSIVE_VCS"),
+    // N1 — strict opt-in. Default false ⇒ no language notice (byte-identical).
+    langDetect: gateOn(env, "QUANTA_LANG_DETECT"),
     // H14a — strict `=== "1"` opt-in. Default false ⇒ no image_gen port wired,
     // tool not registered (byte-identical default menu).
     imageGen: gateOn(env, "QUANTA_IMAGE_GEN"),

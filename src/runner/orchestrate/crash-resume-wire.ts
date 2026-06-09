@@ -31,6 +31,7 @@ import {
   buildCrashResumeOffer,
   clearSessionInterrupted,
   type CrashResumeOffer,
+  crashResumePartialEnabled,
   detectInterruptedSessions,
   markSessionInterrupted,
   type SessionMeta,
@@ -86,4 +87,77 @@ export const bootstrapCrashResumeOffers = async (
 ): Promise<CrashResumeOffer[]> => {
   const detections = await detectInterruptedSessions(candidates, opts)
   return detections.map(buildCrashResumeOffer)
+}
+
+/** A minimal subscribable session — `RuntimeSession.subscribe` satisfies it.
+ *  Only the two event shapes the partial-flush cares about are typed. */
+interface PartialFlushSession {
+  subscribe(listener: (event: { readonly type: string; readonly delta?: string }) => void): () => void
+}
+
+/**
+ * ADR-0528 L3 (P2, gate `QUANTA_CRASH_RESUME_PARTIAL`) — keep the persisted
+ * marker's `partialAssistantText` FRESH during a long turn so a hard crash
+ * recovers the in-flight progress, not just the task intent.
+ *
+ * STRUCTURAL seam (no polling, no magic interval): subscribe to the live session
+ * event stream, ACCUMULATE `turn.output.delta` text, and FLUSH the accumulated
+ * partial to the marker on each `tool.invoked` boundary — i.e. right BEFORE the
+ * agent runs a tool, which is the riskiest crash window (a long/hung tool can
+ * SIGKILL the process). Event-driven ⇒ bounded writes (one per tool call), no
+ * per-token churn. Returns the unsubscribe fn (call it at turn resolve).
+ *
+ * Gate-gated: when `QUANTA_CRASH_RESUME_PARTIAL` (⊃ `QUANTA_CRASH_RESUME`) is
+ * off, this NEVER subscribes and returns a no-op disposer (byte-identical). The
+ * flush impl is injectable for tests; the default updates the marker via
+ * `markSessionInterrupted` (best-effort, NEVER throws).
+ */
+export const attachCrashResumePartial = (
+  session: PartialFlushSession,
+  args: CrashResumeMarkerArgs,
+  flushImpl?: (partial: string) => Promise<void>,
+): (() => void) => {
+  if (!crashResumePartialEnabled(args.env)) return () => undefined
+  const opts = { env: args.env, ...(args.provider !== undefined ? { provider: args.provider } : {}) }
+  const flush =
+    flushImpl ??
+    ((partial: string) =>
+      markSessionInterrupted(
+        args.sessionId,
+        {
+          userText: args.userText,
+          partialAssistantText: partial,
+          reason: "in-progress",
+          interruptedAt: (args.now ?? Date.now)(),
+        },
+        opts,
+      ))
+  let partial = ""
+  return session.subscribe((event) => {
+    if (event.type === "turn.output.delta") {
+      partial += event.delta ?? ""
+    } else if (event.type === "tool.invoked" && partial.length > 0) {
+      void flush(partial)
+    }
+  })
+}
+
+/**
+ * Split startup offers into the one for the CURRENTLY-launching session (`own` —
+ * safe to AUTO RE-INJECT, e.g. `quanta --resume X` where X crashed mid-turn) vs
+ * the rest (`others` — different sessions, surface-only; the user resumes them
+ * via `--resume <id>`). CRITICAL correctness fence: a stranger session's task
+ * must NEVER be re-injected into the current session — only `own` is a reinject
+ * candidate. Pure.
+ */
+export const selectCrashResumeReinject = (
+  offers: readonly CrashResumeOffer[],
+  currentSessionId: string | undefined,
+): { own?: CrashResumeOffer; others: CrashResumeOffer[] } => {
+  const own =
+    currentSessionId === undefined
+      ? undefined
+      : offers.find((o) => o.sessionId === currentSessionId)
+  const others = offers.filter((o) => o.sessionId !== currentSessionId)
+  return own !== undefined ? { own, others } : { others }
 }

@@ -126,6 +126,10 @@ export interface TurnContextInput {
   /** Legacy plan-mode flag. Kept for callers that have not migrated. When
    *  `mode` is absent and `planMode` is true, effective mode is `"plan"`. */
   planMode?: boolean
+  /** N1 — pre-computed assistant-language notice (default-OFF `QUANTA_LANG_DETECT`).
+   *  Built by the context-assembler from the latest user message via
+   *  `buildLanguageHint`. Absent ⇒ no language notice (byte-identical). */
+  languageHint?: string
   memoryContext?: string
   /** Repo-local rule body to inject ahead of memory hints as repo authority
    *  (Codex `repo-local-rule-ingestion-audit.md` mirror). Absent ⇒ no block,
@@ -533,6 +537,12 @@ const buildDynamicContext = (
   // cognitive complexity is unchanged. ALL knobs unset ⇒ nothing pushed ⇒ the
   // dynamic tail is byte-identical to the pre-bundle output (headline invariant).
   appendActiveDirectives(parts, input)
+  // N1 — assistant-language notice rides the DYNAMIC slot with the other prose
+  // shapers (brief / directives). Absent (gate OFF or English/ambiguous) ⇒
+  // nothing pushed ⇒ byte-identical. Pre-computed by the context-assembler so
+  // this module stays free of detection logic.
+  if (input.languageHint !== undefined && input.languageHint.length > 0)
+    parts.push("", input.languageHint)
   // ADR-0397 env block — sits ABOVE repo-rules because env/build context is
   // host-static authority (the platform/shell/pkg-mgr don't change mid-turn
   // and the git snapshot is taken at turn boundary). Absent / empty env ⇒

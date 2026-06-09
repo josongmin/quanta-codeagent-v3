@@ -27,12 +27,23 @@
  * panel renders nothing — chat UI unchanged.
  */
 
-import { memo } from "react"
+import { memo, useState } from "react"
 import type {
   PlanInputRequestedMessage,
   RatelimitSnapshotMessage,
   ToolProgressMessage,
 } from "../types/protocol"
+
+/** The CLOSED 2-arm outcome an answer affordance emits — mirrors the daemon's
+ *  `UserInputOutcome` (an `answer` carries the operator's reply; a `cancelled`
+ *  carries no payload). The host maps it to the wire `planInputAnswer` frame. */
+export type PlanInputAnswer = { decision: "answer"; text: string } | { decision: "cancelled" }
+
+/** The interactive answer callback. When provided to {@link AgentStatePanel} the
+ *  plan-input card renders an ANSWER affordance (text input + Submit/Cancel, plus
+ *  choice buttons when the prompt offers choices). Absent ⇒ the card stays
+ *  PASSIVE (notice only), byte-identical to the read-only baseline. */
+export type OnPlanInputAnswer = (promptId: string, outcome: PlanInputAnswer) => void
 
 /** The current collaboration mode (mirrors `ModeChangedMessage.to`). */
 export type AgentMode = "default" | "plan"
@@ -94,35 +105,44 @@ export const agentStateHasContent = (state: AgentStateView): boolean =>
 
 export interface AgentStatePanelProps {
   readonly state: AgentStateView
+  /**
+   * Optional interactive answer callback for the plan-input prompt card. When
+   * provided, the card renders a text input + Submit/Cancel (and choice buttons
+   * if the prompt offers choices) so a WEB user can ANSWER the paused agent.
+   * Absent ⇒ the card stays PASSIVE (notice only), byte-identical.
+   */
+  readonly onAnswer?: OnPlanInputAnswer
 }
 
 /* ------------------------------------------------------------------ */
 /* Panel                                                               */
 /* ------------------------------------------------------------------ */
 
-export const AgentStatePanel = memo(({ state }: AgentStatePanelProps): JSX.Element | null => {
-  const { mode, toolProgress, compaction, ratelimit, planPrompt } = state
-  // Default-OFF: an idle channel renders nothing (chat UI unchanged). Shares the
-  // exported predicate so the panel's self-hide and the App-level column gate
-  // can never disagree.
-  if (!agentStateHasContent(state)) return null
-  return (
-    <section
-      aria-label="agent state"
-      data-testid="agent-state-panel"
-      className="flex flex-col gap-2"
-    >
-      <header className="flex items-center justify-between">
-        <span className={LABEL}>Agent state</span>
-        {mode !== null ? <ModeBadge mode={mode} /> : null}
-      </header>
-      <PlanPromptCard prompt={planPrompt} />
-      <ToolProgressList progress={toolProgress} />
-      <CompactionMarkerCard marker={compaction} />
-      <RatelimitChip snapshot={ratelimit} />
-    </section>
-  )
-})
+export const AgentStatePanel = memo(
+  ({ state, onAnswer }: AgentStatePanelProps): JSX.Element | null => {
+    const { mode, toolProgress, compaction, ratelimit, planPrompt } = state
+    // Default-OFF: an idle channel renders nothing (chat UI unchanged). Shares
+    // the exported predicate so the panel's self-hide and the App-level column
+    // gate can never disagree.
+    if (!agentStateHasContent(state)) return null
+    return (
+      <section
+        aria-label="agent state"
+        data-testid="agent-state-panel"
+        className="flex flex-col gap-2"
+      >
+        <header className="flex items-center justify-between">
+          <span className={LABEL}>Agent state</span>
+          {mode !== null ? <ModeBadge mode={mode} /> : null}
+        </header>
+        <PlanPromptCard prompt={planPrompt} {...(onAnswer !== undefined ? { onAnswer } : {})} />
+        <ToolProgressList progress={toolProgress} />
+        <CompactionMarkerCard marker={compaction} />
+        <RatelimitChip snapshot={ratelimit} />
+      </section>
+    )
+  },
+)
 
 /* ------------------------------------------------------------------ */
 /* Mode badge (mode.changed)                                           */
@@ -238,11 +258,23 @@ const RatelimitChip = memo(
 /* Plan input prompt (plan.input.requested) — PASSIVE notice           */
 /* ------------------------------------------------------------------ */
 
-/** A PASSIVE "agent is waiting on you" notice for a paused plan flow. The
- *  interactive answer path is OUT OF SCOPE — this only surfaces the prompt (and
- *  any offered choices) so a waiting agent is not invisible. Null ⇒ nothing. */
+/** A "agent is waiting on you" card for a paused plan flow.
+ *
+ *  PASSIVE (no `onAnswer`): surfaces the prompt + any offered choices so a
+ *  waiting agent is not invisible — byte-identical to the read-only baseline.
+ *
+ *  INTERACTIVE (`onAnswer` provided): adds an ANSWER affordance — a text input +
+ *  Submit/Cancel, and a button per offered choice — so a WEB user can close the
+ *  loop. Submitting calls `onAnswer(promptId, {decision:"answer",text})`;
+ *  Cancel calls `onAnswer(promptId, {decision:"cancelled"})`. Null ⇒ nothing. */
 const PlanPromptCard = memo(
-  ({ prompt }: { prompt: PlanInputRequestedMessage | null }): JSX.Element | null => {
+  ({
+    prompt,
+    onAnswer,
+  }: {
+    prompt: PlanInputRequestedMessage | null
+    onAnswer?: OnPlanInputAnswer
+  }): JSX.Element | null => {
     if (prompt === null) return null
     return (
       <section
@@ -253,16 +285,85 @@ const PlanPromptCard = memo(
           Waiting on you
         </h3>
         <p className="mt-1.5 break-words text-sm text-ink">{prompt.prompt}</p>
-        {prompt.choices !== undefined && prompt.choices.length > 0 ? (
-          <ul className="mt-2 list-inside list-disc space-y-0.5 marker:text-ink-faint">
-            {prompt.choices.map((c) => (
-              <li key={c} className="text-xs text-ink-secondary">
-                {c}
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        {onAnswer === undefined ? (
+          // PASSIVE: offered choices surface as a read-only list (byte-identical).
+          prompt.choices !== undefined && prompt.choices.length > 0 ? (
+            <ul className="mt-2 list-inside list-disc space-y-0.5 marker:text-ink-faint">
+              {prompt.choices.map((c) => (
+                <li key={c} className="text-xs text-ink-secondary">
+                  {c}
+                </li>
+              ))}
+            </ul>
+          ) : null
+        ) : (
+          <PlanPromptAnswerForm prompt={prompt} onAnswer={onAnswer} />
+        )}
       </section>
     )
   },
 )
+
+/** The interactive answer affordance for a paused plan-input prompt. Rendered
+ *  ONLY when `onAnswer` is provided (the passive card has no form). A free-text
+ *  reply (Submit) + a Cancel, plus a button per offered choice that answers with
+ *  the choice text verbatim. */
+const PlanPromptAnswerForm = ({
+  prompt,
+  onAnswer,
+}: {
+  prompt: PlanInputRequestedMessage
+  onAnswer: OnPlanInputAnswer
+}): JSX.Element => {
+  const [text, setText] = useState("")
+  const submit = (): void => {
+    onAnswer(prompt.promptId, { decision: "answer", text })
+    setText("")
+  }
+  const cancel = (): void => onAnswer(prompt.promptId, { decision: "cancelled" })
+  return (
+    <div className="mt-2 flex flex-col gap-2" data-testid="agent-state-plan-answer">
+      {prompt.choices !== undefined && prompt.choices.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {prompt.choices.map((c) => (
+            <button
+              key={c}
+              type="button"
+              data-testid="agent-state-plan-choice"
+              onClick={() => onAnswer(prompt.promptId, { decision: "answer", text: c })}
+              className="rounded-full bg-surface-input px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-surface"
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <textarea
+        data-testid="agent-state-plan-input"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Type your answer…"
+        rows={2}
+        className="w-full resize-y rounded-lg border border-line-subtle bg-surface px-2 py-1 text-xs text-ink"
+      />
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          data-testid="agent-state-plan-submit"
+          onClick={submit}
+          className="rounded-lg bg-info/15 px-2.5 py-1 text-xs font-medium text-info hover:bg-info/25"
+        >
+          Submit
+        </button>
+        <button
+          type="button"
+          data-testid="agent-state-plan-cancel"
+          onClick={cancel}
+          className="rounded-lg bg-black/[0.05] px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.08]"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
