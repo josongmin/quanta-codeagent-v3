@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   CRASH_RESUME_GATE,
+  CRASH_RESUME_PARTIAL_GATE,
   listSessions,
   loadSessionById,
   markSessionInterrupted,
@@ -20,8 +21,11 @@ import {
 // The LIVE turn chokepoint every surface funnels through (the wiring site).
 import { runSessionTurn } from "../../src/runner/orchestrate/session-turn-driver"
 import type { RuntimeSession } from "@/sdk/runtime"
-// ADR-0528 L2 auto-reinject seam.
-import { selectCrashResumeReinject } from "../../src/runner/orchestrate/crash-resume-wire"
+// ADR-0528 L2 auto-reinject + L3 partial seams.
+import {
+  attachCrashResumePartial,
+  selectCrashResumeReinject,
+} from "../../src/runner/orchestrate/crash-resume-wire"
 import { ExternalPromptQueue } from "../../src/runner/orchestrate/external-prompt-queue"
 import type { CrashResumeOffer } from "@/session"
 
@@ -213,6 +217,55 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
     // `next()` resolves without any stdin — the seed is already queued, so in the
     // loop's `Promise.race([rawLineReader, queue.next()])` the seed wins.
     expect(await q.next()).toBe("resume the interrupted task")
+  })
+
+  test("L3 partial: accumulates turn.output.delta, flushes the partial on EACH tool.invoked (event-driven, no per-token churn)", () => {
+    type Ev = { type: string; delta?: string }
+    let listener: ((ev: Ev) => void) | undefined
+    const session = {
+      subscribe: (l: (ev: Ev) => void) => {
+        listener = l
+        return () => {
+          listener = undefined
+        }
+      },
+    }
+    const flushed: string[] = []
+    const dispose = attachCrashResumePartial(
+      session,
+      { sessionId: "p1", userText: "task", env: { [CRASH_RESUME_GATE]: "1", [CRASH_RESUME_PARTIAL_GATE]: "1" } },
+      async (p) => {
+        flushed.push(p)
+      },
+    )
+    expect(listener).toBeDefined() // subscribed (both gates on)
+    listener?.({ type: "turn.output.delta", delta: "I will " })
+    listener?.({ type: "turn.output.delta", delta: "edit foo" })
+    expect(flushed).toEqual([]) // no flush mid-text (no tool boundary yet ⇒ no churn)
+    listener?.({ type: "tool.invoked" }) // BEFORE the risky tool ⇒ flush the partial so far
+    expect(flushed).toEqual(["I will edit foo"])
+    listener?.({ type: "turn.output.delta", delta: " then test" })
+    listener?.({ type: "tool.invoked" })
+    expect(flushed).toEqual(["I will edit foo", "I will edit foo then test"]) // cumulative
+    dispose()
+    expect(listener).toBeUndefined()
+  })
+
+  test("L3 partial default-OFF: base gate on but PARTIAL gate absent ⇒ NEVER subscribes (no-op)", () => {
+    let subscribed = false
+    const session = {
+      subscribe: () => {
+        subscribed = true
+        return () => undefined
+      },
+    }
+    const dispose = attachCrashResumePartial(
+      session,
+      { sessionId: "p2", userText: "x", env: { [CRASH_RESUME_GATE]: "1" } }, // partial gate OFF
+      async () => undefined,
+    )
+    expect(subscribed).toBe(false)
+    dispose()
   })
 
   test("DEFAULT-OFF: gate absent ⇒ withCrashResumeMarker writes NO marker (byte-identical)", async () => {

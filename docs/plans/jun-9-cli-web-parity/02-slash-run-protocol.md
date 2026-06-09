@@ -1,8 +1,10 @@
 # Ticket 02 — wire `thin-client-dispatch` + `control-request` to the session protocol
 
-> **REVISED (jun-09 audit)**: the original draft invented a `slash.run` verb + terminal-text capture. That duplicates two slices that already exist. This ticket instead **wires the existing designed mechanism** — the SOTA-aligned, non-duplicating path (IDE-spec build-order #2).
+> **REVISED v2 (jun-09 deep audit) — MOVED TO PHASE 2.** This WS-channel wire is for **mutations / live steering** (`set_model` / `set_permission_mode` / `set_thinking` / `interrupt`), which genuinely belong on the lease-guarded turn channel. **READOUTS do NOT use this** — they are out-of-band HTTP (index §2.5, ticket 05), because the single-writer lease throws mid-turn. Drop the `get_*` `ControlRequest` extension below (readouts aren't control-requests). Also note: `control-request`'s poll is mid-turn only, so an **idle** mutation needs a direct-apply path (or the existing identity/profile session verbs).
+>
+> _(v1 note, superseded for readouts:)_ the original draft invented a `slash.run` verb; this ticket instead wires the existing ADR-0493/0496 mechanism (non-duplicating, SOTA-aligned, IDE-spec build-order #2).
 
-**Phase**: 0 · **Depends**: 01 (for the `local` route only) · **Blocks**: 03, 04 · **Risk**: medium (core session kernel)
+**Phase**: ~~0~~ **2** · **Depends**: 01 (for the `local` route only) · **Risk**: medium (core session kernel)
 
 ## What already exists (do NOT re-implement)
 | Slice | What it gives | File | Wired? |

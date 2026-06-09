@@ -33,6 +33,7 @@ import { makeDocxWriteTool, makePptxWriteTool, makeXlsxWriteTool } from "./docum
 import { editTool, makeEditTool } from "./edit"
 import { type FetchRulesPort, fetchRulesTool } from "./fetch-rules"
 import { type FileHistoryStore, makeFileHistoryRewindTool } from "./file-history"
+import { makeNotebookEditTool } from "./notebook-edit/tool"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
@@ -644,6 +645,11 @@ export interface DefaultToolPorts {
    *  serializes in-memory and writes through the same FS-jail chokepoint the
    *  readers use; an existing target is written to a versioned `-vN` sibling. */
   officeAuthoring?: boolean
+  /** W6 (NotebookEdit P17) — when set, append `notebook_edit` (cell-level
+   *  str_replace/insert/delete on `.ipynb`, reusing the same FS jail `edit`
+   *  uses). Host sets this iff `QUANTA_NOTEBOOK_EDIT` is on; absent ⇒ tool not
+   *  registered (byte-identical default menu). No port — the editor is pure. */
+  notebookEdit?: boolean
   /** C1 — when set, append the artifact (Canvas) read/manage tools
    *  (`artifact_list` / `artifact_get` / `artifact_destroy`) bound to the
    *  session artifact registry. Absent ⇒ tools NOT registered (byte-identical).
@@ -888,6 +894,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
     base.push(
       makeFileHistoryRewindTool(ports.fileHistory, ports.fs ?? defaultFileSystemPort) as Tool,
     )
+  }
+  // W6 (NotebookEdit P17) — conditional `notebook_edit` registration. Absent ⇒
+  // tool NOT registered (byte-identical). Present ⇒ the cell editor bound to the
+  // SAME jailed FS port `edit`/`write` use (pure core, atomic write-back).
+  if (ports.notebookEdit === true) {
+    base.push(makeNotebookEditTool(ports.fs ?? defaultFileSystemPort) as Tool)
   }
   // CLUSTER D #5 — conditional registration of permission_propose_pattern. Absent
   // port ⇒ default set is byte-identical (the model never sees the tool). Present

@@ -1471,6 +1471,15 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "agent/loop/context-assembler.ts",
   },
   {
+    envKey: "QUANTA_NOTEBOOK_EDIT",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "notebook_edit tool — cell-level str_replace/insert/delete on .ipynb (W6, opt-in).",
+    readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
     envKey: "QUANTA_SHADOW",
     kind: "bool",
     default: false,
@@ -1496,6 +1505,16 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe:
       "§13.2 persisted interrupted-turn marker — detect a mid-turn crash on restart and offer resume (opt-in).",
+    readSite: "session/crash-resume.ts",
+  },
+  {
+    envKey: "QUANTA_CRASH_RESUME_PARTIAL",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "ADR-0528 L3 — keep the crash-resume marker's partial progress fresh mid-turn (flush on tool.invoked). Superset of QUANTA_CRASH_RESUME (opt-in).",
     readSite: "session/crash-resume.ts",
   },
   {

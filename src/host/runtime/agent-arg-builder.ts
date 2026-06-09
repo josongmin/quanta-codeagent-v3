@@ -851,6 +851,10 @@ const buildGatedToolPorts = (
     // Boolean port — the tools serialize pure-TS OOXML + write through the same
     // FS-jail chokepoint the readers use; no adapter to construct.
     ...(cfg.officeAuthoring ? { officeAuthoring: true } : {}),
+    // W6 (NotebookEdit P17) — gated `notebook_edit` cell editor. Default-OFF:
+    // tool menu byte-identical unless QUANTA_NOTEBOOK_EDIT === "1". Pure editor
+    // over the shared FS jail; boolean flag (no adapter to construct).
+    ...(cfg.notebookEdit ? { notebookEdit: true } : {}),
     // C2 — gated communicate_update tool. Default-OFF: tool menu byte-identical
     // unless QUANTA_PROGRESS_UPDATE === "1". Boolean port — the tool reads its
     // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from

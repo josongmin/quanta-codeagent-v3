@@ -385,6 +385,12 @@ export interface RuntimeConfig {
    *  real `.xlsx` / `.docx` files (pure-TS STORED-ZIP + OOXML, no office
    *  dependency) to jailed, versioned-sibling paths (never silent overwrite). */
   readonly officeAuthoring: boolean
+  /** W6 (NotebookEdit P17) `notebook_edit` tool gate (`QUANTA_NOTEBOOK_EDIT`).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ host sets NO
+   *  `DefaultToolPorts.notebookEdit`, tool not registered (byte-identical menu).
+   *  When true, the cell editor (str_replace/insert/delete on `.ipynb`) is
+   *  appended, writing through the same FS jail `edit`/`write` use. */
+  readonly notebookEdit: boolean
   /** H15 (jun-3-misc §3) reasoning carry-over gate (`QUANTA_REASONING_CARRYOVER`).
    *  OpenAI-Responses / o-series ONLY (the ChatGPT-OAuth subscription path).
    *  Strict opt-in (`=== "1"`). Default false ⇒ the responses-wire path is
@@ -1419,6 +1425,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     imageGen: gateOn(env, "QUANTA_IMAGE_GEN"),
     // H14b — strict `=== "1"` opt-in. Default false ⇒ no office authoring tools.
     officeAuthoring: gateOn(env, "QUANTA_OFFICE_AUTHORING"),
+    // W6 — strict opt-in. Default false ⇒ no notebook_edit tool (byte-identical).
+    notebookEdit: gateOn(env, "QUANTA_NOTEBOOK_EDIT"),
     // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
     // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
     reasoningCarryover: gateOn(env, "QUANTA_REASONING_CARRYOVER"),

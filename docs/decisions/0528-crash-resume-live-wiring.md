@@ -67,10 +67,10 @@ runSessionTurn(args.sessionId 있을 때):
 ## 단계
 
 - **P0+P1 (✅ LANDED jun-09, gate `QUANTA_CRASH_RESUME`)**: L1 `runSessionTurn` 단일 chokepoint 브래킷(mark-at-start/clear-on-resolve, 2 콜러 sessionId 전달) + L2 detect→분류(own/others)→**OWN auto-reinject(seedPrompts→queue→turn-1)** + OTHERS surface. TDD: `crash-resume-wire-hellgate`가 ① 실 `runSessionTurn` fake-RuntimeSession 구동(브래킷 끊으면 RED) ② `selectCrashResumeReinject` stranger-fence ③ seed-queue 즉시전달 ④ default-OFF byte-identity. **3R 어딧이 초안의 dead-path(`runOnce`) 배선 적발→실 chokepoint로 정정.**
-- **P2 (L3, gate `QUANTA_CRASH_RESUME_PARTIAL`)**: 이벤트-구동 partial flush + interrupt 시 rich-partial 보존(outcome-aware) + flush-policy 포트 + 매직넘버-금지 ratchet. (잔여 — 기능: 크래시 시 *진행분*까지 복구 / 왜: 현재 P0는 task-intent만 / ROI 저: 스트리밍 훅 필요 + 마진value)
+- **P2 (✅ LANDED jun-09, L3, gate `QUANTA_CRASH_RESUME_PARTIAL` ⊃ base)**: 마커 partial 신선도. **구조적 seam = `RuntimeSession.subscribe`**(폴링·매직넘버 없음): `attachCrashResumePartial`가 `turn.output.delta`를 누적하고 **`tool.invoked` 경계마다 flush**(툴실행 직전 = 크래시 최대위험 직전 체크포인트, event-driven ⇒ 툴콜당 1회 bounded write). runSessionTurn이 턴 동안 구독→resolve 시 detach. gate OFF ⇒ never subscribe(byte-identical). TDD: fake-subscribe로 delta누적·tool.invoked flush·cumulative·default-OFF. flush impl 주입가능.
 - **잔여 surface(P1+)**: offer를 surface-agnostic 이벤트로(`/state` 배지 + web/IDE 카드) — CLI는 stderr로 됐고 web/IDE 카드는 동일 이벤트 소비.
 
-P0+P1이 "크래시→재시작→OWN이면 task 자동 재개 / OTHERS면 노출"을 라이브화. partial 신선도(L3)만 P2.
+P0+P1+P2가 "크래시→재시작→OWN이면 task+진행분 자동 재개 / OTHERS면 노출"을 라이브화.
 
 ## Default posture / 안전성
 

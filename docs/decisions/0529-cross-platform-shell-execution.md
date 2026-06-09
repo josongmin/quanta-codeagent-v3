@@ -42,21 +42,20 @@ win32 + QUANTA_WIN_SHELL=auto:
 - **POSIX 우선이 ROI의 핵심**: Git-Bash 유저는 즉시 full parity(전 보안·스냅샷·quoting 재사용, 0 추가 표면). native dialect는 그게 없을 때만.
 - `buildBaseShellArgv`를 `(command, platform, probe, winShell) → ShellArgvDecision`로 **순수 확장** — `process.platform`·`which`·`spawn` 미접촉. darwin서 fake probe로 전 ladder 분기 테스트.
 
-### L2 — dialect-aware 보안
+### L2 — dialect-aware 보안 → **구조적 결론: dialect는 보안 입력이 아니다 (NEW CODE 불필요)**
 
-- **LLM classifier**: 변경 없음(이미 shell-agnostic).
-- **결정적 HARD_DENY 매처**: `dialect`를 주입 + dialect별 위험-패턴 테이블:
-  - `posix`: 현행 그대로(`rm -rf`, `:(){ :|:& };:`, redirect-to-device 등).
-  - `powershell`: `Remove-Item -Recurse -Force`, `-EncodedCommand`, `iex`/`Invoke-Expression`, `Set-ExecutionPolicy Bypass`.
-  - `cmd`: `del /s /q`, `rmdir /s`, `format`, `rd /s`.
-- **fail-closed**: POSIX 외 dialect서 패턴 매칭이 불명확하면 **LLM classifier로 승급**(더 보수적). 결정적 테이블은 경쟁사 검증된 위험표 + CC/Codex 규칙 베이스라인만 — **임의 패턴 추가 금지**([[no-heuristics-only-validated]]).
-- **불변식(hellgate)**: 어떤 dialect서도 HARD_DENY가 loose해지지 않음 — `rm -rf /`(posix) ≡ `del /s /q C:\`(cmd) ≡ `Remove-Item -Recurse -Force C:\`(pwsh)가 **동급 차단**. red-on-injection(dialect 추가가 보안경계 뚫으면 RED).
+> **jun-09 재검토 (구조적 해결):** 초안은 결정적 HARD_DENY 매처에 dialect별 위험표(pwsh `Remove-Item -Recurse -Force` 등)를 넣으려 했으나 — **보안 게이트가 이미 shell-agnostic이라 구조적으로 불필요**:
+> - quanta 보안경계는 ① **user-ask**(비-auto 모드: 모든 mutating 셸 명령을 사용자가 승인 — pwsh/cmd 포함) ② **LLM ClassifierPort**(auto 모드: `CLASSIFIER_SYSTEM_PROMPT`이 명령텍스트를 dialect 무관 추론, `pwsh -EncodedCommand`·base64까지 이미 규칙화). **둘 다 dialect를 안 본다.**
+> - 결정적 bash-syntax HARD_DENY(`rm -rf`)는 pwsh 명령에 안 매칭되지만, 그건 **fast-path 백스톱이 안 탈 뿐 silent-allow가 아님** — pwsh 위험명령은 여전히 user-ask 또는 LLM-classifier로 간다(보안구멍 0).
+> - pwsh/cmd 결정적 위험표를 **새로 발명하는 것은 Windows 실행을 검증할 수 없는 휴리스틱**([[no-heuristics-only-validated]] 위반) + 이미 상위 게이트가 커버하는 중복. → **명시적 non-goal.** dialect의 정당한 소비처는 보안이 아니라 snapshot/observability(L3·future).
+> - 불변식: 어떤 dialect서도 mutating 셸이 게이트를 우회 못 함 — 기존 user-ask/classifier 경로가 dialect-무관하게 보장(별도 hellgate 불요, 기존 권한 hellgate가 cover).
 
-### L3 — per-dialect snapshot
+### L3 — per-dialect snapshot → **구조적 결론: non-posix = no-snapshot degrade (이미 안전)**
 
-- `posix`: `bash-capture.ts`(ADR-0204) 그대로(Git-Bash도 bash 의미).
-- `powershell`: 신규 `powershell-capture`(`$PROFILE` 함수/alias/env dump) **또는 생략**(default — Windows 셸 스냅샷 ROI 낮음, env 상속만). `cmd`: 스냅샷 없음.
-- snapshot 부재 = degrade일 뿐(명령은 실행됨) — SnapshotSpawner no-throw 계약.
+> **jun-09 재검토:** `dialect`별 스냅샷 어댑터 매핑이 구조적 정답이고, 이미 안전하게 성립:
+> - `posix`(darwin/linux/Git-Bash/WSL): `bash-capture.ts`(ADR-0204) 재사용 — 변경 없음.
+> - `powershell`/`cmd`: 스냅샷 시스템은 bash/zsh 전용이라 **non-posix는 자동으로 no-snapshot(env 상속만)** — SnapshotSpawner no-throw degrade 계약 그대로. 명령은 실행되고, 사용자 `$PROFILE` 함수만 미주입(저ROI).
+> - 신규 `powershell-capture`(`$PROFILE` dump)는 **Windows 실행 검증 불가 + 저ROI** → **명시적 non-goal**(억지로 검증불가 spawn-args를 짜지 않는다). dialect 반환값은 이 future 어댑터 선택의 seam으로 남는다(dead 아님 — 구조적 분기점).
 
 ### L4 — darwin 검증가능 설계 (SOTA++ 핵심)
 
@@ -74,8 +73,8 @@ win32 + QUANTA_WIN_SHELL=auto:
 ## 단계
 
 - **P0 (L1 ladder + L4 순수설계, gate `QUANTA_WIN_SHELL=auto`)**: 발견 ladder + dialect 반환 + `ShellDiscoveryPort` + darwin fake-probe 전-분기 테스트. POSIX-우선이라 Git-Bash 유저 즉시 full parity. TDD red-first.
-- **P1 (L2 dialect 보안)**: deny-rule dialect 주입 + powershell/cmd 위험표 + fail-closed 승급 + cross-dialect hellgate(동급차단 red-on-injection).
-- **P2 (L3 snapshot)**: `powershell-capture`(opt) / posix 재사용.
+- **P1 (L2 보안) → 구조적으로 CLOSED, NEW CODE 불필요**: 게이트(user-ask/LLM-classifier)가 이미 shell-agnostic이라 dialect는 보안입력 아님. pwsh/cmd 결정적 위험표 발명은 검증불가 휴리스틱 + 중복 → non-goal(위 L2 재검토).
+- **P2 (L3 snapshot) → 구조적으로 CLOSED**: posix=bash-capture 재사용, non-posix=no-snapshot degrade(이미 안전). powershell-capture는 검증불가·저ROI non-goal. dialect 반환값=future 어댑터 선택 seam.
 
 각 단계 독립 PR. P0이 단독으로 Git-Bash 유저에게 full 셸 parity 제공.
 

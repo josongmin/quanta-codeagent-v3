@@ -1,8 +1,8 @@
 # Ticket 03 — daemon `host.dispatchThinClient`: resolve the route, then plan/exec
 
-> **REVISED (jun-09 audit)**: was "host.runLocalSlash → capture terminal text". Now: implement `host.dispatchThinClient` which **resolves the ADR-0493 route** for the command, then dispatches to the typed `control-request` planner (structured), the hoisted slash (`local`), or post-text. The `SlashContext`-capture below applies **only to the `local` route**.
+> **REVISED v2 (jun-09 deep audit) — PHASE 2 (paired with ticket 02).** This is the WS-channel dispatch for **mutations / steering**. **Readouts are out-of-band HTTP** (ticket 05), so the `local`-route slash-capture below is only for any *mutating* long-tail command with no typed `control-request` — likely a small set. If that set is empty, ticket 01's hoist isn't needed at all.
 
-**Phase**: 0 · **Depends**: 01, 02 · **Parallel with**: 04 · **Risk**: medium
+**Phase**: ~~0~~ **2** · **Depends**: 01 (if any `local`-route command exists), 02 · **Risk**: medium
 
 ## Goal
 Implement `SessionHost.dispatchThinClient` on the runtime host:

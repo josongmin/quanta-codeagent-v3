@@ -598,6 +598,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "NEW CATEGORY — Office document AUTHORING (generate real .xlsx / .docx) alongside image_gen. Pure-TS STORED-ZIP (CRC-32) + minimal-valid OOXML; NO office dependency (installs blocked). Opt-in EVERYWHERE (QUANTA_OFFICE_AUTHORING): writes files, so it never auto-seeds (CLI tool-menu reproducibility). Mutating — serialize in-memory then write through the same FS-jail chokepoint the readers use; an existing target lands at a versioned -vN sibling (never silent overwrite). No port to inject (self-contained). H14 PPTX follow-up added `pptx_write` (PresentationML) reusing this same STORED-ZIP + OOXML core; the matching `pptx_read` reader is BASE (always-on) alongside xlsx_read/docx_read.",
   },
   {
+    name: "notebook_edit",
+    origin: "@/tool/notebook-edit (via DefaultToolPorts.notebookEdit)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.notebookEdit",
+      env: "QUANTA_NOTEBOOK_EDIT",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "W6",
+    note: "W6 (NotebookEdit P17 / §16.5) — cell-level .ipynb editor: str_replace within a cell / insert a cell / delete a cell on the nbformat JSON, preserving every other cell + notebook metadata. Closes the long-standing NotebookEdit defer (quanta READ .ipynb via ADR-0481 but could not EDIT). Pure NEVER-throws core (editNotebook): a malformed notebook / missing-or-ambiguous match / out-of-range index ⇒ ok:false tool_result, never a crash. Mutating — reads/writes through the SAME @/storage FS jail edit/write use, atomic write-back. Opt-in EVERYWHERE (QUANTA_NOTEBOOK_EDIT): writes files, never auto-seeds; absent flag ⇒ tool not registered (byte-identical menu). Live-kernel cell EXECUTION is a separate deferred capability — edit-only.",
+  },
+  {
     name: "prompt_cache_status",
     origin: "@/tool (promptCacheStatusTool, via tier1 buildPromptCacheBlock)",
     gate: {

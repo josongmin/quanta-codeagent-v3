@@ -1,21 +1,16 @@
-# Ticket 05 — Phase 1: the 12 read-only observability readouts
+# Ticket 05 — Phase 1: the 12 read-only readouts (OUT-OF-BAND)
 
-> **REVISED (jun-09 audit)**: each command is assigned a **route** (ADR-0493 `thinClientDispatch` tag). The north-star readouts that benefit from structured panels use the **`control-request` `get_*`** route (typed effect, ticket 02); the niche text-only ones use `local`. This is the per-command tagging the codebase has 0 of today.
+> **REVISED v2 (jun-09 deep audit)**: readouts are **out-of-band HTTP queries**, NOT WS session verbs / control-requests. The WS turn channel throws `single_writer_lease_held` mid-turn ([scheduler.ts:759](../../../src/kernel/session/scheduler.ts#L759) → [lease.ts:25](../../../src/kernel/session/lease.ts#L25)), so a readout fired while the agent works would be rejected. The daemon already serves knobs this way ([knob-catalog-wire.ts](../../../src/apps/web-daemon/knob-catalog-wire.ts)). **Phase 1 does NOT depend on tickets 02-04** (those move to Phase 2 / mutations). See index §2.5.
 
-**Phase**: 1 · **Depends**: 0 (01-04) · **Risk**: low-medium (slot-binding + per-command route tagging)
+**Phase**: 1 · **Depends**: (optionally 01 if reusing CLI renderers) · **Risk**: low (HTTP route + host read-accessor + render)
 
 ## Goal
-Make the 12 read-only commands render real data on the web via their assigned route. After Phase 0 the *transport* + both route mechanisms work; this ticket (a) tags each command's `thinClientDispatch`, (b) for `control-request` readouts adds the `get_*` subtype + binds its ctx snapshot, (c) for `local` readouts binds the daemon **ctx slot**.
+Serve the 12 read-only readouts as **out-of-band HTTP routes** on the daemon, each reading the live session/host state and responding (request/response, per-client, lease-free, works idle + mid-turn).
 
-## Route assignment (the missing tags)
-| Command | Route | Backing |
-|---|---|---|
-| `/context` | `control-request` | `get_context_usage` (exists) |
-| `/state` | `control-request` | new `get_working_state` (ticket 02) |
-| `/plan` | `control-request` | new `get_plan` |
-| `/agents` | `control-request` | new `get_agents` |
-| `/cost` | `control-request` | new `get_cost` |
-| `/skills` `/capabilities` `/mcp` `/knobs` `/branches` `/why` `/memory` | `local` (text) initially | hoisted slash + ctx slot; promote to `get_*` in Phase 3 if a panel wants structure |
+## Mechanism
+- A `GET /state` / `GET /agents` / … route family (or one `GET /readout/:name`) added next to the existing `/threads` / `/config` / knobs routes in [server.ts](../../../src/apps/web-daemon/server.ts), behind the shared bearer-auth gate ([server.ts:825](../../../src/apps/web-daemon/server.ts#L825)).
+- Each handler reaches the live `RuntimeSession` via the session-registry ([session-registry.ts:17](../../../src/apps/web-daemon/session-registry.ts#L17)) and calls a **synchronous read accessor** on its host (no `await` that interleaves with a running turn ⇒ no torn read; JS single-thread makes a sync read between the turn's await-points safe).
+- The web fetches it (the `KnobsPanel` HTTP-fetch pattern is the template) and renders. Phase-3 upgrades the render to a native panel; Phase 1 can render the host's own text first.
 
 ## Per-command matrix (slot needed · status after Phase 0 · work)
 | Command | `SlashContext` slot(s) | Status | Work |

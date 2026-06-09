@@ -72,21 +72,55 @@ A second, deeper pass found a **fatal flaw** in the revision above (which routed
 
 ---
 
+## 2.7 ✅ VERIFIED IMPLEMENTATION STATUS (jun-09 round 3) — most readouts are ALREADY BUILT + RENDERED, just gated OFF
+
+The deep audit's "build HTTP readouts" framing was *still_ partly wrong: a verification of the actual code shows the daemon **already pushes** most readout data to the web over three live channels, and the frontend **already renders** them — they are simply behind three default-OFF gates. This is the ground truth the remaining-work plan must start from.
+
+### Tier A — built end-to-end, gated OFF (work = flip the gate + verify, ~no new code)
+| Readout | Channel (daemon push) | Renders in | Gate (default off) |
+|---|---|---|---|
+| `/plan` | agent-state `plan_created/updated/snapshot` ([messages.ts:88-94](../../../src/protocol/agent-state/messages.ts#L88)) | `PlanPanel` | `QUANTA_WEB_AGENT_STATE` |
+| mode + tool-progress ("what's it doing now") | agent-state `mode_changed`/`tool_progress` | `AgentStatePanel` | `QUANTA_WEB_AGENT_STATE` |
+| compaction / ratelimit | agent-state `context_compacted`/`ratelimit_snapshot` | `AgentStatePanel` | `QUANTA_WEB_AGENT_STATE` |
+| runs (running/waiting/done) + pending approvals | observability `snapshot`/`delta` (ObjectivePort/RunLedgerPort/ApprovalStateMachinePort) | `ObservabilityPane` | `QUANTA_OBSERVABILITY` |
+| `/context` usage | canvas `context.usage` | `UsageBar` / `ObservabilityPane` | `QUANTA_WEB_CANVAS` |
+| tool diffs | canvas `tool.diff` | `DiffPanel` | `QUANTA_WEB_CANVAS` |
+| cumulative cost/tokens | `turn.completed.tokenUsage` | `TokenCounter` | (always on) |
+
+App.tsx already wires `useAgentState` / `useObservabilityState` / `useContextUsage` / `useToolDiffs`. **So Tier A is a flip + the clean auto-hide UX (already added this session), not new wiring.** (Note: the user previously found the observability pane noisy → the gate-off is partly deliberate; Tier A must ship with the auto-hide / a toggle, not a wall of panels.)
+
+### Tier B — genuinely NOT on any channel (real new wiring)
+`/agents` (subagent **fleet roster** — `TaskRegistry` is not pushed; agent-state only has per-tool progress) · `/state` (rich **working-state**: posture / blockers / next-steps / owners — not pushed) · `/branches` · `/skills` · `/capabilities` · `/mcp` · `/memory` · `/why`. Split: fleet + working-state → **extend the agent-state push** (live, structured → native panel); skills/caps/mcp/memory/branches/why → **HTTP pull** out-of-band (like knobs, lease-free).
+
+### Tier C — mutations: MOSTLY ALREADY DONE (corrected — round 4)
+The "fully unwired" claim was wrong. What actually works on the web **today**:
+| Mutation | Path | Status |
+|---|---|---|
+| `/effort`, `/model` | web `buildLlmConfigSlashCommands` ([slash-llm-config.ts](../../../apps/web-frontend/src/components/slash-llm-config.ts)) → `POST /config` → env → next turn. Spliced live ([App.tsx:575](../../../apps/web-frontend/src/App.tsx#L575)); allowlist `QUANTA_MODEL`/`QUANTA_REASONING_EFFORT` ([slash-knobs.ts:60](../../../apps/web-frontend/src/components/slash-knobs.ts#L60)) | ✅ DONE |
+| knobs read + write | `KnobsPanel` ← `GET /api/knobs` + `POST /config` (closed allowlist, bearer auth, [server.ts:429](../../../src/apps/web-daemon/server.ts#L429)) | ✅ DONE |
+| `/interrupt` | `turn.cancel` (`useSendCancel`, App.tsx) | ✅ DONE |
+| approval respond | `EscalationCard` (ADR-0512 P3) | ✅ DONE |
+| login / logout | web `slash-auth` → `/auth/*` routes ([server.ts:967](../../../src/apps/web-daemon/server.ts#L967)) | ✅ DONE |
+| identity / tool-profile / transcript switch | session verbs `session.identity.set` / `session.tool_profile.set` / `session.transcript.replace` are **wired end-to-end** (reducer [:99/:120/:141](../../../src/kernel/session/reducer.ts#L99) → scheduler [:841-847](../../../src/kernel/session/scheduler.ts#L841) → host `setIdentityMode`/`setToolProfile`). Only the **web UI to emit them is missing** — ModeBadge ([ModeBadge.tsx](../../../apps/web-frontend/src/components/ModeBadge.tsx)) currently DISPLAYS the mode but doesn't switch it. | 🟡 backend DONE, UI = a dropdown |
+| `/debug` `/inbound` `/snooze` `/sticky-model` `/focus-chain` `/brief` | none | ❌ niche, unwired |
+
+**⇒ control-request / the new WS wire (tickets 02-04) is NOT needed for the common mutations.** They already ride `/config` (LLM knobs) or the wired session verbs (identity/profile) or `turn.cancel` (interrupt). A new typed control channel is only justified for the ❌ niche set — and even those could extend the `/config` allowlist or add a session verb more cheaply. **Re-scope tickets 02-04 to "only if the niche set proves worth a typed channel".**
+
 ## 3. Phase / ticket map
 
-### Phase 0 — keystone (this plan)
-| Ticket | What | Why it's first |
+### Phase 1 — read-only readouts, OUT-OF-BAND (this plan — the real first slice)
+| Ticket | What | Value |
 |---|---|---|
-| [01 — slash-registry hoist](01-slash-registry-hoist.md) | Move `SlashContext` + the surface-agnostic registry/handlers `apps/cli/slash/**` → `@/runner/slash/**`; leave only CLI-specific ctx construction in `apps/cli` | Fence blocks the daemon from reusing the handlers for the `local` route |
-| [02 — control-request + thin-client wire](02-slash-run-protocol.md) | **REVISED**: wire the EXISTING `resolveThinClientRoute` (ADR-0493) + `planControlRequest` (ADR-0496) to the session protocol via `control.request`/`control.response` verbs; **extend** `ControlRequest` with the missing `get_*` readout subtypes (Claude-Code-aligned). No new `slash.run` invention. | The designed wire the web is missing (IDE-spec build-order #2) |
-| [03 — daemon thin-client adapter](03-daemon-slash-adapter.md) | Daemon `host.dispatchThinClient`: resolve the route, then `planControlRequest` (structured) OR run the hoisted slash over a capture `SlashContext` (`local`) OR post-text | Turns the verb into a routed effect |
-| [04 — web send + render](04-web-slash-run-render.md) | SlashPalette server-routed rows send `control.request`/thin-client command (not prefill); render structured effect → panel, text → `SlashResultBlock` | Closes the loop in the UI |
+| [05 — read-only readouts (HTTP)](05-phase1-readonly-commands.md) | **REVISED v2**: out-of-band HTTP routes (like knobs) that read live session/host state + respond. No session verb / kernel / control-request / lease. The 12: `/state` `/agents` `/plan` `/context` `/cost` `/skills` `/knobs` `/mcp` `/capabilities` `/why` `/memory` `/branches` | see the agent's live state while it works — lease-free, works mid-turn |
+| [01 — slash-registry hoist](01-slash-registry-hoist.md) | **OPTIONAL** — only if Phase 1 reuses the CLI's text renderers server-side (fence blocks the daemon from `apps/cli`). If the web renders native, skip until Phase 2's `local` route needs it. | reuse CLI render, else N/A |
+| [06 — tracking + fc](06-tracking-and-fc.md) | Flip the Phase-1 features `web:missing→full`; ratchet to guard regression; per-phase DoD (`fc surface` already runs clean) | keeps parity from rotting |
 
-### Phase 1 — read-only observability readouts (this plan)
-| Ticket | What | North-star ROI |
+### Phase 2 — mutations / live steering (WS turn channel — moved here by the deep audit)
+| Ticket | What | Note |
 |---|---|---|
-| [05 — read-only commands](05-phase1-readonly-commands.md) | Bind the ctx slots for the 12 read-only commands; per-command works-now vs needs-slot matrix | `/state` `/agents` `/branches` `/plan` `/context` `/cost` `/skills` `/knobs` `/mcp` `/capabilities` `/why` `/memory` — the "what/why/next" surface on the web |
-| [06 — tracking + fc](06-tracking-and-fc.md) | Fix the `fc surface` schema blocker; flip the Phase-1 features `web:missing→full`; ratchet to guard regression; per-phase DoD | Institutionalizes parity so it can't silently rot |
+| [02 — control-request + thin-client wire](02-slash-run-protocol.md) | Wire the EXISTING `resolveThinClientRoute` (ADR-0493) + `planControlRequest` (ADR-0496) to the session protocol for **mutations**: `set_model`/`set_permission_mode`/`set_thinking`/`interrupt` (Claude-Code-aligned). NOT readouts. | belongs on the lease-guarded turn channel |
+| [03 — daemon thin-client adapter](03-daemon-slash-adapter.md) | Daemon `host.dispatchThinClient`: route → `planControlRequest` (mutate) / `local` slash (mutating long tail only) | reconcile with the "ghost" identity/profile verbs; add idle-apply path |
+| [04 — web send + render](04-web-slash-run-render.md) | Mutating SlashPalette rows send the control verb; render the structured effect | — |
 
 ### Later (sketched, not yet ticketed — Phase 2/3/4)
 - **Phase 2 (mutations)**: `/effort` `/identity` `/profile` `/debug` `/inbound` `/snooze`+`/resume` `/summarize-now` `/resume-turn` `/sticky-model` `/focus-chain` `/brief`. **Most map directly to `control-request` subtypes** — `/effort`→`set_thinking`, `/identity`/mode-cycle→`set_permission_mode`, `/model`→`set_model` (all already typed in ADR-0496), plus new `set_*` subtypes for the rest, aligned to the Claude Code table (IDE spec §2: `interrupt`/`rewind_files`/`set_max_thinking_tokens`/…). The 3 "ghost" session verbs (`session.identity.set` / `session.tool_profile.set`, [commands.ts:39-46](../../../src/protocol/session/commands.ts#L39)) become **redundant** with `set_permission_mode`/`set_model` control-requests — Phase 2 reconciles them (consolidate, don't run both channels). This is the "fold interrupt/cancel/set_mode/set_brief under the umbrella" follow-up ADR-0496 already names.
