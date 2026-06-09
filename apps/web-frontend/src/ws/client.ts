@@ -28,6 +28,7 @@
 
 import { computeRetryDelayMs } from "./reconnect"
 import {
+  decodeAgentStateFrame,
   decodeCanvasFrame,
   decodeEventFrame,
   decodeObservabilityFrame,
@@ -39,6 +40,7 @@ import {
   SESSION_PROTOCOL_VERSION,
 } from "./envelope"
 import type {
+  AgentStateMessage,
   CanvasMessage,
   ConnectionState,
   ObservabilityMessage,
@@ -76,6 +78,7 @@ export type ConnectionHandler = (state: ConnectionState) => void
 export type SnapshotHandler = (snapshot: SessionSnapshotLite) => void
 export type ObservabilityHandler = (message: ObservabilityMessage) => void
 export type CanvasHandler = (message: CanvasMessage) => void
+export type AgentStateHandler = (message: AgentStateMessage) => void
 
 /**
  * Minimal interface SessionClient depends on — the global `WebSocket` ctor

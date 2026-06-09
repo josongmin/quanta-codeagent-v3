@@ -13,6 +13,7 @@
  */
 
 import type {
+  AgentStateMessage,
   CanvasMessage,
   CommandEnvelope,
   EventEnvelope,
@@ -324,6 +325,67 @@ export const decodeCanvasFrame = (raw: unknown): CanvasMessage | null => {
   // would be silently mis-rendered.
   if (parsed.version !== CANVAS_PROTOCOL_VERSION) return null
   return isCanvasMessage(parsed.payload) ? parsed.payload : null
+}
+
+/* ------------------------------------------------------------------ */
+/* Agent-state channel (QUANTA_WEB_AGENT_STATE) — plan / mode /         */
+/* tool-progress / compaction / ratelimit frames                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Mirror of `AGENT_STATE_PROTOCOL_VERSION` upstream
+ * (`src/protocol/agent-state/messages.ts`). Decoupled from the other protocol
+ * versions on purpose — a v2 agent-state emitter to a v1 consumer is rejected
+ * (read with the wrong schema ⇒ silent mis-render), same gate as the daemon's
+ * decoder.
+ */
+export const AGENT_STATE_PROTOCOL_VERSION = "agent-state.v1" as const
+
+const AGENT_STATE_MESSAGE_KINDS = [
+  "plan.created",
+  "plan.snapshot",
+  "plan.updated",
+  "plan.input.requested",
+  "plan.input.resolved",
+  "mode.changed",
+  "tool.progress",
+  "context.compacted",
+  "ratelimit.snapshot",
+] as const
+
+const isAgentStateMessageKind = (value: unknown): value is AgentStateMessage["kind"] =>
+  isString(value) && (AGENT_STATE_MESSAGE_KINDS as readonly string[]).includes(value)
+
+/** Best-effort structural guard for an agent-state message payload. Mirrors
+ *  `isAgentStateMessage` upstream — tag + the universal `emittedAt`, no per-kind
+ *  deep validation (unknown fields are forward-compatible). */
+const isAgentStateMessage = (value: unknown): value is AgentStateMessage => {
+  if (!isRecord(value)) return false
+  if (!isAgentStateMessageKind(value.kind)) return false
+  return isNumber(value.emittedAt)
+}
+
+/**
+ * Decode an `agentState` wire frame into a typed agent-state message, or null
+ * on any shape mismatch. Wire envelope (mirrors the canvas / observability
+ * `{version, kind, payload}` shape): `{ version: "agent-state.v1", kind:
+ * "agentState", payload }`. NO-THROW: the client logs + drops on null.
+ */
+export const decodeAgentStateFrame = (raw: unknown): AgentStateMessage | null => {
+  if (!isString(raw)) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+  if (!isRecord(parsed)) return null
+  if (parsed.kind !== "agentState") return null
+  if (!isString(parsed.version) || parsed.version.length === 0) return null
+  // Gate the version we claim to carry: a v2 emitter read with the v1 schema
+  // would be silently mis-rendered.
+  if (parsed.version !== AGENT_STATE_PROTOCOL_VERSION) return null
+  return isAgentStateMessage(parsed.payload) ? parsed.payload : null
 }
 
 /**
