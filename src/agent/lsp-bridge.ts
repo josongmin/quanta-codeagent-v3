@@ -4,6 +4,7 @@ import {
   type LspClient,
   PyrightAdapter,
   type RenameWorkspaceEdit,
+  RustAnalyzerAdapter,
   TypescriptAdapter,
 } from "@/lsp"
 import { errMessage, logger } from "@/shared"
@@ -58,6 +59,10 @@ const TYPESCRIPT: ServerSpec = {
   bin: "typescript-language-server",
   create: (cwd) => new TypescriptAdapter({ cwd }),
 }
+const RUST_ANALYZER: ServerSpec = {
+  bin: "rust-analyzer",
+  create: (cwd) => new RustAnalyzerAdapter({ cwd }),
+}
 
 /**
  * Single source of extension→server truth (OCP): adding a language is ONE
@@ -68,6 +73,7 @@ const TYPESCRIPT: ServerSpec = {
 const SERVERS: ReadonlyArray<{ exts: readonly string[]; spec: ServerSpec }> = [
   { exts: [".py", ".pyi"], spec: PYRIGHT },
   { exts: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"], spec: TYPESCRIPT },
+  { exts: [".rs"], spec: RUST_ANALYZER },
 ]
 
 /** Pick the server for a file by extension, or `null` if unsupported. */

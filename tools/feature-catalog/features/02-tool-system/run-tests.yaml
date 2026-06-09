@@ -1,0 +1,43 @@
+id: run-tests
+title: run_tests — structured multi-language test runner (detect + run + normalized evidence)
+section: 2
+subsystem: tool-system
+order: 61
+maturity: L3
+status: opt-in
+ui_surfaces: [cli, web]
+monitoring: "tool_result: normalized {passed, failed:[{name,file,line,message}]}, or ok:false on detect/spawn/parse fault"
+modes: [n-a]
+configurable: "QUANTA_TEST_RUNNER (strict opt-in) → DefaultToolPorts.testRunner"
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:multilang-debug", "high-risk", "default-off", "code-execution"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "DefaultToolPorts.testRunner conditional registration in src/tool/index.ts; gated by cfg.testRunner in host/runtime/agent-arg-builder.ts (same seam as debug_inspect)"
+    web: "rides the agent-arg-builder composition the daemon-backed session uses"
+purpose: |
+  The failure-evidence half of the Evidence Packet Builder. Detects the
+  project toolchain from marker files (Cargo.toml→`cargo test`, go.mod→
+  `go test -json ./...`, pyproject/setup.py/setup.cfg→`python3 -m unittest
+  discover -v`, package.json→`npm test`) and runs the suite, returning a
+  NORMALIZED {passed, failed:[{name,file,line,message}]}.
+
+  Layers (src/tool/testrun/): detect (pure, injected exists-port) · parse (pure
+  per-language parsers pinned to VERBATIM real output — go JSON event stream /
+  cargo libtest text / python unittest text; NEVER-throws) · tool (FS-jail
+  detection + injected spawn port).
+
+  HIGH RISK: running a suite EXECUTES the project's test code, so the tool is
+  always-confirm (like bash) AND default-OFF. NEVER throws — detect/spawn/parse
+  faults collapse to ok:false. Real-verified 2026-06-10 against cargo 1.95 /
+  go 1.25.4 / python3 unittest with known-failing suites (failing test name +
+  file:line + message extracted).
+tests:
+  - tests/unit/tool/testrun/parse.test.ts
+  - tests/unit/tool/testrun/detect.test.ts
+  - tests/unit/tool/testrun/run-tests-real-e2e.test.ts

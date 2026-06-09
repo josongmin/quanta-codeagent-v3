@@ -8,9 +8,21 @@
  *
  *  Env policy is unchanged: the full parent env is intentionally NOT inherited
  *  so host secrets never reach an arbitrary server; only PATH is kept so the
- *  command resolves, plus anything the config explicitly opted in. */
+ *  command resolves, plus anything the config explicitly opted in.
+ *
+ *  Egress-proxy carve-out (H3): the non-inheritance above is a SECRET-leak
+ *  defense — it withholds host API keys from an arbitrary server. It is NOT an
+ *  egress-gating decision. When the operator turns ON `QUANTA_NETWORK_PROXY`,
+ *  the loopback proxy's `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars (the SAME
+ *  enforcement signals bash/docker children already receive via
+ *  `ToolContext.proxyEnv`) MUST also reach the MCP server child — otherwise the
+ *  server's own sockets bypass the allowlist entirely. These keys carry no host
+ *  secrets, only the proxy address, so injecting them preserves the secret
+ *  defense. The injection is byte-identical when the proxy is OFF: an absent
+ *  `proxyEnv.address` leaves `withProxyEnv` a no-op (same env, no proxy keys). */
 
 import type { Subprocess } from "bun"
+import { type ProxyEnvInput, withProxyEnv } from "@/runtime/network-proxy"
 import { errMessage, logger } from "@/shared"
 import { encodeMessage, LineReader } from "../jsonrpc"
 import type { McpServerConfig } from "../types"
@@ -25,11 +37,20 @@ import type {
  *  host secrets never reach an arbitrary server; only PATH is kept so the
  *  command resolves, plus anything the config explicitly opted in.
  *  (Moved verbatim from `../client.ts` — byte-identical.) */
-const buildEnv = (configEnv?: Record<string, string>): Record<string, string> => {
+const buildEnv = (
+  configEnv?: Record<string, string>,
+  proxyEnv?: ProxyEnvInput,
+): Record<string, string> => {
   const base: Record<string, string> = {}
   const path = process.env.PATH
   if (path !== undefined) base.PATH = path
-  return configEnv === undefined ? base : { ...base, ...configEnv }
+  const withConfig = configEnv === undefined ? base : { ...base, ...configEnv }
+  // Egress-proxy carve-out (H3): inject HTTP_PROXY/HTTPS_PROXY/NO_PROXY when —
+  // and ONLY when — a live proxy address is supplied. With no address (proxy
+  // OFF) `withProxyEnv` returns the SAME object unchanged ⇒ byte-identical.
+  // The result is narrowed back to a plain string record (these keys are always
+  // string-valued; no `undefined` is introduced).
+  return withProxyEnv(withConfig, proxyEnv ?? {}) as Record<string, string>
 }
 
 /** Optional spawn seam so tests can drive the transport without a real
@@ -51,12 +72,18 @@ const defaultSpawn: StdioSpawnFn = (command, opts) =>
 export interface StdioTransportOpts {
   /** Spawn seam (test injection). Default = `Bun.spawn`. */
   readonly spawn?: StdioSpawnFn
+  /** Egress-proxy env to inject into the spawned server (H3). Supplied by the
+   *  wiring site from a live {@link withEgressProxy} context. Absent / no
+   *  `address` ⇒ NO proxy keys are added (byte-identical to the pre-H3
+   *  transport). Carries the proxy ADDRESS only — never a host secret. */
+  readonly proxyEnv?: ProxyEnvInput
 }
 
 /** Newline-delimited JSON-RPC over a spawned subprocess's stdio. */
 export class StdioMcpTransport implements McpTransport {
   private readonly config: McpServerConfig
   private readonly spawnFn: StdioSpawnFn
+  private readonly proxyEnv: ProxyEnvInput
   private readonly reader = new LineReader()
   private readonly messageHandlers = new Set<McpTransportMessageHandler>()
   private readonly exitHandlers = new Set<McpTransportExitHandler>()
@@ -69,6 +96,7 @@ export class StdioMcpTransport implements McpTransport {
   constructor(config: McpServerConfig, opts: StdioTransportOpts = {}) {
     this.config = config
     this.spawnFn = opts.spawn ?? defaultSpawn
+    this.proxyEnv = opts.proxyEnv ?? {}
   }
 
   async start(): Promise<void> {

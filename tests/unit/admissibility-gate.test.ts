@@ -644,7 +644,12 @@ describe("runAdmissibilityGate: parity with dispatchTool", () => {
         expectPreview: null,
       },
       {
-        name: "always-confirm WITHOUT HITL ⇒ bypass allows it (tier ignored)",
+        // always-confirm stays OPT-IN (`hitl.enabled`) — WITHOUT it, the tier is
+        // not enforced and mode policy decides (bypass allows). Universalizing
+        // this is Phase-2 (bash-without-sandbox self-reports always-confirm, so a
+        // blanket flip would gate every shell call). hand-off-required IS already
+        // universal — see hand-off-required-universal-e2e.test.ts.
+        name: "always-confirm WITHOUT HITL ⇒ bypass allows it (tier opt-in, Phase-2)",
         tool: alwaysConfirm,
         input: {},
         permission: { mode: "bypass" },

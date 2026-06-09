@@ -35,6 +35,7 @@ import { type FetchRulesPort, fetchRulesTool } from "./fetch-rules"
 import { type FileHistoryStore, makeFileHistoryRewindTool } from "./file-history"
 import { makeDebugInspectTool } from "./debug/tool"
 import { makeNotebookEditTool } from "./notebook-edit/tool"
+import { makeRunTestsTool } from "./testrun/tool"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
@@ -656,6 +657,10 @@ export interface DefaultToolPorts {
    *  variables). Host sets this iff `QUANTA_DEBUG_TOOLS` is on; absent ⇒ tool
    *  not registered (byte-identical). High-risk (executes user code). */
   debugTools?: boolean
+  /** Epic-2 — when set, append `run_tests` (detect toolchain + run suite +
+   *  normalized pass/fail evidence). Host sets this iff `QUANTA_TEST_RUNNER` is
+   *  on; absent ⇒ tool not registered (byte-identical). High-risk (runs test code). */
+  testRunner?: boolean
   /** C1 — when set, append the artifact (Canvas) read/manage tools
    *  (`artifact_list` / `artifact_get` / `artifact_destroy`) bound to the
    *  session artifact registry. Absent ⇒ tools NOT registered (byte-identical).
@@ -912,6 +917,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // (high-risk: executes the program under a debug adapter, always-confirm tier).
   if (ports.debugTools === true) {
     base.push(makeDebugInspectTool() as Tool)
+  }
+  // Epic-2 — conditional `run_tests` registration. Absent ⇒ NOT registered
+  // (byte-identical). Present ⇒ the structured test-runner bound to the real
+  // FS jail + spawn port (high-risk: runs the project's test code, always-confirm).
+  if (ports.testRunner === true) {
+    base.push(makeRunTestsTool({ fs: ports.fs ?? defaultFileSystemPort }) as Tool)
   }
   // CLUSTER D #5 — conditional registration of permission_propose_pattern. Absent
   // port ⇒ default set is byte-identical (the model never sees the tool). Present

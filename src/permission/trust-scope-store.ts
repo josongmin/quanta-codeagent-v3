@@ -320,41 +320,68 @@ const serializeFile = (state: PersistentTrustScopeFile): string => {
   return `${JSON.stringify({ version: STATE_VERSION, grants: ordered }, null, 2)}\n`
 }
 
-/** 3-way merge: peer-added records survive ours; locally-revoked records stay
- *  revoked. We use grantedAt+tool+actionKey+pattern as the identity key. */
-const mergeFiles = (args: {
-  onDisk: PersistentTrustScopeFile | null
-  inMemory: PersistentTrustScopeFile
-  baseline: PersistentTrustScopeFile | null
-}): PersistentTrustScopeFile => {
-  if (args.onDisk === null) return args.inMemory
-  // Single-process identity law: when onDisk deep-equals baseline, return inMemory verbatim.
-  if (args.baseline !== null && serializeFile(args.onDisk) === serializeFile(args.baseline)) {
-    return args.inMemory
-  }
-  const out: Record<string, PersistentTrustScopeRecord[]> = {}
-  const projects = new Set<string>([
-    ...Object.keys(args.onDisk.grants),
-    ...Object.keys(args.inMemory.grants),
-  ])
-  const recordId = (r: PersistentTrustScopeRecord): string =>
-    `${r.tool}|${r.actionKey ?? ""}|${r.commandPattern ?? ""}|${r.grantedAt}`
-  for (const project of projects) {
-    const diskBucket = args.onDisk.grants[project] ?? []
-    const memBucket = args.inMemory.grants[project] ?? []
-    const baselineBucket = args.baseline?.grants[project] ?? []
-    const baselineIds = new Set(baselineBucket.map(recordId))
-    const memIds = new Set(memBucket.map(recordId))
-    const merged: PersistentTrustScopeRecord[] = [...memBucket]
-    for (const r of diskBucket) {
-      const id = recordId(r)
-      // Peer-added (in disk, not in our baseline, not currently in mem) ⇒ adopt.
-      if (!baselineIds.has(id) && !memIds.has(id)) merged.push(r)
+/** Stable identity key for a record (tool+actionKey+pattern+grantedAt). Used by
+ *  both the merge and the tombstone set. `projectKey` is prefixed so the same
+ *  record id in two project buckets is never conflated. */
+const recordIdentity = (projectKey: string, r: PersistentTrustScopeRecord): string =>
+  `${projectKey} ${r.tool}|${r.actionKey ?? ""}|${r.commandPattern ?? ""}|${r.grantedAt}`
+
+/**
+ * Merge factory closing over a per-instance TOMBSTONE set of records this
+ * instance has explicitly revoked / consumed.
+ *
+ * WHY a tombstone set (not the prior baseline-diff): the previous
+ * `!baselineIds.has(id)` heuristic dropped any disk record that was in our
+ * baseline but not in our current in-memory bucket — which silently included
+ * PEER records we adopted into baseline on a prior flush (we never re-list a
+ * peer's grant in our OWN in-memory bucket). Under concurrent multi-process
+ * grant that manifested as a total lost-update: process A would re-read B's
+ * records, fold them into baseline, then on its NEXT flush treat them as
+ * "locally deleted" and clobber them — last-writer wins, the security grant of
+ * the loser silently vanishes (TOCTOU lost-update).
+ *
+ * The correct invariant is: a disk record is dropped ONLY when THIS instance
+ * actually revoked/consumed it (recorded as a tombstone). Every other disk
+ * record — a peer's grant we have not tombstoned — is adopted (union). This
+ * keeps concurrent grants lossless while still honoring a local revoke across a
+ * concurrent peer write.
+ */
+const makeMergeFiles =
+  (tombstones: ReadonlySet<string>) =>
+  (args: {
+    onDisk: PersistentTrustScopeFile | null
+    inMemory: PersistentTrustScopeFile
+    baseline: PersistentTrustScopeFile | null
+  }): PersistentTrustScopeFile => {
+    if (args.onDisk === null) return args.inMemory
+    // NOTE: there is intentionally NO "onDisk deep-equals baseline ⇒ return
+    // inMemory" fast-path. `inMemory` holds only THIS instance's own grants; a
+    // peer record we adopted into baseline on a prior flush is NOT in inMemory,
+    // so returning inMemory verbatim would silently drop it (the exact
+    // concurrent-grant lost-update we are sealing). The union merge below
+    // already collapses to inMemory's records when the disk has nothing new, so
+    // the single-writer path stays correct without the unsafe shortcut.
+    const out: Record<string, PersistentTrustScopeRecord[]> = {}
+    const projects = new Set<string>([
+      ...Object.keys(args.onDisk.grants),
+      ...Object.keys(args.inMemory.grants),
+    ])
+    for (const project of projects) {
+      const diskBucket = args.onDisk.grants[project] ?? []
+      const memBucket = args.inMemory.grants[project] ?? []
+      const memIds = new Set(memBucket.map((r) => recordIdentity(project, r)))
+      const merged: PersistentTrustScopeRecord[] = [...memBucket]
+      for (const r of diskBucket) {
+        const id = recordIdentity(project, r)
+        // Adopt a peer/disk record UNLESS we already hold it in memory OR we
+        // explicitly tombstoned (revoked/consumed) it. No baseline inference —
+        // that was the source of the concurrent-grant lost-update.
+        if (!memIds.has(id) && !tombstones.has(id)) merged.push(r)
+      }
+      if (merged.length > 0) out[project] = merged
     }
-    if (merged.length > 0) out[project] = merged
+    return { version: STATE_VERSION, grants: out }
   }
-  return { version: STATE_VERSION, grants: out }
-}
 
 /** Compose two file states — overlay wins on identical (project, recordId).
  *  Used to fold the project overlay over the global file in read-only memory.
@@ -477,6 +504,17 @@ export const createPersistentTrustScopeRegistry = (
   let globalState: PersistentTrustScopeFile = { version: STATE_VERSION, grants: {} }
   let overlayState: PersistentTrustScopeFile = { version: STATE_VERSION, grants: {} }
 
+  // Per-instance tombstones: identities this instance has revoked/consumed since
+  // construction. Threaded into the merge so a concurrent peer's flush does NOT
+  // resurrect a record we deleted, while every NON-tombstoned peer record is
+  // adopted (union) — the fix for the concurrent-grant lost-update.
+  const tombstones = new Set<string>()
+  const mergeFiles = makeMergeFiles(tombstones)
+  /** Record an explicit local removal so the merge never re-adopts it. */
+  const tombstone = (projectKey: string, record: PersistentTrustScopeRecord): void => {
+    tombstones.add(recordIdentity(projectKey, record))
+  }
+
   const globalFile: JsonStateFile<PersistentTrustScopeFile> = createJsonStateFile({
     filePath: opts.filePath ?? defaultTrustScopeStatePath(),
     debounceMs,
@@ -528,6 +566,7 @@ export const createPersistentTrustScopeRegistry = (
    *  durably survives a crash. Centralized so the call site stays a single
    *  guard. */
   const consumeOnceOnly = (projectKey: string, win: WinningHit): void => {
+    tombstone(projectKey, win.record)
     if (win.layer === "overlay") {
       overlayState = removeRecord(overlayState, projectKey, win.record)
       if (overlayFile !== null) overlayFile.flushDebounced(() => overlayState)
@@ -548,6 +587,8 @@ export const createPersistentTrustScopeRegistry = (
     const list = state.grants[projectKey] ?? []
     const idx = list.findIndex(pred)
     if (idx < 0) return false
+    const removed = list[idx]
+    if (removed !== undefined) tombstone(projectKey, removed)
     if (layer === "overlay") {
       overlayState = removeAt(overlayState, projectKey, idx)
       if (overlayFile !== null) overlayFile.flushDebounced(() => overlayState)

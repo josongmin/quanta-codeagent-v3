@@ -46,22 +46,33 @@ const turnCalling = (tool: string, id: string): StreamEvent[][] => [
   ],
 ]
 
-const tool = (name: string, counts: { n: number }, tier?: HITLTier): Tool => ({
+/** A mutating tool. Defaults to the `pre-approval-ok` tier (the realistic tier
+ *  for an ordinary write/edit/bash-class tool: mode policy decides — default
+ *  asks, bypass auto-runs). Pass an explicit tier for the security boundaries. */
+const tool = (name: string, counts: { n: number }, tier: HITLTier = "pre-approval-ok"): Tool => ({
   name,
   description: name,
   inputSchema: z.object({}).passthrough(),
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  ...(tier !== undefined ? { hitlTier: () => tier } : {}),
+  hitlTier: () => tier,
   async *execute(): AsyncIterable<ToolEvent> {
     counts.n += 1
     yield { type: "result", result: { ok: true, output: "ran" } }
   },
 })
 
+/** A read-only tool ⇒ inferred tier `none` ⇒ allowed in every mode without an ask. */
 const readOnlyTool = (name: string, counts: { n: number }): Tool => ({
-  ...tool(name, counts),
+  name,
+  description: name,
+  inputSchema: z.object({}).passthrough(),
   isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+  async *execute(): AsyncIterable<ToolEvent> {
+    counts.n += 1
+    yield { type: "result", result: { ok: true, output: "ran" } }
+  },
 })
 
 /** The web daemon's live permission proxy (runtime-factory.ts). */
@@ -101,6 +112,11 @@ const harness = async (args: {
     maxTurns: 8,
     signal: abort.signal,
     onConfirm: args.onConfirm,
+    // Mirror the web daemon's security config (runtime-factory.ts): the HITL
+    // gate enforces hand-off-required ⇒ deny / always-confirm ⇒ ask EVEN under
+    // bypass. A source guard (web-daemon-hitl-enabled) pins that the real
+    // factory sets this, so this mirror can't drift to a false-green.
+    hitl: { enabled: true },
   }
   const { runtime } = await createRuntimeFromAgentConfigBase({
     base,

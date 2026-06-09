@@ -26,7 +26,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { lspDiagnosticsProvider } from "@/agent/lsp-bridge"
+import { lspDiagnosticsProvider, lspExtensionToLanguage } from "@/agent/lsp-bridge"
 
 describe("LSP bridge — binary availability probe", () => {
   test("bogus dockerBin-equivalent (typescript-language-server replacement) → returns null PROMPTLY", async () => {
@@ -120,4 +120,12 @@ describe("LSP bridge — binary availability probe", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 5_000)
+
+  test("OCP registry: .rs maps to rust-analyzer (Epic-1 language add)", () => {
+    const map = lspExtensionToLanguage()
+    expect(map.get(".rs")).toBe("rust-analyzer")
+    // Existing languages still mapped (no regression from the new entry).
+    expect(map.get(".py")).toBe("pyright-langserver")
+    expect(map.get(".ts")).toBe("typescript-language-server")
+  })
 })

@@ -263,6 +263,13 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       cwd,
       maxTurns: 200,
       signal: abort.signal,
+      // SECURITY (jun-10) — enable the HITL 4-tier gate so the per-turn
+      // permission gate enforces `hand-off-required` ⇒ HARD DENY and
+      // `always-confirm` ⇒ ask EVEN under `bypass`/`acceptEdits`. Without this
+      // the daemon's `session.permission.set("bypass")` would blanket-allow
+      // every tool incl. hand-off-required ones — CLI parity
+      // (`apps/cli/.../runtime-context-compose.ts` wires the same rails).
+      hitl: { enabled: true },
       ...(subagent !== undefined ? { subagent } : {}),
       ...(skills !== undefined ? { skills } : {}),
       ...(canvasUsage !== undefined ? { onPromptAssembled: canvasUsage.sink } : {}),

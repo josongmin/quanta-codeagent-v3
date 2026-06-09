@@ -1,0 +1,53 @@
+id: lsp-rust-analyzer-adapter
+title: RustAnalyzerAdapter — rust-analyzer stdio adapter (Rust)
+section: 9
+subsystem: LSP — Rust adapter
+order: 17
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:ipc", "absorbed:multilang-debug"]
+depends_on: [lsp-pyright-adapter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "registered in the lsp-bridge SERVERS table (.rs → rust-analyzer); reachable via the lsp_nav tool import graph"
+    web: "pure internal per-language LSP adapter (ui_surfaces n-a) — no UI affordance on any surface"
+purpose: |
+  Per-language adapter on top of `LspClient` base for `rust-analyzer` over
+  stdio (jun-10 multilang-debug Epic-1). Minimal contribution surface — only
+  the launch argv default `["rust-analyzer"]` (NO `--stdio` flag, unlike
+  pyright/tsserver: rust-analyzer speaks LSP on stdio by default) and a
+  constant `languageIdFor: () => "rust"`. All nav RPCs (definition /
+  references / hover / typeDefinition / implementation / documentSymbol /
+  workspaceSymbol / call-hierarchy / prepareRename), the stdio handshake, and
+  the Content-Length framing are inherited from `LspClient`. Wired into the
+  OCP `SERVERS` registry in `lsp-bridge.ts` (`.rs` extension) so `lsp_nav`
+  serves Rust with zero per-tool change. Real-verified against rust-analyzer
+  1.95.0 (definition + hover resolve through a live cargo project).
+evidence:
+  code:
+    - src/lsp/adapters/rust-analyzer.ts
+    - src/lsp/adapters/base.ts
+    - src/agent/lsp-bridge.ts
+  adrs: [15]
+  tests:
+    unit:
+      - tests/unit/lsp-bridge-probe.test.ts
+    integration:
+      - tests/unit/lsp/rust-analyzer-real-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Third nav-supported language (after Python/TypeScript). Rust DEBUGGING
+  (DAP) rides the existing lldb-dap path (debug_inspect adapter:lldb /
+  adapterCommand), real-verified separately — see debug-inspect.yaml. New
+  languages follow the same shape (argv + languageIdFor + one SERVERS entry).

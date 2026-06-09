@@ -14,11 +14,14 @@
  *   terminate. A timeout guards every wait so a wedged adapter can never hang
  *   the tool.
  */
-import type { DapClient } from "./dap-client"
+import type { DapClient, DapResponse } from "./dap-client"
 
 export interface DapBreakpoint {
   readonly file: string
   readonly line: number
+  /** Optional DAP conditional-breakpoint expression — the adapter only stops
+   *  when it evaluates truthy in the program's context (e.g. `i == 3`). */
+  readonly condition?: string
 }
 
 export interface InspectSpec {
@@ -48,7 +51,7 @@ export type Inspection =
       readonly variables: readonly ScopeVars[]
       readonly evaluated?: { readonly expression: string; readonly result: string }
     }
-  | { readonly outcome: "exited"; readonly exitCode?: number }
+  | { readonly outcome: "exited"; readonly exitCode?: number; readonly breakpointsBound?: boolean }
   | { readonly outcome: "error"; readonly message: string }
 
 export interface InspectOptions {
@@ -128,18 +131,37 @@ export const inspectViaDap = async (
     // Wait for the adapter to be configuration-ready (triggered by launch).
     await withTimeout(initializedP, stopTimeoutMs, undefined)
 
-    // Set breakpoints grouped per source file.
-    const byFile = new Map<string, number[]>()
+    // Set breakpoints grouped per source file (preserving per-bp condition).
+    const byFile = new Map<string, { line: number; condition?: string }[]>()
     for (const bp of spec.breakpoints) {
-      const lines = byFile.get(bp.file) ?? []
-      lines.push(bp.line)
-      byFile.set(bp.file, lines)
+      const arr = byFile.get(bp.file) ?? []
+      arr.push({ line: bp.line, ...(bp.condition !== undefined ? { condition: bp.condition } : {}) })
+      byFile.set(bp.file, arr)
     }
-    for (const [file, lines] of byFile) {
-      await client.request("setBreakpoints", {
-        source: { path: file },
-        breakpoints: lines.map((line) => ({ line })),
-      })
+    // Track whether ANY breakpoint actually bound — an adapter returns
+    // `verified:false` when it can't map a {file,line} to real code (missing
+    // debug info, or a source-path mismatch e.g. /tmp vs /private/tmp). If none
+    // bind and the program then exits, that is the real reason — far more useful
+    // than a bare "ran to completion".
+    let anyRequested = false
+    let anyVerified = false
+    // Adversarial-audit fix: only TRUST a verified-verdict when EVERY
+    // setBreakpoints call actually returned a real response. If any timed
+    // out/errored, we can't conclude "couldn't bind" (the adapter, not the
+    // binary, is at fault) — leave breakpointsBound undefined (no false NOTE).
+    let allResponded = true
+    for (const [file, bps] of byFile) {
+      anyRequested = anyRequested || bps.length > 0
+      const bpRes = await withTimeout<DapResponse>(
+        client.request("setBreakpoints", { source: { path: file }, breakpoints: bps }),
+        stopTimeoutMs,
+        { success: false, message: "setBreakpoints timed out" },
+      )
+      if (!bpRes.success) {
+        allResponded = false
+        continue
+      }
+      if (asArr(asObj(bpRes.body).breakpoints).some((b) => asObj(b).verified === true)) anyVerified = true
     }
     await client.request("configurationDone")
 
@@ -167,7 +189,13 @@ export const inspectViaDap = async (
       client.dispose()
       return { outcome: "error", message: stopped.message }
     }
-    if (stopped.kind === "terminated") return { outcome: "exited" }
+    if (stopped.kind === "terminated")
+      return {
+        outcome: "exited",
+        // Only claim a bind-verdict when breakpoints were requested AND every
+        // setBreakpoints call genuinely responded (see allResponded above).
+        ...(anyRequested && allResponded ? { breakpointsBound: anyVerified } : {}),
+      }
     if (stopped.kind === "timeout") {
       client.dispose()
       return { outcome: "error", message: "timed out waiting for breakpoint" }
@@ -176,7 +204,18 @@ export const inspectViaDap = async (
     const reason = str(asObj(stopped.body).reason, "stopped")
     const threadId = num(asObj(stopped.body).threadId, 1)
 
-    const stRes = await client.request("stackTrace", { threadId, startFrame: 0, levels: 20 })
+    // Post-stop QUERIES must each be timeout-guarded: adapters differ in what
+    // they answer while stopped (e.g. lldb-dap does NOT respond to `terminate`
+    // at a breakpoint — an unguarded await would hang the tool forever). A timed
+    // request degrades to a failure response instead of hanging.
+    const queryTimeoutMs = Math.min(stopTimeoutMs, 15_000)
+    const timed = (command: string, args?: unknown): Promise<DapResponse> =>
+      withTimeout<DapResponse>(client.request(command, args), queryTimeoutMs, {
+        success: false,
+        message: `${command} timed out`,
+      })
+
+    const stRes = await timed("stackTrace", { threadId, startFrame: 0, levels: 20 })
     const frames = asArr(asObj(stRes.body).stackFrames).map((f): StackFrameInfo => {
       const fo = asObj(f)
       const src = asObj(fo.source).path
@@ -185,12 +224,12 @@ export const inspectViaDap = async (
 
     const variables: ScopeVars[] = []
     const topFrameId = num(asObj(asArr(asObj(stRes.body).stackFrames)[0]).id, 0)
-    const scopesRes = await client.request("scopes", { frameId: topFrameId })
+    const scopesRes = await timed("scopes", { frameId: topFrameId })
     for (const sc of asArr(asObj(scopesRes.body).scopes)) {
       const so = asObj(sc)
       const ref = num(so.variablesReference)
       if (ref <= 0) continue
-      const vRes = await client.request("variables", { variablesReference: ref })
+      const vRes = await timed("variables", { variablesReference: ref })
       variables.push({
         scope: str(so.name, "scope"),
         // Drop debugpy's presentation-group pseudo-entries ("special variables",
@@ -208,12 +247,18 @@ export const inspectViaDap = async (
 
     let evaluated: { expression: string; result: string } | undefined
     if (spec.evaluate !== undefined && spec.evaluate.length > 0) {
-      const evRes = await client.request("evaluate", { expression: spec.evaluate, frameId: topFrameId, context: "repl" })
+      const evRes = await timed("evaluate", { expression: spec.evaluate, frameId: topFrameId, context: "repl" })
       if (evRes.success) evaluated = { expression: spec.evaluate, result: str(asObj(evRes.body).result, "") }
     }
 
-    // Best-effort teardown — never let cleanup mask the inspection result.
-    await client.request("terminate").catch(() => {})
+    // Best-effort teardown — fire `terminate` but NEVER block on it (lldb-dap
+    // doesn't answer it at a breakpoint). `dispose()` kills the child process
+    // outright, so cleanup is guaranteed regardless of the terminate response.
+    await withTimeout(
+      client.request("terminate").then(() => {}).catch(() => {}),
+      2_000,
+      undefined,
+    )
     client.dispose()
 
     return { outcome: "stopped", reason, stack: frames, variables, ...(evaluated !== undefined ? { evaluated } : {}) }

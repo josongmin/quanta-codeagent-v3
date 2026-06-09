@@ -476,8 +476,18 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  computes the effective tier and routes through tier-specific gates:
    *  hand-off-required terminates, always-confirm always calls onConfirm
    *  (cannot be skipped by acceptEdits/bypass), pre-approval-ok defers to the
-   *  existing mode policy, and none allows. */
-  hitl?: { enabled?: boolean }
+   *  existing mode policy, and none allows.
+   *
+   *  `enabled` turns on the richer reviewer escalation. INDEPENDENTLY, the
+   *  `hand-off-required` tier is a UNIVERSAL security floor — it denies on every
+   *  surface regardless of `enabled` (jun-10 keystone).
+   *
+   *  `autoApprove` is RESERVED for ticket P2-T3 (always-confirm secure-by-default):
+   *  the autonomous opt-out that lets a headless / bench / CI surface auto-run
+   *  always-confirm tools unattended. Inert until T3 universalizes the
+   *  always-confirm floor (blocked today by the bash-without-sandbox conflation —
+   *  see always-confirm-secure-by-default-e2e, skipped). */
+  hitl?: { enabled?: boolean; autoApprove?: boolean }
   /**
    * ADR-0047 UI integration seam. When the admissibility-gate emits a
    * hand-off-required deny (HARD_DENY hit OR an explicit/registry-
@@ -2282,7 +2292,7 @@ export interface SafetyConfig {
 /** Permission-stack add-ons orthogonal to the core {@link AgentConfig.permission}
  *  context. Each is default-OFF. */
 export interface PermissionExtrasConfig {
-  hitl?: { enabled?: boolean }
+  hitl?: { enabled?: boolean; autoApprove?: boolean }
   trustScope?: { registry: TrustScopeRegistry; projectKey: string }
   permissionStack?: { enabled?: boolean; hostId?: string }
   permissionPatternStore?: PatternGrantStore

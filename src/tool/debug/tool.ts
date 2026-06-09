@@ -19,13 +19,19 @@ import type { Tool, ToolContext, ToolEvent } from "../types"
 const schema = z.object({
   program: z.string().min(1).describe("Path to the program/script to debug (relative to cwd or absolute)."),
   breakpoints: z
-    .array(z.object({ file: z.string().min(1), line: z.number().int().positive() }))
+    .array(
+      z.object({
+        file: z.string().min(1),
+        line: z.number().int().positive(),
+        condition: z.string().optional().describe("Conditional breakpoint: only stop when this expression is truthy (e.g. 'i == 3')."),
+      }),
+    )
     .min(1)
-    .describe("Breakpoints to set before running, as {file, line} (1-based line)."),
+    .describe("Breakpoints to set before running, as {file, line, condition?} (1-based line)."),
   adapter: z
-    .enum(["python"])
+    .enum(["python", "lldb"])
     .optional()
-    .describe("Built-in adapter preset. `python` uses debugpy (must be installed). Omit to use adapterCommand."),
+    .describe("Built-in adapter preset. `python`=debugpy (pip install debugpy). `lldb`=lldb-dap for C/C++/Rust/Swift (program must be the compiled binary built with -g). Omit to use adapterCommand."),
   adapterCommand: z
     .array(z.string())
     .optional()
@@ -39,6 +45,9 @@ type Input = z.infer<typeof schema>
 
 const ADAPTER_PRESETS: Record<string, readonly string[]> = {
   python: ["python3", "-m", "debugpy.adapter"],
+  // lldb-dap (LLVM/Xcode) speaks DAP over stdio; debugs C/C++/Rust/Swift. Must
+  // be on PATH (Linux: llvm package; macOS: `$(xcrun -f lldb-dap)` via adapterCommand).
+  lldb: ["lldb-dap"],
 }
 
 /** Build the adapter-specific DAP `launch` request arguments. debugpy needs the
@@ -65,8 +74,14 @@ const err = (output: string): ToolEvent => ({
 /** Render an {@link Inspection} as a compact, model-readable report. */
 const render = (program: string, r: Inspection): string => {
   if (r.outcome === "error") return `debug_inspect error: ${r.message}`
-  if (r.outcome === "exited")
-    return `Program ${program} ran to completion without hitting a breakpoint (exit ${r.exitCode ?? "?"}).`
+  if (r.outcome === "exited") {
+    const base = `Program ${program} ran to completion without hitting a breakpoint (exit ${r.exitCode ?? "?"}).`
+    // If breakpoints were requested but NONE bound, that — not normal completion
+    // — is the likely reason; tell the model how to fix it.
+    if (r.breakpointsBound === false)
+      return `${base}\nNOTE: no breakpoint could be bound — verify the program is built WITH debug info (e.g. \`-g\` / debug profile) and the breakpoint file path matches the source path in the binary's debug info (on macOS, /tmp resolves to /private/tmp).`
+    return base
+  }
   const lines: string[] = []
   const top = r.stack[0]
   lines.push(`⏸ Stopped (${r.reason})${top ? ` at ${top.name} (${top.source ?? "?"}:${top.line})` : ""}`)
@@ -116,7 +131,11 @@ export const makeDebugInspectTool = (port: DebugAdapterPort = defaultDebugAdapte
       const result = await inspectViaDap(client, {
         adapterID: input.adapter ?? "custom",
         launch: buildLaunchConfig(input, cwd),
-        breakpoints: input.breakpoints,
+        breakpoints: input.breakpoints.map((b) => ({
+          file: b.file,
+          line: b.line,
+          ...(b.condition !== undefined ? { condition: b.condition } : {}),
+        })),
         ...(input.evaluate !== undefined ? { evaluate: input.evaluate } : {}),
       }, {
         // Turn-abort tears the session down instead of lingering to the timeout.

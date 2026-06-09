@@ -18,7 +18,7 @@ import { inspectViaDap } from "@/tool/debug/inspect-driver"
  * `configurationDone` it emits a `stopped` event (breakpoint hit) UNLESS
  * `neverStops` is set (then it `terminated` — program ran to completion).
  */
-const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; stallStopped?: boolean } = {}) => {
+const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; stallStopped?: boolean; unverifiedBp?: boolean; failSetBreakpoints?: boolean } = {}) => {
   let toClient: ((chunk: string | Buffer) => void) | undefined
   let initialized = false
   let bpSet = false
@@ -45,7 +45,12 @@ const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; s
       case "setBreakpoints":
         if (!initialized) return respond(undefined, false, "setBreakpoints before initialized")
         bpSet = true
-        respond({ breakpoints: [{ verified: true, line: 10 }] })
+        // failSetBreakpoints models an adapter that ERRORS/times out on the
+        // request (no `breakpoints` body) — distinct from a clean verified:false.
+        if (opts.failSetBreakpoints) return respond(undefined, false, "setBreakpoints failed")
+        // unverifiedBp models an adapter that can't bind the breakpoint (missing
+        // debug info / source-path mismatch) → verified:false.
+        respond({ breakpoints: [{ verified: opts.unverifiedBp !== true, line: 10 }] })
         break
       case "configurationDone":
         if (!bpSet) return respond(undefined, false, "configurationDone before breakpoints")
@@ -110,6 +115,31 @@ describe("inspectViaDap — full DAP launch+inspect handshake", () => {
     expect(r.stack[0]).toMatchObject({ name: "compute", line: 10 })
     const locals = r.variables.find((s) => s.scope === "Locals")
     expect(locals?.vars).toEqual([{ name: "n", value: "42" }, { name: "acc", value: "[1, 2]" }])
+  })
+
+  test("unbound breakpoint (verified:false) + program exits ⇒ exited with breakpointsBound:false", async () => {
+    const client = new DapClient(makeFakeAdapter({ neverStops: true, unverifiedBp: true }))
+    const r = await inspectViaDap(client, {
+      adapterID: "lldb",
+      launch: { program: "/p/bin" },
+      breakpoints: [{ file: "/p/x.rs", line: 4 }],
+    })
+    expect(r.outcome).toBe("exited")
+    if (r.outcome === "exited") expect(r.breakpointsBound).toBe(false)
+  })
+
+  test("setBreakpoints FAILS (timeout/error) + exit ⇒ exited WITHOUT a false 'unbound' claim", async () => {
+    // Adversarial-audit fix: if the adapter never gave a real setBreakpoints
+    // response, we must NOT report breakpointsBound:false (that would blame the
+    // binary/source when the real cause is an adapter fault).
+    const client = new DapClient(makeFakeAdapter({ neverStops: true, failSetBreakpoints: true }))
+    const r = await inspectViaDap(client, {
+      adapterID: "lldb",
+      launch: { program: "/p/bin" },
+      breakpoints: [{ file: "/p/x.rs", line: 4 }],
+    })
+    expect(r.outcome).toBe("exited")
+    if (r.outcome === "exited") expect(r.breakpointsBound).toBeUndefined()
   })
 
   test("program that never hits a breakpoint ⇒ exited outcome (not a hang)", async () => {

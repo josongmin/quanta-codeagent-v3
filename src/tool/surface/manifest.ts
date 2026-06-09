@@ -598,6 +598,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "NEW CATEGORY — Office document AUTHORING (generate real .xlsx / .docx) alongside image_gen. Pure-TS STORED-ZIP (CRC-32) + minimal-valid OOXML; NO office dependency (installs blocked). Opt-in EVERYWHERE (QUANTA_OFFICE_AUTHORING): writes files, so it never auto-seeds (CLI tool-menu reproducibility). Mutating — serialize in-memory then write through the same FS-jail chokepoint the readers use; an existing target lands at a versioned -vN sibling (never silent overwrite). No port to inject (self-contained). H14 PPTX follow-up added `pptx_write` (PresentationML) reusing this same STORED-ZIP + OOXML core; the matching `pptx_read` reader is BASE (always-on) alongside xlsx_read/docx_read.",
   },
   {
+    name: "run_tests",
+    origin: "@/tool/testrun (via DefaultToolPorts.testRunner)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.testRunner",
+      env: "QUANTA_TEST_RUNNER",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "0532",
+    note: "Epic-2 (multilang-debug) — detect the project toolchain from marker files (Cargo.toml→cargo test, go.mod→go test -json, pyproject/setup.py→python -m unittest, package.json→npm test) and run the suite, returning a NORMALIZED {passed, failed:[{name,file,line,message}]}. Per-language parsers pinned to real output (go JSON event stream / cargo libtest text / unittest text). HIGH RISK: running a suite EXECUTES the project's test code ⇒ always-confirm (like bash/debug_inspect). NEVER throws — detect/spawn/parse faults collapse to ok:false. The failure-evidence half of the Evidence Packet Builder. Opt-in EVERYWHERE (QUANTA_TEST_RUNNER); absent ⇒ tool not registered (byte-identical menu).",
+  },
+  {
     name: "debug_inspect",
     origin: "@/tool/debug (via DefaultToolPorts.debugTools)",
     gate: {

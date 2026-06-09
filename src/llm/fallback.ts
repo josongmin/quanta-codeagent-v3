@@ -203,7 +203,17 @@ export class FallbackLLM implements LLMPort {
     yielded: { value: boolean },
   ): AsyncIterable<StreamEvent> {
     let resetEmitted = false
+    // Honor the abort signal BEFORE pulling the provider's first event and
+    // BETWEEN every yielded event. The loop-level guards (`stream()` top +
+    // post-catch) only cover BETWEEN-provider boundaries; once we have
+    // committed to a provider, an abort that fires while it is mid-`await`
+    // (e.g. opening a socket on the replacement during a swap) would otherwise
+    // never be observed here — `FallbackLLM` would keep draining a now-dead
+    // stream, leaking its channel/listeners and returning a success outcome
+    // instead of surfacing the aborted error to the caller.
+    throwIfAborted(this.signal)
     for await (const ev of provider.stream(input)) {
+      throwIfAborted(this.signal)
       if (priorPartial && !resetEmitted) {
         resetEmitted = true
         yield { type: "stream_reset" }

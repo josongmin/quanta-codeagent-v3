@@ -38,7 +38,7 @@
  * homeDir + projectDir and calls in.
  */
 
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
+import { lstat, mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
 import { isThrottled, loadMigrationLedger, recordDisposition } from "./ledger"
@@ -95,6 +95,38 @@ const pathExists = async (path: string): Promise<boolean> => {
     return false
   }
 }
+
+// ─── SYMLINK-ESCAPE guard on the WRITE destination (O_NOFOLLOW) ───────────
+//
+// The READ side of this slice is already O_NOFOLLOW-hardened (`readImportFile`
+// → `refuseSymlink`, N10): an import SOURCE that is a symlink is refused so a
+// crafted `.claude/x → ~/.ssh/id_rsa` cannot leak credentials. The WRITE side
+// had no symmetric guard — a competitor tree whose `settings.json` / `.mcp.json`
+// DESTINATION is a symlink pointing OUT of the project (e.g. at
+// `~/.ssh/authorized_keys`) would have `writeFile` FOLLOW the link and CLOBBER
+// the outside target: a path-traversal WRITE. We fail CLOSED: a symlinked
+// destination is REFUSED (never followed), surfaced as a typed warning — the
+// same posture as the corrupt-target refusal (refuse rather than destroy).
+
+/** True iff `path` is itself a symlink (lstat, no-follow). Absent / a real file
+ *  / a real dir ⇒ false. A symlinked DESTINATION must NEVER be written through
+ *  (it could point outside the project tree). */
+const isSymlinkDestination = async (path: string): Promise<boolean> => {
+  try {
+    return (await lstat(path)).isSymbolicLink()
+  } catch {
+    // ENOENT (no destination yet) or any stat failure ⇒ not a symlink to follow.
+    return false
+  }
+}
+
+/** A symlinked write destination: refuse + surface a typed warning (never
+ *  follow the link to clobber whatever it points at). */
+const symlinkTargetWarning = (path: string): MigrationWarning =>
+  writeWarning(
+    path,
+    "symlink-escape: destination is a symlink — refusing to write through it (no-follow)",
+  )
 
 /**
  * The state of an existing JSON config target, read fail-CLOSED.
@@ -239,11 +271,22 @@ const isSafeMcpEntry = (entry: {
   return true
 }
 
+/** Thrown by {@link writeNoClobber} when the path it would write is a symlink
+ *  (no-follow). Caught by the per-item loop in `persistConvertedItems` and
+ *  turned into a typed warning — never followed to clobber an outside file. */
+class SymlinkWriteRefusedError extends Error {
+  constructor(readonly destPath: string) {
+    super(`symlink-escape: refusing to write through symlink ${JSON.stringify(destPath)}`)
+  }
+}
+
 /** Write `content` to `path`, but NEVER silently overwrite: if `path` already
  *  exists, write a `<stem>.imported<ext>` SIBLING instead. Returns the path
- *  actually written. Parent dirs are created. */
+ *  actually written. Parent dirs are created. O_NOFOLLOW: if the path actually
+ *  chosen to write is itself a symlink, REFUSE (never follow it out of tree). */
 const writeNoClobber = async (path: string, content: string): Promise<string> => {
   const target = (await pathExists(path)) ? siblingImportedPath(path) : path
+  if (await isSymlinkDestination(target)) throw new SymlinkWriteRefusedError(target)
   await mkdir(dirOf(target), { recursive: true })
   await writeFile(target, content, "utf8")
   return target
@@ -284,6 +327,7 @@ const persistSettings = async (
   value: ConvertedSettings,
 ): Promise<WriteOutcome> => {
   const path = join(projectDir, "settings.json")
+  if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
   const current = existing.state === "object" ? existing.value : {}
@@ -315,6 +359,7 @@ const persistHooks = async (
   value: readonly ConvertedHook[],
 ): Promise<WriteOutcome> => {
   const path = join(projectDir, "settings.json")
+  if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
   const current = existing.state === "object" ? existing.value : {}
@@ -353,6 +398,7 @@ const persistMcp = async (
   value: readonly ConvertedMcpServer[],
 ): Promise<WriteOutcome> => {
   const path = join(projectDir, ".mcp.json")
+  if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
   const current = existing.state === "object" ? existing.value : {}

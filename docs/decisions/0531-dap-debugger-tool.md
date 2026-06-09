@@ -18,7 +18,7 @@
 2. **`dap-client.ts`** — `seq` 단조증가 할당, `request_seq`로 **out-of-order 응답 상관**(adapter는 순서 안 지킴), `event` 라우팅(`onEvent`/`waitForEvent`). **`success:false`는 reject 아님 resolve**(정상 프로토콜 결과 — 도구가 보고). reject는 transport 사망(dispose)에만. dispose는 pending을 합성 실패로 풀어 awaiter 무한대기 방지.
 3. **`inspect-driver.ts`** — 정규 DAP launch 시퀀스 choreography: `initialize` → (`initialized` event 대기) → `setBreakpoints*` → `configurationDone` → race(`stopped`|`terminated`). stopped 시 `threads`→`stackTrace`→`scopes`→`variables*`→(옵션 `evaluate`)→`terminate`. **이벤트 waiter는 첫 request 전에 arm**(빠른 in-process adapter가 `initialized`를 동기 발사 → await 후 arm하면 놓쳐 hang). 모든 대기에 타임아웃 + **abort signal 레이스**(턴 취소 시 즉시 dispose, 30s까지 안 늘어짐).
 4. **`port.ts` (spawn seam)** — `DebugAdapterPort.spawn(argv) → DapTransport`. 실 구현은 `Bun.spawn`(stdin=FileSink write/flush, stdout reader→sink). 닫힌포트 DI라 도구는 스크립트 fake adapter로 테스트(PTY 슬라이스와 동일 posture).
-5. **`tool.ts` — `debug_inspect`** — 입력 {program, breakpoints[{file,line}], adapter:"python"|adapterCommand, args?, cwd?, evaluate?, stopOnEntry?}. python 프리셋=debugpy(`python -m debugpy.adapter`), 그 외 explicit adapterCommand. 결과를 모델 가독 텍스트로 렌더(stopped 위치+콜스택+로컬변수+eval / exited / error). **NEVER-throws** — spawn/protocol/timeout 결함 → ok:false.
+5. **`tool.ts` — `debug_inspect`** — 입력 {program, breakpoints[{file,line,**condition?**}], adapter:**"python"|"lldb"**|adapterCommand, args?, cwd?, evaluate?, stopOnEntry?}. 프리셋: python=debugpy(`python3 -m debugpy.adapter`), **lldb=lldb-dap(C/C++/Rust/Swift, program=컴파일된 바이너리)**; 그 외 explicit adapterCommand. **조건부 breakpoint**(`condition` → DAP setBreakpoints, truthy일 때만 정지). 결과를 모델 가독 텍스트로 렌더(stopped 위치+콜스택+로컬변수+eval / exited / error). **NEVER-throws** — spawn/protocol/timeout 결함 → ok:false. **post-stop 요청 전부 타임아웃 가드**(adapter마다 응답 도구가 다름).
 
 ## 보안 posture
 
@@ -32,13 +32,16 @@
 
 ## 테스트 (red-first)
 
-**38 fake-기반 유닛** + **13 실 debugpy e2e** = 51:
-- codec 9(framing/multi/split/multibyte-byte/malformed-resync/non-JSON) · client 6(상관/out-of-order/success-false-resolve/event/waitForEvent/dispose-reject) · inspect-driver 5(stopped+stack+locals / never-stop→exited / init-fail→error / abort→error / evaluate; **fake가 deferred-launch 모델**=데드락 회귀 가드) · tool e2e 5.
-- **실 debugpy 배터리 13(`debugpy-real-e2e.test.ts`, debugpy 부재 시 auto-skip)**: basic stop+locals+eval / **멀티바이트 unicode byte-정확**(`안녕 세계 🌍 テスト`+CJK dict) / deep nested stack 순서 / **의사변수 노이즈 필터** / 복합 중첩데이터 / never-executed bp→exited / failed-evaluate→omit / stopOnEntry / program args / multiple-bp first-hit / **abort mid-run(30s sleep, <15s 복귀)** / spawn-fault→ok:false / missing-program→resolve.
+**25 fake-기반 유닛** + **15 실 debugpy(Python) e2e** + **3 실 lldb-dap(C) e2e** = 43:
+- codec 9 · client 6 · inspect-driver 5(**fake가 deferred-launch 모델**=데드락 회귀 가드) · tool e2e 5.
+- **실 Python 배터리 15(`debugpy-real-e2e.test.ts`, 부재 시 auto-skip)**: basic / **멀티바이트 unicode byte-정확**(`안녕 세계 🌍 テスト`+CJK dict) / deep nested stack 순서 / **의사변수 노이즈 필터** / 복합 중첩데이터 / never-executed bp→exited / failed-evaluate→omit / stopOnEntry / program args / multiple-bp first-hit / **conditional bp(`i==3`일 때만 정지)** / **multi-file(imported 모듈 bp, 크로스파일 스택)** / abort mid-run(30s sleep <15s 복귀) / spawn-fault / missing-program.
+- **실 C 배터리 3(lldb-dap via xcrun, lldb-dap+clang 부재 시 auto-skip)**: stop+stack(add→main)+locals(a=20/b=22)+eval / conditional bp 루프(`i==4`) / never-hit→exited. **언어무관성 입증**(같은 도구·driver, adapterCommand만 다름).
 
 인접: manifest drift + knob default-off + no-throw AST 가드 green. src tsc clean.
 
-**보강(실측 발견):** debugpy `variables`가 presentation-group 의사엔트리(`special variables`/`function variables`, 빈 value)를 섞어 보냄 → driver에서 `value===""` 필터(실 빈문자열은 `''`로 렌더되므로 value-safe). 출력 노이즈 제거.
+**보강(실측 발견 2건):**
+1. debugpy presentation-group 의사변수(`special variables`/`function variables`, 빈 value) → `value===""` 필터(실 빈문자열은 `''` 렌더라 value-safe).
+2. 🔴🔴 **lldb-dap이 breakpoint 정지 중 `terminate`에 응답 안 함**(debugpy는 함) → 기존 `await terminate`가 무한행. **2번째 언어가 잡은 robustness 버그.** 수정: terminate는 2s 타임아웃 후 dispose(어차피 자식 kill), **post-stop 요청(stackTrace/scopes/variables/evaluate) 전부 타임아웃 가드**.
 
 ## 어딧 (적대 1R + 객관 1R + 실물 검증)
 

@@ -859,6 +859,9 @@ const buildGatedToolPorts = (
     // byte-identical unless QUANTA_DEBUG_TOOLS === "1". Boolean flag — the tool
     // owns the real spawn port; high-risk (always-confirm tier).
     ...(cfg.debugTools ? { debugTools: true } : {}),
+    // Epic-2 — gated `run_tests` structured test-runner. Default-OFF: tool menu
+    // byte-identical unless QUANTA_TEST_RUNNER === "1". High-risk (always-confirm).
+    ...(cfg.testRunner ? { testRunner: true } : {}),
     // C2 — gated communicate_update tool. Default-OFF: tool menu byte-identical
     // unless QUANTA_PROGRESS_UPDATE === "1". Boolean port — the tool reads its
     // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from

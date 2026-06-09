@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { StreamEvent, StreamInput } from "@/llm"
@@ -66,5 +68,16 @@ describe("web-daemon runtime factory", () => {
     off()
     await session.close()
     await runtime.close()
+  })
+
+  // SECURITY GUARD (jun-10): the daemon's `session.permission.set` can switch to
+  // `bypass`/`acceptEdits` (allow-capable modes). Those are only SAFE if the HITL
+  // gate is enabled, so `hand-off-required` ⇒ DENY and `always-confirm` ⇒ ask
+  // EVEN under bypass (CLI parity). This pins that the production base sets it —
+  // the permission e2e suites mirror this flag, so if it were removed they would
+  // pass falsely while the real daemon blanket-allowed every tool under bypass.
+  test("the production runtime base ENABLES the HITL gate (bypass cannot blanket-allow)", () => {
+    const src = readFileSync(join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"), "utf8")
+    expect(src).toMatch(/hitl:\s*\{\s*enabled:\s*true\s*\}/)
   })
 })

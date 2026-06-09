@@ -1489,6 +1489,15 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
+    envKey: "QUANTA_TEST_RUNNER",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "run_tests tool — detect toolchain (cargo/go/python/npm) + run suite + normalized pass/fail evidence (Epic-2, opt-in, high-risk).",
+    readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
     envKey: "QUANTA_SHADOW",
     kind: "bool",
     default: false,

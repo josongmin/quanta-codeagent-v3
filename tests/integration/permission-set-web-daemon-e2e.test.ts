@@ -49,6 +49,10 @@ const mutatingTool = (counts: { n: number }): Tool => ({
   inputSchema: z.object({}).passthrough(),
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
+  // pre-approval-ok = the ordinary mutating-tool tier: mode policy decides
+  // (default asks, bypass auto-runs). Explicit so the web daemon's HITL gate
+  // (now enabled) doesn't conservatively treat it as always-confirm.
+  hitlTier: () => "pre-approval-ok",
   async *execute(): AsyncIterable<ToolEvent> {
     counts.n += 1
     yield { type: "result", result: { ok: true, output: "ran" } }
@@ -90,6 +94,7 @@ describe("session.permission.set — web-daemon runtime e2e", () => {
       cwd: "/tmp/quanta-web-perm",
       maxTurns: 4,
       signal: abort.signal,
+      hitl: { enabled: true }, // mirror the web daemon's security config
       // Deny when asked (default mode asks for a mutating tool) so turn 1
       // COMPLETES (no suspend) with the tool gated-out.
       onConfirm: async () => false,
