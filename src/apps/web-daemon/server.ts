@@ -771,7 +771,7 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
  * NO-THROW: a non-JSON / non-matching frame returns `null` rather than throwing.
  * This is NOT a `SessionCommand` — it never reaches the kernel reducer.
  */
-const peekPlanInputAnswer = (
+export const peekPlanInputAnswer = (
   raw: string,
 ): { promptId: string; decision: "answer" | "cancelled"; text: string } | null => {
   let parsed: unknown

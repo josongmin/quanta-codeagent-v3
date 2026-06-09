@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { main } from "@/apps/web-daemon"
-import { HEARTBEAT_INTERVAL_MS, replyToHeartbeat } from "@/apps/web-daemon/server"
+import {
+  HEARTBEAT_INTERVAL_MS,
+  peekPlanInputAnswer,
+  replyToHeartbeat,
+} from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { SessionTransportMessage } from "@/ipc/session"
 import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "@/ipc/session"
@@ -583,6 +587,76 @@ describe("replyToHeartbeat (pure heartbeat short-circuit)", () => {
     expect(replyToHeartbeat(ws, { kind: "connect", sessionId: "s" })).toBe(false)
     expect(replyToHeartbeat(ws, undefined)).toBe(false)
     expect(sent).toHaveLength(0)
+  })
+})
+
+describe("peekPlanInputAnswer (QUANTA_WEB_AGENT_STATE inbound frame decode)", () => {
+  // The server peeks every inbound text frame for a `planInputAnswer` BEFORE the
+  // session bridge (server.ts message() at ~:1050). This is the wire-decode of
+  // the frame the frontend's `sendPlanInputAnswer` emits — the seam the e2e
+  // `web-user-input-port-e2e` test does NOT cross (it calls `resolve()` directly,
+  // skipping the JSON peek). These give the decode direct teeth: the
+  // request/answer round-trips correctly AND a malformed / non-matching / hostile
+  // frame returns null (falls through to the bridge) instead of throwing.
+
+  test("decodes a well-formed answer frame (kind+promptId+text)", () => {
+    expect(
+      peekPlanInputAnswer(
+        JSON.stringify({ kind: "planInputAnswer", promptId: "p1", decision: "answer", text: "dev" }),
+      ),
+    ).toEqual({ promptId: "p1", decision: "answer", text: "dev" })
+  })
+
+  test("decodes a well-formed cancel frame (text defaults to empty string)", () => {
+    // The frontend omits `text` for a cancel; the decode must still surface a
+    // string (the server maps a "cancelled" decision to a no-text outcome).
+    expect(
+      peekPlanInputAnswer(
+        JSON.stringify({ kind: "planInputAnswer", promptId: "p2", decision: "cancelled" }),
+      ),
+    ).toEqual({ promptId: "p2", decision: "cancelled", text: "" })
+  })
+
+  test("an unknown decision value collapses to 'cancelled' (fail-safe, never a hung answer)", () => {
+    // Anything that is not exactly "answer" must NOT be treated as an answer —
+    // a garbage decision must fail safe to a cancel, never strand the agent on a
+    // half-decoded answer.
+    expect(
+      peekPlanInputAnswer(
+        JSON.stringify({ kind: "planInputAnswer", promptId: "p3", decision: "maybe", text: "x" }),
+      ),
+    ).toEqual({ promptId: "p3", decision: "cancelled", text: "x" })
+  })
+
+  test("a non-string text is coerced to empty string (no NaN/object leaking to the tool)", () => {
+    expect(
+      peekPlanInputAnswer(
+        JSON.stringify({ kind: "planInputAnswer", promptId: "p4", decision: "answer", text: 42 }),
+      ),
+    ).toEqual({ promptId: "p4", decision: "answer", text: "" })
+  })
+
+  test("returns null for a non-JSON frame (NO-THROW → falls through to the bridge)", () => {
+    expect(() => peekPlanInputAnswer("not json {")).not.toThrow()
+    expect(peekPlanInputAnswer("not json {")).toBeNull()
+  })
+
+  test("returns null for the WRONG kind (a real SessionCommand must fall through untouched)", () => {
+    // A genuine session frame must NOT be consumed by the peek — it has to reach
+    // the kernel bridge. The drift contract stays intact.
+    expect(peekPlanInputAnswer(JSON.stringify({ kind: "connect", sessionId: "s" }))).toBeNull()
+  })
+
+  test("returns null when promptId is missing or non-string", () => {
+    expect(peekPlanInputAnswer(JSON.stringify({ kind: "planInputAnswer", decision: "answer" }))).toBeNull()
+    expect(
+      peekPlanInputAnswer(JSON.stringify({ kind: "planInputAnswer", promptId: 7, decision: "answer" })),
+    ).toBeNull()
+  })
+
+  test("returns null for a JSON array or null payload (not an object frame)", () => {
+    expect(peekPlanInputAnswer(JSON.stringify([{ kind: "planInputAnswer", promptId: "p" }]))).toBeNull()
+    expect(peekPlanInputAnswer("null")).toBeNull()
   })
 })
 
