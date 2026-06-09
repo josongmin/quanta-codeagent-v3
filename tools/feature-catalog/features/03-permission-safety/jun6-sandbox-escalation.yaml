@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "sandbox-block detect + HITL escape-hatch escalation loop wired on CLI bash hot path"
+    cli: "runs in the interactive CLI — 15/15 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the onConfirm escape-hatch can route to the EscalationCard approve|deny path but the sandbox-blocked classification, re-run argv and escalation context ride dropped events; only the collapsed confirm reaches the browser"
 purpose: |
   OS sandbox 가 syscall 을 BLOCK 했을 때(=sandbox 가 제대로 작동) 와 일반 명령

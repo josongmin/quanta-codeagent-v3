@@ -13,7 +13,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-handler timeout race in src/agent/hooks.ts runs in the CLI agent loop"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal hook-bus hardening primitive (Promise.race timeout slot) — no user-visible affordance on any surface"
 purpose: |
   Per-handler timeout race for the HookBus emit chain. A stuck handler used to

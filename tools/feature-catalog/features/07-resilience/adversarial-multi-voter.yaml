@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "default-off verification quorum runs inside branch_search, knob QUANTA_MULTI_VOTER reachable in CLI"
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal verification quorum feeding an additive branch-search scorer signal, no rendered affordance"
 purpose: |
   후보 fix/claim을 N개 독립 refute-biased 보터(각자 LLMPort)로 검증 → quorum 규칙으로

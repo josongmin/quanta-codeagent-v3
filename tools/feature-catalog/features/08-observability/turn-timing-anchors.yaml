@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Per-turn wall-clock capture feeding gen_ai.usage OTel attributes; reachable in CLI."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure timing-capture telemetry primitive (src/observability/turn-timing.ts) feeding OTel attributes; TokenCounter shows tokens+cost only, not these durations."
 purpose: |
   Records the three wall-clock anchors that pin down a single LLM-stream

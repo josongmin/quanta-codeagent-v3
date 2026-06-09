@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; registry reachable in CLI build (additive, unwired into dispatch)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal connector REST catalog registry with cache; no UI affordance, not even tool-dispatch wired"
 purpose: |
   Dynamic connector catalog backed by `GET {baseUrl}/connectors`. Replaces the

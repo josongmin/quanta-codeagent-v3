@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4/4 reachable; /capabilities slash command interactive CLI surface"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "web SlashPalette capabilities entry is a prefill stub (action: prefill, SlashPalette.tsx:438) that does not execute (B2); CLI-only operator panel"
 purpose: |
   `/capabilities` (alias `/caps`) — operator-facing READ-ONLY surface over

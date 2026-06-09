@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "boundary error classifier runs in CLI LLM path (adapters + retry/fallback)"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal resilience-primitive (16-kind closed-union classifier at adapter/router boundary), no UI affordance on any surface"
 purpose: |
   Classify external/SDK errors EXACTLY ONCE at the adapter boundary into a

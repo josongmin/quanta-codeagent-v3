@@ -24,7 +24,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "wireObservability runs at the composition root reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "drives the web-ONLY ObservabilityPane (ObjectiveCard/RunColumn/ApprovalsList); the web-daemon runtime-factory.ts:152 wires the hookBus and the observability-emitter projects objective/runLedger/approvalSM into observability.snapshot frames the pane renders"
 purpose: |
   Wave-1 + Wave-2 shipped four pure typed observability ports — `Objective`

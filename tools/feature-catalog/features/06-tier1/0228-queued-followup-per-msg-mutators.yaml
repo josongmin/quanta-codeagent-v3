@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/queue {list|retry|edit|delete|send-now} CLI subcommands via queue-cmd.ts"
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "SlashPalette server-routed stub does not execute (B2) and SessionCommand has no queue verb (B3)"
 purpose: |
   Codex Desktop composer absorption: each paused/active follow-up gets 4

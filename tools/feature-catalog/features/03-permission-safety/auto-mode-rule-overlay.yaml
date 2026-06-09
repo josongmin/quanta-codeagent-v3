@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure overlay composer splices operator rules into classifier prompt behind QUANTA_AUTO_MODE_RULES reachable from CLI; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure prompt-overlay composer with untrusted-source fence (default-OFF byte-identical), internal classifier-prompt primitive with no UI affordance on any surface"
 purpose: |
   AFK auto-mode 분류기(`CLASSIFIER_SYSTEM_PROMPT`, frozen 상수)에 operator 가 자신의

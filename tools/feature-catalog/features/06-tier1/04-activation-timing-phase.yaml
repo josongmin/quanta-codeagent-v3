@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Held decision-boundary marker, empty evidence.code, planned-but-not-built phase machine."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "No built mechanism, no UI affordance on any surface."
 purpose: Activation-timing phase 분리 — 현재 트리거 cache는 session-start 1회 + per-turn 라벨 주입만. 시점별 phase machine은 후속 phase로 의식적 보류
 evidence:

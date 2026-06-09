@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure config artifact (docs/observability/recording-rules.yaml PromQL); no CLI affordance."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Pure Prometheus recording-rules config, no UI affordance on any surface."
 purpose: |
   `docs/observability/recording-rules.yaml` with two groups:

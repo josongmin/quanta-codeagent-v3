@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ReviewKind matrix + verb legality wired into admissibility-gate reviewAndDecide reachable from CLI; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure permission-typing matrix (inferReviewKind + isDecisionLegalFor), internal gate primitive with no UI affordance on any surface"
 purpose: |
   Cursor approval gate의 타입드 매트릭스 흡수 — quanta 권한 레이어에 "무엇을 리뷰하는가" 축

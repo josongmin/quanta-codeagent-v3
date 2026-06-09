@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "3-file atomic writer invoked by Phase 2 consolidator on CLI; derived 4/5 holds"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure on-disk writer primitive (temp-then-rename + git commit); output is files under ~/.quanta, ui_surfaces n-a; no UI affordance"
 purpose: |
   Owns the on-disk side of the Phase 2 cross-session consolidator. Three

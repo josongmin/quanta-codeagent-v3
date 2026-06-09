@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, loadreporules-cwd, mode-notice-block, trust-and-inputs]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "structural prompt-injection defang invariant (embedUntrusted), pure content-plane primitive, no CLI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal prompt-assembly defang invariant, no UI affordance"
 purpose: |
   Per-turn 프롬프트가 untrusted fragment (파일 경로, IDE selection text, diagnostics,

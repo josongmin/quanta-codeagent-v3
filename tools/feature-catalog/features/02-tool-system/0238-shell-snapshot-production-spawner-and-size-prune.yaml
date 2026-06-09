@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Bun spawner + size-prune + session-start prune reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure runtime primitive (shell-env snapshot capture + disk size-budget prune behind ShellSnapshotPort); no UI affordance, only shapes runShell env state."
 purpose: |
   Production wire for ADR-0204's shell-snapshot primitive + ADR-0235's

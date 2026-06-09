@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; parseRRule/serializeRRule run in CLI scheduler"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal RFC 5545 RRULE parser/serializer primitive; no UI affordance on any surface"
 purpose: |
   `parseRRule(s)` / `serializeRRule(rule)` implement a strict RFC 5545

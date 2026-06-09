@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: eval synthetic tier under src/apps/eval, CLI-only"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "synthetic scenario runner + LLM judge runs in the eval CLI app, not in web-daemon; no web affordance"
 purpose: |
   Tier-1 of the 6-tier eval stack (umbrella id: `eval-five-tier`). Generates

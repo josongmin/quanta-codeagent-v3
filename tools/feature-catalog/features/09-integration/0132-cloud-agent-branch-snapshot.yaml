@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: snapshotDirtyToCloudBranch git port not wired into interactive CLI"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "backend git GitProcessPort routine; no browser affordance and no B3 web verb to invoke it"
 purpose: |
   `snapshotDirtyToCloudBranch` packages a dirty working tree onto a brand-new

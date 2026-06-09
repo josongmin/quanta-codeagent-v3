@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: official Python grader integration under src/apps/bench, not in interactive CLI graph"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Python SWE-bench harness verifier spawns from the bench CLI app, not reachable from web-daemon; no browser affordance"
 purpose: |
   The documented swebench-seam, now real. Given a `swebench.verified`

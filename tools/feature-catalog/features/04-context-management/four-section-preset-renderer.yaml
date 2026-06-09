@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure system-prompt section renderer in prompt assembly, reachable from CLI"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure prompt-block renderer, no user-visible affordance on any surface"
 purpose: |
   Pure 렌더링 모듈. `fourSectionPreset(input)` 은 `base + project_md + session_ctx +

@@ -24,7 +24,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "tier-1 tool-result eviction pre-pass wired in maybeCompact, reachable from CLI"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure context-reclaim primitive; its recovery:compact event is dropped at context-binding.ts:1104 default arm and output is byte-identical, no UI affordance"
 purpose: |
   압축 3-tier 중 누락된 tier-1 추가(RFC jun-6-microcompaction). 기존: tier-0 capture-time

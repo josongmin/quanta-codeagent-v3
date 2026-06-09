@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "permission modes (default/acceptEdits/bypass/auto) settable via QUANTA_PERMISSION + repl onConfirm in the CLI."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "The permission mode is rendered read-only as a colored pill via ModeBadge (apps/web-frontend/src/components/ModeBadge.tsx, App.tsx:217), but is NOT settable on web (QUANTA_PERMISSION absent from CONFIG_ALLOWED_KEYS, no mode verb)."
 purpose: default|acceptEdits|bypass|auto , onConfirm 콜백
 evidence:

@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Config-only meta-policy (biome.json slice-isolation + 4-tier test policy); structural enforcement, no runtime emit point or surface affordance."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Pure config/lint meta-policy; no UI affordance on any surface."
 purpose: Biome 슬라이스격리(0001) / 4-tier 테스트(0003) / LoC예산 철회(0011·0012)
 evidence:

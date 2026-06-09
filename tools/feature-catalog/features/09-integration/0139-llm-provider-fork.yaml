@@ -27,7 +27,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Env/QUANTA_LLM_TRANSPORT-driven transport selection wired into the CLI main LLM (src/runner/assemble/llm.ts)."
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal transport-selection port; env-only with no browser affordance. The transportId field rides llm.request but no web component renders llm.request."
 purpose: |
   Hexagonal port that separates Anthropic vendor (wire grammar) from

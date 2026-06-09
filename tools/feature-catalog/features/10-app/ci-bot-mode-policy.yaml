@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [isregex-true, promise-race, wire-finalization, agent-cli-args-parser, agent-config-assembler]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure mode-preset policy primitive (toolSurface/gitWrite/promptPack readers) consulted by dispatch seam; no user-visible affordance"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal policy primitive, no UI affordance on any surface"
 purpose: |
   Bridges the data-only `MODE_PRESETS["ci-bot"]` into a runnable

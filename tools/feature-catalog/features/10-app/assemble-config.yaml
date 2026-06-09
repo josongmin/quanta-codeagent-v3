@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "assembleConfig composer used by run-once/side-chat to build AgentConfig in the CLI runner"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure surface-agnostic type-safe composer primitive, no user-visible affordance"
 purpose: |
   Pure type-safe composer that turns already-built collaborators

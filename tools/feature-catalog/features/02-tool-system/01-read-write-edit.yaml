@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "core tool family (read/write/edit/bash/grep/glob/localize/diagnostics/test_runner) reachable from CLI entry"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "these tools run in web-daemon; each invocation+text result renders as tool.invoked/tool.completed in session-hooks.ts:420-438"
 purpose: |
   Aggregate L5 marker for the primitive tool family covering 9 core tools —

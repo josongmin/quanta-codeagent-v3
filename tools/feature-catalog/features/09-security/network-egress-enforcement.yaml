@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; dispatch-guard wired via assembleAgentConfig"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure dispatch-guard egress policy, no UI affordance; own notes say status-line/approval surfacing is an unbuilt follow-up"
 purpose: |
   Closes the "defined-but-not-enforced" hole found in the 2026-06-01 gap audit:

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: CI/PR-comment trigger sources reachable from CLI reactor path"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "backend gh-poll adapters feeding ProactiveTrigger; no browser affordance, ProactiveTrigger not bridged (B1)"
 purpose: |
   Closed-port trigger sources that turn external signals into typed

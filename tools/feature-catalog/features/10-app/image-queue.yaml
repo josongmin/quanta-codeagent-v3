@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI REPL /image add FIFO drained by PromptSource.next; reachable from CLI import graph."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI REPL-owned queue; the web image input (paste+hotkey, session-hooks) is a separate web mechanism and does not use this REPL queue."
 purpose: |
   REPL surface가 소유하는 in-memory FIFO. 사용자가 `/image add <path>` 슬래시로

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /permission inspector, src/apps/cli/permission-explain.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "B2 prefill stub: SlashPalette.tsx permission slug is prefill(permission), does not execute; no web render of 5-axis stack"
 purpose: |
   Codex 5-axis post-denial precedence stack inspector. Sub-commands:

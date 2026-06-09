@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "protocol-version SSOT + negotiation in client.start() runs on the CLI MCP load path"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal protocol handshake / version-negotiation primitive — no user-visible affordance on any surface"
 purpose: |
   Replaces the single fixed (triplicated) `PROTOCOL_VERSION = "2025-06-18"`

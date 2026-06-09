@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "auto-approval streak ledger raises a user review prompt every N auto-grants reachable from CLI; ui_surfaces cli"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the periodic review-prompt user value rides a prompt event not in the 6-event bridge (dropped at context-binding.ts:1105 default arm); no web render of the streak prompt"
 purpose: |
   **Codex `automaticApprovalReview.actionSummary` 흡수.** 매 N (default 10) 연속

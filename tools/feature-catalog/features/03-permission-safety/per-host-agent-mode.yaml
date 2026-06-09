@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "host-level default policy resolved in admissibility-gate (src/agent/admissibility-gate.ts)"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal permission precedence primitive (ui_surfaces n-a), resolved silently; no UI affordance on any surface"
 purpose: |
   **Host-level default** — hostId(SSH_CONNECTION 기반 결정론적 식별자,

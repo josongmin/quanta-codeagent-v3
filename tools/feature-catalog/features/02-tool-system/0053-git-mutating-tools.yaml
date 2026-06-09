@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; git_commit/git_branch_switch first-class mutating tools reachable in CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the git tools surface as tool.invoked/tool.completed in the browser and the always-confirm HITL triggers an EscalationCard; but the 4-tier hitlTier collapses to the 2-verb approve/deny web approval"
 purpose: |
   Claude Desktop 1.7196.3의 commitWipForBranchSwitch 패턴 흡수 — git push/commit/checkout을

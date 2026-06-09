@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "narrow metric ports emit across 4 slices in CLI run"
+    cli: "runs in the interactive CLI — 2/11 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure OTel metric emission into collector via narrow ports, no UI affordance on any surface"
 purpose: |
   4 새 슬라이스 (error-routing / shell-snapshot / git-directives / stream-timeout)

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "agent-callable skill_create tool registered in tier1 buildSkillBlock; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "backend tool runs identically on web and its call/result render as a generic tool.invoked/tool.completed card (session-hooks.ts), but there is no dedicated skill-creation UI and it is default-OFF behind QUANTA_SKILL_CREATOR"
 purpose: |
   jun-6 Codex skill-creator parity. The `skill_create` tool lets the MODEL author

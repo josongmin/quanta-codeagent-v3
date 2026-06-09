@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/status-bar.ts DECSTBM scroll-region; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI terminal-only chrome (ANSI scroll-region mutation); no browser equivalent"
 purpose: |
   Vim-style fixed bottom status bar implemented via ANSI DECSTBM

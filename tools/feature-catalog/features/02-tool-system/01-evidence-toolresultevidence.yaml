@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ToolResult.evidence type field used across tool registry"
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure type-surface guard replacing duck-typed extra-prop smuggling; ui_surfaces n-a, no user-visible affordance"
 purpose: 'evidence?: ToolResultEvidence — 이전 duck-typed extra-prop smuggling을 타입 surface로 대체. stdErr vs stderr casing drift가 더 이상 tsc를 못 빠져나감.'
 evidence:

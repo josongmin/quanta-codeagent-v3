@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "streaming-dispatch tombstone runs in the CLI loop"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal streaming tombstone/fallback codec (streaming-dispatch.ts); no UI affordance on any surface"
 purpose: stream_reset tombstone
 evidence:

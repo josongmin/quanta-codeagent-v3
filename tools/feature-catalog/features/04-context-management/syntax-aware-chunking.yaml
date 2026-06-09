@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "tree-sitter chunker + read outline mode reachable in CLI graph, knob-gated"
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal indexer chunker plus a read-tool mode; no dedicated web component, output rides generic tool-result preview only"
 purpose: |
   ONE `CodeParserPort` (WASM tree-sitter, `web-tree-sitter` runtime + the

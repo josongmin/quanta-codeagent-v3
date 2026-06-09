@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; CoverageSource port plus coverage_check agent tool"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "coverage_check is an agent-invocable tool so its invocation renders as a tool.invoked/tool.completed card via the bridged tool_call/tool_result events; the per-file MetricSink panel itself does not render"
 purpose: |
   4-part hexagonal slice in `src/observability/coverage/`. Closed

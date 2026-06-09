@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI bench entry; SWE-bench python harness runner"
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure bench harness runner, no UI affordance"
 purpose: 'corpus/sandbox runner, Best-of-N+patchVote, SWE-bench dataset 어댑터. Python harness e2e 폐쇄 — , 7 tests: PATH 앞에 tmpdir 삽입 → python/python3 stub bash 스크립트 → 실 Bun.spawn 경로 통과 → argv 전체 RS(0x1e)-separated 기록 + report.json 작성.'
 evidence:

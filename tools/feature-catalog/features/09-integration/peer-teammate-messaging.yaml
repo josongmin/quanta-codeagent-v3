@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "team_create/team_delete tools + auto-delivered peer inbox reachable in CLI loop"
+    cli: "runs in the interactive CLI — 14/14 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "team_create/team_delete tool calls render as tool cards (and subagent runs appear in RunColumn), but the core auto-delivery injects peer mail as an internal role:user message with no distinct web event, so the messaging substance does not reach the browser"
 purpose: |
   The THREE genuine deltas over quanta's EXISTING peer-messaging substrate

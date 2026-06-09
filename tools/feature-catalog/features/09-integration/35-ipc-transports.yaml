@@ -13,12 +13,12 @@ owners: ['@songmin']
 labels: [surface:ipc]
 depends_on: [slice-ipc-bridge, ipc-event-bridge]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure internal byte-shuttle transports (in-memory/stdio/uds/websocket) behind a closed BridgeTransport shape; no user affordance, uds/websocket skeleton-only."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal transport library; no browser affordance; web-daemon uses its own @/ipc/session codec not these transports."
 purpose: |
   Four `BridgeTransport` implementations behind one closed shape so the

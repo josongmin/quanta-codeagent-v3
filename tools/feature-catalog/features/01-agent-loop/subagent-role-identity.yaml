@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; named-agent registry + role system prompt fold into spawn in CLI"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal spawn-config/system-prompt specialization (named-agent resolver folds system/tools/model into child); no user-visible affordance of its own on any surface"
 purpose: |
   A forked subagent can run with its OWN role identity instead of always inheriting

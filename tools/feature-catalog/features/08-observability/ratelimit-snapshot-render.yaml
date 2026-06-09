@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ratelimit_snapshot painted to CLI status-bar transient via notice port"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "ratelimit_snapshot dropped at context-binding.ts default arm; render is CLI status-bar only (B1)"
 purpose: |
   jun-6 account-ratelimit-snapshot 슬라이스(src/llm/ratelimit-snapshot/: parse.ts·notice.ts·

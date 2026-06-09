@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/image add/list/clear CLI slash queue feeds multimodal PromptPayload; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the user value (send image to the model) reaches the browser fully via the web composer image-attachment subsystem (composer/image-attachment.ts) wired through input.append images[] to the LLM adapter (protocol.ts ImageBlock)"
 purpose: |
   PromptPayload 타입을 backward-compat하게 widening — 기존 string 페이로드

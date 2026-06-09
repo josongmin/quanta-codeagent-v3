@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:cline", "default-off"]
 depends_on: [conversation-checkpoint-store]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure in-memory GranularRegistryPort (record/restore/list/clear); ui_surfaces n-a, deliberate_hold defers all consumer wiring (hook + /rewind-tool arm). No CLI affordance either."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal checkpoint store primitive, no UI affordance on any surface."
 purpose: |
   ADR-0124 `ConversationCheckpointStore` 의 files+task sibling — pure

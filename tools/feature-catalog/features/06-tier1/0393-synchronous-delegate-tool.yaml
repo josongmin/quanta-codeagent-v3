@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "synchronous delegate tool registered as extraTool via SessionDeps.delegation, runs in CLI loop with HITL always-confirm"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "renders as generic tool.invoked/completed (mapped) plus EscalationCard for the always-confirm approval, but no dedicated delegation affordance and default-OFF host-opt-in"
 purpose: |
   quanta엔 이미 background subagent(subagent_fork/poll/await, ADR-0140)와

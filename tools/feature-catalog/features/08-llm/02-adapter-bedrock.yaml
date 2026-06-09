@@ -26,7 +26,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Bedrock transport adapter usable from CLI LLM registry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal cloud transport adapter (SigV4 Bedrock endpoint, ui_surfaces n-a), no UI affordance"
 purpose: |
   `BedrockProviderAdapter` routes Anthropic Messages API calls through AWS Bedrock's

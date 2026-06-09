@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "memoryCitations row rendered in cli-turn-summary panel; derived 2/2 holds"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user value is a cli-turn-summary panel row; turn-summary is a CLI-only panel not in the web-renders set, so it never reaches the browser"
 purpose: |
   `AgentOutcome.memoryCitations` (ADR-0082, `memory-citation-surface` feature가

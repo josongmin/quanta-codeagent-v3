@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4-layer mention pipeline (parser/resolver/event-emitter/inject-builder) producing typed events; ui_surfaces n-a, reachable from CLI entry."
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal mention-to-typed-event pipeline (the user-facing @-mention typing surface is the separate ADR-0418 feature); no user-visible affordance of its own."
 purpose: |
   4-layer mention pipeline parsing `@skill` / `plugin://name` / `@@app`

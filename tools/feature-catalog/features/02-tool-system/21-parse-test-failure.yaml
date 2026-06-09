@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Default model-callable Stage-3 log-parsing tool in CLI."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Agent tool — file:line extraction result renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   raw 테스트/빌드 출력에서 file:line 위치를 프레임워크 무관하게 추출하는 default

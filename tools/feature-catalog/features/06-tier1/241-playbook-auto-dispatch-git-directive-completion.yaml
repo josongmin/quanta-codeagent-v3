@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "dispatchPlaybook enqueues /play follow-up via planQueueSink and git directives publish on stage/push/create-pr success paths in the CLI loop"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "/play is a SlashPalette server-routed prefill stub (B2) and queue enqueue has no SessionCommand verb (B3); never executes in the browser"
 purpose: |
   Closes ADR-0203 inline-trigger dispatch gap + ADR-0221's remaining

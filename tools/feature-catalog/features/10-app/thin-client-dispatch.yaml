@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "thin-client route resolver reachable from CLI dispatch import graph"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal gate-aware route resolver + NO-THROW parser primitive; no distinct browser-rendered affordance of its own"
 purpose: |
   A slash-command/skill carries an optional thinClientDispatch route tag so the SAME

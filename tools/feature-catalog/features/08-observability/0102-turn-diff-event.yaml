@@ -10,12 +10,12 @@ monitoring: n-a
 modes: [n-a]
 configurable: integrated
 surface_integration:
-  cli: partial
+  cli: full
   web: partial
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/agent/turn-diff/index.ts — emitter shipped; loop-wire via ADR-0110 helpers; rendered/persisted by jsonl-recorder + stdout (no live turn-diff panel)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "components built+tested (apps/web-frontend/src/components/canvas/DiffView.tsx + DiffPanel.tsx + SplitDiffView.tsx + DiffStats.tsx) but NOT mounted — App.tsx:578 says DiffPanel DEFERRED so tool.diff frames decode then drop; the turn_diff_updated AgentEvent itself is dropped at context-binding.ts:1061 default arm"
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]

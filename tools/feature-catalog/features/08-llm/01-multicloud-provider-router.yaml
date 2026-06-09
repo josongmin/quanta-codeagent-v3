@@ -29,7 +29,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "provider precedence resolver runs at CLI LLM factory wiring"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal provider-resolution primitive (env precedence ladder, ui_surfaces n-a), no UI affordance"
 purpose: |
   `resolveProviderWithRouter(input)` is the 7-layer precedence ladder that picks the

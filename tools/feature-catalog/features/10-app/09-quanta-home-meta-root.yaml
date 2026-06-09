@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_HOME env override consumed via runtimeConfig SSOT by permission-store/bench/prefs paths"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure cross-cutting path env override, no UI affordance on any surface"
 purpose: |
   Single env override that relocates every Quanta-owned persistent path —

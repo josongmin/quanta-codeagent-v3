@@ -28,7 +28,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "composition-root credential mint resolved in CLI bootstrap (cliBuildLlm to resolveVendorApiKey), env-knob driven"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal credential-resolution seam; credential knobs are deliberately excluded from the served knob catalog, no browser affordance"
 purpose: |
   Extends the H7 `CredentialSource.mintApiKey()` (already hardened — TTL cache,

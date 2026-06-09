@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "transcript reconcile runs on CLI resume/fork/rewind paths (store + resume-fsm)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal transcript-repair primitive (dangling tool_use/tool_result reconciliation), ui_surfaces n-a, no UI affordance"
 purpose: |
   `reconcileToolPairing(messages)` repairs dangling `tool_use`↔`tool_result`

@@ -16,12 +16,12 @@ depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "same-turn recovery policy (backoff/compact/max_tokens/malformed/empty) in recovery.ts is an internal retry/recovery mechanism, no user-visible affordance"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal recovery/retry policy, no UI affordance on any surface"
 purpose: transient backoff / PTL→compact / max_tokens / malformed / empty
 evidence:

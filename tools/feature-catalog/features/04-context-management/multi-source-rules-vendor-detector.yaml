@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "5-vendor rule detector port reachable from CLI rules import graph"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure rule-ingestion port feeding prompt assembly, default-OFF, no UI affordance"
 purpose: |
   6-vendor 자동 감지: .cursor/rules/*.mdc + .clinerules(file|dir) +

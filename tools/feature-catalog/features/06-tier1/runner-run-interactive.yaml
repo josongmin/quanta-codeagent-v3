@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI REPL driver (prompt-pipeline + turn-runner + session-loop, raw-line-reader, Esc-Esc); reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure CLI REPL driver primitive; the web daemon uses its own session loop, no browser affordance"
 purpose: |
   옛 `runInteractive` 단일 helper는 제거됐지만, surface-agnostic REPL driver

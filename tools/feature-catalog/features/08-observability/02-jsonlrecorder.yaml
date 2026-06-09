@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Append-only JSONL trajectory sink runs in CLI backend."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal append-only JSONL sink/codec, no UI affordance on any surface."
 purpose: |
   `JsonlRecorder` — append-only JSON-Lines sink for the trajectory event stream.

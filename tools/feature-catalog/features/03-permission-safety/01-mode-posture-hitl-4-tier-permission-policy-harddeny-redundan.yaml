@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 4/4 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "gate emits approval requests that DO reach web via approval.requested + approval.respond (session-hooks.ts:410), but 4-tier HITL fidelity collapses to approve|deny 2-verb on EscalationCard"
 purpose: '단일 함수 runAdmissibilityGate로 추출 — 순서: mode-posture → HITL 4-tier → permission policy → pre_tool_use hook. dispatch.ts는 thin caller.'
 evidence:

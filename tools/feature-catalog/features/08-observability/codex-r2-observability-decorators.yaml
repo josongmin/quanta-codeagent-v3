@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Cache/registry metric decorators are no-throw wrapping ports reachable from CLI."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal telemetry decorators (emit hit/miss/eviction counters to a metric port), no UI affordance on any surface."
 purpose: |
   Two NO-THROW wrapping decorators emit hit/miss/eviction counters as

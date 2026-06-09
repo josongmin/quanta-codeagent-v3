@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "appshot_verify tool, runs in CLI loop"
+    cli: "runs in the interactive CLI — 14/14 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "appshot_verify tool invocation + result render via tool.invoked/tool.completed; the deferred share/live-preview pane is Tauri-desktop-bound not the browser frontend"
 purpose: |
   G1 Phase 1 — the CLOSED generation→verification cycle quanta never had. quanta

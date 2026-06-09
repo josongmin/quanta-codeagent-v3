@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "session JSONL encode/decode codec used by CLI session rail"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal on-disk codec (ui_surfaces n-a), no UI affordance"
 purpose: |
   Encode/decode pair for the per-line records that make up the session JSONL

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CircumventionTracker remembers soft-denied write effects and threads advisory into classifier prompt behind QUANTA_CIRCUMVENT_DETECT reachable from CLI; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure denied-effect memory primitive feeding the classifier prompt (advisory-first), internal gate primitive with no UI affordance on any surface"
 purpose: |
   실제 AFK 바이패스를 닫음: write-to-X 가 tool A(`Edit`/`Write`/`MultiEdit`)로

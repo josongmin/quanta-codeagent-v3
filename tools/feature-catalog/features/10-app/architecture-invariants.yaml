@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep: biome + slice-boundary test guard, no runtime surface"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "static lint + runtime slice-boundary invariant guard, no user-visible affordance on any surface"
 purpose: |
   4 신규 슬라이스 (@/runner, @/ipc, @/ui, @/auth) × 10 invariants = 20+ enforced guard.

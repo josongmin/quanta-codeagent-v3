@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [jsonrpc-codec]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure branded RequestId type + deterministic seedable id generator; shared/jsonrpc library primitive, no surface affordance."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal id-correlation primitive; no browser affordance and not reachable from web surface."
 purpose: |
   Branded `RequestId` type plus a deterministic, seedable id generator for

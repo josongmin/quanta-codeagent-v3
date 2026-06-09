@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "3 model-facing tools (list_mcp_tasks/get_mcp_task/cancel_mcp_task) reachable from CLI loop"
+    cli: "runs in the interactive CLI — 10/14 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the 3 caller-wired mcp_tasks tools render as tool.invoked/tool.completed cards in session-hooks.ts via the bridged tool_call/tool_result events; the negotiator core is internal but the user-facing mechanism is the tool calls"
 purpose: |
   Cursor + Claude + Codex 3-vendor 강신호 — rmcp 0.15 표준 MCP Tasks

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "discoverSkills calls the parser and dispatch calls assertAllowedTool when QUANTA_SKILLS_DIR active in the CLI"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure SKILL.md schema parser/classifier loader, no browser affordance"
 purpose: |
   SKILL.md frontmatter 6-필드 strict schema (name/description/userInvocable/allowedTools/category/stability).

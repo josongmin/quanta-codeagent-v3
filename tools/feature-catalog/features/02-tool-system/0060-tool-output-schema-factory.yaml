@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "defineTool factory reachable from CLI entry; ui_surfaces cli"
+    cli: "runs in the interactive CLI — 8/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal tool-factory plumbing (outputSchema/toModelOutput/deferred/streaming-input callbacks); no user-visible affordance on any surface"
 purpose: |
   v0.dev createProviderToolFactoryWithOutputSchema 흡수 — Tool에 4개 OPTIONAL 능력

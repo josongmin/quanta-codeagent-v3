@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ShadowOdb/Tool metric wraps not reachable from cli interactive entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "metrics routed to AlertManager/Grafana provisioning, never to the quanta web frontend"
 purpose: |
   Closes 24-metric recipe coverage gap from ADR-0159: ShadowOdb 5-method wrap

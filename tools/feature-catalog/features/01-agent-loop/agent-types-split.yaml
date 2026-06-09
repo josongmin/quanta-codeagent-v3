@@ -15,12 +15,12 @@ depends_on: [model-swap-retry, bench-eval-driver, bench-repair-context-builder, 
 config_refs:
   env: [QUANTA_BENCH_LOCALIZE_PHASE, QUANTA_CAP_ENFORCE]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "types.ts cohesion split (re-export preserved, byte-identical); no CLI affordance"
+    cli: "runs in the interactive CLI — 7/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal type-module split, no user-visible UI affordance on any surface"
 purpose: |
   `src/agent/types.ts` (875 LOC) 의 cohesion split — 응집도 높은 4 묶음을

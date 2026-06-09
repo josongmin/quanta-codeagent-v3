@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:roo", "absorbed:devin", "absorbed:codex", "absorbed:cursor"]
 depends_on: [background-subagent, agent-tool-shape]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure DelegationPort/mode-registry/boomerang primitive, ui_surfaces n-a, default-OFF host-opt-in slot, no CLI affordance"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal delegation port/registry, no browser affordance on any surface; not an AgentEvent the bridge maps"
 purpose: |
   Parent → child mode-typed handoff with isolated context. 4-vendor convergence

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bubblewrap shell-out OS-sandbox backend reachable from CLI shell-spawn path; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure Linux OS-sandbox backend (compileBubblewrapArgs), runtime spawn-wrapper with no user-visible UI affordance on any surface"
 purpose: |
   Linux OS-level sandbox via `bwrap` (bubblewrap) shell-out. Phase 1 stub

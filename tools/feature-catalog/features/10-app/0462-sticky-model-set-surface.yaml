@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI /sticky-model slash command registered in registry-surface; runs in REPL"
+    cli: "runs in the interactive CLI — 8/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI slash command; SlashPalette server-routed prefill stub does not execute (B2) and no model-set web handler exists"
 purpose: |
   The SET half of sticky-model: a `/sticky-model <mode> <modelId>` slash command

@@ -12,12 +12,12 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core, tier:core]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure deterministic circuit-breaker state machine; never touches transcript/LLM/UI, no CLI affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal breaker state machine, no user-visible UI affordance on any surface"
 purpose: |
   Pure deterministic state machine that mirrors Claude Code v2's two

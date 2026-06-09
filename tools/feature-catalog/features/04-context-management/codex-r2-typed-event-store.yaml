@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Closed-port 8-variant typed event store parallel to working memory + in-memory adapter; ui_surfaces n-a, reachable from CLI entry."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal typed-event store primitive (additive side-channel, never mutates wm); no user-visible surface affordance."
 purpose: |
   Closed-port typed event store that sits PARALLEL to the working memory

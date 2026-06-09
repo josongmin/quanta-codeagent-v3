@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/6 reachable, default-OFF closed-port kernel primitive, tool wiring is deliberate_hold, no composition root wires it; keep derived missing"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal slice primitive (per-session node subprocess kernel), no tool surface wired and no UI affordance"
 purpose: |
   Codex `~/.codex/node_repl/active_execs/{execId}.json` 패턴 흡수의 slice

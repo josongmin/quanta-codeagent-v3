@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4/4 evidence files reachable from CLI; registered in defaultTools"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent-callable scripted_replace edit-sibling renders as tool.invoked/tool.completed in session-hooks.ts"
 purpose: |
   Codex `tool-routing-and-triggering.md` absorption — "patch is for local +

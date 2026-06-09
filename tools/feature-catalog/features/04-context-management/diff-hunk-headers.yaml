@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Same src/apps/cli/diff-preview.ts; adds @@ hunk headers to the CLI ANSI render."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only ANSI render; web DiffPanel unmounted (App.tsx:578), hunk headers never reach the browser."
 purpose: |
   Adds `@@ -A,B +C,D @@` hunk headers + old/new line-number gutters to the ANSI

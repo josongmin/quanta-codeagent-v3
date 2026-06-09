@@ -16,12 +16,12 @@ labels: ["adr-0190", "tier:2", "sandbox", "darwin"]
 depends_on:
   - linux-sandbox-native-impl
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "napi-rs native scaffold + typed adapter (crates/darwin-vz-helper + skybridge registry); pure internal sandbox primitive, no CLI affordance."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Native VZ binding scaffold (deliberate_hold, fake-binding only), pure internal primitive with no UI affordance on any surface."
 purpose: |
   napi-rs Cargo workspace member (`crates/darwin-vz-helper/`) — typed

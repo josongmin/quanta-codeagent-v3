@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pdf_read tool reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "tool.invoked/tool.completed render the call but the ToolResult.documents DocumentBlock is composed into the next request and never rendered visually in the browser (no tool-document render)"
 purpose: |
   PDF reader that ships ZERO client-side text-extraction dependency. Every

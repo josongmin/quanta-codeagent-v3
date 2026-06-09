@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "submission op envelope models host->agent input for the CLI loop"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal typed input envelope and legacy adapter (submission.ts); not a UI affordance, control-ops are accepted-and-ignored"
 purpose: |
   Codex `Submission { id; op }` / `Op` discriminated union 흡수. host→agent 입력을

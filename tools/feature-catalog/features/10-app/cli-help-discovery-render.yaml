@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/help discovery renderer (category grouping + env SSOT + virtual /image) runs in CLI REPL"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only /help renderer; no equivalent help affordance in the web frontend (B2)"
 purpose: |
   기존 `cli-slash-help` 의 dynamic BUILTINS 인벤토리 위에 3개 P0

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/repl.ts and siblings reachable from CLI entry; this is an internal CLI REPL code-structure refactor (orphan prune)"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal CLI code-structure refactor, no distinct user-visible affordance on any surface"
 purpose: |
   **Status truth-up (Slice B, 2026-05-25):** the 21-module split landed at

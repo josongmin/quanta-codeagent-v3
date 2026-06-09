@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; per-thread tool registry primitive reachable in CLI"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal per-thread ThreadToolRegistry primitive (default-OFF, plane-clean leaf), ui_surfaces n-a; no UI affordance on any surface"
 purpose: |
   Codex thread-scope dynamic tool 등록 + MCP server별 namespace + lazy

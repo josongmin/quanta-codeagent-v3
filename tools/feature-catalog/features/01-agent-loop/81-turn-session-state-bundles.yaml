@@ -16,12 +16,12 @@ depends_on: [secret-redaction-content-plane, plan-mode, turncontextinput-mode-re
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "type-only parameter-bundling refactor (TurnSession/TurnState), runtime-erased; no CLI affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal parameter-bundle refactor, no user-visible UI affordance on any surface"
 purpose: |
   `runTurn`/`streamConsume`/`applyAction`이 17-20 positional parameter로 자란 부채를

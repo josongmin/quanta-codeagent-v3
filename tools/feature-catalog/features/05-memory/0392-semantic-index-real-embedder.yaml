@@ -27,7 +27,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: search-index backend + embedder/store registry reachable from CLI entry"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal semantic-index backend (real embedder + pluggable vector store, src/runner/assemble/search-index-backend.ts) — env-knob-configured indexing infra, no user-visible affordance on any surface"
 purpose: |
   startIndexer가 더 이상 placeholder hashEmbed(64-d FNV)만 쓰지 않는다 —

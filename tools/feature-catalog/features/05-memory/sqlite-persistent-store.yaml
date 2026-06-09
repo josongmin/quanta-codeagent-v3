@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [embedder-port, memory-dedup-planner, memory-eviction-planner, tier, memory-vector-math]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PersistentStorePort SQLite adapter, internal persistence library, no CLI command/tool affordance"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal storage adapter, no UI affordance"
 purpose: |
   Long-term 메모리 entries의 disk-backed PersistentStorePort 구현. `bun:sqlite` 사용

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PLAN/REVIEW/AUDIT verbatim notice injected into per-turn prompt, reachable from CLI"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure prompt-text reminder block; mode itself rides mode_changed dropped at context-binding.ts:1104, the notice has no rendered affordance"
 purpose: |
   PLAN/REVIEW/AUDIT 모드 별 verbatim 본문을 `PLAN_NOTICE` / `REVIEW_NOTICE` /

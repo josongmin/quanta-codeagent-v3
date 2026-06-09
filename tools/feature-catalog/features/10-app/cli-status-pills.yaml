@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/status-pills.ts top-line pill bar; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only terminal chrome (Mode/Workspace/Sandbox/Skills/Rules pills); not reachable from web-daemon, no web render"
 purpose: |
   CLI chrome top-line "pill" composer — 초기 4-pill (Mode / Workspace /

@@ -23,7 +23,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "cacheTtl resolved at CLI factory from QUANTA_PROMPT_CACHE_TTL, stamps ttl on the codec cache_control"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal codec cache-control field stamping (cost optimization); no user-visible affordance on any surface"
 purpose: |
   quanta는 Anthropic prompt-cache breakpoint를 `cache_control: { type: "ephemeral" }`

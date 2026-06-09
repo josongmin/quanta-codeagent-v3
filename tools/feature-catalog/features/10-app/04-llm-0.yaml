@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: bench --dry-run is a bench-app command, not in interactive CLI import graph"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "bench dry-run plan builder runs in src/apps/bench, not reachable from web-daemon entry; no browser affordance"
 purpose: '--dry-run 모드 () — 순수 plan builder: 코퍼스 load + count + per-instance preview, LLM 호출 0. 통합 전 정합성/필터 검증, CI 비용 없음'
 evidence:

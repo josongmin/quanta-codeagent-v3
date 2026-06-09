@@ -15,12 +15,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-registry-precedence, quantaskillsdir, skill-admin-enforcement, skill-audit-log, skill-discover]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "SkillScope closed union + install-state + fixed precedence order + frontmatter inference — pure typed-shape and precedence policy, no affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure precedence policy + typed scope shapes, no UI on any surface"
 purpose: |
   Codex의 7-scope skill registry 패턴 흡수 (R4 발견). 닫힌 union `SkillScope` (7 value) +

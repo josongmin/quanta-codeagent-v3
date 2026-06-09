@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ToolSearch model-callable tool wired every session, lexical ranking runs in the CLI loop"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal tool-search ranking-quality tweak, no distinct browser affordance (just a model-callable tool)"
 purpose: ToolSearch — 어휘 카탈로그 검색(스키마 반환). createToolSearchTool로 매 에이전트 세션에 배선됨(L3). server-side deferral 아님(정직히 기술).
 evidence:

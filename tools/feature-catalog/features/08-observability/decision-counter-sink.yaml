@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "decision-counter sink wired in src/apps/cli/repl.ts tee chain (default-OFF env gate), reachable from cli entry"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "rides the decision AgentEvent which is dropped at context-binding.ts default arm; counter goes to MetricsRegistry/OTLP, never to the browser"
 purpose: |
   Phase 2 + Phase 3 wiring 후에도 `MetricsRegistry`는 게이트 결정을 보지

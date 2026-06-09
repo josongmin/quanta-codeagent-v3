@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "auth slice reachable from CLI entry; /login via runBrowserFlow loopback"
+    cli: "runs in the interactive CLI — 11/12 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "real web affordance: slash-auth.ts login/logout/whoami call /auth/login /auth/logout /auth/status backed by web-daemon auth-routes.ts which imports runBrowserFlow/exchangeCode/writeToken from the slice; OAuthCallbackProvider port is the Web/Tauri inject seam"
 purpose: |
   `src/auth/chatgpt-oauth/` 8 파일 — ChatGPT OAuth provider seam (ADR-0094 Phase 1).

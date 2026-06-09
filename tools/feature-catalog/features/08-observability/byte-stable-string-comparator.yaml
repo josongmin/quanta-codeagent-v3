@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "byteCompare comparator used in sort callbacks across the CLI import graph."
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal deterministic-ordering primitive, no UI affordance on any surface."
 purpose: |
   Byte-stable string comparator for deterministic ordering. Unlike

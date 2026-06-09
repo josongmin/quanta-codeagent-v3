@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "runBatchCmd is wired into the CLI entry (src/apps/cli/index.ts:171,177,216) as the quanta batch subcommand — deliberate_hold no-wire note is stale"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "separate CLI subcommand entry point, not the interactive session; no web protocol verb (B3) or web-daemon surface — never reaches the browser"
 purpose: |
   Codex `agent_jobs` + Cursor batch fan-out 2-vendor convergence 흡수. CSV (또는

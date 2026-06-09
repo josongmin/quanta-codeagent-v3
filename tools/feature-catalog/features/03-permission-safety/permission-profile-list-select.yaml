@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "List/Select verbs + on-disk user profiles reachable from CLI (src/permission/profile-list-select.ts)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "List/Select user mechanism is CLI/programmatic with no web verb; QUANTA_PROFILES_DIR only a redacted read-only KnobsPanel row"
 purpose: |
   Codex `PermissionProfile{List/Select/Apply/Resolve}` absorption. The existing

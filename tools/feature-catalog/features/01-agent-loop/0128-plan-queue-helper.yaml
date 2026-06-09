@@ -12,12 +12,12 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core, tier:core]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ui_surfaces n-a; pure typed FollowUp envelope primitive, wiring left to host (helper-only deferred-wire), no user-visible affordance"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal typed follow-up primitive (helper-only), no UI affordance on any surface"
 purpose: |
   Typed primitive that lets a host accept user input while a turn is in flight

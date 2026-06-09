@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "buildSamplingWiring wires the @/llm-backed sampling handler + CLI promptBoolean HITL gate at the host composition root; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the user-facing piece is the HITL consent prompt routed through the CLI elicitation prompter; web-daemon non-TTY falls to headless decline and there is no web-frontend consent component"
 purpose: |
   B1 follow-up — wire a REAL `@/llm`-backed inbound MCP `sampling/createMessage`

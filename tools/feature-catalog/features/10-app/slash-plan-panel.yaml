@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /plan panel, src/apps/cli/plan-panel.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "B2 prefill stub: SlashPalette.tsx plan slug is prefill(plan), does not execute; plan_ events also B1-dropped at context-binding.ts default arm; planSnapshot port not web-supplied"
 purpose: |
   Codex + Claude plan-mode TUI panel — renders the live `Plan` (via

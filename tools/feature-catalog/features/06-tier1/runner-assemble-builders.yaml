@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-collaborator builder family wired into CLI buildTooling; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 12/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal collaborator-composition builders, no user-visible affordance on any surface"
 purpose: |
   `apps/cli/internal.ts#buildTooling` 의 단일 GodFn (env 읽기 + collaborator

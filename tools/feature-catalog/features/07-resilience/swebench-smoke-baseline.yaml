@@ -15,12 +15,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "held-promotion"]
 depends_on: [bench-corpus-loader, bench-observe-non-agent-evidence, assert-never-exhaustiveness, bench-best-of-n-sampler, byte-stable-string-comparator]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "frozen SWE-bench regression smoke fixture plus select audit; CI/test infra, not an interactive CLI feature"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure regression-smoke fixture, no UI affordance on any surface"
 purpose: |
   `princeton-nlp/SWE-bench_Verified`에서 결정적·저비용·신뢰성 기준으로 6개

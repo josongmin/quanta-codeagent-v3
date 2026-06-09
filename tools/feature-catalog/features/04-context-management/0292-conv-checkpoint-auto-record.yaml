@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/rewind-conv slash plus per-turn auto recordTurn wire in CLI REPL, replaces live transcript"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only slash plus transcript-replace; SlashPalette routed commands are prefill stubs (B2) and no SessionCommand verb (B3)"
 purpose: |
   ADR-0124 `ConversationCheckpointStore` 의 first consumer — surface-side wire +

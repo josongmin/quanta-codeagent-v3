@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "raw-line reader coalesces large paste echo in the CLI readline pipeline (raw-line-reader.ts)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "terminal readline-only input behavior; the browser has its own input box and never uses the raw-line reader, so the paste-burst echo does not reach the web"
 purpose: |
   Codex-style large-paste coalescing in the raw-line reader. A SINGLE keypress

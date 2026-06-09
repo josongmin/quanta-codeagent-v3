@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_TOOL_OUTPUT_MAX cap + disk-spill reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal tool-output cap/disk-spill mechanism (truncation policy); ui_surfaces n-a, no UI affordance."
 purpose: (200k) / _SPILL_KEEP(50), sub-cap byte-identical
 evidence:

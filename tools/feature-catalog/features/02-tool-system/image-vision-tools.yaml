@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "read_image/read_image_url tools, run in CLI loop"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "read_image/read_image_url tool invocations + results render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   Three modules that compose the vision-input slice. (1) `read_image`

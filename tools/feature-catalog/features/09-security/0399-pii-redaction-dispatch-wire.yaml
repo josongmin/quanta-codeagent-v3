@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PII branch wired into dispatch.applyRedaction (default-OFF config.redaction.pii), running in the CLI dispatch path"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "content-plane PII masking fence spliced after secret redaction; no browser UI affordance of its own"
 purpose: |
   PII 모듈(`src/security/pii-redaction/`)은 sync + masking(redactText)이라

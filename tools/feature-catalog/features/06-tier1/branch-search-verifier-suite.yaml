@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; tsc/test/lint/lsp_diag verifiers + combineVerifiers"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal Verifier impls bound to runShell; no browser UI affordance"
 purpose: |
   Concrete `Verifier` implementations bound to `@/runtime/shell#runShell`

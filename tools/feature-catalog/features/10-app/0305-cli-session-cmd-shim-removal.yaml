@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Refactor of CLI session-command call sites in src/apps/cli/repl.ts (shim removal); reachable from CLI entry."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Internal CLI refactor of session-command wiring; no browser affordance and SessionCommand carries no session-op verb (B3)."
 purpose: |
   Removes `src/apps/cli/session-commands.ts` (the Phase-3 shim wrapping

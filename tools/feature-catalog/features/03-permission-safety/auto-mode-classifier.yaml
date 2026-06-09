@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "LLM-backed auto-mode ClassifierPort consulted as last permission fallback reachable from CLI; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure LLM classifier port (single round-trip, schema enforcement) injected behind the gate, internal decision primitive with no UI affordance on any surface"
 purpose: |
   HITL-AUTO 모드의 LLM 분류기 — 권한 결정을 사람 대신 자동으로 내리는 mode에서

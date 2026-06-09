@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "WorkMetrics cost emitted to OTel registry in CLI run"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure OTel cost/token sink into MetricsRegistry, no render; user-visible cost is the separate TokenCounter feature"
 purpose: |
   `llm/*` adapter 가 계산한 `estimatedCostUsd` + `input_tokens` /

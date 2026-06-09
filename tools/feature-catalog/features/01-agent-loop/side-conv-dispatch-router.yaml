@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; dispatchSideConversation seam reachable in CLI"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal request/response router seam over the side-conversation executor; no distinct user-visible affordance on any surface"
 purpose: |
   UI/CLI/RPC-facing seam decoupling external callers from the executor's

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "output-spill + GC in tool registry result path"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal result cap + disk-spill primitive; ui_surfaces n-a, no user-visible affordance"
 purpose: <persisted-output> 스필 + GC
 evidence:

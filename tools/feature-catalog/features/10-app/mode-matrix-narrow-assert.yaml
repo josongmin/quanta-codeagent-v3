@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [branch-only-guard, run-mode-expansion-ide-daemon, budget-events-union, budget-dials-types, budget-meter]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure compile-time TS assertion plus runtime ModePolicy matrix guard; no user-facing CLI affordance"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal type/policy guard (narrowMode + assertModeMatrix), no UI affordance on any surface"
 purpose: |
   Compile-time + runtime defense against cast-corrupted ModePolicy values.

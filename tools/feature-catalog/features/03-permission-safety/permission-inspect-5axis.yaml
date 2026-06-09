@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "stateless 5-axis inspector backing /permission explain slash (src/permission/inspect.ts)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user mechanism is a CLI slash facade; web SlashPalette commands are prefill stubs (B2) with no real handler, output rides no rendered event"
 purpose: |
   Slash-command 표면(`/permission explain <tool>`)을 위한 stateless inspector. 동일

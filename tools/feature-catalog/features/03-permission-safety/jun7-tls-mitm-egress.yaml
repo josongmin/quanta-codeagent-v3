@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "TLS MITM termination + secret scan on HTTPS egress wired on CLI proxy"
+    cli: "runs in the interactive CLI — 12/12 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "a proxy deny/redact manifests only as the blocked HTTPS tool failing, surfaced as a generic tool.completed error; CA/MITM mechanics and decision-log markers do not reach the browser"
 purpose: |
   secret-egress (B) 의 HTTPS-opaque 갭을 닫음. 기존엔 `CONNECT host:443` 이 raw TLS

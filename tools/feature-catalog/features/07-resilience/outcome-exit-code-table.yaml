@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [batch-aggregate-exit-code, agent-cli-args-parser]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure exitCodeForOutcome function plus SIGINT lifecycle wrapper; POSIX exit-code table, no interactive affordance"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure exit-code policy primitive, no UI affordance on any surface"
 purpose: |
   `exitCodeForOutcome(outcome)` is the PURE function that pins the canonical

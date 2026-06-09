@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "eval Tier-3 thin bench-report bridge; derived 0/3 reachable from interactive CLI entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "eval-harness internal report->PublicPayload bridge, no web UI affordance"
 purpose: |
   Tier 3는 의도적으로 THIN BRIDGE — `apps/bench/`의 기존 harness가 생산한

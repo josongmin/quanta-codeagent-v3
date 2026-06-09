@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "advisory effort-classifier port present in CLI AgentConfig slot"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal advisory classifier (ports-only, slot inert/unwired per deliberate_hold); recommendation rides no rendered event and surfacing is a future wire, no UI affordance on any surface"
 purpose: |
   Session-scoped advisory classifier (`createEffortClassifier`) that watches

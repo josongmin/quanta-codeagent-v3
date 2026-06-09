@@ -15,12 +15,12 @@ depends_on:
   - model-tag-versioning
   - embed-cache
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure retrieval invalidator-registrar primitive, default-OFF, never called by any composition root."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal registrar seam, no UI affordance on any surface."
 purpose: |
   Wrap the ADR-0266 ModelTag invalidator's callback registry with a

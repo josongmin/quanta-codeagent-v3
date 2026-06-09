@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "shift+tab posture cycle + pill in CLI raw-line-reader/repl; reachable from CLI import graph."
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only shift+tab UX; mode_changed rides a B1-dropped event (context-binding.ts:1061 default arm) and there is no web pill."
 purpose: |
   shift+tab (a.k.a. backtab / CSI Z) cycles a single user-facing 4-rung posture

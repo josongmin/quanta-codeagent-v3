@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /queue per-msg mutators, src/apps/cli/queue-cmd.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "/queue absent from SlashPalette.tsx; mutate verbs need a B3-absent SessionCommand verb (no queue/retry/edit/sendNow); ctx.planQueue not web-supplied"
 purpose: |
   Codex Desktop composer parity: each queued follow-up gets 4 per-msg

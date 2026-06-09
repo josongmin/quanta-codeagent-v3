@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "eval taxonomy classifier primitive; derived 0/5 reachable from interactive CLI entry (eval classify is eval-CLI surface)"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "eval-harness internal classification primitive, no web UI affordance"
 purpose: |
   Pure classification primitive `(LLMPort, query) → ClassifyResult`. System

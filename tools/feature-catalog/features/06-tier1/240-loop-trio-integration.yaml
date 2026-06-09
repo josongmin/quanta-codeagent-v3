@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "auto-background onAccept, automation tickScheduler setInterval, and architect/editor per-turn prompt notices all run in the CLI loop"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "auto-bg propose/accept is a CLI prompt affordance; mode/notice events drop at context-binding.ts:1104 default arm (B1) — none reach the browser"
 purpose: |
   Closes 3 of 11 ADR-0236 mega-wire deliberate_holds. (A) auto-background

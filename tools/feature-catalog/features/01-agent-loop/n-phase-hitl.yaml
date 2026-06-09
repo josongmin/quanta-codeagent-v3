@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/4 reachable, AgentConfig wire deliberately held; closed NPhaseDriver state machine not wired into CLI"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "approvals web surface is the 2-verb EscalationCard/PlainApproval; this N-phase per-phase feedback gate is unwired and rides no web command verb, does not reach the browser"
 purpose: |
   Cursor AiProjectService(8)의 N-phase 상태머신(init→clarify→plan→feedback

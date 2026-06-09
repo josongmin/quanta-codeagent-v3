@@ -15,12 +15,12 @@ depends_on: [debug-blame-skills-trio]
 config_refs:
   env: []
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure in-memory capture-and-list primitive (src/agent/debug-trace-autofix.ts), default-OFF, ui_surfaces n-a, no wired caller."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal queue primitive, no slash or UI affordance on any surface."
 purpose: |
   순수 in-memory capture-and-list primitive. `debug-trace` skill (ADR-0181)이

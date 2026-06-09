@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "three env-gated axes wired through resolveMemoryConfigFromEnv into memoryTools on CLI; derived 7/8 holds"
+    cli: "runs in the interactive CLI — 7/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "line citations append to memory_search results which render via tool.completed result preview; per-thread mode + budget write-guard are env-knob/CLI-only and not the 6 CONFIG_ALLOWED_KEYS, so config side does not reach browser"
 purpose: |
   Three INDEPENDENT, default-OFF axes folded into `MemoryToolsDeps` on the

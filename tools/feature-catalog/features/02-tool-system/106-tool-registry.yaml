@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "core per-loop registry composing every tool; runs in CLI dispatch seam"
+    cli: "runs in the interactive CLI — 3/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal infrastructure (schema projection, isReadOnly, output-schema enforcement, capToolOutput/spill); no UI affordance of its own on any surface"
 purpose: |
   Central per-loop registry composing every built-in and ported tool into the

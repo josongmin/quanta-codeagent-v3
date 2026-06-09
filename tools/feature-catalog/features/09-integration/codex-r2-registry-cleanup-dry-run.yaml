@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/session-registry cleanup --dry-run slash flag dispatched in src/apps/cli/session-registry-cmd.ts"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user affordance is a CLI slash command; web SlashPalette server-routed commands are prefill stubs (B2), no real web handler for /session-registry"
 purpose: |
   ADR-0387 extends ADR-0379 `/session-registry cleanup` with a `--dry-run`

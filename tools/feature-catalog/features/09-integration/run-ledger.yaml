@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "RunLedger store/port reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "runLedger.list() is read by the observability-emitter and rendered in the web-only RunColumn (Running/Waiting/Completed) of the ObservabilityPane"
 purpose: |
   ONE state model + closed `RunLedgerPort` + in-memory store so a single

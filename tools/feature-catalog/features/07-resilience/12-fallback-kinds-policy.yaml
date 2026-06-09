@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [streamreset, agent-loop-branch-hardening, response-in-progress, llm-assemble, llm-factory]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal LLMErrorKind policy set that triggers transparent provider swap; no CLI affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal fallback-trigger policy set, no UI affordance; swap is transparent"
 purpose: |
   Provider 교체를 trigger하는 LLMErrorKind 집합을 정책으로 박음 —

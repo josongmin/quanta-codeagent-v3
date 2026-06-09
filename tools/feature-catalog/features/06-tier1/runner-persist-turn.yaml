@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-turn save plumbing behind --state/--resume; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal per-turn save primitive, no user-visible affordance on any surface"
 purpose: |
   CLI REPL `turn` 클로저의 inline save 블록을 surface 무관 슬라이스로 verbatim

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "10 built-in slash commands short-circuited in cli/index.ts main and run in REPL"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only slash registry; SlashPalette server-routed commands are prefill stubs that do not execute (B2)"
 purpose: '/context, /usage, /color, /navigate, /wait, /retry-with, /skills, /reload-skills, /login, /status — surface-agnostic SlashCommand 레지스트리. isSlashCommand는 /<letter>... 만 매치 ([/path/to/file]는 false). cli/index.ts의 main()이 session subcommand 다음, --help 이전에 short-circuit. LLM 호출 0회 (/login 제외 — OAuth 브라우저 플로우). /color & /navigate 는 ~/.quanta/preferences.json 영속화 (QUANTA_PREFS_HOME 테스트 시ams). /wait 캡 = 3600s. /login & /status는 ADR-0094 ChatGPT-OAuth provider 와이어업 (자세한 계약은 chatgpt-oauth-provider feature).'
 evidence:

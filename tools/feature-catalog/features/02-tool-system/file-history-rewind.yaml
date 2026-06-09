@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "file_history_rewind tool, runs in CLI loop"
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "file_history_rewind tool list/restore invocation + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool_call/tool_result arms"
 purpose: |
   Claude `tengu_file_history_rewind_*` 흡수 — 세션 중 특정 FILE을 이전 버전으로 복원.

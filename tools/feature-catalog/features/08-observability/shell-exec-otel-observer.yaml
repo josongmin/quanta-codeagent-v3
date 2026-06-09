@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Wired in CLI via composeShellObservers feeding the Metrics registry."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure telemetry counter-registry observer (src/observability/shell-exec-otel.ts); a sink primitive with no browser render."
 purpose: |
   OTel-bound observer for the ADR-0081 shell exec events. Fans the typed

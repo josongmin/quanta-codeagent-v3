@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "localize recall@K/MRR calibration corpus; offline measurement instrument, no CLI affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "pure offline calibration measurement instrument, no UI affordance on any surface"
 purpose: |
   `src/tool/localize/` 의 ranking 알고리즘 변경이 실제로 도움이 됐는가를

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "debug-error/add-tests/explain-code/extract-function system skills via Skill tool, run in CLI"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "these are Skill-tool system skills; invocation renders via tool.invoked/tool.completed (session-hooks.ts:420,427)"
 purpose: |
   ADR-0111 absorbed 8 CTK git skills; this ADR closes the engineering-task slice

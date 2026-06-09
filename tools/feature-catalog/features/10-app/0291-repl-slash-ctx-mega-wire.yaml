@@ -24,7 +24,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "REPL ReplSlashCtx adapters reachable from src/apps/cli/index.ts wiring 8 slash commands (/edit-plan, /fork-checkpoint, /identity, etc.) in the CLI REPL."
+    cli: "runs in the interactive CLI — 8/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only REPL slash surface; SlashPalette server-routed commands are prefill stubs (B2) and fork/rewind verbs are absent from SessionCommand (B3) — does not reach the browser."
 purpose: |
   Closes 8 default-OFF `ReplSlashCtx` slots so the corresponding slash

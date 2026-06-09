@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "--playbook-trigger flag + QUANTA_PLAYBOOK_TRIGGER env build FS watcher wire in apps/cli/repl; reachable from CLI."
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-flag/env-only watcher; no POST /config key (not in CONFIG_ALLOWED_KEYS) and no web handler (B2) reach the browser."
 purpose: |
   Closes ADR-0203/0240's last unwired hop: the `AgentConfig.playbookTrigger`

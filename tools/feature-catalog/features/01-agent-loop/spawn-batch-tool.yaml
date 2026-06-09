@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; spawn_batch tier-1 tool wired into registry when QUANTA_SUBAGENT_BATCH on"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "as an LLM tool it surfaces in the browser as tool.invoked/tool.completed (name+args+result preview) via the bridge; per-item progress events are B1-dropped so the fan-out observability is thin"
 purpose: |
   Single structured fan-out tool: items[] (inline) XOR items_path

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "costUsd null-proto TABLE guard compiled into pricing path used by CLI."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal correctness/security guard (prototype-pollution NaN block), no UI affordance on any surface."
 purpose: |
   `costUsd(model, ...)`의 model 인자는 untrusted 외부 문자열. 가격 TABLE이 평범한

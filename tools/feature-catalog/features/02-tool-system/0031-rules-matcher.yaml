@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; longest-prefix matcher reachable in CLI permission path"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure deterministic prefix-match algorithm (total function of command+rules), ui_surfaces internal; no user-visible affordance on any surface"
 purpose: |
   Deterministic longest-prefix-match over a single rule set. (1) Normalise

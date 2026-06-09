@@ -15,12 +15,12 @@ depends_on: [shadow-tools-trio, slash-snapshot]
 config_refs:
   env: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Closed ObjectDB port + LRU eviction utility; no direct CLI affordance (underpins shadow-tools-trio / slash-snapshot which are the surfaced features)."
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal git ObjectDB port + LRU cleanup library, no UI affordance on any surface."
 purpose: |
   Closed-port contract for a separate git ObjectDB rooted at

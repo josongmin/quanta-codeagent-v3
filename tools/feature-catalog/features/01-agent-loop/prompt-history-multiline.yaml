@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; CLI raw-line-reader REPL history/multiline input UX"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only raw-line-reader input affordance (purpose states headless/Web surface unaffected); browser has its own input box, this REPL UX never reaches it"
 purpose: |
   REPL 입력 UX 강화 — bash 스타일 ↑/↓ history navigation + Ctrl+R reverse-i-search +

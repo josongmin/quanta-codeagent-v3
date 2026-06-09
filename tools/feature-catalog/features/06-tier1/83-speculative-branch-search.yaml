@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "branch_search tool runs the N-best verifier-prover in the CLI loop; winner diff applied by caller"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "model-invoked tool bridges as a generic tool.invoked/tool.completed card (one of the 6 events), but candidate/scoring/winner view is not rendered and losers are OTel-only"
 purpose: |
   하드 edit를 N개 후보로 격리 워크스페이스에서 병렬 시도 → 닫힌 Verifier 포트(tsc/test/

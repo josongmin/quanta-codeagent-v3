@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "item_started/updated/completed projected onto CLI stream"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "all three item_* variants dropped at context-binding.ts default arm (B1)"
 purpose: |
   Project the event stream into per-item lifecycle events so host UIs can render

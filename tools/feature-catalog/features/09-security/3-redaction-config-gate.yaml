@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "opt-out gate with CLI affordance: normalizeRedactionConfig startup-throw when disabled-without-ack plus per-turn system-reminder banner"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "config-validation policy gate; the banner is a content-plane system-reminder, not a bridged event or web card, so no browser UI affordance"
 purpose: |
   Default-ON gate that enforces the secret-redaction invariant. Disabling at

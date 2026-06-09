@@ -14,12 +14,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: [secret-redaction-content-plane, redaction-config-gate, agent-dispatch-core, agent-loop-branch-hardening, distill-redaction-port]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Layer-1 path/command to SensitivityClass classifier library feeding redaction; pure policy primitive with no direct CLI affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal classifier/policy library, no UI affordance on any surface"
 purpose: |
   Layer 1 of the content-plane secret-redaction invariant. Maps a file path

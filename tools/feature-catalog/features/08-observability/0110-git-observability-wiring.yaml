@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Composition-root git-observability wire helpers run in CLI import graph; ui_surfaces n-a but reachable."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "User value is the turn_diff_updated event + git fingerprint; turn_diff_updated is dropped at context-binding.ts:1052 default arm and DiffPanel is unmounted (App.tsx:578)."
 purpose: |
   Composition-root helpers that wire the deferred halves of ADR-0102

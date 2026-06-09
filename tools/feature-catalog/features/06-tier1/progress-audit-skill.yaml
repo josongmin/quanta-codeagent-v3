@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; progress-audit system skill, slash-wirable"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "skill activation/slash affordance is CLI-only; SlashPalette prefill stub (B2), no web skill handler or panel"
 purpose: |
   사용자가 "진행률"/"코드 레벨로만"/"P0/P1/P2"/"문서는 보지 말고"라고 묻거나 검증을 요구할 때, agent가

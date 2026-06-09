@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:codex"]
 depends_on: [chatgpt-oauth-provider, slice-auth-chatgpt-oauth, refresh-coordinator, chatgpt-responses-adapter]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "internal atomic-write + 0o600 perm-guard durability primitive for OAuth token file"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal token-store durability primitive, no UI affordance (login UI is a separate feature)"
 purpose: |
   OAuth refresh-token / access-token on-disk 저장: (1) tmp + rename atomic

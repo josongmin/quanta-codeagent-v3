@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/fork-checkpoint slash command + ForkSessionPort reachable from CLI"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only slash command; SlashPalette routed commands are prefill stubs (B2) and protocol.ts SessionCommand has no fork/rewind verb (B3)"
 purpose: |
   ADR-0201 의 base `SessionForker` 를 둘러싸는 RICHER `ForkSessionPort` —

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "DECSTBM split-screen live AgentEvent timeline panel in src/apps/cli/timeline-panel.ts wired from repl.ts via QUANTA_TIMELINE; reachable from CLI entry."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Terminal-only ANSI DECSTBM split-screen panel; this specific render has no apps/web-frontend equivalent and AgentEvent variants it renders are mostly dropped at the 6-event web bridge (context-binding.ts:1052), so it never reaches the browser."
 purpose: |
   ADR-0239 debug-tracer가 stderr에 단일-line per-event를 dump하는 방식은

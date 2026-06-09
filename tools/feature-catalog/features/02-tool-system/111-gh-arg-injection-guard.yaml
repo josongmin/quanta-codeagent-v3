@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "normalizeRef leading-dash defense inside gh tools; runs in CLI gh path"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal security validation guard (rejects bad PR identifiers before argv); no UI affordance of its own"
 purpose: |
   Mirrors the `git diff`/`git log` leading-dash defense in the gh slice for the

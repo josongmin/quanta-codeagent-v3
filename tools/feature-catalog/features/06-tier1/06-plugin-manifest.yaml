@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
 depends_on: [skill-admin-enforcement, skill-audit-log, skill-7-scope-tiering, skill-registry-precedence, quantaskillsdir]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "plugin.json Zod loader + filesystem discovery; ui_surfaces none, deliberate_hold (host runtime integration incomplete) — pure parser/loader primitive"
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure manifest loader/discovery primitive, no user-visible affordance anywhere"
 purpose: |
   `.quanta-plugin/plugin.json` (strict Zod) + 옵셔널 `.mcp.json` + `skills/<name>/SKILL.md`

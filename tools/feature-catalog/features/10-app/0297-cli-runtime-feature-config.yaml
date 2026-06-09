@@ -25,7 +25,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CliFeatureConfig resolved at CLI session start (src/apps/cli/repl.ts) feeding REPL factories; reachable from CLI entry."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Surface-level CLI env-config record consumed only by CLI REPL factories; web frontend builds its own config and never imports this CLI slice."
 purpose: |
   Consolidates the scatter of inline `process.env` / `isTTY` reads across

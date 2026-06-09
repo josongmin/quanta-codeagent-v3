@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /rules + status pill, src/apps/cli/rules-cmd.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "/rules absent from SlashPalette.tsx; rule pill rides CLI status-pills row, no web render"
 purpose: |
   Codex `repo-local-rule-ingestion-audit.md` (AGENTS.md pattern) inspired

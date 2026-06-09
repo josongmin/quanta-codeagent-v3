@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; SideConversationPort leak-closure refactor"
+    cli: "runs in the interactive CLI — 5/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure port-extraction refactor (closes a CLI engine-internal import leak), no UI affordance"
 purpose: |
   Closes the engine-internal leak in the CLI slash-surface where

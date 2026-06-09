@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; type-level AssertEqual compile gate"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure type-level compile-time mirror guard, no UI affordance"
 purpose: Cross-slice 타입-레벨 mirror 단언 (FU4) — HITLTier 및 BlockerSurface 양쪽 union 형 일치를 AssertEqual<A,B> 타입-레벨 항등식으로 컴파일 게이트. — 한 쪽만 union 추가/변경 시 tsc --noEmit fail-closed.
 evidence:

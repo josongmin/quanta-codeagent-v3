@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: bun run smoke battery is a dev/test CLI affordance"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "recorded-trajectory test battery (dev tooling); no browser-facing affordance"
 purpose: |
   실제 agent loop + 실제 도구를 돌리되 LLM은 녹화된 trajectory를 replay

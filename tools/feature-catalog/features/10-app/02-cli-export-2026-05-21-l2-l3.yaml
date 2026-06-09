@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; pure CLI helper export refactor"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure CLI helper export refactor (buildLLM/buildStore etc), no UI affordance"
 purpose: 'CLI 헬퍼 export 폐쇄 — 분리: 모든 pure-ish helper (buildLLM/DEFAULT_MODEL/buildStore/buildEmbedder/parseRecallTiers/buildMemoryConfig/buildSubagentConfig/buildVerifyGuardConfig/buildSkillsConfig/buildCompactionBreakerConfig/buildSummarizerLlm/fallbackModels/hasArg/statePath/resumePath/observeDir/planEnabled/lspEnabled/lspNavEnabled/gitToolsEnabled/readMcpConfig/argvPrompt/loadFeatures/buildStreaming/compo'
 evidence:

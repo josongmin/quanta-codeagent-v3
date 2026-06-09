@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI --image flag and /image follow-up via cli image-loader"
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "image INPUT is a first-class web affordance — useSendTurn carries images and turn.started.images renders in session-hooks.ts:319 (paste + hotkey capture)"
 purpose: |
   ContentBlock에 ImageBlock 추가 — 스크린샷·다이어그램 입력. 두 어댑터가 각자 native

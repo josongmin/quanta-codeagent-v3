@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "matcher/subscriber reachable from CLI entry (subscription itself a CLI follow-up)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "in the web-daemon the subscriber IS wired to post_tool_use (runtime-factory.ts:152), populating runLedger which the observability-emitter projects into the web-only RunColumn (Running/Waiting/Completed)"
 purpose: |
   Wave-2 wiring for the wave-1 Run Ledger (ADR-0395). `@/agent/run-ledger` is

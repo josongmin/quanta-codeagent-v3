@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; chooseModel runs in CLI scheduler tick"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal model-selection decision logic (preference/fallback chain probe); no UI affordance"
 purpose: |
   `chooseModel({preference, fallbacks, availability})` probes

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "adr:0159"]
 depends_on: [retrieval-rerank-registry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "embedding port adapters (EmbeddingPort seam), pure library internal with no CLI affordance"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal port/codec primitive, no UI affordance"
 purpose: |
   Generic seam over every embedding provider. Each concrete adapter

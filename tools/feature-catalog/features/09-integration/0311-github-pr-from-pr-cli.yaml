@@ -25,7 +25,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: from-pr CLI sub-command not yet registered in the CLI dispatcher"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "CLI sub-command; SlashPalette web routes are prefill stubs (B2) and there is no web handler"
 purpose: |
   User-facing CLI entry for the Tier 0 PR webhook bot path. Runs ONE cycle

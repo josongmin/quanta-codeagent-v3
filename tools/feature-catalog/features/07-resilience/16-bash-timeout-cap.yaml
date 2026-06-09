@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bash tool runs in CLI with timeout/output-cap and visible truncation marker"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "bash tool result incl cap/timedOut renders via tool.invoked/tool.completed bridge (resultPreview in session-hooks.ts)"
 purpose: |
   `bash` 도구는 단일 shell 실행 별로 (1) `timeout_ms` (default 120000) wall-

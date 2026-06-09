@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Swift native sidecar binary for the Tauri shell; not a CLI affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Tauri native-shell sidecar (ScreenCaptureKit/Vision), not browser web-frontend; no web affordance"
 purpose: |
   Tiny Swift CLI binary at native/screen-ocr/ that the Tauri shell (Worker D)

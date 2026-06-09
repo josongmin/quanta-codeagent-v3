@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [jsonrpc-envelope, jsonrpc-codec, jsonrpc-request-id-correlation, assert-never-exhaustiveness, byte-stable-string-comparator]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure protocol naming convention generator (channelTriple/parseChannelKind); shared/jsonrpc library, no surface affordance, not wired into any entry."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal JSON-RPC channel-naming primitive; no browser affordance and jsonrpc slice not reachable from web surface."
 purpose: |
   Codex-pattern channel-triple generator. Every async method has THREE

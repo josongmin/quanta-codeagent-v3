@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Dead-code prune of src/apps/cli/repl/ orphan tree plus KEEP of mcp-surface-wire seam; repl.ts stays the live CLI God-class."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure dead-code closeout/prune task with no user-facing affordance on any surface; not a UI feature."
 purpose: |
   Closeout of the 21-module orphan tree under `src/apps/cli/repl/` created by

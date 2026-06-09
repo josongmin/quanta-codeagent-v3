@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "errMessage shared helper used across all CLI catch blocks"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal shared error-formatting helper, no UI affordance on any surface"
 purpose: |
   `errMessage(e)` 의 self-recursion 회귀 fix — 2026-05-23 mass migration 이

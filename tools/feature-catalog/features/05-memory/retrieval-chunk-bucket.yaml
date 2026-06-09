@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "token-bucket re-chunker primitive reachable in CLI retrieval assemble; derived 4/4 holds"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure re-chunker library (4 buckets + overlap); ui_surfaces n-a; no UI affordance on any surface"
 purpose: |
   Split a long text into fixed-size token chunks with sliding-window

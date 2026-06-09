@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "system-prompt paragraph emitted in CLI prompt assembly"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal system-prompt content (cache-stable prefix), no UI affordance"
 purpose: 시스템 프롬프트에 "Durable state belongs in workspace files" 단락 — 메모리 = routing hint, 영속 사실 = 작업공간 파일로 분리. cache prefix byte-stable
 evidence:

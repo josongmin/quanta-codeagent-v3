@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "OTLP/Prometheus exporter factory not reachable from cli interactive entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "emits to OpenTelemetry/Prometheus backend (external Grafana monitoring), never to the quanta web frontend; no bridge event"
 purpose: |
   Factory helpers that lazily dynamic-import `@opentelemetry/sdk-metrics` +

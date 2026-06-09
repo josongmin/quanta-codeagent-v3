@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_VERIFY_GUARD env toggle gates the verify-guard in the CLI loop"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal loop guard; QUANTA_VERIFY_GUARD lives only in cli-knobs.ts which knob-catalog-wire.ts explicitly excludes from buildWebKnobCatalog, so not in the web KnobsPanel"
 purpose: / (기본 OFF)
 evidence:

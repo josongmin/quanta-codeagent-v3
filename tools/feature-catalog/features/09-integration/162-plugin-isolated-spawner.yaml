@@ -15,12 +15,12 @@ depends_on: [plugin-dxt-loader, plugin-host-wrapper, plugin-lifecycle-manager, a
 config_refs:
   env: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal IsolatedProcessSpawnerPort + Bun adapter (closed port, ready sentinel); surface:ipc, no UI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal process-spawn port, no UI affordance on any surface"
 purpose: |
   Closed `IsolatedProcessSpawnerPort` (W11 Claude DXT

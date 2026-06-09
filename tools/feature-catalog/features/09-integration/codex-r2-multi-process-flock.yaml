@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-session O_EXCL lockfile serializes disk writes; reachable in CLI"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal lockfile primitive (monitoring none, ui_surfaces n-a); no user-visible affordance anywhere"
 purpose: |
   Closes ADR-0348 single-writer assumption. Per-session lockfile

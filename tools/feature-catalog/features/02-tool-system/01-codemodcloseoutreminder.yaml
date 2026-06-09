@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "closeout-guard runs in CLI agent loop"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal guard that injects a reminder into history; pure agent-loop policy with no user-visible UI affordance"
 purpose: CODE_MOD_CLOSEOUT_REMINDER + isCodeModificationSession(history) 감지. closeout-guard에서 단발 주입, 모듈 순수성 보존
 evidence:

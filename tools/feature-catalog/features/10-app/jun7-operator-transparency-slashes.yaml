@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/version /release-notes /bug registered in APP_SLASH_COMMANDS, rendered to terminal"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only text slash commands; SlashPalette server-routed commands are prefill stubs (B2), no backing web handler"
 purpose: |
   Three read-only, additive operator slash commands. `/version` prints the

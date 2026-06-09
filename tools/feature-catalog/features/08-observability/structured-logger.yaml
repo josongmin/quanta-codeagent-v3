@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "JSON-per-line stderr logger reachable from CLI; operator log sink."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure machine-consumable log sink primitive (src/observability/logger.ts), stderr-only; no browser affordance."
 purpose: |
   JSON-per-line logger for machine-consumable observability — distinct from

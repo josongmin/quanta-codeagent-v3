@@ -15,7 +15,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PermissionProfile struct + inferX projection helpers used by policy engine (src/permission/policy.ts)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal policy projection (configurable static); no user-visible affordance on any surface"
 purpose: |
   **Codex `Permission.{approval, network, sandbox, control.managed}` 4-pillar 흡수.**

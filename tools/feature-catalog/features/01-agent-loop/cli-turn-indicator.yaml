@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/turn-indicator.ts reachable from CLI entry; CLI-only ANSI spinner plus elapsed plus token counter via StreamPort tee, TTY auto-OFF"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI ANSI indicator component, not rendered in browser; web has its own TokenCounter off the usage event, this CLI spinner does not reach the web"
 purpose: |
   LLM 대기 중 spinner + elapsed seconds + live token counter(input/output 누적) 표시.

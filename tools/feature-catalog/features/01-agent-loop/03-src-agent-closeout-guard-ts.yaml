@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "closeout-guard plus static prompt scaffold run in the CLI loop"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal closeout guard and baked prompt scaffold (closeout-guard.ts / prompt.ts); no UI affordance"
 purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'
 evidence:

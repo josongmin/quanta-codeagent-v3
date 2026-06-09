@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Critical-section abort-router wired into CLI dispatch (QUANTA_TOOL_INTERRUPT_BLOCK); ESC is the CLI cancel affordance it defers."
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal abort-router state machine that defers a cancel across an FS window; no distinct user-visible render (web cancel is turn.cancel) — internal mechanism, no UI affordance."
 purpose: |
   A tool that declares `interruptBehavior(): "block"` (write / edit) runs its

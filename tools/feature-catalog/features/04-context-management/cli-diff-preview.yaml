@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/diff-preview.ts renders ANSI unified diff in the terminal; reachable from CLI."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI ANSI terminal render; web DiffPanel is NOT mounted (App.tsx:578) so this diff never reaches the browser."
 purpose: |
   4개 변경-도구(`write` / `edit` / `apply_patch` / `scripted_replace`) 분기를

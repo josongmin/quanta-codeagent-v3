@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; debug-trace/explain-stack-trace/blame-section system skills"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "skill slash invocation is CLI-only; SlashPalette is prefill stubs (B2), no dedicated web skill affordance"
 purpose: |
   세 개의 워크플로 형태 시스템 스킬을 한 번에 흡수 — 모두 prompt-only,

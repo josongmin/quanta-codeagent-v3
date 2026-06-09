@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "5/6 evidence files reachable from CLI; bash tool with sandbox-driven HITL routing"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent-callable bash renders as tool.invoked/tool.completed in session-hooks.ts (output preview + duration); HITL tier is internal policy but the tool surface is web-visible"
 purpose: |
   `bash` is built by `makeBashTool({ sandboxProfile })` so its `hitlTier`

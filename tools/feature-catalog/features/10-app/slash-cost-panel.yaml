@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/cost slash command plus sticky status-bar render of cumulative session spend (src/apps/cli/cost-panel.ts)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the /cost slash panel mechanism is CLI-only (B2), but the cumulative-spend user value is rendered on web via TokenCounter from the bridged usage event, so the value surfaces with collapsed fidelity"
 purpose: |
   Sticky cumulative session-spend dashboard surfaced via `/cost` — Claude SOTA

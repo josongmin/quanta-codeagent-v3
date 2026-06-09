@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "eval Scenario JSON schema + parser; derived 0/5 reachable from interactive CLI entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal schema/parser primitive, no UI affordance on any surface"
 purpose: |
   Tier 1 합성 시나리오 schema (`scenarios/<usecase-id>/<scenario-id>.json`).

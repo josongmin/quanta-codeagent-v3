@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI repl wires a stderr work-summary sink under QUANTA_METRICS; prints turn work line."
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "User value is the per-turn work summary printed to CLI stderr sink; no bridged event and no web render (the bridge maps only usage, not workMetrics)."
 purpose: |
   v0.dev workMetrics 흡수 — turn별 diffMap(파일당 +추가/-삭제 줄), agentActions,

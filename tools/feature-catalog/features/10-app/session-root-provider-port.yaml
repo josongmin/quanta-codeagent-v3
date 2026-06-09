@@ -15,12 +15,12 @@ depends_on: [session-index-store, session-jsonl-envelope, session-sanitize-id, s
 config_refs:
   env: ["QUANTA_MEMORY_PATH", "QUANTA_SESSIONS_DIR"]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure DIP port abstraction (SessionRootProvider) injected at the session slice; no user-facing CLI affordance"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal multi-tenant rooting port, no UI affordance on any surface"
 purpose: |
   Inverts the legacy process-wide `sessionsRoot()` resolver so multi-tenant

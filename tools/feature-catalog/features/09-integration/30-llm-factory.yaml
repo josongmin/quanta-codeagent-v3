@@ -15,12 +15,12 @@ depends_on: [model-swap-retry]
 config_refs:
   env: [QUANTA_LLM_STREAM_FIRST_CHUNK_MS, QUANTA_LLM_STREAM_IDLE_MS, QUANTA_MODEL, QUANTA_PREFS_HOME]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal provider factory + DEFAULT_MODEL registry seam; surface:core, no UI affordance of its own"
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal provider-selection factory; no browser affordance (model select is a separate POST /config feature, not this factory)"
 purpose: |
   `createLLM(provider, opts)` is the one factory the three app entry points

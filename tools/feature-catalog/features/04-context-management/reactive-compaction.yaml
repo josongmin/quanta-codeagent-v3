@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "reactiveCompact recovery squeeze runs inside the agent loop on PTL error"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal compaction primitive; context_compacted has no event surface and would be B1-dropped"
 purpose: |
   Proactive `compactIfNeeded` 가 `DEFAULT_KEEP_TURNS=6` 으로 부드럽게 줄이는 반면,

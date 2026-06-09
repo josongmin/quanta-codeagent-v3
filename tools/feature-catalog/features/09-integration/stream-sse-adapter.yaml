@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [agentevent, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, jsonl-cumulative-retention]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure SSE wire-format serializer/codec; it is the web transport, not a CLI affordance"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal serializer/codec for the SSE wire format, no UI affordance"
 purpose: |
   Serializes every `AgentEvent` as a spec-correct Server-Sent Events frame:

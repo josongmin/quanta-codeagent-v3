@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 5/5 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal allowlist DSL parser/matcher/store policy; no UI affordance on any surface"
 purpose: 'Codex `~/.codex/rules/default.rules` (1060 prefix rules, allow only) 흡수 + 3축 확장: (a) action enum allow|deny|ask (Codex는 allow만), (b) 3-layer precedence project > user > system (project 짧은 prefix가 system 긴 prefix override), (c) noMatchPolicy=fallthrough|deny opt-in. matcher는 longest-prefix + space-boundary (탭은 boundary 아님 — 휴리스틱 회피). parser는 충돌 액션 시 RuleParseError(lineNumber) — silent dedupe는 동일 action만.'
 evidence:

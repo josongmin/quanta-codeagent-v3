@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "role-to-model resolver reachable from CLI (in-memory, no surface wire)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal in-memory resolver primitive ({role to modelId} override), no UI affordance on any surface"
 purpose: |
   Roo Code orchestrator의 "역할별 모델 선택" 패턴 흡수. plan-writer는 deep-reasoning model

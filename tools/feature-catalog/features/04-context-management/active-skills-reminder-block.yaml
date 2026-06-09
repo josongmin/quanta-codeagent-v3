@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "renderActiveSkillsBlock writes the active-skills catalogue into the per-turn system-reminder; runs in CLI prompt path."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal per-turn prompt content (model-facing reminder); no user-visible surface affordance."
 purpose: |
   Active-skills 카탈로그를 per-turn `<system-reminder>` 안에 `- $name — first-line`

@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "contract-tier test skip-vs-fail guard; pure test infra, no CLI affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "pure test-tier gate infra, no UI affordance on any surface"
 purpose: |
   Contract-tier 테스트는 실제 외부 프로세스(Docker daemon, typescript-/pyright-

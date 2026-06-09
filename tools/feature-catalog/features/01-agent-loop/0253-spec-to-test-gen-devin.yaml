@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [absorbed:devin, surface:core, tier:core]
 depends_on: [user-authored-playbook-frontmatter]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure leaf generator (spec to bun:test fixture text), ui_surfaces n-a, no I/O, caller owns FS write; no CLI affordance, not wired"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal code generator primitive, no UI affordance on any surface"
 purpose: |
   Devin Playbook의 `spec` 필드 흡수 — spec → bun:test fixture text 1개를

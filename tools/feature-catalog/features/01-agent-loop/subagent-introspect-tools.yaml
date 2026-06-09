@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; list_agents/followup_task tier-1 tools wired when introspect/followup gates on"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "list_agents/followup_task surface in the browser as tool.invoked/tool.completed cards via the bridge; the rich wake/interrupt/progress signals ride B1-dropped subagent events so the render is thin"
 purpose: |
   Two Codex multi_agents_v2 tools absorbed. list_agents — read-only,

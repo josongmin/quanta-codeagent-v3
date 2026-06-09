@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "quanta session subcommand dispatcher (list/show/delete/rename/archive/unarchive/fork/import) in src/runner/session-ops/index.ts wired from apps/cli/index.ts."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Session ops are CLI subcommands; protocol.ts SessionCommand has only input.append/turn.run/turn.cancel/approval.respond with no resume/fork/rewind verb (B3) and no apps/web-frontend session-management UI, so they never reach the browser."
 purpose: |
   `quanta session <subcommand>` 의 dispatcher 를 surface-agnostic 슬라이스로

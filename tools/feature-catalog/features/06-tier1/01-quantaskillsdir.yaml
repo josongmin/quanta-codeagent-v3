@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Skill tool registered via QUANTA_SKILLS_DIR discovery, runs in CLI"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Skill is an LLM-facing tool; its call/result render via tool.invoked/tool.completed (session-hooks.ts:420,427); the env-gated discovery config is CLI-only but the tool display reaches the browser"
 purpose: |
   frontmatter 발견 → 본문 컨텍스트 주입. CLI surface는 `QUANTA_SKILLS_DIR`

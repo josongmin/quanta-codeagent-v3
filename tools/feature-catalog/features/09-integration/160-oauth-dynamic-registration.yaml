@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; registerOAuthClient reachable in CLI build"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal RFC 7591 dynamic client registration library function; no UI affordance"
 purpose: |
   `registerOAuthClient(endpoint, metadata, fetchPort)` — RFC 7591 dynamic

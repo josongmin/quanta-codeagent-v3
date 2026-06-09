@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "renderActiveSkillsCatalogue injects Active skills block into the system prompt for every CLI turn"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure prompt-injection internal (changes model context only); no browser affordance"
 purpose: |
   Skill 트리거 규칙 (ADR-0022) — session start 시 inventory cache, per-turn reminder에

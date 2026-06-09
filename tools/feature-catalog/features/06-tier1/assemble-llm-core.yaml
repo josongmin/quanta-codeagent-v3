@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; LLM-stack assembler the CLI composes the loop from"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal LLM-stack factory (buildLLMCore/composeLLMCore/parseFallbackModels); no browser UI affordance of its own"
 purpose: |
   Surface-agnostic LLM assembly family that hides three distinct concerns

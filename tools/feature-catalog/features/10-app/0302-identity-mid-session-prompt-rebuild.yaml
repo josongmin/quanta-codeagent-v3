@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Adds /identity mid-session system-prompt rebuild seams (src/apps/cli/repl/system-prompt-rebuilder.ts) reachable from CLI entry."
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only /identity slash seam; mode_changed event is dropped at context-binding.ts default arm (B1) and the slash itself is a SlashPalette stub (B2) — no browser affordance."
 purpose: |
   ADR-0291 wired ctx.identity = {get,set,list}. Today set("plan")

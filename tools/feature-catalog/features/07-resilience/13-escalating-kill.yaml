@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
 depends_on: [bash-timeout-cap, sandbox-policy, disclaimer-shell-wrapper, errors-helper-fix, guarded-spawn]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure child-process SIGTERM-SIGKILL lifecycle primitive, ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal process-kill escalation primitive, no UI affordance"
 purpose: |
   `proc.kill()`은 SIGTERM 1발만 보냄 — `trap '' TERM; sleep 30`처럼 TERM을

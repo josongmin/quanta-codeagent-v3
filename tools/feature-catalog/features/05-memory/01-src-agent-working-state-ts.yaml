@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: working-state store + update_working_state tool reachable from CLI entry; CLI has a working-state panel (tests/unit/cli/working-state-panel.test.ts)"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "update_working_state is a real tool so its calls show as generic tool cards (bridged tool_call/tool_result); but the dedicated working-state panel is CLI-only and the state object itself rides no bridged event — web sees only the tool invocation, not the rendered state"
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
 evidence:

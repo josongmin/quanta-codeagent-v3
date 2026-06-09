@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: bench per-instance env prep, ui_surfaces n-a, not in interactive CLI graph"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "env-prep produces the env_prep_failed verdict surfaced in the bench CLI report, not reachable from web-daemon; no browser affordance"
 purpose: |
   Per-instance env prep — the structural fix for Type-F (verify-loop

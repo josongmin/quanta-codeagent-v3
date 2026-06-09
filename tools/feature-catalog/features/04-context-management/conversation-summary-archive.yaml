@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-compaction summary log appended in loop, reachable from CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure append-only summary store; its only publish path is context_compacted which is dropped at context-binding.ts:1104 default arm; nothing renders it"
 purpose: |
   Cursor compactor 의 `summaries[]` 모방. 각 compaction 직후 `appendSummary` 로

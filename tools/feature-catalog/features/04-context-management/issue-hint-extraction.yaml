@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure issue-hint extractors consumed by bench/driver, reachable from CLI"
+    cli: "runs in the interactive CLI — 8/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure deterministic extractors composing an LLM prompt block, ui_surfaces n-a, no UI affordance"
 purpose: |
   Pure deterministic extractors that scan an issue/problem-statement string

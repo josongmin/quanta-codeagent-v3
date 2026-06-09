@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CI hygiene meta-hellgate + pretest purge; no user CLI affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "pure CI test-hygiene gate, no UI affordance on any surface"
 purpose: |
   Prevent stale `.test.js` TypeScript-emit artifacts from polluting `tests/`.

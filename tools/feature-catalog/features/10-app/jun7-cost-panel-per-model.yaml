@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Per-model breakdown appended to CLI /cost detailed box (cost-panel.ts); reachable from CLI entry."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "The per-model By model box is the CLI /cost panel; the web TokenCounter renders cumulative tokens+cost only, with no per-model breakdown."
 purpose: |
   Extends the cumulative cost panel with per-model attribution. Each turn's

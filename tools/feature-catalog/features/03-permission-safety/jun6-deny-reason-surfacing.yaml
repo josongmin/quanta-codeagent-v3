@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "structured StructuredDenyReason attached to model-facing deny content on CLI dispatch"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the structured layer/pillar value is a model-facing envelope and OTel recorder field only, ui_surfaces n-a; no dedicated browser render and it rides no bridged event"
 purpose: |
   권한 거부가 모델에 free-form prose(`"Permission denied: <prose>"`)로만 도달해 모델이

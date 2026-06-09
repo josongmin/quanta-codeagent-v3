@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; PlanStore to PlanMutator by-value shape adapter"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal slice-boundary by-value translation adapter; no UI affordance"
 purpose: |
   The producer-side `PlanStore` returns `PlanResult<PlanDelta>` (rich

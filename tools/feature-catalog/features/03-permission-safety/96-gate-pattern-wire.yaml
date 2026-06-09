@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "autoPassByPatterns predicate wired into admissibility-gate cascade reachable from CLI; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure pattern-grant cascade predicate (synthesizes config_allowed decision), internal gate primitive with no UI affordance on any surface"
 purpose: |
   Pure module the admissibility-gate calls into to decide whether a pending

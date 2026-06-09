@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ui_surfaces n-a; pure system-prompt cache-breakpoint assembly (prompt-sections.ts), byte-stable internal, no user-visible affordance on any surface"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal prompt-assembly primitive (4-section cache_control), no UI affordance on any surface"
 purpose: |
   Claude Desktop 1.7196.3의 systemPromptSectionCache 패턴 흡수 — 30-50 KiB 단일 cached

@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/session-registry cleanup slash + WAL telemetry + unified mint API reachable in CLI"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user-facing piece is the /session-registry CLI slash; web SlashPalette is a prefill stub (B2), no web handler"
 purpose: |
   R14 partial closeout — 3 of 6 follow-ups landed; 3 deferred to R15 due

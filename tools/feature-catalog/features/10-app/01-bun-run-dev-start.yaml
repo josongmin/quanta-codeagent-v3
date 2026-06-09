@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI entrypoint (bun run dev|start, src/apps/cli/index.ts + repl.ts) — runs in CLI by definition."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI launcher/dotenv loader; the web surface boots via bun run web:daemon, not this CLI start path — no browser affordance."
 purpose: bun run dev|start, .env 로드, 전 SOTA++ 노브 default OFF
 evidence:

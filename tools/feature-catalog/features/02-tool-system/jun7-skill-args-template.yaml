@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Skill tool args input, runs in CLI loop"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Skill TOOL invocation (model-invoked, not the SlashPalette prefill stub) + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   Adds an optional `args` input to the `Skill` tool and interpolates

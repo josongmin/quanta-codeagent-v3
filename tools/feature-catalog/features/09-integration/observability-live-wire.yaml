@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Observability wire lives in apps/agent + web-daemon entries (resolveObservabilitySlots/ObservableRuntimeFacade); 0/3 evidence reachable from the interactive CLI entry."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Live ports (RunLedger/Objective/Approval) feed the web-only ObservabilityPane; web-daemon/index.ts buildObservabilityPorts + ObservableRuntimeFacade wired (apps/web-daemon/index.ts:143)."
 purpose: |
   Closes the three Wave-3 deliberate-holds so observability goes live.

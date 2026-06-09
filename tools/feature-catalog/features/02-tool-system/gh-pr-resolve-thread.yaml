@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "gh_pr_resolve_thread tool, runs in CLI loop"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "gh_pr_resolve_thread tool invocation + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool_call/tool_result arms"
 purpose: |
   The write that closes the review loop. GitHub exposes thread resolution ONLY

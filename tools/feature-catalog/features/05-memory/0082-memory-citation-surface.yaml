@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "memoryCitations provenance accumulated onto AgentOutcome in CLI loop"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal provenance data field on AgentOutcome; grep confirms no web-frontend reference, not surfaced to browser"
 purpose: |
   Surface "which record was placed in this run's prompt window, where, with what

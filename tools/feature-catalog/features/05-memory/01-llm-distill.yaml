@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "session-end LLM distill / consolidate runs in CLI background"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal background knowledge-processing axis, no user-visible affordance on any surface"
 purpose: |
   세션 종료 시 LLM distill (provider 미주입 / 호출 실패 시 휴리스틱 폴백),

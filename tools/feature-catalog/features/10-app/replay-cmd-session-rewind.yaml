@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/replay slash command time-travel-paints session JSONL to terminal (src/apps/cli/replay-cmd.ts)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only slash command; SlashPalette server-routed commands are prefill stubs (B2), no web handler"
 purpose: |
   `/inspect`는 단일 tool-call에 대한 사후 zoom이고 `/debug`는 *live stream*

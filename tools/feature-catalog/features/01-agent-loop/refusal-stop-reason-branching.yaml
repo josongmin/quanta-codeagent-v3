@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; stop_reason router reachable in CLI recovery FSM"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal stop_reason classification policy (closed-port router in recovery FSM), ui_surfaces n-a; no user-visible affordance on any surface"
 purpose: |
   Cursor 3.2.16 흡수 — provider `stop_reason` 8-arm vocabulary 전체

@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "apps/cli/sandbox-wire.ts resolves QUANTA_SANDBOX at boot and installs the shell-sandbox slot (src/apps/cli/index.ts)"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "sandbox confinement is invisible enforcement with no rendered event; only QUANTA_SANDBOX appears as a read-only KnobsPanel row, no active/degrade status surfaced to browser"
 purpose: |
   `defaultOsSandbox()` (macOS Seatbelt + Linux Landlock stub + Windows

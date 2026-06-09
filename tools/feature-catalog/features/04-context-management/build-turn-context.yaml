@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "buildTurnContext SSOT assembling system + per-turn dynamic blocks; runs in CLI prompt path."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal prompt-assembly function; no user-visible surface affordance."
 purpose: |
   `buildTurnContext(input)` → `{system: SystemBlock[], messages: Message[]}` 한 호출로

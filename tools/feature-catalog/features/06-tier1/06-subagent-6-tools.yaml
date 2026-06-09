@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "6-tool frozen dispatch table (dispatch-6.ts) services subagent tool calls in the CLI loop"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure tool contract / dispatch table, no browser affordance"
 purpose: |
   Codex 통계 흡수: exec_command 75% + write_stdin 24% 지배. 6 tool

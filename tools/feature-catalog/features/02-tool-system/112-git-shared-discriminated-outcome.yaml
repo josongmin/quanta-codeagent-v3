@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, git-branch-name-schema-guard, git-runner-cancellation-signal]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure slice-internal boundary helper (safeRun/mutate discriminated outcome); no user-facing affordance on any surface."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal git-slice boundary helper, no UI affordance."
 purpose: |
   Slice-internal helpers (`safeRun` + `mutate`) that normalize the spawn

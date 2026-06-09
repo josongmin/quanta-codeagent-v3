@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "agent-side LSP bridge routes lsp_* nav tools by extension; reachable from CLI entry (lsp_* tools run in CLI)"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "lsp_* nav tool calls surface only via the generic tool.invoked/tool.completed render in apps/web-frontend session-hooks; no dedicated nav UI and the diagnostics channel rides a non-bridged event"
 purpose: |
   Agent 슬라이스가 LSP 어댑터(TypescriptAdapter / PyrightAdapter)와 만나는 단일

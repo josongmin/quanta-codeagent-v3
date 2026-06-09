@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "fetch_rules tool + CLI lazy-load injects requestable-rule index behind QUANTA_FETCH_RULES; ui_surfaces cli; modes interactive/ide"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "fetch_rules is a model-facing tool; its invocation could ride tool.invoked but the CLI wire (fetch-rules-wire.ts) is CLI-only and there is no web wiring of the rule index — no browser affordance"
 purpose: |
   Cursor's "agent-requested" rules: a description-only rule (no globs, not

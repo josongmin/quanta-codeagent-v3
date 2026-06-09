@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; lsp_nav tools run in CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "lsp_nav defineTool family is model-facing; invocations render via tool.invoked/tool.completed (name + args/result preview) in session-hooks.ts"
 purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit
 evidence:

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 depends_on: [identity-mode-variant]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal identity minter (round-robin nickname pool plus role enum), ui_surfaces n-a, default-OFF, no host wires it; no CLI affordance"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal primitive for transcript label and policy routing, no user-visible affordance"
 purpose: |
   Codex `core/src/config/agent_roles.rs`의 nickname_candidates 39-entry 풀과

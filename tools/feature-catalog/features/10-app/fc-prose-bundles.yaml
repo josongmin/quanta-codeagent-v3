@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "build-time catalog renderer invoked via bun fc build (render.ts loadProse)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure feature-catalog build tooling that blends prose into docs MD; no user-visible affordance on any runtime surface"
 purpose: |
   Rendered `docs/10.feature-catalog.md` 의 두 가지 비-YAML 섹션 — (a)

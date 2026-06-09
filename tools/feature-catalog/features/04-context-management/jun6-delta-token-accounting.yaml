@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "O(1) incremental token counter wired at composition root, reachable from CLI"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure perf memoization with byte-identical output and no event, ui_surfaces n-a, no UI affordance"
 purpose: |
   루프가 압축 threshold 게이트 입력으로 working-memory 전체를 `estimateTokens` 로 매 턴

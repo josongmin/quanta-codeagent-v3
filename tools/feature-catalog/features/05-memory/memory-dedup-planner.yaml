@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure near-duplicate planner reachable from CLI consolidation pipeline; derived 3/3 holds"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal planner (returns candidate ids); ui_surfaces n-a; no user-visible affordance on any surface"
 purpose: |
   Before saving a new memory entry the store asks: does an equivalent entry

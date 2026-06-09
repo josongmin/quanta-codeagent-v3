@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: bun run eval CLI stack, not in interactive CLI import graph"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "eval app (src/apps/eval) is a CLI/CI quality stack; does not run in web-daemon and renders nothing in the browser"
 purpose: |
   `bun run eval` — taxonomy(12 major/~120 leaf) 기반 6-tier 로컬 검증 스택.

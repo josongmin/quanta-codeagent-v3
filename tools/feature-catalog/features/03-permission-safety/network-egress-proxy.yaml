@@ -28,7 +28,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "composition roots read QUANTA_NETWORK_PROXY and thread proxyEnv through bash spawn (src/apps/cli/repl/runtime-context-compose.ts)"
+    cli: "runs in the interactive CLI — 17/18 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "egress blocking + amendment prompts never reach the browser (yaml notes status-line surfacing as a follow-up); knob is a redacted read-only KnobsPanel row only"
 purpose: |
   Closes the SUBPROCESS egress bypass the dispatch-layer gate (network-egress-enforcement)

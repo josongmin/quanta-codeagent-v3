@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/4 reachable, default-OFF closed-port (snapshotFor/updateFrom/propagate/link), loop never constructs a store; keep derived missing"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal in-memory todo-readback port, default-OFF, no UI affordance; the todo readback is not bridged to any web component"
 purpose: |
   Roo absorption — bidirectional extension of ADR-0219 focus chain. Where

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [scheduler-runtime, scheduler-rrule]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal AutomationEnginePort (5-verb closed seam + sqlite/in-memory adapters + tickScheduler); surface:core, no UI affordance"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal scheduler engine seam, no web affordance; no automation pane in apps/web-frontend"
 purpose: |
   `AutomationEnginePort` — a 5-verb closed seam (schedule / list / cancel /

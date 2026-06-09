@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "5/5 reachable as a library, but deliberate_hold: dead seam, no caller invokes applyPatchStructured"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure additive patch-apply library seam with no tool wired (deliberate_hold dead seam), no UI affordance on any surface"
 purpose: |
   Cursor ApplyAgentDiff 흡수 — 기존 applyPatch는 첫 bad hunk에서 patch 전체를

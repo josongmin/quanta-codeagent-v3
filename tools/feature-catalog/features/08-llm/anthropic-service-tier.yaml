@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_SERVICE_TIER/QUANTA_FAST resolved at CLI composition root, threaded to codec"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "QUANTA_SERVICE_TIER and QUANTA_FAST are both in CONFIG_ALLOWED_KEYS; web /fast /standard /flex slash commands write them via real POST /config (slash-llm-config.ts) and KnobsPanel can write SERVICE_TIER"
 purpose: |
   Send the Anthropic `service_tier` so a run can opt into priority capacity or pin

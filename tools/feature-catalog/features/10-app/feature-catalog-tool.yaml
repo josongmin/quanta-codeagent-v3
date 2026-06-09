@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bun fc meta CLI (build/validate/list/audit/lint) reachable from CLI entry; real command surface."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Standalone meta CLI tool; code does not run in web-daemon and has no browser affordance."
 purpose: |
   Feature catalog의 단일 진실 원천 (SSOT) 도구. 모든 feature는

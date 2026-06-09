@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure deterministic JSONL/run-dir loader (forward-compat, never throws) under src/apps/probe; internal adapter, not in interactive CLI graph."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal parser/loader primitive, no UI affordance on any surface."
 purpose: |
   Pure deterministic loader for the trajectory JSONL + bench run-dir

@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "dispatch seam runs in CLI loop; tool calls execute and render in terminal"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "backs the tool_call/tool_result events that render as tool.invoked/tool.completed in session-hooks.ts, but gate-decision and evidence-flattening richness does not surface; thin render"
 purpose: |
   `src/agent/dispatch.ts` — `ToolRegistry.run()` 직전/직후 모든 deny/permit

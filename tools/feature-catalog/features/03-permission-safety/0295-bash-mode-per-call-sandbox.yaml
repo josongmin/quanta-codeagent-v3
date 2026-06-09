@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 6/6 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal per-call OS sandbox seam; the mode field is a tool-input arg the model sets, not a UI control; no browser affordance"
 purpose: |
   Cursor 3.2 패턴 흡수 — bash tool 입력에 closed-enum `mode: "read"|"write"`

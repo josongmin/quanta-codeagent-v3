@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "in-process metrics registry backs CLI observability surfaces"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure in-memory counter/gauge/timer store with no exporter, no UI affordance on any surface"
 purpose: |
   Dependency-free in-process metrics registry that backs every downstream

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: port-only scaffold, createWebhookEventSource throws NOT_IMPLEMENTED, not CLI-wired"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Tier-1 webhook host scaffold (HMAC verify only); no browser affordance and no live host"
 purpose: |
   Tier 1 self-hosted webhook receiver port-only scaffold. Defines the seam

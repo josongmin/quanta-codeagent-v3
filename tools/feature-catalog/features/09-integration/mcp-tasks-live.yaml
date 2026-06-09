@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "live tasks/* binding registers the 3 mcp_tasks tools, reachable in CLI loop"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent calls to the registered mcp_tasks tools render as tool cards (tool_call/tool_result bridged at context-binding.ts) in the web session view"
 purpose: |
   Live `McpTasksPort` over a started `McpClient`. `clientTasksPort(client)`

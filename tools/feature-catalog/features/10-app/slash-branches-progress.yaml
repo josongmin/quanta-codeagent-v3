@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/branches slash command plus StatusBar transient render of branch-search progress (src/apps/cli/branch-search-progress.ts)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "rides the typed BranchTraceEvent stream which is not one of the 6 bridged events, dropped at context-binding.ts:1104 default arm; slash itself is B2-stubbed"
 purpose: |
   Live progress visualization for catalog 대6 speculative branch search

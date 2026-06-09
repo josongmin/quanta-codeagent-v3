@@ -23,7 +23,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "composition-root wire helper + session-keyed resource registry runs in CLI assemble path"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal composition wire + process-local resource registry; ui_surfaces n-a, no browser-visible affordance on any surface"
 purpose: |
   Two cross-cutting wires for the Codex-r2 absorption sprint. ADR-0332

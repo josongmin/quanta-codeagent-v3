@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; spawn_agent/wait_agent bounds wired via 6-tool router when enable6Tools"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the spawn/wait subagent tools surface as tool.invoked/tool.completed in the browser; the namespace/timeout/concurrency bounds are internal-only and not separately rendered, so the web render is thin"
 purpose: |
   Three opt-in subagent hardenings from Codex's multi_agent_v2, all default-OFF =

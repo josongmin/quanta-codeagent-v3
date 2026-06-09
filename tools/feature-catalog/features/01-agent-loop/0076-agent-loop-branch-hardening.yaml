@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "loop branch hardening reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 13/14 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user value (refusal terminal, deny_and_steer, thinking carry-over) rides recovery/decision/error-internal paths; deny-steer and refusal signals are not among the 6 bridged events at context-binding.ts:1052-1106, no distinct browser affordance"
 purpose: |
   docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent

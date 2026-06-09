@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "edit tool input field, runs in CLI loop"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "edit tool invocation + line_ranges arg + result render via tool.invoked/tool.completed (session-hooks.ts), bridged at context-binding.ts tool_call/tool_result arms"
 purpose: |
   Optional `line_ranges: [{start, end}]` field on the `edit` tool input —

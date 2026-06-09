@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "in-proc counter/timer registry feeding the CLI cost dashboard (QUANTA_METRICS) in internal.ts"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure in-proc metrics counter registry; no browser rendering of the recorder itself, no user-visible web affordance"
 purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
 evidence:

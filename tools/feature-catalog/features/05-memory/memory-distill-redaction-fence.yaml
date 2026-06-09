@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "redaction fence runs in the distill input path on CLI; derived 3/3 holds"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure structural redaction invariant on distill input; no UI affordance, ui_surfaces n-a"
 purpose: |
   Third application point of the content-plane redaction invariant — the

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:agent", "tier:1"]
 depends_on: [background-subagent, agent, agent-tool-shape, bounded, quantasubagent-maxdepth]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ui_surfaces n-a; serialize/hydrate/snapshotToFile persistence primitives, default-OFF, caller wires at session boundaries — no CLI command affordance"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure cross-restart persistence primitive, no UI on any surface"
 purpose: |
   BackgroundSubagentScheduler serialize / hydrate / hydrateWithPrune primitives

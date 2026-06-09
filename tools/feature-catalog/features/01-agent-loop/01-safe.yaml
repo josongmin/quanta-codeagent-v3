@@ -13,12 +13,12 @@ owners: ['@songmin']
 labels: [surface:core, tier:core]
 depends_on: [secret-redaction-content-plane, agent-loop-branch-hardening, plan-mode, phase-ttft-readonly-trio, response-in-progress]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "safe-tool immediate-dispatch / ordering / head-of-line barrier is an internal streaming-scheduler property; the tool calls surface as tool events but the dispatch-ordering itself is not a distinct affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal streaming-dispatch scheduling primitive (barrier/ordering), no UI affordance on any surface"
 purpose: safe 도구 스트림 중 즉시 디스패치, 순서보존, head-of-line 배리어
 evidence:

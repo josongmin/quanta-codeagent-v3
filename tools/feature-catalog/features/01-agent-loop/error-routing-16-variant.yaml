@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "typed error enum + retry-router policy (port/classifier); pure internal classification, no CLI affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal error-classification policy, no user-visible UI affordance on any surface"
 purpose: |
   Codex 16-arm typed enum 흡수 + 5-action retry routing. 분류:

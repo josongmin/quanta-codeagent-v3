@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "csv_read/ndjson_read tools + parsers reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Model-invokable structured-data tools; tool_call/tool_result render as the generic tool.invoked/completed card (session-hooks.ts:420-435)."
 purpose: |
   First modern coding agent to ship built-in structured-data tools (Cursor /

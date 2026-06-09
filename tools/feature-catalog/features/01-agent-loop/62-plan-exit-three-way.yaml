@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "3-way plan-exit (approve/reject/request-changes) drives the CLI plan-mode flow"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "plan exit rides plan_* events dropped at context-binding.ts default arm; web approval card collapses to approve|deny only, so request-changes never reaches the browser"
 purpose: |
   v0.dev PlanModeExit{Approve,Reject,RequestChanges} 흡수 — plan 모드 종료를 기존

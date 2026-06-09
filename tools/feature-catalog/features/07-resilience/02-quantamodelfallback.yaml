@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_MODEL_FALLBACK env knob assembling the retry-inner/fallback-outer chain; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure config/resilience wiring; not one of the 6 web-writable CONFIG_ALLOWED_KEYS and has no UI affordance"
 purpose: ', retry-inner/fallback-outer'
 evidence:

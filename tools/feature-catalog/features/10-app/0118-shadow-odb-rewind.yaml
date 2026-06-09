@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; rewindToLast primitive plus safety-net ref"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure Shadow ODB rewind primitive (agent-facing tool registered separately under ADR-0119), no UI affordance"
 purpose: |
   Closes the deliberate "not-implemented" trap from ADR-0108 by implementing

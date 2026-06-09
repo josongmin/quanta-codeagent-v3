@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: 9/9 evidence reachable from CLI entry; @-dropdown in CLI input"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "@-mention dropdown is a CLI raw-line-reader/repl input UX (src/apps/cli/at-autocomplete); web composer has no equivalent and the code does not run in web-daemon"
 purpose: |
   Typing `@` at a valid left-boundary opens a kind-grouped candidate dropdown

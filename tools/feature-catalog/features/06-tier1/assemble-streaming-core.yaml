@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; StdoutStream + JsonlRecorder tee wiring"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal streaming/observe-dir assembler (StdoutStream + JsonlRecorder TeeStream); no browser UI affordance"
 purpose: |
   Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).

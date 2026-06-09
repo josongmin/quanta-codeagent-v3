@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "objective_set/_update/_get model-facing tools reachable in CLI loop"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent calls render as tool cards (bridged tool_call/tool_result) AND the resulting objective renders in the web-only ObjectiveCard via observability-emitter (objective.get)"
 purpose: |
   Three LLM-facing tools wired to the ADR-0394 `ObjectivePort` so the agent

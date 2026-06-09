@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "buildSkillBlock registers Skill/ToolSearch tools and the suggestion inventory; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal Tier-1 builder/registration; the skills it wires render only when invoked as generic tool cards, the block itself has no direct UI affordance"
 purpose: |
   Per-subsystem Tier-1 builder that materializes the entire SKILL block off a

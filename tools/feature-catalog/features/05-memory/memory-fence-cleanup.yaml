@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "slice-fence hygiene / dead-stub deletion present in CLI build graph; derived 2/2 holds"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal slice-boundary fence (biome lint + static-scan test); no runtime UI affordance"
 purpose: |
   Slice S9 Part A — delete the orphan `REMOVE-ME (verify biome fence)`

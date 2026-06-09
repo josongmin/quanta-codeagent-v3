@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "MODEL-ONLY substrate (closed ObjectivePort + in-memory store), ui_surfaces none, not wired to any tool/loop/surface"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal typed store/port primitive, no UI affordance on any surface"
 purpose: |
   First-class per-thread Objective — closes quanta's biggest structural gap:

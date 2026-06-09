@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure parsePreferenceSignal grammar + lint in CLI consolidate pipeline; derived 3/3 holds"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure parser/grammar + warning-only lint primitive; ui_surfaces n-a; no user-visible affordance"
 purpose: |
   Codex memory의 feedback-type 메모리 body 컨벤션 흡수 — 자유형 paraphrase

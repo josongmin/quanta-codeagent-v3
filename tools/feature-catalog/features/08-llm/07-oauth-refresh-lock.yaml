@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "distributed refresh-lock port + impls run in CLI auth coordination"
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal distributed-lock primitive (memory/file/redis-stub + fallback chain, ui_surfaces n-a), no UI affordance"
 purpose: |
   `OAuthRefreshLockPort` is the single port behind 3 concrete implementations:

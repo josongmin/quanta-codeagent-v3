@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ColorPolicyResolver caches ANSI color state for the CLI/REPL terminal renderer"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure ANSI color-policy cache helper, no user-visible browser affordance"
 purpose: |
   Encapsulates the ANSI color-policy cache so multiple surfaces (CLI, REPL,

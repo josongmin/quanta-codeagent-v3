@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Emits compaction_event variant from both compaction call-sites into a typed-event store via AgentConfig slot; ui_surfaces n-a, reachable from CLI entry."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal typed-history observability emit (additive side-channel); no user-visible surface affordance."
 purpose: |
   Codex `Compaction / ContextCompaction / CompactionTrigger` ResponseItem

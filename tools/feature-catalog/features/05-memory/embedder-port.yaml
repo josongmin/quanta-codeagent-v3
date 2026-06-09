@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: EmbedderPort + OpenAI/Null/Caching impls reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal embedding-provider port (src/memory/ports.ts, src/agent/memory-embedder.ts) — pluggable seam for recall vectors, no UI affordance on any surface"
 purpose: |
   The memory slice owns the structural EmbedderPort interface (so it stays

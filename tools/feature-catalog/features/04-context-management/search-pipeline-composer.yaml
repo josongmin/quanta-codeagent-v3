@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure DAG SearchPipeline composer importable in CLI graph"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal leaf primitive, default-OFF, no surface wiring, no UI affordance"
 purpose: |
   Pure functional DAG composer for retrieval pipelines. Reduces a

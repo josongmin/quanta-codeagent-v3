@@ -16,12 +16,12 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core, adr-0469, default-off]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-request response_format passthrough + validator leaf; ui_surfaces n-a, no CLI UI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal per-request LLM-request primitive and schema validator, no user-visible affordance on any surface"
 purpose: |
   Caller가 한 LLM 요청에 JSON Schema를 붙여 schema-constrained 응답을 강제한다.

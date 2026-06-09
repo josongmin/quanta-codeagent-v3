@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "write/edit reject glob path via typed rejected outcome on CLI dispatch"
+    cli: "runs in the interactive CLI — 7/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the typed deny surfaces only as a generic tool.completed error preview via the bridged tool_result event; no dedicated exfil-guard affordance"
 purpose: |
   write/edit 가 glob/wildcard path(`src/**/*.ts`, `a/*.js`, `{a,b}.txt`)를

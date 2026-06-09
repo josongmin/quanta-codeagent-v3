@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "inverted-dependency telemetry seam wired in CLI memory slice; derived 4/4 holds"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure structural telemetry port (counts/latencies/outcome enums only); anti-leak seam, no UI affordance, ui_surfaces n-a"
 purpose: |
   Structural port that lets the @/memory slice emit phase1 (per-thread

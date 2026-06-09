@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 3/3 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal runShell option fold (env source-snapshot wire); no user-visible affordance on any surface"
 purpose: |
   Wave 3 wire — ADR-0204 의 ShellSnapshotPort (capture/restore/prune

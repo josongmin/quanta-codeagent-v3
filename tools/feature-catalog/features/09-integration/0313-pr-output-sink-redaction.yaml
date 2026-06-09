@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: PR comment output sink not wired into interactive CLI"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "backend PR-comment sink with redaction marker; no browser affordance"
 purpose: |
   Closed-port sink for every outgoing PR comment / review / issue reply

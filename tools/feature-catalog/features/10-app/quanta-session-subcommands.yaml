@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "quanta session ls/show/fork/rewind/... subcommand dispatcher runs in CLI (src/runner/session-ops)"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI subcommand suite; protocol.ts SessionCommand has no resume/fork/rewind/archive verb (B3) so no browser path exists"
 purpose: |
   `quanta session …` subcommand dispatcher — 세션 라이프사이클의 모든 mutating /

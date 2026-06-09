@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_PROVIDER + QUANTA_MODEL dual-provider knob with .env hydrate in src/apps/cli; reachable from CLI."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "QUANTA_PROVIDER + QUANTA_MODEL are read-visible in KnobsPanel (knob-inventory); QUANTA_MODEL is writable via POST /config + model selector, but QUANTA_PROVIDER itself is read-only (not in CONFIG_ALLOWED_KEYS)."
 purpose: |
   Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는

@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; emits in_progress AgentEvent rendered as thinking line by StdoutStream"
+    cli: "runs in the interactive CLI — 11/11 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user value (thinking indicator) rides the in_progress AgentEvent which is in the B1-dropped set and hits the default arm at context-binding.ts:1105; never reaches the browser"
 purpose: Ingest OpenAI Responses API v2 `response.in_progress` event so UI can show 'thinking' indicator without dropping events. Closes Codex Desktop build 2867 forward-compat gap (Codex silent-drops this event). Provides SSE/WS wire-level parser (parseSseFrame / splitSseFrames / decodeSseEvent / decodeWsEvent) with fragmented-frame, CRLF, multi-line data, BOM, rate-limited unknown-event handling. Adds StreamEvent variant `response_in_progress` (assembler skips it — non-cumulative heartbeat) and an additive `onInProgress` seam on streaming-dispatch (`InProgressIndicator { kind, message?, progress?, timestamp }`). L4 wire (ADR-0048): the agent loop now passes `onInProgress` into its `streamingTurn(...)` call and emits a new `in_progress` AgentEvent (`{ timestamp, message?, progress? }`) on `config.stream`; StdoutStream renders it as a "thinking…" line and JsonlRecorder maps it onto the `recovery` TrajectoryKind (tagged `reason:"in_progress"`). Default-OFF byte-identical — the provider must yield the event AND a non-null stream must be wired for it to surface.
 evidence:

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; memory-tuning block composer"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal memory-config composer (buildMemoryConfigCore/parseRecallTiers); no user-visible browser affordance"
 purpose: |
   Surface-agnostic memory-config assembly. Two distinct helpers:

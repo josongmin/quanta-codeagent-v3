@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Probe plain-text view layer (--failed/--slow/--cost/--json) under src/apps/probe; user-visible output of the probe CLI, not in interactive CLI graph."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Probe CLI view layer producing terminal text; not ported to web and does not run in web-daemon."
 purpose: |
   Pure renderers — events in, strings out. No color, no I/O (RFC-0002 §7

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, probe-funnel-adherence, probe-trajectory-parse]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "A test file (tests/integration/probe.test.ts), not a user-facing CLI feature; pure test harness."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Test artifact, no user-visible affordance on any surface."
 purpose: '통합 테스트: (10 tests) — trajectory JSONL 다양한 변형에 대한 graceful 처리 + view 별 렌더 일관성'
 evidence:

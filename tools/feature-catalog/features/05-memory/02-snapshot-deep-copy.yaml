@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: working-state snapshot() reachable from CLI entry"
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal defensive deep-copy of working-state arrays (src/agent/working-state.ts) — no UI affordance on any surface"
 purpose: "snapshot() deep-copy (R3-P1): JSDoc \"read-only snapshot\" 거짓말 회수. 내부 배열 + 항목 객체 모두 clone → 호출자가 받은 snapshot에 in-place 변경 시도 ⇒ session state 무영향."
 evidence:

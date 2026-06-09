@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "3/3 reachable; git_compose_commit/git_compose_pr tools behind QUANTA_COMPOSE_AUTHORING"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "both compose tools are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
 purpose: |
   Two READ-ONLY authoring tools that close the diff→prose gap (the Codex `yeet`

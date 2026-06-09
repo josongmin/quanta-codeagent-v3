@@ -16,12 +16,12 @@ depends_on: [decideverifyguard]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "turn-exit guard composition framework (verify+closeout); internal control-flow, no CLI affordance"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal guard-chain composer, no user-visible UI affordance on any surface"
 purpose: |
   verify-guard와 closeout-guard가 SAME 컨트롤 포인트(`applyAction` → "모델이 finish

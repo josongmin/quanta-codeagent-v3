@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "8/8 reachable; FS-jail chokepoint unifying the document/image readers"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal security primitive (resolveJailedDoc containment chokepoint); the readers show as tool calls but this feature itself is a jail unification with no UI affordance"
 purpose: |
   Pre-S7, every file-reading tool rolled its own `resolveXxxPath` —

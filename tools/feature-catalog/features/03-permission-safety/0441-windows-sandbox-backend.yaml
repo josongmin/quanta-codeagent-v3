@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "OS-sandbox windows policy compiler + native boundary, reachable from CLI shell-spawn path; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure runtime OS-sandbox backend (compileWindowsSandboxSpec + native broker), no user-visible UI affordance on any surface; default-OFF passthrough"
 purpose: |
   Closes the Windows surface-parity gap in the OS sandbox. Before ADR-0441,

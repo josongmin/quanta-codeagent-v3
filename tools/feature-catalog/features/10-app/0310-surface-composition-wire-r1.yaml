@@ -29,7 +29,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Wires the ADR-0291..0294 slash families through composeSurfaceWires in src/apps/cli/repl/surface-compose.ts; reachable from CLI entry, knob-gated."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI REPL composition-root wire for slash commands (/rewind-conv, /profile, /session); SlashPalette server-routed stubs (B2) and absent fork/rewind verbs (B3) keep it out of the browser."
 purpose: |
   Closes the REPL composition root for the 4 sibling tracks landed in

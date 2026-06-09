@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; leaf slice reachable but dormant (no host wire)"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal NestedPlaybookExecutor primitive (closed port + cycle detector), no host wires it, ui_surfaces n-a; no UI affordance on any surface"
 purpose: |
   ADR-0203의 macro 1-pass invariant 위에 직교적으로 추가되는 슬라이스 —

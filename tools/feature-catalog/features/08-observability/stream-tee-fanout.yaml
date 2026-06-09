@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [agentevent, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, jsonl-cumulative-retention]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure fan-out StreamPort with no IO, ui_surfaces n-a; an internal composition primitive."
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal StreamPort fan-out primitive; no user-visible affordance on any surface."
 purpose: |
   Pure fan-out `StreamPort`. Forwards every `AgentEvent` to every wrapped

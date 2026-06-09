@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "defaultCliPrompter wires the 7-schema elicitation into the REPL; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "interactive prompt is the CLI/REPL prompter only; web-daemon has no TTY so headlessRejecter declines, and no web-frontend elicitation prompt component exists — user-facing mechanism does not reach the browser"
 purpose: |
   rmcp 0.15 Elicitation 7-schema 흡수 — typed user input prompt:

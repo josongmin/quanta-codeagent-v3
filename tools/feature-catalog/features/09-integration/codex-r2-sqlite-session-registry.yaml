@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "sqlite-backed session registry adapter behind the closed port, reachable from CLI"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal sqlite persistence backend (default-off, ui_surfaces n-a); no user-visible affordance on any surface"
 purpose: |
   Sibling SQLite backend for the ADR-0345

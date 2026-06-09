@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; git-log-search system skill, slash-wirable"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "skill slash invocation (/git-log-search) is CLI-only; SlashPalette prefill stub (B2), no web skill handler"
 purpose: |
   사용자가 "when did X get added"/"who wrote this"/"find commits matching Y"/

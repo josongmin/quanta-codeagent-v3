@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "RetryingLLM LLMPort decorator (pre-stream backoff) in the assembled chain; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure resilience-primitive decorator, no user-visible affordance on any surface"
 purpose: |
   RetryingLLM (`src/agent/retry.ts`) — LLMPort 데코레이터. transient pre-stream

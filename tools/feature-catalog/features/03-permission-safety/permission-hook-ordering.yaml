@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "canonical 13-step pre-execute pipeline enforced in dispatch (src/agent/dispatch.ts)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal ordering invariant/lock; no user-visible affordance on any surface"
 purpose: 'P1 cleanup (2026-05-25). Documents + enforces canonical 13-step pre-execute pipeline in dispatch.ts (registry → seam guard → dedup → localize-phase → mode-posture → earlyHardDeny → pattern auto-pass → rules DSL → HITL → permission stack → mode policy → pre_tool_use → execute → post_tool_use → post_tool_use_failure) plus 8 invariants. Lock prevents a future refactor from reordering permission vs hook.'
 evidence:

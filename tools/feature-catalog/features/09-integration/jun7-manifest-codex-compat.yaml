@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "manifest-compat normalizer + relaxed schemas run during skill/plugin discover on the CLI load path"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal schema normalizer / parser (ui_surfaces n-a) — no UI affordance on any surface"
 purpose: |
   quanta claims "Faithful absorption of the Codex plugin layout" but its strict

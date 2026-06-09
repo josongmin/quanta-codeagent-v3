@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Content-Length framed JSON-RPC codec used by the LSP client on the CLI path"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal wire-level codec (Content-Length framing) — no UI affordance on any surface"
 purpose: |
   Wire-level codec behind `lsp-bridge` and `lspport`. LSP framing is NOT MCP's

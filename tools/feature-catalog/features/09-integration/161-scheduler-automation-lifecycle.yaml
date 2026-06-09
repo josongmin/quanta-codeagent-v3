@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; lifecycle helpers + JSONL store run in CLI scheduler"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal 4-arm lifecycle transition helpers + append-only JSONL store; no UI affordance"
 purpose: |
   4-arm closed lifecycle (`active` / `paused` / `deleted` / `error`) +

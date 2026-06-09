@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI raw-line-reader ctrl-x ctrl-e chord opening $EDITOR; reachable from interactive CLI import graph."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI raw-mode-only affordance; web frontend has no $EDITOR chord and no protocol verb for it."
 purpose: |
   A ctrl-x ctrl-e chord (readline convention) suspends raw mode, opens the current

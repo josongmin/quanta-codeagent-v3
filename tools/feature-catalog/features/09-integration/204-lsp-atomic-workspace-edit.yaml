@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:lsp", "tier:adapter"]
 depends_on: [lsp-expansion-4-tools, lsp-client-base, lspport, assert-never-exhaustiveness, byte-stable-string-comparator]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal 3-phase atomic file-write strategy for LSP workspace edits; surface:lsp tier:adapter, no UI affordance"
+    cli: "runs in the interactive CLI — 2/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal atomic-write primitive, no UI affordance on any surface"
 purpose: |
   3-phase atomic commit for cross-file LSP workspace edits (rename refactor,

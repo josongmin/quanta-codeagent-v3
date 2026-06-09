@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "new LLMErrorKind registered in retry FATAL and fallback ELIGIBLE sets on CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal error-classification vocabulary entry, ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: |
   ADR-0094 Phase-1 chatgpt-oauth stub adapter 가 호출 시 매번 throw 하는 deliberate

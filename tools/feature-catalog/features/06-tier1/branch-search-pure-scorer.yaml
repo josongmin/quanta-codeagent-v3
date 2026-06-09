@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; pure scorer/selectors for branch search"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal scorer (DEFAULT_WEIGHTS + argmax/minimal-change selectors); pure functions, no UI affordance"
 purpose: |
   Pure scorer + selector. Given verifier signals, fold to a 0..1 total and

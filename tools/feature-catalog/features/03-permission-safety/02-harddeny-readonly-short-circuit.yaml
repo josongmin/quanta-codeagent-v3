@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 2/2 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal classifier short-circuit logic in the permission engine; no user-visible affordance on any surface"
 purpose: HARD_DENY 선행 / readonly short-circuit
 evidence:

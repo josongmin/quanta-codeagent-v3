@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [surface:core]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Wave-1 closed port contract + DI runner only, no LLM tool, not wired into the loop (ui_surfaces none); pure orchestration primitive with no CLI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal port/runner over injected fakes, nothing wired, no UI affordance on any surface"
 purpose: |
   Multi-file edits change UX more by PRE-APPLY VERIFICATION than by the proposal

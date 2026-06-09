@@ -24,7 +24,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: leaf exporter primitive not wired into the interactive CLI"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal OTLP/JSON exporter library posting spans/metrics to an external collector; no UI affordance on any surface"
 purpose: |
   in-tree OTel scaffold (`metrics/otel-sink.ts`, `tracing/otel-tracer.ts`,

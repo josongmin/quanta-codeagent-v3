@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Real registered LLM tool name diagnostics (src/tool/diagnostics/index.ts), invokable in the CLI loop."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "As an LLM tool, its invocation surfaces via the bridged tool_call -> tool.invoked and tool_result -> tool.completed (context-binding.ts:1079-1096) rendered in the web tool display (session-hooks.ts)."
 purpose: "TS/Pyright → diagnostics 도구 . runAgent e2e(, 4 tests): fake DiagnosticsProvider 주입 → ScriptedLLM이 diagnostics tool_use → (a) errors+warnings → ok:false + 1-based 좌표 포맷 + session.stop() 호출 / (b) clean file → ok:true + \"no diagnostics\" / (c) null provider → 우아하게 ok:false + \"no language server\" / (d) session.diagnostics() throw → ok:false + stop() 여전히 호출."
 evidence:

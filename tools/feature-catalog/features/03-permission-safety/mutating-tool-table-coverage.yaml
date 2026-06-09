@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "plan-mode dispatch classification table runs in CLI dispatch (src/agent/mode.ts)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal dispatch guard preventing UnknownToolError; no user-visible UI affordance on any surface"
 purpose: |
   Closes the silent drift between MUTATING_TOOL_TABLE and the caller-wire tool

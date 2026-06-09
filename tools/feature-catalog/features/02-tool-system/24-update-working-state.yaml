@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "update_working_state meta-tool plus dedicated CLI working-state-panel.ts render."
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Tool invocation/result render in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), but the dedicated scratchpad panel (src/apps/cli/working-state-panel.ts) is CLI-only — no web panel render, so the structured scratchpad surface is partial."
 purpose: |
   모델이 free-form per-task 스크래치패드(owner shortlist / hypothesis / blockers /

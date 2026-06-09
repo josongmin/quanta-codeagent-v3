@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Default-OFF closed realtime WS port with zero @/realtime imports anywhere in the tree (notes line 50); pure injectable adapter primitive, no CLI affordance either."
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal WS port primitive (port/adapter/sdp/codec), zero tree imports, audio marker-only; no user-visible affordance on any surface."
 purpose: |
   Codex Desktop 8 realtime WS methods 흡수 (connect/send/onMessage/negotiate/

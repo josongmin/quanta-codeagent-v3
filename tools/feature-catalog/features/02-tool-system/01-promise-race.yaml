@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "scripted-replace ReDoS-bound internals in CLI tool path"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal ReDoS-defense note (literal fallback + length cap); no user-visible affordance on any surface"
 purpose: '이전 sync regex를 Promise.race로 감싸 setTimeout 타임아웃 시도 → event loop pinned, setTimeout never fires . 회수: 진짜 ReDoS 방어는 applyScriptedReplace의 (1) literal-only fallback + length cap heuristic, (2) FS-jail · count cap뿐.'
 evidence:

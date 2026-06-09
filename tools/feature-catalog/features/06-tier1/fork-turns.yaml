@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; per-spawn fork_turns tool input + redaction core"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal per-spawn tool parameter (selectForkTurns/redact/composeForkedPrompt) affecting child prompt; no distinct browser UI affordance"
 purpose: |
   The `agent` spawn gains a `fork_turns` input (none[default] | all | N): a child

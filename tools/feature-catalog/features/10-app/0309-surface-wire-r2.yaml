@@ -23,7 +23,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; identity onChange plus granular registry plus per-tool record wired in surface-compose"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure CLI surface-compose wiring (per-tool snapshot recorder / identity rebuilder), no web affordance"
 purpose: |
   Closes the 3 deferred last-mile gaps from ADR-0300 + ADR-0302 in a

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PyrightAdapter contributes argv + languageId on top of LspClient base; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal per-language LSP adapter (ui_surfaces n-a) — no UI affordance on any surface"
 purpose: |
   Per-language adapter on top of `LspClient` base for `pyright-langserver`

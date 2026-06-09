@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "AGENTS.md/CLAUDE.md tree walk injected into per-turn system reminder (src/agent/repo-rules.ts)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "auto-injected prompt context (ui_surfaces n-a); no user-visible affordance on any surface"
 purpose: |
   Repo가 ship하는 운영 contract (canonical 커맨드 경로, fail-closed posture,

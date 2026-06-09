@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "recorded predictions JSONL plus review metadata; pure test fixture, no CLI affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "pure recorded-fixture data, no UI affordance on any surface"
 purpose: |
   `swebench-smoke-baseline` 의 6 frozen instance 를 실제 에이전트로 한 번

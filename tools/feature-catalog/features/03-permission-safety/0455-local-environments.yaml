@@ -25,7 +25,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "runMain resolveLocalEnvSelection threads localEnv onto AgentConfig; activated via QUANTA_LOCAL_ENV + .quanta/environment.toml from CLI; ui_surfaces cli"
+    cli: "runs in the interactive CLI — 11/12 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "declared-env selection is a CLI/config-file mechanism with no web render; no SessionCommand verb and no event bridges env switching to browser (B1/B3)"
 purpose: |
   프로젝트가 `.quanta/environment.toml` (또는 Codex-compat

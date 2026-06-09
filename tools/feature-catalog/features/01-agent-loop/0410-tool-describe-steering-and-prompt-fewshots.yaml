@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "tool-describe steering and prompt few-shots feed the CLI loop's prompt build"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal prompt/tool-describe steering text (prompt-body.ts); prompt content is not a UI affordance"
 purpose: |
   Codex 0.131.0-alpha.9 SHELL.md + Claude Code 2.1.138 tools/{Bash,Edit,Write}.ts

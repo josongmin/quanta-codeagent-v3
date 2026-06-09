@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [git-runner-cancellation-signal, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-mutating-tools]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure internal zod schema guard (BRANCH_NAME_RE) on git_branch_switch input; no distinct user-facing affordance."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal schema-level alphabet guard, no UI affordance."
 purpose: |
   Schema-level zod regex `^(?!-)[A-Za-z0-9._/+-]{1,64}$` on `git_branch_switch.branch`

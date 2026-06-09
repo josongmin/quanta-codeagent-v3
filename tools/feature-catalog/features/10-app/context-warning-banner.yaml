@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/context-warning.ts stderr-TTY preamble; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI stderr-TTY warning preamble; no web render, not reachable from web-daemon"
 purpose: |
   A one-line warning surfaced near the prompt BEFORE auto-compaction fires,

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "advisory ScoutingSignal over deny-log + taxonomy prompt line on CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "advisory signal is a pure seam (host-binding surfacing is a noted follow-up, not wired) and the taxonomy line is appended to the LLM prompt; nothing reaches the browser via a bridged event"
 purpose: |
   비할당(allowlist 부재) 엔드포인트들(webhook sink, file-share, DNS resolver)을 연쇄

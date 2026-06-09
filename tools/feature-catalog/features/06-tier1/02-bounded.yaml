@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "maxDepth recursion bound on subagent dispatch via QUANTA_SUBAGENT_MAX_DEPTH, runs in CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal recursion-limit policy fence, no user-visible UI affordance"
 purpose: |
   서브에이전트 다단계 재귀를 `maxDepth` (default 3)로 hard-bound. 자식 호출

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "3/3 evidence files reachable from CLI; read routes .ipynb through renderNotebook"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "read is an agent-callable tool; its notebook-aware result surfaces via tool.completed resultPreview in session-hooks.ts"
 purpose: |
   `read` treats a `.ipynb` as opaque UTF-8 today: it line-numbers the raw

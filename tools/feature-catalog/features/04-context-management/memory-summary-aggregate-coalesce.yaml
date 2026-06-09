@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "prepends distilled memory aggregate into session_ctx prompt section, reachable from CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure prompt-section coalesce, ui_surfaces n-a, no user-visible affordance"
 purpose: |
   Phase-2 consolidated `memory_summary.md` 본문을 4-section preset 의 `session_ctx`

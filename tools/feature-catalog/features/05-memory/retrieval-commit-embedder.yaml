@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "commit embedder + LRU cache reachable in CLI retrieval assemble; derived 4/4 holds"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal retrieval primitive (git-aware embedding + LRU cache behind closed ports); ui_surfaces n-a; no UI affordance"
 purpose: |
   Pull recent git commit notes and embed them so a query like "why did

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bun run tools/swebench-matrix.ts bench meta-tool (surface:bench); env-overlay composer, not a CLI app affordance."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Pure bench experiment runner that sweeps env conditions and emits JSONL/markdown; no user-visible UI affordance on any surface."
 purpose: |
   `bun run tools/swebench-matrix.ts` — SWE-bench-shape 데이터셋(기본

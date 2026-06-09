@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "wired via src/apps/cli/repl/away-summary-wire.ts, CLI renders the recap text on AFK return"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "recap is a CLI repl render (deliberate_hold lists CLI render of kind ok text); not an event in the 6-event web bridge, never reaches the browser"
 purpose: |
   When the user steps away from an in-progress session and returns, generate a

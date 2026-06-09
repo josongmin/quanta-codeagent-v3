@@ -15,12 +15,12 @@ depends_on: [lsp-rename-rpc-and-apply, diagnostics-tool-l5]
 config_refs:
   env: ["QUANTA_LSP_DIAGNOSTICS_HOOK"]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "invisible post-edit promptHook that auto-injects LSP diagnostics into the next prompt; no user-facing affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal prompt-augmentation hook, no UI; only the model context changes, nothing distinct reaches the browser"
 purpose: |
   edit/write/apply_patch 같은 mutating 도구 실행 후 LSP diagnostics를

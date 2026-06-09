@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; frozen prompt constants reachable in CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure frozen prompt constants (no imports, no runtime, no flags); internal byte-identity invariant with no UI affordance"
 purpose: |
   Three frozen constants implementing the byte-identical prompt invariant

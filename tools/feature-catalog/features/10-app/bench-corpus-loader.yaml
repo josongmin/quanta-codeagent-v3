@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: bench corpus adapter under src/apps/bench, not in interactive CLI graph"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "corpus loader feeds the bench CLI run (Instance[] + count), not reachable from web-daemon; no browser affordance"
 purpose: |
   Adapter that turns a `QUANTA_SWEBENCH_CORPUS_ROOT` directory into an

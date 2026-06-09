@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; bootstrapSession moved to surface-agnostic host layer"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure host-extraction refactor, no UI affordance"
 purpose: |
   Moves the per-session bootstrap (`bootstrapSession` from

@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Segmented usage bar in CLI status-line + wired /context slash render the breakdown."
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "User value is the CLI status-line segmented bar and /context; web TokenCounter shows only cumulative total, the breakdown is CLI-only and /context is a B2 SlashPalette prefill stub that does not execute."
 purpose: |
   Extends context-usage-metrics (single total + one-color bar) with the per-category

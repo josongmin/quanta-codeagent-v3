@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "deny_and_steer ConfirmDecision verb wired into the CLI admissibility-gate/dispatch."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "The web EscalationCard maps the deny_and_steer verb (apps/web-frontend/src/components/EscalationCard.tsx) and protocol.ts ApprovalRespondCommand carries the steer field, so the host-redirect verb fully reaches the browser approval card."
 purpose: |
   Gap-4 of the `agent-loop-branch-hardening` umbrella (ADR-0076). Adds a

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "EffortLevel session axis resolved in CLI loop via parseEffort/resolveEffort"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "web /effort slash command executes via postConfig POST /config writing QUANTA_REASONING_EFFORT (in CONFIG_ALLOWED_KEYS, server.ts:318); model/effort config is a real web affordance"
 purpose: 'EffortLevel = default | max | high | medium | low — 세션 단위 효력 축. SkillEffort (per-skill, numeric 포함) 와 직교 — numeric skill 값은 axis 투표 안 함, named tier만 vote. parseEffort (case-insensitive env), resolveEffort (skill > session > default), effortToTokenBudget (1024/4096/16384/64000/undefined), createEffortStore factory.'
 evidence:

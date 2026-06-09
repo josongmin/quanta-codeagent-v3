@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/session-registry stats inspector slash + auto-sweep wired in src/apps/cli/session-registry-cmd.ts + slash/registry-app.ts"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "inspector value is the /session-registry stats CLI slash; web SlashPalette is a prefill stub (B2), no web inspector render"
 purpose: |
   Three-ADR closeout that takes ADR-0348 jsonl + ADR-0361 sqlite adapters

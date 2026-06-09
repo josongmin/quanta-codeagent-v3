@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "registers the subagent_send_message LLM tool (default-OFF slot) callable in the CLI loop"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user value is an LLM tool call which renders as tool.invoked/tool.completed via the bridged tool_call/tool_result events"
 purpose: |
   Inter-agent mailbox so quanta subagents can coordinate WITHOUT teardown —

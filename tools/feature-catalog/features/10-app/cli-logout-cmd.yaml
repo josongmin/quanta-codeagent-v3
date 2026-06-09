@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/logout slash destroys the on-disk ChatGPT-OAuth token bundle in the CLI"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "logout is a web auth affordance: slash-auth.ts executes POST /auth/logout to handleAuthLogout which deletes the token bundle (same user value, mirrored)"
 purpose: |
   Slash command that destroys the ChatGPT-OAuth token bundle written by

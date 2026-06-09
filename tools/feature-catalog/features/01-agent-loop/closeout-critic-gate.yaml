@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "advisory critic verdict surfaces via recovery event in CLI display; default-OFF DI port"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "denied verdict surfaces only via recovery event, dropped at context-binding.ts default arm; never reaches browser"
 purpose: |
   루프가 `{kind:"completed"}` 턴을 봉인하기 직전, 주입된 reviewer/critic 포트(DI)에게

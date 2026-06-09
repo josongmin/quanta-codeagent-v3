@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "lsp_incoming_calls/lsp_outgoing_calls tools, run in CLI loop"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "lsp call-hierarchy tool invocations + results render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   Two new read-only nav tools answering the refactorer's core question — "if I

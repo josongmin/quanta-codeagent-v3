@@ -25,7 +25,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure layered struct-merge engine + permission context derive driven by env knobs on CLI"
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal policy-merge engine with override metadata; no dedicated user-visible render on any surface (only changes a permission decision)"
 purpose: |
   Pure layered struct-merge engine + the permission-domain wiring that consumes

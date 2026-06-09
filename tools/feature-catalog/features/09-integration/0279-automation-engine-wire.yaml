@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; assembleAutomation runs in the CLI/agent composition root"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal composition-root wire (env to AutomationEngineSlot); no user-visible browser affordance, fires ride B1-dropped scheduler events"
 purpose: |
   `assembleAutomation(env, deps)` — the single composition-root helper

@@ -14,12 +14,12 @@ labels: ["surface:core", "absorbed:codex", "negative-decision", "doc-only"]
 depends_on:
   - codex-r2-multi-process-flock
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "doc-only negative decision (ADR-0365), zero code change, a lockfile portability note on a primitive; no CLI affordance"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal lockfile-primitive note (file-lock.ts), no UI affordance on any surface"
 purpose: |
   Investigation + memorialization: Node `fs.open(path, "wx")` maps to

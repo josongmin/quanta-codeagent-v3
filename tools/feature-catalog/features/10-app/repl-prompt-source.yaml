@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Implements runner.PromptSource port for the CLI REPL with in-REPL slash short-circuit (tryRunReplSlash) in src/apps/cli/repl.ts."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI REPL prompt-reader and slash routing adapter; slash commands do not execute in apps/web-frontend SlashPalette (B2) and the web has its own input.append verb, so this adapter never runs in the browser."
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because

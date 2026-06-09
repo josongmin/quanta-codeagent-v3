@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; system skills discoverable + slash-wirable"
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "skill-invocation affordance is CLI/slash-only; /babysit etc not present and SlashPalette commands are prefill stubs (B2) — no web skill handler/panel"
 purpose: |
   ADR-0102 Phase AS absorption batch — 8 highest-ROI Cursor CTK git-task

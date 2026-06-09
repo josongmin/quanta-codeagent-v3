@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slashes /web /paste /edit-plan /edit-message, src/apps/cli/web-cmd.ts etc reachable from CLI entry"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "absent from SlashPalette.tsx; inherently terminal mechanism (EDITOR spawn + OS pbpaste/xclip); TextInbox/PlanEditPort not web-wired"
 purpose: |
   Four-slash absorption batch. /web <url> + /paste deliver out-of-band

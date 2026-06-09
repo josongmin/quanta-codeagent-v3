@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "layered on-disk config loader + per-project trust gate reachable from CLI; QUANTA_CENTRAL_CONFIG; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure config-loader + trust-store policy primitive (file IO injected at composition root), no user-visible UI affordance on any surface"
 purpose: |
   신규 @/config 슬라이스 — Claude/Codex 형상의 layered on-disk config loader

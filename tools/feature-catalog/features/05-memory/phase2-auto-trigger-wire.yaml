@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI/REPL wires runMemoryPhase2AutoTrigger via buildSessionMemoryAutoWires; derived 5/6 holds"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure background fire-and-forget orchestration seam (session-start microtask); outcome surface is {kind,reason} only, never rendered; ui_surfaces n-a"
 purpose: |
   Mirror of the session-end Phase 1 hook for the Phase 2 cross-session

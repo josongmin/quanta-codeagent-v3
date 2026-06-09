@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "5/5 reachable; full /knobs family set/reset/preset/save over the whole registry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "KnobsPanel reads the same catalog broadly via GET /api/knobs but WRITE is limited to the 6 CONFIG_ALLOWED_KEYS; arbitrary /knobs set is CLI-only (read-broad/write-narrow)"
 purpose: |
   `/knobs` live-control — the operator surface for the unified knob control

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [quanta-session-subcommands]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure internal runtime primitive (createPersistentWorktree/removeWorktree) consumed by runner/session-ops; the user-facing CLI fork verb lives in the separate quanta-session-subcommands feature, this registers the library primitive only."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal worktree-lifecycle primitive, no UI affordance on any surface; a web fork would also need a B3-absent SessionCommand fork verb."
 purpose: |
   Persistent (NOT auto-removed) git worktree primitive used by top-level

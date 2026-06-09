@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "eval Tier-1 LLM-as-judge; derived 0/5 reachable from interactive CLI entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "eval-harness internal judge primitive, no web UI affordance"
 purpose: |
   Scenario rubric + 캡쳐된 transcript를 받아 judge LLM에 per-item pass/fail을

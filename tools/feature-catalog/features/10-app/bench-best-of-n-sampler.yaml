@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure Best-of-N sampler module invoked by bench/index.ts in headless/batch bench runs"
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal bench sampling module, no UI affordance on any surface"
 purpose: |
   Pure module that runs N independent agent trajectories against a single

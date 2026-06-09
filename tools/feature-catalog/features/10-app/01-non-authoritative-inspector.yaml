@@ -13,12 +13,12 @@ owners: ['@songmin']
 labels: [surface:cli]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, probe-funnel-adherence]
 surface_integration:
-  cli: full
+  cli: missing
   web: missing
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Standalone bun run probe CLI tool (src/apps/probe/index.ts main(argv)) renders 4 views to terminal; derived missing is wrong — it is its own CLI entry not reachable from the REPL entry."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Separate probe CLI binary; nothing in apps/web-frontend renders a trajectory inspector and no probe event crosses the toSessionHostTurnEvent bridge."
 purpose: '읽기 전용, NON-authoritative inspector — JSONL trajectory 파일 또는 run-dir을 인자로 받아 timeline / failed / slow / cost 4 view 렌더. 4 모듈: parse.ts, triage.ts, render.ts, index.ts(CLI entry).'
 evidence:

@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "withLiveUsage emits output_progress consumed by CLI turn-indicator.ts to update the status bar live counter"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the live climbing counter rides the output_progress event which is DROPPED at the context-binding.ts:1104 default arm (only usage is bridged to TokenCounter, not the live tick)"
 purpose: |
   Claude-Code의 streaming 중 climbing "· N tokens" spinner counter를 구조적으로 흡수.

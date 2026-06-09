@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "tool-failure ladder prompt rules feed the CLI loop's system prompt"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal prompt-only intervention (prompt.ts / prompt-sections.ts); prompt text is not a UI affordance"
 purpose: |
   라이브 REPL replay에서 발견한 두 결함을 시스템 프롬프트 규칙으로 봉합 — (1) 단일 도구 cap

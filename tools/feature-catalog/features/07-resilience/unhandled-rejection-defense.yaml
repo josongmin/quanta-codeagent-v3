@@ -15,12 +15,12 @@ depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports
 config_refs:
   env: ["QUANTA_SANDBOX"]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "process.on unhandledRejection log-never-exit handler; pure process-level safety net, no interactive affordance"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure process-level safety net, no UI affordance on any surface"
 purpose: |
   R-Phase4 P3-1 defense-in-depth handler for promise rejections that escape

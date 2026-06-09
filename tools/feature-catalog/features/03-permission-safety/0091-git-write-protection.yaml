@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "gitWriteProtectReason guard wired into write/edit/dispatch in the CLI agent."
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Static deny of .git/.vscode writes; a blocked write surfaces as a tool_result ok:false (permission_denied) rendering as tool.completed outcome:error in web, but no distinct security affordance."
 purpose: |
   Cursor cursorsandbox의 Seatbelt write-deny-regex를 surface-agnostic 정적 detector로

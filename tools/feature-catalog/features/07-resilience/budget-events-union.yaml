@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [stop-category-matrix]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure discriminated-union event data for trajectory recording, no user affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal event-shape union, no UI affordance"
 purpose: |
   Discriminated-union event shapes for trajectory recording. BudgetTickEvent

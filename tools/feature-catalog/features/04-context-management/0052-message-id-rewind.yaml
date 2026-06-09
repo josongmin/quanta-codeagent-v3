@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "quanta session rewind subcommand truncates transcript to message id"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "needs a B3-absent rewind verb; protocol.ts SessionCommand has only input.append/turn.run/turn.cancel/approval.respond"
 purpose: |
   Claude Desktop 1.7196.3의 transcript 단위 rewind UX 흡수 — Message.id?: string opt-in 필드를

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [absorbed:claude, surface:core]
 depends_on: [conversation-checkpoint-store]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "SideChatManager port + default-impl primitive, default-OFF; /sidechat slash + LLM reply explicitly deferred, no composition root wires it."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal lifecycle primitive, no surfaced slash or UI affordance on any surface."
 purpose: |
   Claude Desktop `LocalSessions.{startSideChat, sendSideChatMessage,

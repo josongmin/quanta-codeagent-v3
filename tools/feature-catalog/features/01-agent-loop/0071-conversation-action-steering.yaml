@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "runs in CLI via src/apps/cli/repl/conversation-action-surface.ts"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "typed 5-arm action layer (cancel_subagent/summarize/resume) needs B3-absent SessionCommand verbs; protocol.ts has only turn.cancel (whole-turn), and response_queued style control events drop at context-binding.ts:1104 default arm"
 purpose: |
   Cursor ConversationAction oneof 흡수 — 기존 단일 free-text SteerRequest 위에 5-arm 타입드

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bun run eval generate scenario gen; derived 0/5 reachable from interactive CLI entry (separate eval batch surface)"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "eval-harness internal scenario generator, no web UI affordance"
 purpose: |
   `bun run eval generate --usecase ID [--count N]` — 주어진 `UseCaseId`로

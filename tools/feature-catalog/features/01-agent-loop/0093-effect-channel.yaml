@@ -16,12 +16,12 @@ depends_on: [agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl
 config_refs:
   env: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "EffectChannel is a relocatable internal dispatch-substrate boundary (LocalEffectChannel), no user-visible affordance on any surface"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal effect-boundary abstraction over registry.run, no UI affordance on any surface"
 purpose: |
   Cursor의 cursor-agent-exec 분리 구조적 교훈 흡수 — 오케스트레이션 평면(permission/HITL/

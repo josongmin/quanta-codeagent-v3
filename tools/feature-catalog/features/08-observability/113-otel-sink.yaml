@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "MetricSink OTel adapter is a closed-port DI module reachable from CLI."
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal metric-sink adapter (MeterProvider codec, default-OFF DI), no UI affordance on any surface."
 purpose: |
   Closed-port `MetricSink` adapter wrapping `@opentelemetry/api` MeterProvider.

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "branch-search verifier/selector + CLI onProgress progress formatter, runs in CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "feature user value is the progress surface (onProgress) which rides progress_update / dropped events at context-binding.ts:1104; the minimal-change bias itself is internal scoring with no web affordance"
 purpose: |
   Verifier and selector that bias the speculative branch search toward

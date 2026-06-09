@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4 LSP tools (code_action/rename_apply/format/signature_help) reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 13/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Model-invokable tools; their tool_call/tool_result emit through the bridged tool_call/tool_result events and render as the generic tool.invoked/completed card (session-hooks.ts:420-435). Rich diff result not shown (DiffPanel unmounted) but tool name+preview render."
 purpose: |
   Expands the Codex-absorbed ADR-0015 read-only LSP nav surface

@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "13/13 reachable; xlsx_write/docx_write tools default-OFF"
+    cli: "runs in the interactive CLI — 13/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "xlsx_write/docx_write are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
 purpose: |
   Opens a NEW tool category alongside H14a image_gen: GENERATING real binary

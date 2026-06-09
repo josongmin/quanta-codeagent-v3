@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/voice CLI slash + recorder/transcriber ports reachable from CLI import graph (voice-cmd.ts)"
+    cli: "runs in the interactive CLI — 10/11 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only /voice slash with no web handler; grep of apps/web-frontend shows no voice surface, so it cannot execute in the browser (B2 SlashPalette stubs do not run)."
 purpose: |
   S3 voice slice — 4-vendor convergence absorption (Claude `/voice` Deepgram,

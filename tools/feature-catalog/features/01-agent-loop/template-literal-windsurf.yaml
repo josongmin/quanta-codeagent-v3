@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/4 reachable, default-OFF pure string-to-string template expander, host must import directly; keep derived missing"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal template-literal expander library (jinja2-style variable substitution), no UI affordance on any surface"
 purpose: |
   Windsurf workflow `.windsurf/workflows/<name>.md`의 jinja2-style `{{ name }}`

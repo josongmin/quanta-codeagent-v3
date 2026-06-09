@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; transport port wired into MCP client in the CLI"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal transport abstraction (stdio/http-sse carrier behind McpTransport interface); no UI affordance on any surface"
 purpose: |
   client.ts core(request/dispatch/pending/timeout)는 불변. stdio 4곳

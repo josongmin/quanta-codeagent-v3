@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "spawn_agents_on_csv LLM tool reachable from CLI (QUANTA_SPAWN_AGENTS_CSV)."
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "LLM-callable tool; tool_call/tool_result render as tool.invoked/tool.completed; per-row subagent fan-out also surfaces in the web-only RunColumn."
 purpose: |
   Make the ADR-0463 batch-jobs domain agent-callable + production-grade. The agent

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: pure encode/buffer/sink core reachable from CLI; composition-root wire is the introspection affordance"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "NDJSON firehose to an external monitor; no browser render and not in toSessionHostTurnEvent (context-binding.ts) bridge"
 purpose: |
   Pure half of Cursor's `cursor-ndjson-ingest`: stream the live agent event

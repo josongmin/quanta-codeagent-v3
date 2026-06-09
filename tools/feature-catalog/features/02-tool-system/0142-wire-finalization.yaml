@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "providerFromEnv env factory + buildDefaultTools registration reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure composition-root wiring (env-driven provider factory + MUTATING_TOOL_TABLE/buildDefaultTools registration); the visible affordance is owned by the doc-tools/web-search features, this has no UI of its own."
 purpose: |
   Surgical 2-part wire-up closing seams deliberately left open by ADR-0127

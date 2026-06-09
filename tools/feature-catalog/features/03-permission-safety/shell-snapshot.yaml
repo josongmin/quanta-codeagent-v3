@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ShellSnapshotPort capture/restore/prune slice (src/runtime/shell-snapshot/index.ts)"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal port, not yet wired (synthesis sites 0); no user-visible affordance on any surface"
 purpose: |
   Codex의 `~/.codex/shell_snapshots/{thread}.{ns}.sh` (~90KB) 패턴

@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; observer plus prompt_cache_status agent tool"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "prompt_cache_status is an agent-invocable tool so its invocation renders as a tool.invoked/tool.completed card via the bridged tool_call/tool_result events; no dedicated cache hit-rate panel renders"
 purpose: |
   Typed observer slice (`src/observability/prompt-cache/`) for the

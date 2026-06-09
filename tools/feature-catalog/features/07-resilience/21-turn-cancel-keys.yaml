@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI REPL raw-mode keypress install (src/apps/cli/repl/turn-cancel-install.ts), reachable from cli entry"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only TTY raw-mode keypress gesture; the cancel verb on the web (turn.cancel) is a separate path and this keypress install never runs in the web-daemon"
 purpose: |
   CLI REPL의 cancellation 2-tier gesture wiring: (1) **Ctrl+C** → outer

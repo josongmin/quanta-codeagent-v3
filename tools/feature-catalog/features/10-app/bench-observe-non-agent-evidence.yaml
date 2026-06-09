@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: 1/4 evidence reachable from CLI entry; bench trajectory evidence emitter"
+    cli: "runs in the interactive CLI — 1/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "emits sandbox/patch_generated/verify trajectory JSONL that are explicitly NOT AgentEvents and bypass the recorder; cannot flow through the 6-event web bridge (context-binding.ts toSessionHostTurnEvent), dropped before browser"
 purpose: |
   Bench is the producer of *non-agent* trajectory evidence: `sandbox`

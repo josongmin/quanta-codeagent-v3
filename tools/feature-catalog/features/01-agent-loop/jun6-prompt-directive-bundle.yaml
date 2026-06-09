@@ -28,7 +28,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; runs in CLI loop via prompt.ts dynamic reminder"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal per-turn system-reminder prompt-assembly primitive (buildDynamicContext splice); ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: |
   Seven cheap, high-value behavioral PROMPT DIRECTIVES, each an independent

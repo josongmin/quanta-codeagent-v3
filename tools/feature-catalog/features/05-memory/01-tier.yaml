@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: memory tier types/ranking reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal recall-ranking primitive (src/memory/ranking.ts, types.ts) — tier weighting in hybrid recall, no UI affordance on any surface"
 purpose: tier+kind, 하이브리드 회상, tier 가중
 evidence:

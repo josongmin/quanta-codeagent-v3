@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/4 reachable, ui_surfaces n-a, default-OFF closed-port side-queue (recordFinding/getUpdates/clearUpdates), host wires nothing; keep derived missing"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal closed-port finding side-queue, default-OFF, no UI affordance; does not mutate plan or emit any web event"
 purpose: |
   Devin playbook 실행 중 skill 이 발견한 finding (discovery / blocker /

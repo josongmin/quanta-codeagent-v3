@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/session-registry evict --pattern / cleanup --dry-run slash + TRUNCATE mode reachable in CLI"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "operator affordance is the /session-registry CLI slash; web SlashPalette server-routed commands are prefill stubs (B2)"
 purpose: |
   R15 closes out the R14 deferred follow-ups + adds two process-level

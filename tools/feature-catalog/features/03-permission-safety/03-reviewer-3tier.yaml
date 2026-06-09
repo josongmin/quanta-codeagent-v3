@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 4/4 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "reviewer-tier plus 8-state outcome; on web only the user-decision approve|deny surfaces via EscalationCard, auto_review/guardian outcomes and the 8-state envelope do not render"
 purpose: 'ReviewerTier (user|auto_review|guardian_subagent) × ApprovalOutcome 8-state (not_needed/config_allowed/guardian_approved|denied/user_approved|approved_for_session|denied|aborted). HITLTier(ADR-0020)와 직교 축 — HITL=위험 형태, Reviewer=결정자. invariant matrix는 `auto_review` deny 금지 + `guardian` user-only outcome 금지를 explicit literal set으로 enforce. sticky precedence: user_aborted > guardian_denied > user_denied (DenialPrecedenceConflictError로 silent winner 금지).'
 evidence:

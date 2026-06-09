@@ -29,7 +29,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: buildMemoryForSession factory reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal session-bootstrap factory (src/runner/assemble/memory-factory.ts) that resolves store/config/auto-trigger slots — a wiring default-flip, no UI affordance on any surface"
 purpose: |
   Flip memory learning from default-OFF to default-ON via one canonical

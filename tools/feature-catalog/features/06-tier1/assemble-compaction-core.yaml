@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; surface-agnostic assembler the CLI boots through"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal config assembler (compaction breaker + summarizer LLM factory); no browser UI affordance — builders run on the web-daemon backend invisibly"
 purpose: |
   Two surface-agnostic compaction assemblers (ADR-0011 Tier-0 safety

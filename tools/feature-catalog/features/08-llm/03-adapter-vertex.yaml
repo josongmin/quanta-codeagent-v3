@@ -23,7 +23,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Vertex transport adapter usable from CLI LLM registry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal cloud transport adapter (GCP Vertex projects/loc endpoint, ui_surfaces n-a), no UI affordance"
 purpose: |
   `VertexProviderAdapter` routes Anthropic Messages API calls through GCP Vertex AI's

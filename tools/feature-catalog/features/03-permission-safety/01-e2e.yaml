@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Policy-injection adversarial gate (policy.ts + admissibility-gate) runs in the CLI agent loop."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Backend injection-defense policy; a blocked smuggling attempt surfaces as a tool_result ok:false rendering as tool.completed outcome:error in web, but no distinct security affordance."
 purpose: '12 시나리오 e2e: bypass-claim/system-tag-smuggle/system-reminder-spoof/authority-claim/plan-bypass/HITL-bypass/hook-deny-spoof/persistent-multi-turn/base64-to-sh/find-delete/git-config-inject + benign control'
 evidence:

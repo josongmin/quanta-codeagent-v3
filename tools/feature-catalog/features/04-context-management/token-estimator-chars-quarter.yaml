@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "estimateTokens heuristic feeds compaction threshold gate in CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal token-estimation heuristic (ui_surfaces n-a), no UI affordance"
 purpose: |
   Threshold 게이트(`compactIfNeeded` / reactive drop-ratio guard) 입력으로 사용되는

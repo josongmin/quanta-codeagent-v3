@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/index.ts main loop + summarizer helper; CLI-only entry plumbing."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI entrypoint top-level code; not loaded by web-daemon, no browser affordance."
 purpose: 톱레벨; 루프 e2e로 검증, lockstep cli 테스트)
 evidence:

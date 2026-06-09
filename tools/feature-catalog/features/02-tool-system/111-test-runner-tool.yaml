@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "2/2 evidence files reachable from CLI; test_runner auto-detect + verdict tool"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent-callable test_runner renders as tool.invoked/tool.completed in session-hooks.ts (verdict + output preview)"
 purpose: |
   Runs the project's test suite. Explicit `command` arg skips auto-detection;

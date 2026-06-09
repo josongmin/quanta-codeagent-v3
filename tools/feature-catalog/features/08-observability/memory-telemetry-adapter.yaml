@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "adapter wires MemoryTelemetryPort onto MetricsRegistry in CLI"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure port-to-registry adapter (default-OFF, no call site), no UI affordance on any surface"
 purpose: |
   Production binding of `MemoryTelemetryPort` (from @/memory) onto the

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "System-prompt cache + drift detector wired in buildTurnContext on CLI path."
+    cli: "runs in the interactive CLI — 4/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal cache + cache-control audit/drift primitive, no UI affordance on any surface."
 purpose: |
   Two complementary pieces. ADR-0322 (passive audit Case C verdict):

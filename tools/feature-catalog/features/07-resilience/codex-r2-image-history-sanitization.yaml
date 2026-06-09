@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "production-wired"]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "internal invalid_image sanitize-and-retry LLM decorator, transparent recovery, no user affordance"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal image-history sanitize-and-retry pipeline, no rendered affordance (image input is a separate feature)"
 purpose: |
   4-ADR pipeline closing Codex `turn.rs:363-381` (invalid image →

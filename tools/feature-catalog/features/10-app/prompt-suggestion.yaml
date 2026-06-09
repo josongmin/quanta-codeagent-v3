@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "next-prompt suggestion rendered in CLI REPL via src/apps/cli/repl/prompt-suggestion-wire.ts; reachable from CLI entry (default-OFF gate)."
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Suggestion render is CLI REPL only; no apps/web-frontend component renders a next-prompt suggestion and it rides no event in the 6-event web bridge (context-binding.ts:1052 toSessionHostTurnEvent) so it never reaches the browser."
 purpose: |
   Suggests what the user might naturally type next. The crown jewel is the

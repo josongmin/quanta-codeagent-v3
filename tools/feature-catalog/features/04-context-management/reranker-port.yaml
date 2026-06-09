@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Reranker port + vendor adapters importable; default identity pass-through"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal port, unwired (deliberate_hold, no composition root), no UI affordance"
 purpose: |
   ADR-0159 의 `RerankPort` family (identity / bm25-secondary / tier-aware / RRF)

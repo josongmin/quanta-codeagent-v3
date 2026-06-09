@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "message-level rewind/resume exposed in CLI agent loop"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "rewindToMessage needs a resume/rewind verb absent from protocol.ts SessionCommand (B3), so it does not reach the browser"
 purpose: |
   Per-message conversation checkpoint — 같은 session 내에서 특정 message id로

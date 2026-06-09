@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [stop-category-matrix]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure deterministic cumulative state machine, no I/O, no user affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal budget state machine, no UI affordance"
 purpose: |
   Per-run cumulative 정량 추적(토큰/턴/USD/wall-clock 등)의 pure deterministic state

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "DXT user_config schema + template substitution + keychain secrets wired in src/plugin-isolation/dxt-loader.ts at spawn time"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal plugin-manifest config (schema extend + interpolate-at-spawn + SecretStorePort); no browser-visible affordance on any surface"
 purpose: |
   Extend the DXT plugin manifest with Claude-Desktop-parity user configuration:

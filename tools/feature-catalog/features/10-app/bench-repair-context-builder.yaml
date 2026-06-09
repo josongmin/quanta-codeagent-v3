@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: pure repair seed-message builder under src/apps/bench, not in interactive CLI graph"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure seed-message + diff-truncation builder internal to the repair-round loop, no standalone user-visible affordance on any surface"
 purpose: |
   Pure seed-message builder for the b2 repair-round orchestrator (RFC §16,

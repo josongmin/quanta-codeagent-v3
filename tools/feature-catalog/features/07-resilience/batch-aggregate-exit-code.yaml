@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [outcome-exit-code-table]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure corpus exit-code aggregator function mapping to process.exit; no interactive CLI affordance"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure POSIX exit-code policy primitive, no UI affordance on any surface"
 purpose: |
   Corpus-level exit-code aggregator for batch mode. `computeExitCode(results)`

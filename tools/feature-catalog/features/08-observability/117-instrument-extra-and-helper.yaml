@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PlanQueue/Budget/LSP metric wraps not reachable from cli interactive entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "metrics emitted to OTel backend plus SLO doc, never to the quanta web frontend"
 purpose: |
   Final closeout for 24-metric recipe coverage: 3 additional typed wraps

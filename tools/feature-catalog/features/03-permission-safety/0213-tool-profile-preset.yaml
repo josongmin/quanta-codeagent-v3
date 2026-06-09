@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 5/5 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal tool-profile port plus presets/resolver; CLI wire (--tool-profile + /profile) deferred per notes, so no user-visible affordance on any surface yet"
 purpose: |
   Zed의 named "tool profile" mode 3종 (Write/Ask/Minimal) + Codex agent_role enum (explorer/

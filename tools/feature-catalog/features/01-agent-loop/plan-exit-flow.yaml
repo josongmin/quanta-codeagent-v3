@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; plan-exit dispatch reachable from CLI"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "plan-exit user value rides plan_* / mode_changed AgentEvents which hit the default arm at context-binding.ts:1105 and are dropped; the orchestrator never reaches the browser"
 purpose: |
   Plan-exit three-way (approved/rejected/changes_requested)의 셋 평면을 잇는 pure async

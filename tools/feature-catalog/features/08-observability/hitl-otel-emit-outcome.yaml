@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "OTel attrs emitted at HITL gate site in CLI run"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure OTel attribute emit into span sink, no user-visible affordance on any surface"
 purpose: |
   `quanta.hitl.tier_resolved` + `registry_escalated` + `handoff_emitted` 3개

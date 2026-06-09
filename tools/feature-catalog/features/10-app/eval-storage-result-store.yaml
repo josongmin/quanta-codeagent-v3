@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "eval JSONL ResultStore I/O; derived 0/3 reachable from interactive CLI entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal eval storage I/O primitive, no UI affordance on any surface"
 purpose: |
   Tier-agnostic JSONL store. 한 runId당 하나의 파일 (`<dir>/<runId>.jsonl`) —

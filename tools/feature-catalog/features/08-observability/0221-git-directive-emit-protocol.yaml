@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Phase-guarded git-directive emitter writes wire lines to stdout/stderr sink in CLI."
+    cli: "runs in the interactive CLI — 17/17 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Directive emit rides a stdout/stderr sink with no web handler; not one of the 6 bridged events and no SlashPalette executor."
 purpose: |
   Codex-style `::git-*` 5-directive emit protocol with a HARD phase guard:

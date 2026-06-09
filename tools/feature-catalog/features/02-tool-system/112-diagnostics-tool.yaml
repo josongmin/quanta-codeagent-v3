@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Model-callable read-only diagnostics tool; runs in CLI loop."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Agent tool — invocation + diagnostics result render in browser via tool.invoked/tool.completed (session-hooks.ts renderToolInvoked/renderToolCompleted), backed by mapped tool_call/tool_result events (context-binding.ts:1079-1096)."
 purpose: |
   Surfaces language-server errors/warnings for one file. Slice isolation

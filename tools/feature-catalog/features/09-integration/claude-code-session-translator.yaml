@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Translator feeds the CLI session import verb; 3/3 evidence reachable from CLI entry import graph."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "User-facing import mechanism is CLI-only; no web import verb (B3-absent) and @/migration not reachable from web-daemon; does not reach the browser."
 purpose: |
   `SessionTranslator` adapter that parses a Claude Code session transcript at

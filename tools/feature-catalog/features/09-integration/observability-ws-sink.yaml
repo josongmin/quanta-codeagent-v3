@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Per-connection served-WebSocket sink lives in web-daemon server.ts + index.ts; 0/2 evidence reachable from CLI entry."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "attachObservabilitySink in server.ts:866 forwards observability.snapshot/delta frames to ws.send so the deltas reach the live ObservabilityPane; this closes the ADR-0415 port-only deferral."
 purpose: |
   Closes ADR-0415's documented emitter-port-only deferral so observability

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Detector + buildPersistentInjectionMessages + buildTurnContext seam splicing context-update envelopes into the per-turn prompt; ui_surfaces n-a, reachable from CLI entry."
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal prompt-injection wire (model-facing context-update); no user-visible surface affordance."
 purpose: |
   Three-layer wire from state-diff producer to the model's per-turn view.

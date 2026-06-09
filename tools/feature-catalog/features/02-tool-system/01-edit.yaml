@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "edit tool reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "edit tool runs in the web-daemon and its invocation+result render as tool.invoked/tool.completed in session-hooks.ts:420-438"
 purpose: 'edit 도구 실패 시 Strategy hint: suffix 자동 추가 — nextStrategy: scripted_replace | read_then_patch | ambiguous, exit semantics 미변경.'
 evidence:

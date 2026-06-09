@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 2/2 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal auto-mode LLM threat classifier (src/permission/classifier.ts); no user-visible affordance on any surface, only feeds approval decisions"
 purpose: verbatim 위협프롬프트, 2-stage+1h캐시, denial-limit 3/20, AFK sticky
 evidence:

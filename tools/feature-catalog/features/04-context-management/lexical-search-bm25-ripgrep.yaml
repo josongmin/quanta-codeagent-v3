@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "BM25 + ripgrep retrieval engine port reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure retrieval engine port/adapters, ui_surfaces empty, no consumer wired, no UI affordance"
 purpose: |
   ADR-0159 retrieval slice 의 first-stage 누락 봉합 — Phase 7 pluggable

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "gh_pr_open tool, runs in CLI loop"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "gh_pr_open tool invocation + PR-open result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms (the create-pr directive event is not the user-facing path)"
 purpose: |
   The seam joining git_compose_pr (authors prose, opens nothing) and gh_pr_create

@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Yaml-derived 0/8 evidence files reachable from CLI entry; the @/ipc slice (EventBridge + transports + PortableSession) is not wired into the interactive CLI."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal protocol/library (event bridge, transport byte-shuttle, portable-session codec) with no user-visible affordance on any surface; not a UI feature."
 purpose: |
   `src/ipc/` — Claude A11 deep-dive 흡수 (importCliSession + logCliEvent pattern). 두

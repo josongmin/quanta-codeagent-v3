@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "typed MetricsRegistry/MetricSink primitive reachable in CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure closed-port in-memory metrics primitive, no UI affordance on any surface"
 purpose: |
   Closed-port metrics primitive: `MetricsRegistry` + `MetricSink` pair

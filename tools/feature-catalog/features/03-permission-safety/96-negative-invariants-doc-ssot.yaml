@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "doc-only ADR SSOT (evidence.code empty), yaml already declares cli na; no runtime affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "doc-only negative-invariants convention SSOT, no code and no UI affordance on any surface"
 purpose: |
   Single ADR documenting 12 patterns from Codex/Claude Desktop audit that v3

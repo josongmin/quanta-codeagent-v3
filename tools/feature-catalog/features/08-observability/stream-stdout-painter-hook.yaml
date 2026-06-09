@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Human-readable stdout ANSI renderer wired into the CLI surface (src/apps/cli/markdown-painter.ts)."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only terminal renderer; the feature itself states the Web surface wires undefined and skips the painter. Web assistant text rides the separate assistant_text bridge, not this painter."
 purpose: |
   Human-readable `StreamPort` adapter that renders `AgentEvent` to

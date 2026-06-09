@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/5 reachable, ui_surfaces empty, default-OFF verify-only JWKS client, dispatch/loop/agent all uninjected; keep derived missing"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal security primitive (JWKS fetch/cache/verify with Web Crypto), no UI affordance on any surface"
 purpose: |
   Codex agent-task 등록 패턴 흡수의 verify-only foundation. 외부 dispatcher가

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_TEAM_IDLE knob-gated side-agent fan-in barrier wired into the side-agent registry/daemon supervise loop"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "idle beacons/barrier are backend side-agent coordination; no bridged AgentEvent and no web affordance reaches the browser (dropped at context-binding.ts default arm)"
 purpose: |
   Claude --agent-teams의 team-idle 배리어 흡수. 리더가 "전원 끝났나"를 폴링하는 대신

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "absorbed:claude", "absorbed:cursor", "default-off", "security-critical"]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure MCP ingestion boundary (annotation trust-gate affecting internal HITL tiering + media codec lifting image/doc blocks); ui_surfaces n-a, no model-facing tool of its own"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal ingestion/trust-gate + media codec, no distinct UI affordance — only enriches/classifies an existing tool result"
 purpose: |
   Closes two MCP-ingestion gaps where quanta dropped protocol richness the

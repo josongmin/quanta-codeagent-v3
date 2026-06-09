@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Default model-callable Stage-1 topology tool in CLI."
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Agent tool — tree-summary result renders in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), mapped tool_call/tool_result (context-binding.ts:1079-1096)."
 purpose: |
   depth-bounded·.gitignore 준수 디렉터리 트리 + per-directory 파일 수를 반환하는

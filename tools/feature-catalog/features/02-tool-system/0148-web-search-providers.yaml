@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Brave + DuckDuckGo WebSearchProvider impls reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure provider implementations behind the web_search closed port (off-barrel, host-injected, OPT-IN); the visible affordance is the web_search tool call owned by ADR-0127, these impls have no UI of their own."
 purpose: |
   ADR-0127 landed the `web_search` tool + `WebSearchProvider` closed port but

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /history panel, src/apps/cli/history-cmd.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only panel riding SlashContext.history port the web daemon never supplies; /history not present in SlashPalette.tsx; turn breadcrumb data has no web render"
 purpose: |
   Compact scannable summary of the live session so the operator can answer

@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: runMemoryConsolidatorHook session-end wire reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "session-end Phase 1 distill hook; the only thing it surfaces is an error AgentEvent on failure (bridged), but the distilled/skipped outcome rides no bridged event and there is no consolidator UI — user-facing value (distilled knowledge) does not reach the browser"
 purpose: |
   Pure wiring around `runPhase1`. Converts the agent's session-end signal +

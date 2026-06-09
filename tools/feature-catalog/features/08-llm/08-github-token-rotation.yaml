@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "lock-protected GitHub token rotation runs in CLI auth lifecycle"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal auth lifecycle primitive (mid-session GH token rotation, ui_surfaces n-a), no UI affordance"
 purpose: |
   `rotateGitHubToken({current, clientId, clientSecret, httpPort, clockPort,

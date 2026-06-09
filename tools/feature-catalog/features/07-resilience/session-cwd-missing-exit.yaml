@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "resume-path guard wired through src/apps/cli/index.ts main catch, reachable from cli entry"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "resume is a B3-absent web verb (protocol.ts has no resume); the diagnostic is a CLI stderr line that never reaches the browser"
 purpose: |
   HIGH-4 fail-loud guard for the resume path. When `--resume <id>` lands on

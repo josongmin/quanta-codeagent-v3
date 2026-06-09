@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; loadMcpTools + mcp-bridge wired in apps/cli/internal.ts"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "bridged mcp__server__tool calls render via tool.invoked/tool.completed and as mcp_task RunKind in RunColumn (protocol.ts:399)"
 purpose: |
   QUANTA_MCP_CONFIG 노브를 넘어선 실제 capability — McpClient(stdio JSON-RPC 2.0:

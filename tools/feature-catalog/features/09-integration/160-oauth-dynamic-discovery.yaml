@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; discoverOAuthEndpoints reachable in CLI build"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal RFC 8414 endpoint discovery library function; no UI affordance on any surface"
 purpose: |
   `discoverOAuthEndpoints(issuer, fetchPort)` — RFC 8414 §3 well-known

@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "env-gated jsonl disk-persistence backend for the session registry, reachable from CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal persistence backend (env-var swap, jsonl adapter, GC); ui_surfaces n-a, no UI affordance on any surface"
 purpose: |
   Three-ADR persistence band for ADR-0345 session-resource-registry.

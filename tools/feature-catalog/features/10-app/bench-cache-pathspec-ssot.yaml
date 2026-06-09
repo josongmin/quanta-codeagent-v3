@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "cache-pathspec SSOT consumed by bench patch sanitizer and failure-classifier"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal bench pathspec SSOT, no UI affordance on any surface"
 purpose: |
   Single source of truth for build/cache-shaped path exclusions across

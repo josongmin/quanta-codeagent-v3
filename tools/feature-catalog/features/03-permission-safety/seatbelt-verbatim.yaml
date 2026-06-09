@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "macOS SBPL profile compiler/parity lock used by os-sandbox (src/runtime/os-sandbox/seatbelt.ts)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal SBPL profile codec/policy (ui_surfaces n-a); no user-visible affordance on any surface"
 purpose: |
   Codex 강신호 — macOS Seatbelt SBPL profile을 verbatim parity로 잠금

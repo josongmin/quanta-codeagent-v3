@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4-state enum column + migration in CLI consolidate schema; derived 4/4 holds"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal data-model enum + DB column + telemetry key; not rendered on any surface, no UI affordance"
 purpose: |
   Codex memory corpus(R4+R6) production 분포 (partial 75% / success 15% /

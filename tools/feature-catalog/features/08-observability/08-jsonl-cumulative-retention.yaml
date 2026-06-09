@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "applyRetention pass runs against JSONL files in CLI backend."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal file-retention primitive (sliding-window rewrite), no UI affordance on any surface."
 purpose: jsonl trajectory 파일의 cumulative-bytes sliding-window retention + atomic rewrite + 명시적 busy error
 evidence:

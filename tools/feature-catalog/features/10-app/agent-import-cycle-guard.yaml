@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep: test-only governance ratchet, zero production code, no CLI affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "pure test-time Tarjan SCC guard, no runtime feature surface or UI on any surface"
 purpose: |
   `src/agent/*.ts` 의 value-level import cycle 은 의도적으로 허용 (cross-edge 값이

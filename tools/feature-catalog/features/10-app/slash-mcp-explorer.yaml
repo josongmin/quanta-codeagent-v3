@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /mcp explorer, src/apps/cli/mcp-cmd.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "B2 prefill stub: SlashPalette.tsx mcp slug is prefill(mcp), does not execute; no web McpSurfaceInfo supplied; never reaches browser"
 purpose: |
   Read-only MCP runtime explorer. Four subcommands: `/mcp` (list servers + tool

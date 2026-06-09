@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "dispatch-seam guard blocks mutating tools during first N turns with a reminder on CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the block surfaces as a reminder/tool-error returned to the model; only the bridged tool_result error preview reaches the browser, with no dedicated localize-phase affordance"
 purpose: |
   Pure deterministic policy at the dispatch seam: during the first N turns of

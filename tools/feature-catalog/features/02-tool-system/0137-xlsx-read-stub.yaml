@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "xlsx_read/docx_read tools reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "readers run in web-daemon and return parsed cells/paragraph TEXT as the result, shown verbatim in the tool.completed resultPreview in session-hooks.ts:427-438"
 purpose: |
   REAL `xlsx_read` + `docx_read` document readers. jun-04 resolved the ADR-0138

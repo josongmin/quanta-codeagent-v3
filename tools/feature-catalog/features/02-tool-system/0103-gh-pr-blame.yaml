@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "gh_pr_blame tool reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "read-only gh tool runs in web-daemon; invocation+text result render as tool.invoked/tool.completed in session-hooks.ts:420-438"
 purpose: |
   gh CLI tool that maps PR review-thread comments onto file:line anchors —

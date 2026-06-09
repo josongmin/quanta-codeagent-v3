@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 4/5 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal env-configured profile-inheritance resolver (QUANTA_PERMISSION_PROFILES_JSON, startup-only); no UI affordance on any surface"
 purpose: |
   ADR-0438 — 3개 고정 named profile(restricted/default/trusted)을 합성 가능한

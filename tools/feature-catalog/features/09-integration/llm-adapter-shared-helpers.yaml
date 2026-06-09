@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "shared adapter helpers (stream-timeout resolve / tool-input parse / usage spread) run inside the Anthropic+OpenAI adapters on the CLI path"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal LLM-adapter helper library (ui_surfaces n-a, modes n-a) — no user-visible affordance on any surface"
 purpose: |
   The Anthropic and OpenAI adapters previously duplicated ~90% of three

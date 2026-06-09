@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "2/2 evidence files reachable from CLI; jailed ripgrep search tool"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent-callable grep renders as tool.invoked/tool.completed in session-hooks.ts"
 purpose: |
   Read-only content search built on ripgrep. Model-supplied `path` is

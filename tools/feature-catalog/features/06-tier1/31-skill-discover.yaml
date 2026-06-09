@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "discoverSkills walks QUANTA_SKILLS_DIR with checkSkillSize guard during CLI session startup (src/apps/cli/internal.ts)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure discovery loader + size-cap guard, ui_surfaces n-a, no browser affordance"
 purpose: |
   Walk `QUANTA_SKILLS_DIR` (or per-project skills/) and emit `Skill[]` —

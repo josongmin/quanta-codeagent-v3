@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Mantle stream-skeleton adapter present in CLI LLM registry (SDK unpublished)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal cloud transport adapter stub (blocked on unpublished SDK, ui_surfaces n-a), no UI affordance"
 purpose: |
   `MantleProviderAdapter` is a REAL stream skeleton (ADR-0172 superseded the

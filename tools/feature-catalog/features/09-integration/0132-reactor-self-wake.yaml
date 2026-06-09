@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: injectSimulatedTurn + /babysit reachable from CLI under QUANTA_PROACTIVE_REACTOR"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "injects via AgentLoopPort; no SessionCommand resume/wake verb (B3) and ReactorSelfWakeEvent not bridged (B1)"
 purpose: |
   `injectSimulatedTurn` hands a `ProactiveTrigger` to a closed

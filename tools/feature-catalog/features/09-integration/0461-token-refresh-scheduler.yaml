@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; closed-port scheduler reachable in CLI build (deliberately unwired)"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal clock-driven token-refresh port; deliberately held / unwired, no UI affordance on any surface"
 purpose: |
   `TokenRefreshScheduler` closed-port — turns ADR-0160's purely caller-driven

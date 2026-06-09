@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "3/3 evidence files reachable from CLI; web_fetch always-on, web_search provider-gated"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent-callable web_fetch/web_search render as tool.invoked/tool.completed in session-hooks.ts"
 purpose: |
   Two read-only web tools delivered as a single slice. (1) `web_fetch` —

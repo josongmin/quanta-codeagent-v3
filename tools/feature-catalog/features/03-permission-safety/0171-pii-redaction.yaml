@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 5/5 evidence files reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal hexagonal PII scanner port plus pattern/Luhn/composite; no UI affordance on any surface"
 purpose: |
   Hexagonal `src/security/pii-redaction/` slice covering the OTHER half

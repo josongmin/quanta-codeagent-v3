@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "side_agent_spawn/_list/_stop/_findings model-facing tools reachable in CLI loop"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent calls to the side_agent_* tools render as tool cards via the bridged tool_call/tool_result events in session-hooks.ts"
 purpose: |
   Claude `tengu_bg_agent_action`(24 occ, 최고신호) 흡수 — 메인루프 안 막고 모니터링/

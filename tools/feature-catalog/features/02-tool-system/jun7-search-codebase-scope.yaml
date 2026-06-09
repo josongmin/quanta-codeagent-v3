@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "search_codebase tool scope input, runs in CLI loop"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "search_codebase tool invocation + scope arg + ranked-hit result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   Adds an optional `scope` input to the `search_codebase` tool so the model

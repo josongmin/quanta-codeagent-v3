@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: Stage1StorePortV2 agent-side adapters reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal persistence port (4-verb stage1-outputs seam, src/agent/memory/stage1-store/port.ts) — no UI affordance on any surface"
 purpose: |
   Agent-side seam for persisting Phase 1 `stage1_outputs` rows. Closes the

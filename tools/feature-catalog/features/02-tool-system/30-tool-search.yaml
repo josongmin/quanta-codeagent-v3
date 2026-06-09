@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ToolSearch deferred-tool catalog search exposed as a model tool in CLI."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Agent tool — search/select result renders in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), mapped tool_call/tool_result (context-binding.ts:1079-1096)."
 purpose: |
   Deferred-tool catalog search exposed as a Tool. Two modes: (1) `select:<name>

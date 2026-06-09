@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "stall detector port + onChunk wire run in CLI stream path (sink/panel deferred)"
+    cli: "runs in the interactive CLI — 8/12 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal soft-signal detector port; sink seam unbuilt on every surface and the would-be spinner-stalled event is not bridged, ui_surfaces n-a, no UI affordance"
 purpose: |
   Claude Code CLI의 `tengu_spinner_stalled_ui` + `tengu_spinner_stall_cleared` 텔레메트리

@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "8/8 reachable; image_gen tool default-OFF behind QUANTA_IMAGE_GEN"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "image_gen is an ordinary tool call -> renders as tool.invoked/completed card via the bridged tool_call/tool_result events"
 purpose: |
   The FIRST binary-artifact-GENERATION tool in quanta — opens a NEW category.

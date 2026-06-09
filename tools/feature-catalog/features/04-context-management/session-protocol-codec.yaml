@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "surface-agnostic session protocol command/event/snapshot codec in import graph"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal wire-protocol codec/library (versioned envelopes + validation), no user-visible affordance"
 purpose: |
   `src/protocol/session/` — the canonical, surface-agnostic wire protocol that

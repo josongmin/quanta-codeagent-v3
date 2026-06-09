@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "the interactive readline REPL is the default CLI surface (src/apps/cli/repl.ts) with in-REPL slash routing"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the terminal REPL surface does not exist in the browser; the web app is a separate apps/web-frontend surface, not this readline loop"
 purpose: |
   `quanta` (인자 없는) 호출 시 진입하는 readline 기반 인터랙티브 REPL — 연속 대화,

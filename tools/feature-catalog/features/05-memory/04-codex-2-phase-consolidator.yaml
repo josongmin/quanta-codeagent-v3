@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: 2-phase consolidator (runPhase1/runPhase2) reachable from CLI entry"
+    cli: "runs in the interactive CLI — 16/17 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "session-end distill + cross-session synthesizer writes git-tracked markdown server-side; runs in the web-daemon backend but emits no bridged event (consolidator outcome rides an error AgentEvent only on failure — error is bridged but the success/distilled value never reaches the browser); no consolidation UI"
 purpose: |
   Codex memory model의 2-phase distill+consolidator 흡수 — 기존 SOTA++ hybrid recall

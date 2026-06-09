@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Cancellable background summarize + 2-phase install, gated by QUANTA_BG_COMPACTION; wired on the live loop, reachable from CLI entry."
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal context-management optimization (invisible background summarize); no user-visible surface affordance and its gating knob is not web-writable."
 purpose: |
   When the live transcript is APPROACHING (not yet at) the context-window ceiling,

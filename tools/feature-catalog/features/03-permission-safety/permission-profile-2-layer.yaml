@@ -15,7 +15,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "AND-condition filesystem access-check primitive (src/permission/access-check.ts)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal access-decision primitive (configurable static); no user-visible affordance on any surface"
 purpose: |
   **Codex `turn_context.permission_profile.file_system` + `file_system_sandbox_policy`

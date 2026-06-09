@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "resolveResume FSM driven by --resume/--new-session argv; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal startup state-machine primitive; protocol.ts has no resume/fork verb so it has no web affordance to surface"
 purpose: |
   `--resume <token>` / `--new-session` startup state 결정을 surface 무관 슬라이스로

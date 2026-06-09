@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "embedding cache port + adapters in retrieval import graph"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure content-hash embedding cache codec, ui_surfaces n-a, no UI affordance"
 purpose: |
   Idempotent embed cache keyed by `hash(text) + ":" + modelTag` so a

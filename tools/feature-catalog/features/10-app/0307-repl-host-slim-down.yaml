@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Lifts 10 REPL build* adapter factories under src/apps/cli/repl/factories/; reachable from CLI entry, byte-identical behavior."
+    cli: "runs in the interactive CLI — 12/12 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure CLI REPL composition refactor; web frontend has its own component tree and does not consume these CLI factories."
 purpose: |
   Lifts 10 inline `build*` helpers (~200 LOC) out of `src/apps/cli/repl.ts`

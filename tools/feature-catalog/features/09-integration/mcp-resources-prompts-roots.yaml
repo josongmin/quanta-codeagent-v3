@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "typed resources/prompts/roots client methods + inbound roots/list handler reachable from CLI entry MCP load"
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal typed MCP protocol-client method families (capability-gated no-throw McpResult / inbound roots provider) — no user-visible affordance on any surface"
 purpose: |
   H19 (jun-3-misc §3) — TYPED MCP client methods for the `resources/*`,

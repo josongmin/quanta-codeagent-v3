@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bash post-exec hook emits classified VcsEvent onto CLI AgentEvent stream"
+    cli: "runs in the interactive CLI — 11/11 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "emitted as a recovery event (reason vcs_event) which is dropped at context-binding.ts default arm (B1)"
 purpose: |
   H6 (jun-3-misc §3). Closes the raw-stdout blind spot of

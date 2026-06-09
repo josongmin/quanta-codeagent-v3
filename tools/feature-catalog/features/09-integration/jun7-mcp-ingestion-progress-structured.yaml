@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/mcp/progress.ts + mcp-bridge relay notifications/progress as ToolEvent.progress; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user value (live MCP progress ticks) rides tool_progress which is dropped at context-binding.ts:1104 default arm; only the 6 bridged events reach the browser"
 purpose: |
   Completes the MCP `tools/call` ingestion boundary on top of the landed

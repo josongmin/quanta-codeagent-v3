@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Translator feeding the /mcp slash command surface in src/apps/cli/repl/mcp-surface-wire.ts, reachable from CLI entry."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Feeds the CLI /mcp slash command only; SlashPalette server-routed commands are prefill stubs (B2) and there is no web handler nor MCP-surface render in apps/web-frontend, so it never reaches the browser."
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because

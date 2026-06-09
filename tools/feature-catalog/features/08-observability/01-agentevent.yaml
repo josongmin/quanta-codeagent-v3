@@ -13,12 +13,12 @@ owners: ['@songmin']
 labels: [surface:core, observability-primitive]
 depends_on: [work-metrics]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "AgentEvent discriminated-union type definition in src/stream/types.ts; pure internal protocol, no UI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal event-stream type/protocol primitive, no user-visible affordance on any surface"
 purpose: |
   `AgentEvent` discriminated union — the surface-facing event stream the agent loop

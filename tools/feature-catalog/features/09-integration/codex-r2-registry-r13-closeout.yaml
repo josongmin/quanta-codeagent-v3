@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/session-registry evict/help slash + sweep telemetry wired into CLI ops surface"
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "operator value is the /session-registry CLI slash; web SlashPalette routes are prefill stubs (B2), telemetry rides no bridged event"
 purpose: |
   6-ADR R13 closeout — every gap from R12's follow-up list landed TDD-strict

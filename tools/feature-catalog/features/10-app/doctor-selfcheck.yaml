@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/doctor slash command runs in CLI REPL via APP_SLASH_COMMANDS registry (src/apps/cli/doctor)"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only slash command; SlashPalette server-routed commands are prefill stubs (B2) and there is no POST/config-backed web handler, so /doctor never reaches the browser"
 purpose: |
   `/doctor` is a read-only startup self-check that aggregates the scattered

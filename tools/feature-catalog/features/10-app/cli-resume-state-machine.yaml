@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/resume.ts parses --resume token; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "resume verb absent from protocol.ts SessionCommand (B3); --resume is a CLI-only flag with no browser path"
 purpose: |
   `--resume <token>` 해석의 pure state machine — 실구현은 surface-agnostic Layer-2

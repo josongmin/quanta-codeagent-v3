@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "probe wired at src/apps/cli/repl/env-probe-wire.ts, reachable from cli entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "StartupWarning[] folded into agent context but no AgentEvent bridge to browser; warnings never reach the web frontend"
 purpose: |
   Faithful absorption of Cursor's CloudAgentStartupWarning /

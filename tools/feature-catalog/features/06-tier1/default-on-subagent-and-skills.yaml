@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "parseEnvFlag default-ON for subagent + skills in apps/cli/internal.ts; reachable from CLI."
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "web-daemon runtime-factory.ts:184-217 builds subagent + skills config (default-ON) for web/tauri; subagent runs render in web-only RunColumn (ObservabilityPane), skills inject into prompt."
 purpose: |
   RFC §1.2 default-OFF byte-identical 원칙의 **의도적 예외**. Codex/Claude

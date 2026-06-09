@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "landlock typed-degrade passthrough on the os-sandbox port; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal os-sandbox primitive (ui_surfaces n-a, phase-1 typed-degrade) — no UI affordance on any surface"
 purpose: |
   Linux Landlock + seccomp implementation, deliberately phase-1. A

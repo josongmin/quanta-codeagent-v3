@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "classifyLLMError marker/kind taxonomy driving retry/skip/PTL routing; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal error-classifier primitive, no user-visible affordance on any surface"
 purpose: |
   `classifyLLMError`는 두 입력 — (1) 메시지 substring 매칭(RETRYABLE_MARKERS:

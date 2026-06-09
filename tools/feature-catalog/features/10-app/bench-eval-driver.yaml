@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "single-instance bench eval driver (sandbox+agent+verdict+diff) run by bench harness in headless/batch"
+    cli: "runs in the interactive CLI — 1/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal bench per-instance orchestration, no browser affordance"
 purpose: |
   Top-level orchestration for a SINGLE SWE-bench-style instance. The ONLY

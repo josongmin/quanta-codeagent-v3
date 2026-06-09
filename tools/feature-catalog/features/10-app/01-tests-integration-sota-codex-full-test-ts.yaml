@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; integration test pinning default-OFF byte-identical invariant"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure integration-test invariant, no UI affordance"
 purpose: default-OFF byte-identical 불변식 — 전 9 phase opt-in 노브 미설정 시 legacy 시스템 프롬프트 + reminder 블록과 byte-동일. legacy unit tests 미변경(보존 증명).
 evidence:

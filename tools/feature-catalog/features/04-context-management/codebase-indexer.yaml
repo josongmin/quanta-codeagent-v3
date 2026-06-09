@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Workspace scanner/chunker/delta-tracker populating a SemanticIndex, default-OFF (QUANTA_INDEX); reachable from CLI entry."
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal retrieval primitive (backend scanner); no user-visible surface affordance."
 purpose: |
   Populates a SearchPipeline's underlying SemanticIndex / lexical store

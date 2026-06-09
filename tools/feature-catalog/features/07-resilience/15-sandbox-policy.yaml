@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
 depends_on: [landlock-degraded-passthrough, os-sandbox-port-router, os-sandbox-wire, seatbelt-profile-compiler, landlock-phase2]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure declarative confinement policy enforced invisibly around shell exec"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal per-command confinement policy, no rendered affordance"
 purpose: |
   Single-command 실행에 옵션 필드 5개로 confinement를 선언: `cwdJail`(작업

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "assemblePipeline(env) + search_codebase tool registered into base registry when wired, reachable from CLI"
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "user-visible value is the model-facing search_codebase tool; its invocation surfaces via tool_call/tool_result mapped to tool.invoked/tool.completed (session-hooks.ts), fully rendered in the web stream"
 purpose: |
   `assemblePipeline(env)` reads `QUANTA_PIPELINE` (closed 6-arm enum:

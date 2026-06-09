@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; buildSeeds record factory"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal seed/temperature diversifier (buildSeeds); ui_surfaces n-a, no browser affordance"
 purpose: |
   `buildSeeds(N, base, modelCandidates?)` — builds N `BranchSeed` records

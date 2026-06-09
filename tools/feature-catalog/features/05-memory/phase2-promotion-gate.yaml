@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure selectForPhase2Promotion gate in CLI consolidate pipeline; derived 3/3 holds"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure deterministic selection function (filter/score/sort/cap); no UI affordance, ui_surfaces is a CLI-side pipeline decision"
 purpose: |
   Codex production stat 10% promotion rate를 selectForPhase2Promotion(entries,

@@ -25,7 +25,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Threads --playbook-trigger boolean through 5 CLI layers (apps/agent + apps/cli/repl); reachable from CLI."
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only flag echo; the flag is not exposed via any web command/POST /config (B2/B3), never reaches the browser."
 purpose: |
   Closes the ADR-0293 last-mile gap. ADR-0293 added the `--playbook-trigger`

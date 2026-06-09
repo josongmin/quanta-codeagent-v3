@@ -16,12 +16,12 @@ depends_on: [recorder-fail-open-permission-verdict]
 config_refs:
   env: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure telemetry fail-open invariant around patch apply, no user affordance"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal observer/OTel swallow invariant, no UI affordance"
 purpose: |
   Negative invariant: a throw from EITHER the in-process user observer OR

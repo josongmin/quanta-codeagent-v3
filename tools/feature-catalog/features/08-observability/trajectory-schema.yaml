@@ -14,12 +14,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [bun-run-dev-start, cli-single-binary-build, run-context-correlation]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure schema SSOT (type union + envelope + redaction id) in src/shared/trajectory.ts; a schema declaration, not a CLI affordance."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal schema/SSOT primitive; no UI affordance on any surface."
 purpose: |
   Single source of truth for the append-only JSONL trajectory (RFC-0002 §5.2).

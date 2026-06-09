@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "--permission-profile flag / QUANTA_PERMISSION_PROFILE env resolved at CLI boot (src/apps/agent/cli-args.ts)"
+    cli: "runs in the interactive CLI — 5/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "profile selection mechanism is a CLI flag/env; no web verb; QUANTA_PERMISSION_PROFILE only appears as a redacted read-only KnobsPanel row, enforcement silent"
 purpose: |
   The 2026-06-01 gap audit found we had DEFAULT_PERMISSION_PROFILE (a single struct)

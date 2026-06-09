@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "2/2 reachable; env-scrubbed spawn boundary for every git call"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal spawn-boundary primitive (env allowlist + deterministic overrides + timeout), no user-visible affordance"
 purpose: |
   Single env-scrubbed spawn boundary for every `git` invocation in the slice.

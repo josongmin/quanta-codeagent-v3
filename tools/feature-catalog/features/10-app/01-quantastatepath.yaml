@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; resume/state via --resume and --state flags"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "resume lifecycle needs a B3-absent SessionCommand verb (protocol.ts has only input.append/turn.run/turn.cancel/approval.respond) so it never reaches the browser"
 purpose: '/--state, /--resume. CLI 리주메 lifecycle e2e(, 7 tests): 실 runAgent → saveSession → loadSession → 새 runAgent 라운드트립으로 (a) 사전 assistant 텍스트가 두 번째 StreamInput.messages에 도달, (b) tool_use/tool_result 쌍이 boundary 보존, (c) 손상 파일 → loadSession null → fresh start no-throw, (d) 다단계 A→save→B→save→C 누적 transcript, (e) sessionId boundary 안정성, (f) StreamPort per-run 격리(공유 누수 없음).'
 evidence:

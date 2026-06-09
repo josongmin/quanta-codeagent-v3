@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "renderDashboardText printed to CLI stderr at turn end when QUANTA_METRICS is active (repl.ts)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the cost/cache dashboard (byTool, p50/p95, stopReasons, shell rollup) has a CLI stderr render but no web mount; its render is CLI-only and does not reach the browser"
 purpose: |
   MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·

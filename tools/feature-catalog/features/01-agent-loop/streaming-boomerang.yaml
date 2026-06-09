@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/4 reachable, ui_surfaces n-a, default-OFF AsyncIterable subagent-chunk port, loop 0 touch; keep derived missing"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal AsyncIterable streaming primitive; subagent progress chunks ride tool_progress/progress_update class events dropped at context-binding.ts default arm, plus the port itself is unwired"
 purpose: |
   Roo Boomerang/Orchestrator의 streaming 분기 흡수 (ADR-0218 result-only sibling).

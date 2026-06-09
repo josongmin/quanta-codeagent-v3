@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "IDE-context provider seam reachable from CLI entry; FileSystemIdeContextProvider reads .quanta/ide-context.json"
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "host-to-agent IDE-state injection seam; the web frontend is not an IDE host and provides no ide-context source; backend-only, no browser affordance"
 purpose: |
   IDE host (VS Code extension, MCP IDE bridge 등) 가 turn-by-turn 에디터 상태를

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "3/3 reachable; underpins defineTool supportsDeferredResults flag"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure in-memory type-surface registry, deliberately NO scheduler wired into the loop, no UI affordance on any surface"
 purpose: |
   Typed seam for tools that need to return a provisional placeholder plus a

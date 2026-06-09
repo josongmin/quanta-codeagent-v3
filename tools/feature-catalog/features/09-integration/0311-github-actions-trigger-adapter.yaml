@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: GITHUB_EVENT_PATH event source not wired into interactive CLI"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "daemon/ci-bot GH event normalizer; no browser affordance and no web verb"
 purpose: |
   Tier 0 GitHub Actions adapter — reads `GITHUB_EVENT_PATH` JSON once per

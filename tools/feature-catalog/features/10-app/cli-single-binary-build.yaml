@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bun build --compile produces dist/agent single binary via package.json build script"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure build/distribution tooling, no user-visible runtime affordance on any surface"
 purpose: |
   `bun run build` produces a single self-contained executable at

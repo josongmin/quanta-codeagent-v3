@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "EnqueueResult plus plan_queue.enqueue.collapsed.total counter wired into instrumentPlanQueue (observability/metrics)"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal observability counter, not an AgentEvent and no browser render"
 purpose: |
   Closes the ADR-0161 follow-up gap: PlanQueueStore previously returned

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "REPL composer wires 5 ports onto slashCtx, src/apps/cli/repl.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure CLI REPL (runRepl) composition wiring; no web-daemon equivalent threads these ports to the browser"
 purpose: |
   Closes the Tier-2 SlashContext deferred-wire gap by threading 5 of the 6 R10

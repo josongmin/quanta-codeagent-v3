@@ -15,12 +15,12 @@ owners: ['@songmin']
 labels: [surface:core]
 depends_on: [runner-assemble-builders, assemble-config, fallback-kinds-policy, llm-factory, model-swap-retry]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "dedicated summarizer-model config plumbing, pure internal, no CLI affordance (ui_surfaces n-a)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal compaction config, no UI affordance"
 purpose: compaction.summarizerLlm 양 사이트 ?? config.llm /_PROVIDER
 evidence:

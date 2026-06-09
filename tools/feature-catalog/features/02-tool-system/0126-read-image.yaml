@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "read_image tool + composer helper reachable from CLI entry"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "tool.invoked/tool.completed render the call but the ToolResult.images payload is injected into the next provider request and is never visually rendered in the browser (no tool-media render; only user-input turn.started.images render)"
 purpose: |
   read_image tool that loads a local image, verifies the format via a magic-

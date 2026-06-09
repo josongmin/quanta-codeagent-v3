@@ -15,7 +15,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src/apps/cli/ask-user-wire.ts binds AskUserPort via the readline/TTY prompter; tool present interactively"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "no web AskUserPort binding — askUserPortFromPrompter is wired only under src/apps/cli/ and tool/index.ts; web-daemon runtime-factory.ts base has no askUser port, so the ask_user tool is absent on web (no-prompter ⇒ no-tool); approval.respond wire carries no elicitation kind"
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude"]

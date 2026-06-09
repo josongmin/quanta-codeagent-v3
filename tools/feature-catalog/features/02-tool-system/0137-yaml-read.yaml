@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "yaml_read tool reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "reader runs in web-daemon and returns JSON-stringified parsed text as the result, shown in the tool.completed resultPreview in session-hooks.ts:427-438"
 purpose: |
   First-class YAML reader closing the de-facto config-file gap left by

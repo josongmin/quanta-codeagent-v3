@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PatchObserver emits op/tier scalars to OTel in CLI apply_patch"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure OTel attribute emit at patch apply site, no UI affordance on any surface"
 purpose: |
   `quanta.patch.op` (`add | update | delete | move`) + `quanta.patch.

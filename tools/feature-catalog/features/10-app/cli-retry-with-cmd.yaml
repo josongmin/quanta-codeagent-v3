@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/retry-with re-streams the prior turn against an alternate model with transcript surgery in the CLI"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "needs a re-stream/transcript-rewrite session verb absent from protocol.ts SessionCommand (B3); no web handler"
 purpose: |
   CLI surface that wires `resolveRetryModel` + `streamWithModel`

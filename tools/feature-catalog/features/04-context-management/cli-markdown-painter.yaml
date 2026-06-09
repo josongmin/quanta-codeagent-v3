@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Line-buffer FSM inline-ANSI painter over the CLI assistant stream (src/apps/cli/markdown-painter.ts); runs in CLI stdout adapter."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-terminal-only ANSI painter; the web frontend renders assistant text via its own session-hooks stream rendering and never runs the ANSI painter, so the affordance does not reach the browser."
 purpose: |
   assistant 텍스트 스트림(델타 청크)을 라인 단위 유한상태머신으로 흘려

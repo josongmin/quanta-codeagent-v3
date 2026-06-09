@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "SlashContext R10 ports interface in src/apps/cli/slash-commands.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only SlashContext surface seam (cost/plan/workingState/history/branchSearch); the web frontend supplies none of these ports, so every R10 panel they feed is absent in browser"
 purpose: |
   R10 extends the `SlashContext` interface in `src/apps/cli/slash-commands.ts`

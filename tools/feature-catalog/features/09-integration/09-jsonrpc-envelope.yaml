@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [jsonrpc-channel-triple, jsonrpc-codec, jsonrpc-request-id-correlation, assert-never-exhaustiveness, byte-stable-string-comparator]
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure @/shared/jsonrpc protocol/codec module; no user CLI affordance"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal JSON-RPC envelope/codec library, no UI affordance on any surface"
 purpose: 'JSON-RPC 2.0 strict envelope (`jsonrpc:"2.0"` literal, id ∈ string|number|null, response = result XOR error) + Codex-style channel triple (`{name}-request/-response/-timeout`) + 명시적 timeout (code -32000 + data.kind="timeout") + deterministic monotonic RequestId generator. standalone `@/shared/jsonrpc` 모듈, mcp/lsp 통합은 후속 ADR로 deferred.'
 evidence:

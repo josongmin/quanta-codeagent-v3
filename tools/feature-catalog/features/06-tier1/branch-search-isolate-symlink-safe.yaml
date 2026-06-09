@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; Isolator port impls for branch search"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal tmpdir/worktree isolators with symlink-safe cleanup; no browser UI affordance"
 purpose: |
   Two `Isolator` port implementations for the speculative branch search.

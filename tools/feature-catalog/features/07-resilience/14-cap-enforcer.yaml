@@ -15,12 +15,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [dispatch-dedup]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "internal anti-thrash reminder injected into model context, not user-visible"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal NextAction enforcement reminder to the LLM, no UI affordance"
 purpose: |
   Tool 호출이 emit하는 `NextAction`(=suggestion to grow `max_depth` /

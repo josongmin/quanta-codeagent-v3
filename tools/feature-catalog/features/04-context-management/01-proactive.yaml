@@ -15,12 +15,12 @@ depends_on: [plan-mode, response-in-progress, secret-redaction-content-plane, du
 config_refs:
   env: [QUANTA_COMPACT_TOKENS, QUANTA_COMPACT_MODEL, QUANTA_COMPACT_PROVIDER]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "proactive/reactive compaction trigger policy, pure internal control, no direct CLI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal compaction trigger policy, no UI affordance"
 purpose: proactive(임계) + reactive(PTL) + orphan-safe 경계
 evidence:

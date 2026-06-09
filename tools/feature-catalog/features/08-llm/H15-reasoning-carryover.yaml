@@ -18,12 +18,12 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core, h15, default-off, provider:openai-responses, zdr]
 depends_on: [llm-stream-timeout]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure OpenAI-Responses provider wire (capture/persist/re-emit encrypted_content); ui_surfaces n-a, no CLI UI affordance"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal provider-wire mechanism, no user-visible affordance on any surface"
 purpose: |
   Codex `encrypted_content` carry-over 흡수 (codex-rs 0.135 `ResponseItem` +

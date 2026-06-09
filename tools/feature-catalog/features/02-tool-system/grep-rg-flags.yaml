@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "grep tool flag surface, runs in CLI loop"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "grep tool invocation + args + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   grep 도구에 ripgrep flag surface 추가 — context lines (-A/-B/-C),

@@ -15,12 +15,12 @@ owners: ["@songmin"]
 labels: ["adr-0191", "tier:1", "tooling", "docs"]
 depends_on: []
 surface_integration:
-  cli: full
+  cli: na
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Caller-invoked tooling generator (bun tools/arch-gen/main.ts) producing ARCHITECTURE.generated.md; runs as a CLI handshake."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Build-time docs generator, no runtime user-facing UI affordance on any surface."
 purpose: |
   Plane-clean mini-generator that walks `docs/decisions/*.md` (ADR

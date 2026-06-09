@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "agent-tool model/role/effort override resolved by the CLI subagent runner"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal subagent spawn config wiring via the agent tool input schema; no browser affordance and no SessionCommand verb to set it (B3)"
 purpose: |
   A parent can assign a specific model and/or dispatch role and/or effort tier to

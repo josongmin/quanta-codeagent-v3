@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI startup detect/import flow via emitConfigMigrationNotice (QUANTA_MIGRATE_CONFIG); 8/8 evidence reachable from CLI entry import graph."
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Startup config-migration notice is a CLI stderr seam only; no web affordance, @/migration not reachable from web-daemon; never reaches the browser."
 purpose: |
   Startup detect-and-import of competitor (Claude Code / Cursor) CONFIG

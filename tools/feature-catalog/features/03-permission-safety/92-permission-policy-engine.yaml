@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "HARD_DENY resolver engine (evaluate/inferToolTier) composed by admissibility gate reachable from CLI; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure policy resolver engine, no user-visible affordance on any surface; description-only surfacing is an internal invariant not a UI"
 purpose: |
   The RESOLVER ENGINE half of the permission policy (SRP split with the data

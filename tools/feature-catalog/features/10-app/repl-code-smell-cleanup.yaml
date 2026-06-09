@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "STATUS_FLASH config, banner strings, silent-catch telemetry all in src/apps/cli/repl.ts visible in the CLI REPL surface."
+    cli: "runs in the interactive CLI — 1/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure CLI repl.ts internal cleanup (flash durations, banners, sandbox-mode cast); these UX flashes/banners are terminal-only and have no apps/web-frontend equivalent, so nothing reaches the browser."
 purpose: |
   Closes 7 audit findings on `src/apps/cli/repl.ts` without splitting the

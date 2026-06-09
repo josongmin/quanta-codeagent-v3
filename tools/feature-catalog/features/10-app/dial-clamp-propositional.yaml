@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure clampDials function applied to budget dials in the run-mode pipeline"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure propositional dial-clamping function, no user-visible affordance on any surface"
 purpose: |
   Pure function `clampDials(dials, caps, onClamp?)` — for each of 16 dial

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure cosine/dot/serde used by adapters and ranking on CLI; derived 5/5 holds"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure vector math + Float32 serde primitive; no scoring or UI, no user-visible affordance"
 purpose: |
   Pure vector math + (de)serialization for semantic recall. Zero deps:

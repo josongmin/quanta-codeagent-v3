@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/7 reachable, ui_surfaces n-a, default-OFF fs.watch trigger primitive with no host wired; keep derived missing"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal source-comment dispatch primitive (fs.watch plus debounce plus scanner), no UI affordance on any surface"
 purpose: |
   The smallest reusable primitive for Aider-style `// fix this AI!` source-comment

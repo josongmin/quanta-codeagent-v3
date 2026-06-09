@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ui-helpers ANSI/box string primitives reachable from CLI entry"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal ANSI/box-drawing string primitive library, no I/O; React/DOM frontend does not consume ANSI helpers (no @/ui import in apps/web-frontend)"
 purpose: |
   `src/ui/ui-helpers.ts` (구 `auth-ui.ts` 에서 이관 + 슬라이스화) — 순수 string/ANSI/

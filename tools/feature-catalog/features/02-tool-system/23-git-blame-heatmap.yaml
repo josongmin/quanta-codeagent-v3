@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "git_blame_heatmap read-only tool registered in gitTools(), runs in CLI."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Agent tool — per-author ownership result renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   한 파일 또는 라인 범위의 per-author 라인 소유권 분포를 반환하는 git tool. 누가

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "DIP callback the CLI surface owns to log minted session id, reachable from CLI repl"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure DIP logging seam inside resume FSM, ui_surfaces n-a, no user-visible affordance"
 purpose: |
   Surface-supplied hook fired ONCE when a fresh session id is minted via

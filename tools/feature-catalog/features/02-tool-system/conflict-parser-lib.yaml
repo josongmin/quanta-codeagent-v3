@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "1/2 reachable as a default-OFF library; nobody in the loop imports it today"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure typed merge-conflict parser library (string in, typed result out), no tool/UI affordance on any surface"
 purpose: |
   Pure typed-and-tested git merge-conflict parser shared by skills and tools

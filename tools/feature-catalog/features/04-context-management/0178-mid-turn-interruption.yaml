@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI raw-mode mid-turn capture wire over PlanQueueStore; reachable from CLI entry."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Captured lines ride externalPromptQueue/response_queued; no protocol.ts queue/turn verb (B3) and no web handler reach the browser."
 purpose: |
   Capture facade that maps the CLI "user submitted while streaming"

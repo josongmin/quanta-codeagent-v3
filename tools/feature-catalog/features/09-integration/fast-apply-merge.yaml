@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "model-based fast-apply MERGE rung in the edit ladder (src/tool/edit/index.ts), gated by QUANTA_FAST_APPLY_MERGE"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal edit-apply recovery rung; merge flows through the normal gated commit + ToolDiffSink, no distinct browser affordance, not a UI feature"
 purpose: |
   A NEW closed `FastApplyPort` (merge direction) sibling to the existing V4A

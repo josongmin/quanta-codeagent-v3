@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4 mcp_* resource/prompt model-facing tools reachable in CLI loop"
+    cli: "runs in the interactive CLI — 13/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent calls to the 4 mcp resource/prompt tools render as tool cards via bridged tool_call/tool_result events"
 purpose: |
   H19(LANDED)이 준 `McpClient`의 typed no-throw `listResources`/`readResource`/

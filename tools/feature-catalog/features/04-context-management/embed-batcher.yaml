@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "adr:0264", "adr:0254"]
 depends_on: []
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure retrieval batcher primitive, wire-shape only, ui_surfaces n-a, no production caller."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure internal coalesce/dedupe primitive, no UI affordance on any surface."
 purpose: |
   Wrap any `embed(texts): Promise<vectors>` underlying with a closed-port

@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-7-scope-tiering, skill-registry-precedence, skill-audit-log, quantaskillsdir, skill-md-frontmatter]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure decideInstall policy/decision function; ui_surfaces none + deliberate_hold says install CLI (quanta skill install) is V2 — no CLI command wires it"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure admin-policy decision primitive, no user-visible affordance on any surface; never reaches browser"
 purpose: |
   `<orgConfigDir>/org-policy.json` strict Zod schema (requiredSkills/bannedSkills/auditRequired/org).

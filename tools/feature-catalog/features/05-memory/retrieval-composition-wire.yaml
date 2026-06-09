@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "buildRetrievalStackCore + bridges + QUANTA_RETRIEVAL_HYBRID env knob wired at CLI/agent entry; derived 6/7 holds"
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure composition-root wire (env-gated stack assembly + memory/localize bridges); affects recall ranking under the hood, no user-visible affordance on any surface"
 purpose: |
   Composition-root wire for the ADR-0159 retrieval stack. The 5 retrieval

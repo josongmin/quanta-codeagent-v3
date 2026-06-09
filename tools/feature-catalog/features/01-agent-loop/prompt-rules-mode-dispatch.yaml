@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full; pure-text rule pack registry feeds system prompt in CLI"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure-text prompt-rules pack registry (renderPackByMode), ui_surfaces n-a; internal prompt assembly with no user-visible affordance"
 purpose: |
   6 verbatim CORE_RULES (R-ENV / R-STOP-ENV / R-SEARCH-FIRST / R-READ-FAILURE

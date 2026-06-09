@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4 model-callable plan tools + set_mode op + plan state machine wired into CLI loop/dispatch/stream"
+    cli: "runs in the interactive CLI — 21/29 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "plan_created/_updated/_snapshot/_user_input/mode_changed all drop at context-binding.ts:1104 default arm; DiffView unmounted; no plan/todo card"
 purpose: |
   ROI-무관 SOTA++ 흡수 — Cursor maximalist 도구셋(create_plan/update_todos) + Codex 이벤트

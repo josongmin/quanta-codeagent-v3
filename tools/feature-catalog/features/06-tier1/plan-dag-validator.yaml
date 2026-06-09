@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; pure DAG validation functions for plan mutations"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal validator (validateDag/findCycle/topologicalSort); no I/O, no UI affordance"
 purpose: |
   Three pure exports operating on a `Readonly<Record<string, TodoItem>>`

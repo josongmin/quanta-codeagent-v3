@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_TEAM_DAG knob-gated spawn_batch dependency ordering wired into run-batch.ts, CLI-observable"
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "dependency-ordering is backend orchestration over spawn_batch; the DAG state rides no bridged event and has no web card (RunColumn shows runs but not dependency edges), dropped at context-binding.ts default arm"
 purpose: |
   Capability A of multi-agent coordination (plan docs/plans/

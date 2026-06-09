@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "emits cap/jail/budget decision events to debug-tracer/JSONL recorder under QUANTA_DEBUG in CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "rides the decision AgentEvent which is dropped at context-binding.ts:1104 default arm (not one of the 6 bridged events)"
 purpose: |
   ADR-0267 Phase 2는 `runAdmissibilityGate` *내부* 3개 게이트 (permission /

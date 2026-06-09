@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Real CLI affordance via /session-registry cleanup --transcripts (src/apps/cli/session-registry-cmd.ts)."
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only slash command; no web-daemon handler and no SessionCommand verb (B2/B3). SlashPalette server-routed entries are prefill stubs that do not execute."
 purpose: |
   Wires the existing `applyRetention` cumulative-bytes sliding window

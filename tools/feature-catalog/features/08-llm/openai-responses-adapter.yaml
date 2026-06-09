@@ -18,12 +18,12 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core, provider:openai-responses]
 depends_on: [reasoning-carryover, structured-output-mode]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure LLMPort adapter + continuation/resume store; ui_surfaces n-a, no CLI UI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal LLMPort adapter and continuation store, no user-visible affordance on any surface"
 purpose: |
   `OpenAIResponsesAdapter` (`src/llm/adapters/openai-responses.ts`) — the

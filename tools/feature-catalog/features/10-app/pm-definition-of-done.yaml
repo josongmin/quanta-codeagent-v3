@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Definition-of-Done checker meta-tool (tools/pm); pure judge + CI reporting, no interactive surface."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Pure process/CI tooling, no UI affordance on any surface."
 purpose: |
   tools/pm is the EXECUTABLE Definition of Done — the process home that makes one

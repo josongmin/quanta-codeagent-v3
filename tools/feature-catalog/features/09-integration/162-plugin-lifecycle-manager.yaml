@@ -15,12 +15,12 @@ depends_on: [plugin-isolated-spawner, plugin-host-wrapper, plugin-dxt-loader, as
 config_refs:
   env: []
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal plugin state-machine (auto-restart + heartbeat); surface:ipc, no UI affordance"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal lifecycle/liveness primitive, no browser affordance"
 purpose: |
   State machine `idle → starting → running ↔ restarting → dead/stopped`.

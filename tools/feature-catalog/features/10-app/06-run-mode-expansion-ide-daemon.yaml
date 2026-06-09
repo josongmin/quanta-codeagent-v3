@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ide and daemon run modes selectable via agent CLI args and mode-presets runners"
+    cli: "runs in the interactive CLI — 3/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "run modes are external-host (VS Code/cron) and CLI selections; the browser surface does not expose a mode picker and these modes do not render in-browser"
 purpose: |
   RFC may-22 4-mode(interactive/headless/batch/ci-bot) × 12-lever ModePolicy

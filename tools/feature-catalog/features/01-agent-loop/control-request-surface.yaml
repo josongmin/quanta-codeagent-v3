@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived 0/3 reachable, not wired into CLI; pure planControlRequest mapping (set_model/permission_mode/thinking/get_context_usage), unwired on both surfaces"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "unwired control-request planner; rides no web command verb (protocol.ts SessionCommand B3 has no such verb) and is bridged by no event, does not reach the browser"
 purpose: |
   A single closed ControlRequest union (set_model / set_permission_mode /

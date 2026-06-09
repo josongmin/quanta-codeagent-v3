@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "6/6 evidence reachable from CLI entry; read-only git tool"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "git_moved_code is an ordinary tool call -> renders as tool.invoked/completed card via the bridged tool_call/tool_result events"
 purpose: |
   Surfaces the pure moved-code classifier (ADR-0109 — normalize + similarity

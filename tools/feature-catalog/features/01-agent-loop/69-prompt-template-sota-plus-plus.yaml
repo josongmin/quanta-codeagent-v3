@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "4 prompt strengthening sections feed the CLI loop's system prompt"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal prompt-only intervention (prompt.ts / prompt-sections.ts); prompt content is not a UI affordance"
 purpose: |
   Codex base prompt (L26/L213-214/L217/L471) + Claude Code 1.7196.3 systemPromptSectionCache

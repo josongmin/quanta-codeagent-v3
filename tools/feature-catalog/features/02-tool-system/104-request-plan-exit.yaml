@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "1/1 evidence file reachable from CLI; dispatch routes via ToolContext.requestPlanExit port"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "plan-exit 3-way outcome surfaces through planExitPort to the CLI/IDE decider; /plan in SlashPalette.tsx is a prefill stub (B2) and no plan-exit handler exists in apps/web-frontend"
 purpose: |
   Model-driven exit from plan mode mirroring Claude Code's `ExitPlanMode`.

@@ -16,12 +16,12 @@ depends_on: [agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl
 config_refs:
   env: ["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure deterministic dedup state machine, no I/O; synthetic observation short-circuit, no CLI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal dedup state machine, no user-visible UI affordance on any surface"
 purpose: |
   Bench Type F("Verify-Loop Stuck on Env") 구조적 fix — 동일 (tool name + canonical

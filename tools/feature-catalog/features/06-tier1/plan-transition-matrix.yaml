@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; TodoStatus transition predicate + frozen table"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal frozen lookup table + isValidTransition predicate; no UI affordance"
 purpose: |
   Closed `TodoStatus` transition matrix as a frozen lookup table + pure

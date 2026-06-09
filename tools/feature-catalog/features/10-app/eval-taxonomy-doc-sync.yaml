@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "eval taxonomy code->markdown renderer; derived 0/1 reachable from interactive CLI entry"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "pure internal doc-render generator primitive, no UI affordance on any surface"
 purpose: |
   `TAXONOMY` 배열을 `docs/analysis/may-21-coding-agent-query-usecase.md` §1

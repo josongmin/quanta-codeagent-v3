@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; prober reachable in CLI build"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal DNS/HEAD availability probe port with LRU cache; no UI affordance on any surface"
 purpose: |
   `createAvailabilityProber({fetchPort, dnsPort, clockPort, lruSize?,

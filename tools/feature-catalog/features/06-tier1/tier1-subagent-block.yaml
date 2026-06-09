@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "buildSubagentBlock wires agent/task_output/task_stop trio plus cleanup; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the agent tool invocation renders as a generic tool.invoked/tool.completed card, but live subagent run tracking in the ObservabilityPane RunColumn rides B1-dropped subagent events (default arm context-binding.ts:1104)"
 purpose: |
   Per-subsystem Tier-1 builder that materializes the SUBAGENT block — the

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "LSP default-adapter real-wire (src/lsp/adapters/*) reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure adapter wire layer (LspClient delegation replacing not-implemented stubs); the visible affordance is the LSP tool calls owned by 0141, this adapter impl has no UI of its own."
 purpose: |
   Promotion-path closer for ADR-0141: replaces the three `not-implemented`

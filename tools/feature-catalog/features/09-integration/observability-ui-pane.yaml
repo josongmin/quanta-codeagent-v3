@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Web/tauri-only pane (ObservabilityPane); 0/5 evidence reachable from CLI entry — no CLI rendering of Running/Waiting/Completed/Objective/Approvals."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "ObservabilityPane mounted App.tsx:631 with useObservabilityState hook; RunColumn/ObjectiveCard/ApprovalsList are the web-only affordances fed by observability.snapshot/delta WS messages."
 purpose: |
   Render the three Wave-1/2 long-running-work state machines (RunLedger /

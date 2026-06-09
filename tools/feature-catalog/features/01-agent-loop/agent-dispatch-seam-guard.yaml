@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [plan-mode-dispatch-block]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure dispatch-seam mutating-tool guard helper (ui_surfaces n-a); no CLI affordance"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal guard predicate, no user-visible UI affordance on any surface"
 purpose: |
   ADR-0036 (Cluster D Feature 1) — `ToolRegistry.run()` 직전에 호출되는

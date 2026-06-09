@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "thread-level permission override consulted in admissibility-gate (src/agent/admissibility-gate.ts)"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal permission precedence primitive (ui_surfaces n-a), resolved silently; no UI affordance on any surface"
 purpose: |
   **Thread-level override** — 특정 sessionId(스레드)에 대해 sandboxPolicy +

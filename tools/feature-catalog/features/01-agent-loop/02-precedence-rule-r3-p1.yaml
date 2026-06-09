@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "closeout-guard precedence policy runs in the CLI agent loop"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal closeout-rule precedence policy (closeout-guard.ts); no rendered web affordance"
 purpose: 'Precedence rule (R3-P1): explicit fourRule:true > code-mod auto-detect > legacy 1-liner — explicit-over-implicit 원칙. 이전엔 code-mod 자동감지가 explicit opt-in을 가렸음(콜러 의도 무시).'
 evidence:

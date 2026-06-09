@@ -15,12 +15,12 @@ owners: ['@songmin']
 labels: [surface:core]
 depends_on: [plan-mode, response-in-progress, runner-assemble-builders, effort-5-tier, fallback-kinds-policy]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "compaction thrash circuit-breaker policy, pure internal control, no direct CLI affordance"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal compaction circuit-breaker policy, no UI affordance"
 purpose: CompactionBreaker 4-사이트, thrash abort [_*]
 evidence:

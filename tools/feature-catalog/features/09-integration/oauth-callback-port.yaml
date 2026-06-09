@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI loopback callback (cli-callback.ts http://localhost:port/auth/callback) reachable from CLI auth flow"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure surface-agnostic port seam plus a CLI-only loopback impl; the Web provider body (web-callback.ts) is deliberately unbuilt per the deliberate_hold, so no web affordance ships here"
 purpose: |
   ChatGPT-OAuth 콜백 수신을 surface-agnostic port로 추상화 — `OAuthCallbackProvider`

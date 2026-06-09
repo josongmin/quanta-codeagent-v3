@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: diff math + usage breakdown share src/runner/diff-ops and CLI diff-preview path"
+    cli: "runs in the interactive CLI — 8/16 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "context.usage half renders via useContextUsage in ObservabilityPane, but DiffView/DiffPanel is NOT mounted (App.tsx:578-587) so tool.diff decodes then drops — split partial"
 purpose: |
   Render-side React components for the web/Tauri surface mirroring Cursor's

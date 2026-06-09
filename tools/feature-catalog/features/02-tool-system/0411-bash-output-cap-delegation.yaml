@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived reachable from CLI; bash output-cap policy runs in the loop"
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the user value is tail preservation of 200K bash output, but the browser tool.completed resultPreview is clamped to 256 chars head-only (clampPreview PREVIEW_MAX=256 context-binding.ts:1131) so tail-survival never reaches the browser"
 purpose: |
   bash가 자체 30K head-only truncation으로 출력 끝부분(에러 메시지/exit

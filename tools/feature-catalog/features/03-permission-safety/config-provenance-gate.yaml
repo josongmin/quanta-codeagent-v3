@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure pre-merge provenance filter reachable from CLI permission merge path"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal config-merge filter; drop record is RETURNED never emitted, ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: |
   SECURITY 🔴. The layered config merge (src/permission/policy-layers/index.ts)

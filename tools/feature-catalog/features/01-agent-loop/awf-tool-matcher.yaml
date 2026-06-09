@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core, tier:1]
 depends_on: [agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, secret-redaction-content-plane, 183-safety-net-green]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PreToolUse HookBus matcher routing; internal hook-channel, no CLI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal hook matcher, no user-visible UI affordance on any surface"
 purpose: 'HookBus.on(type, handler, options?: { matcher? }) — Claude Desktop 1.7196.3의 AWF_GUARDED_TOOLS_MATCHER (FS 7 tools) + Task matcher 2-channel 패턴. ToolMatcher = string | string[] | RegExp | (name) => boolean. matcher 없으면 모든 도구 (legacy parity). pre_tool_use/post_tool_use 만 적용; 기타 이벤트는 matcher 무시. FS_TOOLS_MATCHER / AGENT_TOOLS_MATCHER constant 제공.'
 evidence:

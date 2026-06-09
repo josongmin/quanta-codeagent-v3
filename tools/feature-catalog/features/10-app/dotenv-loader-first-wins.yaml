@@ -15,12 +15,12 @@ depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports
 config_refs:
   env: ["QUANTA_PROVIDER", "QUANTA_SANDBOX"]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure no-deps .env bootstrap loader at process start; no user-visible affordance"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal env-loader primitive, no UI affordance on any surface"
 purpose: |
   Tiny no-dependency `.env` loader (`loadEnvFiles(files)`). Both CLI

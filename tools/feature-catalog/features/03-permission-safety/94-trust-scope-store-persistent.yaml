@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "file-backed persistent grant store consulted by gate to short-circuit ask-flow reachable from CLI; ui_surfaces n-a"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure persistent grant-store primitive (cascade + TTL) injected by caller, no UI affordance on any surface"
 purpose: |
   L3→L4 promotion of `trust-scope-wire-up`. File-backed persistent grant

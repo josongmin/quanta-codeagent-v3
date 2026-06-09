@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "fs-backed sticky-model store + resolver reachable from CLI (set-surface deferred)"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal store + precedence resolver primitive (CLI wire deferred per its own notes), no UI affordance; web model selection is a separate POST /config path"
 purpose: |
   Cline + Roo Code의 "Plan에 강한 모델 / Act에 빠른 모델" 패턴 흡수. v3 모델 resolution은 global

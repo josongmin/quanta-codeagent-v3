@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "layer-owned error-emitter helpers run in CLI retry/checkpoint/sandbox layers"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal error-taxonomy emitter primitives (too-many-failed / thread-rollback / sandbox arms), no UI affordance"
 purpose: |
   Closes the ADR-0214 → ADR-0234 taxonomy gap: three Codex-spec

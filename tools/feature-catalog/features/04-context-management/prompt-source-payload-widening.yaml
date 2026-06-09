@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Layer-2 PromptSource/PromptPayload type widening reachable in CLI runner"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal type-widening port (surface-agnostic prompt union), no UI affordance"
 purpose: |
   Layer-2 `@/runner`가 surface (CLI raw-mode / Web WebSocket / Tauri IPC)에

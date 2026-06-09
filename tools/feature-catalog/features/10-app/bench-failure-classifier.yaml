@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: bench post-run classifier under src/apps/bench, not in interactive CLI graph"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "2-axis failure classifier surfaces in the operator console + bench-report.json (CLI), not reachable from web-daemon; no browser affordance"
 purpose: |
   Classifies an `InstanceResult` for the operator console + `bench-report

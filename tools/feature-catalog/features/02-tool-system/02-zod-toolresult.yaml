@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "zod input validation to recoverable tool_result (registry/factory) reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal dispatch validation primitive that converts bad input to an error tool_result; ui_surfaces n-a, no UI affordance of its own."
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
 evidence:

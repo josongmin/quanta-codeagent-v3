@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Edit-strategy EditMismatchKind union + exhaustiveness compile gate reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal edit-recovery state-machine and exhaustiveness compile guard with out-of-process marker; ui_surfaces n-a, no UI affordance on any surface."
 purpose: CR2 + FU3 exhaustiveness gate — 구조적 EditMismatchKind = "not-found" | "ambiguous" | "fuzzy-no-confident" 리터럴 union + Record<EditMismatchKind, NextStrategy> exhaustiveness 컴파일 게이트. out-of-process [edit-mismatch:<kind>] 마커로 producer/consumer간 통신 — substring sniff 제거.
 evidence:

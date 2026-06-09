@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [shadow-odb-lru-cleanup]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure SHA-256 path-to-directory-name hash primitive for shadow-ODB on-disk layout; no CLI affordance, a library function not a user-invoked thing"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal hash/codec for storage directory naming, no UI affordance on any surface"
 purpose: |
   Deterministic SHA-256 hash of a normalized absolute workspace path,

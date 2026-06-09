@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "6/6 reachable; advisor tool env-flipped by QUANTA_ADVISOR_MODEL"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "advisor consult is an ordinary tool call -> renders as tool.invoked/completed card (name + args/result preview) via the bridged tool_call/tool_result events"
 purpose: |
   Agent-callable PURE consult: the model deliberately asks a STRONGER /

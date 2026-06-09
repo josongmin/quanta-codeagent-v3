@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "ReDoS-hardened glob matcher used by skill activation and rule paths in CLI"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal glob-matching primitive/codec, no user-visible affordance on any surface"
 purpose: |
   Memoized dynamic-programming glob matcher for the constructs Claude Code's

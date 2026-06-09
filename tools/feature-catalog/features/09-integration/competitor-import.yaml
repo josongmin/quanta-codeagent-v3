@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "session import <provider> CLI verb; 10/10 evidence reachable from CLI entry import graph; interactive + headless."
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "User value rides the CLI import verb; protocol.ts SessionCommand has no import/resume verb (B3) and @/migration not reachable from web-daemon; never reaches the browser."
 purpose: |
   `session import <provider>` ingests a competitor coding-agent install and makes

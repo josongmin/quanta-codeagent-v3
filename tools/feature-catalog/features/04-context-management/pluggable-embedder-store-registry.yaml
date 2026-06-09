@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "env-selected embedder/vectorstore provider registry reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 19/19 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal retrieval provider-swap seam (env-driven ports), no user-visible affordance on any surface"
 purpose: |
   Provider-swap seam for both retrieval axes (embedder + vector store) with

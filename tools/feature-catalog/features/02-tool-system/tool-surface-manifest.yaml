@@ -15,12 +15,12 @@ owners: ["@songmin"]
 labels: [surface:cli, tier:core]
 depends_on: [tool-registry]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure data SSOT + pure resolver functions (no I/O, no CLI affordance); a catalog module, not a runtime feature."
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal tool-access catalog data + resolver, no UI affordance on any surface."
 purpose: |
   jun-03 — 단일 관리 카탈로그로 LLM-accessible 도구 집합의 접근 축(어떤 도구가

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "DeferredResultRegistry closed port + DefaultDeferredResultRegistry impl reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal async-work-lifecycle registry primitive (leaf, default-OFF); the visible surface is the poll_deferred tool (0287), this registry has no UI of its own."
 purpose: |
   Closed-port DeferredResultRegistry that OWNS the lifecycle of registered

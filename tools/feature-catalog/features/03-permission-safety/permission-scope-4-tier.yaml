@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "strongerScope precedence helper used by two-layer manager (src/permission/two-layer-manager.ts)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal RBAC precedence helper (configurable static); no user-visible affordance on any surface"
 purpose: |
   **Codex `Scope.{user, project, managed, open}` 4-tier RBAC 흡수.** Skill scope

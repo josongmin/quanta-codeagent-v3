@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "idle-monitor + /snooze /resume slashes + reject-counter wired in src/apps/cli/repl.ts"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only repl panel; /snooze /resume are SlashPalette prefill stubs with no web handler (B2); web frontend has no idle-monitor"
 purpose: |
   Cursor 3.2 §4.1/§4.2/§5 패턴 흡수: idle-monitor + snooze + reject-counter. 60초 무입력

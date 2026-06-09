@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "composeTokenStore(keyring, file) injected into the H18 OAuth token store at the CLI composition root"
+    cli: "runs in the interactive CLI — 13/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal secret-at-rest storage backend (yaml states not an agent-callable surface, no tool/manifest change) — no UI affordance on any surface"
 purpose: |
   Harden H18 (`mcp-http-oauth`) credential STORAGE: an OPTIONAL `KeyringPort`

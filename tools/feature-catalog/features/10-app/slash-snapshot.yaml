@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /snapshot, src/apps/cli/snapshot-cmd.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "/snapshot absent from SlashPalette.tsx; rewind/restore needs a B3-absent SessionCommand verb; ShadowOdb port not web-supplied"
 purpose: |
   CLI surface over the `ShadowOdb` port + the three `shadow_*` tools

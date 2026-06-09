@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "git fingerprint capture onto SessionMeta in CLI graph"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal metadata capture (ui_surfaces n-a), no UI affordance"
 purpose: |
   Captures the three-field git fingerprint (HEAD sha / branch / origin URL)

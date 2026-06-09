@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Architecture invariant enforced by a surface-coupling ratchet test (tests/unit/surface-coupling-ratchet.test.ts); pure governance rule, no CLI affordance."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Pure import-graph governance ratchet, no user-visible UI affordance on any surface."
 purpose: |
   Codifies the "thin surface, headless core" architecture invariant: the

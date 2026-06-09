@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; pure serialize/import primitive plus FS adapter"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure SessionExportEnvelope serialize/import primitive, no UI affordance"
 purpose: |
   Versioned wire-stable `SessionExportEnvelope` (v1) + pure serialize/import

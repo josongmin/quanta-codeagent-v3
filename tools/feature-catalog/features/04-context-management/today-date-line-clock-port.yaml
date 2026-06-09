@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "injected clock port for the date line in CLI turn context"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal clock port for replay determinism, no UI affordance"
 purpose: |
   Per-turn dynamic block 의 `Today's date is YYYY-MM-DD.` 라인이 매 턴 wall-clock

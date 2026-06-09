@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "SQLite Stage1StorePort owns stage1_outputs + watermark tables on CLI; derived 4/4 holds"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure SQLite storage adapter primitive; no UI affordance, ui_surfaces is cli-only data layer with nothing rendered to browser"
 purpose: |
   SQLite-backed `Stage1StorePort` implementation owning the

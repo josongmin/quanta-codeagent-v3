@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "gh_pr_review_diff/auto_merge/create.draft reachable from CLI entry"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "gh PR tools run in web-daemon; invocation+text result render as tool.invoked/tool.completed in session-hooks.ts:420-438 (mutating ops route through the web approval card)"
 purpose: |
   Three typed PR operations on top of gh CLI — review diff fetch with byte cap

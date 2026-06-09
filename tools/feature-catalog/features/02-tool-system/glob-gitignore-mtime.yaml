@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "glob tool engine, runs in CLI loop"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "glob tool invocation + result render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
 purpose: |
   P25 engine swap for the `glob` tool: enumeration moved from `Bun.Glob.scan`

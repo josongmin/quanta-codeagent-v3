@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_CONTEXT_1M / [1m] model-id suffix attaches the context-1m beta header in the CLI factory"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal long-context wire negotiation (beta header attach); no user-visible affordance on any surface"
 purpose: |
   Opt into Anthropic's 1M-token context window via the context-1m-2025-08-07 beta

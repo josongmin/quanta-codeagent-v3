@@ -25,7 +25,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "wraps tool output as DATA at dispatch seam plus system-prompt rule, CLI-seeded gate; runs in CLI loop"
+    cli: "runs in the interactive CLI — 10/11 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal content-plane wrapper that alters what the model sees, no browser-visible affordance"
 purpose: |
   외부 출처에서 온 도구 결과(web_fetch 페이지, MCP 서버, plugin, bash stdout,

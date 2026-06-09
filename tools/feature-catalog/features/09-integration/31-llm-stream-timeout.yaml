@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-factory]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal AsyncIterable stream-timeout decorator (firstChunk/idle deadlines); surface:core, no UI affordance"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal silence-hang guard decorator, no UI affordance on any surface"
 purpose: |
   AsyncIterable decorator wrapping a raw provider stream and racing each

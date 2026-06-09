@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "reachable from CLI; HITL reviewer escalation prompt runs in CLI (ui_surfaces cli/tauri)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "default-OFF attribution wire; when host injects ports its ApprovalRequest reaches the web-only ObservabilityPane (ApprovalsList/ObjectiveCard.blockers/RunColumn.waiting) via the ADR-0408 observability-emitter, not the B1 bridge; reviewer decision collapses to 2-verb approve/deny on the web approval card"
 purpose: |
   Closed-port adapter (`createApprovalGate({ approvalSM?, now? })`) that wraps

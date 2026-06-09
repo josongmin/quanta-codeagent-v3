@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "session id path-component validator on all path constructors"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal filesystem-safety guard, no UI affordance"
 purpose: |
   Hardened id validator enforcing that a session id is safe to use as a single

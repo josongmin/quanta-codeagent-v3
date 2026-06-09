@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /state + /working-state, src/apps/cli/working-state-panel.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "B2 prefill stubs: SlashPalette.tsx state and working-state slugs are prefill(), do not execute; workingState port not web-supplied (web-only ObjectiveCard is a separate feature)"
 purpose: |
   Surface-only renderer for catalog 대5 L4 `WorkingState` — the per-session L3

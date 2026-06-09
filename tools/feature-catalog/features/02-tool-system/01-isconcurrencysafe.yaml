@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-input concurrency flag used by streaming-dispatch in CLI"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure dispatch/batching primitive; ui_surfaces n-a, no user-visible affordance on any surface"
 purpose: per-input isConcurrencySafe 동시성 배칭
 evidence:

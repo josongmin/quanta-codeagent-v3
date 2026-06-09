@@ -21,12 +21,12 @@ depends_on:
   - thin-surface-headless-core
   - repl-host-slim-down
 surface_integration:
-  cli: na
+  cli: missing
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Headless surface (src/apps/headless/) is a portability-proof second consumer driving the host core with fake deps/LLM; no interactive CLI or user affordance."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Architecture portability proof with fake deps, pure internal validation harness, no user-visible UI affordance on any surface."
 purpose: |
   Validates the host-layer SSOT by adding a SECOND surface

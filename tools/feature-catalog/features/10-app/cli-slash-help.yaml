@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/help unified menu (renderHelp over BUILTINS + keybinds + env knobs) runs in CLI REPL"
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only /help renderer; no web help affordance, SlashPalette stubs do not execute (B2)"
 purpose: |
   `/help` 통합 메뉴 렌더러 — pure `renderHelp(BUILTINS)` 함수로 unit-testable.

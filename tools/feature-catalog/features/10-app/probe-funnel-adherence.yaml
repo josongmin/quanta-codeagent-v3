@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bun run probe --funnel analyzer under src/apps/probe; not in interactive CLI import graph (keep derived missing)."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Probe --funnel report is a standalone CLI view; code does not run in web-daemon and has no browser surface."
 purpose: |
   NON-authoritative analyzer that scores a trajectory's adherence to the

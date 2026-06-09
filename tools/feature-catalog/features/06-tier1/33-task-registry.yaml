@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "buildSubagentBlock renders pendingIds() lifecycle pill; task_output/task_stop observe and token-gated cancel in the CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "spawned subagent tasks appear read-only in ObservabilityPane RunColumn (RunKind subagent), but RunRow exposes no task_stop/cancel control"
 purpose: |
   In-memory registry of background subagent tasks (v2's `taskRegistry` shape).

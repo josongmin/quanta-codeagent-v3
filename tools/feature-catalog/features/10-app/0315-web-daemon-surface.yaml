@@ -24,7 +24,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Daemon-only process booted via bun run web:daemon; not reachable from the interactive CLI entry (correctly derived missing)."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "This IS the web surface backend — Bun.serve WS daemon (src/apps/web-daemon/) publishing RuntimeSession to the browser frontend; the web app connects to it."
 purpose: |
   Default-OFF bun process that publishes the existing `@/sdk/runtime`

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure eviction planner runs in CLI consolidation sweep; derived 3/3 holds"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal planner (returns ids to delete/decay); ui_surfaces n-a; no surface affordance"
 purpose: |
   Periodic full-store sweep that bounds each memory tier (semantic / episodic),

@@ -22,7 +22,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "shell-stream-painter consumes the live ShellExecEvent union in the CLI repl"
+    cli: "runs in the interactive CLI — 8/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the feature value is live stdout/stderr delta streaming which rides tool_progress/output_progress events dropped at context-binding.ts:1104 default arm; browser only gets final tool.completed buffered preview"
 purpose: |
   src/runtime/shell.ts의 runShell이 child process stdout/stderr를 buffered

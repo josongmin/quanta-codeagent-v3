@@ -27,7 +27,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived full kept; installCommandHooksIntoBase wired at agent composition root in CLI"
+    cli: "runs in the interactive CLI — 7/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "disk-configured shell executor on HookBus events; runs invisibly on the backend, ui_surfaces n-a, no browser affordance"
 purpose: |
   Adds the missing executor for Claude Code's settings.json#hooks model: a

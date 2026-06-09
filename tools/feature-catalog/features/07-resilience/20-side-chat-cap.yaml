@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "isolated side-chat invoked via src/apps/cli/side-cmd.ts CLI command"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "no side-chat web handler or verb; SlashPalette Server-routed commands are non-executing prefill stubs (B2) and no SessionCommand verb (B3)"
 purpose: |
   사용자의 lookup 질문("어디서 X 정의됨?", "test 커맨드?")을 메인 대화의 history/

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure progress-line formatter for BranchTraceEvent rendered in CLI; closed-port anchor"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "progress line rides branch-search trace events which are dropped at context-binding.ts default arm; CLI-only display formatter"
 purpose: |
   Two leaf modules that complete the speculative branch-search slice.

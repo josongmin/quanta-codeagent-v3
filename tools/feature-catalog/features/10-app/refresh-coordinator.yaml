@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [chatgpt-oauth-provider, slice-auth-chatgpt-oauth, token-store-atomic, chatgpt-responses-adapter]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal Promise-dedup guard for ChatGPT-OAuth token refresh; no user-facing CLI affordance"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal thundering-herd refresh coordinator, no UI affordance on any surface"
 purpose: |
   Coordinates concurrent refresh_token exchanges so multiple callers sharing the

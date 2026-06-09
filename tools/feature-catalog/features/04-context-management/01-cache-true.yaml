@@ -13,12 +13,12 @@ owners: ['@songmin']
 labels: [surface:core]
 depends_on: [fallback-kinds-policy, llm-factory, llm-stream-timeout, mode-repo-rules-active-skills-working-state-memory-hints, model-swap-retry]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "static cache:true breakpoint in prompt prefix, pure internal cache primitive, no CLI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal cache-prefix primitive, no UI affordance"
 purpose: byte-static 단일 cache:true 블록, 동적은 trailing <system-reminder>
 evidence:

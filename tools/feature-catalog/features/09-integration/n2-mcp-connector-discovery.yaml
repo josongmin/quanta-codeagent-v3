@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "mcp_connector_list/_install model-facing tools reachable in CLI loop"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent calls to mcp_connector_list/_install render as tool cards via bridged tool_call/tool_result events"
 purpose: |
   Codex `imported-connector-apps`/`connector-logo` 흡수 — `.mcp.json` 수동편집 대신

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "runner Layer-2 orchestration reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal surface-agnostic orchestration engine (assemble/orchestrate/session-ops); no user-visible browser affordance of its own; frontend does not import @/runner"
 purpose: |
   `src/runner/` 슬라이스 — CLI/Web/Tauri/Codex/Claude 어느 표면에서도 동일하게 호출 가능한

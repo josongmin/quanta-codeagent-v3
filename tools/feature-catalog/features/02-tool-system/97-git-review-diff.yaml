@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "git_review_diff tool spawning isolated reviewer sub-agent, runs in CLI."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Agent tool — reviewer findings return as a single tool result rendered in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
 purpose: |
   Extracts `git diff base...head` (default `origin/main...HEAD`) and hands it

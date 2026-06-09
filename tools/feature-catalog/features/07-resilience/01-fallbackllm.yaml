@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "FallbackLLM LLMPort decorator in the assembled chain; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure resilience-primitive decorator, no user-visible affordance on any surface"
 purpose: |
   `FallbackLLM` (`src/llm/fallback.ts`) — LLMPort 데코레이터. 우선순위

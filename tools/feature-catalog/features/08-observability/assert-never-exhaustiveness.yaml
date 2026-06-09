@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "assertNever guard used throughout CLI import graph (loop, demuxer, adapters)."
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal compile-time exhaustiveness guard primitive, no UI affordance on any surface."
 purpose: |
   Exhaustiveness guard for `switch` / `if-else` chains over a closed

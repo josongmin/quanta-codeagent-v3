@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "CLI slash /memory, src/apps/cli/memory-cmd.ts reachable from CLI entry"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "B2 prefill stub: SlashPalette.tsx memory slug is prefill(memory), does not execute; MemorySlashState port not supplied to web"
 purpose: |
   Browse / recall / delete the durable memory store from the REPL. Subcommand-

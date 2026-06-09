@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "playbook frontmatter parser/validator/dispatcher leaf slice, reachable in CLI import graph"
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "dormant leaf parser primitive (0 host wiring; slash surface is an explicit follow-up), no UI affordance on any surface yet"
 purpose: |
   ADR-0040의 strict 6-field SKILL.md frontmatter 위에 author-facing

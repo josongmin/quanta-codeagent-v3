@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure adversarial test-suite naming pattern, no runtime affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "pure regression-test infra, no UI affordance on any surface"
 purpose: |
   "이김(quanta-wins)" 또는 "절대 깨면 안 되는" 축을 적대적(adversarial)

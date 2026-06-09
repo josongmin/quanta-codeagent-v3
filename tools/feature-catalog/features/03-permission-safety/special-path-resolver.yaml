@@ -10,12 +10,12 @@ labels: [absorbed:codex, surface:cli]
 depends_on: [permission-4-pillar, permission-profile-2-layer, permission-scope-4-tier]
 configurable: static
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal OS-aware path resolver inside access-check (LRU cached), no user-visible CLI affordance"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal permission primitive, no UI affordance on any surface"
 purpose: |
   **8 special path kinds OS-aware resolver.** Codex permission_profile entries는

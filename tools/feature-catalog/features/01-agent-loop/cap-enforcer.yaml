@@ -15,12 +15,12 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [agent-types-split, secret-redaction-content-plane, plan-mode, agent-loop-branch-hardening, ide-context-provider-seam]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure session-scoped state machine detecting NextAction non-adherence; default-OFF, no CLI affordance"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal adherence detector, no user-visible UI affordance on any surface"
 purpose: |
   Session-scoped state machine that detects when the model IGNORES a tool's

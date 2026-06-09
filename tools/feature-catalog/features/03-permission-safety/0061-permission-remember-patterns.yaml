@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "permission_propose_pattern tool + admissibility-gate cascade wired into the CLI (QUANTA_REMEMBER_PATTERNS)."
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "The permission_propose_pattern LLM tool renders via tool_call/tool_result on web, but the pattern-cascade auto-pass and learning gesture operate in the backend gate with no distinct web affordance."
 purpose: |
   v0.dev 권한 학습 흡수 — 모델이 필요 권한을 직접 제안(suggestedPermissions)하고 위험을

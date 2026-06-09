@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [chatgpt-oauth-provider, token-store-atomic, refresh-coordinator]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure internal ChatGPT-OAuth Responses-API LLMPort adapter (transport + token-freshness); surface:core, no UI affordance"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal provider adapter; streamed text reaches web via assistant_text but the adapter itself has no UI affordance"
 purpose: |
   Concrete `LLMPort` that calls `${apiBase}/responses` with the disk-stored

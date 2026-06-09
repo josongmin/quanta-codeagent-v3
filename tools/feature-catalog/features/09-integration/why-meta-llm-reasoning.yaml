@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/why slash command renders a meta-LLM reasoning panel in the CLI REPL (ui_surfaces cli, surface:cli)"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only REPL slash command; SlashPalette Server-routed entries are prefill stubs that do not execute and there is no web handler (bottleneck B2)"
 purpose: |
   ADR-0239가 `/debug` runtime tracer (single-line per-event)를 깔고 ADR-0267이

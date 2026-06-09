@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "phase/TTFT/readonly-deny-steer planes reachable from CLI entry import graph"
+    cli: "runs in the interactive CLI — 10/11 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "phase marker is byte-identical internal data tag; TTFT is OTel-only (gen_ai.response.time_to_first_token_ms span attr), not web-rendered; readonly deny-steer is permission-internal — none reach the browser"
 purpose: |
   하나의 PR로 3개의 직교 신호를 흡수 — 각각 다른 plane(data / observability /

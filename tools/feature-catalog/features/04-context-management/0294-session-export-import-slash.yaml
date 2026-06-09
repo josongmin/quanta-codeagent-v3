@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "/session export and /session import slash commands wired in CLI REPL via sessionIo store"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "CLI-only slash; SlashPalette Server-routed commands are prefill stubs that do not execute (B2) and there is no web export/import handler"
 purpose: |
   ADR-0294 — `/session export <id>` + `/session import <path>` 슬래시 명령으로

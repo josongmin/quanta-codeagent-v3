@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Internal import-log persistence (sidecar lock + atomic rename) backing the CLI import verb; 2/2 evidence reachable from CLI entry import graph."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal persistence primitive (sidecar lock + busy-error); no user-visible affordance on any surface."
 purpose: |
   Persistence for the external-agent import log, mirroring Codex's

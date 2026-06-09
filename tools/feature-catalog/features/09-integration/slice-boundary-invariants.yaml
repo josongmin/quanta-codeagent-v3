@@ -12,7 +12,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Architecture-enforcement slice-boundary runtime guard tests + biome.json; pure structural policy, no runtime affordance on any surface."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Pure architecture-invariant guard (lint + test); no UI affordance on any surface."
 purpose: |
   Each library slice now has a `<slice>-slice-boundary.test.ts` runtime

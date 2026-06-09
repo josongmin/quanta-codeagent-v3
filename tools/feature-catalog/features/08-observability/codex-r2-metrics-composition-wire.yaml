@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Composition-root metrics wire + activation telemetry installed in assemble.ts on CLI path."
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal metrics composition wire (emits activation counters to a metric port), no UI affordance on any surface."
 purpose: |
   Closes ADR-0352 default-OFF state. ADR-0358 ships

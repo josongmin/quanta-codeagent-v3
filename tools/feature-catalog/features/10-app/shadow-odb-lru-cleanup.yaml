@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [shadow-tools-trio, snapshot-slash-cmd, slash-snapshot]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "host-invoked disk-budget housekeeping seam for the shadow ODB; no user-facing CLI affordance"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal LRU eviction housekeeping primitive, no UI affordance on any surface"
 purpose: |
   Bounded-disk policy for the shadow git ODB (ADR-0108). Sums the on-disk

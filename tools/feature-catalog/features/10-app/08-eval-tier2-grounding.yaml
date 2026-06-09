@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: grounding tier under src/apps/eval plus CI workflow, CLI-only"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "grounding structured probe + live-gate workflow runs in eval CLI app and GitHub Actions, not in web-daemon; no browser surface"
 purpose: |
   Tier-2 of the 6-tier eval stack (umbrella id: `eval-five-tier`). Measures

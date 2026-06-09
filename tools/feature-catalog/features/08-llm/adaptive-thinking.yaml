@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_ADAPTIVE_THINKING reshapes the Anthropic thinking wire field via skill-gate/codec in CLI"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal wire-shaper for the thinking field (adaptive vs manual budget); no user-visible affordance on any surface"
 purpose: |
   quanta가 Anthropic extended-thinking을 manual-only로 보냄: effort/classifier가 token 예산을 계산해

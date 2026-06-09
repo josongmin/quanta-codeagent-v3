@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "static destructive-git argv matchers run before tool dispatch reachable from CLI; ui_surfaces cli but is a backstop deny rule"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure HARD_DENY argv-pattern backstop (policy-rules.ts), internal fail-closed deny with no user-visible UI affordance on any surface"
 purpose: |
   HARD_DENY_RULES extension covering workflow-destructive git argv shapes

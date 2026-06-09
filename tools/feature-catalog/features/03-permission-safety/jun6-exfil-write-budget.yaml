@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "per-turn write budget rejects over-cap write/edit on CLI dispatch"
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the budget-exceeded rejection surfaces only as a generic tool.completed error preview via the bridged tool_result event; no dedicated budget affordance"
 purpose: |
   prompt-injection 후 "다수의 작은 write 로 조금씩 유출(drip-exfil)" shape 를 막는

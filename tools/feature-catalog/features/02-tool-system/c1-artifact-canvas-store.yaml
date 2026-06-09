@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "5/5 reachable; artifact_register/list/get/destroy tools default-OFF"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the four artifact tools are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
 purpose: |
   Cursor `agent.v1.Canvas{Register, GetUrl, Destroy}` 흡수 — 생성축(H14 image_gen /

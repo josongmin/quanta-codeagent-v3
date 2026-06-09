@@ -13,7 +13,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "HookBus handler-count + payload-byte caps active in CLI hook bus (src/agent/hooks.ts)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal DoS brake on the HookBus (cap + truncation); no user-visible affordance on any surface"
 purpose: |
   Two structural DoS brakes for the HookBus surface. (1) Per-event handler

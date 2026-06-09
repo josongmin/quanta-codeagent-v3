@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: trajectory replay/classify/freeze under src/apps/eval, CLI-only"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "real-session trajectory replay runs in eval CLI app, not reachable from web-daemon; no web affordance"
 purpose: |
   Tier-4 of the 6-tier eval stack (umbrella id: `eval-five-tier`). Operates on

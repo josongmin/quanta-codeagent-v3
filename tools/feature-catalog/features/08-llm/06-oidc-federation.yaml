@@ -23,7 +23,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "OIDC token-exchange runs in CLI auth path (file to access token)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal auth primitive (workload-identity JWT exchange, ui_surfaces n-a), no UI affordance"
 purpose: |
   `OidcFederationExchanger.exchangeToken({identityTokenFile, federationRuleId,

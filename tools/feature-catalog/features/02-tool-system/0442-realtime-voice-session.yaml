@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "14/14 evidence files reachable from CLI; /voice-live wired at REPL composition root behind QUANTA_VOICE_LIVE"
+    cli: "runs in the interactive CLI — 14/14 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "TTY-only spoken dialog (raw-mode key reader + platform mic + audio playback); /voice-live is a CLI slash with no web audio surface and SlashPalette commands are prefill stubs (B2); no voice UI in apps/web-frontend"
 purpose: |
   RFC-03 live spoken dialog. Composes the existing @/realtime transport

@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "propositional protected-branch check consulted by ci-bot mode presets reachable from CLI; ui_surfaces cli; modes ci-bot"
+    cli: "runs in the interactive CLI — 4/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure ci-bot git-write guard predicate (no FS/shell), internal mode-gate primitive with no UI affordance on any surface"
 purpose: |
   Propositional check on a shell command — is this operation forbidden by the

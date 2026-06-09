@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "derived: reachable from CLI entry; AST adapter behind the ADR-0165 CoverageSource port"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure AST coverage adapter behind the port (no own tool surface), no UI affordance"
 purpose: |
   AST-walked sibling to ADR-0165's V8 keyword-regex heuristic. Uses the

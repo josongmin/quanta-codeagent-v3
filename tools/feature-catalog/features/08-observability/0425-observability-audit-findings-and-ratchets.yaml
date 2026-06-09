@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Audit fixes + ratchet tests live in the codebase; loop.ts touched is reachable."
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal audit-closeout findings + structural ratchet tests, no UI affordance on any surface."
 purpose: |
   Waves 1-5 observability stack(ADR-0394~0421) end-to-end live 도달 후

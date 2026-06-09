@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "LLM-path system skill triggered by rewind keyword in the agent loop; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Backend runs the agent loop on web too and its shadow_* tool calls render as tool.invoked/tool.completed cards (session-hooks.ts), but there is no web /rewind slash and the skill itself plus its decision events are invisible; default-OFF on shadowOdb"
 purpose: |
   사용자가 "rewind" / "undo" / "rollback" / "go back" / "revert changes"라고

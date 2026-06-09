@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "fast-apply fallback port wired into apply_patch under QUANTA_FAST_APPLY=on (apply-patch.ts:315)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal apply-patch recovery mechanism; no distinct UI affordance (the recovery note rides the already-counted tool_result), not a UI feature"
 purpose: |
   When `apply_patch` rejects a V4A patch (anchor drift / generic apply error /

@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "health.json watcher not reachable from cli interactive entry (composition-root opt-in)"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "writes ~/.quanta/health.json for K8s/operator file-scraping, never rendered in the quanta web frontend"
 purpose: |
   ADR-0180 writes `~/.quanta/health.json` once at composition time. Operators

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "force_background control-op + subagent_force_background meta tool behind QUANTA_SUBAGENT_QUEUE/QUANTA_FORCE_BACKGROUND in the CLI"
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "promoting a queued run is control over runs; RunColumn is read-only and SessionCommand has no promote/spawn verb (B3)"
 purpose: |
   Two-part absorption of Cursor's force_background_subagent "run this queued

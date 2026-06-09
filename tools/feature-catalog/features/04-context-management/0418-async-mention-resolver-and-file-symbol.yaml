@@ -27,7 +27,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "@file/@symbol mention parsing + async resolver wired on CLI via installCodexR2Wires; default-ON."
+    cli: "runs in the interactive CLI — 16/17 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "User types @file in the web input box; input.append carries the text to the daemon backend whose host-runtime AgentConfig has the mention-injector wired (mention-wire.ts), so resolution + prompt injection happen and shape the streamed assistant_text. No B1 event needed."
 purpose: |
   Supersedes ADR-0325 (3-kind sync) + ADR-0330 (sync runner). Extends the

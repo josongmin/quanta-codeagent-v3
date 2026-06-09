@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "plan/review/audit mode via QUANTA_PLAN/--plan, admissibility gate runs in CLI"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "mode selection has no web affordance; web POST /config sets only model/effort, mode_changed event is dropped at context-binding.ts:1104 default arm"
 purpose: |
   AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을

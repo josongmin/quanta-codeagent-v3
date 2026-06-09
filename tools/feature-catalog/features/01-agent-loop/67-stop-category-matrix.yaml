@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "StopCategory matrix attaches structured stop reasons in the CLI loop finish()"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "internal stop-reason classification add-on (stop-category.ts); no decision/stop event in the 6-event bridge, nothing rendered"
 purpose: |
   Cursor stop_category 흡수 — 레거시 4-element StopReason을 보완하는 3-layer 구조적 정지

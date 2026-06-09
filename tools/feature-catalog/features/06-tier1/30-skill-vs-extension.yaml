@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "host calls classify + assertAllowedTool before dispatching any tool while a skill is active in the CLI"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure routing/permission classifier consuming parsed frontmatter, no UI on any surface"
 purpose: |
   `SkillFrontmatter.category` is the SSOT for whether an entry is auto-

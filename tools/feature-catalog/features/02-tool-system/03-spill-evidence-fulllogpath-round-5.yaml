@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Spill to evidence.fullLogPath routing (registry post-execute path) reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal evidence/trajectory plumbing (spillPath merged into ToolResult.evidence.fullLogPath then flattened to trajectory tool_end); ui_surfaces n-a, no UI affordance."
 purpose: Spill → evidence.fullLogPath 라우팅 (Round 5) — registry의 post-execute 경로가 capToolOutput.spillPath를 ToolResult.evidence.fullLogPath에 머지. 이전엔 duck-typed extra-prop, 이제 타입 surface 단일 경로 — dispatch seam evidenceOf가 그대로 trajectory tool_end.fullLogPath로 평탄화.
 evidence:

@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "read-only decision-trace port reachable from CLI (src/permission/inspector.ts)"
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "read-only programmatic port whose surface wiring is an explicitly separate track (ui_surfaces n-a); no rendered UI affordance on any surface yet"
 purpose: |
   Read-only programmatic surface — given an action, *어떤* permission layer가 *왜*

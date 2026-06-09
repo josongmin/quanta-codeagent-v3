@@ -24,7 +24,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Closed-port registry slice (src/connectors/custom-3p/*); 0/7 evidence reachable from CLI entry, not re-exported from connectors barrel, no slash/verb wired yet."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "User-facing mechanism (provider register/health) is unwired; no /connector slash or web settings panel; not reachable from web-daemon; does not reach the browser."
 purpose: |
   Claude Desktop `Custom3pSetup` 24-method IPC namespace 의 MVP 5 core

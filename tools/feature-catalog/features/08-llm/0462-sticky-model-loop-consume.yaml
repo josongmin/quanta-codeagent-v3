@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "loop consume site resolves sticky model in CLI streamConsume (set-surface deferred)"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal loop model-resolution wire (skill over sticky over default precedence in loop.ts), no UI affordance; set-surface deferred"
 purpose: |
   ADR-0212 shipped the sticky `{mode → modelId}` store + precedence resolver but

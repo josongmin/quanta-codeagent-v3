@@ -19,7 +19,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "keep derived: A/B pairwise compare adapters under src/apps/eval, CLI-only"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "cross-CLI pairwise judge spawns external CLIs from the eval app, not in web-daemon; no browser surface"
 purpose: |
   Tier-5 of the 6-tier eval stack (umbrella id: `eval-five-tier`). The only

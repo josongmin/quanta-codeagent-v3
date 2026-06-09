@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [worktree-fork-primitive]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Pure internal runtime HOF (withWorktree) consumed by subagent-runner and tool/worktree plumbing; a git-worktree isolation library function, not a user-facing CLI affordance."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal git-worktree isolation primitive, no UI affordance on any surface."
 purpose: |
   Runtime HOF that runs `fn` inside a throwaway git worktree at

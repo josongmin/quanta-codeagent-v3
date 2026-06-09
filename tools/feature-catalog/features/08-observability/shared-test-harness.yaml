@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure test-double library (ScriptedLLM/FakeLLM/cfg); no CLI affordance"
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "pure test infra primitive, no UI affordance on any surface"
 purpose: |
   `tests/integration/_harness.ts` 는 100+ 테스트 파일이 공유하는 단일-출처

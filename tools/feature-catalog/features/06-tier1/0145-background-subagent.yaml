@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "background subagent scheduler with fork/await trio, runs in CLI loop"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "background turn-taking value depends on subagent progress/await which rides dropped progress events (context-binding.ts:1104) and needs a B3-absent background/await verb; SessionCommand has only input/turn/approval"
 purpose: |
   Scheduler that runs a subagent fork in the background so the parent loop

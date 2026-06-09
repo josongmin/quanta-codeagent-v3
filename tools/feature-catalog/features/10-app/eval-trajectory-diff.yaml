@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Internal LCS projection comparator feeding replay verdict; not in interactive CLI graph (keep derived missing)."
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
     web: "Pure deterministic comparator over event kinds, no direct UI affordance on any surface."
 purpose: |
   두 `TrajectoryEvent` 스트림을 PROJECTION 기반으로 비교 (raw equality 아님).

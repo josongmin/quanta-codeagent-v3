@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "permission recorder fail-open emit helpers reachable from CLI; telemetry-only; ui_surfaces cli"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure telemetry fail-open invariant (try/catch swallow around recorder), categorical-primitives-only record, no UI affordance on any surface"
 purpose: |
   Negative invariant: a thrown PermissionRecorder cannot deny an otherwise-

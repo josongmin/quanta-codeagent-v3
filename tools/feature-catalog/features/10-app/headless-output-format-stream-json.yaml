@@ -17,7 +17,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "--output-format text|json|stream-json parsed in headless CLI args, StreamJsonSink wired into headless preset"
+    cli: "runs in the interactive CLI — 1/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "machine STDOUT contract for headless/SDK/CI consumers; ui_surfaces n-a, no browser affordance at all"
 purpose: 'headless 런의 STDOUT 컨트랙트를 SDK/CI가 파싱 가능한 머신 포맷으로 선택(P26). --output-format text|json|stream-json (기본 text) + 선택 --include-partial. stream-json은 각 SessionEvent를 1줄 NDJSON으로(이미 완성된 encodeSessionEvent 코덱 재사용 → {version:session.v1,kind:event,payload}), json은 끝에 단일 최상위 JSON 배열로 flush. partial/delta(turn.output.delta)는 --include-partial일 때만. 사람용 로그는 stderr(logger)로 라우팅돼 stream-json stdout을 오염시키지 않음. 기본/text는 stdout byte-identical(default-OFF).'
 evidence:

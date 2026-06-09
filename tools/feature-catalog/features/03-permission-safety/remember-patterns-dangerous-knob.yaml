@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "composition-root knob threading allowDangerous into propose port (src/host/runtime/agent-arg-builder.ts)"
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal security gate-lift knob (ui_surfaces none); only a redacted read-only KnobsPanel row, no rendered feature affordance"
 purpose: |
   CLUSTER D #5 residual — closes the hardcoded `allowDangerous:false` at the

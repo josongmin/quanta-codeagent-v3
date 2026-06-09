@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "plugin discovery + MCP launcher + skill extension + app catalog substrate, reachable from CLI"
+    cli: "runs in the interactive CLI — 15/15 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal plugin/MCP/app-catalog substrate (ui_surfaces n-a); no browser render affordance on any surface"
 purpose: |
   5-ADR plugin substrate. ADR-0336 ships 3 slices: plugin-discovery

@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "line-based stderr writer + level filter driven by QUANTA_LOG_LEVEL/QUANTA_RUN_ID in CLI diagnostics"
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal diagnostic stderr logging primitive, no user-visible affordance on the web surface"
 purpose: / 임계값 threshold — line-based stderr writer + level filter. Bench/observe 실행 식별자 }) — trajectory/report 메타데이터 상관키.
 evidence:

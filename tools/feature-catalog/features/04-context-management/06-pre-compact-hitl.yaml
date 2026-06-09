@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "PreCompactRequestQuery approve/defer/force HITL + ConversationSummaryArchive + context_compacted marker; reachable from CLI entry."
+    cli: "runs in the interactive CLI — 9/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "HITL rides the onPreCompact host callback (3-verb approve/defer/force), not the web approval.respond path (approve|deny only for tool escalations); the context_compacted AgentEvent is dropped at context-binding.ts:1104 default arm."
 purpose: 압축 직전 호스트에 HITL 질의 (approve/defer/force) + ConversationSummaryArchive 슬라이딩 윈도우 + context_compacted AgentEvent 마커
 evidence:

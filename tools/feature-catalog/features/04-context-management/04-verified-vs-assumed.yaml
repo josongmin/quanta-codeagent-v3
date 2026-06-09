@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Compaction summary prompt hardening; runs in CLI prompt path."
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "Pure internal prompt content (model-facing); no user-visible surface affordance."
 purpose: 압축 프롬프트 verified-vs-assumed 강화
 evidence:

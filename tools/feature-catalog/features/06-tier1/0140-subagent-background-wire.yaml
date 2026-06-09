@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "caller-wire closure adding AgentConfig.subagentBackground slot + composer step; pure plumbing, no CLI affordance of its own"
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal wiring primitive (typed slot + Pick + composer step), no UI affordance"
 purpose: |
   Caller-wire closure for ADR-0130 — adds AgentConfig.subagentBackground

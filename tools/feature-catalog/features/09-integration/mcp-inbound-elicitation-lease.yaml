@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "dispatch routes inbound elicitation/create to the CLI TTY-gated prompter + lease pool; reachable from CLI entry"
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "interactive elicitation prompt is CLI-TTY only; web-daemon non-TTY path falls to headlessRejecter (decline) and no web-frontend prompter component exists"
 purpose: |
   The 2026-06-01 gap audit found MCP elicitation was DEAD: the ElicitationPrompter

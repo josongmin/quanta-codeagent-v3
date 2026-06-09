@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "Ratchet/measurement tooling under tools/feature-catalog (baseline.json + parsers); no interactive surface."
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "Pure CI ratchet/baseline tooling, no UI affordance on any surface."
 purpose: |
   `tools/feature-catalog/baseline.json` 단일 SSOT 가 두 가지를 합쳐 저장:

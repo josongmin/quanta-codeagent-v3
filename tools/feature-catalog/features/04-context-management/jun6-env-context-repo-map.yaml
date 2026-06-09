@@ -21,7 +21,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "bounded repo-map rendered into the env prompt block on turn 0, reachable from CLI"
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure prompt-block content injected into system context, no user-visible affordance on any surface"
 purpose: |
   Codex 0.135 prepends a bounded directory tree at session start so the model is

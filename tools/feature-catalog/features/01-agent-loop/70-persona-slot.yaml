@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "QUANTA_PERSONA env plus REPL /persona select the persona in the CLI loop"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "persona is a @/runner/knobs registered knob so it appears read-only in the web KnobsPanel via buildWebKnobCatalog/GET /api/knobs, but is not among the 6 CONFIG_ALLOWED_KEYS writable keys"
 purpose: |
   Codex Desktop base_instructions의 `{{ personality }}` Handlebars 슬롯 흡수. 3-arm 닫힌

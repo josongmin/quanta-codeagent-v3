@@ -13,12 +13,12 @@ owners: ['@songmin']
 labels: [surface:core]
 depends_on: [plan-mode, response-in-progress, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, effort-5-tier]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "reactive-compaction fail-fast policy, pure internal control, no direct CLI affordance"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal compaction fail-fast policy, no UI affordance"
 purpose: reactive fail-fast
 evidence:

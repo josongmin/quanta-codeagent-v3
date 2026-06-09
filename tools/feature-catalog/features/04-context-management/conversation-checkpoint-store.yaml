@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "pure in-memory snapshot/restore store reachable from CLI import graph; backs /rewind-conv + fork adapters"
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure conversation-rollback store primitive, no rendered affordance on any surface; CLI consumer rides a B3-absent rewind/fork verb"
 purpose: |
   대화-레벨 rollback primitive — `ShadowOdb`(파일 face) 의 대화 face. Hermes Agent

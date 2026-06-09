@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "defineToolAsync wrapper + poll_deferred tool + dispatch envelope reachable from CLI import graph"
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "poll_deferred is a model-invokable tool; its tool_call/tool_result (and the deferred-handle envelope embedded in tool output text) render as the generic tool.invoked/completed card (session-hooks.ts:420-435)."
 purpose: |
   Three-piece async-tool seam built on ADR-0286 registry:
