@@ -9,6 +9,8 @@ import {
 import { defaultResponsesContinuationStore } from "@/llm"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
+import { bootstrapCrashResumeOffers } from "@/runner/orchestrate"
+import { crashResumeEnabled, listSessions } from "@/session"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
@@ -308,6 +310,26 @@ export const runRepl = async (): Promise<void> => {
       cwd: setup.cwd,
       contextUsageView: wires.contextUsageView,
     })
+    // ADR-0528 L2 — surface a crash-resume offer at startup so a session that
+    // died mid-turn is VISIBLE on restart (north-star: "what was I doing"). Gate
+    // FIRST so a gate-off / one-shot / non-TTY launch never even lists sessions
+    // (byte-identical). The operator resumes via `--resume <id>`; auto-prompt +
+    // task re-injection is the P1 surface refinement.
+    if (
+      setup.argPrompt === undefined &&
+      process.stderr.isTTY === true &&
+      crashResumeEnabled(process.env)
+    ) {
+      const offers = await bootstrapCrashResumeOffers(await listSessions({ includeArchived: false }), {
+        env: process.env,
+      })
+      const top = offers[0]
+      if (top !== undefined) {
+        process.stderr.write(
+          `\x1b[2m⏮ ${top.summary} — \`quanta --resume ${top.sessionId}\` to continue\x1b[0m\n`,
+        )
+      }
+    }
     // CLI-06 (ADR-0307) — the per-turn loop wiring is assembled in
     // `repl/session-loop-options.ts` (same host-slimming pattern as
     // `repl/factories/`); the host owns only entry routing + compose.
