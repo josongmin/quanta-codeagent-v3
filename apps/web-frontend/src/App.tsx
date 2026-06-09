@@ -44,6 +44,7 @@ import {
   shouldContinueAfterApproval,
   useConnectionState,
   useSendApprovalDecision,
+  useSendCancel,
   useSendTurn,
   useSessionEvents,
 } from "./ws/session-hooks"
@@ -100,6 +101,7 @@ interface SessionChromeProps {
   readonly sessionState: SessionStateView | null
   readonly tokenUsage: CumulativeTokenUsage
   readonly canRestartDaemon: boolean
+  readonly onCancel?: () => void
 }
 
 const getEnv = (key: "VITE_QUANTA_WS_URL" | "VITE_QUANTA_AUTH_TOKEN"): string | undefined => {
@@ -258,6 +260,7 @@ export const App = (): JSX.Element => {
   // `approval.respond`. Empty when no approval is pending ⇒ no card rendered.
   const { approvals: pendingApprovals, dismiss: dismissApproval } = usePendingApprovals(client)
   const sendApprovalDecision = useSendApprovalDecision(client, learnedSessionId)
+  const sendCancel = useSendCancel(client, learnedSessionId)
   const onApprovalDecision = useCallback(
     (decision: EscalationDecision): void => {
       // Determine escalation-ness BEFORE the optimistic dismiss removes the
@@ -651,6 +654,7 @@ export const App = (): JSX.Element => {
         sessionState={sessionState ?? null}
         tokenUsage={tokenUsage}
         canRestartDaemon={canRestartDaemon}
+        onCancel={sendCancel}
       />
       <div className="flex min-h-0 flex-1 flex-row">
         <ChatPanel
@@ -708,6 +712,7 @@ const SessionChrome = memo(
     sessionState,
     tokenUsage,
     canRestartDaemon,
+    onCancel,
   }: SessionChromeProps): JSX.Element => {
     return (
       <>
@@ -734,6 +739,7 @@ const SessionChrome = memo(
               connection={connection}
               sessionStatus={sessionState?.status ?? null}
               {...(canRestartDaemon ? { onRestartDaemon: restartDaemonViaTauri } : {})}
+              {...(onCancel !== undefined ? { onCancel } : {})}
             />
           </div>
         </header>

@@ -43,10 +43,8 @@ runSessionTurn(args.sessionId 있을 때):
 
 ### L2 — 재시작 detection + operator offer (bootstrap 배선)
 
-- `repl.ts` `bootstrapSession` 진입(세션 활성화 전): `detectInterruptedSessions(listSessions({includeArchived:false}), {env, provider})`. 결과 있으면 most-recent-first로 각 `buildCrashResumeOffer`.
-- **operator prompt seam**: `confirmTrust`류 TTY-guarded readline(또는 ADR-0494 elicitation) 재사용. **headless/CI는 never block** — non-TTY면 offer 자동 skip(마커 보존, 다음 인터랙티브 세션에 재offer).
-- accept ⇒ 해당 세션 로드 + `offer.resumeMessage`를 `role:"user"`로 첫 턴에 주입(control-poll resume 경로와 동형) + `clearSessionInterrupted`(consume). decline ⇒ 마커 유지. "discard" ⇒ clear.
-- 다중 후보: most-recent 1개만 offer(나머지는 `/state`/`/sessions`에 배지) — 부팅을 prompt 폭탄으로 만들지 않음.
+- **P0(detect + surface)**: `repl.ts` startup(`runSessionLoop` 직전)에서 `bootstrapCrashResumeOffers(listSessions({includeArchived:false}), {env})` → most-recent offer를 stderr에 노출(`⏮ Session "X" was interrupted mid-turn: <task> — quanta --resume <id>`). **gate FIRST**(`crashResumeEnabled(env)`) + interactive + TTY 한정 ⇒ gate-off/one-shot/non-TTY는 listSessions조차 안 부름(byte-identical). north-star "뭐 하다 멈췄나"를 재시작 즉시 보이게 + 기존 `--resume`로 이어감.
+- **P1(auto-prompt + re-inject)**: TTY 프롬프트(`confirmTrust`류/ADR-0494) → accept 시 세션 로드 + `offer.resumeMessage`를 `role:"user"` 첫 턴 주입(control-poll resume 경로 동형) + `clearSessionInterrupted`(consume). 이건 interactive **첫-입력 seam**이 필요(현 `runSessionLoop`은 argPrompt=one-shot 전용) — 그 입력흐름 통합과 함께 P1. headless/CI never-block 유지.
 
 ### L3 — 스트리밍 partial 신선도 (SOTA++, 별도 게이트 `QUANTA_CRASH_RESUME_PARTIAL`)
 
@@ -66,11 +64,11 @@ runSessionTurn(args.sessionId 있을 때):
 
 ## 단계
 
-- **P0 (L1+L2, gate `QUANTA_CRASH_RESUME`)**: `runSessionTurn` 단일 chokepoint 브래킷(mark-at-start/clear-on-resolve) + bootstrap detect→offer→prompt→re-inject. TDD: `crash-resume-wire-hellgate`가 **실 `runSessionTurn`을 fake RuntimeSession으로 구동**(브래킷 끊으면 RED) + default-OFF byte-identity. (interrupt-mirror rich-partial은 L3/P2로 이동.)
-- **P1 (operator UX)**: offer를 surface-agnostic 이벤트로(`/state` 배지 + web/IDE 카드). north-star(crash 후 "뭐 하다 멈췄나") 노출.
-- **P2 (L3, gate `QUANTA_CRASH_RESUME_PARTIAL`)**: 이벤트-구동 partial flush + flush-policy 포트 + 매직넘버-금지 ratchet.
+- **P0 (✅ LANDED jun-09, gate `QUANTA_CRASH_RESUME`)**: L1 `runSessionTurn` 단일 chokepoint 브래킷(mark-at-start/clear-on-resolve, 2 콜러 sessionId 전달) + L2-detect bootstrap startup surface(stderr offer + `--resume`). TDD: `crash-resume-wire-hellgate`가 **실 `runSessionTurn`을 fake RuntimeSession으로 구동**(브래킷 끊으면 RED) + default-OFF byte-identity. **3R 어딧이 초안의 dead-path(`runOnce`) 배선 적발→실 chokepoint로 정정.**
+- **P1 (operator UX)**: L2 auto-prompt+re-inject(interactive 첫-입력 seam 필요) + offer를 surface-agnostic 이벤트로(`/state` 배지 + web/IDE 카드). north-star 노출.
+- **P2 (L3, gate `QUANTA_CRASH_RESUME_PARTIAL`)**: 이벤트-구동 partial flush + interrupt 시 rich-partial 보존(outcome-aware) + flush-policy 포트 + 매직넘버-금지 ratchet.
 
-각 단계 독립 PR. P0이 단독으로 "크래시 후 끊긴 작업 이어받기"를 라이브화.
+각 단계 독립 PR. P0이 단독으로 "크래시 후 끊긴 작업이 재시작에 마커로 남고 보임"을 라이브화(이어받기 auto-reinject는 P1).
 
 ## Default posture / 안전성
 

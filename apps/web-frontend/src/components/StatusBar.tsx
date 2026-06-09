@@ -12,6 +12,12 @@ export interface StatusBarProps {
    * automatically via the `quanta:config-ready` event the shell emits).
    */
   readonly onRestartDaemon?: () => Promise<void>
+  /**
+   * If provided, a "정지" (Stop) button is rendered while a turn is in flight
+   * (`sessionStatus === "running"`). Clicking it sends a `turn.cancel` command
+   * so the web user can abort a running turn — the kernel handles the abort.
+   */
+  readonly onCancel?: () => void
 }
 
 const DOT_BY_KIND: Record<ConnectionState["kind"], string> = {
@@ -25,6 +31,7 @@ export const StatusBar = ({
   connection,
   sessionStatus,
   onRestartDaemon,
+  onCancel,
 }: StatusBarProps): JSX.Element => {
   const [restarting, setRestarting] = useState(false)
   const showRestart =
@@ -52,6 +59,19 @@ export const StatusBar = ({
         <div className="rounded-full border border-line px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-ink-tertiary">
           {sessionStatus}
         </div>
+      ) : null}
+      {onCancel !== undefined && sessionStatus === "running" ? (
+        <button
+          type="button"
+          onClick={onCancel}
+          className={cx(
+            "rounded-lg border border-err/40 px-3 py-1 text-sm text-err transition hover:bg-err/[0.08]",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-err/50",
+          )}
+          title="진행 중인 턴 정지 (turn.cancel)"
+        >
+          정지
+        </button>
       ) : null}
       {showRestart ? (
         <button

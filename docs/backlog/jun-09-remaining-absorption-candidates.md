@@ -13,7 +13,7 @@
 | # | 후보 | 출처 (경쟁사 evidence) | quanta gap | 흡수 메커니즘 | ROI | effort | conf | 결정 |
 |---|---|---|---|---|---|---|---|---|
 | N1 | 어시스턴트 언어 자동감지 | Cursor `whichlang-node` (agent-exec, `assistant-language-tracking`, 16-lang) | grep 0 | 유저 입력언어 감지→system-prompt `respond in <lang>` | 중 | S-M | 高 | ⬜ rec:흡수 |
-| N2 | Codex collaboration-mode | Codex 3390 webview `use-collaboration-mode`·`pending-request-item-panel` | multiagent 있으나 collab UX 별개 | 실시간 다자 협업 턴 + 승인대기 패널 | 중 | M | 中 | ⬜ rec:content-diff 후 |
+| N2 | Codex collaboration-mode | Codex 3390 `app-server-manager-signals` webview: `collaborationMode`·`handoff`/`handoffId`·`pendingRequestCount` (jun-09 signal-level 확인) | quanta `handoff`은 LLM provider retry routing(`codex-spec-router`)뿐 — 멀티에이전트 턴 핸드오프 아님 | **에이전트↔사용자 턴 핸드오프(handoffId) + pending-request 큐** 추적 | 중 | M | 中-高 | ⬜ rec:흡수검토(북극성 정렬) |
 | N3 | Codex appgen 앱생성 | Codex 3390 webview `appgen-page/share-dialog/access-mode` | 전무 | 배포가능 앱 생성 surface | 저-중 | L | 中 | ⬜ rec:defer |
 | N4 | `/doctor` 환경 진단 | CC `_cli-symbols.txt` `/doctor` | slash 부재 | env/config/연결성/MCP 헬스 1샷 진단 | 중 | S | 高 | ⬜ rec:흡수 |
 | N5 | `/catch-up` 세션간 변경요약 | CC `/catch-up` | 부재 | 마지막 세션 이후 repo/대화 변경 요약 | 저-중 | S-M | 中 | ⬜ |
@@ -69,6 +69,26 @@ CC UI 토글: `showThinkingSummaries`·`showTurnDuration`·`showMessageTimestamp
 
 ## §F 3바퀴 워크플로우 결과 (도착 시 병합)
 
-> `competitor-absorption-r3` (jun-09, R1 딥리드 webview content-level + R2 grep-verify + R3 completeness) 결과는 도착 후 여기 병합. §A/§B와 dedup된 **추가 신규 후보**만.
->
-> _(pending)_
+`competitor-absorption-r3` 워크플로우: R1이 10 후보 산출(cursor/cc-ide/claude-desktop finder 성공) → R2 verify는 **전부 throttle 전멸** → 트랜스크립트서 10개 회수 후 **메인루프서 직접 grep-verify**(jun-09). **9/10 진짜 gap 확인**(전부 §A/§B와 비중복, 새 영역). Codex finder(webview collab-appgen/codex-rs novel/cc-cli)는 socket-close+throttle로 사망 → **Codex 깊은 content-diff는 여전히 TODO**(§G).
+
+| # | 후보 | type | 출처 evidence | quanta gap (grep 확인) | ROI | effort | conf | 결정 |
+|---|---|---|---|---|---|---|---|---|
+| W1 | DXT 확장 호환성 매트릭스 게이트 | enh | claude-desktop DXT runtime `compatibility`(runtimes/nodeVersion/pythonVersion) | shallow — `src/plugin-isolation/dxt-loader.ts` DxtManifestSchema에 `compatibility` 필드 없음 | 고 | M | 高 | ⬜ |
+| W2 | 확장 코드서명 인증서체인 검증 | new | claude-desktop signed/self-signed/unsigned + x509 chain | absent — `verifySignature/x509/codeSign` grep 0 (plugin-isolation/skill) | 중 | L | 高 | ⬜ rec:보안가치 |
+| W3 | org-스코프 확장 allow/blocklist + can_install (원격+TTL) | enh | claude-desktop 원격 org allowlist + 암호화캐시 TTL | shallow — `marketplace-policy.ts`는 정적 exact-match만(fetch/remote/TTL 없음) | 중 | M | 高 | ⬜ |
+| W4 | @-멘션 라이브 외부UI 윈도우→스크린샷 | new | claude-desktop 멀티모달 컨텍스트 주입 | absent — 멘션리졸버는 file/symbol/skill/plugin/folder만 | 저 | L | 中 | ⬜ |
+| W5 | **DAP 디버거 제어 도구군** | new | CC-IDE `set_breakpoint/step/evaluate/get_stack_trace/get_variables/get_scopes/continue/pause` | absent — `breakpoint/stack_trace/step_over` grep 0, `src/tool/debug*` 없음 | 중 | L | 高 | ⬜ rec:고유가치 |
+| W6 | **Jupyter live-kernel 셀 도구**(실행/편집) | new | CC-IDE `execute_cell/get_cells/add_cell/str_replace_cell/get_cell_output/interrupt` (stable cell IDs) | shallow — ipynb READ만(`src/tool/read/ipynb.ts`), EDIT/EXECUTE 불가 | 중 | L | 高 | ⬜ rec:흡수(NotebookEdit defer 대체+실행) |
+| W7 | workspace python venv/conda auto-activation | enh | CC-IDE 도구실행 전 `VIRTUAL_ENV`+PATH prepend | ⚠️ **possibly-present** — `VIRTUAL_ENV` grep 히트(local-env selection?) — 재검증 필요 | 저 | S | 低 | ⬜ rec:기존 local-env와 중복확인 |
+| W8 | agent-authored 인터랙티브 canvas (.canvas.tsx) | enh | Cursor `cursor/canvas` authoring SDK | shallow — quanta canvas는 read-ONLY(`tool.diff`/`context.usage` 렌더만), 작성 불가 | 중 | L | 高 | ⬜ |
+| W9 | per-environment rule scoping | enh | Cursor `environments`/`disabled_environments`/`attach_to_background_agents` | absent — glob-rules는 `globs`/`alwaysApply`/`description`만 | 저 | S | 高 | ⬜ |
+| W10 | `suggest_next_prompt` 도구 | new | Cursor agent-suggested 다음 프롬프트 | absent — `suggestNextPrompt` grep 0 | 저 | S | 高 | ⬜ |
+
+> **W5/W6 주목:** DAP 디버거 + Jupyter 실행은 quanta가 전혀 없는 **새 도구 패밀리**(§C의 NotebookEdit defer를 실행까지 포함해 대체). W1/W2/W3은 plugin/확장 보안·거버넌스 강화.
+
+## §G 미완 — Codex deep content-diff (throttle TODO)
+
+> 흡수-fleet의 Codex finder(`codex-webview-collab-appgen`/`codex-rs-novel-tools`/`cc-cli-deep`)가 socket-close + 지속 throttle로 **3회 연속 사망**. inline 보강(jun-09):
+> - **N2 collaboration-mode = signal-level 확인됨**: webview `app-server-manager-signals`서 `collaborationMode`·`handoff`/`handoffId`·`pendingRequestCount` 식별 → 메커니즘 = **턴 핸드오프 + 펜딩요청 큐**(quanta의 `handoff`=provider retry routing과 무관). conf 中→中-高.
+> - **N3 appgen / N12 telepathy = 여전히 미확정**(minified webview/symbol 레벨만, 깊은 동작 미해독).
+> - **TODO(throttle 해제 시):** `competitor-absorption-r3` 재개(`resumeFromRunId: wf_68d59202-771` — 성공한 cursor/cc-ide/desktop finder는 캐시재사용) 또는 Codex webview/codex-rs를 메인루프서 직접 content-read.

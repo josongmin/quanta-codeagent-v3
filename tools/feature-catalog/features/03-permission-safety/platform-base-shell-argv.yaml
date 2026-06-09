@@ -1,5 +1,5 @@
 id: platform-base-shell-argv
-title: Platform-aware base shell argv — POSIX byte-identity + win32 loud-fail (P16)
+title: Platform-aware base shell argv — POSIX-first discovery ladder + dialect (P16 → ADR-0529)
 section: 3
 subsystem: 셸 실행 — 플랫폼별 base argv 결정점
 order: 236
@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "reachable from src/apps/cli/index.ts — `runtime/shell.ts` (runShell) imports buildBaseShellArgv + resolveWinShellMode; re-exported via runtime/index.ts barrel"
+    cli: "reachable from src/apps/cli/index.ts — `runtime/shell.ts` (runShell) imports buildBaseShellArgv + resolveWinShellMode (+ ADR-0529 `discoverShells`, called only on win32+auto); re-exported via runtime/index.ts barrel. ADR-0529 adds a POSIX-first discovery ladder (Git-Bash/WSL→PowerShell→cmd.exe) returning a `dialect` tag, all PURE-tested on darwin via injected ShellProbe (3R-audit-hardened: byte-identity covers auto/bash/pwsh; cmd/pwsh-exe fallbacks have teeth)."
     web: "pure platform→argv decision (no I/O, env read hoisted to wire site); no user-visible affordance on any surface"
 purpose: |
   P16 (jun-08 long-tail §P16) — `runShell` 의 base argv 를 플랫폼별로 고르는
@@ -40,10 +40,13 @@ purpose: |
 evidence:
   code:
     - src/runtime/shell-argv.ts
+    - src/runtime/shell.ts
   adrs:
+    - docs/decisions/0529-cross-platform-shell-execution.md
     - docs/decisions/0235-shell-snapshot-runshell-wire.md
   tests:
     unit:
+      - tests/unit/runtime/shell-discovery-ladder-hellgate.test.ts
       - tests/unit/runtime/win-shell-guard-hellgate.test.ts
     integration: []
     contract: []

@@ -765,6 +765,30 @@ export const useSendApprovalDecision = (
   )
 }
 
+/**
+ * Sends a `turn.cancel` command for the in-flight turn. Mirrors `useSendTurn`:
+ * a fresh `commandId` per send so the daemon dedupes at-least-once retries.
+ * No-op until the sessionId is known. The kernel performs the abort (see
+ * `src/kernel/session/__tests__/kernel-cancel.hellgate`); the UI had the wire
+ * type (`TurnCancelCommand`) but no sender — this closes that gap so the web
+ * user can STOP a running turn instead of being stuck until it finishes.
+ */
+export const useSendCancel = (
+  client: SessionClient,
+  sessionId: string | null,
+): (() => void) => {
+  return useCallback(() => {
+    if (sessionId === null) return
+    const cancel: SessionCommand = {
+      sessionId,
+      commandId: makeCommandId(),
+      issuedAt: new Date().toISOString(),
+      type: "turn.cancel",
+    }
+    client.send(cancel)
+  }, [client, sessionId])
+}
+
 const renderRejectedFrame = (frame: SessionRejectedFrame): string => {
   switch (frame.reason) {
     case "session_id_mismatch":
