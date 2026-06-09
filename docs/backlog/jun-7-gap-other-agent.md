@@ -55,13 +55,24 @@
 
 ## 🔴 우선순위 TOP (ROI×임팩트, 근거 확정)
 
-> **🟢 STATUS UPDATE (re-verified jun-08, 4병렬 어딧)** — 아래 jun-07 OPEN-8이 **전부 닫힘/스킵**: P1/P3/P4/P6/P7/P10 ✅ LANDED(jun-07~08 in-flight+misc-ticket closeout), P16(Windows·skip)·P17(NotebookEdit·user-skip). **추가 stale-flip → ✅ LANDED**: P9(`[1m]` context-1m.ts 풀배선)·§9.2(Anthropic service_tier 배선)·§10.1(agent-requested rule, ADR-0509)·§12.4(per-project MCP=central-config 흡수)·§23.2(reached+reset=ratelimit-notice 커버). **남은 IMPROVE(있는데 미완)**: P8(worktree 에이전트도구+edit-fence)·§20.4(FS owned/forbidden 강제화)·§12.2(MITM header-rewrite)·§11.6(/model picker)·§11.7(statusLine+색맹팔레트) → 계획 `docs/tickets/misc-jun-7/11-15-*.md`. **남은 NEW**: §11.1(/init)·§11.2(/agents fleet)·§11.4(Ctrl+B)·§22.3(reverse-MCP)·§1.3/1.5(MCP templates/Tasks)·§6.2-6.4(browser)·§9.4/9.5(reasoning summary/verbosity).
+> # 🟢 jun-09 DEFINITIVE RECONCILIATION (code-verified — this banner supersedes all inline §markers below)
 >
-> **STATUS (verified jun-07 src grep)** — P-list 검증마커는 각 §섹션 본문에 인라인(아래 §14–§26). 요약(15 verified flips/confirms):
-> **✅ LANDED (14)**: P5(tool_search) · P12(closeout-critic) · P13(=§26.5 model-window) · P14(=§26.10 read truncation) · P19(MCP annotations) · P20(MCP image) · P21(subagent system) · P22(named-agent load) · P23(grep -A/-B/-C) · P24(grep output_mode) · P25(glob gitignore/mtime) · P26(stream-json) · P27(ratelimit notice) · §26.1(tree-sitter chunking — jun-07 2nd-pass 배선). 또 §12.2 HTTPS-MITM body-scan(Node+Bun)·D1-D8 naive-impl 하든 8/8 FIXED.
-> **🔲 OPEN (8)**: P1(MCP proto 2025-06-18 그대로) · P3(Guardian assessor) · P4(auto-mode bypass) · P6(image downsample) · P7(중앙config/trust-gate) · P10(MCP SSE resume) · P16(bash -lc Windows) · P17(NotebookEdit). P18(corrupt-store)은 §13 소관(이번 검증범위 외).
-> **✅ LANDED 추가 (jun-7 후속)**: **P11(shell ANSI-strip)** — 이전 마커 stale였음: `stripAnsi`(ui-helper) 심볼만 grep해 OPEN 오판. 실제론 전용함수 `stripModelControlChars`(M4 jun-7; OSC/DCS/CSI/C0 strip + `\n`/`\t` 보존, ui-helper보다 강함)가 `bash/index.ts:312` `formatRunBody` + `:365` bg-completed 양 경로에 무조건 배선(게이트 없음). **P15(UTF-16/BOM)** — `read`가 BOM 기반(UTF-8/UTF-16 LE+BE) 결정적 감지로 UTF-16 텍스트를 binary 오분류 안 하고 매칭 TextDecoder로 디코드(13-case hellgate). §16.3 참조.
-> **PARTIAL (3)**: P2(skill 측 부분해소·plugin 측 strict 그대로) · P8(subagent worktree isolation 있음·Enter/ExitWorktree 도구 없음) · P9(compaction-window 해소·1m beta-header 미plumb).
+> **이 백로그는 사실상 종료됨.** jun-09에 전 §섹션을 실코드로 grep-대조한 결과: 이전 `🔲 OPEN`/`PARTIAL` 인라인 마커는 **대부분 jun-07~08 자라 STALE**(클로즈아웃 후 본문 미갱신). jun-09에 `🔲 OPEN (verified jun-07:` 마커 **33개를 코드확인 후 ✅ LANDED로 flip**. 각 섹션 본문에 jun-07 원본 evidence는 보존(forensics).
+>
+> **✅ 코드확인 LANDED (이전 마커 stale)** — 전 P-list + NEW/PARTIAL "missing-half" 거의 전부:
+> P1 MCP proto(2025-11-25 nego) · P2 manifest/skill codex-compat(`QUANTA_MANIFEST_COMPAT`) · P3 Guardian assessor(`ActionAssessment` 7-variant) · P4 auto-mode circumvention(`CircumventionTracker`) · P6 image downsample(`sipsImageDownsamplePort`) · P7 central-config+trust · P8 worktree 도구(`enterWorktreeTool`) · P9 `[1m]`/§9.2 service_tier · P10 MCP SSE resume(`lastEventId`) · §2.3 implicit-invocation · §2.5/1.6 marketplace-policy · §5.1 fast-apply(`QUANTA_FAST_APPLY_MERGE`) · §5.4 PR code-tour · §6.2-6.4 browser tabs/bbox/highlight(`browser_tab_*`/`browser_highlight`) · §6.5 listVoices · §7.2 co-change · §7.3 CI-finding · §8.3 dynamic_tools · §9.3 dual-window ratelimit · §9.4 reasoning-summary · §9.5 verbosity · §9.6 message-batches · §10.1 agent-requested rule(ADR-0509) · §10.6 memory routing-meta(`QUANTA_MEMORY_ROUTING`) · §11.1 /init · §11.2 /agents fleet · §11.3 vim · §11.4 Ctrl+B background · §11.6 /model picker · §11.7 statusLine+팔레트 · §12.1 central config · §12.2 MITM header-rewrite(`applyHeaderRules`) · §12.4 per-project MCP · §12.6 exclude_tmpdir · §12.7 otel headers · §13.1 corrupt-store 감지(`checkSessionStoreHealth`) · §20.4 FS ownership enforce(`QUANTA_FS_OWNERSHIP_ENFORCE`) · §22.3 reverse-MCP(`src/mcp/server.ts`+skybridge) · §4.3 side-agent attach-daemon(`src/apps/cli/attach/`) + 기존 ✅(P5/P11-P15/P19-P27/§26.x).
+>
+> **🔲 진짜 잔여 (의식적 defer — 본문 마커도 그대로):**
+> - **§16.5 NotebookEdit (P17)** — ipynb write 도구 부재. 노트북 유저층 확인되면. (= misc-jun-7 #10)
+> - **§17.2 Windows `bash -lc` (P16)** — darwin에서 테스트 불가, 플랫폼 수요 대기.
+> - **§13.2 crash-RESUME 영속 interrupted-turn 마커** — 🟡 built-but-not-fully-wired(§11.5 same-turn interrupt-restore는 LANDED+wired). jun-09 통합어딧 §13.2.
+> - **§6.6 네이티브 OS computer-use** — RFC-deferred(올바름, 최고 보안표면).
+> - **아키텍처 defer (cloud/team-shared half)**: §5.3 team-shared canvas · §22.4 agent-SDK 패키징 — local/in-process는 LANDED, 클라우드 절반은 배포-deferred(저ROI).
+> - **외부의존 차단**: Mantle SDK 어댑터(`@anthropic-ai/mantle-sdk` 미발행, jun-3-misc).
+>
+> **🟠 정직성 정정 (gap 아님, 단 over-claim 표기 유지):** §26.2/26.3 기본 embedder = FNV-hash bag-of-words(semantic 아님) + "8 embedder"는 4 real+stub. 기능은 동작하나 "semantic" 라벨 over-claim — 본문 그대로 둠.
+>
+> **🟦 jun-09 추가 흡수 후보 → `§27` (결정 대기):** 코퍼스 2026-06-01 refresh 신규 surface(Codex 3390/Cursor 3.5.33) + CC settings 123필드 field-diff로 발견한 **연동 안 된 후보 ~19개**를 §27에 결정대기 테이블로 적재(N1-N8 신규 · E1-E11 강화 · §27.3 저ROI토글 · §27.4 defer). 각 행 `결정` 칸=⬜미정/✅흡수/⏸defer/❌skip. throttle로 Codex/Desktop webview content-diff는 부분만 — 추가 패스 TODO(§27.5).
 
 | # | GAP | 카테고리 | 비용 | 임팩트 |
 |---|---|---|---|---|
@@ -110,12 +121,12 @@
 
 ## 1. MCP / 프로토콜
 
-### 1.1 [NEW-GAP] 프로토콜 버전 뒤처짐 — P1 — 🔲 OPEN (verified jun-07: `src/mcp/client.ts:46`+`isolated-client.ts:42`+`transports/http-sse.ts:36` 전부 `PROTOCOL_VERSION="2025-06-18"` 하드코딩 그대로; `supportedVersions`/`versionList`/`downgrade`/`2025-11-25` grep 0 in `src/mcp/`)
+### 1.1 [NEW-GAP] 프로토콜 버전 뒤처짐 — P1 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `src/mcp/client.ts:46`+`isolated-client.ts:42`+`transports/http-sse.ts:36` 전부 `PROTOCOL_VERSION="2025-06-18"` 하드코딩 그대로; `supportedVersions`/`versionList`/`downgrade`/`2025-11-25` grep 0 in `src/mcp/`)
 - **경쟁사**: Cursor SDK `cursor/extensions/cursor-mcp/dist/main.js:9322-9323` → `const i="2025-11-25", s=[i,"2025-06-18","2025-03-26","2024-11-05","2024-10-07"]`. Codex `codex/_codex-rs-0.135-symbols.txt` → `2025-11-25`(×2)+fallback.
 - **quanta**: `src/mcp/client.ts:39`·`src/mcp/isolated-client.ts:41`·`src/mcp/transports/http-sse.ts:36` → `PROTOCOL_VERSION="2025-06-18"` 하드코딩. `src/mcp/capabilities/default-negotiator.ts`는 capability만 nego, **버전 리스트/다운그레이드 없음**.
 - **델타**: 둘 다 `2025-11-25`(최신)인데 quanta는 한 버전 뒤 + nego 없음. `related-task` _meta·URL-elicitation 등 신기능 막힘. **비용 저(문자열+nego 분기)/interop 고.**
 
-### 1.2 [NEW-GAP] SSE resumption 없음 — P10 — 🔲 OPEN (verified jun-07: `Last-Event-ID`/`lastEventId`/`resume` grep 0 in `src/mcp/transports/http-sse.ts`)
+### 1.2 [NEW-GAP] SSE resumption 없음 — P10 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `Last-Event-ID`/`lastEventId`/`resume` grep 0 in `src/mcp/transports/http-sse.ts`)
 - **경쟁사**: Codex `StreamableHttpClientWorkerresume`, resume/inconsistent-state 처리.
 - **quanta**: `src/mcp/transports/http-sse.ts` — POST+GET-SSE+DELETE+`Mcp-Session-Id`는 있으나 `Last-Event-ID`/`lastEventId`/resume grep 0. 자체문서 "spec rev 2025-03-26".
 - **델타**: SSE 끊긴 사이 서버발 메시지 유실. **비용 저-중/중.**
@@ -146,27 +157,27 @@
 
 ## 2. Skills / Plugins / Manifests (interop)
 
-### 2.1 [ACTUAL-GAP] 플러그인 manifest가 실제 codex plugin.json 거부 — P2 🛑 — 🔲 OPEN (verified jun-07: `src/skill/plugin-manifest.ts:106` `skills: z.array(z.string()).optional()` + `:109 .strict()` → string `skills` 거부·`repository` 미인식 그대로)
+### 2.1 [ACTUAL-GAP] 플러그인 manifest가 실제 codex plugin.json 거부 — P2 🛑 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `src/skill/plugin-manifest.ts:106` `skills: z.array(z.string()).optional()` + `:109 .strict()` → string `skills` 거부·`repository` 미인식 그대로)
 - **경쟁사**: `userdata/codex/skills/.system/plugin-creator/references/plugin-json-spec.md`. 실제 plugin(spreadsheets)은 `skills:"./skills/"`(**string**), top-level `repository`.
 - **quanta**: `src/skill/plugin-manifest.ts` `.strict()` 스키마 — `skills: z.array(z.string())`라 string 거부(`Expected array, received string`), `repository` 미인식(`Unrecognized key`). `interface` 블록 14필드는 패리티.
 - **델타**: **실제 codex plugin.json을 safeParse하면 거부됨**(경험적 증명). "codex 플러그인 흡수"라면서 못 읽음. (`hooks`/`apps` 필드는 코퍼스 plugin.json에 실재 안함 — 스카우팅 오보고.) **비용 저/interop 고.**
 
-### 2.2 [ACTUAL-GAP] 스킬 frontmatter가 실제 SKILL.md 거부 + 도구 화이트리스트 무음드롭 — P2 🛑 — 🔲 OPEN (verified jun-07: `src/skill/skill-frontmatter.ts:68-69` `userInvocable: z.boolean()` Required + `allowedTools: z.array(...)` (camelCase, list-form) + `:86 .strict()` 그대로 — kebab `allowed-tools`/`user-invocable` 블록리스트 미지원. ADR-0457가 `argument-hint`/`metadata`만 추가했고 kebab 도구키 미추가. `src/skill/discover.ts:155` `declaredAllowedTools(data.allowedTools)` = camelCase만 읽음)
+### 2.2 [ACTUAL-GAP] 스킬 frontmatter가 실제 SKILL.md 거부 + 도구 화이트리스트 무음드롭 — P2 🛑 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `src/skill/skill-frontmatter.ts:68-69` `userInvocable: z.boolean()` Required + `allowedTools: z.array(...)` (camelCase, list-form) + `:86 .strict()` 그대로 — kebab `allowed-tools`/`user-invocable` 블록리스트 미지원. ADR-0457가 `argument-hint`/`metadata`만 추가했고 kebab 도구키 미추가. `src/skill/discover.ts:155` `declaredAllowedTools(data.allowedTools)` = camelCase만 읽음)
 - **경쟁사**: `userdata/codex/skills/.system/*/SKILL.md` — `allowed-tools:` YAML **블록리스트**(`- Read`), kebab `user-invocable`.
 - **quanta**: `src/skill/skill-frontmatter.ts` strict — 블록리스트 `allowed-tools` 파싱 실패("empty value"), `userInvocable` Required 실패. `src/skill/discover.ts:155` `declaredAllowedTools(data.allowedTools)` = **camelCase만 읽음** → codex kebab `allowed-tools`/`user-invocable` **무음 드롭**.
 - **델타**: 실제 codex SKILL.md 못 로드 + 도구 화이트리스트/user-invocable 손실. **비용 저/interop 고.**
 
-### 2.3 [NEW-GAP] `allow_implicit_invocation` 스킬 정책 플래그 없음 — 🔲 OPEN (verified jun-07: `allow_implicit_invocation`/`implicitInvocation`/`allowImplicit` grep 0 in `src/skill/`)
+### 2.3 [NEW-GAP] `allow_implicit_invocation` 스킬 정책 플래그 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `allow_implicit_invocation`/`implicitInvocation`/`allowImplicit` grep 0 in `src/skill/`)
 - **경쟁사**: `userdata/codex/skills/.system/skill-creator/references/openai_yaml.md` → `policy.allow_implicit_invocation: false` (기본 context 미주입, `$skill` 명시호출만).
 - **quanta**: `src/skill/skill-frontmatter.ts` — `allowedTools`는 있으나 주입-게이팅 정책 없음(grep 0). 전 스킬 기본주입.
 - **델타**: 스킬 수 늘수록 프롬프트 토큰 bloat, opt-out 없음. **비용 저(boolean 1)/ROI 고.** (backlog:293 명시되나 미구현.)
 
-### 2.4 [PARTIAL] plugin manifest `hooks`/`apps`/`repository` 포인터 — 🔲 OPEN (verified jun-07: `src/skill/plugin-manifest.ts:109 .strict()` 그대로 — `repository`/`hooks`/`apps` optional 필드 미추가, 2.1과 동일 루트)
+### 2.4 [PARTIAL] plugin manifest `hooks`/`apps`/`repository` 포인터 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `src/skill/plugin-manifest.ts:109 .strict()` 그대로 — `repository`/`hooks`/`apps` optional 필드 미추가, 2.1과 동일 루트)
 - **경쟁사**: plugin-json-spec.md — top-level `repository`, (claude 쪽 hooks 포인터).
 - **quanta**: `src/skill/plugin-manifest.ts` `.strict()`라 optional 필드도 없으면 거부.
 - **델타**: 2.1과 연동 — optional 필드 추가 필요. **ROI 중.**
 
-### 2.5 [NEW-GAP] marketplace.json 정책게이팅 — 🔲 OPEN (verified jun-07: `marketplace` grep 0 in `src/`; connector catalog만 존재, install/auth 정책 게이팅 없음)
+### 2.5 [NEW-GAP] marketplace.json 정책게이팅 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `marketplace` grep 0 in `src/`; connector catalog만 존재, install/auth 정책 게이팅 없음)
 - **경쟁사**: `userdata/codex/config.toml`(`[marketplaces.openai-bundled]`, `[plugins."browser@openai-bundled"] enabled=true`) + plugin-json-spec.md `policy.installation∈{NOT_AVAILABLE,AVAILABLE,INSTALLED_BY_DEFAULT}`·`authentication∈{ON_INSTALL,ON_USE}`.
 - **quanta**: marketplace grep 0. connector catalog는 있으나 install/auth 정책 게이팅 없음.
 - **델타**: 플러그인 카탈로그+정책 게이팅 없음. **ROI 중(배포-deferred).**
@@ -177,12 +188,12 @@
 
 ## 3. Safety / Permission / Sandbox
 
-### 3.1 [OVERCLAIMED→GAP] Guardian per-action-class assessor 없음 — P3 🔴 — 🔲 OPEN (verified jun-07: `GuardianAssessmentAction`/`AssessmentAction`/`action_class`/`decision_source` grep 0 in `src/agent/`+`src/permission/`; `src/agent/reviewer-port.ts`는 단일 opaque approve/deny reviewer 그대로)
+### 3.1 [OVERCLAIMED→GAP] Guardian per-action-class assessor 없음 — P3 🔴 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `GuardianAssessmentAction`/`AssessmentAction`/`action_class`/`decision_source` grep 0 in `src/agent/`+`src/permission/`; `src/agent/reviewer-port.ts`는 단일 opaque approve/deny reviewer 그대로)
 - **경쟁사**: `codex/_codex-rs-0.135-symbols.txt` — `enum GuardianAssessmentAction` **6 variant**(`Execve`(4필드)·`NetworkAccess`(4)·`ApplyPatch`(2)·`Command`(3)·`McpToolCall`(5: tool_name/connector_id/connector_name/tool_title)·`RequestPermissions`(2)) + `GuardianAssessmentEvent`(**11요소**: target_item_id/risk_level/user_authorization/rationale/decision_source) + `guardian_subagent`(전용 model+developer_instructions+timeout) + `GuardianDeniedAction` 오버라이드 상태.
 - **quanta**: `src/agent/reviewer-port.ts:43-48`(guardian은 3 reviewer tier 중 1, 기본 `unavailable`) + `src/agent/tier1/reviewer-subagent.ts:13-22,126-157`(자유JSON `{outcome:guardian_approved|denied, rationale, riskLevel?}` = **opaque approve/deny 1개**). `src/apps/cli/repl/reviewer-policy.ts:47-53`(on-request+workspace-write일 때만 선택).
 - **델타**: Codex는 **모든 액션을 6 클래스로 자동 구조화 assessment + typed event(risk/authorization/decision_source)** = 직교 차원. quanta는 단일 승인차원의 selectable reviewer 1개, `riskLevel`은 조잡한 `isReadOnly?low:high`. "same gate"는 거짓. **비용 중/보안 고.**
 
-### 3.2 [ACTUAL-GAP] auto-mode 유저룰 오버레이 + tool-switch 우회탐지 — P4 🔴 — 🔲 OPEN (verified jun-07: `soft_deny`/`hard_deny`/`autoMode`/`tool_switch`/`circumvent` grep 0 in `src/`; classifier taxonomy+2-stage+denial-limits 패리티만 그대로)
+### 3.2 [ACTUAL-GAP] auto-mode 유저룰 오버레이 + tool-switch 우회탐지 — P4 🔴 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `soft_deny`/`hard_deny`/`autoMode`/`tool_switch`/`circumvent` grep 0 in `src/`; classifier taxonomy+2-stage+denial-limits 패리티만 그대로)
 - **경쟁사**: `claude-code-cli/_cli-symbols.txt` — `autoMode` zod `{allow,soft_deny,hard_deny,deny,environment}` each `array(string).optional()` + 리터럴 `"$defaults"` 위치상속 + 머지코드(`_/q/K/O` 버킷). **우회탐지**: "routing around a deny rule by switching tools" — Bash가 Edit/Write deny 룰 대상 파일을 쓰는 것 잡기(`sed -i`/`python -c`/heredoc/`cat >`).
 - **quanta**: `src/permission/classifier.ts` — verbatim taxonomy + 2-stage(`evaluate()` 246-272) + denial-limits(`{maxConsecutive:3,maxTotal:20}` :161)는 패리티. 단 `soft_deny`/`hard_deny`/`$defaults`/`autoMode`/circumvent/tool_switch grep **0**. 프롬프트는 frozen 상수, 유저 오버레이/우회탐지 없음.
 - **델타**: 운영자가 환경별 AFK 경계 튜닝 불가 + tool-switch 우회 못잡음. **비용 저-중/보안 고.**
@@ -208,7 +219,7 @@
 - **quanta**: `subagent_send_message`(`src/tool/subagent-mailbox/index.ts:133`, **poll-based**)·`subagent_read_messages`·`followup_task`(`src/subagent/introspect-tools.ts`+`turn-wake.ts`, 패리티)·`list_agents`(패리티). **누락**: agent-to-agent `wait_agent`(가장 가까운 `subagent_await`는 bg-fork 핸들 대기), runtime `resume_agent`(spawn시 `priorAttempt` 요약만 `subagent-runner.ts:65`), `fork_turns`(`subagent_fork`는 background detach지 N턴 seed 아님; grep 0).
 - **델타**: 메일박스 양방향은 맞으나 poll-first(push 아님) + wait/resume/fork_turns 부재. **ROI 중.**
 
-### 4.3 [NEW-GAP(embedded)] side-agent는 in-process registry지 process-daemon fleet 아님 — 🔲 OPEN (verified jun-07: `child_process`/`socket`/`attach`/`respawn`/`worktree` grep 0 in `src/side-agent/registry.ts` — in-process `Map` supervise loop 그대로)
+### 4.3 [NEW-GAP(embedded)] side-agent는 in-process registry지 process-daemon fleet 아님 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `child_process`/`socket`/`attach`/`respawn`/`worktree` grep 0 in `src/side-agent/registry.ts` — in-process `Map` supervise loop 그대로)
 - **경쟁사**: `claude-code-cli/_cli-symbols.txt` — `tengu_bg_agent_action`(24×)·`_cc-daemon-detach`·`job_attach`/`job_reply`·`respawnJob`·`fleet_view_open`·`orphan_recovery_failed`·`job_attach_crash_loop`·`agent_namer`·per-job `timeline.jsonl`·`--worktree`. **분리 OS 프로세스 attach/detach/respawn/crash-recovery.**
 - **quanta**: `src/side-agent/registry.ts` — **in-process** `Map<string,DaemonState>` supervise loop. `child_process|socket|attach|respawn|worktree` grep **0**. 부모 프로세스와 함께 죽음.
 - **델타**: coordination 자체(`src/subagent/coordination/` broker+DAG+barrier)는 Claude보다 우위. 단 **프로세스-레벨 daemon fleet**(attach/respawn/crash-recovery)은 부재. **ROI 중.**
@@ -222,7 +233,7 @@
 
 ## 5. Tools — Edit / Apply-patch / Generation
 
-### 5.1 [ACTUAL-GAP] Model-based fast-apply 없음 — 🔲 OPEN (verified jun-07: `Morph`/`Relace`/`FastApplyModel`/`fast_apply_model` grep 0 in `src/`; `src/tool/types.ts:556` `FastApplyFallbackSeam`은 V4A patch 재방출 seam (다른 메커니즘))
+### 5.1 [ACTUAL-GAP] Model-based fast-apply 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `Morph`/`Relace`/`FastApplyModel`/`fast_apply_model` grep 0 in `src/`; `src/tool/types.ts:556` `FastApplyFallbackSeam`은 V4A patch 재방출 seam (다른 메커니즘))
 - **경쟁사**: Cursor `cursor/.../workbench.desktop.main.js` — `FAST_APPLY`/`fast_apply_model_type`/`FastApplyModel`(Morph/Relace)+`speculative` decoding. **전용 fast-apply 모델**이 lazy/elided 편집(`// ... existing ...`)을 받아 전체 파일 rewrite.
 - **quanta**: `src/tool/types.ts:542` `FastApplyFallbackSeam` = 모델이 수정된 **V4A patch** 재방출 → deterministic applier 재실행.
 - **델타**: 같은 이름, **다른 메커니즘** — 모델-기반 diff-rewriter 없음. **ROI 고/비용 고(fast-apply 모델 통합).** 기존 seam 재사용 가능.
@@ -237,7 +248,7 @@
 - **quanta**: `src/artifact/registry.ts` — **session-local in-memory** register/get/list/destroy + `quanta-artifact://` URL. wired(`agent-arg-builder.ts:764` gated `QUANTA_ARTIFACT_STORE`).
 - **델타**: 로컬 CRUD는 건전하나 Cursor의 협업 shared-canvas와 다른(더 단순한) 것. **ROI 저. + 메모리 provenance 수정 필요.**
 
-### 5.4 [PARTIAL] gh PR code-tour 없음 — 🔲 OPEN (verified jun-07: `code-tour`/`CodeTour` grep 0 in `src/tool/gh/`; view/list/create/comment/blame/review-diff 등 충실하나 code-tour 부재)
+### 5.4 [PARTIAL] gh PR code-tour 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `code-tour`/`CodeTour` grep 0 in `src/tool/gh/`; view/list/create/comment/blame/review-diff 등 충실하나 code-tour 부재)
 - **경쟁사**: Cursor `StreamCodeTourRequest`+`PullRequestReference`+`PR_CODE_TOUR_CACHE`+`CodeTourDoneReason` (PR diff의 ordered 내러티브 walkthrough).
 - **quanta**: `src/tool/gh/` — view/list/create/comment/blame/review-diff/auto-merge/labels/resolve-thread/open 충실. code-tour 없음.
 - **델타**: PR 가이드 워크스루 부재. **ROI 저-중(comprehension UX).**
@@ -248,27 +259,27 @@
 
 ## 6. Tools — Browser / Vision / Multimodal
 
-### 6.1 [NEW-GAP] 대용량 이미지 downsample 없음(reject) — P6 — 🔲 OPEN (verified jun-07: `downsample`/`resize`/`scale`/`sharp`/`jimp`/`image_detail` grep 0 in `src/tool/image/` — 5MB 초과 단순 reject 그대로)
+### 6.1 [NEW-GAP] 대용량 이미지 downsample 없음(reject) — P6 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `downsample`/`resize`/`scale`/`sharp`/`jimp`/`image_detail` grep 0 in `src/tool/image/` — 5MB 초과 단순 reject 그대로)
 - **경쟁사**: `codex-cli/_cli-symbols.txt` `view_image` — `image_detail` 힌트("`high` for default resized / `original` when preserved") + `supports_image_detail_original`. 큰 이미지 resize.
 - **quanta**: `src/tool/image/read.ts:139-142`(+read_image_url) — 5MB 초과 시 **단순 reject**. `downsample|resize|scale|sharp|jimp` grep 0.
 - **델타**: 6MB 스크린샷이 quanta에선 사용불가(거부), Codex는 auto-resize. **포터블/ROI 중-고.**
 
-### 6.2 [NEW-GAP] browser_tabs (멀티탭) 없음 — 🔲 OPEN (verified jun-07: `browser_tabs`/`new.*tab` grep 0 in `src/tool/browser/`+`src/browser/` — single-page 그대로)
+### 6.2 [NEW-GAP] browser_tabs (멀티탭) 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `browser_tabs`/`new.*tab` grep 0 in `src/tool/browser/`+`src/browser/` — single-page 그대로)
 - **경쟁사**: Cursor `workbench.desktop.main.js` `browser_tabs` action enum = list/new/close/select.
 - **quanta**: `src/browser/port.ts` — single-page. `browser_tabs|new.tab` grep 0.
 - **델타**: OAuth 팝업/target=_blank/두 페이지 비교 불가. **포터블/ROI 중.**
 
-### 6.3 [NEW-GAP] browser_get_bounding_box 없음 — 🔲 OPEN (verified jun-07: `bounding_box`/`boundingBox` grep 0 in `src/tool/browser/`+`src/browser/`)
+### 6.3 [NEW-GAP] browser_get_bounding_box 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `bounding_box`/`boundingBox` grep 0 in `src/tool/browser/`+`src/browser/`)
 - **경쟁사**: Cursor — ref/selector로 element bounding box 반환.
 - **quanta**: `src/tool/browser/index.ts` — `browser_mouse_click_xy`(좌표클릭)는 있으나 box 조회 없음.
 - **델타**: snapshot ref가 못잡는 canvas/shadow-DOM 타겟 좌표 계산 불가. **포터블/ROI 중.**
 
-### 6.4 [NEW-GAP] browser_highlight 없음 — 🔲 OPEN (verified jun-07: `browser_highlight` grep 0 in `src/tool/browser/`+`src/browser/`)
+### 6.4 [NEW-GAP] browser_highlight 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `browser_highlight` grep 0 in `src/tool/browser/`+`src/browser/`)
 - **경쟁사**: Cursor — ref로 element 시각 하이라이트(screenshot 전 annotation).
 - **quanta**: 부재.
 - **델타**: screenshot-grounding 개선용. **포터블/ROI 저-중.**
 
-### 6.5 [PARTIAL] listVoices 동적 발견 없음 — 🔲 OPEN (verified jun-07: `listVoices`/`RealtimeVoicesList` grep 0 in `src/realtime/` — `voice?:string` 받으나 카탈로그 쿼리 없음)
+### 6.5 [PARTIAL] listVoices 동적 발견 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `listVoices`/`RealtimeVoicesList` grep 0 in `src/realtime/` — `voice?:string` 받으나 카탈로그 쿼리 없음)
 - **경쟁사**: Codex `RealtimeVoicesList`/`realtime_conversation_list_voices_response`.
 - **quanta**: `src/realtime/voice-session/port.ts:62` — `voice?:string` 받으나 `listVoices()` 없음.
 - **델타**: 하드코딩 voice명 vs 쿼리 카탈로그. **gated/ROI 저.**
@@ -284,17 +295,17 @@
 
 ## 7. Git / VCS
 
-### 7.1 [NEW-GAP] Worktree isolation mode + Enter/ExitWorktree 도구 — P8 — 🔲 OPEN (verified jun-07: `git_worktree`/`enter_worktree`/`EnterWorktree` grep 0 in `src/tool/`; `src/runtime/worktree.ts` `withWorktree()` host-orchestrated만, 에이전트 도구/edit-fencing 없음)
+### 7.1 [NEW-GAP] Worktree isolation mode + Enter/ExitWorktree 도구 — P8 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `git_worktree`/`enter_worktree`/`EnterWorktree` grep 0 in `src/tool/`; `src/runtime/worktree.ts` `withWorktree()` host-orchestrated만, 에이전트 도구/edit-fencing 없음)
 - **경쟁사**: `claude-code-cli/_cli-symbols.txt` — `EnterWorktree`/`ExitWorktree`는 **에이전트 도구**(`hq7={..."EnterWorktree"...}`, `m76="ExitWorktree"`), isolation mode("'worktree'(default) blocks Edit/Write in main checkout until EnterWorktree") + `createAgentWorktree`/`getAgentWorktreeChanges`/`copyWorktreeIncludeFiles`/`cleanupStaleAgentWorktrees`/sparse-checkout(`worktreeBaseRef`).
 - **quanta**: `src/runtime/worktree.ts:133` `withWorktree()` — host-orchestrated(session fork/bg-job)만, **에이전트 도구 아님**(`git_worktree`/`enter_worktree` grep 0), main-checkout edit-fencing mode 없음, sparse-checkout/include-file 없음.
 - **델타**: 모델이 mid-session worktree 격리 opt-in 불가 + main 쓰기 펜싱 없음. 기판(`withWorktree`)은 있음. **비용 중/동시편집 안전 고.**
 
-### 7.2 [NEW-GAP] co-change / git-graph related-files 없음 — 🔲 OPEN (verified jun-07: `co-change`/`related-files`/`git-graph` grep 0 in `src/tool/git/`; `git_churn` 단일파일 빈도만)
+### 7.2 [NEW-GAP] co-change / git-graph related-files 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `co-change`/`related-files`/`git-graph` grep 0 in `src/tool/git/`; `git_churn` 단일파일 빈도만)
 - **경쟁사**: Cursor `workbench.desktop.main.js` — `GetGitGraphRelatedFiles`/`getGitGraphRelatedFiles`/`_updateRelatedFileSuggestions`/`chatInputRelatedFilesContrib` (git 히스토리상 함께 변경되는 파일 → context 제안).
 - **quanta**: `src/tool/git/churn.ts:38` `git_churn` — **단일파일** 변경빈도(`rankChurn`→`{file,count}[]`). co-occurrence pair 없음(`co.?change|related.?files|git.?graph` grep 0). backlog(`jun-02-union-audit`)에 "co-change feed" 명시됨.
 - **델타**: churn(많이 바뀌는 파일)은 있으나 co-occurrence("이거랑 같이 바뀌는 파일")는 없음 — retrieval 가치는 후자. **비용 저(read-only `git log --name-only`)/ROI 중.**
 
-### 7.3 [PARTIAL] 구조화 CI-investigation finding 도구 — 🔲 OPEN (verified jun-07: `RecordCiInvestigation`/`CiFinding` grep 0 in `src/`; CI는 prose 스킬 `loop-on-ci/SKILL.md`만)
+### 7.3 [PARTIAL] 구조화 CI-investigation finding 도구 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `RecordCiInvestigation`/`CiFinding` grep 0 in `src/`; CI는 prose 스킬 `loop-on-ci/SKILL.md`만)
 - **경쟁사**: Cursor `RecordCiInvestigationFinding`/`RecordCiInvestigationFindingsToolCall`/`CI_INVESTIGATION_FINDINGS`/`RecordCiInvestigationOverall` (CI 실패 조사 중 finding을 구조화 기록하는 도구).
 - **quanta**: CI 처리는 prose 스킬 `loop-on-ci/SKILL.md`, 구조화 finding-record 도구 없음.
 - **델타**: 자유텍스트 vs 타입드 finding loop. **ROI 저-중.**
@@ -320,7 +331,7 @@
 - **quanta**: `src/session/types.ts`(10필드 SessionMeta) — `forkedFromId`✓(jun-06)+git fingerprint(3). 누락: agent_nickname·dynamic_tools·originator·thread_source·model_provider·cli_version. `thread_name≈title`.
 - **델타**: forked_from_id는 추가됐으나 6+ 필드 더 누락. **ROI 저-중(replay 결정성).**
 
-### 8.3 [PARTIAL] dynamic_tools 세션 기록 없음 — 🔲 OPEN (verified jun-07: `dynamic_tools`/`dynamicTools`/`thread_dynamic_tools` grep 0 in `src/session/`)
+### 8.3 [PARTIAL] dynamic_tools 세션 기록 없음 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `dynamic_tools`/`dynamicTools`/`thread_dynamic_tools` grep 0 in `src/session/`)
 - **경쟁사**: Codex `session_meta.dynamic_tools:[{namespace,name,description,input_schema,defer_loading}]` + `thread_dynamic_tools` 테이블.
 - **quanta**: `src/session/envelope.ts` — base 외 세션별 도구셋 미기록(grep 0).
 - **델타**: MCP/skill 도구 가변 세션의 결정적 replay 불가. **ROI 저(+5.1 deferred tools와 연관).**
@@ -341,7 +352,7 @@
 - **quanta**: OpenAI-Responses에만 세팅(`src/llm/openai-responses-wire.ts:153`,`factory.ts:131`). `toAnthropicCreateParams`(`src/llm/anthropic-messages-codec.ts:184-205`)엔 `service_tier` 없음(grep 0). `QUANTA_SERVICE_TIER` 놉은 이미 존재.
 - **델타**: Anthropic priority-tier(저지연) 못씀. **비용 저(~3줄)/ROI 중.**
 
-### 9.3 [NEW-GAP] account dual-window rate-limit snapshot — 🔲 OPEN (verified jun-07: `used_percent`/`window_minutes`/`RateLimitWindow` grep 0 in `src/llm/ratelimit-snapshot/`; per-request HTTP 헤더만)
+### 9.3 [NEW-GAP] account dual-window rate-limit snapshot — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `used_percent`/`window_minutes`/`RateLimitWindow` grep 0 in `src/llm/ratelimit-snapshot/`; per-request HTTP 헤더만)
 - **경쟁사**: Codex `RateLimitSnapshot`(primary/secondary `RateLimitWindow`·`used_percent`·`window_minutes`·`Credit`/`UsageLimitReached`) — ChatGPT-구독 모델("5h window 82%, weekly 40%").
 - **quanta**: `src/llm/ratelimit-snapshot/parse.ts` — per-request HTTP 헤더만(`anthropic-ratelimit-*`/`x-ratelimit-*`). account-level dual-window/percent/credits 없음(`used_percent|window_minutes` grep 0).
 - **델타**: quanta가 chatgpt-oauth 출시했으니 "5h 윈도우 80%" 넛지 직접 관련. **ROI 중.**
@@ -351,12 +362,12 @@
 - **quanta**: summary 델타는 READ(`src/llm/openai-responses-wire.ts:531`), 요청 body는 `reasoning:{effort}`만(:343) — `summary:"auto"` 미전송.
 - **델타**: read-path 완비, write-path 부재(계정 기본값 의존). **ROI 중(1 optional 필드).**
 
-### 9.5 [NEW-GAP] `verbosity` + effort `xhigh` — 🔲 OPEN (verified jun-07: `verbosity`/`xhigh` grep 0 in `src/llm/`)
+### 9.5 [NEW-GAP] `verbosity` + effort `xhigh` — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `verbosity`/`xhigh` grep 0 in `src/llm/`)
 - **경쟁사**: Codex `support_verbosity`/`default_verbosity`(GPT-5 `text.verbosity` low/med/high) + effort `xhigh`(`lowmediumxhigh`).
 - **quanta**: verbosity grep 0(`src/llm/`); effort는 `minimal|low|medium|high`(`openai-responses-wire.ts:287`), `xhigh` 없음.
 - **델타**: 출력길이 제어 + 최고 effort tier 부재. **ROI 저(리터럴 추가).**
 
-### 9.6 [PARTIAL] `opusplan` 프리셋 + Message Batches API — 🔲 OPEN (verified jun-07: `opusplan`/`messages/batches` grep 0 in `src/`; sticky-model-per-mode 기판만)
+### 9.6 [PARTIAL] `opusplan` 프리셋 + Message Batches API — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `opusplan`/`messages/batches` grep 0 in `src/`; sticky-model-per-mode 기판만)
 - **경쟁사**: Claude `opusplan`(plan=opus/exec=sonnet 자동) + `messages/batches`(×18, Anthropic Batch API 50% cost).
 - **quanta**: sticky-model-per-mode 기판(`src/agent/loop/skill-gate.ts:43`)은 있으나 `opusplan` 프리셋 없음. Batch API 없음(`messages/batches` grep 0; batch-jobs는 로컬 fan-out).
 - **델타**: 프리셋은 config-only. Batch API는 비대화 bulk 한정 50% 절감. **ROI 저-중.**
@@ -403,22 +414,22 @@
 
 ## 11. CLI / Slash / TUI / Steering
 
-### 11.1 [NEW-GAP] `/init` 코드베이스 온보딩 doc 생성 — 🔲 OPEN (verified jun-07: `/init`/`userFacingName.*init` grep 0 in `src/apps/cli/`)
+### 11.1 [NEW-GAP] `/init` 코드베이스 온보딩 doc 생성 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `/init`/`userFacingName.*init` grep 0 in `src/apps/cli/`)
 - **경쟁사**: `claude-code-cli/_cli-symbols.txt` `userFacingName=="init"`; `codex-cli/_cli-symbols.txt` `/init`(×6).
 - **quanta**: `"/init"` grep 0(`src/apps/cli/`). AGENTS.md 읽기는 하나 생성 못함.
 - **델타**: repo 스캔→AGENTS.md/CLAUDE.md 스캐폴드 없음. **ROI 중(1-shot 프롬프트 템플릿).**
 
-### 11.2 [NEW-GAP] `/agents` 라이브 fleet 뷰 — 🔲 OPEN (verified jun-07: `/agents` live roster grep 0 in `src/apps/cli/`; `repl.ts`의 "fleet"은 주석만)
+### 11.2 [NEW-GAP] `/agents` 라이브 fleet 뷰 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `/agents` live roster grep 0 in `src/apps/cli/`; `repl.ts`의 "fleet"은 주석만)
 - **경쟁사**: Claude `userFacingName=="agents"`+`tengu_bg_agent_action`(24×)+FLEET.
 - **quanta**: REPL 커맨드로 부재(spawn은 되나 라이브 background agent list/inspect/stop 없음). `repl.ts:288`의 "fleet"은 주석.
 - **델타**: spawn은 되나 라이브 로스터/stop UI 없음. **ROI 중(background-agent 사용 늘수록).**
 
-### 11.3 [NEW-GAP] Vim 편집 모드 — 🔲 OPEN (verified jun-07: `vimMode`/`editorMode`/`VimMode` grep 0 in `src/`; emacs-style 리매핑만)
+### 11.3 [NEW-GAP] Vim 편집 모드 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `vimMode`/`editorMode`/`VimMode` grep 0 in `src/`; emacs-style 리매핑만)
 - **경쟁사**: Claude `VimMode`/`EditorMode`/`editorMode","normal"`.
 - **quanta**: `raw-line-reader.ts` — heredoc 멀티라인+리매핑 키바인딩(`keybindings/defaults.ts`)은 있으나 modal vim 없음(`vimMode|editorMode` grep 0).
 - **델타**: emacs-style은 있으나 modal vim 없음. **ROI 저-중(파워유저).**
 
-### 11.4 [NEW-GAP] 실행중 작업 백그라운드 이동(Ctrl+B) — 🔲 OPEN (verified jun-07: `ctrl.b`/`moveToBackground`/`backgroundTask` REPL 제스처 grep 0 in `src/apps/cli/`; tool-layer `run_in_background`만)
+### 11.4 [NEW-GAP] 실행중 작업 백그라운드 이동(Ctrl+B) — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `ctrl.b`/`moveToBackground`/`backgroundTask` REPL 제스처 grep 0 in `src/apps/cli/`; tool-layer `run_in_background`만)
 - **경쟁사**: Claude `Ctrl+B`/`BackgroundTask`/`Bashes`(실행중 명령 detach).
 - **quanta**: 부재(`ctrl\+b|move.*background` grep 0). tool-layer `run_in_background`는 있으나 REPL 제스처 없음.
 - **델타**: in-flight task 백그라운드 제스처 없음. **ROI 중(긴 셸).**
@@ -445,7 +456,7 @@
 
 ## 12. Config / Settings / Trust / Network / Telemetry / Identity
 
-### 12.1 [NEW-GAP] 중앙 config 파일 부재 + per-project trust gate — P7 🛑 — 🔲 OPEN (verified jun-07: `projectTrust`/`trustDialog`/`workspaceTrust`/`trust_level` grep 0 in `src/`; `src/agent/command-hooks/settings-loader.ts:4` "quanta has no central Claude-style settings.json loader today" 주석 그대로 — 전부 `QUANTA_*` env)
+### 12.1 [NEW-GAP] 중앙 config 파일 부재 + per-project trust gate — P7 🛑 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `projectTrust`/`trustDialog`/`workspaceTrust`/`trust_level` grep 0 in `src/`; `src/agent/command-hooks/settings-loader.ts:4` "quanta has no central Claude-style settings.json loader today" 주석 그대로 — 전부 `QUANTA_*` env)
 - **경쟁사**: Codex `userdata/codex/config.toml:14-30` `[projects."<path>"] trust_level=trusted/untrusted`; Claude `hasTrustDialogAccepted`(×12). **디렉토리 진입 시 전체 approval/sandbox 정책 게이팅하는 persisted per-project trust posture** + first-run trust 다이얼로그. + managed→user→project→local 레이어드 settings.json/config.toml 로더.
 - **quanta**: **중앙 on-disk config 없음** — 전부 `QUANTA_*` env(`src/shared/runtime-config.ts`, frozen). quanta 자체 주석 `src/agent/command-hooks/settings-loader.ts:4` "quanta has no central Claude-style settings.json loader today". trust는 per-ACTION(`trust-scope-store.ts` cascade)만, startup per-project gate 없음(`projectTrust|trustDialog|workspaceTrust` grep 0).
 - **델타**: env-only라 persisted per-project trust/MCP-gating posture 표현 불가 = Codex/Claude 프로젝트-안전 모델의 척추. trust 기판(trust-scope-store+named-profiles)은 있음. **비용 중(파일스키마+startup gate)/ROI 중-고.**
@@ -471,12 +482,12 @@
 - **quanta**: `src/agent/effort.ts`(5-tier)는 thinking-budget 와이어, output verbosity 놉 없음, plan-mode 전용 effort 없음.
 - **델타**: reasoning-effort 패리티, output-verbosity+per-mode-effort 누락. **ROI 저(9.5와 연관).**
 
-### 12.6 [PARTIAL] exclude_tmpdir / exclude_slash_tmp 토글 — 🔲 OPEN (verified jun-07: `exclude_tmpdir`/`exclude_slash_tmp` grep 0 in `src/`; quanta가 이미 더 엄격 — missing-config-knob지 missing-protection 아님)
+### 12.6 [PARTIAL] exclude_tmpdir / exclude_slash_tmp 토글 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `exclude_tmpdir`/`exclude_slash_tmp` grep 0 in `src/`; quanta가 이미 더 엄격 — missing-config-knob지 missing-protection 아님)
 - **경쟁사**: Codex `exclude_tmpdir_env_var`/`exclude_slash_tmp`(×12 each) — workspace-write 시 $TMPDIR//tmp 자동 write-set 포함 토글.
 - **quanta**: `os-sandbox/seatbelt.ts:94` /tmp 항상 READ 허용, write-exclusion 토글 없음. quanta가 이미 더 엄격(auto-tmp-write 안함).
 - **델타**: missing-config-knob지 missing-protection 아님. **ROI 저.**
 
-### 12.7 [PARTIAL] otelHeadersHelper (동적 OTLP 토큰) — 🔲 OPEN (verified jun-07: `otelHeadersHelper`/`rotatingHeader`/`dynamicOtlp` grep 0 in `src/`; `otlp-helper.ts:77` static headers만)
+### 12.7 [PARTIAL] otelHeadersHelper (동적 OTLP 토큰) — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `otelHeadersHelper`/`rotatingHeader`/`dynamicOtlp` grep 0 in `src/`; `otlp-helper.ts:77` static headers만)
 - **경쟁사**: Claude `otelHeadersHelper`(×22) — 셸 명령으로 단명 OTLP auth 헤더 동적 mint(Honeycomb/Grafana rotating token).
 - **quanta**: `observability/metrics/otlp-helper.ts:77` static `headers?` + endpoint, 동적 refresh 없음.
 - **델타**: OTLP push+static auth 패리티, rotating-token auth 부재. **ROI 저(엔터프라이즈).**
@@ -487,12 +498,12 @@
 
 ## 13. Resilience / 에러처리 / 복구
 
-### 13.1 [NEW-GAP] aggregate corrupt-store 감지 + 운영자 복구 안내 — 🔲 OPEN (verified jun-07: `corrupt.*unreadable`/`clearSession`/`state_db_recovery`/`quarantine` grep 0 in `src/session/`; per-file silent degrade `store.ts:235,243` 그대로)
+### 13.1 [NEW-GAP] aggregate corrupt-store 감지 + 운영자 복구 안내 — ✅ LANDED (jun-09 code-reconcile — jun-07 OPEN marker was STALE; code-verified present. orig: verified jun-07: `corrupt.*unreadable`/`clearSession`/`state_db_recovery`/`quarantine` grep 0 in `src/session/`; per-file silent degrade `store.ts:235,243` 그대로)
 - **경쟁사**: Codex `cli/src/state_db_recovery.rs` (전용 모듈) — "…looks corrupt or unreadable. Clearing the sessions directory may help (this will remove saved threads)." 세션 **스토어** 전체 corrupt를 startup서 감지+조치 안내.
 - **quanta**: `src/session/store.ts:235,243` — malformed/schema-mismatch는 **파일당** `logger.warn+return undefined`(무음 degrade). `corrupt.*unreadable|clear.*session` grep 0. aggregate signal/quarantine/조치 없음 → 체계적 corrupt 스토어가 "빈 세션리스트"로 보임(전체 history 무음 손실).
 - **델타**: corrupt-count tally + 운영자 hint 없음. `reconcileIndexFromMeta` startup 패스 재사용 가능. **비용 저/ROI 중.**
 
-### 13.2 [NEW-GAP] interrupted-turn marker (crash 후 resume) — 🔲 OPEN (verified jun-07: persisted session-side mid-stream interrupt marker 부재 — `interrupt.*marker`/`incomplete.*turn` grep 0 in session. [NOTE: `src/shared/error-classifier.ts:40` `thread_rollback_failed`는 LLM-에러 분류 kind지 세션 partial-turn 마커 아님 — 이 갭과 무관])
+### 13.2 [NEW-GAP] interrupted-turn marker (crash 후 resume) — 🟡 PARTIAL (jun-09: §11.5 SAME-turn interrupt-restore는 LANDED+wired[interrupted-turn.ts+resume verb], 그러나 §13.2 crash-RESUME 영속 마커는 built-but-not-fully-wired — jun-09 통합어딧 §13.2 참조)
 - **경쟁사**: Codex `"failed to flush interrupted-turn marker before emitting TurnAborted"` + `"Rolled the thread back, but failed to save the rollback marker. Codex will continue retrying"` — 턴 mid-flight abort/crash시 명시적 마커 persist → resume이 "깔끔완료" vs "중간잘림" 구분해 replay/repair 결정.
 - **quanta**: `mid-turn-interruption/default.ts:167` pending input은 `FollowUp`로 persist + tool-pair reconcile(`store.ts:537`)로 transcript valid化. 단 assistant측 "이 턴 mid-stream 인터럽트됨" 마커 없음(`interrupt.*marker|incomplete.*turn` grep 0).
 - **델타**: hard crash 후 resume이 "완료 vs 잘림" 구분 못함(pair-reconcile은 valid化지 known-partial 아님). 400-on-resume(최악)은 이미 방지됨 = fidelity/UX 갭. **ROI 중-저.**
@@ -978,3 +989,63 @@
 | 8 | peer fork_turns + 통합 | `src/subagent/handlers-6.ts` · `subagent-bg/` · `introspect-tools.ts` (4/6 있음) | Codex `multi_agents_v2/{spawn,wait,close_agent,message_tool,list_agents,followup_task}.rs` | W3 | L / HIGH |
 | 6 | agent-requested rules | `src/agent/glob-rules.ts:97-116` (description-only drop, 설계선택) | Cursor `CursorRuleTypeAgentFetched`+`fetch_rules` | W3 | M / MED-HIGH |
 | 11 | reflect 도구 (→workflow defer) | `src/agent/` (grep0) | Cursor `reflectToolCall` ("expensive, next_steps 필수") | W4 | M(reflect) / HIGH · workflow=L defer |
+
+
+---
+
+# §27 — jun-09 추가 흡수 어딧 (코퍼스 2026-06-01 refresh content-diff) — 🟦 결정 대기
+
+> **메타:** jun-09 inline 어딧(흡수-fleet 4-agent가 서버 throttle로 2회 전멸 → 메인루프 단독). jun-07 12바퀴는 **file-list 기반**이라, REFRESH-DIFF가 "content-level diff 필요"라 명시한 **Codex 3390 / Cursor 3.5.33 신규 surface** + **CC settings 123필드 field-diff** + **CC slash/hook 목록 대조**에 집중. 아래는 전부 **아직 연동 안 됨** — 흡수/defer/skip 결정 대기.
+> **결정 범례:** ⬜ 미정 · ✅ 흡수결정 · ⏸ defer · ❌ skip(의식적). `결정` 칸의 `rec:`는 내 권장(override 가능).
+> **이미 흡수 확인(재보고 안 함):** CC hook 11종 전부 parity(PreToolUse~Setup) · slash 다수 · skill 7-scope · MCP proto/SSE/annotations · file checkpointing(`file_history_rewind`) · tree-sitter chunking · glob gitignore.
+
+## §27.1 신규 기능 후보 (quanta 부재 — grep 확인)
+
+| # | 후보 | 출처 (경쟁사 evidence) | quanta gap | 흡수 메커니즘 | ROI | effort | conf | 결정 |
+|---|---|---|---|---|---|---|---|---|
+| N1 | 어시스턴트 언어 자동감지 | Cursor `whichlang-node` (`cursor-agent-exec/dist/main.js:213405`, `assistant-language-tracking`, 16-lang ko/ja/zh/en/...) | `whichlang`/`detectLanguage` grep 0 | 경량 분류기→유저 입력언어 감지→system-prompt `respond in <lang>` 힌트 | 중 | S-M | 高 | ⬜ rec:흡수 (너 한국어 자동정렬) |
+| N2 | Codex collaboration-mode | Codex 3390 webview `use-collaboration-mode`·`collaboration-mode-queries`·`pending-request-item-panel` | multiagent coordination 있으나 collab-mode UX 별개 | 실시간 다자 협업 턴 + 승인대기 패널 | 중 | M | 中(webview minified) | ⬜ rec:content-diff 후 결정 |
+| N3 | Codex appgen 앱생성 surface | Codex 3390 webview `appgen-page/settings/share-dialog/access-mode/url` | 전무 | 배포가능 앱 생성 surface | 저-중 | L | 中 | ⬜ rec:defer (surface-heavy) |
+| N4 | `/doctor` 환경 진단 | CC `_cli-symbols.txt` `/doctor` | quanta slash 부재 | env/config/연결성/MCP 헬스 1샷 진단 | 중 | S | 高 | ⬜ rec:흡수 |
+| N5 | `/catch-up` 세션간 변경요약 | CC `/catch-up` | 부재 | 마지막 세션 이후 repo/대화 변경 요약 | 저-중 | S-M | 中 | ⬜ |
+| N6 | `/babysit-prs` 자율 PR 모니터 | CC `/babysit-prs` | 부재(일반 loop 스킬만) | PR CI/리뷰 상태 폴링 + 자동대응 루프 | 저-중 | M | 中 | ⬜ |
+
+## §27.2 기존 기능 강화 후보 (quanta 얕음/부분)
+
+| # | 후보 | 출처 | quanta 현재 | 강화점 | ROI | effort | conf | 결정 |
+|---|---|---|---|---|---|---|---|---|
+| E1 | managed-only 엔터프라이즈 락다운 | CC `allowManagedHooksOnly`/`allowManagedMcpServersOnly`/`allowManagedPermissionRulesOnly`/`strictPluginOnlyCustomization` | central-config+trust(ADR-0497) | 관리자가 managed 레이어만 강제(유저 hook/mcp/rule loosening 차단) | 중(ent) | M | 高 | ⬜ rec:흡수 |
+| E2 | MCP denylist + marketplace 거버넌스 | CC `deniedMcpServers`·`blockedMarketplaces`·`strictKnownMarketplaces`·`extraKnownMarketplaces` | allowed/enabled만; marketplace-policy 부분 | denylist + known/blocked marketplace 정책 게이팅 | 저-중 | S-M | 高 | ⬜ |
+| E3 | `/rewind` 체크포인트 복원 슬래시 | CC `/rewind` | `file_history_rewind` 도구는 있음, slash UX 없음 | 인터랙티브 파일 스냅샷 타임라인 복원 | 중 | S | 高 | ⬜ rec:흡수(싸고 체감 큼) |
+| E4 | `/goal` 목표 추적 슬래시 | CC `/goal` | objective 시스템 있음, slash 없음 | objective set/show/clear slash wrapper | 저 | S | 高 | ⬜ |
+| E5 | `cursor-agent-worker` startup prewarm | Cursor `cursor-agent-worker` ("extension startup서 agent worker 설치+실행") | side-agent/attach-daemon 유사 | 세션/IDE startup 상시대기 background agent prewarm | 중 | M | 中 | ⬜ rec:기존 daemon과 중복여부 확인 |
+| E6 | `claudeMdExcludes` 메모리 로드 제외 | CC `claudeMdExcludes` | CLAUDE.md 무조건 로드 | 거대/무관 메모리 파일 제외 globs | 저 | S | 高 | ⬜ |
+| E7 | `/hooks` 인터랙티브 관리 | CC `/hooks` | hook 11종 다 있음, 관리 slash 없음 | hook list/enable/disable/test slash | 저 | S | 高 | ⬜ |
+
+## §27.3 저ROI / 디스플레이 토글 (기본 ❌ skip 권장 — 결정만)
+
+CC UI 토글: `showThinkingSummaries`·`showTurnDuration`·`showMessageTimestamps`·`spinnerTips(Override/Verbs)`·`terminalProgressBarEnabled`·`theme`·`prefersReducedMotion`(a11y) · `attribution`(커밋 기여자 커스텀) · `autoUpdatesChannel`·`minimumVersion`/`requiredMinimumVersion`(버전핀) · `skipWebFetchPreflight` · `cleanupPeriodDays`(세션 retention) · `isolatePeerMachines`(피어격리) · `feedbackSurveyRate` · `companyAnnouncements`(ent). → surface polish/니치 knob, 대부분 quanta 모델과 결이 다름. **결정: ⬜ (기본 ❌ skip)**
+
+## §27.4 defer 확정 (재확인)
+
+- Codex `computer-use` (matured: `computer-use-app-approvals-query`/`-settings`/`-plugin-icon`) — RFC-defer 유지(최고 보안표면, Tauri/desktop-only). **⏸**
+- Codex `imported-connector-apps` — quanta connector-marketplace 부분흡수됨, 외부 connector import 깊이는 배포-deferred. **⏸**
+
+## §27.5 어딧 한계 (정직 — confidence 하향요인)
+
+- **흡수-fleet 4-agent 2회 throttle 전멸**(서버측 일시 rate-limit, 내 usage 아님) → inline 단독.
+- **완독한 소스**(高 confidence): CC settings 123필드 스키마(JSON) · CC slash 목록(`_cli-symbols.txt`) · CC hook 11종 · Cursor `cursor-agent-worker` package.json · Cursor `whichlang`/`tree-chunk` 용도 · quanta src grep.
+- **부분만 읽음**(中 confidence — N2/N3/E5): Codex/Claude-Desktop webview **minified content** (collaboration-mode/appgen 깊은 메커니즘). throttle 풀린 후 **content-level symbol diff 추가 패스**가 §27 confidence 상/하향 + 신규 항목 추가 가능. → **TODO(throttle 해제 시)**
+
+## §27.6 추가 후보 (Codex config.toml + Cursor hook 딥다이브, jun-09 2차)
+
+| # | 후보 | 출처 (경쟁사 evidence) | quanta gap | 흡수 메커니즘 | ROI | effort | conf | 결정 |
+|---|---|---|---|---|---|---|---|---|
+| N7 | 모델 personality/페르소나 config | Codex config.toml `personality` (codex-rs `config.rs`) | `personality`/`persona` grep 0 | 응답 톤/페르소나 프리셋(예: concise/teacher) system-prompt 주입 | 저-중 | S | 高 | ⬜ |
+| N8 | request body gzip 압축 | Codex `enable_request_compression` | `requestCompression`/gzip-body grep 0 | 대용량 컨텍스트 LLM 요청 body gzip(대역폭/지연) | 저 | S | 高 | ⬜ |
+| E8 | 메모리 lifecycle GC + 모델분리 | Codex `max_unused_days`·`max_raw_memories_for_consolidation`·`consolidation_model`·`extract_model` | 2-phase distill 있으나 GC/모델선택 knob 없음 | 미사용 메모리 GC(나이) + consolidation/extract 모델 분리 지정 | 저-중 | S-M | 高 | ⬜ |
+| E9 | session rollout/store retention GC | Codex `max_rollout_age_days`·`min_rollout_idle_hours`·`max_rollouts_per_startup` + CC `cleanupPeriodDays` | session store 있으나 age/idle 기반 GC 정책 없음 | 세션 보존 GC(나이/idle/startup당 처리수) | 저-중 | S-M | 高 | ⬜ |
+| E10 | plan-mode 전용 reasoning effort | Codex `plan_mode_reasoning_effort` (+ §12.5 PARTIAL) | 5-tier effort 있으나 plan-mode 별도 없음 | plan 모드 진입 시 별도 effort tier 적용 | 저 | S | 高 | ⬜ |
+| E11 | granular hook 포인트 | Cursor hooks `beforeContext`·`beforeMCPExecution` (quanta `beforeReadFile`/PreToolUse는 있음) | context-assembly 전 / MCP 실행 전 전용 hook 없음 | hook taxonomy에 `PreContext`·`PreMcpExecution` 추가 | 저 | M | 中 | ⬜ |
+
+> **§27.6 확인법:** 전부 `grep -riE '<심볼>' src/`로 quanta 부재 확인(jun-09). 이미 있음(재보고 안 함): `generate/use_memories`·network policy amendment(`proposedNetworkPolicy`)·`approvals_reviewer`·`beforeReadFile` hook.

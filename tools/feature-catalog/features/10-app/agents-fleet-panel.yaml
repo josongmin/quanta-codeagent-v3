@@ -1,0 +1,60 @@
+id: agents-fleet-panel
+title: /agents — live subagent fleet panel (pure renderer)
+section: 10
+subsystem: REPL panels (R11.2 / ticket 17)
+order: 23
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [built-in-slash-commands, slash-registry-split]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from src/apps/cli/index.ts import graph — registry-surface.ts imports renderAgentFleet and registers agentsCmd (name: /agents); buildSurfaceSlashCommands → slash-commands.ts (isSlashCommand) → cli/index.ts:10"
+    web: "pure terminal table/tree renderer (renderBox + ANSI via @/ui); no browser affordance — the fleet view is a CLI-only panel"
+purpose: |
+  PURE renderer for the `/agents` slash — a live snapshot of the in-process
+  subagent `TaskRegistry` (threaded as `ctx.agents`, from
+  `setup.lifecycleTaskRegistry`) rendered as `table` | `json` | `tree`. PURE: no
+  clock, no I/O, no TTY detection — the caller injects `now` (so the AGE column
+  is deterministic and golden-testable) and colour is decided entirely by the
+  `@/ui/ui-helpers` layer (byte-identity no-ops when the resolved policy is
+  "off"). The row type `AgentFleetRow` is a LOCAL structural mirror of
+  `@/subagent`'s `TaskRecord` + the surfaced slice of `SubagentResult`, kept
+  local on purpose so the renderer stays behind the slice fence that forbids
+  `@/agent`/`@/llm`/`@/runner`/`@/host` value imports (the wire stays type-only).
+  Ordering is a pure comparator over a copied array (running rows first, settled
+  by `endedAt` desc — never mutates the caller's input). Without `--all`, settled
+  rows collapse to `DEFAULT_SETTLED_SHOWN` (8) with a "… N more settled" note;
+  running rows are NEVER collapsed. HONEST: `--all` only changes presentation —
+  it cannot resurrect LRU-evicted records (already gone from the registry Map
+  before they reach this renderer). `json` is always machine-clean (no ANSI
+  regardless of colour policy — it carries no `@/ui` wrappers). Empty fleet ⇒ a
+  bordered "(no agents)" panel that points at the Agent tool.
+evidence:
+  code:
+    - src/apps/cli/agents-fleet-panel.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/agents-fleet-panel.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Distinct from side-agent-process (which owns the subagent EXECUTION); this is
+  the surface-only VIEW. `formatAge` clamps negative / NaN spans to "0s" (never
+  throws, never emits a negative age). `shortId` drops the `task_` prefix and
+  caps at 12 chars so the table stays narrow while log lines remain greppable.
+  Reachable but render is conditional on `ctx.agents` being threaded — when the
+  surface omits it, `/agents` prints "not wired in this surface" rather than
+  crashing.

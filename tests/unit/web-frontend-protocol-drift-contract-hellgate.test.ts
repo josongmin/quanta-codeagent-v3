@@ -49,6 +49,15 @@ const FRONTEND_SLASH_KNOBS_PATH = join(
 )
 const DAEMON_SERVER_PATH = join(REPO_ROOT, "src/apps/web-daemon/server.ts")
 
+const ESCALATION_CARD_PATH = join(
+  REPO_ROOT,
+  "apps/web-frontend/src/components/EscalationCard.tsx",
+)
+const ESCALATION_OPTIONS_PATH = join(
+  REPO_ROOT,
+  "src/agent/skill-scope-escalation.ts",
+)
+
 const readText = (path: string): string => readFileSync(path, "utf8")
 
 /**
@@ -124,6 +133,41 @@ const extractArrayLiterals = (source: string, constName: string): Set<string> =>
   const literals = new Set<string>()
   for (const m of match[1].matchAll(/"([^"]+)"/g)) literals.add(m[1])
   return literals
+}
+
+/**
+ * Extract the ORDERED string-literal members of an array const, preserving
+ * source order (the SET helpers above lose order). Used by the escalation-verb
+ * drift guard, where the BUTTON ORDER — not just membership — is the contract
+ * pinned 1:1 between the daemon `ESCALATION_OPTIONS` and the web
+ * `ESCALATION_BUTTONS`.
+ */
+const extractOrderedArrayLiterals = (source: string, constName: string): string[] => {
+  const re = new RegExp(`${constName}[^=]*=\\s*\\[([\\s\\S]*?)\\]`)
+  const match = re.exec(source)
+  if (match === null) {
+    throw new Error(`could not locate \`${constName} = [ … ]\` array literal`)
+  }
+  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
+}
+
+/**
+ * Extract the ORDERED `option:` field literals from an array of object literals
+ * (`[{ option: "A", … }, { option: "B", … }]`). Used to read the web
+ * `ESCALATION_BUTTONS` button order without importing the .tsx (different
+ * toolchain). The first `"…"` after each `option:` is the verb.
+ */
+const extractOrderedObjectFieldLiterals = (
+  source: string,
+  constName: string,
+  field: string,
+): string[] => {
+  const re = new RegExp(`${constName}[^=]*=\\s*\\[([\\s\\S]*?)\\]`)
+  const match = re.exec(source)
+  if (match === null) {
+    throw new Error(`could not locate \`${constName} = [ … ]\` array literal`)
+  }
+  return [...match[1].matchAll(new RegExp(`${field}:\\s*"([^"]+)"`, "g"))].map((m) => m[1])
 }
 
 /**
@@ -233,6 +277,31 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
       expect(source).toContain("scopeContext")
       expect(source).toContain("activeSkill")
     }
+  })
+
+  test("[adr-0512] EscalationCard button order === ESCALATION_OPTIONS (daemon SSOT, ordered)", () => {
+    // The web `EscalationCard` re-declares the 4 escalation verbs locally (it
+    // CANNOT import `@/agent/*` — different toolchain) and the source comment
+    // CLAIMS the button order is "1:1 with ESCALATION_OPTIONS in
+    // src/agent/skill-scope-escalation.ts" — but nothing enforced it. A drift
+    // (reorder / add / drop a verb on either side) would silently mismatch the
+    // card buttons against the wire/host decision map. Pin the EXACT ORDER (not
+    // just membership) between the daemon `ESCALATION_OPTIONS` SSOT and the web
+    // `ESCALATION_BUTTONS` so the claim can never go stale.
+    const canonicalOrder = extractOrderedArrayLiterals(
+      readText(ESCALATION_OPTIONS_PATH),
+      "ESCALATION_OPTIONS",
+    )
+    const cardOrder = extractOrderedObjectFieldLiterals(
+      readText(ESCALATION_CARD_PATH),
+      "ESCALATION_BUTTONS",
+      "option",
+    )
+    // Sanity: the daemon SSOT is the known 4-verb closed set (catches a regex
+    // that silently captured zero / partial literals).
+    expect(canonicalOrder).toEqual(["allow_once", "allow_session", "deny", "deny_and_steer"])
+    // The contract: the web card's button order is byte-for-byte the daemon order.
+    expect(cardOrder).toEqual(canonicalOrder)
   })
 
   test("[config] frontend CONFIG_WRITABLE_KEYS === daemon CONFIG_ALLOWED_KEYS (both directions)", () => {

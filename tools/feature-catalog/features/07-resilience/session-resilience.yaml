@@ -1,0 +1,127 @@
+id: session-resilience
+title: Session resilience — persisted crash-resume marker (§13.2) + aggregate store-health diagnostic (§13.1)
+section: 7
+subsystem: 세션 영속 복원력 — 하드-크래시 턴 재개 + store-level 손상 진단
+order: 102
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: planned
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "built-not-wired"]
+depends_on: [session-cwd-missing-exit, conversation-checkpoint]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "export-only via the @/session barrel (src/session/index.ts re-exports markSessionInterrupted/detectInterruptedSessions/buildCrashResumeOffer/checkSessionStoreHealth/buildRecoveryGuidance); the QUANTA_CRASH_RESUME knob is registered in src/config/knob-inventory.ts but NO apps/cli or host callsite invokes these exports (grep RC=1). built-but-not-wired seam — see deliberate_hold."
+    web: "no web verb; session resilience is a host/CLI restart-boundary concern with no browser affordance."
+purpose: |
+  Two leaf durability/diagnostic modules in the `@/session` slice that sit on
+  top of the existing snapshot store (no new on-disk file, no sqlite).
+
+  1. crash-resume (`src/session/crash-resume.ts`, §13.2) — the in-memory
+     `InterruptedTurnBuffer` (`src/agent/interrupted-turn.ts`, jun-08) restores
+     an interrupted turn WITHIN a single process; a hard crash (SIGKILL / OOM /
+     power loss) mid-turn loses that buffer entirely. This module adds the
+     missing DURABILITY layer: it persists the interrupted-turn marker onto the
+     session SNAPSHOT (`SessionMeta.interruptedTurn`), detects sessions that
+     died mid-turn on the next restart, and rebuilds the exact resume message.
+       - `markSessionInterrupted` / `clearSessionInterrupted` — best-effort
+         persist / drop. NEVER throws (a marker is durability, not a correctness
+         invariant — failing to write it must not break the live turn);
+         last-interrupt-wins idempotent overwrite.
+       - `detectInterruptedSessions` — restart-time scan of a caller-supplied
+         candidate list, returns most-recently-touched first. The per-id
+         SNAPSHOT is SSOT (the index is a derived cache that may lag the new
+         field), so each candidate is re-confirmed; a single unreadable session
+         is skipped, not propagated.
+       - `buildCrashResumeOffer` / `buildCrashResumeMessage` — PURE (no I/O,
+         no clock): a detection → an operator-facing offer (summary + the
+         `role:"user"` resume message re-injected so the agent picks the
+         interrupted work back up across the crash boundary).
+     GATE default-OFF: `QUANTA_CRASH_RESUME` absent ⇒ every op is a NO-OP (no
+     marker written, detection returns `[]`) so the session file is
+     byte-identical to the pre-ticket shape. `env` is INJECTED (the `@/session`
+     slice is env-pure — the slice-boundary guard forbids a `process.env`
+     literal here); absent env ⇒ OFF (fail-safe).
+
+  2. store-health (`src/session/store-health.ts`, §13.1) — store-level
+     AGGREGATE corruption detection + operator recovery guidance. The per-file
+     read path already degrades a single corrupt file to `undefined` + a warn;
+     what was MISSING is the aggregate signal — when the WHOLE store is
+     unreadable (disk fault, botched migration, key loss, sync conflict) the
+     user just sees an empty list, indistinguishable from "no sessions yet".
+     `checkSessionStoreHealth` scans `<root>/*.json` + `<root>/archived/*.json`,
+     classifies each `ok | corrupt | unreadable`, and returns a verdict with
+     EXPLICIT ratios (no magic threshold): `empty` (zero files), `healthy`
+     (zero bad), `corrupt` (EVERY file failed — the operator-action case),
+     `degraded` (some failed, some load). `buildRecoveryGuidance` is PURE and
+     names the root, the corruption ratio, and concrete per-file next steps
+     (file-per-session, so recovery is per-file, not all-or-nothing). It is a
+     DIAGNOSTIC, not a behavior change: it never runs on the hot path (a
+     `/doctor`-style or empty-list trigger invokes it), so there is no
+     default-OFF byte-identity concern and no gate. NEVER throws — every fs
+     error (including an invalid on-disk filename that makes the path-builder
+     throw SessionIdError) is captured into the report as `corrupt`.
+
+     Codex parity: Codex's `state db` layer surfaces aggregate persistence
+     failures with explicit recovery messaging rather than degrading to an
+     empty result; quanta is file-per-session (no sqlite), so the aggregate
+     signal is "what fraction of the files refused to load".
+evidence:
+  code:
+    - src/session/crash-resume.ts
+    - src/session/store-health.ts
+  adrs: [525]
+  tests:
+    unit:
+      - tests/unit/session/crash-resume.test.ts
+      - tests/unit/session/store-health.test.ts
+    integration:
+      - tests/integration/crash-resume-hellgate.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_CRASH_RESUME
+    where: src/session/crash-resume.ts (CRASH_RESUME_GATE) / src/config/knob-inventory.ts
+    default: false
+    purpose: §13.2 persisted interrupted-turn marker — arm crash-detect + resume offer (opt-in, default-OFF byte-identical degrade). store-health has NO knob (it is an explicit-call diagnostic, not a gated behavior).
+deliberate_hold:
+  reason: |
+    Built-but-not-wired. Both modules are export-only via the @/session barrel
+    (src/session/index.ts) and the QUANTA_CRASH_RESUME knob is registered in
+    src/config/knob-inventory.ts, but NO live consumer (apps/cli / host) calls
+    markSessionInterrupted, detectInterruptedSessions, buildCrashResumeOffer, or
+    checkSessionStoreHealth (grep over src/ outside the module + barrel + types
+    + knob-inventory returns RC=1). This matches the jun-09 integration-audit
+    finding that flagged §13.2 crash-resume as built-but-not-wired. The slice is
+    fully tested (unit + a §13.2 CROWN JEWEL hellgate) and contract-sealed, so
+    promotion is wiring-only, not a rebuild — hence ui_surfaces/cli/web = n-a/na
+    rather than an overclaimed "full".
+  promotion_path: |
+    (1) crash-resume: the host restart bootstrap calls
+    detectInterruptedSessions(listSessions()) → buildCrashResumeOffer per hit
+    and surfaces the offer (CLI prompt / TUI banner), re-injecting
+    buildCrashResumeMessage as a role:"user" continuation on accept; flip
+    surface_integration.cli → full and configurable → integrated.
+    (2) store-health: a /doctor-style command (or the "list came back empty AND
+    the dir is non-empty" trigger) calls checkSessionStoreHealth() and renders
+    report.guidance to stderr.
+notes: |
+  Distinct from the sibling resume-family entries: `session-cwd-missing-exit`
+  guards the cwd at the resume boundary, `resume-tool-pairing-reconcile` repairs
+  dangling tool pairs in a re-loaded transcript, `conversation-checkpoint`
+  snapshots conversation state. This entry covers the orthogonal DURABILITY +
+  STORE-HEALTH plane: surviving a HARD crash (not a clean resume) and detecting
+  when the whole store — not one file — is unreadable.
+
+  Maturity L3 (not L4): the implementation is real, tested, and contract-sealed
+  but has no live callsite yet, so the operational wiring/monitoring axes are
+  genuinely thin. Leaving it L4 with a deliberate_hold would still be honest,
+  but L3 better reflects "slice exists + tested, integration pending" without
+  tripping the L4-owners/operational expectations. owners set so the
+  promotion path has an accountable owner.

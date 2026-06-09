@@ -49,18 +49,18 @@
 
 ---
 
-## Tickets 11–15 — IMPROVE cluster (jun-08 재어딧 산출) → `11-15-improve-cluster.md`
-4병렬 재어딧이 백로그 jun-07 OPEN 다수가 이미 SOTA임을 확인(P1/P3/P4/P6/P7/P10 닫힘; stale-flip ✅: **P9 `[1m]`**·**§9.2 service_tier**·**§10.1 agent-requested rule**·**§12.4 per-project MCP**·**§23.2 reached/reset**). 남은 "있는데 미완"=5:
+## Tickets 11–15 — IMPROVE cluster → ✅ **전부 DONE (jun-09 code-verified)**
+4병렬 재어딧이 백로그 jun-07 OPEN 다수가 이미 SOTA임을 확인(P1/P3/P4/P6/P7/P10 닫힘; stale-flip ✅: **P9 `[1m]`**·**§9.2 service_tier**·**§10.1 agent-requested rule**·**§12.4 per-project MCP**·**§23.2 reached/reset**). IMPROVE 5개도 jun-09 실코드 grep으로 **5/5 LANDED 확인**:
 
-| # | 갭 | 현재(있는 것) | 미완(SOTA++로 닫을 것) | ROI |
-|---|---|---|---|---|
-| 11 | P8 worktree | host `withWorktree()`+`fork --worktree` | 에이전트 도구 `enter/exit_worktree`+Bash/Edit **edit-fence**(slot) | 고 |
-| 12 | §20.4 FS owned/forbidden | ✅ **DONE(jun-08)** — `ownership-policy.ts`+dispatch gate+knob `QUANTA_FS_OWNERSHIP_ENFORCE`+buildChildConfig; symlink-safe 재정규화(circumvention lexical-only 보완); 17 hellgate(pure+escape e2e+dispatch e2e), 1639 regression | 중-고(보안) |
-| 13 | §12.2 MITM header | secret값 redaction(drop) | pure `applyHeaderRules`(strip/set/rewrite, redaction 우선) | 중 |
-| 14 | §11.6 /model | set-by-id(`/sticky-model`) | `/effort` 미러 인터랙티브 피커(mode-implicit) | 저 |
-| 15 | §11.7 statusLine | 고정 usage bar | scriptable 명령(shell:false+5s cap)+색맹 팔레트(Okabe-Ito) | 저 |
+| # | 갭 | 상태 (jun-09 verified) | ROI |
+|---|---|---|---|
+| 11 | P8 worktree | ✅ **DONE** — `enterWorktreeTool` (`src/tool/index.ts:570`) + `enter/exit_worktree`/`worktree_status` 도구 + edit-fence(`src/tool/types.ts:436+`) | 고 |
+| 12 | §20.4 FS owned/forbidden | ✅ **DONE(jun-08)** — `ownership-policy.ts`+dispatch gate+knob `QUANTA_FS_OWNERSHIP_ENFORCE`+buildChildConfig; symlink-safe 재정규화; 17 hellgate, 1639 regression | 중-고(보안) |
+| 13 | §12.2 MITM header | ✅ **DONE** — pure `applyHeaderRules`(strip/set/rewrite) `src/runtime/network-proxy/header-rules.ts`, `loopback-proxy.ts:247`서 PURE delegate | 중 |
+| 14 | §11.6 /model + /effort | ✅ **DONE** — `/effort` 인터랙티브 피커 + /model `src/apps/cli/slash-contract.ts`·`help-render.ts` | 저 |
+| 15 | §11.7 statusLine | ✅ **DONE** — `parseStatusLineConfig`(`runtime-config.ts:180`, DOUBLE-gated `QUANTA_STATUS_LINE`+`_CONFIG`, shell:false cap) + 팔레트 | 저 |
 
-시퀀싱: **12(보안)→11(고)→13(자기완결)→14·15(UX 묶음)**. 전부 default-OFF·TDD red-first·3R 어딧.
+> **jun-09 NOTE:** 위 5개 + 01~10(ticket board)까지 실코드 확인 완료. **유일 잔여 = #10 NotebookEdit(P17, 노트북 유저층 의존 defer)**. 백로그 `jun-7-gap-other-agent.md`의 인라인 🔲 마커는 stale였고 jun-09에 ✅로 reconcile(상단 배너 참조). 전 IMPROVE: default-OFF·TDD red-first·3R 어딧 충족.
 
 ## Discipline (all tickets)
 - TDD red-first; hellgate scenarios incl. red-on-injection; e2e through real seams.

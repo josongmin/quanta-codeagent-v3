@@ -1,0 +1,70 @@
+id: init-scaffold-slash
+title: /init — AGENTS.md / CLAUDE.md project-rules scaffold (gated)
+section: 10
+subsystem: REPL slash surface (ticket 16)
+order: 24
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [built-in-slash-commands, slash-registry-split]
+config_refs:
+  env: ["QUANTA_INIT_SLASH"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from src/apps/cli/index.ts import graph — registry-surface.ts:38 imports buildInitCmd and conditionally registers it at :878 when readCliKnob('QUANTA_INIT_SLASH','bool') is on; buildSurfaceSlashCommands → slash-commands.ts → cli/index.ts:10. Default-OFF: absent gate ⇒ command not in the registry at all (byte-identical)"
+    web: "one-shot CLI slash; no browser affordance"
+purpose: |
+  A surface-only, GATED (`QUANTA_INIT_SLASH`, default-OFF) one-shot `/init` that
+  bootstraps the project-rules file the agent loads at the top of every session
+  (`repo-rules` reads `AGENTS.md` / `CLAUDE.md` / `.codex/CODEX-RULES.md`). The
+  RICH path is the `/init` SKILL (`src/skill/system-skills/init/SKILL.md`); a
+  registered `/init` slash SHADOWS it via dispatch precedence, so this slash is a
+  fast, deterministic, MECHANICAL scaffold that also points at the skill for the
+  full LLM-authored treatment. Slash-surface constraints: `SlashContext` has NO
+  interactive confirm, so the destructive-overwrite seam is filled by `--force`
+  (refuse + exit 1 when the target exists and `--force` is absent) PLUS
+  `--dry-run` (print the scaffold, write NOTHING, exit 0) as the real
+  "preview-before-commit" answer to the missing Y/N. AGENTS.md is PREFERRED as
+  the write target when it already exists (multi-vendor SSOT, matching
+  `loadRepoRules` same-dir priority); else conventional `CLAUDE.md`. Auto-
+  generated sections are bracketed by `quanta:auto` sentinel markers so a FUTURE
+  surgical `--force` can regenerate ONLY the marked blocks and leave human prose
+  intact. PURITY: `scaffoldClaudeMd(cwd, opts)` is a PURE deterministic golden
+  (no clock, no fs); fs/shell effects live only in `detectCommands` (reads
+  package.json/Makefile/Justfile — never invents a missing command), `scanRepoMap`
+  (one injected-shell `rg --files`, capped depth 3 / 200 files / 4000 chars), and
+  the write body. NO-THROW on the public surface: every fs/shell failure degrades
+  to a typed exit code + a friendly line, never an exception out of `run`.
+evidence:
+  code:
+    - src/apps/cli/init-scaffold.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/init-scaffold.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_INIT_SLASH
+    where: src/apps/cli/slash/registry-surface.ts
+    default: false
+    purpose: Gate (default-OFF) that registers the /init slash; absent ⇒ command not in the registry (byte-identical).
+deliberate_hold: null
+notes: |
+  Command detection is conservative: package.json scripts → `<pm> run <key>`
+  (pm from lockfile, fallback npm) for any of build/test/typecheck/lint that
+  EXIST; else Makefile targets; else Justfile recipes; else all undefined — a
+  rules file with a wrong command is worse than none. The `--force` refusal is a
+  SOTA++ helpful seam: existing file size + section count + exact re-run commands
+  + the skill pointer (which preserves human prose). The `RepoMapShell` is
+  injected so the scan is unit-testable with canned `rg` stdout; the fs writer is
+  injected so the write-failure NO-THROW path is exercisable without a real EACCES.

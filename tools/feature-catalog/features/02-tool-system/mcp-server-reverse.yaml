@@ -1,0 +1,90 @@
+id: mcp-server-reverse
+title: Reverse-MCP — expose quanta AS an MCP server over stdio (TICKET-19, ADR-0520)
+section: 2
+subsystem: mcp slice — reverse-MCP server (TICKET-19)
+order: 520
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:tool", "tier:tool-system"]
+depends_on: [mcp-transport-port-and-http-sse]
+config_refs:
+  env: [QUANTA_MCP_SERVER, QUANTA_MCP_SERVER_EXPOSE]
+  cli: ["mcp-server"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "live subcommand — src/apps/cli/index.ts routes `process.argv[2] === 'mcp-server'` to `runMcpServerCmd` (dynamic import of mcp-server-setup.ts), strict-gated on QUANTA_MCP_SERVER=1"
+    web: "stdio JSON-RPC server process — no web-bridge consumer; the surface IS the stdin/stdout protocol channel, not a web affordance"
+purpose: |
+  The INVERSE of the MCP client (ADR-0391): instead of quanta speaking OUT to an
+  external server, `quanta mcp-server` makes quanta AS an MCP server an external
+  host (Claude Desktop, Cursor, any MCP client) drives over newline-delimited
+  JSON-RPC on stdin/stdout. This is an RCE surface — an external client calling
+  an unguarded `bash`/`write` would be remote code execution — so the design is
+  fail-closed at three independent layers:
+    1. `buildMcpServer` (PURE) computes the whitelist ONCE as
+       `{ tools where readOnly(name) } ∪ explicitOptIn`, intersected with the
+       registry's actual `specs()` so an unknown opt-in name is DROPPED (can
+       never widen). Default-OFF for danger: with no opt-in, only read-only
+       tools are reachable. The frozen set is the single SSOT both `tools/list`
+       projection AND the `tools/call` admit-check consult.
+    2. `McpServer` is a NO-THROW inbound pump (its own stdin/stdout listener,
+       NOT the client-shaped `Stdio` transport): `tools/list` projects only
+       whitelisted tools with a server-minted + validated pagination cursor
+       (loop-guarded); `tools/call` RE-CHECKS the whitelist before dispatch —
+       a non-whitelisted name is `-32602` and the dispatch port is NEVER reached.
+       A routing/write fault is swallowed; async dispatches are tracked so
+       `drain()` settles every reply + FS effect before exit; results are capped
+       at MAX_RESULT_CHARS with a visible truncation marker (slice fence: no
+       reach into `@/tool` spill constants).
+    3. The composition root (`mcp-server-setup.ts`, the ONLY place `@/agent` +
+       `@/mcp` meet) folds the REAL `dispatchTool` under an EXPLICIT
+       `{ mode: "default" }` permission posture — NOT the headless `acceptEdits`
+       that would auto-allow mutating tools and re-open the RCE. So a
+       force-opted-in `write` still APPEARS in tools/list but every call returns
+       `isError` and never touches disk.
+  Slice fence: `@/mcp` imports neither `@/agent` nor `@/tool`; server + builder
+  take duck-typed ports bound only at the apps-layer root. Order is
+  security-deliberate: `--help` returns before any assembly; the STRICT
+  `gateOnStrict(env,'QUANTA_MCP_SERVER')` (exact `=== '1'`; a loose `on` is
+  REFUSED) is checked before any agent assembly, so gate-off does ZERO work and
+  stdout stays empty (default-OFF byte-identity). stdout is PURE JSON-RPC; the
+  start banner + every diagnostic go to STDERR only.
+evidence:
+  code:
+    - src/mcp/server.ts
+    - src/mcp/server-builder.ts
+    - src/apps/cli/mcp-server-setup.ts
+  adrs: [520]
+  tests:
+    unit:
+      - src/mcp/__tests__/server.test.ts
+      - src/mcp/__tests__/server-builder.test.ts
+      - src/apps/cli/__tests__/mcp-server-setup.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MCP_SERVER
+    where: src/apps/cli/mcp-server-setup.ts
+    default: false
+    purpose: "STRICT gate (=== '1'; a loose 'on' is refused). Unset ⇒ `quanta mcp-server` exits 64 and assembles nothing (default-OFF byte-identity, RCE surface)."
+  - name: QUANTA_MCP_SERVER_EXPOSE
+    where: src/apps/cli/mcp-server-setup.ts
+    default: ""
+    purpose: "Comma list of extra tools to expose beyond read-only. Each is validated against the registry (unknown ⇒ warned to stderr, dropped); an opted-in mutating tool STILL passes the full permission/jail pipeline on every call."
+deliberate_hold: null
+notes: |
+  Wired live: `src/apps/cli/index.ts` routes the `mcp-server` subcommand. web=na
+  because the surface is the stdio JSON-RPC protocol channel itself, not a web
+  affordance. ADR-0520 is the dedicated reverse-MCP decision (the inverse of
+  ADR-0391's outbound client transport); the three test files pin the
+  whitelist-intersection, the no-throw pump + cursor loop-guard, and the
+  composition-root default-OFF / RCE-deny hellgate respectively.

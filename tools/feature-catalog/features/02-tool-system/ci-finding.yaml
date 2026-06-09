@@ -1,0 +1,63 @@
+id: ci-finding
+title: ci_finding — structured CI-investigation finding store + tool (§7.3 long-tail) (ADR-0515)
+section: 2
+subsystem: 도구 — CI-investigation structured record (Codex/Cursor parity; record/list/get over a session store)
+order: 220
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [ci-bot, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
+depends_on: [tool-registry]
+config_refs:
+  env: ["QUANTA_CI_FINDING"]
+surface_integration:
+  cli: partial
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "LLM-callable ONLY on the headless apps/agent ci-bot surface: buildCiBotWiring (src/apps/agent/mode-presets/ci-bot.ts:218) mints createCiFindingStore() when gateOn QUANTA_CI_FINDING, passed to ghTools opts.ciFindingStore (src/tool/gh/index.ts:455) which registers ciFindingTool; survives the ci-bot read-only filter. NOT reachable from the interactive src/apps/cli/index.ts loop (the surface-coupling ratchet forbids cli→apps/agent), so partial not full."
+    web: "no web affordance — ephemeral in-session store on a headless one-shot ci-bot run; never surfaced to the web bridge."
+purpose: |
+  Close the §7.3 long-tail gap where a CI-investigation skill leaves its verdict as PROSE
+  (not rendererable / dedupable / feedable). `@/tool/ci-finding` is a plane-clean slice
+  (imports only @/shared) giving the agent a typed substrate: `createCiFindingStore` is a
+  pure in-memory, session-scoped registry of `CiFinding` records (job + category + summary +
+  root-cause + evidence + suggested-fix + confidence). Deterministic by construction —
+  INJECTED clock + id-factory (default monotonic `cif-<seq>`, no Date.now/Math.random) — and
+  retention-bounded by an oldest-evicted ring (maxFindings, default 500). `renderFinding`/
+  `renderFindings` are exported so tool + tests share ONE format (sorted by seq, byteCompare
+  tie-break). The `ci_finding` tool exposes record | list | get over that store: `record`
+  zod-validates the 4 required fields (per-field cap MAX_FIELD=4000); list filters by
+  job/category. risk:meta — it mutates ONLY the in-session store (no FS/shell/git/network),
+  records the agent's OWN analysis, so it self-reports isReadOnly/isConcurrencySafe + hitlTier
+  none like communicate_update / objective_*. NO-THROW (a thrown store collapses to ok:false).
+  Wiring is default-OFF + config-slot shaped: ghTools registers the tool ONLY when
+  opts.ciFindingStore is set; the ci-bot preset mints the store exactly when QUANTA_CI_FINDING
+  is on. Absent ⇒ tool absent, byte-identical legacy ci-bot gh tool set.
+evidence:
+  code:
+    - src/tool/ci-finding/store.ts
+    - src/tool/ci-finding/tool.ts
+  adrs: [515]
+  tests:
+    unit:
+      - tests/unit/ci-finding.test.ts
+    integration:
+      - tests/integration/longtail-new-tools-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_CI_FINDING
+    where: src/apps/cli/cli-knobs.ts:585 (read at ci-bot.ts buildCiBotWiring via gateOn)
+    default: false
+    purpose: "Opt-in §7.3 ci_finding structured CI-investigation record tool; ON ⇒ ci-bot wiring mints createCiFindingStore() and registers ci_finding through ghTools opts.ciFindingStore."
+deliberate_hold: null
+notes: |
+  L3 (not L4): real slice + tests + full ci-bot wiring, but operationally thin — single
+  surface (headless ci-bot only), ephemeral session store, no monitoring/web affordance.
+  Promotion path: surface a /ci-findings render in the interactive loop and/or swap the
+  in-memory ring for a SqliteJobStore-style backing once ci-bot gains resume.

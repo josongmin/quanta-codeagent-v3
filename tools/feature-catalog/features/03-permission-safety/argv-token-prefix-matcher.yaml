@@ -1,0 +1,58 @@
+id: argv-token-prefix-matcher
+title: argv tokenizer + array-literal parser + token-prefix matcher (Codex prefix_rule parity)
+section: 3
+subsystem: 권한 룰 — argv token-vector 매칭 primitive
+order: 32
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [rules-matcher, prefix-rule-dsl]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from src/apps/cli/index.ts — `rules/matcher.ts` (matchArgvRule + tokenizeArgv) and `rules/parser.ts` (parseArgvArrayLiteral) import `./argv`; both are cited as cli:full in rules-matcher / prefix-rule-dsl"
+    web: "pure deterministic tokenizer/parser/matcher (total function of inputs); no user-visible affordance on any surface"
+purpose: |
+  §10.2 — Codex `prefix_rule(pattern=["git","push"])` 흡수: byte-prefix 보다
+  엄격한 argv TOKEN-VECTOR 매칭의 3개 PURE/NO-THROW 결정점.
+  (1) `tokenizeArgv` — command STRING 을 argv 토큰으로 분할 (POSIX-ish 서브셋:
+  공백 분리, single/double-quote 그룹, double-quote 안/밖 backslash escape,
+  인접 quoted+unquoted fuse). full 셸 파서 아님 — expansion/operator 없음;
+  비-string 입력 → `[]`, unterminated quote 는 end-of-string 까지 best-effort
+  로 소비(throw 안 함) — security boundary 가 아니라 MATCHING aid 라서
+  byte-prefix matcher 가 보수적 fallback 으로 남음.
+  (2) `parseArgvArrayLiteral` — rule-side `["git","push"]` / `[git, push]` 를
+  `string[]` 로; bracket 비-구획 / unterminated / 빈 배열 / trailing-comma 의
+  빈 토큰 → `null`. caller(`parseRules`)가 `null` 을 `RuleParseError` 로 올려
+  malformed 배열이 byte-prefix rule 로 silent downgrade 되지 않는 불변식 유지.
+  (3) `matchArgvRule` — pattern 이 commandArgv 의 token PREFIX 인지: 0..n-2 토큰
+  리터럴 일치, 마지막 토큰만 `*` glob-suffix(Codex parity) 허용. pattern 이
+  command 보다 길면 즉시 false; 빈 pattern 은 never-match(방어).
+  결정성: clock/I·O/전역상태 없음 — 입력의 total function.
+evidence:
+  code:
+    - src/rules/argv.ts
+  adrs: [31]
+  tests:
+    unit:
+      - tests/unit/rules/argv-tokenize.test.ts
+      - tests/unit/rules/argv-rule.test.ts
+      - tests/unit/rules/argv-byte-identity-hellgate.test.ts
+    integration:
+      - tests/integration/rules-argv-array-e2e-hellgate.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  argv token-prefix 는 `prefix-rule-dsl` 의 byte-prefix matcher 와 공존하는
+  STRICTER 변형 — rule 이 `argv: string[]` 를 들고 있을 때만 token-vector 로,
+  아니면 matcher 가 byte-prefix 로 fallback. byte-identity hellgate 은 argv 미사용
+  rule 이 legacy byte-prefix 결과와 byte-for-byte 동일함을 봉인.

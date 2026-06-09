@@ -1,0 +1,49 @@
+id: git-co-change
+title: git_co_change — co-change / related-files 신호 (change-impact, §7.2 long-tail)
+section: 2
+subsystem: Git 1급 도구 (ADR-0025/0514) — change-impact / related-files 신호
+order: 25
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:cursor, surface:cli, default-off]
+depends_on: [git-churn, byte-stable-string-comparator, deferred-tool-registry, tool-surface-manifest]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "Reachable from src/apps/cli/index.ts → ./repl → ./internal: gitToolList builds gitTools(undefined, { coChange: true }) at internal.ts:1364 when gitCoChangeEnabled() (QUANTA_GIT_CO_CHANGE gate, internal.ts:655) — default-OFF, byte-identical legacy 12-tool git set when off."
+    web: "Agent tool — when gated on, co-change ranking renders in the browser via the generic tool.invoked/tool.completed bridge like the other git tools; no dedicated web affordance (default-OFF)."
+purpose: |
+  타깃 파일과 '같은 커밋에서 함께 바뀐' 다른 파일들을 git history 공동출현(co-occurrence)
+  매트릭스로 랭킹하는 read-only git tool. git_churn(단일 파일 변경빈도, 1차)의 2차 신호 —
+  "X를 건드리면 Y도 함께 건드릴 확률" (fault-localization·형제파일(test/types/barrel) 누락
+  방지). 메커니즘: `git log --name-only --format=%x1e`(빈 --format=의 commit-boundary 유실
+  버그를 피하려 ASCII Record-Separator를 커밋당 1회 방출) → parseCommitGroups가 RS로 커밋별
+  파일 그룹 분리. file 지정 시 rankCoChange가 다른 파일별 공동출현 횟수 + Jaccard affinity
+  (= coCount / |둘 중 하나라도 건드린 커밋|, 포함-배제 union)로 랭킹; file 없으면
+  rankCoChangePairs가 전역 최밀 co-change PAIR 방출. 임의 임계값 0 — affinity는 표준 Jaccard
+  index(튜닝 컷오프 아님), 동점은 path(byteCompare)로 결정. 순수 랭킹은 export되어 단위
+  테스트, 도구 본체는 thin spawn + format wrapper. Default-OFF: opts.coChange가 true일 때만
+  등록(QUANTA_GIT_CO_CHANGE 게이트 + QUANTA_GIT_TOOLS 의존); off ⇒ git 도구셋 byte-identical.
+evidence:
+  code:
+    - src/tool/git/co-change.ts
+  adrs: [514, 25]
+  tests:
+    unit: [tests/unit/git-co-change.test.ts]
+    integration: [tests/integration/longtail-new-tools-e2e.test.ts]
+    contract: []
+knobs:
+  - name: QUANTA_GIT_CO_CHANGE
+    where: src/apps/cli/internal.ts:655 (gitCoChangeEnabled) + cli-knobs.ts:569
+    default: false
+    purpose: "§7.2 git_co_change related-files 도구를 git 도구셋에 append (co-occurrence 매트릭스; opt-in). QUANTA_GIT_TOOLS도 함께 켜져야 함."
+deliberate_hold: null
+notes: 'git_churn(1차 변경빈도)·git_blame_heatmap(소유권)과 짝 — ADR-0025 git 1급 도구의 change-impact 확장(ADR-0514). Codex change-impact / Cursor related-files 흡수. manifest.ts:797이 surface SSOT.'

@@ -109,6 +109,18 @@ export type SessionHostTurnEvent =
       readonly totalTokens?: number
       readonly costMicroUsd?: number
     }
+  // ADR-0512 — skill-scope decision SUMMARY. The scheduler maps this 1-to-1 onto
+  // the `skill.scope.decision` wire event so a hard-`blocked` / silently-declined
+  // out-of-scope tool produces UI feedback on the web surface (it never reaches
+  // the interactive `approval.requested` card). Distinct from the `usage` /
+  // `tool.*` variants above; it carries no token / state mutation.
+  | {
+      readonly type: "skill.scope.decision"
+      readonly tool: string
+      readonly activeSkill: string
+      readonly decision: "allowed" | "declined" | "steered" | "blocked"
+      readonly isReadOnly: boolean
+    }
 
 export type SessionHostSideConversationInheritance = "none" | "system" | "last-turn"
 

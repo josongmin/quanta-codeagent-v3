@@ -1,0 +1,100 @@
+id: worktree-tool
+title: git-worktree agent tools — session slot + relative-cwd edit-fence (ticket-11 P8, CC EnterWorktree 흡수)
+section: 2
+subsystem: 도구 시스템 — git-worktree 격리 (enter/exit/status + cwd-override edit-fence)
+order: 530
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:claude", "surface:cli", "tier:core", "default-off", "ticket-11", "isolation"]
+depends_on: [tool, agent, shared, storage, runtime]
+config_refs:
+  env: [QUANTA_WORKTREE_TOOL]
+  runtime: [activeWorktreeSlot]
+  cli: [QUANTA_WORKTREE_TOOL]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable ONLY on the CLI surface — mintActiveWorktreeSlot is called at exactly ONE site (src/apps/cli/repl/runtime-context-compose.ts:307), buildWorktreeBlock(config) is pushed into extraTools at src/agent/features.ts:260, and resolveBashCwd/resolveEditBase are consumed by the bash/read/edit tools (src/tool/bash/index.ts:590, src/tool/read/index.ts:305, src/tool/edit/index.ts:473)"
+    web: "no web mint site for the activeWorktreeSlot — bench/web/ide/headless have NO mint, so the manifest advertises the group on CLI only (R4-5 finding #3); web is na, not missing"
+purpose: |
+  CC's EnterWorktree/ExitWorktree/listRegisteredWorktrees camp absorbed as the
+  `enter_worktree` / `exit_worktree` / `worktree_status` agent tools so the model
+  can work inside an ISOLATED git worktree without dirtying the session tree.
+  Three pieces, all PURE·ADDITIVE·DEFAULT-OFF:
+  (1) `createWorktreeSlot` / `mintActiveWorktreeSlot` (src/agent/worktree-slot.ts)
+  — ONE session-scoped holder (`current`/`set`/`clear` + immutable repoRoot /
+  sessionCwd) minted ONLY when `gateOn(env, "QUANTA_WORKTREE_TOOL")`, else
+  undefined. Same closure-handle pattern as createWorkingStateSession: the loop
+  builds one at session start, the tools mutate it across turns. The minter is
+  PURE (env + a boot cwd in, slot-or-undefined out) so the comp-root gate is
+  unit-testable without a full session boot, and it lives in the library slice
+  (not the CLI comp-root) so tests import it without crossing the @/apps/cli
+  fence. (2) `buildWorktreeBlock(config)` (src/agent/tier1/worktree.ts) — returns
+  the 3 worktree tools ONLY when `config.activeWorktreeSlot !== undefined`, else
+  `[]`. It gates on the comp-root-injected slot PRESENCE, never on env directly
+  (mirroring the env-gated tier-1 blocks like buildCheckSecretsBlock), so the
+  block carries NO per-tool state. (3) `resolveBashCwd` / `resolveEditBase`
+  (src/tool/worktree/cwd-override.ts) — the edit-fence INVARIANT: a worktree is a
+  RELATIVE-cwd override, NOT a trust-boundary redefinition. bash spawns its child
+  in `active?.worktreePath ?? sessionCwd`. For edit/read, a RELATIVE path is
+  pre-joined to the worktree (resolve(worktree, raw)) but the storage jail base
+  stays the SESSION cwd; an ABSOLUTE path is passed unchanged and STILL jailed to
+  the session root — byte-identical to the no-worktree path. The jail root NEVER
+  moves to the worktree (the security-critical point): handing the worktree to
+  the storage `base` would FALSE-REJECT a legal absolute write into the session
+  tree but outside the worktree. WIRED: features.ts pushes the block into
+  extraTools; the CLI repl runtime-context mints the slot; bash/read/edit consume
+  the cwd-override helpers. DEFAULT-OFF: gate off ⇒ slot undefined ⇒ tools
+  unregistered + bash/edit cwd byte-identical (RFC §1.2). CLI-ONLY: exactly one
+  mint site, so the manifest must not over-promise the other 4 surfaces.
+evidence:
+  code:
+    - src/agent/tier1/worktree.ts
+    - src/agent/worktree-slot.ts
+    - src/tool/worktree/cwd-override.ts
+  adrs: [523]
+  tests:
+    unit:
+      - tests/unit/tool/worktree/worktree-tools.test.ts
+      - tests/unit/tool/worktree/worktree-comp-root-gate.test.ts
+      - tests/unit/tool/worktree/worktree-mutating-table.test.ts
+    integration:
+      - tests/unit/tool/worktree/worktree-dispatch-e2e.test.ts
+    contract:
+      - tests/unit/tool-surface-manifest-hellgate.test.ts
+knobs:
+  - name: QUANTA_WORKTREE_TOOL
+    default: 'unset (OFF)'
+    purpose: 'gateOn(env, "QUANTA_WORKTREE_TOOL") — when on, the CLI comp-root mints AgentConfig.activeWorktreeSlot so buildWorktreeBlock registers the 3 worktree tools and bash/edit honor the active-worktree relative-cwd override. Unset/off ⇒ slot undefined ⇒ tools unregistered + bash/edit cwd byte-identical (default-OFF). Read via the comp-root minter (mintActiveWorktreeSlot), never process.env in the tool body.'
+deliberate_hold: null
+notes: |
+  The edit-fence invariant is the crux: relative paths resolve against the
+  worktree, absolute paths STILL jail to the session root. `resolveEditBase`
+  threads the needle by pre-joining the relative path to the worktree to get an
+  absolute, then handing the SESSION cwd as the storage jail base — so
+  `resolve(sessionCwd, absInsideWorktree)` === the same absolute (absolute wins)
+  and the jail check passes because the worktree is a subdir of the session jail.
+  An absolute raw path is passed unchanged with the same session base, byte-
+  identical to the no-worktree path. The 3 helpers carry NO state — the only
+  mutable state is the slot, owned by @/agent (which owns the immutable session
+  repoRoot/sessionCwd the slot carries). Reachability is CLI-honest: the manifest
+  (src/tool/surface/manifest.ts) advertises the worktree group on the CLI surface
+  ONLY because mintActiveWorktreeSlot has exactly one call site; the
+  manifest-hellgate test pins that CLI-only contract, the mutating-table test
+  pins all 3 names as plan-mode mutating (isMutatingTool no-throw), the comp-root
+  gate test pins both directions of QUANTA_WORKTREE_TOOL over the pure minter,
+  and the dispatch-e2e drives enter→bash-inside→exit through the REAL dispatchTool
+  pipeline against a real tmpdir git repo (proving the slot's current value is
+  projected onto ToolContext.activeWorktree). The runtime worktree LIFECYCLE
+  primitives this sits on (createPersistentWorktree / withWorktree, src/runtime/
+  worktree*.ts) are catalogued separately as worktree-fork-primitive /
+  with-worktree-runtime-primitive; this entry owns the AGENT-TOOL seam (slot +
+  cwd-override + gated registration) on top of them.

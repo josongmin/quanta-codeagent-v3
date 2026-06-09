@@ -1101,6 +1101,19 @@ const toSessionHostTurnEvent = (event: AgentEvent): SessionHostTurnEvent | undef
         completionTokens: event.outputTokens,
         totalTokens: event.inputTokens + event.outputTokens,
       }
+    case "skill_scope_decision":
+      // ADR-0512 — bridge the skill-scope decision SUMMARY onto the wire so the
+      // web surface sees a hard-`blocked` / silently-declined out-of-scope tool
+      // (these never reach the interactive `approval.requested` card). The CLI
+      // already renders this off the `skill_scope_decision` STREAM event; this
+      // gives the web the same one-line gray timeline note.
+      return {
+        type: "skill.scope.decision",
+        tool: event.tool,
+        activeSkill: event.activeSkill,
+        decision: event.decision,
+        isReadOnly: event.isReadOnly,
+      }
     default:
       return undefined
   }

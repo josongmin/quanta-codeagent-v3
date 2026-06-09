@@ -105,6 +105,34 @@ export interface ToolCompletedEvent extends SessionEventEnvelope<"tool.completed
   readonly durationMs?: number
 }
 
+/**
+ * ADR-0512 — skill-scope decision SUMMARY (NOT the interactive escalation pair).
+ *
+ * The agent loop emits a `skill_scope_decision` AgentEvent for EVERY scope
+ * outcome — including the ones the interactive `approval.requested` /
+ * `approval.resolved` card NEVER sees: a hard `blocked` (hand-off-required
+ * security boundary, denied WITHOUT asking) and a silent auto-decline / steer
+ * (no `onConfirm` wired). The CLI renders this as a one-line gray note
+ * (`stdout.ts`). Without this wire event the WEB surface produced ZERO feedback
+ * for a hard-blocked or silently-declined out-of-scope tool — so the daemon
+ * bridge now translates the AgentEvent onto this SessionEvent and the web
+ * transcript renders the same gray timeline note.
+ *
+ * This is the post-decision SUMMARY only; the interactive seam stays the
+ * enriched `approval.requested` (`scopeContext`) + `approval.resolved` pair.
+ */
+export interface SkillScopeDecisionEvent extends SessionEventEnvelope<"skill.scope.decision"> {
+  /** The out-of-scope tool the model called. */
+  readonly tool: string
+  /** The active skill whose allowlist the tool fell outside of. */
+  readonly activeSkill: string
+  /** The escalation outcome. `blocked` is the gray HARD-LOCK (hand-off-required
+   *  security boundary — never a card); the others are the resolved verbs. */
+  readonly decision: "allowed" | "declined" | "steered" | "blocked"
+  /** Read-only-vs-mutating distinction (same predicate the dispatch + card share). */
+  readonly isReadOnly: boolean
+}
+
 export interface ApprovalRequestedEvent extends SessionEventEnvelope<"approval.requested"> {
   readonly approval: PendingApprovalView
 }
@@ -127,6 +155,7 @@ export type SessionEvent =
   | SessionClosedEvent
   | SessionCreatedEvent
   | SessionStateUpdatedEvent
+  | SkillScopeDecisionEvent
   | ToolCompletedEvent
   | ToolInvokedEvent
   | TurnCompletedEvent
@@ -143,6 +172,7 @@ export const SESSION_EVENT_TYPES = [
   "session.closed",
   "session.created",
   "session.state.updated",
+  "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
   "turn.completed",

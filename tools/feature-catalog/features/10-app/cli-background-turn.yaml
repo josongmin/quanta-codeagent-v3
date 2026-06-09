@@ -1,0 +1,82 @@
+id: cli-background-turn
+title: Ctrl+B background-turn portal + /background (ticket-18 V1)
+section: 10
+subsystem: REPL turn lifecycle (background detach)
+order: 26
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:core", "absorbed:cc-background-tasks"]
+depends_on: [built-in-slash-commands, repl-interactive-surface]
+config_refs:
+  env:
+    - QUANTA_BG_TURN
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "backgroundCmd registered in slash/registry-surface.ts:873 (imported by slash-commands.ts → CLI); portal built in repl/surface-compose.ts:908 under gateOn(QUANTA_BG_TURN) and threaded onto SlashContext.background; Ctrl+B detach sink wired in repl/session-loop.ts via shouldWireBackground"
+    web: "REPL turn-lifecycle keybinding + slash; no web bridge consumer (Ctrl+B + SlashContext.background are CLI-surface-private)"
+purpose: |
+  Ticket-18 (V1): move a running interactive turn to the background with
+  Ctrl+B, then observe/cancel it via `/background [list|reattach <id>|
+  cancel <id>]`. Gated `QUANTA_BG_TURN` (default-OFF, byte-identical when
+  off). The HIGHEST-RISK surgery of the batch — it touches three fragile
+  invariants at once:
+    - turn atomicity: `detach()` takes the SAME live body promise; the body
+      keeps streaming after detach (the portal NEVER re-enters `@/agent`
+      — it is a pure passive observer).
+    - signal cleanup: the turn's own AbortController is handed over; a
+      NO-THROW `.then/.catch` swallows the outcome into a terminal state
+      (done/failed/cancelled) so a backgrounded rejection never escapes as
+      an unhandled rejection; AbortError maps to `cancelled`, distinct from
+      a genuine `failed`. `cancel()` is NO-THROW on unknown id + idempotent
+      on an already-aborted controller.
+    - weave conflict: the Ctrl+B sink is wired ONLY when a portal exists AND
+      inbound mode ≠ weave AND no interrupted turn is active (backgrounding
+      mid-weave would orphan the live blend) — otherwise the keypress is a
+      silent no-op.
+  Output is captured in a bounded HEAD+TAIL window (50 MiB cap, UTF-8-byte
+  accurate so a split multibyte char decodes to U+FFFD, not a lone
+  surrogate) with a `… +N KB elided …` middle marker — head is never
+  dropped. `/background` is observe-only in V1: `reattach` is print-only
+  (buffer + result/error); the SDK session remains the SSOT for the merged
+  transcript. Absent slot ⇒ `/background` prints "not wired" + exit 0.
+evidence:
+  code:
+    - src/apps/cli/background-cmd.ts
+    - src/apps/cli/repl/background-turn-portal.ts
+  adrs: [518]
+  tests:
+    unit:
+      - src/apps/cli/__tests__/background-turn-portal.hellgate.test.ts
+      - src/apps/cli/__tests__/background-ctrlb-turn-runner.hellgate.test.ts
+      - tests/unit/apps/cli/repl/background-turn-portal-buffer.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_BG_TURN
+    where: src/config/knob-inventory.ts
+    default: false
+    purpose: "Ctrl+B detach + `/background` turn portal (ticket-18; opt-in default-OFF)."
+deliberate_hold: null
+notes: |
+  Wiring chain audited: background-cmd.ts → slash/registry-surface.ts
+  (BUILTINS append, no `/rewind-tool`/`/fork`/`/queue` collision) →
+  slash-commands.ts (CLI import graph). background-turn-portal.ts →
+  surface-compose.ts (gate build + ctx.background thread) +
+  session-loop.ts (Ctrl+B detach via shouldWireBackground WEAVE guard +
+  backgroundTurnLabel). The portal imports nothing from `@/agent` (passive
+  observer) and only `node:crypto` (randomBytes task-id mint, no weak RNG).
+  V1 explicitly defers: persistence across restart (V2) and live re-entry
+  reattach that re-awaits the body (V3); `reattach` is print-only and the
+  SDK session owns the merged transcript. The Ctrl+B turn-runner wire +
+  `shouldWireBackground` predicate live in session-loop.ts (a sibling
+  lane's file) — this entry owns the portal store + the `/background`
+  render only.

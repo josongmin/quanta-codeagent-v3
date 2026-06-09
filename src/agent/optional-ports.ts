@@ -7,6 +7,7 @@ import {
 import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
+import { AGENT_STATE_TYPES, type AgentStateObservation } from "@/protocol/agent-state"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { gateOn, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
@@ -179,7 +180,52 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // item_started/updated/completed lifecycle events (host UIs that render
   // per-item progress). Default-OFF (`QUANTA_ITEM_LIFECYCLE` unset ⇒ the stream
   // is returned unwrapped, byte-identical).
-  return wireItemLifecycleStream(wireCloseoutCritic(next, env), env)
+  //
+  // QUANTA_WEB_AGENT_STATE — wrap the (post-lifecycle) stream so the 9
+  // agent-state events ALSO fan out to `config.onAgentState`. Composed LAST so
+  // it observes the SAME stream the loop actually emits onto (including any
+  // lifecycle-derived events). Installed ONLY when the comp-root set
+  // `onAgentState` (gate ON); absent ⇒ the stream is returned verbatim
+  // (byte-identical default-OFF).
+  return wireAgentStateTap(wireItemLifecycleStream(wireCloseoutCritic(next, env), env))
+}
+
+/**
+ * QUANTA_WEB_AGENT_STATE — wrap `base.stream` so each emitted event that is one
+ * of the 9 agent-state types ALSO reaches `base.onAgentState.capture(...)`.
+ *
+ * Cloned from {@link wireItemLifecycleStream}: the base stream emits the event
+ * FIRST + verbatim (so every existing consumer is byte-identical), THEN — only
+ * for the 9 tapped types — the sink is fed. NO-THROW at the fan-out: a throwing
+ * sink can never break the base emit or crash the turn.
+ *
+ * Installed ONLY when `base.onAgentState` is present — the web-daemon comp-root
+ * sets that slot exclusively when `QUANTA_WEB_AGENT_STATE=1`, so an absent slot
+ * ⇒ `base` returned verbatim (the stream is NOT even allocated a wrapper),
+ * proving byte-identical default-OFF. A `base` without a `stream` likewise
+ * passes through unchanged.
+ */
+const wireAgentStateTap = <T extends OptionalPortBase>(base: T): T => {
+  const sink = (base as Partial<AgentConfig>).onAgentState
+  if (sink === undefined) return base
+  const source = base.stream
+  if (source === undefined) return base
+  const wrapped: StreamPort = {
+    emit(event: AgentEvent): void {
+      // Base emit FIRST + verbatim — every existing consumer is byte-identical.
+      source.emit(event)
+      if (!AGENT_STATE_TYPES.has(event.type)) return
+      try {
+        // The 9 tapped types are a structural subset of AgentStateObservation;
+        // the cast is sound (the SSOT `AGENT_STATE_TYPES` gates the narrowing).
+        sink.capture(event as unknown as AgentStateObservation)
+      } catch {
+        // A throwing sink must never break the base emit (already done above)
+        // or crash the turn — observation-only, fail-silent.
+      }
+    },
+  }
+  return { ...base, stream: wrapped } as T
 }
 
 /**

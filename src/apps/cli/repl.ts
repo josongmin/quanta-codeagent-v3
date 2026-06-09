@@ -101,6 +101,7 @@ export const topLevelUsage = (): string =>
     "  quanta session <subcommand> ...      Session management (see `quanta session --help`)",
     "  quanta remote <subcommand> ...       Remote execution plane (see `quanta remote --help`)",
     "  quanta attach [ws-url]               Join a running daemon's shared session over WS",
+    "  quanta mcp-server        Expose quanta AS an MCP server over stdio (needs QUANTA_MCP_SERVER=1)",
     "",
     "Common flags:",
     "  --plan, --lsp, --lsp-tools, --git-tools, --observe-dir <d>, --metrics",

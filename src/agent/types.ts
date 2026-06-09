@@ -1246,6 +1246,27 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   onToolDiff?: import("@/tool").ToolDiffSink
   /**
+   * QUANTA_WEB_AGENT_STATE — OPTIONAL agent-state capture sink. When set, the
+   * out-of-band stream tap (`wireAgentStateTap`, optional-ports.ts) wraps
+   * `config.stream.emit` so each of the 9 agent-state events
+   * (`plan_*` / `mode_changed` / `tool_progress` / `context_compacted` /
+   * `ratelimit_snapshot`) is ALSO handed to this sink AFTER the base stream
+   * emits it verbatim. The web-daemon composition root adapts its per-connection
+   * WS forwarder onto this port ONLY when `QUANTA_WEB_AGENT_STATE=1`; the sink
+   * maps the event → an `AgentStateMessage` and `ws.send`s the encoded frame so
+   * the web/Tauri surface renders plan / mode / progress state the in-band
+   * session protocol currently DROPS.
+   *
+   * Absent ⇒ the tap is NEVER installed (the stream is returned verbatim), NO
+   * event is captured, and the path is byte-identical for every non-web caller
+   * (default-OFF). Duck-typed (structural mirror of `@/protocol/agent-state`'s
+   * `AgentStateSink`) so neither slice imports the other's `@/apps/*` surface —
+   * the composition root is the only place that bridges the daemon forwarder to
+   * this port. Best-effort: the sink is no-throw by contract and the tap
+   * additionally guards, so a misbehaving sink can never crash a turn.
+   */
+  onAgentState?: import("@/protocol/agent-state").AgentStateSink
+  /**
    * H6 (jun-3-misc §3) — OPTIONAL passive-VCS event sink. When set, the dispatch
    * seam surfaces it onto {@link import("@/tool").ToolContext}'s `vcsEventSink`
    * so the `bash` tool's post-exec hook (`maybeEmitPassiveVcs`) — gated by

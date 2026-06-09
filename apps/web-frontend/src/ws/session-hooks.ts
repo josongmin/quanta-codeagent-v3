@@ -436,6 +436,18 @@ export const applySessionEventToTranscript = (
         ),
         timestamp: ts,
       })
+    case "skill.scope.decision":
+      // ADR-0512 — one-line gray timeline note for a skill-scope outcome the
+      // interactive escalation card never surfaces (a hard `blocked`
+      // security boundary, or a silent auto-decline / steer). `system` role so
+      // it renders gray, NOT a red error — a blocked out-of-scope tool is a
+      // policy outcome, not a crash.
+      return appendTranscriptMessage(state, {
+        id: event.eventId,
+        role: "system",
+        text: renderSkillScopeDecision(event.tool, event.activeSkill, event.decision),
+        timestamp: ts,
+      })
     default:
       // Forward-compat: an unknown / newly-added SessionEvent type must be a
       // NO-OP, never corrupt the transcript. Falling through returned
@@ -464,6 +476,15 @@ const renderToolCompleted = (
   const body = resultPreview !== undefined && resultPreview.length > 0 ? `  ${resultPreview}` : ""
   return `${icon} ${toolName}${time}${body}`
 }
+
+/** ADR-0512 — one-line gray note for a skill-scope decision SUMMARY. Mirrors the
+ *  CLI `stdout.ts` line (`⊘ <tool> — outside skill "<skill>" (<decision>)`). A
+ *  `blocked` decision is the gray HARD-LOCK; the others are the resolved verb. */
+const renderSkillScopeDecision = (
+  tool: string,
+  activeSkill: string,
+  decision: "allowed" | "declined" | "steered" | "blocked",
+): string => `⊘ ${tool} — outside skill "${activeSkill}" (${decision})`
 
 export const applyRejectedFrameToTranscript = (
   state: TranscriptState,

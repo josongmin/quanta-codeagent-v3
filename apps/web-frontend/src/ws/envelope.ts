@@ -38,6 +38,7 @@ const EVENT_TYPES: readonly SessionEventType[] = [
   "session.closed",
   "session.created",
   "session.state.updated",
+  "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
   "turn.completed",

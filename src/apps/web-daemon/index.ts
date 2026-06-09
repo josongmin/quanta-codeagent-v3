@@ -23,7 +23,12 @@
 import type { RuntimeFacade } from "@/sdk/runtime"
 import { errMessage, gateOn } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
-import { type CanvasPorts, type ObservabilityPorts, startWebDaemon } from "./server"
+import {
+  type AgentStatePorts,
+  type CanvasPorts,
+  type ObservabilityPorts,
+  startWebDaemon,
+} from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 const DEFAULT_PORT = 4096
@@ -62,11 +67,16 @@ const resolveObservableFactory = async (
   readonly runtimeFactory: () => Promise<RuntimeFacade>
   readonly facade: ObservableRuntimeFacade | undefined
 }> => {
-  // ADR-0440 — eagerly mint the facade when EITHER observability OR canvas is
-  // gated ON, so the emitter (observability) / canvas sink shares ONE facade
-  // (= ONE session host) with the served session. Both gates OFF ⇒ the lazy
-  // factory passes through unchanged + facade is undefined (byte-identical).
-  if (!gateOn(process.env, "QUANTA_OBSERVABILITY") && !gateOn(process.env, "QUANTA_WEB_CANVAS")) {
+  // ADR-0440 + QUANTA_WEB_AGENT_STATE — eagerly mint the facade when ANY of
+  // observability / canvas / agent-state is gated ON, so the emitter
+  // (observability) / canvas sink / agent-state sink shares ONE facade (= ONE
+  // session host) with the served session. ALL gates OFF ⇒ the lazy factory
+  // passes through unchanged + facade is undefined (byte-identical).
+  if (
+    !gateOn(process.env, "QUANTA_OBSERVABILITY") &&
+    !gateOn(process.env, "QUANTA_WEB_CANVAS") &&
+    !gateOn(process.env, "QUANTA_WEB_AGENT_STATE")
+  ) {
     return { runtimeFactory: baseFactory, facade: undefined }
   }
   const facade = (await baseFactory()) as ObservableRuntimeFacade
@@ -126,6 +136,20 @@ const buildCanvasPorts = (facade: ObservableRuntimeFacade | undefined): CanvasPo
 }
 
 /**
+ * QUANTA_WEB_AGENT_STATE — project the live facade's agent-state source into
+ * the per-connection port bundle. Returns `undefined` when the facade is absent
+ * (gate OFF) or carries no agent-state source (`QUANTA_WEB_AGENT_STATE !== "1"`),
+ * so the server attaches no agent-state sink (byte-identical).
+ */
+const buildAgentStatePorts = (
+  facade: ObservableRuntimeFacade | undefined,
+): AgentStatePorts | undefined => {
+  if (facade === undefined) return undefined
+  if (facade.agentState === undefined) return undefined
+  return { source: facade.agentState }
+}
+
+/**
  * Boot the daemon. Accepts an optional override so test code (and a future
  * composition root) can inject a real `runtimeFactory` without parsing env.
  *
@@ -146,9 +170,14 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // server attaches no canvas sink (byte-identical legacy).
   const canvasPorts = buildCanvasPorts(observableFacade)
 
+  // QUANTA_WEB_AGENT_STATE — per-connection agent-state sink bundle. Gate OFF ⇒
+  // undefined ⇒ the server attaches no agent-state sink (byte-identical legacy).
+  const agentStatePorts = buildAgentStatePorts(observableFacade)
+
   const config: WebDaemonConfig & {
     observabilityPorts?: ObservabilityPorts
     canvasPorts?: CanvasPorts
+    agentStatePorts?: AgentStatePorts
   } = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
@@ -160,6 +189,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     sessionConfig: overrides?.sessionConfig ?? {},
     ...(observabilityPorts !== undefined ? { observabilityPorts } : {}),
     ...(canvasPorts !== undefined ? { canvasPorts } : {}),
+    ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),
   }
 
   // Port-collision fallback: if the requested port is taken (EADDRINUSE
@@ -194,6 +224,12 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // `canvasPorts` undefined ⇒ no sink (byte-identical).
   if (canvasPorts !== undefined) {
     process.stderr.write("web-daemon: canvas sink live (per-connection WS)\n")
+  }
+  // QUANTA_WEB_AGENT_STATE — agent-state sink (plan / mode / progress /
+  // compaction / ratelimit render-side data). Gate OFF ⇒ `agentStatePorts`
+  // undefined ⇒ no sink (byte-identical).
+  if (agentStatePorts !== undefined) {
+    process.stderr.write("web-daemon: agent-state sink live (per-connection WS)\n")
   }
 
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {

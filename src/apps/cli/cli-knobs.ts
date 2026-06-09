@@ -574,22 +574,6 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     readSite: "internal.ts (gitToolList) + ci-bot.ts buildCiBotWiring (gitTools opts.coChange)",
   },
   {
-    envKey: "QUANTA_GH_CODE_TOUR",
-    kind: "bool",
-    default: false,
-    group: "misc",
-    describe: "§5.4 gh_pr_code_tour guided PR-diff walkthrough tool (opt-in).",
-    readSite: "ci-bot.ts buildCiBotWiring (ghTools opts.codeTour)",
-  },
-  {
-    envKey: "QUANTA_CI_FINDING",
-    kind: "bool",
-    default: false,
-    group: "misc",
-    describe: "§7.3 ci_finding structured CI-investigation record tool (opt-in).",
-    readSite: "ci-bot.ts buildCiBotWiring (ghTools opts.ciFindingStore)",
-  },
-  {
     envKey: "QUANTA_FETCH_RULES",
     kind: "bool",
     default: false,

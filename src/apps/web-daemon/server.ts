@@ -24,6 +24,11 @@ import {
   tryDecodeSessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
 } from "@/ipc/session"
+import {
+  type AgentStateObservation,
+  agentEventToMessage,
+  encodeAgentStateFrame,
+} from "@/protocol/agent-state"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, gateDisabled, isSessionForbidden, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
@@ -74,6 +79,14 @@ interface WSData {
    * no frames). The detach closure unsubscribes from the shared usage source.
    */
   canvas: { handle: CanvasEmitterHandle; detach: () => void } | undefined
+  /**
+   * QUANTA_WEB_AGENT_STATE — per-connection agent-state forwarder (gate ON
+   * only). `open()` subscribes this socket to the daemon's agent-state source;
+   * `close()` unsubscribes so we never forward to a dead socket. `undefined` ⇒
+   * gate OFF (byte-identical: no sink, no frames). The detach closure
+   * unsubscribes from the shared agent-state source.
+   */
+  agentState: { detach: () => void } | undefined
 }
 
 /** Minimal `ServerWebSocket`-like surface the observability sink writes to.
@@ -267,6 +280,65 @@ export const attachCanvasSink = (
       unsubscribe?.()
       unsubscribeDiffs?.()
       handle.stop()
+    },
+  }
+}
+
+/**
+ * QUANTA_WEB_AGENT_STATE — live agent-state source (subscribe-only, fed by the
+ * session's `onAgentState` stream tap). Structural mirror of
+ * `agent-state-source.ts#AgentStateSourceHandle.subscribe`. Present only when
+ * `QUANTA_WEB_AGENT_STATE=1`; absent ⇒ a connection forwards no `agentState`
+ * frames (byte-identical).
+ */
+export interface AgentStateSource {
+  /** Subscribe to subsequent agent-state captures. Returns an unsubscribe. */
+  subscribe(handler: (event: AgentStateObservation) => void): () => void
+}
+
+/**
+ * QUANTA_WEB_AGENT_STATE — agent-state port bundle handed to each connection.
+ * Optional: the `index.ts` composition root only passes it when the live facade
+ * exposes the source. Gate OFF ⇒ `index.ts` never builds this ⇒ no sink,
+ * byte-identical.
+ */
+export interface AgentStatePorts {
+  readonly source: AgentStateSource
+}
+
+/**
+ * QUANTA_WEB_AGENT_STATE — bridge a served WebSocket to the agent-state source.
+ *
+ * Returns `null` when `ports` is absent (gate OFF ⇒ no sink, byte-identical).
+ * Otherwise subscribes this connection to the shared source: each capture is
+ * mapped (`agentEventToMessage`) + encoded (`encodeAgentStateFrame`) and
+ * `ws.send`-ed. NO snapshot-on-connect (an agent-state event is a point-in-time
+ * observation, not retained state) — frames render from the next event forward.
+ * The caller MUST call `detach()` on disconnect so we never forward to a dead
+ * socket.
+ *
+ * NO-THROW at every fan-out: the mapper is pure, but the encode + `ws.send` are
+ * wrapped in try/catch so a hostile / dead socket can never break the
+ * subscriber fan-out (the source's `capture` additionally guards each handler).
+ */
+export const attachAgentStateSink = (
+  ws: ObservabilitySendable,
+  ports: AgentStatePorts | undefined,
+): { detach: () => void } | null => {
+  if (ports === undefined) return null
+  const unsubscribe = ports.source.subscribe((event) => {
+    try {
+      const msg = agentEventToMessage(event)
+      if (msg === null) return
+      ws.send(encodeAgentStateFrame(msg))
+    } catch {
+      // Dead/throwing socket or mapper edge — swallow (the source also guards
+      // each handler so a throw here never breaks the fan-out to siblings).
+    }
+  })
+  return {
+    detach: () => {
+      unsubscribe()
     },
   }
 }
@@ -657,6 +729,13 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    * it only when `QUANTA_WEB_CANVAS=1`.
    */
   readonly canvasPorts?: CanvasPorts
+  /**
+   * QUANTA_WEB_AGENT_STATE — optional agent-state port bundle. Gate OFF ⇒
+   * absent ⇒ the server attaches no agent-state sink (byte-identical). The
+   * composition root (`./index.ts`) populates it only when
+   * `QUANTA_WEB_AGENT_STATE=1`.
+   */
+  readonly agentStatePorts?: AgentStatePorts
 }
 
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
@@ -714,7 +793,12 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       }
     }
     const upgraded = server.upgrade(req, {
-      data: { adapter: undefined, observability: undefined, canvas: undefined },
+      data: {
+        adapter: undefined,
+        observability: undefined,
+        canvas: undefined,
+        agentState: undefined,
+      },
     })
     if (!upgraded) return new Response("upgrade failed", { status: 400 })
     // 101 is sent by Bun on successful upgrade — return undefined so Bun
@@ -869,6 +953,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // current usage view; `close()` detaches so no frame targets a dead
         // socket.
         ws.data.canvas = attachCanvasSink(ws, config.canvasPorts) ?? undefined
+        // QUANTA_WEB_AGENT_STATE — bridge this socket to the agent-state source
+        // (gate ON only). `null` ⇒ gate OFF (byte-identical). NO
+        // snapshot-on-connect (point-in-time observations); `close()` detaches
+        // so no frame targets a dead socket.
+        ws.data.agentState = attachAgentStateSink(ws, config.agentStatePorts) ?? undefined
         try {
           await buildRegisteredSession(registry, ws, adapter, sharedSession)
         } catch (error) {
@@ -909,6 +998,10 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // + stop the emitter) before evicting so no frame targets a dead socket.
         ws.data.canvas?.detach()
         ws.data.canvas = undefined
+        // QUANTA_WEB_AGENT_STATE — unsubscribe from the agent-state source
+        // before evicting so no frame targets a dead socket.
+        ws.data.agentState?.detach()
+        ws.data.agentState = undefined
         await registry.evict(ws)
       },
     },

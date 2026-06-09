@@ -824,7 +824,15 @@ export const composeSurfaceWires = (
   // (config byte-identical) and the getter stays undefined so `/state` omits the
   // skill-scope section (byte-identical to the working-state-only render).
   let skillScopeGet: (() => SkillScopeView | undefined) | undefined
-  const skillScopeEnabled = isEnvTruthy(envSource.QUANTA_SKILL_SCOPE_V2)
+  // E1: gate-vocab MUST match the loop's 5 consumers, which all read
+  // `runtimeConfig().skillScopeV2 = gateOn(env, "QUANTA_SKILL_SCOPE_V2")`.
+  // `gateOn` is default-OFF (unset / "" / unrecognized ⇒ OFF), whereas the
+  // legacy `isEnvTruthy` (parseEnvFlag(raw,false)) treats `QUANTA_SKILL_SCOPE_V2=`
+  // (empty) as TRUE — that split-brain installed the getter here while the loop
+  // never fired the publisher, breaking the 'unset ⇒ byte-identical OFF'
+  // invariant. Use `gateOn` on the injected hermetic `envSource` (NOT
+  // `runtimeConfig().skillScopeV2`, which reads `process.env` and bypasses it).
+  const skillScopeEnabled = gateOn(envSource, "QUANTA_SKILL_SCOPE_V2")
   // `/retry-with` — model candidates from `QUANTA_RETRY_MODELS` + the latest
   // per-turn stream input (captured via `onTurnStreamInput` when enabled). Both
   // default-OFF: empty candidates ⇒ slot omitted ⇒ "no model candidates

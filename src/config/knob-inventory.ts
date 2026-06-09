@@ -1339,6 +1339,29 @@ const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "§1.6 — connector DirectoryApp marketplace install/lifecycle V1 (opt-in).",
     readSite: "connectors/connector-marketplace.ts",
   },
+  // ── ci-bot GitHub/CI tool gates (jun-08 longtail). AGENT-SIDE reads via
+  // `gateOn(env, "QUANTA_…")` in the ci-bot mode preset — NOT a CLI-terminal-render
+  // knob, so they live HERE, never in apps/cli/cli-knobs.ts (the read-site-domain
+  // ratchet forbids declaring an agent-only gate in the CLI registry). Both
+  // default-OFF: absent ⇒ the ghTools opt is empty ⇒ byte-identical legacy gh set.
+  {
+    envKey: "QUANTA_GH_CODE_TOUR",
+    kind: "bool",
+    default: false,
+    group: "integration",
+    home: "runtime-config",
+    describe: "§5.4 gh_pr_code_tour guided PR-diff walkthrough tool (opt-in).",
+    readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghTools opts.codeTour)",
+  },
+  {
+    envKey: "QUANTA_CI_FINDING",
+    kind: "bool",
+    default: false,
+    group: "integration",
+    home: "runtime-config",
+    describe: "§7.3 ci_finding structured CI-investigation record tool (opt-in).",
+    readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghTools opts.ciFindingStore)",
+  },
 ]
 
 /** P2 audit cluster — CONST-KEYED gates surfaced when the ratchet learned to

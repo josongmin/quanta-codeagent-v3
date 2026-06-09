@@ -18,8 +18,10 @@ const REPO = join(import.meta.dir, "..", "..")
 const features = await loadFeaturesStrict(join(REPO, "tools/feature-catalog/features"))
 
 const STATUS_NEEDS_EVIDENCE = new Set(["full", "partial", "missing"])
-const ev = (s: { cli?: string; web?: string } | undefined, k: "cli" | "web"): string =>
-  (s?.[k] ?? "").trim()
+const ev = (
+  s: { cli?: string | undefined; web?: string | undefined } | undefined,
+  k: "cli" | "web",
+): string => (s?.[k] ?? "").trim()
 
 describe("surface_integration — schema", () => {
   test("SI-01: zod schema accepts a fully-specified block", () => {
@@ -105,16 +107,25 @@ describe("surface_integration — web reachability SSOT anchor", () => {
   // hit `default: return undefined` and are dropped. Pin that whitelist so a
   // future widening of the web bridge fails here and forces a re-audit of every
   // web=missing claim that depended on "dropped at the bridge default arm".
+  //
+  // RE-AUDITED 2026-06-09: ADR-0512 (skill-scope-v2) deliberately added
+  // `skill_scope_decision` → `skill.scope.decision` so the web surface sees a
+  // hard-`blocked` / silently-declined out-of-scope tool (these never reach the
+  // interactive `approval.requested` card). That widening is AUDITED + documented
+  // (feature skill-scope-v2-availability-permission web=full, App.tsx:247 →
+  // EscalationCard), so it is added to the pinned set here — the ratchet still
+  // asserts an EXACT set, so any FUTURE unaudited widening still fires red.
   const KNOWN_BRIDGE_EVENTS = [
     "assistant_text",
     "llm_continuation",
     "llm_request",
+    "skill_scope_decision",
     "tool_call",
     "tool_result",
     "usage",
   ].sort()
 
-  test("SI-20: toSessionHostTurnEvent maps exactly the known 6 event tags", () => {
+  test("SI-20: toSessionHostTurnEvent maps exactly the known 7 event tags", () => {
     const src = readFileSync(join(REPO, "src/host/runtime/internal/context-binding.ts"), "utf8")
     const start = src.indexOf("const toSessionHostTurnEvent")
     expect(start).toBeGreaterThan(-1)

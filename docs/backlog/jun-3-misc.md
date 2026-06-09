@@ -4,6 +4,9 @@
 ## $000000. 필독
 이거 본 AI들은 실제 구현과 문서를 항상 업데이트 시켜놓기. 문서가 보통 stale되니까 코드 보고 업데이트해놔.
 
+> ## ✅ jun-09 CLOSEOUT (code-verified) — 이 백로그는 종료됨
+> §1~§7 전부 LIVE+host배선+적대어딧 완료. jun-09 재확인: **유일 잔여 = Mantle SDK 어댑터**(`@anthropic-ai/mantle-sdk` 미발행 → 외부의존, 우리가 못 만듦. 자리만 잡힌 투기적 어댑터). 나머지 "남은 작업"은 전부 옵션/니치/저ROI로 처리됨. 신규 백로그는 `jun-7-gap-other-agent.md`(이것도 jun-09 reconcile 완료) 참조.
+
 ### 📍 현황 스냅샷 (jun-06 갱신)
 **§1~§4+§7 메인 feature 전부 LIVE + 호스트 배선 완료.** jun-05/06에 마지막 host-binding closeout + 5라운드 적대어딧으로 닫음:
 - ✅ **호스트 배선 LIVE**: N1 side-agent assembler · N2 `.mcp.json` writer · N3/H19 mcp-resources(mcp-bridge aggregate) · H16 auto-dream + `/dream` 수동 · C1 아티팩트 auto-register · 5 SEAM-ONLY 포트(pty/office/imageGen/communicate/mcpResources) · H7 multicloud+rotation+transport-selection(`QUANTA_LLM_TRANSPORT`) · 멀티에이전트 코디네이션 A/B/C.

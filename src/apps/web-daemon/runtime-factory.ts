@@ -32,6 +32,7 @@ import { createRuntimeFromAgentConfigBase, type RuntimeFacade } from "@/sdk/runt
 import { gateOn } from "@/shared"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
 import {
   type CanvasToolDiffSourceHandle,
   createCanvasToolDiffSource,
@@ -65,6 +66,13 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * `tool.diff` frames, byte-identical).
    */
   readonly canvasToolDiff?: CanvasToolDiffSourceHandle
+  /**
+   * QUANTA_WEB_AGENT_STATE — agent-state source fed by the session's
+   * `onAgentState` seam (the out-of-band stream tap). Present only when
+   * `QUANTA_WEB_AGENT_STATE=1` (gate OFF ⇒ undefined ⇒ the server forwards no
+   * `agentState` frames, byte-identical).
+   */
+  readonly agentState?: AgentStateSourceHandle
 }
 
 /**
@@ -203,6 +211,13 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     const canvasToolDiff = gateOn(env, "QUANTA_WEB_CANVAS")
       ? createCanvasToolDiffSource()
       : undefined
+    // QUANTA_WEB_AGENT_STATE — agent-state source. Gate OFF ⇒ undefined ⇒ no
+    // `onAgentState` wired ⇒ the stream tap is never installed (no capture,
+    // byte-identical) + no facade port ⇒ the server forwards no `agentState`
+    // frames.
+    const agentState = gateOn(env, "QUANTA_WEB_AGENT_STATE")
+      ? createAgentStateSource()
+      : undefined
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),
@@ -217,6 +232,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       ...(skills !== undefined ? { skills } : {}),
       ...(canvasUsage !== undefined ? { onPromptAssembled: canvasUsage.sink } : {}),
       ...(canvasToolDiff !== undefined ? { onToolDiff: canvasToolDiff.sink } : {}),
+      ...(agentState !== undefined ? { onAgentState: agentState.sink } : {}),
       ...observabilitySlots(observability),
     }
     const turnAssembler = buildInteractiveTurnAssembler()
@@ -244,6 +260,15 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     if (canvasToolDiff !== undefined) {
       Object.defineProperty(facade, "canvasToolDiff", {
         get: () => canvasToolDiff,
+        enumerable: true,
+      })
+    }
+    // QUANTA_WEB_AGENT_STATE — expose the agent-state source so the daemon's
+    // agent-state sink subscribes to live captures. Gate OFF ⇒ undefined ⇒ no
+    // source.
+    if (agentState !== undefined) {
+      Object.defineProperty(facade, "agentState", {
+        get: () => agentState,
         enumerable: true,
       })
     }

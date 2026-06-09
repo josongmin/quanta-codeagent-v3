@@ -672,10 +672,28 @@ export interface RuntimeConfig {
   readonly subagentTypedKind: boolean
   /** §4.3 — side-agent OS-process daemon V1 (`QUANTA_SIDE_AGENT_PROCESS`). Opt-in.
    *  Default false ⇒ the side-agent registry runs IN-PROCESS (byte-identical).
-   *  When ON (and `QUANTA_SIDE_AGENT` is also on), the host may back a daemon
-   *  with a forked child process via the process-fork port abstraction
-   *  (`@/side-agent/process`), supervised with exponential-backoff respawn. V1
-   *  core only — NOT a launchctl/systemd manager. */
+   *  SEAM (validated CORE, not yet composed at the live root): the fork/supervise/
+   *  respawn pieces all exist and are unit + e2e tested — the OS adapter
+   *  (`nodeProcessForkPort`, `@/host/runtime/side-agent-fork-port`), the supervisor
+   *  (`createSupervisedProcessDaemon`, `@/side-agent/process`: fork → run → crash →
+   *  exponential-backoff respawn → give-up), driven over a REAL forked child in
+   *  `tests/integration/side-agent-process-os-fork-e2e.test.ts`. But the live root
+   *  `maybeWireSideAgent` (`@/host/runtime/agent-config-assembler`) NEVER reads this
+   *  field: it always builds the IN-PROCESS `SideAgentDaemonRegistry`, and the
+   *  process supervisor cannot back `AgentConfig.sideAgentDaemons` as-is for TWO
+   *  reasons — (a) there is NO production worker entrypoint to fork (the ONLY module
+   *  implementing the `ready`/`charter`/`finding`/`shutdown` IPC protocol is the
+   *  test fixture `tests/fixtures/side-agent-worker.mjs`), and (b) `sideAgentDaemons`
+   *  requires the multi-daemon REGISTRY shape (`spawn`/`list`/`findings`/`stop`) that
+   *  the `side_agent_*` tools are exposed over, whereas `SupervisedProcessDaemon` is
+   *  a SINGLE-child `start`/`stop`/`status` supervisor — the "OS daemon MANAGER
+   *  (multi-daemon registry over processes)" is the slice's own EXPLICITLY-DEFERRED
+   *  V1 non-goal (see `@/side-agent/process` header). Consequence: this field has
+   *  ZERO production consumers — it is byte-identical even when ON, because the
+   *  assembler is unread at the wiring call-site (the registry runs in-process
+   *  regardless). V1 core only — NOT a launchctl/systemd manager. Intended end
+   *  state: a production child entrypoint + a process-backed registry adapter, then
+   *  `maybeWireSideAgent` selects the fork port under this gate. */
   readonly sideAgentProcess: boolean
   /** N2 — MCP connector discovery (`QUANTA_MCP_CONNECTORS`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ no discovery port, the `mcp_connector_*` tools

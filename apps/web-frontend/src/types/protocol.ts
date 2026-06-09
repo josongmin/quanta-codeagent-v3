@@ -287,6 +287,21 @@ export interface TurnFailedEvent extends SessionEventEnvelope<"turn.failed"> {
   readonly message: string
 }
 
+/**
+ * ADR-0512 — skill-scope decision SUMMARY (mirrors upstream
+ * `SkillScopeDecisionEvent`). The agent loop emits this for EVERY scope outcome,
+ * including the ones the interactive escalation card never sees: a hard
+ * `blocked` (hand-off-required security boundary, denied WITHOUT asking) and a
+ * silent auto-decline / steer. The web transcript renders it as a one-line gray
+ * note so a hard-blocked / silently-declined out-of-scope tool is not invisible.
+ */
+export interface SkillScopeDecisionEvent extends SessionEventEnvelope<"skill.scope.decision"> {
+  readonly tool: string
+  readonly activeSkill: string
+  readonly decision: "allowed" | "declined" | "steered" | "blocked"
+  readonly isReadOnly: boolean
+}
+
 export interface ApprovalRequestedEvent extends SessionEventEnvelope<"approval.requested"> {
   readonly approval: PendingApprovalView
 }
@@ -313,6 +328,7 @@ export type SessionEvent =
   | TurnFailedEvent
   | ToolInvokedEvent
   | ToolCompletedEvent
+  | SkillScopeDecisionEvent
   | ApprovalRequestedEvent
   | ApprovalResolvedEvent
   | ArtifactReadyEvent
@@ -568,3 +584,157 @@ export interface ContextUsageMessage {
 }
 
 export type CanvasMessage = ToolDiffMessage | ContextUsageMessage
+
+/* --- QUANTA_WEB_AGENT_STATE — agent-state protocol --------------------- */
+
+/**
+ * Agent-state WS protocol — mirrors `src/protocol/agent-state/messages.ts`
+ * upstream, member-for-member. Same copy-not-import pattern as the canvas /
+ * observability protocols: the frontend lives outside the bun tsconfig's
+ * `paths`, so the shapes are re-stated here. Source of truth:
+ * `src/protocol/agent-state/messages.ts`.
+ *
+ * These frames ship the 9 agent-state stream events the in-band session
+ * protocol DROPS — plan / mode / tool-progress / compaction / ratelimit — so
+ * the web/Tauri surface can render them.
+ *
+ * Default-OFF: these frames only arrive when the daemon's agent-state sink is
+ * gated ON (`QUANTA_WEB_AGENT_STATE=1`). Absent that, no frame ever decodes and
+ * the consumers below stay idle — chat UI unchanged.
+ */
+
+/** A todo's status (mirrors `AgentStateTodoStatus` upstream). */
+export type AgentStateTodoStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "blocked"
+
+/** A single todo inside a plan (mirrors `AgentStateTodo` upstream). */
+export interface AgentStateTodo {
+  readonly id: string
+  readonly title: string
+  readonly status: AgentStateTodoStatus
+}
+
+/** A read-only plan snapshot (mirrors `AgentStatePlan` upstream). */
+export interface AgentStatePlan {
+  readonly id: string
+  readonly name: string
+  readonly version: number
+  readonly todos: readonly AgentStateTodo[]
+}
+
+/** Plan-delta kind (mirrors `AgentStatePlanDeltaKind` upstream). */
+export type AgentStatePlanDeltaKind =
+  | "todo_added"
+  | "todo_removed"
+  | "todo_status_changed"
+  | "todo_renamed"
+  | "plan_renamed"
+
+/** A read-only plan delta (mirrors `AgentStatePlanDelta` upstream). */
+export interface AgentStatePlanDelta {
+  readonly kind: AgentStatePlanDeltaKind
+  readonly todoId?: string
+  readonly todoTitle?: string
+  readonly fromStatus?: AgentStateTodoStatus
+  readonly toStatus?: AgentStateTodoStatus
+  readonly fromName?: string
+  readonly toName?: string
+}
+
+/** `plan_created` — a full plan snapshot. */
+export interface PlanCreatedMessage {
+  readonly kind: "plan.created"
+  readonly plan: AgentStatePlan
+  readonly emittedAt: number
+}
+
+/** `plan_snapshot` — a full plan snapshot. */
+export interface PlanSnapshotMessage {
+  readonly kind: "plan.snapshot"
+  readonly plan: AgentStatePlan
+  readonly emittedAt: number
+}
+
+/** `plan_updated` — an incremental plan delta + the new version. */
+export interface PlanUpdatedMessage {
+  readonly kind: "plan.updated"
+  readonly delta: AgentStatePlanDelta
+  readonly version: number
+  readonly emittedAt: number
+}
+
+/** `plan_user_input_requested` — the plan flow paused to ask the user. */
+export interface PlanInputRequestedMessage {
+  readonly kind: "plan.input.requested"
+  readonly promptId: string
+  readonly prompt: string
+  readonly choices?: readonly string[]
+  readonly emittedAt: number
+}
+
+/** `plan_user_input_resolved` — the host answered (or cancelled). */
+export interface PlanInputResolvedMessage {
+  readonly kind: "plan.input.resolved"
+  readonly promptId: string
+  readonly decision: "answer" | "cancelled"
+  readonly text?: string
+  readonly emittedAt: number
+}
+
+/** `mode_changed` — a collaboration-mode transition. */
+export interface ModeChangedMessage {
+  readonly kind: "mode.changed"
+  readonly from: "default" | "plan"
+  readonly to: "default" | "plan"
+  readonly reason?: string
+  readonly emittedAt: number
+}
+
+/** `tool_progress` — a tool's free-text progress line (id/name renamed to
+ *  toolCallId/toolName upstream; message clamped to 256). */
+export interface ToolProgressMessage {
+  readonly kind: "tool.progress"
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly message: string
+  readonly emittedAt: number
+}
+
+/** `context_compacted` — a proactive-compaction marker (summary clamped to
+ *  256 upstream). */
+export interface ContextCompactedMessage {
+  readonly kind: "context.compacted"
+  readonly fromTurnId: string
+  readonly toTurnId: string
+  readonly summary: string
+  readonly ts: number
+  readonly tokens: number
+  readonly emittedAt: number
+}
+
+/** `ratelimit_snapshot` — a transient ratelimit signal (numbers only). */
+export interface RatelimitSnapshotMessage {
+  readonly kind: "ratelimit.snapshot"
+  readonly requestsRemaining?: number
+  readonly requestsResetMs?: number
+  readonly tokensRemaining?: number
+  readonly tokensResetMs?: number
+  readonly observedAt: number
+  readonly emittedAt: number
+}
+
+/** Closed discriminated union — every agent-state message the wire carries. */
+export type AgentStateMessage =
+  | PlanCreatedMessage
+  | PlanSnapshotMessage
+  | PlanUpdatedMessage
+  | PlanInputRequestedMessage
+  | PlanInputResolvedMessage
+  | ModeChangedMessage
+  | ToolProgressMessage
+  | ContextCompactedMessage
+  | RatelimitSnapshotMessage

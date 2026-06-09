@@ -552,6 +552,32 @@ const emitTurnStreamEvent = async (args: {
       await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
       return { state: nextState, emitted: sessionEvent }
     }
+    case "skill.scope.decision": {
+      // ADR-0512 — emit the skill-scope decision SUMMARY as its own wire event.
+      // Carries no state mutation (like `tool.invoked`): it is a transcript note
+      // so the web renders a hard-`blocked` / silently-declined out-of-scope tool
+      // (which the interactive `approval.requested` card never surfaces).
+      const nextState: KernelSessionState = {
+        ...args.state,
+        revision: args.state.revision + 1,
+        seq: args.state.seq + 1,
+      }
+      const sessionEvent: SessionEvent = {
+        eventId: crypto.randomUUID(),
+        seq: nextState.seq,
+        revision: nextState.revision,
+        emittedAt: args.ctx.clock.now().toISOString(),
+        causedByCommandId: args.command.commandId,
+        type: "skill.scope.decision",
+        tool: args.event.tool,
+        activeSkill: args.event.activeSkill,
+        decision: args.event.decision,
+        isReadOnly: args.event.isReadOnly,
+      }
+      await appendEvents(args.ctx.eventLog, [sessionEvent])
+      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
+      return { state: nextState, emitted: sessionEvent }
+    }
     case "usage": {
       // Token usage is NOT a wire event on its own — it accumulates into
       // `state.lastTokenUsage` and gets spread onto the next

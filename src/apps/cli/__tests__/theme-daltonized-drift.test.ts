@@ -1,20 +1,21 @@
 /**
- * ticket-15 (§11.7B) — PENDING-INTEGRATION drift guard for the colorblind theme
- * enum. RED until the orchestrator applies the `VALID_THEMES += daltonized`
- * integration snippet to `src/apps/cli/slash/registry-surface.ts` (an
- * integration file this slice must NOT edit directly).
+ * ticket-15 (§11.7B) — drift guard binding the colorblind theme ENUM to the
+ * palette SSOT. This is a LIVE (green) invariant guard, NOT a pending-integration
+ * stub: `VALID_THEMES` ALREADY carries `light-daltonized` / `dark-daltonized`
+ * (registry-surface.ts) and `getColorPalette` ALREADY resolves both, so the two
+ * surfaces are wired together TODAY and this test pins them so they cannot drift
+ * apart.
  *
  * Claude Code's settings schema `theme` enum (schema.json:2691) includes
- * `light-daltonized` / `dark-daltonized` (CONFIRMED real CC names). Once
- * `VALID_THEMES` carries both, `/color light-daltonized` becomes accepted and
- * the host renderer can resolve the colorblind palette via `getColorPalette`.
+ * `light-daltonized` / `dark-daltonized` (CONFIRMED real CC names). The `/color`
+ * slash accepts both (they are in `VALID_THEMES`) and they map to a colorblind
+ * palette via `getColorPalette` (proven here).
  *
- * Mirrors the existing `getColorPalette` SSOT: the two CC enum names MUST be
- * accepted themes AND map to a colorblind palette (proven here), so the palette
- * surface and the slash surface cannot drift apart.
- *
- * When the snippet lands, this file goes GREEN and should be renamed off the
- * `.pending` suffix (or merged into the registry-surface test).
+ * What is NOT yet wired is the DOWNSTREAM render seam: no host renderer reads
+ * `getColorPalette` to map a selected `*-daltonized` theme onto the actual hex
+ * role colors at the status/box render call-site. That render-root consumer is
+ * the open seam tracked by this feature's `deliberate_hold` — it is unrelated to
+ * the enum↔palette binding this test guards (which is green).
  */
 
 import { describe, expect, test } from "bun:test"
@@ -31,7 +32,7 @@ const validThemes = (): readonly string[] => {
   return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1] as string)
 }
 
-describe("theme daltonized drift (PENDING integration)", () => {
+describe("theme daltonized drift (enum ↔ palette binding)", () => {
   test("VALID_THEMES includes the CC colorblind enum names", () => {
     const themes = validThemes()
     expect(themes).toContain("light-daltonized")
