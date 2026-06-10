@@ -137,5 +137,8 @@ DG("defaultRuntimePort — REAL Go runtime capture (dlv dap over TCP)", () => {
     expect(pkt.runtime).not.toBeNull()
     expect(pkt.runtime?.locals.find((v) => v.name === "result")?.value).toBe("10")
     expect(pkt.runtime?.stack.some((f) => f.name.includes("TestFail"))).toBe(true)
+    // T-03 goroutine dump: the Go runtime always has >1 goroutine (scheduler/GC
+    // alongside the test), so dlv reports them as DAP threads → captured.
+    expect((pkt.runtime?.threads?.length ?? 0)).toBeGreaterThan(1)
   }, 120_000)
 })
