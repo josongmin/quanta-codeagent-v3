@@ -5,9 +5,12 @@ export { DapFrameDecoder, encodeDapMessage } from "./dap-codec"
 export { DapClient, type DapResponse, type DapTransport } from "./dap-client"
 export {
   type DapBreakpoint,
+  type DapVariable,
+  type FrameScopes,
   type Inspection,
   type InspectSpec,
   inspectViaDap,
+  type ScopeVars,
 } from "./inspect-driver"
 export {
   type AdapterSpawnSpec,

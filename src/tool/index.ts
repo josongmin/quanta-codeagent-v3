@@ -788,6 +788,8 @@ export {
   type EvidenceSources,
   type FailureEvidence,
   type RuntimeEvidence,
+  type RuntimeFrame,
+  type RuntimeVar,
   type StaticEvidence,
 } from "./evidence"
 // code-mode (RFC jun-6-code-mode, Phase 1) — the gated `code_cell` tool. Default-OFF:

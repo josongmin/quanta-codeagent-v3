@@ -372,6 +372,16 @@ const scheduleResolvedCall = (
   // in flight, so it overlaps the remaining stream. NOT awaited here.
   onToolStart?.(call)
   slot.promise = dispatch(call)
+  // Interim rejection observer: the slot's settle isn't observed until Phase 2
+  // (`Promise.allSettled` after the stream completes), so a rejection that fires
+  // while the stream is still flowing (e.g. the runtime approval protocol's
+  // onConfirm THROWING `RuntimeApprovalRequiredError` at the gate) would sit
+  // unhandled long enough for the process-level `unhandledRejection` hook to
+  // log a spurious "[error] unhandled rejection (defense-in-depth)" line. The
+  // no-op catch marks the rejection handled WITHOUT consuming it — Phase 2/4
+  // re-observe the SAME promise and still see the rejection (approval re-throw
+  // + dispatchFailedBlock behaviour unchanged).
+  void slot.promise.catch(() => undefined)
 }
 
 /** Process one stream event, mutating `state` in place. A tombstone resets

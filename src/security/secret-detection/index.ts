@@ -21,6 +21,7 @@ export {
   mask,
   type SecretFinding,
   type SecretKind,
+  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
   type SecretScanTextOpts,

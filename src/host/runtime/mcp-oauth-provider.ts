@@ -45,6 +45,7 @@ import {
   type OAuthEndpoints,
   registerOAuthClient,
   type TokenRecord,
+  TokenRotationError,
   type TokenStorePort,
 } from "@/connectors"
 import type { McpOAuthProviderPort } from "@/mcp"
@@ -107,16 +108,65 @@ const formBody = (params: Record<string, string>): string =>
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join("&")
 
+/** Jun-10 silent-failure audit #16 — TYPED token-endpoint failure carrying the
+ *  numeric status (+ the RFC 6749 §5.2 `error` code when the body has one), so
+ *  the refresh catch can branch on `status`/`errorCode` instead of an opaque
+ *  status-string Error. Without it a transient 503 was indistinguishable from
+ *  a revoked refresh token → surprise interactive re-auth + the still-valid
+ *  refresh token overwritten. Carries NO token material (safe to log). */
+export class McpTokenEndpointError extends Error {
+  readonly status: number
+  readonly errorCode?: string
+  constructor(status: number, errorCode?: string) {
+    super(`token endpoint returned status ${status}${errorCode ? ` (${errorCode})` : ""}`)
+    this.name = "McpTokenEndpointError"
+    this.status = status
+    if (errorCode !== undefined) this.errorCode = errorCode
+  }
+}
+
+/** Audit #16 — is this refresh failure an ACTUAL revocation? Per the audit
+ *  checklist, `invalid_grant`/401 is the ONLY re-auth trigger; every other
+ *  failure (429/5xx/network/malformed body/store write) is transient and MUST
+ *  NOT pop an interactive flow or overwrite the stored refresh token. The
+ *  rotator wraps the grant's error in a `TokenRotationError`, so unwrap its
+ *  `cause` first. */
+const isRefreshRevocation = (e: unknown): boolean => {
+  const inner = e instanceof TokenRotationError ? e.cause : e
+  return (
+    inner instanceof McpTokenEndpointError &&
+    (inner.status === 401 || inner.errorCode === "invalid_grant")
+  )
+}
+
+/** Best-effort RFC 6749 §5.2 error-code extraction from a non-2xx token-endpoint
+ *  body (`invalid_grant` is the explicit revocation signal, usually on a 400).
+ *  Malformed/non-JSON body ⇒ `undefined` (the numeric status alone still types
+ *  the branch). */
+const extractOAuthErrorCode = (body: string): string | undefined => {
+  try {
+    const parsed = JSON.parse(body) as unknown
+    if (parsed !== null && typeof parsed === "object") {
+      const code = (parsed as Record<string, unknown>).error
+      if (typeof code === "string") return code
+    }
+  } catch {
+    // non-JSON error body — fall through
+  }
+  return undefined
+}
+
 /** Parse a token-endpoint JSON response into a connectors `TokenRecord`. Throws
- *  on a non-2xx or a malformed body so the caller's catch maps it to a re-auth
- *  (refresh path) or `undefined` (initial path). */
+ *  a typed {@link McpTokenEndpointError} on a non-2xx (so the refresh catch can
+ *  branch on the status) and a plain Error on a malformed 2xx body; the initial
+ *  path's outer catch maps either to `undefined`. */
 const parseTokenResponse = (
   status: number,
   ok: boolean,
   body: string,
   clock: ClockPort,
 ): TokenRecord => {
-  if (!ok) throw new Error(`token endpoint returned status ${status}`)
+  if (!ok) throw new McpTokenEndpointError(status, extractOAuthErrorCode(body))
   let parsed: unknown
   try {
     parsed = JSON.parse(body)
@@ -265,9 +315,24 @@ export const createConnectorsMcpOAuthProvider = (
             refreshGrant(endpoints.tokenEndpoint, clientId, existing.refreshToken as string),
           )
           return refreshed.accessToken
-        } catch {
-          // 3. Refresh rejected (revoked/expired refresh_token) → re-authorize.
-          logger.info("mcp-oauth: refresh failed, re-authorizing", { server: serverName })
+        } catch (e) {
+          // Audit #16 — branch on the TYPED status: only invalid_grant/401
+          // means the refresh token is dead.
+          if (!isRefreshRevocation(e)) {
+            // 3a. TRANSIENT failure (429/5xx/network/store) → degrade to
+            //     unauthenticated for THIS load. NO interactive re-auth (no
+            //     surprise browser pop) and the stored, still-valid refresh
+            //     token is left untouched for the next acquisition.
+            logger.warn("mcp-oauth: transient refresh failure — keeping stored refresh token", {
+              server: serverName,
+              error: errMessage(e),
+            })
+            return undefined
+          }
+          // 3b. Refresh REJECTED (revoked/expired refresh_token) → re-authorize.
+          logger.info("mcp-oauth: refresh rejected (revoked), re-authorizing", {
+            server: serverName,
+          })
         }
       }
       // 4. No usable token (or refresh failed) → fresh authorization flow.

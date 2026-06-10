@@ -41,6 +41,7 @@ purpose: |
   AND default-OFF. NEVER throws — a spawn/protocol/timeout fault collapses to
   ok:false. Turn-abort tears the session down immediately (no lingering process
   to the stop timeout).
+tcp_transport: "jun-10 — DebugAdapterPort gained a TCP carrier (spawnTcpDebugAdapter/connectTcpTransport) for socket-based adapters (dlv-dap, vscode-js-debug); same DapClient/inspectViaDap. Real-verified via dlv-dap Go runtime."
 verified_real: "2026-06-10 — TWO real adapters, language-agnostic. (1) debugpy 1.8.21 (Python): 15 e2e incl multibyte-byte-accuracy, deep stack, conditional bp, multi-file cross-file stack, abort-mid-run, never-hit→exited. (2) lldb-dap (C via clang -g): 3 e2e (stack add→main, locals, conditional loop bp). Caught & fixed: launch-sequencing DEADLOCK (debugpy defers launch resp until configurationDone) + terminate-at-breakpoint HANG (lldb-dap never answers terminate while stopped) + presentation-pseudo-var noise."
 tests:
   - tests/unit/tool/debug/dap-codec.test.ts

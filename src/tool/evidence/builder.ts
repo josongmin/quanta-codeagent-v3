@@ -22,8 +22,10 @@ export interface EvidenceSources {
   detect: (cwd: string) => Promise<Toolchain | null>
   /** Run the suite and return the normalized result. */
   runTests: (tc: Toolchain, cwd: string) => Promise<TestRunResult>
-  /** LSP static context at a failure site (optional). */
-  lspStatic?: (file: string, line: number, cwd: string) => Promise<StaticEvidence | null>
+  /** LSP static context at a failure site (optional). Receives the turn signal
+   *  (so a cancelled turn doesn't keep an indexing-retry loop querying a live
+   *  LSP child for the rest of its budget). */
+  lspStatic?: (file: string, line: number, cwd: string, signal?: AbortSignal) => Promise<StaticEvidence | null>
   /** DAP runtime state for the failing test (optional). Receives the toolchain
    *  (to build the right "run under the debugger" launch) + the turn signal (so a
    *  long debugger run aborts with the turn). */
@@ -39,8 +41,9 @@ export interface EvidenceSources {
 
 export interface BuildEvidenceOptions {
   readonly patchConstraints?: PatchConstraints
-  /** Turn-abort signal, threaded to the runtime (debugger) source so a cancelled
-   *  turn doesn't wait out the debugger stop-timeout. */
+  /** Turn-abort signal, threaded to the runtime (debugger) AND lspStatic
+   *  sources so a cancelled turn doesn't wait out the debugger stop-timeout or
+   *  the LSP indexing-retry budget. */
   readonly signal?: AbortSignal
 }
 
@@ -100,7 +103,7 @@ export const buildEvidence = async (
   const absFile = top.file !== undefined ? (isAbsolute(top.file) ? top.file : resolve(cwd, top.file)) : undefined
   const staticEv =
     absFile !== undefined && top.line !== undefined && sources.lspStatic !== undefined
-      ? await safe(() => sources.lspStatic!(absFile, top.line!, cwd), null)
+      ? await safe(() => sources.lspStatic!(absFile, top.line!, cwd, opts.signal), null)
       : null
   const runtimeEv =
     sources.runtime !== undefined ? await safe(() => sources.runtime!(failure, tc, cwd, opts.signal), null) : null

@@ -22,14 +22,14 @@
 
 - **core LIVE**: detect + run_tests(실패) + git repo_context = 프로덕션 실동작.
 - **static LIVE (jun-10 bridge 완료)**: `@/agent/lsp-bridge`에 `evidenceLspStatic()`(= `lspNavProvider` 위 hover/definition/references 수확, 컬럼 스캔+ContentModified 견딤+session.stop finally) 추가, **agent-arg-builder가 `cfg.evidence ? { evidence: { lspStatic: evidenceLspStatic() } }`로 프로덕션 주입** → 패킷 `static` 섹션이 프로덕션 실값. 실 rust-analyzer e2e 2개(직접 포트 + buildEvidence 융합)로 증명.
-- **runtime(DAP) = Python+Rust LIVE (jun-10)**: `src/tool/evidence/runtime.ts` `defaultRuntimePort`(in-slice — DAP는 @/tool/debug라 bridge 불요), toolchain.kind 디스패치. **Python(debugpy)**: test command `[python,-m,MOD,..]`→`{module,args}` launch+실패라인 bp. **Rust(lldb-dap)**: `cargo test --no-run --message-format=json`로 테스트 바이너리 경로→lldb-dap launch+**realpath'd 실패라인 bp**(cargo DWARF comp_dir=canonical). 둘 다 stack/locals 포착. default-wired, abort signal threaded(cargo compile 포함), 미지원 kind/무 adapter면 null degrade. 실 e2e 2언어(python locals `result=10`, rust locals `result=10`)+node degrade 테스트.
-- inert 아님: **failure+repo+static+Python/Rust runtime 프로덕션 LIVE**. Go/TS runtime(dlv/js-debug, DAP TCP 선행)만 follow-up.
+- **runtime(DAP) = Python+Rust+Go LIVE (jun-10)**: `src/tool/evidence/runtime.ts` `defaultRuntimePort`(in-slice — DAP는 @/tool/debug라 bridge 불요), toolchain.kind 디스패치. **Python(debugpy)**: test command `[python,-m,MOD,..]`→`{module,args}` launch+실패라인 bp. **Rust(lldb-dap)**: `cargo test --no-run --message-format=json`로 테스트 바이너리 경로→lldb-dap launch+**realpath'd 실패라인 bp**(cargo DWARF comp_dir=canonical). **Go(dlv-dap, TCP)**: `dlv dap`가 소켓 listen(신규 **DAP TCP 트랜스포트** `spawnTcpDebugAdapter`/`connectTcpTransport`의 첫 실 소비자)→`{mode:test}` launch+실패라인 bp. 3언어 stack/locals 포착(stack 12프레임 cap=런타임노이즈 제거). default-wired, abort signal threaded(cargo compile 포함), 미지원 kind/무 adapter면 null degrade. 실 e2e 2언어(python locals `result=10`, rust locals `result=10`)+node degrade 테스트.
+- inert 아님: **failure+repo+static+Python/Rust/Go runtime 프로덕션 LIVE**. TS runtime(js-debug)만 follow-up. **DAP TCP 트랜스포트 LANDED**(로컬소켓 4 test + 실 dlv-dap Go e2e).
 - 전 SSOT: DefaultToolPorts.evidence(object 포트) → agent-arg-builder `cfg.evidence?{evidence:{}}` → runtime-config.evidence=gateOn("QUANTA_EVIDENCE") → knob-inventory → manifest GATED → fc.
 
 ## 테스트
 
 - builder hellgate 7 + tool+git 10(porcelain/abs-path/ok-semantics/**unsupported-kind runtime degrade**).
-- **실 융합 e2e 5**(부재 시 skip): `keystone-real-e2e`(실 cargo+실 rust-analyzer static) · `evidence-lsp-bridge-real-e2e`×2(프로덕션 `evidenceLspStatic` 포트+융합) · `runtime-real-e2e`(**실 debugpy**, locals `result=10`) · `runtime-rust-real-e2e`(**실 cargo+lldb-dap**, locals `result=10`). 단일 호출 4섹션(failure/static/runtime/repo) 2언어 실융합 증명.
+- **실 융합 e2e 5**(부재 시 skip): `keystone-real-e2e`(실 cargo+실 rust-analyzer static) · `evidence-lsp-bridge-real-e2e`×2(프로덕션 `evidenceLspStatic` 포트+융합) · `runtime-real-e2e`(**실 debugpy**, locals `result=10`) · `runtime-rust-real-e2e`(**실 cargo+lldb-dap**) · Go(**실 dlv-dap over TCP**), 전부 locals `result=10`. 단일 호출 4섹션 **3언어 runtime** 실융합 증명.
 
 ## 어딧 (적대+객관 병렬 → TDD 보완)
 
@@ -40,5 +40,6 @@
 
 - ✅ ~~LSP/DAP enrichment 프로덕션 bridge~~ — **완료**: static(evidenceLspStatic, agent-arg-builder)+Python runtime(defaultRuntimePort, in-slice) 모두 프로덕션 LIVE.
 - ✅ ~~Rust runtime~~ — **완료 (lldb-dap, cargo test --no-run + realpath bp)**.
-- **(기능) Go/TS runtime** — dlv-dap(go)/js-debug(ts). **(왜)** runtime tier-1 완성. **(ROI)** 중·L — DAP TCP 트랜스포트 선행 필요.
-- **(기능) DAP TCP 트랜스포트** — Go(dlv)/TS(js-debug) DAP 차단해제(현 port는 stdio 전용). **(왜)** tier-1 Go/TS runtime/debug. **(ROI)** 높음·M.
+- ✅ ~~DAP TCP 트랜스포트~~ — **완료**(`spawnTcpDebugAdapter`/`connectTcpTransport`, 소켓 error 핸들러, 로컬소켓 4 test).
+- ✅ ~~Go runtime~~ — **완료**(dlv-dap over TCP, 실 e2e locals 포착).
+- **(기능) TS runtime** — js-debug(vscode-js-debug) over TCP. **(왜)** tier-1 TS 완성. **(ROI)** 중·M — npm js-debug 설치+launch config.

@@ -314,10 +314,10 @@ describe("createTurnIndicator: updateUsage", () => {
   })
 })
 
-// ── markFirstChunk → ttft display ───────────────────────────────────────
+// ── markFirstChunk → thinking→streaming swap ────────────────────────────
 
 describe("createTurnIndicator: markFirstChunk", () => {
-  test("swaps render to 'streaming · …s · ttft …s' shape", () => {
+  test("swaps render to 'streaming · …s' shape — ttft is NOT rendered", () => {
     const { bar, calls } = makeCapBar()
     const timer = makeFakeTimer()
     const clock = makeClock()
@@ -338,10 +338,13 @@ describe("createTurnIndicator: markFirstChunk", () => {
     const lastPaint = calls.filter((c) => c.kind === "transient").pop()
     expect(lastPaint?.text).toMatch(/streaming/)
     expect(lastPaint?.text).toMatch(/8\.1s/)
-    expect(lastPaint?.text).toMatch(/ttft 3\.4s/)
+    // TTFT is a per-turn scalar (constant for the whole stream) — repainting
+    // it every frame was pure noise, so it must NOT appear on the live line.
+    // Telemetry still captures it (observability/turn-timing).
+    expect(lastPaint?.text).not.toMatch(/ttft/)
   })
 
-  test("second markFirstChunk is ignored (one-shot per turn)", () => {
+  test("second markFirstChunk keeps the streaming swap stable (one-shot latch)", () => {
     const { bar, calls } = makeCapBar()
     const timer = makeFakeTimer()
     const clock = makeClock()
@@ -356,13 +359,18 @@ describe("createTurnIndicator: markFirstChunk", () => {
     clock.advance(1000)
     ind.markFirstChunk()
     clock.advance(2000)
-    ind.markFirstChunk() // ignored
+    ind.markFirstChunk() // ignored — latch is one-shot until stop()
     timer.tick()
     ind.stop()
 
     const lastPaint = calls.filter((c) => c.kind === "transient").pop()
-    // ttft should still be 1.0s (the FIRST mark), not 3.0s.
-    expect(lastPaint?.text).toMatch(/ttft 1\.0s/)
+    // Swap survives the redundant call: still "streaming" (never back to
+    // "thinking…"), elapsed runs from start() (3.0s total), and no ttft
+    // segment appears on the live line.
+    expect(lastPaint?.text).toMatch(/streaming/)
+    expect(lastPaint?.text).not.toMatch(/thinking/)
+    expect(lastPaint?.text).toMatch(/3\.0s/)
+    expect(lastPaint?.text).not.toMatch(/ttft/)
   })
 })
 

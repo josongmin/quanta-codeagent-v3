@@ -31,10 +31,11 @@ import {
   refreshToken,
   resolveOAuthConfig,
   resolveQuantaHome,
+  TokenExchangeError,
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
-import { errMessage, LLMError, logger } from "@/shared"
+import { errMessage, LLMError, type LLMErrorKind, logger } from "@/shared"
 import { buildResponsesBody } from "../openai-responses-wire"
 import type { LLMPort } from "../ports"
 import {
@@ -116,6 +117,38 @@ export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
  *  passes the check here is guaranteed valid through the wire call. */
 const TOKEN_REFRESH_SKEW_MS = 60_000
 
+/** Jun-10 silent-failure audit #15 — classify a token-REFRESH failure into a
+ *  typed LLMError shape by branching on the TYPED statusCode, never the
+ *  message. `invalid_grant`/401 is the ONLY re-auth ("run /login") trigger
+ *  (RFC 6749 §5.2: `invalid_grant` = the refresh token is revoked/expired);
+ *  everything else keeps its transient kind so the retry/fallback policy can
+ *  route it instead of fatally killing the turn with a false "run /login". */
+const classifyRefreshFailure = (
+  e: unknown,
+): { kind: LLMErrorKind; statusCode?: number; retryAfterMs?: number } => {
+  if (e instanceof TokenExchangeError) {
+    const status = e.statusCode
+    if (status === 401 || e.errorCode === "invalid_grant") {
+      return { kind: "auth", statusCode: status }
+    }
+    if (status === 429) {
+      return {
+        kind: "rate_limit",
+        statusCode: status,
+        ...(e.retryAfterMs !== undefined ? { retryAfterMs: e.retryAfterMs } : {}),
+      }
+    }
+    if (status >= 500 && status < 600) return { kind: "server_error", statusCode: status }
+    if (status === 400 || status === 422) return { kind: "bad_request", statusCode: status }
+    // statusCode 0 = response-shape failure (malformed 2xx body) and any other
+    // unmapped status: NOT a revocation — never re-classify as fatal auth.
+    return { kind: "unknown", statusCode: status }
+  }
+  // Non-HTTP failure: the fetch itself threw (DNS/socket) or the post-refresh
+  // disk persist failed — transient, retry-eligible, never a re-auth trigger.
+  return { kind: "network" }
+}
+
 export class ChatGPTOAuthAdapter implements LLMPort {
   readonly model: string
   /** Pinned provider id for the pre-stream `llm_request` marker. */
@@ -184,11 +217,21 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       await writeToken(path, next)
       return next
     } catch (e) {
-      throw new LLMError(
-        `ChatGPT-OAuth token refresh failed: ${errMessage(e)}. ` +
-          "Run `quanta /login --chatgpt` or sign in to Codex again.",
-        { kind: "auth", provider: "chatgpt-oauth", cause: e },
-      )
+      // Audit #15 — branch on the TYPED statusCode: only invalid_grant/401
+      // means "the refresh token is dead, re-login"; a 429/5xx/network/disk
+      // blip keeps its transient kind so retry/fallback can route it.
+      const classified = classifyRefreshFailure(e)
+      const advice =
+        classified.kind === "auth"
+          ? " Run `quanta /login --chatgpt` or sign in to Codex again."
+          : ""
+      throw new LLMError(`ChatGPT-OAuth token refresh failed: ${errMessage(e)}.${advice}`, {
+        kind: classified.kind,
+        provider: "chatgpt-oauth",
+        cause: e,
+        ...(classified.statusCode !== undefined ? { statusCode: classified.statusCode } : {}),
+        ...(classified.retryAfterMs !== undefined ? { retryAfterMs: classified.retryAfterMs } : {}),
+      })
     }
   }
 

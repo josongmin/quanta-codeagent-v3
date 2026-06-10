@@ -47,29 +47,29 @@ describe("resolveMaxChars / envMaxChars", () => {
 })
 
 describe("capToolOutput — under cap", () => {
-  test("output at/under cap is returned byte-identical, no write", () => {
+  test("output at/under cap is returned byte-identical, no write", async () => {
     const { write, calls } = collectingWrite()
     const small = "hello world"
-    const r = capToolOutput(small, { maxChars: 100, spillDir: "/tmp/x", write })
+    const r = await capToolOutput(small, { maxChars: 100, spillDir: "/tmp/x", write })
     expect(r.output).toBe(small)
     expect(r.spillPath).toBeUndefined()
     expect(calls).toHaveLength(0)
   })
 
-  test("exactly at cap boundary is untouched", () => {
+  test("exactly at cap boundary is untouched", async () => {
     const { write, calls } = collectingWrite()
     const exact = "a".repeat(50)
-    const r = capToolOutput(exact, { maxChars: 50, spillDir: "/tmp/x", write })
+    const r = await capToolOutput(exact, { maxChars: 50, spillDir: "/tmp/x", write })
     expect(r.output).toBe(exact)
     expect(calls).toHaveLength(0)
   })
 })
 
 describe("capToolOutput — over cap", () => {
-  test("persists full content and returns excerpt + marker", () => {
+  test("persists full content and returns excerpt + marker", async () => {
     const { write, calls } = collectingWrite()
     const big = `${"A".repeat(20_000)}MIDDLE${"Z".repeat(20_000)}`
-    const r = capToolOutput(big, { maxChars: 100, spillDir: "/tmp/spill", write })
+    const r = await capToolOutput(big, { maxChars: 100, spillDir: "/tmp/spill", write })
 
     // full content written exactly once, untruncated
     expect(calls).toHaveLength(1)
@@ -89,13 +89,13 @@ describe("capToolOutput — over cap", () => {
     expect(r.output.length).toBeLessThan(big.length)
   })
 
-  test("head/tail boundaries: keeps first HEAD_CHARS and last TAIL_CHARS", () => {
+  test("head/tail boundaries: keeps first HEAD_CHARS and last TAIL_CHARS", async () => {
     const { write } = collectingWrite()
     const head = "H".repeat(HEAD_CHARS)
     const mid = "M".repeat(5_000)
     const tail = "T".repeat(TAIL_CHARS)
     const big = head + mid + tail
-    const r = capToolOutput(big, { maxChars: 10, spillDir: "/tmp/s", write })
+    const r = await capToolOutput(big, { maxChars: 10, spillDir: "/tmp/s", write })
 
     expect(r.output).toContain(head)
     expect(r.output).toContain(tail)
@@ -104,22 +104,22 @@ describe("capToolOutput — over cap", () => {
     expect(r.output).toContain(`${mid.length} chars omitted`)
   })
 
-  test("no head/tail overlap when over cap but shorter than HEAD+TAIL", () => {
+  test("no head/tail overlap when over cap but shorter than HEAD+TAIL", async () => {
     const { write } = collectingWrite()
     // length 100, cap 10 → over cap, but < HEAD_CHARS+TAIL_CHARS
     const big = "x".repeat(60) + "y".repeat(40)
-    const r = capToolOutput(big, { maxChars: 10, spillDir: "/tmp/s", write })
+    const r = await capToolOutput(big, { maxChars: 10, spillDir: "/tmp/s", write })
     expect(r.spillPath).toBeDefined()
     // 0 chars omitted: head covers whole string, tail empty
     expect(r.output).toContain("0 chars omitted")
     expect(r.output).toContain(big)
   })
 
-  test("env override drives the cap end-to-end", () => {
+  test("env override drives the cap end-to-end", async () => {
     const { write, calls } = collectingWrite()
     const out = "q".repeat(1000)
     const max = envMaxChars({ QUANTA_TOOL_OUTPUT_MAX: "500" })
-    const r = capToolOutput(out, { maxChars: max, spillDir: "/tmp/s", write })
+    const r = await capToolOutput(out, { maxChars: max, spillDir: "/tmp/s", write })
     expect(calls).toHaveLength(1)
     expect(r.output).toContain("500-char")
   })
@@ -268,7 +268,7 @@ describe("pruneSpillDir — bounded retention", () => {
 })
 
 describe("capToolOutput — GC wiring", () => {
-  test("prunes the spill dir after an over-cap write (injected fs)", () => {
+  test("prunes the spill dir after an over-cap write (injected fs)", async () => {
     const { write, calls } = collectingWrite()
     // Pre-existing dir already over the keep limit.
     const files: Record<string, number> = {
@@ -287,7 +287,7 @@ describe("capToolOutput — GC wiring", () => {
         delete files[name]
       },
     }
-    const r = capToolOutput("Z".repeat(1000), {
+    const r = await capToolOutput("Z".repeat(1000), {
       maxChars: 10,
       spillDir: "/spill",
       write,
@@ -300,7 +300,7 @@ describe("capToolOutput — GC wiring", () => {
     expect(Object.keys(files)).toEqual(["old3.txt"])
   })
 
-  test("under-cap path performs no write and no GC (behavior-preserving)", () => {
+  test("under-cap path performs no write and no GC (behavior-preserving)", async () => {
     const { write, calls } = collectingWrite()
     let readdirCalled = false
     const spillFs: SpillFsOps = {
@@ -312,13 +312,13 @@ describe("capToolOutput — GC wiring", () => {
       remove: () => {},
     }
     const small = "tiny"
-    const r = capToolOutput(small, { maxChars: 100, spillDir: "/spill", write, spillFs })
+    const r = await capToolOutput(small, { maxChars: 100, spillDir: "/spill", write, spillFs })
     expect(r.output).toBe(small)
     expect(calls).toHaveLength(0)
     expect(readdirCalled).toBe(false)
   })
 
-  test("GC failure does not break the tool result (marker still returned)", () => {
+  test("GC failure does not break the tool result (marker still returned)", async () => {
     const { write } = collectingWrite()
     const spillFs: SpillFsOps = {
       readdir: () => {
@@ -327,7 +327,7 @@ describe("capToolOutput — GC wiring", () => {
       mtimeMs: () => 0,
       remove: () => {},
     }
-    const r = capToolOutput("Q".repeat(500), {
+    const r = await capToolOutput("Q".repeat(500), {
       maxChars: 10,
       spillDir: "/spill",
       write,

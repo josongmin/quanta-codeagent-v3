@@ -106,6 +106,69 @@ describe("collect_evidence tool — ok semantics (consistent with run_tests)", (
   })
 })
 
+describe("collect_evidence tool — nothing-actually-ran must NEVER be ok:true (silent-failure audit #5)", () => {
+  // The tool is invoked BECAUSE a test is failing; an UNDETECTED toolchain
+  // yields an empty packet (failure:null) which `ok = failure===null` used to
+  // read as green. Mirror run_tests: explicit ok:false naming what was probed.
+  test("UNDETECTED toolchain ⇒ ok:false with an actionable reason, suite never spawned", async () => {
+    let runCalls = 0
+    const tool = makeCollectEvidenceTool({
+      fs: fsWith([]), // no marker files at all ⇒ detect → null
+      testPort: {
+        run: async () => {
+          runCalls++
+          return { stdout: "", stderr: "", exitCode: 0 }
+        },
+      },
+      changedFiles: async () => [],
+    })
+    const r = await runTool(tool)
+    expect(runCalls).toBe(0) // nothing ran — that is exactly why ok:true is a lie
+    expect(r.ok).toBe(false) // red-on-injection: `ok: failure===null` alone turns this green
+    expect(r.output).toContain("no recognized test toolchain")
+    expect(r.output).toContain("Cargo.toml") // names the markers it looked for (actionable)
+    expect(r.failure?.mode).toBe("error") // run_tests' explicit error shape
+  })
+
+  test("detected toolchain but the run FAULTS (spawn error) ⇒ ok:false, never a green empty packet", async () => {
+    const tool = makeCollectEvidenceTool({
+      fs: fsWith(["Cargo.toml"]),
+      testPort: {
+        run: async () => {
+          throw new Error("ENOENT: cargo not found")
+        },
+      },
+      changedFiles: async () => [],
+    })
+    const r = await runTool(tool)
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("faulted") // runToolchain's synthesized failure surfaces in the packet
+  })
+
+  // Paired control: a SUPPORTED repo keeps the documented behavior on both
+  // sides — real failure ⇒ ok:false with the packet, green suite ⇒ ok:true.
+  test("paired control — supported repo, real failure ⇒ ok:false with packet (unchanged)", async () => {
+    const tool = makeCollectEvidenceTool({
+      fs: fsWith(["Cargo.toml"]),
+      testPort: { run: async () => ({ stdout: "", stderr: "", exitCode: 101 }) },
+      changedFiles: async () => [],
+    })
+    const r = await runTool(tool)
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain('"failure"')
+    expect(r.output).not.toContain("no recognized test toolchain")
+  })
+  test("paired control — supported repo, green suite ⇒ ok:true (unchanged)", async () => {
+    const tool = makeCollectEvidenceTool({
+      fs: fsWith(["go.mod"]),
+      testPort: { run: async () => ({ stdout: '{"Action":"pass","Test":"A"}', stderr: "", exitCode: 0 }) },
+      changedFiles: async () => [],
+    })
+    const r = await runTool(tool)
+    expect(r.ok).toBe(true)
+  })
+})
+
 describe("collect_evidence tool — per-section toggles", () => {
   // Real cargo shape: the `---- NAME stdout ----` block carries the panic
   // location, so parseCargo extracts file+line (needed for the static query).

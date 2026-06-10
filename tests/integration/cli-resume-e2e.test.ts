@@ -21,6 +21,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import { loadSession, runAgent, saveSession } from "@/agent"
+import { SessionStateLoadError } from "@/agent/state"
 import { defaultTools, type Tool, ToolRegistry } from "@/tool"
 import { cfg, ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
 
@@ -161,15 +162,23 @@ describe("Session resume e2e — save/load preserves multi-turn transcript and r
     expect(outcome.reason).toBe("completed")
   }, 15_000)
 
-  test("loadSession on corrupt JSON → null; saveSession then writes fresh atomic", async () => {
+  test("loadSession on corrupt JSON → typed SessionStateLoadError; saveSession then writes fresh atomic", async () => {
     const path = join(dir, "corrupt.json")
-    // Pre-seed corrupt content; loadSession must return null (never throw).
+    // Pre-seed corrupt content. jun-10 audit #2: an EXISTING-but-corrupt file
+    // throws loudly (naming the file) instead of silently resetting to null.
     await Bun.write(path, "{this is not json")
-    const before = await loadSession(path)
-    expect(before).toBeNull()
+    let thrown: unknown
+    try {
+      await loadSession(path)
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(SessionStateLoadError)
+    expect((thrown as Error).message).toContain(path)
 
-    // saveSession over corrupt file replaces it cleanly via the .tmp → rename
-    // dance. A subsequent load returns the new transcript.
+    // An EXPLICIT save over the corrupt file replaces it cleanly via the
+    // same-dir tmp → rename(2) commit. A subsequent load returns the new
+    // transcript.
     await saveSession(path, {
       sessionId: "post-corrupt",
       messages: [{ role: "user", content: [{ type: "text", text: "after corrupt" }] }],

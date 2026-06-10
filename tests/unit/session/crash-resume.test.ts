@@ -5,8 +5,8 @@ import { join } from "node:path"
 import {
   buildCrashResumeMessage,
   buildCrashResumeOffer,
-  clearSessionInterrupted,
   CRASH_RESUME_GATE,
+  clearSessionInterrupted,
   crashResumeEnabled,
   detectInterruptedSessions,
   type InterruptedSessionDetection,
@@ -14,9 +14,9 @@ import {
   loadSessionById,
   markSessionInterrupted,
   type PersistedInterruptedTurn,
+  type SessionMeta,
   saveSessionById,
   sessionFilePath,
-  type SessionMeta,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 
@@ -132,10 +132,32 @@ describe("§13.2 crash resume — persisted interrupted-turn marker", () => {
   })
 
   test("NEVER throws: mark/clear on a missing session are silent no-ops", async () => {
-    await expect(
-      markSessionInterrupted("ghost", mkTurn(), { env: ON }),
-    ).resolves.toBeUndefined()
+    await expect(markSessionInterrupted("ghost", mkTurn(), { env: ON })).resolves.toBeUndefined()
     await expect(clearSessionInterrupted("ghost", { env: ON })).resolves.toBeUndefined()
+  })
+
+  test("AUDIT #13: `staleIf` discards an in-flight mark (no write — file byte-identical, prior marker survives)", async () => {
+    // jun-10 silent-failure #13: a partial-flush write that became STALE while
+    // its read-modify-write was in flight must be DISCARDED at the store, not
+    // land and roll the snapshot back. `staleIf` is the wire's epoch probe,
+    // evaluated inside the RMW (between load and save).
+    await seed("s1")
+    await markSessionInterrupted("s1", mkTurn({ userText: "fresh state" }), { env: ON })
+    const before = readFileSync(sessionFilePath("s1"), "utf8")
+    await markSessionInterrupted("s1", mkTurn({ userText: "stale flush" }), {
+      env: ON,
+      staleIf: () => true,
+    })
+    // Fresh readback: the stale write never landed.
+    expect(readFileSync(sessionFilePath("s1"), "utf8")).toBe(before)
+    expect((await loadSessionById("s1"))?.meta.interruptedTurn?.userText).toBe("fresh state")
+    // Paired control: a NON-stale probe writes normally (the discard is not an
+    // unconditional drop).
+    await markSessionInterrupted("s1", mkTurn({ userText: "newer state" }), {
+      env: ON,
+      staleIf: () => false,
+    })
+    expect((await loadSessionById("s1"))?.meta.interruptedTurn?.userText).toBe("newer state")
   })
 
   test("clear is a no-op (no snapshot churn) when there is no marker", async () => {

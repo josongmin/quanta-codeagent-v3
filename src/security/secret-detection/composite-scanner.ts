@@ -16,6 +16,7 @@ import { patternScanner } from "./pattern-scanner"
 import {
   DEFAULT_MAX_FINDINGS,
   type SecretFinding,
+  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
 } from "./port"
@@ -71,8 +72,13 @@ export const compositeSecretScanner = (opts: SecretScannerOpts = {}): SecretScan
       let text: string
       try {
         text = await readFile(path, "utf8")
-      } catch {
-        return []
+      } catch (e) {
+        // SECURITY (jun-10 finding #12): an unreadable file must NOT scan as
+        // "clean" — `[]` is byte-identical to a genuinely clean file. Throw a
+        // typed failure naming the path; `check_secrets` surfaces it as
+        // ok:false. Binary tolerance is unaffected ("utf8" never throws on
+        // weird bytes — it decodes with replacement chars).
+        throw new SecretScanReadError(path, { cause: e })
       }
       const [pf, ef] = await Promise.all([
         pattern.scanText(text, { file: path }),

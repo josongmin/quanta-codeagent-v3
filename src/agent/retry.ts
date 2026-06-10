@@ -2,6 +2,7 @@ import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { LLMError } from "@/shared"
 import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { ErrorClassifier, RetryRouter } from "./error-routing"
+import { sleep as abortAwareSleep } from "./loop/sleep"
 
 /**
  * `LLMPort` decorator adding bounded exponential-backoff retry around a flaky
@@ -16,16 +17,25 @@ import type { ErrorClassifier, RetryRouter } from "./error-routing"
  * - Classification (see {@link isRetryable}): transient network / overload /
  *   rate-limit / 5xx errors retry; auth / 400 / 404 / malformed do not.
  * - Backoff is exponential with full jitter: delay ∈ [0, min(cap, base*2^n)].
- * - The abort signal is honored both while waiting and between attempts.
+ * - The abort signal is honored both while waiting and between attempts: the
+ *   default backoff sleep is the abort-aware sleep from `./loop/sleep` (when
+ *   a `signal` is wired), which resolves early on abort so the loop's
+ *   post-sleep abort check surfaces the typed `aborted` error promptly
+ *   instead of finishing a (up to 60s) backoff timer first.
  *
- * `sleep` and `random` are injectable so tests are deterministic.
+ * `sleep` and `random` are injectable so tests are deterministic. When a
+ * custom `sleep` is injected, honoring the abort signal while waiting is the
+ * injector's responsibility.
  */
 export interface RetryingLLMOptions {
   inner: LLMPort
   maxRetries?: number
   baseDelayMs?: number
   signal?: AbortSignal
-  /** Injectable for deterministic tests. Defaults to a real timer. */
+  /** Injectable for deterministic tests. Defaults to the abort-aware sleep
+   *  (`./loop/sleep`) bound to `signal` when one is provided — abort during
+   *  a backoff wakes the loop immediately — else a plain timer (no signal ⇒
+   *  nothing to honor). An injected sleep must handle abort itself. */
   sleep?: (ms: number) => Promise<void>
   /** Injectable for deterministic tests. Defaults to `Math.random`. */
   random?: () => number
@@ -256,8 +266,17 @@ export class RetryingLLM implements LLMPort {
     if (innerAuthMode !== undefined) this.authMode = innerAuthMode
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES
     this.baseDelayMs = opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
-    this.signal = opts.signal
-    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
+    const signal = opts.signal
+    this.signal = signal
+    // jun-10 silent-failure audit #6: the default backoff MUST honor the
+    // abort signal (Esc/Ctrl+C mid-429-backoff previously hung up to 60s).
+    // The abort-aware sleep resolves early on abort; the loop's post-sleep
+    // `throwIfAborted` then surfaces the typed `aborted` LLMError.
+    this.sleep =
+      opts.sleep ??
+      (signal !== undefined
+        ? (ms) => abortAwareSleep(ms, signal)
+        : (ms) => new Promise((r) => setTimeout(r, ms)))
     this.random = opts.random ?? Math.random
     this.errorRouting = opts.errorRouting
   }

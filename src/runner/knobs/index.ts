@@ -6,12 +6,18 @@
  *   - `resolveKnobs` (layered resolution)
  *   - `applyKnobs` (fold over AgentConfig)
  *   - `validateKnobs` (relationship checks; called inside resolveKnobs)
- *   - `readKnobConfig` / `writeKnobConfig` (user defaults persistence)
+ *   - `readKnobConfig` / `writeKnobConfig` / `saveKnobConfigMerged`
+ *     (user defaults persistence; surfaces save via the MERGING helper)
  *   - `KNOB_PRESETS` (named bundles)
  */
 
 export { applyKnobs } from "./apply"
-export { type KnobConfigFile, readKnobConfig, writeKnobConfig } from "./persist"
+export {
+  type KnobConfigFile,
+  readKnobConfig,
+  saveKnobConfigMerged,
+  writeKnobConfig,
+} from "./persist"
 export { KNOB_PRESETS } from "./presets"
 export {
   __resetRegistry,

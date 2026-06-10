@@ -92,6 +92,9 @@ export class StdioMcpTransport implements McpTransport {
   private readPump: Promise<void> | null = null
   private stderrPump: Promise<void> | null = null
   private exitFired = false
+  /** Set by `close()` BEFORE the kill so the stdout pump's settlement during a
+   *  deliberate teardown is never misreported as a pump death (#8). */
+  private closing = false
 
   constructor(config: McpServerConfig, opts: StdioTransportOpts = {}) {
     this.config = config
@@ -164,6 +167,7 @@ export class StdioMcpTransport implements McpTransport {
   async close(): Promise<void> {
     const proc = this.proc
     if (!proc) return
+    this.closing = true
     try {
       proc.stdin?.end()
     } catch {
@@ -185,13 +189,47 @@ export class StdioMcpTransport implements McpTransport {
   private async pumpStdout(): Promise<void> {
     const stdout = this.proc?.stdout
     if (!stdout) return
+    let pumpError: unknown = null
     try {
       for await (const chunk of stdout) {
         for (const msg of this.reader.push(chunk)) this.emitMessage(msg)
       }
     } catch (e) {
-      logger.debug("mcp: stdout pump ended", { error: errMessage(e) })
+      pumpError = e
     }
+    // Let an already-settled `proc.exited` fan-out (watchExit) run first — its
+    // `.then` continuation was queued before this one — so a normal child
+    // death is never misreported as a pump death.
+    await Promise.resolve()
+    this.handlePumpDeath(pumpError)
+  }
+
+  /** jun-10 silent-failure audit #8 — a settled stdout pump while the child
+   *  still lives means the server→client channel is permanently dead: every
+   *  pending request would otherwise degrade to a generic request timeout and
+   *  the restart supervisor (ADR-0435) would keep believing the server is
+   *  healthy (it only observes `onExit`). Surface the death loudly and fan out
+   *  the exit so the client fails pending requests promptly. A pump that
+   *  settles during `close()` teardown or because the process exited is the
+   *  normal end-of-stream — the `proc.exited` watcher owns that exit — and
+   *  stays at debug. */
+  private handlePumpDeath(pumpError: unknown): void {
+    const proc = this.proc
+    const childAlive =
+      proc !== null && !this.closing && !this.exitFired && typeof proc.exitCode !== "number"
+    if (!childAlive) {
+      if (pumpError !== null) {
+        logger.debug("mcp: stdout pump ended", { error: errMessage(pumpError) })
+      }
+      return
+    }
+    const detail =
+      pumpError === null ? "stdout ended while server still running" : errMessage(pumpError)
+    logger.warn("mcp: stdout pump died while server still running; failing pending requests", {
+      server: this.config.name,
+      error: detail,
+    })
+    this.fireExit(`mcp server "${this.config.name}" stdout pump died: ${detail}`)
   }
 
   /** Background drain of the child's stderr. Reading to completion keeps the

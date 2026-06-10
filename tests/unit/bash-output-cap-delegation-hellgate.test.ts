@@ -171,12 +171,12 @@ describe("bash output cap delegation hellgate (TKT-001 / ADR-0411)", () => {
     expect(result.output).not.toMatch(/truncated,\s+\d+\s+more\s+chars/)
   })
 
-  test("3. capToolOutput preserves TAIL determinator on a long body", () => {
+  test("3. capToolOutput preserves TAIL determinator on a long body", async () => {
     const prefix = "p".repeat(50_000)
     const tailMarker = "__END_MARKER__"
     const body = prefix + tailMarker
     let spilled = false
-    const capped = capToolOutput(body, {
+    const capped = await capToolOutput(body, {
       maxChars: 20_000,
       spillDir: join(dir, "spill-3"),
       write: () => {

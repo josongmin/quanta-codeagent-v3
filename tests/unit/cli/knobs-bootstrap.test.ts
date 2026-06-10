@@ -184,6 +184,36 @@ describe("bootstrapKnobs — registry side-effect + closed-port resolve", () => 
     expect(obj.user_defaults).toEqual({ persona: "pragmatic", "working-state": "1" })
   })
 
+  test("save() MERGES with prior sessions' saves — a second session cannot wipe the first (jun-10 audit #18)", async () => {
+    const configPath = join(dir, "knobs-merge.json")
+    // Session 1: saves persona.
+    const s1 = await bootstrapKnobs({
+      argv: [],
+      env: {} as NodeJS.ProcessEnv,
+      surface: "cli",
+      configPath,
+    })
+    s1.sessionOverrides.persona = "pragmatic"
+    await s1.save()
+    // Session 2: a FRESH process — its bag is empty (pre-condition pinned), it
+    // sets a DIFFERENT knob and saves. Pre-fix this wholesale-replaced the
+    // file and silently wiped session 1's persona.
+    const s2 = await bootstrapKnobs({
+      argv: [],
+      env: {} as NodeJS.ProcessEnv,
+      surface: "cli",
+      configPath,
+    })
+    expect(Object.keys(s2.sessionOverrides)).toEqual([])
+    s2.sessionOverrides["working-state"] = "1"
+    await s2.save()
+    // Fresh readback of the actual file: BOTH sessions' saves survive.
+    const obj = JSON.parse(await readFile(configPath, "utf8")) as {
+      user_defaults: Record<string, string>
+    }
+    expect(obj.user_defaults).toEqual({ persona: "pragmatic", "working-state": "1" })
+  })
+
   test("QUANTA_KNOBS_PRESET env applies as lowest layer above default", async () => {
     const configPath = join(dir, "knobs-5.json")
     const result = await bootstrapKnobs({

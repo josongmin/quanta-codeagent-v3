@@ -1,16 +1,25 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import { FsJailError, fileExists, readFile, writeFile } from "@/storage"
+import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { gitWriteGuardDeny } from "./git-write-guard-result"
-import type { Tool, ToolContext, ToolEvent, ToolFailure } from "./types"
+import { guardWrite } from "./stale-read-guard"
+import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "./types"
+import { resolveEditBase } from "./worktree/cwd-override"
 
 /**
  * Phase 4 Codex absorption — `scripted_replace` (Codex
  * `tool-routing-and-triggering.md`: "patch is for local + stable context;
  * scripted replace is for duplicated blocks, bulk substitution, or patch
- * context mismatch"). Sibling of `edit` — same FS-jail discipline + atomic
- * write — but optimized for the duplicated/bulk case where `edit` would either
- * refuse as ambiguous or be too noisy to use one-occurrence-at-a-time.
+ * context mismatch"). Sibling of `edit` — same FS-jail discipline, the same
+ * ADR-0398 ATOMIC commit (the port's `writeFileAtomic` temp+fsync+rename,
+ * mode-preserving), the same ADR-0474 stale-read guard (`guardWrite` pre-commit
+ * deny ⇒ typed `stale_read` rejection) and the same ticket-11 worktree
+ * edit-fence (`resolveEditBase`) — but optimized for the duplicated/bulk case
+ * where `edit` would either refuse as ambiguous or be too noisy to use
+ * one-occurrence-at-a-time. (T-403 / jun-10 silent-failure finding #1: this
+ * tool previously committed via a plain truncating write with NO stale guard —
+ * the write-class mirror rule now holds: edit / write / apply_patch /
+ * scripted_replace.)
  *
  * Default-OFF posture: the tool is registered, but the LLM only routes to it
  * when the prompt / strategy-hint surface explicitly calls for it. No behavior
@@ -249,7 +258,78 @@ const expandReplacement = (template: string, args: unknown[]): string => {
   return out
 }
 
-export const scriptedReplaceTool: Tool<Input> = {
+/** Map the pure core's `ok:false` outcome to a typed failure result.
+ *  `not_found` ⇒ the pattern matched nothing (no path: the file IS there, the
+ *  match isn't); `rejected` ⇒ an empty/uncompilable/ReDoS-suspicious pattern
+ *  was refused (carry the reason). `output` is unchanged (byte-identical).
+ *  Extracted so `execute` stays under the biome cognitive-complexity cap. */
+const replaceFailureResult = (r: ApplyOutcome): ToolResult => {
+  const failure: ToolFailure =
+    r.failureKind === "rejected" ? { mode: "rejected", reason: r.message } : { mode: "not_found" }
+  return { ok: false, output: r.message, failure }
+}
+
+/** ADR-0474 — stale-read-guard check for `scripted_replace` (T-403 write-class
+ *  mirror rule: edit / write / apply_patch / scripted_replace). Returns a
+ *  failure `ToolResult` when the target was READ this session and externally
+ *  modified since (mtime advanced past the read-time baseline), else `null`.
+ *  No-op (null) when the guard is unwired (`ctx.readFileState` absent — the
+ *  kill-switch path) or the file has no baseline (unread ⇒ allowed). The UX is
+ *  byte-identical to `write`'s `staleWriteGuard`: a typed `stale_read`
+ *  rejection on the NO-THROW path, never a throw out of the iterator. */
+const staleReplaceGuard = async (
+  fs: FileSystemPort,
+  ctx: ToolContext,
+  // ticket-11 — resolved write target (worktree-aware path + session jail base).
+  target: { readonly path: string; readonly base: string },
+): Promise<ToolResult | null> => {
+  if (ctx.readFileState === undefined) return null
+  const cur = await fs.statFile(target.path, target.base)
+  const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
+  if (guard.ok) return null
+  return {
+    ok: false,
+    output: guard.error.message,
+    failure: { mode: "rejected", reason: "stale_read" },
+  }
+}
+
+/** ATOMIC commit (ADR-0398 / LANE 1 parity with `edit`/`write`) — route the
+ *  scripted_replace commit through the port's crash-safe `writeFileAtomic`
+ *  (temp+fsync+rename, mode-preserving) whenever the port provides it, falling
+ *  back to the plain truncating `fs.writeFile` ONLY when the port lacks the
+ *  atomic method (in-memory test fakes ⇒ byte-identical on-disk result). A
+ *  crash mid-commit can never leave a torn / zero-length file under the final
+ *  name, and an existing file's mode (e.g. `0o755`) is preserved.
+ *
+ *  jun-6 tool-interrupt-behavior — the commit runs inside the OPTIONAL critical
+ *  section so an in-flight ESC cannot tear a half-written file. `begin?.()` is
+ *  undefined when the seam is unwired ⇒ no behaviour change. */
+const commitReplace = async (
+  fs: FileSystemPort,
+  ctx: ToolContext,
+  target: { readonly path: string; readonly base: string },
+  next: string,
+): Promise<void> => {
+  const cs = ctx.criticalSection?.begin()
+  try {
+    if (fs.writeFileAtomic !== undefined) {
+      await fs.writeFileAtomic(target.path, next, target.base)
+      return
+    }
+    await fs.writeFile(target.path, next, target.base)
+  } finally {
+    cs?.end()
+  }
+}
+
+/** Build the `scripted_replace` tool against an injected {@link FileSystemPort}
+ *  (#13 — the same seam `edit`/`write` expose). `fs` defaults to the real
+ *  `@/storage`-backed port, so the exported {@link scriptedReplaceTool} keeps
+ *  its registry identity; tests pass a recording / fault-injecting port. */
+export const makeScriptedReplaceTool = (
+  fs: FileSystemPort = defaultFileSystemPort,
+): Tool<Input> => ({
   name: "scripted_replace",
   description:
     "Bulk substring/regex substitution across a file. Use when `edit` reports duplicated matches or context mismatch.",
@@ -261,6 +341,12 @@ export const scriptedReplaceTool: Tool<Input> = {
   // posture as `edit`/`write` — pre-approval covers it. Required since the
   // fallback for mutating tools is now `always-confirm`.
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
+  // jun-6 tool-interrupt-behavior — like `edit`/`write`, the commit is an
+  // ATOMIC-intent window: declare `"block"` so the dispatch abort-router
+  // withholds the turn abort ONLY while the rename/flush window inside
+  // `commitReplace` is open (`ctx.criticalSection`). Default-OFF / inert
+  // unless the host wired the seam AND `QUANTA_TOOL_INTERRUPT_BLOCK` is on.
+  interruptBehavior: (): "block" => "block",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     // ADR-0091 git-write-protection: a scripted_replace targeting
@@ -268,16 +354,22 @@ export const scriptedReplaceTool: Tool<Input> = {
     // code-execution / policy-escape vector exactly as for `write`/`edit`.
     // Static-deny BEFORE any fs read/write, mirroring the FsJailError hard-stop
     // posture below — never a partial write. Default-OFF: when `ctx.gitWriteGuard`
-    // is unwired the helper returns null and the path is byte-identical.
+    // is unwired the helper returns null and the path is byte-identical. Runs on
+    // the RAW `input.file` (a path-shape matcher, not FS resolution) — same as edit.
     const guardDeny = gitWriteGuardDeny(input.file, ctx)
     if (guardDeny) {
       yield guardDeny
       return
     }
+    // ticket-11 (P8 worktree edit-fence) — resolve the effective FS target
+    // exactly as `edit` does: a RELATIVE path resolves against an active
+    // worktree dir; an ABSOLUTE path STILL jails to the SESSION root. Absent
+    // worktree ⇒ `{ path: input.file, base: ctx.cwd }` (byte-identical legacy).
+    const target = resolveEditBase(input.file, ctx.cwd, ctx.activeWorktree)
     try {
       // Pre-check existence so the error message is descriptive rather than
       // surfacing the raw `File not found` from readFile.
-      if (!(await fileExists(input.file, ctx.cwd))) {
+      if (!(await fs.fileExists(target.path, target.base))) {
         yield {
           type: "result",
           result: {
@@ -288,21 +380,24 @@ export const scriptedReplaceTool: Tool<Input> = {
         }
         return
       }
-      const source = await readFile(input.file, ctx.cwd)
+      const source = await fs.readFile(target.path, target.base)
       const r = applyScriptedReplace(source, input)
       if (!r.ok || r.next === undefined) {
-        // Map the pure-core discriminant to a typed failure. `not_found` ⇒ the
-        // pattern matched nothing (no path: the file IS there, the match isn't);
-        // `rejected` ⇒ an empty/uncompilable/ReDoS-suspicious pattern was
-        // refused (carry the reason). `output` is unchanged (byte-identical).
-        const failure: ToolFailure =
-          r.failureKind === "rejected"
-            ? { mode: "rejected", reason: r.message }
-            : { mode: "not_found" }
-        yield { type: "result", result: { ok: false, output: r.message, failure } }
+        // Map the pure-core discriminant to a typed failure (see
+        // `replaceFailureResult`); `output` is unchanged (byte-identical).
+        yield { type: "result", result: replaceFailureResult(r) }
         return
       }
-      await writeFile(input.file, r.next, ctx.cwd)
+      // ADR-0474 stale-read-guard — AFTER planning, BEFORE the commit (a deny
+      // is never a partial write). Unwired guard ⇒ `null` ⇒ byte-identical.
+      const staleDeny = await staleReplaceGuard(fs, ctx, target)
+      if (staleDeny) {
+        yield { type: "result", result: staleDeny }
+        return
+      }
+      // ADR-0398 ATOMIC commit — temp+fsync+rename via the port (crash-safe,
+      // mode-preserving), inside the OPTIONAL critical section.
+      await commitReplace(fs, ctx, target, r.next)
       yield {
         type: "result",
         result: {
@@ -325,4 +420,7 @@ export const scriptedReplaceTool: Tool<Input> = {
       throw e
     }
   },
-}
+})
+
+/** Default-port `scripted_replace` tool used by the registry. */
+export const scriptedReplaceTool: Tool<Input> = makeScriptedReplaceTool()

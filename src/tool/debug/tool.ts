@@ -12,7 +12,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { DapClient } from "./dap-client"
-import { type Inspection, inspectViaDap } from "./inspect-driver"
+import { type DapVariable, type Inspection, inspectViaDap } from "./inspect-driver"
 import { defaultDebugAdapterPort, type DebugAdapterPort } from "./port"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
@@ -89,11 +89,22 @@ const render = (program: string, r: Inspection): string => {
     lines.push("Call stack:")
     for (const f of r.stack) lines.push(`  ${f.name} (${f.source ?? "?"}:${f.line})`)
   }
-  for (const scope of r.variables) {
-    if (scope.vars.length === 0) continue
-    lines.push(`${scope.scope}:`)
-    for (const v of scope.vars) lines.push(`  ${v.name} = ${v.value}`)
+  // One variable line: `name = value (type)`, with nested children indented.
+  const renderVar = (v: DapVariable, indent: string): void => {
+    lines.push(`${indent}${v.name} = ${v.value}${v.type ? ` (${v.type})` : ""}`)
+    for (const c of v.children ?? []) renderVar(c, `${indent}  `)
   }
+  // Per-frame scopes (top K frames). The first frame is the stop site; deeper
+  // frames are labelled so the model can attribute a local to its caller.
+  r.frames.forEach((fr, i) => {
+    const nonEmpty = fr.scopes.filter((s) => s.vars.length > 0)
+    if (nonEmpty.length === 0) return
+    if (i > 0) lines.push(`↑ frame: ${fr.frame} (${fr.source ?? "?"}:${fr.line})`)
+    for (const scope of nonEmpty) {
+      lines.push(`${scope.scope}:`)
+      for (const v of scope.vars) renderVar(v, "  ")
+    }
+  })
   if (r.evaluated) lines.push(`Evaluated \`${r.evaluated.expression}\` ⇒ ${r.evaluated.result}`)
   return lines.join("\n")
 }

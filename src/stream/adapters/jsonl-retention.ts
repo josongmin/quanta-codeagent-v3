@@ -22,6 +22,9 @@
  *  2. Write surviving lines to `<filePath>.tmp` (fresh exclusive create).
  *  3. `rename(<filePath>.tmp, <filePath>)` — atomic on POSIX, atomic
  *     within the same filesystem.
+ *  4. Re-read the ORIGINAL inode (via a handle opened before the rename)
+ *     and O_APPEND any rows a live writer added during (2)–(3) onto the
+ *     new file — see the LOST-UPDATE GUARD comment in `applyRetention`.
  *  Crash between (2) and (3) leaves the original file intact + a `.tmp`
  *  sentinel — the next retention call will see the sentinel and refuse
  *  loudly (`JsonlRecorderRetentionBusyError`). The operator decides
@@ -67,6 +70,14 @@ export interface ApplyRetentionOpts {
    * production. NO-OP when absent.
    */
   _afterReadForTest?: () => Promise<void>
+  /**
+   * TEST-ONLY interleaving seam. Invoked exactly once, AFTER the `.tmp` file is
+   * written+fsynced and BEFORE the rename, so a test can drive a concurrent
+   * append into the residual write→rename window and prove the post-rename
+   * late-tail salvage (jun-10 silent-failure audit #20). Never set in
+   * production. NO-OP when absent.
+   */
+  _beforeRenameForTest?: () => Promise<void>
 }
 
 export interface ApplyRetentionResult {
@@ -121,42 +132,103 @@ export async function applyRetention(
   if (opts.dryRun === true) return result
   if (split.dropped.length === 0) return result
 
-  // LOST-UPDATE GUARD: a live writer may have O_APPEND-ed fresh rows to the file
-  // AFTER our snapshot read but BEFORE this rewrite. Those bytes live past
-  // `before.bytes`. Re-read the tail that grew since the snapshot and carry it
-  // forward, so the rename never drops a concurrently-appended (newest) row.
-  // The append is atomic per POSIX O_APPEND, so the grown tail is always a
-  // sequence of WHOLE rows; we re-split it on newline and append to `kept`.
-  const appendedRows = await readAppendedTail(filePath, before.bytes)
-  const keptWithAppends = appendedRows.length === 0 ? split.kept : [...split.kept, ...appendedRows]
-
-  await atomicRewrite(filePath, tmpPath, keptWithAppends)
+  // LOST-UPDATE GUARD: a live writer may O_APPEND fresh rows to the file at any
+  // point while we rewrite. Two windows exist:
+  //  (a) snapshot-read → tail-re-read: appends land past `before.bytes` on the
+  //      ORIGINAL inode. We re-read that grown tail just before the rewrite and
+  //      bake it into the kept set.
+  //  (b) tail-re-read → rename (the residual write+fsync+rename window): late
+  //      appends still target the ORIGINAL inode, which the rename orphans. We
+  //      hold a read handle opened on the original inode BEFORE the rename and
+  //      re-read it AFTER the rename — repeating until it stops growing — then
+  //      O_APPEND the salvaged rows onto the NEW file.
+  // Real guarantee: no whole-row append by an open-per-append writer (the
+  // JsonlRecorder appends via `appendFileSync`) is dropped, provided its append
+  // syscall completes before our final post-rename re-check; the salvage loop
+  // only ends once the orphaned inode is stable, and only writers that opened
+  // the path BEFORE the rename can still reach it, so in-flight appends are
+  // finite and the loop terminates. Window-(b) rows are re-appended after the
+  // rename, so they may land AFTER rows a live writer already appended to the
+  // new file — ordering across the rewrite boundary is best-effort; loss is
+  // not. The append is atomic per POSIX O_APPEND, so every grown tail is a
+  // sequence of WHOLE rows; we re-split on newline.
+  await rewriteWithSalvage(filePath, tmpPath, split.kept, before.bytes, opts._beforeRenameForTest)
   return result
 }
 
-/** Read whole rows that were appended to `filePath` AFTER byte offset `fromByte`
- *  (the size at snapshot time). Returns `[]` when the file did not grow. The
- *  trailing newline of the last appended row is stripped (row arrays are
- *  newline-joined on write). NO-THROW for a vanished file (treated as no
- *  growth). */
-async function readAppendedTail(filePath: string, fromByte: number): Promise<string[]> {
-  let st: import("node:fs").Stats
+/** The lost-update-guarded rewrite described above: catch-up tail read (window
+ *  a), atomic rewrite, then the post-rename late-tail salvage loop (window b)
+ *  via a handle opened on the original inode BEFORE the rename. */
+async function rewriteWithSalvage(
+  filePath: string,
+  tmpPath: string,
+  splitKept: readonly string[],
+  snapshotBytes: number,
+  beforeRenameForTest?: () => Promise<void>,
+): Promise<void> {
+  let origHandle: Awaited<ReturnType<typeof open>> | undefined
   try {
-    st = await stat(filePath)
+    origHandle = await open(filePath, "r")
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return []
-    throw err
+    // Vanished file (parity with the prior path-based tail read): no original
+    // inode to salvage from — proceed with the rewrite alone.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
   }
-  if (st.size <= fromByte) return []
-  const handle = await open(filePath, "r")
   try {
-    const len = st.size - fromByte
-    const buf = Buffer.alloc(len)
-    await handle.read(buf, 0, len, fromByte)
-    let tail = buf.toString("utf8")
-    if (tail.endsWith("\n")) tail = tail.slice(0, -1)
-    if (tail.length === 0) return []
-    return tail.split("\n")
+    let kept = [...splitKept]
+    let consumedBytes = snapshotBytes
+    if (origHandle !== undefined) {
+      // Window (a): catch-up tail read, baked into the rewrite itself.
+      const tail = await readAppendedTail(origHandle, consumedBytes)
+      consumedBytes = tail.endByte
+      if (tail.rows.length > 0) kept = [...kept, ...tail.rows]
+    }
+
+    await atomicRewrite(filePath, tmpPath, kept, beforeRenameForTest)
+
+    if (origHandle !== undefined) {
+      // Window (b): salvage rows appended to the now-orphaned original inode
+      // during write+fsync+rename, looping until its size is stable.
+      let late = await readAppendedTail(origHandle, consumedBytes)
+      while (late.rows.length > 0) {
+        consumedBytes = late.endByte
+        await appendRows(filePath, late.rows)
+        late = await readAppendedTail(origHandle, consumedBytes)
+      }
+    }
+  } finally {
+    if (origHandle !== undefined) await origHandle.close()
+  }
+}
+
+/** Read whole rows that grew past byte offset `fromByte` on the inode behind
+ *  `handle` (NOT the path — after the rename the path points at the NEW file
+ *  while the handle still reaches the orphaned original). Returns the rows and
+ *  the byte offset consumed (`endByte`), so successive calls resume where the
+ *  previous one stopped. The trailing newline of the last row is stripped (row
+ *  arrays are newline-joined on write). */
+async function readAppendedTail(
+  handle: Awaited<ReturnType<typeof open>>,
+  fromByte: number,
+): Promise<{ rows: string[]; endByte: number }> {
+  const st = await handle.stat()
+  if (st.size <= fromByte) return { rows: [], endByte: fromByte }
+  const len = st.size - fromByte
+  const buf = Buffer.alloc(len)
+  await handle.read(buf, 0, len, fromByte)
+  let tail = buf.toString("utf8")
+  if (tail.endsWith("\n")) tail = tail.slice(0, -1)
+  if (tail.length === 0) return { rows: [], endByte: st.size }
+  return { rows: tail.split("\n"), endByte: st.size }
+}
+
+/** O_APPEND the salvaged rows onto `filePath` (the NEW file post-rename).
+ *  Atomic per POSIX O_APPEND, so a live writer appending concurrently can
+ *  interleave between rows but never tear one. */
+async function appendRows(filePath: string, rows: string[]): Promise<void> {
+  const handle = await open(filePath, "a")
+  try {
+    await handle.write(`${rows.join("\n")}\n`)
   } finally {
     await handle.close()
   }
@@ -228,7 +300,12 @@ function splitByCap(allRows: readonly string[], maxCumulativeBytes: number): Spl
  * If the tmp file is created by a racing writer between our existence
  * check and our open, `EEXIST` surfaces as `JsonlRecorderRetentionBusyError`.
  */
-async function atomicRewrite(filePath: string, tmpPath: string, kept: string[]): Promise<void> {
+async function atomicRewrite(
+  filePath: string,
+  tmpPath: string,
+  kept: string[],
+  beforeRenameForTest?: () => Promise<void>,
+): Promise<void> {
   const body = kept.length === 0 ? "" : `${kept.join("\n")}\n`
   let handle: Awaited<ReturnType<typeof open>> | undefined
   try {
@@ -243,6 +320,7 @@ async function atomicRewrite(filePath: string, tmpPath: string, kept: string[]):
   } finally {
     if (handle !== undefined) await handle.close()
   }
+  if (beforeRenameForTest !== undefined) await beforeRenameForTest()
   await rename(tmpPath, filePath)
 }
 

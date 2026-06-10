@@ -220,11 +220,56 @@ export interface SessionMemoryAutoWires {
    *  path. Idempotent: closing an already-closed handle is swallowed so a
    *  double-dispose never throws. */
   dispose(): void
+  /** Await the deferred Phase-1 consolidation lane (in-flight run PLUS any
+   *  coalesced pending rerun). The consolidator block this bundle mints
+   *  carries `defer`, so `runAgent` hands the distill off instead of
+   *  blocking the turn-completion path on a full-rollout LLM call. MUST be
+   *  awaited BEFORE {@link dispose} — the distill writes to the sqlite
+   *  store dispose closes. Resolves immediately when nothing is in flight. */
+  drain(): Promise<void>
   /** H16 — the cross-session auto-dream trigger, present ONLY when
    *  `QUANTA_AUTO_DREAM=1` (and memory-auto produced a cross-session store to
    *  dream over). The session host calls `onSessionEnd()` once at teardown;
    *  absent ⇒ no dream pass (byte-identical default-OFF). */
   dreamTrigger?: CrossSessionDreamTrigger
+}
+
+/** Single-flight + latest-pending lane for the deferred session-end Phase-1
+ *  distill. `defer` never blocks the caller: when a run is already in flight
+ *  the NEWEST closure replaces any queued one — each run distills a full
+ *  rollout snapshot for the same threadId row, so the latest supersedes
+ *  intermediates (last-write-wins, identical to the prior serialized
+ *  behavior's final state, minus the redundant LLM spend). `drain` loops
+ *  until the lane is empty so a coalesced rerun kicked during the await is
+ *  also covered. */
+const createDeferredConsolidationLane = (): {
+  defer: (run: () => Promise<unknown>) => void
+  drain: () => Promise<void>
+} => {
+  let inflight: Promise<void> | null = null
+  let pending: (() => Promise<unknown>) | null = null
+  const kick = (run: () => Promise<unknown>): void => {
+    if (inflight !== null) {
+      pending = run
+      return
+    }
+    inflight = run()
+      // The hook is NO-THROW by contract; this belt keeps a hostile port from
+      // wedging the lane (a rejected inflight would make drain loop forever).
+      .catch(() => undefined)
+      .then(() => {
+        inflight = null
+        const next = pending
+        pending = null
+        if (next !== null) kick(next)
+      })
+  }
+  return {
+    defer: kick,
+    drain: async (): Promise<void> => {
+      while (inflight !== null) await inflight
+    },
+  }
 }
 
 export interface SessionMemoryAutoWireInput {
@@ -356,6 +401,13 @@ export const buildSessionMemoryAutoWires = async (
     }
   }
 
+  // Deferred consolidation lane — `runAgent` hands the session-end Phase-1
+  // distill (a full-rollout LLM call) here instead of awaiting it inline, so
+  // the surface's turn-completion path (spinner → turn summary → input) is
+  // never blocked on memory bookkeeping. The host awaits `drain()` at session
+  // close, BEFORE `dispose()` closes the sqlite store the distill writes to.
+  const lane = createDeferredConsolidationLane()
+
   return {
     ...(start.sessionCtx !== undefined ? { sessionCtx: start.sessionCtx } : {}),
     stage1OutputsStore,
@@ -364,8 +416,10 @@ export const buildSessionMemoryAutoWires = async (
       port: buildPhase1PortFromLlm(input.llm),
       store: phase1Store,
       threadId: input.sessionId,
+      defer: lane.defer,
     },
     dispose,
+    drain: lane.drain,
     ...(dreamTrigger !== undefined ? { dreamTrigger } : {}),
   }
 }

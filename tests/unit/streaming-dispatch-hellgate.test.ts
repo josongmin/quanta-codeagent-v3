@@ -264,6 +264,70 @@ describe("A4 — all-unsafe sequence", () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────
+// Early-dispatch rejection window — no unhandledRejection leak (jun-10)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("A4 — early-dispatch rejection while the stream is still flowing", () => {
+  test("approval-shaped rejection does NOT leak as unhandledRejection AND still re-throws at Phase 2", async () => {
+    // Approval-shaped error: matches isSessionApprovalRequiredError's structural
+    // predicate (object with approval.{approvalId,reason,requestedAt}) — the
+    // exact shape the runtime approval protocol's onConfirm throws when the
+    // permission gate asks during an early-started `agent` dispatch.
+    const approvalError = Object.assign(new Error("runtime approval required: edit.needs_approval"), {
+      approval: {
+        approvalId: "ap-1",
+        reason: "edit.needs_approval",
+        requestedAt: "2026-06-10T00:00:00.000Z",
+      },
+    })
+
+    const isConcurrencySafe = (): boolean => true
+    const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
+      if (call.id === "a1") throw approvalError
+      return block(call.id, `out-${call.id}`)
+    }
+
+    // The stream MUST cross a real macrotask boundary AFTER the early dispatch
+    // rejects and BEFORE message_stop — that is the window where the slot's
+    // rejection sits with no Phase-2 handler attached yet, which is exactly when
+    // the process-level unhandledRejection hook fires. A microtask-only gap
+    // (the plain `gen`) would not give the hook a chance to trip.
+    async function* slowGen(): AsyncGenerator<StreamEvent> {
+      for (const e of toolUse("a1", "agent", { prompt: "audit" })) yield e
+      await new Promise((r) => setTimeout(r, 30)) // rejection is in flight, unobserved
+      yield { type: "message_stop", stop_reason: "tool_use" } as StreamEvent
+    }
+
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on("unhandledRejection", onUnhandled)
+    try {
+      // Phase 2 must RE-OBSERVE the same rejection and re-throw it (the runtime
+      // turn wrapper upstream converts it into an approvalRequest) — the interim
+      // no-op catch must not swallow it.
+      await expect(
+        withTimeoutTurn(
+          streamingTurn({
+            events: slowGen(),
+            isConcurrencySafe,
+            isReadOnly: () => true,
+            dispatch,
+          }),
+        ),
+      ).rejects.toBe(approvalError)
+      // Let any pending unhandledRejection notification drain (it is delivered
+      // on a later event-loop turn, not synchronously with the rejection).
+      await new Promise((r) => setTimeout(r, 60))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.removeListener("unhandledRejection", onUnhandled)
+    }
+  })
+})
+
 /** Race a streamingTurn against a hang guard — a barrier/abort bug that hangs
  *  the drain would otherwise stall the whole suite. */
 async function withTimeoutTurn<T>(p: Promise<T>): Promise<T> {

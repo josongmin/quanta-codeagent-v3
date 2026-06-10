@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { readdirSync, rmSync, statSync } from "node:fs"
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 /**
@@ -53,9 +54,12 @@ export function envSpillKeep(env: Record<string, string | undefined>): number {
 }
 
 /**
- * Injectable filesystem surface for {@link pruneSpillDir} so tests can drive
- * GC without touching disk. Mirrors the `write` injection on
- * {@link CapToolOutputOptions}.
+ * Injectable SYNCHRONOUS filesystem surface for {@link pruneSpillDir} so tests
+ * can drive GC without touching disk. Mirrors the `write` injection on
+ * {@link CapToolOutputOptions}. The universal tool-result path
+ * ({@link capToolOutput}) uses the async {@link SpillFsOpsAsync} surface
+ * instead — this sync form remains for sync-port callers (the eviction spill
+ * adapter, whose `EvictionSpillPort.persist` contract is synchronous).
  */
 export interface SpillFsOps {
   /** List entry names in `dir`. */
@@ -66,10 +70,32 @@ export interface SpillFsOps {
   remove: (path: string) => void
 }
 
+/**
+ * Async-capable variant of {@link SpillFsOps} — every op may return a Promise
+ * (jun-10 silent-failure audit #21: the universal tool-result GC must never
+ * issue blocking IO on the shared web-daemon event loop). A plain sync
+ * {@link SpillFsOps} is assignable to this type, so existing injections keep
+ * working unchanged.
+ */
+export interface SpillFsOpsAsync {
+  /** List entry names in `dir`. */
+  readdir: (dir: string) => string[] | Promise<string[]>
+  /** Last-modified time (ms epoch) of a path; used to rank by recency. */
+  mtimeMs: (path: string) => number | Promise<number>
+  /** Remove a single file path. */
+  remove: (path: string) => void | Promise<void>
+}
+
 const defaultSpillFs: SpillFsOps = {
   readdir: (dir) => readdirSync(dir),
   mtimeMs: (path) => statSync(path).mtimeMs,
   remove: (path) => rmSync(path, { force: true }),
+}
+
+const defaultSpillFsAsync: SpillFsOpsAsync = {
+  readdir: (dir) => readdir(dir),
+  mtimeMs: async (path) => (await stat(path)).mtimeMs,
+  remove: (path) => rm(path, { force: true }),
 }
 
 /**
@@ -111,12 +137,69 @@ export function pruneSpillDir(
     }
   }
 
-  // Newest first; drop everything past the keep window.
-  ranked.sort((a, b) => b.mtimeMs - a.mtimeMs)
   const removed: string[] = []
-  for (const { path } of ranked.slice(limit)) {
+  for (const path of pruneCandidates(ranked, limit)) {
     try {
       fs.remove(path)
+      removed.push(path)
+    } catch {
+      // Best-effort: skip this file, keep pruning the rest.
+    }
+  }
+  return removed
+}
+
+/** Shared prune POLICY: rank newest-first, return everything past the keep
+ *  window. Single source so the sync and async prune surfaces cannot drift. */
+function pruneCandidates(
+  ranked: ReadonlyArray<{ path: string; mtimeMs: number }>,
+  limit: number,
+): string[] {
+  return [...ranked]
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(limit)
+    .map((e) => e.path)
+}
+
+/**
+ * Async twin of {@link pruneSpillDir} — identical semantics (same
+ * {@link pruneCandidates} policy, same never-throws best-effort contract,
+ * same no-op-under-limit fast path) over an awaitable fs surface. This is the
+ * prune the universal tool-result path uses so GC never issues blocking IO on
+ * the shared event loop (jun-10 silent-failure audit #21).
+ */
+export async function pruneSpillDirAsync(
+  spillDir: string,
+  keep: number,
+  fs: SpillFsOpsAsync = defaultSpillFsAsync,
+): Promise<string[]> {
+  const limit = resolveSpillKeep(keep)
+  let names: string[]
+  try {
+    names = await fs.readdir(spillDir)
+  } catch {
+    return []
+  }
+
+  const spillFiles = names.filter((n) => n.endsWith(".txt"))
+  if (spillFiles.length <= limit) return []
+
+  const ranked: Array<{ path: string; mtimeMs: number }> = []
+  for (const name of spillFiles) {
+    const path = join(spillDir, name)
+    try {
+      ranked.push({ path, mtimeMs: await fs.mtimeMs(path) })
+    } catch {
+      // Unstattable entry (e.g. removed mid-scan): treat as oldest so it is
+      // a prune candidate, never a survivor.
+      ranked.push({ path, mtimeMs: Number.NEGATIVE_INFINITY })
+    }
+  }
+
+  const removed: string[] = []
+  for (const path of pruneCandidates(ranked, limit)) {
+    try {
+      await fs.remove(path)
       removed.push(path)
     } catch {
       // Best-effort: skip this file, keep pruning the rest.
@@ -132,9 +215,11 @@ export interface CapToolOutputOptions {
   spillDir: string
   /**
    * Injected writer for the spill file (path, data). Defaults to a lazy
-   * mkdir + writeFileSync. Override in tests to avoid IO.
+   * async mkdir + writeFile (`node:fs/promises`) — never sync IO on the
+   * shared event loop. A returned Promise is AWAITED before the result is
+   * produced. Override in tests to avoid IO.
    */
-  write?: (path: string, data: string) => void
+  write?: (path: string, data: string) => void | Promise<void>
   /**
    * Max number of most-recent spill files retained after a write. `0`,
    * negative, or non-finite ⇒ {@link DEFAULT_SPILL_KEEP}. Defaults to
@@ -143,9 +228,10 @@ export interface CapToolOutputOptions {
   spillKeep?: number
   /**
    * Injected fs surface used for the post-write GC prune. Override in tests
-   * to drive retention without disk IO.
+   * to drive retention without disk IO. Ops may return Promises (awaited);
+   * plain sync {@link SpillFsOps} injections remain assignable.
    */
-  spillFs?: SpillFsOps
+  spillFs?: SpillFsOpsAsync
 }
 
 export interface CapToolOutputResult {
@@ -155,10 +241,10 @@ export interface CapToolOutputResult {
   spillPath?: string
 }
 
-function defaultWrite(path: string, data: string): void {
+async function defaultWrite(path: string, data: string): Promise<void> {
   const dir = path.slice(0, Math.max(0, path.lastIndexOf("/")))
-  if (dir) mkdirSync(dir, { recursive: true })
-  writeFileSync(path, data)
+  if (dir) await mkdir(dir, { recursive: true })
+  await writeFile(path, data)
 }
 
 /**
@@ -189,9 +275,15 @@ export function envMaxChars(env: Record<string, string | undefined>): number {
  * see analysis/agent-loop-message-normalization.md §2.2). Sub-cap outputs are
  * returned byte-identical with no IO.
  *
- * Pure except for the single `write` call (injectable for tests).
+ * Pure except for the single `write` call (injectable for tests). ASYNC end
+ * to end (jun-10 silent-failure audit #21): this runs on the UNIVERSAL
+ * tool-result path (`ToolRegistry.run`), shared by every session of the web
+ * daemon — the spill write and the GC prune must never block the event loop.
  */
-export function capToolOutput(output: string, opts: CapToolOutputOptions): CapToolOutputResult {
+export async function capToolOutput(
+  output: string,
+  opts: CapToolOutputOptions,
+): Promise<CapToolOutputResult> {
   const maxChars = resolveMaxChars(opts.maxChars)
   if (output.length <= maxChars) {
     return { output }
@@ -199,11 +291,17 @@ export function capToolOutput(output: string, opts: CapToolOutputOptions): CapTo
 
   const spillPath = join(opts.spillDir, `${randomUUID()}.txt`)
   const write = opts.write ?? defaultWrite
-  write(spillPath, output)
+  await write(spillPath, output)
 
   // Bound the spill dir so it can never grow unboundedly. Best-effort:
-  // pruneSpillDir never throws, so a GC failure cannot break this result.
-  pruneSpillDir(opts.spillDir, resolveSpillKeep(opts.spillKeep), opts.spillFs ?? defaultSpillFs)
+  // pruneSpillDirAsync never throws/rejects, so a GC failure cannot break
+  // this result. Awaited (not floated) so the bound holds deterministically
+  // by the time the result is produced.
+  await pruneSpillDirAsync(
+    opts.spillDir,
+    resolveSpillKeep(opts.spillKeep),
+    opts.spillFs ?? defaultSpillFsAsync,
+  )
 
   const originalChars = output.length
   const head = output.slice(0, HEAD_CHARS)

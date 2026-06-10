@@ -4,7 +4,9 @@
  *   "high"`, entropy `"medium"`. Composite dedups: pattern wins on the same
  *   (file, line, column). Structural shapes (SHA / UUID) are skipped by the
  *   entropy adapter. Mask helper redacts mid-secret. allowlist drops matches.
- *   `scanFile` is binary-decode-tolerant.
+ *   `scanFile` is binary-decode-tolerant, but a READ failure (missing file /
+ *   EACCES / EISDIR) is a typed `SecretScanReadError` — a security scanner
+ *   must never report an unreadable file as "clean" (jun-10 finding #12).
  *
  * HELLGATE — adversarial proofs that signature precision is preserved while
  * entropy catches novel formats without drowning callers in SHA/UUID noise.
@@ -20,6 +22,7 @@ import {
   entropyScanner,
   mask,
   patternScanner,
+  SecretScanReadError,
   type SecretScanner,
   secretlintScanner,
   shannonEntropyBits,
@@ -267,10 +270,57 @@ describe("E. scanFile — disk + binary tolerance", () => {
     expect(findings).toEqual([])
   })
 
-  test("E29 — file that does NOT exist → empty array (decode-fail tolerance)", async () => {
+  test("E29 — file that does NOT exist → typed SecretScanReadError naming the path (NEVER silent-clean)", async () => {
+    // Red-on-injection (jun-10 finding #12): an unreadable file used to scan
+    // as `[]` — byte-identical to a clean file. The fix propagates a typed
+    // failure so callers (check_secrets) can surface ok:false.
     const p = join(dir, "missing-file-does-not-exist")
-    const findings = await compositeSecretScanner().scanFile(p)
-    expect(findings).toEqual([])
+    let thrown: unknown
+    try {
+      await compositeSecretScanner().scanFile(p)
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(SecretScanReadError)
+    const err = thrown as SecretScanReadError
+    expect(err.path).toBe(p)
+    expect(err.message).toContain(p)
+    // The underlying fs error is preserved as `cause` (boundary classifies once).
+    expect((err.cause as NodeJS.ErrnoException).code).toBe("ENOENT")
+  })
+
+  test("E29b — entropy adapter MIRROR: missing file → same typed SecretScanReadError", async () => {
+    const p = join(dir, "missing-for-entropy-mirror")
+    let thrown: unknown
+    try {
+      await entropyScanner().scanFile(p)
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(SecretScanReadError)
+    expect((thrown as SecretScanReadError).path).toBe(p)
+    expect((thrown as SecretScanReadError).message).toContain(p)
+  })
+
+  test("E29c — path that is a DIRECTORY (EISDIR read failure) → typed error, not silent-clean", async () => {
+    let thrown: unknown
+    try {
+      await compositeSecretScanner().scanFile(dir)
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(SecretScanReadError)
+    expect((thrown as SecretScanReadError).path).toBe(dir)
+  })
+
+  test("E29d — paired control: entropy adapter still FINDS a secret in a readable file", async () => {
+    // Proves the read-error propagation did not break the mirror's happy
+    // path: readable file with a high-entropy token → finding, no throw.
+    const p = join(dir, "entropy-readable.env")
+    writeFileSync(p, `TOKEN=${HIGH_ENTROPY_40}\n`)
+    const findings = await entropyScanner().scanFile(p)
+    expect(findings.some((f) => f.kind === "generic-high-entropy")).toBe(true)
+    expect(findings[0]?.file).toBe(p)
   })
 
   test("E30 — binary-ish file → no decode throw; returns gracefully", async () => {

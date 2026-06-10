@@ -1,3 +1,4 @@
+import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { errMessage, QuantaError, runtimeConfig } from "@/shared"
 import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
 import { headlessRejecter } from "./elicitation"
@@ -301,7 +302,11 @@ export type McpClientTransport = McpTransport | ((config: McpServerConfig) => Mc
  *  HTTP-SSE carrier is selected only when the config carries a `url` (an
  *  explicit opt-in), preserving stdio byte-identity for every command-based
  *  server. */
-const defaultTransportFor = (config: McpServerConfig, offeredVersion: string): McpTransport => {
+const defaultTransportFor = (
+  config: McpServerConfig,
+  offeredVersion: string,
+  proxyEnv?: ProxyEnvInput,
+): McpTransport => {
   if (config.url !== undefined && config.url !== "") {
     return new HttpSseMcpTransport({
       url: config.url,
@@ -318,7 +323,7 @@ const defaultTransportFor = (config: McpServerConfig, offeredVersion: string): M
         : {}),
     })
   }
-  return new StdioMcpTransport(config)
+  return new StdioMcpTransport(config, proxyEnv !== undefined ? { proxyEnv } : {})
 }
 
 /** A real MCP client speaking newline-delimited JSON-RPC 2.0 over a pluggable
@@ -346,6 +351,8 @@ export class McpClient {
    *  transport construction is deferred (OAuth active + a factory/default
    *  carrier). `null` once `transport` is materialized. */
   private readonly transportFactory: ((config: McpServerConfig) => McpTransport) | null
+  /** H3 (jun-10) — session-scoped proxy env for the stdio child spawn. */
+  private readonly proxyEnv: ProxyEnvInput | undefined
   /** H18 — the wired OAuth provider. Defaults to {@link headlessOAuthRejecter}
    *  (obtains no token), so a client with no provider — or a server that did NOT
    *  opt in (`config.oauth !== true`) — is byte-identical to the pre-H18 path:
@@ -425,6 +432,10 @@ export class McpClient {
       rootsProvider?: RootsProviderPort
       resourceObserver?: McpResourceObserver
       oauthProvider?: McpOAuthProviderPort
+      /** H3 (jun-10) — session-scoped egress proxy env threaded down to the
+       *  stdio child spawn so an MCP server's OWN sockets are gated. Absent ⇒
+       *  byte-identical (no proxy keys in the child env). */
+      proxyEnv?: ProxyEnvInput
     },
   ) {
     this.config = config
@@ -440,12 +451,13 @@ export class McpClient {
     // lower ceiling (e.g. back to the floor ⇒ byte-identical to pre-ticket). An
     // unsupported override conservatively falls back to the SSOT newest.
     this.offeredVersion = resolveOfferedVersion(runtimeConfig().mcpProtocolMax)
+    this.proxyEnv = opts?.proxyEnv
     const t = opts?.transport
     // Bind the offered version into the DEFAULT factory so the HTTP carrier
     // stamps the same offer the `initialize` body carries. An INJECTED factory
     // (test double) keeps its single-arg `McpClientTransport` shape unchanged.
     const boundDefault = (cfg: McpServerConfig): McpTransport =>
-      defaultTransportFor(cfg, this.offeredVersion)
+      defaultTransportFor(cfg, this.offeredVersion, this.proxyEnv)
     // When OAuth is active we MUST resolve the bearer before constructing the
     // carrier (the HTTP transport reads static headers at construction time), so
     // we defer to `start()` — UNLESS an explicit transport INSTANCE was supplied
@@ -499,7 +511,7 @@ export class McpClient {
       const token = await this.oauthProvider.tokenFor(this.config.name)
       const build =
         this.transportFactory ??
-        ((cfg: McpServerConfig) => defaultTransportFor(cfg, this.offeredVersion))
+        ((cfg: McpServerConfig) => defaultTransportFor(cfg, this.offeredVersion, this.proxyEnv))
       this.transport = build(this.withBearer(this.config, token))
     }
     const transport = this.transport

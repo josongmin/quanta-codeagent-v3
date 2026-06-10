@@ -176,6 +176,35 @@ describe("always-confirm — UNIVERSAL floor (secure-by-default) [P2-T1]", () =>
     expect(counts.n).toBe(1) // auto-ran under bypass (NOT gated by the floor)
   })
 
+  // END-TO-END with the REAL git_push tool through runAgent (the user-facing
+  // path): under bypass, the model calls git_push → the loop dispatches → the
+  // floor fires the confirm modal (onConfirm) → a decline BLOCKS the push. The
+  // git runner throws if ever reached, proving the tool body never ran.
+  test("REAL git_push under bypass fires the confirm modal and a decline blocks it", async () => {
+    const { gitPushTool } = await import("@/tool/git")
+    let modalShown = 0
+    const push = gitPushTool((() => {
+      throw new Error("git push must not run without confirmation")
+    }) as never)
+    const out = await runAgent({
+      llm: new FakeLLM([callTool("p1", "git_push"), endText]),
+      registry: new ToolRegistry([push]),
+      stream: new RecordingStream(),
+      permission: { mode: "bypass" },
+      messages: [{ role: "user", content: [{ type: "text", text: "push it" }] }] as Message[],
+      system: "test",
+      cwd: "/tmp",
+      maxTurns: 4,
+      signal: new AbortController().signal,
+      onConfirm: async () => {
+        modalShown += 1
+        return false // operator declines at the modal
+      },
+    })
+    expect(out.reason).toBe("completed")
+    expect(modalShown).toBe(1) // the modal was shown EVEN under bypass
+  })
+
   // REGRESSION GUARD (the 89-breakage): a plain always-confirm tool with NO
   // capability (the inferToolTier catch-all — every unclassified mutating tool,
   // bash included) DEFERS. If the floor ever widens to catch these, the whole

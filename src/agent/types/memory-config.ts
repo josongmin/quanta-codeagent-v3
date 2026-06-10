@@ -122,4 +122,13 @@ export type MemoryConsolidatorBlock = {
    *  `config.sessionId` when omitted; if BOTH are absent the call is
    *  skipped (the consolidator refuses an empty thread id). */
   threadId?: string
+  /** Hand the session-end Phase-1 run to a host-owned background lane instead
+   *  of awaiting it inline. When present, `runAgent` calls `defer(run)` and
+   *  returns immediately — the distill (a full-rollout LLM call that can take
+   *  tens of seconds) no longer blocks the turn-completion path the surface
+   *  is waiting on. The host that wires `defer` OWNS completion: it must
+   *  drain the lane before closing the stage-1 store the distill writes to
+   *  (see `SessionMemoryAutoWires.drain`). Absent ⇒ awaited inline,
+   *  byte-identical to the legacy blocking behavior. */
+  defer?: (run: () => Promise<unknown>) => void
 }

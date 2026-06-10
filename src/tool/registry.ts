@@ -167,7 +167,7 @@ export class ToolRegistry {
     }
     // S5: read tunables from the frozen runtimeConfig — no per-call env reads.
     const cfg = runtimeConfig()
-    const capped = capToolOutput(result.output, {
+    const capped = await capToolOutput(result.output, {
       maxChars: cfg.toolOutputMaxChars ?? DEFAULT_TOOL_OUTPUT_MAX,
       spillDir: join(ctx.cwd, ".quanta", "tool-output"),
       spillKeep: cfg.toolOutputSpillKeep ?? DEFAULT_SPILL_KEEP,

@@ -49,6 +49,12 @@ type RuntimeBase = RuntimeAgentConfigBase & {
    *  Invoked once from the session host's close(); undefined when memory-auto is
    *  off. Per-SESSION, never per-turn (the handle is reused across turns). */
   memoryAutoDispose?: () => void
+  /** Await the deferred Phase-1 consolidation lane (the per-turn distill
+   *  `runAgent` hands off via `memoryConsolidator.defer` so it never blocks
+   *  the turn-completion path). Awaited once from the session host's close(),
+   *  BEFORE {@link memoryAutoDispose} — the distill writes to the sqlite
+   *  handle dispose closes. Undefined when memory-auto is off. */
+  memoryAutoDrain?: () => Promise<void>
   /** H16 — session-end cross-session auto-dream hook. Present only when
    *  `QUANTA_AUTO_DREAM=1` produced a trigger; invoked once (awaited) from the
    *  session host's close() AFTER the WAL dispose. Best-effort + bounded by the
@@ -561,6 +567,10 @@ const extendBaseWithMemoryAuto = async (
     // close() releases the fd. Previously `auto.dispose` was dropped here, so
     // every memory-auto session leaked its sqlite handle for the host lifetime.
     memoryAutoDispose: auto.dispose,
+    // Deferred-consolidation drain — close() awaits this BEFORE the dispose
+    // above so an in-flight background distill finishes writing to the sqlite
+    // store before the WAL handle is released.
+    memoryAutoDrain: auto.drain,
     // H16 — carry the session-end auto-dream hook (default-OFF: absent unless
     // QUANTA_AUTO_DREAM=1 produced a trigger). The host fires it once at close().
     // Also carry the SAME trigger instance so the REPL surface can wire `/dream`
@@ -1268,6 +1278,16 @@ const createRuntimeSessionHost = (args: {
   const close = async (): Promise<void> => {
     if (shutdownComplete) return
     shutdownComplete = true
+    // Deferred consolidation drain — the per-turn Phase-1 distill runs on a
+    // background lane (so it never blocks turn completion); a run kicked off
+    // by the LAST turn may still be in flight here. Await it BEFORE the WAL
+    // dispose below, or the distill's store write lands on a closed handle.
+    // Best-effort: a drain failure must not block session teardown.
+    try {
+      await base.memoryAutoDrain?.()
+    } catch {
+      // swallow — teardown must complete regardless.
+    }
     // U7-10: release the memory-auto bun:sqlite WAL handle for this session
     // BEFORE the broader shutdown. Idempotent + best-effort: a dispose throw
     // must not block session teardown.

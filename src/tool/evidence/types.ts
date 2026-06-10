@@ -27,10 +27,32 @@ export interface FailureEvidence {
   readonly line?: number
 }
 
-/** Runtime state captured at the failure (from DAP debug_inspect). */
+/** One runtime variable: its value, DAP `type`, and (for aggregates) a bounded
+ *  tree of expanded children — so a struct/dict/object shows its fields, not an
+ *  opaque summary. */
+export interface RuntimeVar {
+  readonly name: string
+  readonly value: string
+  readonly type?: string
+  readonly children?: readonly RuntimeVar[]
+}
+
+/** Locals captured for ONE stack frame above the stop site (the bug often lives
+ *  in a caller, not the assertion frame). */
+export interface RuntimeFrame {
+  readonly frame: string
+  readonly file?: string
+  readonly line: number
+  readonly locals: readonly RuntimeVar[]
+}
+
+/** Runtime state captured at the failure (from DAP debug_inspect). `locals` is
+ *  the HEADLINE view — the stop frame's locals (== `frames[0].locals`); `frames`
+ *  adds the top-K caller frames for deeper context. */
 export interface RuntimeEvidence {
   readonly stack: readonly { readonly name: string; readonly file?: string; readonly line: number }[]
-  readonly locals: readonly { readonly name: string; readonly value: string }[]
+  readonly locals: readonly RuntimeVar[]
+  readonly frames?: readonly RuntimeFrame[]
 }
 
 /** Static context around the failure site (from LSP). */

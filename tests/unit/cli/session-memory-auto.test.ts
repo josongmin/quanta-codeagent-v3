@@ -134,5 +134,96 @@ describe("session-memory-auto", () => {
     })
     expect(out).toBeDefined()
     expect(out?.memoryConsolidator.enabled).toBe(true)
+    out?.dispose()
+  })
+
+  test("bundle wires the deferred-consolidation lane: consolidator.defer present + drain exposed", async () => {
+    const llm = { stream: async function* () {} } as never
+    const out = await buildSessionMemoryAutoWires({
+      env: {},
+      llm,
+      sessionId: "sess-lane-wire",
+      homeDir: tempHome,
+    })
+    expect(out).toBeDefined()
+    // The consolidator block carries the lane's defer — this is what makes
+    // runAgent hand the distill off instead of blocking turn completion.
+    expect(typeof out?.memoryConsolidator.defer).toBe("function")
+    expect(typeof out?.drain).toBe("function")
+    out?.dispose()
+  })
+
+  test("lane: single-flight + latest-pending coalescing; drain awaits in-flight AND the coalesced rerun", async () => {
+    const llm = { stream: async function* () {} } as never
+    const out = await buildSessionMemoryAutoWires({
+      env: {},
+      llm,
+      sessionId: "sess-lane-coalesce",
+      homeDir: tempHome,
+    })
+    const defer = out?.memoryConsolidator.defer
+    if (out === undefined || defer === undefined) throw new Error("lane not wired")
+
+    const events: string[] = []
+    let releaseA = (): void => undefined
+    const gateA = new Promise<void>((r) => {
+      releaseA = r
+    })
+    defer(async () => {
+      events.push("A:start")
+      await gateA
+      events.push("A:end")
+    })
+    // While A is in flight, B is queued then SUPERSEDED by C (latest wins —
+    // each run distills a full snapshot for the same threadId row).
+    defer(async () => {
+      events.push("B")
+    })
+    defer(async () => {
+      events.push("C")
+    })
+
+    let drained = false
+    const drainP = out.drain().then(() => {
+      drained = true
+    })
+    await flushMicrotasks()
+    // drain must NOT resolve while A is still in flight.
+    expect(drained).toBe(false)
+    expect(events).toEqual(["A:start"])
+
+    releaseA()
+    await drainP
+    // A completed, then the COALESCED rerun (C) — B never ran.
+    expect(events).toEqual(["A:start", "A:end", "C"])
+
+    // Idle lane: drain resolves immediately (no pending work invented).
+    await out.drain()
+    out.dispose()
+  })
+
+  test("lane: a rejecting run does not wedge the lane (drain resolves; later defers still run)", async () => {
+    const llm = { stream: async function* () {} } as never
+    const out = await buildSessionMemoryAutoWires({
+      env: {},
+      llm,
+      sessionId: "sess-lane-reject",
+      homeDir: tempHome,
+    })
+    const defer = out?.memoryConsolidator.defer
+    if (out === undefined || defer === undefined) throw new Error("lane not wired")
+
+    defer(async () => {
+      throw new Error("hostile run boom")
+    })
+    await out.drain()
+
+    const ran: string[] = []
+    defer(async () => {
+      ran.push("after-reject")
+    })
+    await out.drain()
+    expect(ran).toEqual(["after-reject"])
+    out.dispose()
   })
 })

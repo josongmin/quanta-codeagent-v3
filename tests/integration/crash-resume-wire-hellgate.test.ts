@@ -2,32 +2,34 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { RuntimeSession } from "@/sdk/runtime"
+import type { CrashResumeOffer } from "@/session"
 import {
   CRASH_RESUME_GATE,
   CRASH_RESUME_PARTIAL_GATE,
+  clearSessionInterrupted,
   listSessions,
   loadSessionById,
   markSessionInterrupted,
   type SavePayload,
-  saveSessionById,
   type SessionMeta,
+  saveSessionById,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 // ADR-0528 — the runner-level wiring module under test.
-import {
-  bootstrapCrashResumeOffers,
-  withCrashResumeMarker,
-} from "../../src/runner/orchestrate/crash-resume-wire"
-// The LIVE turn chokepoint every surface funnels through (the wiring site).
-import { runSessionTurn } from "../../src/runner/orchestrate/session-turn-driver"
-import type { RuntimeSession } from "@/sdk/runtime"
 // ADR-0528 L2 auto-reinject + L3 partial seams.
 import {
   attachCrashResumePartial,
+  bootstrapCrashResumeOffers,
   selectCrashResumeReinject,
+  withCrashResumeMarker,
 } from "../../src/runner/orchestrate/crash-resume-wire"
 import { ExternalPromptQueue } from "../../src/runner/orchestrate/external-prompt-queue"
-import type { CrashResumeOffer } from "@/session"
+// The LIVE turn chokepoint every surface funnels through (the wiring site).
+import { runSessionTurn } from "../../src/runner/orchestrate/session-turn-driver"
+// AUDIT #13 test-only drain — settles fire-and-forget marker writes so the
+// fresh-readback below is deterministic (no timing sleeps).
+import { __drainCrashResumeMarkerWrites } from "../../src/session/crash-resume"
 
 /**
  * ADR-0528 CROWN JEWEL (live wiring) — the §13.2 module (ADR-0525) is built but
@@ -124,7 +126,12 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
     await seed("s3")
     await markSessionInterrupted(
       "s3",
-      { userText: "the interrupted task", partialAssistantText: "started", reason: "crash", interruptedAt: 9 },
+      {
+        userText: "the interrupted task",
+        partialAssistantText: "started",
+        reason: "crash",
+        interruptedAt: 9,
+      },
       { env: process.env },
     )
     const offers = await bootstrapCrashResumeOffers(await listSessions({ includeArchived: true }), {
@@ -233,7 +240,11 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
     const flushed: string[] = []
     const dispose = attachCrashResumePartial(
       session,
-      { sessionId: "p1", userText: "task", env: { [CRASH_RESUME_GATE]: "1", [CRASH_RESUME_PARTIAL_GATE]: "1" } },
+      {
+        sessionId: "p1",
+        userText: "task",
+        env: { [CRASH_RESUME_GATE]: "1", [CRASH_RESUME_PARTIAL_GATE]: "1" },
+      },
       async (p) => {
         flushed.push(p)
       },
@@ -266,6 +277,205 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
     )
     expect(subscribed).toBe(false)
     dispose()
+  })
+
+  test("AUDIT #13 hellgate: an in-flight partial flush landing AFTER turn resolve is DISCARDED — final on-disk state is the post-resolve state (fresh readback)", async () => {
+    // The audited race (jun-10 silent-failure #13): `void flush(partial)` is an
+    // unserialized whole-session read-modify-write. A flush that STARTED before
+    // the turn resolved (slow storage) must NOT land after the resolve path's
+    // clear — that would re-instate the interrupted marker on a session that
+    // completed cleanly (ghost resume offer on next restart).
+    process.env[CRASH_RESUME_PARTIAL_GATE] = "1"
+    __resetRuntimeConfig()
+    await seed("race1")
+    type Ev = { type: string; delta?: string }
+    let listener: ((ev: Ev) => void) | undefined
+    const session = {
+      subscribe: (l: (ev: Ev) => void) => {
+        listener = l
+        return () => {
+          listener = undefined
+        }
+      },
+    }
+    let releaseFlush!: () => void
+    const slowStorage = new Promise<void>((r) => {
+      releaseFlush = r
+    })
+    let flushLanded!: () => void
+    const landed = new Promise<void>((r) => {
+      flushLanded = r
+    })
+    const markerArgs = {
+      sessionId: "race1",
+      userText: "long task",
+      env: process.env,
+      now: () => 7_000,
+    }
+    // Injected SLOW storage seam: the flush's write is IN FLIGHT (started, not
+    // yet landed) when the turn resolves — exactly the audited window. It
+    // performs the REAL persistence op (real observable effect on disk), and
+    // forwards the staleness probe the wire hands it.
+    const detach = attachCrashResumePartial(
+      session,
+      markerArgs,
+      async (partial: string, ctx?: { readonly isStale: () => boolean }) => {
+        await slowStorage
+        await markSessionInterrupted(
+          "race1",
+          {
+            userText: "long task",
+            partialAssistantText: partial,
+            reason: "in-progress",
+            interruptedAt: 7_001,
+          },
+          { env: process.env, ...(ctx !== undefined ? { staleIf: ctx.isStale } : {}) },
+        )
+        flushLanded()
+      },
+    )
+    const turnP = withCrashResumeMarker(markerArgs, async () => {
+      listener?.({ type: "turn.output.delta", delta: "half-done work" })
+      listener?.({ type: "tool.invoked" }) // flush A starts — blocked inside slow storage
+      return "ok"
+    })
+    expect(await turnP).toBe("ok")
+    // Post-resolve fresh readback: the resolve path cleared the marker.
+    expect((await loadSessionById("race1"))?.meta.interruptedTurn).toBeUndefined()
+    releaseFlush() // NOW let the in-flight flush try to land — AFTER the resolve path
+    await landed
+    detach()
+    // FRESH READBACK: the stale in-flight flush must have been DISCARDED — the
+    // last state written is the NEWEST (post-resolve) state, not flush A's.
+    const after = await loadSessionById("race1")
+    expect(after?.meta.interruptedTurn).toBeUndefined()
+    expect(JSON.stringify(after)).not.toContain("half-done work")
+  })
+
+  test("AUDIT #13 hellgate: dispose() fences an in-flight flush — a flush landing after detach is a stale no-op", async () => {
+    // Same race through the OTHER fence: the disposer (the driver calls it at
+    // turn teardown). A flush already in flight when dispose() runs must be
+    // discarded, not land afterwards and resurrect a marker the resolve path
+    // (here: an explicit clear) already removed.
+    process.env[CRASH_RESUME_PARTIAL_GATE] = "1"
+    __resetRuntimeConfig()
+    await seed("race2")
+    type Ev = { type: string; delta?: string }
+    let listener: ((ev: Ev) => void) | undefined
+    const session = {
+      subscribe: (l: (ev: Ev) => void) => {
+        listener = l
+        return () => {
+          listener = undefined
+        }
+      },
+    }
+    let releaseFlush!: () => void
+    const slowStorage = new Promise<void>((r) => {
+      releaseFlush = r
+    })
+    let flushLanded!: () => void
+    const landed = new Promise<void>((r) => {
+      flushLanded = r
+    })
+    const markerArgs = { sessionId: "race2", userText: "task", env: process.env, now: () => 1_000 }
+    const detach = attachCrashResumePartial(
+      session,
+      markerArgs,
+      async (partial: string, ctx?: { readonly isStale: () => boolean }) => {
+        await slowStorage
+        await markSessionInterrupted(
+          "race2",
+          {
+            userText: "task",
+            partialAssistantText: partial,
+            reason: "in-progress",
+            interruptedAt: 1_001,
+          },
+          { env: process.env, ...(ctx !== undefined ? { staleIf: ctx.isStale } : {}) },
+        )
+        flushLanded()
+      },
+    )
+    // Simulate the turn: mark, stream a partial, start the (slow) flush.
+    await markSessionInterrupted(
+      "race2",
+      { userText: "task", partialAssistantText: "", reason: "in-progress", interruptedAt: 1_000 },
+      { env: process.env },
+    )
+    listener?.({ type: "turn.output.delta", delta: "stale partial" })
+    listener?.({ type: "tool.invoked" }) // flush A in flight, blocked
+    detach() // teardown fence — everything still in flight is now stale
+    await clearSessionInterrupted("race2", { env: process.env })
+    expect((await loadSessionById("race2"))?.meta.interruptedTurn).toBeUndefined()
+    releaseFlush()
+    await landed
+    // Fresh readback: the detached flush must NOT have re-instated the marker.
+    expect((await loadSessionById("race2"))?.meta.interruptedTurn).toBeUndefined()
+  })
+
+  test("AUDIT #13 wiring proof: the PROD default flush (no injected impl) honors the dispose fence — in-flight write discarded", async () => {
+    // No flushImpl ⇒ the wire's REAL default (markSessionInterrupted) runs. The
+    // dispose fence is raised in the same sync frame the flush dispatched in,
+    // i.e. while its async RMW is in flight — the probe must trip inside the
+    // store and discard the write.
+    process.env[CRASH_RESUME_PARTIAL_GATE] = "1"
+    __resetRuntimeConfig()
+    await seed("dflt1")
+    type Ev = { type: string; delta?: string }
+    let listener: ((ev: Ev) => void) | undefined
+    const session = {
+      subscribe: (l: (ev: Ev) => void) => {
+        listener = l
+        return () => {
+          listener = undefined
+        }
+      },
+    }
+    const detach = attachCrashResumePartial(session, {
+      sessionId: "dflt1",
+      userText: "task",
+      env: process.env,
+      now: () => 3_000,
+    })
+    listener?.({ type: "turn.output.delta", delta: "doomed partial" })
+    listener?.({ type: "tool.invoked" }) // default flush in flight (async RMW just started)
+    detach() // fence raised while the write is in flight
+    await __drainCrashResumeMarkerWrites("dflt1")
+    const after = await loadSessionById("dflt1")
+    expect(after?.meta.interruptedTurn).toBeUndefined()
+    expect(JSON.stringify(after)).not.toContain("doomed partial")
+  })
+
+  test("AUDIT #13 paired control: with NO fence the PROD default flush LANDS the partial (discard is not unconditional)", async () => {
+    process.env[CRASH_RESUME_PARTIAL_GATE] = "1"
+    __resetRuntimeConfig()
+    await seed("dflt2")
+    type Ev = { type: string; delta?: string }
+    let listener: ((ev: Ev) => void) | undefined
+    const session = {
+      subscribe: (l: (ev: Ev) => void) => {
+        listener = l
+        return () => {
+          listener = undefined
+        }
+      },
+    }
+    const detach = attachCrashResumePartial(session, {
+      sessionId: "dflt2",
+      userText: "live task",
+      env: process.env,
+      now: () => 4_000,
+    })
+    listener?.({ type: "turn.output.delta", delta: "real progress" })
+    listener?.({ type: "tool.invoked" })
+    await __drainCrashResumeMarkerWrites("dflt2")
+    // Fresh readback: the un-fenced flush wrote the marker through the real path.
+    const marker = (await loadSessionById("dflt2"))?.meta.interruptedTurn
+    expect(marker?.partialAssistantText).toBe("real progress")
+    expect(marker?.userText).toBe("live task")
+    expect(marker?.interruptedAt).toBe(4_000)
+    detach()
   })
 
   test("DEFAULT-OFF: gate absent ⇒ withCrashResumeMarker writes NO marker (byte-identical)", async () => {

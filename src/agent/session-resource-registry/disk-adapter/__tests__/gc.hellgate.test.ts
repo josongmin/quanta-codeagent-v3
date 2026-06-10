@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { countDiskRegistryCleanupCandidates, sweepDiskRegistry } from "../gc"
@@ -173,6 +173,163 @@ describe("ADR-0348-gc §H — permission / corrupt subentry swallowed", () => {
     // The stray file remains too
     const stray = await readFile(join(root, "stray-file.txt"), "utf8")
     expect(stray).toBe("hello")
+  })
+})
+
+// ─── jun-10 silent-failure audit #3 — locked + atomic truncation ──────────
+//
+// truncateSession used to rewrite a LIVE session's events.jsonl with no
+// per-session lock and no temp+rename: a concurrent O_APPEND landing between
+// the read and the truncating write was silently dropped (newest events
+// lost), and a crash mid-rewrite tore the crash-recovery log the disk
+// backend exists to provide. The fix gates the rewrite on the ADR-0356
+// per-session file-lock (try-once acquire — a held lock means a LIVE owner,
+// so the truncation is deferred to a later sweep) and rewrites via
+// tmp+rename in the same directory with a lost-update tail merge (mirrors
+// src/stream/adapters/jsonl-retention.ts §LOST-UPDATE GUARD).
+
+const fixedRow = (i: number): string =>
+  JSON.stringify({ kind: "context_update", field: "cwd", prev: "a", next: "b", at: 1000 + i })
+
+const fileExists = async (path: string): Promise<boolean> => {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+describe("gc-truncate hellgate §I — foreign lock ⇒ truncation deferred", () => {
+  test("fresh .lock held by another process ⇒ events.jsonl byte-identical", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    const body = `${Array.from({ length: 100 }, (_, i) => fixedRow(i)).join("\n")}\n`
+    const dir = await writeSession(root, "live-locked", { lastTouched: now, eventsBody: body })
+    // Simulate ANOTHER process holding the per-session lock: plant a fresh
+    // `.lock` file. This test process never registered the path in its own
+    // holder map, so same-process re-entrancy does not apply — exactly the
+    // cross-process live-writer shape.
+    await writeFile(
+      join(dir, ".lock"),
+      JSON.stringify({ pid: 999_999, acquiredAt: Date.now() }),
+      "utf8",
+    )
+    const res = await sweepDiskRegistry({
+      storageDir: root,
+      ttlMs: DEFAULT_TTL_MS,
+      maxSessionBytes: 500,
+      now: () => now,
+    })
+    expect(res.truncated).toBe(0)
+    // Fresh readback: the live session's log is untouched, byte-identical.
+    const after = await readFile(join(dir, "events.jsonl"), "utf8")
+    expect(after).toBe(body)
+    // The foreign (fresh, non-stale) lock is NOT stolen.
+    expect(await fileExists(join(dir, ".lock"))).toBe(true)
+  })
+})
+
+describe("gc-truncate hellgate §J — concurrent append ⇒ ZERO row loss", () => {
+  test("row appended between read and rewrite survives the truncation", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    const rows = Array.from({ length: 100 }, (_, i) => fixedRow(i))
+    const body = `${rows.join("\n")}\n`
+    const dir = await writeSession(root, "live-append", { lastTouched: now, eventsBody: body })
+    const eventsPath = join(dir, "events.jsonl")
+    const injected = JSON.stringify({
+      kind: "context_update",
+      field: "cwd",
+      prev: "x",
+      next: "y",
+      at: 999_999,
+    })
+    let fired = 0
+    const res = await sweepDiskRegistry(
+      { storageDir: root, ttlMs: DEFAULT_TTL_MS, maxSessionBytes: 500, now: () => now },
+      {
+        afterReadForTest: async () => {
+          fired += 1
+          // The injection point: AFTER the truncation snapshot read, BEFORE
+          // the rewrite — exactly the window where the old code dropped the
+          // newest row.
+          await appendFile(eventsPath, `${injected}\n`, "utf8")
+        },
+      },
+    )
+    expect(fired).toBe(1)
+    expect(res.truncated).toBe(1)
+    // Fresh readback — exact content assertion.
+    const after = await readFile(eventsPath, "utf8")
+    expect(after.endsWith("\n")).toBe(true)
+    const linesAll = after.split("\n")
+    expect(linesAll[linesAll.length - 1]).toBe("")
+    const lines = linesAll.slice(0, -1)
+    // No spliced / torn lines: every retained line parses as JSON.
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow()
+    }
+    // The concurrently-appended row survives, exactly once, as the newest row.
+    expect(lines.filter((l) => l === injected).length).toBe(1)
+    expect(lines[lines.length - 1]).toBe(injected)
+    // The retained pre-existing rows are a contiguous NEWEST suffix of the
+    // original — zero loss of any row newer than the truncation cut.
+    const keptOriginal = lines.slice(0, -1)
+    expect(keptOriginal.length).toBeGreaterThan(0)
+    expect(keptOriginal).toEqual(rows.slice(rows.length - keptOriginal.length))
+    // Retained pre-existing rows respect the events budget (half of 500).
+    expect(Buffer.byteLength(`${keptOriginal.join("\n")}\n`, "utf8")).toBeLessThanOrEqual(250)
+    // The gc released its lock — no `.lock` leak in the session dir.
+    expect(await fileExists(join(dir, ".lock"))).toBe(false)
+  })
+})
+
+describe("gc-truncate hellgate §K — crash mid-rewrite ⇒ original intact", () => {
+  test("throwing beforeRename leaves events.jsonl byte-identical, no tmp litter", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    const body = `${Array.from({ length: 100 }, (_, i) => fixedRow(i)).join("\n")}\n`
+    const dir = await writeSession(root, "crashy", { lastTouched: now, eventsBody: body })
+    const res = await sweepDiskRegistry(
+      { storageDir: root, ttlMs: DEFAULT_TTL_MS, maxSessionBytes: 500, now: () => now },
+      {
+        beforeRenameForTest: async () => {
+          throw new Error("simulated crash between tmp write and rename")
+        },
+      },
+    )
+    expect(res.truncated).toBe(0)
+    // Fresh readback: the rename never happened, so the original log is
+    // byte-identical — NOT a torn half-written file.
+    const after = await readFile(join(dir, "events.jsonl"), "utf8")
+    expect(after).toBe(body)
+    const entries = await readdir(dir)
+    // No orphaned temp file litter, and the lock was released on the way out.
+    expect(entries.filter((e) => e.includes(".tmp-"))).toEqual([])
+    expect(entries.includes(".lock")).toBe(false)
+  })
+})
+
+describe("gc-truncate hellgate §L — unsanitizable entry skipped", () => {
+  test("dir name outside [A-Za-z0-9_-] is never rewritten (lock path would diverge)", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    const body = `${Array.from({ length: 100 }, (_, i) => fixedRow(i)).join("\n")}\n`
+    // The registry only ever creates sanitized dir names; "weird.name" is a
+    // foreign dir whose lock path (safeId ⇒ "weird_name") would NOT cover it.
+    const dir = await writeSession(root, "weird.name", { lastTouched: now, eventsBody: body })
+    const res = await sweepDiskRegistry({
+      storageDir: root,
+      ttlMs: DEFAULT_TTL_MS,
+      maxSessionBytes: 500,
+      now: () => now,
+    })
+    expect(res.truncated).toBe(0)
+    const after = await readFile(join(dir, "events.jsonl"), "utf8")
+    expect(after).toBe(body)
+    // No sanitized side-directory was minted by a misdirected lock acquire.
+    expect(await dirExists(join(root, "weird_name"))).toBe(false)
   })
 })
 

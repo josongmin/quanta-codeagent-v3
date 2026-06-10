@@ -27,6 +27,10 @@
  *       preserved). Markdown destinations (AGENTS.md, subagent/glob `.md`) are
  *       written as a `*.imported.md` SIBLING when the native file already
  *       exists — the imported content is never lost AND the native is untouched.
+ *   - ATOMIC + SINGLE-RESOLUTION (jun-10 audit #17): the JSON merge writers
+ *       resolve their destination ONCE (parent realpath + leaf) and commit via
+ *       `@/storage` writeFileAtomic temp+rename — no torn settings.json/.mcp.json
+ *       on crash, no check→write symlink TOCTOU window.
  *   - LEDGER: on a successful persist we record `imported` for the source key
  *       so a 2nd run is a no-op (throttled). Caller passes the `sourceKey`.
  *   - NO-THROW: a single item's persist failure becomes a typed
@@ -38,9 +42,21 @@
  * homeDir + projectDir and calls in.
  */
 
-import { lstat, mkdir, readFile, stat, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { errMessage } from "@/shared"
+import { randomBytes } from "node:crypto"
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises"
+import { basename, dirname, join } from "node:path"
+import { errMessage, logger } from "@/shared"
 import { isThrottled, loadMigrationLedger, recordDisposition } from "./ledger"
 import type {
   ConvertedGlobRule,
@@ -127,6 +143,76 @@ const symlinkTargetWarning = (path: string): MigrationWarning =>
     path,
     "symlink-escape: destination is a symlink — refusing to write through it (no-follow)",
   )
+
+/** jun-10 silent-failure audit #17 — resolve a JSON destination ONCE (realpath
+ *  of the PARENT dir + re-joined leaf) so the symlink check, the existing-state
+ *  read, and the atomic write all operate on the SAME resolved real path.
+ *  Re-walking the original path per operation was a TOCTOU: a symlink planted
+ *  between the `lstat` check and the old `writeFile` was FOLLOWED — a
+ *  path-traversal clobber. After this single resolution nothing re-resolves,
+ *  and the atomic temp+rename below REPLACES (never follows) any later-planted
+ *  leaf symlink. Deliberately does NOT realpath the LEAF: a symlinked leaf must
+ *  stay visible to `isSymlinkDestination` so the write-jail refusal holds.
+ *  Throws when the parent dir is missing (the per-item loop surfaces it as a
+ *  typed warning — same posture as the old writeFile ENOENT). */
+const resolveJsonDestinationOnce = async (path: string): Promise<string> =>
+  join(await realpath(dirname(path)), basename(path))
+
+/** Probe the original file's permission bits (absent / unstat-able ⇒
+ *  `undefined` — a NEW file keeps default perms, byte-identical to the old
+ *  plain create). Attributed at debug: this is a benign existence probe. */
+const statModeOrUndefined = async (path: string): Promise<number | undefined> => {
+  try {
+    return (await stat(path)).mode
+  } catch (e) {
+    logger.debug(`config-migration: no original mode to preserve (new file?): ${errMessage(e)}`)
+    return undefined
+  }
+}
+
+/** Atomic commit for the JSON merge writers (audit #17): write to a temp in
+ *  the SAME (already-resolved) directory, `fsync` it (durability barrier),
+ *  re-apply the original file's mode, then `rename` into place. A crash
+ *  mid-write can no longer tear the user's settings.json/.mcp.json into a file
+ *  the next run classifies "corrupt" and permanently refuses to self-heal —
+ *  and a `rename` REPLACES (never follows) a later-planted leaf symlink, so
+ *  the check→write TOCTOU is closed too. MIRRORS `@/storage` writeFileAtomic
+ *  (ADR-0398) — re-declared locally because the migration slice is fenced to
+ *  `@/shared` only (ADR-0038), the same precedent as `@/storage` mirroring the
+ *  `@/lsp` atomic adapter rather than crossing ITS fence. A failure anywhere
+ *  before the rename leaves the original untouched (partial temp cleaned up)
+ *  and propagates to the per-item loop's typed-warning catch. */
+const writeJsonAtomic = async (path: string, value: Record<string, unknown>): Promise<void> => {
+  const content = `${JSON.stringify(value, null, 2)}\n`
+  const temp = `${path}.quanta-tmp-${randomBytes(8).toString("hex")}`
+  const originalMode = await statModeOrUndefined(path)
+  try {
+    await writeFile(temp, content, "utf8")
+    // Durability barrier: flush the temp's bytes BEFORE the rename so a torn /
+    // zero-length temp can never be promoted under the final name.
+    const handle = await open(temp, "r+")
+    try {
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    if (originalMode !== undefined) {
+      // Best-effort mode carry-over (bytes are the contract; mode is the bonus).
+      await chmod(temp, originalMode).catch((e) => {
+        logger.debug(`config-migration: mode preservation failed: ${errMessage(e)}`)
+      })
+    }
+  } catch (e) {
+    // Best-effort cleanup of the partial temp; the ORIGINAL error wins.
+    await unlink(temp).catch((cleanupErr) => {
+      logger.debug(`config-migration: atomic temp cleanup failed: ${errMessage(cleanupErr)}`)
+    })
+    throw e
+  }
+  // POSIX rename(temp, path) — atomic on the same filesystem (the temp lives
+  // next to the destination by construction).
+  await rename(temp, path)
+}
 
 /**
  * The state of an existing JSON config target, read fail-CLOSED.
@@ -326,7 +412,7 @@ const persistSettings = async (
   projectDir: string,
   value: ConvertedSettings,
 ): Promise<WriteOutcome> => {
-  const path = join(projectDir, "settings.json")
+  const path = await resolveJsonDestinationOnce(join(projectDir, "settings.json"))
   if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
@@ -345,7 +431,7 @@ const persistSettings = async (
   if (value.defaultMode !== undefined && current.defaultMode === undefined) {
     next.defaultMode = value.defaultMode
   }
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+  await writeJsonAtomic(path, next)
   return { wrote: true, warnings: [] }
 }
 
@@ -358,7 +444,7 @@ const persistHooks = async (
   projectDir: string,
   value: readonly ConvertedHook[],
 ): Promise<WriteOutcome> => {
-  const path = join(projectDir, "settings.json")
+  const path = await resolveJsonDestinationOnce(join(projectDir, "settings.json"))
   if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
@@ -382,7 +468,7 @@ const persistHooks = async (
     if (!bucket.some((g) => JSON.stringify(g) === serialized)) bucket.push(group)
   }
   const next: Record<string, unknown> = { ...current, hooks }
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+  await writeJsonAtomic(path, next)
   return { wrote: true, warnings: [] }
 }
 
@@ -397,14 +483,14 @@ const persistMcp = async (
   projectDir: string,
   value: readonly ConvertedMcpServer[],
 ): Promise<WriteOutcome> => {
-  const path = join(projectDir, ".mcp.json")
+  const path = await resolveJsonDestinationOnce(join(projectDir, ".mcp.json"))
   if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
   const current = existing.state === "object" ? existing.value : {}
   const { servers, warnings } = mergeMcpServers(path, current, value)
   const next: Record<string, unknown> = { ...current, mcpServers: servers }
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+  await writeJsonAtomic(path, next)
   return { wrote: true, warnings }
 }
 

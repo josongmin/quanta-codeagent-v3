@@ -55,9 +55,42 @@ export const CRASH_RESUME_PARTIAL_GATE = "QUANTA_CRASH_RESUME_PARTIAL"
  *  {@link crashResumeEnabled}: partial-flushing only makes sense ON TOP of the
  *  base marker layer (the flush UPDATES the marker the base layer writes), so
  *  BOTH gates must be on. Default-OFF; absent env ⇒ off (fail-safe). */
-export const crashResumePartialEnabled = (
-  env?: Record<string, string | undefined>,
-): boolean => crashResumeEnabled(env) && env !== undefined && gateOn(env, CRASH_RESUME_PARTIAL_GATE)
+export const crashResumePartialEnabled = (env?: Record<string, string | undefined>): boolean =>
+  crashResumeEnabled(env) && env !== undefined && gateOn(env, CRASH_RESUME_PARTIAL_GATE)
+
+/**
+ * AUDIT #13 (jun-10 silent-failure) — per-session serialization of the marker
+ * READ-MODIFY-WRITE critical sections. mark/partial-flush/clear all do
+ * load→save against the SAME snapshot file; two overlapping ops can interleave
+ * (B loads, A saves, B saves A's state away — last write = OLDEST state). The
+ * chain orders them in call order, and — paired with the `staleIf` probe checked
+ * INSIDE the critical section — closes the check-then-save TOCTOU: once the
+ * resolve path bumps its epoch and acquires the chain, every still-queued stale
+ * write is discarded before it can save. Entries are dropped once a session's
+ * chain drains (no per-session leak).
+ */
+const markerRmwQueues = new Map<string, Promise<void>>()
+
+const withMarkerRmwLock = async <T>(sessionId: string, fn: () => Promise<T>): Promise<T> => {
+  const prev = markerRmwQueues.get(sessionId) ?? Promise.resolve()
+  const run = prev.then(fn)
+  const tail = run.then(
+    () => undefined,
+    () => undefined, // the chain must survive a rejected op (NEVER-throws callers log it)
+  )
+  markerRmwQueues.set(sessionId, tail)
+  void tail.then(() => {
+    if (markerRmwQueues.get(sessionId) === tail) markerRmwQueues.delete(sessionId)
+  })
+  return run
+}
+
+/** TEST-ONLY: settle every queued/in-flight marker write for a session (awaits
+ *  the current chain tail). Lets tests fresh-readback AFTER a fire-and-forget
+ *  partial flush has fully landed or been discarded — no timing sleeps. */
+export const __drainCrashResumeMarkerWrites = async (sessionId: string): Promise<void> => {
+  await (markerRmwQueues.get(sessionId) ?? Promise.resolve())
+}
 
 /**
  * Persist an interrupted-turn marker onto a session's snapshot so a restart can
@@ -69,22 +102,36 @@ export const crashResumePartialEnabled = (
  *
  * Idempotent overwrite (last-interrupt-wins), mirroring the in-memory buffer's
  * single-slot semantics.
+ *
+ * `staleIf` (AUDIT #13): optional staleness probe for fire-and-forget callers
+ * (the L3 partial flush). It is evaluated INSIDE the serialized critical
+ * section, AFTER the load and immediately before the save — a write whose
+ * epoch was invalidated while its RMW was in flight is DISCARDED (no save),
+ * so it can never land after the resolve path and re-instate the marker or
+ * roll the snapshot back.
  */
 export const markSessionInterrupted = async (
   sessionId: string,
   turn: PersistedInterruptedTurn,
-  opts?: { provider?: SessionRootProvider; env?: Record<string, string | undefined> },
+  opts?: {
+    provider?: SessionRootProvider
+    env?: Record<string, string | undefined>
+    staleIf?: () => boolean
+  },
 ): Promise<void> => {
   if (!crashResumeEnabled(opts?.env)) return
   try {
-    const existing = await loadSessionById(sessionId, opts?.provider)
-    if (existing === undefined) return
-    const nextMeta: SessionMeta = { ...existing.meta, interruptedTurn: { ...turn } }
-    await saveSessionById(
-      nextMeta,
-      { reason: existing.reason, turns: existing.turns, messages: existing.messages },
-      opts?.provider,
-    )
+    await withMarkerRmwLock(sessionId, async () => {
+      const existing = await loadSessionById(sessionId, opts?.provider)
+      if (existing === undefined) return
+      if (opts?.staleIf?.() === true) return // a newer state owns the snapshot — discard, don't save
+      const nextMeta: SessionMeta = { ...existing.meta, interruptedTurn: { ...turn } }
+      await saveSessionById(
+        nextMeta,
+        { reason: existing.reason, turns: existing.turns, messages: existing.messages },
+        opts?.provider,
+      )
+    })
   } catch (e) {
     logger.warn("crash-resume: failed to persist interrupted-turn marker", {
       sessionId,
@@ -108,16 +155,18 @@ export const clearSessionInterrupted = async (
 ): Promise<void> => {
   if (!crashResumeEnabled(opts?.env)) return
   try {
-    const existing = await loadSessionById(sessionId, opts?.provider)
-    if (existing === undefined) return
-    if (existing.meta.interruptedTurn === undefined) return // nothing to clear
-    const { interruptedTurn: _drop, ...rest } = existing.meta
-    const nextMeta: SessionMeta = { ...rest }
-    await saveSessionById(
-      nextMeta,
-      { reason: existing.reason, turns: existing.turns, messages: existing.messages },
-      opts?.provider,
-    )
+    await withMarkerRmwLock(sessionId, async () => {
+      const existing = await loadSessionById(sessionId, opts?.provider)
+      if (existing === undefined) return
+      if (existing.meta.interruptedTurn === undefined) return // nothing to clear
+      const { interruptedTurn: _drop, ...rest } = existing.meta
+      const nextMeta: SessionMeta = { ...rest }
+      await saveSessionById(
+        nextMeta,
+        { reason: existing.reason, turns: existing.turns, messages: existing.messages },
+        opts?.provider,
+      )
+    })
   } catch (e) {
     logger.warn("crash-resume: failed to clear interrupted-turn marker", {
       sessionId,

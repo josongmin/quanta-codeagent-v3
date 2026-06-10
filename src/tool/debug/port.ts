@@ -93,22 +93,31 @@ export interface TcpConnectSpec {
 
 /** A {@link DapTransport} over a connected TCP socket — byte-identical contract
  *  to the stdio transport, so DapClient/inspectViaDap are carrier-agnostic. */
-const transportFromSocket = (socket: Socket, onClose?: () => void): DapTransport => ({
-  send: (data) => {
-    socket.write(data)
-  },
-  onData: (cb) => {
-    socket.on("data", (buf: Buffer) => cb(buf))
-  },
-  close: () => {
-    try {
-      socket.destroy()
-    } catch {
-      // already closed
-    }
-    onClose?.()
-  },
-})
+const transportFromSocket = (socket: Socket, onClose?: () => void): DapTransport => {
+  // A mid-session socket error (the adapter crashed / the peer reset) emits an
+  // 'error' event; with NO listener Node THROWS it as an uncaught exception.
+  // Swallow it — the DapClient's pending requests resolve via its dispose/
+  // timeout path, so a dead adapter degrades, never crashes the process.
+  socket.on("error", () => {
+    /* dead adapter — handled by the client's timeout/dispose */
+  })
+  return {
+    send: (data) => {
+      socket.write(data)
+    },
+    onData: (cb) => {
+      socket.on("data", (buf: Buffer) => cb(buf))
+    },
+    close: () => {
+      try {
+        socket.destroy()
+      } catch {
+        // already closed
+      }
+      onClose?.()
+    },
+  }
+}
 
 /** Connect to a TCP DAP adapter, RETRYING until it is listening or the budget
  *  elapses (a freshly-spawned adapter isn't accepting connections instantly).

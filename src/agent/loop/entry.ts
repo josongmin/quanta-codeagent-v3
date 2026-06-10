@@ -18,27 +18,36 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     spanStatus =
       outcome.reason === "aborted" ? "aborted" : outcome.reason === "error" ? "error" : "ok"
     if (spanStatus === "ok") {
-      await runMemoryConsolidatorHook(
-        {
-          sessionOk: true,
-          consolidator: config.memoryConsolidator,
-          sessionId: config.sessionId,
-          rolloutMessages: outcome.messages,
-          turnCount: outcome.turns,
-          ...(config.stage1OutputsStore !== undefined
-            ? { stage1OutputsStore: config.stage1OutputsStore }
-            : {}),
-          signal: config.signal,
-        },
-        (event) => {
-          if (event.kind === "error") {
-            config.stream.emit({
-              type: "error",
-              message: `memory consolidator hook failed: ${event.message}`,
-            })
-          }
-        },
-      )
+      const consolidate = (): Promise<unknown> =>
+        runMemoryConsolidatorHook(
+          {
+            sessionOk: true,
+            consolidator: config.memoryConsolidator,
+            sessionId: config.sessionId,
+            rolloutMessages: outcome.messages,
+            turnCount: outcome.turns,
+            ...(config.stage1OutputsStore !== undefined
+              ? { stage1OutputsStore: config.stage1OutputsStore }
+              : {}),
+            signal: config.signal,
+          },
+          (event) => {
+            if (event.kind === "error") {
+              config.stream.emit({
+                type: "error",
+                message: `memory consolidator hook failed: ${event.message}`,
+              })
+            }
+          },
+        )
+      // Phase-1 distill is a full-rollout LLM call (tens of seconds on a large
+      // transcript). When the host wired a `defer` lane, hand the run off so
+      // the outcome — and with it the surface's turn-completion path (spinner,
+      // turn summary, input re-enable) — is not held hostage by memory
+      // bookkeeping. The lane owner drains before closing the stage-1 store.
+      const deferLane = config.memoryConsolidator?.defer
+      if (deferLane !== undefined) deferLane(consolidate)
+      else await consolidate()
     }
     return outcome
   } catch (e) {

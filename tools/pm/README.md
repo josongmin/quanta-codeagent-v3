@@ -37,6 +37,8 @@ ONE rule impossible to forget.
 **모두 끝났으면**: `bun tools/pm/check.ts <feature-id>` 가 초록불이어야 한다.
 **Only when all three are done** does `bun tools/pm/check.ts <feature-id>` go green.
 
+> 코드 한 줄 단위의 prod-safety 바닥선(silent-failure / prod-unsafe coding rules + enforcement matrix)은 [prod-code-rules.md](./prod-code-rules.md) — feature가 아니라 모든 `src/` prod 코드에 적용.
+
 ---
 
 ## Why these three (the "왜")

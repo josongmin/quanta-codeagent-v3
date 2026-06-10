@@ -1,4 +1,5 @@
 import { URLSearchParams } from "node:url"
+import { parseRetryAfterMs } from "@/shared"
 import type { OAuthConfig } from "./config"
 import { decodeJwtClaims } from "./jwt"
 import type { TokenRecord } from "./token-store"
@@ -13,7 +14,17 @@ export class TokenExchangeError extends Error {
   readonly statusCode: number
   readonly errorCode?: string
   readonly description?: string
-  constructor(statusCode: number, body: { error?: string; error_description?: string } | null) {
+  /** Jun-10 audit #15 — server-instructed retry delay (ms) parsed from the
+   *  token endpoint's `retry-after`(-ms) headers at THIS boundary, so a 429
+   *  on refresh can be re-thrown as a typed `rate_limit` LLMError that keeps
+   *  the server's "when to retry" instruction (ADR-0208). Absent ⇒ no
+   *  parsable header. */
+  readonly retryAfterMs?: number
+  constructor(
+    statusCode: number,
+    body: { error?: string; error_description?: string } | null,
+    retryAfterMs?: number,
+  ) {
     const code = body?.error ?? "unknown"
     const desc = body?.error_description ?? "no description"
     super(`token exchange failed: ${statusCode} ${code}: ${desc}`)
@@ -21,6 +32,7 @@ export class TokenExchangeError extends Error {
     this.statusCode = statusCode
     if (body?.error) this.errorCode = body.error
     if (body?.error_description) this.description = body.error_description
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs
   }
 }
 
@@ -137,7 +149,11 @@ const parseExchange = async (
             : {}),
         }
       : null
-    throw new TokenExchangeError(res.status, bodyObj)
+    // Carry the server's retry instruction (if any) on the typed error so the
+    // adapter boundary can preserve it on a `rate_limit` re-throw. No-throw:
+    // a stub Response without headers degrades to "header absent".
+    const retryAfterMs = parseRetryAfterMs((name) => res.headers?.get(name) ?? null)
+    throw new TokenExchangeError(res.status, bodyObj, retryAfterMs)
   }
   const tr = parseTokenResponse(parsed)
   return buildRecord(tr, prevRefresh, nowMs)

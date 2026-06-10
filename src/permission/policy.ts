@@ -26,6 +26,7 @@ import {
   type PermissionRiskLevel,
   type PermissionStackSource,
 } from "./recorder"
+import type { ToolCapability } from "@/shared"
 import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from "./types"
 
 /** Exposed for the rule-level unit test (positive + negative case enforcement,
@@ -194,6 +195,7 @@ const emitTrust = (
 interface HITLToolDuck {
   isReadOnly(): boolean
   hitlTier?(input: unknown): HITLTier
+  capability?(input: unknown): ToolCapability | undefined
 }
 
 /** Infer the effective HITL tier for a call. The tool's own `hitlTier(input)`
@@ -203,6 +205,13 @@ interface HITLToolDuck {
  *  final routing tier. */
 export const inferToolTier = (tool: HITLToolDuck, input: unknown): HITLTier => {
   const explicit = tool.hitlTier?.(input)
+  // The hardest tier is never downgraded by a capability.
+  if (explicit === "hand-off-required") return explicit
+  // capability is the SSOT for the confirm axis (P2-T3): a declared confirm
+  // reason (sensitive / needs-sandbox) implies the always-confirm tier, so a
+  // tool declares ONE thing — not a redundant hitlTier — and a read-only-looking
+  // tool that is actually sensitive can't silently infer "none" (no floor).
+  if (tool.capability?.(input)?.confirm) return "always-confirm"
   if (explicit) return explicit
   return tool.isReadOnly() ? "none" : "always-confirm"
 }

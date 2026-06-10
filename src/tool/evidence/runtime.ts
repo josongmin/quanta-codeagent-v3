@@ -2,24 +2,35 @@
  * Keystone runtime port — capture the failing test's RUNTIME state (stack +
  * locals at the failure line) by re-running the suite/test under a debug adapter
  * with a breakpoint at the failure site. Reuses the in-slice DAP machinery
- * (@/tool/debug `inspectViaDap` + the spawn port) — no cross-slice bridge needed
- * (DAP lives under @/tool, unlike LSP).
+ * (@/tool/debug `inspectViaDap` + the spawn/TCP ports) — no cross-slice bridge
+ * needed (DAP lives under @/tool, unlike LSP).
  *
- * Languages:
- *  - PYTHON (debugpy): replay the `[python, -m, MOD, ...rest]` test command as a
- *    `{module, args}` launch with a breakpoint at the failure line.
- *  - RUST (lldb-dap): `cargo test --no-run` builds the test binary; run it under
- *    lldb-dap with a breakpoint at the (realpath'd) failure line. cargo's DWARF
- *    comp_dir is canonical, so the source path must be realpath'd to bind.
+ * Languages (toolchain.kind dispatch):
+ *  - PYTHON (debugpy, stdio): replay `[python,-m,MOD,...]` as a `{module,args}`
+ *    launch with a breakpoint at the failure line.
+ *  - RUST (lldb-dap, stdio): `cargo test --no-run` builds the test binary; run
+ *    it under lldb-dap with a (realpath'd) failure-line breakpoint.
+ *  - GO (dlv-dap, TCP): `dlv dap` listens on a socket (first real consumer of
+ *    the TCP transport); `{mode:"test"}` launch with a failure-line breakpoint.
  * Other toolchains ⇒ null (degrade). NEVER throws.
  */
-import { isAbsolute, join } from "node:path"
 import { realpathSync } from "node:fs"
-import { DapClient } from "../debug/dap-client"
-import { type Inspection, inspectViaDap, type InspectSpec } from "../debug/inspect-driver"
-import { defaultDebugAdapterPort, type DebugAdapterPort } from "../debug/port"
+import { homedir } from "node:os"
+import { isAbsolute, join } from "node:path"
+import { DapClient, type DapTransport } from "../debug/dap-client"
+import { type DapVariable, type FrameScopes, type Inspection, inspectViaDap, type InspectSpec } from "../debug/inspect-driver"
+import { defaultDebugAdapterPort, spawnTcpDebugAdapter } from "../debug/port"
 import type { Toolchain } from "../testrun"
-import type { FailureEvidence, RuntimeEvidence } from "./types"
+import type { FailureEvidence, RuntimeEvidence, RuntimeFrame, RuntimeVar } from "./types"
+
+/** Cap on stack frames surfaced — native/managed runtimes (Rust std, Go
+ *  runtime) bury the user frames under dozens of internal ones; the top frames
+ *  are what matter. */
+const MAX_STACK_FRAMES = 12
+
+/** Scope names treated as "locals" for evidence: a frame's own variables and its
+ *  call arguments. Globals/Statics/Registers are excluded as noise. */
+const LOCAL_SCOPES = new Set(["locals", "arguments"])
 
 const ok = (bin: string, ...args: string[]): boolean => {
   try {
@@ -37,28 +48,44 @@ const realpathOr = (p: string): string => {
   }
 }
 
-/** Map a stopped {@link Inspection} to {@link RuntimeEvidence}. */
+/** DAP variable → evidence variable (structurally identical; recurse children). */
+const toVar = (v: DapVariable): RuntimeVar => ({
+  name: v.name,
+  value: v.value,
+  ...(v.type !== undefined ? { type: v.type } : {}),
+  ...(v.children !== undefined && v.children.length > 0 ? { children: v.children.map(toVar) } : {}),
+})
+
+/** A frame's locals = its Locals + Arguments scopes (in order), flattened. */
+const frameLocals = (f: FrameScopes): readonly RuntimeVar[] =>
+  f.scopes.filter((s) => LOCAL_SCOPES.has(s.scope.toLowerCase())).flatMap((s) => s.vars.map(toVar))
+
+/** Map a stopped {@link Inspection} to {@link RuntimeEvidence} (stack capped).
+ *  Headline `locals` = the stop frame's locals; `frames` adds caller frames. */
 const toRuntime = (r: Inspection): RuntimeEvidence | null => {
   if (r.outcome !== "stopped") return null
-  const locals = r.variables.find((s) => s.scope === "Locals")
+  const frames: RuntimeFrame[] = r.frames.map((f) => ({
+    frame: f.frame,
+    ...(f.source !== undefined ? { file: f.source } : {}),
+    line: f.line,
+    locals: frameLocals(f),
+  }))
   return {
-    stack: r.stack.map((f) => ({ name: f.name, ...(f.source !== undefined ? { file: f.source } : {}), line: f.line })),
-    locals: (locals?.vars ?? []).map((v) => ({ name: v.name, value: v.value })),
+    stack: r.stack.slice(0, MAX_STACK_FRAMES).map((f) => ({ name: f.name, ...(f.source !== undefined ? { file: f.source } : {}), line: f.line })),
+    locals: frames[0]?.locals ?? [],
+    ...(frames.length > 0 ? { frames } : {}),
   }
 }
 
-/** Run one DAP inspect and map the result. NEVER throws. */
-const inspect = async (
-  adapterCommand: readonly string[],
-  cwd: string,
+/** Run one DAP inspect over the given transport factory and map it. NEVER throws. */
+const runInspect = async (
+  openTransport: () => Promise<DapTransport>,
   spec: InspectSpec,
   signal?: AbortSignal,
-  port: DebugAdapterPort = defaultDebugAdapterPort,
 ): Promise<RuntimeEvidence | null> => {
   let client: DapClient | undefined
   try {
-    const transport = await port.spawn({ command: [...adapterCommand], cwd })
-    client = new DapClient(transport)
+    client = new DapClient(await openTransport())
     const r = await inspectViaDap(client, spec, { stopTimeoutMs: 20_000, ...(signal !== undefined ? { signal } : {}) })
     return toRuntime(r)
   } catch {
@@ -68,40 +95,29 @@ const inspect = async (
   }
 }
 
-// ── PYTHON (debugpy) ──────────────────────────────────────────────────────
+const absOf = (file: string, cwd: string): string => (isAbsolute(file) ? file : join(cwd, file))
+
+// ── PYTHON (debugpy, stdio) ──────────────────────────────────────────────────
 const hasDebugpy = (): boolean => ok("python3", "-c", "import debugpy")
 
-/** Build a debugpy launch from a `[python, -m, MODULE, ...rest]` command. */
 const debugpyLaunch = (command: readonly string[], cwd: string): Record<string, unknown> | null => {
   const mIdx = command.indexOf("-m")
   if (mIdx === -1 || command[mIdx + 1] === undefined) return null
-  return {
-    request: "launch",
-    type: "python",
-    module: command[mIdx + 1],
-    args: command.slice(mIdx + 2),
-    cwd,
-    console: "internalConsole",
-    python: ["python3"],
-  }
+  return { request: "launch", type: "python", module: command[mIdx + 1], args: command.slice(mIdx + 2), cwd, console: "internalConsole", python: ["python3"] }
 }
 
-const pythonRuntime = async (
-  failure: FailureEvidence,
-  tc: Toolchain,
-  cwd: string,
-  signal?: AbortSignal,
-  port?: DebugAdapterPort,
-): Promise<RuntimeEvidence | null> => {
-  if (!hasDebugpy()) return null
+const pythonRuntime = (f: FailureEvidence, tc: Toolchain, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+  if (!hasDebugpy()) return Promise.resolve(null)
   const launch = debugpyLaunch(tc.command, cwd)
-  if (launch === null) return null
-  const absFile = isAbsolute(failure.file!) ? failure.file! : join(cwd, failure.file!)
-  return inspect(["python3", "-m", "debugpy.adapter"], cwd, { adapterID: "python", launch, breakpoints: [{ file: absFile, line: failure.line! }] }, signal, port)
+  if (launch === null) return Promise.resolve(null)
+  return runInspect(
+    () => defaultDebugAdapterPort.spawn({ command: ["python3", "-m", "debugpy.adapter"], cwd }),
+    { adapterID: "python", launch, breakpoints: [{ file: absOf(f.file!, cwd), line: f.line! }] },
+    signal,
+  )
 }
 
-// ── RUST (lldb-dap) ───────────────────────────────────────────────────────
-/** Resolve the lldb-dap launcher: PATH first, then macOS `xcrun -f lldb-dap`. */
+// ── RUST (lldb-dap, stdio) ───────────────────────────────────────────────────
 const resolveLldbDap = (): readonly string[] | null => {
   if (ok("lldb-dap", "--help")) return ["lldb-dap"]
   try {
@@ -114,7 +130,6 @@ const resolveLldbDap = (): readonly string[] | null => {
   return null
 }
 
-/** `cargo test --no-run --message-format=json` → the test executable path. */
 const cargoTestBinary = async (cwd: string, signal?: AbortSignal): Promise<string | null> => {
   try {
     const proc = Bun.spawn(["cargo", "test", "--no-run", "--message-format=json"], { cwd, stdout: "pipe", stderr: "ignore", ...(signal !== undefined ? { signal } : {}) })
@@ -126,9 +141,7 @@ const cargoTestBinary = async (cwd: string, signal?: AbortSignal): Promise<strin
       if (t.length === 0) continue
       try {
         const o = JSON.parse(t) as { reason?: string; profile?: { test?: boolean }; executable?: string | null }
-        if (o.reason === "compiler-artifact" && o.profile?.test === true && typeof o.executable === "string") {
-          exe = o.executable // last test artifact wins (the crate's test binary)
-        }
+        if (o.reason === "compiler-artifact" && o.profile?.test === true && typeof o.executable === "string") exe = o.executable
       } catch {
         /* non-JSON noise */
       }
@@ -139,21 +152,44 @@ const cargoTestBinary = async (cwd: string, signal?: AbortSignal): Promise<strin
   }
 }
 
-const rustRuntime = async (
-  failure: FailureEvidence,
-  cwd: string,
-  signal?: AbortSignal,
-  port?: DebugAdapterPort,
-): Promise<RuntimeEvidence | null> => {
+const rustRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
   const lldb = resolveLldbDap()
   if (lldb === null) return null
   const exe = await cargoTestBinary(cwd, signal)
   if (exe === null) return null
-  // cargo's DWARF records the CANONICAL source path; realpath the breakpoint
-  // file so it binds (macOS /tmp → /private/tmp).
-  const absFile = isAbsolute(failure.file!) ? failure.file! : join(cwd, failure.file!)
-  const realFile = realpathOr(absFile)
-  return inspect(lldb, cwd, { adapterID: "lldb", launch: { program: exe }, breakpoints: [{ file: realFile, line: failure.line! }] }, signal, port)
+  const realFile = realpathOr(absOf(f.file!, cwd)) // cargo DWARF comp_dir is canonical
+  return runInspect(
+    () => defaultDebugAdapterPort.spawn({ command: [...lldb], cwd }),
+    { adapterID: "lldb", launch: { program: exe }, breakpoints: [{ file: realFile, line: f.line! }] },
+    signal,
+  )
+}
+
+// ── GO (dlv-dap, TCP — first real TCP-transport consumer) ────────────────────
+const resolveDlv = (): string | null => {
+  if (ok("dlv", "version")) return "dlv"
+  // homedir() (not process.env.HOME) — keeps the env-read ban intact and is
+  // correct on platforms that set USERPROFILE instead of HOME.
+  const home = homedir()
+  if (home.length > 0 && ok(`${home}/go/bin/dlv`, "version")) return `${home}/go/bin/dlv`
+  return null
+}
+
+const goRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+  const dlv = resolveDlv()
+  if (dlv === null) return Promise.resolve(null)
+  return runInspect(
+    () =>
+      spawnTcpDebugAdapter({
+        command: (port) => [dlv, "dap", "--listen", `127.0.0.1:${port}`],
+        cwd,
+        connectTimeoutMs: 8_000,
+      }),
+    // dlv `mode:"test"` runs `go test` in `program` (the package dir); the
+    // breakpoint at the failure line stops inside the failing test.
+    { adapterID: "go", launch: { request: "launch", mode: "test", program: cwd }, breakpoints: [{ file: realpathOr(absOf(f.file!, cwd)), line: f.line! }] },
+    signal,
+  )
 }
 
 /** The default runtime source for the Evidence Packet Builder. Dispatches by
@@ -163,10 +199,10 @@ export const defaultRuntimePort = async (
   toolchain: Toolchain,
   cwd: string,
   signal?: AbortSignal,
-  port?: DebugAdapterPort,
 ): Promise<RuntimeEvidence | null> => {
   if (failure.file === undefined || failure.line === undefined) return null
-  if (toolchain.kind === "python") return pythonRuntime(failure, toolchain, cwd, signal, port)
-  if (toolchain.kind === "rust") return rustRuntime(failure, cwd, signal, port)
+  if (toolchain.kind === "python") return pythonRuntime(failure, toolchain, cwd, signal)
+  if (toolchain.kind === "rust") return rustRuntime(failure, cwd, signal)
+  if (toolchain.kind === "go") return goRuntime(failure, cwd, signal)
   return null
 }

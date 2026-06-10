@@ -89,6 +89,32 @@ export interface SecretScanner {
 }
 
 /**
+ * Typed failure for `scanFile` when the underlying READ fails (missing file,
+ * permission denied, path is a directory). A security scanner must NEVER
+ * report an unreadable file as "clean" — `[]` is byte-identical to a genuinely
+ * clean file (jun-10 silent-failure audit, finding #12). Adapters throw this
+ * instead of swallowing the read error; tool callers (`check_secrets`)
+ * surface it as `ok:false` naming the path per their no-throw contract.
+ *
+ * Binary content is NOT a read failure: `readFile(path, "utf8")` decodes
+ * invalid bytes with replacement chars, so decode tolerance is preserved.
+ * Slice plane: extends bare `Error` (no `@/shared` import) so the port stays
+ * re-usable in a Tauri sidecar or a worker thread.
+ */
+export class SecretScanReadError extends Error {
+  constructor(
+    /** The path that could not be read — surfaced verbatim to callers. */
+    readonly path: string,
+    options?: { cause?: unknown },
+  ) {
+    const cause = options?.cause
+    const causeMsg = cause instanceof Error ? cause.message : String(cause)
+    super(`secret scan failed: cannot read ${path} (${causeMsg})`, options)
+    this.name = "SecretScanReadError"
+  }
+}
+
+/**
  * Resolved defaults — single SoT consumed by every adapter. Splitting the
  * defaults from the type lets the hellgate suite assert "override respected"
  * and "default honored" with one symbol per knob.

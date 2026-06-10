@@ -7,9 +7,10 @@ import type { TurnIndicator } from "../../turn-indicator"
  *  port in order) and the indicator just sips the ones it cares about.
  *
  *  Sliced taxonomy (only events that move the indicator state):
- *    - `assistant_text` / `tool_call` ⇒ `markFirstChunk` (TTFT seam — the
- *      first emit of either is the moment the model started producing
- *      something the user can see). Idempotent on the indicator side.
+ *    - `assistant_text` / `tool_call` ⇒ `markFirstChunk` (first-chunk seam —
+ *      the first emit of either is the moment the model started producing
+ *      something the user can see; flips "thinking…" → "streaming").
+ *      Idempotent on the indicator side.
  *    - `output_progress` ⇒ `updateUsage` with the LIVE cumulative output count
  *      (the rising "· N tokens"). `exact` is threaded through so an estimated
  *      tail renders with a `~` prefix. This is the vendor-agnostic live feed —

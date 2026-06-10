@@ -689,3 +689,102 @@ describe("runAgent e2e — session-end consolidator hook fires", () => {
     store.close()
   })
 })
+
+// ─── Deferred consolidation: `defer` unblocks the turn-completion path ─
+
+/** Multi-turn script (3 tool turns + final answer) — same shape as the FULL
+ *  e2e above, so outcome.turns ≥ MIN_TURN_THRESHOLD and the distill arm is
+ *  actually reachable (a below-threshold rollout would make these tests
+ *  vacuously green via the skip arm). */
+const multiTurnLlm = (): LLMPort => {
+  const scripts: StreamEvent[][] = [
+    [
+      { type: "tool_use_start", id: "t1", name: "read" } satisfies StreamEvent,
+      { type: "tool_use_end", id: "t1", input: { path: "/tmp/x" } } satisfies StreamEvent,
+      { type: "message_stop", stop_reason: "tool_use" } satisfies StreamEvent,
+    ],
+    [
+      { type: "tool_use_start", id: "t2", name: "read" } satisfies StreamEvent,
+      { type: "tool_use_end", id: "t2", input: { path: "/tmp/y" } } satisfies StreamEvent,
+      { type: "message_stop", stop_reason: "tool_use" } satisfies StreamEvent,
+    ],
+    [
+      { type: "tool_use_start", id: "t3", name: "read" } satisfies StreamEvent,
+      { type: "tool_use_end", id: "t3", input: { path: "/tmp/z" } } satisfies StreamEvent,
+      { type: "message_stop", stop_reason: "tool_use" } satisfies StreamEvent,
+    ],
+    [
+      { type: "text_delta", delta: "done" } satisfies StreamEvent,
+      { type: "message_stop", stop_reason: "end_turn" } satisfies StreamEvent,
+    ],
+  ]
+  let i = 0
+  return {
+    async *stream(): AsyncIterable<StreamEvent> {
+      const s = scripts[i++] ?? scripts[scripts.length - 1] ?? []
+      for (const ev of s) yield ev
+    },
+  }
+}
+
+describe("runAgent — memoryConsolidator.defer (turn-completion unblock)", () => {
+  test("defer wired: runAgent returns WITHOUT running the distill; the handed-off closure carries the REAL run", async () => {
+    const port = makePort({ summary: "deferred-distill" })
+    const store = makeStore()
+    const deferred: Array<() => Promise<unknown>> = []
+    const out = await runAgent(
+      baseCfg({
+        llm: multiTurnLlm(),
+        maxTurns: 10,
+        sessionId: "e2e-defer-1",
+        memoryConsolidator: {
+          enabled: true,
+          port,
+          store,
+          defer: (run) => deferred.push(run),
+        },
+      }),
+    )
+    expect(out.reason).toBe("completed")
+    expect(out.turns).toBeGreaterThanOrEqual(3)
+    // The distill was handed off, NOT executed inline: runAgent already
+    // resolved yet the port/store are untouched. (The blocking FULL e2e
+    // above is the paired control: same script, no defer ⇒ calls === 1.)
+    expect(deferred).toHaveLength(1)
+    expect(port.calls).toBe(0)
+    expect(store.upsertCount).toBe(0)
+    // The closure is the real run, not a stub: executing it distills and
+    // writes the row (red-on-injection: a no-op handoff fails here).
+    await deferred[0]?.()
+    expect(port.calls).toBe(1)
+    const rows = store.fetchAllSync()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.thread_id).toBe("e2e-defer-1")
+    store.close()
+  })
+
+  test("aborted session: defer is NOT invoked (ok-only gate holds on the deferred path too)", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const port = makePort()
+    const store = makeStore()
+    const deferred: Array<() => Promise<unknown>> = []
+    const out = await runAgent(
+      baseCfg({
+        llm: new TextLLM(),
+        signal: controller.signal,
+        sessionId: "e2e-defer-abort-1",
+        memoryConsolidator: {
+          enabled: true,
+          port,
+          store,
+          defer: (run) => deferred.push(run),
+        },
+      }),
+    )
+    expect(out.reason).toBe("aborted")
+    expect(deferred).toHaveLength(0)
+    expect(port.calls).toBe(0)
+    store.close()
+  })
+})

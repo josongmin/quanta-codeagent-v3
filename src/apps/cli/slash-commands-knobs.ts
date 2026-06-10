@@ -39,7 +39,7 @@ import {
   type KnobValueMap,
   knobsForSurface,
   resolveKnobs,
-  writeKnobConfig,
+  saveKnobConfigMerged,
 } from "@/runner/knobs"
 import { errMessage } from "@/shared"
 import { setCliKnobOverride } from "./cli-knobs-accessor"
@@ -528,7 +528,11 @@ const defaultWire: KnobsSurfaceWire = {
   },
   sessionOverrides: () => DEFAULT_OVERRIDES,
   save: async () => {
-    await writeKnobConfig({ ...DEFAULT_OVERRIDES }, defaultConfigPath())
+    // Merge-on-save (jun-10 silent-failure audit #18): a wholesale
+    // `writeKnobConfig(bag)` from this process's (possibly empty) bag wiped
+    // every other session's saved knobs while still printing "saved N
+    // override(s)". Fresh-read the persisted user_defaults + overlay instead.
+    await saveKnobConfigMerged({ ...DEFAULT_OVERRIDES }, defaultConfigPath())
   },
   get configPath() {
     return defaultConfigPath()

@@ -233,6 +233,38 @@ const savedSessionSchema = z.object({
   messages: z.array(messageSchema),
 })
 
+/** First message element that fails the S19 schema: its array index plus a
+ *  compact rendering of the first zod issue (for the caller's error message). */
+export interface InvalidMessageElement {
+  readonly index: number
+  readonly issue: string
+}
+
+/**
+ * S19 element-level Message validator — exported for REUSE by the V1
+ * path-mode loader (`src/agent/state.ts`, jun-10 silent-failure audit #14) so
+ * both rails validate messages against the SAME lossless schema above (single
+ * SSOT; no drift between V1 and V2 of what a persisted Message may contain).
+ *
+ * Pure CHECK, not a parse-replace: returns the index + first zod issue of the
+ * first element that fails the Message shape, or `undefined` when every
+ * element validates. Unlike `safeParse`-and-keep-`data`, callers keep their
+ * ORIGINAL elements — zod's unknown-key stripping never rewrites the payload.
+ */
+export const firstInvalidMessageElement = (
+  elements: readonly unknown[],
+): InvalidMessageElement | undefined => {
+  for (let i = 0; i < elements.length; i++) {
+    const result = messageSchema.safeParse(elements[i])
+    if (!result.success) {
+      const first = result.error.issues[0]
+      const at = first === undefined || first.path.length === 0 ? "" : ` at ${first.path.join(".")}`
+      return { index: i, issue: `${first?.message ?? "invalid"}${at}` }
+    }
+  }
+  return undefined
+}
+
 /** Strict read+parse of a `SavedSession` JSON. Returns `undefined` on
  *  missing/parse-error AND on shape mismatch — the latter is LOGGED with the
  *  zod error so an operator with a corrupt or forged session sees why the

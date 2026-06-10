@@ -337,6 +337,17 @@ const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "no-string-error-text-classification",
+    // `String(e).includes(` / `String(err).match(` / `/re/.test(String(error))`
+    // — text-classification of a STRINGIFIED error. Evades the
+    // `.message.includes(` ban above by flattening the whole error first
+    // (jun-10 silent-failure audit R4, finding #23: lsp-bridge regex-tested
+    // String(e) instead of branching on `LspRequestError.code`). Zero
+    // tolerance: a typed form always exists.
+    pattern: /\.test\(String\((?:e|err|error)\)\)|String\((?:e|err|error)\)\.(?:includes|match)\(/,
+    why: "Don't classify errors by stringified text — branch on the typed field instead (`e instanceof LspRequestError && e.code === …`, `LLMError.kind`/`statusCode`). Same contract as the `.message.includes(` ban.",
+  },
+  {
     id: "no-undocumented-magic-timeout",
     // Standalone literal that isn't on the right-hand side of a
     // `UPPER_SNAKE_CASE` const declaration.

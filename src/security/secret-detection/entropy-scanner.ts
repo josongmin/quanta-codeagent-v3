@@ -32,6 +32,7 @@ import {
   DEFAULT_MIN_SECRET_LENGTH,
   mask,
   type SecretFinding,
+  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
 } from "./port"
@@ -223,8 +224,11 @@ export const entropyScanner = (opts: SecretScannerOpts = {}): SecretScanner => (
     let text: string
     try {
       text = await readFile(path, "utf8")
-    } catch {
-      return []
+    } catch (e) {
+      // SECURITY (jun-10 finding #12) — MIRROR of composite-scanner.ts: an
+      // unreadable file must NOT scan as "clean". Typed failure naming the
+      // path; binary decode tolerance unaffected ("utf8" never throws).
+      throw new SecretScanReadError(path, { cause: e })
     }
     return scanTextForEntropy(text, path, opts)
   },

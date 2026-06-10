@@ -209,13 +209,19 @@ describe("check_secrets / D. scan behavior", () => {
     }
   })
 
-  test("D6 — file_path that does not exist ⇒ ok:true with 0 findings (scanner-tolerated)", async () => {
-    // `compositeSecretScanner.scanFile` swallows ENOENT and returns []. The
-    // tool surfaces that as ok:true (no findings) — matches the scanner's
-    // documented binary-decode-tolerant posture.
-    const result = await runTool({ file_path: `/does/not/exist/${Math.random().toString(36)}` })
-    expect(result.ok).toBe(true)
-    expect(structured(result).findings.length).toBe(0)
+  test("D6 — file_path that does not exist ⇒ ok:false naming the path (NEVER '0 findings (clean)')", async () => {
+    // jun-10 finding #12: `scanFile` used to swallow ENOENT into [] and the
+    // tool reported "0 findings (clean)" — byte-identical to a clean file.
+    // The scanner now throws a typed SecretScanReadError and the tool's
+    // no-throw boundary surfaces it as ok:false per its documented contract.
+    const p = `/does/not/exist/${Math.random().toString(36)}`
+    const result = await runTool({ file_path: p })
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain(p)
+    expect(result.output).not.toBe("check_secrets: 0 findings (clean)")
+    expect(result.failure?.mode).toBe("error")
+    const visible = result.failure?.mode === "error" ? result.failure.modelVisibleError : undefined
+    expect(visible).toContain(p)
   })
 
   test("D7 — masked preview NEVER contains the raw full secret", async () => {

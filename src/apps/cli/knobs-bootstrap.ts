@@ -28,7 +28,7 @@ import {
   readKnobConfig,
   resolveKnobs,
   type Surface,
-  writeKnobConfig,
+  saveKnobConfigMerged,
 } from "@/runner/knobs"
 
 // Side-effect registry population — ORDER does not matter (each knob is
@@ -127,7 +127,13 @@ export const bootstrapKnobs = async (input: KnobsBootstrapInput): Promise<KnobsB
 
   const initial = doResolve()
   const save = async (): Promise<void> => {
-    await writeKnobConfig(sessionOverrides, input.configPath)
+    // Merge-on-save (jun-10 silent-failure audit #18): overlay THIS process's
+    // overrides on a fresh read of the persisted user_defaults — a wholesale
+    // replace from the per-process bag silently wiped prior sessions' saves.
+    // NOTE(audit #18): the file is write-only in prod today; the moment
+    // bootstrapKnobs gains a production reader this class escalates P2→P1
+    // (docs/audits/jun-10-silent-failure-prod-audit.md).
+    await saveKnobConfigMerged(sessionOverrides, input.configPath)
   }
   return { values: initial, sessionOverrides, resolve: doResolve, save }
 }

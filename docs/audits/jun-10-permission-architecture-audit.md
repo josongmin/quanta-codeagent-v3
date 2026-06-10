@@ -171,5 +171,40 @@ The ADR-0512 approval **lease** (opaque, single-use, turn-scoped) is already the
   (`real sensitive tools are universal-floor gated`). **Governance ratchet** pins
   the set: `tests/unit/permission/sensitive-tool-capability-ratchet.test.ts` (RED
   if a tool drops its capability; add new external-write tools there).
-  **Follow-on:** make the capability spec the FULL replacement for `inferToolTier`
-  + an authoring ratchet that every tool carries a reviewed spec.
+- **Capability is the SSOT for the confirm axis — ✅.** `inferToolTier` now DERIVES
+  the tier from the capability: a declared `confirm` reason ⇒ `always-confirm`
+  (hand-off-required is never downgraded). So a tool declares ONE thing, and a
+  read-only-looking-but-sensitive tool can't silently infer `none` (a no-floor
+  drift). TDD: `pdp-decide-floor.test.ts` (`capability drives the tier`). 0
+  regressions (existing classified tools were already always-confirm).
+  The ratchet now also pins the OUTCOME (`inferToolTier` + `decideFloor` actually
+  land each on the universal floor), not just the declaration — catching a
+  resolution-path regression that would silently un-floor a remote-mutating tool.
+  (A full registry-side enumeration manifest was tried + dropped: `buildDefaultTools`
+  excludes git/gh tools, which the host wires with runners — so the per-tool
+  declaration+outcome ratchet is the governance surface.)
+- **CLI modal fires for sensitive tools under bypass — ✅ verified 3 ways.** The
+  whole point: the operator gets a confirm modal even under bypass for a
+  sensitive tool. Proven (a) gate + reviewer port (the CLI path,
+  `createOnConfirmReviewerPort`): `git_push` under bypass fires the modal exactly
+  once and a decline blocks it; (b) gate + `config.onConfirm`; (c) END-TO-END via
+  `runAgent` with the REAL `git_push` tool — the model calls it under bypass, the
+  modal fires, the decline blocks the push (runner throws if ever reached). The
+  CLI wires both paths (`runtime-context-compose.ts`: `buildCliOnConfirm` →
+  `confirmSlot` → `onConfirm` + `createOnConfirmReviewerPort`); the universal
+  floor is what makes it reachable with HITL NOT opted in (before: `fallthrough`
+  → no modal). Tests in `admissibility-gate.test.ts` + `always-confirm-secure-by-default-e2e.test.ts`.
+- **Single-PEP fence — ✅ (audit §7.1 keystone).** The PEP is real and singular:
+  `dispatchTool` (the only caller of `runAdmissibilityGate`) is the only thing that
+  drives `ToolRegistry.run` → `tool.execute()`; codemode re-enters the SAME
+  `dispatchTool` (`codemode-wire`), subagents run their own loop → same path.
+  STRUCTURAL FENCE: `tests/unit/permission/single-pep-fence-hellgate.test.ts`
+  asserts `tool.execute()` is consumed only at 4 allowlisted sites (canonical
+  executor + 2 metric decorators + the user-direct `/web` command) — a NEW site
+  = a potential gate bypass, RED. The detector has anti-vacuous TEETH (catches
+  method-chain bypasses, ignores sql/definitions). BEHAVIORAL hellgate:
+  `codemode-dispatch-gated-hellgate.test.ts` — a hand-off-required tool invoked
+  via `codeCellDispatch` is DENIED + never executed (even under bypass). This is
+  the recurrence guard for the audit's headline (a surface silently skipping the
+  gate = default-OPEN). **Remaining PDP/PEP:** obligations type, grant ledger, OS
+  sandbox (Ring B) — `docs/plans/permission-pdp-pep-keystone.md`.

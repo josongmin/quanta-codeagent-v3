@@ -26,7 +26,7 @@
 ## 2. 단계 플랜
 
 ### Phase 0 — 토대 (나머지가 의존)
-- **0a. DAP TCP 트랜스포트** — `src/tool/debug/port.ts`가 stdio 전용. `DebugAdapterPort`에 socket transport 추가(spawn→포트 listen→TCP 연결, framing 동일). **tier-1 Go/TS의 단일 최대 차단요인.** (기능)dlv-dap·js-debug 연결 (왜)Go/TS DAP 불가 (ROI)높음·M.
+- **0a. DAP TCP 트랜스포트** ✅ **LANDED (jun-10)** — `spawnTcpDebugAdapter`/`connectTcpTransport`(소켓 error 핸들러, retry-connect, 로컬소켓 4 test). Go dlv-dap의 첫 소비자로 실검증. ~~`src/tool/debug/port.ts`가 stdio 전용.~~ `DebugAdapterPort`에 socket transport 추가(spawn→포트 listen→TCP 연결, framing 동일). **tier-1 Go/TS의 단일 최대 차단요인.** (기능)dlv-dap·js-debug 연결 (왜)Go/TS DAP 불가 (ROI)높음·M.
 - **0b. Toolchain/언어 감지기** ✅ **LANDED (jun-10, ADR-0532)** — `src/tool/testrun/detect.ts`(Cargo.toml→cargo / go.mod→go / pyproject·setup→python / package.json→npm; 순서우선; 주입 exists-port). 7 test. Evidence Builder가 소비. C#/Java 마커는 후속.
 
 ### Phase 1 — Tier-1 언어 (Python/Go/Rust/TS = 유저 MVP)
@@ -39,7 +39,7 @@
 - `run_tests` 도구(`src/tool/testrun/`): 감지→실행→정규화 `{passed, failed:[{name,file,line,message}]}`. 파서 go(-json)/cargo(text)/python(unittest), **실 출력에 핀**. default-OFF `QUANTA_TEST_RUNNER`+always-confirm, NEVER-throws. **false-green 안전망**(exitCode≠0+무failure→ok:false; go build-fail 포착). 실 cargo/go/python e2e + fault hellgate(25 test). 기존 `test_runner`(bash 휴리스틱 verdict, BASE)와 **공존**(이건 구조화 per-language). 남음: pytest 러너·node 구조화 파서·Rust/Go pretty-printer.
 
 ### Phase 3 — Evidence Packet Builder (키스톤) ✅ **LANDED (jun-10, ADR-0533)** — failure+repo+static+Python runtime 프로덕션 LIVE
-- `src/tool/evidence/`(types+builder+tool) `collect_evidence` 도구. detect→run suite→top failure→static/runtime enrich→repo 조립. NEVER-throws(소스별 fault-isolated)·abs-path 정규화·ok=failure-null. **실 융합 e2e**(실 cargo 실패+실 rust-analyzer static 한 패킷). default-OFF QUANTA_EVIDENCE+always-confirm. 16 test. **현 프로덕션=failure+repo+static 실값**(static은 `evidenceLspStatic` bridge로 LIVE 배선, 실 rust-analyzer e2e 2개 증명). **Python+Rust runtime도 LIVE**(`defaultRuntimePort` in-slice debugpy, default-wired, abort-threaded; 실 debugpy e2e로 locals `result=10` 포착). Go/TS runtime(dlv/js-debug, DAP TCP 선행)만 follow-up. 22 test. ADR-0533.
+- `src/tool/evidence/`(types+builder+tool) `collect_evidence` 도구. detect→run suite→top failure→static/runtime enrich→repo 조립. NEVER-throws(소스별 fault-isolated)·abs-path 정규화·ok=failure-null. **실 융합 e2e**(실 cargo 실패+실 rust-analyzer static 한 패킷). default-OFF QUANTA_EVIDENCE+always-confirm. 16 test. **현 프로덕션=failure+repo+static 실값**(static은 `evidenceLspStatic` bridge로 LIVE 배선, 실 rust-analyzer e2e 2개 증명). **Python+Rust+Go runtime도 LIVE**(`defaultRuntimePort` in-slice debugpy, default-wired, abort-threaded; 실 debugpy e2e로 locals `result=10` 포착). TS runtime(js-debug)만 follow-up; **DAP TCP 트랜스포트+Go runtime LANDED**(실 dlv-dap e2e). 22 test. ADR-0533.
 - 유저 통일 스키마로 조립:
   ```
   { language, repo_context{changed_files,symbols,diagnostics},

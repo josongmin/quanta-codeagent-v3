@@ -96,6 +96,10 @@ Each step is a slice behind an existing seam — NOT a big-bang rewrite.
 
 1. **PEP single-call audit + fence** (keystone, biggest safety win): prove ONE
    dispatch chokepoint; add the "no tool executes except via the PEP" ratchet.
+   - ✅ **LANDED (jun-10)**: `dispatchTool` proven singular (codemode + subagents
+     re-enter it). Structural fence `single-pep-fence-hellgate.test.ts` (allowlist
+     of 4 `tool.execute()` sites, anti-vacuous teeth) + behavioral
+     `codemode-dispatch-gated-hellgate.test.ts` (codemode path is gated).
 2. **PDP extraction**: lift the decider ladder behind `decide()` (sync) + enforce;
    keep behavior byte-identical (existing tests are the net).
 3. **Capability spec** replaces `inferToolTier`; ratchet every tool. **This

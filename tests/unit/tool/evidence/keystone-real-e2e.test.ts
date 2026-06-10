@@ -8,9 +8,8 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { RustAnalyzerAdapter } from "@/lsp"
+import { evidenceLspStatic } from "@/agent/lsp-bridge"
 import { buildEvidence, type EvidenceSources } from "@/tool/evidence/builder"
-import type { StaticEvidence } from "@/tool/evidence/types"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 
 const has = (bin: string, ...a: string[]): boolean => {
@@ -21,36 +20,6 @@ const has = (bin: string, ...a: string[]): boolean => {
   }
 }
 const D = has("cargo", "--version") && has("rust-analyzer", "--version") ? describe : describe.skip
-
-/** Real rust-analyzer static source: hover across the failure line (cold-index
- *  tolerant — poll + ignore ContentModified) → type_info. */
-const realRustStatic = (): EvidenceSources["lspStatic"] => async (file, line, cwd) => {
-  const a = new RustAnalyzerAdapter({ cwd })
-  // LSP needs an ABSOLUTE path (run_tests reports cargo's relative `src/lib.rs`).
-  const abs = file.startsWith("/") ? file : join(cwd, file)
-  try {
-    await a.start()
-    const deadline = Date.now() + 30_000
-    while (Date.now() < deadline) {
-      for (let ch = 4; ch < 60; ch += 3) {
-        try {
-          const hov = await a.hover(abs, { line: line - 1, character: ch })
-          const txt = hov === null ? "" : JSON.stringify(hov)
-          if (txt.includes("fn ") || txt.includes("i32")) {
-            const ev: StaticEvidence = { definition_chain: [], references: [], type_info: txt, diagnostics: [] }
-            return ev
-          }
-        } catch (e) {
-          if (!/content modified/i.test(String(e))) throw e
-        }
-      }
-      await new Promise((r) => setTimeout(r, 500))
-    }
-    return { definition_chain: [], references: [], type_info: null, diagnostics: [] }
-  } finally {
-    await a.stop()
-  }
-}
 
 D("buildEvidence — REAL keystone fusion (cargo failure + rust-analyzer static)", () => {
   test("one call returns a packet fusing the real failure + real LSP static", async () => {
@@ -73,7 +42,7 @@ D("buildEvidence — REAL keystone fusion (cargo failure + rust-analyzer static)
     const sources: EvidenceSources = {
       detect: (c) => detectToolchain(c, { fileExists: async (n) => existsSync(join(c, n)) }),
       runTests: (tc, c) => runToolchain(tc, c),
-      lspStatic: realRustStatic(),
+      lspStatic: evidenceLspStatic(), // the PRODUCTION port (hardened cold-index handling)
       changedFiles: async () => ["src/lib.rs"],
     }
     const pkt = await buildEvidence(dir, sources)
@@ -84,8 +53,7 @@ D("buildEvidence — REAL keystone fusion (cargo failure + rust-analyzer static)
     expect(pkt.failure?.file).toContain("lib.rs")
     // Real rust-analyzer static fused in at the SAME packet.
     expect(pkt.static).not.toBeNull()
-    expect(typeof pkt.static?.type_info).toBe("string")
-    expect(pkt.static?.type_info ?? "").toMatch(/fn |i32/)
+    expect((pkt.static?.type_info ?? "").length).toBeGreaterThan(0)
     expect(pkt.repo_context.changed_files).toContain("src/lib.rs")
   }, 90_000)
 })

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { chmod, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadSession, runAgent, saveSession } from "@/agent"
+import { SessionStateLoadError } from "@/agent/state"
 import type { Message } from "@/llm"
 // Import the REAL `isPathLikeToken` (re-exported from
 // `src/runner/orchestrate/resume-fsm.ts`) rather than the mirrored copy in the
@@ -16,8 +17,9 @@ import { cfg, ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } fro
  * `src/apps/cli/index.ts` and the on-disk transcript format in `state.ts`).
  *
  * The unit suite (`tests/unit/state.test.ts`) proves the save/load round trip
- * shape — sessionId + messages survive disk, missing/corrupt/wrong-shape files
- * collapse to null, and a single `runAgent → save → load` keeps the final
+ * shape — sessionId + messages survive disk, a MISSING file collapses to null
+ * while corrupt/wrong-shape files throw a typed SessionStateLoadError (jun-10
+ * audit #2/#14), and a single `runAgent → save → load` keeps the final
  * assistant turn. THIS suite proves the *resume integration* in the CLI's
  * lifecycle shape: a fresh `runAgent` continues from prior messages, the
  * second turn's `StreamInput` actually carries the loaded transcript, and a
@@ -169,19 +171,28 @@ describe("session resume e2e — real runAgent across save→load boundary", () 
     expect(sawPriorToolResult).toBe(true)
   })
 
-  test("3. corrupt state file ⇒ loadSession returns null ⇒ CLI starts fresh (no throw, run still proceeds)", async () => {
-    // Mirrors the CLI's resume guard:
-    //   const prior = await loadSession(resume)
-    //   if (prior) { history = prior.messages; sessionId = prior.sessionId }
-    // The whole `if` is the only resume seam — a null return is a fresh start.
+  test("3. corrupt state file ⇒ loadSession throws typed error (loud) and the corrupt bytes survive for inspection", async () => {
+    // jun-10 silent-failure audit #2: the resume guard used to treat a corrupt
+    // file as `null` → silent fresh start → the next per-turn save OVERWROTE
+    // the (recoverable) transcript. The contract is now loud + attributed:
+    // loadSession throws a SessionStateLoadError naming the file, and the
+    // on-disk bytes are left untouched so the operator can recover them.
     const path = join(dir, "broken.json")
     await Bun.write(path, "{ this is not json")
-    const loaded = await loadSession(path)
-    expect(loaded).toBeNull()
+    let thrown: unknown
+    try {
+      await loadSession(path)
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(SessionStateLoadError)
+    expect((thrown as Error).message).toContain(path)
+    // Fresh readback: the loader did not "heal"/reset the file.
+    expect(await readFile(path, "utf8")).toBe("{ this is not json")
 
-    // The fresh start path then runs runAgent with only the new user message —
-    // identical to a no-resume invocation. We assert that explicitly: no prior
-    // assistant content appears in the LLM input.
+    // A MISSING file is still the legitimate fresh-start path — identical to a
+    // no-resume invocation (null seam preserved for that case only).
+    expect(await loadSession(join(dir, "never-existed.json"))).toBeNull()
     const history: Message[] = [{ role: "user", content: [{ type: "text", text: "go" }] }]
     const llm = new ScriptedLLM([ev(text("ok"))])
     const out = await withTimeout(
@@ -384,39 +395,40 @@ describe("resume e2e hell-cases — corrupt state file", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("empty file: loadSession returns null", async () => {
+  // jun-10 silent-failure audit #2/#14: an EXISTING-but-corrupt state file no
+  // longer collapses to `null` (that silently reset the transcript and the
+  // next save destroyed the evidence). The loader now throws a typed
+  // SessionStateLoadError naming the file; `null` is reserved for MISSING.
+
+  test("empty file (torn artifact): loadSession throws typed SessionStateLoadError", async () => {
     const path = join(dir, "empty.json")
     await Bun.write(path, "")
-    const loaded = await loadSession(path)
-    expect(loaded).toBeNull()
+    await expect(loadSession(path)).rejects.toBeInstanceOf(SessionStateLoadError)
   })
 
-  test("valid JSON but wrong shape ({}): loadSession returns null", async () => {
+  test("valid JSON but wrong shape ({}): loadSession throws (envelope gate)", async () => {
     const path = join(dir, "empty-object.json")
     await Bun.write(path, "{}")
-    const loaded = await loadSession(path)
-    // Pinned: shape gate requires sessionId:string && messages:array → reject.
-    expect(loaded).toBeNull()
+    // Pinned: shape gate requires sessionId:string && messages:array → loud reject.
+    await expect(loadSession(path)).rejects.toBeInstanceOf(SessionStateLoadError)
   })
 
-  test("messages is an object (not array): loadSession returns null", async () => {
+  test("messages is an object (not array): loadSession throws (envelope gate)", async () => {
     const path = join(dir, "wrong-messages.json")
     await Bun.write(
       path,
       JSON.stringify({ version: 1, sessionId: "x", reason: "r", turns: 0, messages: {} }),
     )
-    const loaded = await loadSession(path)
-    expect(loaded).toBeNull()
+    await expect(loadSession(path)).rejects.toBeInstanceOf(SessionStateLoadError)
   })
 
-  test("sessionId is a number: loadSession returns null", async () => {
+  test("sessionId is a number: loadSession throws (envelope gate)", async () => {
     const path = join(dir, "wrong-sid.json")
     await Bun.write(
       path,
       JSON.stringify({ version: 1, sessionId: 42, reason: "r", turns: 0, messages: [] }),
     )
-    const loaded = await loadSession(path)
-    expect(loaded).toBeNull()
+    await expect(loadSession(path)).rejects.toBeInstanceOf(SessionStateLoadError)
   })
 })
 
@@ -536,12 +548,11 @@ describe("resume e2e hell-cases — state file race", () => {
   })
 
   test("reader running while writer overwrites: reader sees either old or new content, never a partial parse error", async () => {
-    // CURRENT BEHAVIOUR: saveSession does write-to-`.tmp` → Bun.write copy →
-    // delete-tmp. There is a small window where Bun.write(path, Bun.file(tmp))
-    // overlaps a concurrent reader. The contract pinned here: a concurrent
-    // reader either sees the pre-write state (returns the OLD sessionId) or
-    // the post-write state (returns the NEW sessionId) — but never a
-    // half-baked JSON parse error (which would manifest as `null`).
+    // saveSession is now real-atomic (jun-10 audit #2): same-dir temp +
+    // kernel rename(2). A concurrent reader either sees the pre-write state
+    // (OLD sessionId) or the post-write state (NEW sessionId) — never a
+    // half-baked parse error and never a briefly-missing target (the rename
+    // swaps the dirent atomically, closing the old copy-window entirely).
     const path = join(dir, "race.json")
     await saveSession(path, {
       sessionId: "old",
@@ -564,18 +575,12 @@ describe("resume e2e hell-cases — state file race", () => {
     for (let i = 0; i < 25; i++) reads.push(loadSession(path))
     const results = await Promise.all(reads)
 
-    // Each non-null result is either {sessionId:"old"} or {sessionId:"new"} —
-    // a "foreign" sessionId would mean cross-write torn frames, which we
-    // explicitly assert never happens.
-    // PINNED FRAGILITY: loadSession swallows IO/parse errors → null. The
-    // saveSession atomic path is write-tmp → Bun.write(path, Bun.file(tmp))
-    // → delete-tmp; the middle step is NOT a kernel-level rename, so a
-    // concurrent reader CAN observe the target as briefly missing
-    // (returns null from `await fileExists`). We pin "no torn / foreign
-    // content" as the load-bearing invariant.
-    // FOLLOW-UP: switch state.ts to a true rename(tmp → path) for kernel
-    // atomicity; would close the brief disappearance window. (Out of scope
-    // for this PR — test-only.)
+    // Each result is either {sessionId:"old"} or {sessionId:"new"} — a
+    // "foreign" sessionId would mean cross-write torn frames, which we
+    // explicitly assert never happens. With the kernel rename(2) commit the
+    // target NEVER disappears mid-swap, so the old tolerated-null window is
+    // gone: every concurrent read must succeed (a `null`/throw here would be
+    // the pre-fix copy-window regressing).
     let nullCount = 0
     let other = 0
     for (const r of results) {
@@ -587,8 +592,7 @@ describe("resume e2e hell-cases — state file race", () => {
       if (sid !== "old" && sid !== "new") other += 1
     }
     expect(other).toBe(0)
-    // Sanity: even if some nulls occur, the vast majority of reads succeed.
-    expect(nullCount).toBeLessThan(results.length)
+    expect(nullCount).toBe(0)
   })
 })
 
@@ -744,9 +748,10 @@ describe("resume e2e hell-cases — state write atomicity", () => {
       turns: 1,
     })
     const results = await Promise.allSettled([p1, p2])
-    // BOTH writes complete without throwing (saveSession has a fallback to a
-    // plain write on rename failure). The on-disk file parses as VALID JSON
-    // and matches exactly one of the two writers' payloads (last-writer-wins).
+    // BOTH writes complete without throwing: each save stages a UNIQUE
+    // same-dir temp (ADR-0398 writeFileAtomic) and rename(2) makes the LAST
+    // commit win atomically. The on-disk file parses as VALID JSON and
+    // matches exactly one of the two writers' payloads (last-writer-wins).
     expect(results.every((r) => r.status === "fulfilled")).toBe(true)
     const raw = await readFile(path, "utf8")
     let parsed: { sessionId?: string } = {}
@@ -758,8 +763,10 @@ describe("resume e2e hell-cases — state write atomicity", () => {
     }
     expect(parseOk).toBe(true)
     expect(["writer-A", "writer-B"]).toContain(parsed.sessionId ?? "")
-    // No leftover `.tmp` sidecar from a successful save sequence.
+    // No leftover staging sidecar of ANY name from a successful save
+    // sequence — both temps were consumed by their renames.
     expect(existsSync(`${path}.tmp`)).toBe(false)
+    expect(readdirSync(dir)).toEqual(["race.json"])
   })
 
   test.skipIf(IS_WIN)(

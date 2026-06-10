@@ -11,5 +11,7 @@ export type {
   FailureEvidence,
   PatchConstraints,
   RuntimeEvidence,
+  RuntimeFrame,
+  RuntimeVar,
   StaticEvidence,
 } from "./types"

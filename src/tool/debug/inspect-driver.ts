@@ -39,16 +39,35 @@ export interface StackFrameInfo {
   readonly line: number
   readonly source?: string
 }
+/** One variable, with its DAP `type` and (for aggregates) a BOUNDED tree of
+ *  children expanded one+ level deep — so a struct/dict/object surfaces its
+ *  fields instead of an opaque `<Foo object at 0x…>` summary. */
+export interface DapVariable {
+  readonly name: string
+  readonly value: string
+  readonly type?: string
+  readonly children?: readonly DapVariable[]
+}
 export interface ScopeVars {
   readonly scope: string
-  readonly vars: readonly { readonly name: string; readonly value: string }[]
+  readonly vars: readonly DapVariable[]
+}
+/** Scopes (Locals/Arguments/…) captured for ONE stack frame. The top K user
+ *  frames are captured (not just frame 0) — the assertion often fails in a
+ *  helper while the bug lives one frame up in the caller. */
+export interface FrameScopes {
+  readonly frame: string
+  readonly line: number
+  readonly source?: string
+  readonly scopes: readonly ScopeVars[]
 }
 export type Inspection =
   | {
       readonly outcome: "stopped"
       readonly reason: string
       readonly stack: readonly StackFrameInfo[]
-      readonly variables: readonly ScopeVars[]
+      /** Per-frame scopes for the top K frames. `frames[0]` is the stop frame. */
+      readonly frames: readonly FrameScopes[]
       readonly evaluated?: { readonly expression: string; readonly result: string }
     }
   | { readonly outcome: "exited"; readonly exitCode?: number; readonly breakpointsBound?: boolean }
@@ -65,6 +84,21 @@ export interface InspectOptions {
 
 const DEFAULT_STOP_TIMEOUT_MS = 30_000
 
+// ── Capture bounds ───────────────────────────────────────────────────────────
+// These are RESOURCE caps (not behavioural heuristics): a real debugger lazy-
+// loads the variable tree and never materializes an unbounded object graph. We
+// bound the same three axes so a huge/cyclic structure can neither blow the
+// packet size nor exhaust the per-query time budget.
+//
+/** Top frames whose scopes+locals are captured (frame 0 = the stop frame). */
+const MAX_FRAMES_WITH_LOCALS = 3
+/** How many levels of nested children to expand (scope vars are depth 1). */
+const MAX_VAR_DEPTH = 2
+/** Children expanded per aggregate node (breadth cap). */
+const MAX_CHILDREN_PER_VAR = 16
+/** Global budget on total variable nodes materialized across ALL frames. */
+const MAX_TOTAL_VARS = 200
+
 const asObj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {})
 const asArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback)
@@ -78,6 +112,53 @@ const withTimeout = <T>(p: Promise<T>, ms: number, onTimeout: T): Promise<T> => 
     timer = setTimeout(() => resolve(onTimeout), ms)
   })
   return Promise.race([p.then((v) => { if (timer) clearTimeout(timer); return v }), timeout])
+}
+
+/** Mutable budget shared across an entire inspection's variable expansion. */
+interface VarBudget {
+  remaining: number
+}
+
+/** Recursively expand a `variablesReference` into a BOUNDED {@link DapVariable}
+ *  tree. Depth-, breadth-, and total-node-capped; a `visited` ref set guards
+ *  against cyclic / shared references re-expanding forever. Each `variables`
+ *  call is timeout-guarded by the caller's `timed`, so a wedged adapter degrades
+ *  rather than hanging. */
+const expandVariables = async (
+  timed: (command: string, args?: unknown) => Promise<DapResponse>,
+  ref: number,
+  depth: number,
+  budget: VarBudget,
+  visited: Set<number>,
+  signal?: AbortSignal,
+): Promise<DapVariable[]> => {
+  // Honour the turn abort mid-expansion — a cancelled turn must not keep
+  // round-tripping `variables` requests through a wedged adapter.
+  if (signal?.aborted === true || ref <= 0 || depth > MAX_VAR_DEPTH || budget.remaining <= 0 || visited.has(ref)) return []
+  visited.add(ref)
+  const vRes = await timed("variables", { variablesReference: ref })
+  const out: DapVariable[] = []
+  for (const v of asArr(asObj(vRes.body).variables)) {
+    if (budget.remaining <= 0 || out.length >= MAX_CHILDREN_PER_VAR) break
+    const vo = asObj(v)
+    const value = str(vo.value, "")
+    // Drop debugpy presentation-group pseudo-entries ("special variables",
+    // "function variables", "class variables") — they carry an empty scalar
+    // `value` (lazy-expand UI nodes only). A real empty string renders as `''`
+    // (quoted), a real empty list as `[]`, never "", so this filter is value-safe.
+    if (value === "") continue
+    budget.remaining--
+    const childRef = num(vo.variablesReference)
+    const type = str(vo.type, "")
+    const children = childRef > 0 ? await expandVariables(timed, childRef, depth + 1, budget, visited, signal) : []
+    out.push({
+      name: str(vo.name, "?"),
+      value,
+      ...(type !== "" ? { type } : {}),
+      ...(children.length > 0 ? { children } : {}),
+    })
+  }
+  return out
 }
 
 export const inspectViaDap = async (
@@ -216,34 +297,44 @@ export const inspectViaDap = async (
       })
 
     const stRes = await timed("stackTrace", { threadId, startFrame: 0, levels: 20 })
-    const frames = asArr(asObj(stRes.body).stackFrames).map((f): StackFrameInfo => {
+    const rawFrames = asArr(asObj(stRes.body).stackFrames)
+    const stack = rawFrames.map((f): StackFrameInfo => {
       const fo = asObj(f)
       const src = asObj(fo.source).path
       return { name: str(fo.name, "?"), line: num(fo.line), ...(typeof src === "string" ? { source: src } : {}) }
     })
 
-    const variables: ScopeVars[] = []
-    const topFrameId = num(asObj(asArr(asObj(stRes.body).stackFrames)[0]).id, 0)
-    const scopesRes = await timed("scopes", { frameId: topFrameId })
-    for (const sc of asArr(asObj(scopesRes.body).scopes)) {
-      const so = asObj(sc)
-      const ref = num(so.variablesReference)
-      if (ref <= 0) continue
-      const vRes = await timed("variables", { variablesReference: ref })
-      variables.push({
-        scope: str(so.name, "scope"),
-        // Drop debugpy's presentation-group pseudo-entries ("special variables",
-        // "function variables", "class variables") — they carry an empty scalar
-        // `value` (they exist only as lazy-expand UI nodes). A real empty string
-        // renders as `''` (quoted), never "", so this filter is value-safe.
-        vars: asArr(asObj(vRes.body).variables)
-          .map((v) => {
-            const vo = asObj(v)
-            return { name: str(vo.name, "?"), value: str(vo.value, "") }
-          })
-          .filter((v) => v.value !== ""),
+    // Capture scopes+locals for the TOP K frames (not just the stop frame) under
+    // ONE shared node budget + visited-ref set, so deep callers contribute
+    // context but a huge graph can't blow the packet. `frames[0]` = stop frame.
+    const budget: VarBudget = { remaining: MAX_TOTAL_VARS }
+    const visited = new Set<number>()
+    const frames: FrameScopes[] = []
+    const framesToCapture = Math.min(rawFrames.length, MAX_FRAMES_WITH_LOCALS)
+    for (let i = 0; i < framesToCapture; i++) {
+      // A cancelled turn stops capturing further frames immediately (we return
+      // whatever we have) rather than waiting out per-query timeouts × frames.
+      if (opts.signal?.aborted === true) break
+      const fo = asObj(rawFrames[i])
+      const frameId = num(fo.id, 0)
+      const scopesRes = await timed("scopes", { frameId })
+      const scopes: ScopeVars[] = []
+      for (const sc of asArr(asObj(scopesRes.body).scopes)) {
+        const so = asObj(sc)
+        const ref = num(so.variablesReference)
+        if (ref <= 0) continue
+        const vars = await expandVariables(timed, ref, 1, budget, visited, opts.signal)
+        if (vars.length > 0) scopes.push({ scope: str(so.name, "scope"), vars })
+      }
+      const src = asObj(fo.source).path
+      frames.push({
+        frame: str(fo.name, "?"),
+        line: num(fo.line),
+        ...(typeof src === "string" ? { source: src } : {}),
+        scopes,
       })
     }
+    const topFrameId = num(asObj(rawFrames[0]).id, 0)
 
     let evaluated: { expression: string; result: string } | undefined
     if (spec.evaluate !== undefined && spec.evaluate.length > 0) {
@@ -261,7 +352,7 @@ export const inspectViaDap = async (
     )
     client.dispose()
 
-    return { outcome: "stopped", reason, stack: frames, variables, ...(evaluated !== undefined ? { evaluated } : {}) }
+    return { outcome: "stopped", reason, stack, frames, ...(evaluated !== undefined ? { evaluated } : {}) }
   } catch (e) {
     client.dispose()
     return { outcome: "error", message: e instanceof Error ? e.message : String(e) }

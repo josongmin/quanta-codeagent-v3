@@ -23,7 +23,7 @@
  *     plumbing; we just render).
  */
 
-import { cyan, dim, gray, green, magenta, yellow } from "@/ui"
+import { cyan, dim, gray, green, magenta } from "@/ui"
 import type { StatusBar } from "./status-bar"
 
 /** Default braille glyph cycle (10 frames). Same set Codex / Claude Desktop
@@ -85,9 +85,11 @@ export interface TurnIndicator {
    *  display rate stays bounded). */
   updateUsage(delta: UsageDelta): void
   /** Mark the first chunk of the assembled stream as observed. Switches the
-   *  glyph line from "thinking… <elapsed>" to "streaming · <elapsed> · ttft
-   *  <…> · …". Idempotent + one-shot per turn (subsequent calls are ignored
-   *  until `stop()` resets the latch). */
+   *  glyph line from "thinking… <elapsed>" to "streaming · <elapsed> · …".
+   *  Idempotent + one-shot per turn (subsequent calls are ignored until
+   *  `stop()` resets the latch). TTFT itself is NOT rendered here — it is a
+   *  per-turn scalar (constant for the whole stream), so repainting it every
+   *  frame is pure noise; telemetry captures it via `turn-timing`. */
   markFirstChunk(): void
 }
 
@@ -225,8 +227,7 @@ const renderLine = (state: RenderState, glyphs: readonly string[], nowMs: number
       : base
   }
 
-  const ttft = formatElapsed(state.firstChunkAt - state.startedAt)
-  const parts: string[] = [glyph, dim("streaming"), cyan(elapsed), `${dim("ttft")} ${yellow(ttft)}`]
+  const parts: string[] = [glyph, dim("streaming"), cyan(elapsed)]
   if (state.inputTokens > 0) parts.push(`${magenta(formatTokens(state.inputTokens))} ${dim("in")}`)
   if (state.outputTokens > 0) {
     parts.push(`${green(formatOutTokens(state.outputTokens, state.outputExact))} ${dim("out")}`)

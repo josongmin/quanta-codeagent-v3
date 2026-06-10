@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { loadSession, runAgent, saveSession } from "@/agent"
+import { SessionStateLoadError } from "@/agent/state"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -37,18 +38,26 @@ describe("session state persistence", () => {
     expect(loaded).toBeNull()
   })
 
-  test("corrupt file → null (never throws)", async () => {
+  // jun-10 silent-failure audit #2/#14: an EXISTING-but-corrupt file used to
+  // load as `null` — the caller then silently started fresh and the next save
+  // OVERWROTE the transcript. The contract is now loud + attributed.
+  test("corrupt file → typed SessionStateLoadError naming the file (no silent reset)", async () => {
     const path = join(dir, "bad.json")
     writeFileSync(path, "{ this is not json")
-    const loaded = await loadSession(path)
-    expect(loaded).toBeNull()
+    let thrown: unknown
+    try {
+      await loadSession(path)
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(SessionStateLoadError)
+    expect((thrown as Error).message).toContain(path)
   })
 
-  test("valid JSON but wrong shape → null", async () => {
+  test("valid JSON but wrong envelope shape → typed SessionStateLoadError", async () => {
     const path = join(dir, "wrong.json")
     writeFileSync(path, JSON.stringify({ foo: "bar" }))
-    const loaded = await loadSession(path)
-    expect(loaded).toBeNull()
+    await expect(loadSession(path)).rejects.toBeInstanceOf(SessionStateLoadError)
   })
 
   // C5 closure (not a vacuity): a real runAgent → saveSession → loadSession

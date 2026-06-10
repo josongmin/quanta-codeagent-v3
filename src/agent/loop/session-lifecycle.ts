@@ -80,6 +80,26 @@ export const cleanupFinishedSession = async (args: {
       message: `skill-mcp shutdown failed: ${errMessage(e)}`,
     })
   }
+  // Finding #7 (jun-10 silent-failure audit) — stop the resident side-agent
+  // daemons on session end. `stopAll` is the registries' host-only shutdown
+  // verb (deliberately NOT on the model-facing `SideAgentDaemonPort`), so
+  // duck-type it off the wired registry: BOTH real backers (`@/side-agent`'s
+  // in-process registry and the §4.3 process-backed one) expose it
+  // structurally. Without this call the un-unref'd wake intervals keep burning
+  // real LLM tokens past session end and forked children orphan under
+  // QUANTA_SIDE_AGENT_PROCESS. Idempotent (both backers only touch RUNNING
+  // daemons) and no-throw wrapped like the sibling disposals above.
+  try {
+    const daemons = args.cfg.sideAgentDaemons as
+      | (NonNullable<AgentConfig["sideAgentDaemons"]> & { stopAll?: () => number })
+      | undefined
+    if (typeof daemons?.stopAll === "function") daemons.stopAll()
+  } catch (e) {
+    args.cfg.stream.emit({
+      type: "error",
+      message: `side-agent stopAll failed: ${errMessage(e)}`,
+    })
+  }
   // M1 leak fix (jun-7) — reap this process's background bash shells on session
   // end. A `timeout_behavior:"background"` command registers a DETACHED shell
   // (`bash -lc "npm run dev"` + its tree) that outlives the turn; without this

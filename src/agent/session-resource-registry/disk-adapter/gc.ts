@@ -15,6 +15,18 @@
  *      newline-boundaries from the end backwards) so we never leave a
  *      partial JSON line on disk. Default 50 MB.
  *
+ *      jun-10 silent-failure audit #3 — the truncation rewrite is gated
+ *      on the ADR-0356 per-session file-lock (try-once acquire: a held
+ *      lock means a LIVE owner elsewhere, so the truncation is deferred
+ *      to a later sweep instead of racing the owner's O_APPENDs) and is
+ *      ATOMIC (tmp + rename in the same directory) with a lost-update
+ *      tail merge: rows appended after the locked snapshot read are
+ *      re-read and carried forward so the rename never drops a
+ *      concurrently-appended (newest) row. Mirrors the LOST-UPDATE GUARD
+ *      in `src/stream/adapters/jsonl-retention.ts`. Residual window: an
+ *      append landing between the tail re-read and the rename can still
+ *      be lost — same documented residual as the retention slice.
+ *
  * NO-THROW: every filesystem call is wrapped; permission errors / race
  * conditions degrade to "no-op for this entry" so a hostile filesystem
  * does not break the registry's contract. Counts are returned for
@@ -23,13 +35,15 @@
  *
  * # Slice fence
  *
- * Imports `node:fs/promises`, `node:path`, and sibling `./types`. No
- * cross-slice imports beyond what `./types` carries (typed-event /
- * system-prompt-cache port types).
+ * Imports `node:crypto`, `node:fs/promises`, `node:path`, and siblings
+ * `./file-lock` + `./types`. No cross-slice imports beyond what
+ * `./types` carries (typed-event / system-prompt-cache port types).
  */
 
-import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { randomBytes } from "node:crypto"
+import { open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { type AcquireSessionLockOpts, acquireSessionLock } from "./file-lock"
 import { DEFAULT_MAX_SESSION_BYTES, DEFAULT_TTL_MS, type DiskRegistryConfig } from "./types"
 
 /** Result of a sweep pass. `evicted` = sessions removed by TTL.
@@ -119,57 +133,240 @@ const truncateFromFront = (body: string, maxBytes: number): string => {
   return lines.slice(keepFrom).join("\n")
 }
 
-/** Best-effort overwrite. NO-THROW. */
-const writeBodySafe = async (path: string, body: string): Promise<boolean> => {
+/**
+ * TEST-ONLY interleaving seams for the locked truncation path (mirrors
+ * `ApplyRetentionOpts._afterReadForTest` in
+ * `src/stream/adapters/jsonl-retention.ts`). Never set in production —
+ * `disk-store.ts` calls `sweepDiskRegistry(cfg)` without hooks.
+ */
+export interface SweepTestHooks {
+  /** Invoked exactly once per truncated session, right AFTER the
+   *  under-lock snapshot read and BEFORE the rewrite, so a test can
+   *  drive a concurrent append into the read→rename window and prove
+   *  the lost-update guard. NO-OP when absent. */
+  readonly afterReadForTest?: () => Promise<void>
+  /** Invoked between the tmp write and the rename. Throwing here
+   *  simulates a crash mid-rewrite — the original file must stay
+   *  intact. NO-OP when absent. */
+  readonly beforeRenameForTest?: () => Promise<void>
+}
+
+/** GC acquires the per-session lock in "try once + fail immediately"
+ *  mode (see `AcquireSessionLockOpts.timeoutMs` — `0` is documented for
+ *  best-effort background sweeps). A contended lock means a LIVE owner
+ *  in another process; the sweep defers truncation rather than blocking
+ *  the lazy `getOrCreate` hook behind a multi-second wait. Same-process
+ *  sweeps (the disk-store's own lazy hook while it holds the session
+ *  lock) succeed instantly via the holder-map re-entrancy. */
+const GC_TRUNCATE_LOCK_TIMEOUT_MS = 0
+
+/** The registry only mints session dirs through `safeId` (`[A-Za-z0-9_-]`
+ *  allowlist — see disk-store/file-lock). An entry outside that alphabet
+ *  is a foreign directory whose lock path would diverge (safeId maps it
+ *  elsewhere), so it can never be truncated under a correct lock. */
+const isLockableEntry = (entry: string): boolean => /^[A-Za-z0-9_-]+$/.test(entry)
+
+/** `stat` a file's on-disk byte size. Missing/unreadable ⇒ 0. NO-THROW. */
+const fileSizeSafe = async (path: string): Promise<number> => {
   try {
-    await writeFile(path, body, "utf8")
+    return (await stat(path)).size
+  } catch {
+    return 0
+  }
+}
+
+/** Read a file body + its exact on-disk byte size at snapshot time (the
+ *  offset from which a concurrent O_APPEND writes — must be the BYTE
+ *  length, not the utf8 string length, so multibyte rows do not shift
+ *  the appended-tail offset). Missing/unreadable ⇒ empty. NO-THROW. */
+const readBodyWithSize = async (path: string): Promise<{ body: string; bytes: number }> => {
+  try {
+    const raw = await readFile(path)
+    return { body: raw.toString("utf8"), bytes: raw.byteLength }
+  } catch {
+    return { body: "", bytes: 0 }
+  }
+}
+
+/** Read the raw bytes appended to `path` AFTER byte offset `fromByte`
+ *  (the size at snapshot time). Returns `""` when the file did not grow.
+ *  POSIX O_APPEND is atomic per write, so the grown tail is always a
+ *  sequence of WHOLE rows. NO-THROW. */
+const readAppendedTail = async (path: string, fromByte: number): Promise<string> => {
+  let size: number
+  try {
+    size = (await stat(path)).size
+  } catch {
+    return ""
+  }
+  if (size <= fromByte) return ""
+  let handle: Awaited<ReturnType<typeof open>>
+  try {
+    handle = await open(path, "r")
+  } catch {
+    return ""
+  }
+  try {
+    const len = size - fromByte
+    const buf = Buffer.alloc(len)
+    await handle.read(buf, 0, len, fromByte)
+    return buf.toString("utf8")
+  } catch {
+    return ""
+  } finally {
+    try {
+      await handle.close()
+    } catch {
+      // fd reclaimed by the kernel at the latest on process exit.
+    }
+  }
+}
+
+/** Join the retained suffix with a concurrently-appended tail without
+ *  splicing rows: the tail starts at a row boundary (it was appended
+ *  after a complete prior write), so the only seam to repair is a
+ *  retained suffix that lacks its trailing newline. */
+const joinRetainedWithTail = (kept: string, tail: string): string => {
+  if (tail.length === 0) return kept
+  if (kept.length === 0) return tail
+  return kept.endsWith("\n") ? `${kept}${tail}` : `${kept}\n${tail}`
+}
+
+/** Atomic single-file rewrite via temp+rename IN THE SAME DIRECTORY
+ *  (mirrors `writeAtomicSafe` in `./disk-store.ts` — kept local because
+ *  disk-store imports this module, so importing back would cycle).
+ *  NO-THROW: returns `false` on any failure, leaving the original file
+ *  intact (a crash between tmp write and rename never tears it). */
+const writeAtomicTruncateSafe = async (
+  path: string,
+  body: string,
+  beforeRenameForTest?: () => Promise<void>,
+): Promise<boolean> => {
+  const suffix = randomBytes(8).toString("hex")
+  const tmpPath = `${path}.tmp-${suffix}`
+  try {
+    await writeFile(tmpPath, body, "utf8")
+  } catch {
+    return false
+  }
+  try {
+    if (beforeRenameForTest !== undefined) await beforeRenameForTest()
+    await rename(tmpPath, path)
     return true
   } catch {
+    // Cleanup the leftover temp on rename failure; swallow further errors.
+    try {
+      await rm(tmpPath, { force: true })
+    } catch {
+      // unreachable in practice; defense in depth.
+    }
     return false
   }
 }
 
-/** Truncate one session's jsonl files to fit `maxSessionBytes`. Returns
- *  `true` iff at least one file was truncated. NO-THROW. */
-const truncateSession = async (sessionDir: string, maxBytes: number): Promise<boolean> => {
+/** Rewrite one jsonl file down to `budget` bytes, atomically, carrying
+ *  forward any rows a live writer appended after the snapshot read
+ *  (lost-update guard). Returns `true` iff the rewrite landed. */
+const truncateFileAtomic = async (
+  path: string,
+  snapshot: { body: string; bytes: number },
+  budget: number,
+  hooks?: SweepTestHooks,
+): Promise<boolean> => {
+  const kept = truncateFromFront(snapshot.body, budget)
+  // LOST-UPDATE GUARD: a live same-process writer may have O_APPEND-ed
+  // fresh rows AFTER our under-lock snapshot read (the disk-store's
+  // append mirror is fire-and-forget and does not re-take the lock per
+  // append). Those bytes live past `snapshot.bytes` — re-read the grown
+  // tail and carry it forward so the rename never drops a newest row.
+  // The merged body may transiently exceed `budget`; the next sweep
+  // re-truncates.
+  const tail = await readAppendedTail(path, snapshot.bytes)
+  const next = joinRetainedWithTail(kept, tail)
+  return writeAtomicTruncateSafe(path, next, hooks?.beforeRenameForTest)
+}
+
+/** Truncate one session's jsonl files to fit `maxSessionBytes`, under
+ *  the per-session lock, with atomic rewrites. Returns `true` iff at
+ *  least one file was truncated. NO-THROW. */
+const truncateSession = async (
+  storageDir: string,
+  entry: string,
+  maxBytes: number,
+  lockOpts?: AcquireSessionLockOpts,
+  hooks?: SweepTestHooks,
+): Promise<boolean> => {
+  const sessionDir = join(storageDir, entry)
   const eventsPath = join(sessionDir, EVENTS_FILENAME)
   const cachePath = join(sessionDir, CACHE_FILENAME)
-  const eventsBody = await readFileSafe(eventsPath)
-  const cacheBody = await readFileSafe(cachePath)
-  const total = byteLen(eventsBody) + byteLen(cacheBody)
-  if (total <= maxBytes) return false
+  // Cheap UNLOCKED pre-check via stat so the common under-cap session
+  // never pays a lock acquire. The authoritative read happens UNDER the
+  // lock below (the pre-check alone would be a TOCTOU).
+  const preTotal = (await fileSizeSafe(eventsPath)) + (await fileSizeSafe(cachePath))
+  if (preTotal <= maxBytes) return false
+  // Foreign dir (never minted by the registry): the lock path would
+  // diverge from the data path, so an unlocked rewrite is exactly the
+  // defect class this guard exists for. Skip.
+  if (!isLockableEntry(entry)) return false
 
-  // Distribute the budget evenly between events + cache. If only one
-  // file is over its share, the other keeps its full body.
-  const halfBudget = Math.floor(maxBytes / 2)
-  const eventsBudget = byteLen(eventsBody) > halfBudget ? halfBudget : byteLen(eventsBody)
-  const cacheBudget =
-    byteLen(cacheBody) > maxBytes - eventsBudget ? maxBytes - eventsBudget : byteLen(cacheBody)
-
+  const lock = await acquireSessionLock(storageDir, entry, {
+    ...(lockOpts ?? {}),
+    timeoutMs: GC_TRUNCATE_LOCK_TIMEOUT_MS,
+  })
+  // Contended ⇒ a LIVE owner elsewhere is appending; defer to a later
+  // sweep rather than racing it.
+  if (lock === null) return false
   let touched = false
-  if (byteLen(eventsBody) > eventsBudget) {
-    const next = truncateFromFront(eventsBody, eventsBudget)
-    if (await writeBodySafe(eventsPath, next)) touched = true
+  try {
+    // Fresh read UNDER the lock — rows appended between the pre-check
+    // and the acquire are captured here.
+    const events = await readBodyWithSize(eventsPath)
+    const cache = await readBodyWithSize(cachePath)
+    if (hooks?.afterReadForTest !== undefined) await hooks.afterReadForTest()
+    const total = events.bytes + cache.bytes
+    if (total <= maxBytes) return false
+
+    // Distribute the budget evenly between events + cache. If only one
+    // file is over its share, the other keeps its full body.
+    const halfBudget = Math.floor(maxBytes / 2)
+    const eventsBudget = events.bytes > halfBudget ? halfBudget : events.bytes
+    const cacheBudget = cache.bytes > maxBytes - eventsBudget ? maxBytes - eventsBudget : cache.bytes
+
+    if (events.bytes > eventsBudget) {
+      if (await truncateFileAtomic(eventsPath, events, eventsBudget, hooks)) touched = true
+    }
+    if (cache.bytes > cacheBudget) {
+      if (await truncateFileAtomic(cachePath, cache, cacheBudget, hooks)) touched = true
+    }
+    return touched
+  } catch {
+    // NO-THROW: a throwing test hook / hostile fs degrades to "whatever
+    // landed so far" — the atomic rewrite guarantees no torn file either way.
+    return touched
+  } finally {
+    await lock.release()
   }
-  if (byteLen(cacheBody) > cacheBudget) {
-    const next = truncateFromFront(cacheBody, cacheBudget)
-    if (await writeBodySafe(cachePath, next)) touched = true
-  }
-  return touched
 }
 
 /** Per-entry classification used by {@link sweepDiskRegistry}. */
 type EntryFate = "skip" | "evicted" | "truncated" | "untouched"
 
+/** Per-sweep invariants threaded into {@link processEntry} (bundled so
+ *  the helper stays within the parameter budget). */
+interface SweepEntryCtx {
+  readonly storageDir: string
+  readonly ttlMs: number
+  readonly maxBytes: number
+  readonly currentNow: number
+  readonly lockOpts?: AcquireSessionLockOpts
+  readonly hooks?: SweepTestHooks
+}
+
 /** Decide the fate of one filesystem entry inside storageDir. Pulled out
  *  of {@link sweepDiskRegistry} so the main fn stays under the cognitive-
  *  complexity budget (biome `noExcessiveCognitiveComplexity`). NO-THROW. */
-const processEntry = async (
-  sessionDir: string,
-  ttlMs: number,
-  maxBytes: number,
-  currentNow: number,
-): Promise<EntryFate> => {
+const processEntry = async (entry: string, ctx: SweepEntryCtx): Promise<EntryFate> => {
+  const sessionDir = join(ctx.storageDir, entry)
   let st: { isDirectory: () => boolean }
   try {
     st = await stat(sessionDir)
@@ -181,11 +378,14 @@ const processEntry = async (
   const meta = await readMeta(sessionDir)
   // TTL check first — an expired entry is removed wholesale, no
   // truncation needed.
-  if (meta !== null && currentNow - meta.lastTouched >= ttlMs) {
+  if (meta !== null && ctx.currentNow - meta.lastTouched >= ctx.ttlMs) {
     return (await removeSession(sessionDir)) ? "evicted" : "skip"
   }
-  // Even without meta we can apply size-cap truncation defensively.
-  return (await truncateSession(sessionDir, maxBytes)) ? "truncated" : "untouched"
+  // Even without meta we can apply size-cap truncation defensively
+  // (lock-gated + atomic — see truncateSession).
+  return (await truncateSession(ctx.storageDir, entry, ctx.maxBytes, ctx.lockOpts, ctx.hooks))
+    ? "truncated"
+    : "untouched"
 }
 
 /**
@@ -306,8 +506,14 @@ export const countDiskRegistryCleanupCandidates = async (
  * resolves to `{ evicted: 0, truncated: 0 }`; per-entry failures are
  * swallowed (best-effort GC). Safe to call from the disk-store's
  * lazy hook on every `getOrCreate`.
+ *
+ * `hooks` is TEST-ONLY (see {@link SweepTestHooks}) — production callers
+ * pass only `cfg`.
  */
-export const sweepDiskRegistry = async (cfg: DiskRegistryConfig): Promise<SweepResult> => {
+export const sweepDiskRegistry = async (
+  cfg: DiskRegistryConfig,
+  hooks?: SweepTestHooks,
+): Promise<SweepResult> => {
   const ttlMs = cfg.ttlMs ?? DEFAULT_TTL_MS
   const maxBytes = cfg.maxSessionBytes ?? DEFAULT_MAX_SESSION_BYTES
   const now = cfg.now ?? Date.now
@@ -322,10 +528,18 @@ export const sweepDiskRegistry = async (cfg: DiskRegistryConfig): Promise<SweepR
   let evicted = 0
   let truncated = 0
   const currentNow = now()
+  // `exactOptionalPropertyTypes` — omit absent optional keys entirely.
+  const ctx: SweepEntryCtx = {
+    storageDir: cfg.storageDir,
+    ttlMs,
+    maxBytes,
+    currentNow,
+    ...(cfg.lock !== undefined ? { lockOpts: cfg.lock } : {}),
+    ...(hooks !== undefined ? { hooks } : {}),
+  }
 
   for (const entry of entries) {
-    const sessionDir = join(cfg.storageDir, entry)
-    const fate = await processEntry(sessionDir, ttlMs, maxBytes, currentNow)
+    const fate = await processEntry(entry, ctx)
     if (fate === "evicted") evicted += 1
     else if (fate === "truncated") truncated += 1
   }

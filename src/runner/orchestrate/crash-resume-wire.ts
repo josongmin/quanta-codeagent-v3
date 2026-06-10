@@ -29,14 +29,49 @@
 
 import {
   buildCrashResumeOffer,
-  clearSessionInterrupted,
   type CrashResumeOffer,
+  clearSessionInterrupted,
   crashResumePartialEnabled,
   detectInterruptedSessions,
   markSessionInterrupted,
   type SessionMeta,
   type SessionRootProvider,
 } from "@/session"
+import { errMessage, logger } from "@/shared"
+
+/**
+ * AUDIT #13 (jun-10 silent-failure) — per-session GENERATION token for the L3
+ * partial flush. `void flush(partial)` is fire-and-forget by contract (a flush
+ * must never block the turn), so a flush that is still in flight when the turn
+ * RESOLVES could otherwise land AFTER the resolve path's clear — re-instating
+ * the interrupted marker on a cleanly-completed session AND rolling the
+ * snapshot back to the state its stale read-modify-write loaded.
+ *
+ * Fence: each flush MINTS the session's current epoch at dispatch; the resolve
+ * path ({@link withCrashResumeMarker}'s `finally`) and the partial-subscription
+ * disposer BUMP it. The probe is threaded into the store write (`staleIf`,
+ * evaluated inside the store's serialized RMW critical section, between load
+ * and save), so a stale flush is DISCARDED — not merely reordered — and the
+ * last state written is always the newest state.
+ *
+ * The map holds one small integer per session id seen by this process (bounded;
+ * epochs are relative, so a fresh entry starting at 0 is always correct).
+ */
+const partialFlushEpochs = new Map<string, number>()
+
+const currentFlushEpoch = (sessionId: string): number => partialFlushEpochs.get(sessionId) ?? 0
+
+const bumpFlushEpoch = (sessionId: string): void => {
+  partialFlushEpochs.set(sessionId, currentFlushEpoch(sessionId) + 1)
+}
+
+/** Staleness probe handed to a partial-flush impl (AUDIT #13). `isStale()`
+ *  flips true once the turn resolved or the subscription was disposed — a
+ *  custom impl SHOULD thread it into its write (the default impl forwards it
+ *  to the store's `staleIf` seam) so an in-flight stale write is discarded. */
+export interface PartialFlushContext {
+  readonly isStale: () => boolean
+}
 
 /** Inputs for {@link withCrashResumeMarker}. `now` is INJECTED (ADR-0525 keeps
  *  the clock out of the pure module); defaults to wall-clock for live callers. */
@@ -61,7 +96,10 @@ export const withCrashResumeMarker = async <T>(
   args: CrashResumeMarkerArgs,
   fn: () => Promise<T>,
 ): Promise<T> => {
-  const opts = { env: args.env, ...(args.provider !== undefined ? { provider: args.provider } : {}) }
+  const opts = {
+    env: args.env,
+    ...(args.provider !== undefined ? { provider: args.provider } : {}),
+  }
   const at = (args.now ?? Date.now)()
   await markSessionInterrupted(
     args.sessionId,
@@ -71,6 +109,11 @@ export const withCrashResumeMarker = async <T>(
   try {
     return await fn()
   } finally {
+    // AUDIT #13 resolve fence: invalidate every outstanding partial flush
+    // BEFORE clearing. A flush still in flight trips its `staleIf` probe inside
+    // the store's serialized RMW and is DISCARDED — it can never land after
+    // this clear and re-instate the marker / roll the snapshot back.
+    bumpFlushEpoch(args.sessionId)
     await clearSessionInterrupted(args.sessionId, opts)
   }
 }
@@ -92,7 +135,9 @@ export const bootstrapCrashResumeOffers = async (
 /** A minimal subscribable session — `RuntimeSession.subscribe` satisfies it.
  *  Only the two event shapes the partial-flush cares about are typed. */
 interface PartialFlushSession {
-  subscribe(listener: (event: { readonly type: string; readonly delta?: string }) => void): () => void
+  subscribe(
+    listener: (event: { readonly type: string; readonly delta?: string }) => void,
+  ): () => void
 }
 
 /**
@@ -115,13 +160,16 @@ interface PartialFlushSession {
 export const attachCrashResumePartial = (
   session: PartialFlushSession,
   args: CrashResumeMarkerArgs,
-  flushImpl?: (partial: string) => Promise<void>,
+  flushImpl?: (partial: string, ctx: PartialFlushContext) => Promise<void>,
 ): (() => void) => {
   if (!crashResumePartialEnabled(args.env)) return () => undefined
-  const opts = { env: args.env, ...(args.provider !== undefined ? { provider: args.provider } : {}) }
+  const opts = {
+    env: args.env,
+    ...(args.provider !== undefined ? { provider: args.provider } : {}),
+  }
   const flush =
     flushImpl ??
-    ((partial: string) =>
+    ((partial: string, ctx: PartialFlushContext) =>
       markSessionInterrupted(
         args.sessionId,
         {
@@ -130,16 +178,35 @@ export const attachCrashResumePartial = (
           reason: "in-progress",
           interruptedAt: (args.now ?? Date.now)(),
         },
-        opts,
+        { ...opts, staleIf: ctx.isStale },
       ))
   let partial = ""
-  return session.subscribe((event) => {
+  const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn.output.delta") {
       partial += event.delta ?? ""
     } else if (event.type === "tool.invoked" && partial.length > 0) {
-      void flush(partial)
+      // AUDIT #13: fire-and-forget by contract, but EPOCH-FENCED — the flush
+      // mints the session's current generation; if the turn resolves (or the
+      // subscription is disposed) while this write is still in flight, the
+      // probe trips inside the store's serialized RMW and the write is
+      // discarded. The `.catch` keeps a rejecting custom impl from becoming an
+      // unhandled rejection (best-effort durability, NEVER throws).
+      const minted = currentFlushEpoch(args.sessionId)
+      void flush(partial, {
+        isStale: () => currentFlushEpoch(args.sessionId) !== minted,
+      }).catch((e) => {
+        logger.warn("crash-resume: partial flush failed", {
+          sessionId: args.sessionId,
+          error: errMessage(e),
+        })
+      })
     }
   })
+  return () => {
+    // Dispose fence (AUDIT #13): anything still in flight is now stale.
+    bumpFlushEpoch(args.sessionId)
+    unsubscribe()
+  }
 }
 
 /**

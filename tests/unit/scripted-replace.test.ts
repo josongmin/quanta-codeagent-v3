@@ -1,25 +1,51 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ToolContext, ToolResult } from "@/tool"
+import type { ActiveWorktree, ToolContext, ToolResult } from "@/tool"
 import { applyScriptedReplace, scriptedReplaceTool } from "@/tool/scripted-replace"
+import { ReadFileState } from "@/tool/stale-read-guard"
 
 const dir = mkdtempSync(join(tmpdir(), "scripted-replace-test-"))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
-const ctx = (cwd: string): ToolContext => ({
+const ctx = (cwd: string, extra?: Partial<ToolContext>): ToolContext => ({
   cwd,
   signal: new AbortController().signal,
+  ...extra,
 })
 
-const run = async (input: unknown, cwd: string = dir): Promise<ToolResult> => {
+const run = async (
+  input: unknown,
+  cwd: string = dir,
+  extra?: Partial<ToolContext>,
+): Promise<ToolResult> => {
   let result: ToolResult | undefined
-  for await (const ev of scriptedReplaceTool.execute(input as never, ctx(cwd))) {
+  for await (const ev of scriptedReplaceTool.execute(input as never, ctx(cwd, extra))) {
     if (ev.type === "result") result = ev.result
   }
   if (!result) throw new Error("no result")
   return result
+}
+
+/** Advance on-disk mtime to a clean integer second strictly greater than now
+ *  (mirrors staleness-default-on-hellgate's bumper). */
+const bumpMtime = (path: string): number => {
+  const cur = statSync(path)
+  const sec = Math.ceil(cur.mtimeMs / 1000) + 5
+  utimesSync(path, sec, sec)
+  return statSync(path).mtimeMs
 }
 
 describe("scriptedReplaceTool metadata", () => {
@@ -442,5 +468,131 @@ describe("scriptedReplaceTool typed failure.mode (absorb #2)", () => {
       rmSync(jail, { recursive: true, force: true })
       rmSync(outside, { recursive: true, force: true })
     }
+  })
+})
+
+// ── ADR-0474 stale-read guard — write-class mirror rule (T-403) ──────────────
+// scripted_replace is a BASE mutating tool; it must honour the SAME
+// `ctx.readFileState` TOCTOU guard as edit / write / apply_patch: a target the
+// model READ that drifted on disk since (mtime advanced) is a typed
+// `stale_read` rejection, NEVER a silent clobber.
+describe("scriptedReplaceTool stale-read guard (ADR-0474 write-class parity)", () => {
+  test("read-record → external modification → stale_read reject, external bytes untouched", async () => {
+    const f = join(dir, "stale-drift.txt")
+    writeFileSync(f, "alpha beta alpha")
+    const rfs = new ReadFileState()
+    const recorded = statSync(f).mtimeMs
+    rfs.record(f, recorded)
+    // External writer lands AFTER the model's read: new bytes + forward mtime.
+    const EXTERNAL = "alpha beta alpha # external change"
+    writeFileSync(f, EXTERNAL)
+    const bumped = bumpMtime(f)
+    expect(bumped).toBeGreaterThan(recorded)
+
+    const r = await run({ file: f, pattern: "alpha", replacement: "GAMMA" }, dir, {
+      readFileState: rfs,
+    })
+
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "rejected", reason: "stale_read" })
+    expect(r.output).toMatch(/modified on disk after you last read it/)
+    // Fresh readback: the EXTERNAL bytes survive — the replace never reached disk.
+    expect(readFileSync(f, "utf8")).toBe(EXTERNAL)
+  })
+
+  test("fresh (recorded === current mtime) ⇒ replace applies ok:true", async () => {
+    const f = join(dir, "stale-fresh.txt")
+    writeFileSync(f, "alpha beta alpha")
+    const rfs = new ReadFileState()
+    rfs.record(f, statSync(f).mtimeMs)
+
+    const r = await run({ file: f, pattern: "alpha", replacement: "GAMMA" }, dir, {
+      readFileState: rfs,
+    })
+
+    expect(r.ok).toBe(true)
+    expect(readFileSync(f, "utf8")).toBe("GAMMA beta GAMMA")
+  })
+
+  test("UNREAD target (no baseline) ⇒ replace applies (no false-positive)", async () => {
+    const f = join(dir, "stale-unread.txt")
+    writeFileSync(f, "alpha beta")
+    const rfs = new ReadFileState() // nothing recorded for this file
+
+    const r = await run({ file: f, pattern: "alpha", replacement: "GAMMA" }, dir, {
+      readFileState: rfs,
+    })
+
+    expect(r.ok).toBe(true)
+    expect(readFileSync(f, "utf8")).toBe("GAMMA beta")
+  })
+
+  test("guard unwired (no ctx.readFileState) ⇒ legacy path proceeds even after drift (paired control)", async () => {
+    const f = join(dir, "stale-unwired.txt")
+    writeFileSync(f, "alpha beta")
+    bumpMtime(f)
+
+    const r = await run({ file: f, pattern: "alpha", replacement: "GAMMA" })
+
+    expect(r.ok).toBe(true)
+    expect(readFileSync(f, "utf8")).toBe("GAMMA beta")
+  })
+})
+
+// ── Atomic commit (temp+rename, ADR-0398 primitive) ─────────────────────────
+describe("scriptedReplaceTool atomic commit (temp+rename)", () => {
+  test("commit lands via rename — the final inode is a NEW inode, no quanta-tmp residue", async () => {
+    const f = join(dir, "atomic-inode.txt")
+    writeFileSync(f, "foo bar foo")
+    const inoBefore = statSync(f).ino
+
+    const r = await run({ file: f, pattern: "foo", replacement: "qux" })
+
+    expect(r.ok).toBe(true)
+    expect(readFileSync(f, "utf8")).toBe("qux bar qux")
+    // A truncating in-place write keeps the inode; the atomic temp+rename
+    // commit promotes a FRESH inode. This is the observable temp+rename shape.
+    expect(statSync(f).ino).not.toBe(inoBefore)
+    // No leaked temp under the final name.
+    const residue = readdirSync(dir).filter((n) => n.startsWith("atomic-inode.txt.quanta-tmp"))
+    expect(residue).toEqual([])
+  })
+
+  test("an existing 0o755 file keeps its mode across the atomic commit (house rule)", async () => {
+    const f = join(dir, "atomic-mode.sh")
+    writeFileSync(f, "#!/bin/sh\necho foo\n")
+    chmodSync(f, 0o755)
+
+    const r = await run({ file: f, pattern: "foo", replacement: "bar" })
+
+    expect(r.ok).toBe(true)
+    expect(readFileSync(f, "utf8")).toBe("#!/bin/sh\necho bar\n")
+    expect(statSync(f).mode & 0o777).toBe(0o755)
+  })
+})
+
+// ── ticket-11 worktree edit-fence parity (resolveEditBase) ───────────────────
+describe("scriptedReplaceTool worktree resolution (resolveEditBase parity with edit)", () => {
+  test("relative path with an active worktree resolves INSIDE the worktree dir", async () => {
+    const wt = join(dir, "wt-sub")
+    mkdirSync(wt, { recursive: true })
+    const inWorktree = join(wt, "wt-rel.txt")
+    writeFileSync(inWorktree, "alpha beta alpha")
+    const active: ActiveWorktree = {
+      worktreePath: wt,
+      branch: "feature/x",
+      isPersistent: false,
+      repoRoot: dir,
+      branchFrom: "head",
+    }
+
+    const r = await run({ file: "wt-rel.txt", pattern: "alpha", replacement: "gamma" }, dir, {
+      activeWorktree: active,
+    })
+
+    expect(r.ok).toBe(true)
+    expect(readFileSync(inWorktree, "utf8")).toBe("gamma beta gamma")
+    // The session-root sibling must NOT have been created/touched.
+    expect(existsSync(join(dir, "wt-rel.txt"))).toBe(false)
   })
 })

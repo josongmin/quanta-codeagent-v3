@@ -1338,8 +1338,10 @@ export class LspClient implements LspPort {
   }
 
   private async pumpStdout(): Promise<void> {
-    const stdout = this.proc?.stdout
-    if (!stdout) return
+    const proc = this.proc
+    const stdout = proc?.stdout
+    if (!proc || !stdout) return
+    let pumpError: unknown = null
     try {
       for await (const chunk of stdout) {
         for (const msg of this.reader.push(chunk)) {
@@ -1347,8 +1349,23 @@ export class LspClient implements LspPort {
         }
       }
     } catch (e) {
-      logger.debug("lsp: stdout pump ended", { error: errMessage(e) })
+      pumpError = e
     }
+    const detail = pumpError === null ? "stdout closed (EOF)" : errMessage(pumpError)
+    // A pump that ends during a deliberate stop() or after process death is
+    // routine — stop()/watchExit() already fail the pending set. Otherwise the
+    // read channel died while the server process still LIVES: the client is
+    // half-dead and every pending + future request would silently burn its full
+    // `requestTimeoutMs`. Mirror send()'s warn and propagate the same
+    // exit/fail-pending the process-death path takes. A clean early EOF and a
+    // stream error are the same defect from the caller's view — both land here.
+    if (this.stopped || this.exited || proc.exitCode !== null || proc.killed) {
+      logger.debug("lsp: stdout pump ended", { error: detail })
+      return
+    }
+    logger.warn("lsp: stdout pump died while the server process is alive", { error: detail })
+    this.exited = true
+    this.failAllPending(new Error(`LSP transport read channel closed: ${detail}`))
   }
 
   /** Background drain of the server's stderr. A verbose server (tsserver /

@@ -739,6 +739,35 @@ describe("runAdmissibilityGate: real sensitive tools are universal-floor gated [
     // Universal floor (sensitive) ⇒ fail-closed deny, NOT auto-passed under bypass.
     expect(res).not.toBeNull()
   })
+
+  test("git_push under bypass FIRES the confirm modal via the reviewer port (the CLI path)", async () => {
+    const { gitPushTool } = await import("@/tool/git")
+    const { createOnConfirmReviewerPort } = await import("@/agent")
+    const push = gitPushTool((() => {
+      throw new Error("git_push.execute must not run — the operator must confirm first")
+    }) as never)
+    // The CLI wires onConfirm through a reviewer port (createOnConfirmReviewerPort);
+    // this stand-in counts the modal firing and DECLINES.
+    let modalShown = 0
+    const reviewerPort = createOnConfirmReviewerPort({
+      onConfirm: async () => {
+        modalShown += 1
+        return false
+      },
+    })
+    const c = cfg({
+      registry: new ToolRegistry([push]),
+      permission: { mode: "bypass" },
+    } as Partial<AgentConfig>)
+    const action: AdmissibilityAction = { tool: "git_push", input: {}, isReadOnly: false }
+    const res = await runAdmissibilityGate(call("git_push", {}), c, { mode: "bypass" }, action, undefined, {
+      reviewerPort,
+    })
+    // THE user-facing behavior: even under bypass + no HITL opt-in, the modal is
+    // shown exactly once, and a decline blocks the push.
+    expect(modalShown).toBe(1)
+    expect(res).not.toBeNull()
+  })
 })
 
 // ⚠️ AGENTS: RED-first hellgate for ticket P2-T2 (A3) — RED until the hand-off

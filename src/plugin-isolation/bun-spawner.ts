@@ -50,6 +50,18 @@ const NEWLINE_CHAR = 0x0a
 const NUL_CHAR = 0x00
 const MAX_EARLY_BUFFERED_MESSAGES = 64
 
+/** Bounded window the pump-death handler waits for a concurrent `proc.exited`
+ *  to settle before concluding the child is genuinely wedged. A natural child
+ *  exit closes stdout (settling `pump.done`) BEFORE Bun fans out `proc.exited`
+ *  and sets `proc.exitCode` — empirically by *more than one microtask* (EOF can
+ *  beat the exit by a full macrotask hop), unlike the sibling stdio transport
+ *  where a single `await Promise.resolve()` suffices. So a microtask yield is
+ *  not enough here: we race the queued exit settlement against this short
+ *  timeout. A natural/killed exit wins the race in well under a millisecond and
+ *  stays quiet; a real wedge (stdout closed, child sleeps) never settles
+ *  `proc.exited`, so the timeout wins and the warn + SIGTERM fire promptly. */
+const PUMP_DEATH_EXIT_GRACE_MS = 50
+
 const validateOpts = (opts: SpawnOpts): void => {
   if (!SERVICE_NAME_RE.test(opts.serviceName)) {
     throw new IsolatedSpawnError(
@@ -129,7 +141,17 @@ const createKillController = (
   return { kill, disarm }
 }
 
-/** Stdout pump: bytes → lines → dispatch.
+/** Settlement report for the stdout pump (jun-10 silent-failure audit #10).
+ *  `error` is null on a clean end-of-stream; the spawn site decides severity
+ *  from child liveness — a settled pump with a LIVE child is a dead transport,
+ *  not a teardown. */
+export interface PumpSettlement {
+  readonly error: string | null
+}
+
+/** Stdout pump: bytes → lines → dispatch. Exported ONLY for hellgate
+ *  injection (throwing / early-ending stream doubles); production callers go
+ *  through {@link createBunSpawner}.
  *
  *  Implementation note: line assembly is segment-based, not concat-based.
  *  A long pre-newline line is buffered once and materialized once at newline,
@@ -137,11 +159,11 @@ const createKillController = (
  *  contains a NUL, we drop buffered segments immediately and stay in a
  *  discard-until-newline mode so memory stays bounded even if the child keeps
  *  streaming bytes without a newline. */
-const createMessagePump = (
-  proc: Subprocess<"pipe", "pipe", "pipe">,
+export const createMessagePump = (
+  stdout: AsyncIterable<Uint8Array>,
   serviceName: string,
   onLine: (line: string) => void,
-): { readonly done: Promise<void> } => {
+): { readonly done: Promise<PumpSettlement> } => {
   const decoder = new TextDecoder()
   const lineSegments: Uint8Array[] = []
   let lineBytes = 0
@@ -226,20 +248,20 @@ const createMessagePump = (
     }
   }
 
-  const pump = async (): Promise<void> => {
+  const pump = async (): Promise<PumpSettlement> => {
     try {
-      for await (const chunk of proc.stdout) {
+      for await (const chunk of stdout) {
         consumeChunk(chunk)
       }
     } catch (e) {
-      logger.debug("plugin-isolation: stdout pump ended with error", {
-        serviceName,
-        error: errMessage(e),
-      })
+      // Report instead of swallowing — the spawn site owns severity (debug
+      // for a dead child's normal teardown, warn + kill for a live child).
+      return { error: errMessage(e) }
     }
     // Last partial line (no trailing \n) is intentionally dropped — the line
     // protocol requires newline termination, and admitting an unterminated
     // tail would invite split-JSON corruption.
+    return { error: null }
   }
   return { done: pump() }
 }
@@ -492,7 +514,7 @@ export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
 
     const watchdog = createSpawnWatchdog(proc, serviceName, spawnTimeoutMs, opts.signal)
 
-    createMessagePump(proc, serviceName, (line) => {
+    const pump = createMessagePump(proc.stdout, serviceName, (line) => {
       if (!sawFirstLine) {
         sawFirstLine = true
         watchdog.notifyFirstLine()
@@ -512,6 +534,63 @@ export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
         return
       }
       registry.dispatch(parsed)
+    })
+
+    // Explicit exit watcher registered BEFORE the pump-death handler so a
+    // natural child death is observable by the time we make the liveness call.
+    // (Mirrors stdio.ts `watchExit` ordering, but here the flag alone is not
+    // enough — see PUMP_DEATH_EXIT_GRACE_MS — because Bun fans out `proc.exited`
+    // a full macrotask AFTER stdout EOF, so we also race the settlement below.)
+    let childExited = false
+    void proc.exited.then(
+      () => {
+        childExited = true
+      },
+      () => {
+        childExited = true
+      },
+    )
+
+    // jun-10 silent-failure audit #10 — observe the pump's settlement
+    // (previously discarded). A settled pump while the child still lives means
+    // the line protocol is permanently dead: every pending and future call
+    // would burn its full timeout and `exitPromise` would never settle — a
+    // wedged IsolatedMcpClient. Kill the child so `proc.exited` → exitPromise
+    // → PluginHost fail-all-pending propagates the death promptly. A pump that
+    // settles because the child exited (or was deliberately killed) is the
+    // normal teardown path — the exit fan-out already owns it — and stays at
+    // debug.
+    void pump.done.then(async (settlement) => {
+      // Natural child exit closes stdout (settling this `pump.done`) BEFORE Bun
+      // sets `proc.exitCode` / fans out `proc.exited`. Yield to a concurrent
+      // exit settlement before judging liveness — bounded so a genuinely wedged
+      // child (stdout closed, child alive forever) still trips the warn after
+      // the short grace window rather than hanging here. The exit wins this
+      // race in sub-millisecond for a normal death; only a real wedge times out.
+      if (typeof proc.exitCode !== "number" && !proc.killed) {
+        await Promise.race([
+          proc.exited.catch(() => undefined),
+          new Promise<void>((r) => {
+            setTimeout(r, PUMP_DEATH_EXIT_GRACE_MS).unref?.()
+          }),
+        ])
+      }
+      const childAlive = typeof proc.exitCode !== "number" && !proc.killed && !childExited
+      if (!childAlive) {
+        if (settlement.error !== null) {
+          logger.debug("plugin-isolation: stdout pump ended with error", {
+            serviceName,
+            error: settlement.error,
+          })
+        }
+        return
+      }
+      const detail = settlement.error ?? "stdout ended while child still running"
+      logger.warn(
+        "plugin-isolation: stdout pump died while child still running; killing child so pending calls fail fast",
+        { serviceName, error: detail },
+      )
+      void killer.kill("SIGTERM")
     })
 
     try {

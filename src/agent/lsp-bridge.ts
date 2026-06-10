@@ -1,7 +1,9 @@
 import { extname } from "node:path"
 import {
   DefaultRenameApplyAdapter,
+  GoplsAdapter,
   type LspClient,
+  LspRequestError,
   PyrightAdapter,
   type RenameWorkspaceEdit,
   RustAnalyzerAdapter,
@@ -20,6 +22,7 @@ import {
   type RenameApplyPort,
   type Tool,
 } from "@/tool"
+import { sleep } from "./loop/sleep"
 import { attachLspDiagnosticsHook, type LspDiagnosticsHookHandle } from "./lsp-diagnostics-hook"
 import type { AgentConfig } from "./types"
 
@@ -64,6 +67,10 @@ const RUST_ANALYZER: ServerSpec = {
   bin: "rust-analyzer",
   create: (cwd) => new RustAnalyzerAdapter({ cwd }),
 }
+const GOPLS: ServerSpec = {
+  bin: "gopls",
+  create: (cwd) => new GoplsAdapter({ cwd }),
+}
 
 /**
  * Single source of extension→server truth (OCP): adding a language is ONE
@@ -75,6 +82,7 @@ const SERVERS: ReadonlyArray<{ exts: readonly string[]; spec: ServerSpec }> = [
   { exts: [".py", ".pyi"], spec: PYRIGHT },
   { exts: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"], spec: TYPESCRIPT },
   { exts: [".rs"], spec: RUST_ANALYZER },
+  { exts: [".go"], spec: GOPLS },
 ]
 
 /** Pick the server for a file by extension, or `null` if unsupported. */
@@ -242,14 +250,15 @@ export const attachLspDiagnosticsHookIfEnabled = (
  *  call this session makes against the same file (didOpen is dedup'd in
  *  Wave B1's LspClient). */
 const adaptToNavSession = (client: LspClient): LspNavSession => ({
-  definition: (file, pos) => client.definition(file, pos),
-  references: (file, pos, includeDeclaration) => client.references(file, pos, includeDeclaration),
-  hover: (file, pos) => client.hover(file, pos),
-  typeDefinition: (file, pos) => client.typeDefinition(file, pos),
-  implementation: (file, pos) => client.implementation(file, pos),
-  documentSymbol: (file) => client.documentSymbol(file),
-  workspaceSymbol: (query) => client.workspaceSymbol(query),
-  prepareRename: (file, pos) => client.prepareRename(file, pos),
+  definition: (file, pos, signal) => client.definition(file, pos, signal),
+  references: (file, pos, includeDeclaration, signal) =>
+    client.references(file, pos, includeDeclaration, signal),
+  hover: (file, pos, signal) => client.hover(file, pos, signal),
+  typeDefinition: (file, pos, signal) => client.typeDefinition(file, pos, signal),
+  implementation: (file, pos, signal) => client.implementation(file, pos, signal),
+  documentSymbol: (file, signal) => client.documentSymbol(file, signal),
+  workspaceSymbol: (query, signal) => client.workspaceSymbol(query, signal),
+  prepareRename: (file, pos, signal) => client.prepareRename(file, pos, signal),
   incomingCalls: (file, pos, signal) => client.incomingCalls(file, pos, signal),
   outgoingCalls: (file, pos, signal) => client.outgoingCalls(file, pos, signal),
   stop: () => client.stop(),
@@ -266,13 +275,13 @@ export const lspNavProvider = (): LspNavProvider => ({
       ? `${spec.bin} is not installed or not on PATH`
       : `no language server for ${extname(filePath) || "this file type"}`
   },
-  open: async (filePath, cwd): Promise<LspNavSession | null> => {
+  open: async (filePath, cwd, signal): Promise<LspNavSession | null> => {
     const spec = specFor(filePath)
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
     const client = spec.create(cwd)
     try {
-      await client.start()
+      await client.start(signal)
     } catch (e) {
       logger.warn("lsp: failed to start language server (nav)", {
         bin: spec.bin,
@@ -295,15 +304,32 @@ export const lspNavProvider = (): LspNavProvider => ({
  *
  * Test runners report only a LINE (no column), so we scan columns on the line
  * for the first symbol the server answers about. rust-analyzer (and others)
- * emit `ContentModified` while indexing — treated as "retry", within a budget.
+ * emit `ContentModified` (-32801) / `ServerCancelled` (-32802) while indexing —
+ * classified by the TYPED {@link LspRequestError} code (never by error text:
+ * rust-analyzer's real -32801 message does not say "content modified") and
+ * treated as "retry", within a budget. The turn `AbortSignal` is threaded from
+ * the tool ctx — an aborted turn bails promptly instead of riding out the
+ * budget's retry sleeps against a live LSP child.
  * Best-effort + NEVER-throws (the builder also `safe()`-wraps it): a missing
- * server / no symbol ⇒ null, never a crash. A fresh server is spawned per call
- * (acceptable for an opt-in, always-confirm tool).
+ * server / no symbol / abort ⇒ null, never a crash. A fresh server is spawned
+ * per call (acceptable for an opt-in, always-confirm tool).
  */
+/** Delay between column-scan sweeps while the server is still indexing. */
+const EVIDENCE_LSP_RETRY_DELAY_MS = 500
+/** Fallback for the abort-aware {@link sleep} when no turn signal is threaded. */
+const NEVER_ABORTED: AbortSignal = new AbortController().signal
+/** Re-reads `aborted` on every call — a plain inline check would be narrowed
+ *  to `false` by TS after the first test, but awaits can flip it mid-loop. */
+const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true
 export const evidenceLspStatic =
-  (budgetMs = 20_000) =>
-  async (file: string, line: number, cwd: string): Promise<EvidenceStatic | null> => {
-    const session = await lspNavProvider().open(file, cwd)
+  (budgetMs = 20_000, provider?: LspNavProvider) =>
+  async (
+    file: string,
+    line: number,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<EvidenceStatic | null> => {
+    const session = await (provider ?? lspNavProvider()).open(file, cwd, signal)
     if (session === null) return null
     const toLoc = (l: { uri: string; range: { start: { line: number } } }): { file: string; line: number } => ({
       file: l.uri.replace(/^file:\/\//, ""),
@@ -313,13 +339,15 @@ export const evidenceLspStatic =
       const ln = Math.max(0, line - 1) // LSP 0-based
       const deadline = Date.now() + budgetMs
       while (Date.now() < deadline) {
+        if (isAborted(signal)) return null
         for (let ch = 0; ch < 80; ch += 2) {
+          if (isAborted(signal)) return null
           const pos = { line: ln, character: ch }
           try {
-            const hov = await session.hover(file, pos)
+            const hov = await session.hover(file, pos, signal)
             if (hov !== null) {
-              const defs = await session.definition(file, pos).catch(() => null)
-              const refs = await session.references(file, pos, false).catch(() => null)
+              const defs = await session.definition(file, pos, signal).catch(() => null)
+              const refs = await session.references(file, pos, false, signal).catch(() => null)
               return {
                 definition_chain: (defs ?? []).map(toLoc),
                 references: (refs ?? []).map(toLoc),
@@ -328,11 +356,16 @@ export const evidenceLspStatic =
               }
             }
           } catch (e) {
-            // ContentModified during indexing ⇒ retry; anything else ⇒ give up.
-            if (!/content modified/i.test(String(e))) return null
+            // TYPED classification (jun-10 audit #23): ContentModified (-32801) /
+            // ServerCancelled (-32802) during indexing ⇒ retry; anything else ⇒
+            // give up. Never `String(e)` text-matching — rust-analyzer's real
+            // -32801 message never contains "content modified".
+            const retryable =
+              e instanceof LspRequestError && (e.code === -32801 || e.code === -32802)
+            if (!retryable) return null
           }
         }
-        await new Promise((r) => setTimeout(r, 500))
+        await sleep(EVIDENCE_LSP_RETRY_DELAY_MS, signal ?? NEVER_ABORTED)
       }
       return { definition_chain: [], references: [], type_info: null, diagnostics: [] }
     } finally {

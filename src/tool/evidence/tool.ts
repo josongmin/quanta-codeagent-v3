@@ -11,7 +11,9 @@
  * section degrades to null, the packet is still built.
  *
  * HIGH RISK: it RUNS the test suite (project code) ⇒ default-OFF
- * (QUANTA_EVIDENCE) + always-confirm. NEVER throws.
+ * (QUANTA_EVIDENCE) + always-confirm. NEVER throws. An UNDETECTED toolchain
+ * (nothing ran) is an explicit ok:false error mirroring run_tests — never a
+ * false-green empty packet (jun-10 silent-failure audit #5).
  */
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
@@ -37,8 +39,10 @@ type Input = z.infer<typeof schema>
 export interface EvidenceToolDeps {
   readonly fs?: FileSystemPort
   readonly testPort?: TestRunPort
-  /** LSP static at a failure site (host-injected, e.g. via lsp-bridge). */
-  readonly lspStatic?: (file: string, line: number, cwd: string) => Promise<StaticEvidence | null>
+  /** LSP static at a failure site (host-injected, e.g. via lsp-bridge).
+   *  Receives the turn signal so an aborted turn bails out of the LSP
+   *  indexing-retry budget promptly. */
+  readonly lspStatic?: (file: string, line: number, cwd: string, signal?: AbortSignal) => Promise<StaticEvidence | null>
   /** DAP runtime for the failing test. Default: `defaultRuntimePort` (python/
    *  debugpy, in-slice). Host may override. */
   readonly runtime?: (failure: FailureEvidence, tc: Toolchain, cwd: string, signal?: AbortSignal) => Promise<RuntimeEvidence | null>
@@ -78,6 +82,12 @@ const gitChangedFiles = async (cwd: string): Promise<readonly string[]> => {
 
 const render = (pkt: EvidencePacket): string => JSON.stringify(pkt, null, 2)
 
+/** Explicit-error result (mirrors run_tests): ok:false + typed failure. */
+const err = (output: string): ToolEvent => ({
+  type: "result",
+  result: { ok: false, output, failure: { mode: "error", modelVisibleError: output } },
+})
+
 export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input> => {
   const fs = deps.fs ?? defaultFileSystemPort
   const testPort = deps.testPort ?? defaultTestRunPort
@@ -99,9 +109,24 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
         return
       }
       const cwd = input.cwd ?? ctx.cwd
+      // Silent-failure guard (jun-10 audit #5): `ok:true` must be reachable
+      // ONLY when the suite actually executed. The builder degrades an
+      // undetected toolchain to an empty packet (failure:null) by contract —
+      // fine for the PACKET, but reporting that as a green RESULT is a
+      // deterministic false green on a tool invoked because a test fails.
+      // Track detection + an actual run through the wired sources.
+      let detected: Toolchain | null = null
+      let suiteRan = false
       const sources: EvidenceSources = {
-        detect: (c) => detectToolchain(c, { fileExists: (name) => fs.fileExists(name, c) }),
-        runTests: (tc, c) => runToolchain(tc, c, testPort, ctx.signal),
+        detect: async (c) => {
+          detected = await detectToolchain(c, { fileExists: (name) => fs.fileExists(name, c) })
+          return detected
+        },
+        runTests: async (tc, c) => {
+          const result = await runToolchain(tc, c, testPort, ctx.signal) // NEVER throws (faults ⇒ synthesized failure)
+          suiteRan = true
+          return result
+        },
         changedFiles: deps.changedFiles ?? gitChangedFiles,
         // static (LSP): wired unless the caller opted out. Host-injected port.
         ...(input.includeStatic !== false && deps.lspStatic !== undefined ? { lspStatic: deps.lspStatic } : {}),
@@ -117,9 +142,24 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
         },
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
       })
+      // Nothing-actually-ran ⇒ explicit error, mirroring run_tests' shape:
+      // an empty packet from an UNDETECTED toolchain is NOT green evidence.
+      if (detected === null) {
+        yield err(
+          "collect_evidence: no recognized test toolchain (looked for Cargo.toml / go.mod / pyproject.toml / setup.py / package.json) — " +
+            "nothing was run, so there is no green evidence. Pass `cwd` pointing at a project root with one of those markers, " +
+            "or use run_tests with an explicit `command`.",
+        )
+        return
+      }
+      if (!suiteRan) {
+        yield err("collect_evidence: the test suite never ran — refusing to report a green result.")
+        return
+      }
       // ok mirrors run_tests: a green suite ⇒ ok:true; a suite with a failure ⇒
       // ok:false (the packet — with `failure` + enrichment — is the payload
       // either way). Consistent with the harness convention (ok:false = red).
+      // Reachable ONLY when the suite actually executed (guards above).
       yield { type: "result", result: { ok: pkt.failure === null, output: render(pkt) } }
     },
   }

@@ -17,6 +17,14 @@
  * We drive the interleaving with the `_afterReadForTest` hook: it fires right
  * after step 1, where we append a fresh row to the real file. After the rewrite
  * completes we assert the appended row SURVIVES (is still present on disk).
+ *
+ * jun-10 silent-failure audit #20 — the RESIDUAL window: the catch-up tail
+ * re-read closes the snapshot→tail-read window, but an append landing AFTER
+ * that re-read and BEFORE the rename (i.e. inside step 3→4, the
+ * write+fsync+rename window) still targets the ORIGINAL inode, which the
+ * rename orphans. The `_beforeRenameForTest` hook fires after the tmp is
+ * written+fsynced and right before the rename — injecting there proves the
+ * post-rename late-tail salvage.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -66,6 +74,61 @@ describe("ROUND-4 retention sweep — concurrent append must not be lost", () =>
     const after = await readFile(path, "utf8")
     // The concurrently-appended NEWEST row must not be lost by the rewrite.
     expect(after.includes(appended)).toBe(true)
+  })
+
+  test("a row appended inside the write→rename window SURVIVES (jun-10 #20 residual race)", async () => {
+    const path = join(dir, "session-c.jsonl")
+    const seed = Array.from({ length: 20 }, (_, i) => `{"i":${i},"pad":"xxxxxxxxxx"}`)
+    await writeFile(path, `${seed.join("\n")}\n`, "utf8")
+
+    const lateAppended = '{"i":1000,"late":true}'
+
+    const res = await applyRetention(path, {
+      maxCumulativeBytes: 120,
+      // Test seam: fires AFTER the tmp file is written+fsynced and BEFORE the
+      // rename — the residual window the pre-rename tail re-read cannot see.
+      _beforeRenameForTest: async () => {
+        await appendRow(path, lateAppended)
+      },
+    })
+
+    expect(res.droppedRows).toBeGreaterThan(0)
+
+    const after = await readFile(path, "utf8")
+    // ZERO row loss: the row appended inside the write→rename window must be
+    // salvaged onto the NEW file post-rename, exactly once.
+    const rows = after.split("\n").filter((l) => l.length > 0)
+    expect(rows.filter((r) => r === lateAppended)).toHaveLength(1)
+    // Newest retained seed row is still there (rewrite itself is intact).
+    expect(rows.includes('{"i":19,"pad":"xxxxxxxxxx"}')).toBe(true)
+    // Every surviving line is a WHOLE row (no torn splice from the salvage).
+    for (const row of rows) expect(() => JSON.parse(row)).not.toThrow()
+  })
+
+  test("appends in BOTH windows (post-read AND write→rename) each survive exactly once", async () => {
+    const path = join(dir, "session-d.jsonl")
+    const seed = Array.from({ length: 20 }, (_, i) => `{"i":${i},"pad":"xxxxxxxxxx"}`)
+    await writeFile(path, `${seed.join("\n")}\n`, "utf8")
+
+    const earlyAppended = '{"i":999,"live":true}'
+    const lateAppended = '{"i":1000,"late":true}'
+
+    const res = await applyRetention(path, {
+      maxCumulativeBytes: 120,
+      _afterReadForTest: async () => {
+        await appendRow(path, earlyAppended)
+      },
+      _beforeRenameForTest: async () => {
+        await appendRow(path, lateAppended)
+      },
+    })
+
+    expect(res.droppedRows).toBeGreaterThan(0)
+
+    const after = await readFile(path, "utf8")
+    const rows = after.split("\n").filter((l) => l.length > 0)
+    expect(rows.filter((r) => r === earlyAppended)).toHaveLength(1)
+    expect(rows.filter((r) => r === lateAppended)).toHaveLength(1)
   })
 
   test("no concurrent append → behaves exactly as before (regression guard)", async () => {

@@ -113,6 +113,18 @@ export const sseDataFromBlock = (block: string): { data: string | null; id: stri
   return { data: data.length === 0 ? null : data.join("\n"), id }
 }
 
+/** How an SSE pump settled (jun-10 silent-failure audit #4). `aborted` is the
+ *  DELIBERATE arm (close() severed the signal); `ended` is a clean stream end
+ *  with no throw; `failed` carries the mid-pump error. Callers decide the
+ *  escalation: a standalone-channel `ended`/`failed` while the transport is
+ *  alive is a DEATH (fireExit so the ADR-0435 supervisor restarts with the
+ *  §1.2 `resumeFromEventId` cursor); a POST-body `failed` rejects its pending
+ *  entry promptly instead of letting it wait out the per-request timeout. */
+interface SsePumpOutcome {
+  readonly outcome: "ended" | "aborted" | "failed"
+  readonly error?: string
+}
+
 /** Pull the JSON-RPC `id` off an outbound payload, if any. A request carries a
  *  string/number `id` and has a pending entry to reject on failure; a
  *  notification has none, so returns `undefined`. */
@@ -339,7 +351,23 @@ export class HttpSseMcpTransport implements McpTransport {
 
       const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
       if (contentType.includes("text/event-stream")) {
-        await this.consumeSseBody(res.body, ctrl.signal)
+        const pump = await this.consumeSseBody(res.body, ctrl.signal)
+        // Audit jun-10 #4 (POST arm): the SSE body carrying the awaited reply
+        // died MID-STREAM. Without this, the pending entry waits out the FULL
+        // per-request timeout — reject it promptly via the same synthesized
+        // envelope the other fast-fail siblings use. `rejectPending` is a
+        // no-op at the client if the reply already landed before the death
+        // (takePending finds nothing), so a post-reply death is harmless. A
+        // clean `ended` is this stream's NORMAL termination, so it stays quiet.
+        if (pump.outcome === "failed" && !this.closed) {
+          logger.warn("mcp: http POST SSE stream failed", {
+            server: this.name,
+            error: pump.error,
+          })
+          if (requestId !== undefined) {
+            this.rejectPending(requestId, `transport POST SSE stream failed: ${pump.error}`)
+          }
+        }
         return
       }
       // Single JSON response.
@@ -390,9 +418,24 @@ export class HttpSseMcpTransport implements McpTransport {
         }),
       ])
     } catch (e) {
-      // Network error opening the channel, or close() aborted the handshake —
-      // proceed POST-only and let the pump settle so close() never wedges.
-      logger.debug("mcp: standalone SSE GET failed", { server: this.name, error: errMessage(e) })
+      // close() aborting the in-flight handshake is DELIBERATE teardown — keep
+      // it at debug and let the pump settle so close() never wedges.
+      if (this.closed || abort.signal.aborted) {
+        logger.debug("mcp: standalone SSE GET aborted by close", {
+          server: this.name,
+          error: errMessage(e),
+        })
+        return
+      }
+      // Audit jun-10 #11 — a REAL network failure opening the channel used to
+      // be conflated with the close()-abort above and silently degrade the
+      // whole session to POST-only. The server→client channel is the
+      // transport's contract: surface the death so the ADR-0435 supervisor can
+      // restart (the replacement re-opens the GET, resuming via §1.2
+      // `Last-Event-ID`). Without a supervisor the client fails pending
+      // promptly instead of half-living on a one-way wire.
+      logger.warn("mcp: standalone SSE GET failed", { server: this.name, error: errMessage(e) })
+      this.fireExit(`mcp server "${this.name}" standalone SSE GET failed: ${errMessage(e)}`)
       return
     }
     // 405 = server has no standalone stream; that's spec-legal, proceed.
@@ -429,7 +472,31 @@ export class HttpSseMcpTransport implements McpTransport {
     } catch {
       return
     }
-    await this.consumeSseBody(res.body, abort.signal)
+    const pump = await this.consumeSseBody(res.body, abort.signal)
+    if (pump.outcome === "aborted" || this.closed) {
+      // Deliberate close()-teardown — close() itself fires the quiet exit.
+      logger.debug("mcp: standalone SSE stream closed", { server: this.name })
+      return
+    }
+    // Audit jun-10 #4 (+ the clean-end sibling): the standalone server→client
+    // channel settled — by mid-stream error OR by ending cleanly — while the
+    // transport is supposed to live. Pre-fix this only debug-logged and
+    // `fireExit` ran solely from close(), so the supervisor stayed "healthy"
+    // over a permanently dead channel and the §1.2 Last-Event-ID resume
+    // machinery was unreachable. fireExit is the documented re-open path: the
+    // client fails pending promptly and the ADR-0435 supervisor (when wired)
+    // mints a replacement seeded with `getLastEventId()` so the server replays
+    // missed events.
+    const detail =
+      pump.outcome === "failed"
+        ? (pump.error ?? "stream error")
+        : "stream ended while the transport is alive"
+    logger.warn("mcp: standalone SSE stream died", {
+      server: this.name,
+      outcome: pump.outcome,
+      detail,
+    })
+    this.fireExit(`mcp server "${this.name}" standalone SSE stream died: ${detail}`)
   }
 
   /** Discard a response body (error path) so the underlying socket is released
@@ -448,12 +515,20 @@ export class HttpSseMcpTransport implements McpTransport {
    *  emitting each event's `data:` payload as a decoded JSON-RPC message.
    *  T01 (audit L9 H12): `signal` (the owning POST / standalone-GET controller)
    *  cancels the reader so `close()` releases the socket instead of leaking it
-   *  behind a server that streams an unbounded body. */
+   *  behind a server that streams an unbounded body.
+   *
+   *  Audit jun-10 #4 — returns HOW the pump settled instead of swallowing a
+   *  mid-stream error at debug, so each caller applies its own escalation
+   *  (see {@link SsePumpOutcome}). A throw with the owning signal already
+   *  aborted is classified `aborted`, not `failed` — reader.cancel() racing
+   *  read() commonly rejects during a deliberate close(). */
   private async consumeSseBody(
     body: ReadableStream<Uint8Array> | null,
     signal?: AbortSignal,
-  ): Promise<void> {
-    if (body === null) return
+  ): Promise<SsePumpOutcome> {
+    // A 200 SSE response with NO body never delivered a channel — report it as
+    // a clean end and let the caller decide whether that violates its contract.
+    if (body === null) return { outcome: "ended" }
     const reader = body.getReader()
     let buffer = ""
     // Resolves the moment the owning signal aborts. We race it against
@@ -476,10 +551,14 @@ export class HttpSseMcpTransport implements McpTransport {
         else signal.addEventListener("abort", fire, { once: true })
       })
     }
+    let outcome: "ended" | "aborted" = "ended"
     try {
       for (;;) {
         const next = await Promise.race([reader.read(), abortWait])
-        if (next === ABORTED) break
+        if (next === ABORTED) {
+          outcome = "aborted"
+          break
+        }
         const { value, done } = next
         if (done) break
         if (value !== undefined) buffer += this.decoder.decode(value, { stream: true })
@@ -503,8 +582,13 @@ export class HttpSseMcpTransport implements McpTransport {
       const parsed = sseDataFromBlock(buffer)
       if (trailingComplete && parsed.id !== null) this.lastEventId = parsed.id
       if (parsed.data !== null) this.decodeAndEmit(parsed.data)
+      return { outcome }
     } catch (e) {
-      logger.debug("mcp: SSE stream ended", { server: this.name, error: errMessage(e) })
+      // Audit jun-10 #4 — classify, don't swallow: an abort-driven rejection
+      // (reader.cancel racing read() during close()) is the deliberate arm;
+      // anything else is a REAL mid-pump failure the caller must escalate.
+      if (signal?.aborted === true) return { outcome: "aborted" }
+      return { outcome: "failed", error: errMessage(e) }
     } finally {
       if (signal !== undefined) signal.removeEventListener("abort", onAbort)
       reader.releaseLock?.()
