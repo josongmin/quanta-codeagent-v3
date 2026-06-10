@@ -62,7 +62,8 @@ const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; s
         else send({ type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1 } })
         break
       case "threads":
-        respond({ threads: [{ id: 1, name: "MainThread" }] })
+        // Two threads model a concurrency dump (dlv reports goroutines here).
+        respond({ threads: [{ id: 1, name: "MainThread" }, { id: 2, name: "goroutine 2" }] })
         break
       case "stackTrace":
         // FOUR frames — real adapters give each frame DISTINCT scope/var refs.
@@ -157,6 +158,8 @@ describe("inspectViaDap — full DAP launch+inspect handshake", () => {
       { name: "n", value: "42", type: "int" },
       { name: "acc", value: "[1, 2]", type: "list" },
     ])
+    // T-03: the thread/goroutine dump is captured (dlv reports goroutines here).
+    expect(r.threads).toEqual([{ id: 1, name: "MainThread" }, { id: 2, name: "goroutine 2" }])
   })
 
   test("MULTI-FRAME: captures locals for the top K frames, caps deeper ones", async () => {
@@ -384,5 +387,69 @@ describe("inspectViaDap — bounded variable-tree expansion", () => {
     const a = deep?.children?.find((c) => c.name === "a")
     expect(a).toBeDefined()
     expect(a?.children).toBeUndefined()
+  })
+})
+
+/**
+ * Exception-aware capture (T-01): a fake that, when `exceptionFilters` are
+ * requested, records them, stops with reason "exception", and answers
+ * `exceptionInfo` — so the driver must call setExceptionBreakpoints in the
+ * config phase and fold the exception type/message into the Inspection.
+ * red-on-injection: drop the setExceptionBreakpoints call ⇒ filters unseen.
+ */
+const makeExceptionAdapter = () => {
+  let toClient: ((c: string | Buffer) => void) | undefined
+  let initialized = false
+  let deferredLaunchSeq: number | undefined
+  let excFilters: unknown
+  const dec = new DapFrameDecoder()
+  const send = (m: unknown) => toClient?.(encodeDapMessage(m))
+  const handle = (req: { seq: number; command: string; arguments?: Record<string, unknown> }) => {
+    const respondTo = (seq: number, command: string, body?: unknown, ok = true) => send({ type: "response", request_seq: seq, success: ok, command, ...(body !== undefined ? { body } : {}) })
+    const respond = (body?: unknown) => respondTo(req.seq, req.command, body)
+    switch (req.command) {
+      case "initialize": respond({ supportsConfigurationDoneRequest: true, supportsExceptionInfoRequest: true }); break
+      case "launch": deferredLaunchSeq = req.seq; initialized = true; send({ type: "event", event: "initialized" }); break
+      case "setExceptionBreakpoints": excFilters = req.arguments?.filters; respond({}); break
+      case "setBreakpoints": initialized ? respond({ breakpoints: [{ verified: true, line: 10 }] }) : respondTo(req.seq, req.command, undefined, false); break
+      case "configurationDone":
+        respond()
+        if (deferredLaunchSeq !== undefined) respondTo(deferredLaunchSeq, "launch")
+        send({ type: "event", event: "stopped", body: { reason: "exception", threadId: 1, text: "RuntimeError" } })
+        break
+      case "threads": respond({ threads: [{ id: 1, name: "MainThread" }] }); break
+      case "stackTrace": respond({ stackFrames: [{ id: 100, name: "boom", line: 12, source: { path: "/p/app.py" } }] }); break
+      case "scopes": respond({ scopes: [{ name: "Locals", variablesReference: 1000 }] }); break
+      case "variables": respond({ variables: [{ name: "n", value: "0", type: "int" }] }); break
+      case "exceptionInfo": respond({ exceptionId: "RuntimeError", description: "boom: division by zero", breakMode: "unhandled" }); break
+      case "terminate": case "disconnect": respond(); send({ type: "event", event: "terminated", body: {} }); break
+      default: respondTo(req.seq, req.command, undefined, false)
+    }
+  }
+  const transport: DapTransport = {
+    send: (data) => { for (const m of dec.push(data)) handle(m as { seq: number; command: string; arguments?: Record<string, unknown> }) },
+    onData: (cb) => { toClient = cb },
+    close: () => {},
+  }
+  return Object.assign(transport, { getFilters: () => excFilters })
+}
+
+describe("inspectViaDap — exception-aware capture (T-01)", () => {
+  test("requests setExceptionBreakpoints, stops on the throw, captures type+message", async () => {
+    const adapter = makeExceptionAdapter()
+    const r = await inspectViaDap(new DapClient(adapter), {
+      adapterID: "python",
+      launch: { program: "/p/app.py" },
+      breakpoints: [],
+      exceptionFilters: ["uncaught", "userUnhandled"],
+    })
+    // The driver MUST have set the exception filters in the config phase.
+    expect((adapter as unknown as { getFilters(): unknown }).getFilters()).toEqual(["uncaught", "userUnhandled"])
+    expect(r.outcome).toBe("stopped")
+    if (r.outcome !== "stopped") return
+    expect(r.reason).toBe("exception")
+    // The exception type + message rode into the Inspection.
+    expect(r.exception).toEqual({ id: "RuntimeError", description: "boom: division by zero" })
+    expect(r.frames[0]?.frame).toBe("boom")
   })
 })

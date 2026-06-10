@@ -35,7 +35,11 @@ import { decorateWithDeltaCounter } from "../token-delta/wm-decorator"
 import { createToolChoiceTurnState } from "../tool-choice"
 import type { TurnSession } from "../turn-context"
 import type { AgentConfig, MemoryCitation } from "../types"
-import { finishAgentSession } from "./session-lifecycle"
+import {
+  disposeSessionResources,
+  finishAgentSession,
+  type SessionDisposeGuard,
+} from "./session-lifecycle"
 import { buildSkillGate } from "./skill-gate"
 import { buildSkillScopeView } from "./skill-scope-view"
 import { sleep } from "./sleep"
@@ -220,6 +224,10 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     ...(cfg.compaction !== undefined ? { tokenBaseline: {} } : {}),
   }
 
+  // D12 — ONE dispose guard shared by the normal finish chain and the throw-path
+  // `finally` in `runAgentInner`, so the resource-dispose pass runs at most once.
+  const disposeGuard: SessionDisposeGuard = { disposed: false }
+
   const finish: FinishAgentSession = async (reason, turns, stopCategory, refusal) =>
     await finishAgentSession({
       cfg,
@@ -234,9 +242,17 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
       lastTurnTiming,
       reason,
       turns,
+      disposeGuard,
       ...(stopCategory !== undefined ? { stopCategory } : {}),
       ...(refusal !== undefined ? { refusal } : {}),
     })
+
+  // D12 — the dispose-only teardown the throw-path `finally` calls. Shares the
+  // guard above, so a clean finish that already disposed makes this a no-op (and
+  // vice-versa). Persist-side snapshots are deliberately NOT run here: a throw
+  // mid-turn has no clean turn-derived state to persist.
+  const disposeResources = async (): Promise<void> =>
+    await disposeSessionResources({ cfg, features, guard: disposeGuard })
 
   return {
     features,
@@ -255,6 +271,7 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     session,
     turnStateSeed,
     finish,
+    disposeResources,
     bgCompaction,
   }
 }

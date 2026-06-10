@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { AgentOutcome } from "@/agent"
+import { createMidTurnApprovalChannel } from "@/apps/cli/repl/mid-turn-approval-channel"
 import { runSessionLoop, type SessionLoopSinks } from "@/apps/cli/repl/session-loop"
 import type { SessionSetupResult } from "@/apps/cli/repl/session-setup"
 import type { Message } from "@/llm"
@@ -133,6 +134,7 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
           },
         },
         identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+        permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         approval: {
           respond: async (
@@ -251,6 +253,9 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
     abort: new AbortController(),
     pills: { dispose: () => undefined, update: () => undefined } as never,
     argPrompt: "needs approval",
+    stderrIsTTY: false,
+    homeDir: "/tmp",
+    midTurnApprovalChannel: createMidTurnApprovalChannel(),
     systemSource: { get: () => "SYS", set: () => undefined },
     refreshSystemPrompt: () => undefined,
     shutdownMcp: async () => undefined,

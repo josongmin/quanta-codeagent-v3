@@ -53,6 +53,12 @@ export interface RuntimeEvidence {
   readonly stack: readonly { readonly name: string; readonly file?: string; readonly line: number }[]
   readonly locals: readonly RuntimeVar[]
   readonly frames?: readonly RuntimeFrame[]
+  /** Set when the runtime stop was an EXCEPTION (break-on-throw) — the throw's
+   *  type + message. */
+  readonly exception?: { readonly type: string; readonly message: string }
+  /** Live threads at the stop (dlv reports goroutines here) — a concurrency dump
+   *  for deadlock/race triage. Bounded; omitted when only the main thread. */
+  readonly threads?: readonly { readonly id: number; readonly name: string }[]
 }
 
 /** Static context around the failure site (from LSP). */

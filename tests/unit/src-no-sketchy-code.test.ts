@@ -340,13 +340,24 @@ const RULES: readonly Rule[] = [
   },
   {
     id: "no-string-error-text-classification",
-    // `String(e).includes(` / `String(err).match(` / `/re/.test(String(error))`
-    // — text-classification of a STRINGIFIED error. Evades the
+    // Text-classification of a STRINGIFIED error — evades the
     // `.message.includes(` ban above by flattening the whole error first
     // (jun-10 silent-failure audit R4, finding #23: lsp-bridge regex-tested
-    // String(e) instead of branching on `LspRequestError.code`). Zero
-    // tolerance: a typed form always exists.
-    pattern: /\.test\(String\((?:e|err|error)\)\)|String\((?:e|err|error)\)\.(?:includes|match)\(/,
+    // String(e) instead of branching on `LspRequestError.code`). This pattern
+    // catches the CLASS, not just the two seed shapes:
+    //   - `String(<err>).<search>(`  where <search> ∈ includes / match /
+    //     search / indexOf / startsWith / endsWith / split / exec
+    //   - `/re/.test(String(<err>))`
+    //   - template coercion: `` `${<err>}`.<search>( ``
+    //   - concat coercion:   `("" + <err>).<search>(`
+    // <err> is scoped to error-typed idents (e | err | error | caught | ex |
+    // reason | cause), optionally with a member access (`String(e.message)`),
+    // so legit `String(count).includes(…)` on a non-error stays clean. The fix
+    // for any match is to branch on the typed field — for the common cases a
+    // typed form exists (`e instanceof LspRequestError && e.code === …`,
+    // `LLMError.kind`/`statusCode`).
+    pattern:
+      /String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\.test\(\s*String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\)\s*\)|`\$\{\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\}`\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\(\s*""\s*\+\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(/,
     why: "Don't classify errors by stringified text — branch on the typed field instead (`e instanceof LspRequestError && e.code === …`, `LLMError.kind`/`statusCode`). Same contract as the `.message.includes(` ban.",
   },
   {
@@ -560,4 +571,51 @@ describe("src/: anti-regression scan (root-cause invariants)", () => {
   test("scan covers a non-empty file set (smoke)", () => {
     expect(files.length).toBeGreaterThan(80)
   }, 30_000)
+})
+
+// D4 (jun-10 audit R4 broaden) — the `no-string-error-text-classification`
+// rule must catch the CLASS of stringified-error text classification, not just
+// the two seed shapes. We exercise the rule's pattern directly against fixtures
+// (the scanner trims+skips comment lines, so we test the raw regex teeth here).
+describe("no-string-error-text-classification: bypass-class coverage", () => {
+  const rule = RULES.find((r) => r.id === "no-string-error-text-classification")
+  const re = (): RegExp => {
+    if (rule === undefined) throw new Error("rule not found")
+    // Fresh regex each call — the source pattern is global-flag-free here, but
+    // re-instantiating avoids any lastIndex statefulness across assertions.
+    return new RegExp(rule.pattern.source, rule.pattern.flags)
+  }
+
+  test("the exact original seed shapes still trip", () => {
+    expect(re().test('if (String(e).includes("timeout")) retry()')).toBe(true)
+    expect(re().test("const m = String(err).match(/429/)")).toBe(true)
+    expect(re().test("if (/ENOENT/.test(String(error))) ignore()")).toBe(true)
+  })
+
+  test("the 4 broadened bypass forms each trip", () => {
+    // Form 1: String(<err>).<other-search-method>( — beyond includes/match.
+    expect(re().test('if (String(e).search("rate") >= 0) retry()')).toBe(true)
+    expect(re().test('String(reason).startsWith("E")')).toBe(true)
+    expect(re().test('String(caught).indexOf("abort")')).toBe(true)
+    expect(re().test('String(ex).split(":")')).toBe(true)
+    expect(re().test('String(e.message).endsWith("timeout")')).toBe(true)
+    // Form 2: /re/.test(String(<err>)) (already a seed, but with a wider ident).
+    expect(re().test("if (/429/.test(String(cause))) backoff()")).toBe(true)
+    // Form 3: template-literal coercion `${e}`.includes(
+    expect(re().test('if (`${e}`.includes("rate limit")) retry()')).toBe(true)
+    expect(re().test("`${err.message}`.match(/ETIMEDOUT/)")).toBe(true)
+    // Form 4: concat coercion ("" + e).includes(
+    expect(re().test('if (("" + e).includes("aborted")) stop()')).toBe(true)
+  })
+
+  test("negative paired control: String(<non-error>).includes stays clean", () => {
+    // The whole point of scoping to error-typed idents: a legit stringify of a
+    // number/length/non-error must NOT trip.
+    expect(re().test('String(count).includes("3")')).toBe(false)
+    expect(re().test('String(n).startsWith("1")')).toBe(false)
+    expect(re().test('String(items.length).includes("0")')).toBe(false)
+    // Plain stringify with no search method is fine (e.g. log formatting).
+    expect(re().test("logger.warn(String(e))")).toBe(false)
+    expect(re().test("const s = String(e)")).toBe(false)
+  })
 })

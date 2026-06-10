@@ -59,8 +59,13 @@ const MAX_EARLY_BUFFERED_MESSAGES = 64
  *  not enough here: we race the queued exit settlement against this short
  *  timeout. A natural/killed exit wins the race in well under a millisecond and
  *  stays quiet; a real wedge (stdout closed, child sleeps) never settles
- *  `proc.exited`, so the timeout wins and the warn + SIGTERM fire promptly. */
-const PUMP_DEATH_EXIT_GRACE_MS = 50
+ *  `proc.exited`, so the timeout wins and the warn + SIGTERM fire promptly.
+ *
+ *  EXPORTED as the single source of truth for this Bun-runtime fact (EOF beats
+ *  the exit fan-out by up to a macrotask): the sibling stdout pumps in the MCP
+ *  stdio transport and the LSP client run the SAME bounded settlement race
+ *  before judging liveness, and must not reinvent the window. */
+export const PUMP_DEATH_EXIT_GRACE_MS = 50
 
 const validateOpts = (opts: SpawnOpts): void => {
   if (!SERVICE_NAME_RE.test(opts.serviceName)) {

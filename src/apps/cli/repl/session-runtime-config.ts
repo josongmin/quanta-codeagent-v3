@@ -48,6 +48,13 @@ export interface SessionRuntimeConfig {
  *  config object so bootstrap and host wiring consume plain data. */
 export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
   const provider = pickProvider()
+  // jun-10 — normalize the positional prompt "" → undefined HERE (the SSOT
+  // seam): `argvPrompt()` returns the joined positionals, which is `""` on a
+  // bare `quanta` launch, but the field is typed `string | undefined` and the
+  // interactive-only gates downstream (welcome banner, ADR-0528 crash-resume
+  // reinject offer) check `=== undefined`. Without this they were dead in real
+  // runs while green in tests (whose stubs passed `undefined`).
+  const rawArgPrompt = argvPrompt()
   return {
     env: process.env,
     stdinIsTTY: process.stdin.isTTY,
@@ -62,7 +69,7 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     mcpConfigPath: resolveMcpConfigPath(process.env),
     spinnerIntervalMs: env("QUANTA_SPINNER_INTERVAL_MS", "80"),
     observeDir: observeDir(),
-    argPrompt: argvPrompt(),
+    argPrompt: rawArgPrompt.length > 0 ? rawArgPrompt : undefined,
     pendingImagePaths: argvImages(),
     newSession: newSessionFlag(),
     title: titleFlag(),

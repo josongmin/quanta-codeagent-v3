@@ -86,6 +86,38 @@ describe("LspClient — stdout pump death while the server process lives (#9)", 
     expect(Date.now() - t0).toBeLessThan(1_000)
   })
 
+  // META-LESSON #1 mirror of the MCP suite: any liveness/exit-ordering guard
+  // over Bun.spawn needs a REAL subprocess — a fake's event ordering is a free
+  // parameter. On a NORMAL shutdown the child closes stdout (settling the pump)
+  // a macrotask BEFORE Bun sets `proc.exitCode` / `proc.killed`, so the
+  // un-backported zero-yield code judges the child "alive" and misfires the
+  // "stdout pump died" warn on EVERY clean exit. The bounded settlement race
+  // must absorb that gap.
+  test("REAL subprocess: a child that prints then exits 0 emits NO pump-death warn (normal shutdown is quiet)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {})
+    try {
+      // Print one (ignored) line, then exit 0 of its own accord — NOT via
+      // stop(). The stdout EOF reaches our pump before `proc.exited` fans out:
+      // the exact race the old zero-yield code lost.
+      client = new LspClient(
+        {
+          defaultCommand: ["/bin/sh", "-c", "printf 'hello\\n'; exit 0"],
+          languageIdFor: () => "plaintext",
+        },
+        { requestTimeoutMs: 300 },
+      )
+      await client.start().catch(() => undefined) // initialize never answered — fine
+      // Let the child fully exit and the pump settle through the grace race.
+      await new Promise((r) => setTimeout(r, 200))
+      // A clean self-exit is a normal shutdown: the watchExit/process-death
+      // path owns it. NO spurious "stdout pump died" warn.
+      const warned = warn.mock.calls.some((c) => String(c[0]).includes("pump died"))
+      expect(warned).toBe(false)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   test("paired control: a DELIBERATE stop() never logs the pump-death warn", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {})
     try {

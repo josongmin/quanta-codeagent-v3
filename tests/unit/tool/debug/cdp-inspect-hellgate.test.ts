@@ -187,3 +187,51 @@ describe("inspectViaCdp — full CDP launch+inspect handshake (node)", () => {
     if (r.outcome === "error") expect(r.message).toMatch(/abort/i)
   })
 })
+
+/**
+ * Exception-aware capture (T-01, CDP): a fake that, when `pauseOnExceptions` is
+ * requested, records the state and pauses with reason "exception" (NO
+ * hitBreakpoints — so the driver must break on the REASON, not just our bp id)
+ * carrying the thrown error's RemoteObject in `data`.
+ */
+const makeExceptionInspector = (): CdpTransport & { state: () => unknown } => {
+  let toClient: ((m: string) => void) | undefined
+  let resumes = 0
+  let pauseState: unknown
+  const send = (m: unknown) => toClient?.(JSON.stringify(m))
+  const t: CdpTransport = {
+    send: (data) => {
+      const req = JSON.parse(data) as { id: number; method: string; params?: Record<string, unknown> }
+      const reply = (result: unknown) => send({ id: req.id, result })
+      switch (req.method) {
+        case "Debugger.setPauseOnExceptions": pauseState = req.params?.state; reply({}); break
+        case "Debugger.setBreakpointByUrl": reply({ breakpointId: "bp1", locations: [{ scriptId: "1", lineNumber: 4 }] }); break
+        case "Runtime.runIfWaitingForDebugger": reply({}); send({ method: "Debugger.paused", params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] } }); break
+        case "Debugger.resume":
+          reply({}); resumes++
+          if (resumes === 1)
+            send({ method: "Debugger.paused", params: { reason: "exception", hitBreakpoints: [], data: { type: "object", subtype: "error", className: "TypeError", description: "TypeError: x is not a function\n    at boom (file:///t/m.mjs:5:3)" }, callFrames: [{ callFrameId: "0", functionName: "boom", url: "file:///t/m.mjs", location: { lineNumber: 4 }, scopeChain: [{ type: "local", object: { objectId: "L0" } }] }] } })
+          break
+        case "Runtime.getProperties": reply({ result: String(req.params?.objectId) === "L0" ? [{ name: "x", value: { type: "undefined" } }] : [] }); break
+        default: reply({})
+      }
+    },
+    onData: (cb) => { toClient = cb },
+    close: () => {},
+  }
+  return Object.assign(t, { state: () => pauseState })
+}
+
+describe("inspectViaCdp — exception-aware capture (T-01)", () => {
+  test("sets pauseOnExceptions, stops on the THROW (no bp hit), captures type+message", async () => {
+    const adapter = makeExceptionInspector()
+    const r = await inspectViaCdp(new CdpClient(adapter), { url: "file:///t/m.mjs", line: 99, pauseOnExceptions: "uncaught" })
+    expect(adapter.state()).toBe("uncaught") // driver armed exception pausing
+    expect(r.outcome).toBe("stopped")
+    if (r.outcome !== "stopped") return
+    expect(r.reason).toBe("exception")
+    // type = className, description = first line of the error description.
+    expect(r.exception).toEqual({ id: "TypeError", description: "TypeError: x is not a function" })
+    expect(r.frames[0]?.frame).toBe("boom")
+  })
+})

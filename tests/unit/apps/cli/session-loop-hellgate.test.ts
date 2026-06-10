@@ -260,6 +260,7 @@ const buildSetup = async (
               },
             },
             identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+            permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
             toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
             approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
             transcript: {
@@ -356,6 +357,8 @@ const buildSetup = async (
       update: () => undefined,
     } as never,
     argPrompt,
+    stderrIsTTY: false,
+    homeDir: "/tmp",
     systemSource: {
       get: () => "SYS",
       set: () => undefined,
@@ -642,6 +645,7 @@ beforeAll(async () => {
               },
             },
             identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+            permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
             toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
             approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
             transcript: {

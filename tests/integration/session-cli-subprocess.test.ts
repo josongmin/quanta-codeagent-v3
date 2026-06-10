@@ -410,6 +410,37 @@ describe("session CLI — subprocess e2e", () => {
   )
 
   test(
+    "T13 — (D3) `--resume <corrupt.json>` exits 1 with the named `fatal: session state file <path>:` message",
+    async () => {
+      // jun-10 audit D3 — a corrupt EXISTING path-mode resume file must NOT
+      // silently reset the transcript (and then let the next save destroy it).
+      // `loadSession` throws a typed `SessionStateLoadError` naming the file; it
+      // propagates RAW (not a SessionBootstrapError) to the CLI's top-level
+      // `main().catch`, which prints `fatal: <message>` via the shared logger
+      // (stderr) and exits 1. This is the end-to-end exit CONTRACT — the highest
+      // reachable seam (the real binary), not an in-process assertion.
+      const corrupt = join(workCwd, "corrupt-resume.json")
+      await writeFile(corrupt, "{this is not valid json")
+      // Path-like token (ends in `.json` AND absolute) ⇒ PATH MODE ⇒ loadSession.
+      const r = await runCli(
+        ["--resume", corrupt],
+        { env: { QUANTA_SESSIONS_DIR: sessionsDir } },
+        workCwd,
+      )
+      expect(r.exit).toBe(1)
+      // The named, file-identifying message — the whole point of throwing loudly
+      // instead of returning null. `errMessage` preserves the Error's message,
+      // which always starts `session state file <path>: …`.
+      expect(r.err).toContain(`session state file ${corrupt}:`)
+      // It is a FATAL load failure (printed via the generic `fatal:` branch), and
+      // the agent loop is never reached (no "quanta ready" on stdout).
+      expect(r.err).toContain("fatal:")
+      expect(r.out).not.toContain("quanta ready")
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  test(
     "T12 — `quanta` with stdin closed (no args) exits cleanly without invoking LLM",
     async () => {
       // The REPL's `rl.question` reads from process.stdin. With stdin=ignore

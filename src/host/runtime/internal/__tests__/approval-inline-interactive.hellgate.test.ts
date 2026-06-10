@@ -86,7 +86,7 @@ describe("inline-interactive — delegation instead of throw", () => {
 
   test("rich decisions pass through VERBATIM (deny_and_steer reaches the gate untouched)", async () => {
     const registry = makeRegistry(() => null)
-    const steer = { decision: "deny_and_steer", steer: "use scripted_replace instead" }
+    const steer = { decision: "deny_and_steer", steer: "use scripted_replace instead" } as const
     const { base } = makeBase(registry, { interactive: true, surface: async () => steer })
     const ctrl = approvalTesting.createRuntimeApprovalProtocolController(base)
 

@@ -1047,6 +1047,10 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     }
 
     await runInteractiveBranch()
+    // Print resume link after clean /exit so the user can continue later.
+    if (setup.stderrIsTTY === true && idMeta !== undefined) {
+      process.stderr.write(`\x1b[2mResume: quanta --resume ${idMeta.id}\x1b[0m\n`)
+    }
   } finally {
     // L5 H-7 — single teardown authority. LIFO drain stops background
     // producers (reactor bridge, automation ticker) and the playbook watcher

@@ -414,3 +414,23 @@ DNODE("debug_inspect — REAL Node e2e via CDP (node --inspect-brk)", () => {
     expect(r?.output).toContain("result = 10") // 0+1+2+3+4
   }, 60_000)
 })
+
+DNODE("debug_inspect — REAL Node break-on-throw via CDP (T-01)", () => {
+  test("exceptionBreakpoints stops at an UNCAUGHT throw and reports the type+message", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "dap-node-exc-")))
+    const prog = join(dir, "boom.mjs")
+    // Uncaught TypeError thrown in user code — no line breakpoint needed.
+    writeFileSync(prog, ["function go() {", "  const obj = null", "  return obj.missing() // throws TypeError", "}", "go()", ""].join("\n"))
+    const tool = makeDebugInspectTool() // real CDP carrier
+    const ctx = { cwd: dir, signal: new AbortController().signal } as ToolContext
+    let r: ToolResult | undefined
+    // Line bp on a NON-EXISTENT line (99) so it never binds/fires — the THROW is
+    // the only stop, proving break-on-throw (not the line bp) caught it.
+    for await (const ev of tool.execute({ program: prog, adapter: "node", breakpoints: [{ file: prog, line: 99 }], exceptionBreakpoints: true } as never, ctx) as AsyncIterable<ToolEvent>)
+      if (ev.type === "result") r = ev.result
+    expect(r?.ok).toBe(true)
+    expect(r?.output).toContain("Stopped (exception)")
+    expect(r?.output).toContain("⚠ Exception")
+    expect(r?.output).toMatch(/TypeError/)
+  }, 60_000)
+})

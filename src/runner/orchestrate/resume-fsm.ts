@@ -185,11 +185,31 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
       conflictError: undefined,
     }
   }
+  // No explicit --resume / --new-session: auto-mint a fresh id so every
+  // interactive session is persisted to disk and resumable by default.
+  const autoId = crypto.randomUUID()
+  const autoNow = Date.now()
+  const autoMeta: SessionMeta = {
+    id: autoId,
+    title: defaultUntitled(autoNow),
+    cwd,
+    createdAt: autoNow,
+    lastTouched: autoNow,
+    archived: false,
+  }
+  await saveSessionById(autoMeta, { reason: "fresh", turns: 0, messages: [] })
+  onSessionMinted?.(autoId)
+  slog.info("session.id_mode.on", {
+    id: autoMeta.id,
+    title: autoMeta.title,
+    cwd: autoMeta.cwd,
+    archived: autoMeta.archived,
+  })
   return {
     history: [],
-    sessionId: initialSessionId,
-    idMeta: undefined,
-    inIdMode: false,
+    sessionId: autoId,
+    idMeta: autoMeta,
+    inIdMode: true,
     missingIdError: undefined,
     conflictError: undefined,
   }

@@ -149,8 +149,12 @@ describe("Session resume e2e — save/load preserves multi-turn transcript and r
     const loaded = await loadSession(path)
     expect(loaded).toBeNull()
 
-    // A fresh runAgent with the empty/loaded history starts from scratch and
-    // still completes — proving the CLI's `loadSession ?? []` pattern is safe.
+    // A fresh runAgent with no prior history starts from scratch and still
+    // completes — proving a missing-file resume degrades gracefully to a fresh
+    // run. NOTE: the real path-mode caller (`@/runner/orchestrate` resolveResume)
+    // does NOT use a `loadSession ?? []` idiom; it branches on `if (prior !==
+    // null)` and returns an explicit empty-history resolution when load is null.
+    // Here we feed `[]` directly to mirror that null branch's effect on runAgent.
     const llm = new ScriptedLLM([ev(text("fresh start"))])
     const config = cfg({
       llm,

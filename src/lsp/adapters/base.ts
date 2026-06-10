@@ -3,6 +3,7 @@ import { readdir, rename, unlink } from "node:fs/promises"
 import { basename, dirname } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { Subprocess } from "bun"
+import { PUMP_DEATH_EXIT_GRACE_MS } from "@/plugin-isolation"
 import { errMessage, logger } from "@/shared"
 import type { LspPort } from "../ports"
 import type {
@@ -1352,6 +1353,23 @@ export class LspClient implements LspPort {
       pumpError = e
     }
     const detail = pumpError === null ? "stdout closed (EOF)" : errMessage(pumpError)
+    // A natural server exit closes stdout (settling this pump) BEFORE Bun sets
+    // `proc.exitCode` and fans out `proc.exited` — by MORE than one microtask
+    // (EOF can beat the exit by a full macrotask hop). Judging liveness with no
+    // yield therefore misfires the "stdout pump died" warn on EVERY normal
+    // shutdown. Run the SAME bounded exit-settlement race the Bun spawner and
+    // the MCP stdio transport use (shared {@link PUMP_DEATH_EXIT_GRACE_MS})
+    // before judging: a natural/killed exit wins in sub-millisecond and stays
+    // quiet; a genuine wedge (stdout closed, server alive forever) times out
+    // and still warns.
+    if (typeof proc.exitCode !== "number" && !proc.killed) {
+      await Promise.race([
+        proc.exited.catch(() => undefined),
+        new Promise<void>((r) => {
+          setTimeout(r, PUMP_DEATH_EXIT_GRACE_MS).unref?.()
+        }),
+      ])
+    }
     // A pump that ends during a deliberate stop() or after process death is
     // routine — stop()/watchExit() already fail the pending set. Otherwise the
     // read channel died while the server process still LIVES: the client is

@@ -230,7 +230,12 @@ describe("gc-truncate hellgate §I — foreign lock ⇒ truncation deferred", ()
   })
 })
 
-describe("gc-truncate hellgate §J — concurrent append ⇒ ZERO row loss", () => {
+// NOTE (D11): this proves only the read→tail-read window — a row appended
+// in that window is carried forward. It does NOT prove the tail-read→rename
+// residual (gc.ts:26-28: an append landing after readAppendedTail but before
+// the rename is still lost). §M below covers the related fail-CLOSED guard for
+// an UNREADABLE tail re-read.
+describe("gc-truncate hellgate §J — append in read→tail-read window carried forward", () => {
   test("row appended between read and rewrite survives the truncation", async () => {
     const root = await tempStorage()
     const now = 100_000_000
@@ -282,6 +287,62 @@ describe("gc-truncate hellgate §J — concurrent append ⇒ ZERO row loss", () 
     expect(Buffer.byteLength(`${keptOriginal.join("\n")}\n`, "utf8")).toBeLessThanOrEqual(250)
     // The gc released its lock — no `.lock` leak in the session dir.
     expect(await fileExists(join(dir, ".lock"))).toBe(false)
+  })
+})
+
+describe("gc-truncate hellgate §M — unreadable tail re-read ⇒ FAIL CLOSED (zero row loss)", () => {
+  test("transient fs failure on the tail re-read aborts the truncate, file byte-identical", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    const rows = Array.from({ length: 100 }, (_, i) => fixedRow(i))
+    const body = `${rows.join("\n")}\n`
+    const dir = await writeSession(root, "tail-unreadable", { lastTouched: now, eventsBody: body })
+    const eventsPath = join(dir, "events.jsonl")
+    const injected = JSON.stringify({
+      kind: "context_update",
+      field: "cwd",
+      prev: "x",
+      next: "y",
+      at: 888_888,
+    })
+    // Land a REAL concurrently-appended row past the snapshot bytes so the
+    // tail re-read genuinely has rows to recover...
+    let appended = 0
+    let tailFailed = 0
+    const res = await sweepDiskRegistry(
+      { storageDir: root, ttlMs: DEFAULT_TTL_MS, maxSessionBytes: 500, now: () => now },
+      {
+        afterReadForTest: async () => {
+          appended += 1
+          await appendFile(eventsPath, `${injected}\n`, "utf8")
+        },
+        // ...then make the tail re-read throw (stat sees the growth, the
+        // open/read fails). The OLD fail-open code returned "" here and let
+        // the rename proceed, DROPPING the injected row. The fail-closed fix
+        // must ABORT instead.
+        failTailReadForTest: async () => {
+          tailFailed += 1
+          throw new Error("simulated transient fs failure on tail re-read")
+        },
+      },
+    )
+    expect(appended).toBe(1)
+    expect(tailFailed).toBe(1)
+    // The truncate ABORTED — nothing reported truncated.
+    expect(res.truncated).toBe(0)
+    // Fresh readback: the file is byte-identical to the post-append on-disk
+    // state — the rename was skipped, so the injected (newest) row survives
+    // and the oversize body is left intact for the next sweep to retry.
+    const after = await readFile(eventsPath, "utf8")
+    expect(after).toBe(`${body}${injected}\n`)
+    // The injected row is present exactly once.
+    const lines = after.split("\n").slice(0, -1)
+    expect(lines.filter((l) => l === injected).length).toBe(1)
+    expect(lines[lines.length - 1]).toBe(injected)
+    // No torn rewrite: no orphaned temp litter, lock released.
+    const entries = await readdir(dir)
+    expect(entries.filter((e) => e.includes(".tmp-"))).toEqual([])
+    expect(entries.includes(".lock")).toBe(false)
   })
 })
 

@@ -33,6 +33,11 @@ export interface InspectSpec {
   readonly breakpoints: readonly DapBreakpoint[]
   /** Optional expression to evaluate in the top frame once stopped. */
   readonly evaluate?: string
+  /** DAP exception-breakpoint filters (e.g. `["uncaught","userUnhandled"]`).
+   *  When set, the adapter ALSO stops at the throw site of a matching exception
+   *  — so a failure with no precise line, or one thrown deep below the test
+   *  frame, is caught AT the throw with its type+message (break-on-throw). */
+  readonly exceptionFilters?: readonly string[]
 }
 
 export interface StackFrameInfo {
@@ -70,6 +75,12 @@ export type Inspection =
       /** Per-frame scopes for the top K frames. `frames[0]` is the stop frame. */
       readonly frames: readonly FrameScopes[]
       readonly evaluated?: { readonly expression: string; readonly result: string }
+      /** Set when the stop was an EXCEPTION (reason "exception") and the adapter
+       *  answered `exceptionInfo` — the throw's type + message. */
+      readonly exception?: { readonly id: string; readonly description: string }
+      /** The live threads at the stop (dlv reports goroutines here) — a
+       *  concurrency dump. Bounded; empty/absent when the adapter doesn't answer. */
+      readonly threads?: readonly { readonly id: number; readonly name: string }[]
     }
   | { readonly outcome: "exited"; readonly exitCode?: number; readonly breakpointsBound?: boolean }
   | { readonly outcome: "error"; readonly message: string }
@@ -99,6 +110,8 @@ const MAX_VAR_DEPTH = 2
 const MAX_CHILDREN_PER_VAR = 16
 /** Global budget on total variable nodes materialized across ALL frames. */
 const MAX_TOTAL_VARS = 200
+/** Cap on threads/goroutines surfaced in the concurrency dump. */
+const MAX_THREADS = 50
 
 const asObj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {})
 const asArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
@@ -250,6 +263,16 @@ export const inspectViaDap = async (
       }
       if (asArr(asObj(bpRes.body).breakpoints).some((b) => asObj(b).verified === true)) anyVerified = true
     }
+    // Break-on-throw: arm exception breakpoints (best-effort — an adapter that
+    // doesn't support them just answers an error, which we ignore). MUST be in
+    // the config phase, like setBreakpoints, before configurationDone.
+    if (spec.exceptionFilters !== undefined && spec.exceptionFilters.length > 0) {
+      await withTimeout<DapResponse>(
+        client.request("setExceptionBreakpoints", { filters: [...spec.exceptionFilters] }),
+        stopTimeoutMs,
+        { success: false, message: "setExceptionBreakpoints timed out" },
+      )
+    }
     await client.request("configurationDone")
 
     // Race the breakpoint hit against the program terminating / launch failing.
@@ -348,6 +371,27 @@ export const inspectViaDap = async (
       if (evRes.success) evaluated = { expression: spec.evaluate, result: str(asObj(evRes.body).result, "") }
     }
 
+    // Concurrency dump: list the live threads (dlv maps goroutines onto DAP
+    // threads). Best-effort + bounded; absent when the adapter doesn't answer.
+    const thRes = await timed("threads")
+    const threads = asArr(asObj(thRes.body).threads)
+      .slice(0, MAX_THREADS)
+      .map((t) => ({ id: num(asObj(t).id), name: str(asObj(t).name, "?") }))
+
+    // If we stopped ON an exception, pull its type+message (break-on-throw). The
+    // `text` on the stopped event is a fallback id when exceptionInfo is absent.
+    let exception: { id: string; description: string } | undefined
+    if (reason === "exception") {
+      const exRes = await timed("exceptionInfo", { threadId })
+      if (exRes.success) {
+        const eb = asObj(exRes.body)
+        exception = { id: str(eb.exceptionId, str(asObj(stopped.body).text, "exception")), description: str(eb.description) }
+      } else {
+        const text = str(asObj(stopped.body).text)
+        if (text.length > 0) exception = { id: text, description: "" }
+      }
+    }
+
     // Best-effort teardown — fire `terminate` but NEVER block on it (lldb-dap
     // doesn't answer it at a breakpoint). `dispose()` kills the child process
     // outright, so cleanup is guaranteed regardless of the terminate response.
@@ -361,7 +405,7 @@ export const inspectViaDap = async (
     )
     client.dispose()
 
-    return { outcome: "stopped", reason, stack, frames, ...(evaluated !== undefined ? { evaluated } : {}) }
+    return { outcome: "stopped", reason, stack, frames, ...(evaluated !== undefined ? { evaluated } : {}), ...(exception !== undefined ? { exception } : {}), ...(threads.length > 0 ? { threads } : {}) }
   } catch (e) {
     client.dispose()
     return { outcome: "error", message: e instanceof Error ? e.message : String(e) }

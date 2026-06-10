@@ -1,5 +1,5 @@
 /** Plugin process isolation slice (ADR-0162). Barrel. */
-export { createBunSpawner } from "./bun-spawner"
+export { createBunSpawner, PUMP_DEATH_EXIT_GRACE_MS } from "./bun-spawner"
 export type { DxtErrorKind, DxtManifest } from "./dxt-loader"
 export {
   DxtError,

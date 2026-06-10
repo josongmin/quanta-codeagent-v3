@@ -22,10 +22,17 @@
  *      ATOMIC (tmp + rename in the same directory) with a lost-update
  *      tail merge: rows appended after the locked snapshot read are
  *      re-read and carried forward so the rename never drops a
- *      concurrently-appended (newest) row. Mirrors the LOST-UPDATE GUARD
- *      in `src/stream/adapters/jsonl-retention.ts`. Residual window: an
+ *      concurrently-appended (newest) row. The tail re-read FAILS CLOSED:
+ *      a transient fs error (stat/open/read throwing while the file DID
+ *      grow) aborts the truncate so the next sweep retries instead of
+ *      clobbering unread rows. Mirrors the LOST-UPDATE GUARD in
+ *      `src/stream/adapters/jsonl-retention.ts`. Residual window: an
  *      append landing between the tail re-read and the rename can still
  *      be lost — same documented residual as the retention slice.
+ *      ("ATOMIC" here means tear-free, not durable: an fsync is not
+ *      forced, so a power loss between rename and the OS flushing the
+ *      directory entry can still lose the rewrite — non-durable by design,
+ *      acceptable for a best-effort GC.)
  *
  * NO-THROW: every filesystem call is wrapped; permission errors / race
  * conditions degrade to "no-op for this entry" so a hostile filesystem
@@ -149,6 +156,14 @@ export interface SweepTestHooks {
    *  simulates a crash mid-rewrite — the original file must stay
    *  intact. NO-OP when absent. */
   readonly beforeRenameForTest?: () => Promise<void>
+  /** Invoked INSIDE {@link readAppendedTail} AFTER `stat` has confirmed
+   *  the file grew past the snapshot (so genuine appended rows DO exist)
+   *  but BEFORE the open/read that would recover them. Throwing here
+   *  simulates a transient fs failure on the tail re-read — the
+   *  fail-CLOSED guard must then ABORT the truncate (leave the original
+   *  file byte-identical) rather than clobber the unread rows. NO-OP when
+   *  absent. */
+  readonly failTailReadForTest?: () => Promise<void>
 }
 
 /** GC acquires the per-session lock in "try once + fail immediately"
@@ -188,31 +203,50 @@ const readBodyWithSize = async (path: string): Promise<{ body: string; bytes: nu
   }
 }
 
+/** Typed result of a tail re-read. `ok:true` carries the recovered tail
+ *  (`""` ONLY when the file legitimately did not grow past `fromByte`);
+ *  `ok:false` signals a TRANSIENT fs failure (stat/open/read threw) while
+ *  growth was POSSIBLE — the caller must FAIL CLOSED (abort the truncate)
+ *  rather than treat an unreadable tail as "no rows appended". */
+type TailReadResult = { readonly ok: true; readonly tail: string } | { readonly ok: false }
+
 /** Read the raw bytes appended to `path` AFTER byte offset `fromByte`
- *  (the size at snapshot time). Returns `""` when the file did not grow.
- *  POSIX O_APPEND is atomic per write, so the grown tail is always a
- *  sequence of WHOLE rows. NO-THROW. */
-const readAppendedTail = async (path: string, fromByte: number): Promise<string> => {
+ *  (the size at snapshot time). POSIX O_APPEND is atomic per write, so
+ *  the grown tail is always a sequence of WHOLE rows.
+ *
+ *  FAIL-CLOSED: returns `{ ok:false }` on any stat/open/read failure so a
+ *  transient fs error cannot masquerade as "no growth" and let the rename
+ *  silently drop concurrently-appended rows (jun-10 silent-failure audit
+ *  D2). `{ ok:true, tail:"" }` is returned ONLY for a genuine no-growth
+ *  (`size <= fromByte`) read. */
+const readAppendedTail = async (
+  path: string,
+  fromByte: number,
+  failTailReadForTest?: () => Promise<void>,
+): Promise<TailReadResult> => {
   let size: number
   try {
     size = (await stat(path)).size
   } catch {
-    return ""
+    return { ok: false }
   }
-  if (size <= fromByte) return ""
+  if (size <= fromByte) return { ok: true, tail: "" }
+  // Growth confirmed past the snapshot: from here on, any failure means
+  // we KNOW rows exist that we could not read — fail closed.
   let handle: Awaited<ReturnType<typeof open>>
   try {
+    if (failTailReadForTest !== undefined) await failTailReadForTest()
     handle = await open(path, "r")
   } catch {
-    return ""
+    return { ok: false }
   }
   try {
     const len = size - fromByte
     const buf = Buffer.alloc(len)
     await handle.read(buf, 0, len, fromByte)
-    return buf.toString("utf8")
+    return { ok: true, tail: buf.toString("utf8") }
   } catch {
-    return ""
+    return { ok: false }
   } finally {
     try {
       await handle.close()
@@ -281,8 +315,14 @@ const truncateFileAtomic = async (
   // tail and carry it forward so the rename never drops a newest row.
   // The merged body may transiently exceed `budget`; the next sweep
   // re-truncates.
-  const tail = await readAppendedTail(path, snapshot.bytes)
-  const next = joinRetainedWithTail(kept, tail)
+  const tailRes = await readAppendedTail(path, snapshot.bytes, hooks?.failTailReadForTest)
+  // FAIL-CLOSED: a transient fs failure on the tail re-read (growth was
+  // possible but unreadable) ⇒ ABORT the truncate. Leaving the original
+  // file intact lets the next sweep retry — clobbering it via the rename
+  // would SILENTLY DROP the concurrently-appended rows we just failed to
+  // read (jun-10 silent-failure audit D2).
+  if (!tailRes.ok) return false
+  const next = joinRetainedWithTail(kept, tailRes.tail)
   return writeAtomicTruncateSafe(path, next, hooks?.beforeRenameForTest)
 }
 

@@ -85,7 +85,15 @@ export const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> 
     return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))
   } finally {
     await diagnosticsHook?.dispose()
-    await ctx.features.browserDispose?.().catch(() => {})
-    await ctx.features.appshotDispose?.().catch(() => {})
+    // D12 — run the resource-DISPOSE teardown on BOTH the normal-completion AND
+    // the throw paths. A mid-turn uncaught throw (e.g. a `SessionApprovalRequired`
+    // escape) skips `ctx.finish`, so without this the resident side-agent daemons
+    // (un-unref'd wake `setInterval`s) / skill-MCP / background bash shells leak
+    // past session end. Idempotent: `ctx.finish` and this call share ONE dispose
+    // guard, so the clean path disposes exactly once. Browser/appshot are folded
+    // into `disposeResources` (the prior standalone `browserDispose`/`appshotDispose`
+    // here were a partial subset of the same teardown — now unified, no double
+    // dispose because the guard short-circuits).
+    await ctx.disposeResources()
   }
 }

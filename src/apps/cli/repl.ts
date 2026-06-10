@@ -18,6 +18,7 @@ import { createIdleMonitor } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
 import {
+  argvPrompt,
   buildAutoTitlePort,
   buildLLMWithByok,
   buildSkillsConfig,
@@ -25,9 +26,11 @@ import {
   buildTooling,
   composeLLM,
   loadFeatures,
+  newSessionFlag,
   pickIdentity,
   pickPersona,
   resolveResume,
+  resumePath,
 } from "./internal"
 import { createRejectCounter } from "./reject-counter"
 import type { CliFeatureConfig } from "./repl/cli-feature-config"
@@ -274,11 +277,62 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   installPills,
 }
 
+/** Show a numbered session picker at startup when the user hasn't passed any
+ *  resume/new-session flags. If the user picks a previous session, injects
+ *  `--resume <id>` into process.argv so setupSession picks it up via the
+ *  normal resumePath() path. TTY-only; no-op in piped/one-shot/headless mode. */
+const maybePickSession = async (): Promise<void> => {
+  if (!process.stderr.isTTY) return
+  if (resumePath() !== undefined) return
+  if (newSessionFlag()) return
+  if (argvPrompt().length > 0) return
+
+  const sessions = (await listSessions({ includeArchived: false })).slice(0, 10)
+  if (sessions.length === 0) return
+
+  const home = process.env.HOME ?? ""
+  const shorten = (p: string) =>
+    home && p.startsWith(home) ? `~${p.slice(home.length)}` : p
+  const relTime = (ms: number): string => {
+    const d = Date.now() - ms
+    if (d < 60_000) return "just now"
+    if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`
+    if (d < 86_400_000) return `${Math.round(d / 3_600_000)}h ago`
+    return `${Math.round(d / 86_400_000)}d ago`
+  }
+
+  process.stderr.write("\x1b[2mRecent sessions:\x1b[0m\n")
+  for (let i = 0; i < sessions.length; i++) {
+    const s = sessions[i]!
+    const title = s.title.length > 44 ? `${s.title.slice(0, 41)}…` : s.title
+    const age = relTime(s.lastTouched)
+    process.stderr.write(
+      `  \x1b[2m[${i + 1}]\x1b[0m ${title}  \x1b[2m${shorten(s.cwd)}  ${age}\x1b[0m\n`,
+    )
+  }
+  process.stderr.write("  \x1b[2m[N]\x1b[0m New session\n")
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+  const ans = (
+    await rl.question(
+      `\x1b[2mResume a session? [1-${sessions.length} or Enter for new]: \x1b[0m`,
+    )
+  ).trim()
+  rl.close()
+
+  if (ans === "" || ans.toLowerCase() === "n") return
+  const num = parseInt(ans, 10)
+  if (!isNaN(num) && num >= 1 && num <= sessions.length) {
+    process.argv.push("--resume", sessions[num - 1]!.id)
+  }
+}
+
 /** Thin orchestrator over the 6 helpers under `src/apps/cli/repl/`:
  *  `setupSession` → `composePromptPipeline` → `runOneTurn` → `installTurnCancel`
  *  → `SessionState` → `runSessionLoop`. The host owns slashCtx composition +
  *  per-turn render sinks; byte-identical default behavior. */
 export const runRepl = async (): Promise<void> => {
+  await maybePickSession()
   const convStore = defaultConversationCheckpointStore()
   const responsesStore = defaultResponsesContinuationStore()
   const setup = await setupSession(sessionSetupDeps, { convStore, responsesStore })
@@ -293,9 +347,9 @@ export const runRepl = async (): Promise<void> => {
     // Claude-Code-style entry box). Interactive + TTY only: one-shot
     // (`argPrompt`), piped and eval launches never see it (byte-identical).
     // stderr, like every other surface chrome — stdout stays the agent stream.
-    if (setup.argPrompt === undefined && process.stderr.isTTY === true) {
+    if (setup.argPrompt === undefined && setup.stderrIsTTY === true) {
       process.stderr.write(
-        `${renderWelcomeBanner(buildWelcomeInfo(setup, process.env.HOME))}\n`,
+        `${renderWelcomeBanner(buildWelcomeInfo(setup, setup.homeDir.length > 0 ? setup.homeDir : undefined))}\n`,
       )
     }
     // H13 — gated external-config migration notice (default-OFF behind
@@ -336,7 +390,7 @@ export const runRepl = async (): Promise<void> => {
     let crashResumeSeeds: readonly string[] | undefined
     if (
       setup.argPrompt === undefined &&
-      process.stderr.isTTY === true &&
+      setup.stderrIsTTY === true &&
       crashResumeEnabled(process.env)
     ) {
       const offers = await bootstrapCrashResumeOffers(

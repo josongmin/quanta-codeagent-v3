@@ -157,6 +157,21 @@ export const parseNodeTest = (output: string): TestRunResult => {
     else if ((m = /^not ok \d+ - (.+)$/.exec(l)) !== null) addName(m[1]!) // TAP
     else if ((m = /^[✕×]\s+(.+)$/.exec(l)) !== null) addName(m[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
   }
+  // mocha uses neither shape — it prints a `N failing` count + numbered `N) name`
+  // entries (summary list first, then per-failure detail). Harvest exactly
+  // `failing`-many numbered names (the summary list comes first, so we stop
+  // before the detail `N) <suite>` headers). Gated on a real failing count so a
+  // passing run can't be mis-read.
+  if (failedNames.length === 0) {
+    const failing = Number(/(\d+)\s+failing\b/.exec(output)?.[1] ?? "0")
+    if (failing > 0) {
+      for (const raw of lines) {
+        const mm = /^\s*\d+\)\s+(.+?)\s*$/.exec(raw)
+        if (mm !== null) addName(mm[1]!)
+        if (failedNames.length >= failing) break
+      }
+    }
+  }
 
   // User-source locations + error messages in document order.
   const locs: { file: string; line: number }[] = []

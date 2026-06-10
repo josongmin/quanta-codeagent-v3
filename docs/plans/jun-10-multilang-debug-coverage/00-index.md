@@ -63,6 +63,10 @@
 | D09 | pytest 러너 | testrun/parse.ts `parsePytest` | 정확성갭 해소(pyproject→pytest 선호), verbatim+라이브 검증 |
 | D10 | Node CDP 런타임 | debug/cdp-{client,inspect}.ts, port.ts | **첫 non-DAP carrier**; `node --inspect-brk`+CDP, 동일 Inspection 셰이프(toRuntime 재사용), 실 e2e |
 | D11 | debug_inspect node carrier | debug/tool.ts `adapter:"node"` | 인터랙티브 디버거도 CDP, 헬게이트 2 + 실 node 도구 e2e |
+| D12 | **exception-aware breakpoint (T-01)** | inspect-driver(DAP setExceptionBreakpoints+exceptionInfo)·cdp-inspect(setPauseOnExceptions)·tool `exceptionBreakpoints` | break-on-throw. DAP+CDP 드라이버 헬게이트 + 실 node break-on-throw e2e(TypeError throw 지점 포착). node "uncaught"→"all"(top-level 래퍼 특성, 측정확인). `RuntimeEvidence.exception` plumbing. **scope: debug_inspect 도구 reachable**; collect_evidence line-less 폴백은 follow-up(line-bp 일차성 유지=assert-internal-frame 회피) |
+| D13 | **coverage-matrix drift ratchet (T-05)** | tests/unit/tool/keystone-coverage-matrix-ratchet-hellgate.test.ts | 4언어×3축 독립 리터럴 앵커(failure detect / static lsp / runtime carrier exhaustive Record). 언어칸 드롭→red. 3도구 manifest GATED·knob·gate 확인. **완성 durable 락** |
+| D14 | **JS 러너 라우팅 (T-02)** | evidence/node-runner.ts, runtime.ts nodeRuntime | jest --runInBand / mocha / node:test 단일프로세스 CDP. 순수 detectJsRunner+nodeInspectArgv+헬게이트. **실 mocha e2e**(npm i mocha→`result=10`). vitest degrade. |
+| D15 | **thread/goroutine dump (T-03)** | inspect-driver.ts threads 캡처 | DAP `threads`(dlv→goroutine) bounded→`RuntimeEvidence.threads`(>1). 동시성 버그 triage. 헬게이트+실 toolchain 그린. (Vec/HashMap pretty-printer=follow-up) |
 
 ---
 
@@ -70,11 +74,14 @@
 
 | # | 티켓 | 기능 | ROI | 충돌주의 |
 |---|---|---|---|---|
-| [T-01](01-exception-aware-breakpoints.md) | exception-aware breakpoint | break-on-throw: 정밀 failure-line 없거나 예외가 깊은 곳서 throw될 때 throw 지점서 정지+예외정보 | **높음**(SOTA, 전 언어, false-line 회피) | inspect-driver.ts/cdp-inspect.ts(동시 co-dev) |
+| ~~T-01~~ ✅ | ~~exception-aware breakpoint~~ | **DONE → D12.** break-on-throw DAP+CDP 드라이버+도구 reachable. (collect_evidence line-less 폴백만 follow-up) | — | — |
 | [T-02](02-runner-orchestrated-js-runtime.md) | 러너-orchestrate JS runtime | jest/vitest/단순.ts 단일파일 CDP 실행(현재 node:test 자체실행만) | 중(JS 런타임 커버 확대) | runtime.ts |
 | [T-03](03-language-pretty-printers.md) | 언어 pretty-printer + goroutine dump | Rust Vec/HashMap/Arc·Go goroutine·Py dataclass 가독 렌더 | 중(evidence 가독성) | 없음(신규 매핑층) |
 | [T-04](04-tier2-languages.md) | Tier-2 언어 | C++(clangd)·Java(jdtls/java-debug)·C#(Roslyn/netcoredbg) | 저-중(점진) | 없음(OCP 증분) |
-| [T-05](05-tracking-fc-ratchet-dod-gate.md) | tracking + fc + ratchet + DoD CI 게이트 | §4를 ratchet/fc로 영구 가드, 새 언어칸 회귀 방지 | **높음**(완성 유지) | fc(동시 co-dev) |
+| ~~T-02~~ ✅ | 러너-orchestrate JS runtime | **DONE → D14.** jest(`--runInBand`)+mocha+node:test 단일프로세스 라우팅(detectJsRunner+nodeInspectArgv 순수+헬게이트, vitest=worker-pool degrade). 실 mocha e2e(`result=10` CDP 포착)+verbatim mocha 파서. | — | — |
+| ~~T-03~~ ✅ | thread/goroutine dump | **DONE → D15.** plan의 goroutine dump 일반화: DAP `threads`(dlv→goroutine, debugpy→thread) bounded 캡처→`RuntimeEvidence.threads`(>1일때만). 헬게이트(2-goroutine)+실 toolchain 스위트 그린. pretty-printer(Vec/HashMap)는 config-의존·verbatim핀 불가→follow-up. | — | — |
+| ~~T-04~~ ⛔ | Tier-2 언어(C++/Java/C#) | **BLOCKED — toolchain 부재.** clangd/jdtls/netcoredbg 미설치라 검증불가→**inert 코드 안 짬**(§4 "실물+복수구현 검증 필수" 불변식). 티켓이 OCP 패턴 문서화; toolchain 가용시 언어당 증분. | 저-중 | — |
+| ~~T-05~~ ✅ | tracking + ratchet + DoD 게이트 | **DONE → D13.** 16칸 매트릭스 drift ratchet(독립 리터럴, red-on-injection) + 3도구 manifest GATED/knob-inventory/gate 확인 + repo-green 게이트 통과. (fc 엔트리/ADR 넘버링은 D06~D12가 기존 도구·슬라이스 확장이라 신규 불요) | — | fc(동시 co-dev) |
 
 > **다음 결정 1개만**: (A) 키스톤 여기서 CLOSE (T-05만 돌려 못박고 종료) / (B) T-01(exception-aware)을 DoD §1에 끌어올려 다음 스코프 OPEN. 어느 쪽이든 이 인덱스 기준으로 한 번에 간다.
 

@@ -87,6 +87,11 @@ export interface RunAgentContext {
   readonly session: TurnSession
   readonly turnStateSeed: RunAgentTurnStateSeed
   readonly finish: FinishAgentSession
+  /** D12 — resource-DISPOSE-only teardown (no persist-side snapshots). Called
+   *  from the `runAgentInner` `finally` so a mid-turn uncaught throw still stops
+   *  the resident daemons / skill-MCP / bg shells. Idempotent w.r.t. `finish`
+   *  (they share one dispose guard). */
+  readonly disposeResources: () => Promise<void>
   readonly bgCompaction: BackgroundSummarizationController<BgSummaryPayload> | undefined
 }
 

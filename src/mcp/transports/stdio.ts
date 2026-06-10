@@ -22,6 +22,7 @@
  *  `proxyEnv.address` leaves `withProxyEnv` a no-op (same env, no proxy keys). */
 
 import type { Subprocess } from "bun"
+import { PUMP_DEATH_EXIT_GRACE_MS } from "@/plugin-isolation"
 import { type ProxyEnvInput, withProxyEnv } from "@/runtime/network-proxy"
 import { errMessage, logger } from "@/shared"
 import { encodeMessage, LineReader } from "../jsonrpc"
@@ -235,10 +236,24 @@ export class StdioMcpTransport implements McpTransport {
     } catch (e) {
       pumpError = e
     }
-    // Let an already-settled `proc.exited` fan-out (watchExit) run first — its
-    // `.then` continuation was queued before this one — so a normal child
-    // death is never misreported as a pump death.
-    await Promise.resolve()
+    // A natural child exit closes stdout (settling this pump) BEFORE Bun sets
+    // `proc.exitCode` and fans out `proc.exited` — empirically by MORE than one
+    // microtask (EOF can beat the exit by a full macrotask hop). A single
+    // `await Promise.resolve()` therefore loses the race on every normal
+    // shutdown and misfires "stdout pump died". Run the SAME bounded
+    // exit-settlement race the Bun spawner uses (shared
+    // {@link PUMP_DEATH_EXIT_GRACE_MS}) before judging liveness: a natural or
+    // killed exit wins in sub-millisecond and stays quiet; a genuine wedge
+    // (stdout closed, child alive forever) times out and still warns.
+    const proc = this.proc
+    if (proc !== null && typeof proc.exitCode !== "number" && !proc.killed) {
+      await Promise.race([
+        proc.exited.catch(() => undefined),
+        new Promise<void>((r) => {
+          setTimeout(r, PUMP_DEATH_EXIT_GRACE_MS).unref?.()
+        }),
+      ])
+    }
     this.handlePumpDeath(pumpError)
   }
 

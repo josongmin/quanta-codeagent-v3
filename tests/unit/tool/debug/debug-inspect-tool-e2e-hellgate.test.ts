@@ -114,6 +114,38 @@ describe("debug_inspect — full-stack hellgate", () => {
     expect(dapSpawned).toBe(false) // node never spawns a DAP adapter
   })
 
+  test("NODE preset + exceptionBreakpoints: break-on-throw renders the exception", async () => {
+    // Fake that arms pauseOnExceptions and stops on a THROW (no bp hit).
+    const excCdp = (): CdpTransport => {
+      let toClient: ((m: string) => void) | undefined
+      let resumes = 0
+      const send = (m: unknown) => toClient?.(JSON.stringify(m))
+      return {
+        send: (data) => {
+          const req = JSON.parse(data) as { id: number; method: string; params?: Record<string, unknown> }
+          const reply = (result: unknown) => send({ id: req.id, result })
+          switch (req.method) {
+            case "Debugger.setBreakpointByUrl": reply({ breakpointId: "bp1", locations: [{ scriptId: "1", lineNumber: 4 }] }); break
+            case "Runtime.runIfWaitingForDebugger": reply({}); send({ method: "Debugger.paused", params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] } }); break
+            case "Debugger.resume":
+              reply({}); resumes++
+              if (resumes === 1) send({ method: "Debugger.paused", params: { reason: "exception", hitBreakpoints: [], data: { className: "TypeError", description: "TypeError: boom\n  at go" }, callFrames: [{ callFrameId: "0", functionName: "go", url: "file:///w/x.mjs", location: { lineNumber: 4 }, scopeChain: [{ type: "local", object: { objectId: "L0" } }] }] } })
+              break
+            case "Runtime.getProperties": reply({ result: [] }); break
+            default: reply({})
+          }
+        },
+        onData: (cb) => { toClient = cb },
+        close: () => {},
+      }
+    }
+    const tool = makeDebugInspectTool(fakePort(fakeAdapterTransport()), async () => excCdp())
+    const r = await run(tool, { program: "/w/x.mjs", adapter: "node", breakpoints: [{ file: "/w/x.mjs", line: 5 }], exceptionBreakpoints: true })
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("Stopped (exception)")
+    expect(r.output).toContain("⚠ Exception: TypeError: TypeError: boom")
+  })
+
   test("NODE preset: a CDP carrier fault ⇒ ok:false, never throws", async () => {
     const tool = makeDebugInspectTool(fakePort(fakeAdapterTransport()), () => { throw new Error("node inspector unreachable") })
     const r = await run(tool, { program: "/w/x.mjs", adapter: "node", breakpoints: [{ file: "/w/x.mjs", line: 5 }] })

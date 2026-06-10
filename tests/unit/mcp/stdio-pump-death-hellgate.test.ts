@@ -220,7 +220,7 @@ describe("StdioMcpTransport — stdout pump death while the server process lives
     await client.stop().catch(() => undefined)
   })
 
-  test("paired control: a REAL process exit is reported as 'exited', never as pump death", async () => {
+  test("paired control: a REAL process exit is reported as 'exited', never as pump death (REAL Bun ordering: EOF FIRST, exit a macrotask later)", async () => {
     const ps = pushableStdout()
     let resolveExit: (n: number) => void = () => {}
     const fakeProc = liveFakeProc(ps.stream, {
@@ -237,10 +237,21 @@ describe("StdioMcpTransport — stdout pump death while the server process lives
     const warn = spyOn(logger, "warn").mockImplementation(() => {})
     try {
       await transport.start()
-      // Child dies for real: exitCode set, exited settles, stream then ends.
-      fakeProc.exitCode = 0
-      resolveExit(0)
+      // Child dies for real, modelling the REAL Bun fan-out ordering that the
+      // old single-`await Promise.resolve()` MASKED: stdout EOF settles the
+      // pump FIRST, while `proc.exitCode` is still null and `proc.exited` is
+      // still pending; Bun only sets the exit code and fans out `proc.exited`
+      // a full macrotask LATER. The bounded settlement race must absorb that
+      // gap before judging liveness — a single microtask yield does not.
       ps.end()
+      const exitSettled = new Promise<void>((r) => {
+        setTimeout(() => {
+          fakeProc.exitCode = 0
+          resolveExit(0)
+          r()
+        }, 1)
+      })
+      await exitSettled
       await sleep(SETTLE_TICK_MS)
       expect(reasons).toHaveLength(1)
       expect(String(reasons[0])).toMatch(/exited/)
@@ -281,6 +292,56 @@ describe("StdioMcpTransport — stdout pump death while the server process lives
       expect(warn.mock.calls.some((c) => String(c[0]).includes("pump"))).toBe(false)
     } finally {
       warn.mockRestore()
+    }
+  })
+
+  // META-LESSON #1: any liveness/exit-ordering guard over Bun.spawn needs at
+  // least one REAL-SUBPROCESS test. A fake's event ordering is a free parameter
+  // that can be (and was) tuned to pass; only a real child exercises Bun's true
+  // fan-out timing (stdout EOF settles BEFORE `proc.exitCode` / `proc.exited`).
+  test("REAL subprocess: a child that prints then exits 0 reports 'exited', NEVER 'pump died', and emits NO pump-death warn", async () => {
+    // Real child: emit one JSON-RPC line on stdout, then exit cleanly. On real
+    // Bun the stdout EOF reaches our pump a macrotask before `proc.exited`
+    // fans out — the exact race the old `await Promise.resolve()` lost.
+    const realCfg: McpServerConfig = {
+      name: "realexit",
+      command: ["/bin/sh", "-c", `printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}'; exit 0`],
+    }
+    const transport = new StdioMcpTransport(realCfg)
+    const reasons: Array<string | undefined> = []
+    let fireFired: () => void = () => {}
+    const fired = new Promise<void>((r) => {
+      fireFired = r
+    })
+    transport.onExit((reason) => {
+      reasons.push(reason)
+      fireFired()
+    })
+    const messages: unknown[] = []
+    transport.onMessage((m) => messages.push(m))
+    const warn = spyOn(logger, "warn").mockImplementation(() => {})
+    try {
+      await transport.start()
+      // The exit MUST fire (the child really exited) — bounded so a regression
+      // that hangs the settlement race fails loudly instead of timing out the
+      // whole suite.
+      const outcome = await Promise.race([
+        fired.then(() => "exit-fired" as const),
+        sleep(WEDGE_WINDOW_MS).then(() => "silent" as const),
+      ])
+      expect(outcome).toBe("exit-fired")
+      // The line really decoded — proves the pump ran against a real pipe.
+      await waitFor(() => messages.length === 1, "real child line decoded")
+      expect(reasons).toHaveLength(1)
+      // The normal-shutdown reason — NOT the misfire the un-backported code
+      // produced on EVERY clean exit.
+      expect(String(reasons[0])).toMatch(/exited/)
+      expect(String(reasons[0])).not.toMatch(/pump died/)
+      // And NO spurious "stdout pump died" warn on a normal shutdown.
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("pump"))).toBe(false)
+    } finally {
+      warn.mockRestore()
+      await transport.close().catch(() => undefined)
     }
   })
 })

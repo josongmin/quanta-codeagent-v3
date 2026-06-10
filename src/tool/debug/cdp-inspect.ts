@@ -21,6 +21,10 @@ export interface CdpInspectSpec {
   readonly url: string
   /** 1-based failure line (converted to CDP's 0-based internally). */
   readonly line: number
+  /** Break-on-throw: when set, `Debugger.setPauseOnExceptions` arms a pause at
+   *  the throw site (CDP's analogue of DAP exception filters) — caught by REASON
+   *  ("exception"), not a breakpoint id. */
+  readonly pauseOnExceptions?: "none" | "uncaught" | "all"
 }
 
 export interface CdpInspectOptions {
@@ -124,6 +128,10 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
   try {
     await client.request("Runtime.enable")
     await client.request("Debugger.enable")
+    // Break-on-throw: best-effort (an old inspector just errors — ignored).
+    if (spec.pauseOnExceptions !== undefined && spec.pauseOnExceptions !== "none") {
+      await client.request("Debugger.setPauseOnExceptions", { state: spec.pauseOnExceptions })
+    }
     const bp = await client.request("Debugger.setBreakpointByUrl", { lineNumber: Math.max(0, spec.line - 1), url: spec.url, columnNumber: 0 })
     const bpId = str(asObj(bp.result).breakpointId)
     const bound = asArr(asObj(bp.result).locations).length > 0
@@ -154,7 +162,8 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
       }
       const body = asObj(ev)
       const hit = asArr(body.hitBreakpoints).map((h) => str(h))
-      if (bpId.length > 0 && hit.includes(bpId)) {
+      const isExceptionStop = spec.pauseOnExceptions !== undefined && spec.pauseOnExceptions !== "none" && str(body.reason) === "exception"
+      if ((bpId.length > 0 && hit.includes(bpId)) || isExceptionStop) {
         pausedBody = body
         break
       }
@@ -219,7 +228,16 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
       undefined,
     )
     client.dispose()
-    return { outcome: "stopped", reason: str(pausedBody.reason, "breakpoint") || "breakpoint", stack, frames }
+    const reason = str(pausedBody.reason, "breakpoint") || "breakpoint"
+    // Break-on-throw: map the paused `data` RemoteObject → {type, first message line}.
+    let exception: { id: string; description: string } | undefined
+    if (reason === "exception") {
+      const d = asObj(pausedBody.data)
+      const id = str(d.className) || str(d.subtype) || "exception"
+      const description = str(d.description).split("\n")[0] ?? ""
+      exception = { id, description }
+    }
+    return { outcome: "stopped", reason, stack, frames, ...(exception !== undefined ? { exception } : {}) }
   } catch (e) {
     client.dispose()
     return { outcome: "error", message: e instanceof Error ? e.message : String(e) }

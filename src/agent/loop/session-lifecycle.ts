@@ -52,10 +52,37 @@ export const persistFinalMessages = async (args: {
   )
 }
 
-export const cleanupFinishedSession = async (args: {
+/** Shared once-flag so the resource-DISPOSE pass runs AT MOST once across the
+ *  two callers that can reach it: the normal `finishAgentSession` chain AND the
+ *  `runAgentInner` `finally` (D12 — an uncaught turn-loop throw, e.g. a mid-turn
+ *  `SessionApprovalRequiredError`, must STILL dispose the resident daemons /
+ *  skill-MCP / bg shells). When BOTH fire on the same session they share ONE
+ *  guard so the disposers are not invoked twice. */
+export interface SessionDisposeGuard {
+  disposed: boolean
+}
+
+/**
+ * Resource-DISPOSE half of session teardown (D12). Stops every process-lifetime
+ * resource the session armed: subagent cleanup, browser, appshot, skill-MCP,
+ * the resident side-agent daemons (un-unref'd wake `setInterval`s / forked
+ * children), and this process's background bash shells. Each disposer is
+ * no-throw wrapped so one failure never blocks the rest of the chain.
+ *
+ * Idempotent: when a `guard` is supplied, a second call is a no-op (the normal
+ * finish path and the throw-path `finally` share one guard). Callers that omit
+ * the guard rely on the disposers' own idempotence (registries only touch
+ * RUNNING entries).
+ */
+export const disposeSessionResources = async (args: {
   readonly cfg: AgentConfig
   readonly features: Awaited<ReturnType<typeof buildSessionFeatures>>
+  readonly guard?: SessionDisposeGuard
 }): Promise<void> => {
+  if (args.guard !== undefined) {
+    if (args.guard.disposed) return
+    args.guard.disposed = true
+  }
   try {
     await args.features.cleanup?.()
   } catch (e) {
@@ -110,11 +137,33 @@ export const cleanupFinishedSession = async (args: {
   } catch (e) {
     args.cfg.stream.emit({ type: "error", message: `bg-shell reap failed: ${errMessage(e)}` })
   }
+}
+
+/** Persist-SIDE half of session teardown — the follow-up queue / plan snapshots
+ *  and the microcompact-map entry drop. Runs ONLY on a clean finish (it
+ *  persists turn-derived state); the throw-path `finally` deliberately calls
+ *  only {@link disposeSessionResources}. */
+export const persistSessionSnapshots = async (args: {
+  readonly cfg: AgentConfig
+}): Promise<void> => {
   await saveFollowUpQueueSnapshot(args.cfg)
   await savePlanSnapshot(args.cfg)
   // Leak fix (jun-7) — drop this session's microcompact-cadence map entry so the
   // module Map in `compaction-wire` doesn't grow one entry per session forever.
   forgetMicrocompactSession(args.cfg.sessionId)
+}
+
+export const cleanupFinishedSession = async (args: {
+  readonly cfg: AgentConfig
+  readonly features: Awaited<ReturnType<typeof buildSessionFeatures>>
+  readonly disposeGuard?: SessionDisposeGuard
+}): Promise<void> => {
+  await disposeSessionResources({
+    cfg: args.cfg,
+    features: args.features,
+    ...(args.disposeGuard !== undefined ? { guard: args.disposeGuard } : {}),
+  })
+  await persistSessionSnapshots({ cfg: args.cfg })
 }
 
 export const buildFinalAgentOutcome = (args: {
@@ -155,6 +204,9 @@ export const finishAgentSession = async (args: {
   readonly turns: number
   readonly stopCategory?: StopCategory
   readonly refusal?: { readonly rationale: string }
+  /** D12 — shared with the `runAgentInner` throw-path `finally` so the dispose
+   *  pass runs at most once when both reach teardown. */
+  readonly disposeGuard?: SessionDisposeGuard
 }): Promise<AgentOutcome> => {
   if (args.cfg.activeTurnRef) {
     args.cfg.activeTurnRef.current = {
@@ -172,7 +224,11 @@ export const finishAgentSession = async (args: {
     messages,
     reason: args.reason,
   })
-  await cleanupFinishedSession({ cfg: args.cfg, features: args.features })
+  await cleanupFinishedSession({
+    cfg: args.cfg,
+    features: args.features,
+    ...(args.disposeGuard !== undefined ? { disposeGuard: args.disposeGuard } : {}),
+  })
   args.recorder?.stopReason(args.reason)
   if (args.cfg.hooks) {
     await args.cfg.hooks.emit({ type: "session_end", reason: args.reason, turns: args.turns })

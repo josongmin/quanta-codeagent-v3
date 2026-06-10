@@ -34,10 +34,14 @@ export const DEFAULT_MODEL: Record<Provider, string> = {
   openai: "gpt-5-mini",
   // ChatGPT-OAuth subscription path. The Codex-only `gpt-5-codex` slug is
   // rejected by chatgpt.com backend ("not supported when using Codex with
-  // a ChatGPT account"), so we default to the flagship `gpt-5` instead —
-  // available on Plus/Pro/Team/Business/Enterprise tiers. Override with
-  // `QUANTA_MODEL=<slug>` (e.g. `gpt-5-pro` on Pro, `o1`, `gpt-4o`).
-  "chatgpt-oauth": "gpt-5",
+  // a ChatGPT account"). jun-10: bumped `gpt-5` → `gpt-5.4` — the bare
+  // `gpt-5` slug dropped out of the `/codex/models` subscription catalog, so
+  // every session opened with a silent-substitution warn and ran the
+  // server-picked fallback instead of a deliberate default. Override with
+  // `QUANTA_MODEL=<slug>`; an account whose catalog lacks gpt-5.4 still
+  // degrades safely (`resolveModelFromCatalog` swaps to the catalog default
+  // with a loud warn).
+  "chatgpt-oauth": "gpt-5.4",
 }
 
 /** Per-provider env var holding the API key. The `chatgpt-oauth` entry is a

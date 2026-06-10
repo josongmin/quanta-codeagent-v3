@@ -156,6 +156,13 @@ export interface SessionSetupResult {
   readonly abort: AbortController
   readonly pills: ReturnType<typeof createStatusPills>
   readonly argPrompt: string | undefined
+  /** ADR-0297 fence — the host (`repl.ts`) may not read `process` directly;
+   *  these surface facts are resolved ONCE at this layer (which owns the
+   *  process reads) and consumed as plain data by the host's interactive-only
+   *  gates (welcome banner, crash-resume reinject offer). */
+  readonly stderrIsTTY: boolean | undefined
+  /** `$HOME` snapshot for ~-shortening (empty string => unknown). */
+  readonly homeDir: string
   readonly systemSource: SessionBootstrapResult["systemSource"]
   readonly refreshSystemPrompt: SessionBootstrapResult["refreshSystemPrompt"]
   /** Tear down MCP clients on REPL exit. The host calls this in the
@@ -316,6 +323,8 @@ export const setupSession = async (
     abort: boot.abort,
     pills,
     argPrompt: boot.argPrompt,
+    stderrIsTTY: process.stderr.isTTY,
+    homeDir: runtime.homeDir,
     systemSource: boot.systemSource,
     refreshSystemPrompt: boot.refreshSystemPrompt,
     shutdownMcp: async () => {

@@ -14,7 +14,7 @@
  *    the TCP transport); `{mode:"test"}` launch with a failure-line breakpoint.
  * Other toolchains ⇒ null (degrade). NEVER throws.
  */
-import { realpathSync } from "node:fs"
+import { readFileSync, realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -24,6 +24,7 @@ import { DapClient, type DapTransport } from "../debug/dap-client"
 import { type DapVariable, type FrameScopes, type Inspection, inspectViaDap, type InspectSpec } from "../debug/inspect-driver"
 import { defaultDebugAdapterPort, spawnNodeCdpInspector, spawnTcpDebugAdapter } from "../debug/port"
 import type { Toolchain } from "../testrun"
+import { detectJsRunner, nodeInspectArgv } from "./node-runner"
 import type { FailureEvidence, RuntimeEvidence, RuntimeFrame, RuntimeVar } from "./types"
 
 /** Cap on stack frames surfaced — native/managed runtimes (Rust std, Go
@@ -77,6 +78,11 @@ const toRuntime = (r: Inspection): RuntimeEvidence | null => {
     stack: r.stack.slice(0, MAX_STACK_FRAMES).map((f) => ({ name: f.name, ...(f.source !== undefined ? { file: f.source } : {}), line: f.line })),
     locals: frames[0]?.locals ?? [],
     ...(frames.length > 0 ? { frames } : {}),
+    // Break-on-throw: carry the exception type+message when the stop was a throw.
+    ...(r.exception !== undefined ? { exception: { type: r.exception.id, message: r.exception.description } } : {}),
+    // Concurrency dump: surface goroutines/threads only when there's more than
+    // the single main thread (so simple single-threaded failures stay quiet).
+    ...(r.threads !== undefined && r.threads.length > 1 ? { threads: r.threads.map((t) => ({ id: t.id, name: t.name })) } : {}),
   }
 }
 
@@ -198,18 +204,29 @@ const goRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promi
 // ── NODE / JS (CDP over WebSocket — node --inspect-brk, single-process) ───────
 const resolveNode = (): string | null => (ok("node", "--version") ? "node" : null)
 
+const readPkgJson = (cwd: string): string | null => {
+  try {
+    return readFileSync(join(cwd, "package.json"), "utf8")
+  } catch {
+    return null
+  }
+}
+
 const nodeRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
   const node = resolveNode()
   if (node === null) return null
-  // Run the failing FILE directly (node:test files self-run inline → ONE
-  // process, so CDP attaches to the test process — `--test` would fork a child
-  // per file and we'd attach to the runner instead). node 23.6+ strips types, so
-  // simple .ts runs too; runner-specific (jest/vitest) entrypoints are future work.
+  // Route by the project's JS runner: node:test/plain files run directly (self-
+  // run inline → ONE process, CDP attaches there); jest --runInBand + mocha run
+  // single-process; vitest degrades (worker pool owns its own inspector). node
+  // 23.6+ strips types, so simple .ts runs too.
+  const runner = detectJsRunner(readPkgJson(cwd))
   const realFile = realpathOr(absOf(f.file!, cwd))
+  const argv = nodeInspectArgv(runner, node, realFile, 0) // probe shape; 0 replaced per-port below
+  if (argv === null) return null // vitest — single-process inspect not supported yet
   let client: CdpClient | undefined
   try {
     const transport = await spawnNodeCdpInspector({
-      command: (port) => [node, `--inspect-brk=${port}`, realFile],
+      command: (port) => nodeInspectArgv(runner, node, realFile, port) ?? [],
       cwd,
       connectTimeoutMs: 8_000,
     })
@@ -223,8 +240,22 @@ const nodeRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal
   }
 }
 
+/** Per-language runtime handlers, keyed EXHAUSTIVELY by `Toolchain["kind"]`.
+ *  This Record is the runtime-axis coverage guard: adding a kind to the union
+ *  (or dropping a handler) is a COMPILE error here — so a refactor can't
+ *  silently lose a language's runtime (the gap the coverage-matrix ratchet
+ *  couldn't catch behaviourally, since a missing arm and an absent toolchain
+ *  both degrade to null). */
+const RUNTIME_HANDLERS: Record<Toolchain["kind"], (f: FailureEvidence, tc: Toolchain, cwd: string, signal?: AbortSignal) => Promise<RuntimeEvidence | null>> = {
+  python: (f, tc, cwd, signal) => pythonRuntime(f, tc, cwd, signal),
+  rust: (f, _tc, cwd, signal) => rustRuntime(f, cwd, signal),
+  go: (f, _tc, cwd, signal) => goRuntime(f, cwd, signal),
+  node: (f, _tc, cwd, signal) => nodeRuntime(f, cwd, signal),
+}
+
 /** The default runtime source for the Evidence Packet Builder. Dispatches by
- *  toolchain; degrades to null for unsupported/unavailable cases. */
+ *  toolchain (exhaustive); degrades to null when the failure isn't localizable
+ *  or the toolchain/adapter is unavailable. */
 export const defaultRuntimePort = async (
   failure: FailureEvidence,
   toolchain: Toolchain,
@@ -232,9 +263,5 @@ export const defaultRuntimePort = async (
   signal?: AbortSignal,
 ): Promise<RuntimeEvidence | null> => {
   if (failure.file === undefined || failure.line === undefined) return null
-  if (toolchain.kind === "python") return pythonRuntime(failure, toolchain, cwd, signal)
-  if (toolchain.kind === "rust") return rustRuntime(failure, cwd, signal)
-  if (toolchain.kind === "go") return goRuntime(failure, cwd, signal)
-  if (toolchain.kind === "node") return nodeRuntime(failure, cwd, signal)
-  return null
+  return RUNTIME_HANDLERS[toolchain.kind](failure, toolchain, cwd, signal)
 }

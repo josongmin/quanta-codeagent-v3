@@ -41,6 +41,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join } from "node:path"
+import { SessionStateLoadError } from "@/agent/state"
 import {
   bootstrapSession,
   isSessionBootstrapError,
@@ -624,6 +625,64 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     }
     expect(caught).toBeInstanceOf(Error)
     expect((caught as Error).message).toBe("tooling boom")
+    expect(stopped).toEqual([1])
+  })
+
+  test("18b. (D3) a `resolveResume` that THROWS SessionStateLoadError (corrupt --resume <path>) rethrows RAW — NOT wrapped — AFTER MCP cleanup", async () => {
+    // jun-10 audit D3 — `loadSession` throws a typed `SessionStateLoadError`
+    // (naming the file) on a corrupt path-mode `--resume <corrupt.json>` so a
+    // torn transcript is never silently reset+overwritten. That throw surfaces
+    // out of `resolveResume`, which runs INSIDE the bootstrap's resume try-block
+    // (after the MCP fleet started). The contract under test:
+    //   (a) the typed error rethrows RAW — it is a fatal startup load failure the
+    //       CLI's top-level handler prints as `fatal: session state file <path>: …`,
+    //       NOT a `SessionBootstrapError` (which would relabel the message);
+    //   (b) the in-flight MCP clients are STILL stopped on the rethrow path so a
+    //       corrupt-resume start doesn't leak child processes.
+    const stopped: number[] = []
+    const corruptPath = "/tmp/quanta-test/corrupt-resume.json"
+    const loadErr = new SessionStateLoadError(
+      corruptPath,
+      "torn/malformed JSON — refusing to silently reset the transcript",
+    )
+    const deps = makeFakeDeps({
+      loadFeatures: async () => ({
+        planMode: false,
+        metrics: undefined,
+        state: undefined,
+        // Path-like resume token ⇒ the real `resolveResume` would call
+        // `loadSession`; here the fake throws the SAME typed error that load does.
+        resume: corruptPath,
+        mcpTools: [],
+        mcpClients: [
+          {
+            stop: async () => {
+              stopped.push(1)
+            },
+          },
+        ],
+        mcpConfigs: [],
+        lspTools: [],
+        lspNavTools: [],
+        gitToolList: [],
+      }),
+      resolveResume: async () => {
+        throw loadErr
+      },
+    })
+    let caught: unknown
+    try {
+      await bootstrapSession(deps, makeRuntime(), {})
+    } catch (e) {
+      caught = e
+    }
+    // (a) RAW typed error — same instance, NOT re-wrapped.
+    expect(caught).toBe(loadErr)
+    expect(caught).toBeInstanceOf(SessionStateLoadError)
+    expect(isSessionBootstrapError(caught)).toBe(false)
+    expect((caught as SessionStateLoadError).message).toContain(corruptPath)
+    expect((caught as SessionStateLoadError).message.startsWith("session state file ")).toBe(true)
+    // (b) the in-flight MCP client was stopped on the rethrow (no child leak).
     expect(stopped).toEqual([1])
   })
 
