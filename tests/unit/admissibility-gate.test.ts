@@ -720,3 +720,51 @@ describe("runAdmissibilityGate: pattern auto-pass CANNOT bypass HARD_DENY (AUDIT
     expect(res).toBeNull()
   })
 })
+
+// ⚠️ AGENTS: RED-first hellgate for ticket P2-T2 (A3) — RED until the hand-off
+// floor is pulled AHEAD of pattern-auto-pass + rules-DSL. Do not delete.
+describe("runAdmissibilityGate: hand-off-required tier CANNOT be overridden by a grant/rule [P2-T2]", () => {
+  test("a granted pattern auto-pass does NOT unlock a hand-off-required tool", async () => {
+    const { PatternGrantStore } = await import("@/permission")
+    const handoff = makeTool("destroyer", { readOnly: false, hitlTier: () => "hand-off-required" })
+    const store = new PatternGrantStore(["destroyer:go"])
+    const input = {}
+    const action: AdmissibilityAction = {
+      tool: "destroyer",
+      input,
+      isReadOnly: false,
+      rememberPatterns: ["destroyer:go"],
+    }
+    const c = cfg({
+      registry: new ToolRegistry([handoff]),
+      permissionPatternStore: store,
+      permission: { mode: "bypass" },
+    } as Partial<AgentConfig>)
+    const res = await runAdmissibilityGate(call("destroyer", input), c, { mode: "bypass" }, action)
+    // The hard floor wins over the operator's pattern grant — NOT auto-passed.
+    expect(res).not.toBeNull()
+    expect(res?.preview).toBe("handoff")
+  })
+
+  test("even permissionAllowDangerous + a granted pattern cannot unlock a hand-off-required tool", async () => {
+    const { PatternGrantStore } = await import("@/permission")
+    const handoff = makeTool("destroyer", { readOnly: false, hitlTier: () => "hand-off-required" })
+    const input = {}
+    const action: AdmissibilityAction = {
+      tool: "destroyer",
+      input,
+      isReadOnly: false,
+      isMaybeDangerous: true,
+      rememberPatterns: ["destroyer:go"],
+    }
+    const c = cfg({
+      registry: new ToolRegistry([handoff]),
+      permissionPatternStore: new PatternGrantStore(["destroyer:go"]),
+      permissionAllowDangerous: true, // the strongest auto-pass escape
+      permission: { mode: "bypass" },
+    } as Partial<AgentConfig>)
+    const res = await runAdmissibilityGate(call("destroyer", input), c, { mode: "bypass" }, action)
+    expect(res).not.toBeNull()
+    expect(res?.preview).toBe("handoff")
+  })
+})

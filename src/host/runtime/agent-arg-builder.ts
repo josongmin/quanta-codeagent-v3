@@ -862,6 +862,10 @@ const buildGatedToolPorts = (
     // Epic-2 — gated `run_tests` structured test-runner. Default-OFF: tool menu
     // byte-identical unless QUANTA_TEST_RUNNER === "1". High-risk (always-confirm).
     ...(cfg.testRunner ? { testRunner: true } : {}),
+    // Keystone — gated `collect_evidence` (Evidence Packet Builder). Default-OFF
+    // unless QUANTA_EVIDENCE === "1". `{}` = failure+repo evidence (LSP/DAP
+    // enrichment ports wired separately by a bridge when available).
+    ...(cfg.evidence ? { evidence: {} } : {}),
     // C2 — gated communicate_update tool. Default-OFF: tool menu byte-identical
     // unless QUANTA_PROGRESS_UPDATE === "1". Boolean port — the tool reads its
     // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from

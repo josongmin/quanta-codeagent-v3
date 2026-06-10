@@ -103,7 +103,11 @@ export class StdioMcpTransport implements McpTransport {
     if (this.proc) return
     this.proc = this.spawnFn(this.config.command, {
       cwd: this.config.cwd ?? process.cwd(),
-      env: buildEnv(this.config.env),
+      // H3: thread the stored egress-proxy env into the child. With no live
+      // proxy address (`proxyEnv` absent / `{}`) `withProxyEnv` is a no-op ⇒
+      // byte-identical to the pre-H3 spawn. With a live address the child's own
+      // sockets are forced through the loopback allowlist (no egress bypass).
+      env: buildEnv(this.config.env, this.proxyEnv),
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

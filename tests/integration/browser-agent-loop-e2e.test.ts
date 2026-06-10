@@ -26,13 +26,14 @@
  * REAL-CHROME (optional, env-gated): a separate block drives the cdp-adapter
  * PORT directly (NOT the tool layer — 127.0.0.1 is SSRF-denied at the tool
  * layer) against a `Bun.serve` fixture. It runs ONLY when a real Chrome session
- * can actually be brought up; otherwise it skips cleanly and the file stays
- * green. `availability() !== null` only means the binary exists — it does NOT
- * guarantee the CDP `Page.enable` bring-up succeeds in a sandboxed CI, so the
- * gate is a real spawn probe in `beforeAll`, not the binary probe.
+ * can actually be brought up; otherwise it is SKIPPED (a visible `skipped` in
+ * the runner) — never a silent green pass. `availability() !== null` only means
+ * the binary exists — it does NOT guarantee the CDP `Page.enable` bring-up
+ * succeeds in a sandboxed CI, so the gate is a real spawn probe done at module
+ * load (top-level await), feeding `describe.skipIf`, not the binary probe alone.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -480,24 +481,28 @@ describe("browser features seam — registry surface", () => {
 //
 // `availability() !== null` only proves the binary exists. The CDP bring-up
 // (Page.enable) can still fail under a sandboxed CI. So the gate is a REAL
-// spawn probe in beforeAll; if the session can't be brought up, the whole
-// block skips cleanly and the file stays green. We report the outcome via
-// REAL_CHROME_RAN so the harness knows whether the real assertions ran.
+// spawn probe done at MODULE LOAD (top-level await) — `REAL_CHROME_RAN` is true
+// only once an actual CDP session is established. It feeds `describe.skipIf`
+// below, so an unavailable Chrome (missing binary OR session won't come up)
+// yields a VISIBLE `skipped` in the runner — never a silent green pass with the
+// real assertions quietly not running. When the block DOES run, every test
+// exercises the real port and asserts real page content.
 
 const TEMP_ROOT = mkdtempSync(join(tmpdir(), "qbe-"))
 let realPort: BrowserPort | undefined
 let realHandle: BrowserHandle | undefined
 let server: ReturnType<typeof Bun.serve> | undefined
-let REAL_CHROME_RAN = false
 
-const FORM_HTML = `<!doctype html><html><body>
+const FORM_HTML = `<!doctype html><html><head><title>Fixture Page</title></head><body>
 <h1 id="hd">Fixture</h1>
 <button id="btn">Go</button>
 <input id="inp" type="text" value="">
 </body></html>`
 
-beforeAll(async () => {
-  realPort = createCdpBrowser({
+// Module-load bring-up probe: only attempt the real spawn when the binary is
+// present, and only flip REAL_CHROME_RAN once a CDP session is actually live.
+const REAL_CHROME_RAN = await (async (): Promise<boolean> => {
+  const probe = createCdpBrowser({
     spawner: defaultProcessSpawner,
     transport: defaultCdpTransport,
     fs: defaultBrowserFs,
@@ -506,10 +511,10 @@ beforeAll(async () => {
     profileRoot: TEMP_ROOT,
     endpointTimeoutMs: 15000,
   })
-  if (realPort.availability() === null) return
-  // Real bring-up probe: spawn must actually establish a CDP session.
-  const sp = await realPort.spawn()
-  if (!sp.ok) return // binary present but session won't come up here → skip
+  if (probe.availability() === null) return false
+  const sp = await probe.spawn()
+  if (!sp.ok) return false // binary present but session won't come up here → skip
+  realPort = probe
   realHandle = sp.value
   server = Bun.serve({
     port: 0,
@@ -522,8 +527,8 @@ beforeAll(async () => {
       })
     },
   })
-  REAL_CHROME_RAN = true
-})
+  return true
+})()
 
 afterAll(async () => {
   if (realPort && realHandle) await realPort.close(realHandle)
@@ -531,25 +536,28 @@ afterAll(async () => {
   rmSync(TEMP_ROOT, { recursive: true, force: true })
 })
 
-describe("REAL chrome — cdp-adapter port direct (SSRF gate is tool-layer-only)", () => {
-  test("(16) navigate returns the fixture <title>/title-equivalent through the real port", async () => {
-    if (!REAL_CHROME_RAN || !realPort || !realHandle || !server) {
-      // Chrome session could not be brought up in this environment — skip.
-      expect(REAL_CHROME_RAN).toBe(false)
-      return
-    }
-    const nav = await realPort.navigate(realHandle, `http://127.0.0.1:${server.port}/form`)
-    expect(nav.ok).toBe(true)
-  })
+describe.skipIf(!REAL_CHROME_RAN)(
+  "REAL chrome — cdp-adapter port direct (SSRF gate is tool-layer-only)",
+  () => {
+    // Non-null inside the block: REAL_CHROME_RAN === true ⇒ these were assigned.
+    const port = (): BrowserPort => realPort as BrowserPort
+    const handle = (): BrowserHandle => realHandle as BrowserHandle
+    const origin = (): string => `http://127.0.0.1:${(server as ReturnType<typeof Bun.serve>).port}`
 
-  test("(17) snapshot of the fixture page contains the real heading text", async () => {
-    if (!REAL_CHROME_RAN || !realPort || !realHandle || !server) {
-      expect(REAL_CHROME_RAN).toBe(false)
-      return
-    }
-    await realPort.navigate(realHandle, `http://127.0.0.1:${server.port}/form`)
-    const snap = await realPort.snapshot(realHandle)
-    expect(snap.ok).toBe(true)
-    if (snap.ok) expect(snap.value.yaml.length).toBeGreaterThan(0)
-  })
-})
+    test("(16) navigate returns the fixture <title> through the real port", async () => {
+      const nav = await port().navigate(handle(), `${origin()}/form`)
+      expect(nav.ok).toBe(true)
+      // Real teeth: the title is read out of the live Chrome DOM, not echoed.
+      if (nav.ok) expect(nav.value.title).toBe("Fixture Page")
+    })
+
+    test("(17) snapshot of the fixture page contains the real heading text", async () => {
+      await port().navigate(handle(), `${origin()}/form`)
+      const snap = await port().snapshot(handle())
+      expect(snap.ok).toBe(true)
+      // The accessibility snapshot must carry the real <h1> text, not just
+      // be non-empty — a blank/garbled bring-up would fail this.
+      if (snap.ok) expect(snap.value.yaml).toContain("Fixture")
+    })
+  },
+)

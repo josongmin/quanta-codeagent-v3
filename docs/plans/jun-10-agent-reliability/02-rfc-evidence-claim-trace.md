@@ -1,82 +1,77 @@
-# RFC-02: Evidence Contract — Reconcile Model Claims Against the Tool Trace
+# RFC-02 (FINAL): Evidence Contract — Reconcile Model Claims Against the Tool Trace
 
-**Status:** PROPOSED · **Priority:** P1 · **Axis:** 2 (증거 계약)
+**Status:** FINAL · **Priority:** P1 · **Axis:** 2 (증거 계약)
+**R4 revision:** seams corrected (annotate at `finishAgentSession`, force via `guards/chain.ts`); prose-path extractor is an explicit deliverable (no existing utility); toolCallId threading is conditional today; Korean-negation fixtures added to the FP-zero bar; hallucinated-API coverage explicitly dispositioned.
 
 ## Problem statement
 
-The harness validates what the model **does** (tool calls: unknown tools denied, stale writes blocked, hallucinated merges rejected) but trusts what the model **says**. Nothing cross-checks prose assertions — "I verified X", "I read `src/foo.ts:123`", "tests pass" — against the actual tool trace. A final answer can cite files that were never read or don't exist, claim verification that never ran, and the harness will report it verbatim. The asymmetry: tool inputs are gated by ~9 layers (admissibility gate), tool *outputs into prose* are gated by zero.
+The harness validates what the model **does** (unknown tools denied, stale writes blocked, hallucinated merges rejected) but trusts what the model **says**. Nothing cross-checks prose assertions — "I verified X", "I read `src/foo.ts:123`", "tests pass" — against the actual tool trace. The asymmetry: tool inputs pass ~9 gate layers; prose passes zero. The project's own history shows why this matters: implementation agents self-reported "wired+green" falsely 2/2 times until adversarially verified (jun-08) — the same failure mode users face.
 
-This matters doubly here because the project's own history shows implementation agents self-reporting "wired+green" falsely 2/2 times until adversarially verified (jun-08 memory) — the same failure mode our users face.
-
-## Evidence (3-round audit, reconciled)
+## Evidence (3-round audit + R4 seam verification)
 
 What exists (don't rebuild):
 
-- **Action-level enforcement (LIVE):**
-  - Unknown tool → typed deny, loop continues: `src/agent/dispatch.ts:896-898`.
-  - Hallucinated file path in read → typed `not_found`: `src/tool/read/index.ts:23-53`.
-  - Hallucinated merge defense in edit (elision-copy, occurrence-count): `src/tool/edit/index.ts:142-200`.
-  - Stale-read TOCTOU guard default-ON: `src/tool/stale-read-guard/gate.ts:37-42`.
-- **verify-guard (LIVE, default-OFF, `QUANTA_VERIFY_GUARD` presence-based):** blocks finish when a mutating tool ran with no verify-classified call after it; must-pass tier blocks finish on failed verify. `src/agent/verify-guard.ts:142-194`, recognition registry (14 ecosystems) `src/agent/verify-signal.ts:53-96`, forcing via `tool_choice:"any"` `src/agent/tool-choice.ts:93-156`. **This covers act-without-verify, not say-without-act.**
-- **Memory placement provenance (ADR-0082):** deterministic record of which memories were placed where — context provenance, NOT assertion provenance.
-- **ToolResult.evidence (LIVE, optional):** `src/tool/types.ts:1005-1011` — tools MAY report cited paths, but nothing mandates it and there is **no link back to the originating tool_use id** (`ctx.toolCallId` exists separately at `types.ts:312`).
-- **progress-audit system skill (ADR-0045):** "no finding without code evidence" — prompt-discipline only, applies when the skill is invoked.
+- **Action-level enforcement (LIVE):** unknown tool typed deny `src/agent/dispatch.ts:896-898`; read `not_found` `src/tool/read/index.ts:23-53`; edit merge defenses `src/tool/edit/index.ts:142-200`; stale-read-guard default-ON `src/tool/stale-read-guard/gate.ts:37-42`.
+- **verify-guard (LIVE, default-OFF, presence gate `QUANTA_VERIFY_GUARD`):** blocks finish on mutate-without-verify; must-pass tier on failed verify. `src/agent/verify-guard.ts:142-194`; 14-ecosystem recognition `src/agent/verify-signal.ts:53-96`, failure matchers `:152-188`. Covers act-without-verify, **not** say-without-act.
+- **R4 seam facts:** verify-guard/closeout run via `runGuardChain` in `src/agent/loop/recovery-executor.ts:203` (`src/agent/guards/chain.ts`) — NOT in turn-outcome; the final assistant text + `wm` are in scope at `finishAgentSession` (`src/agent/loop/session-lifecycle.ts:123`). No existing free-prose path-extraction utility exists (mention-runner parses `@`-mentions only) — the extractor must be built.
+- **ToolResult.evidence (LIVE, optional):** `src/tool/types.ts:1005-1011`; `ctx.toolCallId` is threaded **conditionally** — only when the ADR-0440 `onToolDiff` sink is wired (`src/agent/dispatch.ts:803`); the `types.ts:312` comment says so.
+- **Doc/code drift:** verify-guard max-trips — code `DEFAULT_MAX_TRIPS = 1` (`src/agent/verify-guard.ts:102`); knob docs say 2 (`src/apps/cli/cli-knobs.ts:584-599`; `internal.ts:386` comment also says 2). Drift confirmed on both sides.
+- Absent (confirmed): prose-path validation, verification-claim reconciliation, structured assertion citations ("source-tag" does not exist in src/).
 
-What does NOT exist (confirmed across rounds; R2's attempted refutation via verify-guard was scope-confused — verify-guard checks *edits*, not *claims*):
+## SOTA alignment (R4 corpus)
 
-- No validation that file paths mentioned in final assistant prose exist (R3 finding 2A; `AgentOutcome` `src/agent/types/agent-outcome.ts:77-128` carries the transcript, nothing validates it).
-- No reconciliation of "I tested/verified/confirmed" prose against verify-signal history.
-- No structured citation ("source-tag") on model assertions — zero matches for any such feature in `src/` (the jun-04 "source-tag" memory referred to something else; confirmed absent).
-- **Doc/code drift found en route:** CLI knob docs say verify-guard max-trips default 2; code says `DEFAULT_MAX_TRIPS = 1` (`src/agent/verify-guard.ts:102`, `src/apps/cli/cli-knobs.ts:406-411`).
+- **Citation formats are prompt-only across the industry.** Cursor mandates `` `startLine:endLine:filepath` `` fenced citations (`cursor-agent-exec/dist/main.js:~213378`); Claude Code prompts `file_path:line_number`. **No competitor validates cited paths/lines at runtime.** W1 is exceed-class.
+- **Claim-vs-trace:** Claude Code's hook model (Stop hook with `last_assistant_message`; PostToolUse can replace output / block continuation) is the strongest *seam* a competitor exposes — but it's user-configured infrastructure, no shipped default check. W2 ships the check itself — exceed-class.
+- **Read-before-edit / stale detection:** Claude Code enforces at the tool layer (content-hash, "File content has changed") — quanta's stale-guard is at parity (mtime vs hash noted as a possible hardening, out of scope here).
+- Absorb move folded in: Claude Code's Stop-hook shape (inspect last assistant message at turn end) validates our choice of finish-seam annotation over mid-stream checking.
 
 ## Goals
 
-1. At turn finish, deterministically cross-check the final assistant text against the session's tool trace and surface mismatches (path claims, verification claims).
-2. Make tool-reported evidence traceable to the call that produced it.
+1. At turn finish, deterministically cross-check the final assistant text against the session's tool trace; surface mismatches (path claims, verification claims) as structured annotations.
+2. Make tool-reported evidence traceable to the producing call.
 3. Fix the verify-guard doc/code drift.
 
 ## Non-goals
 
-- NLP-grade claim extraction or LLM-judged truthfulness of arbitrary prose — only deterministic, pattern-anchored checks (paths, verification verbs + test claims), consistent with the no-heuristics rule.
-- Forcing citations into every answer (prompt-bloat; competitor parity doesn't require it).
-- Blocking finish by default — first ship as **annotate/warn**, escalation to forcing is a later, gated decision.
+- NLP-grade claim extraction or LLM-judged truthfulness — deterministic, pattern-anchored checks only (no-heuristics rule).
+- **Hallucinated API/symbol claims ("`fooBar()` handles this") — deliberately deferred** (R4-M10 disposition): symbol-existence checking requires the import-graph/LSP machinery RFC-03 W1 builds; revisit as a gated stretch after RFC-03 lands. Recorded here so the axis-2 fragment isn't silently dropped.
+- Forcing citations into every answer; blocking finish by default (annotate first, forcing is gated).
 
-## Workstreams (ticket-able)
+## Workstreams (ticket-able; see tickets/T-201..205)
 
-### W1 — Closeout claim-trace check: path claims (deterministic)
-At the finish chokepoint (same seam as verify-guard / closeout in `src/agent/loop/turn-outcome.ts`), scan the final assistant text for path-shaped references (existing path-recognition utilities; repo-relative + absolute). For each: (a) does the path exist on disk, and (b) was it touched by any tool call this session (read/edit/grep hit)? Mismatches produce a structured `claimAudit` annotation: `{path, exists, observedInTrace}`.
+### W1 — Prose path-claim audit (extractor + builder + finish-seam annotation)
+**Deliverable 1 — extractor (new, specced):** deterministic free-prose path extractor (repo-relative + absolute forms, fenced/inline code spans included; anchored patterns, no fuzzy matching). FP-zero acceptance bar with adversarial fixtures: URLs, version strings, `a/b` diff prefixes, prose slashes.
+**Deliverable 2 — audit builder:** for each extracted path: `{path, exists (stat), observedInTrace (read/edit/grep-hit this session)}`.
+**Deliverable 3 — wiring:** attach as `claimAudit` at `finishAgentSession` (`session-lifecycle.ts:123`) — same seam as RFC-07 W1, shapes coordinated.
 
-Posture: **annotate-only**, attached to the outcome (consumed by RFC-07's summary and `/state`); a separate `QUANTA_CLAIM_TRACE_FORCE` (default-OFF) can convert "path does not exist" into a verify-guard-style forcing message.
+**Acceptance:** nonexistent claimed path → flagged; session-read path → clean; pathless prose → zero-cost no-op; extractor adversarial fixture suite green. **Default:** ON (annotate-only; registered in 00-index posture table).
 
-**Acceptance:** unit tests: nonexistent claimed path → flagged; path read this session → clean; prose without paths → zero-cost no-op. Hellgate: model fabricates a path in final text under replay → annotation present. **Default:** check ON (annotation is additive and cheap — stat per unique mentioned path), forcing OFF.
+### W2 — Verification-claim audit (deterministic)
+If final text asserts verification (small anchored registry: "tests pass(ed)", "verified", "all green", "확인했…" — **Korean fixtures must cover conjugation/negation: "확인했지만 실패", "확인 못 했", "테스트는 통과 못함"**) and the trace has no verify-classified call, or the last one **failed** (matchers `verify-signal.ts:152-188`), flag `{claim, trace: "none" | "last-verify-failed"}`. Quoted/negated text must not fire — FP-zero bar, both languages.
 
-### W2 — Closeout claim-trace check: verification claims (deterministic)
-Reuse `verify-signal.ts` matchers in reverse: if the final text asserts verification (anchored patterns: "tests pass(ed)", "verified", "확인했", "all green" — small fixed registry, mirroring the 14-ecosystem matcher style) but the session trace contains **no verify-classified tool call**, or the last verify-classified call **failed** (failure-outcome matchers `verify-signal.ts:152-188`), flag `{claim: "verified", trace: "none" | "last-verify-failed"}`.
+**Acceptance:** claim+no-verify flagged; claim+passing clean; negation fixtures (en+ko) clean; no claim → no-op. **Default:** ON (annotate-only).
 
-This is the harness-level mirror of the false "wired+green" self-report problem.
+### W3 — Force-guard variant (gated)
+A third guard in `guards/chain.ts` (alongside verify-guard) converting W1 "claimed path does not exist" / W2 "claim without verify" into a forcing message, budgeted like verify-guard trips. Gate `QUANTA_CLAIM_TRACE_FORCE`, **default-OFF**.
 
-**Acceptance:** unit: claim+no-verify → flagged; claim+passing-verify → clean; no claim → no-op. Must not fire on quoted/negated text ("tests do NOT pass") — pattern set is small and anchored precisely to keep false positives at zero (false-positive-zero posture, like the staleness gate). **Default:** ON (annotate-only).
+**Acceptance:** guard-chain integration test; trip budget respected; OFF → byte-identical.
 
-### W3 — ToolResult.evidence ⇄ tool-call cross-link
-Add `toolCallId` to `ToolResultEvidence` (populated from `ctx.toolCallId`, already threaded at `src/tool/types.ts:312`), so downstream consumers (W1, RFC-07, web surfaces) can trace any evidence item to the exact call. Optional-field addition; byte-identical when absent.
+### W4 — toolCallId unconditional threading + evidence cross-link
+Thread `toolCallId` into tool ctx **unconditionally** (today conditional on `onToolDiff`, `dispatch.ts:803` — contract change, needs byte-identical check on existing outputs), then add `toolCallId` to `ToolResultEvidence`; populate in read/edit/grep.
 
-**Acceptance:** populating tools (read/edit/grep first) carry the id; type-level test that absence stays legal. **Default:** ON for the tools we touch.
+**Acceptance:** threading present without onToolDiff wired; evidence carries id in the three tools; absence stays legal for others.
 
-### W4 — verify-guard max-trips doc/code reconciliation (tiny)
-Decide intended default (1 or 2), align `src/agent/verify-guard.ts:102` and `src/apps/cli/cli-knobs.ts:406-411` + `--help` text, add a knob-registry test pinning the documented default to the code constant (drift-guard pattern).
-
-**Acceptance:** single source of truth asserted by test. **Default:** unchanged gate posture (OFF).
-
-### W5 — (Stretch) surface the annotations
-Render `claimAudit` in CLI turn summary (`src/apps/cli/turn-summary.ts` collector already exists) and include in the agent-state push for web. Depends on W1/W2 shapes; coordinate with RFC-07.
+### W5 — verify-guard max-trips doc/code reconciliation (tiny)
+Decide 1 vs 2; align `verify-guard.ts:102`, `cli-knobs.ts:584-599`, `internal.ts:386` comment, `--help`; add a knob-registry test pinning doc default == code constant (drift-guard pattern).
 
 ## Risks
 
-- False positives erode trust fastest. Mitigation: anchored pattern sets, annotate-only default, zero-FP acceptance bar (same bar the staleness gate met before going default-ON).
-- Path-scan cost on huge answers: bounded by unique path mentions; stat-only, no reads.
+- False positives erode trust fastest → anchored patterns, annotate-only defaults, FP-zero acceptance incl. Korean negation (R4-L5).
+- Path-scan cost bounded: stat per unique mentioned path, no reads.
+- W4's unconditional threading touches the dispatch hot path — byte-identical regression check mandatory.
 
 ## Relations
 
-- Builds on: verify-guard/verify-signal, ToolResult.evidence, turn-outcome finish seam.
-- Feeds: RFC-07 pre-handoff summary (failureCause can cite claim-audit), `/state`.
-- ADR required (L3 feature, DoD three-axis bar applies).
+- Feeds RFC-07 (claimAudit → failureCause enrichment) and `/state`.
+- Surfacing rides RFC-07 W4's CLI panel (no separate surface ticket here).
+- ADR required (L3, full DoD bar).

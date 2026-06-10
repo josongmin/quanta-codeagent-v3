@@ -77,7 +77,18 @@
 
 ---
 
-## 권장 착수 순서
+## 구현 상태 (2026-06-10 완료)
+**15/15 전부 SOTA++ 헬게이트로 랜딩, 94 tests / 8353 expects GREEN.** 병렬 디스패치(서버 throttle로 2웨이브) + 각 테스트 red-on-injection 치아검증.
+
+실버그 4건 발견·수정:
+- **H1** trust-scope 2-프로세스 동시 grant **TOCTOU lost-update** — `mergeFiles` baseline-diff가 peer 레코드를 "내가 삭제"로 오판 + O_EXCL 락 부재. tombstone set + advisory 락으로 수정. (src/permission, 동시 sweep이 커밋)
+- **H2** config 마이그레이션 **심링크 write-traversal** — persist 경로에 O_NOFOLLOW 가드 부재(read는 있는데 write만 비대칭). 심링크 destination fail-closed. (src/migration, 커밋됨)
+- **H3** MCP stdio **proxyEnv dead-arg** — `start()`가 `buildEnv(config.env)`로 두번째 인자 `this.proxyEnv` 누락 → 저장된 proxyEnv가 데드코드, MCP 서버 자식이 이그레스 게이트 우회. 1줄 wire-fix. ⚠️잔여: 라이브 팩토리 `client.ts:321`가 아직 proxyEnv 미전달 — transport 계약만 봉인, 팩토리 배선은 over-wire 회피로 보류(6번째 케이스로 회귀가드).
+- **H11** side-agent IPC **half-built finding leak** — SIGKILL mid-result가 complete frame에 non-string summary 전달 → `SideAgentFinding.summary:string` 계약 위반 로그 오염. typed 가드로 drop. (src/side-agent)
+
+나머지 11건은 **회귀가드(이미 안전)**: H4 fallback abort(3중 throwIfAborted 존재), H5 페어링(evict가 페어 보존), H6 verify×breaker(strike가 re-stream 이유에 blind=정당), H7 plan-queue(user-text≠tool_result 구조적 보존), H8 notebook 루프통합, H9 github webhook, H10 memory WAL, H12 worktree 슬롯 세션경계 mint, H13 sqlite GC FK-cascade autocommit, H14 pty escape(BIDI/surrogate 스트립 존재), H15 xlsx READ deflate cap.
+
+## 권장 착수 순서 (원안, 참고용)
 1. **P0 H1·H2·H3** — 보안 회귀가드, blast radius 최대. 각 1파일 hellgate.
 2. **P1 H4·H5** — fallback×abort/멀티툴은 좀비·400 둘 다 production 라이브.
 3. **P2 H8·H9** — 신규 슬라이스 루프배선 봉인(랜딩 직후라 회귀 신선).

@@ -403,6 +403,12 @@ export interface RuntimeConfig {
    *  true, `run_tests` (detect toolchain + run suite + normalized evidence) is
    *  appended — high-risk (runs project test code), always-confirm tier. */
   readonly testRunner: boolean
+  /** Keystone `collect_evidence` Evidence Packet Builder gate (`QUANTA_EVIDENCE`).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ host sets NO
+   *  `DefaultToolPorts.evidence`, tool not registered (byte-identical). When true,
+   *  `collect_evidence` (detect → run suite → fuse failure+static+runtime+repo
+   *  into one packet) is appended — high-risk (runs the suite), always-confirm. */
+  readonly evidence: boolean
   /** H15 (jun-3-misc §3) reasoning carry-over gate (`QUANTA_REASONING_CARRYOVER`).
    *  OpenAI-Responses / o-series ONLY (the ChatGPT-OAuth subscription path).
    *  Strict opt-in (`=== "1"`). Default false ⇒ the responses-wire path is
@@ -1441,6 +1447,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     notebookEdit: gateOn(env, "QUANTA_NOTEBOOK_EDIT"),
     debugTools: gateOn(env, "QUANTA_DEBUG_TOOLS"),
     testRunner: gateOn(env, "QUANTA_TEST_RUNNER"),
+    evidence: gateOn(env, "QUANTA_EVIDENCE"),
     // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
     // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
     reasoningCarryover: gateOn(env, "QUANTA_REASONING_CARRYOVER"),

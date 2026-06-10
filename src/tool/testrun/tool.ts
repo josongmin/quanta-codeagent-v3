@@ -109,6 +109,23 @@ const parseFor = (tc: Toolchain, stdout: string, stderr: string, exitCode: numbe
   return { ...r, ok: r.failed.length === 0 && r.ok }
 }
 
+/** Run a detected toolchain's suite and return the NORMALIZED result (the
+ *  reusable run+parse core — `run_tests` renders this; the Evidence Packet
+ *  Builder consumes it structurally). NEVER throws. */
+export const runToolchain = async (
+  tc: Toolchain,
+  cwd: string,
+  port: TestRunPort = defaultTestRunPort,
+  signal?: AbortSignal,
+): Promise<TestRunResult> => {
+  try {
+    const { stdout, stderr, exitCode } = await port.run(tc.command, cwd, signal)
+    return parseFor(tc, stdout, stderr, exitCode)
+  } catch {
+    return { runner: tc.parser, passed: 0, failed: [{ name: "(test run faulted — see logs)" }], ok: false }
+  }
+}
+
 const render = (tc: Toolchain, r: TestRunResult): string => {
   const head = `${r.runner}: ${r.passed} passed, ${r.failed.length} failed (${tc.command.join(" ")})`
   if (r.failed.length === 0) return `✓ ${head}`
@@ -159,8 +176,7 @@ export const makeRunTestsTool = (deps: RunTestsDeps = {}): Tool<Input> => {
         return
       }
       try {
-        const { stdout, stderr, exitCode } = await port.run(toolchain.command, cwd, ctx.signal)
-        const result = parseFor(toolchain, stdout, stderr, exitCode)
+        const result = await runToolchain(toolchain, cwd, port, ctx.signal)
         yield { type: "result", result: { ok: result.ok, output: render(toolchain, result) } }
       } catch (e) {
         yield err(`run_tests: ${errMessage(e)}`)

@@ -198,8 +198,18 @@ export const createSupervisedProcessDaemon = (
 
   const handleChildMessage = (msg: SideAgentIpcMessage): void => {
     if (msg.kind === "finding") {
+      // Trust boundary: a child killed mid-result-write (SIGKILL) can deliver a
+      // COMPLETE IPC frame whose `finding` payload is half-built — `summary`
+      // absent, or a non-string slot left from a partially-serialized object.
+      // (Node's `serialization:"advanced"` channel never delivers a TRUNCATED
+      // frame — it's whole-frame-or-nothing — but it does NOT validate our
+      // payload shape.) Drop a malformed finding rather than forwarding ill-typed
+      // junk into the findings log (which is typed `summary: string`); the wake's
+      // crash is still observed via `onExit`. This keeps the read loop NO-THROW
+      // and the log shape-clean even against an adversarial / dying child.
+      if (typeof msg.summary !== "string" || msg.summary.length === 0) return
       opts.onFinding(
-        msg.detail !== undefined
+        typeof msg.detail === "string"
           ? { summary: msg.summary, detail: msg.detail }
           : { summary: msg.summary },
       )

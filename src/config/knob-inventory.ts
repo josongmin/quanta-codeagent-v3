@@ -1498,6 +1498,15 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
+    envKey: "QUANTA_EVIDENCE",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "collect_evidence tool — Evidence Packet Builder: fuse failure(run_tests)+static(LSP)+runtime(DAP)+repo(git) into one packet (keystone, opt-in, high-risk).",
+    readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
     envKey: "QUANTA_SHADOW",
     kind: "bool",
     default: false,

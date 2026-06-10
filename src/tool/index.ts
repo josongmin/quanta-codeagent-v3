@@ -34,6 +34,7 @@ import { editTool, makeEditTool } from "./edit"
 import { type FetchRulesPort, fetchRulesTool } from "./fetch-rules"
 import { type FileHistoryStore, makeFileHistoryRewindTool } from "./file-history"
 import { makeDebugInspectTool } from "./debug/tool"
+import { type EvidenceToolDeps, makeCollectEvidenceTool } from "./evidence/tool"
 import { makeNotebookEditTool } from "./notebook-edit/tool"
 import { makeRunTestsTool } from "./testrun/tool"
 import { fileTreeSummaryTool } from "./file-tree-summary"
@@ -661,6 +662,12 @@ export interface DefaultToolPorts {
    *  normalized pass/fail evidence). Host sets this iff `QUANTA_TEST_RUNNER` is
    *  on; absent ⇒ tool not registered (byte-identical). High-risk (runs test code). */
   testRunner?: boolean
+  /** Keystone — when set (even `{}`), append `collect_evidence` (Evidence Packet
+   *  Builder). The object carries the OPTIONAL cross-slice enrichment ports the
+   *  host injects (LSP static / DAP runtime / changed-files); `{}` ⇒ failure +
+   *  repo evidence only. Host sets this iff `QUANTA_EVIDENCE` is on; absent ⇒
+   *  tool not registered (byte-identical). High-risk (runs the suite). */
+  evidence?: Omit<EvidenceToolDeps, "fs" | "testPort">
   /** C1 — when set, append the artifact (Canvas) read/manage tools
    *  (`artifact_list` / `artifact_get` / `artifact_destroy`) bound to the
    *  session artifact registry. Absent ⇒ tools NOT registered (byte-identical).
@@ -923,6 +930,13 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // FS jail + spawn port (high-risk: runs the project's test code, always-confirm).
   if (ports.testRunner === true) {
     base.push(makeRunTestsTool({ fs: ports.fs ?? defaultFileSystemPort }) as Tool)
+  }
+  // Keystone — conditional `collect_evidence` registration. Absent ⇒ NOT
+  // registered (byte-identical). Present ⇒ the Evidence Packet Builder bound to
+  // the real FS jail (+ host-injected LSP/DAP enrichment ports). High-risk
+  // (runs the suite), always-confirm.
+  if (ports.evidence !== undefined) {
+    base.push(makeCollectEvidenceTool({ fs: ports.fs ?? defaultFileSystemPort, ...ports.evidence }) as Tool)
   }
   // CLUSTER D #5 — conditional registration of permission_propose_pattern. Absent
   // port ⇒ default set is byte-identical (the model never sees the tool). Present

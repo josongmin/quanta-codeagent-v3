@@ -598,6 +598,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "NEW CATEGORY — Office document AUTHORING (generate real .xlsx / .docx) alongside image_gen. Pure-TS STORED-ZIP (CRC-32) + minimal-valid OOXML; NO office dependency (installs blocked). Opt-in EVERYWHERE (QUANTA_OFFICE_AUTHORING): writes files, so it never auto-seeds (CLI tool-menu reproducibility). Mutating — serialize in-memory then write through the same FS-jail chokepoint the readers use; an existing target lands at a versioned -vN sibling (never silent overwrite). No port to inject (self-contained). H14 PPTX follow-up added `pptx_write` (PresentationML) reusing this same STORED-ZIP + OOXML core; the matching `pptx_read` reader is BASE (always-on) alongside xlsx_read/docx_read.",
   },
   {
+    name: "collect_evidence",
+    origin: "@/tool/evidence (via DefaultToolPorts.evidence)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.evidence",
+      env: "QUANTA_EVIDENCE",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "0533",
+    note: "KEYSTONE (multilang-debug) — Evidence Packet Builder: one call detects the toolchain, runs the suite, and FUSES the top failing test with its static context (LSP definitions/refs/types/diagnostics), runtime state (DAP stack/locals), and repo changed-files into ONE unified JSON packet for the LLM. Replaces hand-orchestrating run_tests + lsp_nav + debug_inspect. Each source is independently optional + fault-isolated (a missing/throwing source degrades its section, never the packet). HIGH RISK: runs the suite (project code) ⇒ always-confirm. NEVER throws. Real-verified: a single buildEvidence call fusing a real cargo failure + real rust-analyzer static. Opt-in EVERYWHERE (QUANTA_EVIDENCE); cross-slice LSP/DAP enrichment ports are host-injected (absent ⇒ failure+repo evidence only).",
+  },
+  {
     name: "run_tests",
     origin: "@/tool/testrun (via DefaultToolPorts.testRunner)",
     gate: {

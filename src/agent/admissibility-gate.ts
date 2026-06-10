@@ -1074,6 +1074,24 @@ const runPatternAutoPassGate = async (
     : "fallthrough"
 }
 
+/** P2-T2 (A3) — the `hand-off-required` tier floor, pulled to HARD_DENY-level
+ *  precedence (BEFORE pattern-grant + rules DSL) so no operator grant/rule can
+ *  unlock it. Routed through {@link runHitlGate} so the deny is byte-identical
+ *  AND the tier telemetry still emits. Non-hand-off tiers ⇒ "fallthrough" (they
+ *  are handled later, after the grant/rule gates, by {@link runHitlReviewGate}). */
+const runHandoffFloorGate = async (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): Promise<DispatchResult | null | "fallthrough"> => {
+  const { tier } = resolveHitlTier(config, call, action)
+  if (tier !== "hand-off-required") return "fallthrough"
+  const hitlResult = await runHitlGate(call, config, action, opts)
+  if (hitlResult === "fallthrough") return "fallthrough"
+  return hitlResult ?? runPreToolUseHook(call, config, opts)
+}
+
 const runHitlReviewGate = async (
   call: ToolUseBlock,
   config: AdmissibilityGateConfig,
@@ -1912,6 +1930,15 @@ export const runAdmissibilityGate = async (
   //    that added permissionPatternStore to the trigger to close a fail-open).
   const earlyDeny = earlyHardDeny(call, config, action, opts)
   if (earlyDeny) return earlyDeny
+
+  // 2.1. hand-off-required tier floor (jun-10 P2-T2/A3) — the tier whose contract
+  //      is "NO mode can authorize" is pulled AHEAD of the permission hook /
+  //      tool-profile / pattern auto-pass / rules DSL, so an operator pattern
+  //      grant or `allow` rule CANNOT unlock it (parity with HARD_DENY above).
+  //      `always-confirm` is intentionally NOT here — it is relaxable by an
+  //      operator rule by design; it stays in the later HITL review gate.
+  const handoffFloor = await runHandoffFloorGate(call, config, action, opts)
+  if (handoffFloor !== "fallthrough") return handoffFloor
 
   // 3b. permission_request hook (jun-6). Consults an operator-authored handler
   //     that may PROGRAMMATICALLY supply the allow/deny/ask decision BEFORE the
