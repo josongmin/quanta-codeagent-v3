@@ -1,8 +1,8 @@
 /**
- * Feature-catalog test-audit — 12-rule admissibility enforcer for tests/.
+ * Feature-catalog test-audit — 13-rule admissibility enforcer for tests/.
  *
- * Audits every `tests/**` file against the 12 admissibility rules from the
- * user-supplied spec. Rules R1-R3, R5, R8-R10 are objective static/regex
+ * Audits every `tests/**` file against the admissibility rules from the
+ * user-supplied spec. Rules R1-R3, R5, R8-R10, R13 are objective static/regex
  * checks and emit violations. R4, R6, R7, R11, R12 are semantic and out of
  * scope here — they're documented in `test-audit-rules.md` as "advisory /
  * human review" so this tool's silence on them is not interpreted as a pass.
@@ -414,6 +414,51 @@ export function checkR10EnvIsolation(ts: readonly TestFile[]): Violation[] {
   return violations
 }
 
+// R13: external-dependency tests must SKIP visibly, never early-return + PASS.
+// A test that guards on an availability/readiness flag and `return`s when the
+// dependency is missing reports as PASSED with its real assertions never run —
+// a green run becomes indistinguishable from one that actually exercised the
+// dep. The fix is a collection-time skip (`test.skipIf` / `describe.skip(If)`),
+// so absence surfaces as a visible `skipped`, not a silent pass.
+//
+// Objective signal: within a test body, an `if (...AVAIL...) ... return` where
+// the guard references an availability-named token (`HAS_*`, `*_RAN`,
+// `*AVAILABLE*`, `*USABLE*`, `*available*`, `canSpawn`, `hasChrome`,
+// `installed`). The `[^}]` span between the guard and `return` ensures we only
+// match returns INSIDE the guard block (the skip-and-pass shape), not unrelated
+// later returns.
+//
+// File-level exemption: if the file gates ANY block via `test.skipIf` /
+// `it.skipIf` / `describe.skip` / `describe.skipIf`, it is exempt — it already
+// knows the visible-skip idiom, and the residual bare-return (binary present
+// but session unusable) is a narrow, lower-severity case. Explicit opt-out:
+// `// skip-and-pass allowed`.
+const R13_SKIP_CONSTRUCT_RE = /\b(?:describe|test|it)\.skip(?:If)?\b/
+const R13_OPT_IN_RE = /\/\/\s*skip-and-pass allowed/
+const R13_AVAIL_GUARD_RETURN_RE =
+  /if\s*\(\s*!?[^)]*(?:HAS_[A-Z0-9_]+|[A-Za-z0-9_]*_RAN\b|[A-Za-z0-9_]*AVAILABLE[A-Za-z0-9_]*|[A-Za-z0-9_]*USABLE[A-Za-z0-9_]*|[A-Za-z0-9_]*available[A-Za-z0-9_]*|canSpawn|hasChrome|installed)[^)]*\)\s*\{?[^}]*?\breturn\b/
+
+/**
+ * R13 — "External-dependency tests skip visibly, never pass as a no-op."
+ */
+export function checkR13SkipAndPass(ts: readonly TestFile[]): Violation[] {
+  const violations: Violation[] = []
+  for (const f of ts) {
+    if (R13_SKIP_CONSTRUCT_RE.test(f.text)) continue
+    if (R13_OPT_IN_RE.test(f.text)) continue
+    const blocks = extractTestBlocks(f.text)
+    for (const b of blocks) {
+      if (!R13_AVAIL_GUARD_RETURN_RE.test(b.bodyText)) continue
+      violations.push({
+        file: f.path,
+        line: b.titleLine,
+        message: `test "${truncate(b.title, 70)}" early-returns on an availability guard (skip-and-pass) while the file never visibly skips — use test.skipIf / describe.skip(If) so an unavailable dependency reports as skipped, not passed`,
+      })
+    }
+  }
+  return violations
+}
+
 // ---------------------------------------------------------------------------
 // Public entry: runAllRules
 // ---------------------------------------------------------------------------
@@ -431,6 +476,7 @@ const RULE_TITLES: Record<string, string> = {
   R10: "Environment isolation tests fail on forbidden env access",
   R11: "Would fail against at least one realistic broken implementation",
   R12: "Would survive a behavior-preserving refactor",
+  R13: "External-dependency tests skip visibly, never pass as a no-op",
 }
 
 const SEMANTIC_RULES = ["R4", "R6", "R7", "R11", "R12"] as const
@@ -452,6 +498,7 @@ export function runAllRules(input: {
   push("R8", checkR8Cleanup(ts))
   push("R9", checkR9Cancellation(ts))
   push("R10", checkR10EnvIsolation(ts))
+  push("R13", checkR13SkipAndPass(ts))
   for (const r of SEMANTIC_RULES) {
     reports.push({
       rule: r,

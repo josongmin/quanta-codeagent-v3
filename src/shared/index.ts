@@ -125,6 +125,6 @@ export type {
   TurnPolicyToolChoiceKind,
 } from "./turn-policy-types"
 export { AGENT_PROMPT_MODES } from "./turn-policy-types"
-export type { HITLTier, Id, Result } from "./types"
+export type { HITLTier, Id, Result, ToolCapability } from "./types"
 export { ALL_HITL_TIERS, err, ok } from "./types"
 export { embedUntrusted, escapeBoundary } from "./untrusted"

@@ -42,7 +42,9 @@ import {
   type IdentityModeSessionState,
   type ToolProfileSessionState,
 } from "@/runner/assemble"
+import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
+import { openSessionEgressProxy } from "@/runtime/network-proxy"
 import { errMessage, gateOn, logger } from "@/shared"
 import {
   type BootstrapFeatures,
@@ -331,11 +333,33 @@ export const bootstrapSession = async (
   // Absent ⇒ `context-binding.ts` omits `AgentConfig.autoTitlePort` (byte-identical).
   const autoTitlePort = deps.buildAutoTitlePort(runtime.provider, abort.signal)
 
+  // H3 (jun-10 session-scoped egress) — open the SESSION-SCOPED egress proxy
+  // BEFORE `loadFeatures` spawns the MCP stdio servers, so the proxy's stable
+  // address is fixed into every server child's env at spawn time. This is the
+  // ARCHITECTURAL fix for the bypass: the per-turn `withEgressProxy` (bound
+  // INSIDE `runAgent`, fresh ephemeral port each turn, closed on turn return)
+  // cannot gate a process-lifetime MCP child spawned here, before any turn. We
+  // resolve the config from `runtime.env` (the SAME `resolveNetworkProxyFromEnv`
+  // the per-turn `AgentConfig.networkProxy` slot uses, so the bytes match) and
+  // bind ONCE. DEFAULT-OFF: `QUANTA_NETWORK_PROXY` absent ⇒ `undefined` ⇒
+  // `openSessionEgressProxy` binds NO socket, returns `proxyEnv = {}` (no proxy
+  // keys reach the child) + a no-op `close()` ⇒ byte-identical to today.
+  const networkProxy = resolveNetworkProxyFromEnv(runtime.env)
+  const sessionProxy = await openSessionEgressProxy(networkProxy)
   // B1 (jun-04) — thread the freshly-built LLM so an inbound MCP
   // `sampling/createMessage` can be fulfilled by the loaded clients (the surface
   // gates advertisement on its knobs + consent; passing the LLM here is what
   // makes the wiring possible at all).
-  const features = await deps.loadFeatures(slog, finalLLM)
+  let features: BootstrapFeatures
+  try {
+    features = await deps.loadFeatures(slog, finalLLM, sessionProxy.proxyEnv)
+  } catch (e) {
+    // The proxy socket was bound BEFORE the MCP spawn that just failed; release
+    // it so a failed load never leaks the listening port (mirrors the MCP-client
+    // cleanup the catch below performs once `features` exists).
+    await sessionProxy.close()
+    throw e
+  }
   try {
     const {
       pills: lifecyclePills,
@@ -449,6 +473,12 @@ export const bootstrapSession = async (
     }
     const shutdownMcp = async (): Promise<void> => {
       await stopMcpClients(features.mcpClients)
+      // H3 (jun-10) — close the session egress proxy on the SAME teardown hook
+      // that stops the MCP clients: the proxy exists ONLY to gate those clients'
+      // children, so its lifetime is exactly the MCP fleet's. No-op when the proxy
+      // is OFF (byte-identical). Closing AFTER the clients stop avoids tearing the
+      // socket out from under an in-flight child shutdown.
+      await sessionProxy.close()
     }
 
     return {
@@ -506,6 +536,9 @@ export const bootstrapSession = async (
     }
   } catch (error) {
     await stopMcpClients(features.mcpClients)
+    // H3 (jun-10) — a failure AFTER the MCP fleet started must also release the
+    // session egress proxy bound above (no-op when OFF) so no listening port leaks.
+    await sessionProxy.close()
     throw error
   }
 }

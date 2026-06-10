@@ -780,6 +780,16 @@ export interface AppshotSlot {
 }
 
 export { automationUpdateTool } from "./automation_update"
+// Keystone — Evidence Packet Builder public surface (the cross-slice
+// enrichment bridge in @/agent consumes StaticEvidence/RuntimeEvidence).
+export {
+  buildEvidence,
+  type EvidencePacket,
+  type EvidenceSources,
+  type FailureEvidence,
+  type RuntimeEvidence,
+  type StaticEvidence,
+} from "./evidence"
 // code-mode (RFC jun-6-code-mode, Phase 1) — the gated `code_cell` tool. Default-OFF:
 // registered only when `DefaultToolPorts.codeMode === true` (QUANTA_CODE_MODE on AND
 // the host wired `AgentConfig.codeCellDispatchFactory`). The dispatch port arrives

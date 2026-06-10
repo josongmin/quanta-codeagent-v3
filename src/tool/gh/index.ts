@@ -164,6 +164,10 @@ export const ghPrCommentTool = (runner: GhRunner = defaultGhRunner): Tool<PrComm
   inputSchema: prCommentSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
+  hitlTier: (): "always-confirm" => "always-confirm",
+  // PDP capability (P2-T3): posting to a GitHub PR is an externally-visible
+  // action ⇒ the UNIVERSAL floor (confirm on every surface, even bypass).
+  capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
   async *execute(input: PrCommentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
@@ -213,6 +217,10 @@ export const ghPrCreateTool = (
   inputSchema: prCreateSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
+  hitlTier: (): "always-confirm" => "always-confirm",
+  // PDP capability (P2-T3): creating a GitHub PR is an externally-visible action
+  // ⇒ the UNIVERSAL floor (confirm on every surface, even bypass).
+  capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
   async *execute(input: PrCreateInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const argv = [
       "gh",
@@ -325,6 +333,10 @@ export const ghPrAutoMergeTool = (runner: GhRunner = defaultGhRunner): Tool<PrAu
   inputSchema: prAutoMergeSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
+  hitlTier: (): "always-confirm" => "always-confirm",
+  // PDP capability (P2-T3): merging a PR is an IRREVERSIBLE external action ⇒ the
+  // UNIVERSAL floor (confirm on every surface, even bypass).
+  capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
   async *execute(input: PrAutoMergeInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {

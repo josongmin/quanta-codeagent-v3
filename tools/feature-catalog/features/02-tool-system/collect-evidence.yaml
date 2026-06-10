@@ -1,0 +1,54 @@
+id: collect-evidence
+title: collect_evidence — Evidence Packet Builder (keystone; fuse failure+static+runtime+repo)
+section: 2
+subsystem: tool-system
+order: 62
+maturity: L3
+status: opt-in
+ui_surfaces: [cli, web]
+monitoring: "tool_result: unified EvidencePacket JSON; ok = (suite green). NEVER-throws."
+modes: [n-a]
+configurable: "QUANTA_EVIDENCE (strict opt-in) → DefaultToolPorts.evidence"
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:multilang-debug", "high-risk", "default-off", "code-execution", "keystone"]
+depends_on: [run-tests]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "DefaultToolPorts.evidence conditional registration in src/tool/index.ts; gated by cfg.evidence in host/runtime/agent-arg-builder.ts (same seam as run_tests/debug_inspect)"
+    web: "rides the agent-arg-builder composition the daemon-backed session uses"
+purpose: |
+  The KEYSTONE of multi-language agentic debugging. One call assembles the
+  unified EvidencePacket for the current failure instead of the LLM hand-
+  orchestrating run_tests + lsp_nav + debug_inspect: detect toolchain → run the
+  suite → pick the top failing test → fuse it with static context (LSP
+  definitions/refs/types/diagnostics at the failure site), runtime state (DAP
+  stack/locals), and repo changed-files into one JSON matching the agreed schema
+  {language, repo_context, failure, runtime, static, patch_constraints}.
+
+  Pure orchestrator (src/tool/evidence/builder.ts) over injected sources, each
+  independently optional AND fault-isolated (a missing/throwing source degrades
+  its section to null, never the packet) → NEVER-throws. The failure file is
+  normalized to an absolute path before LSP/DAP handoff (runners report it
+  relative). ok mirrors run_tests (green ⇒ ok:true; failure ⇒ ok:false).
+
+  STATUS: failure + repo + STATIC + Python(debugpy)+Rust(lldb-dap) RUNTIME are LIVE in production.
+  static = evidenceLspStatic (@/agent/lsp-bridge) wired in agent-arg-builder;
+  runtime = defaultRuntimePort (in-slice @/tool/debug, default-wired in the tool,
+  abort-threaded, degrades to null without debugpy/python). Proven by real
+  rust-analyzer static e2e + real debugpy + real lldb-dap runtime e2e (both capture the failing locals).
+  Go/TS runtime (dlv/js-debug, needs DAP TCP transport) remain follow-up. HIGH
+  RISK: runs the suite ⇒ always-confirm + default-OFF (QUANTA_EVIDENCE).
+  Per-section toggles: includeRuntime / includeStatic (both default ON) let the
+  caller skip the expensive DAP runtime re-run or the LSP static query for a
+  faster partial packet.
+tests:
+  - tests/unit/tool/evidence/builder-hellgate.test.ts
+  - tests/unit/tool/evidence/tool-and-git.test.ts
+  - tests/unit/tool/evidence/keystone-real-e2e.test.ts
+  - tests/unit/tool/evidence/runtime-real-e2e.test.ts
+  - tests/unit/tool/evidence/runtime-rust-real-e2e.test.ts
+  - tests/unit/evidence-lsp-bridge-real-e2e.test.ts

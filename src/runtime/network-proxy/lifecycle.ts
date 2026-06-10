@@ -92,3 +92,59 @@ export const withEgressProxy = async <T>(
     await proxy.close()
   }
 }
+
+/** What {@link openSessionEgressProxy} hands back: the stable {@link ProxyEnvInput}
+ *  to thread into PROCESS-LIFETIME child spawns (MCP stdio servers) plus an
+ *  idempotent `close()` to release the bound socket on session teardown. When the
+ *  config is OFF, `proxyEnv` is `{}` (byte-identical child env) and `close()` is a
+ *  no-op. */
+export interface SessionEgressProxy {
+  readonly proxyEnv: ProxyEnvInput
+  readonly close: () => Promise<void>
+}
+
+/**
+ * Open a SESSION-SCOPED egress proxy (open/close, NOT callback-scoped).
+ *
+ * WHY a second shape vs {@link withEgressProxy} — `withEgressProxy` binds a FRESH
+ * proxy per `runAgent` (per turn) and closes it on the callback's return, which is
+ * correct for per-turn children (bash / docker / sandbox). But an MCP stdio server
+ * is a PROCESS-LIFETIME child spawned ONCE at bootstrap (before any turn) and lives
+ * across every turn — it cannot be re-pointed at a per-turn proxy whose ephemeral
+ * port changes each turn. So MCP needs a proxy bound ONCE, BEFORE the spawn, whose
+ * stable address is fixed into the child's env and stays valid for the whole
+ * session. This helper provides exactly that: bind once, hand back the stable env,
+ * and expose `close()` for the session-shutdown hook.
+ *
+ * DEFAULT-OFF / byte-identical: `config` absent OR `config.enabled !== true` ⇒ NO
+ * proxy is constructed, NO socket bound, `proxyEnv = {}` (so `withProxyEnv(base,{})`
+ * returns the SAME base ⇒ byte-identical MCP spawn env), and `close()` is a no-op.
+ * This is the path every default run takes.
+ *
+ * @param config  the (possibly OFF) proxy config from `AgentConfig.networkProxy`.
+ * @param deps    optional clock + hermetic dial seam for tests (same as
+ *                {@link withEgressProxy}).
+ */
+export const openSessionEgressProxy = async (
+  config: NetworkProxyConfig | undefined,
+  deps: EgressProxyDeps = {},
+): Promise<SessionEgressProxy> => {
+  // DEFAULT-OFF: absent or disabled ⇒ no socket, byte-identical child env, no-op close.
+  if (config === undefined || config.enabled !== true) {
+    return { proxyEnv: {}, close: async () => {} }
+  }
+
+  const proxy = new LoopbackEgressProxy(config, {
+    ...(deps.now !== undefined ? { now: deps.now } : {}),
+    ...(deps.dial !== undefined ? { dial: deps.dial } : {}),
+    ...(deps.resolvePeerHost !== undefined ? { resolvePeerHost: deps.resolvePeerHost } : {}),
+  })
+  const address = await proxy.listen()
+  return {
+    proxyEnv: {
+      address,
+      ...(config.noProxy !== undefined ? { noProxy: config.noProxy } : {}),
+    },
+    close: () => proxy.close(),
+  }
+}

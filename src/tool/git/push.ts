@@ -137,6 +137,11 @@ export const gitPushTool = (runner: GitRunner, opts: GitPushToolOpts = {}): Tool
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: (): "always-confirm" => "always-confirm",
+  // PDP capability (P2-T3): pushing commits to a remote is an inherently
+  // SENSITIVE, externally-visible, hard-to-reverse action ⇒ the UNIVERSAL floor.
+  // Confirmed on EVERY surface even under bypass (an autonomous surface that
+  // accepts the risk opts out via `hitl.autoApprove`).
+  capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
 
   async *execute(input: GitPushInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitPushInputSchema.safeParse(input)

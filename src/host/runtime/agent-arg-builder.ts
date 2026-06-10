@@ -19,7 +19,7 @@
  */
 
 import { join as joinPath } from "node:path"
-import { buildSystemPrompt, HookBus, reflectConsultFromLLM, wireOptionalAgentPorts } from "@/agent"
+import { buildSystemPrompt, evidenceLspStatic, HookBus, reflectConsultFromLLM, wireOptionalAgentPorts } from "@/agent"
 import {
   type CommandHookBinding,
   type CommandHookConfig,
@@ -863,9 +863,11 @@ const buildGatedToolPorts = (
     // byte-identical unless QUANTA_TEST_RUNNER === "1". High-risk (always-confirm).
     ...(cfg.testRunner ? { testRunner: true } : {}),
     // Keystone — gated `collect_evidence` (Evidence Packet Builder). Default-OFF
-    // unless QUANTA_EVIDENCE === "1". `{}` = failure+repo evidence (LSP/DAP
-    // enrichment ports wired separately by a bridge when available).
-    ...(cfg.evidence ? { evidence: {} } : {}),
+    // unless QUANTA_EVIDENCE === "1". The `lspStatic` enrichment port is wired
+    // LIVE here from the LSP bridge (`evidenceLspStatic`), so the packet's
+    // `static` section is real in production (not just test-local). DAP `runtime`
+    // remains a follow-up port (test-under-debugger orchestration).
+    ...(cfg.evidence ? { evidence: { lspStatic: evidenceLspStatic() } } : {}),
     // C2 — gated communicate_update tool. Default-OFF: tool menu byte-identical
     // unless QUANTA_PROGRESS_UPDATE === "1". Boolean port — the tool reads its
     // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from

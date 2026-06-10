@@ -1,7 +1,7 @@
 # Test admissibility rules
 
-`bun fc test-audit` audits every `tests/**/*.test.{ts,js}` file against the 12
-admissibility rules below. Seven rules (R1, R2, R3, R5, R8, R9, R10) have
+`bun fc test-audit` audits every `tests/**/*.test.{ts,js}` file against the 13
+admissibility rules below. Eight rules (R1, R2, R3, R5, R8, R9, R10, R13) have
 objective static signals and are **enforced** by the tool. The remaining five
 (R4, R6, R7, R11, R12) require semantic judgement and are **advisory only** —
 listed here so reviewers know the bar and so the tool's silence on them isn't
@@ -28,6 +28,7 @@ fuzzy name match.
 | R10  | enforced    | test title contains `env\|environment\|isolation\|isolated` but body lacks any of: `mockEnv()`, `process.env.X = undefined`, `Object.defineProperty(process.env...)`, `toThrow` over env access |
 | R11  | semantic    | (human review — mutation-testing intuition) |
 | R12  | semantic    | (human review — refactor robustness) |
+| R13  | enforced    | test body has `if (…AVAIL…) … return` (avail token: `HAS_*`/`*_RAN`/`*AVAILABLE*`/`*USABLE*`/`*available*`/`canSpawn`/`hasChrome`/`installed`) while the file uses no `test.skipIf`/`it.skipIf`/`describe.skip(If)` and lacks `// skip-and-pass allowed` |
 
 ## The 12 rules — verbatim spec
 
@@ -62,6 +63,15 @@ fuzzy name match.
     not testing anything.
 12. **Would survive a behavior-preserving refactor.** A test that breaks on
     every rename or inline-extract is asserting on form, not function.
+13. **External-dependency tests skip visibly, never pass as a no-op.** A test
+    gated on an optional dependency (real browser, debugger, DB, binary) must
+    **SKIP** when the dep is absent — a visible `skipped` in the runner — not
+    early-`return` and report PASS with its real assertions silently un-run.
+    Probe availability at collection time (a synchronous check or top-level
+    `await`) and feed `test.skipIf` / `describe.skip(If)`. A flag set in
+    `beforeAll` is too late for `skipIf`; guarding the body with
+    `if (!ready) return` makes a green run indistinguishable from one that
+    actually ran the dependency.
 
 ## Escape hatches
 
@@ -72,6 +82,11 @@ fuzzy name match.
 - **R3 import-of-src exemption.** Tests under `tests/unit/_arch/`,
   `tests/architecture/`, `tests/**/_harness/`, or `tests/unit/_parity/` are
   auto-exempt — they audit filesystem layout, not behavior.
+- **R13 skip-and-pass opt-in / exemption.** A file that gates ANY block via
+  `test.skipIf` / `it.skipIf` / `describe.skip` / `describe.skipIf` is exempt
+  (it already knows the visible-skip idiom; a residual bare guard for a
+  binary-present-but-unusable sub-case is narrow and lower-severity). For a
+  genuine exception, add `// skip-and-pass allowed` near the top of the file.
 
 ## Usage
 

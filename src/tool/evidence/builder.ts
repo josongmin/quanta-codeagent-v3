@@ -13,6 +13,7 @@
  *    THROWING source degrades its section to null/[], never the whole packet.
  *  NEVER throws.
  */
+import { isAbsolute, resolve } from "node:path"
 import type { TestRunResult, Toolchain } from "../testrun"
 import type { EvidencePacket, FailureEvidence, PatchConstraints, RuntimeEvidence, StaticEvidence } from "./types"
 
@@ -23,14 +24,24 @@ export interface EvidenceSources {
   runTests: (tc: Toolchain, cwd: string) => Promise<TestRunResult>
   /** LSP static context at a failure site (optional). */
   lspStatic?: (file: string, line: number, cwd: string) => Promise<StaticEvidence | null>
-  /** DAP runtime state for the failing test (optional). */
-  runtime?: (failure: FailureEvidence, cwd: string) => Promise<RuntimeEvidence | null>
+  /** DAP runtime state for the failing test (optional). Receives the toolchain
+   *  (to build the right "run under the debugger" launch) + the turn signal (so a
+   *  long debugger run aborts with the turn). */
+  runtime?: (
+    failure: FailureEvidence,
+    tc: Toolchain,
+    cwd: string,
+    signal?: AbortSignal,
+  ) => Promise<RuntimeEvidence | null>
   /** Repo changed files, e.g. `git diff --name-only` (optional). */
   changedFiles?: (cwd: string) => Promise<readonly string[]>
 }
 
 export interface BuildEvidenceOptions {
   readonly patchConstraints?: PatchConstraints
+  /** Turn-abort signal, threaded to the runtime (debugger) source so a cancelled
+   *  turn doesn't wait out the debugger stop-timeout. */
+  readonly signal?: AbortSignal
 }
 
 const DEFAULT_CONSTRAINTS: PatchConstraints = { public_api_change_allowed: false }
@@ -70,7 +81,10 @@ export const buildEvidence = async (
   if (result === null || result.failed.length === 0) return empty
 
   // TOP failure: prefer the first with a concrete file+line (localizable).
-  const top = result.failed.find((f) => f.file !== undefined && f.line !== undefined) ?? result.failed[0]!
+  // `result.failed` is non-empty here (guarded above), but avoid the `!` so a
+  // future parser contract change can't turn this into a crash.
+  const top = result.failed.find((f) => f.file !== undefined && f.line !== undefined) ?? result.failed[0]
+  if (top === undefined) return empty
   const failure: FailureEvidence = {
     command: tc.command.join(" "),
     test_name: top.name,
@@ -80,13 +94,16 @@ export const buildEvidence = async (
   }
 
   // Enrich ONLY when the failure is localizable (file+line) for static; runtime
-  // is keyed by the failing test name.
+  // is keyed by the failing test name. The file is normalized to an ABSOLUTE
+  // path before handoff — test runners report it relative to cwd, but LSP/DAP
+  // need an absolute path (a relative one silently fails to bind/hover).
+  const absFile = top.file !== undefined ? (isAbsolute(top.file) ? top.file : resolve(cwd, top.file)) : undefined
   const staticEv =
-    top.file !== undefined && top.line !== undefined && sources.lspStatic !== undefined
-      ? await safe(() => sources.lspStatic!(top.file!, top.line!, cwd), null)
+    absFile !== undefined && top.line !== undefined && sources.lspStatic !== undefined
+      ? await safe(() => sources.lspStatic!(absFile, top.line!, cwd), null)
       : null
   const runtimeEv =
-    sources.runtime !== undefined ? await safe(() => sources.runtime!(failure, cwd), null) : null
+    sources.runtime !== undefined ? await safe(() => sources.runtime!(failure, tc, cwd, opts.signal), null) : null
 
   return {
     language: tc.kind,

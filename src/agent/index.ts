@@ -196,7 +196,7 @@ export { runAgent } from "./loop"
 // can never drift from what the model actually sees.
 export { buildSkillGate, filterSpecsByScope, isAlwaysInScope } from "./loop/skill-gate"
 export { buildSkillScopeView, type SkillScopeView } from "./loop/skill-scope-view"
-export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
+export { evidenceLspStatic, lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {
   attachLspDiagnosticsHook,
   type LspDiagnosticsHookHandle,

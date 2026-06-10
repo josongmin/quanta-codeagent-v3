@@ -101,6 +101,10 @@ Each step is a slice behind an existing seam — NOT a big-bang rewrite.
 3. **Capability spec** replaces `inferToolTier`; ratchet every tool. **This
    un-skips P2-T1** — `always-confirm` universalizes for inherently-sensitive
    tools while bash defers to its sandbox profile.
+   - ✅ **First decider LANDED (jun-10)**: `ToolCapability` (`@/shared`) + the pure
+     `decideFloor` (`@/permission/pdp`); the gate consults it for the floor
+     question. T1 un-blocked, 0 regressions. REMAINING: classify real tools +
+     make the spec the FULL replacement for `inferToolTier` + the authoring ratchet.
 4. **Obligations type** (with `runInSandbox` no-op).
 5. **Grant ledger** generalizes the lease (preserve turn-scoped single-use).
 6. **OS sandbox** (Ring B) behind the obligation seam.

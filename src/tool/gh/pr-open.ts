@@ -204,6 +204,11 @@ export const ghPrOpenTool = (
   inputSchema: prOpenSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
+  hitlTier: (): "always-confirm" => "always-confirm",
+  // PDP capability (P2-T3): opening a PR is an inherently SENSITIVE, externally-
+  // visible action ⇒ the UNIVERSAL floor (confirmed on every surface, even bypass;
+  // autonomous surfaces opt out via `hitl.autoApprove`).
+  capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
 
   async *execute(input: PrOpenInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = prOpenSchema.safeParse(input)

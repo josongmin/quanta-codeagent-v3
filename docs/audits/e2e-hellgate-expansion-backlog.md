@@ -88,6 +88,28 @@
 
 나머지 11건은 **회귀가드(이미 안전)**: H4 fallback abort(3중 throwIfAborted 존재), H5 페어링(evict가 페어 보존), H6 verify×breaker(strike가 re-stream 이유에 blind=정당), H7 plan-queue(user-text≠tool_result 구조적 보존), H8 notebook 루프통합, H9 github webhook, H10 memory WAL, H12 worktree 슬롯 세션경계 mint, H13 sqlite GC FK-cascade autocommit, H14 pty escape(BIDI/surrogate 스트립 존재), H15 xlsx READ deflate cap.
 
+## 라운드2 (2026-06-10 완료) — 웹표면 + 새 적대벡터
+조합축은 0/7 전부 PRUNED(코드가 명시적 격리: subagent skill 비전파/recovery·plan-exit 예산분리/distill 세션끝만/baseline 턴내불변). 웹표면(라운드1 미착수)+새벡터에서 6건 랜딩. **43 tests / 160 expects GREEN, 전부 회귀가드(신버그 0), src 무수정.**
+
+- **W1** approval.respond **mid-turn 웹데몬 continuation** — ADR-0512 P3 실버그(approve가 lease만 걸고 turn.run 없음) 수정의 **첫 통합 회귀가드**. red-on-injection=continuation 루프(`session-turn-driver.ts:138`) 절단 시 도구 미실행 RED. 메커니즘: approval suspend가 lease-held await가 아니라 loop unwind+lease release라 데드락 없음.
+- **W2** readout HTTP route — 실 소켓 `GET /readout/:name`: auth 401/200, mid-turn **lease-free** live snapshot, pending accessor wired:false(404 아님). red=requireAuth/lease-free 절단 시 RED.
+- **W3** canvas tool.diff+context.usage **emit→WS 데몬 e2e** — 실 Bun.serve+실 WS, 도구실행→sink→프레임. 기존은 capture unit만. red=onToolDiff/onPromptAssembled 와이어 절단.
+- **W4** agent-state/observability **실 데몬 WS** — 기존 `agent-state-daemon-e2e-flow`는 fakeWs in-process만, 이건 `startWebDaemon` 실부팅+실소켓. snapshot-on-connect/delta/fault-isolation. red=attachObservabilitySink/attachAgentStateSink(server.ts:1023/1033) 절단.
+- **V1** cross-shell `-EncodedCommand` 규칙우회 — **갈래 B(설계 경계 봉인)**. deterministic rules는 "matching aid, not security boundary"(argv.ts:42)라 base64 decode 안 함(=휴리스틱 금지 준수), 인코딩 페이로드는 classifier(classifier.ts:119) 책임. 🔴**실 잔여리스크 명시**: fallthrough/allowlist posture에서 `pwsh -EncodedCommand <base64>`가 argv DENY+HARD_DENY substring 게이트 **둘 다 우회**, LLM classifier만 backstop. 완화책=operator가 `deny ["pwsh","-EncodedCommand"]`로 flag 차단(CONTROL 케이스로 봉인). default-deny posture에선 우회 안 됨.
+- **V2** hooks 동시 핸들러 burn — N=32 독립 timeout 수렴+MAX_HANDLERS=64 ceiling+격리. 🔴**정직한 한계**: 동기 `while(true){}` CPU-burn은 JS 단일스레드라 timeout이 못 막음(async-yield burn만 봉인, worker-thread 격리는 별도 ROI). truncation false-negative(보안훅이 truncated payload 보는 경우) marker 신호까지만 봉인.
+
+## 라운드3 (2026-06-10) — 랜딩한 4개 실버그 픽스 적대감사
+e2e 확장은 수확체감이라, 가장 위험한 표면인 **내가 랜딩한 4개 prod 픽스 자체**를 적대감사(과교정/신규구멍/blast-radius). 2개 actionable 발견·해소, H2/H11은 모든 가설 기각 SHIP.
+
+- **H1 NUL 바이트 (확정 실결함→수정)**: trust-scope-store.ts:327에 리터럴 `\x00`이 박혀 파일이 binary로 인식+편집 landmine(공백으로 오타 시 identity 스킴 무음 변경). ` ` escape로 교체(런타임 byte-identical). src-no-sketchy 스캐너가 raw NUL을 못 잡던 갭도 노출.
+- **H3 라이브 MCP egress 우회 (설계갭 확정·문서화, 강제봉인 안 함)**: transport 계약은 봉인됐지만 라이브 경로는 **두 구조적 단절**로 thread 불가 — ①TIMING: MCP 서버는 bootstrap(mcp-bridge.ts:789)서 spawn되는데 egress 프록시는 runAgent 내부(entry.ts:53)서야 bind→spawn 시점 proxy=undefined. ②LIFETIME: 프록시는 턴당 ephemeral(매턴 새 포트, 턴간 close)인데 MCP 자식은 프로세스 수명. 가짜 thread는 stale/undefined 주입=거짓봉인이라 **안 함**. 진짜 해법=**session-scoped egress 프록시**(bootstrap서 1회 bind, 세션 수명, 안정 주소). 잔여리스크: QUANTA_NETWORK_PROXY ON 시 MCP 서버 자식 소켓이 allowlist 우회(default-OFF이라 severity bounded). 테스트는 정확한 2-단절 진단으로 회귀가드 승격.
+- **permission-store 2-프로세스 갭 (감사 발견→신규 헬게이트)**: H1 락 엔진을 trust-scope와 permission-store가 공유하는데 2-OS-프로세스 race 테스트는 trust-scope만 있었음. permission-state.json(보안핵심 denial)에 `permission-store-concurrent-write-e2e-hellgate` 추가(4케이스: denial/grant-never-lost+fail-closed+stress). 회귀가드(같은 엔진이라 이미 안전), red=merge hook blind 시 denial 유실 RED.
+- **H2/H11**: 모든 적대 가설 기각 SHIP. H2 TOCTOU는 repo 전역 패턴(O_NOFOLLOW 미사용)과 동일한 accepted posture, 읽기경로는 refuseSymlink로 이미 방어. H11 빈문자열/undefined detail은 합법 처리, IPC union에 progress/error kind 없어 갭 없음.
+
+**H1 followup(미강제, fail-safe 분류)**: lock release-after-steal(owner-token 없음, >5s FS stall서만 도달+union-merge backstop), tombstone 무한증가(장수세션 미배선), same-ms grantedAt 충돌(restriction 쪽 실패=안전). 휴리스틱 금지+측정없음이라 defer.
+
+누적: **22개 신규 헬게이트 e2e, 실버그 5건 수정**(trust-scope TOCTOU·심링크·MCP proxy dead-arg·IPC half-frame·NUL byte). 미해소 1건=H3 session-scoped 프록시(설계 필요, default-OFF bounded).
+
 ## 권장 착수 순서 (원안, 참고용)
 1. **P0 H1·H2·H3** — 보안 회귀가드, blast radius 최대. 각 1파일 hellgate.
 2. **P1 H4·H5** — fallback×abort/멀티툴은 좀비·400 둘 다 production 라이브.

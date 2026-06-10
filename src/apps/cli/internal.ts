@@ -87,6 +87,7 @@ import {
 import type { Tooling } from "@/runner/assemble/tooling"
 import { type AutoTitlePort, createAutoTitlePort } from "@/runner/session-ops/auto-title"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
+import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import {
   createBunSpawner,
   createShellSnapshotPort,
@@ -697,6 +698,7 @@ const mcpSupervisorDepsFor = (
   wiring: SamplingWiringInput | undefined,
   transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
   oauthProvider: McpOAuthProviderPort | undefined,
+  proxyEnv: ProxyEnvInput | undefined,
 ) => {
   return (_config: McpServerConfig): SupervisorDeps => ({
     factory: (c): SupervisableMcpClient => {
@@ -706,7 +708,10 @@ const mcpSupervisorDepsFor = (
       // via the SAME helper the single-client path uses, so a reconnected client
       // RE-resolves a bearer for an `oauth:true` server. Absent ⇒ headless
       // rejecter (byte-identical to the pre-wire supervised path).
-      applyMcpClientWiring(clientOpts, wiring, oauthProvider)
+      // H3 (jun-10) — `proxyEnv` rides the same helper so a RECONNECTED MCP server
+      // child re-injects the session egress proxy (the bypass cannot reopen on a
+      // restart). Absent ⇒ no keys (byte-identical).
+      applyMcpClientWiring(clientOpts, wiring, oauthProvider, proxyEnv)
       return new McpClient(c, clientOpts)
     },
     policy: DEFAULT_BACKOFF_POLICY,
@@ -1243,6 +1248,13 @@ export interface LoadFeaturesOpts {
    *  {@link resolveMcpOAuthProvider}. Production omits it (real `globalThis.fetch`,
    *  loopback browser flow, `<quanta-home>/mcp-oauth/`, live keyring). */
   readonly mcpOAuthDeps?: Parameters<typeof resolveMcpOAuthProvider>[1]
+  /** H3 (jun-10 session-scoped egress) — the SESSION-SCOPED egress proxy env the
+   *  host bootstrap opened (`openSessionEgressProxy`) BEFORE this call, live for
+   *  the whole session. Threaded DOWN to `loadMcpTools` so every stdio MCP server
+   *  child's own sockets are forced through the loopback allowlist (closing the
+   *  bypass per-turn `withEgressProxy` cannot — an MCP child outlives a turn).
+   *  Absent / proxy OFF ⇒ `{}` ⇒ no proxy keys injected (byte-identical load). */
+  readonly proxyEnv?: ProxyEnvInput
 }
 
 /** B1 (jun-04) — compute the advertise-iff-able inbound-sampling wiring for the
@@ -1366,12 +1378,18 @@ const buildMcpLoadOpts = (
           args.inboundWiring,
           args.opts.mcpTransportFor,
           args.oauthProvider,
+          args.opts.proxyEnv,
         ),
       }
     : {}),
   ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
   ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
+  // H3 (jun-10 session-scoped egress) — the session proxy env (opened once at
+  // bootstrap, BEFORE any MCP spawn) rides BOTH the single-client and the
+  // supervised path so every stdio server child's own sockets are forced through
+  // the loopback allowlist. Absent / proxy OFF ⇒ slot omitted ⇒ byte-identical.
+  ...(args.opts.proxyEnv !== undefined ? { proxyEnv: args.opts.proxyEnv } : {}),
   // §19.1 (QUANTA_MCP_TOOL_ANNOTATIONS) — the global default-OFF master switch.
   // OFF (default) ⇒ slot omitted ⇒ the bridge's `annotationsHonored` stays false
   // ⇒ `honored = annotationsHonored && trusted` is false for EVERY tool, so the

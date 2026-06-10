@@ -8,6 +8,7 @@ import {
   TypescriptAdapter,
 } from "@/lsp"
 import { errMessage, logger } from "@/shared"
+import type { StaticEvidence as EvidenceStatic } from "@/tool"
 import {
   lspNavTools as buildLspNavTools,
   type DiagnosticsProvider,
@@ -283,6 +284,61 @@ export const lspNavProvider = (): LspNavProvider => ({
     return adaptToNavSession(client)
   },
 })
+
+/**
+ * Keystone enrichment — the PRODUCTION `lspStatic` port for `collect_evidence`.
+ * Given a failure site (absolute file + 1-based line), open the right language
+ * server via {@link lspNavProvider} and harvest the static context: hover
+ * (type_info), definition (definition_chain), references — fused into the
+ * Evidence Packet's `static` section. This is what turns the keystone's static
+ * section from test-local to LIVE.
+ *
+ * Test runners report only a LINE (no column), so we scan columns on the line
+ * for the first symbol the server answers about. rust-analyzer (and others)
+ * emit `ContentModified` while indexing — treated as "retry", within a budget.
+ * Best-effort + NEVER-throws (the builder also `safe()`-wraps it): a missing
+ * server / no symbol ⇒ null, never a crash. A fresh server is spawned per call
+ * (acceptable for an opt-in, always-confirm tool).
+ */
+export const evidenceLspStatic =
+  (budgetMs = 20_000) =>
+  async (file: string, line: number, cwd: string): Promise<EvidenceStatic | null> => {
+    const session = await lspNavProvider().open(file, cwd)
+    if (session === null) return null
+    const toLoc = (l: { uri: string; range: { start: { line: number } } }): { file: string; line: number } => ({
+      file: l.uri.replace(/^file:\/\//, ""),
+      line: l.range.start.line + 1,
+    })
+    try {
+      const ln = Math.max(0, line - 1) // LSP 0-based
+      const deadline = Date.now() + budgetMs
+      while (Date.now() < deadline) {
+        for (let ch = 0; ch < 80; ch += 2) {
+          const pos = { line: ln, character: ch }
+          try {
+            const hov = await session.hover(file, pos)
+            if (hov !== null) {
+              const defs = await session.definition(file, pos).catch(() => null)
+              const refs = await session.references(file, pos, false).catch(() => null)
+              return {
+                definition_chain: (defs ?? []).map(toLoc),
+                references: (refs ?? []).map(toLoc),
+                type_info: hov.contents,
+                diagnostics: [],
+              }
+            }
+          } catch (e) {
+            // ContentModified during indexing ⇒ retry; anything else ⇒ give up.
+            if (!/content modified/i.test(String(e))) return null
+          }
+        }
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      return { definition_chain: [], references: [], type_info: null, diagnostics: [] }
+    } finally {
+      await session.stop().catch(() => undefined)
+    }
+  }
 
 /**
  * Build the LSP-backed nav tool set (8 tools — see `@/tool/lsp_nav` for the

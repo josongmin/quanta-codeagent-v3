@@ -1,7 +1,7 @@
 import type { z } from "zod"
 import type { DocumentBlock, ImageBlock } from "@/llm"
 import type { SensitivityClass } from "@/security"
-import type { HITLTier } from "@/shared"
+import type { HITLTier, ToolCapability } from "@/shared"
 import type { WriteBudgetPort } from "./_shared/write-budget"
 import type { ShellExecObserver } from "./shell-exec-types"
 import type { ReadFileState } from "./stale-read-guard"
@@ -1337,6 +1337,14 @@ export interface ToolSecurityHooks<I = unknown> {
    *  pre-approval-ok) provide their own classifier here. Only consulted
    *  when the HITL gate is explicitly enabled in `AgentConfig.hitl`. */
   hitlTier(input: I): HITLTier
+  /** PDP capability declaration (jun-10, P2-T3). Optional, additive: the SSOT for
+   *  WHY a tool needs a confirm, read by the security-floor decider
+   *  (`@/permission` `decideFloor`). A tool that declares `confirm: "sensitive"`
+   *  joins the UNIVERSAL always-confirm floor — confirmed on every surface,
+   *  even under bypass, even without the HITL opt-in. `needs-sandbox` (e.g. bash
+   *  without a profile) DEFERS to the sandbox / mode layer. Absent ⇒ defer
+   *  (byte-identical legacy). Per-input so a tool can vary it. */
+  capability?(input: I): ToolCapability
   /** S16: when a tool accepts a raw shell command string, it implements this
    *  to expose the command for HARD_DENY evaluation. The permission policy
    *  gates ANY tool whose `extractShellCommand` returns a non-null value

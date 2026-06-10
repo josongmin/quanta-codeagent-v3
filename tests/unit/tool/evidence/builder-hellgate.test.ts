@@ -40,16 +40,18 @@ describe("buildEvidence — keystone orchestration", () => {
           diagnostics: [],
         }
       },
-      runtime: async (f) => {
+      runtime: async (f, tc) => {
         seen.runtimeFor = f.test_name
+        expect(tc.kind).toBe("rust") // toolchain threaded to the runtime source
         return { stack: [{ name: "add", file: "src/lib.rs", line: 6 }], locals: [{ name: "a", value: "2" }] }
       },
     }))
     expect(pkt.language).toBe("rust")
     expect(pkt.failure?.test_name).toBe("tests::fail_test")
     expect(pkt.failure?.file).toBe("src/lib.rs")
-    // Static + runtime were queried AT THE FAILURE SITE / for the failing test.
-    expect(seen.staticAt).toEqual(["src/lib.rs", 6])
+    // Static + runtime were queried AT THE FAILURE SITE (absolute path) / for
+    // the failing test.
+    expect(seen.staticAt).toEqual(["/repo/src/lib.rs", 6])
     expect(seen.runtimeFor).toBe("tests::fail_test")
     expect(pkt.static?.type_info).toContain("fn add")
     expect(pkt.runtime?.stack[0]?.name).toBe("add")
@@ -122,7 +124,7 @@ describe("buildEvidence — keystone orchestration", () => {
         return null
       },
     }))
-    expect(at).toEqual(["m_test.go", 12])
+    expect(at).toEqual(["/repo/m_test.go", 12]) // resolved to absolute against cwd
   })
 
   test("patch_constraints flow through from options (default: no public API change)", async () => {

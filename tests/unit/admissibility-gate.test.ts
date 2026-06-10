@@ -721,6 +721,26 @@ describe("runAdmissibilityGate: pattern auto-pass CANNOT bypass HARD_DENY (AUDIT
   })
 })
 
+// Real sensitive tools join the universal floor via the PDP capability spec.
+describe("runAdmissibilityGate: real sensitive tools are universal-floor gated [P2-T3]", () => {
+  test("git_push (capability: sensitive) is DENIED under bypass with no HITL + no asker", async () => {
+    const { gitPushTool } = await import("@/tool/git")
+    // The runner must NEVER be invoked — the floor denies before execute.
+    const push = gitPushTool((() => {
+      throw new Error("git_push.execute must not run — gate should deny first")
+    }) as never)
+    expect(push.capability?.({})).toEqual({ confirm: "sensitive" })
+    const c = cfg({
+      registry: new ToolRegistry([push]),
+      permission: { mode: "bypass" },
+    } as Partial<AgentConfig>)
+    const action: AdmissibilityAction = { tool: "git_push", input: {}, isReadOnly: false }
+    const res = await runAdmissibilityGate(call("git_push", {}), c, { mode: "bypass" }, action)
+    // Universal floor (sensitive) ⇒ fail-closed deny, NOT auto-passed under bypass.
+    expect(res).not.toBeNull()
+  })
+})
+
 // ⚠️ AGENTS: RED-first hellgate for ticket P2-T2 (A3) — RED until the hand-off
 // floor is pulled AHEAD of pattern-auto-pass + rules-DSL. Do not delete.
 describe("runAdmissibilityGate: hand-off-required tier CANNOT be overridden by a grant/rule [P2-T2]", () => {

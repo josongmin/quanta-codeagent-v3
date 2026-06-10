@@ -20,6 +20,7 @@ import {
   type SupervisorDeps,
   tasksPortOver,
 } from "@/mcp"
+import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { errMessage, logger } from "@/shared"
 import {
   type ResourcesHandleResult as HandleResult,
@@ -640,7 +641,16 @@ export const applyMcpClientWiring = (
   opts: NonNullable<ConstructorParameters<typeof McpClient>[1]>,
   wiring: SamplingWiringInput | undefined,
   oauthProvider?: McpOAuthProviderPort,
+  proxyEnv?: ProxyEnvInput,
 ): NonNullable<ConstructorParameters<typeof McpClient>[1]> => {
+  // H3 (jun-10 session-scoped egress) — the egress-proxy env is applied through
+  // the SAME unification point as the OAuth provider + inbound bundle so the
+  // single-client and the supervised (restart) factory wire it IDENTICALLY (no
+  // path can gate the child socket while the other forgets it ⇒ a reconnected MCP
+  // server would otherwise bypass the allowlist). Present (live proxy) ⇒ each
+  // constructed client injects HTTP_PROXY/HTTPS_PROXY/NO_PROXY into its stdio
+  // child; absent ⇒ no keys (byte-identical to the pre-thread spawn).
+  if (proxyEnv !== undefined) opts.proxyEnv = proxyEnv
   // H18 (jun-06 live-wire) — the OAuth provider is applied through the SAME
   // unification point as the inbound bundle so the single-client and the
   // supervised (restart) factory wire it IDENTICALLY (no path can set the
@@ -701,6 +711,14 @@ export interface LoadMcpToolsOpts {
    *  inside {@link annotationPredicates}, so this flag alone can never elevate an
    *  untrusted server. */
   annotationsHonored?: boolean
+  /** H3 (jun-10 session-scoped egress) — the egress-proxy env opened ONCE at
+   *  session bootstrap (`openSessionEgressProxy`), BEFORE any MCP server is
+   *  spawned, and live for the whole session. Threaded into EVERY constructed
+   *  client (single AND supervised path) via {@link applyMcpClientWiring} so each
+   *  stdio server child's own sockets are forced through the loopback allowlist.
+   *  Absent / proxy OFF ⇒ no keys injected (byte-identical). The HTTP-SSE carrier
+   *  is unaffected. */
+  proxyEnv?: ProxyEnvInput
 }
 
 /** §19.1 — the bind opts for ONE server: combine the global knob flag with this
@@ -767,6 +785,7 @@ const loadSingle = async (
   samplingWiring: SamplingWiringInput | undefined,
   oauthProvider: McpOAuthProviderPort | undefined,
   annotationsHonored: boolean | undefined,
+  proxyEnv: ProxyEnvInput | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
   if (elicitationPrompterFor !== undefined) {
@@ -783,7 +802,7 @@ const loadSingle = async (
   // helper so it is applied identically on both paths. Absent ⇒ no override
   // (defaultNegotiator + the client's headless rejecter + empty roots + the
   // headless OAuth rejecter), byte-identical to the legacy load.
-  applyMcpClientWiring(clientOpts, samplingWiring, oauthProvider)
+  applyMcpClientWiring(clientOpts, samplingWiring, oauthProvider, proxyEnv)
   const client = new McpClient(config, clientOpts)
   try {
     await client.start()
@@ -830,6 +849,7 @@ export const loadMcpTools = async (
             opts?.samplingWiring,
             opts?.oauthProvider,
             opts?.annotationsHonored,
+            opts?.proxyEnv,
           )
     if (loaded === null) continue
     tools.push(...loaded.tools)

@@ -24,6 +24,7 @@ import type {
   ToolProfileSessionState,
 } from "@/runner/assemble"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate"
+import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { ShellExecObserver, Tool } from "@/tool"
@@ -216,6 +217,12 @@ export type BuildToolingFactory = (
 export type LoadFeaturesFactory = (
   slog: StructuredLogger,
   llm?: LLMPort,
+  /** H3 (jun-10 session-scoped egress) — the SESSION-SCOPED egress-proxy env the
+   *  bootstrap opened (`openSessionEgressProxy`) BEFORE MCP servers spawn, live
+   *  for the whole session. Threaded so each stdio MCP server child's own sockets
+   *  are forced through the loopback allowlist (per-turn `withEgressProxy` cannot
+   *  gate a process-lifetime child). Absent / proxy OFF ⇒ byte-identical load. */
+  proxyEnv?: ProxyEnvInput,
 ) => Promise<BootstrapFeatures>
 
 /** Load one image at `path` synchronously — terminal-host helper. */

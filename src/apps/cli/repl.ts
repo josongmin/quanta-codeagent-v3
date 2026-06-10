@@ -242,7 +242,14 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   // surface's `(slog, opts)` loader: the threaded LLM becomes the `llm` opt so
   // an inbound MCP `sampling/createMessage` can be fulfilled. Omitted ⇒ `{}` ⇒
   // byte-identical (no sampling wiring).
-  loadFeatures: (slog, llm) => loadFeatures(slog, llm !== undefined ? { llm } : {}),
+  // H3 (jun-10 session-scoped egress) — the bootstrap opens the session proxy and
+  // hands its `proxyEnv` down so each MCP stdio child's own sockets are gated.
+  // Absent / proxy OFF ⇒ `{}` slot omitted ⇒ byte-identical load.
+  loadFeatures: (slog, llm, proxyEnv) =>
+    loadFeatures(slog, {
+      ...(llm !== undefined ? { llm } : {}),
+      ...(proxyEnv !== undefined ? { proxyEnv } : {}),
+    }),
   loadImageBlock,
   pickIdentity,
   pickPersona,

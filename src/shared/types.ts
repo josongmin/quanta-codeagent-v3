@@ -42,3 +42,15 @@ export const ALL_HITL_TIERS = [
 
 /** Canonical HITL 4-tier literal union, derived from {@link ALL_HITL_TIERS}. */
 export type HITLTier = (typeof ALL_HITL_TIERS)[number]
+
+/**
+ * PDP capability declaration for a tool (jun-10, P2-T3) — lives in `@/shared` so
+ * both `@/tool` and `@/permission` import it without a cycle. The SSOT for WHY a
+ * tool needs a confirm; the security-floor decider (`@/permission` `decideFloor`)
+ * reads it. `"sensitive"` ⇒ UNIVERSAL floor (every surface, even bypass);
+ * `"needs-sandbox"` (e.g. bash without a profile) ⇒ defer to the sandbox / mode
+ * layer; absent ⇒ defer (legacy). Minimal by design — room to grow (effects /
+ * fsScope / netScope / dangerClass). */
+export interface ToolCapability {
+  readonly confirm?: "sensitive" | "needs-sandbox"
+}

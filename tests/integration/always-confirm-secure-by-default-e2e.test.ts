@@ -1,16 +1,9 @@
 /**
- * ⚠️ AGENTS: SKIPPED ON PURPOSE — this is the TARGET hellgate for ticket P2-T1
- * (always-confirm secure-by-default), BLOCKED on P2-T3. Do NOT delete it and do
- * NOT un-skip it with a naive gate flip.
- *
- * WHY BLOCKED: universalizing always-confirm at the admissibility-gate level
- * breaks ~89 integration tests because `bash` without a sandbox profile
- * self-reports `always-confirm` for ALL commands ("needs-sandbox"), which the
- * tier cannot distinguish from an inherently-sensitive tool (git push). The real
- * fix needs the capability-spec (P2-T3 PDP/PEP) to split those two reasons so
- * only inherently-sensitive tools get the universal floor while bash defers to
- * its sandbox profile. The `hitl.autoApprove` opt-out (used below) is the
- * autonomous escape hatch that ships with that work. Un-skip when T3 lands.
+ * Ticket P2-T1 (always-confirm secure-by-default) — UN-BLOCKED by P2-T3 (PDP
+ * capability spec). A tool that declares `capability.confirm: "sensitive"` joins
+ * the UNIVERSAL always-confirm floor: confirmed on EVERY surface, even under
+ * bypass, even without the HITL opt-in. A `needs-sandbox` tool (e.g. bash without
+ * a profile) DEFERS — that is what keeps the ~89 shell tests from being gated.
  *
  * Ticket P2-T1 — `always-confirm` is a UNIVERSAL security floor (jun-10 Phase-2).
  *
@@ -65,6 +58,8 @@ const endText: StreamEvent[] = [
   { type: "text_delta", delta: "ok" },
   { type: "message_stop", stop_reason: "end_turn" },
 ]
+/** Inherently-sensitive (e.g. git push / deploy): declares the capability ⇒
+ *  joins the UNIVERSAL floor. */
 const alwaysConfirmTool = (counts: { n: number }): Tool => ({
   name: "deployer",
   description: "deployer",
@@ -72,6 +67,23 @@ const alwaysConfirmTool = (counts: { n: number }): Tool => ({
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "always-confirm",
+  capability: () => ({ confirm: "sensitive" }),
+  async *execute(): AsyncIterable<ToolEvent> {
+    counts.n += 1
+    yield { type: "result", result: { ok: true, output: "ran" } }
+  },
+})
+
+/** needs-sandbox (e.g. bash without a profile): always-confirm tier but NOT
+ *  inherently sensitive ⇒ DEFERS (not gated by the universal floor). */
+const needsSandboxTool = (counts: { n: number }): Tool => ({
+  name: "sh",
+  description: "sh",
+  inputSchema: z.object({}).passthrough(),
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  hitlTier: () => "always-confirm",
+  capability: () => ({ confirm: "needs-sandbox" }),
   async *execute(): AsyncIterable<ToolEvent> {
     counts.n += 1
     yield { type: "result", result: { ok: true, output: "ran" } }
@@ -82,8 +94,9 @@ const cfg = (args: {
   permission: PermissionContext
   onConfirm?: AgentConfig["onConfirm"]
   hitl?: AgentConfig["hitl"]
+  toolName?: string
 }): AgentConfig => ({
-  llm: new FakeLLM([callTool("a1", "deployer"), endText]),
+  llm: new FakeLLM([callTool("a1", args.toolName ?? "deployer"), endText]),
   registry: args.registry,
   stream: new RecordingStream(),
   permission: args.permission,
@@ -96,7 +109,7 @@ const cfg = (args: {
   ...(args.hitl !== undefined ? { hitl: args.hitl } : {}),
 })
 
-describe.skip("always-confirm — UNIVERSAL floor (secure-by-default) [P2-T1, BLOCKED on T3]", () => {
+describe("always-confirm — UNIVERSAL floor (secure-by-default) [P2-T1]", () => {
   test("interactive surface is ASKED for an always-confirm tool under bypass with HITL NOT opted in", async () => {
     const counts = { n: 0 }
     let asked = 0
@@ -139,5 +152,61 @@ describe.skip("always-confirm — UNIVERSAL floor (secure-by-default) [P2-T1, BL
     )
     expect(asked).toBe(0) // never asked — autonomous opt-out
     expect(counts.n).toBe(1) // auto-ran
+  })
+
+  // THE split that un-blocks T1 without gating bash: a `needs-sandbox`
+  // always-confirm tool is NOT promoted to the universal floor. With HITL not
+  // opted in it DEFERS to mode policy — under bypass it auto-runs (no ask). This
+  // is exactly why the ~89 shell tests do not break.
+  test("needs-sandbox always-confirm tool DEFERS (auto-runs under bypass, not universally gated)", async () => {
+    const counts = { n: 0 }
+    let asked = 0
+    await runAgent(
+      cfg({
+        registry: new ToolRegistry([needsSandboxTool(counts)]),
+        toolName: "sh",
+        permission: { mode: "bypass" },
+        onConfirm: async () => {
+          asked += 1
+          return false
+        },
+      }),
+    )
+    expect(asked).toBe(0) // never asked — deferred to mode policy
+    expect(counts.n).toBe(1) // auto-ran under bypass (NOT gated by the floor)
+  })
+
+  // REGRESSION GUARD (the 89-breakage): a plain always-confirm tool with NO
+  // capability (the inferToolTier catch-all — every unclassified mutating tool,
+  // bash included) DEFERS. If the floor ever widens to catch these, the whole
+  // shell-tool suite breaks again — this flips RED first.
+  test("capability-LESS always-confirm tool DEFERS under bypass (no over-gating)", async () => {
+    const counts = { n: 0 }
+    let asked = 0
+    const plain: Tool = {
+      name: "plainac",
+      description: "plainac",
+      inputSchema: z.object({}).passthrough(),
+      isReadOnly: () => false,
+      isConcurrencySafe: () => false,
+      hitlTier: () => "always-confirm", // tier present, capability absent
+      async *execute(): AsyncIterable<ToolEvent> {
+        counts.n += 1
+        yield { type: "result", result: { ok: true, output: "ran" } }
+      },
+    }
+    await runAgent(
+      cfg({
+        registry: new ToolRegistry([plain]),
+        toolName: "plainac",
+        permission: { mode: "bypass" },
+        onConfirm: async () => {
+          asked += 1
+          return false
+        },
+      }),
+    )
+    expect(asked).toBe(0) // never asked — capability-less defers
+    expect(counts.n).toBe(1) // auto-ran (mode policy), NOT gated by the floor
   })
 })

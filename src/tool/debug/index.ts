@@ -9,5 +9,14 @@ export {
   type InspectSpec,
   inspectViaDap,
 } from "./inspect-driver"
-export { type AdapterSpawnSpec, type DebugAdapterPort, defaultDebugAdapterPort } from "./port"
+export {
+  type AdapterSpawnSpec,
+  connectTcpTransport,
+  type DebugAdapterPort,
+  defaultDebugAdapterPort,
+  getFreePort,
+  spawnTcpDebugAdapter,
+  type TcpAdapterSpawnSpec,
+  type TcpConnectSpec,
+} from "./port"
 export { debugInspectTool, makeDebugInspectTool } from "./tool"

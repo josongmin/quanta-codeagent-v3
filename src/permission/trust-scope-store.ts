@@ -324,7 +324,7 @@ const serializeFile = (state: PersistentTrustScopeFile): string => {
  *  both the merge and the tombstone set. `projectKey` is prefixed so the same
  *  record id in two project buckets is never conflated. */
 const recordIdentity = (projectKey: string, r: PersistentTrustScopeRecord): string =>
-  `${projectKey} ${r.tool}|${r.actionKey ?? ""}|${r.commandPattern ?? ""}|${r.grantedAt}`
+  `${projectKey}\u0000${r.tool}|${r.actionKey ?? ""}|${r.commandPattern ?? ""}|${r.grantedAt}`
 
 /**
  * Merge factory closing over a per-instance TOMBSTONE set of records this

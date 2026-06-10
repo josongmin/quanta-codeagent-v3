@@ -133,3 +133,43 @@ The ADR-0512 approval **lease** (opaque, single-use, turn-scoped) is already the
 | Introspection | `inspect.ts` (tool matrix) | PDP describe-mode `/permission explain <action>` |
 
 **Migration is incremental and non-breaking:** P1 (collapse to one PDP + make the PEP the only caller + ratchet) is the keystone and the biggest safety win; §7.3 (capability spec) and §7.5 (sandbox) layer on without re-touching surfaces; §7.6 generalizes an existing primitive. None requires a big-bang rewrite — each step is a slice behind the existing seams.
+
+---
+
+## §8 Phase-2 ticket status (jun-10)
+
+- **hand-off-required universal floor — ✅ LANDED.** Enforced on every surface
+  regardless of `hitl.enabled`, via `runHitlReviewGate` routed through
+  `runHitlGate` (telemetry-preserving). 16-cell matrix ratchet in
+  `tests/integration/hand-off-required-universal-e2e.test.ts`.
+- **P2-T2 (A3) — ✅ LANDED.** `runHandoffFloorGate` pulls hand-off-required to
+  HARD_DENY-level precedence (before pattern-grant + rules DSL); no grant / rule /
+  `permissionAllowDangerous` can unlock it. Tests in `admissibility-gate.test.ts`
+  (`hand-off-required tier CANNOT be overridden`).
+- **P2-T3 first decider (PDP capability spec) — ✅ LANDED.** The audit's
+  capability-spec is real: `ToolCapability` (in `@/shared`, no cycle) + the pure
+  `decideFloor` decider (`@/permission/pdp`, exhaustive truth-table test). The
+  admissibility gate now asks the PDP "does this tier apply universally?" instead
+  of reading the raw tier. The SSOT skeleton for the security floor; the full
+  PDP/PEP migration (single-PEP fence, obligations, grant ledger) stays in
+  `docs/plans/permission-pdp-pep-keystone.md`.
+- **P2-T1 (always-confirm secure-by-default) — ✅ UN-BLOCKED, seam LIVE.** The
+  capability spec splits the two reasons a tool is `always-confirm`: declaring
+  `capability.confirm: "sensitive"` (git push / deploy) joins the UNIVERSAL floor
+  (every surface, even bypass, no HITL opt-in); `needs-sandbox` (bash without a
+  profile) DEFERS — so the ~89 shell tests do NOT break (measured: 0 regressions).
+  Hellgate GREEN + un-skipped: `tests/integration/always-confirm-secure-by-default-e2e.test.ts`
+  (incl. a capability-LESS-defers regression guard). `hitl.autoApprove` =
+  autonomous opt-out.
+- **Real sensitive tools classified — ✅ 5 external-write tools.** `git_push`,
+  `gh_pr_open`, `gh_pr_create`, `gh_pr_comment`, `gh_pr_auto_merge` all declare
+  `capability.confirm: "sensitive"` (externally-visible, hard-to-reverse) ⇒ they
+  now confirm on EVERY surface even under bypass, not just when HITL is opted in.
+  0 regressions (directive/tool unit tests + ci-bot/bench/headless don't dispatch
+  these through the agent-loop gate; an autonomous surface that did would DENY
+  them — secure default). Gate hellgate: `admissibility-gate.test.ts`
+  (`real sensitive tools are universal-floor gated`). **Governance ratchet** pins
+  the set: `tests/unit/permission/sensitive-tool-capability-ratchet.test.ts` (RED
+  if a tool drops its capability; add new external-write tools there).
+  **Follow-on:** make the capability spec the FULL replacement for `inferToolTier`
+  + an authoring ratchet that every tool carries a reviewed spec.

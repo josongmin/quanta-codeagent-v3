@@ -57,6 +57,7 @@ import {
   type LayeredRule,
   type LearningSource,
   type PendingPermission,
+  decideFloor,
   type PermissionContext,
   type PermissionDecision,
   type PermissionStore,
@@ -1098,22 +1099,27 @@ const runHitlReviewGate = async (
   action: AdmissibilityAction,
   opts: AdmissibilityWaveAOptions,
 ): Promise<DispatchResult | null | "fallthrough"> => {
-  // SECURITY FLOOR (jun-10 keystone, audit §F1) — `hand-off-required` ("NO mode
-  // can authorize", like HARD_DENY) is a UNIVERSAL floor: enforced even when the
-  // opt-in `hitl.enabled` flag is off, so no surface (CLI / agent / bench / web)
-  // can blanket-allow it under `bypass` by never opting into HITL. Routed THROUGH
-  // `runHitlGate` (not short-circuited) so the tier telemetry still emits.
+  // SECURITY FLOOR (jun-10, audit §F1 + P2-T3 PDP) — the floor is UNIVERSAL
+  // (secure-by-default): enforced even when the opt-in `hitl.enabled` flag is off,
+  // so no surface (CLI / agent / bench / web) can blanket-allow it under `bypass`
+  // by never opting in. Routed THROUGH `runHitlGate` so the tier telemetry emits.
   //
-  // `always-confirm` stays OPT-IN (`hitl.enabled`). Universalizing it is BLOCKED
-  // at the gate level: `bash` without a sandbox profile self-reports
-  // `always-confirm` for ALL commands (a "needs-sandbox" signal), which the tier
-  // cannot distinguish from a tool that is "inherently sensitive" (git push). A
-  // blanket flip gates every shell call on every profile-less surface (89 e2e
-  // RED). The real fix needs the capability-spec to split those two reasons —
-  // see ticket P2-T3 (PDP/PEP) and always-confirm-secure-by-default-e2e (skipped).
+  // WHICH tiers are universal is decided by the PDP capability decider
+  // (`decideFloor`), NOT the raw tier — that is what splits the two reasons a
+  // tool is `always-confirm`: `confirm: "sensitive"` (git push) joins the floor;
+  // `needs-sandbox` (bash without a profile) DEFERS to mode / sandbox, so every
+  // shell call is not gated. hand-off-required is its own (harder) universal
+  // floor — caught upstream by `runHandoffFloorGate`; kept here belt-and-suspenders.
   const { tier } = resolveHitlTier(config, call, action)
-  const isHandoff = tier === "hand-off-required"
-  if (config.hitl?.enabled !== true && !isHandoff) return "fallthrough"
+  const capability = config.registry.get(call.name)?.capability?.(call.input)
+  const universalFloor =
+    tier === "hand-off-required" || decideFloor({ tier, capability }) === "universal-floor"
+  // AUTONOMOUS opt-out — an explicit `autoApprove` surface auto-runs floor
+  // always-confirm tools unattended (hand-off-required is NEVER opted out).
+  if (tier === "always-confirm" && universalFloor && config.hitl?.autoApprove === true) {
+    return "fallthrough"
+  }
+  if (config.hitl?.enabled !== true && !universalFloor) return "fallthrough"
   if (opts.reviewerPort !== undefined && tier === "always-confirm") {
     return await reviewAndDecide(call, config, action, opts, "hitl")
   }

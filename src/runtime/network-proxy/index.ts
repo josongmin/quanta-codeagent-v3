@@ -31,6 +31,8 @@ export {
 export {
   type EgressProxyContext,
   type EgressProxyDeps,
+  openSessionEgressProxy,
+  type SessionEgressProxy,
   withEgressProxy,
 } from "./lifecycle"
 export {

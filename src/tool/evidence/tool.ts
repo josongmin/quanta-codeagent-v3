@@ -15,15 +15,21 @@
  */
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
-import { detectToolchain, defaultTestRunPort, runToolchain, type TestRunPort } from "../testrun"
+import { detectToolchain, defaultTestRunPort, runToolchain, type TestRunPort, type Toolchain } from "../testrun"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { buildEvidence, type EvidenceSources } from "./builder"
-import type { EvidencePacket, RuntimeEvidence, StaticEvidence } from "./types"
+import { defaultRuntimePort } from "./runtime"
+import type { EvidencePacket, FailureEvidence, RuntimeEvidence, StaticEvidence } from "./types"
 
 const schema = z.object({
   cwd: z.string().optional().describe("Project root (defaults to session cwd)."),
   publicApiChangeAllowed: z.boolean().optional().describe("Patch constraint: may the fix change a public API? Default false."),
   style: z.string().optional().describe("Patch constraint: style guidance (e.g. 'match surrounding')."),
+  // Per-section toggles — each defaults ON. `runtime` is the expensive one (it
+  // re-runs the suite under a debugger), so turn it OFF for a fast failure+static
+  // packet; turn `static` off to skip the LSP query.
+  includeRuntime: z.boolean().optional().describe("Capture runtime stack+locals by re-running the failing test under a debugger (DAP). Default true; set false to skip the extra debugger run."),
+  includeStatic: z.boolean().optional().describe("Capture static context (LSP definitions/refs/types) at the failure site. Default true."),
 })
 type Input = z.infer<typeof schema>
 
@@ -33,22 +39,38 @@ export interface EvidenceToolDeps {
   readonly testPort?: TestRunPort
   /** LSP static at a failure site (host-injected, e.g. via lsp-bridge). */
   readonly lspStatic?: (file: string, line: number, cwd: string) => Promise<StaticEvidence | null>
-  /** DAP runtime for the failing test (host-injected). */
-  readonly runtime?: (failure: { test_name: string; file?: string; line?: number }, cwd: string) => Promise<RuntimeEvidence | null>
+  /** DAP runtime for the failing test. Default: `defaultRuntimePort` (python/
+   *  debugpy, in-slice). Host may override. */
+  readonly runtime?: (failure: FailureEvidence, tc: Toolchain, cwd: string, signal?: AbortSignal) => Promise<RuntimeEvidence | null>
   /** Changed-files probe (default: `git diff --name-only HEAD`). */
   readonly changedFiles?: (cwd: string) => Promise<readonly string[]>
 }
 
-/** Default git changed-files: union of unstaged+staged vs HEAD, plus untracked. */
+/** Parse `git status --porcelain` into changed file paths. Handles renames
+ *  (`R  old -> new` → new), quoted paths with spaces, and untracked (`??`).
+ *  Pure + NEVER-throws. */
+export const parseGitPorcelain = (text: string): readonly string[] => {
+  const out: string[] = []
+  const unquote = (s: string): string =>
+    s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1).replace(/\\(.)/g, "$1") : s
+  for (const raw of text.split("\n")) {
+    if (raw.length < 4) continue // "XY path" is ≥4 chars
+    let path = raw.slice(3) // strip the 2-char XY status + the space
+    const arrow = path.indexOf(" -> ")
+    if (arrow !== -1) path = path.slice(arrow + 4) // rename/copy: keep the NEW path
+    const trimmed = unquote(path.trim())
+    if (trimmed.length > 0) out.push(trimmed)
+  }
+  return out
+}
+
+/** Default git changed-files: working-tree + index status, plus untracked. */
 const gitChangedFiles = async (cwd: string): Promise<readonly string[]> => {
   try {
     const proc = Bun.spawn(["git", "-C", cwd, "status", "--porcelain"], { stdout: "pipe", stderr: "ignore" })
     const out = await new Response(proc.stdout).text()
     await proc.exited
-    return out
-      .split("\n")
-      .map((l) => l.slice(3).trim()) // strip the 2-char status + space
-      .filter((l) => l.length > 0)
+    return parseGitPorcelain(out)
   } catch {
     return []
   }
@@ -81,19 +103,24 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
         detect: (c) => detectToolchain(c, { fileExists: (name) => fs.fileExists(name, c) }),
         runTests: (tc, c) => runToolchain(tc, c, testPort, ctx.signal),
         changedFiles: deps.changedFiles ?? gitChangedFiles,
-        ...(deps.lspStatic !== undefined ? { lspStatic: deps.lspStatic } : {}),
-        ...(deps.runtime !== undefined ? { runtime: deps.runtime } : {}),
+        // static (LSP): wired unless the caller opted out. Host-injected port.
+        ...(input.includeStatic !== false && deps.lspStatic !== undefined ? { lspStatic: deps.lspStatic } : {}),
+        // runtime (DAP): default ON (python/debugpy + rust/lldb, in-slice),
+        // degrades to null when the toolchain/adapter is absent. Opt OUT with
+        // includeRuntime:false to skip the expensive extra debugger run.
+        ...(input.includeRuntime !== false ? { runtime: deps.runtime ?? defaultRuntimePort } : {}),
       }
       const pkt = await buildEvidence(cwd, sources, {
         patchConstraints: {
           public_api_change_allowed: input.publicApiChangeAllowed ?? false,
           ...(input.style !== undefined ? { style: input.style } : {}),
         },
+        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
       })
-      // ok reflects the SUITE: a clean (no-failure) packet is ok; a packet with
-      // a failure is the normal "here's what's broken" payload (ok:true — the
-      // TOOL succeeded; the suite's redness lives in `failure`).
-      yield { type: "result", result: { ok: true, output: render(pkt) } }
+      // ok mirrors run_tests: a green suite ⇒ ok:true; a suite with a failure ⇒
+      // ok:false (the packet — with `failure` + enrichment — is the payload
+      // either way). Consistent with the harness convention (ok:false = red).
+      yield { type: "result", result: { ok: pkt.failure === null, output: render(pkt) } }
     },
   }
 }
