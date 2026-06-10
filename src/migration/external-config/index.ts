@@ -28,6 +28,8 @@ export {
   sourceKeyOf,
 } from "./ledger"
 export {
+  type ConfigWriteSync,
+  defaultConfigWriteSync,
   type PersistConvertedInput,
   type PersistConvertedResult,
   persistConvertedItems,

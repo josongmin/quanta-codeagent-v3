@@ -125,11 +125,19 @@ const TOKEN_REFRESH_SKEW_MS = 60_000
  *  route it instead of fatally killing the turn with a false "run /login". */
 const classifyRefreshFailure = (
   e: unknown,
-): { kind: LLMErrorKind; statusCode?: number; retryAfterMs?: number } => {
+): { kind: LLMErrorKind; statusCode?: number; retryAfterMs?: number; errorCode?: string } => {
   if (e instanceof TokenExchangeError) {
     const status = e.statusCode
     if (status === 401 || e.errorCode === "invalid_grant") {
-      return { kind: "auth", statusCode: status }
+      // Thread the OAuth `error` code so the token-purge predicate can fire on
+      // an explicit `invalid_grant` even when the issuer returned it at 400
+      // (RFC 6749 §5.2 allows 400) — D6: a revoked bundle must be deleted, not
+      // re-refreshed forever, regardless of the status code it arrived on.
+      return {
+        kind: "auth",
+        statusCode: status,
+        ...(e.errorCode !== undefined ? { errorCode: e.errorCode } : {}),
+      }
     }
     if (status === 429) {
       return {
@@ -140,6 +148,11 @@ const classifyRefreshFailure = (
     }
     if (status >= 500 && status < 600) return { kind: "server_error", statusCode: status }
     if (status === 400 || status === 422) return { kind: "bad_request", statusCode: status }
+    // D8 — a 403 at the token endpoint (account suspended, scope/grant revoked,
+    // non-`invalid_grant`) is an auth problem: route it to the "run /login"
+    // advice + purge path rather than the catch-all `unknown` (which gave no
+    // remediation hint and left the dead bundle on disk).
+    if (status === 403) return { kind: "auth", statusCode: status }
     // statusCode 0 = response-shape failure (malformed 2xx body) and any other
     // unmapped status: NOT a revocation — never re-classify as fatal auth.
     return { kind: "unknown", statusCode: status }
@@ -207,19 +220,18 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     const rec = resolved.record
     if (!isExpired(rec, this.nowMs(), TOKEN_REFRESH_SKEW_MS)) return rec
     const cfg = resolveOAuthConfig(this.env)
+    let next: TokenRecord
     try {
-      const next = await refreshToken({
+      next = await refreshToken({
         cfg,
         current: rec,
         fetchImpl: this.fetchImpl,
         nowMs: this.nowMs,
       })
-      await writeToken(path, next)
-      return next
     } catch (e) {
-      // Audit #15 — branch on the TYPED statusCode: only invalid_grant/401
-      // means "the refresh token is dead, re-login"; a 429/5xx/network/disk
-      // blip keeps its transient kind so retry/fallback can route it.
+      // Audit #15 — branch on the TYPED statusCode: only invalid_grant/401/403
+      // means "the refresh token is dead, re-login"; a 429/5xx/network blip
+      // keeps its transient kind so retry/fallback can route it.
       const classified = classifyRefreshFailure(e)
       const advice =
         classified.kind === "auth"
@@ -231,8 +243,25 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         cause: e,
         ...(classified.statusCode !== undefined ? { statusCode: classified.statusCode } : {}),
         ...(classified.retryAfterMs !== undefined ? { retryAfterMs: classified.retryAfterMs } : {}),
+        ...(classified.errorCode !== undefined ? { providerCode: classified.errorCode } : {}),
       })
     }
+    // D7 — the refresh itself SUCCEEDED; the new bundle is valid in memory. The
+    // on-disk copy is a cache (it lets the NEXT process reuse the token), NOT
+    // load-bearing for THIS call. A persist failure (EACCES, full disk, etc.)
+    // must NOT discard the fresh token and re-classify the success as a
+    // retryable "network" error — that burned the issuer budget on a full
+    // re-refresh ×maxRetries and threw away a perfectly good access token.
+    // Log + proceed on the in-memory token.
+    try {
+      await writeToken(path, next)
+    } catch (e) {
+      logger.warn(
+        `chatgpt-oauth: refreshed token persist failed (${errMessage(e)}) — ` +
+          "proceeding with the in-memory token; the next process will re-refresh.",
+      )
+    }
+    return next
   }
 
   /** Fetch (or reuse cached) `/codex/models` catalog. This is how Codex CLI
@@ -328,13 +357,21 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     }
   }
 
-  /** True only for a server-side token-invalidation 401 — NOT for other
-   *  `kind: "auth"` errors like "not signed in" (refresh failed before any
-   *  HTTP call) or "empty catalog" (success status but no models). Those
-   *  must NOT trigger token purge — there's nothing wrong with the bundle. */
-  private static is401AuthError(error: unknown): boolean {
+  /** True for a server-side token-INVALIDATION — the on-disk bundle is dead
+   *  weight and must be purged so the router falls through instead of looping a
+   *  refresh on a revoked grant (D6). Fires on:
+   *    - statusCode 401 (mid-stream invalidation, or a 401 refresh failure), OR
+   *    - statusCode 400/403 carrying `providerCode === "invalid_grant"` — the
+   *      classifier (`classifyRefreshFailure`) already calls these `kind:"auth"`,
+   *      so the purge predicate MUST agree or the revoked bundle survives and
+   *      re-refreshes a dead token until the user manually `/login`s.
+   *  Deliberately NOT fired for other `kind:"auth"` errors with no invalidation
+   *  signal ("not signed in" / "empty catalog") — there's nothing wrong with the
+   *  bundle there, so we keep it. */
+  private static isInvalidatedAuthError(error: unknown): boolean {
     if (!(error instanceof LLMError)) return false
-    return error.statusCode === 401
+    if (error.kind !== "auth") return false
+    return error.statusCode === 401 || error.providerCode === "invalid_grant"
   }
 
   /** H15 — the carry-over flag+store fragment, present ONLY when the gate is on
@@ -423,23 +460,28 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         disableResumeOnStatuses: new Set([400, 422]),
       })
     } catch (error) {
-      // Server-side token invalidation (401) — happens when the user signs
-      // out from chatgpt.com on another device, OpenAI force-rotates, etc.
-      // The on-disk bundle is dead weight at that point: every subsequent
-      // call would 401 again until `/login` overwrites it. Purge our copy
-      // proactively so the provider router falls through to whatever else
-      // is configured (BYOK key, anthropic, etc.) instead of looping.
-      if (ChatGPTOAuthAdapter.is401AuthError(error)) {
+      // Server-side token invalidation — happens when the user signs out from
+      // chatgpt.com on another device, OpenAI force-rotates, or the refresh
+      // grant is revoked (401, or 400/403 `invalid_grant`). The on-disk bundle
+      // is dead weight at that point: every subsequent call would fail again
+      // until `/login` overwrites it. Purge our copy proactively so the provider
+      // router falls through to whatever else is configured (BYOK key,
+      // anthropic, etc.) instead of looping on a dead token (D6).
+      if (ChatGPTOAuthAdapter.isInvalidatedAuthError(error)) {
         const purged = await this.purgeQuantaTokenBestEffort()
         const hint = purged
           ? "Local token deleted — run /login to sign in again."
           : "Token is managed externally (e.g. Codex CLI) — sign out and back in there."
-        throw new LLMError(`ChatGPT-OAuth token invalidated by server (401). ${hint}`, {
-          kind: "auth",
-          statusCode: 401,
-          provider: "chatgpt-oauth",
-          cause: error,
-        })
+        const status = error instanceof LLMError ? error.statusCode : undefined
+        throw new LLMError(
+          `ChatGPT-OAuth token invalidated by server${status !== undefined ? ` (${status})` : ""}. ${hint}`,
+          {
+            kind: "auth",
+            provider: "chatgpt-oauth",
+            cause: error,
+            ...(status !== undefined ? { statusCode: status } : {}),
+          },
+        )
       }
       throw error
     }

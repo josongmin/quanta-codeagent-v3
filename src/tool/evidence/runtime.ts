@@ -14,8 +14,8 @@
  *    the TCP transport); `{mode:"test"}` launch with a failure-line breakpoint.
  * Other toolchains ⇒ null (degrade). NEVER throws.
  */
-import { readFileSync, realpathSync } from "node:fs"
-import { homedir } from "node:os"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { isAbsolute, join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { CdpClient } from "../debug/cdp-client"
@@ -161,12 +161,61 @@ const cargoTestBinary = async (cwd: string, signal?: AbortSignal): Promise<strin
   }
 }
 
+/** lldb-dap `initCommands` that source Rust's own data formatters (synthetic
+ *  providers for Vec/HashMap/String/Option/…), so a `Vec<i32>` renders as
+ *  `size=3` + `[0]=10,[1]=20,…` instead of the raw `{buf,len}` struct. Path
+ *  discovered via `rustc --print sysroot`; empty when unavailable (degrade). */
+const rustLldbInitCommands = (): readonly string[] => {
+  try {
+    const r = Bun.spawnSync(["rustc", "--print", "sysroot"], { stdout: "pipe", stderr: "ignore" })
+    if (r.exitCode !== 0) return []
+    const etc = join(r.stdout.toString().trim(), "lib/rustlib/etc")
+    const cmds = join(etc, "lldb_commands")
+    const lookup = join(etc, "lldb_lookup.py")
+    if (!existsSync(cmds) || !existsSync(lookup)) return []
+    return [`command script import "${lookup}"`, `command source -s 0 "${cmds}"`]
+  } catch {
+    return []
+  }
+}
+
 const rustRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
   const lldb = resolveLldbDap()
   if (lldb === null) return null
   const exe = await cargoTestBinary(cwd, signal)
   if (exe === null) return null
   const realFile = realpathOr(absOf(f.file!, cwd)) // cargo DWARF comp_dir is canonical
+  const initCommands = rustLldbInitCommands()
+  return runInspect(
+    () => defaultDebugAdapterPort.spawn({ command: [...lldb], cwd }),
+    { adapterID: "lldb", launch: { program: exe, ...(initCommands.length > 0 ? { initCommands } : {}) }, breakpoints: [{ file: realFile, line: f.line! }] },
+    signal,
+  )
+}
+
+// ── C++ (clang++ -g → lldb-dap, same adapter as Rust) ────────────────────────
+const resolveClangxx = (): string | null => (ok("clang++", "--version") ? "clang++" : ok("g++", "--version") ? "g++" : null)
+
+/** Compile the failing C++ source standalone with debug info, returning the
+ *  binary path (in the OS tmp dir). Single-file only — a CMake/multi-TU build is
+ *  a follow-up. NEVER throws. */
+const compileCppDebug = (cxx: string, realFile: string): string | null => {
+  try {
+    const out = join(tmpdir(), `qcpp-${realpathSync(realFile).replace(/[^\w]/g, "_")}`)
+    const r = Bun.spawnSync([cxx, "-g", "-O0", "-std=c++17", realFile, "-o", out], { stdout: "ignore", stderr: "ignore" })
+    return r.exitCode === 0 ? out : null
+  } catch {
+    return null
+  }
+}
+
+const cppRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+  const lldb = resolveLldbDap()
+  const cxx = resolveClangxx()
+  if (lldb === null || cxx === null) return Promise.resolve(null)
+  const realFile = realpathOr(absOf(f.file!, cwd))
+  const exe = compileCppDebug(cxx, realFile)
+  if (exe === null) return Promise.resolve(null)
   return runInspect(
     () => defaultDebugAdapterPort.spawn({ command: [...lldb], cwd }),
     { adapterID: "lldb", launch: { program: exe }, breakpoints: [{ file: realFile, line: f.line! }] },
@@ -251,6 +300,7 @@ const RUNTIME_HANDLERS: Record<Toolchain["kind"], (f: FailureEvidence, tc: Toolc
   rust: (f, _tc, cwd, signal) => rustRuntime(f, cwd, signal),
   go: (f, _tc, cwd, signal) => goRuntime(f, cwd, signal),
   node: (f, _tc, cwd, signal) => nodeRuntime(f, cwd, signal),
+  cpp: (f, _tc, cwd, signal) => cppRuntime(f, cwd, signal),
 }
 
 /** The default runtime source for the Evidence Packet Builder. Dispatches by

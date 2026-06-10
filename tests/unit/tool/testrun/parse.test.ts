@@ -5,7 +5,7 @@
  * {passed, failed:[{name,file,line,message}]}.
  */
 import { describe, expect, test } from "bun:test"
-import { parseCargo, parseGoJson, parsePytest, parsePythonUnittest } from "@/tool/testrun/parse"
+import { parseCargo, parseCtest, parseGoJson, parsePytest, parsePythonUnittest } from "@/tool/testrun/parse"
 
 const GO_JSON = [
   '{"Action":"run","Package":"t","Test":"TestPass"}',
@@ -221,5 +221,41 @@ describe("parsePytest", () => {
 
   test("NEVER-throws on garbage", () => {
     expect(() => parsePytest("¬ nonsense ½")).not.toThrow()
+  })
+})
+
+describe("parseCtest (C++)", () => {
+  test("libc assert (VERBATIM): localizes file+line+function+message", () => {
+    // Captured 2026-06-10 from a real `clang++ -g` build's assert abort.
+    const out = "Assertion failed: (result == 99), function main, file t.cpp, line 5."
+    const r = parseCtest(out)
+    expect(r.runner).toBe("ctest")
+    expect(r.ok).toBe(false)
+    expect(r.failed).toHaveLength(1)
+    expect(r.failed[0]).toEqual({ name: "main", file: "t.cpp", line: 5, message: "Assertion failed: (result == 99)" })
+  })
+
+  test("GoogleTest: `[ FAILED ] Suite.Test` + `FILE:LINE: Failure` localization", () => {
+    const out = [
+      "[ RUN      ] MathTest.Adds",
+      "/p/math_test.cpp:10: Failure",
+      "Expected equality of these values:",
+      "  compute(5)",
+      "    Which is: 10",
+      "  99",
+      "[  FAILED  ] MathTest.Adds (0 ms)",
+      "[  PASSED  ] 2 tests.",
+      "[  FAILED  ] 1 test, listed below:",
+    ].join("\n")
+    const r = parseCtest(out)
+    expect(r.passed).toBe(2)
+    expect(r.failed[0]?.name).toBe("MathTest.Adds") // NOT the `1 test` summary line
+    expect(r.failed[0]?.file).toBe("/p/math_test.cpp")
+    expect(r.failed[0]?.line).toBe(10)
+  })
+
+  test("green run ⇒ no failures; NEVER-throws on garbage", () => {
+    expect(parseCtest("[  PASSED  ] 3 tests.").ok).toBe(true)
+    expect(() => parseCtest("¬ noise")).not.toThrow()
   })
 })

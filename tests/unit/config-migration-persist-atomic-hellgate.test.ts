@@ -29,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { chmod, lstat, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { ConfigWriteSync } from "@/migration/external-config"
 import { persistConvertedItems } from "@/migration/external-config"
 
 const IS_WIN = process.platform === "win32"
@@ -216,6 +217,92 @@ describe.skipIf(IS_WIN)("config-migration SINGLE-resolution destination (TOCTOU 
       peer: number
     }
     // Merge semantics preserved: union of allow, peer keys intact.
+    expect(parsed.permissions.allow).toEqual(["Existing", "Read"])
+    expect(parsed.peer).toBe(7)
+    expect(await readdir(project)).toEqual(["settings.json"])
+  })
+})
+
+// ─── D15: fsync DURABILITY barrier (parity with import-log) ─────────────────
+//
+// D10 brought `writeJsonAtomic` to parity with the slice's sibling import-log
+// writer: an INJECTABLE durability barrier (`syncFile` BEFORE the rename,
+// `syncDir` AFTER it). The barrier is fail-CLOSED: if `syncFile` rejects (a
+// simulated crash at the fsync point), the rename is SKIPPED, the partial temp
+// is cleaned up, and the user's ORIGINAL config survives byte-identical — the
+// torn-file regression D10 fixed can never re-appear. A paired control proves
+// the real barrier merges + flushes in the right order.
+describe("config-migration fsync barrier (D15 — durability parity, injectable seam)", () => {
+  test("syncFile rejects (crash at the fsync barrier): typed warning, ORIGINAL bytes intact, no temp residue", async () => {
+    const path = join(project, "settings.json")
+    const ORIGINAL = `${JSON.stringify({ permissions: { allow: ["Keep"] }, peer: true }, null, 2)}\n`
+    await writeFile(path, ORIGINAL, "utf8")
+
+    const order: string[] = []
+    const crashingSync: ConfigWriteSync = {
+      syncFile: async () => {
+        order.push("syncFile")
+        throw new Error("injected crash: fsync barrier")
+      },
+      syncDir: async () => {
+        order.push("syncDir")
+      },
+    }
+
+    const r = await persistConvertedItems({
+      enabled: true,
+      homeDir: home,
+      projectDir: project,
+      converted: [SETTINGS_ITEM],
+      writeSync: crashingSync,
+    })
+
+    // The barrier fired and aborted BEFORE any dir flush (rename skipped).
+    expect(order).toEqual(["syncFile"])
+    // Fail-closed: original survives byte-for-byte, nothing recorded written.
+    expect(await readFile(path, "utf8")).toBe(ORIGINAL)
+    expect(r.writtenTypes).not.toContain("settings")
+    expect(r.warnings.some((w) => w.path.endsWith("settings.json"))).toBe(true)
+    // No leaked atomic temp next to the config.
+    const residue = (await readdir(project)).filter((n) => n.includes(".quanta-tmp-"))
+    expect(residue).toEqual([])
+    expect(await readdir(project)).toEqual(["settings.json"])
+  })
+
+  test("paired control: real barrier succeeds → merges + flushes in order [syncFile, syncDir]", async () => {
+    const path = join(project, "settings.json")
+    await writeFile(
+      path,
+      `${JSON.stringify({ permissions: { allow: ["Existing"] }, peer: 7 }, null, 2)}\n`,
+      "utf8",
+    )
+
+    const order: string[] = []
+    const realOrdered: ConfigWriteSync = {
+      syncFile: async () => {
+        order.push("syncFile")
+      },
+      syncDir: async () => {
+        order.push("syncDir")
+      },
+    }
+
+    const r = await persistConvertedItems({
+      enabled: true,
+      homeDir: home,
+      projectDir: project,
+      converted: [SETTINGS_ITEM],
+      writeSync: realOrdered,
+    })
+
+    // Same fsync ordering invariant the import-log writer asserts: temp flush
+    // BEFORE rename, dir flush AFTER.
+    expect(order).toEqual(["syncFile", "syncDir"])
+    expect(r.writtenTypes).toContain("settings")
+    const parsed = JSON.parse(await readFile(path, "utf8")) as {
+      permissions: { allow: string[] }
+      peer: number
+    }
     expect(parsed.permissions.allow).toEqual(["Existing", "Read"])
     expect(parsed.peer).toBe(7)
     expect(await readdir(project)).toEqual(["settings.json"])

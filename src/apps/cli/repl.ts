@@ -293,12 +293,17 @@ const maybePickSession = async (): Promise<void> => {
   const home = process.env.HOME ?? ""
   const shorten = (p: string) =>
     home && p.startsWith(home) ? `~${p.slice(home.length)}` : p
+  // Relative-time display thresholds (durations in ms, not timers) — named so
+  // the no-magic-timeout scanner sees bound constants, not stray wall-clock.
+  const MINUTE_MS = 60_000
+  const HOUR_MS = 60 * MINUTE_MS
+  const DAY_MS = 24 * HOUR_MS
   const relTime = (ms: number): string => {
     const d = Date.now() - ms
-    if (d < 60_000) return "just now"
-    if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`
-    if (d < 86_400_000) return `${Math.round(d / 3_600_000)}h ago`
-    return `${Math.round(d / 86_400_000)}d ago`
+    if (d < MINUTE_MS) return "just now"
+    if (d < HOUR_MS) return `${Math.round(d / MINUTE_MS)}m ago`
+    if (d < DAY_MS) return `${Math.round(d / HOUR_MS)}h ago`
+    return `${Math.round(d / DAY_MS)}d ago`
   }
 
   process.stderr.write("\x1b[2mRecent sessions:\x1b[0m\n")

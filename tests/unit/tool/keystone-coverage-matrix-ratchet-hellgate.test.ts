@@ -26,6 +26,7 @@ describe("keystone coverage matrix — drift ratchet (DoD §1)", () => {
     expect(await detectToolchain("/p", fsWith(["go.mod"]))).toMatchObject({ kind: "go", parser: "go" })
     expect(await detectToolchain("/p", fsWith(["Cargo.toml"]))).toMatchObject({ kind: "rust", parser: "cargo" })
     expect(await detectToolchain("/p", fsWith(["package.json"]))).toMatchObject({ kind: "node", parser: "node" })
+    expect(await detectToolchain("/p", fsWith(["CMakeLists.txt"]))).toMatchObject({ kind: "cpp", parser: "ctest" })
     // python: unittest by default, pytest when installed (canRun probe true).
     expect(await detectToolchain("/p", fsWith(["pyproject.toml"]))).toMatchObject({ kind: "python", parser: "python-unittest" })
     expect(await detectToolchain("/p", fsWith(["pyproject.toml"], true))).toMatchObject({ kind: "python", parser: "pytest" })
@@ -37,6 +38,8 @@ describe("keystone coverage matrix — drift ratchet (DoD §1)", () => {
     expect(m.get(".ts")).toBe("typescript-language-server")
     expect(m.get(".rs")).toBe("rust-analyzer")
     expect(m.get(".go")).toBe("gopls")
+    expect(m.get(".cpp")).toBe("clangd")
+    expect(m.get(".h")).toBe("clangd")
   })
 
   test("RUNTIME axis: every toolchain kind has a debugger carrier (exhaustive)", async () => {
@@ -47,8 +50,9 @@ describe("keystone coverage matrix — drift ratchet (DoD §1)", () => {
       rust: "DAP", // lldb-dap
       go: "DAP", // dlv-dap over TCP
       node: "CDP", // node --inspect-brk
+      cpp: "DAP", // clang++ -g → lldb-dap
     }
-    expect(Object.keys(carriers).sort()).toEqual(["go", "node", "python", "rust"])
+    expect(Object.keys(carriers).sort()).toEqual(["cpp", "go", "node", "python", "rust"])
     // Behavioural: defaultRuntimePort handles every kind WITHOUT throwing — it
     // degrades to null when the failure has no file/line OR the tool is absent,
     // never crashes on an unrecognized kind.

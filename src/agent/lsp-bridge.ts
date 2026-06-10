@@ -1,5 +1,6 @@
 import { extname } from "node:path"
 import {
+  ClangdAdapter,
   DefaultRenameApplyAdapter,
   GoplsAdapter,
   type LspClient,
@@ -71,6 +72,10 @@ const GOPLS: ServerSpec = {
   bin: "gopls",
   create: (cwd) => new GoplsAdapter({ cwd }),
 }
+const CLANGD: ServerSpec = {
+  bin: "clangd",
+  create: (cwd) => new ClangdAdapter({ cwd }),
+}
 
 /**
  * Single source of extension→server truth (OCP): adding a language is ONE
@@ -83,6 +88,7 @@ const SERVERS: ReadonlyArray<{ exts: readonly string[]; spec: ServerSpec }> = [
   { exts: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"], spec: TYPESCRIPT },
   { exts: [".rs"], spec: RUST_ANALYZER },
   { exts: [".go"], spec: GOPLS },
+  { exts: [".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".h", ".c"], spec: CLANGD },
 ]
 
 /** Pick the server for a file by extension, or `null` if unsupported. */

@@ -286,7 +286,7 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     // production type). A rename/removal of any factory field in production
     // surfaces here as a missing key — not a self-count of literals the test
     // itself typed two lines above.
-    const realDeps = makeFakeDeps() as Record<string, unknown>
+    const realDeps = makeFakeDeps() as unknown as Record<string, unknown>
     for (const key of required) {
       expect(Object.hasOwn(realDeps, key as string)).toBe(true)
     }

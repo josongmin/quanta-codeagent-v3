@@ -66,6 +66,12 @@ describe("detectToolchain", () => {
     expect(t?.parser).toBe("node") // was "generic" — drift guard for the JS parser wiring
   })
 
+  test("CMakeLists.txt ⇒ cpp / ctest (Tier-2 C++)", async () => {
+    const t = await detectToolchain("/p", fsWith(["CMakeLists.txt"]))
+    expect(t?.kind).toBe("cpp")
+    expect(t?.parser).toBe("ctest")
+  })
+
   test("precedence: Cargo.toml wins over package.json (a rust crate with a JS sidecar)", async () => {
     const t = await detectToolchain("/p", fsWith(["Cargo.toml", "package.json"]))
     expect(t?.kind).toBe("rust")

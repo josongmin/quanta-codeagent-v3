@@ -20,9 +20,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { access, chmod, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   __resetInflightForTest,
   chatgptTokenPath,
@@ -194,5 +194,173 @@ describe("chatgpt-oauth refresh catch branches on typed statusCode — invalid_g
     expect(err.statusCode).toBeUndefined()
     expect(err.cause).toBe(netErr)
     expect(err.message).not.toContain("/login")
+  })
+})
+
+/** Does the on-disk quanta token still exist? Used to observe the purge. */
+const tokenStillOnDisk = async (): Promise<boolean> => {
+  try {
+    await access(chatgptTokenPath(dir))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** D6 — purge predicate MUST agree with the classifier. `classifyRefreshFailure`
+ *  calls a 400 `invalid_grant` (RFC 6749 §5.2: refresh token revoked) `kind:"auth"`,
+ *  but the pre-fix purge predicate (`is401AuthError`) only fired on statusCode 401,
+ *  so the dead bundle survived on disk and re-refreshed a revoked token on every
+ *  subsequent call until the user manually `/login`s. After the fix the revoked
+ *  bundle is deleted AND the user is advised to `/login`. Paired controls
+ *  (429/503/network) MUST NOT purge — there is nothing wrong with the bundle. */
+describe("chatgpt-oauth refresh: revoked-grant purge predicate agrees with the classifier (D6)", () => {
+  test("400 invalid_grant with a quanta-sourced on-disk token ⇒ token purged + /login advice", async () => {
+    await seedExpiredToken("rt-d6-invalid-grant")
+    expect(await tokenStillOnDisk()).toBe(true)
+
+    const caught = await streamAndCatch(
+      tokenEndpointFailure(400, {
+        error: "invalid_grant",
+        error_description: "refresh token revoked",
+      }),
+    )
+
+    expect(caught).toBeInstanceOf(LLMError)
+    const err = caught as LLMError
+    expect(err.kind).toBe("auth")
+    expect(err.message).toContain("/login")
+    // The real observable effect of the predicate broadening: the dead bundle
+    // is gone, so the next call won't re-refresh a revoked token in a loop.
+    expect(await tokenStillOnDisk()).toBe(false)
+  })
+
+  const noPurgeRows: readonly {
+    readonly name: string
+    readonly status: number
+    readonly body: unknown
+    readonly headers?: Record<string, string>
+  }[] = [
+    {
+      name: "429 rate-limited",
+      status: 429,
+      body: { error: "rate_limited" },
+      headers: { "retry-after": "7" },
+    },
+    { name: "503 upstream down", status: 503, body: { error: "upstream_down" } },
+  ]
+  for (const row of noPurgeRows) {
+    test(`paired control: ${row.name} ⇒ token NOT purged (transient, bundle is fine)`, async () => {
+      await seedExpiredToken(`rt-d6-nopurge-${row.status}`)
+      const caught = await streamAndCatch(tokenEndpointFailure(row.status, row.body, row.headers))
+      expect(caught).toBeInstanceOf(LLMError)
+      expect((caught as LLMError).message).not.toContain("/login")
+      expect(await tokenStillOnDisk()).toBe(true)
+    })
+  }
+
+  test("paired control: network throw ⇒ token NOT purged", async () => {
+    await seedExpiredToken("rt-d6-nopurge-network")
+    const caught = await streamAndCatch(async (url) => {
+      if (url.includes("/oauth/token")) throw new TypeError("fetch failed: ECONNRESET")
+      throw new Error(`unexpected fetch URL: ${url}`)
+    })
+    expect(caught).toBeInstanceOf(LLMError)
+    expect((caught as LLMError).message).not.toContain("/login")
+    expect(await tokenStillOnDisk()).toBe(true)
+  })
+})
+
+/** A successful refresh response body for the token endpoint. */
+const refreshSuccessBody = {
+  access_token: "at-fresh",
+  refresh_token: "rt-rotated",
+  expires_in: 3600,
+}
+
+/** Stub that succeeds on /oauth/token (counting hits) and lets the caller
+ *  observe the next leg. After a SUCCESSFUL refresh `stream()` proceeds to
+ *  /codex/models; we fail there with a sentinel so the test terminates without
+ *  needing a full SSE body, while still proving the in-memory token was USED
+ *  (the buggy path threw at `ensureFreshToken` and never reached /models). */
+const refreshSucceedsThenModelsSentinel = (
+  counters: { tokenHits: number; modelsHit: boolean },
+): FetchLike => {
+  return async (url) => {
+    if (url.includes("/oauth/token")) {
+      counters.tokenHits += 1
+      return new Response(JSON.stringify(refreshSuccessBody), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }
+    if (url.includes("/models")) {
+      counters.modelsHit = true
+      // Sentinel: terminate the stream past ensureFreshToken cleanly.
+      return new Response(JSON.stringify({ error: "models-sentinel" }), {
+        status: 418,
+        headers: { "content-type": "application/json" },
+      })
+    }
+    throw new Error(`unexpected fetch URL: ${url}`)
+  }
+}
+
+/** D7 — a disk-persist failure on an OTHERWISE-SUCCESSFUL refresh must NOT
+ *  discard the valid in-memory token. The pre-fix catch wrapped the EACCES from
+ *  `writeToken` as `kind:"network"` (retryable), so the in-flight call threw and
+ *  the retry layer re-ran the FULL refresh ×maxRetries, burning the issuer
+ *  budget and tossing a perfectly good access token. The fix returns the
+ *  in-memory token (the disk copy is a cache, not load-bearing) with a logged
+ *  warning, so the call proceeds on ONE refresh. */
+describe("chatgpt-oauth refresh: disk-persist failure keeps the fresh in-memory token (D7)", () => {
+  test("/token SUCCEEDS but writeToken throws EACCES ⇒ in-memory token used, no re-fetch", async () => {
+    await seedExpiredToken("rt-d7-persist-fail")
+    const authDir = dirname(chatgptTokenPath(dir))
+    // Make the post-refresh writeToken (write-to-tmp + rename) fail EACCES.
+    await chmod(authDir, 0o500)
+    try {
+      const counters = { tokenHits: 0, modelsHit: false }
+      const caught = await streamAndCatch(refreshSucceedsThenModelsSentinel(counters))
+
+      // The refresh ran exactly once — the in-memory token carried the call
+      // forward instead of being discarded + re-fetched.
+      expect(counters.tokenHits).toBe(1)
+      // Proof the fresh token was USED: stream() advanced to /codex/models.
+      // (Pre-fix this was never reached — ensureFreshToken threw "network".)
+      expect(counters.modelsHit).toBe(true)
+      // The error the test sees is the /models sentinel, NOT a refresh failure.
+      expect(caught).toBeInstanceOf(LLMError)
+      expect((caught as LLMError).message).not.toContain("token refresh failed")
+    } finally {
+      await chmod(authDir, 0o700)
+    }
+  })
+})
+
+/** D8 — a 403 from the token endpoint (e.g. account suspended / scope revoked,
+ *  non-`invalid_grant`) is an auth problem, not the catch-all `unknown`. Pre-fix
+ *  it fell through to `kind:"unknown"` ⇒ no `/login` advice + no purge. The fix
+ *  classifies 403 as `kind:"auth"` before the unknown fallthrough. */
+describe("chatgpt-oauth refresh: 403 classified as auth, not unknown (D8)", () => {
+  test("403 (non-invalid_grant body) ⇒ kind auth + /login advice", async () => {
+    await seedExpiredToken("rt-d8-403")
+    const caught = await streamAndCatch(tokenEndpointFailure(403, { error: "access_denied" }))
+    expect(caught).toBeInstanceOf(LLMError)
+    const err = caught as LLMError
+    expect(err.kind).toBe("auth")
+    expect(err.statusCode).toBe(403)
+    expect(err.message).toContain("/login")
+  })
+
+  test("paired control: 403 body invalid_grant still hits the errorCode branch (kind auth)", async () => {
+    await seedExpiredToken("rt-d8-403-invalid-grant")
+    const caught = await streamAndCatch(
+      tokenEndpointFailure(403, { error: "invalid_grant", error_description: "revoked" }),
+    )
+    expect(caught).toBeInstanceOf(LLMError)
+    const err = caught as LLMError
+    expect(err.kind).toBe("auth")
+    expect(err.message).toContain("/login")
   })
 })

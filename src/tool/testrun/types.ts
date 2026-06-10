@@ -21,14 +21,14 @@ export interface TestRunResult {
   readonly ok: boolean
 }
 
-/** Detected project toolchain + how to test it. Tier-1 (go/rust/python/node)
- *  are fully wired+verified; Tier-2 (cpp/java/csharp) add the OCP slots —
- *  cpp is toolchain-verified (clangd+lldb-dap), java/csharp land the
- *  detect+parser+LSP structure with runtime degrade pending a local toolchain. */
+/** Detected project toolchain + how to test it. Tier-1 (go/rust/python/node) +
+ *  C++ are fully wired + toolchain-verified. Java/C# are deliberately NOT here:
+ *  no JRE / dotnet was available to verify against (would be speculative) —
+ *  they remain a documented OCP increment (T-04) for when those toolchains land. */
 export interface Toolchain {
-  readonly kind: "go" | "rust" | "python" | "node" | "cpp" | "java" | "csharp"
+  readonly kind: "go" | "rust" | "python" | "node" | "cpp"
   /** argv to run the suite. */
   readonly command: readonly string[]
   /** Which parser to apply to the output. */
-  readonly parser: "go" | "cargo" | "python-unittest" | "pytest" | "node" | "ctest" | "junit" | "dotnet" | "generic"
+  readonly parser: "go" | "cargo" | "python-unittest" | "pytest" | "node" | "ctest" | "generic"
 }

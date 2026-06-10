@@ -72,6 +72,12 @@ export class StdoutStream implements StreamPort {
   }
 
   emit(event: AgentEvent): void {
+    // Suppress in_progress heartbeats while text is actively streaming — the
+    // provider fires these between deltas and the guard below would insert a
+    // spurious \n in the middle of the output text (visible as broken Korean
+    // or any multi-byte chars split across lines).
+    if (event.type === "in_progress" && this.inText) return
+
     if (event.type !== "assistant_text" && this.inText) {
       this.drainPainterTail()
       this.write("\n")

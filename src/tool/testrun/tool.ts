@@ -11,7 +11,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
 import { detectToolchain } from "./detect"
-import { parseCargo, parseGoJson, parseNodeTest, parsePytest, parsePythonUnittest } from "./parse"
+import { parseCargo, parseCtest, parseGoJson, parseNodeTest, parsePytest, parsePythonUnittest } from "./parse"
 import type { TestRunResult, Toolchain } from "./types"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
@@ -100,6 +100,9 @@ const parseFor = (tc: Toolchain, stdout: string, stderr: string, exitCode: numbe
       break
     case "node":
       r = parseNodeTest(combined)
+      break
+    case "ctest":
+      r = parseCtest(combined)
       break
     default:
       // generic: no structured parse — exit code is the only verdict.

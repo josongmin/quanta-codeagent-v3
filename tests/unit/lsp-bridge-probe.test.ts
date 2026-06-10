@@ -145,4 +145,9 @@ describe("LSP bridge — binary availability probe", () => {
     // injection: drop the SERVERS entry and this (and Go static) goes red.
     expect(lspExtensionToLanguage().get(".go")).toBe("gopls")
   })
+
+  test("OCP registry: C-family extensions map to clangd (Tier-2 C++ static)", () => {
+    const m = lspExtensionToLanguage()
+    for (const ext of [".cpp", ".cc", ".cxx", ".hpp", ".h", ".c"]) expect(m.get(ext)).toBe("clangd")
+  })
 })

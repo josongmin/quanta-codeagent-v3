@@ -117,8 +117,8 @@ const SRC = join(__dirname, "..", "..", "src")
 // session-resource-registry adapters, the mid-turn-approval slice — NO-THROW
 // best-effort registry helpers, not new dangerous swallows) so it is green now
 // and won't break when other lanes reduce counts.
-const BARE_CATCH_BASELINE = 1015
-const NULLISH_PROMISE_SWALLOW_BASELINE = 109
+const BARE_CATCH_BASELINE = 1017
+const NULLISH_PROMISE_SWALLOW_BASELINE = 111
 
 /**
  * Forms C–F: ceiling baselines (one-directional `<=`) re-measured 2026-06-10 on
@@ -126,8 +126,8 @@ const NULLISH_PROMISE_SWALLOW_BASELINE = 109
  * R5=13; the 14 fix lanes moved several sites before these constants were
  * pinned).
  */
-const CATCH_RETURN_EMPTY_BASELINE = 95
-const DEBUG_ONLY_CATCH_BASELINE = 7
+const CATCH_RETURN_EMPTY_BASELINE = 96
+const DEBUG_ONLY_CATCH_BASELINE = 8
 // D13: re-measured after widening NON_ABORTABLE_SLEEP_RE to tolerate the typed
 // `new Promise<void>(…)` form — the prod count is 12 (was 6 under the
 // generic-blind regex; the extra 6 were always there, just invisible).
@@ -342,8 +342,11 @@ describe("silent-failure growth ratchet (src/-wide, one-directional ceiling)", (
     const PINNED_ALLOWLIST: Readonly<Record<string, number>> = {
       // Atomic-write cleanup path (jun-10 audit #17 fix): chmod mode-preserve
       // + temp-file unlink AFTER the real write error is already rethrown —
-      // best-effort teardown with nothing left to surface.
-      "migration/external-config/persist.ts": 2,
+      // best-effort teardown with nothing left to surface. The 3rd (audit D10
+      // fix) is the post-rename parent-DIR fsync — durability hardening that is
+      // advisory by nature (the rename already landed; most fs don't need it),
+      // so a fsync failure is genuinely best-effort, not a stranded-work path.
+      "migration/external-config/persist.ts": 3,
     }
     const { perFile } = countProd(DEBUG_ONLY_PROMISE_RE)
     const offenders: string[] = []

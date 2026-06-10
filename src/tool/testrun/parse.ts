@@ -6,6 +6,51 @@
  */
 import type { TestFailure, TestRunResult } from "./types"
 
+/** C++ via `ctest --output-on-failure`. ctest surfaces the underlying framework
+ *  output; we localize from the two dominant shapes: libc `assert` (VERBATIM-
+ *  pinned: `Assertion failed: (COND), function FN, file FILE, line N.`) and
+ *  GoogleTest (`FILE:LINE: Failure` + `[  FAILED  ] Suite.Test`). NEVER-throws. */
+export const parseCtest = (output: string): TestRunResult => {
+  const lines = output.split("\n")
+  const failed: TestFailure[] = []
+
+  // libc assert (verbatim) — one failure per assert line, fully localized.
+  for (const raw of lines) {
+    const am = /^Assertion failed: \((.+)\), function (.+), file (.+), line (\d+)\.?$/.exec(raw.trim())
+    if (am !== null) failed.push({ name: am[2]!.trim(), file: am[3]!.trim(), line: Number(am[4]), message: `Assertion failed: (${am[1]})` })
+  }
+
+  // GoogleTest: `[  FAILED  ] Suite.Test` markers + nearest `FILE:LINE: Failure`
+  // location (emitted just before, in document order) + the assertion message.
+  if (failed.length === 0) {
+    const locs: { file: string; line: number }[] = []
+    const msgs: string[] = []
+    const names: string[] = []
+    for (const raw of lines) {
+      const lm = /^(.+?):(\d+): Failure$/.exec(raw.trim())
+      if (lm !== null) {
+        locs.push({ file: lm[1]!, line: Number(lm[2]) })
+        continue
+      }
+      const fm = /^\[\s*FAILED\s*\]\s+(.+?)(?:\s+\(\d+\s*ms\))?$/.exec(raw.trim())
+      // The trailing `[  FAILED  ] N tests` summary line is NOT a test name.
+      if (fm !== null && !/^\d+\s+tests?$/.test(fm[1]!)) names.push(fm[1]!)
+      const em = /^(?:Expected|Actual|Value of|error:)\b.*$/.exec(raw.trim())
+      if (em !== null) msgs.push(raw.trim())
+    }
+    names.forEach((name, i) => {
+      const loc = locs[i]
+      failed.push({ name, ...(loc ? { file: loc.file, line: loc.line } : {}), ...(msgs[i] ? { message: msgs[i] } : {}) })
+    })
+  }
+
+  // Pass count: gtest `[  PASSED  ] N tests` or ctest `N% tests passed, M ... failed`.
+  let passed = 0
+  const gp = /\[\s*PASSED\s*\]\s+(\d+)\s+tests?/.exec(output)
+  if (gp !== null) passed = Number(gp[1])
+  return { runner: "ctest", passed, failed, ok: failed.length === 0 }
+}
+
 /** `go test -json`: newline-delimited JSON events. `Action:"pass"|"fail"` with a
  *  `Test` field are per-test verdicts; `Output` lines carry `file.go:line: msg`. */
 export const parseGoJson = (stdout: string): TestRunResult => {

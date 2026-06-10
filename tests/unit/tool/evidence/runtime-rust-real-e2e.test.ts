@@ -40,8 +40,9 @@ const LIB_RS = [
   "    use super::*;",
   "    #[test]",
   "    fn fail_test() {",
+  "        let items: Vec<i32> = vec![10, 20, 30];",
   "        let result = compute(5);",
-  "        assert_eq!(result, 99);  // line 8",
+  "        assert_eq!(result, items.len() as i32 + 96);  // line 9 — fails (10 != 99)",
   "    }",
   "}",
 ].join("\n")
@@ -72,5 +73,11 @@ D("defaultRuntimePort — REAL Rust runtime via lldb-dap (second runtime languag
     // frame's, exposed again under `frames[0]` for caller-context drill-down.
     expect((pkt.runtime?.frames?.length ?? 0)).toBeGreaterThan(0)
     expect(pkt.runtime?.frames?.[0]?.locals.some((v) => v.name === "result")).toBe(true)
+    // T-03 follow-up — Rust PRETTY-PRINTER: with Rust's lldb formatters sourced
+    // (initCommands), a `Vec<i32>` surfaces its ELEMENTS as children ([0]=10, …)
+    // instead of the raw `{buf,len}` struct. red-on-injection: drop the
+    // initCommands and `items` shows RawVec internals, not 10/20/30.
+    const items = pkt.runtime?.locals.find((v) => v.name === "items")
+    expect(items?.children?.map((c) => c.value)).toEqual(["10", "20", "30"])
   }, 180_000)
 })

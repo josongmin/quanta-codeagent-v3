@@ -45,9 +45,15 @@ const PYTEST: Toolchain = { kind: "python", command: ["python3", "-m", "pytest"]
 
 // Compiled-language markers outrank python/node (a Rust/Go repo often carries a
 // JS sidecar or a pyproject for tooling but is tested via cargo/go).
+// C++ (CMake): ctest runs the test executables; `--output-on-failure` surfaces
+// the framework's failure (gtest `file:line: Failure`, or libc assert) which
+// parseCtest localizes. Ranked above python/node like the other compiled langs.
+const CPP: Toolchain = { kind: "cpp", command: ["ctest", "--output-on-failure", "--test-dir", "build"], parser: "ctest" }
+
 const MARKERS: readonly Marker[] = [
   { file: "Cargo.toml", toolchain: RUST },
   { file: "go.mod", toolchain: GO },
+  { file: "CMakeLists.txt", toolchain: CPP },
 ]
 
 /** Detect the project's toolchain, or `null` if no marker is present. Python
