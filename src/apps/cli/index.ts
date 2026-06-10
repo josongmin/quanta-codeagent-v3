@@ -32,11 +32,10 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 // extra (tools-denied, single-shot) LLM call per turn — disable with
 // `QUANTA_ENABLE_PROMPT_SUGGESTION=0` if that latency/spend is unwanted.
 // CLI surface FEATURE gates — these are CLI surface behaviors, NOT LLM tools
-// (env-probe/away-summary/prompt-suggestion), so they are NOT in the tool-
-// surface manifest and stay listed explicitly here.
+// (env-probe/prompt-suggestion), so they are NOT in the tool-surface manifest
+// and stay listed explicitly here.
 const CLI_FEATURE_GATES = [
   "QUANTA_ENABLE_ENV_PROBE",
-  "QUANTA_ENABLE_AWAY_SUMMARY",
   "QUANTA_ENABLE_PROMPT_SUGGESTION",
   // ADR-0474 — stale-read-guard: block write/edit of a file externally modified
   // since the agent read it ("re-read first"). Protective correctness guard.

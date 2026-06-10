@@ -15,7 +15,7 @@ import {
   type SessionMeta,
   saveSessionById,
 } from "@/session"
-import { __resetRuntimeConfig } from "@/shared"
+import { __resetRuntimeConfig, gateOn } from "@/shared"
 // ADR-0528 — the runner-level wiring module under test.
 // ADR-0528 L2 auto-reinject + L3 partial seams.
 import {
@@ -165,6 +165,11 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
       text: "live crash-resume task",
       turnSignal: new AbortController().signal,
       sessionId: "live1",
+      // env THREADED (gate ON) — the marker reads its gate off THIS env, not
+      // ambient process.env. (beforeEach also armed the ambient gate, so this
+      // case alone does not prove the source; the OFF-via-injected-env case
+      // below does — it leaves the ambient gate ON yet writes no marker.)
+      env: { ...ON },
     })
     expect(res.outcome.reason).toBe("completed")
     // The marker was LIVE during the turn (mark-at-start through the real driver):
@@ -174,8 +179,13 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
     expect((await loadSessionById("live1"))?.meta.interruptedTurn).toBeUndefined()
   })
 
-  test("LIVE PATH default-OFF: gate absent ⇒ runSessionTurn writes no marker", async () => {
-    delete process.env[CRASH_RESUME_GATE]
+  test("LIVE PATH gate follows the INJECTED env, not ambient: ambient gate ON but injected env gate-off ⇒ no marker", async () => {
+    // The ambient gate is ON (beforeEach `Object.assign(process.env, ON)`). We do
+    // NOT clear it — instead we pass an injected env WITHOUT the gate. If the
+    // driver still read `process.env` (the leak this fix removes), the ambient ON
+    // would arm the marker and this would go RED. It stays green ONLY because the
+    // gate decision now follows `args.env`.
+    expect(gateOn(process.env, CRASH_RESUME_GATE)).toBe(true) // precondition: ambient ON
     __resetRuntimeConfig()
     await seed("live2")
     let markerDuringTurn: unknown = "sentinel"
@@ -195,8 +205,49 @@ describe("ADR-0528 crash-resume LIVE wiring", () => {
       text: "x",
       turnSignal: new AbortController().signal,
       sessionId: "live2",
+      // Injected env has NO crash-resume gate ⇒ marker must NOT be written even
+      // though ambient process.env DOES have it. (The snapshot FILE path is still
+      // resolved from the ambient `QUANTA_SESSIONS_DIR` set in beforeEach — only
+      // the GATE decision reads this injected env.)
+      env: {},
     })
     expect(markerDuringTurn).toBeUndefined()
+    // Fresh-readback: the snapshot carries no marker either.
+    expect((await loadSessionById("live2"))?.meta.interruptedTurn).toBeUndefined()
+  })
+
+  test("LIVE PATH gate follows the INJECTED env: ambient gate OFF but injected env gate-ON ⇒ marker IS written", async () => {
+    // Inverse of the above — prove BOTH directions follow the injected env. Clear
+    // the ambient gate, then inject an env WITH the gate. A driver reading
+    // `process.env` would see OFF and write nothing (RED); reading `args.env`
+    // sees ON and marks mid-turn.
+    delete process.env[CRASH_RESUME_GATE]
+    __resetRuntimeConfig()
+    expect(gateOn(process.env, CRASH_RESUME_GATE)).toBe(false) // precondition: ambient OFF
+    await seed("live3")
+    let markerDuringTurn: unknown
+    const fakeSession = {
+      input: { append: async () => undefined },
+      turn: {
+        run: async () => {
+          markerDuringTurn = (await loadSessionById("live3"))?.meta.interruptedTurn
+          return { turn: { messages: [], outcome: { reason: "completed" } } }
+        },
+      },
+      approval: { respond: async () => undefined },
+    } as unknown as RuntimeSession
+    await runSessionTurn({
+      session: fakeSession,
+      resolveApproval: async () => "approve",
+      text: "inject-on task",
+      turnSignal: new AbortController().signal,
+      sessionId: "live3",
+      env: { ...ON },
+    })
+    expect((markerDuringTurn as { userText?: string })?.userText).toBe("inject-on task")
+    expect((markerDuringTurn as { reason?: string })?.reason).toBe("in-progress")
+    // Cleared after the turn resolved (process survived):
+    expect((await loadSessionById("live3"))?.meta.interruptedTurn).toBeUndefined()
   })
 
   test("L2 auto-reinject: ONLY the current session's interrupt is a reinject candidate (no stranger-task injection)", () => {

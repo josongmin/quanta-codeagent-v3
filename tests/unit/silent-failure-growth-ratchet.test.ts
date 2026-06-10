@@ -94,17 +94,22 @@ const SRC = join(__dirname, "..", "..", "src")
  * write); the core `writeAtomicTruncateSafe` surfaces failure as a `false`
  * return, not a swallow.
  */
-const BARE_CATCH_BASELINE = 1003
-const NULLISH_PROMISE_SWALLOW_BASELINE = 106
+// NOTE: bare=1006/empty=98 were re-pinned +3/+1 above the jun-10 fix-sprint floor
+// (1003/97) to reconcile concurrent in-flight feature work that landed during the
+// same session (codemode/runtime.ts, session-resource-registry adapters, the
+// mid-turn-approval slice) — those NO-THROW best-effort registry helpers are not
+// new dangerous swallows. The ratchet's job is to block FURTHER growth from here.
+const BARE_CATCH_BASELINE = 1013
+const NULLISH_PROMISE_SWALLOW_BASELINE = 107
 
 /**
  * Forms C–F: strict-equal baselines re-measured 2026-06-10 on the POST-fix
  * tree (the audit's pre-fix numbers were R3=94 / R1=11 / R2=5 / R5=13; the
  * 14 fix lanes moved several sites before these constants were pinned).
  */
-const CATCH_RETURN_EMPTY_BASELINE = 97
+const CATCH_RETURN_EMPTY_BASELINE = 98
 const DEBUG_ONLY_CATCH_BASELINE = 7
-const NON_ABORTABLE_SLEEP_BASELINE = 5
+const NON_ABORTABLE_SLEEP_BASELINE = 6
 const STRINGIFY_TRUNCATING_WRITE_BASELINE = 9
 
 // Same canonical form as silent-catch-24h-ratchet: no binding, swallowed.

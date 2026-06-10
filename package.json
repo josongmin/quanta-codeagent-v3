@@ -1,6 +1,6 @@
 {
   "name": "quanta-codeagent",
-  "version": "0.1.0",
+  "version": "1.0.001",
   "type": "module",
   "scripts": {
     "dev": "bun --hot run src/apps/cli/index.ts",

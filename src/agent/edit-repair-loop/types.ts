@@ -11,7 +11,7 @@
  * SLICES IMPORTED: `@/shared` ONLY (Result/ok/err, errMessage). This slice lives
  * under `@/agent` but does NOT import `@/llm`, `@/tool`, or any sibling slice.
  * The two intelligence collaborators are PORT-INVERTED (mirrors
- * `src/permission/classifier.ts` ClassifierPort + `away-summary` SummarizeFn):
+ * `src/permission/classifier.ts` ClassifierPort):
  *   - `DiagnosticsProvider` — runs the linter/type-checker over a file revision.
  *   - `RepairReactorPort` — the fast edit model: given failures + per-loop custom
  *     instructions, returns ONE repaired edit attempt.

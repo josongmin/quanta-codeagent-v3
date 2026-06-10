@@ -48,6 +48,7 @@ import { buildMcpSurfaceInfo } from "./repl/mcp-surface-wire"
 import { runSessionLoop } from "./repl/session-loop"
 import { buildSessionLoopOptions } from "./repl/session-loop-options"
 import { setupSession } from "./repl/session-setup"
+import { buildWelcomeInfo, renderWelcomeBanner } from "./welcome-banner"
 import { buildSkillsCallback, installPills } from "./repl/skills-surface"
 import {
   composeSurfaceSlashCtx,
@@ -288,6 +289,15 @@ export const runRepl = async (): Promise<void> => {
     history: setup.history,
   })
   try {
+    // jun-10 — welcome banner: the interactive surface's FIRST paint (the
+    // Claude-Code-style entry box). Interactive + TTY only: one-shot
+    // (`argPrompt`), piped and eval launches never see it (byte-identical).
+    // stderr, like every other surface chrome — stdout stays the agent stream.
+    if (setup.argPrompt === undefined && process.stderr.isTTY === true) {
+      process.stderr.write(
+        `${renderWelcomeBanner(buildWelcomeInfo(setup, process.env.HOME))}\n`,
+      )
+    }
     // H13 — gated external-config migration notice (default-OFF behind
     // QUANTA_MIGRATE_CONFIG). Detects competitor (Claude Code / Cursor) config
     // under ~ + cwd, converts it to the quanta shape, throttles a re-offer, and

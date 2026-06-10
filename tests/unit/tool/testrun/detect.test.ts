@@ -24,10 +24,35 @@ describe("detectToolchain", () => {
     expect(t?.parser).toBe("go")
   })
 
-  test("pyproject.toml ⇒ python / unittest", async () => {
+  test("pyproject.toml ⇒ python / unittest (no pytest probe ⇒ conservative default)", async () => {
     const t = await detectToolchain("/p", fsWith(["pyproject.toml"]))
     expect(t?.kind).toBe("python")
     expect(t?.parser).toBe("python-unittest")
+  })
+
+  test("python project WITH pytest installed (canRun ⇒ true) ⇒ pytest, not unittest", async () => {
+    const t = await detectToolchain("/p", {
+      fileExists: async (n) => n === "pyproject.toml",
+      canRun: async (cmd) => cmd.includes("pytest"), // pytest is installed
+    })
+    expect(t?.kind).toBe("python")
+    expect(t?.parser).toBe("pytest")
+    expect(t?.command.join(" ")).toBe("python3 -m pytest")
+  })
+
+  test("python project WITHOUT pytest (canRun ⇒ false) ⇒ unittest fallback", async () => {
+    const t = await detectToolchain("/p", {
+      fileExists: async (n) => n === "pyproject.toml",
+      canRun: async () => false,
+    })
+    expect(t?.parser).toBe("python-unittest")
+  })
+
+  test("conftest.py ALONE is NOT a marker (pytest-only ⇒ unittest fallback would false-green a 0-tests run)", async () => {
+    // Deliberate: a pytest-only marker without an unittest-capable marker is not
+    // detected, so we never fall back to unittest and falsely pass a pytest repo.
+    const t = await detectToolchain("/p", { fileExists: async (n) => n === "conftest.py", canRun: async () => true })
+    expect(t).toBeNull()
   })
 
   test("setup.py also ⇒ python", async () => {
@@ -35,9 +60,10 @@ describe("detectToolchain", () => {
     expect(t?.kind).toBe("python")
   })
 
-  test("package.json ⇒ node", async () => {
+  test("package.json ⇒ node / node parser (localizes JS failures for static enrich)", async () => {
     const t = await detectToolchain("/p", fsWith(["package.json"]))
     expect(t?.kind).toBe("node")
+    expect(t?.parser).toBe("node") // was "generic" — drift guard for the JS parser wiring
   })
 
   test("precedence: Cargo.toml wins over package.json (a rust crate with a JS sidecar)", async () => {

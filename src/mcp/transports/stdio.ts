@@ -69,6 +69,15 @@ export type StdioSpawnFn = (
 const defaultSpawn: StdioSpawnFn = (command, opts) =>
   Bun.spawn(command, opts) as Subprocess<"pipe", "pipe", "pipe">
 
+/** Grace window between the polite SIGTERM and the SIGKILL escalation in
+ *  {@link StdioMcpTransport.close}. Without the escalation a server that traps
+ *  or ignores SIGTERM pins `close()` — and the session teardown awaiting it —
+ *  forever (`proc.exited` never settles). 5s is the conventional
+ *  graceful-shutdown grace for small CLI children (half of Docker's 10s
+ *  `stop` default); MCP servers hold no durable state worth waiting longer
+ *  for. Tests may override via {@link StdioTransportOpts.termGraceMs}. */
+const SIGTERM_GRACE_MS = 5_000
+
 export interface StdioTransportOpts {
   /** Spawn seam (test injection). Default = `Bun.spawn`. */
   readonly spawn?: StdioSpawnFn
@@ -77,6 +86,10 @@ export interface StdioTransportOpts {
    *  `address` ⇒ NO proxy keys are added (byte-identical to the pre-H3
    *  transport). Carries the proxy ADDRESS only — never a host secret. */
   readonly proxyEnv?: ProxyEnvInput
+  /** SIGTERM→SIGKILL escalation grace for `close()`. Default
+   *  {@link SIGTERM_GRACE_MS}; tests inject a short grace so the
+   *  ignores-SIGTERM path stays fast. */
+  readonly termGraceMs?: number
 }
 
 /** Newline-delimited JSON-RPC over a spawned subprocess's stdio. */
@@ -92,6 +105,7 @@ export class StdioMcpTransport implements McpTransport {
   private readPump: Promise<void> | null = null
   private stderrPump: Promise<void> | null = null
   private exitFired = false
+  private readonly termGraceMs: number
   /** Set by `close()` BEFORE the kill so the stdout pump's settlement during a
    *  deliberate teardown is never misreported as a pump death (#8). */
   private closing = false
@@ -100,6 +114,7 @@ export class StdioMcpTransport implements McpTransport {
     this.config = config
     this.spawnFn = opts.spawn ?? defaultSpawn
     this.proxyEnv = opts.proxyEnv ?? {}
+    this.termGraceMs = opts.termGraceMs ?? SIGTERM_GRACE_MS
   }
 
   async start(): Promise<void> {
@@ -178,7 +193,30 @@ export class StdioMcpTransport implements McpTransport {
     } catch {
       // process may have already exited
     }
-    await proc.exited.catch(() => undefined)
+    // SIGTERM→SIGKILL escalation: a server that traps/ignores SIGTERM used to
+    // pin this await forever (and with it every teardown path that serially
+    // stops MCP clients). Give the polite kill `termGraceMs`, then force.
+    const exited = proc.exited.catch(() => undefined)
+    let graceTimer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = await Promise.race([
+      exited.then(() => false),
+      new Promise<boolean>((resolve) => {
+        graceTimer = setTimeout(() => resolve(true), this.termGraceMs)
+      }),
+    ])
+    clearTimeout(graceTimer)
+    if (timedOut) {
+      logger.warn("mcp: server ignored SIGTERM; escalating to SIGKILL", {
+        server: this.config.name,
+        graceMs: this.termGraceMs,
+      })
+      try {
+        proc.kill("SIGKILL")
+      } catch {
+        // process may have exited in the race window
+      }
+      await exited
+    }
     await this.readPump?.catch(() => undefined)
     await this.stderrPump?.catch(() => undefined)
     this.proc = null

@@ -75,6 +75,13 @@ interface RuntimeConfirmSlot {
 
 interface RuntimeApprovalProtocolConfig {
   readonly confirmSlot: RuntimeConfirmSlot
+  /** jun-10 HITL restructure — the surface has a LIVE OPERATOR (interactive
+   *  CLI): a mid-turn "ask" should delegate INLINE to the surface confirm that
+   *  was in the slot at `runWithProtocol` entry, instead of minting a pending
+   *  approval and aborting the whole turn (the deferred protocol re-runs the
+   *  turn from scratch — re-paying the full prompt per approval). Absent/false
+   *  ⇒ byte-identical deferred behavior (web/SDK/headless round-trip). */
+  readonly interactive?: boolean
 }
 
 interface BootBindings {
@@ -764,6 +771,11 @@ const isRuntimeApprovalRequiredError = (error: unknown): error is RuntimeApprova
 interface PendingRuntimeApprovalRecord {
   readonly approval: PendingApprovalView
   readonly actionKey: string
+  /** False when shell extraction threw at mint time (the stored `actionKey` is
+   *  a diagnostics-only sentinel string). A non-grantable record still mints
+   *  the single-use lease (which can never match — fail closed, re-prompts)
+   *  but must NEVER mint a standing session grant. */
+  readonly grantable: boolean
 }
 
 /** T03 (audit L5 H-1/M-3) — an approval grant is an opaque, single-use LEASE
@@ -846,6 +858,33 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
   // consumed is cleared when that scope exits, so an approval cannot leak past
   // the immediate re-run (audit L5 H-1).
   const leases = new Map<string, RuntimeApprovalLease>()
+  // jun-10 HITL restructure — inline-interactive delegation. When the surface
+  // declares `approvalProtocol.interactive`, a mid-turn ask is answered by the
+  // SURFACE confirm that occupied the slot at scope entry (the live operator's
+  // prompt) instead of the deferred mint+throw round-trip. The stack mirrors
+  // `runWithProtocol` nesting: each scope pushes the confirm it displaced
+  // (skipping self on nested scopes) and pops it on exit, so a side
+  // conversation nested inside a turn still resolves to the outer operator.
+  const interactive = base.approvalProtocol?.interactive === true
+  const surfaceConfirms: Array<NonNullable<AgentConfig["onConfirm"]>> = []
+  // Inline prompts SERIALIZE: one operator, one question on screen at a time.
+  // Early-dispatched parallel calls (the `agent` fan-out) hit the gate
+  // concurrently — without this chain the second prompt would clobber the
+  // first on the single input channel (auto-deny). Each queued confirm
+  // RE-CHECKS leases + session grants inside its critical section, so a
+  // fan-out answered "[a]lways" prompts exactly once and the queued siblings
+  // ride the just-minted grant.
+  let inlineChain: Promise<unknown> = Promise.resolve()
+  // EXPLICIT standing grants — minted ONLY when the operator answers with the
+  // session verb (`{decision:"allow", scope:"session"}`, the CLI's "[a]lways
+  // this session"). NOT the T03 H-1 leak class: H-1 was a single one-shot
+  // approval silently auto-granting later turns; this grant exists only when
+  // the operator explicitly chose the session scope, mirroring Claude Code's
+  // "don't ask again this session". Keyed by the SAME shell-aware actionKey the
+  // leases use (`bash|ls` never unlocks `bash|rm`); a SHELL_EXTRACT_FAILED key
+  // is never granted (fail closed). Session-host lifetime (this controller is
+  // minted once per session).
+  const sessionGrants = new Set<string>()
 
   /** Claim AT MOST ONE unclaimed lease whose `actionKey` matches. The lookup +
    *  delete is synchronous (no `await` between find and consume) so two
@@ -873,6 +912,41 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
     const actionKey = actionKeyOf(base.registry, action)
     const leased = claimLease(actionKey)
     if (leased !== false) return leased
+    // Standing session grant (explicit operator "always" verb) — non-consuming.
+    if (actionKey !== SHELL_EXTRACT_FAILED && sessionGrants.has(actionKey)) return true
+
+    // Inline-interactive path: a live operator is bound to this scope — ask
+    // them NOW, at the gate, and hand the (possibly rich) decision straight
+    // back. No pending approval, no turn abort, no re-run. The deferred
+    // mint+throw below remains for surfaces without an operator (web/SDK).
+    const surface = surfaceConfirms[surfaceConfirms.length - 1]
+    if (interactive && surface !== undefined) {
+      const promptOperator = async (): Promise<Awaited<ReturnType<typeof surface>>> => {
+        // Critical section — re-check: a confirm queued behind us may have just
+        // minted the lease/grant this very key needs (the "[a]lways" fan-out).
+        const leasedNow = claimLease(actionKey)
+        if (leasedNow !== false) return leasedNow
+        if (actionKey !== SHELL_EXTRACT_FAILED && sessionGrants.has(actionKey)) return true
+        const raw = await surface(action)
+        if (
+          actionKey !== SHELL_EXTRACT_FAILED &&
+          typeof raw === "object" &&
+          raw !== null &&
+          (raw as { decision?: unknown }).decision === "allow" &&
+          (raw as { scope?: unknown }).scope === "session"
+        ) {
+          sessionGrants.add(actionKey)
+        }
+        return raw
+      }
+      const result = inlineChain.then(promptOperator, promptOperator)
+      // Park the chain on settlement only — a deny/throw must not jam the queue.
+      inlineChain = result.then(
+        () => undefined,
+        () => undefined,
+      )
+      return await result
+    }
 
     const approval: PendingApprovalView = {
       approvalId: crypto.randomUUID(),
@@ -884,11 +958,13 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       ...escalationScopeFields(action),
     }
     // A throwing shell extraction has no stable key; record the sentinel string
-    // form only for diagnostics — it can never match a future lease.
+    // form only for diagnostics — it can never match a future lease, and it is
+    // marked non-grantable so a session-scoped approve can't stand on it.
     pending.set(approval.approvalId, {
       approval,
       actionKey:
         actionKey === SHELL_EXTRACT_FAILED ? `${action.tool}|<shell-extract-failed>` : actionKey,
+      grantable: actionKey !== SHELL_EXTRACT_FAILED,
     })
     throw new RuntimeApprovalRequiredError(approval)
   }
@@ -899,6 +975,11 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       if (slot === undefined) return await work()
       const previous = slot.current
       slot.current = onConfirm
+      // Capture the displaced SURFACE confirm for inline delegation. A nested
+      // scope displaces `onConfirm` itself — skip it so the stack top stays the
+      // real operator prompt (or empty ⇒ deferred fail-closed).
+      const pushedSurface = typeof previous === "function" && previous !== onConfirm
+      if (pushedSurface) surfaceConfirms.push(previous)
       // Snapshot the leases present at scope entry; any of these still present
       // at scope exit were NOT consumed by this turn run and are stale — clear
       // them so an approval is good for exactly one turn (audit L5 H-1).
@@ -919,6 +1000,7 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         return await work()
       } finally {
         slot.current = previous
+        if (pushedSurface) surfaceConfirms.pop()
         for (const approvalId of armedAtEntry) leases.delete(approvalId)
         for (const approvalId of pendingAtEntry) pending.delete(approvalId)
       }
@@ -948,6 +1030,18 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
           actionKey: record.actionKey,
           ...(leaseDecision !== undefined ? { decision: leaseDecision } : {}),
         })
+        // jun-10 — deferred "always" verb: a NORMAL approval resolved with the
+        // EXPLICIT session scope additionally mints the standing grant (same
+        // ledger the inline "[a]lways" uses), so a deferred surface (web card /
+        // CLI fallback) pays the abort+re-run round-trip ONCE per key instead
+        // of once per ask. Escalations are excluded: a session-scoped skill
+        // widening is the skill-scope axis (the rich lease above), NOT a
+        // tool-level never-ask-again. Non-grantable (shell-extract-failed)
+        // records never stand (fail closed). Same consent semantics as the
+        // inline path — the grant exists only on the operator's explicit verb.
+        if (!isEscalation && opts?.scope === "session" && record.grantable) {
+          sessionGrants.add(record.actionKey)
+        }
         return
       }
       // decision === "deny". A normal deny sets no lease (unchanged). An
@@ -1174,7 +1268,6 @@ const buildRuntimeTurnArgs = (args: {
   readonly images?: readonly ImageBlock[]
   readonly state: string | undefined
   readonly idMeta: SessionMeta | undefined
-  readonly mcpClients?: Array<{ stop: () => Promise<void> }>
   readonly signal?: AbortSignal
   readonly onEvent?: (event: SessionHostTurnEvent) => void
 }) => ({
@@ -1185,7 +1278,6 @@ const buildRuntimeTurnArgs = (args: {
   ...(args.images !== undefined && args.images.length > 0 ? { images: [...args.images] } : {}),
   state: args.state,
   idMeta: args.idMeta,
-  ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
   ...(args.signal !== undefined ? { signal: args.signal } : {}),
   ...(args.onEvent !== undefined ? { onEvent: args.onEvent } : {}),
 })
@@ -1212,11 +1304,9 @@ const runRuntimeTurn = async (args: {
   readonly images?: readonly ImageBlock[]
   readonly state: string | undefined
   readonly idMeta: SessionMeta | undefined
-  readonly mcpClients?: Array<{ stop: () => Promise<void> }>
   readonly signal?: AbortSignal
   readonly onEvent?: (event: SessionHostTurnEvent) => void
 }): Promise<RuntimeTurnResult> => {
-  const mcpClients = args.mcpClients ?? []
   const turnStream = createTurnStreamPort({
     baseStream: args.base.stream,
     ...(args.onEvent !== undefined ? { onEvent: args.onEvent } : {}),
@@ -1260,8 +1350,6 @@ const runRuntimeTurn = async (args: {
       }
     }
     throw error
-  } finally {
-    for (const client of mcpClients) await client.stop().catch(() => undefined)
   }
 }
 
@@ -1305,6 +1393,17 @@ const createRuntimeSessionHost = (args: {
     } catch {
       // swallow — teardown must complete regardless.
     }
+    // Session-scoped MCP teardown. These clients live for the WHOLE session —
+    // the per-turn `runRuntimeTurn` finally that used to stop them was a
+    // one-shot relic: it killed the fleet at the end of turn 1 (every later
+    // turn's MCP tools hit a stopped client) and put a serial, potentially
+    // unbounded shutdown wait on the turn-completion critical path. Stopped
+    // here instead, BEFORE `options.shutdown()` so a bootstrap-owned shutdown
+    // (stop clients → close egress proxy) keeps its ordering — `client.stop()`
+    // is idempotent, so the double-stop is a no-op.
+    for (const client of args.options.mcpClients ?? []) {
+      await client.stop().catch(() => undefined)
+    }
     await args.options.shutdown()
     closed = true
   }
@@ -1341,9 +1440,6 @@ const createRuntimeSessionHost = (args: {
               ...(images !== undefined ? { images } : {}),
               state: args.options.state,
               idMeta: args.options.idMeta,
-              ...(args.options.mcpClients !== undefined
-                ? { mcpClients: args.options.mcpClients }
-                : {}),
               ...(signal !== undefined ? { signal } : {}),
               ...(onEvent !== undefined ? { onEvent } : {}),
             }),

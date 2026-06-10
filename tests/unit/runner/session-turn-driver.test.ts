@@ -57,6 +57,7 @@ describe("driveSessionTurn — behavioral contract", () => {
   test("no-approval turn: appends once (no image opts) and returns normalized result", async () => {
     const rec: Recorder = { appends: [], responds: [] }
     const result = await driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session: fakeSession([turnPayload()], rec),
       resolveApproval: async () => "approve",
       text: "hello",
@@ -76,6 +77,7 @@ describe("driveSessionTurn — behavioral contract", () => {
     const rec: Recorder = { appends: [], responds: [] }
     let asked = 0
     const result = await driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session: fakeSession(
         [turnPayload({ approvalId: "ap1", reason: "needs_it" }), turnPayload()],
         rec,
@@ -95,6 +97,7 @@ describe("driveSessionTurn — behavioral contract", () => {
   test("deny throws the verbatim approval-denied error (fails closed)", async () => {
     const rec: Recorder = { appends: [], responds: [] }
     const run = driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session: fakeSession(
         [turnPayload({ approvalId: "ap1", reason: "terminal.x" }), turnPayload()],
         rec,
@@ -111,6 +114,7 @@ describe("driveSessionTurn — behavioral contract", () => {
   test("missing turn payload throws the verbatim error", async () => {
     const rec: Recorder = { appends: [], responds: [] }
     const run = driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session: fakeSession([{ revision: 1, seq: 1, events: [] }], rec),
       resolveApproval: async () => "approve",
       text: "x",
@@ -122,6 +126,7 @@ describe("driveSessionTurn — behavioral contract", () => {
   test("beforeTurn host hook fires BEFORE append", async () => {
     const order: string[] = []
     await driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session: {
         input: {
           append: async () => {
@@ -143,6 +148,7 @@ describe("driveSessionTurn — behavioral contract", () => {
     const rec: Recorder = { appends: [], responds: [] }
     const img = { type: "image", source: {} } as never
     await driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session: fakeSession([turnPayload()], rec),
       resolveApproval: async () => "approve",
       text: "look",

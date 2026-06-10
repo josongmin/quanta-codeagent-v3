@@ -213,7 +213,18 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // CLI (`internal.ts`), so the web/tauri surface gets subagent fan-out + the
     // skill catalogue/auto-trigger by default. `QUANTA_SUBAGENT=0` /
     // `QUANTA_SKILLS=0` opt out; `QUANTA_SKILLS_DIR` adds a user skill dir.
-    const subagent = buildSubagentConfigCore({ enabled: parseEnvFlag(env.QUANTA_SUBAGENT, true) })
+    const subagentEnabled = parseEnvFlag(env.QUANTA_SUBAGENT, true)
+    // §25.1 — wire `run_workflow` on the web/tauri surface too (CLI parity with
+    // apps/cli/internal.ts buildSubagentConfig). DEFAULT-OFF byte-identical:
+    // QUANTA_WORKFLOW unset ⇒ `enableWorkflow` absent ⇒ the tool is NOT
+    // registered (legacy web behavior). It rides the SAME tier-1 subagent
+    // runner, so it requires subagent enabled AND QUANTA_WORKFLOW=1.
+    const subagent = buildSubagentConfigCore({
+      enabled: subagentEnabled,
+      ...(subagentEnabled && parseEnvFlag(env.QUANTA_WORKFLOW, false)
+        ? { enableWorkflow: true }
+        : {}),
+    })
     const skillsDir = env.QUANTA_SKILLS_DIR
     const skills = buildSkillsConfigCore({
       ...(skillsDir !== undefined ? { dir: skillsDir } : {}),

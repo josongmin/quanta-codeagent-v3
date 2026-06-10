@@ -74,6 +74,14 @@ export interface RunSessionTurnArgs {
    *  death mid-turn is recoverable on restart. Absent (ephemeral/headless-fake
    *  session) OR gate off ⇒ byte-identical no-op. */
   readonly sessionId?: string
+  /** ADR-0528 — env THREADED from the composition root (apps/cli / host), NOT
+   *  read from `process.env` here. The crash-resume marker drives its gate
+   *  (`gateOn(env, CRASH_RESUME_GATE)`) off this exact env, so a feature-gate
+   *  input must arrive through the args — not an ambient raw `process.env`
+   *  literal (the `@/session` slice is env-pure by design; see
+   *  `src/session/crash-resume.ts`). Surfaces that never set `sessionId` (the
+   *  ephemeral/escalation paths) still thread it so the gate is deterministic. */
+  readonly env: Record<string, string | undefined>
 }
 
 const requireTurnPayload = (result: SessionDispatchResult): SessionTurnPayload => {
@@ -128,7 +136,7 @@ const resolvePendingApproval = async (
  * exactly ONCE.
  */
 export const runSessionTurn = async (args: RunSessionTurnArgs): Promise<SessionTurnResult> => {
-  const { session, resolveApproval, text, images, turnSignal, beforeTurn, sessionId } = args
+  const { session, resolveApproval, text, images, turnSignal, beforeTurn, sessionId, env } = args
   const body = async (): Promise<SessionTurnResult> => {
     beforeTurn?.()
     const imgs = images ?? []
@@ -147,7 +155,7 @@ export const runSessionTurn = async (args: RunSessionTurnArgs): Promise<SessionT
   // process survived; only a hard crash leaves the marker). Gate-gated + only
   // when a durable `sessionId` is known ⇒ byte-identical otherwise.
   if (sessionId === undefined) return body()
-  const markerArgs = { sessionId, userText: text, env: process.env }
+  const markerArgs = { sessionId, userText: text, env }
   // ADR-0528 L3 (P2) — keep the marker's partial FRESH during the turn by
   // subscribing to the session stream (no-op unless QUANTA_CRASH_RESUME_PARTIAL).
   const detachPartial = attachCrashResumePartial(session, markerArgs)

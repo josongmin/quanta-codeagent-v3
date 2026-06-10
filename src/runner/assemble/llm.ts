@@ -147,18 +147,18 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
       signal: input.signal,
       ...(input.fallbackMetrics !== undefined ? { metrics: input.fallbackMetrics } : {}),
     })
-    input.slog.info("llm.fallback.on", { models: input.fallbackModelIds })
+    input.slog.debug("llm.fallback.on", { models: input.fallbackModelIds })
   }
   if (input.mode === "auto") {
     input.permission.classify = createAutoClassifierPort({ llm: finalLLM })
-    input.slog.info("permission.auto.on")
+    input.slog.debug("permission.auto.on")
   }
   // Outermost wrap: live output-token meter. Placed AFTER the classifier so
   // the classifier's internal calls use the un-wrapped port (no stray
   // `output_progress` from permission classification). Identity when OFF.
   if (input.liveUsage === true) {
     finalLLM = withLiveUsage(finalLLM, { enabled: true })
-    input.slog.info("llm.live_usage.on")
+    input.slog.debug("llm.live_usage.on")
   }
   return finalLLM
 }

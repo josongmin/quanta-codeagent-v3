@@ -1,5 +1,6 @@
 import * as readline from "node:readline/promises"
 import {
+  type ConfirmDecision,
   createOnConfirmReviewerPort,
   loadNamedAgents,
   mintActiveWorktreeSlot,
@@ -21,10 +22,23 @@ import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
 import type { RejectCounter } from "../reject-counter"
+import {
+  createMidTurnApprovalChannel,
+  type MidTurnApprovalChannel,
+} from "./mid-turn-approval-channel"
 import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 
-const askLine = async (prompt: string): Promise<string> => {
+// MID-TURN FIX (jun-10): when an in-turn keystroke reader owns stdin (a turn is
+// streaming), opening a second ad-hoc `readline` here fights it and the prompt
+// fail-closes to deny ("입력창이 안 떠서"). When `channel.active`, route through
+// the in-turn reader's captured line instead of a conflicting readline. Between
+// turns (`active` false) keep the ad-hoc readline (byte-identical legacy).
+const askLine = async (channel: MidTurnApprovalChannel, prompt: string): Promise<string> => {
+  if (channel.active) {
+    process.stderr.write(prompt)
+    return await channel.awaitLine()
+  }
   const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
   try {
     return await adhoc.question(prompt)
@@ -33,64 +47,158 @@ const askLine = async (prompt: string): Promise<string> => {
   }
 }
 
+interface CliHitlDeps {
+  readonly idleMonitor: IdleMonitor
+  readonly rejectCounter: RejectCounter
+  readonly channel: MidTurnApprovalChannel
+}
+
+/** Shared inline 4-verb prompt for a skill-scope ESCALATION (`scopeContext`
+ *  present): allow once / allow session / deny / deny+steer — the same verbs
+ *  the web card offers (ADR-0512 P3). Used by BOTH the inline confirm (live
+ *  operator, jun-10) and the deferred approval prompt (fallback path), so the
+ *  CLI's escalation wording/verbs can never fork between the two routes. */
+interface EscalationScopeView {
+  readonly activeSkill: string
+  readonly tool: string
+  readonly reason: string
+  readonly justification?: string | undefined
+}
+
+const promptEscalationVerbs = async (
+  deps: CliHitlDeps,
+  scope: EscalationScopeView,
+): Promise<ConfirmDecision> => {
+  process.stderr.write(
+    `Skill '${scope.activeSkill}' scope — tool '${scope.tool}' is out of scope.\n` +
+      `  reason: ${scope.reason}\n` +
+      (scope.justification !== undefined ? `  rationale: ${scope.justification}\n` : ""),
+  )
+  const ans = (
+    await askLine(deps.channel, "Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ")
+  )
+    .trim()
+    .toLowerCase()
+  deps.idleMonitor.markActive()
+  if (ans === "o") {
+    deps.rejectCounter.recordAccept()
+    return { decision: "allow", scope: "once" }
+  }
+  if (ans === "s") {
+    deps.rejectCounter.recordAccept()
+    return { decision: "allow", scope: "session" }
+  }
+  if (ans === "t") {
+    const steer = (await askLine(deps.channel, "Steer (what to do instead): ")).trim()
+    deps.rejectCounter.recordDeny()
+    return steer.length > 0 ? { decision: "deny_and_steer", steer } : { decision: "deny" }
+  }
+  deps.rejectCounter.recordDeny()
+  return { decision: "deny" }
+}
+
+/** jun-10 HITL restructure — the INLINE confirm a live operator answers AT THE
+ *  GATE. With `approvalProtocol.interactive` set (below), the runtime approval
+ *  controller delegates a mid-turn "ask" here instead of throwing
+ *  `RuntimeApprovalRequiredError` — so the turn is NEVER aborted + re-run for
+ *  an approval (the deferred round-trip re-paid the full prompt, ~140k input
+ *  tokens per approval in real sessions; web/SDK surfaces keep it).
+ *
+ *  Plain confirms offer the SOTA 4-verb set (Claude Code / Cursor baseline):
+ *    [y]es              — allow this call only
+ *    [a]lways session   — allow + standing session grant for this actionKey
+ *                         (shell-aware, minted by the runtime controller; the
+ *                         CC "don't ask again this session" verb — makes a
+ *                         parallel `agent` fan-out a ONE-keystroke approval)
+ *    [N]o               — deny (default on empty/unknown answer — fail closed)
+ *    deny+s[t]eer       — deny AND carry a corrective instruction the loop
+ *                         injects as the next user message (Cursor
+ *                         REJECT_AND_TELL; the gate already supports it)
+ *  An escalation (`scopeContext`) routes to the dedicated o/s/D/t verb set. */
 const buildCliOnConfirm =
-  (deps: { readonly idleMonitor: IdleMonitor; readonly rejectCounter: RejectCounter }) =>
-  async (action: ToolAction): Promise<boolean> => {
+  (deps: CliHitlDeps) =>
+  async (action: ToolAction): Promise<boolean | ConfirmDecision> => {
     if (diffPreviewEnabled()) {
       const preview = await renderActionDiff(action)
       if (preview !== undefined) process.stderr.write(`${preview}\n`)
     }
-    const ans = await askLine(`Allow ${action.tool}? [y/N] `)
-    const accepted = ans.trim().toLowerCase() === "y"
-    if (accepted) deps.rejectCounter.recordAccept()
-    else deps.rejectCounter.recordDeny()
+    const scope = action.scopeContext
+    if (scope !== undefined) {
+      // ToolAction's scopeContext omits the tool name (it lives on the action) —
+      // re-attach it so the shared prompt renders the same header both routes.
+      return promptEscalationVerbs(deps, { ...scope, tool: action.tool })
+    }
+    const ans = (
+      await askLine(
+        deps.channel,
+        `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
+      )
+    )
+      .trim()
+      .toLowerCase()
     deps.idleMonitor.markActive()
-    return accepted
+    if (ans === "y" || ans === "yes") {
+      deps.rejectCounter.recordAccept()
+      return true
+    }
+    if (ans === "a" || ans === "always") {
+      deps.rejectCounter.recordAccept()
+      return { decision: "allow", scope: "session" }
+    }
+    if (ans === "t") {
+      const steer = (await askLine(deps.channel, "Steer (what to do instead): ")).trim()
+      deps.rejectCounter.recordDeny()
+      return steer.length > 0 ? { decision: "deny_and_steer", steer } : false
+    }
+    deps.rejectCounter.recordDeny()
+    return false
   }
 
 const buildCliApprovalPrompt =
-  (deps: { readonly idleMonitor: IdleMonitor; readonly rejectCounter: RejectCounter }) =>
+  (deps: CliHitlDeps) =>
   async (approval: PendingApprovalView): Promise<ApprovalDecisionResult> => {
     // ADR-0512 P3 — a skill-scope ESCALATION approval (carries `scopeContext`)
     // offers the FULL 4-verb prompt so allow_once (no widen) and deny_and_steer
     // (corrective steer) are genuinely reachable on the CLI — matching the yellow
-    // escalation card. A NORMAL approval keeps the byte-identical `[y/N]` prompt.
+    // escalation card (shared verbatim with the inline confirm via
+    // {@link promptEscalationVerbs}). A NORMAL approval keeps the byte-identical
+    // `[y/N]` prompt. With `approvalProtocol.interactive` this path is the
+    // FALLBACK only (a confirm raised outside any turn scope) — the live-operator
+    // route answers inline at the gate and never mints a pending approval.
     const scope = approval.scopeContext
     if (scope !== undefined) {
-      process.stderr.write(
-        `Skill '${scope.activeSkill}' scope — tool '${scope.tool}' is out of scope.\n` +
-          `  reason: ${scope.reason}\n` +
-          (scope.justification !== undefined ? `  rationale: ${scope.justification}\n` : ""),
-      )
-      const ans = (
-        await askLine("Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ")
-      )
-        .trim()
-        .toLowerCase()
-      deps.idleMonitor.markActive()
-      if (ans === "o") {
-        deps.rejectCounter.recordAccept()
-        return { decision: "approve", scope: "once" }
+      const decision = await promptEscalationVerbs(deps, scope)
+      if (decision.decision === "allow") {
+        return {
+          decision: "approve",
+          ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
+        }
       }
-      if (ans === "s") {
-        deps.rejectCounter.recordAccept()
-        return { decision: "approve", scope: "session" }
+      if (decision.decision === "deny_and_steer") {
+        return { decision: "deny", steer: decision.steer }
       }
-      if (ans === "t") {
-        const steer = (await askLine("Steer (what to do instead): ")).trim()
-        deps.rejectCounter.recordDeny()
-        return steer.length > 0 ? { decision: "deny", steer } : { decision: "deny" }
-      }
-      deps.rejectCounter.recordDeny()
       return { decision: "deny" }
     }
     process.stderr.write(`Approval required: ${approval.reason}\n`)
-    const ans = await askLine("Approve pending action? [y/N] ")
-    const accepted = ans.trim().toLowerCase() === "y"
-    if (accepted) deps.rejectCounter.recordAccept()
-    else deps.rejectCounter.recordDeny()
+    // jun-10 — "[a]lways session" on the DEFERRED prompt too: resolves
+    // approve+scope:"session" so the runtime controller mints the standing
+    // grant (one abort+re-run round-trip per key per session, not per ask).
+    const ans = (
+      await askLine(deps.channel, "Approve pending action? [y]es / [a]lways session / [N]o ")
+    )
+      .trim()
+      .toLowerCase()
     deps.idleMonitor.markActive()
-    return accepted ? "approve" : "deny"
+    if (ans === "y" || ans === "yes") {
+      deps.rejectCounter.recordAccept()
+      return "approve"
+    }
+    if (ans === "a" || ans === "always") {
+      deps.rejectCounter.recordAccept()
+      return { decision: "approve", scope: "session" }
+    }
+    deps.rejectCounter.recordDeny()
+    return "deny"
   }
 
 export interface ComposeCliRuntimeContextArgs {
@@ -105,13 +213,17 @@ export interface ComposeCliRuntimeContextArgs {
 
 export interface CliRuntimeContextBindings {
   readonly approvalPrompt: (approval: PendingApprovalView) => Promise<ApprovalDecisionResult>
+  /** The in-turn approval input channel — the session loop flips `.active` +
+   *  routes captured stdin lines into it around each turn so a mid-turn approval
+   *  prompt reads the operator's answer without a second stdin reader. */
+  readonly midTurnApprovalChannel: MidTurnApprovalChannel
   readonly runtimeContext: RuntimeContext
 }
 
 type RuntimeContextAdmissibility = ReturnType<RuntimeContext["admissibility"]>
 
 interface RuntimeConfirmSlot {
-  current: (action: ToolAction) => Promise<boolean>
+  current: (action: ToolAction) => Promise<boolean | ConfirmDecision>
 }
 
 const buildSessionMemoryAutoSummarizer = (
@@ -122,7 +234,7 @@ const buildBootstrapContextArgs = (args: {
   readonly boot: SessionBootstrapResult
   readonly turnStream: StreamPort
   readonly confirmSlot: RuntimeConfirmSlot
-  readonly onConfirm: (action: ToolAction) => Promise<boolean>
+  readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
   readonly planExitPort: ReturnType<typeof createCliPlanExitPort>
   readonly userInputPort: ReturnType<typeof createCliUserInputPort>
   readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
@@ -169,7 +281,11 @@ const buildBootstrapContextArgs = (args: {
     onConfirm,
     includeSearchPipeline: true,
     overlay: {
-      approvalProtocol: { confirmSlot },
+      // jun-10 HITL restructure — `interactive: true` declares the live
+      // operator: the runtime approval controller delegates mid-turn asks to
+      // the slot's surface confirm INLINE (no turn abort / re-run). Non-CLI
+      // surfaces never set this and keep the deferred approvalRequest protocol.
+      approvalProtocol: { confirmSlot, interactive: true },
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
       planExitPort,
       userInputPort,
@@ -199,7 +315,7 @@ const buildBootstrapContextArgs = (args: {
 
 const buildAdmissibility = (args: {
   readonly boot: SessionBootstrapResult
-  readonly onConfirm: (action: ToolAction) => Promise<boolean>
+  readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
   readonly sandboxProfile: CliReviewerSandboxProfile
   readonly permissionStore: PermissionStore | undefined
   readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
@@ -267,14 +383,19 @@ export const composeCliRuntimeContext = async (
   args: ComposeCliRuntimeContextArgs,
 ): Promise<CliRuntimeContextBindings> => {
   const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
+  // MID-TURN FIX — the channel that lets a mid-turn approval read the operator's
+  // answer through the in-turn keystroke reader (no stdin fight). The session
+  // loop flips `.active` + routes captured lines into it around each turn.
+  const midTurnApprovalChannel = createMidTurnApprovalChannel()
   const surfaceOnConfirm = buildCliOnConfirm({
     idleMonitor: boot.idleMonitor as IdleMonitor,
     rejectCounter: boot.rejectCounter as RejectCounter,
+    channel: midTurnApprovalChannel,
   })
   const confirmSlot: RuntimeConfirmSlot = {
     current: surfaceOnConfirm,
   }
-  const onConfirm = async (action: ToolAction): Promise<boolean> =>
+  const onConfirm = async (action: ToolAction): Promise<boolean | ConfirmDecision> =>
     await confirmSlot.current(action)
   const autoReviewUserPort = createOnConfirmReviewerPort({ onConfirm })
   const autoReview =
@@ -285,8 +406,11 @@ export const composeCliRuntimeContext = async (
         })
       : undefined
   const permissionStore = await loadPermissionStore()
-  const planExitPort = createCliPlanExitPort({ ask: askLine })
-  const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
+  const planExitPort = createCliPlanExitPort({ ask: (p) => askLine(midTurnApprovalChannel, p) })
+  const userInputPort = createCliUserInputPort({
+    ask: (p) => askLine(midTurnApprovalChannel, p),
+    stream: turnStream,
+  })
   const summarizerLlm = buildSessionMemoryAutoSummarizer(boot)
   // F2 (round-2) — load `.quanta/agents` (+ native dir) ONCE per session at this
   // async composition root, using the SESSION-RESOLVED `boot.cwd` (the jailed /
@@ -341,7 +465,17 @@ export const composeCliRuntimeContext = async (
     approvalPrompt: buildCliApprovalPrompt({
       idleMonitor: boot.idleMonitor as IdleMonitor,
       rejectCounter: boot.rejectCounter as RejectCounter,
+      channel: midTurnApprovalChannel,
     }),
+    midTurnApprovalChannel,
     runtimeContext,
   }
+}
+
+/** Test seam — never import in production. Exposes the HITL prompt builders so
+ *  the e2e suite can drive the REAL CLI confirm/approval wording + verb routing
+ *  against the real gate/controller without booting a full session. */
+export const __testing = {
+  buildCliOnConfirm,
+  buildCliApprovalPrompt,
 }

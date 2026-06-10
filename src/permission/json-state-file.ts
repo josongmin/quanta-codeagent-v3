@@ -111,9 +111,14 @@ const PERSISTED: PersistOutcome = Object.freeze({ durable: true })
  * The retry spin yields to the event loop (`await` of a resolved microtask) so
  * it is cooperative, not a busy-CPU spin, and is bounded by `timeoutMs` so a
  * truly stuck peer degrades to "write anyway" rather than hanging the caller.
+ *
+ * CLOCK: lock expiry compares a peer's written `ts` against now. In production
+ * each process uses the real global clock (the default `now` param). Injecting
+ * the clock makes stale-lock STEALING deterministically testable — the whole
+ * point of the injected-clock rule (`opts?.now ?? Date.now`).
  */
-const LOCK_STALE_MS = 5_000
-const LOCK_TIMEOUT_MS = 10_000
+export const LOCK_STALE_MS = 5_000
+export const LOCK_TIMEOUT_MS = 10_000
 
 /** Best-effort: read the lock holder's birth timestamp; null when unreadable. */
 const readLockBirth = async (lockPath: string): Promise<number | null> => {
@@ -127,10 +132,16 @@ const readLockBirth = async (lockPath: string): Promise<number | null> => {
 }
 
 /** Acquire the lock or return false if we timed out (caller then proceeds
- *  best-effort — non-durability never blocks the in-memory authority). */
-const acquireLock = async (lockPath: string, tmpSuffix: string): Promise<boolean> => {
-  const deadline = Date.now() + LOCK_TIMEOUT_MS
-  const body = JSON.stringify({ pid: process.pid, ts: Date.now() })
+ *  best-effort — non-durability never blocks the in-memory authority).
+ *  `now` is injected so stale-lock STEALING is deterministically testable; the
+ *  literal `Date.now` is only the default-factory fallback (no call form). */
+export const acquireLock = async (
+  lockPath: string,
+  tmpSuffix: string,
+  now: () => number = Date.now,
+): Promise<boolean> => {
+  const deadline = now() + LOCK_TIMEOUT_MS
+  const body = JSON.stringify({ pid: process.pid, ts: now() })
   for (;;) {
     try {
       const handle = await open(lockPath, "wx")
@@ -145,13 +156,13 @@ const acquireLock = async (lockPath: string, tmpSuffix: string): Promise<boolean
     const ageKnown = birth !== null
     let stale = false
     if (ageKnown) {
-      stale = Date.now() - birth > LOCK_STALE_MS
+      stale = now() - birth > LOCK_STALE_MS
     } else {
       // Unreadable lock body — fall back to mtime so a partially-written or
       // legacy lock can still be reclaimed once it ages out.
       try {
         const st = await stat(lockPath)
-        stale = Date.now() - st.mtimeMs > LOCK_STALE_MS
+        stale = now() - st.mtimeMs > LOCK_STALE_MS
       } catch {
         // Lock vanished between EEXIST and stat — retry the create immediately.
         continue
@@ -169,7 +180,7 @@ const acquireLock = async (lockPath: string, tmpSuffix: string): Promise<boolean
       }
       continue
     }
-    if (Date.now() > deadline) return false
+    if (now() > deadline) return false
     // Cooperative yield before retrying — not a CPU spin.
     await new Promise<void>((resolve) => setTimeout(resolve, 1))
   }
@@ -220,6 +231,10 @@ export interface JsonStateFileOptions<T> {
    *  result MUST equal `inMemory` byte-for-byte so the single-process path is
    *  unchanged. When absent, the engine falls back to writing `inMemory`. */
   mergeWithDisk?: (args: { onDisk: T | null; inMemory: T; baseline: T | null }) => T
+  /** Injected clock for the cross-process lock's staleness math (default
+   *  `Date.now`). Threaded into {@link acquireLock} so a peer's stale lock is
+   *  reclaimed deterministically in tests; production uses the real clock. */
+  now?: () => number
 }
 
 /**
@@ -253,6 +268,9 @@ export interface JsonStateFile<T> {
 
 export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonStateFile<T> => {
   const { filePath, debounceMs, emptyState, serialize, parse, stateVersion, mergeWithDisk } = opts
+  /** Injected lock-staleness clock; the literal `Date.now` is only the
+   *  default-factory fallback (no call form ⇒ scanner-clean). */
+  const lockNow = opts.now ?? Date.now
   let loaded = false
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
   let pendingFlush: Promise<PersistOutcome> | null = null
@@ -320,7 +338,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     let locked = false
     try {
       await mkdir(dirname(filePath), { recursive: true })
-      if (useLock) locked = await acquireLock(lockPath, tmpSuffix)
+      if (useLock) locked = await acquireLock(lockPath, tmpSuffix, lockNow)
       const inMemory = snapshotState()
       // Read-reconcile-MERGE: fold any peer-written records on disk into our
       // payload so a concurrent flush is last-write-MERGE, not -WINS. Absent

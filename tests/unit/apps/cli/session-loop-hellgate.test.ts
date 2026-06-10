@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { AgentOutcome } from "../../../../src/agent"
+import { createMidTurnApprovalChannel } from "../../../../src/apps/cli/repl/mid-turn-approval-channel"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { LifecyclePills } from "../../../../src/apps/cli/lifecycle-pills"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
@@ -339,6 +340,7 @@ const buildSetup = async (
     debugHandle: undefined,
     timelinePanel: undefined,
     approvalPrompt: async () => "approve" as const,
+    midTurnApprovalChannel: createMidTurnApprovalChannel(),
     runtimeContext,
     costPanel: undefined,
     branchProgress: undefined,
@@ -1252,6 +1254,32 @@ describe("session-loop — in-turn keystroke SOURCE wiring (#8)", () => {
     expect(snap[0]?.source).toBe("user_keystroke")
     // The reader resumed the stream (it was consumed during the turn).
     expect(stdin.resumeCalls).toBeGreaterThanOrEqual(1)
+  })
+
+  // MID-TURN FIX — when an approval is PENDING, the in-turn line is its answer:
+  // it resolves the prompt and does NOT land on the plan-queue as a follow-up.
+  test("APPROVAL: a line typed during the turn resolves a pending approval (not queued)", async () => {
+    process.env[KNOB] = "1"
+    resetRuntimeConfig()
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    const planQueue = defaultPlanQueueStore()
+    const stdin = makeLoopFakeStdin({ emitOnResume: ["y\n"] })
+    // Simulate a mid-turn approval waiting for input (as buildCliApprovalPrompt
+    // does once `active`). It is registered before the line arrives.
+    const answer = setup.midTurnApprovalChannel.awaitLine()
+    promptQueue.push("do the work", null)
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      registerExitTeardown: () => undefined,
+      planQueueStore: planQueue,
+      inTurnStdin: stdin,
+    })
+    expect(await answer).toBe("y") // routed to the approval
+    expect(planQueue.peek(setup.sessionId as string)).toHaveLength(0) // NOT queued
   })
 
   test("ON-2: multiple lines during one turn ⇒ all captured in order", async () => {

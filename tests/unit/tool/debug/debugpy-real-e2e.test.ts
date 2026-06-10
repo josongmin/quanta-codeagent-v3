@@ -374,5 +374,43 @@ DR("debug_inspect — REAL Rust e2e via lldb-dap (third language)", () => {
     expect(r?.ok).toBe(true)
     expect(r?.output).toContain("compute")
     expect(r?.output).toContain("n = 5")
+    // SOTA++: the DAP `type` is surfaced inline (lldb types the ints).
+    expect(r?.output).toContain("(int)")
+    // SOTA++: nested aggregate expansion — the desugared `for` loop's Range
+    // iterator (a struct local) reveals its `end` field as an expanded child.
+    // `end` is NOT a top-level local, so its presence proves one expansion level
+    // through a REAL lldb-dap (red-on-injection: drop expansion ⇒ no `end = 5`).
+    expect(r?.output).toContain("end = 5")
   }, 90_000)
+})
+
+// ── FOURTH carrier: Node via CDP (node --inspect-brk), no DAP adapter. Proves
+//    the `debug_inspect` tool's `adapter:"node"` path against a REAL node. ──
+const hasNode = (): boolean => {
+  try {
+    return Bun.spawnSync(["node", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+  } catch {
+    return false
+  }
+}
+const DNODE = hasNode() ? describe : describe.skip
+
+DNODE("debug_inspect — REAL Node e2e via CDP (node --inspect-brk)", () => {
+  test("stops in a node program and reports the stack + local over CDP", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "dap-node-")))
+    const prog = join(dir, "x.mjs")
+    writeFileSync(
+      prog,
+      ["function compute(n) {", "  let total = 0", "  for (let i = 0; i < n; i++) total += i", "  const result = total", "  return result // line 5", "}", "globalThis.__r = compute(5)", ""].join("\n"),
+    )
+    const tool = makeDebugInspectTool() // real ports (CDP carrier)
+    const ctx = { cwd: dir, signal: new AbortController().signal } as ToolContext
+    let r: ToolResult | undefined
+    for await (const ev of tool.execute({ program: prog, adapter: "node", breakpoints: [{ file: prog, line: 5 }] } as never, ctx) as AsyncIterable<ToolEvent>)
+      if (ev.type === "result") r = ev.result
+    expect(r?.ok).toBe(true)
+    expect(r?.output).toContain("Stopped")
+    expect(r?.output).toContain("compute")
+    expect(r?.output).toContain("result = 10") // 0+1+2+3+4
+  }, 60_000)
 })

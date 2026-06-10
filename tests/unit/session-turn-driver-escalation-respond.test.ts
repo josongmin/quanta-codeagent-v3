@@ -67,6 +67,9 @@ const run = (session: never, resolveApproval: never) =>
     resolveApproval,
     text: "go",
     turnSignal: new AbortController().signal,
+    // ADR-0528 — env threaded (no sessionId ⇒ crash-resume marker never armed);
+    // empty env keeps the escalation path gate-off + deterministic.
+    env: {},
   })
 
 describe("turn driver — escalation approval scope/steer + recoverable deny", () => {

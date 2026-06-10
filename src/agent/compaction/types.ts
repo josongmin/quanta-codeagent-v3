@@ -13,8 +13,8 @@
  *
  * Slices imported: `@/shared` ONLY (Result/ok/err). This is a leaf in @/agent.
  * The summarize primitive arrives as the INJECTED {@link SpeculativeSummarizeFn}
- * port (port inversion, mirrors @/permission ClassifierPort + @/agent
- * away-summary SummarizeFn) so the slice stays @/llm-free and unit-testable
+ * port (port inversion, mirrors @/permission ClassifierPort) so the slice
+ * stays @/llm-free and unit-testable
  * with a spy double. The clock arrives as an INJECTED {@link Clock}.
  *
  * NO-THROW contract: every public method returns a value (Result / outcome),

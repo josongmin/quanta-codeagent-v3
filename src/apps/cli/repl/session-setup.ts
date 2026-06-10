@@ -148,6 +148,7 @@ export interface SessionSetupResult {
    *  default-OFF). */
   readonly timelinePanel: TimelinePanel | undefined
   readonly approvalPrompt: (approval: PendingApprovalView) => Promise<ApprovalDecisionResult>
+  readonly midTurnApprovalChannel: import("./mid-turn-approval-channel").MidTurnApprovalChannel
   readonly runtimeContext: RuntimeContext
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
@@ -227,7 +228,7 @@ export const setupSession = async (
     timelineStream,
   )
 
-  const { approvalPrompt, runtimeContext } = await composeCliRuntimeContext({
+  const { approvalPrompt, midTurnApprovalChannel, runtimeContext } = await composeCliRuntimeContext({
     boot,
     turnStream,
     loadPermissionStore: deps.loadPermissionStore,
@@ -307,6 +308,7 @@ export const setupSession = async (
     debugHandle,
     timelinePanel,
     approvalPrompt,
+    midTurnApprovalChannel,
     runtimeContext,
     costPanel: boot.costPanel as CostPanel | undefined,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,

@@ -115,7 +115,8 @@ export interface ToolingAssembleInput {
  *     (last-write-wins via `ToolRegistry`'s Map).
  *   - Same memory-self-edit gate: registered only when a `store` exists and
  *     `memoryConfig.selfEditTools !== false`.
- *   - Same per-config gate logs (`slog.info("subagent.on", …)` etc.).
+ *   - Same per-config gate logs (`slog.debug("subagent.on", …)` etc. — demoted
+ *     to DEBUG jun-10: machine diagnostics, the welcome banner owns first paint).
  *   - Same optional `memory on (…)` info-line emission when both
  *     `memoryKindLabel` and `onMemoryReady` are supplied.
  *
@@ -188,11 +189,11 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
       `memory on (kind=${input.memoryKindLabel}, embed=${input.embedder ? "on" : "off"}, session=${input.sessionId})`,
     )
   }
-  if (input.subagentConfig) input.slog.info("subagent.on", input.subagentConfig)
-  if (input.skillsConfig) input.slog.info("skills.on", input.skillsConfig)
+  if (input.subagentConfig) input.slog.debug("subagent.on", input.subagentConfig)
+  if (input.skillsConfig) input.slog.debug("skills.on", input.skillsConfig)
   if (input.compactionBreakerConfig)
-    input.slog.info("compaction.breaker.config", input.compactionBreakerConfig)
-  if (input.verifyGuardConfig) input.slog.info("verify.guard.on", input.verifyGuardConfig)
+    input.slog.debug("compaction.breaker.config", input.compactionBreakerConfig)
+  if (input.verifyGuardConfig) input.slog.debug("verify.guard.on", input.verifyGuardConfig)
   // Self-edit memory tools: only when a store exists and `memory.selfEditTools`
   // is not opted out.
   const memTools: Tool[] =

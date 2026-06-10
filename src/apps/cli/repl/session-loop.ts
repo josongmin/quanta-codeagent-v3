@@ -1,7 +1,7 @@
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { InboundMode } from "@/agent/inbound-mode"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
-import type { Message, TextBlock } from "@/llm"
+import type { Message } from "@/llm"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { driveSessionTurn } from "@/runner/orchestrate"
@@ -14,7 +14,6 @@ import type {
 import { errMessage, gateOnStrict, logger, runtimeConfig, sliceWholeChars } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
-import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-summary-wire"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import type { ConversationActionSurface } from "./conversation-action-surface"
 import { ExternalPromptQueue } from "./external-prompt-queue"
@@ -251,6 +250,9 @@ const makeInTurnCaptureWrapper = (args: {
   readonly externalPromptQueue: ExternalPromptQueue
   /** `QUANTA_MIDTURN_VISIBLE` knob value; the TTY gate is applied here. */
   readonly midTurnVisibleKnob: boolean
+  /** MID-TURN FIX — flipped `.active` while the reader owns stdin so a mid-turn
+   *  approval prompt reads via the captured line (not a second readline). */
+  readonly midTurnApprovalChannel: import("./mid-turn-approval-channel").MidTurnApprovalChannel
 }): (<R>(run: () => Promise<R>) => Promise<R>) => {
   // §08b — the lane render is opt-in AND TTY-only (ANSI to a pipe corrupts output).
   const midTurnVisible = args.midTurnVisibleKnob && process.stdout.isTTY === true
@@ -266,6 +268,10 @@ const makeInTurnCaptureWrapper = (args: {
     const reader: InTurnLineReaderHandle = startInTurnLineReader({
       stdin: inTurnStdin,
       onLine: (line) => {
+        // MID-TURN FIX — a pending approval claims the next line as its answer
+        // BEFORE follow-up routing (so "y"/"n" confirms the tool, not a queued
+        // prompt). Consumed ⇒ stop here.
+        if (args.midTurnApprovalChannel.tryResolve(line)) return
         // §steer — route by inbound mode (tested core `routeMidTurnLine`). queue /
         // no surface ⇒ capture path (byte-identical); weave/interrupt ⇒ decide
         // against the live turn. Ack NOT rendered inline (the EFFECT is the signal).
@@ -280,9 +286,14 @@ const makeInTurnCaptureWrapper = (args: {
       },
       ...(lane !== undefined ? { onPartial: lane.render } : {}),
     })
+    // The in-turn reader now owns stdin ⇒ a mid-turn approval must read via the
+    // captured line, not a conflicting readline.
+    args.midTurnApprovalChannel.active = true
     try {
       return await run()
     } finally {
+      args.midTurnApprovalChannel.active = false
+      args.midTurnApprovalChannel.clear() // release any unanswered approval ⇒ deny
       reader.dispose()
       lane?.teardown() // R3 — only if entered; uses rows captured at enter.
     }
@@ -335,34 +346,6 @@ const notifyTurnComplete = (
     ok: out.result !== undefined && !out.turnAborted,
     cwdBasename,
   })
-}
-
-/** ADR-0465 — when the user returns after an idle gap, render a <40-word recap
- *  of the transcript-so-far. Free function so the interactive loop stays inside
- *  its complexity budget. NO-OP (zero LLM) unless `wasIdle` AND the away-summary
- *  wire is active (env opt-in). NEVER throws — `recap()` is no-throw and only a
- *  `{kind:"ok"}` outcome renders (every skip stays silent by design). */
-const renderAwayRecapIfReturned = async (
-  awaySummary: AwaySummaryWireHandle,
-  wasIdle: boolean,
-  history: readonly Message[],
-  signal: AbortSignal,
-): Promise<void> => {
-  if (!wasIdle || !awaySummary.isActive()) return
-  const transcript = history
-    .filter(
-      (m): m is Message & { role: "user" | "assistant" } =>
-        m.role === "user" || m.role === "assistant",
-    )
-    .map((m) => ({
-      role: m.role,
-      text: m.content
-        .filter((b): b is TextBlock => b.type === "text")
-        .map((b) => b.text)
-        .join(""),
-    }))
-  const outcome = await awaySummary.recap({ transcript, signal })
-  if (outcome.kind === "ok") process.stderr.write(`\n${outcome.text}\n\n`)
 }
 
 /** RFC-09 — build the optional prompt-pipeline deps (A idle notify + B warning
@@ -550,6 +533,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     conversationActions: deps.conversationActions,
     externalPromptQueue,
     midTurnVisibleKnob: runtimeConfig().midTurnVisible,
+    midTurnApprovalChannel: setup.midTurnApprovalChannel,
   })
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
@@ -764,6 +748,10 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       text: args.text,
       images,
       turnSignal: args.turnSignal,
+      // ADR-0528 — env THREADED from the composition root (this CLI surface IS
+      // an allowed `process.env` reader); the crash-resume marker reads its gate
+      // off THIS env, never an ambient literal below the surface.
+      env: process.env,
       // ADR-0528 — crash-resume marker for the durable (id-mode) session;
       // gate-gated + no-op when the session id is absent/ephemeral.
       ...(setup.sessionId !== undefined ? { sessionId: setup.sessionId } : {}),
@@ -909,9 +897,6 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       closeStack.push({ label: "reactorBridge.close", dispose: () => reactorBridge.close() })
     }
 
-    // ADR-0465 — away-summary recap wire. Default-OFF: NOOP handle + zero LLM
-    // unless QUANTA_ENABLE_AWAY_SUMMARY === "1".
-    const awaySummary = maybeCreateAwaySummaryWire({ env: process.env, llm: setup.llm })
     // ADR-0468 — NDJSON live-introspection sink. Default-OFF: NullNdjsonSink
     // (no socket/file/alloc) unless QUANTA_NDJSON_INGEST_PORT / _FILE is set.
     const ndjson = maybeCreateNdjsonSinkWire({ env: process.env, logger })
@@ -923,12 +908,8 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     )
     const runInteractiveBranch = async (): Promise<void> => {
       while (abort.signal.aborted !== true) {
-        // Read idle state BEFORE next() resolves — the prompt pipeline marks
-        // active inside next(), so this captures "user was away".
-        const wasIdle = setup.idleMonitor.isIdle()
         const next = await promptSource.next(abort.signal)
         if (next === null) break
-        await renderAwayRecapIfReturned(awaySummary, wasIdle, surfaceState.history, abort.signal)
         const prompt = normalizeCliPromptInput(next)
         // Ticket 18 (V1) — discoverable turn-start hint. Painted ONLY when the
         // Ctrl+B detach is actually wired for THIS turn (portal present + WEAVE

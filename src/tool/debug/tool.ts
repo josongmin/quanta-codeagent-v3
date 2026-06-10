@@ -9,11 +9,15 @@
  * `bash`) AND default-OFF (registered only when QUANTA_DEBUG_TOOLS is on).
  * NEVER throws — a spawn / protocol / timeout fault collapses to ok:false.
  */
+import { isAbsolute, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import { CdpClient, type CdpTransport } from "./cdp-client"
+import { inspectViaCdp } from "./cdp-inspect"
 import { DapClient } from "./dap-client"
 import { type DapVariable, type Inspection, inspectViaDap } from "./inspect-driver"
-import { defaultDebugAdapterPort, type DebugAdapterPort } from "./port"
+import { defaultDebugAdapterPort, type DebugAdapterPort, type NodeCdpSpawnSpec, spawnNodeCdpInspector } from "./port"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -29,9 +33,9 @@ const schema = z.object({
     .min(1)
     .describe("Breakpoints to set before running, as {file, line, condition?} (1-based line)."),
   adapter: z
-    .enum(["python", "lldb"])
+    .enum(["python", "lldb", "node"])
     .optional()
-    .describe("Built-in adapter preset. `python`=debugpy (pip install debugpy). `lldb`=lldb-dap for C/C++/Rust/Swift (program must be the compiled binary built with -g). Omit to use adapterCommand."),
+    .describe("Built-in adapter preset. `python`=debugpy (pip install debugpy). `lldb`=lldb-dap for C/C++/Rust/Swift (program=compiled binary built with -g). `node`=Node via the built-in inspector (CDP over `node --inspect-brk`; no install — stops at the FIRST breakpoint, condition/evaluate not supported on this preset). Omit to use adapterCommand."),
   adapterCommand: z
     .array(z.string())
     .optional()
@@ -110,8 +114,13 @@ const render = (program: string, r: Inspection): string => {
 }
 
 /** Build `debug_inspect` against an injected adapter port (defaults to the real
- *  `Bun.spawn` port; tests pass a scripted in-memory adapter). */
-export const makeDebugInspectTool = (port: DebugAdapterPort = defaultDebugAdapterPort): Tool<Input> => ({
+ *  `Bun.spawn` port; tests pass a scripted in-memory adapter). The `nodeCdp`
+ *  factory is the carrier for the `node` preset (CDP over a WebSocket) — also
+ *  injectable so the node path is testable against a scripted fake. */
+export const makeDebugInspectTool = (
+  port: DebugAdapterPort = defaultDebugAdapterPort,
+  nodeCdp: (spec: NodeCdpSpawnSpec) => Promise<CdpTransport> = spawnNodeCdpInspector,
+): Tool<Input> => ({
   name: "debug_inspect",
   description:
     "Run a program under a debugger, stop at the FIRST breakpoint, and report the call stack + local " +
@@ -129,12 +138,37 @@ export const makeDebugInspectTool = (port: DebugAdapterPort = defaultDebugAdapte
       yield err("aborted before start")
       return
     }
+    const cwd = input.cwd ?? ctx.cwd
+
+    // NODE preset: not a DAP adapter — speak CDP to `node --inspect-brk`. Single
+    // process (no `--test`), stop at the FIRST breakpoint, snapshot via CDP.
+    if (input.adapter === "node") {
+      const program = isAbsolute(input.program) ? input.program : resolve(cwd, input.program)
+      const bp = input.breakpoints[0] // schema guarantees ≥1
+      if (bp === undefined) {
+        yield err("debug_inspect: node preset needs at least one breakpoint")
+        return
+      }
+      const bpFile = isAbsolute(bp.file) ? bp.file : resolve(cwd, bp.file)
+      let cdp: CdpClient | undefined
+      try {
+        const transport = await nodeCdp({ command: (p) => ["node", `--inspect-brk=${p}`, program, ...(input.args ?? [])], cwd })
+        cdp = new CdpClient(transport)
+        const result = await inspectViaCdp(cdp, { url: pathToFileURL(bpFile).href, line: bp.line }, { ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}) })
+        yield { type: "result", result: { ok: result.outcome !== "error", output: render(input.program, result) } }
+      } catch (e) {
+        yield err(`debug_inspect: ${errMessage(e)}`)
+      } finally {
+        cdp?.dispose()
+      }
+      return
+    }
+
     const command = input.adapterCommand ?? (input.adapter ? ADAPTER_PRESETS[input.adapter] : undefined)
     if (command === undefined || command.length === 0) {
       yield err("debug_inspect: provide `adapter` (preset) or `adapterCommand` (explicit adapter argv)")
       return
     }
-    const cwd = input.cwd ?? ctx.cwd
     let client: DapClient | undefined
     try {
       const transport = await port.spawn({ command: [...command], cwd })

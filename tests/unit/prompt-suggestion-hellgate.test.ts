@@ -17,8 +17,7 @@
  *     throws;
  *   - the happy path shows the sanitized text.
  *
- * Pure slice — no IO, no network, no clock. Sibling discipline to
- * tests/unit/away-summary-hellgate.test.ts.
+ * Pure slice — no IO, no network, no clock.
  */
 import { describe, expect, test } from "bun:test"
 import {

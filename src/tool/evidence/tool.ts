@@ -17,7 +17,7 @@
  */
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
-import { detectToolchain, defaultTestRunPort, runToolchain, type TestRunPort, type Toolchain } from "../testrun"
+import { commandRunsOk, detectToolchain, defaultTestRunPort, runToolchain, type TestRunPort, type Toolchain } from "../testrun"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { buildEvidence, type EvidenceSources } from "./builder"
 import { defaultRuntimePort } from "./runtime"
@@ -119,7 +119,10 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
       let suiteRan = false
       const sources: EvidenceSources = {
         detect: async (c) => {
-          detected = await detectToolchain(c, { fileExists: (name) => fs.fileExists(name, c) })
+          detected = await detectToolchain(c, {
+            fileExists: (name) => fs.fileExists(name, c),
+            canRun: (cmd) => commandRunsOk(cmd, c), // prefer pytest over unittest when installed
+          })
           return detected
         },
         runTests: async (tc, c) => {

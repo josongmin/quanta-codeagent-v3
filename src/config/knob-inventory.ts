@@ -1417,15 +1417,6 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "agent/optional-ports.ts",
   },
   {
-    envKey: "QUANTA_ENABLE_AWAY_SUMMARY",
-    kind: "bool",
-    default: false,
-    group: "agent-feature",
-    home: "runtime-config",
-    describe: "Away-summary on long turns (opt-in).",
-    readSite: "agent/away-summary/runner.ts",
-  },
-  {
     envKey: "QUANTA_ENABLE_PROMPT_SUGGESTION",
     kind: "bool",
     default: false,

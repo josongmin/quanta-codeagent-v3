@@ -168,6 +168,8 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — copies parent PATH into spawned plugin child (same posture as tool/git/runner.ts and runtime/shell.ts).",
       "storage/shadow-odb/default.ts":
         "Shadow ODB composition root — resolves HOME at boot for default odb path; not a feature flag.",
+      "tool/debug/port.ts":
+        "ENV PROPAGATION — forwards the parent OS env (merged with `spec.env`) to the spawned DAP debug-adapter child so it can find its binary on the real PATH/HOME; pass-through, not a feature read. Same posture as tool/git/runner.ts and plugin-isolation/bun-spawner.ts.",
       "tool/web/providers/from-env.ts":
         "BY NAME — this is the documented env-reader for web-search providers (factory mirrors openai/anthropic adapters' env-key bootstrap).",
       "ui/ui-helpers.ts":

@@ -5,6 +5,7 @@
  * scripted in-memory adapter (closed-port DI, same posture as the PTY slice).
  */
 import { type AddressInfo, createServer, Socket } from "node:net"
+import type { CdpTransport } from "./cdp-client"
 import type { DapTransport } from "./dap-client"
 
 export interface AdapterSpawnSpec {
@@ -71,6 +72,10 @@ export const defaultDebugAdapterPort: DebugAdapterPort = {
 
 // ── TCP transport (dlv-dap / vscode-js-debug speak DAP over a socket) ────────
 
+/** Default TCP connect budget for a freshly-spawned DAP adapter that is not
+ *  accepting connections instantly; retried until listening or this elapses. */
+const DEFAULT_TCP_CONNECT_TIMEOUT_MS = 5_000
+
 /** Pick a free localhost TCP port (bind :0, read the assigned port, release). */
 export const getFreePort = (): Promise<number> =>
   new Promise((resolve, reject) => {
@@ -123,7 +128,7 @@ const transportFromSocket = (socket: Socket, onClose?: () => void): DapTransport
  *  elapses (a freshly-spawned adapter isn't accepting connections instantly).
  *  Rejects (never hangs) when the budget runs out. */
 export const connectTcpTransport = async (spec: TcpConnectSpec, onClose?: () => void): Promise<DapTransport> => {
-  const deadline = Date.now() + (spec.connectTimeoutMs ?? 5_000)
+  const deadline = Date.now() + (spec.connectTimeoutMs ?? DEFAULT_TCP_CONNECT_TIMEOUT_MS)
   for (;;) {
     try {
       const socket = await new Promise<Socket>((resolve, reject) => {
@@ -182,6 +187,85 @@ export const spawnTcpDebugAdapter = async (spec: TcpAdapterSpawnSpec): Promise<D
     } catch {
       // best-effort
     }
+    throw e
+  }
+}
+
+// ── Node CDP transport (node --inspect-brk speaks CDP over a WebSocket) ───────
+
+export interface NodeCdpSpawnSpec {
+  /** Build the node argv given the chosen inspector port, e.g.
+   *  `(p) => ["node", `--inspect-brk=${p}`, "--test", file]`. */
+  readonly command: (port: number) => readonly string[]
+  readonly cwd?: string
+  readonly env?: Record<string, string>
+  /** Budget to wait for the inspector endpoint to come up. Default 8s. */
+  readonly connectTimeoutMs?: number
+}
+
+/** Discover the inspector's WebSocket URL from `http://127.0.0.1:PORT/json/list`,
+ *  retrying until it is up or the deadline passes. */
+const discoverInspectorWs = async (port: number, deadline: number): Promise<string> => {
+  for (;;) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/list`)
+      const list = (await res.json()) as Array<{ webSocketDebuggerUrl?: string }>
+      const ws = Array.isArray(list) ? list.find((e) => typeof e.webSocketDebuggerUrl === "string")?.webSocketDebuggerUrl : undefined
+      if (ws !== undefined) return ws
+    } catch {
+      // endpoint not up yet
+    }
+    if (Date.now() >= deadline) throw new Error(`cdp: node inspector on :${port} did not expose a ws endpoint in time`)
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
+
+/** Spawn `node --inspect-brk` (on a chosen free port), discover + open its CDP
+ *  WebSocket, and return a {@link CdpTransport} whose `close()` ALSO kills the
+ *  spawned node process. */
+export const spawnNodeCdpInspector = async (spec: NodeCdpSpawnSpec): Promise<CdpTransport> => {
+  const port = await getFreePort()
+  const [cmd, ...args] = spec.command(port)
+  if (cmd === undefined) throw new Error("cdp: empty node command")
+  const child = Bun.spawn([cmd, ...args], {
+    ...(spec.cwd !== undefined ? { cwd: spec.cwd } : {}),
+    env: spec.env !== undefined ? { ...process.env, ...spec.env } : process.env,
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  const killChild = (): void => {
+    try {
+      child.kill()
+    } catch {
+      // best-effort
+    }
+  }
+  try {
+    const wsUrl = await discoverInspectorWs(port, Date.now() + (spec.connectTimeoutMs ?? 8_000))
+    const ws = new WebSocket(wsUrl)
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener("open", () => resolve(), { once: true })
+      ws.addEventListener("error", () => reject(new Error("cdp: websocket connect failed")), { once: true })
+    })
+    // A mid-session WS error must not throw uncaught — the client's pending
+    // requests resolve via dispose/timeout (mirrors the TCP transport's guard).
+    ws.addEventListener("error", () => {
+      /* dead inspector — handled by the client's timeout/dispose */
+    })
+    return {
+      send: (data) => ws.send(data),
+      onData: (cb) => ws.addEventListener("message", (e: MessageEvent) => cb(typeof e.data === "string" ? e.data : String(e.data))),
+      close: () => {
+        try {
+          ws.close()
+        } catch {
+          // already closed
+        }
+        killChild()
+      },
+    }
+  } catch (e) {
+    killChild()
     throw e
   }
 }

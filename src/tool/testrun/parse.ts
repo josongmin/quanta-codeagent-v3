@@ -106,6 +106,155 @@ export const parseCargo = (output: string): TestRunResult => {
   return { runner: "cargo", passed, failed, ok }
 }
 
+// ── Node / JS runners (bun test, node --test, jest, vitest, mocha) ───────────
+// There is no single JS test-output format, but every V8 runner prints stack
+// frames in the SAME shape — `at [name ](FILE:LINE:COL)` (vitest also uses
+// `❯ FILE:LINE:COL`). That shared frame is the reliable localization signal; the
+// fail-marker + count lines are matched per-runner. Pinned to VERBATIM bun +
+// node:test output (see parse-node.test.ts).
+const NODE_SRC_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/
+/** A frame is USER source (not a runner/stdlib frame) when it has a JS/TS
+ *  extension and is neither under node_modules nor a `node:` internal module. */
+const isUserSource = (f: string): boolean => NODE_SRC_EXT.test(f) && !f.includes("/node_modules/") && !f.startsWith("node:")
+
+/** Pull a `{file,line}` out of a V8 stack frame or a vitest `❯` location line,
+ *  stripping a `file://` URL prefix. Returns null for non-frames / non-user
+ *  frames (runner internals, node_modules). */
+const extractNodeLoc = (line: string): { file: string; line: number } | null => {
+  // V8 STACK FRAME: real frames are INDENTED (`      at <name> (FILE:LINE:COL)`
+  // or bare `      at FILE:LINE:COL`). The leading-whitespace anchor excludes
+  // node:test's `test at FILE:LINE` DEFINITION annotation (not indented, points
+  // at the test() call, not the failure site) — we want the assertion frame.
+  // FILE may be a file:// URL (node --test); the path token has no spaces/parens.
+  const v8 = /^\s+at\s+(?:.*?\()?(?:file:\/\/)?(\/?[^\s():]+):(\d+):\d+\)?/.exec(line)
+  // vitest: `❯ FILE:LINE:COL`.
+  const vt = /❯\s+(?:file:\/\/)?([^\s():]+):(\d+):\d+/.exec(line)
+  const m = v8 ?? vt
+  if (m === null) return null
+  const file = m[1]!
+  return isUserSource(file) ? { file, line: Number(m[2]) } : null
+}
+
+/** Parse a JS/TS runner's output. Extracts failed test NAMES (bun `(fail)`,
+ *  node:test `✖`, jest/vitest `✕/×`, TAP `not ok`), and localizes each via the
+ *  first user-source stack frame + the error message. Location association is
+ *  EXACT for a single failure (the localization case the Evidence Packet uses);
+ *  for multiple failures it is best-effort, by order. NEVER-throws. */
+export const parseNodeTest = (output: string): TestRunResult => {
+  const lines = output.split("\n")
+
+  const failedNames: string[] = []
+  const addName = (n: string): void => {
+    const t = n.trim()
+    // Skip section headers like `✖ failing tests:` (node:test) — they end with `:`.
+    if (t.length > 0 && !t.endsWith(":") && !failedNames.includes(t)) failedNames.push(t)
+  }
+  for (const raw of lines) {
+    const l = raw.trim()
+    let m: RegExpExecArray | null
+    if ((m = /^\(fail\)\s+(.+?)(?:\s+\[[\d.]+\s*m?s\])?$/.exec(l)) !== null) addName(m[1]!) // bun
+    else if ((m = /^[✖✗✕×]\s+(.+?)\s+\([\d.]+\s*ms\)$/.exec(l)) !== null) addName(m[1]!) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
+    else if ((m = /^not ok \d+ - (.+)$/.exec(l)) !== null) addName(m[1]!) // TAP
+    else if ((m = /^[✕×]\s+(.+)$/.exec(l)) !== null) addName(m[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
+  }
+
+  // User-source locations + error messages in document order.
+  const locs: { file: string; line: number }[] = []
+  const messages: string[] = []
+  for (const raw of lines) {
+    const loc = extractNodeLoc(raw)
+    if (loc !== null) locs.push(loc)
+    const em = /^\s*(?:error:\s*(.+)|([A-Za-z_][\w.]*(?:Error|Exception|Failure)(?:\s*\[[^\]]+\])?):\s*(.+))$/.exec(raw)
+    if (em !== null) messages.push((em[1] ?? `${em[2]}: ${em[3]}`).trim())
+  }
+
+  const failed: TestFailure[] = failedNames.map((name, i) => {
+    const loc = locs[i] ?? (failedNames.length === 1 ? locs[0] : undefined)
+    const message = messages[i] ?? (failedNames.length === 1 ? messages[0] : undefined)
+    return { name, ...(loc ? { file: loc.file, line: loc.line } : {}), ...(message ? { message } : {}) }
+  })
+  // NB: a markerless failure (unusual formatter, exit≠0 but nothing parsed) is
+  // NOT synthesized here — that is the EXIT-CODE safety net's job in `tool.ts`
+  // (it has the exit code; this pure parser does not). Synthesizing on
+  // loc+message alone would FALSE-RED a passing run that merely logged an
+  // "Error:" line next to a stack frame.
+
+  // Pass counts across runners; default 0 when not reported.
+  let passed = 0
+  const pc =
+    /^\s*(\d+)\s+pass\b/m.exec(output) ?? // bun ` 1 pass`
+    /ℹ pass (\d+)/.exec(output) ?? // node:test
+    /Tests:.*?(\d+)\s+passed/.exec(output) ?? // jest/vitest summary
+    null
+  if (pc !== null) passed = Number(pc[1])
+
+  return { runner: "node", passed, failed, ok: failed.length === 0 }
+}
+
+/** `python -m pytest` (text): a `=== FAILURES ===` section with one
+ *  `___ test ___` block per failure (each ending in `FILE:LINE: ExcType`), and a
+ *  `short test summary info` with `FAILED FILE::test - message` lines + an
+ *  `N failed, M passed` total. Blocks and summary lines are in the SAME order, so
+ *  we zip the per-block location onto the summary entry. Pinned to VERBATIM
+ *  pytest 9.x output. NEVER-throws. */
+export const parsePytest = (output: string): TestRunResult => {
+  const lines = output.split("\n")
+  const passed = Number(/(\d+) passed/.exec(output)?.[1] ?? "0")
+
+  // Short summary (authoritative failure list + messages).
+  const summary: { testid: string; message?: string }[] = []
+  for (const l of lines) {
+    const m = /^(?:FAILED|ERROR)\s+(\S+)(?:\s+-\s+(.*))?$/.exec(l.trim())
+    if (m !== null) summary.push({ testid: m[1]!, ...(m[2] ? { message: m[2].trim() } : {}) })
+  }
+
+  // FAILURES blocks: header `___ name ___`; the LAST `FILE.py:LINE:` inside a
+  // block is the assertion / raise site (deepest user frame).
+  const blockLocs: { file: string; line: number }[] = []
+  let inFailures = false
+  let started = false
+  let cur: { file: string; line: number } | undefined
+  for (const raw of lines) {
+    const t = raw.trim()
+    if (/^=+\s*FAILURES\s*=+$/.test(t)) {
+      inFailures = true
+      continue
+    }
+    if (!inFailures) continue
+    // End of the FAILURES section (short summary / totals / errors section).
+    if (/^=+\s*(short test summary|\d+ (failed|passed|error)|ERRORS)\b/.test(t)) {
+      if (started) blockLocs.push(cur ?? { file: "", line: 0 })
+      break
+    }
+    if (/^_{3,}.*_{3,}$/.test(t)) {
+      if (started) blockLocs.push(cur ?? { file: "", line: 0 })
+      cur = undefined
+      started = true
+      continue
+    }
+    const fm = /^(.+\.py):(\d+):\s/.exec(raw)
+    if (fm !== null) cur = { file: fm[1]!, line: Number(fm[2]) }
+  }
+  // If FAILURES ran to EOF without a trailing summary/section (no `break`/header
+  // fired), the final block's location is still pending — flush it.
+  if (started && (blockLocs.length === 0 || blockLocs.length < summary.length)) blockLocs.push(cur ?? { file: "", line: 0 })
+
+  const failed: TestFailure[] = summary.map((s, i) => {
+    const sep = s.testid.indexOf("::")
+    const fileFromId = sep === -1 ? undefined : s.testid.slice(0, sep)
+    const name = sep === -1 ? s.testid : s.testid.slice(sep + 2)
+    const loc = blockLocs[i]
+    const file = loc?.file && loc.file.length > 0 ? loc.file : fileFromId
+    return {
+      name,
+      ...(file ? { file } : {}),
+      ...(loc && loc.line > 0 ? { line: loc.line } : {}),
+      ...(s.message ? { message: s.message } : {}),
+    }
+  })
+  return { runner: "pytest", passed, failed, ok: failed.length === 0 }
+}
+
 /** `python -m unittest -v` (text): `name (mod.Class) ... ok|FAIL|ERROR`,
  *  `FAIL: name (mod.Class)` blocks with a traceback `File "PATH", line N, in name`
  *  + a trailing exception line, and a `Ran N tests` + `OK`/`FAILED` summary. */

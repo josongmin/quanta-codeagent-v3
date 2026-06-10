@@ -5,7 +5,7 @@
  * {passed, failed:[{name,file,line,message}]}.
  */
 import { describe, expect, test } from "bun:test"
-import { parseCargo, parseGoJson, parsePythonUnittest } from "@/tool/testrun/parse"
+import { parseCargo, parseGoJson, parsePytest, parsePythonUnittest } from "@/tool/testrun/parse"
 
 const GO_JSON = [
   '{"Action":"run","Package":"t","Test":"TestPass"}',
@@ -150,5 +150,76 @@ describe("parsePythonUnittest", () => {
     const r = parsePythonUnittest("test_a (m.T) ... ok\n\nRan 1 test in 0.0s\n\nOK")
     expect(r.ok).toBe(true)
     expect(r.failed).toHaveLength(0)
+  })
+})
+
+// VERBATIM pytest 9.0.3 output (captured 2026-06-10 via a venv): a FAILURES
+// section (one `___ test ___` block per failure, ending `FILE:LINE: ExcType`) +
+// a short-summary `FAILED FILE::test - msg` list + an `N failed, M passed` total.
+const PYTEST = [
+  "F.F                                                                      [100%]",
+  "=================================== FAILURES ===================================",
+  "___________________________________ test_add ___________________________________",
+  "",
+  "    def test_add():",
+  ">       assert add(2, 2) == 5",
+  "E       assert 4 == 5",
+  "E        +  where 4 = add(2, 2)",
+  "",
+  "test_math.py:5: AssertionError",
+  "____________________________ TestThings.test_method ____________________________",
+  "",
+  "self = <test_math.TestThings object at 0x107ef3d90>",
+  "",
+  "    def test_method(self):",
+  ">       assert add(0, 0) == 9",
+  "E       assert 0 == 9",
+  "E        +  where 0 = add(0, 0)",
+  "",
+  "test_math.py:12: AssertionError",
+  "=========================== short test summary info ============================",
+  "FAILED test_math.py::test_add - assert 4 == 5",
+  "FAILED test_math.py::TestThings::test_method - assert 0 == 9",
+  "2 failed, 1 passed in 0.01s",
+].join("\n")
+
+describe("parsePytest", () => {
+  test("localizes each failure to {file,line} via the FAILURES block + summary msg", () => {
+    const r = parsePytest(PYTEST)
+    expect(r.runner).toBe("pytest")
+    expect(r.ok).toBe(false)
+    expect(r.passed).toBe(1)
+    expect(r.failed).toHaveLength(2)
+    // Zipped per-block location onto the summary entry (same order).
+    expect(r.failed[0]).toEqual({ name: "test_add", file: "test_math.py", line: 5, message: "assert 4 == 5" })
+    expect(r.failed[1]).toEqual({ name: "TestThings::test_method", file: "test_math.py", line: 12, message: "assert 0 == 9" })
+  })
+
+  test("green run ⇒ no failures", () => {
+    const r = parsePytest("..                                  [100%]\n\n2 passed in 0.01s")
+    expect(r.ok).toBe(true)
+    expect(r.passed).toBe(2)
+    expect(r.failed).toHaveLength(0)
+  })
+
+  test("collection ERROR (e.g. import/syntax) is surfaced as a failure", () => {
+    const out = [
+      "==================================== ERRORS ====================================",
+      "_____________________ ERROR collecting test_bad.py _____________________",
+      "test_bad.py:1: in <module>",
+      "    import nope",
+      "E   ModuleNotFoundError: No module named 'nope'",
+      "=========================== short test summary info ============================",
+      "ERROR test_bad.py - ModuleNotFoundError: No module named 'nope'",
+      "1 error in 0.02s",
+    ].join("\n")
+    const r = parsePytest(out)
+    expect(r.ok).toBe(false)
+    expect(r.failed[0]?.name).toBe("test_bad.py") // no `::test` ⇒ the file is the id
+    expect(r.failed[0]?.message).toContain("ModuleNotFoundError")
+  })
+
+  test("NEVER-throws on garbage", () => {
+    expect(() => parsePytest("¬ nonsense ½")).not.toThrow()
   })
 })

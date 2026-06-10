@@ -17,9 +17,12 @@
 import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join } from "node:path"
+import { pathToFileURL } from "node:url"
+import { CdpClient } from "../debug/cdp-client"
+import { inspectViaCdp } from "../debug/cdp-inspect"
 import { DapClient, type DapTransport } from "../debug/dap-client"
 import { type DapVariable, type FrameScopes, type Inspection, inspectViaDap, type InspectSpec } from "../debug/inspect-driver"
-import { defaultDebugAdapterPort, spawnTcpDebugAdapter } from "../debug/port"
+import { defaultDebugAdapterPort, spawnNodeCdpInspector, spawnTcpDebugAdapter } from "../debug/port"
 import type { Toolchain } from "../testrun"
 import type { FailureEvidence, RuntimeEvidence, RuntimeFrame, RuntimeVar } from "./types"
 
@@ -192,6 +195,34 @@ const goRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promi
   )
 }
 
+// ── NODE / JS (CDP over WebSocket — node --inspect-brk, single-process) ───────
+const resolveNode = (): string | null => (ok("node", "--version") ? "node" : null)
+
+const nodeRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+  const node = resolveNode()
+  if (node === null) return null
+  // Run the failing FILE directly (node:test files self-run inline → ONE
+  // process, so CDP attaches to the test process — `--test` would fork a child
+  // per file and we'd attach to the runner instead). node 23.6+ strips types, so
+  // simple .ts runs too; runner-specific (jest/vitest) entrypoints are future work.
+  const realFile = realpathOr(absOf(f.file!, cwd))
+  let client: CdpClient | undefined
+  try {
+    const transport = await spawnNodeCdpInspector({
+      command: (port) => [node, `--inspect-brk=${port}`, realFile],
+      cwd,
+      connectTimeoutMs: 8_000,
+    })
+    client = new CdpClient(transport)
+    const r = await inspectViaCdp(client, { url: pathToFileURL(realFile).href, line: f.line! }, { stopTimeoutMs: 20_000, ...(signal !== undefined ? { signal } : {}) })
+    return toRuntime(r)
+  } catch {
+    return null
+  } finally {
+    client?.dispose()
+  }
+}
+
 /** The default runtime source for the Evidence Packet Builder. Dispatches by
  *  toolchain; degrades to null for unsupported/unavailable cases. */
 export const defaultRuntimePort = async (
@@ -204,5 +235,6 @@ export const defaultRuntimePort = async (
   if (toolchain.kind === "python") return pythonRuntime(failure, toolchain, cwd, signal)
   if (toolchain.kind === "rust") return rustRuntime(failure, cwd, signal)
   if (toolchain.kind === "go") return goRuntime(failure, cwd, signal)
+  if (toolchain.kind === "node") return nodeRuntime(failure, cwd, signal)
   return null
 }

@@ -22,13 +22,23 @@
  * `null` when no server is available for the file's extension (after the
  * binary probe failed). That `null` is our signal.
  */
-import { describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { lspDiagnosticsProvider, lspExtensionToLanguage } from "@/agent/lsp-bridge"
+import {
+  __resetLspAvailabilityCacheForTest,
+  lspDiagnosticsProvider,
+  lspExtensionToLanguage,
+} from "@/agent/lsp-bridge"
 
 describe("LSP bridge — binary availability probe", () => {
+  // The availability cache is a per-PROCESS module singleton. In the full
+  // suite, an earlier test (or file sharing this worker's module registry) can
+  // probe a real binary with the ambient PATH and leave `bin → true` cached;
+  // the PATH-override tests below then read that stale `true` and fail
+  // order-dependently. Reset before each test so the probes are deterministic.
+  beforeEach(() => __resetLspAvailabilityCacheForTest())
   test("bogus dockerBin-equivalent (typescript-language-server replacement) → returns null PROMPTLY", async () => {
     // Override PATH for this test so the real typescript-language-server (if
     // installed locally) cannot be found, forcing the probe to fail.
@@ -127,5 +137,12 @@ describe("LSP bridge — binary availability probe", () => {
     // Existing languages still mapped (no regression from the new entry).
     expect(map.get(".py")).toBe("pyright-langserver")
     expect(map.get(".ts")).toBe("typescript-language-server")
+  })
+
+  test("OCP registry: .go maps to gopls (Go static parity wiring)", () => {
+    // Drift guard for the new `.go` → GoplsAdapter entry — Go previously had
+    // failure + DAP runtime but NO static; this closes that gap. red-on-
+    // injection: drop the SERVERS entry and this (and Go static) goes red.
+    expect(lspExtensionToLanguage().get(".go")).toBe("gopls")
   })
 })

@@ -5,6 +5,7 @@
  * (spawn fault / unknown adapter) collapse to ok:false without throwing.
  */
 import { describe, expect, test } from "bun:test"
+import type { CdpTransport } from "@/tool/debug/cdp-client"
 import { DapFrameDecoder, encodeDapMessage } from "@/tool/debug/dap-codec"
 import type { DapTransport } from "@/tool/debug/dap-client"
 import type { DebugAdapterPort } from "@/tool/debug/port"
@@ -55,6 +56,32 @@ const fakePort = (t: DapTransport | (() => never)): DebugAdapterPort => ({
   spawn: async () => (typeof t === "function" ? t() : t),
 })
 
+/** Scripted fake CDP inspector (node preset carrier): entry pause → resume →
+ *  paused@bp with one local. */
+const fakeCdpTransport = (): CdpTransport => {
+  let toClient: ((m: string) => void) | undefined
+  let resumes = 0
+  const send = (m: unknown) => toClient?.(JSON.stringify(m))
+  return {
+    send: (data) => {
+      const req = JSON.parse(data) as { id: number; method: string; params?: Record<string, unknown> }
+      const reply = (result: unknown) => send({ id: req.id, result })
+      switch (req.method) {
+        case "Debugger.setBreakpointByUrl": reply({ breakpointId: "bp1", locations: [{ scriptId: "1", lineNumber: 4 }] }); break
+        case "Runtime.runIfWaitingForDebugger": reply({}); send({ method: "Debugger.paused", params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] } }); break
+        case "Debugger.resume":
+          reply({}); resumes++
+          if (resumes === 1) send({ method: "Debugger.paused", params: { reason: "other", hitBreakpoints: ["bp1"], callFrames: [{ callFrameId: "0", functionName: "go", url: "file:///w/x.mjs", location: { lineNumber: 4 }, scopeChain: [{ type: "local", object: { objectId: "L0" } }] }] } })
+          break
+        case "Runtime.getProperties": reply({ result: String(req.params?.objectId) === "L0" ? [{ name: "n", value: { type: "number", value: 42 } }] : [] }); break
+        default: reply({})
+      }
+    },
+    onData: (cb) => { toClient = cb },
+    close: () => {},
+  }
+}
+
 const ctx = (): ToolContext => ({ cwd: "/w", signal: new AbortController().signal }) as ToolContext
 const run = async (tool: ReturnType<typeof makeDebugInspectTool>, input: object): Promise<ToolResult> => {
   let last: ToolResult | undefined
@@ -72,6 +99,26 @@ describe("debug_inspect — full-stack hellgate", () => {
     expect(r.output).toContain("Stopped (breakpoint)")
     expect(r.output).toContain("foo (/w/x.py:5)")
     expect(r.output).toContain("y = 7")
+  })
+
+  test("NODE preset: drives CDP (not DAP) and renders the stack + local", async () => {
+    // The DAP port must NOT be touched for the node preset; the CDP carrier is.
+    let dapSpawned = false
+    const dapPort: DebugAdapterPort = { spawn: async () => { dapSpawned = true; return fakeAdapterTransport() } }
+    const tool = makeDebugInspectTool(dapPort, async () => fakeCdpTransport())
+    const r = await run(tool, { program: "/w/x.mjs", adapter: "node", breakpoints: [{ file: "/w/x.mjs", line: 5 }] })
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("Stopped")
+    expect(r.output).toContain("go (file:///w/x.mjs:5)") // CDP 0-based line 4 ⇒ 5
+    expect(r.output).toContain("n = 42")
+    expect(dapSpawned).toBe(false) // node never spawns a DAP adapter
+  })
+
+  test("NODE preset: a CDP carrier fault ⇒ ok:false, never throws", async () => {
+    const tool = makeDebugInspectTool(fakePort(fakeAdapterTransport()), () => { throw new Error("node inspector unreachable") })
+    const r = await run(tool, { program: "/w/x.mjs", adapter: "node", breakpoints: [{ file: "/w/x.mjs", line: 5 }] })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("node inspector unreachable")
   })
 
   test("metadata: always-confirm tier (executes user code) + not read-only", () => {

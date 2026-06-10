@@ -148,6 +148,16 @@ const isAvailable = (bin: string): Promise<boolean> => {
   return probe
 }
 
+/** TEST-ONLY: clear the per-process availability cache. The cache is a module
+ *  singleton (one `bin --version` per process by design — see above), so a test
+ *  that probes a real binary leaks a cached `true` into a later test that
+ *  overrides `PATH` to force a miss, making the suite order-dependent / flaky.
+ *  Resetting in `beforeEach` restores per-test isolation. Mirrors the
+ *  `__drain*ForTest` seams elsewhere; NEVER called in production. */
+export const __resetLspAvailabilityCacheForTest = (): void => {
+  availabilityCache.clear()
+}
+
 /** The real provider: extension → server, with graceful unavailability. */
 export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
   unavailableReason: (filePath) => {
@@ -322,7 +332,7 @@ const NEVER_ABORTED: AbortSignal = new AbortController().signal
  *  to `false` by TS after the first test, but awaits can flip it mid-loop. */
 const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true
 export const evidenceLspStatic =
-  (budgetMs = 20_000, provider?: LspNavProvider) =>
+  (budgetMs = 20_000, provider?: LspNavProvider, now: () => number = Date.now) =>
   async (
     file: string,
     line: number,
@@ -337,8 +347,8 @@ export const evidenceLspStatic =
     })
     try {
       const ln = Math.max(0, line - 1) // LSP 0-based
-      const deadline = Date.now() + budgetMs
-      while (Date.now() < deadline) {
+      const deadline = now() + budgetMs
+      while (now() < deadline) {
         if (isAborted(signal)) return null
         for (let ch = 0; ch < 80; ch += 2) {
           if (isAborted(signal)) return null

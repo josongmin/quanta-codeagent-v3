@@ -49,6 +49,6 @@ export const buildStreamingCore = (input: StreamingAssembleInput): StreamingResu
   const runId = input.runId ?? crypto.randomUUID()
   const run: RunContext = { runId }
   const recorder = new JsonlRecorder(join(input.observeDir, runId, "session.jsonl"), { ctx: run })
-  input.slog.info("observe.on", { dir: input.observeDir, runId })
+  input.slog.debug("observe.on", { dir: input.observeDir, runId })
   return { stream: new TeeStream([stream, recorder]), run }
 }

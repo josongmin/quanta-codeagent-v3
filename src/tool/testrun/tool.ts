@@ -11,7 +11,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
 import { detectToolchain } from "./detect"
-import { parseCargo, parseGoJson, parsePythonUnittest } from "./parse"
+import { parseCargo, parseGoJson, parseNodeTest, parsePytest, parsePythonUnittest } from "./parse"
 import type { TestRunResult, Toolchain } from "./types"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
@@ -95,6 +95,12 @@ const parseFor = (tc: Toolchain, stdout: string, stderr: string, exitCode: numbe
     case "python-unittest":
       r = parsePythonUnittest(combined)
       break
+    case "pytest":
+      r = parsePytest(combined)
+      break
+    case "node":
+      r = parseNodeTest(combined)
+      break
     default:
       // generic: no structured parse — exit code is the only verdict.
       r = { runner: "generic", passed: 0, failed: exitCode === 0 ? [] : [{ name: "(suite failed — see output)" }], ok: exitCode === 0 }
@@ -126,6 +132,33 @@ export const runToolchain = async (
   }
 }
 
+/** Ceiling for the `canRun` probe spawn — a wedged interpreter can't stall
+ *  detection longer than this before the probe forces a non-zero exit code. */
+const CANRUN_PROBE_TIMEOUT_MS = 5_000
+
+/** Probe whether a command runs successfully (exit 0) in `cwd`, with a 5s
+ *  ceiling so a wedged interpreter can't stall detection. Used by the detector's
+ *  `canRun` to prefer pytest when it is installed. NEVER throws. */
+export const commandRunsOk = async (command: readonly string[], cwd: string): Promise<boolean> => {
+  const [cmd, ...args] = command
+  if (cmd === undefined) return false
+  try {
+    const proc = Bun.spawn([cmd, ...args], { cwd, stdout: "ignore", stderr: "ignore" })
+    const code = await Promise.race([
+      proc.exited,
+      new Promise<number>((r) => setTimeout(() => r(-1), CANRUN_PROBE_TIMEOUT_MS)),
+    ])
+    try {
+      proc.kill()
+    } catch {
+      // already exited
+    }
+    return code === 0
+  } catch {
+    return false
+  }
+}
+
 const render = (tc: Toolchain, r: TestRunResult): string => {
   const head = `${r.runner}: ${r.passed} passed, ${r.failed.length} failed (${tc.command.join(" ")})`
   if (r.failed.length === 0) return `✓ ${head}`
@@ -148,8 +181,8 @@ export const makeRunTestsTool = (deps: RunTestsDeps = {}): Tool<Input> => {
   return {
     name: "run_tests",
     description:
-      "Detect the project's test toolchain (Cargo.toml→cargo, go.mod→go, pyproject/setup.py→python unittest, " +
-      "package.json→npm) and run the suite, returning a normalized pass/fail summary with the failing tests' " +
+      "Detect the project's test toolchain (Cargo.toml→cargo, go.mod→go, pyproject/setup.py→python pytest if " +
+      "installed else unittest, package.json→npm) and run the suite, returning a normalized pass/fail summary with the failing tests' " +
       "names + file:line + message. Pass `command` to override the detected runner.",
     inputSchema: schema,
     isReadOnly: () => false,
@@ -163,8 +196,9 @@ export const makeRunTestsTool = (deps: RunTestsDeps = {}): Tool<Input> => {
         return
       }
       const cwd = input.cwd ?? ctx.cwd
-      // Detection probes marker files THROUGH the FS jail (baseDir = cwd).
-      const existsPort = { fileExists: (name: string) => fs.fileExists(name, cwd) }
+      // Detection probes marker files THROUGH the FS jail (baseDir = cwd); the
+      // canRun probe lets it prefer pytest over unittest when pytest is installed.
+      const existsPort = { fileExists: (name: string) => fs.fileExists(name, cwd), canRun: (c: readonly string[]) => commandRunsOk(c, cwd) }
       let toolchain: Toolchain | null
       if (input.command !== undefined && input.command.length > 0) {
         toolchain = { kind: "node", command: input.command, parser: "generic" }

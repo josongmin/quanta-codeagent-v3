@@ -39,7 +39,12 @@ const buildSinks = (): SessionLoopSinks & {
   }
 }
 
-const stubSetup = (approvalDecisions: readonly ("approve" | "deny")[]) => {
+type StubApprovalDecision =
+  | "approve"
+  | "deny"
+  | { decision: "approve" | "deny"; scope?: "once" | "session"; steer?: string }
+
+const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
   const counters = {
     approvalPrompt: 0,
     approvalRespond: 0,
@@ -48,6 +53,14 @@ const stubSetup = (approvalDecisions: readonly ("approve" | "deny")[]) => {
     sessionClose: 0,
     runtimeClose: 0,
   }
+  // jun-10 — capture the respond WIRE (approvalId, decision, meta) so tests can
+  // pin that a rich operator decision (e.g. the "[a]lways session" verb)
+  // actually reaches `session.approval.respond` with its scope intact.
+  const respondCalls: Array<{
+    approvalId: string
+    decision: string
+    meta: { scope?: string; steer?: string } | undefined
+  }> = []
   const queue = [...approvalDecisions]
   const outcome = makeOutcome()
   const runtimeContext: RuntimeContext = {
@@ -122,8 +135,13 @@ const stubSetup = (approvalDecisions: readonly ("approve" | "deny")[]) => {
         identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         approval: {
-          respond: async () => {
+          respond: async (
+            approvalId: string,
+            decision: string,
+            meta?: { scope?: string; steer?: string },
+          ) => {
             counters.approvalRespond += 1
+            respondCalls.push({ approvalId, decision, meta })
             return { revision: 3, seq: 3, events: [] }
           },
         },
@@ -254,7 +272,7 @@ const stubSetup = (approvalDecisions: readonly ("approve" | "deny")[]) => {
     } as never,
   }
 
-  return { counters, setup }
+  return { counters, setup, respondCalls }
 }
 
 describe("T5 approval flow cli", () => {
@@ -298,6 +316,29 @@ describe("T5 approval flow cli", () => {
     expect(sinks.errs).toHaveLength(1)
     expect(sinks.errs[0]).toBeInstanceOf(Error)
     expect((sinks.errs[0] as Error).message).toContain("runtime session approval denied")
+  })
+
+  test("a rich 'approve + scope:session' decision reaches approval.respond with scope INTACT (jun-10 'always' verb wire)", async () => {
+    const { setup, counters, respondCalls } = stubSetup([
+      { decision: "approve", scope: "session" },
+    ])
+    const sinks = buildSinks()
+
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+    })
+
+    // Same approve→rerun shape as the plain path…
+    expect(counters.turnRun).toBe(2)
+    expect(counters.approvalRespond).toBe(1)
+    // …but the WIRE carries the session scope — this is what lets the runtime
+    // controller mint the standing grant (one round-trip per key per session).
+    expect(respondCalls).toEqual([
+      { approvalId: "ap1", decision: "approve", meta: { scope: "session" } },
+    ])
+    expect(sinks.errs).toHaveLength(0)
   })
 
   test("CLI source routes approval requests through approval.respond and rerun", () => {

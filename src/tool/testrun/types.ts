@@ -27,5 +27,5 @@ export interface Toolchain {
   /** argv to run the suite. */
   readonly command: readonly string[]
   /** Which parser to apply to the output. */
-  readonly parser: "go" | "cargo" | "python-unittest" | "generic"
+  readonly parser: "go" | "cargo" | "python-unittest" | "pytest" | "node" | "generic"
 }

@@ -197,6 +197,7 @@ describe("approval.respond mid-turn → turn.run continuation (web-daemon e2e)",
     // lands mid-turn (the suspend already released the kernel lease) and the
     // loop's follow-up `turn.run` is the continuation under test.
     const result = await driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session,
       text: "do the dangerous thing",
       turnSignal: new AbortController().signal,
@@ -289,6 +290,7 @@ describe("approval.respond mid-turn → turn.run continuation (web-daemon e2e)",
     let threw = false
     try {
       await driveSessionTurn({
+        env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
         session,
         text: "do the dangerous thing",
         turnSignal: new AbortController().signal,
@@ -330,6 +332,7 @@ describe("approval.respond mid-turn → turn.run continuation (web-daemon e2e)",
     }
 
     const result = await driveSessionTurn({
+      env: {}, // ADR-0528 — env threaded; empty ⇒ crash-resume marker gate-off (deterministic).
       session,
       text: "just say hi",
       turnSignal: new AbortController().signal,

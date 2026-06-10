@@ -14,6 +14,7 @@
  *   terminate. A timeout guards every wait so a wedged adapter can never hang
  *   the tool.
  */
+import { errMessage, logger } from "@/shared"
 import type { DapClient, DapResponse } from "./dap-client"
 
 export interface DapBreakpoint {
@@ -179,6 +180,11 @@ export const inspectViaDap = async (
     client.dispose()
     return { outcome: "error", message: "aborted" }
   }
+  // Read the signal through a closure for later checks: the `=== true` guard
+  // above flow-narrows `opts.signal.aborted` to `false | undefined` for the rest
+  // of this scope, so a direct re-check post-await would be (wrongly) flagged as
+  // dead by TS — but the EXTERNAL signal genuinely can flip true across an await.
+  const aborted = (): boolean => opts.signal?.aborted === true
   try {
     // Arm ALL async-event waiters BEFORE the first request. A fast (in-process)
     // adapter can emit `initialized` synchronously while it answers `initialize`;
@@ -314,7 +320,7 @@ export const inspectViaDap = async (
     for (let i = 0; i < framesToCapture; i++) {
       // A cancelled turn stops capturing further frames immediately (we return
       // whatever we have) rather than waiting out per-query timeouts × frames.
-      if (opts.signal?.aborted === true) break
+      if (aborted()) break
       const fo = asObj(rawFrames[i])
       const frameId = num(fo.id, 0)
       const scopesRes = await timed("scopes", { frameId })
@@ -346,7 +352,10 @@ export const inspectViaDap = async (
     // doesn't answer it at a breakpoint). `dispose()` kills the child process
     // outright, so cleanup is guaranteed regardless of the terminate response.
     await withTimeout(
-      client.request("terminate").then(() => {}).catch(() => {}),
+      client.request("terminate").then(
+        () => {},
+        (e) => logger.debug(`debug-inspect: best-effort terminate request failed: ${errMessage(e)}`),
+      ),
       2_000,
       undefined,
     )

@@ -66,5 +66,11 @@ D("defaultRuntimePort — REAL Rust runtime via lldb-dap (second runtime languag
     const result = pkt.runtime?.locals.find((v) => v.name === "result")
     expect(result?.value).toBe("10")
     expect(pkt.runtime?.stack.some((f) => f.name.includes("fail_test"))).toBe(true)
+    // SOTA++: the DAP `type` rides along on the captured local (e.g. "int").
+    expect((result?.type ?? "").length).toBeGreaterThan(0)
+    // SOTA++: per-frame locals are captured — the headline `locals` is the stop
+    // frame's, exposed again under `frames[0]` for caller-context drill-down.
+    expect((pkt.runtime?.frames?.length ?? 0)).toBeGreaterThan(0)
+    expect(pkt.runtime?.frames?.[0]?.locals.some((v) => v.name === "result")).toBe(true)
   }, 180_000)
 })
