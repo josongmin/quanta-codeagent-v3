@@ -30,6 +30,16 @@ export const KEY_ACTIONS = [
   "cursor-end",
   "delete-back",
   "delete-forward",
+  // jun-11 (#12) — readline-style word/line editing. Each maps 1:1 to a new
+  // onKey branch in raw-line-reader.ts + a default chord in defaults.ts:
+  //   delete-word-back → ctrl+w   kill-to-home → ctrl+u   kill-to-end → ctrl+k
+  //   word-left → alt+b           word-right → alt+f
+  // (cursor-home/cursor-end also gain ctrl+a / ctrl+e default chords.)
+  "delete-word-back",
+  "kill-to-home",
+  "kill-to-end",
+  "word-left",
+  "word-right",
   "open-editor",
   // Ticket 18 (V1) — advertise the Ctrl+B "move running turn to background"
   // intent. ADVERTISING ONLY: the actual detach lives in the per-turn cancel

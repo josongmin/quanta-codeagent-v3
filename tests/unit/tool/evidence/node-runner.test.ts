@@ -27,13 +27,13 @@ describe("nodeInspectArgv — single-process inspect command per runner", () => 
   test("node:test / plain file runs the file directly", () => {
     expect(nodeInspectArgv("node", "node", F, 9229)).toEqual(["node", "--inspect-brk=9229", F])
   })
-  test("jest uses --runInBand (main process, no workers)", () => {
-    expect(nodeInspectArgv("jest", "node", F, 9229)).toEqual(["node", "--inspect-brk=9229", "node_modules/.bin/jest", "--runInBand", F])
-  })
-  test("mocha runs in-process via its bin", () => {
+  test("mocha runs in-process via its bin (source as-is ⇒ bp binds)", () => {
     expect(nodeInspectArgv("mocha", "node", F, 9229)).toEqual(["node", "--inspect-brk=9229", "node_modules/.bin/mocha", F])
   })
-  test("vitest ⇒ null (worker pool owns its own inspector — degrade, follow-up)", () => {
+  test("jest ⇒ null (single-process but TRANSFORMS source ⇒ file:line bp won't bind)", () => {
+    expect(nodeInspectArgv("jest", "node", F, 9229)).toBeNull()
+  })
+  test("vitest ⇒ null (worker pool owns its own inspector — degrade)", () => {
     expect(nodeInspectArgv("vitest", "node", F, 9229)).toBeNull()
   })
 })

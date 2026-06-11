@@ -240,6 +240,6 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
     return { outcome: "stopped", reason, stack, frames, ...(exception !== undefined ? { exception } : {}) }
   } catch (e) {
     client.dispose()
-    return { outcome: "error", message: e instanceof Error ? e.message : String(e) }
+    return { outcome: "error", message: errMessage(e) }
   }
 }

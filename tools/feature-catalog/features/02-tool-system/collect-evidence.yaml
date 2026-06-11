@@ -4,11 +4,11 @@ section: 2
 subsystem: tool-system
 order: 62
 maturity: L3
-status: opt-in
+status: stable
 ui_surfaces: [cli, web]
-monitoring: "tool_result: unified EvidencePacket JSON; ok = (suite green). NEVER-throws."
+monitoring: integrated
 modes: [n-a]
-configurable: "QUANTA_EVIDENCE (strict opt-in) → DefaultToolPorts.evidence"
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:multilang-debug", "high-risk", "default-off", "code-execution", "keystone"]
 depends_on: [run-tests]
@@ -45,10 +45,18 @@ purpose: |
   Per-section toggles: includeRuntime / includeStatic (both default ON) let the
   caller skip the expensive DAP runtime re-run or the LSP static query for a
   faster partial packet.
-tests:
-  - tests/unit/tool/evidence/builder-hellgate.test.ts
-  - tests/unit/tool/evidence/tool-and-git.test.ts
-  - tests/unit/tool/evidence/keystone-real-e2e.test.ts
-  - tests/unit/tool/evidence/runtime-real-e2e.test.ts
-  - tests/unit/tool/evidence/runtime-rust-real-e2e.test.ts
-  - tests/unit/evidence-lsp-bridge-real-e2e.test.ts
+evidence:
+  code:
+    - src/tool/evidence/builder.ts
+    - src/tool/evidence/tool.ts
+    - src/tool/evidence/runtime.ts
+    - src/tool/evidence/types.ts
+  adrs: [533]
+  tests:
+    unit:
+      - tests/unit/tool/evidence/builder-hellgate.test.ts
+      - tests/unit/tool/evidence/tool-and-git.test.ts
+      - tests/unit/tool/evidence/keystone-real-e2e.test.ts
+      - tests/unit/tool/evidence/runtime-real-e2e.test.ts
+      - tests/unit/tool/evidence/runtime-rust-real-e2e.test.ts
+      - tests/unit/evidence-lsp-bridge-real-e2e.test.ts

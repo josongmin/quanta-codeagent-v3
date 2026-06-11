@@ -336,6 +336,41 @@ describe("chatgpt-oauth refresh: disk-persist failure keeps the fresh in-memory 
       await chmod(authDir, 0o700)
     }
   })
+
+  test("persistent persist failure: a SECOND call on the same adapter reuses the in-memory token (no re-refresh churn)", async () => {
+    // rounds-2/3 audit (D7 follow-up): ensureFreshToken re-reads DISK each call,
+    // so with writeToken persistently failing the OLD code re-refreshed on EVERY
+    // call (issuer-budget churn). The in-memory fallback must carry the fresh
+    // token so call #2 does NOT hit /token again.
+    await seedExpiredToken("rt-d7-persist-churn")
+    const authDir = dirname(chatgptTokenPath(dir))
+    await chmod(authDir, 0o500) // writeToken (tmp+rename) fails for the whole test
+    try {
+      const counters = { tokenHits: 0, modelsHit: false }
+      const adapter = new ChatGPTOAuthAdapter({
+        model: "gpt-5",
+        env: { QUANTA_PREFS_HOME: dir },
+        fetchImpl: refreshSucceedsThenModelsSentinel(counters),
+        nowMs: () => FIXED_NOW,
+      })
+      const runOnce = async (): Promise<void> => {
+        try {
+          for await (const _ of adapter.stream(streamInput())) void _
+        } catch {
+          // the /models sentinel throws — expected; we only care about tokenHits
+        }
+      }
+      await runOnce()
+      await runOnce()
+      // TWO stream passes, but the token endpoint was hit exactly ONCE — call #2
+      // reused the in-memory fallback. red-on-injection: drop `memTokenFallback`
+      // and this is 2 (disk re-read of the still-expired token re-refreshes).
+      expect(counters.tokenHits).toBe(1)
+      expect(counters.modelsHit).toBe(true)
+    } finally {
+      await chmod(authDir, 0o700)
+    }
+  })
 })
 
 /** D8 — a 403 from the token endpoint (e.g. account suspended / scope revoked,

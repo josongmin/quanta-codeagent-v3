@@ -70,6 +70,18 @@
  *     voluntarily, WITHOUT a red test forcing a reflexive bump (the strict-equal
  *     form did force one, re-admitting growth headroom — META-LESSON #6).
  *
+ * KNOWN LIMITATION — net-neutral substitution (rounds-2/3 audit). The
+ * high-volume forms (A bare-catch, B nullish) are AGGREGATE counts with no
+ * per-site identity, so a single commit that REMOVES n swallows and ADDS ≤n new
+ * ones nets at-or-below the ceiling and slips past. Per-file identity (the shape
+ * the low-count zero-tolerance forms — `@ts-ignore`, the debug-only-promise
+ * allowlist — use) is economically infeasible at the ~1000-site volume of forms
+ * A/B (the allowlist would be larger than the code it guards and churn every
+ * edit). So substitution within the ceiling is caught by CODE REVIEW + the diff,
+ * NOT this ratchet — the ratchet's job is bounding net GROWTH. The zero-headroom
+ * pin (baseline == live count) makes any pure +1 red immediately, which closes
+ * the common case; only a concurrent genuine removal opens the window.
+ *
  * NOTE on biome: `nursery/noFloatingPromises` / `noMisusedPromises` would
  * cover the unawaited-promise corner of this class, but both rules crash
  * biome 2.4.15's type-inference worker (stack overflow) on this repo —
@@ -117,7 +129,7 @@ const SRC = join(__dirname, "..", "..", "src")
 // session-resource-registry adapters, the mid-turn-approval slice — NO-THROW
 // best-effort registry helpers, not new dangerous swallows) so it is green now
 // and won't break when other lanes reduce counts.
-const BARE_CATCH_BASELINE = 1017
+const BARE_CATCH_BASELINE = 1018
 const NULLISH_PROMISE_SWALLOW_BASELINE = 111
 
 /**

@@ -322,31 +322,29 @@ describe("buildSubagentConfig — QUANTA_SUBAGENT + max-depth", () => {
   // own `=0` knob). With QUANTA_SUBAGENT enabled and those knobs unset, the
   // block carries the three default-on flags.
   const ON = { enable6Tools: true, enableBatchSpawn: true, enableIntrospect: true }
+  // DI the env bag explicitly (NEVER mutate the GLOBAL process.env): bun runs
+  // test files with cross-file concurrency, so a sibling suite touching
+  // QUANTA_SUBAGENT* used to race this one (the flake this fix removes). The
+  // wrapper threads `env` into every readCliKnob, so an explicit bag is hermetic.
 
   test("unset → default-ON block (QUANTA_SUBAGENT absent ⇒ enabled + companions)", () => {
-    expect(buildSubagentConfig()).toEqual(ON)
+    expect(buildSubagentConfig(undefined, {})).toEqual(ON)
   })
 
   test("QUANTA_SUBAGENT=0 → undefined (explicit opt-out, byte-identical loop)", () => {
-    process.env.QUANTA_SUBAGENT = "0"
-    expect(buildSubagentConfig()).toBeUndefined()
+    expect(buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "0" })).toBeUndefined()
   })
 
   test("set to any value + no max-depth → default-ON block (uses runner default depth)", () => {
-    process.env.QUANTA_SUBAGENT = "1"
-    expect(buildSubagentConfig()).toEqual(ON)
+    expect(buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1" })).toEqual(ON)
   })
 
   test("max-depth integer → block includes maxDepth", () => {
-    process.env.QUANTA_SUBAGENT = "1"
-    process.env.QUANTA_SUBAGENT_MAX_DEPTH = "3"
-    expect(buildSubagentConfig()).toEqual({ maxDepth: 3, ...ON })
+    expect(buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1", QUANTA_SUBAGENT_MAX_DEPTH: "3" })).toEqual({ maxDepth: 3, ...ON })
   })
 
   test("max-depth non-integer → ignored, falls back to default-ON block", () => {
-    process.env.QUANTA_SUBAGENT = "1"
-    process.env.QUANTA_SUBAGENT_MAX_DEPTH = "many"
-    expect(buildSubagentConfig()).toEqual(ON)
+    expect(buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1", QUANTA_SUBAGENT_MAX_DEPTH: "many" })).toEqual(ON)
   })
 })
 

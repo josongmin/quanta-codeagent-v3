@@ -18,6 +18,11 @@ export interface SessionRuntimeConfig {
   readonly env: NodeJS.ProcessEnv
   readonly stdinIsTTY: boolean | undefined
   readonly stdoutIsTTY: boolean | undefined
+  /** `process.stderr.isTTY` — the bit the welcome banner + human startup logs
+   *  gate on (both target stderr). Threaded into bootstrap so the redundant
+   *  "quanta ready" / "session:" lines are suppressed exactly when the banner
+   *  renders (interactive TTY), and kept verbatim otherwise (pipe / one-shot). */
+  readonly stderrIsTTY: boolean | undefined
   readonly cwd: string
   readonly homeDir: string
   readonly provider: Provider
@@ -59,6 +64,7 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     env: process.env,
     stdinIsTTY: process.stdin.isTTY,
     stdoutIsTTY: process.stdout.isTTY,
+    stderrIsTTY: process.stderr.isTTY,
     cwd: process.cwd(),
     homeDir: process.env.HOME ?? "",
     provider,

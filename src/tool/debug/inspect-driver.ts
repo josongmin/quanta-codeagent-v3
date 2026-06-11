@@ -408,6 +408,6 @@ export const inspectViaDap = async (
     return { outcome: "stopped", reason, stack, frames, ...(evaluated !== undefined ? { evaluated } : {}), ...(exception !== undefined ? { exception } : {}), ...(threads.length > 0 ? { threads } : {}) }
   } catch (e) {
     client.dispose()
-    return { outcome: "error", message: e instanceof Error ? e.message : String(e) }
+    return { outcome: "error", message: errMessage(e) }
   }
 }

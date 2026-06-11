@@ -50,6 +50,13 @@ import {
 } from "./at-autocomplete"
 import { CANONICAL_KEY_FOR_ACTION } from "./keybindings/defaults"
 import { keyOf } from "./keybindings/normalize"
+import {
+  deleteWordBefore,
+  killToLineEnd,
+  killToLineStart,
+  wordLeft,
+  wordRight,
+} from "./line-edit-ops"
 import type { KeybindingMap } from "./keybindings/types"
 import type { PromptHistory } from "./prompt-history"
 import type { ExternalEditorPort } from "./raw-line-reader-editor"
@@ -1124,6 +1131,50 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
           refreshCandidates()
           redraw()
         }
+        return
+      }
+
+      // jun-11 (#12) — readline-style word/line editing. Placed before the char-
+      // insertion block so the control chars (\x17/\x15/\x0b) are consumed here
+      // instead of being dropped by the `str < " "` guard. Kill ops mirror
+      // backspace's bookkeeping (history-draft reset + candidate refresh); the
+      // pure boundary logic lives in `line-edit-ops.ts` (unit-tested). With the
+      // keybinding layer on, ctrl+a/ctrl+e are remapped onto the Home/End
+      // branches above (canonical key), so they need no branch here; when the
+      // layer is OFF the explicit ctrl+a/ctrl+e branch below covers them.
+      if (k.ctrl === true && (k.name === "w" || k.name === "u" || k.name === "k")) {
+        const cur = { buf: state.buf, cursor: state.cursor }
+        const next =
+          k.name === "w"
+            ? deleteWordBefore(cur)
+            : k.name === "u"
+              ? killToLineStart(cur)
+              : killToLineEnd(cur)
+        if (next.buf !== state.buf || next.cursor !== state.cursor) {
+          state.buf = next.buf
+          state.cursor = next.cursor
+          if (state.historyDraft !== null) {
+            state.historyDraft = null
+            opts.history?.reset()
+          }
+          refreshCandidates()
+          redraw()
+        }
+        return
+      }
+
+      if (k.ctrl === true && (k.name === "a" || k.name === "e")) {
+        state.cursor = k.name === "a" ? 0 : state.buf.length
+        redraw()
+        return
+      }
+
+      if (k.meta === true && (k.name === "b" || k.name === "f")) {
+        state.cursor =
+          k.name === "b"
+            ? wordLeft({ buf: state.buf, cursor: state.cursor })
+            : wordRight({ buf: state.buf, cursor: state.cursor })
+        redraw()
         return
       }
 

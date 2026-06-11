@@ -24,6 +24,7 @@
   "assemble-streaming-core",
   "assemble-tooling-core",
   "assert-never-exhaustiveness",
+  "assistant-language-auto-detect",
   "auto-approval-reviewer",
   "auto-dream-cross-session",
   "auto-mode-classifier",
@@ -437,5 +438,14 @@
   "work-metrics",
   "working-memory-buffer",
   "worktree-fork-primitive",
-  "zod-toolresult"
+  "zod-toolresult",
+  "agents-fleet-panel",
+  "color-palettes",
+  "eol-detect-split-join",
+  "init-scaffold-slash",
+  "mcp-launch-governance",
+  "message-batches-client-core",
+  "model-preset-sticky-resolver",
+  "notebook-edit-cell-tool",
+  "ratelimit-dual-window-snapshot"
 ]

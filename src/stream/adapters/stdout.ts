@@ -72,11 +72,21 @@ export class StdoutStream implements StreamPort {
   }
 
   emit(event: AgentEvent): void {
-    // Suppress in_progress heartbeats while text is actively streaming — the
-    // provider fires these between deltas and the guard below would insert a
-    // spurious \n in the middle of the output text (visible as broken Korean
-    // or any multi-byte chars split across lines).
-    if (event.type === "in_progress" && this.inText) return
+    // Events that produce no visible stdout line — must not trigger the inText
+    // flush or they insert a spurious \n between streaming text deltas.
+    // output_progress fires on every token (live counter → status-bar only),
+    // in_progress fires between deltas (heartbeat), item_* and ratelimit_snapshot
+    // are all no-ops in the switch below.
+    if (
+      this.inText &&
+      (event.type === "output_progress" ||
+        event.type === "in_progress" ||
+        event.type === "ratelimit_snapshot" ||
+        event.type === "item_started" ||
+        event.type === "item_updated" ||
+        event.type === "item_completed")
+    )
+      return
 
     if (event.type !== "assistant_text" && this.inText) {
       this.drainPainterTail()
@@ -193,7 +203,7 @@ export class StdoutStream implements StreamPort {
         break
       case "usage":
         this.write(
-          `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,
+          `${DIM}— usage in ${formatTokenCount(event.inputTokens)}, out ${formatTokenCount(event.outputTokens)} (${event.model}) —${RESET}\n`,
         )
         break
       case "done":
@@ -325,6 +335,15 @@ const renderInProgress = (event: Extract<AgentEvent, { type: "in_progress" }>): 
   const msg =
     event.message !== undefined && event.message !== "" ? `: ${oneLine(event.message)}` : ""
   return `${DIM}… thinking${pct}${msg}${RESET}\n`
+}
+
+/** Compact token count for the usage one-liner: `823`, `34.2k`, `123k`.
+ *  Same convention as the status-line/turn-indicator formatters (those live in
+ *  the apps slice, which this stream adapter cannot import). */
+const formatTokenCount = (n: number): string => {
+  if (n < 1000) return String(n)
+  const k = n / 1000
+  return k >= 100 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`
 }
 
 /** OpenAI Responses continuation-wire observation. */

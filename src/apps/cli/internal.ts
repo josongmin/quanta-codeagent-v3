@@ -342,30 +342,35 @@ export const buildSubagentConfig = (
    *  surface (CLI lifecycle pills) can poll `pendingIds()` per turn.
    *  Unset ⇒ byte-identical to today (loop mints its own). */
   taskRegistry?: import("@/subagent").TaskRegistry,
+  /** Env bag (DI) — defaults to `process.env`. Threaded to every `readCliKnob`
+   *  so tests inject an explicit bag instead of mutating the GLOBAL process.env
+   *  (which, under bun's cross-file test concurrency, races other suites that
+   *  touch QUANTA_SUBAGENT* — the flake this carve-out removes). */
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): AgentConfig["subagent"] | undefined => {
-  const enabled = readCliKnob("QUANTA_SUBAGENT", "bool") ?? true
-  const depth = readCliKnob("QUANTA_SUBAGENT_MAX_DEPTH", "int")
+  const enabled = readCliKnob("QUANTA_SUBAGENT", "bool", env) ?? true
+  const depth = readCliKnob("QUANTA_SUBAGENT_MAX_DEPTH", "int", env)
   // ADR-0041 — parallel-worker (6-tool) router. CLI default-ON is seeded by the
   // gate block in index.ts (QUANTA_SUBAGENT_6TOOLS), so the agent can fan out
   // background `spawn_agent`/`wait_agent` workers. `QUANTA_SUBAGENT_6TOOLS=0`
   // (or QUANTA_SUBAGENT=0) disables. exec_command's model-supplied cwd is jailed
   // to the workspace by the loop assembly; dangerous commands still pass the
   // permission/HITL gate.
-  const enable6Tools = enabled && (readCliKnob("QUANTA_SUBAGENT_6TOOLS", "bool") ?? true)
-  const conc = readCliKnob("QUANTA_SUBAGENT_MAX_CONCURRENT", "int")
+  const enable6Tools = enabled && (readCliKnob("QUANTA_SUBAGENT_6TOOLS", "bool", env) ?? true)
+  const conc = readCliKnob("QUANTA_SUBAGENT_MAX_CONCURRENT", "int", env)
   // Companions to the parallel-worker router: `spawn_batch` (fan a prompt list
   // out in one call) + `list_agents` (see the spawned workers). Default-ON under
   // QUANTA_SUBAGENT; `QUANTA_SUBAGENT_BATCH=0` / `QUANTA_SUBAGENT_INTROSPECT=0`
   // disable individually. Zero-adapter: both ride the existing runner/registry.
-  const enableBatchSpawn = enabled && (readCliKnob("QUANTA_SUBAGENT_BATCH", "bool") ?? true)
-  const enableIntrospect = enabled && (readCliKnob("QUANTA_SUBAGENT_INTROSPECT", "bool") ?? true)
+  const enableBatchSpawn = enabled && (readCliKnob("QUANTA_SUBAGENT_BATCH", "bool", env) ?? true)
+  const enableIntrospect = enabled && (readCliKnob("QUANTA_SUBAGENT_INTROSPECT", "bool", env) ?? true)
   // §25.1 — `run_workflow` (LLM-authored declarative orchestration). DEFAULT-OFF
   // (gateOn ⇒ must be explicitly QUANTA_WORKFLOW=on/1): it fans out a tree of
   // subagents, so it opts in rather than riding the default subagent-ON seed.
-  const enableWorkflow = enabled && (readCliKnob("QUANTA_WORKFLOW", "bool") ?? false)
+  const enableWorkflow = enabled && (readCliKnob("QUANTA_WORKFLOW", "bool", env) ?? false)
   // GAP7-4 — `spawn_agents_on_csv` (CSV batch fan-out). DEFAULT-OFF (opt-in: it
   // spawns one child per row, so it does not ride the default subagent-ON seed).
-  const enableSpawnAgentsCsv = enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool") ?? false)
+  const enableSpawnAgentsCsv = enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool", env) ?? false)
   return buildSubagentConfigCore({
     enabled,
     ...(depth !== undefined ? { maxDepth: depth } : {}),

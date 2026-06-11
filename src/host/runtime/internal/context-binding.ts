@@ -1353,9 +1353,20 @@ const runRuntimeTurn = async (args: {
   }
 }
 
+/** Live-host refcount shared by every session host minted from ONE facade.
+ *  The shared session-scoped resources (MCP fleet, memory-auto wires, the
+ *  bootstrap shutdown hook) are torn down by the LAST close, never the first —
+ *  so a future multi-session facade cannot have session A's close strand
+ *  session B's MCP tools. Every live surface today is 1-session-per-facade,
+ *  where this is byte-identical (first close == last close). */
+export interface SessionHostFleet {
+  live: number
+}
+
 const createRuntimeSessionHost = (args: {
   readonly state: RuntimeContextBindingState
   readonly options: CreateRuntimeContextHostArgs
+  readonly fleet: SessionHostFleet
 }): SessionHost => {
   let closed = false
   let shutdownComplete = false
@@ -1366,6 +1377,11 @@ const createRuntimeSessionHost = (args: {
   const close = async (): Promise<void> => {
     if (shutdownComplete) return
     shutdownComplete = true
+    closed = true
+    // Last-close-wins: siblings minted from the same facade still hold the
+    // shared resources below — defer the teardown to whichever closes last.
+    args.fleet.live -= 1
+    if (args.fleet.live > 0) return
     // Deferred consolidation drain — the per-turn Phase-1 distill runs on a
     // background lane (so it never blocks turn completion); a run kicked off
     // by the LAST turn may still be in flight here. Await it BEFORE the WAL
@@ -1405,7 +1421,6 @@ const createRuntimeSessionHost = (args: {
       await client.stop().catch(() => undefined)
     }
     await args.options.shutdown()
-    closed = true
   }
 
   return {
@@ -1512,13 +1527,20 @@ const createRuntimeContextBinding = (state: RuntimeContextBindingState): Runtime
           ? { turnAssembler: normalizedState.turnAssembler }
           : {}),
       }),
-    createRuntimeHost: (options) =>
-      createSingleSessionRuntimeHost((_config: RuntimeSessionConfig) =>
-        createRuntimeSessionHost({
+    createRuntimeHost: (options) => {
+      // One refcount per facade: every session host minted below shares the
+      // session-scoped resources on `options`/`base`, so the LAST close owns
+      // the shared teardown (see {@link SessionHostFleet}).
+      const fleet: SessionHostFleet = { live: 0 }
+      return createSingleSessionRuntimeHost((_config: RuntimeSessionConfig) => {
+        fleet.live += 1
+        return createRuntimeSessionHost({
           state: normalizedState,
           options,
-        }),
-      ),
+          fleet,
+        })
+      })
+    },
     materializeReviewerAgent: (boot, turnAssembler) =>
       boot.materializeReviewerAgent(
         buildAgentConfigFromBase(

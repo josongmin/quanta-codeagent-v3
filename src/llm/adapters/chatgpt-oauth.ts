@@ -185,6 +185,12 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   private readonly reasoningCarryover: boolean
   private readonly reasoningCarryoverStore: ResponsesReasoningCarryoverStore | undefined
   private readonly debugOAuth: boolean
+  /** D7 (rounds-2/3 audit) — in-memory fallback for a refreshed token whose
+   *  disk PERSIST failed. Set ONLY on a write failure: the on-disk copy is then
+   *  stale, so without this every subsequent call would re-read the expired disk
+   *  token and re-refresh (issuer-budget churn). Cleared on a successful persist
+   *  so the normal path keeps re-reading disk (picks up other-process rotations). */
+  private memTokenFallback: TokenRecord | undefined
 
   constructor(config: ChatGPTOAuthConfig) {
     this.model = config.model
@@ -207,6 +213,15 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   private async ensureFreshToken(): Promise<TokenRecord> {
     const home = resolveQuantaHome(this.env)
     const path = chatgptTokenPath(home)
+    // D7 fallback: a previously-refreshed token whose disk persist failed is the
+    // freshest known good — reuse it until it expires rather than re-refreshing
+    // off the stale disk copy on every call. (Normal path leaves this undefined.)
+    if (this.memTokenFallback !== undefined) {
+      if (!isExpired(this.memTokenFallback, this.nowMs(), TOKEN_REFRESH_SKEW_MS)) {
+        return this.memTokenFallback
+      }
+      this.memTokenFallback = undefined
+    }
     const resolved = await readResolvedToken(this.env)
     if (resolved === null) {
       throw new LLMError(
@@ -255,10 +270,14 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     // Log + proceed on the in-memory token.
     try {
       await writeToken(path, next)
+      this.memTokenFallback = undefined // disk is fresh — keep re-reading it.
     } catch (e) {
+      // Disk copy is now stale; hold the fresh token in memory so subsequent
+      // calls in THIS process reuse it instead of re-refreshing off stale disk.
+      this.memTokenFallback = next
       logger.warn(
         `chatgpt-oauth: refreshed token persist failed (${errMessage(e)}) — ` +
-          "proceeding with the in-memory token; the next process will re-refresh.",
+          "proceeding with the in-memory token; will reuse it until it expires.",
       )
     }
     return next

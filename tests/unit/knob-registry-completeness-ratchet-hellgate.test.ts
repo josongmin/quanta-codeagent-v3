@@ -123,6 +123,7 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_LANCE_API_KEY", "secret: Lance vector-DB credential (search-index-backend)"],
   ["QUANTA_QDRANT_API_KEY", "secret: Qdrant vector-DB credential (search-index-backend)"],
   ["QUANTA_CHATGPT_AUTH_SOURCE", "secret: ChatGPT token-store preference (@/auth/chatgpt-oauth)"],
+  ["QUANTA_SIDE_AGENT_LLM_REPLAY", "test-only: side-agent hermetic forked-child LLM replay seam (worker-charter-runner), not a user knob"],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {

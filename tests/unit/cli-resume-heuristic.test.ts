@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { StructuredLogger } from "@/observability"
+import { __resetRuntimeConfig } from "@/shared"
 import {
   defaultUntitled,
   idModeEnabled,
@@ -151,5 +152,71 @@ describe("resolveResume conflict + default-title contract", () => {
     // 2026-05-21T13:45:00.000Z
     const ts = Date.UTC(2026, 4, 21, 13, 45, 0)
     expect(defaultUntitled(ts)).toBe("Untitled 2026-05-21 13:45")
+  })
+})
+
+describe("resolveResume — structured id_mode.on echo gating (jun-10 welcome-banner cleanup)", () => {
+  // The interactive welcome banner already shows the session id, so when the CLI
+  // renders it the raw `session.id_mode.on` JSONL line is redundant noise above
+  // the box. `quietIdModeLog: true` suppresses that structured echo; absent /
+  // false keeps it firing unconditionally (pipes, CI, Web/Tauri, log collectors).
+  let envSnapshot: NodeJS.ProcessEnv
+  let dir: string
+
+  beforeEach(() => {
+    envSnapshot = { ...process.env }
+    dir = mkdtempSync(join(tmpdir(), "resume-idmode-"))
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in envSnapshot)) delete process.env[key]
+    }
+    Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Capture structured records via the sink seam (no stderr dependence). Pin
+  // `level: "info"` so an ambient QUANTA_LOG_LEVEL can never make this flaky.
+  const captureSlog = (): { slog: StructuredLogger; lines: string[] } => {
+    const lines: string[] = []
+    const slog = new StructuredLogger({ level: "info", sink: (l) => lines.push(l) })
+    return { slog, lines }
+  }
+  const emittedIdMode = (lines: string[]): boolean =>
+    lines.some((l) => l.includes("session.id_mode.on"))
+
+  test("default (quietIdModeLog absent): session.id_mode.on IS emitted", async () => {
+    const { slog, lines } = captureSlog()
+    const r = await resolveResume({
+      resume: undefined,
+      newSession: true,
+      title: "T",
+      cwd: dir,
+      initialSessionId: "init-id",
+      slog,
+    })
+    expect(r.idMeta).toBeDefined()
+    expect(emittedIdMode(lines)).toBe(true)
+  })
+
+  test("quietIdModeLog: true SUPPRESSES the echo — session still minted (banner shows the id)", async () => {
+    const { slog, lines } = captureSlog()
+    const r = await resolveResume({
+      resume: undefined,
+      newSession: true,
+      title: "T",
+      cwd: dir,
+      initialSessionId: "init-id",
+      slog,
+      quietIdModeLog: true,
+    })
+    // Paired control: identical inputs except the flag. The session is still
+    // minted + persisted (behavior unchanged) — ONLY the terminal echo is gone.
+    expect(r.idMeta).toBeDefined()
+    expect(r.idMeta?.id).toBe(r.sessionId)
+    expect(emittedIdMode(lines)).toBe(false)
   })
 })

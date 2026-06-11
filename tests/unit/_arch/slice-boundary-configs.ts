@@ -96,7 +96,11 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     //    a pure leaf with no `@/observability` value import.
     // Reviewed exceptions.
     allowImports: ["@/observability/coverage", "@/observability/patch-trace"],
-    envAllowFiles: ["runner.ts", "from-env.ts"],
+    // debug/port.ts is a process SPAWNER (DAP adapters / `node --inspect-brk`): it
+    // must pass the parent env to the child so PATH resolves node/lldb/dlv — the
+    // same env-boundary carve-out as runner.ts. The gate VALUES come from cfg; only
+    // the spawned child's env inherits `process.env`.
+    envAllowFiles: ["runner.ts", "from-env.ts", "port.ts"],
     requireSliceBarrel: true,
   },
   memory: {

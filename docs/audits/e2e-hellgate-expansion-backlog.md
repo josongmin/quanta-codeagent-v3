@@ -101,7 +101,7 @@
 ## 라운드3 (2026-06-10) — 랜딩한 4개 실버그 픽스 적대감사
 e2e 확장은 수확체감이라, 가장 위험한 표면인 **내가 랜딩한 4개 prod 픽스 자체**를 적대감사(과교정/신규구멍/blast-radius). 2개 actionable 발견·해소, H2/H11은 모든 가설 기각 SHIP.
 
-- **H1 NUL 바이트 (확정 실결함→수정)**: trust-scope-store.ts:327에 리터럴 `\x00`이 박혀 파일이 binary로 인식+편집 landmine(공백으로 오타 시 identity 스킴 무음 변경). ` ` escape로 교체(런타임 byte-identical). src-no-sketchy 스캐너가 raw NUL을 못 잡던 갭도 노출.
+- **H1 NUL 바이트 (확정 실결함→수정)**: trust-scope-store.ts:327에 리터럴 `\x00`이 박혀 파일이 binary로 인식+편집 landmine(공백으로 오타 시 identity 스킴 무음 변경). `` escape로 교체(런타임 byte-identical). src-no-sketchy 스캐너가 raw NUL을 못 잡던 갭도 노출.
 - **H3 라이브 MCP egress 우회 → 라운드4에서 구조적 봉인 완료**: 진단은 **두 구조적 단절** — ①TIMING: MCP는 bootstrap서 spawn되는데 egress 프록시는 runAgent 내부서야 bind. ②LIFETIME: 프록시는 턴당 ephemeral인데 MCP 자식은 프로세스 수명. **근본원인=프록시 수명≠자식 수명**. 해법(라운드4): bash/docker(per-turn 자식)는 per-turn 프록시 유지, **MCP(프로세스 수명 자식)용 session-scoped 프록시 추가**(`openSessionEgressProxy` open/close 헬퍼)를 bootstrap→loadFeatures→loadMcpTools→loadSingle→McpClient→defaultTransportFor→StdioMcpTransport로 thread. 2-scope가 hack 아니라 올바른 모델. **라운드4 참조.**
 - **permission-store 2-프로세스 갭 (감사 발견→신규 헬게이트)**: H1 락 엔진을 trust-scope와 permission-store가 공유하는데 2-OS-프로세스 race 테스트는 trust-scope만 있었음. permission-state.json(보안핵심 denial)에 `permission-store-concurrent-write-e2e-hellgate` 추가(4케이스: denial/grant-never-lost+fail-closed+stress). 회귀가드(같은 엔진이라 이미 안전), red=merge hook blind 시 denial 유실 RED.
 - **H2/H11**: 모든 적대 가설 기각 SHIP. H2 TOCTOU는 repo 전역 패턴(O_NOFOLLOW 미사용)과 동일한 accepted posture, 읽기경로는 refuseSymlink로 이미 방어. H11 빈문자열/undefined detail은 합법 처리, IPC union에 progress/error kind 없어 갭 없음.

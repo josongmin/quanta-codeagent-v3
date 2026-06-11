@@ -45,7 +45,7 @@ import {
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
-import { errMessage, gateOn, logger } from "@/shared"
+import { errMessage, gateOn, type Logger, logger } from "@/shared"
 import {
   type BootstrapFeatures,
   type SessionBootstrapDeps,
@@ -273,6 +273,30 @@ const probeCapabilityConsistency = (env: NodeJS.ProcessEnv): void => {
   }
 }
 
+/**
+ * jun-10 — gate the legacy stderr startup lines on whether the interactive
+ * welcome banner (repl.ts) will paint. The banner is the surface's first frame
+ * and already shows provider/model/mode/cwd/session, so when it renders the
+ * three legacy lines ("[info] quanta ready", "[info] session: <id>", and the
+ * structured `session.id_mode.on` JSONL) are pure duplication noise above the
+ * box. The banner renders on exactly this condition: no positional prompt +
+ * stderr is a TTY. Return `undefined` (⇒ a no-op `?.info`, suppressing the
+ * human lines) in that case; otherwise the live `logger` (pipe / one-shot /
+ * CI — the banner never shows there, so the lines remain the ONLY ready
+ * signal, byte-identical). Finishes the migration the welcome-banner docblock
+ * describes ("Replaces the bare `[info] quanta ready` + JSONL config dumps").
+ */
+const startupReadyLogger = (runtime: SessionRuntimeConfigShape): Logger | undefined =>
+  runtime.argPrompt === undefined && runtime.stderrIsTTY === true ? undefined : logger
+
+/** Emit a human startup line through the gated logger — a no-op when the
+ *  welcome banner renders (`log` is then `undefined`). Wrapping the `?.` here
+ *  keeps it out of `bootstrapSession`'s body so its cognitive complexity stays
+ *  at the pre-jun-10 baseline. */
+const emitStartupLine = (log: Logger | undefined, msg: string): void => {
+  log?.info(msg)
+}
+
 /** Resolve feature flags, tooling, resume state, and reusable session deps that
  *  do not require terminal-specific host wiring.
  *
@@ -407,10 +431,16 @@ export const bootstrapSession = async (
     const pendingImages = loadSeedImages(runtime, deps.loadImageBlock)
 
     let cwd = runtime.cwd
+    // `startupLog` is `undefined` when the welcome banner will render (see
+    // `startupReadyLogger`), so the `?.info` below no-ops the redundant
+    // "quanta ready" / "session:" lines; `quietIdModeLog` likewise suppresses
+    // the structured `session.id_mode.on` echo. Non-interactive ⇒ live logger.
+    const startupLog = startupReadyLogger(runtime)
     const inIdModeAtStart =
       runtime.newSession || (features.resume !== undefined && !isPathLikeToken(features.resume))
     if (!inIdModeAtStart) {
-      logger.info(
+      emitStartupLine(
+        startupLog,
         `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd})`,
       )
     }
@@ -421,7 +451,8 @@ export const bootstrapSession = async (
       cwd,
       initialSessionId: tooling.sessionId,
       slog,
-      onSessionMinted: (id) => logger.info(`session: ${id}`),
+      quietIdModeLog: startupLog === undefined,
+      onSessionMinted: (id) => emitStartupLine(startupLog, `session: ${id}`),
     })
     if (resolved.conflictError !== undefined) {
       failSessionBootstrap("resume_conflict", resolved.conflictError)
@@ -437,7 +468,8 @@ export const bootstrapSession = async (
     const sessionId = resolved.sessionId
     if (idMeta) cwd = deps.switchToSessionCwd(cwd, idMeta.cwd, slog)
     if (inIdModeAtStart && idMeta) {
-      logger.info(
+      emitStartupLine(
+        startupLog,
         `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd}, session=${idMeta.id})`,
       )
     }

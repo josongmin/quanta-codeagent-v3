@@ -8,6 +8,8 @@ import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
+import { renderVersion } from "./version-cmd"
+import { QUANTA_VERSION } from "./welcome-banner"
 
 setTerminalIo({
   stdout: (chunk) => {
@@ -36,7 +38,6 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 // and stay listed explicitly here.
 const CLI_FEATURE_GATES = [
   "QUANTA_ENABLE_ENV_PROBE",
-  "QUANTA_ENABLE_PROMPT_SUGGESTION",
   // ADR-0474 — stale-read-guard: block write/edit of a file externally modified
   // since the agent read it ("re-read first"). Protective correctness guard.
   "QUANTA_STALE_READ_GUARD",
@@ -75,6 +76,28 @@ const CLI_FEATURE_GATES = [
   // `gateOn` SSOT it accepts the standard "1" like every other gate, so it rides
   // the normal seed loop below (the old strict-"on" special case is gone).
   "QUANTA_SUBAGENT_FOLLOWUP",
+  // jun-11 CLI-UX default-ON (R3-hardened worklist #1/#2/#3/#9) — features that
+  // were fully built AND wired but shipped DEFAULT-OFF behind gates the CLI host
+  // never seeded, so the out-of-box REPL never surfaced them. These are CLI
+  // surface BEHAVIORS (not LLM tools) ⇒ they live here, not the tool-surface
+  // manifest. Each has a real src/ consumer (pinned by cli-feature-gates-drift-
+  // hellgate) and reads "1" via the canonical `gateOn` SSOT; the slice default
+  // stays OFF so non-CLI surfaces (web-daemon/headless) are byte-identical, and
+  // `QUANTA_X=0` still wins (we only seed when unset).
+  //   @-file/@-symbol mention autocomplete dropdown  (consumer: at-autocomplete/env.ts)
+  "QUANTA_AT_AUTOCOMPLETE",
+  //   ctrl+x ctrl+e → compose the draft in $EDITOR   (consumer: repl/surface-compose.ts)
+  "QUANTA_EXTERNAL_EDITOR",
+  //   ~/.quanta/keybindings.json action remap (no-throw merge, consumer: repl/surface-compose.ts)
+  "QUANTA_KEYBINDINGS",
+  //   rate-limit-reached transient status notice (consumer: ratelimit-notice.ts) — else silent
+  "QUANTA_RATELIMIT_NOTICE",
+  //   shift+tab permission-mode cycle (consumer: mode-cycle.ts). The operator
+  //   EXPLICITLY opted into the full 4-rung cycle INCLUDING the no-confirm
+  //   `bypass` rung (default → acceptEdits → plan → bypass) — a deliberate,
+  //   accepted trade-off; the red BYPASS pill is the only guard, and bypass
+  //   also stays reachable via `--mode` / `QUANTA_PERMISSION`.
+  "QUANTA_MODE_CYCLE",
 ]
 // The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
 // surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a
@@ -250,6 +273,17 @@ const main = async (): Promise<void> => {
   const rawArgs = process.argv.slice(2)
   if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
     process.stdout.write(topLevelUsage())
+    process.exit(0)
+  }
+
+  // jun-11 (R3 worklist #7) — top-level `--version` / `-v` BEFORE any LLM/REPL
+  // wiring so a version query never falls through to an empty-prompt REPL (the
+  // dash tokens are dropped by `argvPrompt`, so today `quanta --version` silently
+  // starts the REPL — a confusing no-op). Reuses the SAME `renderVersion()` the
+  // `/version` slash + welcome banner use; no new version-string wiring. Mirrors
+  // the `--help` short-circuit above.
+  if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
+    process.stdout.write(`${renderVersion({ version: QUANTA_VERSION })}\n`)
     process.exit(0)
   }
 

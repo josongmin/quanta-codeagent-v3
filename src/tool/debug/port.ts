@@ -5,6 +5,7 @@
  * scripted in-memory adapter (closed-port DI, same posture as the PTY slice).
  */
 import { type AddressInfo, createServer, Socket } from "node:net"
+import { errMessage } from "@/shared"
 import type { CdpTransport } from "./cdp-client"
 import type { DapTransport } from "./dap-client"
 
@@ -145,7 +146,7 @@ export const connectTcpTransport = async (spec: TcpConnectSpec, onClose?: () => 
       })
       return transportFromSocket(socket, onClose)
     } catch (e) {
-      if (Date.now() >= deadline) throw new Error(`dap: TCP connect to ${spec.host}:${spec.port} failed: ${(e as Error).message}`)
+      if (Date.now() >= deadline) throw new Error(`dap: TCP connect to ${spec.host}:${spec.port} failed: ${errMessage(e)}`)
       await new Promise((r) => setTimeout(r, 100))
     }
   }

@@ -139,6 +139,12 @@ export type AgentEvent =
       statusCode?: number
     }
   | { type: "assistant_text"; delta: string }
+  // jun-11 (#11) — a streamed extended-thinking / reasoning-summary delta. Only
+  // produced when `QUANTA_REASONING_SUMMARY` is on (the LLM then emits
+  // `thinking_delta`s); the stdout adapter renders these DIM, distinct from the
+  // assistant's answer. Before this, thinking_delta was consumed only for TTFT
+  // timing + the token counter and never shown (pay-without-display).
+  | { type: "assistant_thinking"; delta: string }
   // ADR-0048 in-progress heartbeat — surfaced from a provider's
   // `response.in_progress` event so a UI can paint a "thinking…" indicator.
   // Mirrors the `InProgressIndicator` the streaming engine produces: a stable

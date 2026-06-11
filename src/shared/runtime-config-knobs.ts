@@ -1114,6 +1114,42 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     group: "bench",
     describe: "Force local build attempt on arm64.",
   },
+  // ── multilang-debug keystone tool gates (strict opt-in, default-OFF)
+  {
+    envKey: "QUANTA_DEBUG_TOOLS",
+    kind: "bool",
+    default: false,
+    group: "tools",
+    describe: "W5 DAP `debug_inspect` debugger tool gate (strict opt-in).",
+  },
+  {
+    envKey: "QUANTA_TEST_RUNNER",
+    kind: "bool",
+    default: false,
+    group: "tools",
+    describe: "Epic-2 `run_tests` structured test-runner gate (strict opt-in).",
+  },
+  {
+    envKey: "QUANTA_EVIDENCE",
+    kind: "bool",
+    default: false,
+    group: "tools",
+    describe: "Keystone `collect_evidence` Evidence Packet Builder gate (strict opt-in).",
+  },
+  {
+    envKey: "QUANTA_LANG_DETECT",
+    kind: "bool",
+    default: false,
+    group: "tools",
+    describe: "Assistant-language auto-detect per-turn notice gate (default-OFF).",
+  },
+  {
+    envKey: "QUANTA_NOTEBOOK_EDIT",
+    kind: "bool",
+    default: false,
+    group: "tools",
+    describe: "`notebook_edit` Jupyter cell-edit tool gate (default-OFF).",
+  },
 ]
 
 export const allRuntimeConfigKnobs = (): readonly RuntimeConfigKnob[] => RUNTIME_CONFIG_KNOBS

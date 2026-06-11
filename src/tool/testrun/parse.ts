@@ -32,9 +32,12 @@ export const parseCtest = (output: string): TestRunResult => {
         locs.push({ file: lm[1]!, line: Number(lm[2]) })
         continue
       }
-      const fm = /^\[\s*FAILED\s*\]\s+(.+?)(?:\s+\(\d+\s*ms\))?$/.exec(raw.trim())
-      // The trailing `[  FAILED  ] N tests` summary line is NOT a test name.
-      if (fm !== null && !/^\d+\s+tests?$/.test(fm[1]!)) names.push(fm[1]!)
+      // ONLY the per-test result line carries `(N ms)` — the trailing summary
+      // block (`[ FAILED ] 1 test, listed below:` and a bare `[ FAILED ] Name`)
+      // has no timing, so requiring `(N ms)` excludes both (verbatim-confirmed
+      // against real gtest, which a simpler fixture had hidden).
+      const fm = /^\[\s*FAILED\s*\]\s+(.+?)\s+\(\d+\s*ms\)$/.exec(raw.trim())
+      if (fm !== null) names.push(fm[1]!)
       const em = /^(?:Expected|Actual|Value of|error:)\b.*$/.exec(raw.trim())
       if (em !== null) msgs.push(raw.trim())
     }
@@ -201,6 +204,7 @@ export const parseNodeTest = (output: string): TestRunResult => {
     else if ((m = /^[✖✗✕×]\s+(.+?)\s+\([\d.]+\s*ms\)$/.exec(l)) !== null) addName(m[1]!) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
     else if ((m = /^not ok \d+ - (.+)$/.exec(l)) !== null) addName(m[1]!) // TAP
     else if ((m = /^[✕×]\s+(.+)$/.exec(l)) !== null) addName(m[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
+    else if ((m = /^●\s+(.+)$/.exec(l)) !== null) addName(m[1]!) // jest DEFAULT reporter bullet (● U+25CF) — `● Suite › test`
   }
   // mocha uses neither shape — it prints a `N failing` count + numbered `N) name`
   // entries (summary list first, then per-failure detail). Harvest exactly

@@ -356,8 +356,14 @@ const RULES: readonly Rule[] = [
     // for any match is to branch on the typed field — for the common cases a
     // typed form exists (`e instanceof LspRequestError && e.code === …`,
     // `LLMError.kind`/`statusCode`).
+    // The member arm is `(?:\.(?:message|stack|toString\(\)))?` — the WHOLE-error
+    // TEXT forms (bare `String(e)` / `String(e.message)` / `String(e.stack)`).
+    // It deliberately does NOT match a typed SCALAR field read like
+    // `String(e.code).startsWith("E")` / `String(e.status)` — that IS the typed
+    // branching the rule recommends (rounds-2/3 audit: the old `(?:\.\w+)*` arm
+    // over-corrected, redding the very fix it advises).
     pattern:
-      /String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\.test\(\s*String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\)\s*\)|`\$\{\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\}`\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\(\s*""\s*\+\s*(?:e|err|error|caught|ex|reason|cause)(?:\.\w+)*\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(/,
+      /String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\.test\(\s*String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\)\s*\)|`\$\{\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\}`\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\(\s*""\s*\+\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(/,
     why: "Don't classify errors by stringified text — branch on the typed field instead (`e instanceof LspRequestError && e.code === …`, `LLMError.kind`/`statusCode`). Same contract as the `.message.includes(` ban.",
   },
   {
@@ -617,5 +623,19 @@ describe("no-string-error-text-classification: bypass-class coverage", () => {
     // Plain stringify with no search method is fine (e.g. log formatting).
     expect(re().test("logger.warn(String(e))")).toBe(false)
     expect(re().test("const s = String(e)")).toBe(false)
+  })
+
+  test("negative control: stringifying a TYPED SCALAR field is the recommended fix, not a violation", () => {
+    // rounds-2/3 audit: the old `(?:\.\w+)*` member arm over-corrected — it
+    // redded `String(e.code).startsWith(…)`, which is exactly the typed-field
+    // branching the rule's `why` advises. A scalar field read (.code/.status/
+    // .errno) stringified for comparison must stay CLEAN; only the whole-error
+    // TEXT forms (bare / .message / .stack) are the classification smell.
+    expect(re().test('String(err.code).startsWith("E")')).toBe(false)
+    expect(re().test('String(error.status).includes("4")')).toBe(false)
+    expect(re().test('String(e.errno).indexOf("13")')).toBe(false)
+    // ...but the whole-error TEXT forms still trip (teeth retained).
+    expect(re().test('String(e.message).includes("timeout")')).toBe(true)
+    expect(re().test('String(err.stack).split("\\n")')).toBe(true)
   })
 })

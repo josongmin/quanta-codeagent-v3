@@ -84,6 +84,19 @@ warn_path() {
 }
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
+  # Bump the patch segment of the version in package.json before each build.
+  current_ver=$(bun -e "console.log(require('${REPO_ROOT}/package.json').version)")
+  IFS='.' read -r v_major v_minor v_patch <<< "$current_ver"
+  new_patch=$(printf "%03d" $((10#$v_patch + 1)))
+  new_ver="${v_major}.${v_minor}.${new_patch}"
+  bun -e "
+    const fs = require('fs');
+    const p = '${REPO_ROOT}/package.json';
+    const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+    pkg.version = '${new_ver}';
+    fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+  "
+  echo "install-quanta-cli: version ${current_ver} → ${new_ver}"
   echo "install-quanta-cli: building ${SOURCE} ..."
   run cd "$REPO_ROOT"
   run bun run build

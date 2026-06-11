@@ -4,11 +4,11 @@ section: 2
 subsystem: tool-system
 order: 61
 maturity: L3
-status: opt-in
+status: stable
 ui_surfaces: [cli, web]
-monitoring: "tool_result: normalized {passed, failed:[{name,file,line,message}]}, or ok:false on detect/spawn/parse fault"
+monitoring: integrated
 modes: [n-a]
-configurable: "QUANTA_TEST_RUNNER (strict opt-in) → DefaultToolPorts.testRunner"
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:multilang-debug", "high-risk", "default-off", "code-execution"]
 depends_on: []
@@ -37,7 +37,14 @@ purpose: |
   faults collapse to ok:false. Real-verified 2026-06-10 against cargo 1.95 /
   go 1.25.4 / python3 unittest with known-failing suites (failing test name +
   file:line + message extracted).
-tests:
-  - tests/unit/tool/testrun/parse.test.ts
-  - tests/unit/tool/testrun/detect.test.ts
-  - tests/unit/tool/testrun/run-tests-real-e2e.test.ts
+evidence:
+  code:
+    - src/tool/testrun/tool.ts
+    - src/tool/testrun/detect.ts
+    - src/tool/testrun/parse.ts
+  adrs: [532]
+  tests:
+    unit:
+      - tests/unit/tool/testrun/parse.test.ts
+      - tests/unit/tool/testrun/detect.test.ts
+      - tests/unit/tool/testrun/run-tests-real-e2e.test.ts

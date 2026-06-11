@@ -4,11 +4,11 @@ section: 1
 subsystem: 프롬프트 동적 컨텍스트 (per-turn dynamic slot)
 order: 60
 maturity: L2
-status: opt-in
+status: stable
 ui_surfaces: [cli, web]
 monitoring: n-a
 modes: [n-a]
-configurable: "QUANTA_LANG_DETECT (default-OFF, gateOn)"
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:cursor", "default-off"]
 depends_on: []

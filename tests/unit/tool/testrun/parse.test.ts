@@ -235,23 +235,34 @@ describe("parseCtest (C++)", () => {
     expect(r.failed[0]).toEqual({ name: "main", file: "t.cpp", line: 5, message: "Assertion failed: (result == 99)" })
   })
 
-  test("GoogleTest: `[ FAILED ] Suite.Test` + `FILE:LINE: Failure` localization", () => {
+  test("GoogleTest (VERBATIM, gtest 1.17.0): one failure, NOT the summary lines", () => {
+    // Captured 2026-06-10 from a real `clang++ + libgtest` build. The trailing
+    // summary block has TWO extra `[ FAILED ]` lines (`1 test, listed below:` +
+    // a bare `MathTest.Adds`) — neither has `(N ms)`, so both are excluded.
     const out = [
+      "[==========] Running 1 test from 1 test suite.",
+      "[----------] 1 test from MathTest",
       "[ RUN      ] MathTest.Adds",
-      "/p/math_test.cpp:10: Failure",
+      "math_test.cpp:5: Failure",
       "Expected equality of these values:",
-      "  compute(5)",
+      "  result",
       "    Which is: 10",
       "  99",
+      "",
       "[  FAILED  ] MathTest.Adds (0 ms)",
-      "[  PASSED  ] 2 tests.",
+      "[----------] 1 test from MathTest (0 ms total)",
+      "[  PASSED  ] 0 tests.",
       "[  FAILED  ] 1 test, listed below:",
+      "[  FAILED  ] MathTest.Adds",
+      "",
+      " 1 FAILED TEST",
     ].join("\n")
     const r = parseCtest(out)
-    expect(r.passed).toBe(2)
-    expect(r.failed[0]?.name).toBe("MathTest.Adds") // NOT the `1 test` summary line
-    expect(r.failed[0]?.file).toBe("/p/math_test.cpp")
-    expect(r.failed[0]?.line).toBe(10)
+    expect(r.passed).toBe(0)
+    expect(r.failed).toHaveLength(1) // NOT 3 — summary lines excluded (the bug verbatim caught)
+    expect(r.failed[0]?.name).toBe("MathTest.Adds")
+    expect(r.failed[0]?.file).toBe("math_test.cpp")
+    expect(r.failed[0]?.line).toBe(5)
   })
 
   test("green run ⇒ no failures; NEVER-throws on garbage", () => {

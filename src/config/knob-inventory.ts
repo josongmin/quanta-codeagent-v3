@@ -1452,50 +1452,20 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     describe: "Reflection tool (opt-in).",
     readSite: "tool/surface/manifest.ts",
   },
+  // NB: QUANTA_LANG_DETECT / NOTEBOOK_EDIT / DEBUG_TOOLS / TEST_RUNNER / EVIDENCE
+  // are declared in @/shared/runtime-config-knobs.ts (their `home`), NOT here —
+  // re-declaring would violate the pairwise-disjoint registry ratchet (ADR-0503 P3).
   {
-    envKey: "QUANTA_LANG_DETECT",
+    envKey: "QUANTA_WEB_AGENT_STATE",
     kind: "bool",
     default: false,
-    group: "agent-feature",
+    group: "web-daemon",
     home: "runtime-config",
-    describe: "Assistant language auto-detect — inject 'respond in <lang>' notice (opt-in).",
-    readSite: "agent/loop/context-assembler.ts",
-  },
-  {
-    envKey: "QUANTA_NOTEBOOK_EDIT",
-    kind: "bool",
-    default: false,
-    group: "agent-feature",
-    home: "runtime-config",
-    describe: "notebook_edit tool — cell-level str_replace/insert/delete on .ipynb (W6, opt-in).",
-    readSite: "host/runtime/agent-arg-builder.ts",
-  },
-  {
-    envKey: "QUANTA_DEBUG_TOOLS",
-    kind: "bool",
-    default: false,
-    group: "agent-feature",
-    home: "runtime-config",
-    describe: "debug_inspect tool — run a program under a DAP adapter, stop at first breakpoint, report stack+vars (W5, opt-in, high-risk).",
-    readSite: "host/runtime/agent-arg-builder.ts",
-  },
-  {
-    envKey: "QUANTA_TEST_RUNNER",
-    kind: "bool",
-    default: false,
-    group: "agent-feature",
-    home: "runtime-config",
-    describe: "run_tests tool — detect toolchain (cargo/go/python/npm) + run suite + normalized pass/fail evidence (Epic-2, opt-in, high-risk).",
-    readSite: "host/runtime/agent-arg-builder.ts",
-  },
-  {
-    envKey: "QUANTA_EVIDENCE",
-    kind: "bool",
-    default: false,
-    group: "agent-feature",
-    home: "runtime-config",
-    describe: "collect_evidence tool — Evidence Packet Builder: fuse failure(run_tests)+static(LSP)+runtime(DAP)+repo(git) into one packet (keystone, opt-in, high-risk).",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    // Read via gateOn at the daemon site (NOT loadFromEnv), so it lives here (a
+    // declaration-only registry) rather than runtime-config-knobs (which the
+    // parity ratchet requires every entry be read by loadFromEnv).
+    describe: "Web daemon — forward agent-state frames to the web client (opt-in).",
+    readSite: "apps/web-daemon/runtime-factory.ts",
   },
   {
     envKey: "QUANTA_SHADOW",

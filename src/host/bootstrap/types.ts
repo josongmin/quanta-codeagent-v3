@@ -304,6 +304,11 @@ export interface SessionRuntimeConfigShape {
   readonly homeDir: string
   readonly stdinIsTTY: boolean | undefined
   readonly stdoutIsTTY: boolean | undefined
+  /** `process.stderr.isTTY`. The interactive welcome banner (repl.ts) and the
+   *  human "quanta ready" / "session:" startup logs are gated on this exact
+   *  bit (logs go to stderr). Optional so non-CLI surfaces / test stubs that
+   *  omit it default to `undefined` ⇒ banner-suppression OFF ⇒ byte-identical. */
+  readonly stderrIsTTY?: boolean | undefined
   readonly newSession: boolean
   readonly title: string | undefined
   readonly idleMs: number

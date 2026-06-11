@@ -242,7 +242,14 @@ export interface SessionMemoryAutoWires {
  *  behavior's final state, minus the redundant LLM spend). `drain` loops
  *  until the lane is empty so a coalesced rerun kicked during the await is
  *  also covered. */
-const createDeferredConsolidationLane = (): {
+const createDeferredConsolidationLane = (
+  opts: {
+    /** Fired ONCE per drain call that actually has to wait (an in-flight run
+     *  exists) — the session-close path uses it to tell the operator WHY exit
+     *  is pausing instead of waiting silently. Idle drains never fire it. */
+    readonly onDrainWait?: () => void
+  } = {},
+): {
   defer: (run: () => Promise<unknown>) => void
   drain: () => Promise<void>
 } => {
@@ -267,6 +274,12 @@ const createDeferredConsolidationLane = (): {
   return {
     defer: kick,
     drain: async (): Promise<void> => {
+      if (inflight === null) return
+      try {
+        opts.onDrainWait?.()
+      } catch {
+        // advisory observer — never wedge the drain
+      }
       while (inflight !== null) await inflight
     },
   }
@@ -406,7 +419,12 @@ export const buildSessionMemoryAutoWires = async (
   // the surface's turn-completion path (spinner → turn summary → input) is
   // never blocked on memory bookkeeping. The host awaits `drain()` at session
   // close, BEFORE `dispose()` closes the sqlite store the distill writes to.
-  const lane = createDeferredConsolidationLane()
+  // The wait notice fires only when close actually has to pause for an
+  // in-flight distill (e.g. the operator quits right after a heavy turn) —
+  // a silent multi-second exit hang reads as a wedge.
+  const lane = createDeferredConsolidationLane({
+    onDrainWait: () => logWarn("finishing in-flight memory consolidation before close…"),
+  })
 
   return {
     ...(start.sessionCtx !== undefined ? { sessionCtx: start.sessionCtx } : {}),

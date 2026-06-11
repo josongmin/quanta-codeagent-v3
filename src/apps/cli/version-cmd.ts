@@ -19,13 +19,19 @@ export interface VersionDeps {
   readonly env?: NodeJS.ProcessEnv
   /** cwd for the package.json walk (injected for tests). */
   readonly cwd?: string
+  /** Explicit version override. When set, bypasses the `QUANTA_VERSION` env /
+   *  cwd package.json walk entirely. The top-level `--version` flag passes the
+   *  BUNDLED `QUANTA_VERSION` const (the same build-time-baked value the welcome
+   *  banner shows) so the flag reports the real build version regardless of the
+   *  user's cwd — the cwd walk is unreliable outside the quanta repo. */
+  readonly version?: string
 }
 
 /** Build the `/version` line(s). Pure: returns the rendered string so tests
  *  assert it without capturing stdout. */
 export const renderVersion = (deps: VersionDeps = {}): string => {
   const env = deps.env ?? process.env
-  const version = resolveVersion(env, deps.cwd ?? process.cwd())
+  const version = deps.version ?? resolveVersion(env, deps.cwd ?? process.cwd())
   const commit = resolveCommit(env)
   const head = commit !== undefined ? `quanta ${version} (${commit})` : `quanta ${version}`
   return `${head}\n${process.platform}-${process.arch} · ${repoUrl(env)}`

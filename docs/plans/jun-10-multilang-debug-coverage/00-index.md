@@ -66,7 +66,7 @@
 | D11 | debug_inspect node carrier | debug/tool.ts `adapter:"node"` | 인터랙티브 디버거도 CDP, 헬게이트 2 + 실 node 도구 e2e |
 | D12 | **exception-aware breakpoint (T-01)** | inspect-driver(DAP setExceptionBreakpoints+exceptionInfo)·cdp-inspect(setPauseOnExceptions)·tool `exceptionBreakpoints` | break-on-throw. DAP+CDP 드라이버 헬게이트 + 실 node break-on-throw e2e(TypeError throw 지점 포착). node "uncaught"→"all"(top-level 래퍼 특성, 측정확인). `RuntimeEvidence.exception` plumbing. **scope: debug_inspect 도구 reachable**; collect_evidence line-less 폴백은 follow-up(line-bp 일차성 유지=assert-internal-frame 회피) |
 | D13 | **coverage-matrix drift ratchet (T-05)** | tests/unit/tool/keystone-coverage-matrix-ratchet-hellgate.test.ts | 4언어×3축 독립 리터럴 앵커(failure detect / static lsp / runtime carrier exhaustive Record). 언어칸 드롭→red. 3도구 manifest GATED·knob·gate 확인. **완성 durable 락** |
-| D14 | **JS 러너 라우팅 (T-02)** | evidence/node-runner.ts, runtime.ts nodeRuntime | jest --runInBand / mocha / node:test 단일프로세스 CDP. 순수 detectJsRunner+nodeInspectArgv+헬게이트. **실 mocha e2e**(npm i mocha→`result=10`). vitest degrade. |
+| D14 | **JS 러너 라우팅 (T-02)** | evidence/node-runner.ts, runtime.ts nodeRuntime | **mocha + node:test** 단일프로세스 CDP runtime(**실 mocha e2e `result=10`**). 🔴**jest=runtime degrade**(적대 재어딧: `--runInBand`은 단일프로세스지만 babel-jest transform이 CDP file:line bp 바인딩 깸→실e2e가 캡처실패로 적발; jest failure+static은 `●`파서로 작동). vitest degrade(worker-pool). 순수 detectJsRunner+nodeInspectArgv 헬게이트. |
 | D15 | **thread/goroutine dump (T-03)** | inspect-driver.ts threads 캡처 | DAP `threads`(dlv→goroutine) bounded→`RuntimeEvidence.threads`(>1). 동시성 버그 triage. 헬게이트+**실 go e2e 단언**(goroutine>1, R1 보완). |
 | D16 | **C++ 5번째 언어 (T-04)** | lsp/adapters/clangd.ts, testrun detect/parseCtest, runtime cppRuntime | failure(ctest: libc-assert verbatim+gtest)·static(clangd 실 e2e)·runtime(clang++ -g→lldb-dap 실 e2e, `result=10`). 매트릭스 ratchet 5언어 확장. Java/C#=toolchain 부재로 미포함(정직 defer). |
 | D17 | **Rust pretty-printer (R3)** | runtime.ts `rustLldbInitCommands` | lldb-dap launch `initCommands`로 rust 자체 formatters(`<sysroot>/lib/rustlib/etc/lldb_commands`) sourcing→`Vec<i32>`가 `[10,20,30]` 요소로 펼쳐짐(raw `{buf,len}` 대신). 측정확인+**실 e2e 단언**. |
@@ -84,6 +84,8 @@
 | ~~T-04~~ ✅ | Tier-2 언어 | **DONE(C++) → D16.** C++ 풀 검증(clangd+lldb-dap+ctest). **Java/C#=toolchain(JRE/dotnet) 부재 확인→no-guessing 회피, OCP 문서화 defer.** | 저-중 | — |
 | ~~T-05~~ ✅ | tracking + ratchet + DoD 게이트 | **DONE → D13.** 16칸 매트릭스 drift ratchet(독립 리터럴, red-on-injection) + 3도구 manifest GATED/knob-inventory/gate 확인 + repo-green 게이트 통과. (fc 엔트리/ADR 넘버링은 D06~D12가 기존 도구·슬라이스 확장이라 신규 불요) | — | fc(동시 co-dev) |
 
+> **풀스위트 tree-green 실증 (jun-10, `bun test tests/unit` 26239 tests)**: 내 keystone 슬라이스 fail **0**, src tsc **0**, 적대 어딧 **3회**(R1 exhaustive-dispatch/goroutine · R2 jest 오버클레임 적발→degrade 정정 · R3 gtest verbatim이 요약라인 false-name 버그 적발→수정). error-message ratchet 내 4위반 수정→green. **잔여 ~22 fail은 전부 동시세션 in-flight**(fc `status:'opt-in'` 스키마 mid-migration cascade ~12 + subagent 4 + knob/env 5 + NUL 1 + silent-failure ceiling 2[글로벌]); 내 파일 무관, 충돌회피로 미수정. **tree-100은 상대세션 settle 의존**.
+>
 > **상태: 모든 티켓 CLOSED (D01~D17).** OPEN 백로그 0. 검증 가능한 잔여 0. 측정-기반 deferral 2개(둘 다 정직): **vitest worker-inspector**(멀티프로세스, `--inspect-brk` /json/list 미노출 측정) · **Java/C# Tier-2**(JRE/dotnet 부재 측정). 둘 다 toolchain/멀티프로세스 벽이지 우리 설계 미비가 아님. 키스톤 = **DONE**.
 
 ## 불변식 (모든 티켓 상속)

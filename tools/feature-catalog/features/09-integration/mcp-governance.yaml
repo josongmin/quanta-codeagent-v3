@@ -4,11 +4,11 @@ section: 9
 subsystem: central-config (ADR-0497) → MCP launcher
 order: 40
 maturity: L3
-status: opt-in
+status: stable
 ui_surfaces: [cli, web]
-monitoring: "slog events: mcp.governance.dropped / mcp.governance.resolve_failed / mcp.governance.layer"
+monitoring: integrated
 modes: [n-a]
-configurable: "QUANTA_CENTRAL_CONFIG (gate) + settings layers `mcp.{enabledServers,deniedServers,allowManagedMcpServersOnly}`"
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude-code", "security", "default-off"]
 depends_on: []

@@ -4,11 +4,11 @@ section: 2
 subsystem: 파일 편집 도구 (FS-jail mutating)
 order: 70
 maturity: L2
-status: opt-in
+status: stable
 ui_surfaces: [cli, web]
 monitoring: n-a
 modes: [n-a]
-configurable: "QUANTA_NOTEBOOK_EDIT (default-OFF, gateOn → DefaultToolPorts.notebookEdit)"
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude-code", "default-off", "mutating"]
 depends_on: []

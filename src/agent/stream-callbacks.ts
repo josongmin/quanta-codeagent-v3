@@ -67,6 +67,10 @@ export interface StreamCallbacks {
   dispatch: (call: StreamingCall) => Promise<DispatchOutcome>
   /** Mirror text deltas onto the loop's `AgentEvent` stream. */
   onTextDelta: (delta: string) => void
+  /** jun-11 (#11) — mirror extended-thinking/reasoning deltas onto the stream as
+   *  `assistant_thinking` (rendered DIM). Only fires when the LLM emits
+   *  `thinking_delta`s, i.e. `QUANTA_REASONING_SUMMARY` is on. */
+  onThinkingDelta: (delta: string) => void
   /** Per-tool scheduling notification: emit `tool_call` event, push verify-
    *  guard history entry (when armed). */
   onToolStart: (call: StreamingCall) => void
@@ -406,6 +410,14 @@ export const createStreamDispatcher = (
     config.stream.emit({ type: "assistant_text", delta })
   }
 
+  // jun-11 (#11) — reasoning/thinking deltas onto the stream as a DISTINCT event
+  // (rendered DIM by the stdout adapter). NOT accumulated into
+  // `pendingAssistantText` — thinking is not the pre-tool answer rationale the
+  // escalation card snapshots.
+  const onThinkingDelta = (delta: string): void => {
+    config.stream.emit({ type: "assistant_thinking", delta })
+  }
+
   const onToolStart = (call: StreamingCall): void => {
     config.stream.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input })
     recorder?.toolCall(call.name)
@@ -466,5 +478,5 @@ export const createStreamDispatcher = (
     turnTimingCapture.markFirstToken()
   }
 
-  return { dispatch, onTextDelta, onToolStart, onInProgress, onFirstChunk }
+  return { dispatch, onTextDelta, onThinkingDelta, onToolStart, onInProgress, onFirstChunk }
 }

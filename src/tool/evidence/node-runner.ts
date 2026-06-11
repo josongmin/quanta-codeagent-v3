@@ -4,13 +4,17 @@
  * to the test process). Which entrypoint to run depends on the runner:
  *
  *  - node:test / plain file → run the file directly (it self-runs inline).
- *  - jest  → `jest --runInBand <file>` — `--runInBand` keeps tests in the MAIN
- *            process (no worker pool), so the inspector attaches to them.
- *  - mocha → `mocha <file>` — mocha runs in-process by default.
- *  - vitest → DEGRADE (null): vitest runs tests in a worker pool/fork and owns
- *            its own `--inspect-brk` on the worker, so `node --inspect-brk` on the
- *            CLI process would attach to the wrong process. Worker-inspector
- *            handling is a follow-up (same multi-process shape as js-debug).
+ *  - mocha → `mocha <file>` — mocha runs the source AS-IS in-process, so a CDP
+ *            file:line breakpoint binds (VERIFIED end-to-end).
+ *  - jest → DEGRADE (null): although `--runInBand` is single-process, jest
+ *            TRANSFORMS the source (babel-jest) and runs it via `vm`, so a CDP
+ *            `setBreakpointByUrl` on the original file URL does NOT bind to the
+ *            executing (transformed) module — the breakpoint never hits. (Real
+ *            e2e caught this: failure+static localize fine via the `●` parser,
+ *            but runtime capture fails.) Failure+static still work for jest;
+ *            sourcemap-aware runtime is a follow-up.
+ *  - vitest → DEGRADE (null): worker pool/fork owns its own `--inspect-brk`;
+ *            `node --inspect-brk` on the CLI attaches to the wrong process.
  *
  * Pure functions (no IO) so the routing is unit-testable without installing any
  * runner; the caller reads package.json + spawns.
@@ -44,11 +48,10 @@ export const nodeInspectArgv = (runner: JsRunner, node: string, file: string, po
   switch (runner) {
     case "node":
       return [node, brk, file]
-    case "jest":
-      // --runInBand ⇒ tests run in THIS process (no workers) → inspector attaches.
-      return [node, brk, "node_modules/.bin/jest", "--runInBand", file]
     case "mocha":
       return [node, brk, "node_modules/.bin/mocha", file]
+    case "jest":
+      return null // single-process but TRANSFORMS source ⇒ file:line bp won't bind
     case "vitest":
       return null // worker-pool / owns its own inspector — follow-up
   }

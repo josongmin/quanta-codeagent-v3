@@ -40,7 +40,7 @@ class NullStream implements StreamPort {
   }
 }
 
-const harness = async (root: string, order: string[]) => {
+const harness = async (root: string, order: string[], baseExtras: object = {}) => {
   const client = {
     stops: 0,
     stop: async (): Promise<void> => {
@@ -59,6 +59,7 @@ const harness = async (root: string, order: string[]) => {
       cwd: root,
       maxTurns: 4,
       signal: new AbortController().signal,
+      ...baseExtras,
     },
     history: [],
     state: undefined,
@@ -98,6 +99,66 @@ describe("MCP clients are session-scoped, not per-turn", () => {
       expect(client.stops).toBe(1)
       // Stop-then-shutdown ordering: the bootstrap shutdown hook (which closes
       // the egress proxy the clients' children ride) runs AFTER the fleet stop.
+      expect(order).toEqual(["client.stop", "options.shutdown"])
+    } finally {
+      await runtime.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("[T1] teardown ordering: memory drain is AWAITED before sqlite dispose, fleet stop before shutdown", async () => {
+    const root = mkdtempSync(join(tmpdir(), "mcp-session-teardown-order-"))
+    const order: string[] = []
+    // An ASYNC drain that yields twice before recording — if close() fires
+    // dispose without awaiting drain (the in-flight-distill-on-closed-handle
+    // bug this ordering exists for), "dispose" lands first and the assert reds.
+    const { runtime, session } = await harness(root, order, {
+      memoryAutoDrain: async () => {
+        await new Promise((r) => setTimeout(r, 10))
+        order.push("memory.drain")
+      },
+      memoryAutoDispose: () => {
+        order.push("memory.dispose")
+      },
+      dreamOnSessionEnd: async () => {
+        order.push("dream")
+      },
+    })
+    try {
+      await session.input.append("one turn")
+      await session.turn.run()
+      await session.close()
+      expect(order).toEqual([
+        "memory.drain",
+        "memory.dispose",
+        "dream",
+        "client.stop",
+        "options.shutdown",
+      ])
+    } finally {
+      await runtime.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("[F1] two sessions from ONE facade: first close leaves the shared fleet alive; LAST close tears down once", async () => {
+    const root = mkdtempSync(join(tmpdir(), "mcp-session-fleet-share-"))
+    const order: string[] = []
+    const { client, runtime, session } = await harness(root, order)
+    try {
+      const sibling = await runtime.createSession({ cwd: root, permissionMode: "acceptEdits" })
+      await session.input.append("session A turn")
+      await session.turn.run()
+      await session.close()
+      // Session B still rides the shared fleet — A's close must NOT stop it.
+      expect(client.stops).toBe(0)
+      expect(order).toEqual([])
+
+      await sibling.input.append("session B turn")
+      await sibling.turn.run()
+      await sibling.close()
+      // Last close owns the shared teardown, exactly once.
+      expect(client.stops).toBe(1)
       expect(order).toEqual(["client.stop", "options.shutdown"])
     } finally {
       await runtime.close()

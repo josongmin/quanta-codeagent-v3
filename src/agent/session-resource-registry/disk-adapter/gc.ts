@@ -175,6 +175,16 @@ export interface SweepTestHooks {
  *  lock) succeed instantly via the holder-map re-entrancy. */
 const GC_TRUNCATE_LOCK_TIMEOUT_MS = 0
 
+/** Hard overshoot multiple for the tail-read fail-closed ESCAPE VALVE
+ *  (rounds-2/3 adversarial audit). A TRANSIENT tail re-read failure self-heals
+ *  — defer to the next sweep. But a PERSISTENT failure (fd exhaustion / EIO)
+ *  while a live writer keeps O_APPENDing would abort every sweep forever and
+ *  SILENTLY DEFEAT the size cap (unbounded growth). Once the file blows past
+ *  `budget × this`, force-truncate from the under-lock snapshot — dropping ONLY
+ *  the tail we already could not read (the lesser evil vs unbounded growth).
+ *  4× tolerates transient blips while bounding worst-case growth. */
+const GC_TAILREAD_FAILURE_HARD_CAP_MULTIPLE = 4
+
 /** The registry only mints session dirs through `safeId` (`[A-Za-z0-9_-]`
  *  allowlist — see disk-store/file-lock). An entry outside that alphabet
  *  is a foreign directory whose lock path would diverge (safeId maps it
@@ -320,8 +330,17 @@ const truncateFileAtomic = async (
   // possible but unreadable) ⇒ ABORT the truncate. Leaving the original
   // file intact lets the next sweep retry — clobbering it via the rename
   // would SILENTLY DROP the concurrently-appended rows we just failed to
-  // read (jun-10 silent-failure audit D2).
-  if (!tailRes.ok) return false
+  // read (jun-10 silent-failure audit D2). BUT bound it: if the failure is
+  // PERSISTENT and a live writer keeps appending, an unconditional abort would
+  // grow the file without bound and silently defeat the cap (rounds-2/3 audit).
+  // Escape valve — once the file blows past `budget × HARD_CAP_MULTIPLE`,
+  // force-truncate from the snapshot (dropping only the tail we could not read).
+  // The force-truncate lands in `SweepResult.truncated`, so it is observable.
+  if (!tailRes.ok) {
+    const size = await fileSizeSafe(path)
+    if (size <= budget * GC_TAILREAD_FAILURE_HARD_CAP_MULTIPLE) return false
+    return writeAtomicTruncateSafe(path, kept, hooks?.beforeRenameForTest)
+  }
   const next = joinRetainedWithTail(kept, tailRes.tail)
   return writeAtomicTruncateSafe(path, next, hooks?.beforeRenameForTest)
 }

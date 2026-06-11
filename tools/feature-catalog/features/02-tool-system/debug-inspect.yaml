@@ -4,11 +4,11 @@ section: 2
 subsystem: tool-system
 order: 60
 maturity: L3
-status: opt-in
+status: stable
 ui_surfaces: [cli, web]
-monitoring: "tool_result output (stopped location / call stack / locals / evaluated expr), or ok:false on spawn/protocol/timeout fault"
+monitoring: integrated
 modes: [n-a]
-configurable: "QUANTA_DEBUG_TOOLS (strict opt-in) → DefaultToolPorts.debugTools"
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude-code", "high-risk", "default-off", "code-execution"]
 depends_on: []
@@ -43,9 +43,18 @@ purpose: |
   to the stop timeout).
 tcp_transport: "jun-10 — DebugAdapterPort gained a TCP carrier (spawnTcpDebugAdapter/connectTcpTransport) for socket-based adapters (dlv-dap, vscode-js-debug); same DapClient/inspectViaDap. Real-verified via dlv-dap Go runtime."
 verified_real: "2026-06-10 — TWO real adapters, language-agnostic. (1) debugpy 1.8.21 (Python): 15 e2e incl multibyte-byte-accuracy, deep stack, conditional bp, multi-file cross-file stack, abort-mid-run, never-hit→exited. (2) lldb-dap (C via clang -g): 3 e2e (stack add→main, locals, conditional loop bp). Caught & fixed: launch-sequencing DEADLOCK (debugpy defers launch resp until configurationDone) + terminate-at-breakpoint HANG (lldb-dap never answers terminate while stopped) + presentation-pseudo-var noise."
-tests:
-  - tests/unit/tool/debug/dap-codec.test.ts
-  - tests/unit/tool/debug/dap-client.test.ts
-  - tests/unit/tool/debug/dap-inspect-driver-hellgate.test.ts
-  - tests/unit/tool/debug/debug-inspect-tool-e2e-hellgate.test.ts
-  - tests/unit/tool/debug/debugpy-real-e2e.test.ts  # real debugpy (auto-skip if absent)
+evidence:
+  code:
+    - src/tool/debug/tool.ts
+    - src/tool/debug/inspect-driver.ts
+    - src/tool/debug/dap-client.ts
+    - src/tool/debug/dap-codec.ts
+    - src/tool/debug/cdp-inspect.ts
+  adrs: [531]
+  tests:
+    unit:
+      - tests/unit/tool/debug/dap-codec.test.ts
+      - tests/unit/tool/debug/dap-client.test.ts
+      - tests/unit/tool/debug/dap-inspect-driver-hellgate.test.ts
+      - tests/unit/tool/debug/debug-inspect-tool-e2e-hellgate.test.ts
+      - tests/unit/tool/debug/debugpy-real-e2e.test.ts

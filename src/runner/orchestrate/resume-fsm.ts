@@ -43,6 +43,12 @@ export interface ResolveResumeInput {
    *  unconditionally regardless of this hook). Byte-identical default-OFF:
    *  CLI passes the hook in its shim so the log line is preserved verbatim. */
   onSessionMinted?: (id: string) => void
+  /** Surface opt-in to suppress the `session.id_mode.on` structured echo. The
+   *  CLI sets this when it renders its interactive welcome banner (which already
+   *  shows the session id) so the raw JSONL line doesn't clutter the human
+   *  terminal. Absent / false ⇒ the event fires unconditionally (default —
+   *  pipes, CI, Web/Tauri, and any collector reading stderr stay byte-identical). */
+  quietIdModeLog?: boolean
 }
 
 /** Resolved session-startup state. `idMeta` is `undefined` when the run is in
@@ -93,6 +99,11 @@ const reconcileLoadedHistory = (messages: readonly Message[]): Message[] => {
  *  - `--new-session [--title t]` → V2 id-mode (fresh id, stub saved) */
 export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeResolution> => {
   const { resume, newSession, title, cwd, initialSessionId, slog, onSessionMinted } = input
+  // Surface opt-in (CLI interactive banner) to keep the structured id-mode echo
+  // off the human terminal. Default false ⇒ fires unconditionally (byte-identical).
+  const emitIdMode = (fields: Record<string, unknown>): void => {
+    if (input.quietIdModeLog !== true) slog.info("session.id_mode.on", fields)
+  }
   // HIGH-5: `--new-session --resume <id>` previously silently ignored
   // `--new-session` because the `if (resume !== undefined)` branch returned
   // first. Reject the combination up front so the caller can exit 1 with a
@@ -142,7 +153,7 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
         conflictError: undefined,
       }
     }
-    slog.info("session.id_mode.on", {
+    emitIdMode({
       id: saved.meta.id,
       title: saved.meta.title,
       cwd: saved.meta.cwd,
@@ -170,7 +181,7 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
     }
     await saveSessionById(idMeta, { reason: "fresh", turns: 0, messages: [] })
     onSessionMinted?.(newId)
-    slog.info("session.id_mode.on", {
+    emitIdMode({
       id: idMeta.id,
       title: idMeta.title,
       cwd: idMeta.cwd,
@@ -199,7 +210,7 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
   }
   await saveSessionById(autoMeta, { reason: "fresh", turns: 0, messages: [] })
   onSessionMinted?.(autoId)
-  slog.info("session.id_mode.on", {
+  emitIdMode({
     id: autoMeta.id,
     title: autoMeta.title,
     cwd: autoMeta.cwd,

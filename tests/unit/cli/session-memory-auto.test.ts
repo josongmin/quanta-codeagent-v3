@@ -202,6 +202,40 @@ describe("session-memory-auto", () => {
     out.dispose()
   })
 
+  test("lane: drain that actually waits announces ONCE via logWarn; idle drain stays silent", async () => {
+    const llm = { stream: async function* () {} } as never
+    const warns: string[] = []
+    const out = await buildSessionMemoryAutoWires({
+      env: {},
+      llm,
+      sessionId: "sess-lane-notice",
+      homeDir: tempHome,
+      logWarn: (msg) => warns.push(msg),
+    })
+    const defer = out?.memoryConsolidator.defer
+    if (out === undefined || defer === undefined) throw new Error("lane not wired")
+
+    // Idle drain: no in-flight work ⇒ no notice (a notice here would cry wolf
+    // on every clean exit).
+    await out.drain()
+    expect(warns.filter((w) => w.includes("memory consolidation"))).toEqual([])
+
+    let release = (): void => undefined
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    defer(async () => {
+      await gate
+    })
+    const drainP = out.drain()
+    // The notice fires as soon as drain commits to waiting — before release.
+    expect(warns.filter((w) => w.includes("memory consolidation"))).toHaveLength(1)
+    release()
+    await drainP
+    expect(warns.filter((w) => w.includes("memory consolidation"))).toHaveLength(1)
+    out.dispose()
+  })
+
   test("lane: a rejecting run does not wedge the lane (drain resolves; later defers still run)", async () => {
     const llm = { stream: async function* () {} } as never
     const out = await buildSessionMemoryAutoWires({

@@ -294,7 +294,11 @@ describe("gc-truncate hellgate §M — unreadable tail re-read ⇒ FAIL CLOSED (
   test("transient fs failure on the tail re-read aborts the truncate, file byte-identical", async () => {
     const root = await tempStorage()
     const now = 100_000_000
-    const rows = Array.from({ length: 100 }, (_, i) => fixedRow(i))
+    // Over the per-file budget (forces a truncation attempt) but UNDER the
+    // fail-closed escape valve's hard cap (budget × 4 = 1000B for maxBytes 500),
+    // so a TRANSIENT read blip defers cleanly instead of tripping the
+    // force-truncate (§M2 covers the egregiously-oversize force path).
+    const rows = Array.from({ length: 10 }, (_, i) => fixedRow(i))
     const body = `${rows.join("\n")}\n`
     const dir = await writeSession(root, "tail-unreadable", { lastTouched: now, eventsBody: body })
     const eventsPath = join(dir, "events.jsonl")
@@ -340,6 +344,59 @@ describe("gc-truncate hellgate §M — unreadable tail re-read ⇒ FAIL CLOSED (
     expect(lines.filter((l) => l === injected).length).toBe(1)
     expect(lines[lines.length - 1]).toBe(injected)
     // No torn rewrite: no orphaned temp litter, lock released.
+    const entries = await readdir(dir)
+    expect(entries.filter((e) => e.includes(".tmp-"))).toEqual([])
+    expect(entries.includes(".lock")).toBe(false)
+  })
+})
+
+describe("gc-truncate hellgate §M2 — PERSISTENT unreadable tail ⇒ BOUNDED escape (no unbounded growth)", () => {
+  // Rounds-2/3 adversarial audit: an unconditional fail-closed abort, under a
+  // PERSISTENT tail-read failure + a live appender, would defer EVERY sweep and
+  // grow the file without bound — silently defeating the size cap. The escape
+  // valve force-truncates from the snapshot once the file blows past
+  // budget × HARD_CAP_MULTIPLE, dropping ONLY the tail it could not read (the
+  // lesser evil vs unbounded growth) and surfacing it via SweepResult.truncated.
+  test("egregiously-oversize file + unreadable tail ⇒ force-truncate, bounded, observable", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    // ~7KB events file ≫ the escape hard cap (budget 250 × 4 = 1000B).
+    const rows = Array.from({ length: 100 }, (_, i) => fixedRow(i))
+    const body = `${rows.join("\n")}\n`
+    const dir = await writeSession(root, "tail-persistent-fail", { lastTouched: now, eventsBody: body })
+    const eventsPath = join(dir, "events.jsonl")
+    const before = Buffer.byteLength(await readFile(eventsPath, "utf8"), "utf8")
+    const injected = JSON.stringify({ kind: "context_update", field: "cwd", prev: "x", next: "y", at: 777_777 })
+    let tailFailed = 0
+    const res = await sweepDiskRegistry(
+      { storageDir: root, ttlMs: DEFAULT_TTL_MS, maxSessionBytes: 500, now: () => now },
+      {
+        // Land a row past the snapshot so the tail re-read is actually attempted...
+        afterReadForTest: async () => {
+          await appendFile(eventsPath, `${injected}\n`, "utf8")
+        },
+        // ...then fail it (persistent). The file is ≫ the hard cap, so instead of
+        // deferring forever the escape valve force-truncates (dropping this
+        // unreadable row — the lesser evil vs unbounded growth).
+        failTailReadForTest: async () => {
+          tailFailed += 1
+          throw new Error("simulated PERSISTENT fs failure on tail re-read")
+        },
+      },
+    )
+    expect(tailFailed).toBe(1)
+    // The unreadable tail row was dropped (documented bounded degradation).
+    expect((await readFile(eventsPath, "utf8")).includes(injected)).toBe(false)
+    // BOUNDED + OBSERVABLE: the force-truncate landed (not a silent no-op defer).
+    expect(res.truncated).toBe(1)
+    const after = await readFile(eventsPath, "utf8")
+    const afterBytes = Buffer.byteLength(after, "utf8")
+    // The cap is enforced — the file shrank well below its pre-sweep size and
+    // within the events budget (half of 500), not left to grow unbounded.
+    expect(afterBytes).toBeLessThan(before)
+    expect(afterBytes).toBeLessThanOrEqual(250)
+    // No torn rewrite: every retained line still parses, no temp litter, lock freed.
+    for (const line of after.split("\n").slice(0, -1)) expect(() => JSON.parse(line)).not.toThrow()
     const entries = await readdir(dir)
     expect(entries.filter((e) => e.includes(".tmp-"))).toEqual([])
     expect(entries.includes(".lock")).toBe(false)

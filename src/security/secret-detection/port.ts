@@ -21,6 +21,7 @@
  * and node fs/path/os primitives (for `scanFile`). No other quanta slice is
  * touched — keeps the port re-usable in a Tauri sidecar or a worker thread.
  */
+import { errMessage } from "@/shared"
 
 /**
  * Closed enum of detected secret formats. Adding a kind without wiring a
@@ -108,8 +109,7 @@ export class SecretScanReadError extends Error {
     options?: { cause?: unknown },
   ) {
     const cause = options?.cause
-    const causeMsg = cause instanceof Error ? cause.message : String(cause)
-    super(`secret scan failed: cannot read ${path} (${causeMsg})`, options)
+    super(`secret scan failed: cannot read ${path} (${errMessage(cause)})`, options)
     this.name = "SecretScanReadError"
   }
 }
