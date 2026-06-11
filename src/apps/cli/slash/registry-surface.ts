@@ -28,14 +28,13 @@ import { errMessage, logger, runtimeConfig } from "@/shared"
 import { renderAgentFleet } from "../agents-fleet-panel"
 import { backgroundCmd } from "../background-cmd"
 import { formatBranchesPanel } from "../branch-search-progress"
-import { readCliKnob } from "../cli-knobs-accessor"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
 import { forkCheckpointCmd } from "../fork-checkpoint-cmd"
 import { runHelpRender } from "../help-render"
 import { historyCmd } from "../history-cmd"
 import { parseSnoozeDuration } from "../idle-monitor"
-import { buildInitCmd } from "../init-scaffold"
+import { buildInitCmd, isInitSlashEnabled } from "../init-scaffold"
 import { inspectCmd } from "../inspect-cmd"
 import { loginCmd } from "../login-cmd"
 import { buildLogoutCmd } from "../logout-cmd"
@@ -824,6 +823,53 @@ const briefCmd: SlashCommand = {
   },
 }
 
+/** #13 — `/mode` interactive permission-posture switch (RFC-08 mode-cycle, the
+ *  non-keyboard counterpart to shift+tab). No args ⇒ show the active rung + the
+ *  selectable list; one named arg ⇒ jump to it. The wire mutates the SAME
+ *  `ModeCycleStore` the session loop projects into `permissionModeState` before
+ *  each turn, so the new posture applies on the NEXT submitted prompt. `bypass`
+ *  is reachable without a second confirm — parity with shift+tab's 4-rung cycle,
+ *  whose bypass rung the user already opted into unconfirmed. */
+const modeCmd: SlashCommand = {
+  name: "/mode",
+  describe: "Show or switch permission posture (default|acceptEdits|plan|bypass)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.mode === undefined) {
+      ctx.out("/mode: not wired in this surface\n")
+      return 0
+    }
+    const { get, set, list } = ctx.mode
+    if (args.length === 0) {
+      const cur = get()
+      ctx.out(`🔐 permission mode: ${cur}\n`)
+      for (const key of list()) ctx.out(` ${key === cur ? "*" : " "} ${key}\n`)
+      ctx.out("use: /mode <name>\n")
+      return 0
+    }
+    if (args.length > 1) {
+      ctx.err(`/mode: takes at most one argument; got ${args.length}\n`)
+      return 1
+    }
+    const arg = (args[0] as string).trim()
+    const result = set(arg)
+    if (result !== "ok") {
+      ctx.err(`/mode: unknown posture '${arg}'; known = ${result.known.join(", ")}\n`)
+      return 1
+    }
+    ctx.out(`🔐 permission mode: ${get()}\n`)
+    return 0
+  },
+  complete: (args, partial, ctx) => {
+    if (ctx.mode === undefined || args.length >= 1) return []
+    const seed = partial.toLowerCase()
+    return ctx.mode
+      .list()
+      .filter((k) => k.toLowerCase().startsWith(seed))
+      .map((k) => ({ value: k, kind: "argument" as const }))
+  },
+}
+
 /** Build the surface-layer registry. `helpRegistryLookup` is supplied by
  *  `slash-commands.ts` so `/help` reflects the LIVE concatenated registry
  *  (all three layers + any later spreads). The function form keeps the
@@ -871,11 +917,16 @@ export const buildSurfaceSlashCommands = (
   // Always in the registry; the command itself prints "not wired" + exit 0 when
   // `ctx.background` is absent (default-OFF byte-identical, parity with /agents).
   backgroundCmd,
-  // Ticket 16 — `/init` scaffolds AGENTS.md/CLAUDE.md from the repo. GATED (it
-  // WRITES to cwd): present ONLY when QUANTA_INIT_SLASH=on, so default-OFF it is
-  // absent from the registry entirely (byte-identical; the /init SKILL still owns
-  // the bare verb). The @/runner repo-map import lives inside init-scaffold.ts.
-  ...((readCliKnob("QUANTA_INIT_SLASH", "bool") ?? false) ? [buildInitCmd()] : []),
+  // #21 — `/init` scaffolds AGENTS.md/CLAUDE.md from the repo. CLI-surface
+  // DEFAULT-ON, opt-OUT: present UNLESS `QUANTA_INIT_SLASH` is explicitly
+  // disabled (`isInitSlashEnabled`, the rewind/dream idiom). Registration ≠
+  // execution — `/init` only WRITES on explicit invocation, so a visible verb is
+  // safe (matches Claude Code). R3 fix: the prior `readCliKnob(...) ?? false`
+  // was read at module-eval BEFORE index.ts's seed loop ran AND defaulted to the
+  // inventory `false`, so the command was unreachable; a default-ON env read is
+  // immune to that timing. Non-CLI surfaces never import this registry ⇒ absent
+  // there (the inventory keeps `default:false` as the runtime-config baseline).
+  ...(isInitSlashEnabled() ? [buildInitCmd()] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,
@@ -890,6 +941,8 @@ export const buildSurfaceSlashCommands = (
   focusChainCmd,
   effortCmd,
   briefCmd,
+  // #13 — `/mode` interactive posture switch (sibling of /effort + /brief).
+  modeCmd,
   inspectCmd,
   replayCmd,
   sessionCmd,

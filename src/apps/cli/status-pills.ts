@@ -73,6 +73,11 @@ export interface StatusPillsState {
   activeSkills?: { name: string; description?: string }[]
   sandboxMode?: SandboxMode
   rules?: RulesPillState
+  /** #15 — operator scriptable statusLine output (one rendered line from
+   *  `runStatusCommand`). Appended as the FAR-RIGHT segment when non-empty so
+   *  it renders ALONGSIDE the built-in pills rather than clobbering them.
+   *  Absent / empty ⇒ no segment (byte-identical to today). */
+  statusLine?: string
 }
 
 export interface StatusPills {
@@ -237,6 +242,11 @@ const composeLine = (state: StatusPillsState, flags: PillFlags): string => {
   pushIfNotEmpty(segs, left.join(" "))
   pushIfNotEmpty(segs, center.join(" "))
   pushIfNotEmpty(segs, right.join(" "))
+  // #15 — operator scriptable statusLine renders as the FAR-RIGHT segment,
+  // alongside (never clobbering) the built-in pills. Not pill-flag gated: its
+  // own upstream gate (`QUANTA_STATUS_LINE`) decides whether the value is ever
+  // set. Absent / empty ⇒ no segment (byte-identical to pre-#15).
+  pushIfNotEmpty(segs, state.statusLine ?? "")
   return segs.join(sep)
 }
 

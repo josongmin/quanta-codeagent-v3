@@ -9,6 +9,7 @@ import { OpenAIResponsesAdapter } from "./adapters/openai-responses"
 import { resolveContext1M } from "./context-1m"
 import type { CredentialSource } from "./credential-helper"
 import type { LLMPort } from "./ports"
+import { jsonlReplayStore, replayLlmPort } from "./replay"
 import { type BedrockAdapterOptions, BedrockProviderAdapter } from "./providers/bedrock-adapter"
 import type {
   LlmProvider,
@@ -404,6 +405,39 @@ const resolveApiKey = (
  *             baseURL when not passed explicitly. Passed by the composition
  *             root so the factory never reads `process.env` itself. */
 export const createLLM = (provider: Provider, opts: CreateLLMOptions, env: EnvLike): LLMPort => {
+  // jun-11 — DETERMINISTIC REPLAY seam (default-OFF). `QUANTA_LLM_REPLAY=<jsonl>`
+  // swaps the network adapter for a cassette player: every `stream()` returns the
+  // recorded `StreamEvent`s, no API key / no network. Enables turn-layer e2e
+  // (e.g. reasoning-display render, mid-turn behavior) + reproducible repro. The
+  // request→cassette hash is pinned to a constant so a hand-authored single-turn
+  // cassette (`{"id":"replay","events":[…]}`) matches without predicting a hash;
+  // `onMiss:"throw"` makes a stale/short cassette FAIL loud. Unset ⇒ byte-
+  // identical (no replay import side effect, the real adapter path below runs).
+  const replayPath = (env as { QUANTA_LLM_REPLAY?: string }).QUANTA_LLM_REPLAY
+  if (replayPath !== undefined && replayPath !== "") {
+    const inner = replayLlmPort({
+      store: jsonlReplayStore({ path: replayPath, hashRequest: () => "replay" }),
+      onMiss: "throw",
+    })
+    // Optional per-event delay (`QUANTA_LLM_REPLAY_DELAY_MS`, e2e only) to SUSTAIN
+    // the turn so a test can type a follow-up DURING it (mid-turn-capture e2e).
+    // Unset / ≤0 ⇒ instant (byte-identical to the bare replay port).
+    const delayMs = Number(
+      (env as { QUANTA_LLM_REPLAY_DELAY_MS?: string }).QUANTA_LLM_REPLAY_DELAY_MS,
+    )
+    if (Number.isFinite(delayMs) && delayMs > 0) {
+      return {
+        ...(inner.model !== undefined ? { model: inner.model } : {}),
+        async *stream(input) {
+          for await (const ev of inner.stream(input)) {
+            await new Promise((r) => setTimeout(r, delayMs))
+            yield ev
+          }
+        },
+      }
+    }
+    return inner
+  }
   // ChatGPT-OAuth has no env-var credential — short-circuit the api-key
   // resolution so MissingApiKeyError never fires for it. The adapter itself
   // reads the on-disk token bundle when it actually streams.

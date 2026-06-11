@@ -96,6 +96,13 @@ export type ReplSlashCtx = Partial<{
     readonly levels: readonly import("@/agent").EffortLevel[]
     readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
   }
+  /** #17 (C3) — `/brief` session-posture wire. Closes over the surface-owned
+   *  `BriefStore`; ORTHOGONAL to {@link effort}. Absent ⇒ `/brief` prints "not
+   *  wired in this surface". */
+  brief: {
+    readonly get: () => boolean
+    readonly set: (on: boolean) => void
+  }
   /** ADR-0291 — `/edit-plan` plan-edit wire. Wraps the surface-owned
    *  `PlanStore`; absent ⇒ slash prints "not wired in this surface". */
   planEdit: PlanEditPort
@@ -205,6 +212,15 @@ export interface BuildReplSlashCtxArgs {
     readonly set: (level: import("@/agent").EffortLevel) => void
     readonly levels: readonly import("@/agent").EffortLevel[]
     readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
+  }
+  /** #17 (C3) — `/brief` session-posture wire. `get` reads the surface-owned
+   *  `BriefStore`; `set` mutates it (the loop reads the SAME cell via
+   *  `AgentConfig.sessionBrief`). Optional so test/headless constructors that
+   *  predate the slot still compile; absent ⇒ `/brief` prints "not wired in this
+   *  surface" (byte-identical). The live REPL surface always wires it. */
+  brief?: {
+    readonly get: () => boolean
+    readonly set: (on: boolean) => void
   }
   /** ADR-0291 — `/edit-plan`: REPL surface owns the mutable text. When
    *  omitted, the slash prints "not wired in this surface". */
@@ -423,6 +439,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     inspect,
     replay,
     effort,
+    brief,
     contextUsage,
     taskRegistry,
   } = args
@@ -463,6 +480,10 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // Session-level reasoning-effort. Closes over the surface's EffortStore
     // (read on `/effort` no-arg) and pill (repainted on `/effort <level>`).
     effort,
+    // #17 (C3) — `/brief` posture wire over the surface's BriefStore (the loop
+    // reads the SAME cell via AgentConfig.sessionBrief). Presence-spread so an
+    // absent slot omits `/brief` (byte-identical "not wired").
+    ...(brief !== undefined ? { brief } : {}),
     // Track D — `/context` live segmented usage. Absent upstream getter ⇒ slot
     // omitted (default-OFF byte-identical; `/context` keeps its fallback).
     ...(contextUsage !== undefined ? { contextUsage } : {}),
@@ -482,6 +503,10 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
 const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.skills !== undefined ? { skills: s.skills } : {}),
   ...(s.idle !== undefined ? { idle: s.idle } : {}),
+  // #18 — expose the image queue on the contract ctx so `/paste` can enqueue a
+  // clipboard image (the SAME instance `/image` mutates). Absent ⇒ slot omitted
+  // ⇒ `/paste` degrades to the "save to disk + /image add" hint (byte-identical).
+  ...(s.imageQueue !== undefined ? { imageQueue: s.imageQueue } : {}),
   ...(s.rewindSession !== undefined ? { rewindSession: s.rewindSession } : {}),
   ...(s.mcp !== undefined ? { mcp: s.mcp } : {}),
   ...(s.cost !== undefined ? { cost: s.cost } : {}),
@@ -494,6 +519,7 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.inspect !== undefined ? { inspect: s.inspect } : {}),
   ...(s.replay !== undefined ? { replay: s.replay } : {}),
   ...(s.effort !== undefined ? { effort: s.effort } : {}),
+  ...(s.brief !== undefined ? { brief: s.brief } : {}),
   ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
   ...(s.agents !== undefined ? { agents: s.agents } : {}),
 })

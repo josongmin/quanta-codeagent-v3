@@ -32,6 +32,7 @@ import type { WebSearchProvider } from "@/tool/web"
 import type { ApprovalStateMachinePort } from "./approval-state-machine"
 import type { AutoBackgroundConfig } from "./auto-background"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
+import type { BriefStore } from "./brief"
 import type { BudgetMeter, TaskBudget } from "./budget"
 import type { BudgetLedger } from "./budget-ledger"
 import type { CapEnforcer } from "./cap-enforcer"
@@ -788,6 +789,26 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * override still wins when present.
    */
   sessionEffort?: () => EffortLevel | undefined
+  /**
+   * #17 (C3, jun-4-brief-mode RFC) — session-level brief-mode read accessor.
+   * Read once per turn by `assembleTurnContext` to splice {@link BRIEF_NOTICE}
+   * into the per-turn DYNAMIC `<system-reminder>` tail (never the cached
+   * prefix). A FUNCTION (mirrors {@link sessionEffort}) so a surface-owned
+   * `BriefStore` (`/brief` slash) can flip it across turns without
+   * re-assembling AgentConfig. Returning `undefined`/`false` ⇒ no notice
+   * (byte-identical default-OFF). ORTHOGONAL to `sessionEffort` — both compose.
+   */
+  sessionBrief?: () => boolean | undefined
+  /**
+   * #17 — backing {@link BriefStore} for the `set_brief` CONTROL-OP write path
+   * (`handleSubmissionControlOp` → {@link applyBriefTransition}). The SAME store
+   * `sessionBrief` reads, threaded so a host/model-initiated `set_brief`
+   * submission mutates the live posture the next turn observes. Absent ⇒ the
+   * control-op is observed-and-ignored (byte-identical; the parent turn keeps
+   * running). The `/brief` slash writes the store directly on the surface, so
+   * this is ONLY needed for the submission-envelope path.
+   */
+  briefStore?: BriefStore
   /**
    * ADR-0417 (absorption gap A1) — prompt-keyword + tool-failure effort
    * escalation classifier. Session-scoped advisory: it watches user prompts

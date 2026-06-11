@@ -1,12 +1,13 @@
 import type { AtCandidateProvider } from "../at-autocomplete"
-import type { IdleMonitor } from "../idle-monitor"
+import { DEFAULT_IDLE_MS, type IdleMonitor } from "../idle-monitor"
 import type { ImageQueue } from "../image-queue"
 import type { KeybindingMap } from "../keybindings/types"
 import type { NotificationPort } from "../notify"
 import type { PromptHistory } from "../prompt-history"
 import { AbortError, readLine } from "../raw-line-reader"
 import type { ExternalEditorPort } from "../raw-line-reader-editor"
-import type { RejectCounter } from "../reject-counter"
+import { DEFAULT_THRESHOLD, type RejectCounter } from "../reject-counter"
+import { idleBanner, rejectExitBanner } from "../repl-banners"
 import { describeSlashCommand, slashCompleter } from "../slash-commands"
 import type { StatusBar } from "../status-bar"
 import { renderInboxPreamble, type TextInbox } from "../text-inbox"
@@ -46,6 +47,12 @@ export interface PromptPipelineUxOpts {
    *  from the `QUANTA_PASTE_BURST` knob; absent ⇒ paste echoes inline
    *  (byte-identical). */
   readonly pasteBurst?: { readonly minChars: number }
+  /** #10 (jun-11) — bracketed-paste mode. When `true`, the raw-line reader
+   *  enables DECSET 2004 so a multi-line paste accumulates into one buffer
+   *  instead of submitting at its first embedded newline. Built at the host from
+   *  the `QUANTA_BRACKETED_PASTE` CLI gate; absent ⇒ byte-identical (a pasted
+   *  newline still early-submits, the legacy behavior). */
+  readonly bracketedPaste?: boolean
 }
 
 type PromptLineReader = (
@@ -130,6 +137,7 @@ const defaultPromptLineReader: PromptLineReader = async (
       ...(ux?.openEditor !== undefined ? { openEditor: ux.openEditor } : {}),
       ...(ux?.keybindings !== undefined ? { keybindings: ux.keybindings } : {}),
       ...(ux?.pasteBurst !== undefined ? { pasteBurst: ux.pasteBurst } : {}),
+      ...(ux?.bracketedPaste === true ? { bracketedPaste: true } : {}),
     })
     return raw.trim()
   } catch (e) {
@@ -299,7 +307,9 @@ const wrapPromptSourceWithIdleGate = (args: {
       return
     }
     if (idle.isIdle()) {
-      statusBar.transient("[idle 60s — auto-paused. type or /resume]", 3000)
+      // #22 — interpolate the RESOLVED idle threshold (not a hardcoded "60s")
+      // so the banner number matches the gate the monitor actually enforces.
+      statusBar.transient(idleBanner(idle.thresholdMs ?? DEFAULT_IDLE_MS), 3000)
       // RFC-09 (A) — input-needed notify. The adapter latches so a long idle
       // wait fires exactly ONCE; `markActive` on the next accepted prompt
       // resets the latch. Absent ⇒ no-op (byte-identical).
@@ -308,7 +318,8 @@ const wrapPromptSourceWithIdleGate = (args: {
   }
   const readOneGated = async (signal?: AbortSignal): Promise<CliPromptInput | null | undefined> => {
     if (rejects.shouldAutoExit()) {
-      process.stderr.write("\n[20 consecutive denials — exiting. To re-enable, restart quanta]\n")
+      // #22 — interpolate the RESOLVED reject limit (not a hardcoded "20").
+      process.stderr.write(rejectExitBanner(rejects.limit ?? DEFAULT_THRESHOLD))
       return null
     }
     paintGateBanners()

@@ -12,7 +12,15 @@ import type {
 } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message, ResponsesContinuationStore } from "@/llm"
 import type { CrossSessionDreamTrigger } from "@/memory"
-import { inferReviewKind, isPermissionMode, reasonCodeFor, type ToolAction } from "@/permission"
+import {
+  // #20 — prefix-aware session grants ("always allow `<program> …` this session").
+  actionMatchesPrefixGrant,
+  derivePrefixGrantKey,
+  inferReviewKind,
+  isPermissionMode,
+  reasonCodeFor,
+  type ToolAction,
+} from "@/permission"
 import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
 import { wireInteractiveKnobs } from "@/runner/assemble"
 import type {
@@ -251,6 +259,13 @@ type RuntimeBootstrapOverlay = {
    *  slot omitted (default-OFF, byte-identical: tools unregistered, bash/edit cwd
    *  unchanged). */
   readonly activeWorktreeSlot?: AgentConfig["activeWorktreeSlot"]
+  /** #20 (durable prefix grants) — persistent trust-scope registry + projectKey.
+   *  When set (the comp-root wires it behind `QUANTA_TRUST_SCOPE`), the base
+   *  carries `trustScope` so the admissibility gate's ask-branch consults
+   *  `hasGrant` (a durable "always allow `git …`" grant ask-skips matching
+   *  commands across sessions). Absent ⇒ slot omitted (default-OFF,
+   *  byte-identical: the gate's `trustScopeGrants` returns false). */
+  readonly trustScope?: AgentConfig["trustScope"]
 }
 
 interface RuntimeBootstrapHelpers {
@@ -509,6 +524,10 @@ const buildBootstrapBaseShape = (
     ...whenDefined("admissibility", args.overlay?.admissibility),
     ...whenDefined("shellSnapshot", args.overlay?.shellSnapshot),
     ...whenDefined("networkProxy", args.overlay?.networkProxy),
+    // #20 — lift the persistent trust-scope registry onto the base so the
+    // per-turn AgentConfig carries `trustScope` and the gate consults durable
+    // grants. Absent ⇒ omitted (default-OFF, byte-identical).
+    ...whenDefined("trustScope", args.overlay?.trustScope),
     // F2 (round-2) — lift the host-wired named-agent resolver onto the base so
     // the per-turn `assembleAgentConfig` spread carries it to the SubagentRunner.
     ...whenDefined("namedAgentResolver", args.overlay?.namedAgentResolver),
@@ -522,6 +541,14 @@ const buildBootstrapBaseShape = (
     // loop's first-turn title branch is dead (byte-identical default-OFF).
     ...whenDefined("autoTitlePort", args.boot.autoTitlePort),
     sessionEffort: () => args.boot.effortStore.get(),
+    // #17 (C3) — brief-mode posture. The read accessor (consumed per turn by
+    // `assembleTurnContext`) and the backing store (for the `set_brief`
+    // control-op write path) both project from the SAME bootstrap `briefStore`,
+    // so a `/brief` slash write and a `set_brief` submission converge on one
+    // cell. Seeded from `QUANTA_BRIEF`; default-OFF ⇒ getter yields false ⇒
+    // byte-identical (no BRIEF_NOTICE spliced).
+    sessionBrief: () => args.boot.briefStore.get(),
+    briefStore: args.boot.briefStore,
   })
 }
 
@@ -885,6 +912,45 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
   // is never granted (fail closed). Session-host lifetime (this controller is
   // minted once per session).
   const sessionGrants = new Set<string>()
+  // #20 — PREFIX session grants ("always allow `<program> …` this session"). A
+  // distinct, MORE conservative store than `sessionGrants`: keyed by the program
+  // token (`bash|git`), matched by token-boundary + tool, and ONLY ever covers a
+  // SINGLE SIMPLE command (a chained/complex command derives no key ⇒ re-prompts,
+  // see `@/permission/session-grant-prefix`). Minted ONLY on the operator's
+  // explicit `session_prefix` verb — never on a plain approve.
+  const sessionPrefixGrants = new Set<string>()
+
+  /** True iff `actionKey` rides a standing grant — an EXACT session grant for
+   *  this key, OR a PREFIX grant whose program token covers this (simple)
+   *  command. A `SHELL_EXTRACT_FAILED` key is checked by the callers before this
+   *  (never granted). */
+  const hasStandingGrant = (actionKey: string): boolean =>
+    sessionGrants.has(actionKey) || actionMatchesPrefixGrant(actionKey, sessionPrefixGrants)
+
+  /** Mint the operator's chosen standing grant. `session` adds the EXACT key.
+   *  `session_prefix` adds a safe program-token PREFIX key when the command is a
+   *  single simple invocation; when no safe prefix exists (chained/complex /
+   *  non-shell command) it DEGRADES to the exact key — never widening beyond
+   *  what is safe, and never silently granting nothing. */
+  const mintStandingGrant = (actionKey: string, scope: "session" | "session_prefix"): void => {
+    if (scope === "session") {
+      sessionGrants.add(actionKey)
+      return
+    }
+    const prefixKey = derivePrefixGrantKey(actionKey)
+    if (prefixKey !== null) sessionPrefixGrants.add(prefixKey)
+    else sessionGrants.add(actionKey)
+  }
+
+  /** The explicit standing-grant scope the operator chose on an ALLOW decision,
+   *  or `undefined` for any other shape. Centralised so the inline + deferred
+   *  paths read consent identically. */
+  const chosenGrantScope = (raw: unknown): "session" | "session_prefix" | undefined => {
+    if (typeof raw !== "object" || raw === null) return undefined
+    if ((raw as { decision?: unknown }).decision !== "allow") return undefined
+    const scope = (raw as { scope?: unknown }).scope
+    return scope === "session" || scope === "session_prefix" ? scope : undefined
+  }
 
   /** Claim AT MOST ONE unclaimed lease whose `actionKey` matches. The lookup +
    *  delete is synchronous (no `await` between find and consume) so two
@@ -913,7 +979,9 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
     const leased = claimLease(actionKey)
     if (leased !== false) return leased
     // Standing session grant (explicit operator "always" verb) — non-consuming.
-    if (actionKey !== SHELL_EXTRACT_FAILED && sessionGrants.has(actionKey)) return true
+    // #20 — also rides a PREFIX grant ("always allow `<program> …`") when this
+    // simple command's program token was prefix-granted earlier this session.
+    if (actionKey !== SHELL_EXTRACT_FAILED && hasStandingGrant(actionKey)) return true
 
     // Inline-interactive path: a live operator is bound to this scope — ask
     // them NOW, at the gate, and hand the (possibly rich) decision straight
@@ -926,16 +994,14 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         // minted the lease/grant this very key needs (the "[a]lways" fan-out).
         const leasedNow = claimLease(actionKey)
         if (leasedNow !== false) return leasedNow
-        if (actionKey !== SHELL_EXTRACT_FAILED && sessionGrants.has(actionKey)) return true
+        if (actionKey !== SHELL_EXTRACT_FAILED && hasStandingGrant(actionKey)) return true
         const raw = await surface(action)
-        if (
-          actionKey !== SHELL_EXTRACT_FAILED &&
-          typeof raw === "object" &&
-          raw !== null &&
-          (raw as { decision?: unknown }).decision === "allow" &&
-          (raw as { scope?: unknown }).scope === "session"
-        ) {
-          sessionGrants.add(actionKey)
+        // #20 — mint the operator's standing grant: `session` (exact key) or
+        // `session_prefix` (safe program-token prefix). A non-grant answer mints
+        // nothing (byte-identical to the pre-#20 deny/once path).
+        const scope = chosenGrantScope(raw)
+        if (actionKey !== SHELL_EXTRACT_FAILED && scope !== undefined) {
+          mintStandingGrant(actionKey, scope)
         }
         return raw
       }
@@ -1008,7 +1074,8 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
     resolveApproval: (
       approvalId: string,
       decision: "approve" | "deny",
-      opts?: { readonly scope?: "once" | "session"; readonly steer?: string },
+      // #20 — `session_prefix` widens the deferred approve scope (prefix grant).
+      opts?: { readonly scope?: "once" | "session" | "session_prefix"; readonly steer?: string },
     ): void => {
       const record = pending.get(approvalId)
       if (record === undefined) return
@@ -1039,8 +1106,15 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         // tool-level never-ask-again. Non-grantable (shell-extract-failed)
         // records never stand (fail closed). Same consent semantics as the
         // inline path — the grant exists only on the operator's explicit verb.
-        if (!isEscalation && opts?.scope === "session" && record.grantable) {
-          sessionGrants.add(record.actionKey)
+        // #20 — also accept the `session_prefix` verb on the deferred path so a
+        // web card / CLI fallback can mint a standing prefix grant once instead
+        // of paying the abort+re-run round-trip per matching command.
+        if (
+          !isEscalation &&
+          record.grantable &&
+          (opts?.scope === "session" || opts?.scope === "session_prefix")
+        ) {
+          mintStandingGrant(record.actionKey, opts.scope)
         }
         return
       }

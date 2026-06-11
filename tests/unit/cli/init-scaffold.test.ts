@@ -9,6 +9,7 @@ import {
   detectCommands,
   INIT_AUTO_END,
   INIT_AUTO_START,
+  isInitSlashEnabled,
   scaffoldClaudeMd,
 } from "../../../src/apps/cli/init-scaffold"
 import { BUILTINS } from "../../../src/apps/cli/slash-commands"
@@ -289,19 +290,33 @@ describe("/init slash flows", () => {
 })
 
 // ── DEFAULT-OFF byte-identity ─────────────────────────────────────────────────
-describe("default-OFF byte-identity (QUANTA_INIT_SLASH)", () => {
-  test("gate unset ⇒ /init absent from registered BUILTINS", () => {
-    // The unit-test environment leaves QUANTA_INIT_SLASH unset, so the surface
-    // registry must NOT contain /init (byte-identical to before the ticket).
+describe("#21 — CLI-surface default-ON, opt-OUT (QUANTA_INIT_SLASH)", () => {
+  test("gate unset ⇒ /init PRESENT in registered BUILTINS (default-ON)", () => {
+    // R3 fix: the unit-test environment leaves QUANTA_INIT_SLASH unset, and the
+    // CLI surface now default-ONs `/init` (registration ≠ execution — it only
+    // writes on EXPLICIT invocation). Inverse of the prior default-OFF
+    // assertion; the BUILTINS sweep in slash-commands.test.ts lists /init
+    // explicitly, so the two stay in lockstep.
     expect(process.env.QUANTA_INIT_SLASH).toBeUndefined()
-    expect(BUILTINS.map((cmd) => cmd.name)).not.toContain("/init")
+    expect(BUILTINS.map((cmd) => cmd.name)).toContain("/init")
   })
 
-  test("red-on-injection: if /init were unconditionally registered, this guard fails", () => {
-    // This is the inverse invariant — the BUILTINS sweep in slash-commands.test.ts
-    // asserts the EXACT list; adding /init there without the gate would make this
-    // pass AND that sweep fail. Keeping them split proves the gate is load-bearing.
-    const names = BUILTINS.map((cmd) => cmd.name)
-    expect(names.filter((n) => n === "/init")).toHaveLength(0)
+  test("isInitSlashEnabled — PAIRED control: unset/empty/truthy ⇒ on, explicit-disable ⇒ off", () => {
+    // ON (present): unset, empty, and any non-disable token register the command.
+    expect(isInitSlashEnabled({})).toBe(true)
+    expect(isInitSlashEnabled({ QUANTA_INIT_SLASH: "" })).toBe(true)
+    expect(isInitSlashEnabled({ QUANTA_INIT_SLASH: "1" })).toBe(true)
+    expect(isInitSlashEnabled({ QUANTA_INIT_SLASH: "on" })).toBe(true)
+    // OFF (absent): the explicit opt-OUT vocabulary, case/space-insensitive.
+    for (const off of ["0", "false", "off", "no", " OFF ", "False"]) {
+      expect(isInitSlashEnabled({ QUANTA_INIT_SLASH: off })).toBe(false)
+    }
+  })
+
+  test("red-on-injection: the gate is load-bearing (explicit-disable removes it)", () => {
+    // If `isInitSlashEnabled` ignored its input (always-true), the disable arm
+    // would WRONGLY return true and this fails — proving the OFF path is wired,
+    // not vacuous.
+    expect(isInitSlashEnabled({ QUANTA_INIT_SLASH: "0" })).toBe(false)
   })
 })

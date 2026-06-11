@@ -97,6 +97,12 @@ export interface ModeCycleStore {
   current(): ModeCyclePosture
   /** Advance one rung (wrap-around) and return the new active posture. */
   cycle(): ModeCyclePosture
+  /** #13 — jump DIRECTLY to a posture by key (the `/mode <name>` slash path,
+   *  vs `cycle()`'s shift+tab rung-advance). Unknown key (defensive) ⇒ the
+   *  default rung. Returns the new active posture. The host's per-turn
+   *  `permissionModeState` projection reads `.current()` after the set, so the
+   *  jump applies on the NEXT submitted prompt — identical to the cycle path. */
+  set(key: ModeCyclePosture["key"]): ModeCyclePosture
 }
 
 /** Build a store seeded at `start` (default: the DEFAULT rung). Pure in-memory;
@@ -107,6 +113,10 @@ export const createModeCycleStore = (start: ModeCyclePosture = DEFAULT_POSTURE):
     current: () => active,
     cycle: () => {
       active = nextPosture(active.key)
+      return active
+    },
+    set: (key) => {
+      active = postureByKey(key)
       return active
     },
   }

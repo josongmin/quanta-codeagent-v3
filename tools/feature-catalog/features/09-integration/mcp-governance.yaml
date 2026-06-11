@@ -34,7 +34,17 @@ purpose: |
   Managed layer can set `allowManagedMcpServersOnly` so even a trusted repo
   cannot add servers. Every dropped server is slog'd (observable governance).
   Fail-soft: a resolution fault warns + falls back to legacy (availability).
-tests:
-  - tests/unit/config/mcp-governance-filter.test.ts
-  - tests/unit/config/mcp-governance-merge-hellgate.test.ts
-  - tests/unit/mcp-governance-live-wire-hellgate.test.ts
+config_refs:
+  env: [QUANTA_CENTRAL_CONFIG]
+evidence:
+  code:
+    - src/config/mcp-governance.ts
+    - src/apps/cli/internal.ts
+  adrs: [530]
+  tests:
+    unit:
+      - tests/unit/config/mcp-governance-filter.test.ts
+      - tests/unit/config/mcp-governance-merge-hellgate.test.ts
+      - tests/unit/mcp-governance-live-wire-hellgate.test.ts
+    integration: []
+    contract: []

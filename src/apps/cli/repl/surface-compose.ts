@@ -69,6 +69,7 @@ import type { MemorySlashState } from "../memory-cmd"
 import {
   createModeCycleStore,
   formatPostureMeta,
+  MODE_CYCLE,
   type ModeCycleStore,
   modeCycleEnabled,
 } from "../mode-cycle"
@@ -133,6 +134,9 @@ export interface PromptUxOpts {
    *  `QUANTA_PASTE_BURST` is a positive integer (read via `runtimeConfig`).
    *  Absent ⇒ paste echoes inline (byte-identical). */
   readonly pasteBurst?: { readonly minChars: number }
+  /** #10 (jun-11) — bracketed-paste mode. Present iff `QUANTA_BRACKETED_PASTE`
+   *  is on (CLI-default-ON). Absent ⇒ byte-identical (pasted newline early-submits). */
+  readonly bracketedPaste?: boolean
 }
 
 /** Opt-in env gate for this surface's feature knobs (QUANTA_WORKING_STATE /
@@ -231,9 +235,14 @@ const renderRetryEvent = (ev: StreamEvent): void => {
 const buildModeCycle = (
   env: NodeJS.ProcessEnv,
   onPosture?: (agentMode: AgentMode) => void,
+  // #13 — when the surface already built a mode-cycle store (so `/mode` mutates
+  // the SAME instance the shift+tab pill + session-loop projection read), reuse
+  // it instead of minting a second one (two stores would diverge). Absent ⇒
+  // create one locally (legacy path for callers without the shared store).
+  sharedStore?: ModeCycleStore,
 ): Pick<PromptUxOpts, "modeCycle" | "modeMeta" | "onCycleMode"> => {
   if (!modeCycleEnabled(env)) return {}
-  const store = createModeCycleStore()
+  const store = sharedStore ?? createModeCycleStore()
   // Paint the bottom status-bar pill at start too, so BOTH surfaces (the
   // input meta row + the status bar) agree from the first render (RFC-08 §4.3).
   onPosture?.(store.current().agentMode)
@@ -279,6 +288,10 @@ export const buildPromptUx = async (
    *  shift+tab posture change also repaints the bottom status-bar pill. Absent
    *  ⇒ only the input meta-row pill updates (still correct, just one surface). */
   onPosture?: (agentMode: AgentMode) => void,
+  // #13 — the surface-owned mode-cycle store (from `composeSurfaceWires`) so the
+  // shift+tab cycle and `/mode` share ONE instance. Absent ⇒ buildModeCycle
+  // mints its own (legacy / test path).
+  modeCycleStore?: ModeCycleStore,
 ): Promise<PromptUxOpts> => {
   const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
@@ -297,14 +310,18 @@ export const buildPromptUx = async (
   // SINGLE env touchpoint; no new `env.QUANTA_*` gate here). Absent / invalid ⇒
   // undefined ⇒ the reader echoes a paste inline (byte-identical).
   const pasteBurstMinChars = runtimeConfig().pasteBurstMinChars
+  // #10 — bracketed-paste gate (CLI-default-ON via CLI_FEATURE_GATES). Read off
+  // the injected `env` (no `process.*`); OFF ⇒ slot omitted ⇒ byte-identical.
+  const bracketedPaste = gateOn(env, "QUANTA_BRACKETED_PASTE")
   return {
     ...(promptHistory !== undefined ? { promptHistory } : {}),
     multiline: multiline.enabled,
     ...(atProvider !== undefined ? { atProvider } : {}),
-    ...buildModeCycle(env, onPosture),
+    ...buildModeCycle(env, onPosture, modeCycleStore),
     ...(openEditor !== undefined ? { openEditor } : {}),
     ...(keybindings !== undefined ? { keybindings } : {}),
     ...(pasteBurstMinChars !== undefined ? { pasteBurst: { minChars: pasteBurstMinChars } } : {}),
+    ...(bracketedPaste ? { bracketedPaste: true } : {}), // #10
   }
 }
 
@@ -483,6 +500,12 @@ export interface ReplSurfaceWires {
    *  seeded from `QUANTA_INBOUND_MODE`. The session loop reads `.current` per
    *  mid-turn line; the `/inbound` slash mutates it. */
   readonly inboundMode: { current: InboundMode }
+  /** #13 — the shared mode-cycle store (present iff `QUANTA_MODE_CYCLE` is on).
+   *  Threaded into `buildPromptUx` so the shift+tab pill/hook reuses the SAME
+   *  instance the `/mode` slash mutates + the session loop's per-turn
+   *  `permissionModeState` projection reads. Absent ⇒ no mode-cycle (byte-
+   *  identical). */
+  readonly modeCycleStore?: ModeCycleStore
   /** Track D (runtime → REPL context wire) — the per-turn prompt-assembly sink
    *  the composition root wires into `AgentConfig.onPromptAssembled`. Each call
    *  retains the latest snapshot the `/context` slash renders via the
@@ -568,6 +591,10 @@ const buildSurfaceDispatch = (args: {
    *  reads/sets it (the SAME ref the session loop reads per mid-turn line).
    *  Always present (the REPL seeds it `queue`). */
   readonly inboundMode: { current: InboundMode }
+  /** #13 — `/mode` posture wire over the shared mode-cycle store. Present iff
+   *  `QUANTA_MODE_CYCLE` is on; absent ⇒ slot omitted ⇒ `/mode` prints "not
+   *  wired" (default-OFF byte-identical). */
+  readonly mode?: SlashContext["mode"]
   /** Ticket 14 (§11.6) — `/model` interactive-picker adapter over the SAME
    *  sticky-model store the loop reads. Present iff a sticky store was wired;
    *  absent ⇒ `/model` prints "not wired in this surface" (default-OFF). */
@@ -641,6 +668,9 @@ const buildSurfaceDispatch = (args: {
         : {}),
       // `/inbound` mode ref (always present in the REPL — seeded queue).
       inboundMode: args.inboundMode,
+      // #13 — `/mode` posture wire. Present only when QUANTA_MODE_CYCLE is on;
+      // absent ⇒ slot omitted ⇒ `/mode` prints "not wired" (default-OFF).
+      ...(args.mode !== undefined ? { mode: args.mode } : {}),
       // Ticket 18 (§V1) — `/background` read-only portal view. Present only when
       // QUANTA_BG_TURN is on; absent ⇒ slot omitted ⇒ "not wired" (default-OFF).
       ...(args.background !== undefined ? { background: args.background } : {}),
@@ -762,6 +792,34 @@ export const composeSurfaceWires = (
   opts?: { readonly convStore?: ConversationCheckpointStore },
 ): ReplSurfaceWires => {
   const convStore = opts?.convStore ?? defaultConversationCheckpointStore()
+  // #13 — build the ONE mode-cycle store the whole surface shares (gated on
+  // QUANTA_MODE_CYCLE). The shift+tab pill/hook (via buildPromptUx) AND the
+  // `/mode` slash AND the session loop's per-turn permissionMode projection all
+  // read THIS instance, so a `/mode acceptEdits` and a shift+tab agree. Absent
+  // gate ⇒ undefined ⇒ `/mode` prints "not wired" + no shift+tab hook (byte-
+  // identical). Exposed on the returned wires so buildPromptUx reuses it.
+  const modeCycleStore: ModeCycleStore | undefined = modeCycleEnabled(envSource)
+    ? createModeCycleStore()
+    : undefined
+  // #13 — `/mode` ctx slot over the shared store. SET jumps the rung AND repaints
+  // the bottom status-bar pill (mirrors the shift+tab onPosture sink); the loop's
+  // projection then applies the new permissionMode on the NEXT turn.
+  const modeSlot: SlashContext["mode"] =
+    modeCycleStore !== undefined
+      ? {
+          get: () => modeCycleStore.current().key,
+          set: (key: string) => {
+            const known = MODE_CYCLE.map((p) => p.key)
+            if (!known.includes(key as (typeof known)[number])) {
+              return { kind: "unknown" as const, known }
+            }
+            modeCycleStore.set(key as (typeof known)[number])
+            setup.pills.update({ mode: modeCycleStore.current().agentMode })
+            return "ok" as const
+          },
+          list: () => MODE_CYCLE.map((p) => p.key),
+        }
+      : undefined
   const granularRegistry: GranularRegistryPort = defaultGranularRegistry()
   let registryToolMapper: RuntimeFacadeComposeOptions["registryToolMapper"] | undefined
   // ADR-0309 Wire 3 — per-tool auto-record cadence. Env-gated:
@@ -1079,6 +1137,16 @@ export const composeSurfaceWires = (
       levels: EFFORT_LEVELS,
       budgetTokens: effortToTokenBudget,
     },
+    // #17 (C3) — `/brief` session-posture wire over the SAME `BriefStore` the
+    // loop's consume side reads (`AgentConfig.sessionBrief`, bound at the
+    // composition root to this bootstrap store). A SET is observed by the NEXT
+    // turn's prompt assembly (BRIEF_NOTICE splice). Mirrors the effort slot; no
+    // pill segment exists for brief, so set() only mutates the store (the
+    // `/brief` command echoes the new state to stdout itself).
+    brief: {
+      get: () => setup.briefStore.get(),
+      set: (on) => setup.briefStore.set(on),
+    },
     // ADR-0291 — 8 ctx adapters wired through optional upstream-port fields.
     // Each is presence-spread by `buildReplSlashCtx`, so absent ports omit
     // the slot entirely (default-OFF byte-identical).
@@ -1203,6 +1271,9 @@ export const composeSurfaceWires = (
     ...(shadowOdb !== undefined ? { shadowOdb } : {}),
     ...(conversationActions !== undefined ? { conversationActions } : {}),
     inboundMode,
+    // #13 — `/mode` posture slot over the shared store (omitted when the gate
+    // is off ⇒ "not wired").
+    ...(modeSlot !== undefined ? { mode: modeSlot } : {}),
     // Ticket 14 (§11.6) — build the `/model` picker adapter over the SAME sticky
     // store the loop's consume side reads (so a SET is observed by the loop), with
     // the boot model + retry candidates as the selectable id set. The mode-implicit
@@ -1236,6 +1307,10 @@ export const composeSurfaceWires = (
     // threaded to the session loop's in-turn reader.
     ...(conversationActions !== undefined ? { conversationActions } : {}),
     inboundMode,
+    // #13 — the shared mode-cycle store, threaded to buildPromptUx so the
+    // shift+tab pill/hook reuses the SAME instance `/mode` mutates (and the
+    // session loop projects). Absent ⇒ QUANTA_MODE_CYCLE off (byte-identical).
+    ...(modeCycleStore !== undefined ? { modeCycleStore } : {}),
     promptAssembledSink: contextUsageHolder.sink,
     // RFC-09 (B) — expose the retained per-turn usage snapshot getter so the
     // host can bind the pre-compaction warning to the SAME token count the

@@ -1,0 +1,41 @@
+id: web-slash-readout-http
+title: Web slash readouts — GET /readout/:name out-of-band HTTP (jun-9 parity Phase 1)
+section: 10
+subsystem: Web daemon — read-only slash readouts (lease-free)
+order: 96
+maturity: L2
+status: new
+ui_surfaces: [web]
+monitoring: n-a
+modes: [daemon, interactive]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:web", "jun-9-cli-web-parity", "read-only"]
+depends_on: [web-daemon-surface]
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "pure daemon renderer — biome slice fence forbids importing @/apps/cli slash registry"
+    web: "GET /readout/:name serves snapshot-backed text while a turn holds the WS lease; frontend slash-readout component displays the body"
+purpose: |
+  Phase 1 jun-9-cli-web-parity ticket-05: serve read-only slash readouts
+  (`/capabilities`, `/state`, …) OUT-OF-BAND over HTTP so they work idle AND
+  mid-turn (an in-flight `turn.run` holds the WS single-writer lease). Pure
+  `renderReadout(snapshot, name)` in `readout.ts` — no I/O, no CLI import.
+  Recognized-but-not-yet-wired names degrade gracefully to a pending line
+  (never `isError`). Server route stays thin; snapshot is a sync read between
+  await-points.
+evidence:
+  code:
+    - src/apps/web-daemon/readout.ts
+    - src/apps/web-daemon/server.ts
+    - apps/web-frontend/src/components/slash-readout.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/web-daemon/readout-hellgate.test.ts
+    integration:
+      - tests/integration/readout-http-route-web-daemon-e2e.test.ts

@@ -340,6 +340,28 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     expect(result.createSubagentBackedGuardianReview).toBe(deps.createSubagentBackedGuardianReview)
   })
 
+  test("#17 (C3) — QUANTA_BRIEF seeds the bootstrap briefStore (env → store, PAIRED)", async () => {
+    // ON arm: the brief posture knob is truthy ⇒ the bootstrap brief store is
+    // seeded ON (the loop later reads it via AgentConfig.sessionBrief). This is
+    // the env → store link the runAgent-level wiring test cannot reach.
+    const on = await bootstrapSession(
+      makeFakeDeps(),
+      makeRuntime({ env: { QUANTA_BRIEF: "1" } }),
+      {},
+    )
+    expect(on.briefStore.get()).toBe(true)
+    // OFF arm (control): unset ⇒ seeded OFF (default-OFF byte-identical posture).
+    const off = await bootstrapSession(makeFakeDeps(), makeRuntime({ env: {} }), {})
+    expect(off.briefStore.get()).toBe(false)
+    // Explicit-false token ⇒ OFF (the knob vocabulary is honored, not "any value").
+    const explicit = await bootstrapSession(
+      makeFakeDeps(),
+      makeRuntime({ env: { QUANTA_BRIEF: "false" } }),
+      {},
+    )
+    expect(explicit.briefStore.get()).toBe(false)
+  })
+
   test("8. The barrel re-exports SessionBootstrapError (instanceof-friendly)", async () => {
     const mod = await import("@/host/bootstrap")
     expect(mod.SessionBootstrapError).toBe(SessionBootstrapError)

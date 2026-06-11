@@ -137,13 +137,20 @@ export const retryWithCmd: SlashCommand = {
       return 1
     }
 
+    // #16 — when no candidates are configured, surface the EXACT activation
+    // requirement instead of a dead-end notice (Agent-B ticket-16, option (b)):
+    // `/retry-with` needs a model set, so name the knob + format so the user can
+    // act. Read-only path (the transcript is never touched). The byte-prefix
+    // "no model candidates configured" is preserved so existing assertions hold.
+    const RETRY_HINT =
+      "no model candidates configured — set QUANTA_RETRY_MODELS=<id,id,…> to enable /retry-with\n"
     const state = ctx.retry
     if (state === undefined) {
-      ctx.out("no model candidates configured\n")
+      ctx.out(RETRY_HINT)
       return 1
     }
     if (state.candidates.length === 0) {
-      ctx.out("no model candidates configured\n")
+      ctx.out(RETRY_HINT)
       return 1
     }
 

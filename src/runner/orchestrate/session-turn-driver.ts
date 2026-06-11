@@ -37,7 +37,11 @@ type PendingApproval = NonNullable<SessionTurnPayload["approvalRequest"]>
 export type ApprovalDecisionResult =
   | "approve"
   | "deny"
-  | { readonly decision: "approve"; readonly scope?: "once" | "session" }
+  // #20 — `session_prefix` joins the approve scopes: the deferred surface (web
+  // card / CLI fallback) can also mint the standing "always allow `<program> …`
+  // this session" prefix grant (the controller derives a safe prefix key, see
+  // `@/permission/session-grant-prefix`).
+  | { readonly decision: "approve"; readonly scope?: "once" | "session" | "session_prefix" }
   | { readonly decision: "deny"; readonly steer?: string }
 
 /** Host-injected approval resolver — mirrors the CLI's `setup.approvalPrompt`.
@@ -104,8 +108,12 @@ const resolvePendingApproval = async (
   turnSignal: AbortSignal,
 ): Promise<void> => {
   const raw = await resolveApproval(approval)
-  const norm: { decision: "approve" | "deny"; scope?: "once" | "session"; steer?: string } =
-    typeof raw === "string" ? { decision: raw } : raw
+  const norm: {
+    decision: "approve" | "deny"
+    // #20 — `session_prefix` joins the once/session scopes the host lease carries.
+    scope?: "once" | "session" | "session_prefix"
+    steer?: string
+  } = typeof raw === "string" ? { decision: raw } : raw
   // ADR-0512 P3 — forward the escalation's once/session scope + corrective steer
   // so the host lease carries the operator's rich decision. Empty ⇒ `undefined`
   // meta, byte-identical to the legacy 2-verb respond.

@@ -54,6 +54,9 @@ import {
   inferToolTier,
   isAllowed,
   isDecisionLegalFor,
+  // #20 (durable prefix safety) — single-simple-command guard for the
+  // trust-scope ask-skip (a chained command must never ride a token-prefix grant).
+  isSimpleCommand,
   type LayeredRule,
   type LearningSource,
   type PendingPermission,
@@ -1366,6 +1369,15 @@ const trustScopeGrants = (
 ): boolean => {
   if (!config.trustScope) return false
   const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  // #20 (durable prefix safety) — a token-prefix trust-scope grant (`commandPattern`)
+  // matches by FIRST TOKEN, so a chained command (`echo x && cat /etc/passwd`)
+  // whose first token rides the grant would smuggle the rest past the prompt.
+  // The persistent store's `patternMatchesAction` has no metachar guard, so we
+  // apply the SAME single-simple-command guard the session prefix grant uses
+  // here: a shell-command action with any chaining/redirection/substitution
+  // metachar NEVER ask-skips (it re-prompts, fail-closed). A non-shell action
+  // (shellCommand === null) is unaffected. HARD_DENY already precedes this gate.
+  if (shellCommand !== null && !isSimpleCommand(shellCommand)) return false
   const lookup: { tool: string; actionKey?: string } = { tool: action.tool }
   if (shellCommand !== null) lookup.actionKey = `${action.tool}|${shellCommand}`
   return config.trustScope.registry.hasGrant(config.trustScope.projectKey, lookup)

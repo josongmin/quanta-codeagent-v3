@@ -314,6 +314,8 @@ const buildSetup = async (
       set: () => undefined,
       snapshot: () => "default" as const,
     },
+    // #17 (Agent-B, additive) — required brief store fake (mirrors effortStore).
+    briefStore: { get: () => false, set: () => undefined, snapshot: () => false },
     llm: llmStub,
     planMode: false,
     metrics: undefined as never,

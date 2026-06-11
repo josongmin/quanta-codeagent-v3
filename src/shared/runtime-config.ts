@@ -266,7 +266,7 @@ export interface RuntimeConfig {
    *  synchronous proactive/reactive compaction paths are byte-identical. */
   readonly bgCompaction: boolean
   /** RFC jun-6-microcompaction — tier-1 tool-result eviction gate
-   *  (`QUANTA_MICROCOMPACT`). Strict opt-in: `true` ONLY when the value is
+   *  (`QUANTA_MICROCOMPACT`). Opt-in: `true` ONLY when the value is
    *  exactly `"1"`. Default false ⇒ `maybeCompact` never constructs the
    *  eviction pre-pass, never reads its clock, never touches the spill dir — the
    *  existing tier-2-only flow is byte-identical. */
@@ -298,7 +298,7 @@ export interface RuntimeConfig {
    *  (byte-identical). Also read by the slice's own `skillMcpDepsEnabled`. */
   readonly skillMcpDeps: boolean
   /** ADR-0470 B1 follow-up inbound MCP sampling gate (`QUANTA_MCP_SAMPLING`).
-   *  Strict opt-in (`=== "1"`). SEAM (validated, not yet composed at the root):
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). SEAM (validated, not yet composed at the root):
    *  the handler builder (`host/runtime/mcp-sampling-handler.ts`
    *  `buildSamplingWiring`) and the `McpClient` `samplingHandler` acceptance slot
    *  both exist and are unit-tested, but NO production code reads this field to
@@ -323,7 +323,7 @@ export interface RuntimeConfig {
    *  calls `estimateTokens(...)` directly — byte-identical, zero new allocation. */
   readonly deltaTokenCount: boolean
   /** H19 (jun-3-misc §3) inbound MCP `roots/list` gate (`QUANTA_MCP_ROOTS`).
-   *  Strict opt-in (`=== "1"`). When ON *and* the composition root wires a
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). When ON *and* the composition root wires a
    *  `RootsProviderPort` (from the active workspace), the MCP client advertises
    *  `roots` AND answers inbound `roots/list` from that source
    *  (advertise-iff-able — the advertisement and the source always move
@@ -333,8 +333,8 @@ export interface RuntimeConfig {
    *  this knob — they only act when the connected server advertises the
    *  matching capability, so they are always safe to expose. */
   readonly mcpRoots: boolean
-  /** H18 (jun-04) MCP HTTP-server OAuth gate (`QUANTA_MCP_OAUTH`). Strict opt-in
-   *  (`=== "1"`). When ON *and* the composition root wires a connectors-backed
+  /** H18 (jun-04) MCP HTTP-server OAuth gate (`QUANTA_MCP_OAUTH`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). When ON *and* the composition root wires a connectors-backed
    *  `McpOAuthProviderPort` (RFC 8414 discovery → DCR → PKCE browser flow →
    *  token, RFC 6749 §6 refresh) AND a server config sets `oauth: true`, the
    *  `McpClient` resolves a bearer and attaches `Authorization: Bearer <token>`
@@ -344,8 +344,8 @@ export interface RuntimeConfig {
    *  header). The provider and the per-server `oauth` opt-in must BOTH be present
    *  for any OAuth side effect (advertise-iff-able). */
   readonly mcpOAuth: boolean
-  /** H9 read `file_unchanged` dedup gate (`QUANTA_READ_DEDUP`). Strict opt-in
-   *  (`=== "1"`). When ON, the `read` tool short-circuits a re-read of the SAME
+  /** H9 read `file_unchanged` dedup gate (`QUANTA_READ_DEDUP`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). When ON, the `read` tool short-circuits a re-read of the SAME
    *  (canonical path, offset, limit) whose on-disk mtime equals the recorded
    *  read-time mtime for that range, returning a compact `file_unchanged`
    *  sentinel instead of re-sending the full content (large token savings in
@@ -355,7 +355,7 @@ export interface RuntimeConfig {
    *  is the READ-SIDE dedup, keyed by RANGE, and never affects guardWrite. */
   readonly readDedup: boolean
   /** H6 (jun-3-misc §3) passive git/gh VCS classification gate
-   *  (`QUANTA_PASSIVE_VCS`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  (`QUANTA_PASSIVE_VCS`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ the
    *  bash post-exec hook returns immediately (no stdout classification, no
    *  sink touch, byte-identical). When true AND a host wired a `vcsEventSink`,
    *  a completed git/gh command's stdout is classified into a structured VCS
@@ -365,12 +365,12 @@ export interface RuntimeConfig {
    *  `::git-*` lines). */
   readonly passiveVcs: boolean
   /** N1 assistant language auto-detect gate (`QUANTA_LANG_DETECT`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ buildDynamicContext pushes NO language
+   *  opt-in (`gateOn` vocab; #24). Default false ⇒ buildDynamicContext pushes NO language
    *  notice (byte-identical prompt). When true, a high-confidence non-English
    *  Unicode-script detection on the latest user message injects a per-turn
    *  "respond in <lang>" notice (English/ambiguous ⇒ still byte-identical). */
   readonly langDetect: boolean
-  /** H14a image_gen tool gate (`QUANTA_IMAGE_GEN`). Strict opt-in (`=== "1"`).
+  /** H14a image_gen tool gate (`QUANTA_IMAGE_GEN`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24).
    *  Default false ⇒ the composition root wires NO `DefaultToolPorts.imageGen`
    *  port, so the `image_gen` tool is NOT registered (byte-identical default
    *  menu). When true AND a provider key resolves, the host passes a key-bound
@@ -379,39 +379,39 @@ export interface RuntimeConfig {
    *  key surfaces as a typed `no_key` failure, never a crash. */
   readonly imageGen: boolean
   /** H14b Office document AUTHORING gate (`QUANTA_OFFICE_AUTHORING`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ the composition root wires NO
+   *  opt-in (`gateOn` vocab; #24). Default false ⇒ the composition root wires NO
    *  `DefaultToolPorts.officeAuthoring`, so `xlsx_write` / `docx_write` are NOT
    *  registered (byte-identical default menu). When true the agent can generate
    *  real `.xlsx` / `.docx` files (pure-TS STORED-ZIP + OOXML, no office
    *  dependency) to jailed, versioned-sibling paths (never silent overwrite). */
   readonly officeAuthoring: boolean
   /** W6 (NotebookEdit P17) `notebook_edit` tool gate (`QUANTA_NOTEBOOK_EDIT`).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ host sets NO
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ host sets NO
    *  `DefaultToolPorts.notebookEdit`, tool not registered (byte-identical menu).
    *  When true, the cell editor (str_replace/insert/delete on `.ipynb`) is
    *  appended, writing through the same FS jail `edit`/`write` use. */
   readonly notebookEdit: boolean
   /** W5 (DAP) `debug_inspect` debugger tool gate (`QUANTA_DEBUG_TOOLS`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ host sets NO `DefaultToolPorts.debugTools`,
+   *  opt-in (`gateOn` vocab; #24). Default false ⇒ host sets NO `DefaultToolPorts.debugTools`,
    *  tool not registered (byte-identical menu). When true, `debug_inspect` (run
    *  under a DAP adapter, stop at first breakpoint, report stack + variables) is
    *  appended — high-risk (executes the program), always-confirm tier. */
   readonly debugTools: boolean
   /** Epic-2 `run_tests` structured test-runner gate (`QUANTA_TEST_RUNNER`).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ host sets NO
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ host sets NO
    *  `DefaultToolPorts.testRunner`, tool not registered (byte-identical). When
    *  true, `run_tests` (detect toolchain + run suite + normalized evidence) is
    *  appended — high-risk (runs project test code), always-confirm tier. */
   readonly testRunner: boolean
   /** Keystone `collect_evidence` Evidence Packet Builder gate (`QUANTA_EVIDENCE`).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ host sets NO
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ host sets NO
    *  `DefaultToolPorts.evidence`, tool not registered (byte-identical). When true,
    *  `collect_evidence` (detect → run suite → fuse failure+static+runtime+repo
    *  into one packet) is appended — high-risk (runs the suite), always-confirm. */
   readonly evidence: boolean
   /** H15 (jun-3-misc §3) reasoning carry-over gate (`QUANTA_REASONING_CARRYOVER`).
    *  OpenAI-Responses / o-series ONLY (the ChatGPT-OAuth subscription path).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ the responses-wire path is
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ the responses-wire path is
    *  BYTE-IDENTICAL to today: each reasoning item's `encrypted_content` is
    *  DROPPED (non-resumable), no `include` field is added, and no prior reasoning
    *  is re-emitted on the next turn's input. When true the wire captures each
@@ -423,7 +423,7 @@ export interface RuntimeConfig {
    *  chat-completions path (provider-scoped to the Responses surface). */
   readonly reasoningCarryover: boolean
   /** H13 external-agent-config migration gate (`QUANTA_MIGRATE_CONFIG`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ startup runs NO detect of competitor
+   *  opt-in (`gateOn` vocab; #24). Default false ⇒ startup runs NO detect of competitor
    *  (Claude Code / Cursor) config, surfaces no migration prompt, and writes no
    *  throttle ledger — byte-identical startup. When true the CLI startup seam
    *  runs `runConfigMigration({ enabled: true, homeDir, projectDir })`, which
@@ -433,7 +433,7 @@ export interface RuntimeConfig {
    *  one-line stderr notice. Import is opt-in (notice only). */
   readonly migrateConfig: boolean
   /** H17 thread-goal budget ENFORCEMENT gate (`QUANTA_OBJECTIVE_BUDGET_ENFORCE`).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ the `ObjectiveBudget`
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ the `ObjectiveBudget`
    *  (maxTokens/maxTurns) stays purely INFORMATIONAL — the objective store's
    *  derived `status` never takes `"budget_limited"` and the loop's
    *  idle-continuation re-issues `setNextActions` exactly as today
@@ -445,8 +445,8 @@ export interface RuntimeConfig {
    *  auto-resume). Raising/resetting the budget un-limits (the status is a pure
    *  function of the current cell, no sticky flag). */
   readonly objectiveBudgetEnforce: boolean
-  /** H17 idle goal-CONTINUATION gate (`QUANTA_GOAL_ENFORCE`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ NO idle goal-continuation is ever launched —
+  /** H17 idle goal-CONTINUATION gate (`QUANTA_GOAL_ENFORCE`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Default false ⇒ NO idle goal-continuation is ever launched —
    *  byte-identical to today's informational objective (the orchestrator's
    *  `enabled` is false, so `runIdleContinuation` returns `disabled` before
    *  touching any port or resume sink). When true the host wires the
@@ -458,7 +458,7 @@ export interface RuntimeConfig {
    *  one controls whether the idle resume fires at all). */
   readonly goalContinuationEnforce: boolean
   /** Capability A — multi-agent task dependency DAG gate (`QUANTA_TEAM_DAG`).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ `spawn_batch` fan-out is the
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ `spawn_batch` fan-out is the
    *  EXISTING flat parallel pool (no dependency ordering) — byte-identical. When
    *  ON *and* a batch carries dependency edges, the tier1 builder wraps the
    *  child runner with a DAG gate (`@/subagent/coordination`) so each child
@@ -468,7 +468,7 @@ export interface RuntimeConfig {
    *  dependents as a typed dead branch (never an indefinite hang). */
   readonly teamDag: boolean
   /** Capability B — leader-mediated permission escalation broker
-   *  (`QUANTA_TEAM_BROKER`). Strict opt-in (`=== "1"`). Default false ⇒ a worker
+   *  (`QUANTA_TEAM_BROKER`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ a worker
    *  that hits a denied tool fails hard (today's behavior — no escalation path).
    *  When ON, the worker's SOFT-deny is brokered IN-PROCESS by the leader's
    *  wire (`@/agent/coordination-broker-wire#buildLeaderHitlBroker`): it runs the
@@ -476,15 +476,15 @@ export interface RuntimeConfig {
    *  ONLY a leader-authored response matching its outstanding correlationId — it
    *  can NEVER self-grant (load-bearing security invariant, plan §5). */
   readonly teamBroker: boolean
-  /** Capability C — team-idle barrier (`QUANTA_TEAM_IDLE`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ the leader polls / no fan-in barrier (today).
+  /** Capability C — team-idle barrier (`QUANTA_TEAM_IDLE`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the leader polls / no fan-in barrier (today).
    *  When ON, each subagent emits an idle beacon at turn-end and the leader
    *  awaits `teamIdle` (`@/subagent/coordination`) — every member idle — before
    *  fanning in (next phase / handoff / shutdown). Pure predicate + injected
    *  clock; absent ⇒ no beacons, byte-identical. */
   readonly teamIdle: boolean
-  /** Peer teammate messaging (`QUANTA_TEAM_PEER_MSG`, RFC jun-6). Strict opt-in
-   *  (`=== "1"`). Builds ON the EXISTING `QUANTA_TEAM_*` peer mailbox + wake-idle
+  /** Peer teammate messaging (`QUANTA_TEAM_PEER_MSG`, RFC jun-6). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Builds ON the EXISTING `QUANTA_TEAM_*` peer mailbox + wake-idle
    *  substrate; adds three deltas. Default false ⇒ (a) the loop wires no
    *  `peerInbox` drain (`pollPeerInbox` returns null ⇒ the turn loop is
    *  byte-identical — peer mail surfaces ONLY via a manual `subagent_read_messages`
@@ -504,7 +504,7 @@ export interface RuntimeConfig {
    *  leader-authored-response-only widen (no-self-grant) is preserved. */
   readonly teamPeerMsg: boolean
   /** C1 — Canvas / artifact persistence store (`QUANTA_ARTIFACT_STORE`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ no registry, the artifact tools are NOT
+   *  opt-in (`gateOn` vocab; #24). Default false ⇒ no registry, the artifact tools are NOT
    *  registered (byte-identical). When ON, the composition root mints ONE
    *  per-session `@/artifact` registry and passes it to
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
@@ -555,7 +555,7 @@ export interface RuntimeConfig {
    *  Unset ⇒ 16 KiB default; over-cap return is truncated with a marker. */
   readonly codeModeOutputCap: number | undefined
   /** file_history_rewind — per-file session-snapshot capture + restore
-   *  (`QUANTA_FILE_HISTORY`). Strict opt-in (`=== "1"`). Default false ⇒ no
+   *  (`QUANTA_FILE_HISTORY`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ no
    *  per-file history store is constructed, the write/edit capture sink is NOT
    *  wired (no recording), and `file_history_rewind` is NOT registered
    *  (byte-identical). When ON, the composition root mints ONE per-session
@@ -566,7 +566,7 @@ export interface RuntimeConfig {
    *  escape cwd; same `resolveJailed` chokepoint as read/write). */
   readonly fileHistory: boolean
   /** CLUSTER D #5 — remember-patterns RECORDING seam (`QUANTA_REMEMBER_PATTERNS`).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ no `PatternGrantStore` is
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ no `PatternGrantStore` is
    *  constructed, `DefaultToolPorts.permissionPatternPropose` stays absent, and
    *  `permission_propose_pattern` is NOT registered (byte-identical). When ON, the
    *  composition root mints ONE per-session `PatternGrantStore` seeded with the
@@ -594,14 +594,14 @@ export interface RuntimeConfig {
    *  takes this by injection (`ReadLineOptions.pasteBurst`); it never reads env. */
   readonly pasteBurstMinChars: number | undefined
   /** jun-6 (Codex skill-creator) — agent-callable skill-authoring tool gate
-   *  (`QUANTA_SKILL_CREATOR`). Strict opt-in (`=== "1"`). Default false ⇒ no
+   *  (`QUANTA_SKILL_CREATOR`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ no
    *  `SkillWriterPort` is constructed and the `skill_create` tool is NOT
    *  registered (byte-identical default tool surface). When ON, the composition
    *  root wires a jailed writer (under the user/repo skills dir) and registers
    *  the tool so the model can scaffold + validate + install a new skill. */
   readonly skillCreator: boolean
-  /** C6 — structured deny-reason surfacing (`QUANTA_DENY_REASON`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ the `ToolFailure.permission_denied` envelope
+  /** C6 — structured deny-reason surfacing (`QUANTA_DENY_REASON`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the `ToolFailure.permission_denied` envelope
    *  omits `denyReason`, the model-facing deny `content` carries no
    *  `[layer/pillar]` prefix, and the `DecisionEvent` carries only its current
    *  fields — byte-identical to today. When ON, each deny site attaches a
@@ -613,8 +613,8 @@ export interface RuntimeConfig {
    *  otherwise). */
   readonly surfaceDenyReason: boolean
   /** sandbox-escalation (RFC jun-6) — OS-sandbox block → user-gated
-   *  escalation-retry loop (`QUANTA_SANDBOX_ESCALATION`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ the platform result-mapping points NEVER
+   *  escalation-retry loop (`QUANTA_SANDBOX_ESCALATION`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the platform result-mapping points NEVER
    *  consult `classifySandboxDenial` (no `denialReason` is ever set),
    *  `sandboxBlockToLlmError` is never wired, and a nonzero exit from a
    *  sandboxed command is BYTE-IDENTICAL to today (a plain failure — no
@@ -640,7 +640,7 @@ export interface RuntimeConfig {
    *  not tool calls. */
   readonly sandboxEscalationMax: number | undefined
   /** account-ratelimit (RFC jun-6) proactive pre-request delay gate
-   *  (`QUANTA_RATELIMIT_PROACTIVE`). Strict opt-in (`=== "1"`). Default false ⇒
+   *  (`QUANTA_RATELIMIT_PROACTIVE`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒
    *  the LLM adapters never capture `.withResponse()` ratelimit headers into the
    *  snapshot store and the loop never inserts a `proactiveDelayMs` sleep before a
    *  request (byte-identical to today). When ON, the adapter response-header hook
@@ -660,34 +660,34 @@ export interface RuntimeConfig {
    *  registered at all). */
   readonly ptyBackend: PtyBackend
   /** H18/keyring — OS-keyring-backed MCP OAuth token store
-   *  (`QUANTA_MCP_OAUTH_KEYRING`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  (`QUANTA_MCP_OAUTH_KEYRING`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ the
    *  MCP OAuth provider uses the plain 0600 file `TokenStorePort` (byte-identical).
    *  When ON *and* the OS keyring binary is reachable, the composition root wraps
    *  the file store with `composeTokenStore(selectKeyring(...), fileStore)`
    *  (Keychain / libsecret, file-fallback + migration, NO-THROW). */
   readonly mcpOAuthKeyring: boolean
   /** ADR-0487 subagent background admission queue (`QUANTA_SUBAGENT_QUEUE`).
-   *  Strict opt-in (`=== "1"`). Default false ⇒ `defaultBackgroundSubagentScheduler`
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ `defaultBackgroundSubagentScheduler`
    *  is constructed WITHOUT `admissionQueue`, so an over-cap spawn throws-at-cap
    *  (today's behavior) and the 4th `subagent_force_background` tool is NOT
    *  registered (byte-identical). When ON, the scheduler admits over-cap spawns
    *  onto a FIFO queue and `forceBackground` can promote/reorder. */
   readonly subagentQueue: boolean
   /** ADR-0487 force-background tool exposure (`QUANTA_FORCE_BACKGROUND`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ `subagentBgTools` does NOT mint the
+   *  opt-in (`gateOn` vocab; #24). Default false ⇒ `subagentBgTools` does NOT mint the
    *  `subagent_force_background` tool (byte-identical). When ON *and* the queue is
    *  enabled, the tool is exposed so the model can promote a queued spawn to the
    *  front / burst-run it. */
   readonly forceBackground: boolean
-  /** G1 appshot visual-verify loop (`QUANTA_APPSHOT`). Strict opt-in (`=== "1"`).
+  /** G1 appshot visual-verify loop (`QUANTA_APPSHOT`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24).
    *  Default false ⇒ the composition root mints NO `DefaultToolPorts.appshot`
    *  slot, so `appshot_verify` is NOT registered (byte-identical default menu).
    *  When ON *and* a BrowserPort + judge LLM are reachable, the root assembles the
    *  `AppshotPort` (render/screenshot→BrowserPort, verify→LLM-judge,
    *  scaffold→jailed scaffold, artifactSink→artifact registry). */
   readonly appshot: boolean
-  /** N1 — background side-agent daemons (`QUANTA_SIDE_AGENT`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ no daemon registry, the `side_agent_*` tools
+  /** N1 — background side-agent daemons (`QUANTA_SIDE_AGENT`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Default false ⇒ no daemon registry, the `side_agent_*` tools
    *  are NOT registered (byte-identical). When ON, the assembler mints a
    *  `@/side-agent` registry (Phase-2: with the real subagent runner / mailbox /
    *  timers) and the tier1 block exposes the management tools over it. */
@@ -721,13 +721,15 @@ export interface RuntimeConfig {
    *  single swap point for a full LLM-backed child loop. V1 core only — NOT a
    *  launchctl/systemd manager. */
   readonly sideAgentProcess: boolean
-  /** N2 — MCP connector discovery (`QUANTA_MCP_CONNECTORS`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ no discovery port, the `mcp_connector_*` tools
+  /** N2 — MCP connector discovery (`QUANTA_MCP_CONNECTORS`). Opt-in via the
+   *  canonical `gateOn` vocab (`1`/`on`/`true`/`yes`; #24 doc-fix — the resolver
+   *  is `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ no discovery port, the `mcp_connector_*` tools
    *  are NOT registered (byte-identical). When ON, the composition root wires a
    *  discovery port (catalog source + `.mcp.json` writer). */
   readonly mcpConnectors: boolean
-  /** N3 — MCP resource/prompt tools (`QUANTA_MCP_RESOURCES`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ the four `mcp_list_resources` / `mcp_read_resource`
+  /** N3 — MCP resource/prompt tools (`QUANTA_MCP_RESOURCES`). Opt-in via the
+   *  canonical `gateOn` vocab (`1`/`on`/`true`/`yes`; #24 doc-fix — resolver is
+   *  `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ the four `mcp_list_resources` / `mcp_read_resource`
    *  / `mcp_list_prompts` / `mcp_get_prompt` tools are NOT registered
    *  (byte-identical). When ON AND at least one connected MCP server advertises
    *  `resources`/`prompts`, the surface (`loadFeatures`) builds an aggregate
@@ -737,7 +739,8 @@ export interface RuntimeConfig {
    *  the handle is undefined ⇒ tools still absent. */
   readonly mcpResources: boolean
   /** §19.1 — honor MCP server-declared tool annotations (`QUANTA_MCP_TOOL_ANNOTATIONS`).
-   *  Strict opt-in (`=== "1"`). The global default-OFF master switch: when OFF the
+   *  Opt-in via the standard boolean vocab (`1`/`true`/`on`; #24 doc-fix — resolver
+   *  is `parseBool`, NOT strict the `gateOn` truthy vocab (#24)). The global default-OFF master switch: when OFF the
    *  bridge ignores `readOnlyHint`/`idempotentHint` entirely (`annotationsHonored`
    *  stays false ⇒ every MCP tool keeps its conservative read/concurrency
    *  classification, byte-identical). When ON the composition root passes
@@ -745,15 +748,17 @@ export interface RuntimeConfig {
    *  annotations may ELEVATE a tool's `isReadOnly`/`isConcurrencySafe` predicates
    *  (never demote — annotations can only relax, and only for trusted origins). */
   readonly mcpToolAnnotations: boolean
-  /** C2 — structured mid-turn progress report (`QUANTA_PROGRESS_UPDATE`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ the `communicate_update` tool is NOT
+  /** C2 — structured mid-turn progress report (`QUANTA_PROGRESS_UPDATE`). Opt-in
+   *  via the canonical `gateOn` vocab (`1`/`on`/`true`/`yes`; #24 doc-fix — resolver
+   *  is `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ the `communicate_update` tool is NOT
    *  registered (byte-identical). When ON, the composition root passes
    *  `DefaultToolPorts.progressUpdate=true` AND wires `AgentConfig.progressSink`
    *  (the host adapter that turns the tool's mirror into a render-only
    *  `progress_update` AgentEvent). */
   readonly progressUpdate: boolean
-  /** #8 — mid-turn keystroke capture (`QUANTA_MIDTURN_CAPTURE`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ the CLI session loop wires NO mid-turn capture
+  /** #8 — mid-turn keystroke capture (`QUANTA_MIDTURN_CAPTURE`). Opt-in via the
+   *  canonical `gateOn` vocab (`1`/`on`/`true`/`yes`; #24 doc-fix — resolver is
+   *  `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ the CLI session loop wires NO mid-turn capture
    *  facade; the input reader is byte-identical to today (one `readLine` per turn
    *  boundary, no keystroke source while a turn runs). When ON, the session loop
    *  builds a `defaultMidTurnCapture` over the live plan-queue + drains captured
@@ -766,7 +771,9 @@ export interface RuntimeConfig {
    *  byte-identical. */
   readonly midTurnCapture: boolean
   /** §11.5 ticket-08b — render the bottom input LANE for mid-turn keystrokes
-   *  (`QUANTA_MIDTURN_VISIBLE`). Strict opt-in, TTY-only. With capture on the
+   *  (`QUANTA_MIDTURN_VISIBLE`). Opt-in via the canonical `gateOn` vocab
+   *  (`1`/`on`/`true`/`yes`; #24 doc-fix — resolver is `gateOn`, NOT strict
+   *  the `gateOn` truthy vocab (#24)), TTY-only. With capture on the
    *  reader sees keystrokes but the user types BLIND; this knob makes the session
    *  loop echo the live partial into a bottom-anchored lane (cursor save/restore
    *  so streamed output above is undisturbed). Separate from capture because the
@@ -777,8 +784,8 @@ export interface RuntimeConfig {
    *  (`QUANTA_MANAGED_SETTINGS_PATH`). Non-blank ⇒ used on every platform (CI /
    *  org-lockdown escape hatch); absent ⇒ the per-OS default. */
   readonly managedSettingsPath: string | undefined
-  /** N6 — PTY/tmux session attach (`QUANTA_PTY_ATTACH`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ the 6 `pty_*` tools are NOT registered
+  /** N6 — PTY/tmux session attach (`QUANTA_PTY_ATTACH`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the 6 `pty_*` tools are NOT registered
    *  (byte-identical, exec-risk). When ON, the composition root wires a
    *  `DefaultToolPorts.ptySession` backend (tmux/Bun). */
   readonly ptyAttach: boolean
@@ -826,7 +833,7 @@ export interface RuntimeConfig {
    *  on (the rail is harmless prose when no advisor exists). */
   readonly directiveAdvisorRail: boolean
   /** adaptive-thinking (RFC jun-6) — Anthropic `thinking:{type:"adaptive"}` gate
-   *  (`QUANTA_ADAPTIVE_THINKING`). Strict opt-in (`=== "1"`). Default false ⇒
+   *  (`QUANTA_ADAPTIVE_THINKING`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒
    *  the effort/classifier producer (`applyEffortClassifierFloor`) emits the
    *  manual `{type:"enabled", budget_tokens:N}` arm for EVERY model — BYTE-IDENTICAL
    *  to today. When ON *and* the resolved model's family is adaptive-capable
@@ -848,13 +855,13 @@ export interface RuntimeConfig {
    *  UNCONDITIONAL — it is a bug fix, not gated by this flag. */
   readonly skillScopeV2: boolean
   /** Advisor full-history forward (RFC jun-6 §5.1 — `QUANTA_ADVISOR_FORWARD_HISTORY`).
-   *  Strict `=== "1"` opt-in. Default false ⇒ the advisor knob wires NO
+   *  Strict the `gateOn` truthy vocab (#24) opt-in. Default false ⇒ the advisor knob wires NO
    *  `transcriptSource`, so a `forwardHistory:true` request is a no-op (the
    *  explicit question/context path is byte-identical). ON ⇒ the knob injects a
    *  redacted live-transcript source into `advisorConsultFromLLM`. */
   readonly advisorForwardHistory: boolean
   /** syntax-aware-chunking (RFC jun-6) — AST-aligned indexer chunker gate
-   *  (`QUANTA_SYNTAX_CHUNK`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  (`QUANTA_SYNTAX_CHUNK`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ the
    *  indexer calls the pure line-window `chunkFile` exactly as today
    *  (byte-identical retrieval); the `CodeParserPort` is never constructed and
    *  NO WASM is loaded. When ON *and* a composition root injects a parser, the
@@ -863,7 +870,7 @@ export interface RuntimeConfig {
    *  to the line-window for any non-supported / unparseable file. */
   readonly syntaxChunk: boolean
   /** read-outline (RFC jun-6) — collapsed signatures+structure `read` mode
-   *  gate (`QUANTA_READ_OUTLINE`). Strict opt-in (`=== "1"`). Default false ⇒
+   *  gate (`QUANTA_READ_OUTLINE`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒
    *  a `read outline:true` request returns the normal line-range read (the
    *  parser is never constructed, no WASM); `read` without the flag is
    *  byte-identical regardless. When ON *and* a parser is wired, `outline:true`
@@ -1113,7 +1120,7 @@ export interface RuntimeConfig {
    *  ON it is a no-op for non-allowlisted models. */
   readonly cacheTtl: "5m" | "1h"
   /** OAuth token revoke-on-logout gate (`QUANTA_OAUTH_REVOKE_ON_LOGOUT`). Strict
-   *  opt-in (`=== "1"`). Default false ⇒ logout only clears local credential
+   *  opt-in (`gateOn` vocab; #24). Default false ⇒ logout only clears local credential
    *  state (byte-identical). When true, the logout command additionally calls
    *  the provider's RFC 7009 token revocation endpoint before clearing. */
   readonly oauthRevokeOnLogout: boolean
@@ -1131,8 +1138,8 @@ export interface RuntimeConfig {
    *  is byte-identical to the pre-ADR raw render. */
   readonly ipynbIncludeOutputs: boolean
   /** jun-6 (RFC jun-6-byok-api-key-helper) — legacy per-vendor apiKeyHelper
-   *  resolution gate (`QUANTA_API_KEY_HELPER_LEGACY_VENDOR`). Strict opt-in
-   *  (`=== "1"`). Default false ⇒ the legacy LLM-build seam passes
+   *  resolution gate (`QUANTA_API_KEY_HELPER_LEGACY_VENDOR`). Opt-in
+   *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the legacy LLM-build seam passes
    *  `source: undefined` to `resolveVendorApiKey`, so key resolution is
    *  byte-identical to the pre-slice BYOK/env path. When ON, the composition
    *  root resolves the per-vendor key through the apiKeyHelper credential
@@ -1151,7 +1158,7 @@ export interface RuntimeConfig {
    *  `sessionAutoTitle` is on (both must be present — advertise-iff-able). */
   readonly sessionTitleModel: string | undefined
   /** jun-6 (RFC jun-6-tool-interrupt-behavior) — `block`-interrupt critical-
-   *  section gate (`QUANTA_TOOL_INTERRUPT_BLOCK`). Strict opt-in (`=== "1"`).
+   *  section gate (`QUANTA_TOOL_INTERRUPT_BLOCK`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24).
    *  Default false ⇒ the dispatch seam threads the raw `config.signal` and NO
    *  `criticalSection` onto `ToolContext` (byte-identical: a `block` tool
    *  behaves exactly like `cancel`). When ON, a tool whose
@@ -1168,7 +1175,7 @@ export interface RuntimeConfig {
    *  cancel across one bounded window, never SWALLOW it. */
   readonly criticalSectionMaxMs: number
   /** jun-6 (RFC jun-6-permission-request-hook) — `permission_request` hook
-   *  kill-switch (`QUANTA_PERMISSION_HOOK`). Strict opt-in (`=== "1"`). Default
+   *  kill-switch (`QUANTA_PERMISSION_HOOK`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default
    *  false ⇒ the admissibility gate does NOT emit the pre-decision
    *  `permission_request` event (byte-identical, the gate falls through to the
    *  policy stack). When ON *and* a `HookBus` is wired, the gate emits the event
@@ -1186,7 +1193,7 @@ export interface RuntimeConfig {
    *  default-OFF for byte-identity (mirrors `globWriteGuardEnabled`). */
   readonly globWriteGuard: boolean
   /** jun-6 (RFC jun-6-exfil-egress-rails (a)) — per-turn write/edit budget gate
-   *  (`QUANTA_WRITE_BUDGET`). Strict opt-in (`=== "1"`). Default false ⇒ no
+   *  (`QUANTA_WRITE_BUDGET`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ no
    *  budget port is constructed and `ToolContext.writeBudget` is absent, so
    *  `write`/`edit` proceed byte-identically (no counter). The budget ALSO
    *  requires a configured cap ({@link writeBudgetMax}) — both must be present
@@ -1383,7 +1390,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
     bgCompaction: gateOnStrict(env, "QUANTA_BG_COMPACTION"),
-    // RFC jun-6-microcompaction — strict `=== "1"` opt-in. Default false ⇒ the
+    // RFC jun-6-microcompaction — opt-in (gateOn vocab `1`/`on`/`true`/`yes`;
+    // #24 doc-fix — resolver is `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ the
     // tier-1 eviction pre-pass is never constructed (byte-identical). The
     // keep/floor/interval tunables are positive ints (no magic literals); absent
     // ⇒ the wire applies its own named defaults.
@@ -1409,7 +1417,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // ADR-0476 — strict `=== "1"` opt-in (matches the `skillMcpDepsEnabled`
     // slice gate). Default false ⇒ no deps lifted, no auto-attach.
     skillMcpDeps: gateOnStrict(env, "QUANTA_SKILL_MCP_DEPS"),
-    // ADR-0470 B1 follow-up — strict `=== "1"` opt-in. SEAM (validated, not yet
+    // ADR-0470 B1 follow-up — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24
+    // doc-fix — resolver is `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). SEAM (validated, not yet
     // composed at the root): no production code reads this field, so it is a
     // no-op today (byte-identical ON or OFF). Default false ⇒ MCP `sampling` is
     // NOT advertised and the headless rejecter declines (`no-handler`). Intended
@@ -1421,63 +1430,63 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // directly at every site (byte-identical). ON guards CONSTRUCTION/perf only;
     // the counter's numbers are byte-identical to a full re-scan by §4.1.
     deltaTokenCount: gateOnStrict(env, "QUANTA_DELTA_TOKEN_COUNT"),
-    // H19 — strict `=== "1"` opt-in. Default false ⇒ MCP `roots` is NOT
+    // H19 — opt-in (`gateOn` vocab; #24). Default false ⇒ MCP `roots` is NOT
     // advertised and inbound `roots/list` answers an empty list (byte-identical).
     // The composition root advertises + wires the RootsProviderPort together
     // only when this is on AND a workspace roots source is available.
     mcpRoots: gateOn(env, "QUANTA_MCP_ROOTS"),
-    // H18 — strict `=== "1"` opt-in. Default false ⇒ no OAuth provider is wired,
+    // H18 — opt-in (`gateOn` vocab; #24). Default false ⇒ no OAuth provider is wired,
     // the McpClient falls back to the headless rejecter (no token), every MCP
     // load is byte-identical (no discovery, no flow, no Authorization header).
     mcpOAuth: gateOn(env, "QUANTA_MCP_OAUTH"),
-    // H9 — strict `=== "1"` opt-in. Default false ⇒ the read tool renders full
+    // H9 — opt-in (`gateOn` vocab; #24). Default false ⇒ the read tool renders full
     // content on every call and allocates no per-range dedup state.
     readDedup: gateOn(env, "QUANTA_READ_DEDUP"),
-    // H6 — strict `=== "1"` opt-in. Default false ⇒ the bash post-exec hook
+    // H6 — opt-in (`gateOn` vocab; #24). Default false ⇒ the bash post-exec hook
     // classifies nothing and touches no sink (byte-identical).
     passiveVcs: gateOn(env, "QUANTA_PASSIVE_VCS"),
     // N1 — strict opt-in. Default false ⇒ no language notice (byte-identical).
     langDetect: gateOn(env, "QUANTA_LANG_DETECT"),
-    // H14a — strict `=== "1"` opt-in. Default false ⇒ no image_gen port wired,
+    // H14a — opt-in (`gateOn` vocab; #24). Default false ⇒ no image_gen port wired,
     // tool not registered (byte-identical default menu).
     imageGen: gateOn(env, "QUANTA_IMAGE_GEN"),
-    // H14b — strict `=== "1"` opt-in. Default false ⇒ no office authoring tools.
+    // H14b — opt-in (`gateOn` vocab; #24). Default false ⇒ no office authoring tools.
     officeAuthoring: gateOn(env, "QUANTA_OFFICE_AUTHORING"),
     // W6 — strict opt-in. Default false ⇒ no notebook_edit tool (byte-identical).
     notebookEdit: gateOn(env, "QUANTA_NOTEBOOK_EDIT"),
     debugTools: gateOn(env, "QUANTA_DEBUG_TOOLS"),
     testRunner: gateOn(env, "QUANTA_TEST_RUNNER"),
     evidence: gateOn(env, "QUANTA_EVIDENCE"),
-    // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
+    // H15 — opt-in (`gateOn` vocab; #24). Default false ⇒ responses-wire byte-identical
     // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
     reasoningCarryover: gateOn(env, "QUANTA_REASONING_CARRYOVER"),
     // ADR-0512 — skill tool-scoping v2 (availability filter + escalation ask).
     // Default false ⇒ ADR-0011 dispatch-deny behavior (byte-identical).
     skillScopeV2: gateOn(env, "QUANTA_SKILL_SCOPE_V2"),
-    // H17 — idle goal-continuation + budget enforcement. Strict `=== "1"` opt-in;
+    // H17 — idle goal-continuation + budget enforcement. Strict the `gateOn` truthy vocab (#24) opt-in;
     // default false ⇒ objective stays informational-only (byte-identical).
     goalContinuationEnforce: gateOn(env, "QUANTA_GOAL_ENFORCE"),
-    // H13 — strict `=== "1"` opt-in. Default false ⇒ no config-migration detect,
+    // H13 — opt-in (`gateOn` vocab; #24). Default false ⇒ no config-migration detect,
     // no prompt, no ledger (byte-identical startup).
     migrateConfig: gateOn(env, "QUANTA_MIGRATE_CONFIG"),
-    // H17 — strict `=== "1"` opt-in. Default false ⇒ objective budget stays
+    // H17 — opt-in (`gateOn` vocab; #24). Default false ⇒ objective budget stays
     // informational (status never flips, idle-continuation byte-identical).
     objectiveBudgetEnforce: gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE"),
-    // Capability A — strict `=== "1"` opt-in. Default false ⇒ batch fan-out is
+    // Capability A — opt-in (`gateOn` vocab; #24). Default false ⇒ batch fan-out is
     // the existing flat parallel pool (byte-identical, no DAG ordering).
     teamDag: gateOn(env, "QUANTA_TEAM_DAG"),
-    // Capability B — strict `=== "1"` opt-in. Default false ⇒ a denied worker
+    // Capability B — opt-in (`gateOn` vocab; #24). Default false ⇒ a denied worker
     // tool stays a hard failure (no escalation broker, byte-identical).
     teamBroker: gateOn(env, "QUANTA_TEAM_BROKER"),
-    // Capability C — strict `=== "1"` opt-in. Default false ⇒ no idle beacons /
+    // Capability C — opt-in (`gateOn` vocab; #24). Default false ⇒ no idle beacons /
     // no fan-in barrier (the leader polls, byte-identical).
     teamIdle: gateOn(env, "QUANTA_TEAM_IDLE"),
-    // Peer teammate messaging (RFC jun-6) — strict `=== "1"` opt-in. Default
+    // Peer teammate messaging (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default
     // false ⇒ no peerInbox drain (turn loop byte-identical), no TeamScopedMailbox
     // decorator (raw global mailbox), no team registry / team_* tools. Builds ON
     // the existing QUANTA_TEAM_* peer mailbox + wake-idle.
     teamPeerMsg: gateOn(env, "QUANTA_TEAM_PEER_MSG"),
-    // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
+    // C1 — opt-in (`gateOn` vocab; #24). Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: gateOn(env, "QUANTA_ARTIFACT_STORE"),
     // ADR-0503 P3 — capability-layer master gate. STRICT `=== "1"` opt-in (arming
@@ -1513,10 +1522,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_CODE_MODE_OUTPUT_CAP"],
       "QUANTA_CODE_MODE_OUTPUT_CAP",
     ),
-    // file_history_rewind — strict `=== "1"` opt-in. Default false ⇒ no per-file
+    // file_history_rewind — opt-in (`gateOn` vocab; #24). Default false ⇒ no per-file
     // history store, no capture sink, no file_history_rewind tool (byte-identical).
     fileHistory: gateOn(env, "QUANTA_FILE_HISTORY"),
-    // CLUSTER D #5 — strict `=== "1"` opt-in. Default false ⇒ no PatternGrantStore
+    // CLUSTER D #5 — opt-in (`gateOn` vocab; #24). Default false ⇒ no PatternGrantStore
     // constructed, no permission_propose_pattern tool (byte-identical).
     rememberPatterns: gateOn(env, "QUANTA_REMEMBER_PATTERNS"),
     // CLUSTER D #5 residual — strict `=== "1"` opt-in. Default false ⇒ a
@@ -1527,13 +1536,13 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // jun-6 paste-burst — positive-integer min-char threshold. Absent / invalid
     // ⇒ undefined ⇒ the CLI reader echoes a paste inline (byte-identical).
     pasteBurstMinChars: parsePositiveInt(env["QUANTA_PASTE_BURST"], "QUANTA_PASTE_BURST"),
-    // jun-6 skill-creator — strict `=== "1"` opt-in. Default false ⇒ no writer
+    // jun-6 skill-creator — opt-in (`gateOn` vocab; #24). Default false ⇒ no writer
     // port, `skill_create` not registered (byte-identical default tool surface).
     skillCreator: gateOn(env, "QUANTA_SKILL_CREATOR"),
-    // C6 — strict `=== "1"` opt-in. Default false ⇒ no structured deny reason
+    // C6 — opt-in (`gateOn` vocab; #24). Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
     surfaceDenyReason: gateOn(env, "QUANTA_DENY_REASON"),
-    // sandbox-escalation (RFC jun-6) — strict `=== "1"` opt-in. Default false ⇒
+    // sandbox-escalation (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default false ⇒
     // classifySandboxDenial is never consulted, no denialReason is ever set, no
     // escalation prompt, no post-denial record (a sandboxed nonzero exit is
     // byte-identical to a plain failure). Default-ON flip is OUT OF SCOPE.
@@ -1542,34 +1551,37 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_SANDBOX_ESCALATION_MAX"],
       "QUANTA_SANDBOX_ESCALATION_MAX",
     ),
-    // account-ratelimit — strict `=== "1"` opt-in. Default false ⇒ adapters
+    // account-ratelimit — opt-in (`gateOn` vocab; #24). Default false ⇒ adapters
     // capture no ratelimit headers and the loop inserts no pre-request delay
     // (byte-identical).
     proactiveRateLimit: gateOn(env, "QUANTA_RATELIMIT_PROACTIVE"),
     ratelimitNotice: ratelimitNoticeWanted(env.QUANTA_RATELIMIT_NOTICE),
     // N6 PTY backend selector. Default "tmux" ⇒ byte-identical to pre-slice path.
     ptyBackend: parsePtyBackend(env["QUANTA_PTY_BACKEND"]),
-    // H18/keyring — strict `=== "1"` opt-in. Default false ⇒ MCP OAuth uses the
+    // H18/keyring — opt-in (`gateOn` vocab; #24). Default false ⇒ MCP OAuth uses the
     // plain 0600 file token store (byte-identical, no keyring wrap).
     mcpOAuthKeyring: gateOn(env, "QUANTA_MCP_OAUTH_KEYRING"),
-    // ADR-0487 — strict `=== "1"` opt-in. Default false ⇒ scheduler built without
+    // ADR-0487 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default
+    // false ⇒ scheduler built without
     // admissionQueue (throw-at-cap) and no 4th tool (byte-identical).
     subagentQueue: gateOn(env, "QUANTA_SUBAGENT_QUEUE"),
-    // ADR-0487 — strict `=== "1"` opt-in. Default false ⇒ subagentBgTools mints no
+    // ADR-0487 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default
+    // false ⇒ subagentBgTools mints no
     // subagent_force_background tool (byte-identical).
     forceBackground: gateOn(env, "QUANTA_FORCE_BACKGROUND"),
-    // G1 — strict `=== "1"` opt-in. Default false ⇒ no DefaultToolPorts.appshot
+    // G1 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false
+    // ⇒ no DefaultToolPorts.appshot
     // slot, appshot_verify not registered (byte-identical default menu).
     appshot: gateOn(env, "QUANTA_APPSHOT"),
-    // N1 — strict `=== "1"` opt-in. Default false ⇒ no side-agent daemons/tools.
+    // N1 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no side-agent daemons/tools.
     sideAgent: gateOn(env, "QUANTA_SIDE_AGENT"),
     // §4.4 — opt-in. Default false ⇒ agent_type is the legacy free string.
     subagentTypedKind: gateOn(env, "QUANTA_SUBAGENT_TYPED_KIND"),
     // §4.3 — opt-in OS-process side-agent daemon V1. Default false ⇒ in-process.
     sideAgentProcess: gateOn(env, "QUANTA_SIDE_AGENT_PROCESS"),
-    // N2 — strict `=== "1"` opt-in. Default false ⇒ no MCP connector tools.
+    // N2 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no MCP connector tools.
     mcpConnectors: gateOn(env, "QUANTA_MCP_CONNECTORS"),
-    // N3 — strict `=== "1"` opt-in. Default false ⇒ no MCP resource/prompt tools.
+    // N3 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no MCP resource/prompt tools.
     mcpResources: gateOn(env, "QUANTA_MCP_RESOURCES"),
     // §19.1 — opt-in honoring of server-declared tool annotations. SSOT with the
     // `mcp-tool-annotations` KNOB (Finding 2): both channels share the standard
@@ -1580,7 +1592,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // classification, byte-identical default).
     mcpToolAnnotations: parseBool(env["QUANTA_MCP_TOOL_ANNOTATIONS"]),
     progressUpdate: gateOn(env, "QUANTA_PROGRESS_UPDATE"),
-    // #8 — strict `=== "1"` opt-in. Default false ⇒ no mid-turn capture facade.
+    // #8 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no mid-turn capture facade.
     midTurnCapture: gateOn(env, "QUANTA_MIDTURN_CAPTURE"),
     midTurnVisible: gateOn(env, "QUANTA_MIDTURN_VISIBLE"),
     managedSettingsPath: env.QUANTA_MANAGED_SETTINGS_PATH,
@@ -1605,10 +1617,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     directiveParallelTools: gateOn(env, "QUANTA_DIRECTIVE_PARALLEL_TOOLS"),
     // Advisor timing-rail directive (RFC jun-6 §5.2) — canonical opt-in (gateOn).
     directiveAdvisorRail: gateOn(env, "QUANTA_ADVISOR_RAIL"),
-    // adaptive-thinking — strict `=== "1"` opt-in. Default false ⇒ the producer
+    // adaptive-thinking — opt-in (`gateOn` vocab; #24). Default false ⇒ the producer
     // emits manual `{type:"enabled",budget_tokens}` for every model (byte-identical).
     adaptiveThinking: gateOn(env, "QUANTA_ADAPTIVE_THINKING"),
-    // RFC jun-6 §5.1 — advisor full-history forward (strict `=== "1"` opt-in).
+    // RFC jun-6 §5.1 — advisor full-history forward (opt-in (`gateOn` vocab; #24)).
     advisorForwardHistory: gateOn(env, "QUANTA_ADVISOR_FORWARD_HISTORY"),
     // SECURITY protection (filesystem jail) — tearing it down requires the
     // deliberate, unambiguous `=off`; a loose `=0` must NOT silently drop the jail.
@@ -1667,7 +1679,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     asyncTools: parseBool(env["QUANTA_ASYNC_TOOLS"]),
     deferredCap: parsePositiveInt(env["QUANTA_DEFERRED_CAP"], "QUANTA_DEFERRED_CAP"),
-    // H16 — strict `=== "1"` opt-in (matches the slice gate; default-OFF).
+    // H16 — opt-in (`gateOn` vocab; #24) (matches the slice gate; default-OFF).
     // OFF ⇒ no CrossSessionDreamTrigger constructed, byte-identical.
     autoDream: gateOn(env, "QUANTA_AUTO_DREAM"),
     autoDreamSessions: parsePositiveInt(
@@ -1701,7 +1713,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // (incl. absent) ⇒ "5m" (byte-identical fixed-5m cache_control). The
     // factory additionally gates "1h" behind a model allowlist.
     cacheTtl: env["QUANTA_PROMPT_CACHE_TTL"] === "1h" ? "1h" : "5m",
-    // OAuth revoke-on-logout — strict `=== "1"` opt-in. Default false ⇒ logout
+    // OAuth revoke-on-logout — opt-in (`gateOn` vocab; #24). Default false ⇒ logout
     // only clears local state (byte-identical, no network revoke call).
     oauthRevokeOnLogout: gateOn(env, "QUANTA_OAUTH_REVOKE_ON_LOGOUT"),
     // jun-6 (ADR-0481) — DEFAULT-ON (the only default-true knob). Toggles only
@@ -1709,7 +1721,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // stripping are unconditional. NO effect on non-`.ipynb` reads (extension
     // gate). Off only when explicitly set to 0/false/off.
     ipynbIncludeOutputs: parseBoolDefaultTrue(env["QUANTA_IPYNB_OUTPUTS"]),
-    // jun-6 BYOK — strict `=== "1"` opt-in. Default false ⇒ the legacy LLM-build
+    // jun-6 BYOK — opt-in (`gateOn` vocab; #24). Default false ⇒ the legacy LLM-build
     // seam passes `source: undefined` (byte-identical key resolution).
     apiKeyHelperLegacyVendor: gateOn(env, "QUANTA_API_KEY_HELPER_LEGACY_VENDOR"),
     // jun-6 AI session title — boolean knob vocabulary (1/true/on). Default false
@@ -1717,14 +1729,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // sessionTitleModel must be present for the feature to arm.
     sessionAutoTitle: parseBool(env["QUANTA_SESSION_AUTO_TITLE"]),
     sessionTitleModel: stringOrUndef(env["QUANTA_SESSION_TITLE_MODEL"]),
-    // jun-6 tool-interrupt — strict `=== "1"` opt-in. Default false ⇒ dispatch
+    // jun-6 tool-interrupt — opt-in (`gateOn` vocab; #24). Default false ⇒ dispatch
     // threads the raw signal, no criticalSection (block behaves like cancel).
     toolInterruptBlock: gateOn(env, "QUANTA_TOOL_INTERRUPT_BLOCK"),
     // jun-6 — watchdog cap (ms). Absent / invalid ⇒ DEFAULT_CRITICAL_SECTION_MAX_MS.
     criticalSectionMaxMs:
       parsePositiveInt(env["QUANTA_CRITICAL_SECTION_MAX_MS"], "QUANTA_CRITICAL_SECTION_MAX_MS") ??
       DEFAULT_CRITICAL_SECTION_MAX_MS,
-    // jun-6 permission_request hook — strict `=== "1"` opt-in kill-switch.
+    // jun-6 permission_request hook — opt-in (`gateOn` vocab; #24) kill-switch.
     // Default false ⇒ the gate does NOT emit permission_request (byte-identical;
     // falls through to the policy stack). Extra guard atop HookBus presence.
     permissionHook: gateOn(env, "QUANTA_PERMISSION_HOOK"),
@@ -1732,7 +1744,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // check threaded onto ToolContext (write/edit accept a glob path as a
     // literal filename, byte-identical).
     globWriteGuard: gateOnStrict(env, "QUANTA_GLOB_WRITE_GUARD"),
-    // jun-6 exfil-rail (a) — strict `=== "1"` opt-in. Default false ⇒ no budget
+    // jun-6 exfil-rail (a) — opt-in (`gateOn` vocab; #24). Default false ⇒ no budget
     // port wired (byte-identical). Also requires a configured cap below.
     writeBudget: gateOn(env, "QUANTA_WRITE_BUDGET"),
     // jun-6 exfil-rail (a) — the CONFIGURABLE cap N (positive integer). No
@@ -1769,11 +1781,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // token; everything else (incl. unset) ⇒ `deny` (fail closed by default).
     tlsMitmOnFailure:
       env["QUANTA_TLS_MITM_ON_FAILURE"] === "opaque-tunnel" ? "opaque-tunnel" : "deny",
-    // syntax-aware-chunking (RFC jun-6) — strict `=== "1"` opt-in. Default
+    // syntax-aware-chunking (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default
     // false ⇒ indexer uses the line-window chunkFile (byte-identical), parser
     // never constructed, no WASM.
     syntaxChunk: gateOn(env, "QUANTA_SYNTAX_CHUNK"),
-    // read-outline (RFC jun-6) — strict `=== "1"` opt-in. Default false ⇒
+    // read-outline (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default false ⇒
     // `read outline:true` returns the line-range fallback, parser never built.
     readOutline: gateOn(env, "QUANTA_READ_OUTLINE"),
     // Grammar-wasm dir override. Absent ⇒ resolve tree-sitter-wasms/out.

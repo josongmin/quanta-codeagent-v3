@@ -12,6 +12,7 @@ import type { PermissionMode, PermissionStore } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
+import { runtimeConfig } from "@/shared"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
@@ -24,6 +25,8 @@ import type { LifecyclePills } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RejectCounter } from "../reject-counter"
 import { installStatusBar, type StatusBar } from "../status-bar"
+import type { SessionStatusView } from "../status-command-runner"
+import { createStatusLineDriver, type StatusLineDriver } from "../status-line-driver"
 import type { createStatusPills } from "../status-pills"
 import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
@@ -107,6 +110,10 @@ export interface SessionSetupResult {
    *  REPL surface composer can wire `/effort` against the SAME instance the
    *  loop reads via `AgentConfig.sessionEffort`). */
   readonly effortStore: import("@/agent").EffortStore
+  // #17 (Agent-B, additive) — brief-mode store forwarded from bootstrap so the
+  // REPL surface composer can wire `/brief` against the SAME instance the loop
+  // reads via `AgentConfig.sessionBrief`. Mirrors `effortStore`.
+  readonly briefStore: import("@/agent").BriefStore
   readonly llm: LLMPort
   readonly planMode: boolean
   readonly metrics: SessionBootstrapResult["features"]["metrics"]
@@ -235,15 +242,17 @@ export const setupSession = async (
     timelineStream,
   )
 
-  const { approvalPrompt, midTurnApprovalChannel, runtimeContext } = await composeCliRuntimeContext({
-    boot,
-    turnStream,
-    loadPermissionStore: deps.loadPermissionStore,
-    sandboxProfile: runtime.sandboxProfile,
-    ...(options.convStore !== undefined ? { convStore: options.convStore } : {}),
-    ...(options.responsesStore !== undefined ? { responsesStore: options.responsesStore } : {}),
-    envSource: runtime.env,
-  })
+  const { approvalPrompt, midTurnApprovalChannel, runtimeContext } = await composeCliRuntimeContext(
+    {
+      boot,
+      turnStream,
+      loadPermissionStore: deps.loadPermissionStore,
+      sandboxProfile: runtime.sandboxProfile,
+      ...(options.convStore !== undefined ? { convStore: options.convStore } : {}),
+      ...(options.responsesStore !== undefined ? { responsesStore: options.responsesStore } : {}),
+      envSource: runtime.env,
+    },
+  )
   // ADR-0269 Phase 3 closure — install the process-level fs-jail decision
   // sink. fs-jail (storage/service.ts) can't import @/stream (slice-fence),
   // so it carries a module-level sink slot the composition root fills with
@@ -271,6 +280,38 @@ export const setupSession = async (
   // remains a no-op (same value re-applied).
   pills.update({ effort: boot.effortStore.get() })
 
+  // #15 — scriptable statusLine driver (the missing prod consumer). DOUBLE-gated
+  // default-OFF: `runtimeConfig().statusLineConfig` is `undefined` unless
+  // `QUANTA_STATUS_LINE` is on AND a valid `QUANTA_STATUS_LINE_CONFIG` parses, so
+  // OFF ⇒ no driver, no view thunk, no poll ⇒ byte-identical. When ON, the
+  // command's first line is routed into the pills row as the far-right segment
+  // (NOT a direct `setDefault`, which would clobber the pill composer).
+  const statusLineCfg = runtimeConfig().statusLineConfig
+  let statusLineDriver: StatusLineDriver | undefined
+  if (statusLineCfg !== undefined) {
+    const costPanel = boot.costPanel as CostPanel | undefined
+    const statusView = (): SessionStatusView => {
+      const cost = costPanel?.snapshot()
+      return {
+        ...(boot.sessionId !== undefined ? { sessionId: boot.sessionId } : {}),
+        cwd: boot.cwd,
+        currentDir: boot.cwd,
+        modelId: boot.model,
+        modelDisplayName: boot.model,
+        effortLevel: boot.effortStore.get(),
+        ...(cost?.totalCostUsd != null ? { totalCostUsd: cost.totalCostUsd } : {}),
+      }
+    }
+    statusLineDriver = createStatusLineDriver({
+      cfg: statusLineCfg,
+      view: statusView,
+      pills,
+      width: process.stdout.columns ?? 0,
+    })
+    void statusLineDriver.tick() // initial paint (async, non-blocking)
+    statusLineDriver.start() // poll iff the config carries refreshInterval
+  }
+
   // ADR-0466 — one-shot startup environment probe. Default-OFF: a no-op that
   // builds no exec port and spawns nothing unless QUANTA_ENABLE_ENV_PROBE="1".
   // Awaited so a degradation notice (missing toolchain / test runner) lands
@@ -291,6 +332,8 @@ export const setupSession = async (
     idleMonitor: boot.idleMonitor as IdleMonitor,
     rejectCounter: boot.rejectCounter as RejectCounter,
     effortStore: boot.effortStore,
+    // #17 (Agent-B, additive) — forward the bootstrap brief-mode store.
+    briefStore: boot.briefStore,
     llm: boot.llm,
     planMode: boot.features.planMode,
     metrics: boot.features.metrics,
@@ -332,6 +375,9 @@ export const setupSession = async (
       // teardown so a sibling/re-entered session never inherits this
       // run's emitter (the slot is process-global by slice-fence design).
       clearFsJailDecisionSink()
+      // #15 — stop the status-line poll on session end (idempotent; undefined
+      // when the feature is gated off).
+      statusLineDriver?.stop()
       await boot.shutdownMcp()
     },
     // ADR-0301 — forward the CLI flag echo so `runRepl` can hand it to

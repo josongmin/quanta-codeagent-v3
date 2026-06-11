@@ -50,6 +50,7 @@ evidence:
     - src/tool/evidence/builder.ts
     - src/tool/evidence/tool.ts
     - src/tool/evidence/runtime.ts
+    - src/tool/evidence/node-runner.ts
     - src/tool/evidence/types.ts
   adrs: [533]
   tests:
@@ -59,4 +60,5 @@ evidence:
       - tests/unit/tool/evidence/keystone-real-e2e.test.ts
       - tests/unit/tool/evidence/runtime-real-e2e.test.ts
       - tests/unit/tool/evidence/runtime-rust-real-e2e.test.ts
+      - tests/unit/tool/evidence/runtime-jest-real-e2e.test.ts
       - tests/unit/evidence-lsp-bridge-real-e2e.test.ts

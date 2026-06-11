@@ -94,6 +94,41 @@ export const createInboxBanner = (opts: InboxBannerOpts): InboxBanner => {
   }
 }
 
+/** #22 — compose an {@link InboxBanner} ONTO an automation-engine slot's
+ *  `onTick` so the live ticker (`startAutomationEngineTicker`) paints
+ *  `[automation inbox: N]` on each fire/errored tick. The slot's EXISTING
+ *  `onTick` (errored-telemetry) is preserved — both observers run, banner
+ *  second. Opt-in: when `enabled` is false the slot is returned UNTOUCHED
+ *  (same reference, byte-identical) and NO banner is constructed.
+ *
+ *  Generic over the slot shape so the caller keeps its concrete
+ *  `AutomationEngineSlot` type (all other fields flow through the spread). */
+export const wireInboxBannerOntoSlot = <
+  T extends {
+    readonly engine: AutomationEnginePort
+    readonly onTick?: (outcome: TickOutcome) => void
+  },
+>(
+  slot: T,
+  opts: {
+    readonly enabled: boolean
+    /** Test seam — defaults to {@link createInboxBanner}. */
+    readonly createBanner?: (bannerOpts: InboxBannerOpts) => InboxBanner
+  },
+): { slot: T & { onTick?: (outcome: TickOutcome) => void }; banner: InboxBanner | undefined } => {
+  if (!opts.enabled) return { slot, banner: undefined }
+  const banner = (opts.createBanner ?? createInboxBanner)({ engine: slot.engine })
+  const prior = slot.onTick
+  const composed = {
+    ...slot,
+    onTick: (outcome: TickOutcome): void => {
+      prior?.(outcome)
+      banner.onTick(outcome)
+    },
+  }
+  return { slot: composed, banner }
+}
+
 /** Default unread counter — duck-typed read of `engine.inbox`. Engines
  *  that don't expose the inspection array always report 0 (banner becomes
  *  silent). */

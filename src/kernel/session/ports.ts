@@ -155,8 +155,9 @@ export interface SessionHost {
     readonly decision: "approve" | "deny"
     /** ADR-0512 P3 — once-vs-session scope for an `approve` of a skill-scope
      *  escalation (`once` ⇒ dispatch WITHOUT widening). Absent ⇒ session/widen
-     *  (or N/A for a normal approval). */
-    readonly scope?: "once" | "session"
+     *  (or N/A for a normal approval). #20 — `session_prefix` additionally mints
+     *  a standing program-token prefix grant on a NORMAL approval. */
+    readonly scope?: "once" | "session" | "session_prefix"
     /** ADR-0512 P3 — corrective steer for a `deny` of a skill-scope escalation
      *  (`deny_and_steer`). Absent ⇒ a plain decline. */
     readonly steer?: string

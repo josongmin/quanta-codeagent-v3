@@ -50,6 +50,7 @@ import {
 } from "./at-autocomplete"
 import { CANONICAL_KEY_FOR_ACTION } from "./keybindings/defaults"
 import { keyOf } from "./keybindings/normalize"
+import type { KeybindingMap } from "./keybindings/types"
 import {
   deleteWordBefore,
   killToLineEnd,
@@ -57,7 +58,6 @@ import {
   wordLeft,
   wordRight,
 } from "./line-edit-ops"
-import type { KeybindingMap } from "./keybindings/types"
 import type { PromptHistory } from "./prompt-history"
 import type { ExternalEditorPort } from "./raw-line-reader-editor"
 
@@ -131,6 +131,21 @@ export interface ReadLineOptions {
    *  echoed inline, exactly as before). Injected at the composition root from the
    *  `QUANTA_PASTE_BURST` knob (the slice never reads env directly). */
   readonly pasteBurst?: PasteBurstOptions
+  /** #10 (jun-11) — bracketed-paste mode. When `true`, the reader emits the
+   *  DECSET `?2004h` enable sequence on raw-mode entry (and `?2004l` on every
+   *  exit / editor-suspend) so the terminal wraps a paste in `ESC[200~ … ESC[201~`
+   *  markers. Bun's `node:readline` surfaces those markers as discrete
+   *  `paste-start`/`paste-end` keypress events (probe-verified 2026-06-11), so the
+   *  reader can ACCUMULATE every keystroke between them — including the embedded
+   *  `\r`/`\n` line breaks that otherwise arrive as `name:"return"` and SUBMIT the
+   *  line at the first newline (the bug this fixes). The full pasted text lands in
+   *  `buf` (multi-line preserved); the line only submits on a genuine Enter
+   *  OUTSIDE a paste. Absent / `false` (default-OFF) ⇒ no `?2004h` is emitted, the
+   *  markers never arrive, and EVERY keypress path is byte-identical to today's
+   *  build (a pasted newline still early-submits — the legacy behavior). Injected
+   *  at the composition root from the `QUANTA_BRACKETED_PASTE` CLI gate; the slice
+   *  never reads env. */
+  readonly bracketedPaste?: boolean
 }
 
 /** jun-6 — paste-burst coalescing config (closed-port DI; the slice never reads
@@ -225,6 +240,10 @@ const RESET = `${ESC}0m`
 const CYAN = `${ESC}36m`
 const GRAY = `${ESC}90m`
 const REVERSE = `${ESC}7m`
+// #10 — DECSET 2004: bracketed-paste enable / disable. Emitted only when
+// `opts.bracketedPaste` is set so the OFF path never writes these bytes.
+const ENABLE_BRACKETED_PASTE = `${ESC}?2004h`
+const DISABLE_BRACKETED_PASTE = `${ESC}?2004l`
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches ANSI SGR sequences to strip them.
 const ANSI_RE = /\x1b\[[0-9;]*m/g
@@ -300,6 +319,21 @@ interface State {
    *  injected AND a ≥minChars keypress arrived. Display-only: `buf` always holds
    *  the FULL text; these only collapse the ECHO. */
   pasteSegments: PasteSegment[]
+  /** #10 — true between a `paste-start` and `paste-end` marker. While true,
+   *  EVERY keypress is accumulated into `pasteText` (CR/LF normalized to `\n`)
+   *  rather than routed to the submit / nav / completion handlers, so a
+   *  multi-line paste never submits at its first newline. Inert (always false)
+   *  unless `opts.bracketedPaste` is set AND the terminal sent a paste-start. */
+  pasting: boolean
+  /** Cursor index where the active paste began (where the accumulated text is
+   *  spliced into `buf` on paste-end). */
+  pasteAnchor: number
+  /** Accumulated text of the active paste (line breaks normalized to `\n`). */
+  pasteText: string
+  /** `\r\n` collapse latch: a `\n` (`name:"enter"`) immediately after a `\r`
+   *  (`name:"return"`) is the second half of a CRLF and is dropped so the
+   *  buffer keeps a single `\n` per line break. */
+  pasteLastCR: boolean
 }
 
 const ghostSuffix = (buf: string, candidates: readonly string[]): string => {
@@ -363,6 +397,10 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       heredocLines: [],
       at: createAtState(),
       pasteSegments: [],
+      pasting: false,
+      pasteAnchor: 0,
+      pasteText: "",
+      pasteLastCR: false,
     }
     // Reset the history cursor at the start of every readLine so `↑` always
     // pulls the freshest entry first. Default-OFF when `opts.history` absent.
@@ -379,6 +417,20 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
     const wasRaw = stdin.isTTY === true ? (stdin.isRaw ?? false) : false
     if (stdin.isTTY === true) stdin.setRawMode?.(true)
     stdin.resume()
+
+    // #10 — bracketed-paste enable/disable. Guarded on the opt AND a real TTY so
+    // the OFF path (and a non-tty test stdin) never emits the DECSET bytes
+    // (byte-identical). `enable` is called on raw-mode entry + editor-resume;
+    // `disable` on every exit (cleanup) + editor-suspend, so no terminal is ever
+    // left with bracketed-paste latched after the reader yields or crashes.
+    const bracketedPasteOn = opts.bracketedPaste === true
+    const enableBracketedPaste = (): void => {
+      if (bracketedPasteOn && stdin.isTTY === true) stdout.write(ENABLE_BRACKETED_PASTE)
+    }
+    const disableBracketedPaste = (): void => {
+      if (bracketedPasteOn && stdin.isTTY === true) stdout.write(DISABLE_BRACKETED_PASTE)
+    }
+    enableBracketedPaste()
 
     const refreshCandidates = (): void => {
       if (opts.completer === undefined) {
@@ -566,6 +618,10 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
     const cleanup = (): void => {
       stdin.removeListener("keypress", onKey)
       if (signalListener !== null) opts.signal?.removeEventListener("abort", signalListener)
+      // #10 — turn bracketed-paste OFF before restoring the prior raw-mode state
+      // so the host terminal is never left with `?2004h` latched (it would wrap
+      // the user's NEXT shell paste in stray `[200~`/`[201~` markers otherwise).
+      disableBracketedPaste()
       if (stdin.isTTY === true) stdin.setRawMode?.(wasRaw)
       stdin.pause()
     }
@@ -777,6 +833,9 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       stdout.write(CR + ERASE_LINE)
       const draft = state.buf
       try {
+        // #10 — drop bracketed-paste before handing the TTY to $EDITOR (the
+        // editor manages its own paste mode); re-enabled in the finally on resume.
+        disableBracketedPaste()
         if (stdin.isTTY === true) stdin.setRawMode?.(false)
         stdin.pause()
         // `openDraft` is contractually no-throw, but we still swallow a
@@ -799,6 +858,8 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
         if (!settled) {
           if (stdin.isTTY === true) stdin.setRawMode?.(true)
           stdin.resume()
+          // #10 — re-arm bracketed-paste now that we own the TTY again.
+          enableBracketedPaste()
           if (testIO?.skipKeypressSetup !== true) {
             readline.emitKeypressEvents(stdin as unknown as NodeJS.ReadStream)
           }
@@ -810,12 +871,99 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       }
     }
 
+    // ── #10 — bracketed-paste accumulation ──────────────────────────────────
+    // Bun's `node:readline` surfaces the DECSET 2004 markers as discrete
+    // `paste-start`/`paste-end` keypresses (probe 2026-06-11); we ALSO match the
+    // raw `sequence` as a fallback for runtimes that pass it through unnamed.
+    const isPasteStart = (k: KeyEvent): boolean =>
+      k.name === "paste-start" || k.sequence === `${ESC}200~`
+    const isPasteEnd = (k: KeyEvent): boolean =>
+      k.name === "paste-end" || k.sequence === `${ESC}201~`
+
+    const beginPaste = (): void => {
+      state.pasting = true
+      state.pasteAnchor = state.cursor
+      state.pasteText = ""
+      state.pasteLastCR = false
+    }
+
+    /** Fold one in-paste keypress into `pasteText`. CR (`name:"return"`) and LF
+     *  (`name:"enter"`) both become a single `\n`; a `\n` directly after a `\r`
+     *  is the trailing half of a CRLF and is dropped. Non-printable control keys
+     *  (arrows etc.) inside a paste are ignored — a paste is data, not editing. */
+    const accumulatePasteKey = (str: string | undefined, k: KeyEvent): void => {
+      if (k.name === "return" || str === "\r") {
+        state.pasteText += "\n"
+        state.pasteLastCR = true
+        return
+      }
+      if (k.name === "enter" || str === "\n") {
+        if (state.pasteLastCR) {
+          state.pasteLastCR = false
+          return
+        }
+        state.pasteText += "\n"
+        return
+      }
+      state.pasteLastCR = false
+      if (typeof str === "string" && str.length >= 1) state.pasteText += str
+    }
+
+    /** Splice the accumulated paste into `buf` at its anchor in ONE mutation and
+     *  redraw once. The echo collapses to a `[Pasted Content N chars]` placeholder
+     *  when the paste is multi-line (a raw `\n` in `buf` would corrupt the single-
+     *  row composer band) or when paste-burst is configured and the size crosses
+     *  its threshold; a short single-line paste inserts raw (renders inline). The
+     *  FULL text always stays in `buf` and submits verbatim on the next genuine
+     *  Enter. */
+    const finishPaste = (): void => {
+      state.pasting = false
+      const text = state.pasteText
+      state.pasteText = ""
+      state.pasteLastCR = false
+      if (text.length > 0) {
+        const anchor = Math.min(state.pasteAnchor, state.buf.length)
+        state.buf = state.buf.slice(0, anchor) + text + state.buf.slice(anchor)
+        state.cursor = anchor + text.length
+        const count = [...text].length
+        const collapse =
+          text.includes("\n") ||
+          (opts.pasteBurst !== undefined && count >= opts.pasteBurst.minChars)
+        if (collapse) state.pasteSegments.push({ text, placeholder: pasteBurstPlaceholder(count) })
+        if (state.historyDraft !== null) {
+          state.historyDraft = null
+          opts.history?.reset()
+        }
+      }
+      refreshCandidates()
+      redraw()
+    }
+
     const onKey = (str: string | undefined, key: KeyEvent | undefined): void => {
       if (settled) return
       // RFC-11 — `k` is reassignable so the keybinding remap can rewrite the
       // event to its action's canonical default key in place (no downstream
       // churn). Absent map ⇒ never reassigned (byte-identical).
       let k = key ?? {}
+
+      // #10 — bracketed paste. While pasting, route EVERY keypress to
+      // accumulation so an embedded `\r` never reaches the submit branch.
+      // Placed ABOVE ctrl+c so content between the markers is literal data.
+      // Inert (whole block skipped) unless `bracketedPasteOn` (byte-identical).
+      if (bracketedPasteOn) {
+        if (state.pasting) {
+          if (isPasteEnd(k)) {
+            finishPaste()
+            return
+          }
+          accumulatePasteKey(str, k)
+          return
+        }
+        if (isPasteStart(k)) {
+          beginPaste()
+          return
+        }
+      }
 
       if (k.ctrl === true && k.name === "c") {
         settleReject(new AbortError())

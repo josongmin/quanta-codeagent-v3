@@ -74,13 +74,19 @@ describe("/paste hellgate (ADR-0224)", () => {
     expect(io.err.join("")).toContain("empty")
   })
 
-  test("HELL-PASTE-04: image clipboard ⇒ '/image add' hint + exit 1", async () => {
+  test("HELL-PASTE-04: image clipboard + NO image queue ⇒ '/image add' hint + exit 1", async () => {
     const io = collectOut()
     const code = await pasteCmd.run([], {
       out: io.outFn,
       err: io.errFn,
       cwd: "/",
-      clipboardReader: fakeReader({ kind: "image", bytes: 1024 }),
+      // #18 — image now carries decoded bytes + mediaType; with no queue wired,
+      // `/paste` degrades to the pre-#18 "save to disk + /image add" hint.
+      clipboardReader: fakeReader({
+        kind: "image",
+        bytes: Buffer.from("x".repeat(1024)),
+        mediaType: "image/png",
+      }),
     })
     expect(code).toBe(1)
     expect(io.err.join("")).toContain("/image add")

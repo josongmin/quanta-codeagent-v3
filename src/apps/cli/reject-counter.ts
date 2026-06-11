@@ -21,7 +21,7 @@
  * Slice discipline: pure data structure, no IO, no imports.
  */
 
-const DEFAULT_THRESHOLD = 20
+export const DEFAULT_THRESHOLD = 20
 
 export interface RejectCounter {
   /** Record one denial. Returns the new (post-increment) total. */
@@ -35,6 +35,12 @@ export interface RejectCounter {
   shouldAutoExit(): boolean
   /** Reset state (test seam). */
   reset(): void
+  /** #22 — the RESOLVED auto-exit threshold this counter enforces (=
+   *  `threshold` or {@link DEFAULT_THRESHOLD}). Exposed so the exit banner
+   *  interpolates the SAME number the gate trips on, killing the hardcoded-"20"
+   *  UI-lie when an operator overrides `QUANTA_REJECT_LIMIT`. Optional so
+   *  existing test doubles stay assignable; the real factory always sets it. */
+  readonly limit?: number
 }
 
 export interface RejectCounterOptions {
@@ -47,6 +53,7 @@ export const createRejectCounter = (opts?: RejectCounterOptions): RejectCounter 
   let consecutive = 0
 
   return {
+    limit: threshold,
     recordDeny: (): number => {
       consecutive += 1
       return consecutive

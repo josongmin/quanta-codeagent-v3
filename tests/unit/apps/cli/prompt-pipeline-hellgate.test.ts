@@ -30,7 +30,7 @@ const stubIdle = (overrides: Partial<IdleMonitor> = {}): IdleMonitor => ({
   ...overrides,
 })
 
-const stubRejects = (shouldExit: boolean): RejectCounter => {
+const stubRejects = (shouldExit: boolean, limit?: number): RejectCounter => {
   let count = 0
   return {
     recordDeny: () => ++count,
@@ -40,6 +40,7 @@ const stubRejects = (shouldExit: boolean): RejectCounter => {
     count: () => count,
     shouldAutoExit: () => shouldExit,
     reset: () => undefined,
+    ...(limit !== undefined ? { limit } : {}),
   }
 }
 
@@ -395,5 +396,79 @@ describe("RFC-09 — DEFAULT-OFF byte-identical anchor", () => {
 
     expect(withOffWires.result).toBe(baseline.result)
     expect(withOffWires.writes).toEqual(baseline.writes)
+  })
+})
+
+// =============================================================================
+// #22 — repl-banners WIRED: idle/reject banners reflect the RESOLVED threshold
+// (QUANTA_IDLE_MS / QUANTA_REJECT_LIMIT) instead of the hardcoded "60s" / "20".
+// Closes the UI-lie bug class: an operator who overrides the env saw a banner
+// number that disagreed with the actual behaviour.
+// =============================================================================
+
+import { createIdleMonitor } from "../../../../src/apps/cli/idle-monitor"
+import { createRejectCounter } from "../../../../src/apps/cli/reject-counter"
+
+describe("#22 — idle/reject banners interpolate the resolved threshold", () => {
+  test("idle banner shows idle.thresholdMs (override ⇒ NOT the hardcoded 60s)", async () => {
+    const statusBar = stubStatusBar()
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ isIdle: () => true, thresholdMs: 30_000 }),
+      rejectCounter: stubRejects(false),
+      statusBar,
+      readPromptLine: async () => "typed",
+    })
+    await pipe.next(new AbortController().signal)
+    expect(statusBar.transients.some((t) => t.includes("idle 30s"))).toBe(true)
+    expect(statusBar.transients.some((t) => t.includes("idle 60s"))).toBe(false)
+  })
+
+  test("PAIRED control — a DIFFERENT threshold yields a DIFFERENT banner number", async () => {
+    const statusBar = stubStatusBar()
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ isIdle: () => true, thresholdMs: 90_000 }),
+      rejectCounter: stubRejects(false),
+      statusBar,
+      readPromptLine: async () => "typed",
+    })
+    await pipe.next(new AbortController().signal)
+    expect(statusBar.transients.some((t) => t.includes("idle 90s"))).toBe(true)
+  })
+
+  test("reject-exit banner shows rejects.limit (override ⇒ NOT the hardcoded 20)", async () => {
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(true, 5),
+      statusBar: stubStatusBar(),
+    })
+    const { writes } = await withCapturedStderr(() => pipe.next(new AbortController().signal))
+    expect(writes.some((w) => w.includes("5 consecutive denials"))).toBe(true)
+    expect(writes.some((w) => w.includes("20 consecutive denials"))).toBe(false)
+  })
+
+  test("default fallback — stub WITHOUT threshold/limit keeps 60s/20 (byte-identical)", async () => {
+    const statusBar = stubStatusBar()
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ isIdle: () => true }),
+      rejectCounter: stubRejects(false),
+      statusBar,
+      readPromptLine: async () => "typed",
+    })
+    await pipe.next(new AbortController().signal)
+    expect(statusBar.transients.some((t) => t.includes("idle 60s"))).toBe(true)
+  })
+})
+
+describe("#22 — monitors expose their resolved threshold (SSOT source)", () => {
+  test("createIdleMonitor exposes idleThresholdMs as `thresholdMs`", () => {
+    const m = createIdleMonitor({ idleThresholdMs: 30_000, loadSnoozeFromDisk: false })
+    expect(m.thresholdMs).toBe(30_000)
+  })
+  test("createRejectCounter exposes threshold as `limit`", () => {
+    expect(createRejectCounter({ threshold: 5 }).limit).toBe(5)
   })
 })

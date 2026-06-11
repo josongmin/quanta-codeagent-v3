@@ -38,7 +38,14 @@
  *    an empty steer is a wiring bug and throws {@link ConfirmDecisionError}.
  */
 export type ConfirmDecision =
-  | { decision: "allow"; scope?: "once" | "session" }
+  // #20 — `session_prefix` is the "always allow `<program> …` this session"
+  // verb: a standing grant for all SIMPLE commands sharing this action's program
+  // token (e.g. all `git …`), distinct from `session` (this exact actionKey
+  // only). The runtime controller mints the prefix grant only when the action's
+  // command is a single simple invocation (see `@/permission/session-grant-prefix`),
+  // falling back to an exact `session` grant otherwise — so this scope can never
+  // widen beyond what is safe.
+  | { decision: "allow"; scope?: "once" | "session" | "session_prefix" }
   | { decision: "deny" }
   | { decision: "deny_and_steer"; steer: string }
 
@@ -88,10 +95,16 @@ export class ConfirmDecisionError extends Error {
  *  Extracted from `normalizeConfirm` to keep it under biome's complexity cap. */
 const normalizeAllowScope = (r: object): ConfirmDecision => {
   const scope = (r as { scope?: unknown }).scope
-  if (scope !== undefined && scope !== "once" && scope !== "session") {
+  // #20 — `session_prefix` joins the accepted allow scopes (the prefix grant verb).
+  if (
+    scope !== undefined &&
+    scope !== "once" &&
+    scope !== "session" &&
+    scope !== "session_prefix"
+  ) {
     throw new ConfirmDecisionError(
       "scope",
-      `allow scope must be "once" | "session" (got ${String(scope)})`,
+      `allow scope must be "once" | "session" | "session_prefix" (got ${String(scope)})`,
     )
   }
   return scope === undefined ? { decision: "allow" } : { decision: "allow", scope }

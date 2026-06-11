@@ -198,6 +198,8 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
       set: () => undefined,
       snapshot: () => "default" as const,
     },
+    // #17 (Agent-B, additive) — required brief store fake (mirrors effortStore).
+    briefStore: { get: () => false, set: () => undefined, snapshot: () => false },
     llm: { generate: async () => ({ content: [] }) } as never,
     planMode: false,
     metrics: undefined as never,

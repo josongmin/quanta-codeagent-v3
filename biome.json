@@ -1158,6 +1158,8 @@
         "!tests/unit/shell-exec-observers-surface.test.ts",
         "!tests/unit/cli-image-loader.test.ts",
         "!tests/unit/cli-argv-prompt.test.ts",
+        "!tests/unit/cli-preflight-applicability-hellgate.test.ts",
+        "!tests/unit/cli-preflight-applicability-hellgate.test.js",
         "!tests/unit/cli/**",
         "!tests/unit/apps/cli/**",
         "!tests/integration/cli/**",

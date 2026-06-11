@@ -33,6 +33,16 @@ purpose: |
   registered ONLY when QUANTA_NOTEBOOK_EDIT is on (tool menu byte-identical
   otherwise). Live-kernel cell EXECUTION is a separate, deferred capability —
   this is edit-only.
-tests:
-  - tests/unit/tool/notebook-edit.test.ts
-  - tests/unit/tool/notebook-edit-tool-hellgate.test.ts
+config_refs:
+  env: [QUANTA_NOTEBOOK_EDIT]
+evidence:
+  code:
+    - src/tool/notebook-edit/index.ts
+    - src/tool/notebook-edit/tool.ts
+  adrs: [530]
+  tests:
+    unit:
+      - tests/unit/tool/notebook-edit.test.ts
+      - tests/unit/tool/notebook-edit-tool-hellgate.test.ts
+    integration: []
+    contract: []

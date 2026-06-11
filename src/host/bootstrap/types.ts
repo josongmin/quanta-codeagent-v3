@@ -8,7 +8,7 @@
  * back the CLI today and a Web/Tauri surface tomorrow without a fork.
  */
 
-import type { AgentConfig, EffortStore, PersonaKind } from "@/agent"
+import type { AgentConfig, BriefStore, EffortStore, PersonaKind } from "@/agent"
 import type { FocusChainPort } from "@/agent/focus-chain"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
@@ -432,6 +432,12 @@ export interface SessionBootstrapResult {
    *  ⇒ store defaults to `"default"`. The `/effort` slash mutates this; the
    *  agent loop reads it once per turn via `AgentConfig.sessionEffort`. */
   readonly effortStore: EffortStore
+  /** #17 (C3) — session-level brief-mode store. Initial value comes from
+   *  `QUANTA_BRIEF` (parsed via `parseBoolKnob`; unset/non-truthy ⇒ false). The
+   *  `/brief` slash + a `set_brief` control-op mutate this; the agent loop reads
+   *  it once per turn via `AgentConfig.sessionBrief` to splice BRIEF_NOTICE.
+   *  Default-OFF ⇒ getter false ⇒ byte-identical (no notice). */
+  readonly briefStore: BriefStore
   readonly llm: LLMPort
   readonly features: BootstrapFeatures
   readonly tooling: Tooling

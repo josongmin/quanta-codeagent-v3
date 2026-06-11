@@ -47,7 +47,11 @@ export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval
    *  scope (re-asked next time); `session`/absent ⇒ widen for the session. Only
    *  meaningful on an escalation approval (carries `scopeContext`); ignored on a
    *  normal approval ⇒ byte-identical. */
-  readonly scope?: "once" | "session"
+  /** #20 — `session_prefix`: a NORMAL approval (not an escalation) may mint a
+   *  standing prefix grant ("always allow `<program> …` this session"); the host
+   *  controller derives a SAFE program-token prefix (single simple command) or
+   *  degrades to the exact key. Ignored on an escalation approval. */
+  readonly scope?: "once" | "session" | "session_prefix"
   /** ADR-0512 P3 — corrective steer for a `deny` of a skill-scope ESCALATION
    *  (the `deny_and_steer` verb): a non-empty message telling the model what to
    *  do instead. Absent ⇒ a plain decline. Ignored on a normal approval. */

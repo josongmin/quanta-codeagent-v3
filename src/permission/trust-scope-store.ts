@@ -645,11 +645,20 @@ export const createPersistentTrustScopeRegistry = (
   }
 
   const doGrant = (projectKey: string, grant: TrustScopeGrant): void => {
+    // #20 (durable prefix) — carry the OPTIONAL `commandPattern` onto the
+    // persisted record (normalized the SAME way as a file-loaded pattern, so a
+    // programmatically-granted prefix and a hand-authored one are byte-identical
+    // and the `patternMatchesAction` token-prefix cascade fires for both). A
+    // null/empty pattern is dropped (no pattern field), leaving the legacy
+    // tool[+actionKey] record byte-identical.
+    const normalizedPattern =
+      grant.commandPattern !== undefined ? normalizePattern(grant.commandPattern) : null
     const record: PersistentTrustScopeRecord = {
       tool: grant.tool,
       scope: grant.scope,
       grantedAt: now(),
       ...(grant.actionKey !== undefined ? { actionKey: grant.actionKey } : {}),
+      ...(normalizedPattern !== null ? { commandPattern: normalizedPattern } : {}),
     }
     // Project-keyed grants land in the overlay when one exists; otherwise
     // they go to the global file under their projectKey.

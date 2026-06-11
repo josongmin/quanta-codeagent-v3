@@ -62,9 +62,7 @@ export const resolveMemoryContext = async (
         // current cwd as the routing context so memories scoped to this
         // checkout (Codex `applies_to: cwd=...`) are weighted up. Absent flag
         // (the default) ⇒ no routing passed ⇒ ranking is byte-identical.
-        ...(config.memory?.routingEnabled && config.cwd
-          ? { routing: { cwd: config.cwd } }
-          : {}),
+        ...(config.memory?.routingEnabled && config.cwd ? { routing: { cwd: config.cwd } } : {}),
       },
     )
     return block ?? undefined
@@ -312,6 +310,11 @@ export const prepareTurnContext = async (
     ...(contextEvents.length > 0 ? { contextChangeEvents: contextEvents } : {}),
     ...(mentionMessages.length > 0 ? { mentionInjectionMessages: mentionMessages } : {}),
     ...(taskBudgetForTurn !== undefined ? { taskBudget: taskBudgetForTurn } : {}),
+    // #17 (C3) — brief-mode posture. Read the session accessor once per turn so a
+    // mid-session `/brief on` (or a `set_brief` control-op) splices BRIEF_NOTICE
+    // into the per-turn DYNAMIC tail (prompt.ts). Absent/false ⇒ omitted ⇒
+    // byte-identical default-OFF. ORTHOGONAL to effort/language (all compose).
+    ...(config.sessionBrief?.() === true ? { brief: true } : {}),
     untrustedEnvelope: runtimeConfig().untrustedEnvelope,
   })
   const finalCtx = injectRedactionBanner(config, await injectIdeContext(config, ctx))

@@ -11,9 +11,10 @@ import type {
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
-import { errMessage, gateOnStrict, logger, runtimeConfig, sliceWholeChars } from "@/shared"
+import { errMessage, gateOn, gateOnStrict, logger, runtimeConfig, sliceWholeChars } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
+import { wireInboxBannerOntoSlot } from "./automation-banner"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import type { ConversationActionSurface } from "./conversation-action-surface"
 import { ExternalPromptQueue } from "./external-prompt-queue"
@@ -835,9 +836,18 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   // during any awaited setup step still drains the close stack (no leaked
   // facade / session / watcher / ticker / bridge on partial init).
   try {
-    const automationTicker =
+    // #22 — opt-in (`QUANTA_AUTOMATION_INBOX`, default-OFF) inbox banner: compose
+    // `[automation inbox: N]` onto the slot's existing onTick so the live ticker
+    // paints unread counts on each fire. OFF ⇒ slot untouched (byte-identical).
+    const automationSlotForTicker =
       liveAutomationSlot !== undefined
-        ? startAutomationEngineTicker({ automationEngine: liveAutomationSlot } as AgentConfig)
+        ? wireInboxBannerOntoSlot(liveAutomationSlot, {
+            enabled: gateOn(process.env, "QUANTA_AUTOMATION_INBOX"),
+          }).slot
+        : undefined
+    const automationTicker =
+      automationSlotForTicker !== undefined
+        ? startAutomationEngineTicker({ automationEngine: automationSlotForTicker } as AgentConfig)
         : undefined
     if (automationTicker !== undefined) {
       // L5 H-7 — register before the next awaited init step (reactor bridge) can

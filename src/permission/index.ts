@@ -135,6 +135,7 @@ export {
   OutcomeInvariantError,
   requiresUserConfirmation,
 } from "./outcome"
+export { decideFloor, type FloorVerdict, type ToolCapability } from "./pdp"
 export type { HostAgentMode } from "./per-host-mode"
 export {
   clearHostMode,
@@ -314,6 +315,14 @@ export {
   ReviewerUnavailableError,
   reviewAction,
 } from "./reviewer"
+// #20 — prefix-aware session grants (pure: derive/match the "always allow `git
+// …` this session" prefix key, with the single-simple-command safety guard).
+export {
+  actionMatchesPrefixGrant,
+  derivePrefixGrantKey,
+  isSimpleCommand,
+  prefixGrantLabel,
+} from "./session-grant-prefix"
 export type {
   CachedResolver,
   CwdPort,
@@ -367,4 +376,3 @@ export {
   type AssessmentKind,
   isPermissionMode,
 } from "./types"
-export { decideFloor, type FloorVerdict, type ToolCapability } from "./pdp"

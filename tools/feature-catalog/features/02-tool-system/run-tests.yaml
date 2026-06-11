@@ -46,5 +46,6 @@ evidence:
   tests:
     unit:
       - tests/unit/tool/testrun/parse.test.ts
+      - tests/unit/tool/testrun/parse-node.test.ts
       - tests/unit/tool/testrun/detect.test.ts
       - tests/unit/tool/testrun/run-tests-real-e2e.test.ts

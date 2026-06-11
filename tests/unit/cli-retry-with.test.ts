@@ -151,6 +151,35 @@ describe("/retry-with — slash dispatch", () => {
     expect(messages.length).toBe(1)
   })
 
+  test("#16 PAIRED — no candidates surfaces the QUANTA_RETRY_MODELS activation hint; configured does NOT", async () => {
+    // OFF arm: unconfigured ⇒ the notice now NAMES the knob to set (option (b)),
+    // so the user can act instead of hitting a dead-end.
+    const off = buildCtx(undefined)
+    expect(await retryWithCmd.run([], off.ctx)).toBe(1)
+    expect(off.out).toContain("QUANTA_RETRY_MODELS")
+    // ON arm (control): with candidates configured, the hint is NEVER shown —
+    // proves the hint is bound to the no-candidate branch, not printed always.
+    const messages: Message[] = [userMsg("q", "u1"), asstMsg("a", "a1")]
+    const on = buildCtx({
+      candidates: [
+        { id: "m1", port: new ScriptedLLM("m1", []) },
+        {
+          id: "m2",
+          port: new ScriptedLLM("m2", [
+            { type: "text_delta", delta: "x" },
+            { type: "message_stop", stop_reason: "end_turn" },
+          ]),
+        },
+      ],
+      currentModelId: "m1",
+      messages,
+      streamInput: emptyStreamInput,
+      onEvent: () => {},
+    })
+    await retryWithCmd.run([], on.ctx)
+    expect(on.out).not.toContain("QUANTA_RETRY_MODELS")
+  })
+
   test("dispatch via runSlashCommand — `/retry-with` no arg routes correctly", async () => {
     const cap = buildCtx(undefined)
     const code = await runSlashCommand("/retry-with", cap.ctx)

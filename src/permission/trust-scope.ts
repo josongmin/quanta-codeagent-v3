@@ -48,6 +48,12 @@ export interface TrustScopeGrant {
   readonly scope: TrustScope
   /** Optional finer key (must match the lookup key when set). */
   readonly actionKey?: string
+  /** #20 (durable prefix) — OPTIONAL leading-token command pattern (e.g. `git`,
+   *  `npm,install`). When set, a persistent registry stores it and matches a
+   *  later action by TOKEN-PREFIX (`patternMatchesAction`), so a durable
+   *  "always allow `git …`" grant covers `git log`, `git diff`, … — not just the
+   *  one exact command. The in-memory registry ignores it (exact-key only). */
+  readonly commandPattern?: string
 }
 
 /** The wire-up only invokes `hasGrant`. `consume` is called by the registry

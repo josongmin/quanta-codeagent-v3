@@ -30,6 +30,17 @@ purpose: |
   non-English signal from the latest user message, injects a per-turn
   "respond in <lang>" notice into buildDynamicContext's DYNAMIC slot. Gate OFF /
   English / ambiguous (Latin) ⇒ NO notice ⇒ byte-identical prompt.
-tests:
-  - tests/unit/agent/language-detect.test.ts
-  - tests/unit/agent/language-hint-prompt-hellgate.test.ts
+config_refs:
+  env: [QUANTA_LANG_DETECT]
+evidence:
+  code:
+    - src/agent/language-detect/index.ts
+    - src/agent/prompt.ts
+    - src/agent/loop/context-assembler.ts
+  adrs: [530]
+  tests:
+    unit:
+      - tests/unit/agent/language-detect.test.ts
+      - tests/unit/agent/language-hint-prompt-hellgate.test.ts
+    integration: []
+    contract: []

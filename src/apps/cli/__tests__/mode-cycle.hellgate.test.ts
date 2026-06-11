@@ -94,6 +94,21 @@ describe("mode-cycle — pure cycle/store (§4.1)", () => {
     expect(s.cycle().key).toBe("default") // wrap persisted
   })
 
+  test("A4b (#13) — set(key) jumps DIRECTLY to a posture (the /mode path) + persists", () => {
+    const s = createModeCycleStore()
+    // Jump past the cycle order: default → plan in one set (cycle would need 2).
+    expect(s.set("plan").key).toBe("plan")
+    expect(s.current().key).toBe("plan") // persisted, not a transient return
+    expect(s.current().permissionMode).toBe("default") // plan projects to default perm
+    // A subsequent cycle() resumes from the SET rung (plan → bypass), proving
+    // set + cycle share ONE cursor (the /mode and shift+tab single-source).
+    expect(s.cycle().key).toBe("bypass")
+    // bypass jump exposes the dangerous permissionMode (wiring proof, not label).
+    expect(s.set("bypass").permissionMode).toBe("bypass")
+    // Unknown key ⇒ DEFAULT rung (never throws) — defensive parity with cycle.
+    expect(s.set("nope" as "default").key).toBe("default")
+  })
+
   test("A5 — formatPostureMeta renders the label + desc + affordance", () => {
     const meta = formatPostureMeta(postureByKey("bypass"))
     expect(meta).toContain("BYPASS")

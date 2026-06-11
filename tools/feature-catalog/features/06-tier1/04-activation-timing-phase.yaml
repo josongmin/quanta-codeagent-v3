@@ -19,13 +19,24 @@ surface_integration:
   evidence:
     cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
     web: "No built mechanism, no UI affordance on any surface."
-purpose: Activation-timing phase 분리 — 현재 트리거 cache는 session-start 1회 + per-turn 라벨 주입만. 시점별 phase machine은 후속 phase로 의식적 보류
+purpose: |
+  Activation-timing phase 분리 — DECISION BOUNDARY for a planned-but-not-built
+  per-moment phase machine. What IS live today (and what this entry anchors
+  evidence to): session-start skill inventory cache (`src/skill/activation.ts`)
+  + per-turn suggestion/label injection (`src/agent/features.ts` /
+  `buildSkillFeatures`). What is HELD: time-sliced activation phases beyond
+  that one-shot cache. Distinct from ADR-0077 output-phase tagging
+  (commentary/final_answer on the LLM stream).
 evidence:
-  code: []
-  adrs: []
+  code:
+    - src/skill/activation.ts
+    - src/agent/features.ts
+  adrs: [18]
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/skill-trigger-rules.test.ts
+    integration:
+      - tests/integration/skill-paths-activation-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold:
@@ -37,6 +48,7 @@ deliberate_hold:
     Lift only when SKILL.md activation-window heuristics measurably miss
     triggers — current session-start cache is sufficient by measurement.
 notes: |
-  F-grade by design: empty evidence.code intentional. The "phase machine"
-  is a planned-but-not-built concept; this entry exists to mark the
-  decision boundary so future contributors don't reinvent it ad-hoc.
+  L1 deliberate-hold: evidence.code points at the LIVE activation boundary
+  (session-start cache + per-turn injection), NOT at an unbuilt phase machine.
+  This entry marks the decision fence so future contributors don't reinvent
+  timing phases ad-hoc.

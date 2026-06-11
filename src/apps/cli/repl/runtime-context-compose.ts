@@ -10,10 +10,17 @@ import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoin
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { ResponsesContinuationStore } from "@/llm"
-import { CircumventionTracker, type PermissionStore, type ToolAction } from "@/permission"
+import {
+  CircumventionTracker,
+  type PermissionStore,
+  // #20 — the operator-facing program token a `session_prefix` grant would cover
+  // (null when this command cannot be safely prefix-granted).
+  prefixGrantLabel,
+  type ToolAction,
+} from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
-import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
+import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
 import { runtimeConfig } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
@@ -21,6 +28,8 @@ import type { WorktreeSlotHandle } from "@/tool"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
+// #19 — approval-time applicability pre-flight (edit/apply_patch).
+import { preflightApplyWarning, preflightCheckEnabled } from "../preflight"
 import type { RejectCounter } from "../reject-counter"
 import {
   createMidTurnApprovalChannel,
@@ -51,6 +60,12 @@ interface CliHitlDeps {
   readonly idleMonitor: IdleMonitor
   readonly rejectCounter: RejectCounter
   readonly channel: MidTurnApprovalChannel
+  // #19 — session cwd, so the pre-flight resolves relative edit/apply_patch
+  // targets against the SAME base the tool's jail uses. OPTIONAL: a caller that
+  // omits it (deferred-prompt builder / tests) falls back to `process.cwd()` —
+  // the pre-flight is best-effort, so a slightly-off base only risks a
+  // missed/extra warning, never correctness.
+  readonly cwd?: string
 }
 
 /** Shared inline 4-verb prompt for a skill-scope ESCALATION (`scopeContext`
@@ -75,7 +90,10 @@ const promptEscalationVerbs = async (
       (scope.justification !== undefined ? `  rationale: ${scope.justification}\n` : ""),
   )
   const ans = (
-    await askLine(deps.channel, "Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ")
+    await askLine(
+      deps.channel,
+      "Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ",
+    )
   )
     .trim()
     .toLowerCase()
@@ -122,16 +140,35 @@ const buildCliOnConfirm =
       const preview = await renderActionDiff(action)
       if (preview !== undefined) process.stderr.write(`${preview}\n`)
     }
+    // #19 — after the diff, warn if the mutating action would NOT cleanly apply
+    // (stale edit anchor / unlocatable patch hunk / missing target) so the
+    // operator approves with eyes open. Default-ON via QUANTA_PREFLIGHT_CHECK;
+    // OFF ⇒ byte-identical to the pre-#19 prompt. Best-effort (never throws).
+    if (preflightCheckEnabled()) {
+      const warning = await preflightApplyWarning(action, { cwd: deps.cwd ?? process.cwd() })
+      if (warning !== undefined) process.stderr.write(`${warning}\n`)
+    }
     const scope = action.scopeContext
     if (scope !== undefined) {
       // ToolAction's scopeContext omits the tool name (it lives on the action) —
       // re-attach it so the shared prompt renders the same header both routes.
       return promptEscalationVerbs(deps, { ...scope, tool: action.tool })
     }
+    // #20 — offer the PREFIX verb ([p] "always allow `<program> …` this
+    // session") ONLY when this action is a single simple shell command whose
+    // program token can be safely prefix-granted. For a complex/chained command
+    // or a non-shell tool `prefixGrantLabel` returns null ⇒ the prompt is
+    // byte-identical to the pre-#20 4-verb prompt (no tempting an unsafe grant).
+    const prefixLabel =
+      typeof action.shellCommand === "string" && action.shellCommand.length > 0
+        ? prefixGrantLabel(`${action.tool}|${action.shellCommand}`)
+        : null
     const ans = (
       await askLine(
         deps.channel,
-        `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
+        prefixLabel !== null
+          ? `Allow ${action.tool}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer: `
+          : `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
       )
     )
       .trim()
@@ -144,6 +181,10 @@ const buildCliOnConfirm =
     if (ans === "a" || ans === "always") {
       deps.rejectCounter.recordAccept()
       return { decision: "allow", scope: "session" }
+    }
+    if (prefixLabel !== null && ans === "p") {
+      deps.rejectCounter.recordAccept()
+      return { decision: "allow", scope: "session_prefix" }
     }
     if (ans === "t") {
       const steer = (await askLine(deps.channel, "Steer (what to do instead): ")).trim()
@@ -391,6 +432,7 @@ export const composeCliRuntimeContext = async (
     idleMonitor: boot.idleMonitor as IdleMonitor,
     rejectCounter: boot.rejectCounter as RejectCounter,
     channel: midTurnApprovalChannel,
+    cwd: boot.cwd, // #19
   })
   const confirmSlot: RuntimeConfirmSlot = {
     current: surfaceOnConfirm,
@@ -466,6 +508,7 @@ export const composeCliRuntimeContext = async (
       idleMonitor: boot.idleMonitor as IdleMonitor,
       rejectCounter: boot.rejectCounter as RejectCounter,
       channel: midTurnApprovalChannel,
+      cwd: boot.cwd, // #19 (unused by the deferred prompt; CliHitlDeps shares the shape)
     }),
     midTurnApprovalChannel,
     runtimeContext,

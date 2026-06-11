@@ -33,7 +33,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
-const DEFAULT_IDLE_MS = 60_000
+export const DEFAULT_IDLE_MS = 60_000
 const DEFAULT_SNOOZE_MS = 300_000
 
 export interface IdleMonitor {
@@ -55,6 +55,12 @@ export interface IdleMonitor {
   isSnoozed(): boolean
   /** Test-only: clear in-memory state (does NOT delete the disk record). */
   reset(): void
+  /** #22 — the RESOLVED idle threshold (ms) this monitor enforces (=
+   *  `idleThresholdMs` or {@link DEFAULT_IDLE_MS}). Exposed so the idle banner
+   *  interpolates the SAME number the gate uses, killing the hardcoded-"60s"
+   *  UI-lie when an operator overrides `QUANTA_IDLE_MS`. Optional so existing
+   *  test doubles stay assignable; the real factory always sets it. */
+  readonly thresholdMs?: number
 }
 
 export interface IdleMonitorOptions {
@@ -131,6 +137,7 @@ export const createIdleMonitor = (opts?: IdleMonitorOptions): IdleMonitor => {
   }
 
   return {
+    thresholdMs: idleMs,
     markActive: (): void => {
       lastActive = now()
     },

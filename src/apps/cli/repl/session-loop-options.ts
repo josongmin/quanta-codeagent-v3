@@ -33,8 +33,12 @@ const buildReplPromptUx = (
   featureCfg: CliFeatureConfig,
   setup: Setup,
   env: NodeJS.ProcessEnv,
+  // #13 (Agent-B, additive) — the surface-built mode-cycle store, so the
+  // shift+tab pill/hook reuses the SAME instance the `/mode` slash mutates.
+  // Absent ⇒ buildModeCycle mints its own (gate off ⇒ undefined anyway).
+  modeCycleStore?: Wires["modeCycleStore"],
 ): ReturnType<typeof buildPromptUx> =>
-  buildPromptUx(featureCfg, setup.cwd, env, (m) => setup.pills.update({ mode: m }))
+  buildPromptUx(featureCfg, setup.cwd, env, (m) => setup.pills.update({ mode: m }), modeCycleStore)
 
 /** Project the built bundles into the `runSessionLoop` argument object. */
 export const buildSessionLoopOptions = async (deps: {
@@ -64,7 +68,7 @@ export const buildSessionLoopOptions = async (deps: {
     ...rfc09,
     ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
     textInbox: wires.textInbox,
-    ux: await buildReplPromptUx(featureCfg, setup, env),
+    ux: await buildReplPromptUx(featureCfg, setup, env, wires.modeCycleStore),
     registerExitTeardown: (cb) => {
       process.once("exit", cb)
     },

@@ -47,3 +47,41 @@ export const loadImageBlock = (path: string): ImageBlock => {
   const data = readFileSync(path).toString("base64")
   return { type: "image", data, mediaType }
 }
+
+/** The four media types BOTH providers accept (deduped from the extension map —
+ *  `.jpg`/`.jpeg` both map to `image/jpeg`). Used to validate a media type that
+ *  arrives WITHOUT a file path (e.g. a clipboard image). */
+export const SUPPORTED_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set(
+  Object.values(SUPPORTED_IMAGE_TYPES),
+)
+
+/**
+ * #18 (jun-11) — build an {@link ImageBlock} from raw bytes already in memory
+ * (a clipboard image, a downloaded blob), as opposed to {@link loadImageBlock}
+ * which reads a file path. Same media-type allowlist and 20 MB cap so a
+ * clipboard paste can never sneak past the limits a `--image` path is held to.
+ *
+ *  - Rejects an unsupported `mediaType` (no silent coerce — a wrong type yields a
+ *    provider 400 we'd rather catch here).
+ *  - Rejects an empty buffer (a failed clipboard read produces 0 bytes; failing
+ *    loud beats attaching an empty image).
+ *  - Rejects > {@link MAX_IMAGE_BYTES} (the SAME cap as the path loader).
+ */
+export const imageBlockFromBytes = (buf: Buffer, mediaType: string): ImageBlock => {
+  if (!SUPPORTED_IMAGE_MEDIA_TYPES.has(mediaType)) {
+    throw new Error(
+      `clipboard image: unsupported media type "${mediaType}" ` +
+        `(supported: ${[...SUPPORTED_IMAGE_MEDIA_TYPES].join(", ")})`,
+    )
+  }
+  if (buf.length === 0) {
+    throw new Error("clipboard image: empty image data")
+  }
+  if (buf.length > MAX_IMAGE_BYTES) {
+    throw new Error(
+      `clipboard image: ${(buf.length / 1024 / 1024).toFixed(1)}MB ` +
+        `(max ${MAX_IMAGE_BYTES / 1024 / 1024}MB)`,
+    )
+  }
+  return { type: "image", data: buf.toString("base64"), mediaType }
+}

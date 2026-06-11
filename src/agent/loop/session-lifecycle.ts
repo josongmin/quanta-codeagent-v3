@@ -4,9 +4,11 @@ import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import { errMessage } from "@/shared"
 import {
+  applyBriefTransition,
   cancelSubagent,
   isCancelSubagentOp,
   isInterruptOp,
+  isSetBriefOp,
   isSetModeOp,
 } from "../control-op-handler"
 import type { buildSessionFeatures } from "../features"
@@ -303,6 +305,15 @@ export const handleSubmissionControlOp = (
         ...(reason !== undefined ? { reason } : {}),
       })
     }
+  }
+  // #17 (C3) — `set_brief` submission op. Routes through `applyBriefTransition`
+  // (making the previously dead helper's doc TRUE) when the session has a
+  // `briefStore` wired. The mutation IS the observable effect: the NEXT turn's
+  // `assembleTurnContext` reads `cfg.sessionBrief()` (backed by the SAME store)
+  // and splices BRIEF_NOTICE. Registry-absent ⇒ observed-and-ignored (the parent
+  // turn keeps running; no throw, mirroring the cancel/mode arms).
+  if (isSetBriefOp(cfg.submission) && cfg.briefStore !== undefined) {
+    applyBriefTransition(cfg.briefStore, cfg.submission.op.on)
   }
   return "continue"
 }

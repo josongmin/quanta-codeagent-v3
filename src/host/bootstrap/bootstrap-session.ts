@@ -16,7 +16,14 @@
  * the produced result is identical to today's.
  */
 
-import { BudgetMeter, buildSystemPrompt, createEffortStore, parseEffort } from "@/agent"
+import {
+  BudgetMeter,
+  buildSystemPrompt,
+  createBriefStore,
+  createEffortStore,
+  parseBoolKnob,
+  parseEffort,
+} from "@/agent"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   buildSystemPromptForMode,
@@ -335,6 +342,10 @@ export const bootstrapSession = async (
   }
   const abort = new AbortController()
   const effortStore = createEffortStore(parseEffort(runtime.env.QUANTA_EFFORT) ?? "default")
+  // #17 (C3) — seed the brief-mode store from `QUANTA_BRIEF` (default-OFF). The
+  // `/brief` slash + a `set_brief` control-op mutate the SAME cell; the loop
+  // reads it per turn via `AgentConfig.sessionBrief`.
+  const briefStore = createBriefStore(parseBoolKnob(runtime.env.QUANTA_BRIEF))
   let finalLLM: LLMPort
   try {
     finalLLM = await deps.buildLlm(
@@ -526,6 +537,7 @@ export const bootstrapSession = async (
       idleMonitor,
       rejectCounter,
       effortStore,
+      briefStore,
       llm: finalLLM,
       features,
       tooling,

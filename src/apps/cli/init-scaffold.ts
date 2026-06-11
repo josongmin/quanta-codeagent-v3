@@ -437,11 +437,38 @@ const runWrite = async (
   return 0
 }
 
+/** #21 — CLI-surface activation gate for `/init`. DEFAULT-ON, opt-OUT: the
+ *  command is present in the CLI registry UNLESS `QUANTA_INIT_SLASH` is
+ *  explicitly disabled (`0`/`false`/`off`/`no`). Mirrors the rewind/dream
+ *  default-ON idiom (`isRewindEnabled`) so registration never depends on the
+ *  index.ts seed loop's timing (R3: the prior `readCliKnob(...) ?? false` was
+ *  read at module-eval, BEFORE the seed ran, so the seed never took — and even
+ *  then the inventory default `false` kept it absent).
+ *
+ *  Surface scope: this read lives in a CLI-surface module that ONLY the CLI
+ *  BUILTINS registry consumes — no non-CLI surface (web-daemon/headless) imports
+ *  it, so they never register `/init`. The knob-inventory entry keeps its
+ *  conservative `default: false` as the RUNTIME-CONFIG baseline for any future
+ *  non-CLI reader; this CLI site applies its own default-ON, exactly as the
+ *  (un-catalogued) rewind/dream slash gates do.
+ *
+ *  Registration ≠ execution: `/init` WRITES to cwd only on EXPLICIT invocation
+ *  (`runWrite`), never on registry presence. So a visible-but-unused command is
+ *  not a footgun — it matches Claude Code shipping `/init` by default. */
+const isInitDisabled = (raw: string | undefined): boolean => {
+  if (raw === undefined) return false
+  const v = raw.trim().toLowerCase()
+  return v === "0" || v === "false" || v === "off" || v === "no"
+}
+
+export const isInitSlashEnabled = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean => !isInitDisabled(env.QUANTA_INIT_SLASH)
+
 /**
- * Build the `/init` slash command. Default-OFF: the surface only registers it
- * when `QUANTA_INIT_SLASH` is on, so when the gate is absent the command is not
- * in the registry at all (byte-identical). NO-THROW: every fs/shell failure is
- * a typed exit code + a friendly line, never an exception out of `run`.
+ * Build the `/init` slash command. NO-THROW: every fs/shell failure is a typed
+ * exit code + a friendly line, never an exception out of `run`. Registration is
+ * gated by {@link isInitSlashEnabled} at the CLI registry build site.
  */
 export const buildInitCmd = (deps: InitCmdDeps = {}): SlashCommand => {
   const write = deps.write ?? defaultWrite

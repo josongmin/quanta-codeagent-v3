@@ -62,12 +62,15 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/status-command-runner.ts
+    - src/apps/cli/status-line-driver.ts
+    - src/apps/cli/repl/session-setup.ts
   adrs:
     - docs/decisions/0526-scriptable-statusline-runner.md
   tests:
     unit:
       - src/apps/cli/__tests__/status-command-runner.test.ts
       - tests/unit/statusline-config-knob-hellgate.test.ts
+      - tests/unit/cli/status-line-driver-hellgate.test.ts
     integration: []
     contract: []
 knobs:

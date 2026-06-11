@@ -46,6 +46,23 @@ const DEFAULT_ON = [
   "QUANTA_KEYBINDINGS",
   "QUANTA_RATELIMIT_NOTICE",
   "QUANTA_MODE_CYCLE",
+  // #5/#6 — type-while-the-agent-runs: mid-turn keystroke CAPTURE + the VISIBLE
+  // bottom input lane. Paired (capture without visible ⇒ blind typing). e2e-
+  // validated (tests/e2e-pty/cli-turn-layer-e2e.test.ts): a follow-up typed
+  // during a sustained replay turn is captured + echoed in the `» ` lane while
+  // the turn streams underneath. consumers: session-loop.ts (runtimeConfig
+  // .midTurnCapture / .midTurnVisible).
+  "QUANTA_MIDTURN_CAPTURE",
+  "QUANTA_MIDTURN_VISIBLE",
+  // #19 — approval-time applicability pre-flight: warns in the confirm prompt
+  // when a mutating edit/apply_patch would NOT cleanly apply. consumer:
+  // repl/runtime-context-compose.ts via preflight.ts#preflightCheckEnabled.
+  "QUANTA_PREFLIGHT_CHECK",
+  // #10 — bracketed-paste: a multi-line paste accumulates into one buffer instead
+  // of early-submitting at the first embedded newline. CLI correctness fix,
+  // default-ON. consumer: repl/surface-compose.ts (gateOn → ReadLineOptions
+  // .bracketedPaste → raw-line-reader DECSET 2004 + paste accumulation).
+  "QUANTA_BRACKETED_PASTE",
 ] as const
 
 describe("jun-11 CLI default-ON UX feature gates", () => {

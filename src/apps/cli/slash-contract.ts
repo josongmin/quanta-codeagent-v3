@@ -71,6 +71,23 @@ export interface SlashContext {
         readonly list: () => readonly string[]
       }
     | undefined
+  /** #13 — `/mode` interactive permission-posture wire (RFC-08 mode-cycle).
+   *  `get` returns the active rung key; `set` jumps to a named posture and
+   *  mutates the SAME `ModeCycleStore` the shift+tab cycle + the session loop's
+   *  per-turn `permissionModeState` projection read, so a `/mode acceptEdits`
+   *  applies on the NEXT submitted prompt (NOT a direct `permissionModeState`
+   *  write, which the projection would clobber). `list` enumerates the rung
+   *  keys. Present iff `QUANTA_MODE_CYCLE` is on AND the surface built the store;
+   *  absent ⇒ `/mode` prints "not wired in this surface" (byte-identical). */
+  readonly mode?:
+    | {
+        readonly get: () => string
+        readonly set: (
+          key: string,
+        ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
+        readonly list: () => readonly string[]
+      }
+    | undefined
   /** Identity-mode slash wire. */
   readonly identity?:
     | {

@@ -98,6 +98,35 @@ const CLI_FEATURE_GATES = [
   //   accepted trade-off; the red BYPASS pill is the only guard, and bypass
   //   also stays reachable via `--mode` / `QUANTA_PERMISSION`.
   "QUANTA_MODE_CYCLE",
+  //   #5/#6 — type-while-the-agent-runs: mid-turn keystroke CAPTURE + the
+  //   VISIBLE bottom input lane (`» ` prompt). Paired (capture alone = blind
+  //   typing). Codex/Claude Code both ship this default-ON; quanta had the whole
+  //   reader/queue/lane built but DARK. e2e-validated happy path (a follow-up
+  //   typed during a sustained turn is captured + echoed in the lane while the
+  //   turn streams). consumers read via runtimeConfig().midTurnCapture /
+  //   .midTurnVisible in session-loop.ts; the in-turn reader only owns stdin
+  //   DURING a turn, so between-turn editing is unchanged. `QUANTA_MIDTURN_*=0`
+  //   still wins (kill switch if a hot-path edge bites).
+  "QUANTA_MIDTURN_CAPTURE",
+  "QUANTA_MIDTURN_VISIBLE",
+  // #19 — approval-time applicability pre-flight: warn (in the confirm prompt,
+  // after the diff) when a mutating edit/apply_patch would NOT cleanly apply
+  // (stale anchor / unlocatable hunk / missing target). Reuses the SAME matchers
+  // the tools run; the preview NEVER mutates. CLI surface behavior (not an LLM
+  // tool) so it lives here, not the manifest. consumer: repl/runtime-context-
+  // compose.ts via preflight.ts#preflightCheckEnabled. Slice default-OFF keeps
+  // non-CLI surfaces byte-identical; QUANTA_PREFLIGHT_CHECK=0 still wins.
+  "QUANTA_PREFLIGHT_CHECK",
+  // #10 jun-11 — bracketed-paste mode. Correctness fix: a multi-line clipboard
+  // paste used to SUBMIT at its first embedded newline (the terminal sends a
+  // pasted line break as a `\r` keypress, which the reader treated as Enter).
+  // With this on, the reader enables DECSET 2004 and accumulates the whole paste
+  // (markers consumed, newlines preserved) into one buffer that submits only on a
+  // genuine Enter. CLI surface BEHAVIOR (not an LLM tool). consumer:
+  // repl/surface-compose.ts (gateOn → ReadLineOptions.bracketedPaste). The slice
+  // default stays OFF so non-CLI surfaces (web-daemon/headless) are byte-identical,
+  // and `QUANTA_BRACKETED_PASTE=0` still wins (we only seed when unset).
+  "QUANTA_BRACKETED_PASTE",
 ]
 // The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
 // surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a

@@ -100,6 +100,10 @@ describe("BUILTINS table", () => {
       "/branches",
       "/agents",
       "/background",
+      // #21 — `/init` is CLI-surface default-ON (opt-OUT via QUANTA_INIT_SLASH=0);
+      // the unit env leaves the knob unset ⇒ registered between /background and
+      // /fork-checkpoint (its slot in buildSurfaceSlashCommands).
+      "/init",
       "/fork-checkpoint",
       "/queue",
       "/web",
@@ -114,6 +118,8 @@ describe("BUILTINS table", () => {
       "/focus-chain",
       "/effort",
       "/brief",
+      // #13 — `/mode` interactive posture switch (slot between /brief and /inspect).
+      "/mode",
       "/inspect",
       "/replay",
       "/session",

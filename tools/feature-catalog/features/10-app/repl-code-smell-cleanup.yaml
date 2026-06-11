@@ -60,7 +60,8 @@ evidence:
     - src/apps/cli/repl-banners.ts
     - src/apps/cli/repl-silent-catch.ts
     - src/apps/cli/sandbox-mode-parse.ts
-    - src/apps/cli/plan-store-enabled.ts
+    - src/apps/cli/repl/cli-feature-config.ts
+    - src/apps/cli/repl/factories/plan-store.ts
   adrs: []
   tests:
     unit:
