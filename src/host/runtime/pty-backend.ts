@@ -119,9 +119,15 @@ export const bunPtyFactory = (jailRoot: string): PtyFactoryPort => ({
       // reachable if a caller mints the factory directly on an old runtime.
       throw new Error("Bun.Terminal is not available on this Bun runtime (needs 1.3.14+)")
     }
-    const term = new Ctor({ cols: opts.cols, rows: opts.rows })
-    term.onData?.((bytes) => opts.onData(bytes))
-    term.onExit?.((code) => opts.onExit(code))
+    // Bun 1.3.14 API: data/exit callbacks are CONSTRUCTOR OPTIONS, not methods.
+    // `Bun.Terminal` has no `onData`/`onExit` methods — calling them via `?.`
+    // would silently no-op and leave the ring buffer permanently empty.
+    const term = new Ctor({
+      cols: opts.cols,
+      rows: opts.rows,
+      data: (_terminal: unknown, bytes: Uint8Array) => opts.onData(bytes),
+      exit: (_terminal: unknown, _exitCode: number) => opts.onExit(0),
+    } as unknown as { cols: number; rows: number })
     const handle: PtyTerminalHandle = {
       write: (data) => term.write(data),
       resize: (cols, rows) => term.resize(cols, rows),

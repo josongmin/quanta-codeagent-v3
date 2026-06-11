@@ -1,0 +1,183 @@
+/**
+ * CLI e2e PTY harness (jun-11) — drive the REAL interactive `quanta` REPL inside
+ * a genuine pseudo-terminal so the raw-mode keypress path (the `@`-dropdown,
+ * shift+tab mode cycle, ctrl+w/u/k word editing, slash palette, history …)
+ * actually runs. The piped subprocess harness uses `stdin:"ignore"` (NOT a TTY),
+ * so none of those paths execute there.
+ *
+ * ## Why FFI `openpty`
+ * Bun 1.3.14's native `Bun.Terminal` is WRITE-ONLY (no `onData`/read surface), so
+ * child output can't be captured through it; and BSD `script(1)` aborts under a
+ * piped stdin (`tcgetattr/ioctl … not supported on socket`). The robust,
+ * zero-install path is to call libc `openpty()` via `bun:ffi`: we get a
+ * master/slave fd pair, spawn the child with its stdio bound to the SLAVE (so it
+ * sees a real tty → `isTTY===true` → raw mode), and read/write the MASTER fd
+ * ourselves. Verified: a child's `tty` prints `/dev/ttysNNN` under this harness.
+ *
+ * Cross-platform: `openpty` lives in libSystem on macOS and libutil on Linux.
+ * `PTY_AVAILABLE` is false (suite skips) if neither resolves.
+ *
+ * Determinism: input-layer tests drive the prompt editor and assert on the
+ * rendered frame, then exit BEFORE submitting a turn — so no LLM call is made.
+ */
+import { dlopen, FFIType, ptr } from "bun:ffi"
+import { closeSync, read as fsRead, mkdtempSync, writeSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+// ── libc openpty(int *amaster, int *aslave, char *name, termios*, winsize*) ──
+const openOpenpty = (): ((m: unknown, s: unknown, w: unknown) => number) | undefined => {
+  const libs =
+    process.platform === "darwin" ? ["/usr/lib/libSystem.B.dylib"] : ["libutil.so.1", "libutil.so"]
+  for (const path of libs) {
+    try {
+      const lib = dlopen(path, {
+        openpty: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
+          returns: FFIType.int,
+        },
+      })
+      return (m, s, w) =>
+        (lib.symbols.openpty as (a: unknown, b: unknown, c: null, d: null, e: unknown) => number)(
+          m,
+          s,
+          null,
+          null,
+          w,
+        )
+    } catch {
+      // try next candidate lib
+    }
+  }
+  return undefined
+}
+
+const openpty = openOpenpty()
+
+/** True iff libc `openpty` resolved — gate the suite with
+ *  `describe.skipIf(!PTY_AVAILABLE)` for a visible skip on unsupported runtimes. */
+export const PTY_AVAILABLE = openpty !== undefined
+
+const CLI_ENTRY = new URL("../../src/apps/cli/index.ts", import.meta.url).pathname
+
+// Strip CSI / SGR / cursor sequences so assertions read the visible text (built
+// from a string so the literal ESC byte never appears in source).
+const ANSI_RE = new RegExp(`${String.fromCharCode(27)}[[0-9;?]*[ -/]*[@-~]`, "g")
+export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
+
+export interface DrivePtyOpts {
+  readonly args?: readonly string[]
+  /** Extra env on top of the isolated base (PATH/HOME/TERM + dummy provider). */
+  readonly env?: Record<string, string>
+  /** Working dir (defaults to a fresh tmp). Place fixture files here for `@`. */
+  readonly cwd?: string
+  readonly cols?: number
+  readonly rows?: number
+}
+
+export interface PtyCli {
+  /** Write raw bytes to the child's stdin (keystrokes: "\x17"=ctrl+w, "\x1b[Z"=shift+tab). */
+  send(data: string): void
+  /** Resolve once the ANSI-stripped capture contains `pattern`; reject on timeout. */
+  waitFor(pattern: string | RegExp, timeoutMs?: number): Promise<string>
+  /** Full raw capture (with ANSI). */
+  output(): string
+  /** ANSI-stripped capture. */
+  screen(): string
+  kill(): void
+  readonly exited: Promise<number>
+  readonly cwd: string
+}
+
+export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
+  if (openpty === undefined) throw new Error("openpty unavailable on this platform")
+  const cols = opts.cols ?? 80
+  const rows = opts.rows ?? 24
+
+  // out-param fd buffers + a `struct winsize { ws_row, ws_col, ws_xpixel, ws_ypixel }`.
+  const master = new Int32Array(1)
+  const slave = new Int32Array(1)
+  const winsize = new Uint16Array([rows, cols, 0, 0])
+  const rc = openpty(ptr(master), ptr(slave), ptr(winsize))
+  if (rc !== 0) throw new Error(`openpty failed (rc=${rc})`)
+  const masterFd = master[0] as number
+  const slaveFd = slave[0] as number
+
+  const cwd = opts.cwd ?? mkdtempSync(join(tmpdir(), "e2e-pty-cwd-"))
+  const child = Bun.spawn(["bun", CLI_ENTRY, ...(opts.args ?? [])], {
+    cwd,
+    env: {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: process.env.HOME ?? "/tmp",
+      TERM: "xterm-256color",
+      QUANTA_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "test",
+      ...opts.env,
+    },
+    stdin: slaveFd,
+    stdout: slaveFd,
+    stderr: slaveFd,
+  } as unknown as Parameters<typeof Bun.spawn>[1])
+
+  // Parent must drop its own slave copy so the master sees EOF/EIO once the child
+  // exits (otherwise the read loop would never end).
+  closeSync(slaveFd)
+
+  let buf = ""
+  const decoder = new TextDecoder()
+  let pumping = true
+  const pump = (): void => {
+    if (!pumping) return
+    const b = Buffer.allocUnsafe(65_536)
+    fsRead(masterFd, b, 0, b.length, null, (err, n) => {
+      if (err) {
+        pumping = false // EIO on slave close is the normal end-of-stream
+        return
+      }
+      if (n > 0) buf += decoder.decode(b.subarray(0, n), { stream: true })
+      if (pumping) pump()
+    })
+  }
+  pump()
+
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+  return {
+    send: (data) => {
+      try {
+        writeSync(masterFd, data)
+      } catch {
+        // child may have exited
+      }
+    },
+    output: () => buf,
+    screen: () => stripAnsi(buf),
+    exited: child.exited,
+    cwd,
+    kill: () => {
+      pumping = false
+      try {
+        child.kill()
+      } catch {
+        // already gone
+      }
+      try {
+        closeSync(masterFd)
+      } catch {
+        // already closed
+      }
+    },
+    waitFor: async (pattern, timeoutMs = 12_000) => {
+      const re = typeof pattern === "string" ? undefined : pattern
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        const hay = stripAnsi(buf)
+        if (re !== undefined ? re.test(hay) : hay.includes(pattern as string)) return buf
+        await sleep(25)
+      }
+      throw new Error(
+        `waitFor timed out (${timeoutMs}ms) for ${String(pattern)}\n--- screen ---\n${stripAnsi(buf).slice(-1500)}`,
+      )
+    },
+  }
+}

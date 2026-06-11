@@ -37,7 +37,11 @@ import {
   type ObservabilityWireHandle,
   wireObservability,
 } from "@/agent/observability-wire"
-import { fsBackedStickyModelStore, type StickyModelStore } from "@/agent/sticky-model"
+import {
+  fsBackedStickyModelStore,
+  inMemoryStickyModelStore,
+  type StickyModelStore,
+} from "@/agent/sticky-model"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import {
   AGENT_MODES,
@@ -1089,24 +1093,28 @@ const resolveIdentitySystemPrompt = (
   return { system: "" }
 }
 
-/** ADR-0236 — wire the sticky-model store slot. When the CLI passes
- *  `--sticky-model`, the composition root constructs the fs-backed store
- *  (defaults to `~/.quanta/sticky-model.json`). Absent ⇒ undefined ⇒ slot
- *  omitted. The in-memory store is a sibling test-only impl that lives in
- *  `@/agent/sticky-model`; this surface NEVER picks it (operators get
- *  persistence by default once they opt in). */
-const resolveStickyModelStore = (
+/** ADR-0236 / jun-11 (#4) — wire the sticky-model store slot. The default is now
+ *  an IN-MEMORY store so `/model` switches the model IN-SESSION out of the box
+ *  (no `--sticky-model` flag required — previously this returned `undefined`, so
+ *  `buildModelAdapterWire` returned `{}` and `/model` printed "not wired"). The
+ *  store is INERT until set: an empty store's `get()` returns `undefined`, so the
+ *  per-turn model resolver (`skill-gate#readStickyModelForMode`) falls back to the
+ *  boot model — byte-identical for any surface that never calls `/model`
+ *  (headless / one-shot included). `--sticky-model` upgrades to the fs-backed
+ *  store (`~/.quanta/sticky-model.json`) for cross-session PERSISTENCE.
+ *
+ *  Exported for unit testing. Return type keeps `| undefined` so existing
+ *  call-site undefined-guards stay valid (the default simply never returns it). */
+export const resolveStickyModelStore = (
   stickyModel: boolean | undefined,
 ): { readonly store: StickyModelStore } | undefined => {
-  if (stickyModel !== true) return undefined
-  // Construction is IO-free (the store only computes its path; all fs access is
-  // deferred to get/set/load), so it cannot throw here — a try/catch + in-memory
-  // fallback would be dead code. A read-only fs or corrupt home dir surfaces as
-  // a TYPED result at the call site instead: get/load degrade to the global
-  // default, and set returns a `StickyModelWriteError` that `/sticky-model`
-  // renders ("write failed — …"). That is strictly more honest than a silent
-  // in-memory degrade where writes would vanish on exit.
-  return { store: fsBackedStickyModelStore() }
+  // fs-backed construction is IO-free (it only computes its path; all fs access
+  // is deferred to get/set/load), so it cannot throw here — a read-only fs or
+  // corrupt home dir surfaces as a TYPED result at the call site (get/load
+  // degrade to the global default; set returns a `StickyModelWriteError` that
+  // `/sticky-model` renders). In-memory set/get round-trips in process and is
+  // dropped on exit (no persistence) — exactly the session-scoped default.
+  return { store: stickyModel === true ? fsBackedStickyModelStore() : inMemoryStickyModelStore() }
 }
 
 /** ADR-0236 — wire the tool-profile resolver slot when the CLI passes

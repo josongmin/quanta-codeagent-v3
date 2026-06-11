@@ -42,6 +42,9 @@ export interface StdoutStreamOptions {
  *  activity and lifecycle render as dim status lines. */
 export class StdoutStream implements StreamPort {
   private inText = false
+  // jun-11 (#11) — open DIM reasoning run, symmetric to `inText`, so a thinking
+  // stream is newline-terminated when any other event interrupts it.
+  private inThinking = false
   private readonly painter: AssistantTextPainter | undefined
   private readonly write: TerminalWriter
 
@@ -78,7 +81,7 @@ export class StdoutStream implements StreamPort {
     // in_progress fires between deltas (heartbeat), item_* and ratelimit_snapshot
     // are all no-ops in the switch below.
     if (
-      this.inText &&
+      (this.inText || this.inThinking) &&
       (event.type === "output_progress" ||
         event.type === "in_progress" ||
         event.type === "ratelimit_snapshot" ||
@@ -92,6 +95,13 @@ export class StdoutStream implements StreamPort {
       this.drainPainterTail()
       this.write("\n")
       this.inText = false
+    }
+
+    // jun-11 (#11) — symmetric: close an open DIM reasoning run when any non-
+    // thinking event arrives (so the answer / tool line starts on its own line).
+    if (event.type !== "assistant_thinking" && this.inThinking) {
+      this.write("\n")
+      this.inThinking = false
     }
 
     switch (event.type) {
@@ -108,6 +118,15 @@ export class StdoutStream implements StreamPort {
         // delta verbatim (byte-identical to the pre-painter path).
         this.writeAssistantText(event.delta)
         break
+      case "assistant_thinking": {
+        // jun-11 (#11) — reasoning rendered DIM, distinct from the answer. Each
+        // delta is self-contained (DIM…RESET) so an interleaved no-op event can
+        // never strand an open ANSI escape; redacted like all model output.
+        const safe = redactStr(event.delta)
+        if (safe !== "") this.write(`${DIM}${safe}${RESET}`)
+        this.inThinking = true
+        break
+      }
       case "tool_call":
         this.write(`${CYAN}⚙ ${event.name}${RESET} ${DIM}${compact(event.input)}${RESET}\n`)
         break

@@ -121,6 +121,10 @@ export interface StreamingTurnArgs {
   dispatch: StreamingDispatch
   /** Mirror of text deltas (the loop emits `assistant_text`). */
   onTextDelta?: (delta: string) => void
+  /** jun-11 (#11) — mirror of thinking/reasoning deltas (the loop emits
+   *  `assistant_thinking`, rendered DIM). Fires only when the LLM produces
+   *  `thinking_delta`s (`QUANTA_REASONING_SUMMARY` on). */
+  onThinkingDelta?: (delta: string) => void
   /** Fired once per call the instant it is scheduled (in model-call order for
    *  early-started safe calls; at drain time for deferred calls). */
   onToolStart?: (call: StreamingCall) => void
@@ -402,6 +406,15 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
 
   if (ev.type === "text_delta") {
     args.onTextDelta?.(ev.delta)
+    return
+  }
+
+  // jun-11 (#11) — reasoning/thinking deltas (LLM `thinking_delta`, field `.text`)
+  // were previously dropped here (only counted for TTFT timing + tokens). Mirror
+  // them out so the surface can render the reasoning DIM. Fires only when the
+  // provider emits them (QUANTA_REASONING_SUMMARY on); otherwise this is dead.
+  if (ev.type === "thinking_delta") {
+    args.onThinkingDelta?.(ev.text)
     return
   }
 

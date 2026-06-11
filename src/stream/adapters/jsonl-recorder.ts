@@ -111,6 +111,12 @@ export class JsonlRecorder implements StreamPort {
     // tool_result / recovery trajectory (and the DURABLE escalation pair is
     // recorded separately below), so the recorder skips this summary line.
     if (event.type === "skill_scope_decision") return
+    // jun-11 (#11) — `assistant_thinking` is a transient render-only reasoning
+    // signal (DIM stream), the SAME class as item_* / output_progress: the
+    // durable trajectory records the assistant's ANSWER (`assistant_text`) and
+    // its actions, not the streamed reasoning summary. Kept out of
+    // `RecordedEventType` below so KIND_MAP / dataOf never see it.
+    if (event.type === "assistant_thinking") return
     if (this.written >= this.maxLines) {
       this.handleCap()
       return
@@ -286,6 +292,9 @@ type RecordedEventType = Exclude<
   | "item_updated"
   | "item_completed"
   | "skill_scope_decision"
+  // jun-11 (#11) — streamed reasoning (DIM render-only); the answer is recorded
+  // via `assistant_text`, so the reasoning summary carries no separate payload.
+  | "assistant_thinking"
 >
 type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
 

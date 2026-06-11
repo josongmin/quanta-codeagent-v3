@@ -1,6 +1,6 @@
 {
   "name": "quanta-codeagent",
-  "version": "1.0.006",
+  "version": "1.0.009",
   "type": "module",
   "scripts": {
     "dev": "bun --hot run src/apps/cli/index.ts",
@@ -23,6 +23,7 @@
     "test:ci": "bun run test:admission && bun run typecheck:all && bun run test:clean-js && bun test tests/unit tests/integration tests/contract",
     "test:cov": "bun run typecheck && bun run test:clean-js && bun test --coverage tests/unit tests/integration",
     "test:eval": "bun run src/apps/bench/index.ts",
+    "e2e:pty": "bun test tests/e2e-pty",
     "test:watch": "bun run test:clean-js && bun test --watch tests/unit",
     "smoke": "bun run tests/smoke/index.ts",
     "smoke:live": "bun run tests/smoke/index.ts --tier=live",

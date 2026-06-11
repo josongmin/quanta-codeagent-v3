@@ -138,9 +138,9 @@ export const CLI_KNOBS: readonly CliKnob[] = [
   {
     envKey: "QUANTA_PILL_RULES",
     kind: "bool",
-    default: true,
+    default: false,
     group: "status-ui",
-    describe: "Rules pill.",
+    describe: "Rules pill (default OFF; =1 shows it).",
     readSite: "status-pills.ts",
   },
 

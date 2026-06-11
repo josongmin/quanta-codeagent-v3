@@ -22,10 +22,10 @@
  *   - No mutation of any rule file. The user is told what is in scope; rule
  *     editing happens out of band (their editor).
  *
- * Default-ON contract (byte-identical OFF):
- *   - The pill is gated by `QUANTA_PILL_RULES` (default `"1"`) so a user who
- *     runs `QUANTA_PILL_RULES=0 quanta` sees the same pill row they did
- *     yesterday — byte-identical.
+ * Gating contract:
+ *   - The pill is gated by `QUANTA_PILL_RULES` (default OFF — jun-11 user
+ *     call: the pill is noise in the default chrome). `QUANTA_PILL_RULES=1`
+ *     opts the pill back into the status row.
  *   - The master `QUANTA_RULE_INDICATOR=0` knob also short-circuits the
  *     inventory builder (returns the empty inventory immediately) so even the
  *     `/rules` slash command paints "(disabled)" without touching disk.
@@ -136,9 +136,10 @@ export const isRuleIndicatorEnabled = (env: NodeJS.ProcessEnv = process.env): bo
 
 /** True iff the rule pill should ride in the status-pill row. The pill is a
  *  subset of the indicator master switch: disabling the pill does NOT disable
- *  the `/rules` slash command. */
+ *  the `/rules` slash command. Default OFF (opt-in via `QUANTA_PILL_RULES=1`);
+ *  the master indicator stays default-ON so `/rules` keeps working. */
 export const isRulePillEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  isRuleIndicatorEnabled(env) && parseEnvFlag(env[RULE_PILL_ENV], true)
+  isRuleIndicatorEnabled(env) && parseEnvFlag(env[RULE_PILL_ENV], false)
 
 /** Compute a best-effort byte size for a source path. ENOENT / EACCES /
  *  EISDIR all fall through to `undefined` — display omits the size hint when

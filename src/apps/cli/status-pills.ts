@@ -198,7 +198,8 @@ const readFlags = (
     mode: parseEnvFlag(env.QUANTA_PILL_MODE, true),
     skills: parseEnvFlag(env.QUANTA_PILL_SKILLS, true),
     sandbox: parseEnvFlag(env.QUANTA_PILL_SANDBOX, true),
-    rules: parseEnvFlag(env.QUANTA_PILL_RULES, true),
+    // Default OFF (jun-11): the rules pill is opt-in via QUANTA_PILL_RULES=1.
+    rules: parseEnvFlag(env.QUANTA_PILL_RULES, false),
   }
 }
 
