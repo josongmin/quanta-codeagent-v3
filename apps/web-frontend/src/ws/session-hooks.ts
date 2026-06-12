@@ -16,6 +16,7 @@ import type {
   ImageBlock,
   SessionCommand,
   SessionEvent,
+  SessionEventType,
   SessionRejectedFrame,
   SessionSnapshotLite,
   SessionStateView,
@@ -176,285 +177,370 @@ const fallbackTextOf = (pending: PendingCompletion): string =>
       ? pending.outcomeReason
       : "(turn completed)"
 
+const clearCompletionTracking = (
+  state: TranscriptState,
+  lastAssistantSignature: string | null = state.lastAssistantSignature,
+): TranscriptState => ({
+  ...state,
+  lastAssistantSignature,
+  streamingAssistant: null,
+  pendingCompletion: null,
+  fallbackCompletion: null,
+})
+
+const appendFinalAssistantMessage = (args: {
+  readonly state: TranscriptState
+  readonly text: string
+  readonly timestamp: string
+  readonly eventId?: string
+  readonly fallback: PendingCompletion | null
+  readonly signature: string
+}): TranscriptState =>
+  appendTranscriptMessage(clearCompletionTracking(args.state, args.signature), {
+    id: args.fallback?.eventId ?? args.eventId ?? `assistant-${args.timestamp}`,
+    role: "assistant",
+    text: args.text,
+    timestamp: args.fallback?.timestamp ?? args.timestamp,
+  })
+
+const repairTrailingAssistantMessage = (args: {
+  readonly state: TranscriptState
+  readonly lastMessage: UiMessage
+  readonly text: string
+  readonly timestamp: string
+  readonly signature: string
+}): TranscriptState => ({
+  ...clearCompletionTracking(args.state, args.signature),
+  messages: [
+    ...args.state.messages.slice(0, -1),
+    {
+      ...args.lastMessage,
+      text: args.text,
+      timestamp: args.timestamp,
+    },
+  ],
+})
+
+const applyStreamingSessionStateToTranscript = (
+  state: TranscriptState,
+  sessionState: SessionStateView,
+  timestamp: string,
+  eventId?: string,
+): TranscriptState | null => {
+  if (
+    sessionState.status !== "running" ||
+    typeof sessionState.streamingAssistantText !== "string" ||
+    sessionState.streamingAssistantText.length === 0
+  ) {
+    return null
+  }
+  const streamingId =
+    state.streamingAssistant?.id ??
+    (eventId === undefined ? `assistant-stream-${timestamp}` : `assistant-stream-${eventId}`)
+  return reconcileStreamingAssistant(
+    state,
+    sessionState.streamingAssistantText,
+    state.streamingAssistant?.timestamp ?? timestamp,
+    streamingId,
+  )
+}
+
+const applyAssistantSignatureToTranscript = (args: {
+  readonly state: TranscriptState
+  readonly sessionState: SessionStateView
+  readonly timestamp: string
+  readonly eventId?: string
+}): TranscriptState | null => {
+  const signature = assistantSignatureFromState(args.sessionState)
+  if (signature === null || signature === args.state.lastAssistantSignature) {
+    return null
+  }
+  const text = args.sessionState.lastAssistantText ?? "(turn completed)"
+  const lastMessage = args.state.messages.at(-1)
+  if (
+    args.state.streamingAssistant !== null &&
+    lastMessage?.role === "assistant" &&
+    lastMessage.id === args.state.streamingAssistant.id
+  ) {
+    return repairTrailingAssistantMessage({
+      state: args.state,
+      lastMessage,
+      text,
+      timestamp: args.state.streamingAssistant.timestamp,
+      signature,
+    })
+  }
+  const fallback = args.state.pendingCompletion ?? args.state.fallbackCompletion
+  const fallbackText = fallback === null ? null : fallbackTextOf(fallback)
+  const canRepairFallback =
+    fallback !== null &&
+    lastMessage?.role === "assistant" &&
+    lastMessage.id === fallback.eventId &&
+    lastMessage.text === fallbackText
+  if (canRepairFallback && lastMessage !== undefined) {
+    return repairTrailingAssistantMessage({
+      state: args.state,
+      lastMessage,
+      text,
+      timestamp: fallback.timestamp,
+      signature,
+    })
+  }
+  return appendFinalAssistantMessage({
+    state: args.state,
+    text,
+    timestamp: args.timestamp,
+    eventId: args.eventId,
+    fallback,
+    signature,
+  })
+}
+
+const settlePendingCompletionOnIdle = (
+  state: TranscriptState,
+  sessionState: SessionStateView,
+): TranscriptState | null => {
+  if (state.pendingCompletion === null || sessionState.status !== "idle") {
+    return null
+  }
+  const fallback = state.pendingCompletion
+  const lastMessage = state.messages.at(-1)
+  if (
+    state.streamingAssistant !== null &&
+    lastMessage?.role === "assistant" &&
+    lastMessage.id === state.streamingAssistant.id
+  ) {
+    return {
+      ...clearCompletionTracking(state),
+      messages: [
+        ...state.messages.slice(0, -1),
+        {
+          ...lastMessage,
+          text:
+            fallback.assistantText ??
+            (lastMessage.text.length > 0 ? lastMessage.text : fallbackTextOf(fallback)),
+        },
+      ],
+    }
+  }
+  return appendTranscriptMessage(
+    {
+      ...state,
+      streamingAssistant: null,
+      pendingCompletion: null,
+      fallbackCompletion: fallback,
+    },
+    pendingCompletionMessage(fallback),
+  )
+}
+
 const applySessionStateToTranscript = (
   state: TranscriptState,
   sessionState: SessionStateView,
   timestamp: string,
   eventId?: string,
-): TranscriptState => {
-  if (
-    sessionState.status === "running" &&
-    typeof sessionState.streamingAssistantText === "string" &&
-    sessionState.streamingAssistantText.length > 0
-  ) {
-    const streamingId =
-      state.streamingAssistant?.id ??
-      (eventId === undefined ? `assistant-stream-${timestamp}` : `assistant-stream-${eventId}`)
-    return reconcileStreamingAssistant(
-      state,
-      sessionState.streamingAssistantText,
-      state.streamingAssistant?.timestamp ?? timestamp,
-      streamingId,
-    )
-  }
-  const signature = assistantSignatureFromState(sessionState)
-  if (signature !== null && signature !== state.lastAssistantSignature) {
-    const lastMessage = state.messages.at(-1)
-    if (
-      state.streamingAssistant !== null &&
-      lastMessage?.role === "assistant" &&
-      lastMessage.id === state.streamingAssistant.id
-    ) {
-      return {
-        ...state,
-        lastAssistantSignature: signature,
-        streamingAssistant: null,
-        pendingCompletion: null,
-        fallbackCompletion: null,
-        messages: [
-          ...state.messages.slice(0, -1),
-          {
-            ...lastMessage,
-            text: sessionState.lastAssistantText ?? "(turn completed)",
-            timestamp: state.streamingAssistant.timestamp,
-          },
-        ],
-      }
-    }
-    const fallback = state.pendingCompletion ?? state.fallbackCompletion
-    const fallbackText = fallback === null ? null : fallbackTextOf(fallback)
-    const canRepairFallback =
-      fallback !== null &&
-      lastMessage?.role === "assistant" &&
-      lastMessage.id === fallback.eventId &&
-      lastMessage.text === fallbackText
-    if (canRepairFallback && lastMessage !== undefined) {
-      return {
-        ...state,
-        lastAssistantSignature: signature,
-        streamingAssistant: null,
-        pendingCompletion: null,
-        fallbackCompletion: null,
-        messages: [
-          ...state.messages.slice(0, -1),
-          {
-            ...lastMessage,
-            text: sessionState.lastAssistantText ?? "(turn completed)",
-            timestamp: fallback.timestamp,
-          },
-        ],
-      }
-    }
-    return appendTranscriptMessage(
-      {
-        ...state,
-        lastAssistantSignature: signature,
-        streamingAssistant: null,
-        pendingCompletion: null,
-        fallbackCompletion: null,
-      },
-      {
-        id: fallback?.eventId ?? eventId ?? `assistant-${timestamp}`,
-        role: "assistant",
-        text: sessionState.lastAssistantText ?? "(turn completed)",
-        timestamp: fallback?.timestamp ?? timestamp,
-      },
-    )
-  }
-  if (state.pendingCompletion !== null && sessionState.status === "idle") {
-    const fallback = state.pendingCompletion
-    if (
-      state.streamingAssistant !== null &&
-      state.messages.at(-1)?.role === "assistant" &&
-      state.messages.at(-1)?.id === state.streamingAssistant.id
-    ) {
-      const lastMessage = state.messages.at(-1)
-      if (lastMessage !== undefined) {
-        return {
-          ...state,
-          streamingAssistant: null,
-          pendingCompletion: null,
-          fallbackCompletion: null,
-          messages: [
-            ...state.messages.slice(0, -1),
-            {
-              ...lastMessage,
-              text:
-                fallback.assistantText ??
-                (lastMessage.text.length > 0 ? lastMessage.text : fallbackTextOf(fallback)),
-            },
-          ],
-        }
-      }
-    }
-    return appendTranscriptMessage(
-      {
-        ...state,
-        streamingAssistant: null,
-        pendingCompletion: null,
-        fallbackCompletion: fallback,
-      },
-      pendingCompletionMessage(fallback),
-    )
-  }
-  return state
-}
+): TranscriptState =>
+  applyStreamingSessionStateToTranscript(state, sessionState, timestamp, eventId) ??
+  applyAssistantSignatureToTranscript({ state, sessionState, timestamp, eventId }) ??
+  settlePendingCompletionOnIdle(state, sessionState) ??
+  state
 
 const cloneImages = (images: readonly ImageBlock[]): readonly ImageBlock[] =>
   images.map((image) => ({ ...image }))
+
+type TranscriptEventHandler<K extends SessionEventType> = (
+  state: TranscriptState,
+  event: Extract<SessionEvent, { type: K }>,
+) => TranscriptState
+
+type TranscriptEventHandlerRegistry = {
+  [K in SessionEventType]?: TranscriptEventHandler<K>
+}
+
+export const TRANSCRIPT_MUTATING_SESSION_EVENT_TYPES = [
+  "approval.requested",
+  "session.closed",
+  "session.created",
+  "session.state.updated",
+  "skill.scope.decision",
+  "tool.completed",
+  "tool.invoked",
+  "turn.completed",
+  "turn.failed",
+  "turn.output.delta",
+  "turn.started",
+] as const satisfies readonly SessionEventType[]
+
+export const TRANSCRIPT_NOOP_SESSION_EVENT_TYPES = [
+  "approval.resolved",
+  "artifact.ready",
+  "turn.llm.continuation",
+  "turn.llm.request",
+] as const satisfies readonly SessionEventType[]
+
+const TRANSCRIPT_NOOP_SESSION_EVENT_TYPE_SET = new Set<string>(TRANSCRIPT_NOOP_SESSION_EVENT_TYPES)
+
+const TRANSCRIPT_EVENT_HANDLERS = {
+  "turn.started": (state, event) => ({
+    ...appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "user",
+      text: event.prompt,
+      timestamp: event.emittedAt,
+      ...(event.images !== undefined && event.images.length > 0
+        ? { images: cloneImages(event.images) }
+        : {}),
+    }),
+    streamingAssistant: null,
+  }),
+  "turn.output.delta": (state, event) => {
+    const streamingId =
+      state.streamingAssistant?.id ??
+      (event.causedByCommandId === undefined
+        ? `assistant-stream-${event.eventId}`
+        : `assistant-stream-${event.causedByCommandId}`)
+    const nextText =
+      state.streamingAssistant !== null
+        ? `${state.streamingAssistant.text}${event.delta}`
+        : event.delta
+    return reconcileStreamingAssistant(
+      state,
+      nextText,
+      state.streamingAssistant?.timestamp ?? event.emittedAt,
+      streamingId,
+    )
+  },
+  "turn.completed": (state, event) => {
+    const nextUsage =
+      event.tokenUsage !== undefined
+        ? {
+            promptTokens: state.tokenUsage.promptTokens + (event.tokenUsage.promptTokens ?? 0),
+            completionTokens:
+              state.tokenUsage.completionTokens + (event.tokenUsage.completionTokens ?? 0),
+            totalTokens: state.tokenUsage.totalTokens + (event.tokenUsage.totalTokens ?? 0),
+            costMicroUsd: state.tokenUsage.costMicroUsd + (event.tokenUsage.costMicroUsd ?? 0),
+            turns: state.tokenUsage.turns + 1,
+          }
+        : state.tokenUsage
+    const nextModel =
+      event.modelSlug !== undefined && event.modelSlug.length > 0
+        ? event.modelSlug
+        : state.modelSlug
+    return {
+      ...state,
+      tokenUsage: nextUsage,
+      modelSlug: nextModel,
+      pendingCompletion: {
+        eventId: event.eventId,
+        outcomeReason: event.outcomeReason,
+        ...(event.assistantText !== undefined ? { assistantText: event.assistantText } : {}),
+        timestamp: event.emittedAt,
+      },
+      fallbackCompletion: null,
+    }
+  },
+  "turn.failed": (state, event) =>
+    appendTranscriptMessage(
+      {
+        ...state,
+        streamingAssistant: null,
+        pendingCompletion: null,
+        fallbackCompletion: null,
+      },
+      {
+        id: event.eventId,
+        role: "error",
+        text: event.message,
+        timestamp: event.emittedAt,
+      },
+    ),
+  "session.created": (state, event) =>
+    appendTranscriptMessage(
+      event.model !== undefined && event.model.length > 0
+        ? { ...state, modelSlug: event.model }
+        : state,
+      {
+        id: event.eventId,
+        role: "system",
+        text:
+          event.model !== undefined && event.model.length > 0
+            ? `session created · model=${event.model} · transport=${event.capabilityManifest.transport}`
+            : `session created (transport=${event.capabilityManifest.transport})`,
+        timestamp: event.emittedAt,
+      },
+    ),
+  "session.state.updated": (state, event) =>
+    applySessionStateToTranscript(state, event.state, event.emittedAt, event.eventId),
+  "session.closed": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "system",
+      text: "session closed",
+      timestamp: event.emittedAt,
+    }),
+  "approval.requested": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "system",
+      text: `approval requested: ${event.approval.reason}`,
+      timestamp: event.emittedAt,
+    }),
+  "tool.invoked": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "system",
+      text: renderToolInvoked(event.toolName, event.argsPreview),
+      timestamp: event.emittedAt,
+    }),
+  "tool.completed": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: event.outcome === "error" || event.outcome === "denied" ? "error" : "system",
+      text: renderToolCompleted(
+        event.toolName,
+        event.outcome,
+        event.resultPreview,
+        event.durationMs,
+      ),
+      timestamp: event.emittedAt,
+    }),
+  "skill.scope.decision": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "system",
+      text: renderSkillScopeDecision(event.tool, event.activeSkill, event.decision),
+      timestamp: event.emittedAt,
+    }),
+} as const satisfies TranscriptEventHandlerRegistry
+
+export const applyUnsupportedSessionEventToTranscript = (
+  state: TranscriptState,
+  _event: SessionEvent,
+): TranscriptState => state
+
+const isExplicitTranscriptNoopSessionEventType = (
+  type: SessionEventType,
+): type is (typeof TRANSCRIPT_NOOP_SESSION_EVENT_TYPES)[number] =>
+  TRANSCRIPT_NOOP_SESSION_EVENT_TYPE_SET.has(type)
 
 export const applySessionEventToTranscript = (
   state: TranscriptState,
   event: SessionEvent,
 ): TranscriptState => {
-  const ts = event.emittedAt
-  switch (event.type) {
-    case "turn.started":
-      return {
-        ...appendTranscriptMessage(state, {
-          id: event.eventId,
-          role: "user",
-          text: event.prompt,
-          timestamp: ts,
-          ...(event.images !== undefined && event.images.length > 0
-            ? { images: cloneImages(event.images) }
-            : {}),
-        }),
-        streamingAssistant: null,
-      }
-    case "turn.output.delta": {
-      const streamingId =
-        state.streamingAssistant?.id ??
-        (event.causedByCommandId === undefined
-          ? `assistant-stream-${event.eventId}`
-          : `assistant-stream-${event.causedByCommandId}`)
-      const nextText =
-        state.streamingAssistant !== null
-          ? `${state.streamingAssistant.text}${event.delta}`
-          : event.delta
-      return reconcileStreamingAssistant(
-        state,
-        nextText,
-        state.streamingAssistant?.timestamp ?? ts,
-        streamingId,
-      )
-    }
-    case "turn.completed": {
-      const nextUsage =
-        event.tokenUsage !== undefined
-          ? {
-              promptTokens: state.tokenUsage.promptTokens + (event.tokenUsage.promptTokens ?? 0),
-              completionTokens:
-                state.tokenUsage.completionTokens + (event.tokenUsage.completionTokens ?? 0),
-              totalTokens: state.tokenUsage.totalTokens + (event.tokenUsage.totalTokens ?? 0),
-              costMicroUsd: state.tokenUsage.costMicroUsd + (event.tokenUsage.costMicroUsd ?? 0),
-              turns: state.tokenUsage.turns + 1,
-            }
-          : state.tokenUsage
-      const nextModel =
-        event.modelSlug !== undefined && event.modelSlug.length > 0
-          ? event.modelSlug
-          : state.modelSlug
-      return {
-        ...state,
-        tokenUsage: nextUsage,
-        modelSlug: nextModel,
-        pendingCompletion: {
-          eventId: event.eventId,
-          outcomeReason: event.outcomeReason,
-          ...(event.assistantText !== undefined ? { assistantText: event.assistantText } : {}),
-          timestamp: ts,
-        },
-        fallbackCompletion: null,
-      }
-    }
-    case "turn.failed":
-      return appendTranscriptMessage(
-        {
-          ...state,
-          streamingAssistant: null,
-          pendingCompletion: null,
-          fallbackCompletion: null,
-        },
-        {
-          id: event.eventId,
-          role: "error",
-          text: event.message,
-          timestamp: ts,
-        },
-      )
-    case "session.created":
-      return appendTranscriptMessage(
-        event.model !== undefined && event.model.length > 0
-          ? { ...state, modelSlug: event.model }
-          : state,
-        {
-          id: event.eventId,
-          role: "system",
-          text:
-            event.model !== undefined && event.model.length > 0
-              ? `session created · model=${event.model} · transport=${event.capabilityManifest.transport}`
-              : `session created (transport=${event.capabilityManifest.transport})`,
-          timestamp: ts,
-        },
-      )
-    case "session.state.updated":
-      return applySessionStateToTranscript(state, event.state, ts, event.eventId)
-    case "session.closed":
-      return appendTranscriptMessage(state, {
-        id: event.eventId,
-        role: "system",
-        text: "session closed",
-        timestamp: ts,
-      })
-    case "approval.requested":
-      return appendTranscriptMessage(state, {
-        id: event.eventId,
-        role: "system",
-        text: `approval requested: ${event.approval.reason}`,
-        timestamp: ts,
-      })
-    case "approval.resolved":
-    case "artifact.ready":
-      return state
-    case "tool.invoked":
-      return appendTranscriptMessage(state, {
-        id: event.eventId,
-        role: "system",
-        text: renderToolInvoked(event.toolName, event.argsPreview),
-        timestamp: ts,
-      })
-    case "tool.completed":
-      return appendTranscriptMessage(state, {
-        id: event.eventId,
-        role: event.outcome === "error" || event.outcome === "denied" ? "error" : "system",
-        text: renderToolCompleted(
-          event.toolName,
-          event.outcome,
-          event.resultPreview,
-          event.durationMs,
-        ),
-        timestamp: ts,
-      })
-    case "skill.scope.decision":
-      // ADR-0512 — one-line gray timeline note for a skill-scope outcome the
-      // interactive escalation card never surfaces (a hard `blocked`
-      // security boundary, or a silent auto-decline / steer). `system` role so
-      // it renders gray, NOT a red error — a blocked out-of-scope tool is a
-      // policy outcome, not a crash.
-      return appendTranscriptMessage(state, {
-        id: event.eventId,
-        role: "system",
-        text: renderSkillScopeDecision(event.tool, event.activeSkill, event.decision),
-        timestamp: ts,
-      })
-    default:
-      // Forward-compat: an unknown / newly-added SessionEvent type must be a
-      // NO-OP, never corrupt the transcript. Falling through returned
-      // `undefined` here, which poisoned reducer state → the next
-      // `turn.output.delta` crashed on `state.streamingAssistant`.
-      return state
+  const handler = TRANSCRIPT_EVENT_HANDLERS[event.type] as
+    | ((state: TranscriptState, event: SessionEvent) => TranscriptState)
+    | undefined
+  if (handler !== undefined) {
+    return handler(state, event)
   }
+  if (isExplicitTranscriptNoopSessionEventType(event.type)) {
+    return state
+  }
+  // Forward-compat: an unknown / newly-added SessionEvent type must be a
+  // NO-OP, never corrupt the transcript. Falling through once returned
+  // `undefined` here, which poisoned reducer state → the next
+  // `turn.output.delta` crashed on `state.streamingAssistant`.
+  return applyUnsupportedSessionEventToTranscript(state, event)
 }
 
 const renderToolInvoked = (toolName: string, argsPreview: string | undefined): string => {
@@ -797,10 +883,7 @@ export const useSendPermissionMode = (
  * type (`TurnCancelCommand`) but no sender — this closes that gap so the web
  * user can STOP a running turn instead of being stuck until it finishes.
  */
-export const useSendCancel = (
-  client: SessionClient,
-  sessionId: string | null,
-): (() => void) => {
+export const useSendCancel = (client: SessionClient, sessionId: string | null): (() => void) => {
   return useCallback(() => {
     if (sessionId === null) return
     const cancel: SessionCommand = {

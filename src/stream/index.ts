@@ -22,6 +22,7 @@ export {
 export type { StreamPort } from "./ports"
 export type {
   AgentEvent,
+  AgentEventType,
   EscalationOption,
   PlanDeltaKindMirror,
   PlanDeltaReadonlyMirror,
@@ -31,3 +32,4 @@ export type {
   TodoStatusMirror,
   ToolRiskMirror,
 } from "./types"
+export { AGENT_EVENT_TYPES, isAgentEventType } from "./types"

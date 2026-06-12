@@ -46,8 +46,17 @@ const bashLikeTool = (): Tool => {
     (i as { command: string }).command
   return t
 }
-const call = (command: string): ToolUseBlock => ({ type: "tool_use", id: "c1", name: "bash", input: { command } })
-const actionOf = (command: string): AdmissibilityAction => ({ tool: "bash", input: { command }, isReadOnly: false })
+const call = (command: string): ToolUseBlock => ({
+  type: "tool_use",
+  id: "c1",
+  name: "bash",
+  input: { command },
+})
+const actionOf = (command: string): AdmissibilityAction => ({
+  tool: "bash",
+  input: { command },
+  isReadOnly: false,
+})
 
 let dir: string
 let reg: PersistentTrustScopeRegistry

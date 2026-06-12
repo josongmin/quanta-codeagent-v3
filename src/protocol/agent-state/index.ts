@@ -1,22 +1,14 @@
 /**
  * Web agent-state protocol slice barrel.
  *
- * Sole import path for the agent-state WS protocol types + codec helpers + the
- * pure `agentEventToMessage` mapper. Slice fence: this module re-exports from
- * `./messages`, which is SELF-CONTAINED (no `@/agent` / `@/stream` runtime, no
- * CLI surface import).
+ * Sole import path for the agent-state WS protocol types + codec helpers +
+ * projection helpers. Wire schema lives in `./messages`; the central
+ * AgentEvent->read-model projection owner lives in `./projection`.
  */
 
 export type {
   AgentStateMessage,
   AgentStateMessageKind,
-  AgentStateObservation,
-  AgentStatePlan,
-  AgentStatePlanDelta,
-  AgentStatePlanDeltaKind,
-  AgentStateSink,
-  AgentStateTodo,
-  AgentStateTodoStatus,
   AgentStateWireEnvelope,
   ContextCompactedMessage,
   ModeChangedMessage,
@@ -28,13 +20,31 @@ export type {
   RatelimitSnapshotMessage,
   ToolProgressMessage,
 } from "./messages"
+export type {
+  AgentStateObservation,
+  AgentStateObservationType,
+  AgentStatePlan,
+  AgentStatePlanDelta,
+  AgentStatePlanDeltaKind,
+  AgentStateSink,
+  AgentStateTodo,
+  AgentStateTodoStatus,
+} from "./projection"
 export {
   AGENT_STATE_MESSAGE_KINDS,
   AGENT_STATE_PROTOCOL_VERSION,
-  AGENT_STATE_TYPES,
-  agentEventToMessage,
   decodeAgentStateFrame,
   encodeAgentStateFrame,
   isAgentStateMessage,
   isAgentStateMessageKind,
 } from "./messages"
+export {
+  AGENT_STATE_MESSAGE_KIND_BY_EVENT_TYPE,
+  AGENT_STATE_OBSERVATION_EVENT_TYPES,
+  AGENT_STATE_TYPES,
+  agentStateObservationToMessage,
+  agentEventToMessage,
+  isAgentStateObservationType,
+  projectAgentEventToAgentStateMessage,
+  projectAgentEventToAgentStateObservation,
+} from "./projection"

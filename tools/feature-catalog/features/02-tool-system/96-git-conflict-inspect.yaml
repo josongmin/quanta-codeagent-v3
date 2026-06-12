@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Agent tool — structured conflict list renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
+    web: "Agent tool — structured conflict list renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (session-host-turn-event-bridge.ts tool_result arm (via context-binding))."
 purpose: |
   Surfaces the pure conflict parser (`./conflict-parser`) as a typed first-class
   git tool so the `fix-merge-conflicts` skill (and any future loop consumer)

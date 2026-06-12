@@ -23,7 +23,7 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-11"
   evidence:
     cli: "dispatched from src/apps/cli/index.ts:132 (`process.argv[2] === \"attach\"` → dynamic import(./attach-cmd) → runAttachCmd); a real `quanta attach [ws-url]` subcommand with --help, live event render, and y/N approval prompts."
     web: "Not a web surface — this is the CLI-side WS *client* that ATTACHES TO the web daemon (ADR-0315). The daemon is the web backend; this slice renders its events to a terminal. No browser-rendered affordance of its own."
@@ -65,6 +65,7 @@ evidence:
       - tests/unit/apps/cli/attach/attach-client.test.ts
       - tests/unit/apps/cli/attach/attach-cmd.test.ts
       - tests/unit/apps/cli/attach/attach-routing-guard.test.ts
+      - tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts
     integration:
       - tests/unit/apps/cli/attach/attach-e2e.test.ts
     contract: []

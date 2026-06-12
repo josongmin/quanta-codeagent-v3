@@ -12,17 +12,21 @@ import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { ResponsesContinuationStore } from "@/llm"
 import {
   CircumventionTracker,
+  // #20 (durable prefix grants) — the persistent, cross-session trust-scope
+  // registry the gate consults + the [P] verb mints into.
+  createPersistentTrustScopeRegistry,
   type PermissionStore,
   // #20 — the operator-facing program token a `session_prefix` grant would cover
   // (null when this command cannot be safely prefix-granted).
   prefixGrantLabel,
   type ToolAction,
+  type TrustScopeRegistry,
 } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
-import { runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfig } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
@@ -66,6 +70,11 @@ interface CliHitlDeps {
   // the pre-flight is best-effort, so a slightly-off base only risks a
   // missed/extra warning, never correctness.
   readonly cwd?: string
+  // #20 (durable prefix grants) — when set (gate `QUANTA_TRUST_SCOPE` on), the
+  // confirm offers a [P] verb that mints a DURABLE program-token grant into this
+  // registry (persisted across sessions); the SAME registry is on the gate
+  // config so a later session ask-skips matching commands. Absent ⇒ no [P] verb.
+  readonly trustScope?: { registry: TrustScopeRegistry; projectKey: string }
 }
 
 /** Shared inline 4-verb prompt for a skill-scope ESCALATION (`scopeContext`
@@ -163,16 +172,24 @@ const buildCliOnConfirm =
       typeof action.shellCommand === "string" && action.shellCommand.length > 0
         ? prefixGrantLabel(`${action.tool}|${action.shellCommand}`)
         : null
-    const ans = (
+    // #20 durable — the [P] verb is offered ONLY when a prefix is safe AND a
+    // persistent trust-scope registry is wired (gate `QUANTA_TRUST_SCOPE` on).
+    const durable = prefixLabel !== null && deps.trustScope !== undefined
+    // Capture the RAW answer too: the prefix verbs are case-SENSITIVE ([p] this
+    // session vs [P] all sessions) and the lowercased `ans` cannot tell them
+    // apart — so the durable check below reads `raw` and runs BEFORE the `ans`
+    // "p" check (a typed "P" lowercases to "p", so durable must win first).
+    const raw = (
       await askLine(
         deps.channel,
-        prefixLabel !== null
-          ? `Allow ${action.tool}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer: `
-          : `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
+        durable
+          ? `Allow ${action.tool}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer: `
+          : prefixLabel !== null
+            ? `Allow ${action.tool}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer: `
+            : `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
       )
-    )
-      .trim()
-      .toLowerCase()
+    ).trim()
+    const ans = raw.toLowerCase()
     deps.idleMonitor.markActive()
     if (ans === "y" || ans === "yes") {
       deps.rejectCounter.recordAccept()
@@ -181,6 +198,18 @@ const buildCliOnConfirm =
     if (ans === "a" || ans === "always") {
       deps.rejectCounter.recordAccept()
       return { decision: "allow", scope: "session" }
+    }
+    // #20 durable — [P] (capital, exact) mints a DURABLE program-token grant into
+    // the persistent registry (survives across sessions) AND allows this session
+    // (session_prefix). Checked BEFORE the lowercase [p] so a typed "P" is durable.
+    if (durable && raw === "P" && deps.trustScope !== undefined && prefixLabel !== null) {
+      deps.trustScope.registry.grant(deps.trustScope.projectKey, {
+        tool: action.tool,
+        scope: "project",
+        commandPattern: prefixLabel,
+      })
+      deps.rejectCounter.recordAccept()
+      return { decision: "allow", scope: "session_prefix" }
     }
     if (prefixLabel !== null && ans === "p") {
       deps.rejectCounter.recordAccept()
@@ -295,6 +324,11 @@ const buildBootstrapContextArgs = (args: {
    *  over it and dispatch projects its value onto the bash/edit edit-fence. Absent
    *  ⇒ tools unregistered + cwd byte-identical (default-OFF). */
   readonly activeWorktreeSlot?: WorktreeSlotHandle
+  /** #20 (durable prefix grants) — persistent trust-scope registry + projectKey,
+   *  wired ONLY when `QUANTA_TRUST_SCOPE` is on. Threaded onto the overlay so the
+   *  per-turn AgentConfig carries `trustScope` and the gate consults durable
+   *  grants. Absent ⇒ slot omitted (default-OFF, byte-identical). */
+  readonly trustScope?: { registry: TrustScopeRegistry; projectKey: string }
 }): Parameters<typeof composeRuntimeBootstrapContext>[0] => {
   const {
     boot,
@@ -310,6 +344,7 @@ const buildBootstrapContextArgs = (args: {
     env,
     namedAgentResolver,
     activeWorktreeSlot,
+    trustScope,
   } = args
   // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` (this
   // surface builds its base via the host overlay, not `applyKnobs`). Absent /
@@ -350,6 +385,10 @@ const buildBootstrapContextArgs = (args: {
       // QUANTA_WORKTREE_TOOL minted one. Absent ⇒ slot omitted ⇒ worktree tools
       // unregistered + bash/edit cwd byte-identical (default-OFF).
       ...(activeWorktreeSlot !== undefined ? { activeWorktreeSlot } : {}),
+      // #20 — overlay the persistent trust-scope registry when QUANTA_TRUST_SCOPE
+      // wired one. Absent ⇒ slot omitted ⇒ gate's trustScopeGrants returns false
+      // (default-OFF byte-identical).
+      ...(trustScope !== undefined ? { trustScope } : {}),
     },
   }
 }
@@ -428,11 +467,28 @@ export const composeCliRuntimeContext = async (
   // answer through the in-turn keystroke reader (no stdin fight). The session
   // loop flips `.active` + routes captured lines into it around each turn.
   const midTurnApprovalChannel = createMidTurnApprovalChannel()
+  // #20 (durable prefix grants) — wire the PERSISTENT trust-scope registry ONLY
+  // when `QUANTA_TRUST_SCOPE` is on (opt-in; NOT seeded default-ON like the other
+  // CLI gates — durable cross-session grants are a deliberate operator choice).
+  // Hydrated once here (async comp-root) so the gate sees prior-session grants on
+  // turn 1. `boot.cwd` is the SESSION-RESOLVED jail root, used as BOTH the
+  // projectRoot (overlay file location) and the projectKey (grant lookup key) so
+  // mint + consult agree. Absent ⇒ undefined ⇒ no [P] verb + gate skips trust-
+  // scope (default-OFF, byte-identical).
+  const trustScopeEnv = args.envSource ?? process.env
+  const trustScope = gateOn(trustScopeEnv, "QUANTA_TRUST_SCOPE")
+    ? await (async (): Promise<{ registry: TrustScopeRegistry; projectKey: string }> => {
+        const registry = createPersistentTrustScopeRegistry({ projectRoot: boot.cwd })
+        await registry.hydrate()
+        return { registry, projectKey: boot.cwd }
+      })()
+    : undefined
   const surfaceOnConfirm = buildCliOnConfirm({
     idleMonitor: boot.idleMonitor as IdleMonitor,
     rejectCounter: boot.rejectCounter as RejectCounter,
     channel: midTurnApprovalChannel,
     cwd: boot.cwd, // #19
+    ...(trustScope !== undefined ? { trustScope } : {}), // #20 durable
   })
   const confirmSlot: RuntimeConfirmSlot = {
     current: surfaceOnConfirm,
@@ -486,6 +542,7 @@ export const composeCliRuntimeContext = async (
       env: args.envSource ?? process.env,
       ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
       ...(activeWorktreeSlot !== undefined ? { activeWorktreeSlot } : {}),
+      ...(trustScope !== undefined ? { trustScope } : {}), // #20 durable
     }),
     ...(args.convStore !== undefined || args.responsesStore !== undefined
       ? {

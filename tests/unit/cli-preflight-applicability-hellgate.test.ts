@@ -19,7 +19,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ToolAction } from "@/permission"
+import { createPersistentTrustScopeRegistry, type ToolAction } from "@/permission"
 import { preflightApplyWarning, preflightCheckEnabled } from "../../src/apps/cli/preflight"
 import { __testing } from "../../src/apps/cli/repl/runtime-context-compose"
 
@@ -291,5 +291,48 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
     })
     expect(out).not.toContain("[p]") // no unsafe prefix offered for a chained cmd
     expect(decision).toBe(false) // 'p' is not a verb here ⇒ fail-closed deny
+  })
+
+  // #20 DURABLE — with a wired trust-scope registry the confirm offers [P] (all
+  // sessions); answering "P" MINTS a durable program-token grant + allows now.
+  const depsWithTrust = (
+    answer: string,
+    registry: ReturnType<typeof createPersistentTrustScopeRegistry>,
+  ) => ({
+    idleMonitor: { markActive: () => {} } as never,
+    rejectCounter: { recordAccept: () => {}, recordDeny: () => {} } as never,
+    channel: {
+      active: true,
+      awaitLine: async () => answer,
+      tryResolve: () => false,
+      clear: () => {},
+    } as never,
+    cwd: dir,
+    trustScope: { registry, projectKey: "proj" },
+  })
+
+  test("#20 durable: [P] mints a persistent grant (fresh-readback) + allows this session", async () => {
+    process.env.QUANTA_PREFLIGHT_CHECK = "0"
+    process.env.QUANTA_DIFF_PREVIEW = "0"
+    const registry = createPersistentTrustScopeRegistry({ filePath: join(dir, "grants.json") })
+    await registry.hydrate()
+    const onConfirm = __testing.buildCliOnConfirm(depsWithTrust("P", registry))
+    let decision: unknown
+    const out = await captureStderr(async () => {
+      decision = await onConfirm(bashAct("git status"))
+    })
+    expect(out).toContain("ALL sessions") // the durable verb is offered
+    expect(decision).toEqual({ decision: "allow", scope: "session_prefix" }) // allows now too
+    // FRESH-READBACK: a sibling git command now rides the DURABLE grant.
+    expect(registry.hasGrant("proj", { tool: "bash", actionKey: "bash|git log" })).toBe(true)
+    expect(registry.hasGrant("proj", { tool: "bash", actionKey: "bash|cargo build" })).toBe(false)
+  })
+
+  test("#20 PAIRED: NO registry ⇒ no [P] verb offered (durable opt-in, byte-identical)", async () => {
+    process.env.QUANTA_PREFLIGHT_CHECK = "0"
+    process.env.QUANTA_DIFF_PREVIEW = "0"
+    const onConfirm = __testing.buildCliOnConfirm(depsWith("y"))
+    const out = await captureStderr(() => onConfirm(bashAct("git status")))
+    expect(out).not.toContain("ALL sessions") // durable verb absent without a wired registry
   })
 })

@@ -18,10 +18,10 @@ surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-11"
   evidence:
-    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "CLI-only box panel; rides recovery/context_compacted events dropped at context-binding.ts:1061 default arm (B1); no web render"
+    cli: "TURN_SUMMARY_CONSUMED_AGENT_EVENT_TYPES is a pinned strict subset of AGENT_EVENT_TYPES (agent-event-surface-inventory-hellgate)"
+    web: "CLI-only box panel; rides recovery/context_compacted events outside the 7-tag bridge default arm (B1); no web render"
 purpose: |
   Turn-end "summary box" panel — 한 턴 종료 시 다음을 한 박스에 모아 출력:
   (1) tools row (도구 호출/결과 카운트 + 실패 카운트),
@@ -41,6 +41,7 @@ evidence:
   tests:
     unit:
       - tests/unit/cli/turn-summary.test.ts
+      - tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts
     integration: []
     contract: []
 knobs:

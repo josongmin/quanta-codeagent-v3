@@ -163,7 +163,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "src/apps/cli/...:NN — 무엇이 렌더/제어하는지"
-    web: "dropped at context-binding.ts:1061 default arm — 왜 missing 인지"
+    web: "dropped at session-host-turn-event-bridge.ts default arm — 왜 missing 인지"
 ```
 
 - 미기입 feature 는 `unknown/unverified` 기본값 (byte-identical, 레거시 무영향).

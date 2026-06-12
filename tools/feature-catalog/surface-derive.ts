@@ -16,7 +16,7 @@
  *   ≥1 src file reachable from web entry → web=partial        ┐ backend RUNS it;
  *                                                              │ browser affordance
  *                                                              │ is gated by the
- *                                                              │ 6-event bridge /
+ *                                                              │ 7-tag session-host-turn-event bridge /
  *                                                              │ SlashPalette /
  *                                                              │ SessionCommand and
  *                                                              │ is NOT mechanically

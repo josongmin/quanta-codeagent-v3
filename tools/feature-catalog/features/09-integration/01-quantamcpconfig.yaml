@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Bridged mcp__ passthrough tool invocations surface via tool_call -> tool.invoked / tool_result -> tool.completed (context-binding.ts:1079-1096) in the web tool display."
+    web: "Bridged mcp__ passthrough tool invocations surface via tool_call -> tool.invoked / tool_result -> tool.completed (session-host-turn-event-bridge.ts (tool_call/tool_result → tool.invoked/tool.completed via context-binding)) in the web tool display."
 purpose: 'stdio JSON-RPC + passthrough 도구 브리지 . runAgent e2e(, 3 tests): 모의 MCP 서버를 .mjs 서브프로세스로 spawn → loadMcpTools로 브리지 → ScriptedLLM이 mcp__mock__alpha/boom tool_use 발사 → 풀 runAgent → tool_result event → 루프 continue + 두 번째 LLM 호출.'
 evidence:
   code:

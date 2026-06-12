@@ -11,7 +11,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
 
-const BOOT = "Ctrl+C quit"
+// Must wait for the readline prompt (rendered AFTER setRawMode) not the
+// welcome banner ("Ctrl+C quit", before setRawMode). Sending "\r" while the
+// PTY is still in cooked mode causes the kernel to convert it to "\n", which
+// raw-line-reader drops — the readline never submits (~30% flake otherwise).
+const BOOT = "ask before every edit"
 const T = 30_000
 
 // One-turn cassette: reasoning summary (thinking) → answer (text) → end. The
@@ -36,10 +40,9 @@ const CASSETTE_SIMPLE = `${JSON.stringify({
   ],
 })}\n`
 
-// Multi-entry cassette for #13. Each entry is a valid one-turn reply; extra
-// entries absorb the background LLM calls the CLI makes between sessions
-// (e.g. compaction summarizer). 8 entries is conservative — profiling shows
-// ≤2 background calls per session in practice.
+// Multi-entry cassette for #13. Two entries: one per session. With
+// QUANTA_MEMORY=off there is no store → persistSession is skipped → zero
+// background LLM calls between sessions, so exactly 2 entries suffice.
 const mkReplayEntry = (): string =>
   JSON.stringify({
     id: "replay",
@@ -50,7 +53,7 @@ const mkReplayEntry = (): string =>
     ],
   })
 
-const CASSETTE_MULTI = Array.from({ length: 8 }, mkReplayEntry).join("\n") + "\n"
+const CASSETTE_MULTI = [mkReplayEntry(), mkReplayEntry()].join("\n") + "\n"
 
 describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
   let dir: string
@@ -118,6 +121,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
           QUANTA_LLM_REPLAY_DELAY_MS: "700", // ~5s turn
           QUANTA_MIDTURN_CAPTURE: "1",
           QUANTA_MIDTURN_VISIBLE: "1",
+          QUANTA_MEMORY: "off",
           QUANTA_MEMORY_AUTO: "0",
         },
       })
@@ -147,6 +151,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         env: {
           QUANTA_SESSIONS_DIR: join(dir, "sessions"),
           QUANTA_LLM_REPLAY: cassette,
+          QUANTA_MEMORY: "off",
           QUANTA_MEMORY_AUTO: "0",
         },
       })
@@ -176,6 +181,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         env: {
           QUANTA_SESSIONS_DIR: join(dir, "sessions"),
           QUANTA_LLM_REPLAY: cassette,
+          QUANTA_MEMORY: "off",
           QUANTA_MEMORY_AUTO: "0",
         },
       })
@@ -183,7 +189,12 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
       await c.waitFor(BOOT, 15_000)
       c.send("hello\r") // prompt 1 — starts first session
       await c.waitFor("MULTI_DONE", 12_000) // LLM replied
-      await c.waitFor("— done (completed,", 12_000) // session 1 done
+      // Wait for "done" AND the second readline prompt in the same waitFor.
+      // After turn 1 ends, runOneTurn's finally calls cancel.dispose() which
+      // resets setRawMode(false); the second readLine re-sets it to true BEFORE
+      // calling redraw(). Waiting for both patterns guarantees raw mode is active
+      // before we send "world\r", so \r isn't cooked into \n by the PTY.
+      await c.waitFor(/— done \(completed,[\s\S]*ask before every edit/, 12_000)
       c.send("world\r") // prompt 2 — starts second session
       // Wait for "done" to appear a SECOND time in the accumulated buffer.
       await c.waitFor(
@@ -206,6 +217,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         env: {
           QUANTA_SESSIONS_DIR: join(dir, "sessions"),
           QUANTA_LLM_REPLAY: cassette,
+          QUANTA_MEMORY: "off",
           QUANTA_MEMORY_AUTO: "0",
         },
       })

@@ -93,6 +93,50 @@ export interface PlanDeltaReadonlyMirror {
   readonly toName?: string
 }
 
+export const AGENT_EVENT_TYPES = [
+  "session_start",
+  "turn_start",
+  "llm_request",
+  "llm_continuation",
+  "assistant_text",
+  "assistant_thinking",
+  "in_progress",
+  "tool_call",
+  "tool_progress",
+  "tool_result",
+  "skill_scope_decision",
+  "permission_escalation_requested",
+  "permission_escalation_resolved",
+  "recovery",
+  "context_compacted",
+  "error",
+  "usage",
+  "output_progress",
+  "response_queued",
+  "interrupted",
+  "subagent_cancel",
+  "plan_created",
+  "plan_updated",
+  "plan_snapshot",
+  "item_started",
+  "item_updated",
+  "item_completed",
+  "plan_user_input_requested",
+  "plan_user_input_resolved",
+  "mode_changed",
+  "turn_diff_updated",
+  "decision",
+  "knobs_applied",
+  "progress_update",
+  "ratelimit_snapshot",
+  "done",
+] as const
+
+export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number]
+
+export const isAgentEventType = (value: unknown): value is AgentEventType =>
+  typeof value === "string" && (AGENT_EVENT_TYPES as readonly string[]).includes(value)
+
 export type AgentEvent =
   // RFC-0002 §5.2 `session_start` — emitted once at run start so the trajectory
   // has a head marker (recorder maps it to kind:"session_start").

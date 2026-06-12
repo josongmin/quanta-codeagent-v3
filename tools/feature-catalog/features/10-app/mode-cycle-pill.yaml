@@ -16,10 +16,10 @@ surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-11"
   evidence:
-    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "CLI-only shift+tab UX; mode_changed rides a B1-dropped event (context-binding.ts:1061 default arm) and there is no web pill."
+    cli: "shift+tab cycle + /mode slash (#13) wired via mode-cycle.ts + registry-surface.ts; pill renders in input meta + status bar"
+    web: "CLI-only shift+tab UX; mode_changed rides a B1-dropped event (session-host-turn-event-bridge.ts default arm (outside 7-tag AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES)) and there is no web pill."
 purpose: |
   shift+tab (a.k.a. backtab / CSI Z) cycles a single user-facing 4-rung posture
   (default → acceptEdits → plan → bypass), collapsing the two orthogonal axes
@@ -35,11 +35,14 @@ evidence:
     - src/apps/cli/repl/surface-compose.ts
     - src/apps/cli/repl/prompt-pipeline.ts
     - src/apps/cli/repl/session-loop.ts
+    - src/apps/cli/slash/registry-surface.ts
   adrs: [443]
   tests:
     unit:
       - src/apps/cli/__tests__/mode-cycle.hellgate.test.ts
-    integration: []
+      - tests/unit/cli/mode-slash-hellgate.test.ts
+    integration:
+      - tests/integration/cli/mode-slash-gate-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_MODE_CYCLE

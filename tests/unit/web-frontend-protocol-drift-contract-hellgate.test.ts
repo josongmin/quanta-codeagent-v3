@@ -5,6 +5,8 @@ import {
   SESSION_COMMAND_TYPES,
   SESSION_EVENT_TYPES,
   SESSION_PROTOCOL_VERSION,
+  SURFACE_READ_MODEL_IDS,
+  SURFACE_READ_MODEL_STATUSES,
 } from "@/protocol/session"
 
 /**
@@ -252,6 +254,38 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
       "SESSION_PROTOCOL_VERSION",
     )
     expect(frontendVersion).toBe(SESSION_PROTOCOL_VERSION)
+  })
+
+  test("[read-models] frontend SURFACE_READ_MODEL_IDS === canonical", () => {
+    const frontendIds = extractArrayLiterals(
+      readText(FRONTEND_PROTOCOL_PATH),
+      "SURFACE_READ_MODEL_IDS",
+    )
+    const canonical = new Set<string>(SURFACE_READ_MODEL_IDS)
+
+    expect([...frontendIds].sort()).toEqual([...canonical].sort())
+    for (const id of canonical) {
+      expect(frontendIds.has(id)).toBe(true)
+    }
+    for (const id of frontendIds) {
+      expect(canonical.has(id)).toBe(true)
+    }
+  })
+
+  test("[read-model-statuses] frontend SURFACE_READ_MODEL_STATUSES === canonical", () => {
+    const frontendStatuses = extractArrayLiterals(
+      readText(FRONTEND_PROTOCOL_PATH),
+      "SURFACE_READ_MODEL_STATUSES",
+    )
+    const canonical = new Set<string>(SURFACE_READ_MODEL_STATUSES)
+
+    expect([...frontendStatuses].sort()).toEqual([...canonical].sort())
+    for (const status of canonical) {
+      expect(frontendStatuses.has(status)).toBe(true)
+    }
+    for (const status of frontendStatuses) {
+      expect(canonical.has(status)).toBe(true)
+    }
   })
 
   test("[adr-0512] approval scopeContext field mirrored canonical ↔ frontend (additive, type set unchanged)", () => {

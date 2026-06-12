@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "user value (live MCP progress ticks) rides tool_progress which is dropped at context-binding.ts:1104 default arm; only the 6 bridged events reach the browser"
+    web: "user value (live MCP progress ticks) rides tool_progress which is dropped at session-host-turn-event-bridge.ts default arm (outside 7-tag AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES); only the 7-tag bridged AgentEvent types reach the browser"
 purpose: |
   Completes the MCP `tools/call` ingestion boundary on top of the landed
   annotations+media work:

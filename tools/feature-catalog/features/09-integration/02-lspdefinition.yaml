@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "LLM tool invocations surface via the bridged tool_call -> tool.invoked / tool_result -> tool.completed (context-binding.ts:1079-1096) rendered in the web tool display."
+    web: "LLM tool invocations surface via the bridged tool_call -> tool.invoked / tool_result -> tool.completed (session-host-turn-event-bridge.ts (tool_call/tool_result → tool.invoked/tool.completed via context-binding)) rendered in the web tool display."
 purpose: 8 도구 lsp_definition/_references/_hover/_type_definition/_implementation/_document_symbol/_workspace_symbol/_rename_preview — 1-based human coords, nullLspNavProvider 기본, structural mirror 타입으로 slice 격리
 evidence:
   code:

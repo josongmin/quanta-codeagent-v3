@@ -21,6 +21,7 @@
  */
 
 import type { RuntimeFacade } from "@/sdk/runtime"
+import { supported, type SupportedReadModels } from "@/protocol/session"
 import { errMessage, gateOn } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import {
@@ -28,6 +29,7 @@ import {
   type CanvasPorts,
   type ObservabilityPorts,
   startWebDaemon,
+  type WebDaemonServerConfig,
   type UserInputPorts,
 } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
@@ -166,6 +168,21 @@ const buildUserInputPorts = (
   return { handle: facade.userInput }
 }
 
+const buildSupportedReadModels = (args: {
+  readonly observabilityPorts: ObservabilityPorts | undefined
+  readonly canvasPorts: CanvasPorts | undefined
+  readonly agentStatePorts: AgentStatePorts | undefined
+}): SupportedReadModels => ({
+  session: supported("session.v1"),
+  agentState:
+    args.agentStatePorts !== undefined ? supported("agent-state.v1") : { status: "unsupported" },
+  canvas: args.canvasPorts !== undefined ? supported("canvas.v1") : { status: "unsupported" },
+  observability:
+    args.observabilityPorts !== undefined
+      ? supported("observability.v1")
+      : { status: "unsupported" },
+})
+
 /**
  * Boot the daemon. Accepts an optional override so test code (and a future
  * composition root) can inject a real `runtimeFactory` without parsing env.
@@ -195,13 +212,13 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // Gate OFF ⇒ undefined ⇒ the server has no port to resolve into AND the tool
   // was never registered (byte-identical legacy).
   const userInputPorts = buildUserInputPorts(observableFacade)
+  const supportedReadModels = buildSupportedReadModels({
+    observabilityPorts,
+    canvasPorts,
+    agentStatePorts,
+  })
 
-  const config: WebDaemonConfig & {
-    observabilityPorts?: ObservabilityPorts
-    canvasPorts?: CanvasPorts
-    agentStatePorts?: AgentStatePorts
-    userInputPorts?: UserInputPorts
-  } = {
+  const config: WebDaemonServerConfig = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
     authToken:
@@ -210,6 +227,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
         : parseAuthToken(process.env.QUANTA_WEB_AUTH_TOKEN),
     runtimeFactory,
     sessionConfig: overrides?.sessionConfig ?? {},
+    supportedReadModels,
     ...(observabilityPorts !== undefined ? { observabilityPorts } : {}),
     ...(canvasPorts !== undefined ? { canvasPorts } : {}),
     ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),

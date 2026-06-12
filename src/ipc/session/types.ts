@@ -1,4 +1,9 @@
-import type { SessionCommand, SessionEvent, SessionSnapshotLite } from "@/protocol/session"
+import type {
+  SessionCommand,
+  SessionEvent,
+  SessionSnapshotLite,
+  SurfaceSubscription,
+} from "@/protocol/session"
 
 export type SessionTransportRejectTarget = "connect" | "command"
 
@@ -12,6 +17,7 @@ export interface SessionTransportConnectMessage {
   readonly kind: "connect"
   readonly sessionId: string
   readonly resumeFromSeq?: number
+  readonly surfaceSubscription?: SurfaceSubscription
 }
 
 export interface SessionTransportRejectedMessage {

@@ -4,13 +4,18 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { main } from "@/apps/web-daemon"
 import {
+  type AgentStatePorts,
   HEARTBEAT_INTERVAL_MS,
+  type ObservabilityPorts,
   peekPlanInputAnswer,
   replyToHeartbeat,
+  startWebDaemon,
 } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { SessionTransportMessage } from "@/ipc/session"
 import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "@/ipc/session"
+import { decodeAgentStateFrame, type AgentStateObservation } from "@/protocol/agent-state"
+import { supported } from "@/protocol/session"
 import { createStubRuntimeFactory } from "./fixture"
 
 const handles: WebDaemonHandle[] = []
@@ -50,6 +55,47 @@ const waitForMessage = (
     }
     ws.addEventListener("message", onMessage)
   })
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+const encodeConnectWithSubscription = (surfaceSubscription: unknown): string =>
+  JSON.stringify({
+    version: "session.v1",
+    kind: "connect",
+    sessionId: "stub-session-1",
+    surfaceSubscription,
+  })
+
+const makeAgentStateSource = (): {
+  readonly ports: AgentStatePorts
+  emit(event: AgentStateObservation): void
+} => {
+  const listeners = new Set<(event: AgentStateObservation) => void>()
+  return {
+    ports: {
+      source: {
+        subscribe(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    },
+    emit(event) {
+      for (const listener of listeners) listener(event)
+    },
+  }
+}
+
+const makeObservabilityPorts = (): ObservabilityPorts => ({
+  timer: {
+    setInterval: () => 0,
+    clearInterval: () => undefined,
+  },
+  objective: {
+    snapshot: () => null,
+    subscribe: () => () => undefined,
+  },
+})
 
 describe("web daemon end-to-end", () => {
   test("client connect handshake receives snapshot frame for the runtime session", async () => {
@@ -539,6 +585,109 @@ describe("web daemon end-to-end", () => {
 
     ws.close()
     await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
+  test("unsupported read models in the connect handshake suppress derived side-channel fanout", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const agentState = makeAgentStateSource()
+    const handle = await startWebDaemon({
+      port: 0,
+      bind: "127.0.0.1",
+      authToken: undefined,
+      runtimeFactory: factory,
+      sessionConfig: {},
+      supportedReadModels: {
+        session: supported("session.v1"),
+        agentState: supported("agent-state.v1"),
+        canvas: { status: "unsupported" },
+        observability: supported("observability.v1"),
+      },
+      agentStatePorts: agentState.ports,
+      observabilityPorts: makeObservabilityPorts(),
+    })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await wait(25)
+
+    const frames: string[] = []
+    ws.addEventListener("message", (event: MessageEvent) => {
+      if (typeof event.data === "string") frames.push(event.data)
+    })
+
+    ws.send(
+      encodeConnectWithSubscription({
+        session: { status: "subscribed", protocol: "session.v1" },
+        agentState: { status: "unsupported" },
+        canvas: { status: "unsupported" },
+        observability: { status: "unsupported" },
+      }),
+    )
+    await waitForMessage(ws, (m) => m.kind === "snapshot", 2000)
+
+    agentState.emit({
+      type: "tool_progress",
+      id: "tool-1",
+      name: "bash",
+      message: "hidden",
+    })
+    await wait(50)
+
+    expect(frames.some((raw) => raw.includes('"kind":"agentState"'))).toBe(false)
+    expect(frames.some((raw) => raw.includes('"kind":"observability"'))).toBe(false)
+
+    ws.close()
+    await wait(50)
+  })
+
+  test("legacy raw socket receives agent-state fanout before any explicit connect subscription", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const agentState = makeAgentStateSource()
+    const handle = await startWebDaemon({
+      port: 0,
+      bind: "127.0.0.1",
+      authToken: undefined,
+      runtimeFactory: factory,
+      sessionConfig: {},
+      supportedReadModels: {
+        session: supported("session.v1"),
+        agentState: supported("agent-state.v1"),
+        canvas: { status: "unsupported" },
+        observability: { status: "unsupported" },
+      },
+      agentStatePorts: agentState.ports,
+    })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await wait(25)
+
+    const frames: string[] = []
+    ws.addEventListener("message", (event: MessageEvent) => {
+      if (typeof event.data === "string") frames.push(event.data)
+    })
+
+    agentState.emit({
+      type: "tool_progress",
+      id: "tool-legacy",
+      name: "bash",
+      message: "visible",
+    })
+    await wait(50)
+
+    const decoded = frames
+      .map((raw) => decodeAgentStateFrame(raw))
+      .find((msg) => msg?.kind === "tool.progress")
+    expect(decoded?.kind).toBe("tool.progress")
+    if (decoded?.kind === "tool.progress") {
+      expect(decoded.toolCallId).toBe("tool-legacy")
+      expect(decoded.toolName).toBe("bash")
+    }
+
+    ws.close()
+    await wait(50)
   })
 })
 

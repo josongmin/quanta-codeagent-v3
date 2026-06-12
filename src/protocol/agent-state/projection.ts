@@ -1,0 +1,323 @@
+/**
+ * Central agent-state projection ownership.
+ *
+ * Owns the closed tapped inventory plus the two pure read-model projectors:
+ *
+ *   AgentEvent -> AgentStateObservation
+ *   AgentStateObservation -> AgentStateMessage
+ *
+ * The tap (`wireAgentStateTap`) and the daemon WS forwarder both route through
+ * this module so widening the side channel now requires an intentional update
+ * at one owner seam instead of drifting across independent filter/mapper code.
+ */
+
+import type {
+  AgentEvent,
+  PlanDeltaKindMirror,
+  PlanDeltaReadonlyMirror,
+  PlanReadonlyMirror,
+  TodoReadonlyMirror,
+  TodoStatusMirror,
+} from "@/stream"
+import type {
+  AgentStateMessage,
+  AgentStateMessageKind,
+  ContextCompactedMessage,
+  ModeChangedMessage,
+  PlanCreatedMessage,
+  PlanInputRequestedMessage,
+  PlanInputResolvedMessage,
+  PlanSnapshotMessage,
+  PlanUpdatedMessage,
+  RatelimitSnapshotMessage,
+  ToolProgressMessage,
+} from "./messages"
+
+export type AgentStateTodoStatus = TodoStatusMirror
+export type AgentStateTodo = TodoReadonlyMirror
+export type AgentStatePlan = PlanReadonlyMirror
+export type AgentStatePlanDeltaKind = PlanDeltaKindMirror
+export type AgentStatePlanDelta = PlanDeltaReadonlyMirror
+
+export const AGENT_STATE_OBSERVATION_EVENT_TYPES = [
+  "plan_created",
+  "plan_updated",
+  "plan_snapshot",
+  "plan_user_input_requested",
+  "plan_user_input_resolved",
+  "mode_changed",
+  "tool_progress",
+  "context_compacted",
+  "ratelimit_snapshot",
+] as const
+
+export type AgentStateObservationType = (typeof AGENT_STATE_OBSERVATION_EVENT_TYPES)[number]
+
+export const AGENT_STATE_TYPES: ReadonlySet<AgentStateObservationType> =
+  new Set<AgentStateObservationType>(AGENT_STATE_OBSERVATION_EVENT_TYPES)
+
+export const isAgentStateObservationType = (value: unknown): value is AgentStateObservationType =>
+  typeof value === "string" &&
+  (AGENT_STATE_OBSERVATION_EVENT_TYPES as readonly string[]).includes(value)
+
+export type AgentStateObservation = Extract<AgentEvent, { type: AgentStateObservationType }>
+
+export interface AgentStateSink {
+  capture(event: AgentStateObservation): void
+}
+
+export const AGENT_STATE_MESSAGE_KIND_BY_EVENT_TYPE = {
+  plan_created: "plan.created",
+  plan_updated: "plan.updated",
+  plan_snapshot: "plan.snapshot",
+  plan_user_input_requested: "plan.input.requested",
+  plan_user_input_resolved: "plan.input.resolved",
+  mode_changed: "mode.changed",
+  tool_progress: "tool.progress",
+  context_compacted: "context.compacted",
+  ratelimit_snapshot: "ratelimit.snapshot",
+} as const satisfies Record<AgentStateObservationType, AgentStateMessageKind>
+
+type ObservationOf<K extends AgentStateObservationType> = Extract<
+  AgentStateObservation,
+  { type: K }
+>
+type MessageOf<K extends AgentStateObservationType> = Extract<
+  AgentStateMessage,
+  { kind: (typeof AGENT_STATE_MESSAGE_KIND_BY_EVENT_TYPE)[K] }
+>
+
+type ObservationProjector<K extends AgentStateObservationType> = (
+  event: Extract<AgentEvent, { type: K }>,
+) => ObservationOf<K>
+
+type MessageProjector<K extends AgentStateObservationType> = (
+  observation: ObservationOf<K>,
+  emittedAt: number,
+) => MessageOf<K>
+
+const AGENT_STATE_OBSERVATION_PROJECTORS = {
+  plan_created: (event) => ({ type: "plan_created", plan: event.plan }),
+  plan_updated: (event) => ({
+    type: "plan_updated",
+    delta: event.delta,
+    version: event.version,
+  }),
+  plan_snapshot: (event) => ({ type: "plan_snapshot", plan: event.plan }),
+  plan_user_input_requested: (event) => ({
+    type: "plan_user_input_requested",
+    promptId: event.promptId,
+    prompt: event.prompt,
+    ...(event.choices !== undefined ? { choices: event.choices } : {}),
+  }),
+  plan_user_input_resolved: (event) => ({
+    type: "plan_user_input_resolved",
+    promptId: event.promptId,
+    decision: event.decision,
+    ...(event.text !== undefined ? { text: event.text } : {}),
+  }),
+  mode_changed: (event) => ({
+    type: "mode_changed",
+    from: event.from,
+    to: event.to,
+    ...(event.reason !== undefined ? { reason: event.reason } : {}),
+  }),
+  tool_progress: (event) => ({
+    type: "tool_progress",
+    id: event.id,
+    name: event.name,
+    message: event.message,
+  }),
+  context_compacted: (event) => ({
+    type: "context_compacted",
+    fromTurnId: event.fromTurnId,
+    toTurnId: event.toTurnId,
+    summary: event.summary,
+    ts: event.ts,
+    tokens: event.tokens,
+  }),
+  ratelimit_snapshot: (event) => ({
+    type: "ratelimit_snapshot",
+    ...(event.requestsRemaining !== undefined
+      ? { requestsRemaining: event.requestsRemaining }
+      : {}),
+    ...(event.requestsResetMs !== undefined ? { requestsResetMs: event.requestsResetMs } : {}),
+    ...(event.tokensRemaining !== undefined ? { tokensRemaining: event.tokensRemaining } : {}),
+    ...(event.tokensResetMs !== undefined ? { tokensResetMs: event.tokensResetMs } : {}),
+    observedAt: event.observedAt,
+  }),
+} satisfies {
+  [K in AgentStateObservationType]: ObservationProjector<K>
+}
+
+const TEXT_CLAMP = 256
+
+const clamp = (value: string): string =>
+  value.length > TEXT_CLAMP ? value.slice(0, TEXT_CLAMP) : value
+
+const AGENT_STATE_MESSAGE_PROJECTORS = {
+  plan_created: (observation, emittedAt) => ({
+    kind: "plan.created",
+    plan: observation.plan,
+    emittedAt,
+  }),
+  plan_updated: (observation, emittedAt) => ({
+    kind: "plan.updated",
+    delta: observation.delta,
+    version: observation.version,
+    emittedAt,
+  }),
+  plan_snapshot: (observation, emittedAt) => ({
+    kind: "plan.snapshot",
+    plan: observation.plan,
+    emittedAt,
+  }),
+  plan_user_input_requested: (observation, emittedAt) => ({
+    kind: "plan.input.requested",
+    promptId: observation.promptId,
+    prompt: observation.prompt,
+    ...(observation.choices !== undefined ? { choices: observation.choices } : {}),
+    emittedAt,
+  }),
+  plan_user_input_resolved: (observation, emittedAt) => ({
+    kind: "plan.input.resolved",
+    promptId: observation.promptId,
+    decision: observation.decision,
+    ...(observation.text !== undefined ? { text: observation.text } : {}),
+    emittedAt,
+  }),
+  mode_changed: (observation, emittedAt) => ({
+    kind: "mode.changed",
+    from: observation.from,
+    to: observation.to,
+    ...(observation.reason !== undefined ? { reason: observation.reason } : {}),
+    emittedAt,
+  }),
+  tool_progress: (observation, emittedAt) => ({
+    kind: "tool.progress",
+    toolCallId: observation.id,
+    toolName: observation.name,
+    message: clamp(observation.message),
+    emittedAt,
+  }),
+  context_compacted: (observation, emittedAt) => ({
+    kind: "context.compacted",
+    fromTurnId: observation.fromTurnId,
+    toTurnId: observation.toTurnId,
+    summary: clamp(observation.summary),
+    ts: observation.ts,
+    tokens: observation.tokens,
+    emittedAt,
+  }),
+  ratelimit_snapshot: (observation, emittedAt) => ({
+    kind: "ratelimit.snapshot",
+    ...(observation.requestsRemaining !== undefined
+      ? { requestsRemaining: observation.requestsRemaining }
+      : {}),
+    ...(observation.requestsResetMs !== undefined
+      ? { requestsResetMs: observation.requestsResetMs }
+      : {}),
+    ...(observation.tokensRemaining !== undefined
+      ? { tokensRemaining: observation.tokensRemaining }
+      : {}),
+    ...(observation.tokensResetMs !== undefined
+      ? { tokensResetMs: observation.tokensResetMs }
+      : {}),
+    observedAt: observation.observedAt,
+    emittedAt,
+  }),
+} satisfies {
+  plan_created: MessageProjector<"plan_created">
+  plan_updated: MessageProjector<"plan_updated">
+  plan_snapshot: MessageProjector<"plan_snapshot">
+  plan_user_input_requested: MessageProjector<"plan_user_input_requested">
+  plan_user_input_resolved: MessageProjector<"plan_user_input_resolved">
+  mode_changed: MessageProjector<"mode_changed">
+  tool_progress: MessageProjector<"tool_progress">
+  context_compacted: MessageProjector<"context_compacted">
+  ratelimit_snapshot: MessageProjector<"ratelimit_snapshot">
+}
+
+export interface AgentStateProjectionOptions {
+  readonly emittedAt?: number
+}
+
+const emittedAtOf = (opts?: AgentStateProjectionOptions): number => opts?.emittedAt ?? Date.now()
+
+export const projectAgentEventToAgentStateObservation = (
+  event: AgentEvent,
+): AgentStateObservation | null => {
+  if (!isAgentStateObservationType(event.type)) return null
+  switch (event.type) {
+    case "plan_created":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.plan_created(event)
+    case "plan_updated":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.plan_updated(event)
+    case "plan_snapshot":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.plan_snapshot(event)
+    case "plan_user_input_requested":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.plan_user_input_requested(event)
+    case "plan_user_input_resolved":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.plan_user_input_resolved(event)
+    case "mode_changed":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.mode_changed(event)
+    case "tool_progress":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.tool_progress(event)
+    case "context_compacted":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.context_compacted(event)
+    case "ratelimit_snapshot":
+      return AGENT_STATE_OBSERVATION_PROJECTORS.ratelimit_snapshot(event)
+  }
+}
+
+export const agentStateObservationToMessage = (
+  observation: AgentStateObservation,
+  opts?: AgentStateProjectionOptions,
+): AgentStateMessage => {
+  const emittedAt = emittedAtOf(opts)
+  switch (observation.type) {
+    case "plan_created":
+      return AGENT_STATE_MESSAGE_PROJECTORS.plan_created(observation, emittedAt)
+    case "plan_updated":
+      return AGENT_STATE_MESSAGE_PROJECTORS.plan_updated(observation, emittedAt)
+    case "plan_snapshot":
+      return AGENT_STATE_MESSAGE_PROJECTORS.plan_snapshot(observation, emittedAt)
+    case "plan_user_input_requested":
+      return AGENT_STATE_MESSAGE_PROJECTORS.plan_user_input_requested(observation, emittedAt)
+    case "plan_user_input_resolved":
+      return AGENT_STATE_MESSAGE_PROJECTORS.plan_user_input_resolved(observation, emittedAt)
+    case "mode_changed":
+      return AGENT_STATE_MESSAGE_PROJECTORS.mode_changed(observation, emittedAt)
+    case "tool_progress":
+      return AGENT_STATE_MESSAGE_PROJECTORS.tool_progress(observation, emittedAt)
+    case "context_compacted":
+      return AGENT_STATE_MESSAGE_PROJECTORS.context_compacted(observation, emittedAt)
+    case "ratelimit_snapshot":
+      return AGENT_STATE_MESSAGE_PROJECTORS.ratelimit_snapshot(observation, emittedAt)
+  }
+}
+
+export const projectAgentEventToAgentStateMessage = (
+  event: AgentEvent,
+  opts?: AgentStateProjectionOptions,
+): AgentStateMessage | null => {
+  const observation = projectAgentEventToAgentStateObservation(event)
+  return observation === null ? null : agentStateObservationToMessage(observation, opts)
+}
+
+export const agentEventToMessage = (
+  observation: AgentStateObservation,
+  opts?: AgentStateProjectionOptions,
+): AgentStateMessage => agentStateObservationToMessage(observation, opts)
+
+export type {
+  ContextCompactedMessage,
+  ModeChangedMessage,
+  PlanCreatedMessage,
+  PlanInputRequestedMessage,
+  PlanInputResolvedMessage,
+  PlanSnapshotMessage,
+  PlanUpdatedMessage,
+  RatelimitSnapshotMessage,
+  ToolProgressMessage,
+}

@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "the live climbing counter rides the output_progress event which is DROPPED at the context-binding.ts:1104 default arm (only usage is bridged to TokenCounter, not the live tick)"
+    web: "the live climbing counter rides the output_progress event which is DROPPED at the context-binding default arm (outside 7-tag bridge whitelist) (only usage is bridged to TokenCounter, not the live tick)"
 purpose: |
   Claude-Code의 streaming 중 climbing "· N tokens" spinner counter를 구조적으로 흡수.
   commit 9dcea445 "feat(llm/cli): live · N tokens output counter". 핵심은 ONE

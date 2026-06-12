@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure append-only summary store; its only publish path is context_compacted which is dropped at context-binding.ts:1104 default arm; nothing renders it"
+    web: "pure append-only summary store; its only publish path is context_compacted which is dropped at context-binding default arm (outside 7-tag bridge whitelist); nothing renders it"
 purpose: |
   Cursor compactor 의 `summaries[]` 모방. 각 compaction 직후 `appendSummary` 로
   `ConversationSummaryEntry{fromTurnId, toTurnId, summary, ts, tokens}` 한 entry 를

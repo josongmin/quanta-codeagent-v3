@@ -16,7 +16,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "components built+tested (apps/web-frontend/src/components/canvas/DiffView.tsx + DiffPanel.tsx + SplitDiffView.tsx + DiffStats.tsx) but NOT mounted — App.tsx:578 says DiffPanel DEFERRED so tool.diff frames decode then drop; the turn_diff_updated AgentEvent itself is dropped at context-binding.ts:1061 default arm"
+    web: "components built+tested (apps/web-frontend/src/components/canvas/DiffView.tsx + DiffPanel.tsx + SplitDiffView.tsx + DiffStats.tsx) but NOT mounted — App.tsx:578 says DiffPanel DEFERRED so tool.diff frames decode then drop; the turn_diff_updated AgentEvent itself is dropped at context-binding default arm (outside 7-tag bridge whitelist)"
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [agentevent, git-branch-name-schema-guard, git-runner-cancellation-signal, jsonl-cumulative-retention, plan-mode]

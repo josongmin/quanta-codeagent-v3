@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "queue emits response_queued AgentEvent which drops at context-binding.ts:1104 default arm; enqueue needs a B3-absent SessionCommand verb; UI queued-count painter is explicitly host-side"
+    web: "queue emits response_queued AgentEvent which drops at context-binding default arm (outside 7-tag bridge whitelist); enqueue needs a B3-absent SessionCommand verb; UI queued-count painter is explicitly host-side"
 purpose: |
   Per-thread FIFO follow-up queue with multi-thread isolation and serializable
   snapshot/restore. 10 explicit PausedReason values — popReady delivers iff

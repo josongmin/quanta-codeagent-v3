@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
-    web: "emits operator log + metric counter only; no browser render and not in the 6-event context-binding bridge"
+    web: "emits operator log + metric counter only; no browser render and not in the 7-tag session-host-turn-event-bridge"
 purpose: |
   ADR-0183 박은 construction-time drift detector. `defaultToolCallCache({
   checkRecommendedDrift: true })` 가 caller 의 `perToolTtlMs` 와 audited

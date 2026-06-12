@@ -31,12 +31,14 @@ import type {
   CanvasMessage,
   ConnectionState,
   ObservabilityMessage,
+  SurfaceSubscription,
   SessionCommand,
   SessionEvent,
   SessionEventType,
   SessionRejectedFrame,
   SessionSnapshotLite,
 } from "../types/protocol"
+import { DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION } from "../types/protocol"
 import {
   decodeAgentStateFrame,
   decodeCanvasFrame,
@@ -68,6 +70,7 @@ export interface AuthCredential {
 export interface ConnectOptions {
   readonly url: string
   readonly auth?: AuthCredential
+  readonly surfaceSubscription?: SurfaceSubscription
 }
 
 export type EventHandler<TType extends SessionEventType = SessionEventType> = (
@@ -111,6 +114,8 @@ export interface SessionClientOptions {
   /** Optional logger — defaults to `console.warn`. */
   readonly log?: (level: "info" | "warn", msg: string) => void
 }
+
+export { DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION }
 
 /* ------------------------------------------------------------------ */
 /* Constants — readyState mirrors the WHATWG WebSocket spec.            */
@@ -849,9 +854,17 @@ export class SessionClient {
       // snapshot). Arm the resume flag so the first inbound event promotes us
       // to `connected` even when no snapshot arrives (see {@link #resuming}).
       this.#resuming = true
-      return encodeConnectFrame(sessionId, this.#lastSeq)
+      return encodeConnectFrame(
+        sessionId,
+        this.#lastSeq,
+        this.#currentConnect?.surfaceSubscription ?? DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION,
+      )
     }
-    return encodeConnectFrame(sessionId)
+    return encodeConnectFrame(
+      sessionId,
+      undefined,
+      this.#currentConnect?.surfaceSubscription ?? DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION,
+    )
   }
 
   #adoptSessionId(sessionId: string): void {

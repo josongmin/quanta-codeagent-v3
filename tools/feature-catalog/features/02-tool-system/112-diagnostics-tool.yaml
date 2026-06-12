@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Agent tool — invocation + diagnostics result render in browser via tool.invoked/tool.completed (session-hooks.ts renderToolInvoked/renderToolCompleted), backed by mapped tool_call/tool_result events (context-binding.ts:1079-1096)."
+    web: "Agent tool — invocation + diagnostics result render in browser via tool.invoked/tool.completed (session-hooks.ts renderToolInvoked/renderToolCompleted), backed by mapped tool_call/tool_result events (session-host-turn-event-bridge.ts (tool_call/tool_result → tool.invoked/tool.completed via context-binding))."
 purpose: |
   Surfaces language-server errors/warnings for one file. Slice isolation
   (RFC §3.1, biome-enforced): `@/tool` MUST NOT import `@/lsp` — so this file

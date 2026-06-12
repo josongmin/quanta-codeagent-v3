@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "refusal surfaces only via the generic error path (extractTurnErrorMessage at context-binding.ts:1049 sets errorMessage); the typed refusal-vs-failure distinction and rationale field are not separately rendered — collapsed to a thin error string"
+    web: "refusal surfaces only via the generic error path (extractTurnErrorMessage in context-binding.ts sets errorMessage); the typed refusal-vs-failure distinction and rationale field are not separately rendered — collapsed to a thin error string"
 purpose: |
   Replaces the lossy generic-error supersession of provider-side refusals
   with a typed StopReason variant. extractRefusalRationale lifts the rationale

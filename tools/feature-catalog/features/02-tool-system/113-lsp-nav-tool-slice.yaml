@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Agent tools — each invocation + nav result preview render in browser via tool.invoked/tool.completed (session-hooks.ts:420-466), mapped tool_call/tool_result (context-binding.ts:1079-1096)."
+    web: "Agent tools — each invocation + nav result preview render in browser via tool.invoked/tool.completed (session-hooks.ts:420-466), mapped tool_call/tool_result (session-host-turn-event-bridge.ts (tool_call/tool_result → tool.invoked/tool.completed via context-binding))."
 purpose: |
   Eight navigation tools fronted by an injected `LspNavProvider` (same
   slice-isolation pattern as `diagnostics` — `@/tool` MUST NOT import

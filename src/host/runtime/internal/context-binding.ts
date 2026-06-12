@@ -38,11 +38,11 @@ import type {
   RuntimeAgentTurnDeps,
 } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
-import { sliceWholeChars } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
 import { deriveCapabilityManifest } from "../capabilities"
+import { toSessionHostTurnEvent } from "./session-host-turn-event-bridge"
 import type { RuntimeHost, RuntimeSessionConfig } from "../types"
 import { installCliMentionInjector } from "./mention-wire"
 
@@ -1227,76 +1227,6 @@ interface RuntimeTurnResult {
 const extractTurnErrorMessage = (event: AgentEvent): string | undefined =>
   event.type === "error" && event.message.length > 0 ? event.message : undefined
 
-const toSessionHostTurnEvent = (event: AgentEvent): SessionHostTurnEvent | undefined => {
-  switch (event.type) {
-    case "assistant_text":
-      return event.delta.length > 0
-        ? { type: "assistant_text.delta", delta: event.delta }
-        : undefined
-    case "llm_request":
-      return {
-        type: "llm.request",
-        model: event.model,
-        ...(event.provider !== undefined ? { provider: event.provider } : {}),
-        ...(event.surfaceId !== undefined ? { surfaceId: event.surfaceId } : {}),
-        ...(event.transportId !== undefined ? { transportId: event.transportId } : {}),
-        ...(event.authMode !== undefined ? { authMode: event.authMode } : {}),
-        ...(event.policy !== undefined ? { policy: event.policy } : {}),
-      }
-    case "llm_continuation":
-      return {
-        type: "llm.continuation",
-        ...(event.provider !== undefined ? { provider: event.provider } : {}),
-        surfaceId: event.surfaceId,
-        transportId: event.transportId,
-        phase: event.phase,
-        mode: event.mode,
-        reason: event.reason,
-        ...(event.statusCode !== undefined ? { statusCode: event.statusCode } : {}),
-      }
-    case "tool_call":
-      return {
-        type: "tool.invoked",
-        toolCallId: event.id,
-        toolName: event.name,
-        ...(event.input !== undefined ? { argsPreview: previewToolArgs(event.input) } : {}),
-      }
-    case "tool_result":
-      return {
-        type: "tool.completed",
-        toolCallId: event.id,
-        toolName: event.name,
-        outcome: event.ok ? "ok" : "error",
-        ...(event.preview !== undefined && event.preview.length > 0
-          ? { resultPreview: clampPreview(event.preview) }
-          : {}),
-        ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
-      }
-    case "usage":
-      return {
-        type: "usage",
-        promptTokens: event.inputTokens,
-        completionTokens: event.outputTokens,
-        totalTokens: event.inputTokens + event.outputTokens,
-      }
-    case "skill_scope_decision":
-      // ADR-0512 — bridge the skill-scope decision SUMMARY onto the wire so the
-      // web surface sees a hard-`blocked` / silently-declined out-of-scope tool
-      // (these never reach the interactive `approval.requested` card). The CLI
-      // already renders this off the `skill_scope_decision` STREAM event; this
-      // gives the web the same one-line gray timeline note.
-      return {
-        type: "skill.scope.decision",
-        tool: event.tool,
-        activeSkill: event.activeSkill,
-        decision: event.decision,
-        isReadOnly: event.isReadOnly,
-      }
-    default:
-      return undefined
-  }
-}
-
 const createTurnStreamPort = (args: {
   readonly baseStream: AgentConfig["stream"]
   readonly onEvent?: (event: SessionHostTurnEvent) => void
@@ -1317,21 +1247,6 @@ const createTurnStreamPort = (args: {
     },
     getLastErrorMessage: () => lastErrorMessage,
   }
-}
-
-const PREVIEW_MAX = 256
-
-const clampPreview = (text: string): string =>
-  text.length <= PREVIEW_MAX ? text : `${sliceWholeChars(text, PREVIEW_MAX - 1)}…`
-
-const previewToolArgs = (input: unknown): string => {
-  let serialised: string
-  try {
-    serialised = typeof input === "string" ? input : JSON.stringify(input)
-  } catch {
-    return "<unserialisable>"
-  }
-  return clampPreview(serialised)
 }
 
 const buildRuntimeTurnArgs = (args: {

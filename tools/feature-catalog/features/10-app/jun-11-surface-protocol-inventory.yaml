@@ -1,0 +1,105 @@
+id: jun-11-surface-protocol-inventory
+title: jun-11 surface-protocol truth inventory — AgentEvent / SessionProtocol / bridge / render coverage ratchets
+section: 10
+subsystem: Multi-surface protocol — Phase-0 truth inventory + central bridge SSOT
+order: 76
+maturity: L3
+status: new
+ui_surfaces: [cli, web]
+monitoring: integrated
+modes: [interactive, daemon]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "jun-11", "coverage-ratchet", "session-protocol"]
+depends_on:
+  - session-protocol-codec
+  - agentevent
+  - web-agent-state-channel
+  - skill-scope-v2-availability-permission
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-11"
+  evidence:
+    cli: "attach render inventory partitions SESSION_EVENT_TYPES; timeline + turn-summary inventories partition/subset AGENT_EVENT_TYPES; bridge SSOT in session-host-turn-event-bridge.ts consumed by context-binding.ts"
+    web: "7-tag bridge whitelist + web transcript consumer inventory (session-hooks mutating/noop partition) + copy-not-import drift hellgates (session + agent-state protocol mirrors); SI-20 meta-ratchet in feature-catalog-surface-integration.test.ts"
+purpose: |
+  Executable Phase-0 of docs/plans/jun-11-surface-protocol-unification.md.
+  Closes the "built-not-wired / orphan UI / parity lag" class by pinning FOUR
+  orthogonal inventory axes + ONE central bridge + TWO copy-not-import drift
+  contracts — without falsely promoting raw `AgentEvent` to the wire SSOT
+  (canonical boundary stays `SessionProtocol` / `session.v1`).
+
+  Inventory axes (counts pinned — intentional RED on drift):
+    (1) ENGINE — `AGENT_EVENT_TYPES` (36) in `src/stream/types.ts` (`agentevent`).
+    (2) BOUNDARY — `SESSION_EVENT_TYPES` (15) in `@/protocol/session`
+        (`session-protocol-codec`).
+    (3) DERIVED side channel — `AGENT_STATE_TYPES` (9) strict AgentEvent subset
+        (`web-agent-state-channel`).
+    (4) WEB TRANSCRIPT consumer — `TRANSCRIPT_MUTATING_*` ∪ `TRANSCRIPT_NOOP_*`
+        = all SessionEvent types in `apps/web-frontend/src/ws/session-hooks.ts`
+        (`web-frontend-transcript-consumer-inventory-hellgate`).
+
+  Central bridge (jun-11 extraction from context-binding):
+    `session-host-turn-event-bridge.ts` owns `toSessionHostTurnEvent` +
+    `AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES` (exactly 7 tags).
+    Maps into `SessionHostTurnEvent` (`kernel/session/ports.ts`). Empty
+    `assistant_text` deltas drop before the host. `context-binding.ts` is the
+    sole production consumer — import-only wiring.
+
+  CLI surface render coverage (declarative inventory — no silent default branch):
+    - attach: rendered ∪ ignored = all SessionEvent types.
+    - timeline: formatted ∪ fallback = all AgentEvent types.
+    - turn-summary: consumed = strict AgentEvent subset (6 today).
+
+  Web copy-not-import drift contracts (frontend lives outside bun tsconfig paths):
+    - `web-frontend-protocol-drift-contract-hellgate` — SessionEvent/Command
+      types + protocol version + CONFIG_ALLOWED_KEYS mirror.
+    - `web-frontend-agent-state-drift-contract-hellgate` — agent-state kind list
+      + version mirror (blind spot for in-band session drift guard).
+
+  Meta-ratchet: `feature-catalog-surface-integration.test.ts` SI-20 pins the
+  bridged tag set so unaudited bridge widening forces FC re-audit.
+
+  NOT in scope (plan §5): raw 36-event web fanout, CapabilityManifest-as-render-
+  manifest, generic mutation queue on WS lease.
+evidence:
+  code:
+    - src/stream/types.ts
+    - src/stream/index.ts
+    - src/protocol/session/events.ts
+    - src/protocol/session/read-models.ts
+    - src/protocol/agent-state/messages.ts
+    - src/protocol/agent-state/projection.ts
+    - src/host/runtime/internal/session-host-turn-event-bridge.ts
+    - src/host/runtime/internal/context-binding.ts
+    - src/kernel/session/ports.ts
+    - src/kernel/session/session-host-turn-event-projection.ts
+    - src/apps/cli/attach/render.ts
+    - src/apps/cli/timeline-panel.ts
+    - src/apps/cli/turn-summary.ts
+    - apps/web-frontend/src/ws/session-hooks.ts
+    - apps/web-frontend/src/types/protocol.ts
+  adrs:
+    - docs/plans/jun-11-surface-protocol-unification.md
+  tests:
+    unit:
+      - tests/unit/surface-protocol-inventory-hellgate.test.ts
+      - tests/unit/host/session-host-turn-event-bridge-hellgate.test.ts
+      - tests/unit/kernel/session-host-turn-event-projection-hellgate.test.ts
+      - tests/unit/agent-state-projection-ownership-hellgate.test.ts
+      - tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts
+      - tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts
+      - tests/unit/web-frontend-transcript-consumer-inventory-hellgate.test.ts
+      - tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts
+      - tests/unit/web-frontend-agent-state-drift-contract-hellgate.test.ts
+      - tests/unit/feature-catalog-surface-integration.test.ts
+    integration: []
+    contract: []
+knobs: []
+notes: |
+  Phase 1 follow-up (renderer registry extraction) stays separate. Prose drift
+  normalizer: `scripts/fix-fc-bridge-prose.mjs` (context-binding.ts:LINE →
+  bridge SSOT vocabulary). When projection centralizes, extend THIS entry's code
+  evidence — do not fork parallel inventories.

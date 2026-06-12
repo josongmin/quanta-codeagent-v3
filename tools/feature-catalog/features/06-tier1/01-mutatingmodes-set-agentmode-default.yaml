@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "mode selection has no web affordance; web POST /config sets only model/effort, mode_changed event is dropped at context-binding.ts:1104 default arm"
+    web: "mode selection has no web affordance; web POST /config sets only model/effort, mode_changed event is dropped at context-binding default arm (outside 7-tag bridge whitelist)"
 purpose: |
   AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을
   positive set(`MUTATING_MODES = Set<AgentMode>(["default"])`)으로 표현하는

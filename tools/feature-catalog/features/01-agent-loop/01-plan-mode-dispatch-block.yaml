@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "no web verb to enter plan mode; mode_changed drops at context-binding.ts:1104 default arm and SlashPalette commands are prefill stubs (B2), so the plan posture cannot be engaged from the browser"
+    web: "no web verb to enter plan mode; mode_changed drops at context-binding default arm (outside 7-tag bridge whitelist) and SlashPalette commands are prefill stubs (B2), so the plan posture cannot be engaged from the browser"
 purpose: Plan collaboration mode blocks every mutating tool at the dispatch seam via an explicit per-tool table (write/edit/scripted_replace/apply_patch/bash/update_working_state/git_commit/git_branch_switch). Unknown tools throw UnknownToolError rather than silently passing. Mode transitions are sticky and only flip on a developer-channel mode=plan / mode=default directive. L4 (2026-05-23) wires `checkDispatchAllowed` at `dispatch.ts` after `registry.has`, with a read-only fast path that defers to `registry.isReadOnly()` so custom read-only tools pass through without table membership.
 evidence:
   code:

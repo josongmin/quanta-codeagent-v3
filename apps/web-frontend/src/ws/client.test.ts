@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
   SessionClient,
@@ -257,6 +258,18 @@ describe("SessionClient", () => {
     h.fakes[0]?._simulateOpen()
     expect(states).toEqual(["closed", "connecting"])
     expectConnectFrame(h.fakes[0]?.sent[0], "ui-session")
+  })
+
+  it("declares explicit read-model coverage on the connect handshake", () => {
+    const h = buildHarness()
+
+    h.client.connect({ url: "ws://localhost/test" })
+    h.fakes[0]?._simulateOpen()
+
+    const parsed = parseSentFrame(h.fakes[0]?.sent[0] ?? "")
+    expect(parsed.surfaceSubscription).toEqual(
+      DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION,
+    )
   })
 
   it("appends ?token query when an auth token is provided", () => {

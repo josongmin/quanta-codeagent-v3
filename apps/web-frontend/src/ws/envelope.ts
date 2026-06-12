@@ -18,6 +18,7 @@ import type {
   CommandEnvelope,
   EventEnvelope,
   ObservabilityMessage,
+  SurfaceSubscription,
   SessionCommand,
   SessionEvent,
   SessionEventType,
@@ -150,12 +151,17 @@ export const encodeCommandFrame = (command: SessionCommand): string => {
  *  byte-identical to the legacy 3-key frame and the client receives a full
  *  snapshot. `resumeFromSeq === 0` is a real bootstrap seq and IS emitted
  *  (we gate on `undefined`, not falsiness). */
-export const encodeConnectFrame = (sessionId: string, resumeFromSeq?: number): string =>
+export const encodeConnectFrame = (
+  sessionId: string,
+  resumeFromSeq?: number,
+  surfaceSubscription?: SurfaceSubscription,
+): string =>
   JSON.stringify({
     version: SESSION_PROTOCOL_VERSION,
     kind: "connect",
     sessionId,
     ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
+    ...(surfaceSubscription !== undefined ? { surfaceSubscription } : {}),
   })
 
 /**

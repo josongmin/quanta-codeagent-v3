@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "rides the decision AgentEvent which is dropped at context-binding.ts:1104 default arm (not one of the 6 bridged events)"
+    web: "rides the decision AgentEvent which is dropped at session-host-turn-event-bridge.ts default arm (outside 7-tag AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES) (not one of the 7-tag bridged AgentEvent types)"
 purpose: |
   ADR-0267 Phase 2는 `runAdmissibilityGate` *내부* 3개 게이트 (permission /
   rule / hook)만 wire함. cap / jail / budget 게이트는 admissibility call graph

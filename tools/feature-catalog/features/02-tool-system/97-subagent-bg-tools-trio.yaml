@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "subagent_fork/poll/await invocations render via the 6-event bridge tool_call/tool_result (tool.invoked/completed cards in apps/web-frontend/src/ws/session-hooks.ts)"
+    web: "subagent_fork/poll/await invocations render via the 7-tag session-host-turn-event bridge tool_call/tool_result (tool.invoked/completed cards in apps/web-frontend/src/ws/session-hooks.ts)"
 purpose: |
   Three first-class tools wrapping a `BackgroundSubagentSchedulerPort` so the
   parent loop can fork a non-blocking subagent, poll its status without

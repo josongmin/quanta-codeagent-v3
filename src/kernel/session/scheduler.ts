@@ -9,6 +9,7 @@ import type {
   SessionHostTurnResult,
 } from "./ports"
 import { reduceSessionCommand } from "./reducer"
+import { projectSessionHostTurnEvent } from "./session-host-turn-event-projection"
 import {
   type KernelSessionState,
   type KernelTranscriptState,
@@ -415,205 +416,15 @@ const emitTurnStreamEvent = async (args: {
   readonly state: KernelSessionState
   readonly emitted: SessionEvent
 }> => {
-  switch (args.event.type) {
-    case "llm.request": {
-      const nextState: KernelSessionState = {
-        ...args.state,
-        revision: args.state.revision + 1,
-        seq: args.state.seq + 1,
-        lastLlmRequest: {
-          model: args.event.model,
-          ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
-          ...(args.event.surfaceId !== undefined ? { surfaceId: args.event.surfaceId } : {}),
-          ...(args.event.transportId !== undefined ? { transportId: args.event.transportId } : {}),
-          ...(args.event.authMode !== undefined ? { authMode: args.event.authMode } : {}),
-          ...(args.event.policy !== undefined ? { policy: args.event.policy } : {}),
-        },
-      }
-      const sessionEvent: SessionEvent = {
-        eventId: crypto.randomUUID(),
-        seq: nextState.seq,
-        revision: nextState.revision,
-        emittedAt: args.ctx.clock.now().toISOString(),
-        causedByCommandId: args.command.commandId,
-        type: "turn.llm.request",
-        model: args.event.model,
-        ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
-        ...(args.event.surfaceId !== undefined ? { surfaceId: args.event.surfaceId } : {}),
-        ...(args.event.transportId !== undefined ? { transportId: args.event.transportId } : {}),
-        ...(args.event.authMode !== undefined ? { authMode: args.event.authMode } : {}),
-        ...(args.event.policy !== undefined ? { policy: args.event.policy } : {}),
-      }
-      await appendEvents(args.ctx.eventLog, [sessionEvent])
-      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
-      return { state: nextState, emitted: sessionEvent }
-    }
-    case "llm.continuation": {
-      const nextState: KernelSessionState = {
-        ...args.state,
-        revision: args.state.revision + 1,
-        seq: args.state.seq + 1,
-        lastLlmContinuation: {
-          ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
-          surfaceId: args.event.surfaceId,
-          transportId: args.event.transportId,
-          phase: args.event.phase,
-          mode: args.event.mode,
-          reason: args.event.reason,
-          ...(args.event.statusCode !== undefined ? { statusCode: args.event.statusCode } : {}),
-        },
-      }
-      const sessionEvent: SessionEvent = {
-        eventId: crypto.randomUUID(),
-        seq: nextState.seq,
-        revision: nextState.revision,
-        emittedAt: args.ctx.clock.now().toISOString(),
-        causedByCommandId: args.command.commandId,
-        type: "turn.llm.continuation",
-        ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
-        surfaceId: args.event.surfaceId,
-        transportId: args.event.transportId,
-        phase: args.event.phase,
-        mode: args.event.mode,
-        reason: args.event.reason,
-        ...(args.event.statusCode !== undefined ? { statusCode: args.event.statusCode } : {}),
-      }
-      await appendEvents(args.ctx.eventLog, [sessionEvent])
-      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
-      return { state: nextState, emitted: sessionEvent }
-    }
-    case "assistant_text.delta": {
-      const nextText = `${args.state.transcript.streamingAssistantText ?? ""}${args.event.delta}`
-      const nextState: KernelSessionState = {
-        ...args.state,
-        revision: args.state.revision + 1,
-        seq: args.state.seq + 1,
-        transcript: {
-          ...args.state.transcript,
-          streamingAssistantText: nextText,
-        },
-      }
-      const sessionEvent: SessionEvent = {
-        eventId: crypto.randomUUID(),
-        seq: nextState.seq,
-        revision: nextState.revision,
-        emittedAt: args.ctx.clock.now().toISOString(),
-        causedByCommandId: args.command.commandId,
-        type: "turn.output.delta",
-        delta: args.event.delta,
-      }
-      await appendEvents(args.ctx.eventLog, [sessionEvent])
-      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
-      return { state: nextState, emitted: sessionEvent }
-    }
-    case "tool.invoked": {
-      const nextState: KernelSessionState = {
-        ...args.state,
-        revision: args.state.revision + 1,
-        seq: args.state.seq + 1,
-      }
-      const sessionEvent: SessionEvent = {
-        eventId: crypto.randomUUID(),
-        seq: nextState.seq,
-        revision: nextState.revision,
-        emittedAt: args.ctx.clock.now().toISOString(),
-        causedByCommandId: args.command.commandId,
-        type: "tool.invoked",
-        toolCallId: args.event.toolCallId,
-        toolName: args.event.toolName,
-        ...(args.event.argsPreview !== undefined ? { argsPreview: args.event.argsPreview } : {}),
-      }
-      await appendEvents(args.ctx.eventLog, [sessionEvent])
-      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
-      return { state: nextState, emitted: sessionEvent }
-    }
-    case "tool.completed": {
-      const nextState: KernelSessionState = {
-        ...args.state,
-        revision: args.state.revision + 1,
-        seq: args.state.seq + 1,
-      }
-      const sessionEvent: SessionEvent = {
-        eventId: crypto.randomUUID(),
-        seq: nextState.seq,
-        revision: nextState.revision,
-        emittedAt: args.ctx.clock.now().toISOString(),
-        causedByCommandId: args.command.commandId,
-        type: "tool.completed",
-        toolCallId: args.event.toolCallId,
-        toolName: args.event.toolName,
-        outcome: args.event.outcome,
-        ...(args.event.resultPreview !== undefined
-          ? { resultPreview: args.event.resultPreview }
-          : {}),
-        ...(args.event.durationMs !== undefined ? { durationMs: args.event.durationMs } : {}),
-      }
-      await appendEvents(args.ctx.eventLog, [sessionEvent])
-      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
-      return { state: nextState, emitted: sessionEvent }
-    }
-    case "skill.scope.decision": {
-      // ADR-0512 — emit the skill-scope decision SUMMARY as its own wire event.
-      // Carries no state mutation (like `tool.invoked`): it is a transcript note
-      // so the web renders a hard-`blocked` / silently-declined out-of-scope tool
-      // (which the interactive `approval.requested` card never surfaces).
-      const nextState: KernelSessionState = {
-        ...args.state,
-        revision: args.state.revision + 1,
-        seq: args.state.seq + 1,
-      }
-      const sessionEvent: SessionEvent = {
-        eventId: crypto.randomUUID(),
-        seq: nextState.seq,
-        revision: nextState.revision,
-        emittedAt: args.ctx.clock.now().toISOString(),
-        causedByCommandId: args.command.commandId,
-        type: "skill.scope.decision",
-        tool: args.event.tool,
-        activeSkill: args.event.activeSkill,
-        decision: args.event.decision,
-        isReadOnly: args.event.isReadOnly,
-      }
-      await appendEvents(args.ctx.eventLog, [sessionEvent])
-      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
-      return { state: nextState, emitted: sessionEvent }
-    }
-    case "usage": {
-      // Token usage is NOT a wire event on its own — it accumulates into
-      // `state.lastTokenUsage` and gets spread onto the next
-      // `turn.completed`. We still emit a `session.state.updated` so the
-      // session view stays consistent, but we keep it cheap.
-      const nextState: KernelSessionState = {
-        ...args.state,
-        revision: args.state.revision + 1,
-        seq: args.state.seq + 1,
-        lastTokenUsage: {
-          ...(args.event.promptTokens !== undefined
-            ? { promptTokens: args.event.promptTokens }
-            : {}),
-          ...(args.event.completionTokens !== undefined
-            ? { completionTokens: args.event.completionTokens }
-            : {}),
-          ...(args.event.totalTokens !== undefined ? { totalTokens: args.event.totalTokens } : {}),
-          ...(args.event.costMicroUsd !== undefined
-            ? { costMicroUsd: args.event.costMicroUsd }
-            : {}),
-        },
-      }
-      const sessionEvent: SessionEvent = {
-        eventId: crypto.randomUUID(),
-        seq: nextState.seq,
-        revision: nextState.revision,
-        emittedAt: args.ctx.clock.now().toISOString(),
-        causedByCommandId: args.command.commandId,
-        type: "session.state.updated",
-        state: toSessionStateView(nextState),
-      }
-      await appendEvents(args.ctx.eventLog, [sessionEvent])
-      await notifyCommitted(args.ctx, { state: nextState, events: [sessionEvent] })
-      return { state: nextState, emitted: sessionEvent }
-    }
-  }
+  const projected = projectSessionHostTurnEvent({
+    state: args.state,
+    commandId: args.command.commandId,
+    emittedAt: args.ctx.clock.now().toISOString(),
+    event: args.event,
+  })
+  await appendEvents(args.ctx.eventLog, [projected.emitted])
+  await notifyCommitted(args.ctx, { state: projected.state, events: [projected.emitted] })
+  return projected
 }
 
 const runTurn = async (args: {

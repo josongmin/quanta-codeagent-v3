@@ -67,6 +67,21 @@ export interface SessionHostTurnResult {
  * `tool.invoked` / `tool.completed`) and the `usage` variant feeds
  * `KernelSessionState.lastTokenUsage` so the next `turn.completed` carries it.
  */
+export const SESSION_HOST_TURN_EVENT_TYPES = [
+  "assistant_text.delta",
+  "llm.request",
+  "llm.continuation",
+  "tool.invoked",
+  "tool.completed",
+  "usage",
+  "skill.scope.decision",
+] as const
+
+export type SessionHostTurnEventType = (typeof SESSION_HOST_TURN_EVENT_TYPES)[number]
+
+export const isSessionHostTurnEventType = (value: unknown): value is SessionHostTurnEventType =>
+  typeof value === "string" && (SESSION_HOST_TURN_EVENT_TYPES as readonly string[]).includes(value)
+
 export type SessionHostTurnEvent =
   | { readonly type: "assistant_text.delta"; readonly delta: string }
   | {

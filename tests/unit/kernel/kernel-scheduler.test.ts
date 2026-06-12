@@ -583,6 +583,205 @@ describe("kernel scheduler approval flow", () => {
     })
   })
 
+  test("preserves tool, skill-scope, and usage stream semantics through the scheduler", async () => {
+    let state = createKernelSessionState({
+      sessionId: "s3c",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    })
+    const committed: Array<{ types: string[] }> = []
+    const host = {
+      describe: () => ({
+        sessionId: "s3c",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      runTurn: async ({
+        onEvent,
+      }: {
+        onEvent?: (
+          event:
+            | {
+                type: "tool.invoked"
+                toolCallId: string
+                toolName: string
+                argsPreview?: string
+              }
+            | {
+                type: "skill.scope.decision"
+                tool: string
+                activeSkill: string
+                decision: "allowed" | "declined" | "steered" | "blocked"
+                isReadOnly: boolean
+              }
+            | {
+                type: "tool.completed"
+                toolCallId: string
+                toolName: string
+                outcome: "ok" | "error" | "denied" | "timeout"
+                resultPreview?: string
+                durationMs?: number
+              }
+            | {
+                type: "usage"
+                promptTokens?: number
+                completionTokens?: number
+                totalTokens?: number
+                costMicroUsd?: number
+              },
+        ) => void
+      }) => {
+        onEvent?.({
+          type: "tool.invoked",
+          toolCallId: "tool-1",
+          toolName: "bash",
+          argsPreview: '{"cmd":"pwd"}',
+        })
+        onEvent?.({
+          type: "skill.scope.decision",
+          tool: "bash",
+          activeSkill: "rr",
+          decision: "blocked",
+          isReadOnly: false,
+        })
+        onEvent?.({
+          type: "tool.completed",
+          toolCallId: "tool-1",
+          toolName: "bash",
+          outcome: "ok",
+          resultPreview: "/Users/songmin/quanta-codeagent-v3",
+          durationMs: 12,
+        })
+        onEvent?.({
+          type: "usage",
+          promptTokens: 7,
+          completionTokens: 9,
+          totalTokens: 16,
+          costMicroUsd: 25,
+        })
+        const messages = messagesOf("ping", "pong")
+        return {
+          outcome: {
+            reason: "completed",
+            turns: 1,
+            messages,
+          } as AgentOutcome,
+          messages,
+        }
+      },
+      close: async () => undefined,
+    }
+    const eventLog = new InMemorySessionEventLog()
+
+    state = (
+      await dispatchSessionCommand(
+        state,
+        {
+          sessionId: "s3c",
+          commandId: "c1",
+          issuedAt: "2026-06-12T00:01:00.000Z",
+          type: "input.append",
+          text: "ping",
+        },
+        {
+          clock: makeClock("2026-06-12T00:01:00.000Z"),
+          eventLog,
+          host,
+        },
+      )
+    ).state
+
+    const turn = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "s3c",
+        commandId: "c2",
+        issuedAt: "2026-06-12T00:01:01.000Z",
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      {
+        clock: makeClock(
+          "2026-06-12T00:01:01.000Z",
+          "2026-06-12T00:01:02.000Z",
+          "2026-06-12T00:01:03.000Z",
+          "2026-06-12T00:01:04.000Z",
+          "2026-06-12T00:01:05.000Z",
+          "2026-06-12T00:01:06.000Z",
+        ),
+        eventLog,
+        host,
+        onCommitted: ({ events }) => {
+          committed.push({ types: events.map((event) => event.type) })
+        },
+      },
+    )
+
+    expect(turn.events.map((event) => event.type)).toEqual([
+      "turn.started",
+      "session.state.updated",
+      "tool.invoked",
+      "skill.scope.decision",
+      "tool.completed",
+      "session.state.updated",
+      "turn.completed",
+      "session.state.updated",
+    ])
+    expect(turn.events[2]).toMatchObject({
+      type: "tool.invoked",
+      toolCallId: "tool-1",
+      toolName: "bash",
+      argsPreview: '{"cmd":"pwd"}',
+    })
+    expect(turn.events[3]).toMatchObject({
+      type: "skill.scope.decision",
+      tool: "bash",
+      activeSkill: "rr",
+      decision: "blocked",
+      isReadOnly: false,
+    })
+    expect(turn.events[4]).toMatchObject({
+      type: "tool.completed",
+      toolCallId: "tool-1",
+      toolName: "bash",
+      outcome: "ok",
+      resultPreview: "/Users/songmin/quanta-codeagent-v3",
+      durationMs: 12,
+    })
+    expect(turn.events[5]).toMatchObject({
+      type: "session.state.updated",
+      state: {
+        status: "running",
+        draftInput: "ping",
+        permissionMode: "default",
+      },
+    })
+    expect(turn.events[6]).toMatchObject({
+      type: "turn.completed",
+      outcomeReason: "completed",
+      assistantText: "pong",
+      tokenUsage: {
+        promptTokens: 7,
+        completionTokens: 9,
+        totalTokens: 16,
+        costMicroUsd: 25,
+      },
+    })
+    expect(committed).toEqual([
+      { types: ["turn.started", "session.state.updated"] },
+      { types: ["tool.invoked"] },
+      { types: ["skill.scope.decision"] },
+      { types: ["tool.completed"] },
+      { types: ["session.state.updated"] },
+    ])
+    expect(turn.state.lastTokenUsage).toEqual({
+      promptTokens: 7,
+      completionTokens: 9,
+      totalTokens: 16,
+      costMicroUsd: 25,
+    })
+  })
+
   test("maps logical error outcomes to turn.failed with the detailed error message", async () => {
     let state = createKernelSessionState({
       sessionId: "s4",

@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "the stuck-proposal nudge is a progress_update/propose event dropped at context-binding.ts:1104 default arm; no web nudge"
+    web: "the stuck-proposal nudge is a progress_update/propose event dropped at context-binding default arm (outside 7-tag bridge whitelist); no web nudge"
 purpose: |
   Claude Code SOTA absorption: when a long-running tool exec sits >2 s with
   no progress, the UX automatically surfaces "move this to background?" and

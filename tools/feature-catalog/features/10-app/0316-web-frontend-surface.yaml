@@ -17,14 +17,16 @@ owners: ["@songmin"]
 labels: ["surface:web", "tier:1", "adr-0316"]
 depends_on:
   - thin-surface-headless-core
+  - jun-11-surface-protocol-inventory
+  - session-protocol-codec
 surface_integration:
   cli: na
   web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-11"
   evidence:
     cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
-    web: "This IS the web surface itself — the React SPA (ChatPanel/InputBar/StatusBar) the user sees in the browser, driven by the session protocol over WS."
+    web: "React SPA transcript reducer in session-hooks.ts; TRANSCRIPT_MUTATING/NOOP inventories partition SESSION_EVENT_TYPES; protocol + agent-state copy-not-import drift hellgates prevent silent wire-shape regression"
 purpose: |
   Standalone Vite + React 18 + TypeScript strict + Tailwind 3.4 SPA at
   `apps/web-frontend/`, the web surface of the multi-surface plan
@@ -44,10 +46,11 @@ purpose: |
       defensive wire validators that drop malformed / unknown-type frames
       silently with a warn log.
     - React hooks (`src/ws/session-hooks.ts`) — `useConnectionState`,
-      `useSessionEvents` (reducer that folds `turn.started/completed/failed`
-      + `session.created/closed/state.updated` + `approval.requested` into
-      a `UiMessage[]` transcript), `useSendTurn` (emits `input.append` +
-      `turn.run` back-to-back with fresh `commandId`s).
+      `useSessionEvents` (reducer folding SessionEvents into `UiMessage[]`;
+      exports `TRANSCRIPT_MUTATING_SESSION_EVENT_TYPES` +
+      `TRANSCRIPT_NOOP_SESSION_EVENT_TYPES` whose union partitions canonical
+      `SESSION_EVENT_TYPES` — pinned by transcript-consumer inventory hellgate),
+      `useSendTurn` (emits `input.append` + `turn.run` back-to-back).
     - UI components — `ChatPanel` (auto-scroll list + composer),
       `MessageBubble` (react-markdown + remark-gfm + Prism code highlight,
       role-coloured), `InputBar` (Enter / Cmd+Enter submit, Shift+Enter
@@ -69,6 +72,13 @@ purpose: |
   Default-OFF byte-identical: absent this directory + absent the daemon,
   CLI surface continues unchanged. The frontend is a sibling, not a
   dependency.
+
+  Wire drift guards (jun-11): the frontend keeps LOCAL COPIES of session +
+  agent-state protocol shapes (`src/types/protocol.ts`). Canonical SSOT lives
+  in `src/protocol/session/` and `src/protocol/agent-state/`. Two bun-side
+  hellgates (`web-frontend-protocol-drift-contract`,
+  `web-frontend-agent-state-drift-contract`) read the frontend mirrors AS TEXT
+  and assert set-equality — drift cannot merge silently.
 evidence:
   code:
     - apps/web-frontend/package.json
@@ -91,6 +101,9 @@ evidence:
       - apps/web-frontend/src/ws/reconnect.test.ts
       - apps/web-frontend/src/ws/envelope.test.ts
       - apps/web-frontend/src/ws/client.test.ts
+      - tests/unit/web-frontend-transcript-consumer-inventory-hellgate.test.ts
+      - tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts
+      - tests/unit/web-frontend-agent-state-drift-contract-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -125,8 +138,9 @@ notes: |
   `tauri.conf.json#distDir` at `apps/web-frontend/dist/`.
 
   Type drift between `src/protocol/session/` (canonical) and
-  `apps/web-frontend/src/types/protocol.ts` (local copy) is possible. A
-  follow-up CI gate can diff the two — not in scope for this slice.
+  `apps/web-frontend/src/types/protocol.ts` (local copy) is blocked by
+  `web-frontend-protocol-drift-contract-hellgate` (session) and
+  `web-frontend-agent-state-drift-contract-hellgate` (agent-state side channel).
 
   Tests are vitest-node (no DOM, no React render); they exercise the
   pure-TS portion of the slice (cx / backoff math / envelope codec /

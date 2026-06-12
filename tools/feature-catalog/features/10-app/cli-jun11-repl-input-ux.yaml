@@ -15,8 +15,8 @@ config_refs:
     - QUANTA_BRACKETED_PASTE
     - QUANTA_AUTOMATION_INBOX
 owners: ["@songmin"]
-labels: ["surface:cli", "jun-11", "default-off"]
-depends_on: [cli-runtime-feature-config-unification, repl-interactive-surface]
+labels: ["surface:cli", "jun-11", "default-on-partial"]
+depends_on: [cli-runtime-feature-config-unification, repl-interactive-surface, trust-scope-wire-up]
 surface_integration:
   cli: full
   web: missing
@@ -36,7 +36,8 @@ purpose: |
   (3) #22 `QUANTA_AUTOMATION_INBOX` — opt-in inbox banner in the REPL status
   chrome when scheduler automations are pending (default-OFF).
   Companion: `session-grant-prefix.ts` (#20 prefix-aware session grants) wired
-  in context-binding for standing `git …` style approvals.
+  in context-binding for standing `git …` style approvals, with durable prefix
+  grants + harddeny backstop in trust-scope-store.
 evidence:
   code:
     - src/apps/cli/preflight.ts
@@ -53,8 +54,12 @@ evidence:
       - src/apps/cli/__tests__/raw-line-reader-bracketed-paste.hellgate.test.ts
       - tests/unit/cli/automation-inbox-wire-hellgate.test.ts
       - tests/unit/permission/session-grant-prefix-hellgate.test.ts
+      - tests/unit/permission/trust-scope-durable-prefix-grant-hellgate.test.ts
+      - tests/unit/permission/prefix-grant-harddeny-backstop-hellgate.test.ts
+      - tests/unit/permission/trust-scope-prefix-gate-guard-hellgate.test.ts
       - tests/unit/cli-default-on-ux-gates-hellgate.test.ts
-    integration: []
+    integration:
+      - tests/e2e-pty/cli-approval-preflight-prefix-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_PREFLIGHT_CHECK

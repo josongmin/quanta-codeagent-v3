@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "internal turn-termination classification (stop-category.ts); no stop/decision event in the 6-event bridge, nothing rendered"
+    web: "internal turn-termination classification (stop-category.ts); no stop/decision event in the 7-tag session-host-turn-event bridge, nothing rendered"
 purpose: 종료사유 completed|max_turns|aborted|error, AbortSignal 협조취소
 evidence:
   code:

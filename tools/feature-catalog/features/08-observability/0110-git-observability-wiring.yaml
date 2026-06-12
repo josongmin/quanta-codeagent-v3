@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "User value is the turn_diff_updated event + git fingerprint; turn_diff_updated is dropped at context-binding.ts:1052 default arm and DiffPanel is unmounted (App.tsx:578)."
+    web: "User value is the turn_diff_updated event + git fingerprint; turn_diff_updated is dropped at context-binding default arm (outside 7-tag bridge whitelist) and DiffPanel is unmounted (App.tsx:578)."
 purpose: |
   Composition-root helpers that wire the deferred halves of ADR-0102
   (turn_diff_updated event emit) and ADR-0106 (SessionMeta git fingerprint).

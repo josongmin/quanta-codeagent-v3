@@ -16,26 +16,34 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-11"
   evidence:
-    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure internal event-stream type/protocol primitive, no user-visible affordance on any surface"
+    cli: "runs in the interactive CLI — AGENT_EVENT_TYPES (36) SSOT in src/stream/types.ts; timeline/turn-summary inventories partition/subset this set (jun-11-surface-protocol-inventory)"
+    web: "internal engine event union — only the 7-tag bridge subset in session-host-turn-event-bridge.ts can reach SessionHostTurnEvent / browser"
 purpose: |
-  `AgentEvent` discriminated union — the surface-facing event stream the agent loop
-  emits per turn (turn_start / assistant_text / tool_call / tool_progress /
-  tool_result / usage / error / done). Carries the RunContext correlation tuple
+  `AgentEvent` discriminated union — the ENGINE-INTERNAL event stream the agent
+  loop emits per turn (36 variants today: turn_start / assistant_text /
+  assistant_thinking / tool_call / tool_progress / tool_result / usage / error /
+  done / plan_* / mode_changed / …). Carries the RunContext correlation tuple
   (runId / instanceId / attempt / turn / toolUseId) so downstream sinks (JSONL
   recorder, SSE adapter, work-metrics) can slice the run-graph (RFC-0002 §5.1).
-  Definition lives in `src/stream/types.ts`; consumed by every transport adapter
-  (SSE/JSONL/tee) and by the trajectory translator.
+
+  jun-11 SSOT exports: `AGENT_EVENT_TYPES` + `isAgentEventType` from
+  `src/stream/types.ts` (re-exported `@/stream`). NOT the wire protocol —
+  `SessionProtocol` (`session-protocol-codec`) owns the product boundary;
+  `toSessionHostTurnEvent` bridges a strict 7-tag subset for web reachability.
 evidence:
   code:
     - src/stream/types.ts
+    - src/stream/index.ts
     - src/stream/ports.ts
     - src/agent/turn-context.ts
   adrs: []
   tests:
-    unit: [tests/unit/observability.test.ts]
+    unit:
+      - tests/unit/observability.test.ts
+      - tests/unit/surface-protocol-inventory-hellgate.test.ts
+      - tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

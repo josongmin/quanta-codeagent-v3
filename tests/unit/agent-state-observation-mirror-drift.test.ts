@@ -1,30 +1,25 @@
 /**
- * Compile-time mirror assertions — `AgentStateObservation` (@/protocol/agent-state)
- * structurally === the 9 source `AgentEvent` variants (@/stream).
+ * Compile-time projection assertions — `AgentStateObservation`
+ * (`@/protocol/agent-state`) is source-derived from the central tapped
+ * inventory plus the canonical `AgentEvent` union (`@/stream`).
  *
- * The agent-state protocol slice is SLICE-FENCED: `messages.ts` may NOT import
- * `@/stream`, so it RE-MIRRORS the 9 tapped `AgentEvent` variants
- * (`plan_created` / `plan_updated` / `plan_snapshot` / `plan_user_input_requested`
- * / `plan_user_input_resolved` / `mode_changed` / `tool_progress` /
- * `context_compacted` / `ratelimit_snapshot`) as a hand-maintained structural
- * copy (`AgentStateObservation`). The `wireAgentStateTap` casts the live
- * `AgentEvent` to `AgentStateObservation` (the SSOT `AGENT_STATE_TYPES` gates the
- * narrowing), so a field added to ONE `AgentEvent` variant but not the matching
- * mirror would be SILENTLY LOST at the tap with NO compiler complaint — exactly
- * the drift this guard closes.
+ * The protocol no longer keeps a hand-maintained 9-arm mirror union. Instead
+ * `projection.ts` derives `AgentStateObservation` from the typed tapped-event
+ * inventory (`AGENT_STATE_OBSERVATION_EVENT_TYPES`) and the canonical
+ * `AgentEvent` union via `Extract<...>`. If the inventory or any tapped source
+ * event drifts, these pins fail at type-check time before the owner-path tests
+ * even run.
  *
  * This file is exempt from the slice-isolation lint (tests are the integration
- * layer), so we ARM the type checker: import BOTH the protocol mirror union AND
- * the canonical `AgentEvent`, then declare a per-variant type-level identity
- * (`AssertEqual<Extract<AgentEvent, {type}>, Extract<AgentStateObservation,
- * {type}>>`). If either side drifts (a renamed/added/removed field), the
- * `_assert*` constant fails to type-check and `tsc --noEmit` fails BEFORE review.
+ * layer), so we arm the type checker directly against the source union and the
+ * exported central inventory.
  *
  * The runtime `expect` below is a proof-of-life sentinel; the real contract is
  * the `extends` chains — the file's value is its TYPE failure mode.
  */
 
 import { describe, expect, test } from "bun:test"
+import { AGENT_STATE_OBSERVATION_EVENT_TYPES } from "@/protocol/agent-state"
 import type { AgentStateObservation } from "@/protocol/agent-state"
 import type { AgentEvent } from "@/stream"
 
@@ -74,19 +69,9 @@ const _ratelimitSnapshot: MutualExtends<
 > = true
 
 /* Closure pin: the protocol mirror union covers EXACTLY the 9 tapped types — no
- * more, no less. `AgentStateObservation["type"]` must equal the closed 9-literal
- * union (a 10th member added to the mirror without a tap entry, or a dropped
- * member, fails here). */
-type TappedType =
-  | "plan_created"
-  | "plan_updated"
-  | "plan_snapshot"
-  | "plan_user_input_requested"
-  | "plan_user_input_resolved"
-  | "mode_changed"
-  | "tool_progress"
-  | "context_compacted"
-  | "ratelimit_snapshot"
+ * more, no less. `AgentStateObservation["type"]` must equal the typed central
+ * inventory union (a 10th member added to one side only fails here). */
+type TappedType = (typeof AGENT_STATE_OBSERVATION_EVENT_TYPES)[number]
 const _coversExactly9: AssertEqual<AgentStateObservation["type"], TappedType> = true
 
 describe("AgentStateObservation ↔ AgentEvent mirror (compile-time enforcement)", () => {

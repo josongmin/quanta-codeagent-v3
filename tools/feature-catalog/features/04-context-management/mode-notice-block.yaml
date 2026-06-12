@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure prompt-text reminder block; mode itself rides mode_changed dropped at context-binding.ts:1104, the notice has no rendered affordance"
+    web: "pure prompt-text reminder block; mode itself rides mode_changed dropped at context-binding default arm (outside 7-tag bridge whitelist), the notice has no rendered affordance"
 purpose: |
   PLAN/REVIEW/AUDIT 모드 별 verbatim 본문을 `PLAN_NOTICE` / `REVIEW_NOTICE` /
   `AUDIT_NOTICE` 상수로 고정하고, `modeNotice(mode)` 가 mode → notice text 매핑

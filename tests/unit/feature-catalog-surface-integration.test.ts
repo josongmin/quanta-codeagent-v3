@@ -10,8 +10,8 @@
 // new field honest and tie its web claims to the code SSOT that actually
 // decides web reachability (the toSessionHostTurnEvent event-bridge whitelist).
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES } from "../../src/host/runtime/internal/session-host-turn-event-bridge"
 import { loadFeaturesStrict, SurfaceIntegrationSchema } from "../../tools/feature-catalog/schema"
 
 const REPO = join(import.meta.dir, "..", "..")
@@ -126,15 +126,9 @@ describe("surface_integration — web reachability SSOT anchor", () => {
   ].sort()
 
   test("SI-20: toSessionHostTurnEvent maps exactly the known 7 event tags", () => {
-    const src = readFileSync(join(REPO, "src/host/runtime/internal/context-binding.ts"), "utf8")
-    const start = src.indexOf("const toSessionHostTurnEvent")
-    expect(start).toBeGreaterThan(-1)
-    // slice to the next top-level `const ` declaration after the function
-    const rest = src.slice(start + 1)
-    const end = rest.indexOf("\nconst ")
-    const body = end === -1 ? rest : rest.slice(0, end)
-    const cases = [...body.matchAll(/case "([a-z_]+)":/g)].map((m) => m[1]).sort()
-    expect([...new Set(cases)]).toEqual(KNOWN_BRIDGE_EVENTS)
+    expect([...AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES].sort()).toEqual(
+      KNOWN_BRIDGE_EVENTS,
+    )
   })
 })
 

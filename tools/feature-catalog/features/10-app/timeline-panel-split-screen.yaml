@@ -18,10 +18,10 @@ surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-11"
   evidence:
-    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Terminal-only ANSI DECSTBM split-screen panel; this specific render has no apps/web-frontend equivalent and AgentEvent variants it renders are mostly dropped at the 6-event web bridge (context-binding.ts:1052), so it never reaches the browser."
+    cli: "TIMELINE_FORMATTED + TIMELINE_FALLBACK inventories partition AGENT_EVENT_TYPES exactly (agent-event-surface-inventory-hellgate)"
+    web: "Terminal-only ANSI DECSTBM split-screen panel; AgentEvent variants it renders are mostly outside the 7-tag session-host-turn-event bridge, so they never reach the browser."
 purpose: |
   ADR-0239 debug-tracer가 stderr에 단일-line per-event를 dump하는 방식은
   scrollback에 묻혀버려서 high-rate session에서 한눈에 trajectory를 보기
@@ -60,6 +60,7 @@ evidence:
     unit:
       - tests/unit/cli/timeline-panel-hellgate.test.ts
       - tests/unit/cli/wire-tir-hellgate.test.ts
+      - tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts
     integration: []
     contract: []
 knobs:

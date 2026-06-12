@@ -52,6 +52,7 @@ import {
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import { type AgentStateMessage, decodeAgentStateFrame } from "@/protocol/agent-state"
 import { type ObservabilityMessage, decodeObservabilityFrame } from "@/protocol/observability"
+import { supported } from "@/protocol/session"
 import { createStubRuntimeFactory } from "../unit/apps/web-daemon/fixture"
 
 // ── handle teardown ───────────────────────────────────────────────────────────
@@ -251,6 +252,16 @@ const boot = async (
     authToken: undefined,
     runtimeFactory: factory,
     sessionConfig: {},
+    supportedReadModels: {
+      session: supported("session.v1"),
+      agentState:
+        extra.agentStatePorts !== undefined ? supported("agent-state.v1") : { status: "unsupported" },
+      canvas: { status: "unsupported" },
+      observability:
+        extra.observabilityPorts !== undefined
+          ? supported("observability.v1")
+          : { status: "unsupported" },
+    },
     ...extra,
   })
   handles.push(handle)

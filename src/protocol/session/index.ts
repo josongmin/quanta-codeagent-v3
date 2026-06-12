@@ -1,5 +1,28 @@
 export type { CapabilityExpectation, CapabilityManifest } from "./capabilities"
 export { normalizeCapabilityManifest } from "./capabilities"
+export type {
+  ResolvedReadModelSupport,
+  ResolvedReadModels,
+  SupportedReadModelSupport,
+  SupportedReadModels,
+  SurfaceReadModelId,
+  SurfaceReadModelStatus,
+  SurfaceSubscriptionSupport,
+  SurfaceSubscription,
+} from "./read-models"
+export {
+  isReadModelSubscribed,
+  isSupportedReadModels,
+  isSurfaceReadModelId,
+  isSurfaceReadModelStatus,
+  isSurfaceSubscription,
+  LEGACY_DEFAULT_SURFACE_SUBSCRIPTION,
+  normalizeSurfaceSubscription,
+  resolveReadModels,
+  supported,
+  SURFACE_READ_MODEL_IDS,
+  SURFACE_READ_MODEL_STATUSES,
+} from "./read-models"
 export {
   decodeSessionCommand,
   decodeSessionEvent,

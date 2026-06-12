@@ -5,6 +5,7 @@ import {
   encodeSessionCommand,
   encodeSessionEvent,
   encodeSessionSnapshot,
+  isSurfaceSubscription,
   isSessionProtocolVersion,
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
@@ -93,10 +94,19 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
     envelope.resumeFromSeq,
     "bad_transport_resume_from_seq",
   )
+  const surfaceSubscription =
+    envelope.surfaceSubscription === undefined
+      ? undefined
+      : isSurfaceSubscription(envelope.surfaceSubscription)
+        ? envelope.surfaceSubscription
+        : (() => {
+            throw new SessionProtocolValidationError("bad_transport_surface_subscription")
+          })()
   return {
     kind: "connect",
     sessionId: decodeConnectSessionId(envelope.sessionId),
     ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
+    ...(surfaceSubscription !== undefined ? { surfaceSubscription } : {}),
   }
 }
 
@@ -153,6 +163,9 @@ export const encodeSessionTransportMessage = (message: SessionTransportMessage):
         kind: "connect",
         sessionId: message.sessionId,
         ...(message.resumeFromSeq !== undefined ? { resumeFromSeq: message.resumeFromSeq } : {}),
+        ...(message.surfaceSubscription !== undefined
+          ? { surfaceSubscription: message.surfaceSubscription }
+          : {}),
       })
     case "command":
       return encodeSessionCommand(message.command)

@@ -7,7 +7,7 @@ import {
 import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
-import { AGENT_STATE_TYPES, type AgentStateObservation } from "@/protocol/agent-state"
+import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { gateOn, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
@@ -214,11 +214,10 @@ const wireAgentStateTap = <T extends OptionalPortBase>(base: T): T => {
     emit(event: AgentEvent): void {
       // Base emit FIRST + verbatim — every existing consumer is byte-identical.
       source.emit(event)
-      if (!AGENT_STATE_TYPES.has(event.type)) return
+      const observation = projectAgentEventToAgentStateObservation(event)
+      if (observation === null) return
       try {
-        // The 9 tapped types are a structural subset of AgentStateObservation;
-        // the cast is sound (the SSOT `AGENT_STATE_TYPES` gates the narrowing).
-        sink.capture(event as unknown as AgentStateObservation)
+        sink.capture(observation)
       } catch {
         // A throwing sink must never break the base emit (already done above)
         // or crash the turn — observation-only, fail-silent.

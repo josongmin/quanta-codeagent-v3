@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 13/14 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "user value (refusal terminal, deny_and_steer, thinking carry-over) rides recovery/decision/error-internal paths; deny-steer and refusal signals are not among the 6 bridged events at context-binding.ts:1052-1106, no distinct browser affordance"
+    web: "user value (refusal terminal, deny_and_steer, thinking carry-over) rides recovery/decision/error-internal paths; deny-steer and refusal signals are not among the 7-tag bridged AgentEvent types at session-host-turn-event-bridge.ts (outside 7-tag whitelist), no distinct browser affordance"
 purpose: |
   docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent
   loop의 4개 결함 중 3개 shipped + 1개 deferred. Gap-1 — Provider refusal/abnormal stop:

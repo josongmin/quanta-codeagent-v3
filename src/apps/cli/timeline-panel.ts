@@ -32,7 +32,7 @@
  *     the byte-identical default-OFF goal).
  */
 
-import type { AgentEvent } from "@/stream"
+import type { AgentEvent, AgentEventType } from "@/stream"
 
 // --- ANSI control sequences ---------------------------------------------
 
@@ -102,6 +102,52 @@ export interface TimelinePanel {
  *  right tool. */
 export const MAX_PANEL_HEIGHT = 20
 
+type TimelineBodyRegistry = {
+  [K in AgentEventType]?: (event: Extract<AgentEvent, { type: K }>) => string
+}
+
+export const TIMELINE_FORMATTED_AGENT_EVENT_TYPES = [
+  "session_start",
+  "turn_start",
+  "llm_request",
+  "llm_continuation",
+  "assistant_text",
+  "in_progress",
+  "tool_call",
+  "tool_progress",
+  "tool_result",
+  "recovery",
+  "context_compacted",
+  "error",
+  "usage",
+  "response_queued",
+  "interrupted",
+  "subagent_cancel",
+  "plan_created",
+  "plan_updated",
+  "plan_snapshot",
+  "plan_user_input_requested",
+  "plan_user_input_resolved",
+  "mode_changed",
+  "turn_diff_updated",
+  "done",
+] as const satisfies readonly AgentEventType[]
+
+export const TIMELINE_FALLBACK_AGENT_EVENT_TYPES = [
+  "assistant_thinking",
+  "skill_scope_decision",
+  "permission_escalation_requested",
+  "permission_escalation_resolved",
+  "output_progress",
+  "item_started",
+  "item_updated",
+  "item_completed",
+  "decision",
+  "knobs_applied",
+  "progress_update",
+  "ratelimit_snapshot",
+] as const satisfies readonly AgentEventType[]
+
 /** Minimum number of scroll-region rows we MUST leave for stream output.
  *  Below this the surface becomes unusable (model paints would scroll the
  *  status bar). Empirically 4 rows is the floor — anything below clamps the
@@ -136,61 +182,35 @@ export const formatEventLine = (event: AgentEvent, ts: number): string => {
 }
 
 const renderBody = (event: AgentEvent): string => {
-  switch (event.type) {
-    case "session_start":
-      return "session"
-    case "turn_start":
-      return `turn ${event.turn}`
-    case "llm_request":
-      return `llm_request ${event.model}`
-    case "llm_continuation":
-      return `llm_continuation ${event.mode} ${event.reason}`
-    case "assistant_text":
-      return `assistant_text ${event.delta.length}b`
-    case "in_progress":
-      return event.message !== undefined ? `in_progress ${event.message}` : "in_progress"
-    case "tool_call":
-      return `tool_call ${event.name}`
-    case "tool_progress":
-      return `tool_progress ${event.name} ${event.message}`
-    case "tool_result":
-      return `tool_result ${event.name} ${event.ok ? "ok" : "fail"}`
-    case "recovery":
-      return `recovery ${event.reason}`
-    case "context_compacted":
-      return `compacted ${event.tokens}t`
-    case "error":
-      return `error ${event.message}`
-    case "usage":
-      return `usage in=${event.inputTokens} out=${event.outputTokens}`
-    case "response_queued":
-      return `queued ${event.reason}`
-    case "interrupted":
-      return `interrupted ${event.source}`
-    case "subagent_cancel":
-      return `subagent_cancel ${event.subagentId} ${event.outcome}`
-    case "plan_created":
-      return `plan_created ${event.plan.name}`
-    case "plan_updated":
-      return `plan_updated v${event.version}`
-    case "plan_snapshot":
-      return `plan_snapshot ${event.plan.name}`
-    case "plan_user_input_requested":
-      return `plan_input_req ${event.promptId}`
-    case "plan_user_input_resolved":
-      return `plan_input_resolved ${event.decision}`
-    case "mode_changed":
-      return `mode ${event.from}→${event.to}`
-    case "turn_diff_updated":
-      return `turn_diff turn=${event.turn} files=${event.filesChanged}`
-    case "done":
-      return `done ${event.reason} turns=${event.turns}`
-    default:
-      // Forward-compat: an `AgentEvent` variant we don't render yet still
-      // shows up as a generic row. `(event as { type: string }).type` is
-      // safe — every variant in the closed union has a string `type`.
-      return (event as { type: string }).type
+  const registry: TimelineBodyRegistry = {
+    session_start: () => "session",
+    turn_start: (event) => `turn ${event.turn}`,
+    llm_request: (event) => `llm_request ${event.model}`,
+    llm_continuation: (event) => `llm_continuation ${event.mode} ${event.reason}`,
+    assistant_text: (event) => `assistant_text ${event.delta.length}b`,
+    in_progress: (event) =>
+      event.message !== undefined ? `in_progress ${event.message}` : "in_progress",
+    tool_call: (event) => `tool_call ${event.name}`,
+    tool_progress: (event) => `tool_progress ${event.name} ${event.message}`,
+    tool_result: (event) => `tool_result ${event.name} ${event.ok ? "ok" : "fail"}`,
+    recovery: (event) => `recovery ${event.reason}`,
+    context_compacted: (event) => `compacted ${event.tokens}t`,
+    error: (event) => `error ${event.message}`,
+    usage: (event) => `usage in=${event.inputTokens} out=${event.outputTokens}`,
+    response_queued: (event) => `queued ${event.reason}`,
+    interrupted: (event) => `interrupted ${event.source}`,
+    subagent_cancel: (event) => `subagent_cancel ${event.subagentId} ${event.outcome}`,
+    plan_created: (event) => `plan_created ${event.plan.name}`,
+    plan_updated: (event) => `plan_updated v${event.version}`,
+    plan_snapshot: (event) => `plan_snapshot ${event.plan.name}`,
+    plan_user_input_requested: (event) => `plan_input_req ${event.promptId}`,
+    plan_user_input_resolved: (event) => `plan_input_resolved ${event.decision}`,
+    mode_changed: (event) => `mode ${event.from}→${event.to}`,
+    turn_diff_updated: (event) => `turn_diff turn=${event.turn} files=${event.filesChanged}`,
+    done: (event) => `done ${event.reason} turns=${event.turns}`,
   }
+  const renderer = registry[event.type] as ((event: AgentEvent) => string) | undefined
+  return renderer?.(event) ?? event.type
 }
 
 const pad2 = (n: number): string => (n < 10 ? `0${n}` : String(n))

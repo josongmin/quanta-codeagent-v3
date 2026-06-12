@@ -26,9 +26,14 @@ import {
 } from "@/ipc/session"
 import {
   type AgentStateObservation,
-  agentEventToMessage,
+  agentStateObservationToMessage,
   encodeAgentStateFrame,
 } from "@/protocol/agent-state"
+import {
+  resolveReadModels,
+  type SupportedReadModels,
+  type SurfaceSubscription,
+} from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, gateDisabled, isSessionForbidden, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
@@ -328,8 +333,9 @@ export interface UserInputPorts {
  *
  * Returns `null` when `ports` is absent (gate OFF ⇒ no sink, byte-identical).
  * Otherwise subscribes this connection to the shared source: each capture is
- * mapped (`agentEventToMessage`) + encoded (`encodeAgentStateFrame`) and
- * `ws.send`-ed. NO snapshot-on-connect (an agent-state event is a point-in-time
+ * projected (`agentStateObservationToMessage`) + encoded
+ * (`encodeAgentStateFrame`) and `ws.send`-ed. NO snapshot-on-connect (an
+ * agent-state event is a point-in-time
  * observation, not retained state) — frames render from the next event forward.
  * The caller MUST call `detach()` on disconnect so we never forward to a dead
  * socket.
@@ -345,9 +351,7 @@ export const attachAgentStateSink = (
   if (ports === undefined) return null
   const unsubscribe = ports.source.subscribe((event) => {
     try {
-      const msg = agentEventToMessage(event)
-      if (msg === null) return
-      ws.send(encodeAgentStateFrame(msg))
+      ws.send(encodeAgentStateFrame(agentStateObservationToMessage(event)))
     } catch {
       // Dead/throwing socket or mapper edge — swallow (the source also guards
       // each handler so a throw here never breaks the fan-out to siblings).
@@ -357,6 +361,35 @@ export const attachAgentStateSink = (
     detach: () => {
       unsubscribe()
     },
+  }
+}
+
+const applySurfaceSubscription = (
+  ws: ServerWebSocket<WSData>,
+  config: Pick<
+    WebDaemonServerConfig,
+    "agentStatePorts" | "canvasPorts" | "observabilityPorts" | "supportedReadModels"
+  >,
+  subscription: SurfaceSubscription | undefined,
+): void => {
+  const resolved = resolveReadModels(config.supportedReadModels, subscription)
+
+  ws.data.observability?.stop()
+  ws.data.observability = undefined
+  if (resolved.observability.status === "subscribed") {
+    ws.data.observability = attachObservabilitySink(ws, config.observabilityPorts) ?? undefined
+  }
+
+  ws.data.canvas?.detach()
+  ws.data.canvas = undefined
+  if (resolved.canvas.status === "subscribed") {
+    ws.data.canvas = attachCanvasSink(ws, config.canvasPorts) ?? undefined
+  }
+
+  ws.data.agentState?.detach()
+  ws.data.agentState = undefined
+  if (resolved.agentState.status === "subscribed") {
+    ws.data.agentState = attachAgentStateSink(ws, config.agentStatePorts) ?? undefined
   }
 }
 
@@ -739,6 +772,7 @@ const buildRegisteredSession = async (
  * (`./index.ts`) populates it only when `QUANTA_OBSERVABILITY=on`.
  */
 export interface WebDaemonServerConfig extends WebDaemonConfig {
+  readonly supportedReadModels: SupportedReadModels
   readonly observabilityPorts?: ObservabilityPorts
   /**
    * ADR-0440 — optional canvas port bundle. Gate OFF ⇒ absent ⇒ the server
@@ -1016,21 +1050,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // Attach adapter immediately so a fast inbound frame is buffered to
         // the right adapter; the registered session is filled in below.
         ws.data.adapter = adapter
-        // ADR-0420 — bridge this socket to the observability emitter (gate ON
-        // only). `null` ⇒ gate OFF (byte-identical: no sink, no frames). The
-        // emitter's first tick is a snapshot; deltas follow as the live ports
-        // change. `close()` stops it so we never emit to a dead socket.
-        ws.data.observability = attachObservabilitySink(ws, config.observabilityPorts) ?? undefined
-        // ADR-0440 — bridge this socket to the canvas emitter (gate ON only).
-        // `null` ⇒ gate OFF (byte-identical). Snapshot-on-connect forwards the
-        // current usage view; `close()` detaches so no frame targets a dead
-        // socket.
-        ws.data.canvas = attachCanvasSink(ws, config.canvasPorts) ?? undefined
-        // QUANTA_WEB_AGENT_STATE — bridge this socket to the agent-state source
-        // (gate ON only). `null` ⇒ gate OFF (byte-identical). NO
-        // snapshot-on-connect (point-in-time observations); `close()` detaches
-        // so no frame targets a dead socket.
-        ws.data.agentState = attachAgentStateSink(ws, config.agentStatePorts) ?? undefined
+        // Backward-compat default: a raw/legacy socket that has not sent the
+        // explicit `connect.surfaceSubscription` handshake still receives the
+        // historical full side-channel fan-out. A later `connect` frame can
+        // narrow this set intentionally via `applySurfaceSubscription(...)`.
+        applySurfaceSubscription(ws, config, undefined)
         try {
           await buildRegisteredSession(registry, ws, adapter, sharedSession)
         } catch (error) {
@@ -1058,6 +1082,9 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
           // never sees it — its 5-kind contract is unchanged. Any non-heartbeat
           // frame falls through to the adapter exactly as before.
           if (replyToHeartbeat(ws, decoded)) return
+          if (decoded?.kind === "connect") {
+            applySurfaceSubscription(ws, config, decoded.surfaceSubscription)
+          }
           // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND answer frame
           // (mirror of the agent-state OUTBOUND channel). Peek BEFORE the
           // session bridge: a `planInputAnswer` resolves a paused agent's

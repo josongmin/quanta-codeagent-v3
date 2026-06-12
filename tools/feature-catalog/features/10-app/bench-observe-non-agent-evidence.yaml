@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 1/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "emits sandbox/patch_generated/verify trajectory JSONL that are explicitly NOT AgentEvents and bypass the recorder; cannot flow through the 6-event web bridge (context-binding.ts toSessionHostTurnEvent), dropped before browser"
+    web: "emits sandbox/patch_generated/verify trajectory JSONL that are explicitly NOT AgentEvents and bypass the recorder; cannot flow through the 7-tag session-host-turn-event bridge (session-host-turn-event-bridge.ts toSessionHostTurnEvent via context-binding), dropped before browser"
 purpose: |
   Bench is the producer of *non-agent* trajectory evidence: `sandbox`
   events, `patch_generated`, `verify` (pre/post-verify outcomes). The

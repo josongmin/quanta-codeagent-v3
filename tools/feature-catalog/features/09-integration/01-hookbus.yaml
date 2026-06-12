@@ -22,7 +22,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Control-plane policy infrastructure with no browser affordance; hook lifecycle events (pre_compact, subagent_start/_stop, post_tool_use_failure) are not rendered and are not in the 6-event bridge."
+    web: "Control-plane policy infrastructure with no browser affordance; hook lifecycle events (pre_compact, subagent_start/_stop, post_tool_use_failure) are not rendered and are not in the 7-tag session-host-turn-event bridge."
 purpose: |
   In-process HookBus — 9 이벤트(session_start / session_end / turn_start /
   pre_tool_use / post_tool_use / **post_tool_use_failure** / **pre_compact** /

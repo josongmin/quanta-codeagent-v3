@@ -18,7 +18,7 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-11"
   evidence:
     cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal wire-protocol codec/library (versioned envelopes + validation), no user-visible affordance"
@@ -36,7 +36,9 @@ purpose: |
       .closed, turn.started / .output.delta / .completed / .failed,
       turn.llm.request / .continuation, tool.invoked / .completed,
       approval.requested / .resolved, artifact.ready — closed
-      `SESSION_EVENT_TYPES` set with `isSessionEventType`.
+      `SESSION_EVENT_TYPES` set (15 today) with an `isSessionEventType` guard.
+      Inventory pinned by `surface-protocol-inventory-hellgate`; attach surface
+      classifies every type as rendered or explicitly ignored.
     - SNAPSHOT (`snapshot.ts`): `SessionSnapshotLite` (SessionStateView +
       PendingApprovalView + ArtifactRef) for state hydration.
   `codec.ts` is the load-bearing piece: `encodeSession{Command,Event,Snapshot}`
@@ -65,6 +67,9 @@ evidence:
     unit:
       - tests/unit/protocol/session-codec.test.ts
       - tests/unit/protocol/protocol-validate-typesafe-hellgate.test.ts
+      - tests/unit/surface-protocol-inventory-hellgate.test.ts
+      - tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts
+      - tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -75,7 +80,8 @@ notes: |
   the multi-surface transport (`src/protocol/session/`) — consumed by
   `slice-ipc-bridge` / `web-daemon-surface` / `web-frontend-surface` (the
   frontend carries a narrow LOCAL COPY in `apps/web-frontend/src/types/
-  protocol.ts` to stay decoupled from the bun tsconfig paths). Decode never
+  protocol.ts` to stay decoupled from the bun tsconfig paths; drift blocked by
+  `web-frontend-protocol-drift-contract-hellgate`). Decode never
   throws an untyped error: every malformed-input path surfaces a
   `SessionProtocolValidationError` with a discriminating issue code, so the
   transport decides drop / log / reject per frame.

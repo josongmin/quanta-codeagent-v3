@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "rides the typed BranchTraceEvent stream which is not one of the 6 bridged events, dropped at context-binding.ts:1104 default arm; slash itself is B2-stubbed"
+    web: "rides the typed BranchTraceEvent stream which is not one of the 7-tag bridged AgentEvent types, dropped at session-host-turn-event-bridge.ts default arm (outside 7-tag AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES); slash itself is B2-stubbed"
 purpose: |
   Live progress visualization for catalog 대6 speculative branch search
   (ADR-0084 / Agentless N-best verifier-prover). Without a sticky indicator the

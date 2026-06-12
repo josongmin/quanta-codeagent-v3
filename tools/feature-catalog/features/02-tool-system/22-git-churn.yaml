@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Agent tool — churn ranking renders in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), mapped tool_call/tool_result (context-binding.ts:1079-1096)."
+    web: "Agent tool — churn ranking renders in browser via tool.invoked/tool.completed (session-hooks.ts:420-438), mapped tool_call/tool_result (session-host-turn-event-bridge.ts (tool_call/tool_result → tool.invoked/tool.completed via context-binding))."
 purpose: |
   최근 윈도우 내 변경 빈도로 파일을 랭킹하는 git tool (churn 핫스팟). 자주 바뀌는
   파일에 버그가 불균형하게 모인다는 Stage-1 fault-localization 신호. gitTools()에

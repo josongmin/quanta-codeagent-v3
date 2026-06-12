@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "port wired only into CLI bootstrap, not web-daemon; no session-title event in the 6-event bridge or observability protocol so no title reaches the browser"
+    web: "port wired only into CLI bootstrap, not web-daemon; no session-title event in the 7-tag session-host-turn-event bridge or observability protocol so no title reaches the browser"
 purpose: |
   Opt-in, cheap-model, fire-and-forget session titler (RFC
   `docs/plans/jun-6-ai-session-title.md`). On the FIRST turn only, an opted-in

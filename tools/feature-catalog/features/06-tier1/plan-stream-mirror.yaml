@@ -16,7 +16,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "every plan_* event (plan_created/updated/snapshot/user_input_requested/resolved) + mode_changed is dropped at the only AgentEvent→web bridge context-binding.ts:1061 default arm; SlashPalette.tsx:405 /plan is a prefill() stub sent to the LLM as plain text, not executed; zero plan_* consumer anywhere in apps/web-frontend"
+    web: "every plan_* event (plan_created/updated/snapshot/user_input_requested/resolved) + mode_changed is dropped at the only AgentEvent→web bridge context-binding default arm (outside 7-tag bridge whitelist); SlashPalette.tsx:405 /plan is a prefill() stub sent to the LLM as plain text, not executed; zero plan_* consumer anywhere in apps/web-frontend"
 config_refs:
   env: ["QUANTA_PLAN"]
   cli: ["--plan"]

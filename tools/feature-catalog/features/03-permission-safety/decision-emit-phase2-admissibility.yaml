@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "rides the decision AgentEvent which is dropped at context-binding.ts:1104 default arm (not one of the 6 bridged events)"
+    web: "rides the decision AgentEvent which is dropped at session-host-turn-event-bridge.ts default arm (outside 7-tag AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES) (not one of the 7-tag bridged AgentEvent types)"
 purpose: |
   ADR-0239 Phase 1은 `decision` AgentEvent variant + debug-tracer consumer만
   깔았고 *production code는 아직 emit하지 않는 상태*였음. 이 슬라이스는

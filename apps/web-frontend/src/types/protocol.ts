@@ -37,6 +37,71 @@ export interface CapabilityManifest {
   readonly transport: "inproc" | "stdio" | "websocket"
 }
 
+export const SURFACE_READ_MODEL_IDS = [
+  "session",
+  "agentState",
+  "canvas",
+  "observability",
+] as const
+
+export type SurfaceReadModelId = (typeof SURFACE_READ_MODEL_IDS)[number]
+
+export const SURFACE_READ_MODEL_STATUSES = [
+  "subscribed",
+  "supported",
+  "unsupported",
+] as const
+
+export type SurfaceReadModelStatus = (typeof SURFACE_READ_MODEL_STATUSES)[number]
+
+export type SurfaceReadModelSupport<TProtocol extends string> =
+  | {
+      readonly status: "subscribed" | "supported"
+      readonly protocol: TProtocol
+    }
+  | {
+      readonly status: "unsupported"
+    }
+
+export type SurfaceSubscriptionSupport<TProtocol extends string> =
+  | {
+      readonly status: "subscribed"
+      readonly protocol: TProtocol
+    }
+  | {
+      readonly status: "unsupported"
+    }
+
+export type SupportedReadModelSupport<TProtocol extends string> =
+  | {
+      readonly status: "supported"
+      readonly protocol: TProtocol
+    }
+  | {
+      readonly status: "unsupported"
+    }
+
+export interface SupportedReadModels {
+  readonly session: SupportedReadModelSupport<"session.v1">
+  readonly agentState: SupportedReadModelSupport<"agent-state.v1">
+  readonly canvas: SupportedReadModelSupport<"canvas.v1">
+  readonly observability: SupportedReadModelSupport<"observability.v1">
+}
+
+export interface SurfaceSubscription {
+  readonly session: SurfaceSubscriptionSupport<"session.v1">
+  readonly agentState: SurfaceSubscriptionSupport<"agent-state.v1">
+  readonly canvas: SurfaceSubscriptionSupport<"canvas.v1">
+  readonly observability: SurfaceSubscriptionSupport<"observability.v1">
+}
+
+export const DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION: SurfaceSubscription = {
+  session: { status: "subscribed", protocol: "session.v1" },
+  agentState: { status: "subscribed", protocol: "agent-state.v1" },
+  canvas: { status: "subscribed", protocol: "canvas.v1" },
+  observability: { status: "subscribed", protocol: "observability.v1" },
+}
+
 /* --- Snapshot views ---------------------------------------------------- */
 
 export type SessionStatus = "idle" | "running" | "awaiting_approval" | "failed" | "closed"

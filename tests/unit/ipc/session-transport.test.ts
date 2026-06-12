@@ -209,6 +209,22 @@ describe("session transport connect-frame codec", () => {
     expect(decodeSessionTransportMessage(wire)).toEqual(message)
   })
 
+  test("round-trips a connect frame carrying explicit surface read-model coverage", () => {
+    const message: SessionTransportMessage = {
+      kind: "connect",
+      sessionId: "session-1",
+      surfaceSubscription: {
+        session: { status: "subscribed", protocol: "session.v1" },
+        agentState: { status: "unsupported" },
+        canvas: { status: "supported", protocol: "canvas.v1" },
+        observability: { status: "unsupported" },
+      },
+    }
+    const wire = encodeSessionTransportMessage(message)
+    expect(JSON.parse(wire).surfaceSubscription).toEqual(message.surfaceSubscription)
+    expect(decodeSessionTransportMessage(wire)).toEqual(message)
+  })
+
   test("round-trips resumeFromSeq=0 (a valid bootstrap seq) without dropping it", () => {
     const message: SessionTransportMessage = {
       kind: "connect",

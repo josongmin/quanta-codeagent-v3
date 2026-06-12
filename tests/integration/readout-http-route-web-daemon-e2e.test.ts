@@ -45,6 +45,7 @@ import type {
   SessionEvent,
   SessionSnapshotLite,
 } from "@/protocol/session"
+import { supported } from "@/protocol/session"
 import { startWebDaemon } from "@/apps/web-daemon/server"
 import type { WebDaemonServerConfig } from "@/apps/web-daemon/server"
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
@@ -224,6 +225,12 @@ const boot = async (over: {
     authToken: over.authToken,
     runtimeFactory: over.factory,
     sessionConfig: {},
+    supportedReadModels: {
+      session: supported("session.v1"),
+      agentState: { status: "unsupported" },
+      canvas: { status: "unsupported" },
+      observability: { status: "unsupported" },
+    },
   }
   const handle = await startWebDaemon(config)
   handles.push(handle)

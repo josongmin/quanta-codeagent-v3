@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Emits turn_diff_updated AgentEvent which is dropped at context-binding.ts:1104 default arm; DiffPanel is also unmounted (App.tsx:578)."
+    web: "Emits turn_diff_updated AgentEvent which is dropped at context-binding default arm (outside 7-tag bridge whitelist); DiffPanel is also unmounted (App.tsx:578)."
 purpose: |
   Stateful per-session adapter orchestrating the
   `captureTurnStart / computeTurnDiff / buildTurnDiffEvent` trio from

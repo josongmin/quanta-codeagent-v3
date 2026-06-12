@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Agent tool — rendered log (hash/author/date/subject) shows in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (context-binding.ts:1086)."
+    web: "Agent tool — rendered log (hash/author/date/subject) shows in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (session-host-turn-event-bridge.ts tool_result arm (via context-binding))."
 purpose: |
   `git_log` 도구가 commit 라인을 머신 파싱할 때 TAB(`\x09`) 대신 ASCII Unit
   Separator(`\x1f`, US_SEP)를 필드 구분자로 쓴다 — commit subject와 author name에

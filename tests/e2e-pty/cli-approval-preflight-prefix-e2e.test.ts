@@ -21,7 +21,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
 
-const BOOT = "Ctrl+C quit"
+// Must wait for the readline prompt (rendered AFTER setRawMode) not the
+// welcome banner ("Ctrl+C quit", before setRawMode). Sending "\r" while the
+// PTY is still in cooked mode causes the kernel to convert it to "\n", which
+// raw-line-reader drops — the readline never submits (~30% flake otherwise).
+const BOOT = "ask before every edit"
 const T = 60_000
 
 /** One assistant turn that calls `edit` with an old_string NOT in the file. */
@@ -152,6 +156,38 @@ describe.skipIf(!PTY_AVAILABLE)("CLI approval preflight + prefix-grant e2e (PTY 
       // Belt-and-suspenders: exactly ONE bash confirm was shown all turn (count
       // on the FULL raw buffer — `screen()` is a scrolling window that may have
       // dropped the early prompt by the time ALL_DONE renders).
+      expect(countOccurrences(c.output(), "Allow bash?")).toBe(1)
+    },
+    T,
+  )
+
+  test(
+    "#20 durable: QUANTA_TRUST_SCOPE wires the [P] (ALL sessions) verb; 'P' rides the sibling",
+    async () => {
+      const cassette = join(dir, "bash.jsonl")
+      writeFileSync(cassette, BASH_PREFIX_CASSETTE)
+      const c = drivePtyCli({
+        cwd: dir,
+        env: {
+          QUANTA_SESSIONS_DIR: join(dir, "sessions"),
+          QUANTA_LLM_REPLAY: cassette,
+          QUANTA_MEMORY_AUTO: "0",
+          QUANTA_ENABLE_PROMPT_SUGGESTION: "0",
+          // Opt into the persistent trust-scope registry. The durable grant
+          // (scope:"project", projectKey = cwd) writes to the PROJECT overlay
+          // under the temp cwd — not the user's global ~/.quanta (which is only
+          // read, harmlessly, at hydrate).
+          QUANTA_TRUST_SCOPE: "1",
+        },
+      })
+      cli = c
+      await c.waitFor(BOOT, 25_000)
+      c.send("run echo\r")
+      await c.waitFor("Allow bash?", 25_000)
+      // The DURABLE verb is offered only because the registry is wired.
+      await c.waitFor("ALL sessions", 20_000)
+      c.send("P\r") // durable grant + allow this session
+      await c.waitFor("ALL_DONE_PREFIX", 25_000) // sibling echo rode the grant
       expect(countOccurrences(c.output(), "Allow bash?")).toBe(1)
     },
     T,

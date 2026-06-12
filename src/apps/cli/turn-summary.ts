@@ -32,7 +32,7 @@
 
 import type { AgentOutcome } from "@/agent"
 import type { MemoryCitation } from "@/agent/types"
-import type { AgentEvent, StreamPort } from "@/stream"
+import type { AgentEvent, AgentEventType, StreamPort } from "@/stream"
 import { cyan, dim, gray, green, magenta, red, renderBox, yellow } from "@/ui/ui-helpers"
 
 /** Per-turn signal counts captured by the collector. Pure data — the renderer
@@ -105,6 +105,15 @@ export interface TurnSummaryOptions {
   /** Verbose mode: include raw recovery counts even when zero. Default `false`. */
   verbose?: boolean
 }
+
+export const TURN_SUMMARY_CONSUMED_AGENT_EVENT_TYPES = [
+  "tool_call",
+  "tool_result",
+  "recovery",
+  "context_compacted",
+  "usage",
+  "llm_continuation",
+] as const satisfies readonly AgentEventType[]
 
 /** Probe whether the turn-summary collector should be active for the calling
  *  surface. `QUANTA_TURN_SUMMARY` overrides; non-TTY auto-OFF. */
