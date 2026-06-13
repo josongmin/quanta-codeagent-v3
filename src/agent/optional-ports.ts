@@ -4,14 +4,20 @@ import {
   createFastApplyFallback,
   createFastApplyMerge,
 } from "@/agent/fast-apply-fallback"
+import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "@/agent/refusal-fallback"
 import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
-import { gateOn, gateOnStrict, logger, runtimeConfig } from "@/shared"
+import { gateOn, gateOnStrict, itemStreamEnabled, logger, runtimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
-import { ItemLifecycleTracker, itemLifecycleEnabled, type StreamPort } from "@/stream"
+import {
+  ItemLifecycleTracker,
+  itemLifecycleEnabled,
+  ItemStreamProjector,
+  type StreamPort,
+} from "@/stream"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
@@ -38,6 +44,9 @@ const QUANTA_CODE_MODE_ENV = "QUANTA_CODE_MODE"
  *  turns the feature on. */
 const QUANTA_CLOSEOUT_CRITIC_ENV = "QUANTA_CLOSEOUT_CRITIC"
 const CLOSEOUT_CRITIC_TRUTHY = new Set(["1", "on", "true"])
+/** T08 — model-refusal recovery gate + optional re-prompt override. */
+const QUANTA_REFUSAL_FALLBACK_ENV = "QUANTA_REFUSAL_FALLBACK"
+const QUANTA_REFUSAL_FALLBACK_PROMPT_ENV = "QUANTA_REFUSAL_FALLBACK_PROMPT"
 
 /** Per-sender undelivered quota baked into the env-gated wire (R3 audit-H).
  *  Hosts wiring the mailbox by hand still get to override via the closed-port
@@ -148,6 +157,11 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
     } as T
   }
 
+  // T08 — model-refusal recovery (fork/neutralize + re-prompt). Default-OFF:
+  // unset ⇒ `next` returned verbatim (the loop terminates a refusal exactly as
+  // before). Caller-override-precedence: a pre-set `refusalFallback` is kept.
+  next = wireRefusalFallback(next, env)
+
   // R3 audit-H production wire for the subagent mailbox. Default-OFF (the
   // tier-1 builder still returns [] when `subagentMailbox` is undefined). Env
   // gate `QUANTA_SUBAGENT_MAILBOX=on` flips it on with the per-sender DoS cap
@@ -187,7 +201,46 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // lifecycle-derived events). Installed ONLY when the comp-root set
   // `onAgentState` (gate ON); absent ⇒ the stream is returned verbatim
   // (byte-identical default-OFF).
-  return wireAgentStateTap(wireItemLifecycleStream(wireCloseoutCritic(next, env), env))
+  // T01 — wrap the (post-lifecycle) stream so a per-run {@link ItemStreamProjector}
+  // fans its fine-grained item cores onto `config.onAgentState` as `item.*`
+  // observations (web agent-state plane). Composed INSIDE `wireAgentStateTap` so
+  // both taps observe the SAME loop stream; default-OFF when `QUANTA_ITEM_STREAM`
+  // is unset OR no `onAgentState` sink (byte-identical).
+  return wireAgentStateTap(
+    wireItemStreamTap(wireItemLifecycleStream(wireCloseoutCritic(next, env), env), env),
+  )
+}
+
+/**
+ * T01 — wrap `base.stream` so a per-run {@link ItemStreamProjector} feeds the
+ * SAME `onAgentState` sink with `item.*` observations. Installed ONLY when BOTH
+ * `QUANTA_ITEM_STREAM` is on AND a sink is present (the web-daemon comp-root sets
+ * `onAgentState` only under `QUANTA_WEB_AGENT_STATE`). Either absent ⇒ `base`
+ * returned verbatim (the projector is never even allocated), proving
+ * byte-identical default-OFF. The base stream emits FIRST + verbatim; a throwing
+ * sink can never break the emit (the item fan-out is observation-only).
+ */
+const wireItemStreamTap = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  const sink = (base as Partial<AgentConfig>).onAgentState
+  if (sink === undefined) return base
+  if (!itemStreamEnabled(env)) return base
+  const source = base.stream
+  if (source === undefined) return base
+  const projector = new ItemStreamProjector()
+  const wrapped: StreamPort = {
+    emit(event: AgentEvent): void {
+      // Base emit FIRST + verbatim — every existing consumer is byte-identical.
+      source.emit(event)
+      for (const item of projector.project(event)) {
+        try {
+          sink.capture({ type: "item_stream", item })
+        } catch {
+          // A throwing sink must never break the base emit or crash the turn.
+        }
+      }
+    },
+  }
+  return { ...base, stream: wrapped } as T
 }
 
 /**
@@ -331,6 +384,23 @@ const wireCodeCellDispatch = <T extends OptionalPortBase>(base: T, env: Optional
 let warnedCloseoutCriticNoReviewer = false
 export const __resetCloseoutCriticWarning = (): void => {
   warnedCloseoutCriticNoReviewer = false
+}
+
+/** T08 — wire model-refusal recovery behind `QUANTA_REFUSAL_FALLBACK`. OFF /
+ *  unset ⇒ `base` returned verbatim (byte-identical: a refusal terminates the
+ *  turn as before). Caller-override-precedence: a pre-set `refusalFallback`
+ *  (e.g. a host-supplied config or a test) is preserved untouched. The optional
+ *  `QUANTA_REFUSAL_FALLBACK_PROMPT` overrides the built-in re-prompt template;
+ *  blank/whitespace ⇒ the built-in default. */
+const wireRefusalFallback = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  if (base.refusalFallback !== undefined) return base
+  if (!envGateOn(env, QUANTA_REFUSAL_FALLBACK_ENV)) return base
+  const promptRaw = env[QUANTA_REFUSAL_FALLBACK_PROMPT_ENV]
+  const prompt =
+    promptRaw !== undefined && promptRaw.trim().length > 0
+      ? promptRaw
+      : DEFAULT_REFUSAL_FALLBACK_PROMPT
+  return { ...base, refusalFallback: { enabled: true, prompt } } as T
 }
 
 const wireCloseoutCritic = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {

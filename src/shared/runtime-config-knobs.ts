@@ -641,6 +641,22 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "Per-action LLM risk assessor gate.",
   },
   {
+    envKey: "QUANTA_AUTO_REVIEW",
+    kind: "bool",
+    default: false,
+    group: "permission",
+    describe:
+      "T03 auto-approval reviewer gate — seed the session with the guardian-approvals posture so an LLM side-agent renders approvals (HARD_DENY still runs first).",
+  },
+  {
+    envKey: "QUANTA_APPROVAL_LADDER",
+    kind: "enum",
+    default: undefined,
+    group: "permission",
+    describe:
+      "T03 named approval-ladder posture (read-only|auto|granular|guardian-approvals|full-access); unset/custom ⇒ no posture seeded.",
+  },
+  {
     envKey: "QUANTA_HITL_OVERRIDES",
     kind: "string",
     default: undefined,

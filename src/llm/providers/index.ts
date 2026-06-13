@@ -19,7 +19,7 @@ export type {
   StreamEvent,
   StreamInput,
 } from "./provider-port"
-export { ProviderError } from "./provider-port"
+export { isRefusalStopReason, ProviderError } from "./provider-port"
 export type { ProviderEnv, ResolvedProvider } from "./registry"
 export { PROVIDER_ENV_KEYS, resolveProvider } from "./registry"
 export { VertexProviderAdapter } from "./vertex-adapter"

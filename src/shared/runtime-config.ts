@@ -612,6 +612,16 @@ export interface RuntimeConfig {
    *  structured reason is computed lazily ONLY when this is on (zero allocation
    *  otherwise). */
   readonly surfaceDenyReason: boolean
+  /** T05 (per-hunk diff accept/reject) — `QUANTA_HUNK_APPROVAL`. Opt-in (the
+   *  `gateOn` truthy vocab; #24). Default false ⇒ the approval prompt offers
+   *  ONLY whole-call approve/deny (byte-identical to today); a `selectedHunks`
+   *  on the decision/command is inert. When ON, the CLI confirm offers an
+   *  `[h]unk-select` verb for a previewable mutation with ≥2 hunks, and the
+   *  accepted subset is applied via `@/runner/hunk-apply` (atomic + mode-
+   *  preserving + staleness-guarded). Partial application is an integrity risk
+   *  on overlapping/offset hunks, so this starts opt-in (unlike the default-ON
+   *  `QUANTA_DIFF_PREVIEW`). */
+  readonly hunkApproval: boolean
   /** sandbox-escalation (RFC jun-6) — OS-sandbox block → user-gated
    *  escalation-retry loop (`QUANTA_SANDBOX_ESCALATION`). Opt-in
    *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the platform result-mapping points NEVER
@@ -1273,6 +1283,22 @@ export interface RuntimeConfig {
    *  an advisory risk signal (it NEVER auto-grants — it can only add caution /
    *  route to HITL, never widen a grant). */
   readonly guardianAssessor: boolean
+  /** T03 (jun-13 codex-ide, feature 03-guardian) — auto-approval reviewer gate
+   *  (`QUANTA_AUTO_REVIEW`). Strict opt-in (`=== "1"`): a feature that lets an
+   *  LLM side-agent AUTO-APPROVE tool calls without a human must NEVER be armed by
+   *  a stray loose-truthy spelling. Default false ⇒ no thread posture is seeded,
+   *  the reviewer stays `user` (or the legacy posture-gated selection), and the
+   *  approval path is byte-identical. When ON, the composition root seeds the
+   *  session thread with the `guardian-approvals` approval-ladder rung so the
+   *  side-agent guardian renders the verdict — HARD_DENY still runs BEFORE it. */
+  readonly autoReview: boolean
+  /** T03 — named approval-ladder posture (`QUANTA_APPROVAL_LADDER`): one of
+   *  `read-only | auto | granular | guardian-approvals | full-access` (the
+   *  `@/permission/approval-ladder` SSOT). Unset / unknown / `custom` ⇒ no rung
+   *  seeded ⇒ byte-identical. A valid rung seeds the session thread's
+   *  `ThreadPermission` (sandbox + approvalPolicy + reviewer). NEVER defaults to a
+   *  guardian/full posture — absent the env var, no posture is selected. */
+  readonly approvalLadder: string | undefined
   /** jun-7-misc 04 (auto-mode rule overlay) — user-authored rule overlay onto
    *  the auto-mode classifier system prompt (`QUANTA_AUTO_MODE_RULES`). Strict
    *  opt-in (`=== "1"`). Default false ⇒ `evaluateAuto` flows the exact current
@@ -1542,6 +1568,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C6 — opt-in (`gateOn` vocab; #24). Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
     surfaceDenyReason: gateOn(env, "QUANTA_DENY_REASON"),
+    // T05 — opt-in (`gateOn` vocab; #24). Default false ⇒ no [h]unk verb in the
+    // confirm prompt, no partial apply; whole-call approve/deny only (byte-
+    // identical). See `@/runner/hunk-apply` for the apply executor.
+    hunkApproval: gateOn(env, "QUANTA_HUNK_APPROVAL"),
     // sandbox-escalation (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default false ⇒
     // classifySandboxDenial is never consulted, no denialReason is ever set, no
     // escalation prompt, no post-denial record (a sandboxed nonzero exit is
@@ -1799,6 +1829,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // assessor constructed, no per-action LLM risk pass, tool dispatch
     // byte-identical. The assessor (when wired) is advisory-only — never grants.
     guardianAssessor: gateOnStrict(env, "QUANTA_GUARDIAN_ASSESSOR"),
+    // T03 — strict `=== "1"` opt-in. Auto-approval by an LLM side-agent must not
+    // be armed by a loose-truthy spelling. Default false ⇒ no posture seeded ⇒
+    // reviewer stays user ⇒ byte-identical.
+    autoReview: gateOnStrict(env, "QUANTA_AUTO_REVIEW"),
+    // T03 — named approval-ladder posture. Parsed/validated at the consumer
+    // (`@/permission/approval-ladder#parseApprovalLadderName`); an unknown / empty
+    // / `custom` value seeds NO posture (byte-identical).
+    approvalLadder: env["QUANTA_APPROVAL_LADDER"],
     // jun-7-misc 04 — strict `=== "1"` opt-in. Default false ⇒ `evaluateAuto`
     // flows the exact current CLASSIFIER_SYSTEM_PROMPT unchanged (byte-identical).
     autoModeRules: gateOnStrict(env, "QUANTA_AUTO_MODE_RULES"),

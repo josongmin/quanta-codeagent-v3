@@ -29,7 +29,8 @@
 
 import { randomBytes } from "node:crypto"
 import { buildMcpServer, type ToolCallPort, type ToolListSource } from "@/mcp"
-import { errMessage, gateOnStrict } from "@/shared"
+import { errMessage, gateOn, gateOnStrict } from "@/shared"
+import type { Tool, ToolOrigin } from "@/tool"
 
 /** EX_USAGE — gate-off / argument / assembly fault (BSD sysexits). */
 const EXIT_USAGE = 64
@@ -42,6 +43,18 @@ export interface McpServerCmdIo {
   readonly out: (s: string) => void
   readonly err: (s: string) => void
   readonly stdin: AsyncIterable<Uint8Array>
+}
+
+/** Composition-root dependency seam (test-injectable). Production leaves every
+ *  field unset so the real builders are used; the hellgate test overrides
+ *  {@link lspToolsForBridge} with fake-provider-backed tools to observe a real
+ *  effect through the full JSON-RPC pipeline without a language-server binary. */
+export interface McpServerCmdDeps {
+  /** T06 LSP-as-MCP bridge — build the LSP tool list merged into the registry
+   *  when `QUANTA_LSP_MCP` is set. Unset ⇒ the real `lspNavToolList()` +
+   *  `lspDiagnosticsTool()` (from `@/agent`) are built lazily. The returned
+   *  list is filtered to READ-ONLY tools before exposure regardless. */
+  readonly lspToolsForBridge?: () => Tool[]
 }
 
 /** Default IO bound to the real process. Constructed ONLY on an actual
@@ -117,6 +130,43 @@ const idMinter = (): (() => string) => {
   return () => `mcp-server-${salt}-${(seq++).toString(36)}`
 }
 
+/** T06 — build the read-only LSP tool set and merge it into the assembled
+ *  registry (returns a fresh {@link ToolRegistry}). `override` (test seam)
+ *  supplies fake-provider-backed tools; production builds the real
+ *  `lspNavToolList()` + `lspDiagnosticsTool()` from `@/agent` lazily (nothing
+ *  spawns a server until a tool is actually CALLED).
+ *
+ *  Only READ-ONLY tools are merged — a mutating LSP tool (`lsp_rename_apply`,
+ *  bundled in `lspNavToolList()`) is dropped (the whitelist would block it
+ *  anyway, but we don't even register it).
+ *
+ *  Merge is OVERRIDE-by-name (bridge tools last ⇒ `ToolRegistry` set() lets
+ *  them win): the base `diagnostics` tool ships a `nullDiagnosticsProvider`
+ *  (always "no language server"), so the bridge's real-provider `diagnostics`
+ *  must REPLACE it — otherwise the gate would expose a permanently-empty tool.
+ *  The `lsp_*` nav tools are net-new names (no base collision). The origin map
+ *  is preserved (and bridged tools tagged `lsp`) so provenance/trust derivation
+ *  is unchanged for every pre-existing tool. */
+const mergeLspBridgeTools = async (
+  config: import("@/agent").AgentConfig,
+  override: (() => Tool[]) | undefined,
+  io: McpServerCmdIo,
+): Promise<import("@/tool").ToolRegistry> => {
+  const [{ ToolRegistry }, agent] = await Promise.all([import("@/tool"), import("@/agent")])
+  const built = override ? override() : [...agent.lspNavToolList(), agent.lspDiagnosticsTool()]
+  const readOnly = built.filter((t) => t.isReadOnly())
+  if (readOnly.length === 0) return config.registry as import("@/tool").ToolRegistry
+  const currentTools = config.registry
+    .specs()
+    .map((s) => config.registry.get(s.name))
+    .filter((t): t is Tool => t !== undefined)
+  const origin = new Map<string, ToolOrigin>()
+  for (const s of config.registry.specs()) origin.set(s.name, config.registry.originOf(s.name))
+  for (const t of readOnly) origin.set(t.name, "lsp")
+  io.err(`quanta MCP server · LSP bridge on (+${readOnly.length} read-only LSP tools)\n`)
+  return new ToolRegistry([...currentTools, ...readOnly], origin)
+}
+
 /**
  * Run the `quanta mcp-server` subcommand. NO-THROW: returns a numeric exit code,
  * never rejects. `argv` is `process.argv.slice(3)` (everything after
@@ -132,6 +182,7 @@ const idMinter = (): (() => string) => {
 export const runMcpServerCmd = async (
   argv: readonly string[],
   injectedIo?: McpServerCmdIo,
+  deps?: McpServerCmdDeps,
 ): Promise<number> => {
   const io = injectedIo ?? defaultIo()
 
@@ -151,12 +202,12 @@ export const runMcpServerCmd = async (
   // 3. Assemble the headless parent config (the ONLY place @/agent meets @/mcp).
   //    Dynamic import keeps the heavy agent assembly out of the common startup
   //    path AND off the gate-off fast path above.
-  return await assembleAndServe(io)
+  return await assembleAndServe(io, deps)
 }
 
 /** Assemble the headless config, build the whitelisted server, and pump stdin.
  *  Split out so {@link runMcpServerCmd} owns only the help + gate fast paths. */
-const assembleAndServe = async (io: McpServerCmdIo): Promise<number> => {
+const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Promise<number> => {
   // `assembleAgentConfig` + the arg builders live in `@/host/runtime` (ADR-0303
   // thin-surface). `dispatchTool` is internal to `@/agent` (not on the barrel),
   // so it is reached via the deep `@/agent/dispatch` specifier — the same
@@ -194,7 +245,24 @@ const assembleAndServe = async (io: McpServerCmdIo): Promise<number> => {
     return EXIT_USAGE
   }
 
-  const registry = config.registry
+  // T06 — LSP-as-MCP bridge. quanta already owns the LSP client AND read-only
+  // LSP tools (`lsp_diagnostics` / `lsp_references` / `lsp_workspace_symbol` /
+  // …), but this headless `assembleAgentConfig` path wires neither the `lsp`
+  // knob nor the CLI's `QUANTA_LSP_TOOLS` surface — so they never reach this
+  // server's registry. When `QUANTA_LSP_MCP` is set we merge the EXISTING tools
+  // in (NOT new duplicates), giving an external/CLI client real code
+  // intelligence without an IDE — Codex IDE's `vscode-codex-lsp-mcp-server`
+  // parity. Filtered to READ-ONLY (the whitelist would block mutating ones
+  // anyway; we don't even register `lsp_rename_apply`). Default-OFF: gate unset
+  // ⇒ this branch is skipped and the surface is byte-identical to today. This
+  // file is the reverse-MCP composition root (env-read exempt per the
+  // no-raw-process-env ratchet), so the gate read lives here beside the server
+  // gate. The new registry is rebuilt so `dispatchTool` (which resolves tools
+  // from `config.registry`) can find the bridged tools on `tools/call`.
+  const registry = gateOn(process.env, "QUANTA_LSP_MCP")
+    ? await mergeLspBridgeTools(config, deps?.lspToolsForBridge, io)
+    : config.registry
+  config = { ...config, registry }
   const knownNames = new Set(registry.specs().map((s) => s.name))
 
   // ToolListSource over the assembled registry: `specs()` enumerates the

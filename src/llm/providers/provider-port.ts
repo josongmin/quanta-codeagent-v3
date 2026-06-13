@@ -34,6 +34,26 @@ export type { StreamEvent, StreamInput }
 export type ProviderId = "default" | "bedrock" | "vertex" | "foundry" | "mantle"
 
 /**
+ * T08 — provider-AGNOSTIC refusal classifier (the §T08 normalization seam).
+ *
+ * Both vendor channels surface a model refusal through the canonical
+ * `StopReasonKind` vocabulary, but via DIFFERENT arms: Anthropic emits
+ * `stop_reason="refusal"` directly; OpenAI's content filter arrives as a
+ * `response.incomplete{reason:"content_filter"}` event which `openai-responses-wire`
+ * normalizes to `content_filtered`. This seam folds BOTH onto one boolean so the
+ * loop's refusal-fallback recovery branch is written ONCE, provider-blind — no
+ * OpenAI-specific (or Anthropic-specific) pattern leaks into the loop. Any other
+ * stop reason (`end_turn` / `tool_use` / `max_tokens` / `guardrail_intervened` /
+ * `error` / unknown) ⇒ `false`. Pure; no allocation.
+ *
+ * NB: `guardrail_intervened` is deliberately EXCLUDED — it routes to HITL
+ * escalation (default-policy), a human-in-the-loop hand-off rather than a
+ * model self-refusal an automatic re-prompt could clear.
+ */
+export const isRefusalStopReason = (stopReason: string): boolean =>
+  stopReason === "refusal" || stopReason === "content_filtered"
+
+/**
  * Provider authentication bundle. Every field is OPTIONAL — each transport
  * picks the subset it needs and ignores the rest. We deliberately keep ONE
  * struct (rather than a discriminated union per transport) so callers wiring

@@ -18,8 +18,19 @@
  */
 
 import { readFile } from "node:fs/promises"
-import type { HookGroupSetting } from "@/config"
-import type { CommandHookBinding } from "./types"
+import type { HookGroupSetting, SettingsLayerName } from "@/config"
+import { type CommandHookBinding, type CommandHookSource, sourceNeedsReview } from "./types"
+
+/** Map a config {@link SettingsLayerName} → command-hook {@link CommandHookSource}.
+ *  `local` (a repo-local `.local` overlay) shares the repo trust class with
+ *  `project`, so it folds into `"project"` — both are review-gated; the precise
+ *  label is informational, the trust decision is what is load-bearing. */
+const LAYER_TO_SOURCE: Readonly<Record<SettingsLayerName, CommandHookSource>> = {
+  managed: "managed",
+  user: "user",
+  project: "project",
+  local: "project",
+}
 
 /** Coerce an unknown into a non-null plain object, else undefined. */
 const asObject = (v: unknown): Record<string, unknown> | undefined =>
@@ -44,15 +55,26 @@ const commandsOf = (group: Record<string, unknown>): string[] => {
 /** Parse already-read JSON text into bindings. Exported so a host that loads
  *  settings through another path (or a test) can reuse the exact parse without
  *  a filesystem round-trip. Malformed text ⇒ `[]`. */
-/** Flatten one hook group into bindings for `event`. Non-object group ⇒ `[]`. */
+/** Flatten one hook group into bindings for `event`. Non-object group ⇒ `[]`.
+ *
+ *  T04 — the LEGACY (non-central) path has no config-layer trust model, so a
+ *  binding is review-gated ONLY when the on-disk group carries the migration
+ *  `needsReview: true` marker (written by `src/migration/external-config`). This
+ *  is read in the TIGHTENING direction ONLY: a `true` marks the binding
+ *  `source:"imported"` + `needsReview:true`; an absent / `false` marker yields a
+ *  byte-identical un-provenanced binding (no source/needsReview keys), so a
+ *  hand-authored `settings.json#hooks` fires exactly as before. A hostile repo
+ *  can therefore only ADD a review requirement to its own hook, never remove one. */
 const bindingsForGroup = (event: string, rawGroup: unknown): CommandHookBinding[] => {
   const group = asObject(rawGroup)
   if (group === undefined) return []
   const matcher = typeof group.matcher === "string" ? group.matcher : undefined
+  const imported = group.needsReview === true
   return commandsOf(group).map((command) => ({
     event,
     command,
     ...(matcher !== undefined ? { matcher } : {}),
+    ...(imported ? { source: "imported" as const, needsReview: true } : {}),
   }))
 }
 
@@ -110,10 +132,24 @@ export const loadCommandHookBindings = async (
  */
 const bindingsFromConfigGroup = (event: string, group: HookGroupSetting): CommandHookBinding[] => {
   const matcher = typeof group.matcher === "string" ? group.matcher : undefined
+  // T04 — `group.source` was STAMPED by the trusted merge from the LAYER NAME
+  // (never disk-readable). Derive the command-hook provenance + the review
+  // requirement from it. Managed/user ⇒ trusted (no review); project/local ⇒
+  // review-gated. Absent source (direct construction in a test / a non-merge
+  // caller) ⇒ un-provenanced, byte-identical.
+  const source = group.source !== undefined ? LAYER_TO_SOURCE[group.source] : undefined
+  const needsReview = sourceNeedsReview(source)
+  const provenance: Pick<CommandHookBinding, "source" | "needsReview"> =
+    source !== undefined ? { source, needsReview } : {}
   const out: CommandHookBinding[] = []
   for (const h of group.hooks ?? []) {
     if (h.type === "command" && typeof h.command === "string" && h.command.trim().length > 0) {
-      out.push({ event, command: h.command, ...(matcher !== undefined ? { matcher } : {}) })
+      out.push({
+        event,
+        command: h.command,
+        ...(matcher !== undefined ? { matcher } : {}),
+        ...provenance,
+      })
     }
   }
   return out

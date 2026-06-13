@@ -129,9 +129,14 @@ describe("BUILTINS table", () => {
       "/debug",
       "/why",
       "/cancel",
+      // T02 — thread-follower co-control verbs (steer/interrupt), inserted after
+      // /cancel in the session layer (registry-session.ts).
+      "/steer",
+      "/interrupt",
       "/summarize-now",
       "/inbound",
       "/resume-turn",
+      "/hooks",
       // ── app layer (./slash/registry-app.ts) ─────────────────────────
       "/permission",
       "/mcp",

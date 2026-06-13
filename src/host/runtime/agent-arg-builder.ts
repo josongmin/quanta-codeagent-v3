@@ -18,12 +18,16 @@
  * process.env" invariant stays true.
  */
 
+import { homedir } from "node:os"
 import { join as joinPath } from "node:path"
 import { buildSystemPrompt, evidenceLspStatic, HookBus, reflectConsultFromLLM, wireOptionalAgentPorts } from "@/agent"
 import {
   type CommandHookBinding,
   type CommandHookConfig,
+  type CommandHookReviewPort,
   createSandboxCommandHookExec,
+  defaultHookApprovalsPath,
+  HookReviewStore,
   installCommandHooks,
   normalizeCommandHookGate,
 } from "@/agent/command-hooks"
@@ -568,12 +572,19 @@ export const installCommandHooksIntoBase = (
   bindings: readonly CommandHookBinding[] | undefined,
 ): void => {
   if (!gateOn(env, "QUANTA_COMMAND_HOOKS")) return // default-OFF
+  // T04 — the trust gate is an INDEPENDENT opt-in (`QUANTA_HOOK_TRUST_GATE`).
+  // OFF (default) ⇒ `needsReview` is informational and every armed binding fires
+  // (byte-identical pre-T04). ON ⇒ imported / repo-shipped bindings flagged
+  // `needsReview` are HELD until approved via `/hooks` (read from the on-disk
+  // approval ledger below).
+  const trustGate = gateOn(env, "QUANTA_HOOK_TRUST_GATE")
   const config: CommandHookConfig = {
     enabled: true,
     ...(env.QUANTA_COMMAND_HOOKS_ACK !== undefined
       ? { acknowledgedRisk: env.QUANTA_COMMAND_HOOKS_ACK }
       : {}),
     bindings: bindings ?? [],
+    trustGate,
   }
   const gate = normalizeCommandHookGate(config) // throws on enabled-without-ack (fail-fast)
   if (!gate.armed) return // ack present but no bindings ⇒ disarmed ⇒ no-op
@@ -585,7 +596,25 @@ export const installCommandHooksIntoBase = (
     exec: createSandboxCommandHookExec(),
     permission: { isAllowed: () => true },
     cwd: base.cwd,
+    // Review port — wired ONLY when the trust gate is armed AND at least one
+    // binding is review-gated (else byte-identical: no ledger read). Re-`load`s
+    // the (tiny) ledger per hook fire so a mid-session `/hooks approve` takes
+    // effect immediately without threading an in-process handle from the CLI.
+    ...(trustGate && gate.bindings.some((b) => b.needsReview === true)
+      ? { review: hookReviewPort(env) }
+      : {}),
   })
+}
+
+/** T04 — the production review port: read-through to the on-disk approval
+ *  ledger (user-config-dir scoped). Fail-closed — an unreadable / absent ledger
+ *  means "nothing approved", so an un-reviewed imported hook never fires. */
+const hookReviewPort = (env: NodeJS.ProcessEnv): CommandHookReviewPort => {
+  const userConfigDir = env.QUANTA_CONFIG_DIR ?? joinPath(homedir(), ".quanta")
+  const path = defaultHookApprovalsPath(userConfigDir)
+  return {
+    isApproved: async (binding) => (await HookReviewStore.load(path)).isApproved(binding),
+  }
 }
 
 /** N6 — resolve the spread-ready `ptySession` slot (`{}` when the knob is OFF

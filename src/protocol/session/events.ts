@@ -1,5 +1,9 @@
 import type { ImageBlock } from "@/llm"
 import type {
+  ItemStreamDeltaKind,
+  ItemStreamItemType,
+} from "@/shared/item-stream"
+import type {
   LlmSurfaceId,
   LlmTransportId,
   ResponsesContinuationMode,
@@ -133,6 +137,38 @@ export interface SkillScopeDecisionEvent extends SessionEventEnvelope<"skill.sco
   readonly isReadOnly: boolean
 }
 
+/**
+ * T01 — `item/*` fine-grained streaming (additive to session.v1). A turn's
+ * INTERIOR projected as discrete items: `item.started` → 0..N `item.delta` →
+ * `item.completed` (Codex app-server parity). Emitted ONLY when
+ * `QUANTA_ITEM_STREAM` is on — absent ⇒ no item events, byte-identical legacy
+ * (every existing consumer ignores unknown `type`s; the codec is a membership
+ * gate, not an exhaustive switch). Payloads mirror {@link ItemStreamCore} in
+ * `@/shared/item-stream` — the SINGLE projector that produces them. `itemType`
+ * (reasoning / commandExecution / fileChange / tool) + `deltaKind` let a surface
+ * branch on a delta alone without joining back to the `started`.
+ */
+export interface ItemStartedEvent extends SessionEventEnvelope<"item.started"> {
+  readonly itemId: string
+  readonly itemType: ItemStreamItemType
+  /** Monotonic across all items in the turn-stream. */
+  readonly itemIndex: number
+}
+
+export interface ItemDeltaEvent extends SessionEventEnvelope<"item.delta"> {
+  readonly itemId: string
+  readonly itemType: ItemStreamItemType
+  readonly deltaKind: ItemStreamDeltaKind
+  readonly delta: string
+}
+
+export interface ItemCompletedEvent extends SessionEventEnvelope<"item.completed"> {
+  readonly itemId: string
+  readonly itemType: ItemStreamItemType
+  /** Accumulated delta body flushed at completion (absent when no deltas). */
+  readonly text?: string
+}
+
 export interface ApprovalRequestedEvent extends SessionEventEnvelope<"approval.requested"> {
   readonly approval: PendingApprovalView
 }
@@ -152,6 +188,9 @@ export type SessionEvent =
   | ApprovalRequestedEvent
   | ApprovalResolvedEvent
   | ArtifactReadyEvent
+  | ItemCompletedEvent
+  | ItemDeltaEvent
+  | ItemStartedEvent
   | SessionClosedEvent
   | SessionCreatedEvent
   | SessionStateUpdatedEvent
@@ -169,6 +208,9 @@ export const SESSION_EVENT_TYPES = [
   "approval.requested",
   "approval.resolved",
   "artifact.ready",
+  "item.completed",
+  "item.delta",
+  "item.started",
   "session.closed",
   "session.created",
   "session.state.updated",

@@ -78,7 +78,8 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         env: {
           QUANTA_SESSIONS_DIR: join(dir, "sessions"),
           QUANTA_LLM_REPLAY: cassette,
-          QUANTA_MEMORY_AUTO: "0", // disable background distillation (no extra LLM calls)
+          QUANTA_MEMORY: "off",
+          QUANTA_MEMORY_AUTO: "0",
         },
       })
       cli = c
@@ -89,6 +90,11 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
       await c.waitFor("REASONING_TRACE", 12_000)
       // …and the answer text streams too.
       await c.waitFor("ANSWER the result is 42", 12_000)
+      const scr = c.screen()
+      // Thinking must precede the answer in the output stream.
+      expect(scr.indexOf("REASONING_TRACE")).toBeLessThan(scr.indexOf("ANSWER the result is 42"))
+      // Thinking block was rendered DIM (\x1b[2m…\x1b[0m) — visible in raw output.
+      expect(c.output()).toMatch(/\x1b\[2m[^\x1b]*REASONING_TRACE/)
     },
     T,
   )

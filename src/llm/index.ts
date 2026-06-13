@@ -95,7 +95,7 @@ export {
 export type { ModelWindow } from "./provider-metadata"
 export { MODEL_CONTEXT_WINDOWS, resolveModelWindow } from "./provider-metadata"
 export type { ProviderEnv, ProviderId, ResolvedProvider } from "./providers"
-export { PROVIDER_ENV_KEYS, resolveProvider } from "./providers"
+export { isRefusalStopReason, PROVIDER_ENV_KEYS, resolveProvider } from "./providers"
 export type {
   ResponsesContinuationEntry,
   ResponsesContinuationStore,

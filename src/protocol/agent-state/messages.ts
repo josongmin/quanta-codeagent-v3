@@ -6,6 +6,7 @@
  * read-model projection logic.
  */
 
+import type { ItemStreamDeltaKind, ItemStreamItemType } from "@/shared/item-stream"
 import type {
   AgentStatePlan,
   AgentStatePlanDelta,
@@ -104,6 +105,35 @@ export interface RatelimitSnapshotMessage {
   readonly emittedAt: number
 }
 
+/** T01 — `item.started` — an interior item opened (reasoning / commandExecution
+ *  / fileChange / tool). `itemIndex` is monotonic across the turn-stream. */
+export interface ItemStartedMessage {
+  readonly kind: "item.started"
+  readonly itemId: string
+  readonly itemType: ItemStreamItemType
+  readonly itemIndex: number
+  readonly emittedAt: number
+}
+
+/** T01 — `item.delta` — an incremental delta for an open item. */
+export interface ItemDeltaMessage {
+  readonly kind: "item.delta"
+  readonly itemId: string
+  readonly itemType: ItemStreamItemType
+  readonly deltaKind: ItemStreamDeltaKind
+  readonly delta: string
+  readonly emittedAt: number
+}
+
+/** T01 — `item.completed` — an item closed; `text` is the accumulated body. */
+export interface ItemCompletedMessage {
+  readonly kind: "item.completed"
+  readonly itemId: string
+  readonly itemType: ItemStreamItemType
+  readonly text?: string
+  readonly emittedAt: number
+}
+
 /** Closed discriminated union — every agent-state message the wire carries. */
 export type AgentStateMessage =
   | PlanCreatedMessage
@@ -115,6 +145,9 @@ export type AgentStateMessage =
   | ToolProgressMessage
   | ContextCompactedMessage
   | RatelimitSnapshotMessage
+  | ItemStartedMessage
+  | ItemDeltaMessage
+  | ItemCompletedMessage
 
 /** Closed enum of message tags — keep in lock-step with the union. */
 export const AGENT_STATE_MESSAGE_KINDS = [
@@ -127,6 +160,9 @@ export const AGENT_STATE_MESSAGE_KINDS = [
   "tool.progress",
   "context.compacted",
   "ratelimit.snapshot",
+  "item.started",
+  "item.delta",
+  "item.completed",
 ] as const
 
 export type AgentStateMessageKind = (typeof AGENT_STATE_MESSAGE_KINDS)[number]

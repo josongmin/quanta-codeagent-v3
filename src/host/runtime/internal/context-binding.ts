@@ -38,7 +38,9 @@ import type {
   RuntimeAgentTurnDeps,
 } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
+import { itemStreamEnabled } from "@/shared"
 import type { AgentEvent } from "@/stream"
+import { ItemStreamProjector } from "@/stream"
 import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
 import { deriveCapabilityManifest } from "../capabilities"
@@ -48,6 +50,11 @@ import { installCliMentionInjector } from "./mention-wire"
 
 type RuntimeBase = RuntimeAgentConfigBase & {
   approvalProtocol?: RuntimeApprovalProtocolConfig
+  /** T01 — `QUANTA_ITEM_STREAM` resolved ONCE at the composition boundary
+   *  ({@link wireRuntimePorts}, where env is available). When true, each turn's
+   *  {@link createTurnStreamPort} runs a fresh {@link ItemStreamProjector} so the
+   *  session wire carries `item.*` events. Absent ⇒ no projector, byte-identical. */
+  itemStream?: boolean
   systemSource?: SystemSource
   toolProfileState?: ToolProfileSessionState
   identityModeState?: IdentityModeSessionState
@@ -309,7 +316,12 @@ const DEFAULT_RUNTIME_ENV: Readonly<Record<string, string | undefined>> = proces
 const wireRuntimePorts = (
   base: RuntimeBase,
   env: Readonly<Record<string, string | undefined>> = DEFAULT_RUNTIME_ENV,
-): RuntimeBase => sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
+): RuntimeBase => {
+  const wired = sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
+  // T01 — resolve QUANTA_ITEM_STREAM here (env in scope) and stamp it onto the
+  // base so the per-turn stream port can mint a projector without re-reading env.
+  return itemStreamEnabled(env) ? sanitizeRuntimeBase({ ...wired, itemStream: true }) : wired
+}
 
 const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =>
   deriveCapabilityManifest({
@@ -1230,11 +1242,18 @@ const extractTurnErrorMessage = (event: AgentEvent): string | undefined =>
 const createTurnStreamPort = (args: {
   readonly baseStream: AgentConfig["stream"]
   readonly onEvent?: (event: SessionHostTurnEvent) => void
+  /** T01 — when true, a fresh per-turn item-stream projector forwards `item.*`
+   *  carriers to `onEvent` alongside the 1:1 bridge. Default-OFF byte-identical. */
+  readonly itemStream?: boolean
 }): {
   readonly stream: AgentConfig["stream"]
   readonly getLastErrorMessage: () => string | undefined
 } => {
   let lastErrorMessage: string | undefined
+  // Per-turn projector instance (stateful across the turn's events). Only minted
+  // when the gate is on AND a consumer (`onEvent`) exists — otherwise no work.
+  const itemProjector =
+    args.itemStream === true && args.onEvent !== undefined ? new ItemStreamProjector() : undefined
   return {
     stream: {
       emit(event: AgentEvent): void {
@@ -1242,6 +1261,14 @@ const createTurnStreamPort = (args: {
         if (errorMessage !== undefined) lastErrorMessage = errorMessage
         const sessionEvent = toSessionHostTurnEvent(event)
         if (sessionEvent !== undefined) args.onEvent?.(sessionEvent)
+        // T01 — fan the item cores derived from THIS event onto the session wire.
+        // Emitted AFTER the 1:1 bridge event so e.g. a tool's `tool.invoked`
+        // precedes its `item.started` (stable causal order).
+        if (itemProjector !== undefined) {
+          for (const item of itemProjector.project(event)) {
+            args.onEvent?.({ type: "item.stream", item })
+          }
+        }
         args.baseStream.emit(event)
       },
     },
@@ -1299,6 +1326,7 @@ const runRuntimeTurn = async (args: {
   const turnStream = createTurnStreamPort({
     baseStream: args.base.stream,
     ...(args.onEvent !== undefined ? { onEvent: args.onEvent } : {}),
+    ...(args.base.itemStream === true ? { itemStream: true } : {}),
   })
   try {
     const content: ContentBlock[] = [{ type: "text", text: args.prompt }, ...(args.images ?? [])]

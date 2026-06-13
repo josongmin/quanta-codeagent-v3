@@ -105,6 +105,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI approval preflight + prefix-grant e2e (PTY 
         env: {
           QUANTA_SESSIONS_DIR: join(dir, "sessions"),
           QUANTA_LLM_REPLAY: cassette,
+          QUANTA_MEMORY: "off",
           QUANTA_MEMORY_AUTO: "0",
           // The prompt-suggestion call (default-ON) fires an extra single-shot
           // LLM round that would consume a cassette entry and desync the replay.
@@ -137,6 +138,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI approval preflight + prefix-grant e2e (PTY 
         env: {
           QUANTA_SESSIONS_DIR: join(dir, "sessions"),
           QUANTA_LLM_REPLAY: cassette,
+          QUANTA_MEMORY: "off",
           QUANTA_MEMORY_AUTO: "0",
           QUANTA_ENABLE_PROMPT_SUGGESTION: "0", // keep the replay in lock-step
         },
@@ -171,6 +173,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI approval preflight + prefix-grant e2e (PTY 
         env: {
           QUANTA_SESSIONS_DIR: join(dir, "sessions"),
           QUANTA_LLM_REPLAY: cassette,
+          QUANTA_MEMORY: "off",
           QUANTA_MEMORY_AUTO: "0",
           QUANTA_ENABLE_PROMPT_SUGGESTION: "0",
           // Opt into the persistent trust-scope registry. The durable grant

@@ -36,6 +36,33 @@
  * (which can be model- or tool-derived) could alter the command string.
  */
 
+/** Provenance of a command-hook binding (T04 trust gate, Codex `source`).
+ *  DERIVED from the config layer (or the migration importer) by TRUSTED code —
+ *  NEVER read from disk in a loosening direction (a hostile repo cannot stamp
+ *  `"user"` to skip review; the disk parser strips the key and the merge
+ *  re-stamps it authoritatively from the layer name). The split that matters:
+ *  machine-owned (`managed`/`user`) is trusted; repo-shippable / externally
+ *  imported (`project`/`imported`) is review-gated. See {@link sourceNeedsReview}. */
+export type CommandHookSource = "managed" | "user" | "project" | "imported"
+
+/** Machine-owned sources that an operator already controls — a hook from one
+ *  of these never needs review (it is not attacker-shippable in a cloned repo).
+ *  Everything else (repo-local `project`, migration-`imported`, or an unknown
+ *  provenance) is review-gated when the trust gate is armed. */
+const TRUSTED_HOOK_SOURCES: ReadonlySet<CommandHookSource> = new Set<CommandHookSource>([
+  "managed",
+  "user",
+])
+
+/** Whether a binding of this provenance must be reviewed before it may fire,
+ *  when the trust gate is armed. `managed`/`user` ⇒ false (trusted). Repo /
+ *  imported / `undefined` (legacy, un-provenanced) ⇒ the binding is NOT review-
+ *  gated by source ALONE — `undefined` returns false so the legacy path stays
+ *  byte-identical; a review requirement on the legacy path comes ONLY from the
+ *  migration `needsReview:true` marker, never from an inferred source. */
+export const sourceNeedsReview = (source: CommandHookSource | undefined): boolean =>
+  source !== undefined && !TRUSTED_HOOK_SOURCES.has(source)
+
 /** A single resolved command-hook binding. Mirrors the translator's
  *  {@link TranslatedHook} shape (event + optional matcher + command) but is
  *  flattened to ONE command per binding so the runner iterates a flat list
@@ -51,6 +78,16 @@ export interface CommandHookBinding {
   /** The user-authored shell command, run verbatim as the argv tail. NEVER
    *  concatenated with the payload. */
   readonly command: string
+  /** Provenance (T04). Derived from the config layer / importer by trusted
+   *  code. Absent on the legacy un-provenanced path. */
+  readonly source?: CommandHookSource
+  /** When true, this binding must be APPROVED (via the review store) before the
+   *  runner will spawn it — but ONLY when the gate's trust gate is armed
+   *  ({@link CommandHookGate.trustGate}). Absent / false ⇒ fires as usual.
+   *  Set by trusted code from {@link sourceNeedsReview} or the migration
+   *  importer's `needsReview` marker; the on-disk loosening direction
+   *  (`false`) is never honored. */
+  readonly needsReview?: boolean
 }
 
 /** Result of running one command hook, normalized to the HookBus channels.
@@ -123,6 +160,21 @@ export interface CommandHookPermissionPort {
   isAllowed(input: { event: string; toolName?: string }): Promise<boolean> | boolean
 }
 
+/** Trust-review gate for a {@link CommandHookBinding} flagged
+ *  {@link CommandHookBinding.needsReview} (T04). The runner consults this
+ *  PER-BINDING — only when {@link CommandHookGate.trustGate} is armed — BEFORE
+ *  spawning a review-gated hook. Returning false ⇒ the binding is HELD (the
+ *  command never spawns; the tool still proceeds — a held hook does not deny,
+ *  it simply has not been activated yet). Injected so the slice does not depend
+ *  on the concrete approval store; the production adapter is backed by the
+ *  on-disk hook-approval store the `/hooks` slash writes. */
+export interface CommandHookReviewPort {
+  /** Whether `binding` (review-gated) has been explicitly approved by the user.
+   *  A fail-closed default (no record ⇒ false) keeps an un-reviewed imported
+   *  hook from ever firing. */
+  isApproved(binding: CommandHookBinding): Promise<boolean> | boolean
+}
+
 /** Injected dependencies for the runner. ALL spawning + any wall-clock timing
  *  lives behind {@link CommandHookExecPort} (the spawn port) — the runner
  *  itself reads NO clock and spawns NO process directly (NO-HEURISTICS
@@ -133,6 +185,11 @@ export interface CommandHookDeps {
   readonly permission: CommandHookPermissionPort
   /** Working directory passed to every exec. */
   readonly cwd: string
+  /** Trust-review gate (T04). Consulted ONLY for bindings flagged
+   *  {@link CommandHookBinding.needsReview} when {@link CommandHookGate.trustGate}
+   *  is armed. Absent ⇒ a review-gated binding is treated as NOT approved
+   *  (fail-closed: an un-reviewed imported hook never fires). */
+  readonly review?: CommandHookReviewPort
 }
 
 /** Frozen, validated gate produced by {@link normalizeCommandHookGate}. The
@@ -140,6 +197,12 @@ export interface CommandHookDeps {
 export interface CommandHookGate {
   /** All three guards satisfied AND at least one binding present. */
   readonly armed: boolean
+  /** T04 trust gate. When true, a binding flagged
+   *  {@link CommandHookBinding.needsReview} is HELD (does not spawn) until the
+   *  injected {@link CommandHookReviewPort} approves it. When false (the
+   *  DEFAULT), `needsReview` is purely informational and every armed binding
+   *  fires as before — byte-identical to the pre-T04 behavior. */
+  readonly trustGate: boolean
   /** The acknowledgement string (preserved for audit) when armed; else
    *  undefined. */
   readonly acknowledgedRisk: string | undefined

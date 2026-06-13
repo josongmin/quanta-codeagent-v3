@@ -100,6 +100,61 @@ describe("selectDefaultReviewer", () => {
     ).toBe("auto_review")
   })
 
+  test("autoReviewEnabled routes to guardian REGARDLESS of env sandbox posture (T03 opt-in)", () => {
+    // QUANTA_AUTO_REVIEW / QUANTA_APPROVAL_LADDER=guardian-approvals. The agent
+    // reviewer is selected even when the env sandboxProfile is the unset
+    // "default" — the opt-in IS the operator's posture choice.
+    expect(
+      selectDefaultReviewer({
+        threadPermission: undefined,
+        permissionMode: "default",
+        sandboxProfile: "default",
+        hasAutoReview: false,
+        hasGuardianReview: true,
+        autoReviewEnabled: true,
+      }),
+    ).toBe("guardian_subagent")
+  })
+
+  test("autoReviewEnabled with NO guardian capability falls back (never silent auto-approve)", () => {
+    // A headless run with no subagent: the opt-in must NOT silently auto-approve
+    // with no reviewer — it degrades to auto_review then user.
+    expect(
+      selectDefaultReviewer({
+        threadPermission: undefined,
+        permissionMode: "default",
+        sandboxProfile: "default",
+        hasAutoReview: true,
+        hasGuardianReview: false,
+        autoReviewEnabled: true,
+      }),
+    ).toBe("auto_review")
+    expect(
+      selectDefaultReviewer({
+        threadPermission: undefined,
+        permissionMode: "default",
+        sandboxProfile: "default",
+        hasAutoReview: false,
+        hasGuardianReview: false,
+        autoReviewEnabled: true,
+      }),
+    ).toBe("user")
+  })
+
+  test("autoReviewEnabled=false is byte-identical to the legacy selection", () => {
+    // The default. Outside the legacy workspace-write posture ⇒ user.
+    expect(
+      selectDefaultReviewer({
+        threadPermission: undefined,
+        permissionMode: "default",
+        sandboxProfile: "default",
+        hasAutoReview: false,
+        hasGuardianReview: true,
+        autoReviewEnabled: false,
+      }),
+    ).toBe("user")
+  })
+
   test("keeps user as the fallback outside the default workspace-write posture", () => {
     expect(
       selectDefaultReviewer({

@@ -98,7 +98,8 @@ const HOST: readonly KnobInventoryEntry[] = [
     default: false,
     group: "host-gate",
     home: "runtime-config",
-    describe: "browser_element_bounds tool — element pixel rect by ref (ticket-24; opt-in, needs QUANTA_BROWSER_TOOL).",
+    describe:
+      "browser_element_bounds tool — element pixel rect by ref (ticket-24; opt-in, needs QUANTA_BROWSER_TOOL).",
     readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
@@ -107,7 +108,8 @@ const HOST: readonly KnobInventoryEntry[] = [
     default: false,
     group: "host-gate",
     home: "runtime-config",
-    describe: "browser_highlight tool — transient cosmetic overlay by ref (ticket-24; opt-in, needs QUANTA_BROWSER_TOOL).",
+    describe:
+      "browser_highlight tool — transient cosmetic overlay by ref (ticket-24; opt-in, needs QUANTA_BROWSER_TOOL).",
     readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
@@ -116,7 +118,8 @@ const HOST: readonly KnobInventoryEntry[] = [
     default: false,
     group: "host-gate",
     home: "runtime-config",
-    describe: "browser_tab_* tools — multi-tab (new/switch/close/list, per-tab refMap) (ticket-24 Wave B; opt-in, needs QUANTA_BROWSER_TOOL).",
+    describe:
+      "browser_tab_* tools — multi-tab (new/switch/close/list, per-tab refMap) (ticket-24 Wave B; opt-in, needs QUANTA_BROWSER_TOOL).",
     readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
@@ -125,7 +128,8 @@ const HOST: readonly KnobInventoryEntry[] = [
     default: false,
     group: "host-gate",
     home: "runtime-config",
-    describe: "/init slash command — scaffold AGENTS.md/CLAUDE.md from the repo (ticket-16; opt-in, writes cwd).",
+    describe:
+      "/init slash command — scaffold AGENTS.md/CLAUDE.md from the repo (ticket-16; opt-in, writes cwd).",
     readSite: "apps/cli/slash/registry-surface.ts",
   },
   {
@@ -144,6 +148,16 @@ const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Acknowledgement phrase for command-hooks.",
+    readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
+    envKey: "QUANTA_HOOK_TRUST_GATE",
+    kind: "bool",
+    default: false,
+    group: "security",
+    home: "runtime-config",
+    describe:
+      "T04 command-hook trust gate — hold imported/repo-shipped hooks (needsReview) until approved via /hooks.",
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
@@ -379,6 +393,23 @@ const HOST: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "MCP config file path override.",
     readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
+    // T06 (jun-13 Codex-IDE reabsorption) — reverse-MCP LSP bridge. When the
+    // `quanta mcp-server` is running, expose the EXISTING read-only LSP tools
+    // (the base `diagnostics` upgraded to the real provider + the `lsp_*` nav
+    // family) so an external/CLI client gets real code intelligence without an
+    // IDE. Read at the reverse-MCP composition root (mcp-server-setup.ts),
+    // NOT a manifest tool gate — the tools are already catalogued under
+    // QUANTA_LSP / QUANTA_LSP_TOOLS; this gate only governs their reverse-MCP
+    // exposure path. Default-OFF.
+    envKey: "QUANTA_LSP_MCP",
+    kind: "bool",
+    default: false,
+    group: "mcp",
+    home: "runtime-config",
+    describe: "Reverse-MCP server: expose read-only LSP tools (diagnostics/references/symbols).",
+    readSite: "apps/cli/mcp-server-setup.ts",
   },
   {
     envKey: "QUANTA_RETRIEVAL_HYBRID",
@@ -671,6 +702,15 @@ const RUNNER: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "Diff visible line cap.",
     readSite: "runner/diff-ops.ts",
+  },
+  {
+    envKey: "QUANTA_HUNK_APPROVAL",
+    kind: "bool",
+    default: false,
+    group: "diff",
+    home: "runtime-config",
+    describe: "Per-hunk diff accept/reject in the approval prompt (T05; opt-in).",
+    readSite: "apps/cli/repl/runtime-context-compose.ts",
   },
 ]
 
@@ -1390,6 +1430,20 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "stream/item-lifecycle.ts",
   },
   {
+    // T01 — fine-grained `item/*` streaming protocol (Codex app-server parity):
+    // a turn's interior projected as session.v1 `item.*` events + web agent-state
+    // `item.*` messages from a SINGLE ItemStreamProjector. Distinct from
+    // QUANTA_ITEM_LIFECYCLE (coarse in-proc AgentEvents); this is the wire plane.
+    envKey: "QUANTA_ITEM_STREAM",
+    kind: "bool",
+    default: false,
+    group: "observability",
+    home: "runtime-config",
+    describe: "Fine-grained item/* streaming on session.v1 + agent-state (opt-in).",
+    readSite:
+      "shared/item-stream.ts (itemStreamEnabled; wired host/runtime context-binding + agent/optional-ports)",
+  },
+  {
     envKey: "QUANTA_FAST_APPLY",
     kind: "bool",
     default: false,
@@ -1414,6 +1468,25 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe: "Subagent follow-up task tool (opt-in).",
+    readSite: "agent/optional-ports.ts",
+  },
+  {
+    envKey: "QUANTA_REFUSAL_FALLBACK",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "T08 model-refusal recovery — fork/neutralize the refused turn and re-prompt once (opt-in).",
+    readSite: "agent/optional-ports.ts",
+  },
+  {
+    envKey: "QUANTA_REFUSAL_FALLBACK_PROMPT",
+    kind: "string",
+    default: undefined,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Override the refusal-fallback re-prompt template (built-in default when unset).",
     readSite: "agent/optional-ports.ts",
   },
   {
@@ -1482,7 +1555,8 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     default: false,
     group: "agent-feature",
     home: "runtime-config",
-    describe: "Thin-client dispatch routing (opt-in).",
+    describe:
+      "Thin-client dispatch routing + T02 thread-follower co-control verbs (steer/interrupt/approval-relay, timeout-bounded) (opt-in).",
     readSite: "shared/thin-client-route.ts",
   },
   {

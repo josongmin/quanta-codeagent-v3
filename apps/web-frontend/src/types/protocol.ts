@@ -377,6 +377,33 @@ export interface SkillScopeDecisionEvent extends SessionEventEnvelope<"skill.sco
   readonly isReadOnly: boolean
 }
 
+/**
+ * T01 — `item/*` fine-grained streaming (mirrors upstream `Item*Event` in
+ * `src/protocol/session/events.ts`). A turn's interior projected as discrete
+ * items: `item.started` → 0..N `item.delta` → `item.completed`. Emitted only
+ * when `QUANTA_ITEM_STREAM` is on (additive; absent ⇒ never sent). `itemType` /
+ * `deltaKind` are narrowed to strings (upstream uses closed unions the UI does
+ * not enumerate).
+ */
+export interface ItemStartedEvent extends SessionEventEnvelope<"item.started"> {
+  readonly itemId: string
+  readonly itemType: string
+  readonly itemIndex: number
+}
+
+export interface ItemDeltaEvent extends SessionEventEnvelope<"item.delta"> {
+  readonly itemId: string
+  readonly itemType: string
+  readonly deltaKind: string
+  readonly delta: string
+}
+
+export interface ItemCompletedEvent extends SessionEventEnvelope<"item.completed"> {
+  readonly itemId: string
+  readonly itemType: string
+  readonly text?: string
+}
+
 export interface ApprovalRequestedEvent extends SessionEventEnvelope<"approval.requested"> {
   readonly approval: PendingApprovalView
 }
@@ -404,6 +431,9 @@ export type SessionEvent =
   | ToolInvokedEvent
   | ToolCompletedEvent
   | SkillScopeDecisionEvent
+  | ItemStartedEvent
+  | ItemDeltaEvent
+  | ItemCompletedEvent
   | ApprovalRequestedEvent
   | ApprovalResolvedEvent
   | ArtifactReadyEvent
@@ -802,6 +832,33 @@ export interface RatelimitSnapshotMessage {
   readonly emittedAt: number
 }
 
+/** T01 — `item.*` fine-grained item stream on the agent-state channel (mirrors
+ *  upstream `Item*Message`). `itemType` / `deltaKind` narrowed to strings. */
+export interface ItemStartedMessage {
+  readonly kind: "item.started"
+  readonly itemId: string
+  readonly itemType: string
+  readonly itemIndex: number
+  readonly emittedAt: number
+}
+
+export interface ItemDeltaMessage {
+  readonly kind: "item.delta"
+  readonly itemId: string
+  readonly itemType: string
+  readonly deltaKind: string
+  readonly delta: string
+  readonly emittedAt: number
+}
+
+export interface ItemCompletedMessage {
+  readonly kind: "item.completed"
+  readonly itemId: string
+  readonly itemType: string
+  readonly text?: string
+  readonly emittedAt: number
+}
+
 /** Closed discriminated union — every agent-state message the wire carries. */
 export type AgentStateMessage =
   | PlanCreatedMessage
@@ -813,3 +870,6 @@ export type AgentStateMessage =
   | ToolProgressMessage
   | ContextCompactedMessage
   | RatelimitSnapshotMessage
+  | ItemStartedMessage
+  | ItemDeltaMessage
+  | ItemCompletedMessage

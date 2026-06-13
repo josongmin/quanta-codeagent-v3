@@ -24,7 +24,8 @@ import { AGENT_EVENT_TYPES } from "@/stream"
 describe("surface-protocol inventory hellgate", () => {
   test("current canonical inventories stay at the reviewed counts", () => {
     expect(AGENT_EVENT_TYPES.length).toBe(36)
-    expect(SESSION_EVENT_TYPES.length).toBe(15)
+    // T01 — +3 additive session.v1 item events (item.started/delta/completed).
+    expect(SESSION_EVENT_TYPES.length).toBe(18)
     expect(AGENT_STATE_TYPES.size).toBe(9)
     expect(SURFACE_READ_MODEL_IDS.length).toBe(4)
     expect(SURFACE_READ_MODEL_STATUSES).toEqual(["subscribed", "supported", "unsupported"])

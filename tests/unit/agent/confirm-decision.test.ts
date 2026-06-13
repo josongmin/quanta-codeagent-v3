@@ -56,6 +56,7 @@ describe("normalizeConfirm — structured ConfirmDecision round-trip", () => {
     const out = normalizeConfirm({ decision: "deny_and_steer", steer })
     expect(out).toEqual({ decision: "deny_and_steer", steer })
   })
+
 })
 
 describe("normalizeConfirm — invalid shapes THROW (no silent coercion)", () => {

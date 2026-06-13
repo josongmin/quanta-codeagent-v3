@@ -52,6 +52,20 @@ export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval
    *  controller derives a SAFE program-token prefix (single simple command) or
    *  degrades to the exact key. Ignored on an escalation approval. */
   readonly scope?: "once" | "session" | "session_prefix"
+  /** T05 (per-hunk diff accept/reject) — on an `approve` of a previewable
+   *  mutation, the subset of hunk ids (`h1`, `h2`, …) the operator accepted; the
+   *  intended apply consumer is `@/runner/hunk-apply` (partial apply, atomic +
+   *  mode-preserving + staleness-guarded). ABSENT ⇒ whole-call approve, byte-
+   *  identical to the pre-T05 behavior.
+   *
+   *  WIRING STATUS (honest): the CLI inline-confirm surface applies per-hunk
+   *  DIRECTLY via the executor (it holds the previewed before/after) and does
+   *  NOT route through this command. This protocol field is the carrier for the
+   *  DEFERRED (web/SDK) out-of-band approval path; that path does not yet capture
+   *  the pending mutation's before/after on resolve, so a host setting this field
+   *  there currently has NO effect (documented follow-up — not silently honored).
+   *  Ignored on a `deny`. */
+  readonly selectedHunks?: readonly string[]
   /** ADR-0512 P3 — corrective steer for a `deny` of a skill-scope ESCALATION
    *  (the `deny_and_steer` verb): a non-empty message telling the model what to
    *  do instead. Absent ⇒ a plain decline. Ignored on a normal approval. */

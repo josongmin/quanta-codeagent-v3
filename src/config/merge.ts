@@ -136,7 +136,14 @@ export const mergeSettings = (
       else if (!hooksBlocked) {
         for (const [event, groups] of Object.entries(sec.hooks.events)) {
           const bucket = hooks[event] ?? []
-          bucket.push(...groups)
+          // T04 — STAMP the provenance authoritatively from the LAYER NAME,
+          // overwriting any (already-stripped) disk `source`. This is the
+          // single trusted derivation point: a repo (project/local) layer's
+          // groups carry a repo-class source ⇒ the command-hooks loader marks
+          // them `needsReview`; managed/user stay trusted. Migration-imported
+          // hooks land in the project layer, so they inherit `source:"project"`
+          // here even without the legacy import marker.
+          bucket.push(...groups.map((g) => ({ ...g, source: layerName })))
           hooks[event] = bucket
         }
       }

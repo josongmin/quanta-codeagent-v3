@@ -9,6 +9,11 @@ const MAX_TURN_STREAM_RETRIES = 3
 const MAX_OUTPUT_CONTINUES = 3
 const MAX_MALFORMED_RETRIES = 1
 const MAX_CONSECUTIVE_EMPTIES = 2
+/** T08 — model-refusal recovery is ONE-SHOT. This is a HARD rule, NOT a tunable
+ *  knob: re-prompting more than once on repeated refusals risks an infinite
+ *  refusal loop and pressures the model past real safety boundaries, and `n>1`
+ *  is forbidden without measurement ([[no-heuristics-only-validated]]). */
+const MAX_REFUSAL_FALLBACKS = 1
 
 /** Per-kind same-turn recovery budget caps (ADR documented in this module
  *  header + the conversation_action_noop branch of loop.ts). Frozen so a test
@@ -19,6 +24,7 @@ export const RECOVERY_CAPS = Object.freeze({
   outputContinues: MAX_OUTPUT_CONTINUES,
   malformedRetries: MAX_MALFORMED_RETRIES,
   consecutiveEmpties: MAX_CONSECUTIVE_EMPTIES,
+  refusalFallbacks: MAX_REFUSAL_FALLBACKS,
 } as const)
 
 /** Assembled-message shape produced by `assembleFromEvents`. Re-exported by
@@ -43,6 +49,9 @@ export interface RecoveryState {
   outputContinues: number
   malformedRetries: number
   consecutiveEmpties: number
+  /** T08 — count of refusal-fallback re-prompts spent THIS turn (cap
+   *  {@link RECOVERY_CAPS.refusalFallbacks}). A fresh turn resets it. */
+  refusalFallbacks: number
 }
 
 export const freshRecovery = (): RecoveryState => ({
@@ -50,6 +59,7 @@ export const freshRecovery = (): RecoveryState => ({
   outputContinues: 0,
   malformedRetries: 0,
   consecutiveEmpties: 0,
+  refusalFallbacks: 0,
 })
 
 /** What the turn driver should do next. `retry_*` re-enters the SAME turn
@@ -68,6 +78,7 @@ export type RecoveryAction =
   | { do: "proceed" }
   | { do: "completed" }
   | { do: "refusal"; rationale: string }
+  | { do: "refusal_fallback"; text: string; message: AssembledMessage }
   | { do: "error"; reason: string }
 
 /** True when the assembled turn produced nothing usable: no text, no tool_use
@@ -91,6 +102,24 @@ export const extractRefusalRationale = (m: AssembledMessage): string => {
   }
   return parts.join("\n\n").trim()
 }
+
+/** T08 — harness-authored marker that REPLACES a refused assistant turn when
+ *  the refusal-fallback recovery forks it off. It is DATA, never the model's
+ *  withheld SAY. Kept terse + neutral so the single retry does not re-anchor on
+ *  the prior refusal. */
+export const REFUSAL_NEUTRALIZED_MARKER =
+  "(Previous response was withheld and neutralized for a single automatic retry.)"
+
+/** Build the neutralized assistant turn that stands in for a refused turn (T08
+ *  fork/neutralize). We keep an ASSISTANT message — not a drop — so provider
+ *  role-alternation holds (both Anthropic and OpenAI reject two consecutive
+ *  user turns, which a bare drop-then-reprompt would create), but its content is
+ *  ONLY the neutral marker: the refusal text never enters the durable transcript
+ *  nor the retry's context. Pure; allocates one message. */
+export const neutralizedRefusalTurn = (): AssembledMessage => ({
+  role: "assistant",
+  content: [{ type: "text", text: REFUSAL_NEUTRALIZED_MARKER }],
+})
 
 /** Pure policy for a thrown stream error: classify it, consult the SAME-TURN
  *  budget, and decide. Mutates `rec` (consumes a retry slot) only when it

@@ -113,6 +113,32 @@ export const routeInbound = (args: RouteInboundArgs): InboundDecision => {
   return { kind: "interrupt", text: input }
 }
 
+/**
+ * Per-message INVERT (T02 / Codex Cmd-Ctrl+Shift+Enter — "send this ONE message
+ * the other way"). The invert toggles between deferred delivery (`queue`) and
+ * live delivery into the current turn (`weave` ≈ Codex `steer`):
+ *
+ *   - `queue`     ⇄ `weave`   — the queue/steer pair (the headline invert).
+ *   - `interrupt` →  `queue`  — inverting a barge-in defers it instead (its
+ *                               natural opposite is "don't barge in"; there is
+ *                               no second live mode to flip to).
+ *
+ * Pure + total + involutive on the queue/weave pair (`invert(invert(queue))` is
+ * `queue`). Used for a ONE-SHOT override of the session's base inbound mode — the
+ * base mode is never mutated; the surface applies the inverted mode to the next
+ * single message only.
+ */
+export const invertInboundModeOnce = (base: InboundMode): InboundMode => {
+  switch (base) {
+    case "queue":
+      return "weave"
+    case "weave":
+      return "queue"
+    case "interrupt":
+      return "queue"
+  }
+}
+
 /** Parse a raw env / config string into an {@link InboundMode}. Unrecognised ⇒
  *  `undefined` (caller falls through to its default — usually `queue`). */
 export const parseInboundMode = (raw: string | undefined): InboundMode | undefined => {

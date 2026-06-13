@@ -29,6 +29,7 @@ import type {
   CommandHookBinding,
   CommandHookDeps,
   CommandHookGate,
+  CommandHookReviewPort,
   CommandHookVerdict,
 } from "./types"
 
@@ -64,6 +65,33 @@ const matcherPredicate = (matcher: string | undefined): ((name: string) => boole
     return (name) => matchTool(matcher, name)
   }
   return (name) => re.test(name)
+}
+
+/** T04 — filter `matching` down to the bindings allowed to fire under the trust
+ *  gate. A binding NOT flagged `needsReview` always passes. A `needsReview`
+ *  binding passes ONLY if the review port explicitly approves it; with NO review
+ *  port it is HELD (fail-closed — an imported hook never fires un-reviewed). A
+ *  throwing review port is treated as "not approved" (never spawns on error). */
+const selectApproved = async (
+  matching: readonly CommandHookBinding[],
+  review: CommandHookReviewPort | undefined,
+): Promise<CommandHookBinding[]> => {
+  const out: CommandHookBinding[] = []
+  for (const b of matching) {
+    if (b.needsReview !== true) {
+      out.push(b)
+      continue
+    }
+    if (review === undefined) continue
+    let approved = false
+    try {
+      approved = await review.isApproved(b)
+    } catch {
+      approved = false
+    }
+    if (approved) out.push(b)
+  }
+  return out
 }
 
 /** True iff this binding applies to this event. Non-tool events ignore the
@@ -152,6 +180,17 @@ export const runCommandHooks = async (
   const matching = gate.bindings.filter((b) => bindingMatches(b, event))
   if (matching.length === 0) return NEUTRAL
 
+  // T04 TRUST GATE — a binding flagged `needsReview` (imported / repo-shipped
+  // provenance) must NOT spawn until the user has explicitly approved it. Only
+  // enforced when the gate's trust gate is armed; otherwise `needsReview` is
+  // informational and every binding fires (byte-identical pre-T04 path). A
+  // HELD binding does NOT deny the tool — it is simply not active yet (the RCE
+  // surface is the COMMAND EXEC, which never happens for an un-approved hook).
+  // Fail-closed: no review port ⇒ a review-gated binding is treated as not
+  // approved (never silently fires).
+  const runnable = gate.trustGate ? await selectApproved(matching, deps.review) : matching
+  if (runnable.length === 0) return NEUTRAL
+
   // Permission guard — a command hook is privileged. Consulted ONCE per event
   // (the bindings for one event share the same approve/deny decision).
   const permitted = await deps.permission.isAllowed({
@@ -172,7 +211,7 @@ export const runCommandHooks = async (
   let mutated = false
   let anyTimedOut = false
 
-  for (const binding of matching) {
+  for (const binding of runnable) {
     const result = await deps.exec.exec({
       command: binding.command,
       stdinJson,

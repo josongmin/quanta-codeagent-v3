@@ -39,6 +39,7 @@ import type { CapEnforcer } from "./cap-enforcer"
 import type { GranularRegistryPort } from "./checkpoint/granular-registry"
 import type { CheckpointTriggerMode, DestructivenessOracle } from "./checkpoint-policy"
 import type { CloseoutCriticConfig } from "./closeout-critic"
+import type { RefusalFallbackConfig } from "./refusal-fallback"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
 import type { ConversationCheckpointStore } from "./conversation-checkpoint"
@@ -472,6 +473,13 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  NEVER blocks completion. Port absent / critic throws ⇒ FAIL-OPEN. Knob:
    *  `QUANTA_CLOSEOUT_CRITIC`. */
   closeoutCritic?: CloseoutCriticConfig
+  /** T08 — model-refusal recovery (fork/neutralize + re-prompt). Absent ⇒ OFF
+   *  and a refusal-class stop (`refusal` / `content_filtered`) terminates the
+   *  turn byte-identically. When `enabled`, the loop neutralizes the refused
+   *  turn and re-prompts ONCE with the (configurable) fallback prompt; a second
+   *  refusal — or a fork that would exceed `taskBudget` — is terminal. Knob:
+   *  `QUANTA_REFUSAL_FALLBACK` (+ optional `QUANTA_REFUSAL_FALLBACK_PROMPT`). */
+  refusalFallback?: RefusalFallbackConfig
   /** HITL 4-tier gate (Codex hitl-audit.md absorption). Absent ⇒ legacy
    *  single-tier behavior (byte-identical). When enabled, every dispatch
    *  computes the effective tier and routes through tier-specific gates:

@@ -28,7 +28,10 @@ const toCommandHookEvent = (event: HookEvent): CommandHookEvent => {
   if (
     event.type === "pre_tool_use" ||
     event.type === "post_tool_use" ||
-    event.type === "post_tool_use_failure"
+    event.type === "post_tool_use_failure" ||
+    // T04 (UC4) — permission_request is tool-shaped (it carries the tool `name`
+    // the gate is deciding on), so a `matcher` must select against it too.
+    event.type === "permission_request"
   ) {
     return { type: event.type, toolName: event.name, payload: event }
   }

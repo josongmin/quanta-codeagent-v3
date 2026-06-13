@@ -11,6 +11,7 @@
  * at one owner seam instead of drifting across independent filter/mapper code.
  */
 
+import type { ItemStreamCore } from "@/shared/item-stream"
 import type {
   AgentEvent,
   PlanDeltaKindMirror,
@@ -23,6 +24,9 @@ import type {
   AgentStateMessage,
   AgentStateMessageKind,
   ContextCompactedMessage,
+  ItemCompletedMessage,
+  ItemDeltaMessage,
+  ItemStartedMessage,
   ModeChangedMessage,
   PlanCreatedMessage,
   PlanInputRequestedMessage,
@@ -60,7 +64,24 @@ export const isAgentStateObservationType = (value: unknown): value is AgentState
   typeof value === "string" &&
   (AGENT_STATE_OBSERVATION_EVENT_TYPES as readonly string[]).includes(value)
 
-export type AgentStateObservation = Extract<AgentEvent, { type: AgentStateObservationType }>
+/** The 1:1 AgentEvent-subset observations (the original 9 tapped types). */
+export type AgentStateEventObservation = Extract<AgentEvent, { type: AgentStateObservationType }>
+
+/**
+ * T01 — a SYNTHETIC observation carrying one {@link ItemStreamCore}. Unlike the
+ * 9 event observations it is NOT a 1:1 projection of a single AgentEvent — the
+ * stateful {@link ItemStreamProjector} (the SINGLE source) produces it from a
+ * RUN of events. It rides the SAME agent-state channel so the daemon forwarder
+ * (`agentStateObservationToMessage`) maps it onto an `item.*` message with no
+ * forwarder change.
+ */
+export interface ItemStreamObservation {
+  readonly type: "item_stream"
+  readonly item: ItemStreamCore
+}
+
+/** Every observation the agent-state channel carries. */
+export type AgentStateObservation = AgentStateEventObservation | ItemStreamObservation
 
 export interface AgentStateSink {
   capture(event: AgentStateObservation): void
@@ -270,11 +291,54 @@ export const projectAgentEventToAgentStateObservation = (
   }
 }
 
+/**
+ * T01 — SSOT mapper: one {@link ItemStreamCore} → its `item.*` agent-state
+ * message. This is the AGENT-STATE half of the dual-plane projection; the
+ * SESSION-WIRE half lives in `@/kernel/session/session-host-turn-event-projection`
+ * (`item.stream` case). The drift ratchet
+ * (`tests/unit/item-stream-projection-drift-hellgate.test.ts`) feeds one core to
+ * BOTH and asserts the carried fields are identical — the "single path" proof.
+ */
+export const itemCoreToAgentStateMessage = (
+  item: ItemStreamCore,
+  emittedAt: number,
+): ItemStartedMessage | ItemDeltaMessage | ItemCompletedMessage => {
+  if (item.phase === "started") {
+    return {
+      kind: "item.started",
+      itemId: item.itemId,
+      itemType: item.itemType,
+      itemIndex: item.index,
+      emittedAt,
+    }
+  }
+  if (item.phase === "delta") {
+    return {
+      kind: "item.delta",
+      itemId: item.itemId,
+      itemType: item.itemType,
+      deltaKind: item.deltaKind,
+      delta: item.delta,
+      emittedAt,
+    }
+  }
+  return {
+    kind: "item.completed",
+    itemId: item.itemId,
+    itemType: item.itemType,
+    ...(item.text !== undefined ? { text: item.text } : {}),
+    emittedAt,
+  }
+}
+
 export const agentStateObservationToMessage = (
   observation: AgentStateObservation,
   opts?: AgentStateProjectionOptions,
 ): AgentStateMessage => {
   const emittedAt = emittedAtOf(opts)
+  if (observation.type === "item_stream") {
+    return itemCoreToAgentStateMessage(observation.item, emittedAt)
+  }
   switch (observation.type) {
     case "plan_created":
       return AGENT_STATE_MESSAGE_PROJECTORS.plan_created(observation, emittedAt)
@@ -312,6 +376,9 @@ export const agentEventToMessage = (
 
 export type {
   ContextCompactedMessage,
+  ItemCompletedMessage,
+  ItemDeltaMessage,
+  ItemStartedMessage,
   ModeChangedMessage,
   PlanCreatedMessage,
   PlanInputRequestedMessage,

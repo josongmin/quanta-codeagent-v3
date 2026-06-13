@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from "node:path"
 import * as readline from "node:readline/promises"
 import {
   type ConfirmDecision,
@@ -14,7 +15,9 @@ import {
   CircumventionTracker,
   // #20 (durable prefix grants) — the persistent, cross-session trust-scope
   // registry the gate consults + the [P] verb mints into.
+  APPROVAL_LADDER,
   createPersistentTrustScopeRegistry,
+  parseApprovalLadderName,
   type PermissionStore,
   // #20 — the operator-facing program token a `session_prefix` grant would cover
   // (null when this command cannot be safely prefix-granted).
@@ -23,14 +26,17 @@ import {
   type TrustScopeRegistry,
 } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
+import { splitHunks } from "@/runner/diff-ops"
+import { applyHunkSelection } from "@/runner/hunk-apply"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
 import { gateOn, runtimeConfig } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
-import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
+import { type ActionDiff, computeActionDiff, diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
+import { parseHunkSelection, renderHunkChoices, shapePartialDecision } from "./hunk-select"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
 // #19 — approval-time applicability pre-flight (edit/apply_patch).
 import { preflightApplyWarning, preflightCheckEnabled } from "../preflight"
@@ -124,6 +130,71 @@ const promptEscalationVerbs = async (
   return { decision: "deny" }
 }
 
+/** T05 — when `QUANTA_HUNK_APPROVAL` is ON, compute the previewed mutation's
+ *  `(path, before, after)` so the confirm prompt can offer per-hunk selection.
+ *  Returns the diff + its atomic hunk ids ONLY when there are ≥2 hunks (a single
+ *  hunk has no meaningful subset — accept/deny already covers it). `undefined`
+ *  ⇒ the prompt is byte-identical to the pre-T05 flow. Best-effort: any failure
+ *  (unsupported tool, read error, apply_patch) degrades to whole-call. */
+const maybeHunkOption = async (
+  deps: CliHitlDeps,
+  action: ToolAction,
+): Promise<{ diff: ActionDiff; ids: string[] } | undefined> => {
+  if (!runtimeConfig().hunkApproval) return undefined
+  const cwd = deps.cwd ?? process.cwd()
+  const reader = (p: string): Promise<string> => {
+    const abs = isAbsolute(p) ? p : resolve(cwd, p)
+    return Bun.file(abs).text()
+  }
+  const diff = await computeActionDiff(action, { readFile: reader })
+  if (diff === undefined) return undefined
+  const ids = splitHunks(diff.before, diff.after).map((h) => h.id)
+  if (ids.length < 2) return undefined
+  return { diff, ids }
+}
+
+/** T05 — drive the interactive hunk picker after the operator chose `[h]`.
+ *  Renders the numbered hunks, reads the selection, and either (a) returns a
+ *  plain allow when ALL hunks are accepted (let the original tool run), (b) a
+ *  plain deny when NONE are, or (c) applies the chosen subset via the executor
+ *  (atomic + mode-preserving + staleness-guarded) and returns the shaped
+ *  `deny_and_steer` so the model learns exactly what landed. */
+const runHunkSelect = async (
+  deps: CliHitlDeps,
+  diff: ActionDiff,
+  ids: string[],
+): Promise<boolean | ConfirmDecision> => {
+  process.stderr.write(`${renderHunkChoices(diff.before, diff.after)}\n`)
+  const raw = await askLine(
+    deps.channel,
+    `Accept which hunks? [1-${ids.length}] (e.g. "1,3" / "all" / "none"): `,
+  )
+  deps.idleMonitor.markActive()
+  const selected = parseHunkSelection(raw, ids)
+  if (selected.length === ids.length) {
+    // Whole-call accept — let the original tool apply normally (no executor).
+    deps.rejectCounter.recordAccept()
+    return true
+  }
+  if (selected.length === 0) {
+    deps.rejectCounter.recordDeny()
+    return false
+  }
+  const cwd = deps.cwd ?? process.cwd()
+  const path = isAbsolute(diff.path) ? diff.path : resolve(cwd, diff.path)
+  const result = await applyHunkSelection({
+    path,
+    before: diff.before,
+    after: diff.after,
+    selectedHunkIds: selected,
+  })
+  // A successful partial apply is an operator ACCEPT (they kept something), even
+  // though the vehicle is a deny_and_steer for the original whole-call.
+  if (result.status === "applied") deps.rejectCounter.recordAccept()
+  else deps.rejectCounter.recordDeny()
+  return shapePartialDecision(result, selected, ids, diff.path)
+}
+
 /** jun-10 HITL restructure — the INLINE confirm a live operator answers AT THE
  *  GATE. With `approvalProtocol.interactive` set (below), the runtime approval
  *  controller delegates a mid-turn "ask" here instead of throwing
@@ -163,6 +234,10 @@ const buildCliOnConfirm =
       // re-attach it so the shared prompt renders the same header both routes.
       return promptEscalationVerbs(deps, { ...scope, tool: action.tool })
     }
+    // T05 — offer the [h]unk-select verb ONLY when QUANTA_HUNK_APPROVAL is ON
+    // AND this mutation decomposes into ≥2 previewable hunks. Absent ⇒ the
+    // prompt is byte-identical to the pre-T05 flow (no [h] offered).
+    const hunkOption = await maybeHunkOption(deps, action)
     // #20 — offer the PREFIX verb ([p] "always allow `<program> …` this
     // session") ONLY when this action is a single simple shell command whose
     // program token can be safely prefix-granted. For a complex/chained command
@@ -179,18 +254,24 @@ const buildCliOnConfirm =
     // session vs [P] all sessions) and the lowercased `ans` cannot tell them
     // apart — so the durable check below reads `raw` and runs BEFORE the `ans`
     // "p" check (a typed "P" lowercases to "p", so durable must win first).
+    // T05 — append the [h]unk-select verb when a per-hunk option exists.
+    const hunkVerb = hunkOption !== undefined ? " / [h]unk-select" : ""
     const raw = (
       await askLine(
         deps.channel,
         durable
-          ? `Allow ${action.tool}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer: `
+          ? `Allow ${action.tool}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
           : prefixLabel !== null
-            ? `Allow ${action.tool}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer: `
-            : `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
+            ? `Allow ${action.tool}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
+            : `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `,
       )
     ).trim()
     const ans = raw.toLowerCase()
     deps.idleMonitor.markActive()
+    // T05 — [h] drives the per-hunk picker (only offered when hunkOption is set).
+    if (hunkOption !== undefined && ans === "h") {
+      return runHunkSelect(deps, hunkOption.diff, hunkOption.ids)
+    }
     if (ans === "y" || ans === "yes") {
       deps.rejectCounter.recordAccept()
       return true
@@ -406,6 +487,23 @@ const buildAdmissibility = (args: {
   const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, materializeReviewerAgent } =
     args
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
+  // T03 (feature 03-guardian) — route approvals to the side-agent guardian when
+  // the operator opts into the agent reviewer. Driven through the SINGLE approval-
+  // ladder SSOT: `QUANTA_APPROVAL_LADDER=<name>` selects a rung and the rung's OWN
+  // `approvalsReviewer` field decides (only `guardian-approvals` is `agent`);
+  // `QUANTA_AUTO_REVIEW=1` is the strict shortcut for that one rung. Default
+  // (neither set / a `user` rung / unknown / `custom`) ⇒ `autoReviewEnabled` stays
+  // false ⇒ `selectDefaultReviewer` is byte-identical (reviewer = user / legacy).
+  //
+  // We do NOT seed a per-thread `ThreadPermission` here: a thread record makes the
+  // permission stack (`evaluateStack`) resolve allow/deny directly and never reach
+  // the reviewer, so a posture record would DEFEAT guardian routing. Routing the
+  // reviewer tier (below) keeps the gate's `ask` → guardian path intact. HARD_DENY
+  // still runs BEFORE the guardian (see `@/permission/policy`).
+  const ladderRung = parseApprovalLadderName(runtimeConfig().approvalLadder)
+  const autoReviewEnabled =
+    runtimeConfig().autoReview ||
+    (ladderRung !== undefined && APPROVAL_LADDER[ladderRung].approvalsReviewer === "agent")
   const threadPermission = permissionStore?.getThread(boot.sessionId)
   const reviewerAgent = materializeReviewerAgent()
   const guardianReview =
@@ -454,6 +552,7 @@ const buildAdmissibility = (args: {
       sandboxProfile,
       hasAutoReview: autoReview !== undefined,
       hasGuardianReview: guardianReview !== undefined,
+      autoReviewEnabled,
     }),
     ...(circumventionTracker !== undefined ? { circumventionTracker } : {}),
   }

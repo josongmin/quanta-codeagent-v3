@@ -19,8 +19,9 @@
  *   ...APP_SLASH_COMMANDS]` into the historic `BUILTINS`.
  */
 
-import { ALL_INBOUND_MODES, parseInboundMode } from "@/agent/inbound-mode"
+import { ALL_INBOUND_MODES, invertInboundModeOnce, parseInboundMode } from "@/agent/inbound-mode"
 import { runDebugCmd } from "../debug-cmd"
+import { hooksCmd } from "../hooks-cmd"
 import { retryWithCmd } from "../retry-with"
 import { sideCmd } from "../side-cmd"
 import type { SlashCommand } from "../slash-contract"
@@ -99,6 +100,52 @@ const summarizeNowCmd: SlashCommand = {
   },
 }
 
+/** `/steer` — T02 thread-follower `steer-turn`: inject ONE message into the
+ *  CURRENT in-flight turn (the §steer weave path) REGARDLESS of the session's
+ *  base inbound mode — i.e. the per-message invert (Codex Cmd-Ctrl+Shift+Enter)
+ *  realized as an explicit verb. Lease-safe: it rides `pushUserMessage`, which
+ *  the loop drains as a `user_message` ConversationAction injected into the lease
+ *  holder's running turn — NOT a second writer. Absent surface ⇒ "not wired". */
+const steerCmd: SlashCommand = {
+  name: "/steer",
+  describe: "Steer the current turn: inject one message into the in-flight turn (T02 follower verb)",
+  category: "session",
+  async run(args, ctx) {
+    if (ctx.conversationActions === undefined) {
+      ctx.out("/steer: not wired in this surface (boot with QUANTA_CONVERSATION_ACTIONS=on)\n")
+      return 0
+    }
+    const text = args.join(" ").trim()
+    if (text === "") {
+      ctx.err("/steer: needs a message to inject (usage: /steer <text>)\n")
+      return 1
+    }
+    ctx.conversationActions.pushUserMessage(text)
+    ctx.out(`/steer: queued — woven into the current turn at the next step: ${text}\n`)
+    return 0
+  },
+}
+
+/** `/interrupt` — T02 thread-follower `interrupt-turn`: abort the active turn
+ *  (the lease-bypassing cancel path). Synonym of `/cancel` framed as the Codex
+ *  follower barge-in verb; both push the SAME typed `cancel` action the loop
+ *  drains per-turn. Absent surface ⇒ "not wired". */
+const interruptCmd: SlashCommand = {
+  name: "/interrupt",
+  describe: "Interrupt (abort) the active turn — Codex follower barge-in (T02)",
+  category: "session",
+  async run(args, ctx) {
+    if (ctx.conversationActions === undefined) {
+      ctx.out("/interrupt: not wired in this surface (boot with QUANTA_CONVERSATION_ACTIONS=on)\n")
+      return 0
+    }
+    const reason = args.join(" ").trim() || "follower requested interrupt"
+    ctx.conversationActions.pushCancel(reason)
+    ctx.out(`/interrupt: queued (applies at next turn boundary): ${reason}\n`)
+    return 0
+  },
+}
+
 /** `/inbound` — §steer: show or set the inbound message-delivery mode. A fired
  *  message while a turn is in flight is handled per mode:
  *    queue     — runs as the NEXT turn (default; FIFO follow-up)
@@ -120,6 +167,15 @@ const inboundCmd: SlashCommand = {
       ctx.out(`/inbound: ${ctx.inboundMode.current} (modes: queue | weave | interrupt)\n`)
       return 0
     }
+    // T02 (UC5) — flip the base mode via the queue/weave invert (Codex per-message
+    // invert, here applied to the session default). `/steer` is the true one-shot
+    // per-message invert; this flips the standing default.
+    if (arg === "invert" || arg === "toggle") {
+      const next = invertInboundModeOnce(ctx.inboundMode.current)
+      ctx.inboundMode.current = next
+      ctx.out(`/inbound: inverted → ${next}\n`)
+      return 0
+    }
     const parsed = parseInboundMode(arg)
     if (parsed === undefined) {
       ctx.out(`/inbound: unknown mode '${arg}' — use queue | weave | interrupt\n`)
@@ -135,10 +191,9 @@ const inboundCmd: SlashCommand = {
   },
   complete(_args, partial) {
     const p = partial.toLowerCase()
-    return ALL_INBOUND_MODES.filter((m) => m.startsWith(p)).map((m) => ({
-      value: m,
-      kind: "argument" as const,
-    }))
+    return [...ALL_INBOUND_MODES, "invert"]
+      .filter((m) => m.startsWith(p))
+      .map((m) => ({ value: m, kind: "argument" as const }))
   },
 }
 
@@ -171,7 +226,10 @@ export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
   debugCmd,
   whyCmd,
   cancelCmd,
+  steerCmd,
+  interruptCmd,
   summarizeNowCmd,
   inboundCmd,
   resumeTurnCmd,
+  hooksCmd,
 ]

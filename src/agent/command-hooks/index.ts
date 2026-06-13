@@ -17,8 +17,15 @@ export {
   type CommandHookEvent,
   runCommandHooks,
 } from "./runner"
+export {
+  defaultHookApprovalsPath,
+  type HookApprovalRecord,
+  hookBindingKey,
+  HookReviewStore,
+} from "./review-store"
 export { createSandboxCommandHookExec } from "./sandbox-exec"
 export {
+  bindingsFromHookEvents,
   loadCommandHookBindings,
   parseCommandHookBindings,
 } from "./settings-loader"
@@ -32,7 +39,10 @@ export {
   type CommandHookExecResult,
   type CommandHookGate,
   type CommandHookPermissionPort,
+  type CommandHookReviewPort,
+  type CommandHookSource,
   type CommandHookVerdict,
   DEFAULT_COMMAND_HOOK_MAX_OUTPUT_BYTES,
   DEFAULT_COMMAND_HOOK_TIMEOUT_MS,
+  sourceNeedsReview,
 } from "./types"

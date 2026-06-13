@@ -19,6 +19,7 @@ export {
   ItemLifecycleTracker,
   itemLifecycleEnabled,
 } from "./item-lifecycle"
+export { ItemStreamProjector } from "./item-stream-projector"
 export type { StreamPort } from "./ports"
 export type {
   AgentEvent,

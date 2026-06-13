@@ -27,6 +27,9 @@ export const ATTACH_RENDERED_SESSION_EVENT_TYPES = [
   "turn.failed",
   "tool.invoked",
   "tool.completed",
+  "item.started",
+  "item.delta",
+  "item.completed",
   "approval.requested",
   "approval.resolved",
   "artifact.ready",
@@ -57,6 +60,13 @@ const ATTACH_SESSION_EVENT_RENDERERS: AttachRendererRegistry = {
     const dur = event.durationMs !== undefined ? ` (${event.durationMs}ms)` : ""
     return `  ✓ ${event.toolName} → ${event.outcome}${dur}\n`
   },
+  // T01 — item/* fine-grained stream (QUANTA_ITEM_STREAM). The `started` opens a
+  // labelled line; `delta`s append verbatim so reasoning / command output / patch
+  // text streams in place; `completed` closes the line. This is the wire-driven
+  // observation the attach CLI gets that the raw turn events do NOT carry.
+  "item.started": (event) => `\n  ⟢ ${event.itemType}: `,
+  "item.delta": (event) => event.delta,
+  "item.completed": () => "\n",
   "approval.requested": (event) => `\n[approval requested] ${event.approval.reason}\n`,
   "approval.resolved": (event) => `[approval ${event.decision}d]\n`,
   "artifact.ready": (event) => {

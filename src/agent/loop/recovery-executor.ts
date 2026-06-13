@@ -1,4 +1,4 @@
-import type { SystemPromptInput } from "@/llm"
+import { isRefusalStopReason, type SystemPromptInput } from "@/llm"
 import { runCloseoutCritic } from "../closeout-critic"
 import {
   dropOldestSalvage,
@@ -7,17 +7,21 @@ import {
   resolveCompactionLimitTokens,
 } from "../compaction"
 import { metaUser, runGuardChain } from "../guards"
-import type { AssembledMessage, RecoveryAction } from "../recovery"
+import type { AssembledMessage, RecoveryAction, RecoveryState } from "../recovery"
 import {
   decideFromStopPolicy,
   decideOnAssembled,
   decideOnStreamError,
   extractRefusalRationale,
+  neutralizedRefusalTurn,
+  RECOVERY_CAPS,
 } from "../recovery"
+import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "../refusal-fallback"
 import { backoffDelayMs } from "../retry"
 import type { ToolHistoryEntry } from "../session-resources"
 import { stripOrphanToolUse } from "../turn-closeout"
 import type { TurnSession, TurnState } from "../turn-context"
+import type { AgentConfig } from "../types"
 import { emitCompactionEvent } from "./compaction-wire"
 import { resetEffortClassifier } from "./context-assembler"
 import { emitRecovery, objectiveBudgetExhausted, resolveWindowModel } from "./emit-helpers"
@@ -50,6 +54,27 @@ export const applyNonSuccessRecoveryAction = async (
       done: true,
       result: { kind: "refusal", rationale: action.rationale, message: sealed },
     }
+  }
+  if (action.do === "refusal_fallback") {
+    // T08 — fork the refused turn off the transcript (replace it with a neutral
+    // marker so role-alternation holds and the retry never re-anchors on the
+    // prior "no"), then re-prompt ONCE with the fallback prompt. SAME turn (no
+    // increment): the one-shot cap lives in `rec.refusalFallbacks`, already
+    // consumed in `resolveTurnAction`, so this can never spin. Surfaced as a
+    // `recovery`/`nudge` event with a `model_refusal_fallback` detail so the
+    // recovery is visible (north-star) without minting a new event vocabulary.
+    wm.append(neutralizedRefusalTurn())
+    wm.append(metaUser(action.text))
+    // Surface the refused rationale (clipped) in the recovery detail so the
+    // recovery is observable ("why did it refuse") without leaking the full
+    // refusal into the transcript (north-star: agent-state visibility).
+    const why = extractRefusalRationale(action.message).slice(0, 120)
+    emitRecovery(
+      config,
+      "nudge",
+      `model_refusal_fallback (neutralizedByFork)${why.length > 0 ? `: ${why}` : ""}`,
+    )
+    return CONTINUE
   }
   if (action.do === "backoff") {
     emitRecovery(config, "backoff", `attempt ${action.attempt}`)
@@ -233,12 +258,69 @@ export const applyAction = async (
   return { done: true, result: { kind: "tools", message, resultBlocks: success.resultBlocks } }
 }
 
+/**
+ * T08 — refusal-fallback decision inputs threaded into {@link resolveTurnAction}.
+ * Kept as a tiny plain struct (no `AgentConfig` / `TurnState`) so the decision
+ * stays a PURE, unit-testable function. `budgetOk` is a thunk so the (possibly
+ * `taskBudget`-derived) check is evaluated only on a refusal-class stop.
+ */
+export interface RefusalFallbackInput {
+  readonly enabled: boolean
+  readonly prompt: string
+  readonly budgetOk: () => boolean
+}
+
+/** Build the refusal-fallback input from config + live turn state, or
+ *  `undefined` when the feature is OFF (so {@link resolveTurnAction} is
+ *  byte-identical). Pure aside from reading the (already-accumulated) spend. */
+export const buildRefusalFallbackInput = (
+  config: AgentConfig,
+  state: TurnState,
+): RefusalFallbackInput | undefined => {
+  const cfg = config.refusalFallback
+  if (cfg === undefined || cfg.enabled !== true) return undefined
+  return {
+    enabled: true,
+    prompt: cfg.prompt ?? DEFAULT_REFUSAL_FALLBACK_PROMPT,
+    budgetOk: () => refusalForkBudgetOk(config, state),
+  }
+}
+
+/** A refusal fork roughly DOUBLES the turn's token cost (re-prompt + re-stream).
+ *  Gate it on the SOFT task budget: when a finite, positive `taskBudget` is set
+ *  and the cumulative spend has already reached it, decline the fork (terminal).
+ *  No `taskBudget` (or non-positive) ⇒ no ceiling to exceed ⇒ allowed. The
+ *  boundary is the budget itself — NOT an arbitrary fraction
+ *  ([[no-heuristics-only-validated]]). */
+const refusalForkBudgetOk = (config: AgentConfig, state: TurnState): boolean => {
+  const tb = config.taskBudget
+  if (tb === undefined || !Number.isFinite(tb.tokens) || tb.tokens <= 0) return true
+  const spent = state.taskSpend?.tokens ?? tb.spent ?? 0
+  return spent < tb.tokens
+}
+
 export const resolveTurnAction = (
   policy: import("../stop-reason").StopReasonPolicy | undefined,
   result: StreamSuccess | { error: unknown; message: string },
-  rec: import("../recovery").RecoveryState,
+  rec: RecoveryState,
+  refusal?: RefusalFallbackInput,
 ): RecoveryAction => {
   if ("error" in result) return decideOnStreamError(result.error, result.message, rec)
-  const override = decideFromStopPolicy(policy, result.stopReason)
-  return override ?? decideOnAssembled(result.stopReason, result.message, rec)
+  const base = decideFromStopPolicy(policy, result.stopReason) ?? decideOnAssembled(result.stopReason, result.message, rec)
+  // T08 — refusal-fallback recovery. Provider-blind: the `isRefusalStopReason`
+  // seam folds Anthropic `refusal` and OpenAI `content_filtered` onto one check,
+  // so this branch is identical for both vendors. OFF / non-refusal ⇒ `base`
+  // verbatim (byte-identical default).
+  if (refusal?.enabled !== true || !isRefusalStopReason(result.stopReason)) return base
+  if (rec.refusalFallbacks < RECOVERY_CAPS.refusalFallbacks && refusal.budgetOk()) {
+    rec.refusalFallbacks += 1
+    return { do: "refusal_fallback", text: refusal.prompt, message: result.message }
+  }
+  // One-shot spent OR a fork would exceed budget ⇒ TERMINAL. Force a refusal
+  // outcome even where the legacy mapping would have let `content_filtered`
+  // slip through as `proceed` (no stop-policy wired): once the feature is on, a
+  // refusal-class stop that cannot be recovered must never silently complete.
+  return base.do === "refusal" || base.do === "error"
+    ? base
+    : { do: "refusal", rationale: extractRefusalRationale(result.message) }
 }

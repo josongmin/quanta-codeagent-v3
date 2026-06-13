@@ -7,6 +7,7 @@ import {
   renderEnvBlock,
   type TurnEnvContext,
 } from "@/agent"
+import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 
 /**
  * RFC jun-6 §6.1 — repo-map turn-0 injection hellgate (TDD red→green).
@@ -123,5 +124,27 @@ describe("repo-map — probeRepoMap (injected scan, no-throw, caps threaded)", (
     expect(await probeRepoMap({ cwd: "/r", scan: async () => undefined })).toBeUndefined()
     expect(await probeRepoMap({ cwd: "/r", scan: async () => "" })).toBeUndefined()
     expect(await probeRepoMap({ cwd: "/r", scan: async () => "   \n  " })).toBeUndefined()
+  })
+})
+
+describe("repo-map — bench surface now in SURFACES", () => {
+  test("HELL-bench: applyRepoMap applies when surface='bench' and env is set", () => {
+    // Red-on-injection: if 'bench' is removed from SURFACES in repo-map.ts,
+    // this test turns red — proves the wiring is real, not vacuous.
+    const knob = repoMapKnob
+    const parsed = knob.parse("1")
+    expect(parsed).not.toBeUndefined()
+    const baseCfg = { llm: {} as any, registry: {} as any } as any
+    const ctx = { surface: "bench" as const }
+    const result = knob.apply(baseCfg, parsed!, ctx)
+    expect(result.repoMap).toBeDefined()
+    expect(result.repoMap?.maxDepth).toBeGreaterThan(0)
+    expect(result.repoMap?.maxFiles).toBeGreaterThan(0)
+  })
+
+  test("HELL-bench-off: bench surface WITHOUT QUANTA_REPO_MAP=1 ⇒ no repoMap", () => {
+    const knob = repoMapKnob
+    const parsed = knob.parse(undefined) // not set
+    expect(parsed).toBeUndefined()
   })
 })

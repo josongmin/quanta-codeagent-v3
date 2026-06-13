@@ -11,6 +11,7 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_SOURCE_TYPES = [
   "tool.completed",
   "usage",
   "skill.scope.decision",
+  "item.stream",
 ] as const satisfies readonly SessionHostTurnEventType[]
 
 export const SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES = [
@@ -21,6 +22,9 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES = [
   "turn.llm.continuation",
   "turn.llm.request",
   "turn.output.delta",
+  "item.started",
+  "item.delta",
+  "item.completed",
 ] as const satisfies readonly SessionEventType[]
 
 interface ProjectionContext {
@@ -195,6 +199,49 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY = {
       },
     }
   },
+  // T01 — project the item-stream carrier onto a phase-routed wire event. Pure
+  // observation: bump seq/revision (monotonic) like `tool.invoked`, no state
+  // patch. The discriminating `item.phase` selects started / delta / completed.
+  "item.stream": (args) => {
+    const nextState = bumpSessionState(args.state, {})
+    const base = createEventBase(args, nextState)
+    const { item } = args.event
+    if (item.phase === "started") {
+      return {
+        state: nextState,
+        emitted: {
+          ...base,
+          type: "item.started",
+          itemId: item.itemId,
+          itemType: item.itemType,
+          itemIndex: item.index,
+        },
+      }
+    }
+    if (item.phase === "delta") {
+      return {
+        state: nextState,
+        emitted: {
+          ...base,
+          type: "item.delta",
+          itemId: item.itemId,
+          itemType: item.itemType,
+          deltaKind: item.deltaKind,
+          delta: item.delta,
+        },
+      }
+    }
+    return {
+      state: nextState,
+      emitted: {
+        ...base,
+        type: "item.completed",
+        itemId: item.itemId,
+        itemType: item.itemType,
+        ...(item.text !== undefined ? { text: item.text } : {}),
+      },
+    }
+  },
 } satisfies SessionHostTurnEventProjectionRegistry
 
 export const projectSessionHostTurnEvent = (
@@ -243,5 +290,10 @@ export const projectSessionHostTurnEvent = (
         ...context,
         event,
       } satisfies ProjectionArgs<"skill.scope.decision">)
+    case "item.stream":
+      return SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY["item.stream"]({
+        ...context,
+        event,
+      } satisfies ProjectionArgs<"item.stream">)
   }
 }

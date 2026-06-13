@@ -144,6 +144,8 @@ export {
   resolveHostId,
   setHostMode,
 } from "./per-host-mode"
+export type { ApprovalLadderName, NamedApprovalLadderRung } from "./approval-ladder"
+export { APPROVAL_LADDER, APPROVAL_LADDER_NAMES, parseApprovalLadderName } from "./approval-ladder"
 export type { ThreadPermission } from "./per-thread-store"
 export {
   clearThreadPermission,

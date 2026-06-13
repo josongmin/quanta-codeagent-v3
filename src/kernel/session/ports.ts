@@ -6,6 +6,7 @@ import type {
   PendingApprovalView,
   SessionEvent,
 } from "@/protocol/session"
+import type { ItemStreamCore } from "@/shared/item-stream"
 import type {
   LlmSurfaceId,
   LlmTransportId,
@@ -75,6 +76,7 @@ export const SESSION_HOST_TURN_EVENT_TYPES = [
   "tool.completed",
   "usage",
   "skill.scope.decision",
+  "item.stream",
 ] as const
 
 export type SessionHostTurnEventType = (typeof SESSION_HOST_TURN_EVENT_TYPES)[number]
@@ -136,6 +138,13 @@ export type SessionHostTurnEvent =
       readonly decision: "allowed" | "declined" | "steered" | "blocked"
       readonly isReadOnly: boolean
     }
+  // T01 — item/* fine-grained stream carrier. The host's per-turn
+  // {@link ItemStreamProjector} produces 0..N {@link ItemStreamCore}s per source
+  // AgentEvent; each is forwarded as ONE `item.stream` and the scheduler projects
+  // it onto an `item.started` / `item.delta` / `item.completed` wire event by
+  // `item.phase`. Carried ONLY when `QUANTA_ITEM_STREAM` is on (absent ⇒ never
+  // produced, byte-identical). Pure observation: no token / state mutation.
+  | { readonly type: "item.stream"; readonly item: ItemStreamCore }
 
 export type SessionHostSideConversationInheritance = "none" | "system" | "last-turn"
 

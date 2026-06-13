@@ -539,6 +539,14 @@ const persistHooks = async (
     const group: Record<string, unknown> = {
       ...(h.matcher !== undefined ? { matcher: h.matcher } : {}),
       hooks: h.commands.map((command) => ({ type: "command", command })),
+      // T04 trust gate — an IMPORTED hook is external/untrusted shell, so stamp
+      // the review marker the command-hooks loader reads (TIGHTENING-only: the
+      // legacy `parseCommandHookBindings` honors `needsReview:true` → the hook
+      // is HELD until the user approves it via `/hooks` when the trust gate is
+      // armed). The marker is inert when the gate is OFF (byte-identical run).
+      // `source` is informational; `needsReview` is the load-bearing field.
+      source: "imported",
+      needsReview: true,
     }
     const bucket = hooks[h.event] ?? []
     hooks[h.event] = bucket

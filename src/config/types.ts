@@ -60,6 +60,13 @@ export interface PermissionSettings {
 export interface HookGroupSetting {
   readonly matcher?: string
   readonly hooks?: readonly { readonly type?: string; readonly command?: string }[]
+  /** T04 provenance — the config LAYER this group came from, STAMPED BY THE
+   *  TRUSTED MERGE ({@link mergeSettings}), NEVER read from disk (the layer
+   *  parser drops unknown keys, so a hostile repo cannot smuggle a trusted
+   *  `source` to skip review). Absent on a freshly-parsed disk group; present
+   *  only on a group inside {@link ResolvedSettings.hooks}. Consumed by the
+   *  command-hooks `bindingsFromHookEvents` to derive `needsReview`. */
+  readonly source?: SettingsLayerName
 }
 
 /** Hooks block — command execution. Capability-granting ⇒ trust-gated. */

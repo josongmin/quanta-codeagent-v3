@@ -296,7 +296,11 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
   {
     name: "browser_highlight",
     origin: "@/agent/tier1/browser (CDP)",
-    gate: { kind: "resource", resource: "chrome/chromium on PATH", env: "QUANTA_BROWSER_HIGHLIGHT" },
+    gate: {
+      kind: "resource",
+      resource: "chrome/chromium on PATH",
+      env: "QUANTA_BROWSER_HIGHLIGHT",
+    },
     default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
     risk: "read-only",
     adr: "0427",
@@ -399,7 +403,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     default: { cli: "opt-in" },
     risk: "mutating",
     adr: "0141",
-    note: "Opt-in LSP navigation/edit tools — needs a language server.",
+    note: "Opt-in LSP navigation/edit tools — needs a language server. T06 (jun-13): the READ-ONLY members (references / workspace_symbol / document_symbol / definition / hover / type_definition / implementation / incoming·outgoing_calls) are ALSO bridged into the reverse-MCP server (`quanta mcp-server`) when QUANTA_LSP_MCP=1, alongside the base `diagnostics` tool upgraded to the real provider. Mutating members (rename_apply) are NOT bridged.",
   },
   {
     name: "check_secrets",

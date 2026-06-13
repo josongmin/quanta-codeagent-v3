@@ -28,10 +28,14 @@ export interface CommandHookConfig {
   readonly timeoutMs?: number
   readonly maxOutputBytes?: number
   readonly envAllowlist?: readonly string[]
+  /** T04 — arm the trust gate: a binding flagged `needsReview` is HELD until
+   *  approved. Default false ⇒ `needsReview` is informational (byte-identical). */
+  readonly trustGate?: boolean
 }
 
 const DISARMED: CommandHookGate = Object.freeze({
   armed: false,
+  trustGate: false,
   acknowledgedRisk: undefined,
   bindings: Object.freeze([]),
   timeoutMs: DEFAULT_COMMAND_HOOK_TIMEOUT_MS,
@@ -77,6 +81,7 @@ export const normalizeCommandHookGate = (raw: CommandHookConfig | undefined): Co
     // command hooks for the current repo.
     return Object.freeze({
       armed: false,
+      trustGate: raw.trustGate === true,
       acknowledgedRisk: ack,
       bindings: Object.freeze([]),
       timeoutMs: resolveTimeout(raw.timeoutMs),
@@ -87,6 +92,7 @@ export const normalizeCommandHookGate = (raw: CommandHookConfig | undefined): Co
 
   return Object.freeze({
     armed: true,
+    trustGate: raw.trustGate === true,
     acknowledgedRisk: ack,
     bindings: Object.freeze([...bindings]),
     timeoutMs: resolveTimeout(raw.timeoutMs),
@@ -106,40 +112,76 @@ const resolveAllowlist = (v: readonly string[] | undefined): readonly string[] =
     ? Object.freeze([...v])
     : Object.freeze([...DEFAULT_ENV_ALLOWLIST])
 
-/** Map a Claude Code hook event name to the quanta {@link HookEventType}.
+/** Map a Claude Code / Codex hook event name to the quanta {@link HookEventType}.
  *  Returns undefined for events quanta does not model (the binding is skipped
- *  — never thrown). Case-insensitive on the leading char so both `PreToolUse`
- *  and `preToolUse` resolve, matching the loose shapes seen in the wild. */
+ *  — never thrown). Accepts both the PascalCase Claude spelling (`PreToolUse`)
+ *  and the camelCase Codex spelling (`preToolUse`) plus the snake_case quanta
+ *  spelling, matching the loose shapes seen in the wild.
+ *
+ *  T04 (UC4) — coverage now spans Codex's FULL 10-event set:
+ *  `preToolUse · permissionRequest · postToolUse · preCompact · postCompact ·
+ *  sessionStart · userPromptSubmit · subagentStart · subagentStop · stop`. The
+ *  previously-unmapped four (`permissionRequest`, `postCompact`,
+ *  `subagentStart`, `subagentStop`) all have quanta event variants
+ *  (`permission_request`, `post_compact`, `subagent_start`, `subagent_stop`)
+ *  that the HookBus already dispatches — so adding the mapping is a pure wiring
+ *  fill (zero-unwired). */
 export const mapClaudeEvent = (
   event: string,
 ):
   | "pre_tool_use"
   | "post_tool_use"
+  | "permission_request"
   | "user_prompt_submit"
   | "session_start"
   | "session_end"
   | "pre_compact"
+  | "post_compact"
+  | "subagent_start"
+  | "subagent_stop"
   | undefined => {
   switch (event) {
     case "PreToolUse":
+    case "preToolUse":
     case "pre_tool_use":
       return "pre_tool_use"
     case "PostToolUse":
+    case "postToolUse":
     case "post_tool_use":
       return "post_tool_use"
+    case "PermissionRequest":
+    case "permissionRequest":
+    case "permission_request":
+      return "permission_request"
     case "UserPromptSubmit":
+    case "userPromptSubmit":
     case "user_prompt_submit":
       return "user_prompt_submit"
     case "SessionStart":
+    case "sessionStart":
     case "session_start":
       return "session_start"
     case "SessionEnd":
     case "Stop":
+    case "stop":
     case "session_end":
       return "session_end"
     case "PreCompact":
+    case "preCompact":
     case "pre_compact":
       return "pre_compact"
+    case "PostCompact":
+    case "postCompact":
+    case "post_compact":
+      return "post_compact"
+    case "SubagentStart":
+    case "subagentStart":
+    case "subagent_start":
+      return "subagent_start"
+    case "SubagentStop":
+    case "subagentStop":
+    case "subagent_stop":
+      return "subagent_stop"
     default:
       return undefined
   }

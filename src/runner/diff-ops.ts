@@ -106,6 +106,158 @@ const buildLcsTable = (a: readonly string[], b: readonly string[]): LcsTable => 
   return { dp, stride }
 }
 
+// ───────────────────────────────────────────────────────────────────────
+// Hunk decomposition + partial reconstruction (T05 — per-hunk accept/reject)
+// ───────────────────────────────────────────────────────────────────────
+
+/**
+ * One ATOMIC hunk: a maximal run of consecutive non-`keep` ops (a contiguous
+ * change region). A modify (`del` immediately followed by `add`) is ONE hunk,
+ * not two — the smallest unit a user can accept/reject without leaving a
+ * half-applied edit. Context (`keep`) ops never belong to a hunk; they are
+ * always emitted unchanged on both sides, so partial application stays
+ * line-coherent regardless of which hunks are selected.
+ *
+ * `id` is a deterministic 1-based `h<N>` derived purely from hunk ORDER, so the
+ * same `(before, after)` pair always produces the same ids — the selection a
+ * surface sends back (referencing the preview's numbering) is stable as long as
+ * the SAME `before`/`after` are re-diffed at apply time (the staleness guard
+ * enforces that `before` still matches disk).
+ */
+export interface DiffHunk {
+  /** Stable order-derived identifier: `h1`, `h2`, … */
+  readonly id: string
+  /** 0-based hunk index (=== Number(id.slice(1)) - 1). */
+  readonly index: number
+  /** The consecutive `del`/`add` ops composing this change (no `keep`). */
+  readonly ops: readonly DiffOp[]
+  /** 1-based old-file line of the first old line this hunk touches; for a pure
+   *  insertion (zero `del`) it is the old-line AFTER which the insertion lands
+   *  (0 when inserting before the very first line / into an empty file). */
+  readonly oldStart: number
+  /** 1-based new-file line of the first new line this hunk produces; for a pure
+   *  deletion (zero `add`) it is the new-line the deletion sits between (0 when
+   *  the deletion is at the very top). */
+  readonly newStart: number
+  readonly delCount: number
+  readonly addCount: number
+}
+
+/**
+ * Decompose `before → after` into atomic hunks (see {@link DiffHunk}). Pure —
+ * computes the line-LCS once and groups maximal non-`keep` runs. An unchanged
+ * pair yields `[]`. Ids are assigned in document order (`h1`, `h2`, …).
+ */
+export const splitHunks = (before: string, after: string): DiffHunk[] =>
+  hunksFromOps(diffOps(before, after))
+
+/**
+ * Group a pre-computed op list into atomic hunks. Factored out so
+ * {@link applySelectedHunks} can derive hunk membership from the SAME op array
+ * it walks for reconstruction (op object identity is meaningless across two
+ * separate `diffOps` calls — membership is keyed by ARRAY INDEX instead).
+ */
+const hunksFromOps = (ops: readonly DiffOp[]): DiffHunk[] => {
+  const hunks: DiffHunk[] = []
+  let oldLine = 0 // 1-based cursor: last old line CONSUMED
+  let newLine = 0 // 1-based cursor: last new line PRODUCED
+  let run: DiffOp[] = []
+  let runOldCursor = 0 // old cursor captured when the run started
+  let runNewCursor = 0 // new cursor captured when the run started
+  let runDel = 0
+  let runAdd = 0
+  const flush = (): void => {
+    if (run.length === 0) return
+    const index = hunks.length
+    hunks.push({
+      id: `h${index + 1}`,
+      index,
+      ops: run,
+      // First old line touched when the hunk deletes; else the insertion point
+      // (the cursor — the old line the inserted block follows).
+      oldStart: runDel > 0 ? runOldCursor + 1 : runOldCursor,
+      // First new line produced when the hunk inserts; else the deletion's
+      // position on the new side (the cursor it sits between).
+      newStart: runAdd > 0 ? runNewCursor + 1 : runNewCursor,
+      delCount: runDel,
+      addCount: runAdd,
+    })
+    run = []
+    runDel = 0
+    runAdd = 0
+  }
+  for (const op of ops) {
+    if (op === undefined) continue
+    if (op.kind === "keep") {
+      flush()
+      oldLine++
+      newLine++
+      continue
+    }
+    if (run.length === 0) {
+      runOldCursor = oldLine
+      runNewCursor = newLine
+    }
+    run.push(op)
+    if (op.kind === "del") {
+      oldLine++
+      runDel++
+    } else {
+      newLine++
+      runAdd++
+    }
+  }
+  flush()
+  return hunks
+}
+
+/**
+ * Reconstruct the file content that results from applying ONLY the hunks in
+ * `selectedIds` to `before` (the other hunks stay at their `before` state).
+ * Pure — re-diffs `before → after` and walks the ops once:
+ *   - `keep` → always emitted (shared context),
+ *   - `del`  → emitted (line RETAINED) iff its hunk is NOT selected,
+ *   - `add`  → emitted (line INSERTED) iff its hunk IS selected.
+ *
+ * Invariants (asserted in tests): selecting every hunk id reproduces `after`
+ * exactly; selecting none reproduces `before` exactly. Unknown / duplicate ids
+ * are ignored (the Set membership is idempotent) — never throws.
+ */
+export const applySelectedHunks = (
+  before: string,
+  after: string,
+  selectedIds: readonly string[],
+): string => {
+  const selected = new Set(selectedIds)
+  const ops = diffOps(before, after)
+  const out: string[] = []
+  // Walk the ops once, tracking the CURRENT hunk index the same way
+  // `hunksFromOps` numbers them: a hunk is a maximal run of non-`keep` ops, so
+  // the index advances when a non-`keep` run STARTS (after a `keep` boundary).
+  let hunkIndex = -1
+  let inRun = false
+  for (const op of ops) {
+    if (op.kind === "keep") {
+      out.push(op.line)
+      inRun = false
+      continue
+    }
+    if (!inRun) {
+      inRun = true
+      hunkIndex++
+    }
+    const isSelected = selected.has(`h${hunkIndex + 1}`)
+    if (op.kind === "del") {
+      // Retain the original line when its hunk was NOT accepted.
+      if (!isSelected) out.push(op.line)
+    } else if (isSelected) {
+      // Insert the new line only when its hunk WAS accepted.
+      out.push(op.line)
+    }
+  }
+  return out.join("\n")
+}
+
 const backtrack = (a: readonly string[], b: readonly string[], t: LcsTable): DiffOp[] => {
   const m = a.length
   const n = b.length

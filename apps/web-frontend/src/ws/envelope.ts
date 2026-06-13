@@ -37,6 +37,9 @@ const EVENT_TYPES: readonly SessionEventType[] = [
   "approval.requested",
   "approval.resolved",
   "artifact.ready",
+  "item.completed",
+  "item.delta",
+  "item.started",
   "session.closed",
   "session.created",
   "session.state.updated",
@@ -357,6 +360,9 @@ const AGENT_STATE_MESSAGE_KINDS = [
   "tool.progress",
   "context.compacted",
   "ratelimit.snapshot",
+  "item.started",
+  "item.delta",
+  "item.completed",
 ] as const
 
 const isAgentStateMessageKind = (value: unknown): value is AgentStateMessage["kind"] =>

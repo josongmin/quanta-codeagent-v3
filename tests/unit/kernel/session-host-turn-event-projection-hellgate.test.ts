@@ -34,6 +34,9 @@ describe("session-host turn-event projection inventory", () => {
       expect(canonical.has(type)).toBe(true)
     }
     expect([...SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES].sort()).toEqual([
+      "item.completed",
+      "item.delta",
+      "item.started",
       "session.state.updated",
       "skill.scope.decision",
       "tool.completed",
@@ -132,6 +135,40 @@ describe("session-host turn-event projection behavior", () => {
           completionTokens: 5,
           totalTokens: 8,
           costMicroUsd: 42,
+        },
+      }),
+      // T01 — the item.stream carrier projects onto a phase-routed wire event.
+      projectSessionHostTurnEvent({
+        state: initialState,
+        commandId: "c1",
+        emittedAt: "2026-06-12T00:00:08.000Z",
+        event: {
+          type: "item.stream",
+          item: { phase: "started", itemId: "it-1", itemType: "reasoning", index: 0 },
+        },
+      }),
+      projectSessionHostTurnEvent({
+        state: initialState,
+        commandId: "c1",
+        emittedAt: "2026-06-12T00:00:09.000Z",
+        event: {
+          type: "item.stream",
+          item: {
+            phase: "delta",
+            itemId: "it-1",
+            itemType: "reasoning",
+            deltaKind: "reasoning.text",
+            delta: "hi",
+          },
+        },
+      }),
+      projectSessionHostTurnEvent({
+        state: initialState,
+        commandId: "c1",
+        emittedAt: "2026-06-12T00:00:10.000Z",
+        event: {
+          type: "item.stream",
+          item: { phase: "completed", itemId: "it-1", itemType: "reasoning", text: "hi" },
         },
       }),
     ]

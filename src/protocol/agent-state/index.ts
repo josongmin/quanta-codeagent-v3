@@ -11,6 +11,9 @@ export type {
   AgentStateMessageKind,
   AgentStateWireEnvelope,
   ContextCompactedMessage,
+  ItemCompletedMessage,
+  ItemDeltaMessage,
+  ItemStartedMessage,
   ModeChangedMessage,
   PlanCreatedMessage,
   PlanInputRequestedMessage,
@@ -21,6 +24,7 @@ export type {
   ToolProgressMessage,
 } from "./messages"
 export type {
+  AgentStateEventObservation,
   AgentStateObservation,
   AgentStateObservationType,
   AgentStatePlan,
@@ -29,6 +33,7 @@ export type {
   AgentStateSink,
   AgentStateTodo,
   AgentStateTodoStatus,
+  ItemStreamObservation,
 } from "./projection"
 export {
   AGENT_STATE_MESSAGE_KINDS,
@@ -45,6 +50,7 @@ export {
   agentStateObservationToMessage,
   agentEventToMessage,
   isAgentStateObservationType,
+  itemCoreToAgentStateMessage,
   projectAgentEventToAgentStateMessage,
   projectAgentEventToAgentStateObservation,
 } from "./projection"

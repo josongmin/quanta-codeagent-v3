@@ -42,6 +42,7 @@ import {
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { errMessage, gateOn } from "@/shared"
+import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
@@ -181,6 +182,11 @@ const SWEBENCH_DIRECTIVE = [
   "  of the issue. If anything fails, iterate. Do NOT stop right after an edit",
   "  without running tests — an unverified edit is the #1 cause of failure.",
   "- Keep the final diff minimal and isolated to the fix.",
+  "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
+  "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
+  "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
+  "- If tests fail with ModuleNotFoundError, set PYTHONPATH=. before pytest to",
+  "  ensure the repo root is on sys.path (e.g. PYTHONPATH=. python -m pytest ...).",
 ].join("\n")
 
 /**
@@ -301,10 +307,16 @@ export const benchOptIns = (): {
    *  of `issueHintMode` — can be set even when the parent gate is off (in
    *  which case it has no effect because no hint runs at all). */
   issueHintExpectedActual: boolean
+  sotaOn: boolean
 } => {
+  // QUANTA_BENCH_SOTA=1 enables the full SOTA++ recommended posture in one flag:
+  // lspNav + localize-phase=5 + issue-hint=agentless. Individual flags still
+  // override SOTA defaults (explicit wins). Measurement: use SOTA as the baseline
+  // for competitive runs; leave unset for byte-identical historical comparison.
+  const sotaOn = gateOn(process.env, "QUANTA_BENCH_SOTA")
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
-  const lspNav = process.env.QUANTA_LSP_TOOLS === "full" || gateOn(process.env, "QUANTA_BENCH_LSP")
+  const lspNav = sotaOn || process.env.QUANTA_LSP_TOOLS === "full" || gateOn(process.env, "QUANTA_BENCH_LSP")
   // Subagent: bench-only `QUANTA_BENCH_SUBAGENT=1`. Empty block ⇒ runner default
   // applies (no per-bench maxDepth tuning — keep the surface minimal until a
   // measured reason appears).
@@ -325,7 +337,9 @@ export const benchOptIns = (): {
   // (absent, 0, negative, NaN, >20, non-integer) ⇒ `undefined` (guard OFF).
   // NOT auto-activated for `instance.swebench` — over-correction risk; opt-in
   // is explicit.
-  const localizePhase = parseLocalizePhaseEnv(process.env.QUANTA_BENCH_LOCALIZE_PHASE)
+  const localizePhase =
+    parseLocalizePhaseEnv(process.env.QUANTA_BENCH_LOCALIZE_PHASE) ??
+    (sotaOn ? { phase1Turns: 5 } : undefined)
   // ADR-0084 branch-search (Agentless N-best, K candidates). Strict integer
   // gate (see parseBenchBranchSearchK); K<2 / non-integer / out-of-range ⇒
   // undefined (key omitted by buildConfig, byte-identical to baseline).
@@ -355,7 +369,7 @@ export const benchOptIns = (): {
   //                              measurement until explicit opt-in)
   const v = process.env.QUANTA_BENCH_ISSUE_HINT
   const issueHintMode: IssueHintMode =
-    v === "agentless" ? "agentless" : v === "1" || v === "on" ? "regex" : "off"
+    v === "agentless" ? "agentless" : v === "1" || v === "on" ? "regex" : sotaOn ? "agentless" : "off"
   // Back-compat: the old `issueHint` boolean stays true for BOTH `regex` and
   // `agentless` modes (anything that produces a non-empty hint block).
   const issueHint = issueHintMode !== "off"
@@ -373,6 +387,7 @@ export const benchOptIns = (): {
     issueHint,
     issueHintMode,
     issueHintExpectedActual,
+    sotaOn,
   }
 }
 
@@ -834,6 +849,14 @@ export const buildConfig = (
   // registration is harmless without a server. Default-OFF preserves
   // byte-identical bench behavior.
   const opt = benchOptIns()
+  // SOTA preset: wire QUANTA_READ_OUTLINE + QUANTA_TEST_RUNNER as live-channel
+  // overrides when QUANTA_BENCH_SOTA=1. setKnobOverride invalidates the
+  // runtimeConfig cache so subsequent reads pick up the new values. These are
+  // idempotent (set to the same value on every buildConfig call for a SOTA run).
+  if (opt.sotaOn) {
+    setKnobOverride("QUANTA_READ_OUTLINE", "1")
+    setKnobOverride("QUANTA_TEST_RUNNER", "1")
+  }
   const lspNavTools = opt.lspNav ? lspNavToolList() : []
   // DIP factory: bench driver runs against the default port surface; the
   // per-instance sandbox is enforced by cwd, not by injected fs ports.

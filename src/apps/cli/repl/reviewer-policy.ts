@@ -81,9 +81,23 @@ export const selectDefaultReviewer = (input: {
   sandboxProfile: CliReviewerSandboxProfile
   hasAutoReview: boolean
   hasGuardianReview: boolean
+  /** T03 (feature 03-guardian) — the operator opted into the agent reviewer via
+   *  the approval ladder (`QUANTA_APPROVAL_LADDER=guardian-approvals`) or its
+   *  strict shortcut (`QUANTA_AUTO_REVIEW=1`). When set, the side-agent guardian
+   *  renders approvals REGARDLESS of the env sandbox posture — the opt-in IS the
+   *  operator's posture choice. Default (absent / false) ⇒ the legacy
+   *  posture-gated selection below is byte-identical. An explicit per-thread
+   *  authority still takes precedence (handled above). */
+  autoReviewEnabled?: boolean
 }): ReviewerTier => {
   if (input.threadPermission !== undefined) {
     return selectExplicitAuthorityReviewer(input.threadPermission, input)
+  }
+  // T03 — explicit agent-reviewer opt-in. Routes to the guardian when its
+  // capability is live; falls back to auto_review then user when it is not (so a
+  // headless run with no subagent never silently auto-approves with no reviewer).
+  if (input.autoReviewEnabled === true && input.hasGuardianReview) {
+    return "guardian_subagent"
   }
   if (input.hasAutoReview) return "auto_review"
   if (

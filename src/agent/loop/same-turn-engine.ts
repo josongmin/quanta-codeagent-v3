@@ -1,7 +1,12 @@
 import type { HookPromptInject } from "../hooks"
 import type { TurnSession, TurnState } from "../turn-context"
 import { prepareTurnContext } from "./context-assembler"
-import { applyAction, EMPTY_TOOL_HISTORY, resolveTurnAction } from "./recovery-executor"
+import {
+  applyAction,
+  buildRefusalFallbackInput,
+  EMPTY_TOOL_HISTORY,
+  resolveTurnAction,
+} from "./recovery-executor"
 import { resolveActiveModelId } from "./skill-gate"
 import { streamConsume } from "./stream-consume"
 import { buildTurnSessionView, classifyTurnAbort } from "./turn-gate"
@@ -50,7 +55,9 @@ export const runTurn = async (
     if (breakerVerdict.abort) return { kind: "error", reason: breakerVerdict.reason }
     const result = await streamConsume(turnSession, state, ctx)
     if ("aborted" in result) return classifyTurnAbort(gate, config.signal)
-    const action = resolveTurnAction(turnConfig.stopReasonPolicy, result, rec)
+    // T08 — refusal-fallback recovery input (undefined ⇒ OFF, byte-identical).
+    const refusalFallback = buildRefusalFallbackInput(turnConfig, state)
+    const action = resolveTurnAction(turnConfig.stopReasonPolicy, result, rec, refusalFallback)
     const step = await applyAction(
       turnSession,
       state,

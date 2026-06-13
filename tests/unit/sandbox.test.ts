@@ -52,6 +52,33 @@ describe("S5 — code-exec env vars dropped from DEFAULT_ENV_ALLOWLIST", () => {
       delete process.env.NODE_EXTRA_CA_CERTS
     }
   })
+
+  // RED-ON-INJECTION: if PYTHONPATH or PYTEST_ADDOPTS are removed from
+  // DEFAULT_ENV_ALLOWLIST, this test turns red immediately — proving the
+  // allowlist is the single source of truth for SWE-bench Python env vars and
+  // cannot silently regress without a failing test.
+  test("PYTHONPATH and PYTEST_ADDOPTS are allowlisted (SWE-bench Python env)", () => {
+    expect(DEFAULT_ENV_ALLOWLIST).toContain("PYTHONPATH")
+    expect(DEFAULT_ENV_ALLOWLIST).toContain("PYTEST_ADDOPTS")
+  })
+
+  // RED-ON-INJECTION: if scrubEnv() stops forwarding PYTHONPATH or
+  // PYTEST_ADDOPTS (e.g. via an overly aggressive scrub loop), this test
+  // catches the regression by observing the actual returned env map, not
+  // just the allowlist declaration — ensuring declaration and behavior stay
+  // in sync.
+  test("scrubEnv() forwards PYTHONPATH and PYTEST_ADDOPTS when set in parent", () => {
+    process.env.PYTHONPATH = "/repo/src:/repo"
+    process.env.PYTEST_ADDOPTS = "-p no:warnings"
+    try {
+      const env = scrubEnv()
+      expect(env.PYTHONPATH).toBe("/repo/src:/repo")
+      expect(env.PYTEST_ADDOPTS).toBe("-p no:warnings")
+    } finally {
+      delete process.env.PYTHONPATH
+      delete process.env.PYTEST_ADDOPTS
+    }
+  })
 })
 
 describe("LocalSandbox env scrub", () => {

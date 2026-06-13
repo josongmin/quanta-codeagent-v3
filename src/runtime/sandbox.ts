@@ -124,6 +124,13 @@ export const DEFAULT_ENV_ALLOWLIST = [
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
   "VIRTUAL_ENV",
+  // Python-specific: PYTHONPATH is needed for SWE-bench repos where the package
+  // is not installed but added to sys.path at runtime. Without it, pytest fails
+  // with ModuleNotFoundError silently (the agent sees a test failure but not why).
+  // PYTEST_ADDOPTS carries per-repo pytest flags (e.g. -p no:warnings) needed by
+  // some repos' CI configs. Both are non-secret, non-code-exec env vars.
+  "PYTHONPATH",
+  "PYTEST_ADDOPTS",
 ]
 
 /** Build the scrubbed environment: ONLY allowlisted names, copied from the

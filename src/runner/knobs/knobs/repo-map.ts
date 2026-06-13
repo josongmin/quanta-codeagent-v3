@@ -18,9 +18,10 @@
  * `REPO_MAP_DEFAULT_*`). Per-cap env overrides are a documented follow-up (they
  * would need `ApplyContext` to carry the env snapshot, which it does not today).
  *
- * Surfaces: cli + agent-batch + agent-interactive. EXCLUDES `bench` — a turn-0
- * tree changes the prefix-cache key + trajectory, so SWE-bench-style measurement
- * stays on the no-map path.
+ * Surfaces: cli + agent-batch + agent-interactive + bench. The bench surface
+ * activates ONLY when QUANTA_REPO_MAP is explicitly set (same gate as other
+ * surfaces) — the knob is still default-OFF; the previous exclusion was
+ * over-restrictive. Turn-0 orientation reduces wasted nav turns on SWE-bench.
  */
 
 import type { AgentConfig } from "@/agent"
@@ -32,7 +33,7 @@ import {
 import { registerKnob } from "../registry"
 import type { ApplyContext, Knob, Surface } from "../types"
 
-const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive"]
+const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive", "bench"]
 
 /** Enable-only boolean parse — `1`/`true`/`on` enable; anything else ⇒ inactive
  *  (byte-identical default-OFF). */

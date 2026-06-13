@@ -41,6 +41,22 @@ export {
   ToolInputError,
   toError,
 } from "./errors"
+export type {
+  ItemStreamCompleted,
+  ItemStreamCore,
+  ItemStreamDelta,
+  ItemStreamDeltaKind,
+  ItemStreamItemType,
+  ItemStreamPhase,
+  ItemStreamStarted,
+} from "./item-stream"
+export {
+  classifyToolItemType,
+  ITEM_DELTA_KIND_BY_ITEM_TYPE,
+  ITEM_STREAM_FLAG,
+  ITEM_TYPE_BY_TOOL_NAME,
+  itemStreamEnabled,
+} from "./item-stream"
 export {
   __resetKnobOverrides,
   getKnobOverride,
