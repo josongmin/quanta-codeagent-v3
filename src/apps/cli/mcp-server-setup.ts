@@ -155,7 +155,7 @@ const mergeLspBridgeTools = async (
   const [{ ToolRegistry }, agent] = await Promise.all([import("@/tool"), import("@/agent")])
   const built = override ? override() : [...agent.lspNavToolList(), agent.lspDiagnosticsTool()]
   const readOnly = built.filter((t) => t.isReadOnly())
-  if (readOnly.length === 0) return config.registry as import("@/tool").ToolRegistry
+  if (readOnly.length === 0) return config.registry
   const currentTools = config.registry
     .specs()
     .map((s) => config.registry.get(s.name))
@@ -259,10 +259,13 @@ const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Pr
   // no-raw-process-env ratchet), so the gate read lives here beside the server
   // gate. The new registry is rebuilt so `dispatchTool` (which resolves tools
   // from `config.registry`) can find the bridged tools on `tools/call`.
-  const registry = gateOn(process.env, "QUANTA_LSP_MCP")
-    ? await mergeLspBridgeTools(config, deps?.lspToolsForBridge, io)
-    : config.registry
-  config = { ...config, registry }
+  // Reassign ONLY when the gate is on — the OFF path leaves `config` (and its
+  // registry) the exact object `assembleAgentConfig` returned, so default-OFF is
+  // LITERALLY byte-identical (no spread, no new object).
+  if (gateOn(process.env, "QUANTA_LSP_MCP")) {
+    config = { ...config, registry: await mergeLspBridgeTools(config, deps?.lspToolsForBridge, io) }
+  }
+  const registry = config.registry
   const knownNames = new Set(registry.specs().map((s) => s.name))
 
   // ToolListSource over the assembled registry: `specs()` enumerates the

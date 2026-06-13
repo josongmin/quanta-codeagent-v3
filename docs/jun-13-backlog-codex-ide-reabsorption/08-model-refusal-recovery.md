@@ -1,6 +1,14 @@
 # T08 — model-refusal 복구 (fork/neutralize + re-prompt)
 
-**현황:** ❌ CONFIRMED-GAP · **ROI:** ★★ (신뢰성) · **게이트:** `QUANTA_REFUSAL_FALLBACK`(default-OFF)
+**현황:** ✅ LANDED (2026-06-13) · **ROI:** ★★ (신뢰성) · **게이트:** `QUANTA_REFUSAL_FALLBACK`(default-OFF)
+
+## 구현 요약 (LANDED)
+- **정규화 seam:** `@/llm#isRefusalStopReason` (`src/llm/providers/provider-port.ts`) — Anthropic `refusal` + OpenAI `content_filtered`를 한 boolean으로 접어 루프는 provider-blind. (`guardrail_intervened`은 HITL 경로라 제외.)
+- **루프 배선:** `resolveTurnAction`(`src/agent/loop/recovery-executor.ts`)이 refusal-class stop을 가로채 1회 한정 `{do:"refusal_fallback"}` 반환 → `applyNonSuccessRecoveryAction`이 거부 턴을 `neutralizedRefusalTurn()`(역할 교대 유지용 중립 assistant 마커)으로 fork-off + `metaUser(prompt)` 재프롬프트(같은 턴 CONTINUE). 1회 cap = `RECOVERY_CAPS.refusalFallbacks`(`rec.refusalFallbacks`, freshRecovery per-turn). exhaust/over-budget 시 `content_filtered`도 `{do:"refusal"}`로 강제 terminal(조용한 complete 방지).
+- **budget:** `taskBudget` 설정 + 누적 spend ≥ tokens면 fork 거부(terminal). 임계값 아닌 budget 경계 그 자체.
+- **knob:** `QUANTA_REFUSAL_FALLBACK`(bool) + `QUANTA_REFUSAL_FALLBACK_PROMPT`(string override). `wireRefusalFallback`(`src/agent/optional-ports.ts`, caller-override-precedence) → `AgentConfig.refusalFallback`. knob-inventory `agent-feature/runtime-config`, **readSite=`agent/optional-ports.ts`**(스펙의 `llm/openai-responses-wire.ts`에서 의도적 변경: provider-agnostic은 wire가 아닌 루프 배선이 정본; fast-apply/effort-auto/followup과 동일 패턴).
+- **관측성(북극성):** 복구 시 `recovery` 이벤트(`nudge` reason, detail `model_refusal_fallback (neutralizedByFork): <거부사유 clip>`).
+- **테스트:** `tests/unit/refusal-fallback-recovery-hellgate.test.ts` (UC1~5 + UC1b 중립화 + UC4b content_filtered re-refusal terminal + UC5b headroom). 3 mutation으로 teeth 검증(feature-dead/cap-off/budget-off 각각 정확한 UC red).
 
 ## 무엇 (코퍼스 증거)
 Claude Code IDE **2.1.170** 신규(manifest 동일, 코드만): 모델이 거부하면 그 턴을 **fork/중립화**(`type:"system", subtype:"model_refusal_fallback"`, `{neutralizedByFork:true}`)하고 `refusal_fallback_prompt`로 **재프롬프트**한다. 즉 거부를 막다른 에러로 두지 않고 복구 경로로 흡수.

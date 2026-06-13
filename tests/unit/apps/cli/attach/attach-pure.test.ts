@@ -8,14 +8,14 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { SessionEvent } from "@/protocol/session"
-import type { SessionTransportMessage } from "@/ipc/session"
 import {
   buildApprovalRespondCommand,
   buildLineCommands,
   createAttachHandshake,
   renderSessionEvent,
 } from "@/apps/cli/attach"
+import type { SessionTransportMessage } from "@/ipc/session"
+import type { SessionEvent } from "@/protocol/session"
 
 const HANDSHAKE_DISCOVERY_SESSION_ID = "ui-session"
 
@@ -273,6 +273,53 @@ describe("attach renderer (SessionEvent → terminal text)", () => {
     expect(invoked).toContain("bash")
     expect(completed).toContain("bash")
     expect(completed).toContain("ok")
+  })
+
+  test("T01 item.* events stream a labelled reasoning/command/patch line", () => {
+    // started opens a labelled line; deltas append verbatim (so reasoning text
+    // streams in place); completed closes it. This is the wire-driven CLI
+    // observation the raw turn events do NOT carry (reasoning/command output).
+    const started = renderSessionEvent(
+      event({
+        eventId: "e1",
+        seq: 1,
+        revision: 1,
+        emittedAt: "t",
+        type: "item.started",
+        itemId: "r0",
+        itemType: "reasoning",
+        itemIndex: 0,
+      }),
+    )
+    const delta = renderSessionEvent(
+      event({
+        eventId: "e2",
+        seq: 2,
+        revision: 1,
+        emittedAt: "t",
+        type: "item.delta",
+        itemId: "r0",
+        itemType: "reasoning",
+        deltaKind: "reasoning.text",
+        delta: "thinking…",
+      }),
+    )
+    const completed = renderSessionEvent(
+      event({
+        eventId: "e3",
+        seq: 3,
+        revision: 1,
+        emittedAt: "t",
+        type: "item.completed",
+        itemId: "r0",
+        itemType: "reasoning",
+        text: "thinking…",
+      }),
+    )
+    expect(started).toContain("reasoning")
+    // delta is appended verbatim so consecutive deltas concatenate in place.
+    expect(delta).toBe("thinking…")
+    expect(completed).toContain("\n")
   })
 
   test("approval.requested renders the reason so the operator can decide", () => {

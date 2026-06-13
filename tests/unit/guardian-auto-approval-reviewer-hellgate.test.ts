@@ -111,10 +111,16 @@ describe("UC2 — HARD_DENY runs BEFORE the reviewer (red-on-injection)", () => 
   test("evaluate() denies a destructive command at the gate, before any reviewer", () => {
     const decision = evaluate(destructive, askMode)
     expect(decision.kind).toBe("deny")
-    // The gate's deny is what a normal (non-denied) mutation would surface as
-    // `ask` → reviewAndDecide → reviewer. A deny short-circuits THAT path
-    // entirely, so the reviewer (guardian) is never constructed for this call.
-    expect(evaluate({ ...destructive, tool: "bash" }, askMode).kind).not.toBe("ask")
+    // Paired control — a benign mutation in the SAME mode surfaces `ask`
+    // (→ reviewAndDecide → reviewer), proving the deny above is the HARD_DENY
+    // gate short-circuiting BEFORE the reviewer, not the mode denying everything.
+    const benign: ToolAction = {
+      tool: "bash",
+      input: { command: "mkdir build" },
+      isReadOnly: false,
+      shellCommand: "mkdir build",
+    }
+    expect(evaluate(benign, askMode).kind).toBe("ask")
   })
 
   test("a guardian that WOULD approve the same command cannot unblock it — the gate already denied", async () => {
@@ -209,5 +215,27 @@ describe("delta-3 — auto-review observer surfaces the agent verdict (started�
     const { run } = runner(APPROVE)
     const dec = await reviewAction(safeMutating, ctx({ toolCallId: "c1" }), guardianPort(run))
     expect(isAllowed(dec.outcome)).toBe(true)
+  })
+
+  test("a THROWING reviewer still closes the lifecycle: started THEN a terminal completed", async () => {
+    // Finding D — `started` fires before the (fallible) dispatch. If the port or
+    // decision validation throws, the surface must NOT be left showing
+    // "reviewing…" forever — a terminal `completed` (not-allowed) must close it,
+    // and the original error must still propagate (the gate fail-closes on it).
+    const events: AutoApprovalReviewEvent[] = []
+    setAutoApprovalReviewObserver({ observe: (e) => events.push(e) })
+    const throwingPort: ReviewerPort = createOnConfirmReviewerPort({
+      onConfirm: onConfirmSpy,
+      guardianReview: async () => {
+        throw new Error("guardian transport blew up mid-review")
+      },
+    })
+    await expect(
+      reviewAction(safeMutating, ctx({ toolCallId: "c9" }), throwingPort),
+    ).rejects.toThrow("guardian transport blew up")
+    expect(events.map((e) => e.phase)).toEqual(["started", "completed"])
+    const completed = events[1] as AutoApprovalReviewEvent
+    expect(completed.allowed).toBe(false) // a failed review never reads as approved
+    expect(completed.toolCallId).toBe("c9")
   })
 })

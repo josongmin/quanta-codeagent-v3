@@ -58,8 +58,13 @@ export const parseHunkSelection = (raw: string, ids: readonly string[]): string[
     if (token === "") continue
     const range = token.match(/^(\d+)-(\d+)$/)
     if (range) {
-      const lo = Number(range[1])
-      const hi = Number(range[2])
+      // CLAMP to the valid 1-based id range BEFORE iterating. Indices outside
+      // [1, ids.length] are dropped by the final filter anyway, so a pathological
+      // `1-999999999` must never materialize a billion-entry Set (OOM/hang that
+      // would wedge the blocking approval prompt). A reversed range (lo>hi) adds
+      // nothing (the loop body never runs).
+      const lo = Math.max(1, Number(range[1]))
+      const hi = Math.min(ids.length, Number(range[2]))
       for (let n = lo; n <= hi; n++) picked.add(n)
       continue
     }

@@ -53,8 +53,8 @@
 ### 2.2 권한·승인·샌드박스
 | 기능 | 설명·증거 | quanta 현황 | 흡수 포인트 |
 |---|---|---|---|
-| `guardian_subagent` 자동승인 reviewer | 승인을 LLM 서브에이전트에 위임(`approvalsReviewer`=user\|agent), `item/autoApprovalReview/*` 스트림 | ❌ 없음 | **T03** |
-| approval ladder (명명 6단) | read-only→auto→granular→guardian-approvals→full-access→custom | 🟡 모드 있으나 사다리 아님 | T03 포함 |
+| `guardian_subagent` 자동승인 reviewer | 승인을 LLM 서브에이전트에 위임(`approvalsReviewer`=user\|agent), `item/autoApprovalReview/*` 스트림 | ✅ LANDED (reviewer 코어는 이미 LIVE였음·false-gap; delta=knob+ladder+surface) | **T03** |
+| approval ladder (명명 6단) | read-only→auto→granular→guardian-approvals→full-access→custom | ✅ LANDED (`@/permission/approval-ladder` SSOT) | T03 포함 |
 | hooks `needsReview` 신뢰게이트 | imported/project hook 활성 전 review, `source∈{user,admin,project,sessionFlags}` | ❌ 없음 | **T04** |
 | per-site 브라우저 권한 + full-CDP 게이팅 | site별 allow/deny, allowedFullCdpOrigins, multi-tab | 🟡 browser-use 있으나 게이팅 약함 | 후순위 |
 
@@ -109,14 +109,14 @@
 
 | # | 티켓 | 현황 | ROI | 근거 |
 |---|---|---|---|---|
-| [T01](01-item-level-streaming.md) | `item/*` fine-grained 스트리밍 프로토콜 | 🟡 | ★★★ | 북극성 agent-state 가시성 직결 |
+| [T01](01-item-level-streaming.md) | `item/*` fine-grained 스트리밍 프로토콜 | ✅ LANDED (jun-13) | ★★★ | 북극성 agent-state 가시성 직결 |
 | [T02](02-thread-follower-cocontrol.md) | `thread-follower` co-control + queue modes | 🟡 | ★★★ | CLI↔web parity·mid-turn-channel SOTA 답 |
-| [T03](03-guardian-auto-approval-reviewer.md) | `guardian_subagent` 자동승인 reviewer + approval ladder | ❌ | ★★ | 무인-but-안전 실행, HITL 4-verb 확장 |
+| [T03](03-guardian-auto-approval-reviewer.md) | `guardian_subagent` 자동승인 reviewer + approval ladder | ✅ LANDED | ★★ | 무인-but-안전 실행, HITL 4-verb 확장 (코어 false-gap; delta=knob+ladder SSOT+surface notice) |
 | [T04](04-hooks-trust-gate-and-model.md) | hooks 신뢰게이트(`needsReview`) + per-hook model | ✅ (per-hook model=N/A defer) | ★★ | 보안갭 + 기능갭 |
 | [T05](05-per-hunk-diff-accept-reject.md) | per-hunk diff accept/reject | 🟡 | ★★ | 입자도 갭, diff-ops 위 |
 | [T06](06-lsp-as-mcp-bridge.md) | LSP-as-MCP 브릿지 | 🟡 | ★★ | IDE 없이 코드 인텔리전스 |
 | [T07](07-chatsessions-editor-extension.md) | VS Code `chatSessions` 에디터 확장 | ❌ | ★(전략) | 에디터 surface 자체 부재 |
-| [T08](08-model-refusal-recovery.md) | model-refusal 복구(fork+re-prompt) | ❌ | ★★ | CC IDE 2.1.170 신규; quanta는 terminal error만 |
+| [T08](08-model-refusal-recovery.md) | model-refusal 복구(fork+re-prompt) | ✅ LANDED | ★★ | CC IDE 2.1.170 신규; quanta는 terminal error만 → fork/neutralize+1회 재프롬프트(default-OFF, provider-agnostic seam) |
 
 ### 티켓 안 만든 후순위 꼬리 (의식적 defer — silent cap 아님)
 (기능)+(왜 defer)+(ROI). 승격 필요하면 별 티켓화.

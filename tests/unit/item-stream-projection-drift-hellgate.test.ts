@@ -14,17 +14,17 @@
  * on ONE transport (the drift this guards) turns this RED.
  */
 import { describe, expect, test } from "bun:test"
-import { itemCoreToAgentStateMessage } from "@/protocol/agent-state"
-import type { AgentStateMessage } from "@/protocol/agent-state"
 import { createKernelSessionState } from "@/kernel/session"
 import {
   projectSessionHostTurnEvent,
   SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES,
 } from "@/kernel/session/session-host-turn-event-projection"
+import type { AgentStateMessage } from "@/protocol/agent-state"
+import { itemCoreToAgentStateMessage } from "@/protocol/agent-state"
+import type { SessionEvent } from "@/protocol/session"
 import type { ItemStreamCore } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { ItemStreamProjector } from "@/stream"
-import type { SessionEvent } from "@/protocol/session"
 
 const manifest = {
   approvals: "operator" as const,
@@ -59,7 +59,7 @@ const collectCores = (events: readonly AgentEvent[]): ItemStreamCore[] => {
 }
 
 /** The item-identifying fields a transport MUST carry, normalized for compare. */
-const coreFields = (item: ItemStreamCore) => ({
+const coreFields = (item: ItemStreamCore): Record<string, unknown> => ({
   phase: item.phase,
   itemId: item.itemId,
   itemType: item.itemType,
@@ -68,7 +68,7 @@ const coreFields = (item: ItemStreamCore) => ({
   ...(item.phase === "completed" ? { text: item.text } : {}),
 })
 
-const sessionEventFields = (e: SessionEvent) => {
+const sessionEventFields = (e: SessionEvent): Record<string, unknown> => {
   if (e.type === "item.started") {
     return { phase: "started", itemId: e.itemId, itemType: e.itemType, index: e.itemIndex }
   }
@@ -92,7 +92,7 @@ const sessionEventFields = (e: SessionEvent) => {
   throw new Error(`not an item event: ${e.type}`)
 }
 
-const agentStateMessageFields = (m: AgentStateMessage) => {
+const agentStateMessageFields = (m: AgentStateMessage): Record<string, unknown> => {
   if (m.kind === "item.started") {
     return { phase: "started", itemId: m.itemId, itemType: m.itemType, index: m.itemIndex }
   }
@@ -167,9 +167,9 @@ describe("item-stream dual-plane drift ratchet", () => {
     )
     for (const t of ["item.started", "item.delta", "item.completed"] as const) {
       expect(emittedTypes.has(t)).toBe(true)
-      expect((SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES as readonly string[]).includes(t)).toBe(
-        true,
-      )
+      expect(
+        (SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES as readonly string[]).includes(t),
+      ).toBe(true)
     }
   })
 

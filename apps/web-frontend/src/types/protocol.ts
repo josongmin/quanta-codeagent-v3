@@ -37,20 +37,11 @@ export interface CapabilityManifest {
   readonly transport: "inproc" | "stdio" | "websocket"
 }
 
-export const SURFACE_READ_MODEL_IDS = [
-  "session",
-  "agentState",
-  "canvas",
-  "observability",
-] as const
+export const SURFACE_READ_MODEL_IDS = ["session", "agentState", "canvas", "observability"] as const
 
 export type SurfaceReadModelId = (typeof SURFACE_READ_MODEL_IDS)[number]
 
-export const SURFACE_READ_MODEL_STATUSES = [
-  "subscribed",
-  "supported",
-  "unsupported",
-] as const
+export const SURFACE_READ_MODEL_STATUSES = ["subscribed", "supported", "unsupported"] as const
 
 export type SurfaceReadModelStatus = (typeof SURFACE_READ_MODEL_STATUSES)[number]
 
@@ -709,12 +700,7 @@ export type CanvasMessage = ToolDiffMessage | ContextUsageMessage
  */
 
 /** A todo's status (mirrors `AgentStateTodoStatus` upstream). */
-export type AgentStateTodoStatus =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "cancelled"
-  | "blocked"
+export type AgentStateTodoStatus = "pending" | "in_progress" | "completed" | "cancelled" | "blocked"
 
 /** A single todo inside a plan (mirrors `AgentStateTodo` upstream). */
 export interface AgentStateTodo {

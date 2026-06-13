@@ -18,6 +18,13 @@
  * Default-OFF guarantee: no registered observer ⇒ every emit is a zero-alloc
  * no-op (byte-identical hot path). A throw from the observer is swallowed here —
  * a telemetry/UI bug must NEVER alter a permission decision.
+ *
+ * SCOPE — single-session: the sink is a process-level singleton (like
+ * {@link import("./recorder").setPermissionRecorder}). It is wired ONLY by the
+ * single-session CLI composition root (`runtime-context-compose`), so there is
+ * one stream to route to. A future MULTI-session host (web-daemon) that wires it
+ * MUST route per-session instead (last-writer-wins would cross-route notices) —
+ * carry the observer on `ReviewContext` rather than this global at that point.
  */
 
 import type { ApprovalOutcome, ReviewerTier } from "./types"

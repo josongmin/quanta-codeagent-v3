@@ -57,5 +57,9 @@ full-access:         sandbox=danger-full-access,approval=never,      reviewer=us
 
 **🔴 어딧 R3가 잡은 실버그:** ladder를 `setThreadPermission`로 시딩하면 `evaluateStack`(라이브 CLI gate)이 thread record에서 allow/deny를 **직접** 결정→**reviewer를 영영 안 거침**. workspace-write(writableRoots 無)는 `threadAllowsMutation=false`→**모든 쓰기 deny**(guardian 도달 0). → 시딩 폐기, `selectDefaultReviewer`의 `autoReviewEnabled` 라우팅으로 전환(threadPermission undefined 유지→gate가 `ask`→guardian).
 
-## 후속 (delta-3, 미구현) — (기능)+(왜)+(ROI)
-- **`item/autoApprovalReview/{started,completed}` 스트림 이벤트 + CLI/Web "auto-reviewed by guardian" annotation** — (기능) reviewer 판정을 T01 item-level 이벤트로 노출, CLI 승인영역/Web 카드에 누가 자동승인했는지 표시. (왜) 현재 guardian 자동승인은 `emitReviewerDecision`(metrics recorder)만 타고 사용자-가시 스트림엔 안 뜸→무인 자동승인이 조용히 일어남(관측성 북극성 위배). (ROI) ★★ — 코어 자동승인은 이미 동작하므로 순수 가시성 추가지만, stream/types·projection·CLI render 동시편집(T01/T05) 충돌영역이라 합류 후 별도 착수가 안전. `emitReviewerDecision`에 stream sink 한 갈래 추가가 최소 구현.
+## delta-3 (구현 완료) — auto-review 가시성
+- **reviewer started→completed 가시화** — guardian/auto 티어가 판정할 때 `src/permission/auto-approval-review-observer.ts`(default-OFF slice-local sink, recorder 패턴 미러)로 started/completed emit. compose가 opt-in일 때만 observer 등록→기존 **`tool_progress`** 이벤트로 변환("auto-reviewed by guardian: approved (no prompt)"). **신규 이벤트타입 0개**(tool_progress는 이미 CLI timeline-panel 렌더 + agent-state projection→web 카드 양면 소비)라 stream/types·projection·events.ts 동시편집 충돌영역 **회피**.
+- toolCallId는 `ReviewContext.toolCallId`(optional, additive)로 gate가 `call.id` 주입→notice가 정확한 tool call에 키잉.
+- fail-safe: observer throw가 판정 절대 안 깸(sink가 swallow). default-OFF: observer 미등록이면 emit no-op→byte-identical.
+- 테스트: `guardian-auto-approval-reviewer-hellgate`에 observer 블록 추가(started→completed 순서/toolCallId·tool·outcome 운반/user티어 무발화/throw-safe/default-OFF no-op). 총 30 신규 green.
+- **남은 polish**(미구현, 선택): Codex와 1:1인 전용 `autoApprovalReview.{started,completed}` session.v1 이벤트(현재는 tool_progress 재사용). (왜) 전용 타입이면 surface가 reviewer 아이템을 도구진행과 구분 렌더 가능. (ROI) ★ — 현재 tool_progress 재사용으로 가시성 목표는 이미 달성, 전용타입은 렌더 세분화뿐이라 낮음.

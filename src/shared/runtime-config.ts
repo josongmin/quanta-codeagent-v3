@@ -1286,11 +1286,16 @@ export interface RuntimeConfig {
   /** T03 (jun-13 codex-ide, feature 03-guardian) — auto-approval reviewer gate
    *  (`QUANTA_AUTO_REVIEW`). Strict opt-in (`=== "1"`): a feature that lets an
    *  LLM side-agent AUTO-APPROVE tool calls without a human must NEVER be armed by
-   *  a stray loose-truthy spelling. Default false ⇒ no thread posture is seeded,
-   *  the reviewer stays `user` (or the legacy posture-gated selection), and the
-   *  approval path is byte-identical. When ON, the composition root seeds the
-   *  session thread with the `guardian-approvals` approval-ladder rung so the
-   *  side-agent guardian renders the verdict — HARD_DENY still runs BEFORE it. */
+   *  a stray loose-truthy spelling. Default false ⇒ the reviewer stays `user` (or
+   *  the legacy posture-gated selection) and the approval path is byte-identical.
+   *  When ON, `selectDefaultReviewer` routes approvals to the side-agent guardian
+   *  (the `guardian-approvals` ladder rung) — HARD_DENY still runs BEFORE it.
+   *
+   *  NOTE — needs an APPROVAL to gate: the guardian only runs when the gate would
+   *  otherwise prompt (mode `default`, the interactive default). In `acceptEdits`/
+   *  `bypass` the gate auto-allows mutations BEFORE any reviewer, so this knob has
+   *  no effect there (no silent escalation — those modes are already a deliberate
+   *  "don't review" choice). */
   readonly autoReview: boolean
   /** T03 — named approval-ladder posture (`QUANTA_APPROVAL_LADDER`): one of
    *  `read-only | auto | granular | guardian-approvals | full-access` (the

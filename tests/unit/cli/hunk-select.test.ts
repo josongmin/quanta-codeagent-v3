@@ -36,6 +36,16 @@ describe("parseHunkSelection", () => {
   it("out-of-range / garbage tokens are dropped (never throws)", () => {
     expect(parseHunkSelection("1,99,foo,0,-2", IDS)).toEqual(["h1"])
   })
+  it("a pathological huge range is clamped to the id count (no OOM/hang)", () => {
+    const t0 = Date.now()
+    // Indices beyond the id count are useless (the filter drops them); the parser
+    // must NOT materialize a 10^9-entry Set. Result = every real id, computed fast.
+    expect(parseHunkSelection("1-999999999", IDS)).toEqual(IDS)
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
+  it("a reversed / inverted range yields nothing (lo>hi, no underflow loop)", () => {
+    expect(parseHunkSelection("3-1", IDS)).toEqual([])
+  })
   it("dedupes and preserves diff order regardless of input order", () => {
     expect(parseHunkSelection("3,1,3,1", IDS)).toEqual(["h1", "h3"])
   })
@@ -52,6 +62,29 @@ describe("renderHunkChoices", () => {
     expect(out).toContain("[2]")
     expect(out).toContain("- b")
     expect(out).toContain("+ B")
+  })
+
+  it("pure-deletion hunk renders only the removed line (no spurious + line)", () => {
+    setColorPolicy("on")
+    const before = ["a", "b", "c"].join("\n")
+    const after = ["a", "c"].join("\n")
+    const out = stripAnsi(renderHunkChoices(before, after))
+    setColorPolicy(null)
+    expect(out).toContain("[1]")
+    expect(out).toContain("- b")
+    expect(out).toContain("-1/+0") // delCount=1, addCount=0 in the header
+    expect(out).not.toContain("+ ") // no added line for a pure deletion
+  })
+
+  it("pure-insertion hunk renders only the added line (no spurious - line)", () => {
+    setColorPolicy("on")
+    const before = ["a", "c"].join("\n")
+    const after = ["a", "b", "c"].join("\n")
+    const out = stripAnsi(renderHunkChoices(before, after))
+    setColorPolicy(null)
+    expect(out).toContain("+ b")
+    expect(out).toContain("-0/+1")
+    expect(out).not.toContain("- ") // no removed line for a pure insertion
   })
 })
 
@@ -82,6 +115,33 @@ describe("shapePartialDecision", () => {
     if (d.decision === "deny_and_steer") {
       expect(d.steer.toLowerCase()).toContain("no")
       expect(d.steer.toLowerCase()).toContain("chang")
+    }
+  })
+
+  it("applied with ALL hunks accepted → 'rejected: none' (fmt none-branch)", () => {
+    const d = shapePartialDecision(
+      { status: "applied", appliedHunkIds: ["h1", "h2"], content: "x" },
+      ["h1", "h2"],
+      ["h1", "h2"],
+      "/f",
+    )
+    expect(d.decision).toBe("deny_and_steer")
+    if (d.decision === "deny_and_steer") {
+      expect(d.steer).toContain("accepted: h1, h2")
+      expect(d.steer).toContain("rejected: none")
+    }
+  })
+
+  it("applied with ZERO hunks accepted → 'accepted: none' (fmt none-branch)", () => {
+    const d = shapePartialDecision(
+      { status: "applied", appliedHunkIds: [], content: "before" },
+      [],
+      ["h1", "h2"],
+      "/f",
+    )
+    if (d.decision === "deny_and_steer") {
+      expect(d.steer).toContain("accepted: none")
+      expect(d.steer).toContain("rejected: h1, h2")
     }
   })
 

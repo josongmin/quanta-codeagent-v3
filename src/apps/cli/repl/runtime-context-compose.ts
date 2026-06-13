@@ -160,16 +160,24 @@ const maybeHunkOption = async (
   action: ToolAction,
 ): Promise<{ diff: ActionDiff; ids: string[] } | undefined> => {
   if (!runtimeConfig().hunkApproval) return undefined
-  const cwd = deps.cwd ?? process.cwd()
-  const reader = (p: string): Promise<string> => {
-    const abs = isAbsolute(p) ? p : resolve(cwd, p)
-    return Bun.file(abs).text()
+  // Best-effort, fully fenced: this runs INSIDE the blocking confirm prompt, so a
+  // throw here must NEVER crash/hang the approval. computeActionDiff is already
+  // try/catch'd internally, but the splitHunks/map below sit outside it — wrap the
+  // whole body so any unexpected failure degrades to whole-call (undefined).
+  try {
+    const cwd = deps.cwd ?? process.cwd()
+    const reader = (p: string): Promise<string> => {
+      const abs = isAbsolute(p) ? p : resolve(cwd, p)
+      return Bun.file(abs).text()
+    }
+    const diff = await computeActionDiff(action, { readFile: reader })
+    if (diff === undefined) return undefined
+    const ids = splitHunks(diff.before, diff.after).map((h) => h.id)
+    if (ids.length < 2) return undefined
+    return { diff, ids }
+  } catch {
+    return undefined
   }
-  const diff = await computeActionDiff(action, { readFile: reader })
-  if (diff === undefined) return undefined
-  const ids = splitHunks(diff.before, diff.after).map((h) => h.id)
-  if (ids.length < 2) return undefined
-  return { diff, ids }
 }
 
 /** T05 — drive the interactive hunk picker after the operator chose `[h]`.

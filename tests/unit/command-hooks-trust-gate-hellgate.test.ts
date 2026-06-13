@@ -291,6 +291,22 @@ describe("T04 — UC5 trust gate OFF is byte-identical", () => {
     expect(armed([userBinding], false).trustGate).toBe(false)
     expect(normalizeCommandHookGate(undefined).trustGate).toBe(false)
   })
+
+  test("OMITTING trustGate defaults to false ⇒ needsReview binding still FIRES", async () => {
+    // Teeth for the default: a config that never mentions trustGate must NOT
+    // accidentally arm the gate (kills the `raw.trustGate !== false` mutation,
+    // which only diverges when trustGate is UNDEFINED — every other test pins
+    // it explicitly). An un-mentioned trust gate is OFF ⇒ byte-identical.
+    const gate = normalizeCommandHookGate({
+      enabled: true,
+      acknowledgedRisk: "trustGate omitted",
+      bindings: [importedBinding],
+    })
+    expect(gate.trustGate).toBe(false)
+    const { port, calls } = fakeExec()
+    await fire(gate, port) // NO review port
+    expect(calls.length).toBe(1) // needsReview ignored ⇒ fires
+  })
 })
 
 // ---- provenance derivation -------------------------------------------------

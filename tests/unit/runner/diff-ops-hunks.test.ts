@@ -32,9 +32,8 @@ describe("splitHunks — atomic changed runs", () => {
     const after = ["a", "X", "c"].join("\n")
     const hunks = splitHunks(before, after)
     expect(hunks.length).toBe(1)
-    const h = hunks[0]!
-    expect(h.delCount).toBe(1)
-    expect(h.addCount).toBe(1)
+    expect(hunks[0]?.delCount).toBe(1)
+    expect(hunks[0]?.addCount).toBe(1)
   })
 
   it("identical before/after yields zero hunks", () => {
@@ -46,15 +45,15 @@ describe("splitHunks — atomic changed runs", () => {
     const after = ["a", "b", "c", "d"].join("\n")
     const hunks = splitHunks(before, after)
     expect(hunks.length).toBe(1)
-    expect(hunks[0]!.delCount).toBe(0)
-    expect(hunks[0]!.addCount).toBe(2)
+    expect(hunks[0]?.delCount).toBe(0)
+    expect(hunks[0]?.addCount).toBe(2)
   })
 
   it("reports 1-based oldStart/newStart anchors", () => {
     const hunks = splitHunks(B, A)
     // h1 modifies line2 (old line 2, new line 2).
-    expect(hunks[0]!.oldStart).toBe(2)
-    expect(hunks[0]!.newStart).toBe(2)
+    expect(hunks[0]?.oldStart).toBe(2)
+    expect(hunks[0]?.newStart).toBe(2)
   })
 })
 

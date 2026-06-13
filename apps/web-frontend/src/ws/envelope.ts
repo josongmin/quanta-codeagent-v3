@@ -18,12 +18,12 @@ import type {
   CommandEnvelope,
   EventEnvelope,
   ObservabilityMessage,
-  SurfaceSubscription,
   SessionCommand,
   SessionEvent,
   SessionEventType,
   SessionRejectedFrame,
   SessionSnapshotLite,
+  SurfaceSubscription,
 } from "../types/protocol"
 
 /**

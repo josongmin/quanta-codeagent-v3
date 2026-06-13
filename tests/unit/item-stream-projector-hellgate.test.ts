@@ -23,8 +23,8 @@
  *   7. gate default-OFF via @/shared SSOT.
  */
 import { describe, expect, test } from "bun:test"
-import { itemStreamEnabled } from "@/shared"
 import type { ItemStreamCore } from "@/shared"
+import { itemStreamEnabled } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { ItemStreamProjector } from "@/stream"
 
@@ -92,7 +92,9 @@ describe("ItemStreamProjector — tool items (UC2/UC3) + classification", () => 
   test("bash tool_call opens a commandExecution item; progress is command.output; result flushes", () => {
     const p = new ItemStreamProjector()
     const started = p.project(call("t1", "bash"))
-    expect(started).toEqual([{ phase: "started", itemId: "t1", itemType: "commandExecution", index: 0 }])
+    expect(started).toEqual([
+      { phase: "started", itemId: "t1", itemType: "commandExecution", index: 0 },
+    ])
     const d = p.project(progress("t1", "line1\n"))
     expect(d).toEqual([
       {
@@ -104,7 +106,9 @@ describe("ItemStreamProjector — tool items (UC2/UC3) + classification", () => 
       },
     ])
     const c = p.project(result("t1"))
-    expect(c).toEqual([{ phase: "completed", itemId: "t1", itemType: "commandExecution", text: "line1\n" }])
+    expect(c).toEqual([
+      { phase: "completed", itemId: "t1", itemType: "commandExecution", text: "line1\n" },
+    ])
   })
 
   test("edit tool_call opens a fileChange item; progress is file.patch", () => {
@@ -133,6 +137,20 @@ describe("ItemStreamProjector — tool items (UC2/UC3) + classification", () => 
     const [c] = p.project(result("t1"))
     expect(c).toEqual({ phase: "completed", itemId: "t1", itemType: "commandExecution" })
     expect(c && "text" in c).toBe(false)
+  })
+})
+
+describe("ItemStreamProjector — empty-delta discipline (audit R3)", () => {
+  test("a leading empty thinking delta opens NO item; the first non-empty one does", () => {
+    const p = new ItemStreamProjector()
+    expect(p.project(thinking(""))).toEqual([])
+    expect(phases(p.project(thinking("real")))).toEqual(["started", "delta"])
+  })
+
+  test("an empty tool_progress message yields no delta", () => {
+    const p = new ItemStreamProjector()
+    p.project(call("t1", "bash"))
+    expect(p.project(progress("t1", ""))).toEqual([])
   })
 })
 
@@ -188,6 +206,73 @@ describe("ItemStreamProjector — turn boundary flush", () => {
     const out = p.project(done)
     expect(out.map((c) => c.itemId).sort()).toEqual(["a", "b"])
     expect(out.every((c) => c.phase === "completed")).toBe(true)
+  })
+})
+
+describe("ItemStreamProjector — transient events must NOT split a reasoning run (audit R2)", () => {
+  const transient: AgentEvent[] = [
+    { type: "in_progress", timestamp: 1 },
+    { type: "output_progress", outputTokens: 5, exact: false },
+    { type: "usage", inputTokens: 1, outputTokens: 2, model: "m" },
+    { type: "ratelimit_snapshot", observedAt: 1 },
+  ]
+  for (const ev of transient) {
+    test(`${ev.type} interleaved in a reasoning run does NOT close it (no spurious split)`, () => {
+      const p = new ItemStreamProjector()
+      p.project(thinking("part1 "))
+      // A transient event between thinking deltas must produce NO item core and
+      // must NOT flush the open reasoning item.
+      expect(p.project(ev)).toEqual([])
+      const more = p.project(thinking("part2"))
+      // Still the SAME reasoning item (delta only, no new started) — one run.
+      expect(more.map((c) => c.phase)).toEqual(["delta"])
+      const [completed] = p.project(done)
+      expect(completed).toMatchObject({
+        phase: "completed",
+        itemType: "reasoning",
+        text: "part1 part2",
+      })
+    })
+  }
+})
+
+describe("ItemStreamProjector — abort/pause behavior (audit R2: no premature completion)", () => {
+  test("WITHOUT a terminal event, an open item stays OPEN (no fabricated completed)", () => {
+    // A turn that throws/pauses (e.g. HITL approval) before `done` must NOT have
+    // its open items force-completed by the projector — the consumer closes them
+    // on the turn-terminal SessionEvent. Force-completing here would LIE about a
+    // paused tool/reasoning item having finished. Matches ItemLifecycleTracker.
+    const p = new ItemStreamProjector()
+    p.project(call("t1", "bash"))
+    p.project(progress("t1", "partial output"))
+    // No done / turn_start emitted (turn threw). The projector yields nothing
+    // further — the item is intentionally left open.
+    expect(p.project({ type: "error", message: "boom" } as AgentEvent)).toEqual([])
+  })
+
+  test("a turn_start (next turn) flushes a still-open item from a prior aborted run", () => {
+    const p = new ItemStreamProjector()
+    p.project(call("t1", "bash"))
+    const flushed = p.project(turnStart)
+    expect(flushed).toEqual([{ phase: "completed", itemId: "t1", itemType: "commandExecution" }])
+  })
+})
+
+describe("ItemStreamProjector — determinism (audit R3: two production instances agree)", () => {
+  test("two instances fed the SAME event order emit byte-identical cores", () => {
+    const seq: AgentEvent[] = [
+      thinking("a"),
+      thinking("b"),
+      call("t1", "bash"),
+      progress("t1", "x"),
+      result("t1"),
+      done,
+    ]
+    const run = () => {
+      const p = new ItemStreamProjector()
+      return seq.flatMap((ev) => p.project(ev))
+    }
+    expect(run()).toEqual(run())
   })
 })
 

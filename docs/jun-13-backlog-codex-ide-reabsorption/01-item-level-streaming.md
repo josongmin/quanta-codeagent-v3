@@ -1,6 +1,8 @@
 # T01 — `item/*` fine-grained 스트리밍 프로토콜
 
-**현황:** 🟡 PARTIAL · **ROI:** ★★★ · **게이트:** `QUANTA_ITEM_STREAM`(default-OFF)
+**현황:** ✅ LANDED (jun-13) · **ROI:** ★★★ · **게이트:** `QUANTA_ITEM_STREAM`(default-OFF)
+
+> **구현 요약(jun-13):** 단일 소스 `ItemStreamProjector`(`@/stream/item-stream-projector.ts`)가 in-proc AgentEvent(`assistant_thinking`/`tool_call`/`tool_progress`/`tool_result`/턴경계)를 fine-grained `ItemStreamCore`(reasoning/commandExecution/fileChange/tool × started/delta/completed)로 투영. **양 plane LIVE 배선**: (1) session.v1 additive `item.started/delta/completed`(events.ts) — host `createTurnStreamPort`가 게이트 ON 시 per-turn projector로 `item.stream` SessionHostTurnEvent를 onEvent로 흘려 scheduler가 phase-라우팅; (2) web agent-state `item.*` 메시지 — `wireItemStreamTap`이 같은 projector로 `onAgentState` sink fan-out. **drift 라쳇**(`item-stream-projection-drift-hellgate`)이 두 plane이 동일 코어를 운반함을 증명(단일경로). 코어 타입/분류기/게이트는 `@/shared/item-stream`. CLI 관측=attach `renderSessionEvent`(item.* RENDERED). web-frontend mirror(envelope/protocol/transcript) 동기화. default-OFF byte-identical(게이트 OFF→projector 미할당). 적대어딧 3R: LIVE-path 검증(dead-path 아님)·abort/pause는 의도적 open-유지(조기 completed 금지, ItemLifecycleTracker baseline)·empty-delta 가드·9-event subset forward-compat no-op. knob inventory 등록(observability/runtime-config, orphan 0).
 
 ## 무엇 (코퍼스 증거)
 Codex app-server(codex-ide `extension.js`)는 턴 내부를 **item 단위**로 스트리밍한다. `item/started` → 0..N delta → `item/completed`. delta 종류:

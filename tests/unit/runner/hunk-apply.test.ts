@@ -82,6 +82,45 @@ describe("applyHunkSelection — partial apply to disk", () => {
     expect(after).toBe(0o755)
   })
 
+  it("error status when the atomic write throws (injected) — no false success", async () => {
+    const dir = fresh()
+    const path = join(dir, "f.txt")
+    writeFileSync(path, B)
+    const res = await applyHunkSelection(
+      { path, before: B, after: A, selectedHunkIds: ["h1"] },
+      {
+        writeFile: async () => {
+          throw new Error("EACCES: permission denied")
+        },
+      },
+    )
+    expect(res.status).toBe("error")
+    if (res.status === "error") expect(res.reason).toContain("EACCES")
+    // The real disk was never touched (the injected write threw before any I/O).
+    expect(readFileSync(path, "utf8")).toBe(B)
+  })
+
+  it("UC5b: preserves a restrictive 0o600 mode across the partial apply", async () => {
+    const dir = fresh()
+    const path = join(dir, "secret.txt")
+    writeFileSync(path, B)
+    chmodSync(path, 0o600)
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    await applyHunkSelection({ path, before: B, after: A, selectedHunkIds: ["h1"] })
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+  })
+
+  it("UC5c: preserves a read-only 0o444 mode (rename replaces the dir entry, mode carried)", async () => {
+    const dir = fresh()
+    const path = join(dir, "frozen.txt")
+    writeFileSync(path, B)
+    chmodSync(path, 0o444)
+    expect(statSync(path).mode & 0o777).toBe(0o444)
+    const res = await applyHunkSelection({ path, before: B, after: A, selectedHunkIds: ["h1"] })
+    expect(res.status).toBe("applied")
+    expect(statSync(path).mode & 0o777).toBe(0o444)
+  })
+
   it("no-op when no hunks selected — disk stays at `before` (still passes the staleness gate)", async () => {
     const dir = fresh()
     const path = join(dir, "f.txt")

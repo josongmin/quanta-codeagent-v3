@@ -306,21 +306,39 @@ export const resolveTurnAction = (
   refusal?: RefusalFallbackInput,
 ): RecoveryAction => {
   if ("error" in result) return decideOnStreamError(result.error, result.message, rec)
-  const base = decideFromStopPolicy(policy, result.stopReason) ?? decideOnAssembled(result.stopReason, result.message, rec)
+  const stop = result.stopReason
   // T08 — refusal-fallback recovery. Provider-blind: the `isRefusalStopReason`
   // seam folds Anthropic `refusal` and OpenAI `content_filtered` onto one check,
-  // so this branch is identical for both vendors. OFF / non-refusal ⇒ `base`
-  // verbatim (byte-identical default).
-  if (refusal?.enabled !== true || !isRefusalStopReason(result.stopReason)) return base
-  if (rec.refusalFallbacks < RECOVERY_CAPS.refusalFallbacks && refusal.budgetOk()) {
-    rec.refusalFallbacks += 1
-    return { do: "refusal_fallback", text: refusal.prompt, message: result.message }
+  // so this branch is identical for both vendors. Checked BEFORE the legacy
+  // mapping so a recovered/exhausted refusal never runs `decideOnAssembled`'s
+  // mutating empty/nudge accounting (which would corrupt same-turn budgets).
+  //
+  // GUARD — only recover a CLEAN, text-only refusal. A refusal-class stop that
+  // ALSO carried a `tool_use` block already (partially) dispatched those calls
+  // in `streamingTurn`: `content_filtered` does NOT take the in-stream
+  // short-circuit (only `refusal` does, streaming-dispatch.ts), so its deferred
+  // MUTATING tools run. Neutralizing such a turn would discard executed-tool
+  // results AND risk a re-execution on the re-prompt (double side effect). So a
+  // tool-carrying refusal falls through to the legacy mapping (terminal for
+  // `refusal`; pre-existing tool-proceed for `content_filtered`) — byte-identical
+  // to the OFF path for that case.
+  if (
+    refusal?.enabled === true &&
+    isRefusalStopReason(stop) &&
+    !result.message.content.some((b) => b.type === "tool_use")
+  ) {
+    if (rec.refusalFallbacks < RECOVERY_CAPS.refusalFallbacks && refusal.budgetOk()) {
+      rec.refusalFallbacks += 1
+      return { do: "refusal_fallback", text: refusal.prompt, message: result.message }
+    }
+    // One-shot spent OR a fork would exceed budget ⇒ TERMINAL refusal. Surfaced
+    // as `refusal` (not a generic error) for BOTH providers so a re-refusal —
+    // including `content_filtered`, which the legacy mapping would let slip
+    // through as `proceed` when no stop-policy is wired — never silently
+    // completes and reads consistently to the host.
+    return { do: "refusal", rationale: extractRefusalRationale(result.message) }
   }
-  // One-shot spent OR a fork would exceed budget ⇒ TERMINAL. Force a refusal
-  // outcome even where the legacy mapping would have let `content_filtered`
-  // slip through as `proceed` (no stop-policy wired): once the feature is on, a
-  // refusal-class stop that cannot be recovered must never silently complete.
-  return base.do === "refusal" || base.do === "error"
-    ? base
-    : { do: "refusal", rationale: extractRefusalRationale(result.message) }
+  // OFF / non-refusal / tool-carrying refusal ⇒ legacy mapping verbatim
+  // (byte-identical default).
+  return decideFromStopPolicy(policy, stop) ?? decideOnAssembled(stop, result.message, rec)
 }

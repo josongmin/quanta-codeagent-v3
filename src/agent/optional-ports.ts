@@ -8,14 +8,14 @@ import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "@/agent/refusal-fallback"
 import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
-import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
+import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
 import { gateOn, gateOnStrict, itemStreamEnabled, logger, runtimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import {
   ItemLifecycleTracker,
-  itemLifecycleEnabled,
   ItemStreamProjector,
+  itemLifecycleEnabled,
   type StreamPort,
 } from "@/stream"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"

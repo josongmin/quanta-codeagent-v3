@@ -190,6 +190,14 @@ const diffForEdit = async (
   if (before === undefined || before === BINARY_SENTINEL) return undefined
   if (!before.includes(oldS)) return undefined
   const replaceAll = i.replace_all === true
+  // Uniqueness parity with the edit tool's exact tier: when `replace_all` is
+  // unset, `old_string` MUST be unique — a non-unique match is `ambiguous` (the
+  // tool errors, zero write). A literal `replaceFirst` preview would instead
+  // silently apply the FIRST occurrence, so the previewed hunks (and any partial
+  // apply) could diverge from what the tool does. Refuse ⇒ whole-call fallback
+  // (the tool's own ambiguity error then surfaces). Empty `old_string` never
+  // counts (split-count guard) and is already excluded by `includes` above.
+  if (!replaceAll && oldS.length > 0 && before.split(oldS).length - 1 !== 1) return undefined
   const after = replaceAll ? before.split(oldS).join(newS) : replaceFirst(before, oldS, newS)
   if (after === before) return undefined
   if (after.length > maxBytes || isBinary(after)) return undefined

@@ -19,8 +19,11 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { AGENT_STATE_OBSERVATION_EVENT_TYPES } from "@/protocol/agent-state"
-import type { AgentStateObservation } from "@/protocol/agent-state"
+import type {
+  AGENT_STATE_OBSERVATION_EVENT_TYPES,
+  AgentStateEventObservation,
+  AgentStateObservation,
+} from "@/protocol/agent-state"
 import type { AgentEvent } from "@/stream"
 
 type AssertEqual<A, B> =
@@ -68,11 +71,19 @@ const _ratelimitSnapshot: MutualExtends<
   ObsOf<"ratelimit_snapshot">
 > = true
 
-/* Closure pin: the protocol mirror union covers EXACTLY the 9 tapped types — no
- * more, no less. `AgentStateObservation["type"]` must equal the typed central
- * inventory union (a 10th member added to one side only fails here). */
+/* Closure pin: the EVENT-derived observation union covers EXACTLY the 9 tapped
+ * types — no more, no less (a 10th AgentEvent tap added to one side fails here). */
 type TappedType = (typeof AGENT_STATE_OBSERVATION_EVENT_TYPES)[number]
-const _coversExactly9: AssertEqual<AgentStateObservation["type"], TappedType> = true
+const _coversExactly9: AssertEqual<AgentStateEventObservation["type"], TappedType> = true
+
+/* T01 — the FULL observation channel is the 9 event types PLUS the synthetic
+ * `item_stream` carrier (NOT an AgentEvent — produced by the central
+ * ItemStreamProjector). Pin the exact widening so neither a dropped nor a 3rd
+ * synthetic member slips in unnoticed. */
+const _fullChannelIs9PlusItem: AssertEqual<
+  AgentStateObservation["type"],
+  TappedType | "item_stream"
+> = true
 
 describe("AgentStateObservation ↔ AgentEvent mirror (compile-time enforcement)", () => {
   test("the 9 per-variant structural pins + the closure pin all type-check", () => {
@@ -90,6 +101,7 @@ describe("AgentStateObservation ↔ AgentEvent mirror (compile-time enforcement)
         _contextCompacted,
         _ratelimitSnapshot,
         _coversExactly9,
+        _fullChannelIs9PlusItem,
       ].every((v) => v === true),
     ).toBe(true)
   })

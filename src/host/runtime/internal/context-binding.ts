@@ -46,9 +46,9 @@ import { ItemStreamProjector } from "@/stream"
 import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
 import { deriveCapabilityManifest } from "../capabilities"
-import { toSessionHostTurnEvent } from "./session-host-turn-event-bridge"
 import type { RuntimeHost, RuntimeSessionConfig } from "../types"
 import { installCliMentionInjector } from "./mention-wire"
+import { toSessionHostTurnEvent } from "./session-host-turn-event-bridge"
 
 type RuntimeBase = RuntimeAgentConfigBase & {
   approvalProtocol?: RuntimeApprovalProtocolConfig
@@ -1663,4 +1663,7 @@ export const createRuntimeContextBindingFromBootstrap = async (
  *  up a whole runtime host. NOT part of the production API surface. */
 export const __testing = {
   createRuntimeApprovalProtocolController,
+  // T01 — exposed so the item-stream session-wire hellgate can drive the EXACT
+  // production stream port (gated projector → item.stream onEvent) end-to-end.
+  createTurnStreamPort,
 }

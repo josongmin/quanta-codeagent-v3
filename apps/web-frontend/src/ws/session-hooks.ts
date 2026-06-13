@@ -376,6 +376,13 @@ export const TRANSCRIPT_NOOP_SESSION_EVENT_TYPES = [
   "artifact.ready",
   "turn.llm.continuation",
   "turn.llm.request",
+  // T01 — `item.*` fine-grained stream rides the SEPARATE agent-state item
+  // channel, not the transcript reducer; transcript-noop is the forward-compat
+  // posture (never corrupt the message list). A dedicated item renderer is a
+  // follow-up — the wire contract + decode gate already accept them.
+  "item.started",
+  "item.delta",
+  "item.completed",
 ] as const satisfies readonly SessionEventType[]
 
 const TRANSCRIPT_NOOP_SESSION_EVENT_TYPE_SET = new Set<string>(TRANSCRIPT_NOOP_SESSION_EVENT_TYPES)
@@ -527,7 +534,7 @@ export const applySessionEventToTranscript = (
   state: TranscriptState,
   event: SessionEvent,
 ): TranscriptState => {
-  const handler = TRANSCRIPT_EVENT_HANDLERS[event.type] as
+  const handler = (TRANSCRIPT_EVENT_HANDLERS as TranscriptEventHandlerRegistry)[event.type] as
     | ((state: TranscriptState, event: SessionEvent) => TranscriptState)
     | undefined
   if (handler !== undefined) {

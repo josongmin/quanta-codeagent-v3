@@ -289,8 +289,27 @@ export const reviewAction = async (
       turnId: ctx.turnId,
     })
   }
-  const fresh = await dispatchFresh(action, ctx, port)
-  const validated = validateDecision(fresh)
+  let validated: ApprovalDecision
+  try {
+    const fresh = await dispatchFresh(action, ctx, port)
+    validated = validateDecision(fresh)
+  } catch (err) {
+    // A throwing port / invalid decision fails CLOSED at the gate. Close the
+    // surface lifecycle with a terminal not-allowed `completed` (never leave a
+    // dangling "reviewing…"), then re-throw so the gate's deny path is unchanged.
+    if (isAutoTier) {
+      emitAutoApprovalReview({
+        phase: "completed",
+        toolCallId: ctx.toolCallId,
+        tool: action.tool,
+        reviewer: ctx.configReviewer,
+        allowed: false,
+        sessionId: ctx.sessionId,
+        turnId: ctx.turnId,
+      })
+    }
+    throw err
+  }
   emitReviewerDecision(validated)
   if (isAutoTier) {
     emitAutoApprovalReview({

@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { SESSION_HOST_TURN_EVENT_TYPES } from "../../../src/kernel/session"
 import {
   AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES,
   AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_TYPES,
   toSessionHostTurnEvent,
 } from "../../../src/host/runtime/internal/session-host-turn-event-bridge"
+import {
+  SESSION_HOST_TURN_EVENT_TYPES,
+  type SessionHostTurnEventType,
+} from "../../../src/kernel/session"
 import { AGENT_EVENT_TYPES } from "../../../src/stream"
 
 describe("session-host turn-event bridge inventory", () => {
@@ -69,7 +72,7 @@ describe("session-host turn-event bridge behavior", () => {
       }),
     ]
       .map((event) => event?.type)
-      .filter((type): type is string => type !== undefined)
+      .filter((type): type is SessionHostTurnEventType => type !== undefined)
       .sort()
 
     // The bridge materializes every host event type EXCEPT item.stream (produced

@@ -25,6 +25,15 @@
  * Accumulation → flush: deltas are accumulated; `completed.text` carries the
  * full body (absent when the item produced no deltas). This is the
  * event-driven L3-partial flush pattern — no timer, no race.
+ *
+ * Abort / pause posture (audit R2): open items are flushed ONLY by `done` /
+ * `turn_start`. A turn that THROWS before `done` (an uncaught error, or a HITL
+ * approval-required PAUSE) intentionally leaves its items OPEN — the projector
+ * never fabricates a `completed`, because a paused tool/reasoning item has NOT
+ * finished and force-completing it would lie. The consumer closes open items on
+ * the turn-terminal SessionEvent (`turn.completed` / `turn.failed`). This
+ * matches the established {@link ItemLifecycleTracker} baseline and is uniform
+ * across BOTH wire planes (no asymmetric flush plumbing).
  */
 import {
   classifyToolItemType,
@@ -76,6 +85,10 @@ export class ItemStreamProjector {
   }
 
   private onThinking(delta: string): ItemStreamCore[] {
+    // Empty deltas carry no signal (the 1:1 bridge likewise drops empty
+    // assistant_text). Skipping them avoids opening a spurious empty reasoning
+    // item on a leading empty delta and avoids zero-width delta noise.
+    if (delta.length === 0) return []
     const out: ItemStreamCore[] = []
     if (this.openReasoning === null) {
       const itemId = `item-reasoning-${this.index}`
@@ -106,6 +119,7 @@ export class ItemStreamProjector {
   }
 
   private onToolProgress(id: string, message: string): ItemStreamCore[] {
+    if (message.length === 0) return []
     const open = this.openTools.get(id)
     // Orphan progress (no prior tool_call) is ignored — no phantom item.
     if (open === undefined) return []

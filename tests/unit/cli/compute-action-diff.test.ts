@@ -72,6 +72,33 @@ describe("computeActionDiff", () => {
     expect(got).toBeUndefined()
   })
 
+  it("edit: NON-UNIQUE old_string with replace_all unset → undefined (tool would be ambiguous)", async () => {
+    // The edit tool's exact tier requires a UNIQUE match unless replace_all; a
+    // non-unique old_string is `ambiguous` (errors, no write). A literal replaceFirst
+    // preview would silently apply the FIRST occurrence — a divergence. Refuse it.
+    const got = await computeActionDiff(
+      action("edit", { path: "/f", old_string: "x", new_string: "Y" }),
+      { readFile: reader("x\na\nx") },
+    )
+    expect(got).toBeUndefined()
+  })
+
+  it("edit: non-unique old_string WITH replace_all=true is fine (swaps all)", async () => {
+    const got = await computeActionDiff(
+      action("edit", { path: "/f", old_string: "x", new_string: "Y", replace_all: true }),
+      { readFile: reader("x\na\nx") },
+    )
+    expect(got?.after).toBe("Y\na\nY")
+  })
+
+  it("edit: UNIQUE old_string, replace_all unset → still works (the safe common case)", async () => {
+    const got = await computeActionDiff(
+      action("edit", { path: "/f", old_string: "b", new_string: "B" }),
+      { readFile: reader("a\nb\nc") },
+    )
+    expect(got).toEqual({ path: "/f", before: "a\nb\nc", after: "a\nB\nc" })
+  })
+
   it("edit: old_string not found → undefined (whole-call fallback)", async () => {
     const got = await computeActionDiff(
       action("edit", { path: "/f", old_string: "absent", new_string: "Z" }),
@@ -91,6 +118,34 @@ describe("computeActionDiff", () => {
       { readFile: reader("foo\nbaz\nfoo") },
     )
     expect(got).toEqual({ path: "/f", before: "foo\nbaz\nfoo", after: "bar\nbaz\nbar" })
+  })
+
+  it("scripted_replace: isRegex=true applies the regex (distinct from literal)", async () => {
+    const got = await computeActionDiff(
+      action("scripted_replace", {
+        file: "/f",
+        pattern: "\\d+",
+        replacement: "N",
+        isRegex: true,
+      }),
+      { readFile: reader("foo123\nbar456") },
+    )
+    expect(got?.after).toBe("fooN\nbarN")
+  })
+
+  it("scripted_replace: count cap limits replacements", async () => {
+    const got = await computeActionDiff(
+      action("scripted_replace", {
+        file: "/f",
+        pattern: "x",
+        replacement: "Y",
+        isRegex: false,
+        count: 2,
+      }),
+      { readFile: reader("x\nx\nx\nx") },
+    )
+    // Only the first 2 of 4 occurrences swapped.
+    expect(got?.after).toBe("Y\nY\nx\nx")
   })
 
   it("scripted_replace: no match → undefined", async () => {

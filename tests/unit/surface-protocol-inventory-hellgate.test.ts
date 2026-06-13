@@ -4,9 +4,9 @@ import {
   LEGACY_DEFAULT_SURFACE_SUBSCRIPTION,
   resolveReadModels,
   SESSION_EVENT_TYPES,
-  supported,
   SURFACE_READ_MODEL_IDS,
   SURFACE_READ_MODEL_STATUSES,
+  supported,
 } from "@/protocol/session"
 import { AGENT_EVENT_TYPES } from "@/stream"
 

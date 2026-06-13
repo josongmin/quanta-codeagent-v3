@@ -87,6 +87,12 @@ const driveMcp = async (
     "QUANTA_MCP_SERVER_EXPOSE",
     "OPENAI_API_KEY",
     "QUANTA_PROVIDER",
+    // Hermeticity (R2 audit): clear ambient LSP gates so a developer/CI env with
+    // these set can't wire LSP tools through a non-bridge path and make the
+    // default-OFF / loose-falsy assertions vacuous.
+    "QUANTA_LSP_TOOLS",
+    "QUANTA_LSP",
+    "QUANTA_BENCH_LSP",
   ]
   const saved = new Map<string, string | undefined>()
   for (const k of KEYS) saved.set(k, process.env[k])
@@ -382,5 +388,57 @@ describe("T06 LSP-as-MCP bridge", () => {
     expect(call?.error).toBeUndefined() // graceful tool_result, NOT a protocol error
     const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
     expect(text.toLowerCase()).toContain("unavailable")
+  })
+
+  // PRODUCTION-PATH teeth (R1 audit): the tests above use the fake-deps seam, so
+  // they only prove the MERGE plumbing — NOT that the REAL `lspNavToolList()` /
+  // `lspDiagnosticsTool()` builder actually yields the expected tools. These two
+  // drive the REAL builder (no `deps`) so a regression in the production builder
+  // (renamed/dropped tool, or `lsp_rename_apply` slipping through read-only) is
+  // caught. (No language server needed — `tools/list` lists tool OBJECTS; a
+  // server only spawns on an actual CALL.)
+  test("REAL builder: gate ON projects the read-only nav family into tools/list", async () => {
+    const { exit, responses } = await driveMcp(baseEnv({ QUANTA_LSP_MCP: "1" }), LIST_REQUESTS)
+    expect(exit).toBe(0)
+    const names = collectToolNames(responses)
+    expect(names.has("lsp_references")).toBe(true)
+    expect(names.has("lsp_workspace_symbol")).toBe(true)
+    expect(names.has("lsp_document_symbol")).toBe(true)
+    expect(names.has("diagnostics")).toBe(true)
+    // The REAL `lspNavToolList()` BUNDLES the mutating `lsp_rename_apply`; it must
+    // not surface (read-only whitelist hides it from tools/list).
+    expect(names.has("lsp_rename_apply")).toBe(false)
+  })
+  test("REAL builder: mutating lsp_rename_apply is kept OUT of the registry (EXPOSE can't reach it)", async () => {
+    const reqs = [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "lsp_rename_apply",
+          arguments: { path: "src/x.ts", line: 1, character: 1, newName: "X" },
+        },
+      },
+    ]
+    // No fakeDeps ⇒ real lspNavToolList() (which DOES build lsp_rename_apply).
+    // The read-only filter must drop it from the registry so even an explicit
+    // EXPOSE sees an unknown name and the call is refused (-32602) — never run.
+    const { responses } = await driveMcp(
+      baseEnv({ QUANTA_LSP_MCP: "1", QUANTA_MCP_SERVER_EXPOSE: "lsp_rename_apply" }),
+      reqs,
+    )
+    const call = responses.find((r) => r.id === 2)
+    expect(call?.error?.code).toBe(-32602)
+  })
+
+  // Gate vocabulary (R2 audit): a loose-FALSY value must read as OFF, same as
+  // unset — the nav tools must not leak.
+  test("QUANTA_LSP_MCP=0 reads as OFF (loose-falsy) — nav tools absent", async () => {
+    const { responses } = await driveMcp(baseEnv({ QUANTA_LSP_MCP: "0" }), LIST_REQUESTS, fakeDeps)
+    const names = collectToolNames(responses)
+    expect(names.has("lsp_references")).toBe(false)
+    expect(names.has("lsp_workspace_symbol")).toBe(false)
   })
 })

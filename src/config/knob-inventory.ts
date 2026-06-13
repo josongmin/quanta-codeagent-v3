@@ -985,6 +985,16 @@ const DAEMON: readonly KnobInventoryEntry[] = [
  *  surface (resolveBenchKnobs); declared here for governance completeness. */
 const BENCH: readonly KnobInventoryEntry[] = [
   {
+    envKey: "QUANTA_BENCH_SOTA",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: SOTA++ recommended posture bundle (lspNav + localize-5 + agentless issue-hint + expected-actual + repro-test-5 + retry-transient-3 + repo-map). Individual flags override; unset ⇒ byte-identical historical baseline.",
+    readSite: "runner/batch/eval/driver.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_LSP",
     kind: "bool",
     default: false,
@@ -1070,6 +1080,29 @@ const BENCH: readonly KnobInventoryEntry[] = [
 /** P1 cluster — memory pipeline (memory-factory.ts), @-mention resolver caps
  *  (mention-runner), swebench/bench harness, web-daemon persistence. */
 const EXTRA: readonly KnobInventoryEntry[] = [
+  // tool gates (env-flag) — gate string lives in the tool-surface manifest SSOT;
+  // declared here so the orphan ratchet sees the read (ADR-0503 P1).
+  {
+    envKey: "QUANTA_AST_GREP",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "ast_grep tool gate (opt-in everywhere) — structural AST code search; requires ast-grep binary on PATH, read-only, 50-match cap. Gate SSOT = tool/surface/manifest.ts.",
+    readSite: "tool/surface/manifest.ts",
+  },
+  // durable cross-session trust grants (CLI comp-root; opt-in, NOT default-seeded)
+  {
+    envKey: "QUANTA_TRUST_SCOPE",
+    kind: "bool",
+    default: false,
+    group: "permission",
+    home: "runtime-config",
+    describe:
+      "Persistent cross-session trust-scope grants ([P] prefix-grant verb); hydrated once at CLI comp-root so the gate sees prior-session grants on turn 1. Opt-in (durable grants are a deliberate operator choice); absent ⇒ byte-identical.",
+    readSite: "apps/cli/repl/runtime-context-compose.ts",
+  },
   // memory pipeline — gateDisabled (=off disables) ⇒ default-ON; recall values
   {
     envKey: "QUANTA_MEMORY",
