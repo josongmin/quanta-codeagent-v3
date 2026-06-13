@@ -83,9 +83,7 @@ describe("applySelectedHunks — partial reconstruction", () => {
   })
 
   it("unknown / duplicate ids are ignored (no throw, dedupe-safe)", () => {
-    expect(applySelectedHunks(B, A, ["h1", "h1", "h99"])).toBe(
-      applySelectedHunks(B, A, ["h1"]),
-    )
+    expect(applySelectedHunks(B, A, ["h1", "h1", "h99"])).toBe(applySelectedHunks(B, A, ["h1"]))
   })
 
   it("empty before (new file) — selecting the sole hunk yields after, none yields empty", () => {

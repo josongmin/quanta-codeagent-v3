@@ -112,7 +112,7 @@
 | [T01](01-item-level-streaming.md) | `item/*` fine-grained 스트리밍 프로토콜 | 🟡 | ★★★ | 북극성 agent-state 가시성 직결 |
 | [T02](02-thread-follower-cocontrol.md) | `thread-follower` co-control + queue modes | 🟡 | ★★★ | CLI↔web parity·mid-turn-channel SOTA 답 |
 | [T03](03-guardian-auto-approval-reviewer.md) | `guardian_subagent` 자동승인 reviewer + approval ladder | ❌ | ★★ | 무인-but-안전 실행, HITL 4-verb 확장 |
-| [T04](04-hooks-trust-gate-and-model.md) | hooks 신뢰게이트(`needsReview`) + per-hook model | ❌ | ★★ | 보안갭 + 기능갭 |
+| [T04](04-hooks-trust-gate-and-model.md) | hooks 신뢰게이트(`needsReview`) + per-hook model | ✅ (per-hook model=N/A defer) | ★★ | 보안갭 + 기능갭 |
 | [T05](05-per-hunk-diff-accept-reject.md) | per-hunk diff accept/reject | 🟡 | ★★ | 입자도 갭, diff-ops 위 |
 | [T06](06-lsp-as-mcp-bridge.md) | LSP-as-MCP 브릿지 | 🟡 | ★★ | IDE 없이 코드 인텔리전스 |
 | [T07](07-chatsessions-editor-extension.md) | VS Code `chatSessions` 에디터 확장 | ❌ | ★(전략) | 에디터 surface 자체 부재 |

@@ -1,0 +1,54 @@
+id: thread-follower-cocontrol
+title: thread-follower co-control — timeout-bounded follower verbs (steer/interrupt/approval-relay) + queue-mode invert (T02)
+section: 10
+subsystem: app — multi-surface co-control (an auxiliary follower client steers one live thread)
+order: 213
+maturity: L3
+status: new
+ui_surfaces: [cli, web, ide]
+modes: [interactive, ide, daemon]
+monitoring: n-a
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [thin-client-dispatch, slash-command-registry]
+config_refs:
+  env: ["QUANTA_THIN_CLIENT_DISPATCH"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-13"
+  evidence:
+    cli: "/steer (lease-safe weave inject via pushUserMessage) + /interrupt (lease-bypass cancel via pushCancel) registered in registry-session.ts, reachable from src/apps/cli/index.ts; /inbound invert applies the per-message queue↔weave invert"
+    web: "the HARD_DENY relay re-check is LIVE for ANY approval.respond (incl. a web/ide follower) at the real resolver (context-binding.ts resolveApproval); the dedicated follower-verb transport frame (2nd-client steer/interrupt over session IPC → a per-thread FollowerVerbTracker) is the documented follow-up — protocol core + guard are tested with the real oracle"
+purpose: |
+  A FOLLOWER (auxiliary client — a second window / web / ide) co-controls ONE live
+  thread via timeout-bounded verbs. planFollowerVerb maps each verb onto an EXISTING
+  lease-safe effect: steer-turn → §steer weave INJECT into the lease holder's running
+  turn (never a second writer); interrupt-turn → the lease-bypassing cancel;
+  command-approval-decision → approval.respond, RE-CHECKED against HARD_DENY at the
+  relay boundary (fail-closed — a relayed approve can never launder a dangerous
+  command); set-queue-mode → the inbound-mode SSOT (queue/weave/interrupt). Every
+  verb is request/response/TIMEOUT: FollowerVerbTracker applies a response only in
+  time — a late one is STALE and never applied (the defined fallback owns the
+  decision). Default-OFF behind the existing QUANTA_THIN_CLIENT_DISPATCH gate (no new
+  knob). UC5: invertInboundModeOnce is the per-message invert (Codex Cmd-Ctrl+Shift+Enter).
+evidence:
+  code:
+    - src/agent/thread-follower/types.ts
+    - src/agent/thread-follower/timeout.ts
+    - src/agent/thread-follower/index.ts
+    - src/agent/inbound-mode.ts
+    - src/apps/cli/slash/registry-session.ts
+    - src/host/runtime/internal/context-binding.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/thread-follower-cocontrol-hellgate.test.ts
+      - tests/unit/apps/cli/thread-follower-surface-integration-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: "🟡 live 2nd-client follower-verb transport frame deferred; HARD_DENY relay re-check is LIVE for all approval.respond at the real resolver. steer=inject (no second writer), reconciles the CLI↔web parity self-contradiction."

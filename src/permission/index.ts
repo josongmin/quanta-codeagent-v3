@@ -146,6 +146,14 @@ export {
 } from "./per-host-mode"
 export type { ApprovalLadderName, NamedApprovalLadderRung } from "./approval-ladder"
 export { APPROVAL_LADDER, APPROVAL_LADDER_NAMES, parseApprovalLadderName } from "./approval-ladder"
+export type {
+  AutoApprovalReviewEvent,
+  AutoApprovalReviewObserver,
+} from "./auto-approval-review-observer"
+export {
+  __resetAutoApprovalReviewObserver,
+  setAutoApprovalReviewObserver,
+} from "./auto-approval-review-observer"
 export type { ThreadPermission } from "./per-thread-store"
 export {
   clearThreadPermission,

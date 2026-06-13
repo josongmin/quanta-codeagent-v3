@@ -24,7 +24,7 @@ import { createConversationActionSurface } from "../../../../src/apps/cli/repl/c
 const CFG: SteerConfig = { maxInputBytes: 10_000 }
 
 const activeMainTurn = (turnId: string) => ({
-  currentTurn: { turnId, kind: "main" as const, startedAt: 0 },
+  currentTurn: { turnId, kind: "main" as const, startedAt: 0, threadId: "thread-1" },
   isInterrupted: false,
 })
 

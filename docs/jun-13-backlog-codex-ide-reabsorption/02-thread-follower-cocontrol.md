@@ -50,7 +50,10 @@ Codex IDE는 한 라이브 스레드를 **보조(follower) 클라이언트가 �
 - 순수 프로토콜 코어 `src/agent/thread-follower/`:
   - `types.ts` — `planFollowerVerb(verb, ctx)` 순수 NO-THROW 플래너. verb 4종(steer-turn/interrupt-turn/command-approval-decision/set-queue-mode) → 기존 lease-safe effect(inject/interrupt/approval-relay/queue-mode-set) 매핑. 드리프트 가드·exhaustive 배열.
   - `timeout.ts` — `FollowerVerbTracker`: request/response/**timeout**. deadline INCLUSIVE, late response=stale(적용 안 됨), sweep는 fallback 1회만, **중복 register가 deadline 못 늘림**, garbage clock fail-safe. (UC4)
-- **UC3 HARD_DENY relay-boundary fail-closed** — 실 `@/permission` hardDenyReason 오라클 주입, relay-approve of dangerous cmd ⇒ rejected. **mutation으로 red-on-injection 증명**(가드 제거 시 RED).
+- **UC3 HARD_DENY relay-boundary fail-closed** — 2겹:
+  - 프로토콜 코어 `planFollowerVerb`(실 hardDenyReason 주입, relay-approve of dangerous ⇒ rejected).
+  - **🟢 LIVE 리졸버 배선**: `context-binding.ts resolveApproval`에서 pending record에 proposed `ToolAction` 캡처→approve 시 `hardDenyReason` 재검(히트면 grant 0). **모든 `approval.respond`(웹/ide 팔로워 relay 포함)에 라이브 적용**. tests/unit/host/runtime-approval-harddeny-relay-recheck-hellgate. **mutation red-on-injection 증명**(가드 제거 시 dangerous approve가 lease mint→RED; 동시sweep이 실제로 가드 wipe했을 때 RED 관측됨).
+- **fc 등록**: `tools/feature-catalog/features/10-app/thread-follower-cocontrol.yaml`(L3, cli:full/web:partial, evidence.code 6파일). `bun fc validate` 970 features all resolved, check-changed ok.
 - **UC5 per-message invert** — `invertInboundModeOnce`(inbound-mode SSOT), `/inbound invert` 배선.
 - CLI 팔로워 verb: `/steer`(lease-safe inject via pushUserMessage), `/interrupt`(lease-bypass cancel via pushCancel) — 기존 ConversationActionSurface 재사용.
 - **lease-safety 통합 헬게이트**(실 conversation-action transport + 실 `decideAction`): steer→lease holder 주입, turn-id mismatch→reject(잘못된 턴 기록 0), interrupt→cancel control. **별도 writer 안 됨** 증명.

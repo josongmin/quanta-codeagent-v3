@@ -19,6 +19,7 @@ import {
   createPersistentTrustScopeRegistry,
   type PermissionStore,
   parseApprovalLadderName,
+  setAutoApprovalReviewObserver,
   // #20 — the operator-facing program token a `session_prefix` grant would cover
   // (null when this command cannot be safely prefix-granted).
   prefixGrantLabel,
@@ -69,6 +70,19 @@ const askLine = async (channel: MidTurnApprovalChannel, prompt: string): Promise
   } finally {
     adhoc.close()
   }
+}
+
+/** T03 — is the AGENT reviewer (guardian) the operator's chosen posture? True
+ *  when the strict `QUANTA_AUTO_REVIEW` gate is on OR a named approval-ladder
+ *  rung whose `approvalsReviewer` is `agent` is selected (only `guardian-approvals`
+ *  is). The ladder SSOT is the single source of the reviewer axis. False ⇒
+ *  byte-identical legacy reviewer selection + no auto-review notice. */
+const ladderAutoReviewEnabled = (): boolean => {
+  const rung = parseApprovalLadderName(runtimeConfig().approvalLadder)
+  return (
+    runtimeConfig().autoReview ||
+    (rung !== undefined && APPROVAL_LADDER[rung].approvalsReviewer === "agent")
+  )
 }
 
 interface CliHitlDeps {
@@ -505,10 +519,7 @@ const buildAdmissibility = (args: {
   // the reviewer, so a posture record would DEFEAT guardian routing. Routing the
   // reviewer tier (below) keeps the gate's `ask` → guardian path intact. HARD_DENY
   // still runs BEFORE the guardian (see `@/permission/policy`).
-  const ladderRung = parseApprovalLadderName(runtimeConfig().approvalLadder)
-  const autoReviewEnabled =
-    runtimeConfig().autoReview ||
-    (ladderRung !== undefined && APPROVAL_LADDER[ladderRung].approvalsReviewer === "agent")
+  const autoReviewEnabled = ladderAutoReviewEnabled()
   const threadPermission = permissionStore?.getThread(boot.sessionId)
   const reviewerAgent = materializeReviewerAgent()
   const guardianReview =
@@ -607,6 +618,31 @@ export const composeCliRuntimeContext = async (
           userReview: autoReviewUserPort.userReview,
         })
       : undefined
+  // T03 — when the agent reviewer is the chosen posture, surface each auto-review
+  // as a `tool_progress` notice (keyed by the reviewed tool-call id) so the CLI
+  // timeline + web card show "auto-reviewed by guardian: …" rather than the tool
+  // silently running. Registered ONLY under the opt-in ⇒ default-OFF byte-identical
+  // (no observer ⇒ the reviewer slice's emit is a no-op). The notice is best-effort:
+  // `decisionEmitterFromStream`-style throw isolation lives in the sink itself.
+  if (ladderAutoReviewEnabled()) {
+    setAutoApprovalReviewObserver({
+      observe: (ev) => {
+        const who = ev.reviewer === "guardian_subagent" ? "guardian" : "auto-review"
+        const what =
+          ev.phase === "started"
+            ? "reviewing…"
+            : ev.allowed
+              ? "approved (no prompt)"
+              : "denied"
+        turnStream.emit({
+          type: "tool_progress",
+          id: ev.toolCallId ?? "",
+          name: ev.tool,
+          message: `auto-reviewed by ${who}: ${what}`,
+        })
+      },
+    })
+  }
   const permissionStore = await loadPermissionStore()
   const planExitPort = createCliPlanExitPort({ ask: (p) => askLine(midTurnApprovalChannel, p) })
   const userInputPort = createCliUserInputPort({

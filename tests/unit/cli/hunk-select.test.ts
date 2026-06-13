@@ -47,7 +47,7 @@ describe("renderHunkChoices", () => {
     const before = ["a", "b", "c", "d", "e"].join("\n")
     const after = ["a", "B", "c", "D", "e"].join("\n")
     const out = stripAnsi(renderHunkChoices(before, after))
-    setColorPolicy("auto")
+    setColorPolicy(null)
     expect(out).toContain("[1]")
     expect(out).toContain("[2]")
     expect(out).toContain("- b")

@@ -39,6 +39,7 @@ import { makeNotebookEditTool } from "./notebook-edit/tool"
 import { makeRunTestsTool } from "./testrun/tool"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
+import { astGrepTool } from "./ast-grep"
 import { grepTool } from "./grep"
 import { type ImageDownsamplePort, makeReadImageTool, readImageUrlTool } from "./image"
 import { type ImageGenPort, imageGenTool } from "./image-gen"
@@ -195,6 +196,11 @@ export {
   renderModelOutput,
   validateToolOutput,
 } from "./factory"
+// ast_grep — structural code search via ast-grep patterns (QUANTA_AST_GREP opt-in).
+// Caller-wired: registered by the composition root when QUANTA_AST_GREP is on
+// AND ast-grep is present on PATH (the tool self-probes and returns an install
+// hint if the binary is missing). Read-only + concurrency-safe.
+export { astGrepTool } from "./ast-grep"
 export {
   aggregate as aggregateFileTree,
   fileTreeSummaryTool,

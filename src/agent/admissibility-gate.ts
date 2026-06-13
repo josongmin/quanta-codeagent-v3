@@ -570,7 +570,10 @@ const reviewAndDecide = async (
   // `opts.reviewKindOverride`; otherwise inferred from the tool name + readonly
   // shape. The port may consume `ctx.reviewKind` to render a kind-typed UI; if
   // it doesn't, the field is ignored (byte-identical legacy port behavior).
-  const ctx = buildReviewContext(config, action, opts)
+  // T03 — carry the dispatch tool-call id so the auto-approval-review notice can
+  // key its `tool_progress` annotation to this exact call (surface-only; the
+  // decision is unaffected).
+  const ctx = { ...buildReviewContext(config, action, opts), toolCallId: call.id }
   // ADR-0407 — attribute reviewer escalations to Objective+RunLedger via the
   // approval-SM when wired. Default-OFF ⇒ byte-identical legacy passthrough.
   const gate = createApprovalGate(

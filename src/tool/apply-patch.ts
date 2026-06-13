@@ -39,9 +39,11 @@ import { otelPatchTracePort } from "@/observability/patch-trace"
 import {
   type ApplyResult,
   applyPatch,
+  isUnifiedDiff,
   type Patch,
   type PatchFileSystemPort,
   parsePatch,
+  unifiedDiffToV4A,
   // biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
 } from "@/patch"
 import { errMessage } from "@/shared"
@@ -490,8 +492,11 @@ async function guardedParseAndApply(
   guard: GitWriteGuard | undefined,
   ctx?: ToolContext,
 ): Promise<{ deny: ToolEvent } | { result: ApplyResult }> {
-  // parsePatch throws PatchParseError on grammar violation — propagate.
-  const patch = parsePatch(patchText)
+  // Auto-convert standard unified diff (--- a/file / +++ b/file format) to V4A.
+  // Models frequently produce unified diff; without this, parsePatch throws on a
+  // structurally-valid patch that simply uses the wrong sentinel format.
+  const normalizedPatch = isUnifiedDiff(patchText) ? unifiedDiffToV4A(patchText) : patchText
+  const patch = parsePatch(normalizedPatch)
   // Guard EVERY target BEFORE any filesystem mutation (hard-stop posture).
   const guardDeny = guardPatchTargets(patch, guard)
   if (guardDeny) return { deny: guardDeny }

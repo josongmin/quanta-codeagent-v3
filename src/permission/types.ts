@@ -327,4 +327,9 @@ export interface ReviewContext {
    *  before invoking the port. Absent ⇒ port renders the legacy generic
    *  confirm prompt (byte-identical). */
   readonly reviewKind?: ReviewKind
+  /** T03 — the dispatch tool-call id this review belongs to. OPTIONAL: only the
+   *  surface-facing auto-approval-review notice (`emitAutoApprovalReview`) reads
+   *  it, to key its `tool_progress` annotation to the right tool call. Absent ⇒
+   *  the notice still fires with no id (best-effort); the decision is unchanged. */
+  readonly toolCallId?: string
 }

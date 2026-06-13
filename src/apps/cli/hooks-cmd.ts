@@ -18,6 +18,7 @@
  * fire with no in-process wiring.
  */
 
+import { homedir } from "node:os"
 import { join } from "node:path"
 import {
   type CommandHookBinding,
@@ -28,9 +29,13 @@ import {
 } from "@/agent"
 import type { SlashCommand } from "./slash-contract"
 
-/** Resolve the user-config dir the runner uses for the approval ledger. */
+/** Resolve the user-config dir the runner uses for the approval ledger. MUST
+ *  match `hookReviewPort` in host/runtime/agent-arg-builder.ts byte-for-byte
+ *  (`QUANTA_CONFIG_DIR ?? homedir()/.quanta`) — a mismatch would write the
+ *  approval to a ledger the runner never reads, so an approve would silently
+ *  not take effect. */
 const userConfigDir = (env: NodeJS.ProcessEnv): string =>
-  env.QUANTA_CONFIG_DIR ?? join(env.HOME ?? env.USERPROFILE ?? ".", ".quanta")
+  env.QUANTA_CONFIG_DIR ?? join(homedir(), ".quanta")
 
 /** One display row: the binding + its short key + review/approval status. */
 const statusOf = (b: CommandHookBinding, approved: boolean): string => {

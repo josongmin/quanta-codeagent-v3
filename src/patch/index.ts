@@ -22,3 +22,4 @@ export type {
   PatchTracePort,
 } from "./types"
 export { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "./types"
+export { isUnifiedDiff, unifiedDiffToV4A } from "./unified-to-v4a"

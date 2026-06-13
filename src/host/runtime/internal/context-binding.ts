@@ -16,6 +16,8 @@ import {
   // #20 — prefix-aware session grants ("always allow `<program> …` this session").
   actionMatchesPrefixGrant,
   derivePrefixGrantKey,
+  // T02 — defense-in-depth HARD_DENY re-check at the approval RESOLVE boundary.
+  hardDenyReason,
   inferReviewKind,
   isPermissionMode,
   reasonCodeFor,
@@ -815,6 +817,13 @@ interface PendingRuntimeApprovalRecord {
    *  the single-use lease (which can never match — fail closed, re-prompts)
    *  but must NEVER mint a standing session grant. */
   readonly grantable: boolean
+  /** T02 — the proposed action captured at mint time, so an APPROVE (which may
+   *  arrive RELAYED from a follower client over the session transport) is
+   *  re-checked against HARD_DENY at resolve time. The dispatch gate already
+   *  denies HARD_DENY commands BEFORE they reach this prompt (earlyHardDeny), so
+   *  this is defense-in-depth: it guarantees NO approve path — local or relayed —
+   *  can ever mint a grant for a dangerous command. */
+  readonly action: ToolAction
 }
 
 /** T03 (audit L5 H-1/M-3) — an approval grant is an opaque, single-use LEASE
@@ -1043,6 +1052,7 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       actionKey:
         actionKey === SHELL_EXTRACT_FAILED ? `${action.tool}|<shell-extract-failed>` : actionKey,
       grantable: actionKey !== SHELL_EXTRACT_FAILED,
+      action,
     })
     throw new RuntimeApprovalRequiredError(approval)
   }
@@ -1101,6 +1111,13 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       // lease (the turn aborts), BYTE-IDENTICAL to the pre-ADR-0512 path.
       const isEscalation = record.approval.scopeContext !== undefined
       if (decision === "approve") {
+        // T02 — HARD_DENY re-check at the relay boundary (fail-closed). An approve
+        // may have been RELAYED by a follower client; a dangerous command must
+        // never mint a grant here regardless of who relayed it. On a hit we mint
+        // NOTHING (the action is re-prompted / denied downstream) — the same
+        // effect as a normal deny. Defense-in-depth: the dispatch gate already
+        // denies such commands before they reach this prompt.
+        if (hardDenyReason(record.action) !== null) return
         const leaseDecision: ConfirmDecision | undefined = isEscalation
           ? { decision: "allow", ...(opts?.scope !== undefined ? { scope: opts.scope } : {}) }
           : undefined

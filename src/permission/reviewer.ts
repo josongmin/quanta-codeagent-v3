@@ -25,6 +25,7 @@
 
 import { runtimeConfig } from "@/shared/runtime-config"
 import { collapseAssessment } from "./assessment-collapse"
+import { emitAutoApprovalReview } from "./auto-approval-review-observer"
 import { buildDecision, isAdmissible, isAllowed } from "./outcome"
 import { emitPermissionDecision, type PermissionOutcomeLabel } from "./recorder"
 import type {
@@ -273,8 +274,35 @@ export const reviewAction = async (
     return replayed
   }
   assertReviewerAvailable(ctx.configReviewer, port)
+  // T03 — surface the AGENT reviewer's lifecycle so an auto-approval is never
+  // invisible. Only the auto tiers emit (the `user` tier already has a visible
+  // prompt). Default-OFF: no registered observer ⇒ both calls are no-ops.
+  const isAutoTier =
+    ctx.configReviewer === "guardian_subagent" || ctx.configReviewer === "auto_review"
+  if (isAutoTier) {
+    emitAutoApprovalReview({
+      phase: "started",
+      toolCallId: ctx.toolCallId,
+      tool: action.tool,
+      reviewer: ctx.configReviewer,
+      sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+    })
+  }
   const fresh = await dispatchFresh(action, ctx, port)
   const validated = validateDecision(fresh)
   emitReviewerDecision(validated)
+  if (isAutoTier) {
+    emitAutoApprovalReview({
+      phase: "completed",
+      toolCallId: ctx.toolCallId,
+      tool: action.tool,
+      reviewer: validated.reviewer,
+      outcome: validated.outcome,
+      allowed: isAllowed(validated.outcome),
+      sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+    })
+  }
   return validated
 }

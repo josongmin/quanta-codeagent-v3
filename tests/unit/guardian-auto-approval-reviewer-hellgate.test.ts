@@ -19,17 +19,20 @@
  *        crash → `ok:false`) fails CLOSED (deny), never auto-approves.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { createOnConfirmReviewerPort } from "@/agent/reviewer-port"
 import { createSubagentBackedGuardianReview } from "@/agent/tier1/reviewer-subagent"
 import {
+  __resetAutoApprovalReviewObserver,
   type ApprovalDecision,
+  type AutoApprovalReviewEvent,
   evaluate,
   isAllowed,
   type PermissionContext,
   type ReviewContext,
   type ReviewerPort,
   reviewAction,
+  setAutoApprovalReviewObserver,
   type ToolAction,
   type ToolActionKeyed,
 } from "@/permission"
@@ -153,5 +156,58 @@ describe("UC5 — cost/failure boundary: guardian failure fails CLOSED", () => {
     const { run } = runner(DENY)
     const dec = await reviewAction(safeMutating, ctx(), guardianPort(run))
     expect(isAllowed(dec.outcome)).toBe(false)
+  })
+})
+
+describe("delta-3 — auto-review observer surfaces the agent verdict (started→completed)", () => {
+  afterEach(() => {
+    __resetAutoApprovalReviewObserver()
+  })
+
+  test("guardian decision emits started THEN completed, carrying tool + toolCallId + outcome", async () => {
+    const events: AutoApprovalReviewEvent[] = []
+    setAutoApprovalReviewObserver({ observe: (e) => events.push(e) })
+    const { run } = runner(APPROVE)
+    await reviewAction(safeMutating, ctx({ toolCallId: "call_42" }), guardianPort(run))
+    expect(events.map((e) => e.phase)).toEqual(["started", "completed"])
+    expect(events.every((e) => e.toolCallId === "call_42" && e.tool === "bash")).toBe(true)
+    expect(events.every((e) => e.reviewer === "guardian_subagent")).toBe(true)
+    const completed = events[1] as AutoApprovalReviewEvent
+    expect(completed.allowed).toBe(true)
+    expect(completed.outcome).toBe("guardian_approved")
+  })
+
+  test("a guardian DENY surfaces completed with allowed:false", async () => {
+    const events: AutoApprovalReviewEvent[] = []
+    setAutoApprovalReviewObserver({ observe: (e) => events.push(e) })
+    const { run } = runner(DENY)
+    await reviewAction(safeMutating, ctx({ toolCallId: "c1" }), guardianPort(run))
+    expect((events[1] as AutoApprovalReviewEvent).allowed).toBe(false)
+  })
+
+  test("the USER tier emits NO auto-review notice (only the agent tiers do)", async () => {
+    const events: AutoApprovalReviewEvent[] = []
+    setAutoApprovalReviewObserver({ observe: (e) => events.push(e) })
+    const { run } = runner(APPROVE)
+    await reviewAction(safeMutating, ctx({ configReviewer: "user" }), guardianPort(run))
+    expect(events).toHaveLength(0)
+  })
+
+  test("a throwing observer never breaks the decision (fail-safe sink)", async () => {
+    setAutoApprovalReviewObserver({
+      observe: () => {
+        throw new Error("UI sink blew up")
+      },
+    })
+    const { run } = runner(APPROVE)
+    const dec = await reviewAction(safeMutating, ctx({ toolCallId: "c1" }), guardianPort(run))
+    expect(isAllowed(dec.outcome)).toBe(true) // decision survives the observer throw
+  })
+
+  test("default-OFF: no registered observer ⇒ no-op (no throw, decision intact)", async () => {
+    __resetAutoApprovalReviewObserver()
+    const { run } = runner(APPROVE)
+    const dec = await reviewAction(safeMutating, ctx({ toolCallId: "c1" }), guardianPort(run))
+    expect(isAllowed(dec.outcome)).toBe(true)
   })
 })

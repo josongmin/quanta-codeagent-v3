@@ -880,6 +880,14 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "jun-6-code-mode",
     note: "code-mode (RFC jun-6-code-mode, Phase 1) — run a model-authored JS program (a 'code cell') in a QuickJS-WASM isolate; each in-cell `await tools.read/grep/write(args)` re-enters the REAL dispatchTool, so EVERY in-cell tool call passes the full admissibility gate / HARD_DENY / plan-mode / permission / redaction pipeline EXACTLY like a normal tool call (a cell is N ordinary gated tool calls — the structural no-bypass invariant). risk:`exec` (it runs model-authored code, even though each in-cell call is re-gated — at least as powerful as the union of the tools it can call). The cell has NO require/fetch/process/filesystem/network surface (QuickJS gives none; we add none). Minted only when DefaultToolPorts.codeMode is wired (QUANTA_CODE_MODE on AND the host wired AgentConfig.codeCellDispatchFactory, the @/agent/codemode-wire security binding); off ⇒ tool absent AND the WASM module never instantiated (lazy import), byte-identical default menu. Opt-in EVERYWHERE (runs code + can write files, never auto-seeds). Phase 2 (jun-07, LIVE): the cell binds tools.<name> for the agent's FULL registered set (registry.toolNames() via AgentConfig.codeCellSurfaceTools → ToolContext.codeCellSurface) — each STILL re-gated through dispatchTool. Phase 3 (jun-07, LIVE, default-OFF): QUANTA_CODE_MODE_ONLY steers the model toward cells via a gated prompt directive WITHOUT hiding any tool from this menu (the catalog is byte-identical whether the steering is on). The cell-lifecycle stream events remain a follow-up.",
   },
+  {
+    name: "ast_grep",
+    origin: "@/tool/ast-grep (astGrepTool)",
+    gate: { kind: "env-flag", env: "QUANTA_AST_GREP" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    note: "Structural code search via ast-grep — finds code by AST shape (pattern + metavariables), not text, so there are no false positives from comments/strings. Opt-in EVERYWHERE (QUANTA_AST_GREP): requires the ast-grep binary on PATH (brew install ast-grep / cargo install ast-grep); absent binary ⇒ tool returns an install hint. Read-only + concurrency-safe (pure subprocess search, no FS writes). Capped at 50 matches per call.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state
