@@ -14,6 +14,7 @@ const ENV_KEYS = [
   "QUANTA_BENCH_LSP",
   "QUANTA_BENCH_LOCALIZE_PHASE",
   "QUANTA_BENCH_ISSUE_HINT",
+  "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL",
   "QUANTA_LSP_TOOLS",
 ] as const
 
@@ -117,5 +118,22 @@ describe("bench SOTA preset hellgate — QUANTA_BENCH_SOTA=1", () => {
     expect(opt.localizePhase).toEqual({ phase1Turns: 3 })
     // Confirm we did NOT get the SOTA default of 5.
     expect(opt.localizePhase?.phase1Turns).not.toBe(5)
+  })
+
+  // SOTA-8: issueHintExpectedActual must be true when SOTA=1, even without the
+  // explicit QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL flag.
+  // Red-on-injection: remove `sotaOn ||` from the issueHintExpectedActual line
+  // and this test fails (eaRaw is undefined, so it would be false).
+  test("SOTA-8: QUANTA_BENCH_SOTA=1 enables issueHintExpectedActual", () => {
+    process.env.QUANTA_BENCH_SOTA = "1"
+    const opt = benchOptIns()
+    expect(opt.issueHintExpectedActual).toBe(true)
+  })
+
+  // SOTA-9: without SOTA, issueHintExpectedActual stays false when the explicit
+  // flag is also absent — confirms default-OFF is preserved.
+  test("SOTA-9: without SOTA, issueHintExpectedActual=false when flag absent", () => {
+    const opt = benchOptIns()
+    expect(opt.issueHintExpectedActual).toBe(false)
   })
 })

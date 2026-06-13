@@ -12,13 +12,13 @@ import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { ResponsesContinuationStore } from "@/llm"
 import {
-  CircumventionTracker,
   // #20 (durable prefix grants) — the persistent, cross-session trust-scope
   // registry the gate consults + the [P] verb mints into.
   APPROVAL_LADDER,
+  CircumventionTracker,
   createPersistentTrustScopeRegistry,
-  parseApprovalLadderName,
   type PermissionStore,
+  parseApprovalLadderName,
   // #20 — the operator-facing program token a `session_prefix` grant would cover
   // (null when this command cannot be safely prefix-granted).
   prefixGrantLabel,
@@ -34,13 +34,18 @@ import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runti
 import { gateOn, runtimeConfig } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
-import { type ActionDiff, computeActionDiff, diffPreviewEnabled, renderActionDiff } from "../diff-preview"
+import {
+  type ActionDiff,
+  computeActionDiff,
+  diffPreviewEnabled,
+  renderActionDiff,
+} from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
-import { parseHunkSelection, renderHunkChoices, shapePartialDecision } from "./hunk-select"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
 // #19 — approval-time applicability pre-flight (edit/apply_patch).
 import { preflightApplyWarning, preflightCheckEnabled } from "../preflight"
 import type { RejectCounter } from "../reject-counter"
+import { parseHunkSelection, renderHunkChoices, shapePartialDecision } from "./hunk-select"
 import {
   createMidTurnApprovalChannel,
   type MidTurnApprovalChannel,

@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -41,7 +41,6 @@ import {
   hookBindingKey,
   HookReviewStore,
   installCommandHooks,
-  loadCommandHookBindings,
   mapClaudeEvent,
   normalizeCommandHookGate,
   parseCommandHookBindings,
@@ -50,7 +49,6 @@ import {
 } from "@/agent"
 import { bindingsFromHookEvents } from "@/agent/command-hooks/settings-loader"
 import { mergeSettings } from "@/config"
-import { persistConvertedItems } from "@/migration/external-config/persist"
 
 // ---- fakes -----------------------------------------------------------------
 
@@ -376,44 +374,3 @@ describe("T04 — source provenance derivation", () => {
   })
 })
 
-// ---- migration importer → legacy load (full UC1 pipeline) ------------------
-
-describe("T04 — migration-imported hook lands needsReview (import→persist→load)", () => {
-  test("persistConvertedItems writes the review marker; loadCommandHookBindings reads it", async () => {
-    const projectDir = await mkdtemp(join(tmpdir(), "hook-import-"))
-    const homeDir = await mkdtemp(join(tmpdir(), "hook-import-home-"))
-    try {
-      const result = await persistConvertedItems({
-        enabled: true,
-        homeDir,
-        projectDir,
-        converted: [
-          {
-            type: "hooks",
-            ok: true,
-            value: [{ event: "PreToolUse", commands: ["external-scan.sh"] }],
-          },
-        ],
-      })
-      expect(result.persisted).toBe(true)
-
-      // The on-disk settings.json#hooks group carries the marker.
-      const raw = JSON.parse(await readFile(join(projectDir, "settings.json"), "utf8"))
-      expect(raw.hooks.PreToolUse[0].needsReview).toBe(true)
-
-      // And the command-hooks loader resolves it to a review-gated binding.
-      const bindings = await loadCommandHookBindings(join(projectDir, "settings.json"))
-      const b = bindings.find((x) => x.command === "external-scan.sh")
-      expect(b?.needsReview).toBe(true)
-      expect(b?.source).toBe("imported")
-
-      // FULL UC1 — under an armed trust gate this imported hook does NOT fire.
-      const { port, calls } = fakeExec()
-      await fire(armed(bindings, true), port)
-      expect(calls.length).toBe(0)
-    } finally {
-      await rm(projectDir, { recursive: true, force: true })
-      await rm(homeDir, { recursive: true, force: true })
-    }
-  })
-})

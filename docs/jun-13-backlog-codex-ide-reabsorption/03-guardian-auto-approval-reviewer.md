@@ -44,3 +44,18 @@ full-access:         sandbox=danger-full-access,approval=never,      reviewer=us
 - reviewer 축 + ladder preset SSOT; default-OFF byte-identical(reviewer=user가 기존 경로).
 - e2e: guardian reviewer가 안전 명령 자동승인 / 위험 명령은 HARD_DENY가 reviewer 앞에서 차단(red-on-injection).
 - ≥3R 적대어딧(권한상승 매트릭스: pillar×reviewer×gate 전수, [[jun-04-3round-hardening-audit]] 패턴).
+
+## 구현 상태 (2026-06-13) — DELTA-ONLY 합의
+**⚠️ 1차 판정 정정: reviewer 축 코어는 이미 LIVE였음(false-gap).** [[jun-13-t03-reviewer-axis-false-gap]].
+이미 존재: `ReviewerTier` 3-tier(user/auto_review/guardian_subagent)·`dispatchFresh`·subagent guardian(`reviewer-subagent.ts`, fail-closed, `REVIEWER_MAX_TURNS=4`, tool-filter=[read,grep,glob]→재귀불가)·`reviewerPort` gate 배선·HARD_DENY가 reviewer 앞(`evaluate`/`evaluateStack` 모두 hardDeny 최우선).
+
+**이번에 구현한 진짜 델타:**
+1. `QUANTA_AUTO_REVIEW`(bool, **strict `=== "1"`**) + `QUANTA_APPROVAL_LADDER`(enum) — `runtime-config.ts`+`runtime-config-knobs.ts`(home=runtime-config; 디스조인트/parity/orphan 라쳇 통과). default-OFF byte-identical.
+2. **approval ladder 6-name SSOT** — `src/permission/approval-ladder.ts`(`APPROVAL_LADDER` Record + `parseApprovalLadderName`). 각 rung=full `ThreadPermission`{sandbox,approvalPolicy,reviewer}. guardian-approvals만 reviewer=agent(red-on-injection 테스트로 봉인).
+3. 배선: `compose`가 ladder rung의 `approvalsReviewer==="agent"`(또는 strict AUTO_REVIEW)→`autoReviewEnabled`→`selectDefaultReviewer`가 guardian 선택. **ThreadPermission 시딩 안 함**(아래 어딧 참조).
+- 테스트: `approval-ladder-hellgate`(SSOT/UC3)·`guardian-auto-approval-reviewer-hellgate`(UC1 자동승인-no-prompt/UC2 HARD_DENY-앞-red-on-injection/UC4 byte-identical/UC5 fail-closed)·`reviewer-policy.test`(opt-in routing). 25 신규 + 1444 permission-area green, 0 회귀. src/test typecheck 0(내 파일).
+
+**🔴 어딧 R3가 잡은 실버그:** ladder를 `setThreadPermission`로 시딩하면 `evaluateStack`(라이브 CLI gate)이 thread record에서 allow/deny를 **직접** 결정→**reviewer를 영영 안 거침**. workspace-write(writableRoots 無)는 `threadAllowsMutation=false`→**모든 쓰기 deny**(guardian 도달 0). → 시딩 폐기, `selectDefaultReviewer`의 `autoReviewEnabled` 라우팅으로 전환(threadPermission undefined 유지→gate가 `ask`→guardian).
+
+## 후속 (delta-3, 미구현) — (기능)+(왜)+(ROI)
+- **`item/autoApprovalReview/{started,completed}` 스트림 이벤트 + CLI/Web "auto-reviewed by guardian" annotation** — (기능) reviewer 판정을 T01 item-level 이벤트로 노출, CLI 승인영역/Web 카드에 누가 자동승인했는지 표시. (왜) 현재 guardian 자동승인은 `emitReviewerDecision`(metrics recorder)만 타고 사용자-가시 스트림엔 안 뜸→무인 자동승인이 조용히 일어남(관측성 북극성 위배). (ROI) ★★ — 코어 자동승인은 이미 동작하므로 순수 가시성 추가지만, stream/types·projection·CLI render 동시편집(T01/T05) 충돌영역이라 합류 후 별도 착수가 안전. `emitReviewerDecision`에 stream sink 한 갈래 추가가 최소 구현.

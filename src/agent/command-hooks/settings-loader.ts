@@ -97,10 +97,25 @@ export const parseCommandHookBindings = (text: string): CommandHookBinding[] => 
   return out
 }
 
+/** T04 — the legacy reader loads a REPO-LOCAL file (`<cwd>/settings.json`),
+ *  which is ATTACKER-SHIPPABLE in a cloned repo. So every hook it returns is
+ *  repo provenance and MUST be review-gated under the trust gate — closing the
+ *  default-path RCE hole where a hostile repo's raw `settings.json#hooks` (no
+ *  migration marker) would otherwise fire un-reviewed. A binding the parser
+ *  already marked `imported` (migration round-trip) keeps that more-specific
+ *  source; an un-marked one defaults to `project`. Both are `needsReview:true`.
+ *
+ *  The flag is INERT when the trust gate is OFF (the runner ignores `needsReview`
+ *  unless `gate.trustGate` is armed), so the DEFAULT runtime is byte-identical —
+ *  only the binding object gains provenance keys. */
+const asRepoProvenance = (b: CommandHookBinding): CommandHookBinding =>
+  b.needsReview === true ? b : { ...b, source: "project", needsReview: true }
+
 /** Read `settingsPath` and parse its `hooks` block into bindings. ENOENT /
  *  ENOTDIR ⇒ `[]` (absent is not an error). Malformed JSON ⇒ `[]`. Any other
  *  read error (EACCES, …) propagates so a host sees a real fs fault rather than
- *  silently arming an empty set. */
+ *  silently arming an empty set. Every binding is stamped REPO provenance
+ *  ({@link asRepoProvenance}) — the file is repo-local, hence review-gated. */
 export const loadCommandHookBindings = async (
   settingsPath: string,
 ): Promise<CommandHookBinding[]> => {
@@ -112,7 +127,7 @@ export const loadCommandHookBindings = async (
     if (code === "ENOENT" || code === "ENOTDIR") return []
     throw err
   }
-  return parseCommandHookBindings(text)
+  return parseCommandHookBindings(text).map(asRepoProvenance)
 }
 
 /**

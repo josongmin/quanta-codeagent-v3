@@ -178,7 +178,11 @@ describe("WIRE — central config closes the §2 ungated repo-local hook read at
     const bindings = await resolveCommandHookBindings(repoCwd, deps())
     // The untrusted repo's malicious hook is dropped; the machine-owned user hook
     // survives (machine layers are never trust-gated).
-    expect(bindings).toEqual([{ event: "PreToolUse", command: "echo user-hook" }])
+    // T04 — a machine-owned USER-layer hook is `source:"user"` ⇒ TRUSTED (no
+    // review): the trust gate never holds an operator's own user-global hook.
+    expect(bindings).toEqual([
+      { event: "PreToolUse", command: "echo user-hook", source: "user", needsReview: false },
+    ])
     expect(bindings.some((b) => b.command === MALICIOUS)).toBe(false)
   })
 
@@ -190,7 +194,7 @@ describe("WIRE — central config closes the §2 ungated repo-local hook read at
 
     const bindings = await resolveCommandHookBindings(repoCwd, deps())
 
-    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash", source: "project", needsReview: true }])
   })
 
   test("(b') ON + headless QUANTA_TRUSTED_PATHS allow-list trusts THIS repo", async () => {
@@ -199,7 +203,7 @@ describe("WIRE — central config closes the §2 ungated repo-local hook read at
     __resetRuntimeConfig()
 
     const bindings = await resolveCommandHookBindings(repoCwd, deps())
-    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash", source: "project", needsReview: true }])
   })
 
   test("(b'') ON + allow-list for a DIFFERENT path does NOT leak trust to this repo", async () => {
@@ -243,11 +247,16 @@ describe("WIRE default-OFF byte-identity — knob unset ⇒ legacy path, zero ce
     expect(centralReadCalls).toBe(0)
     expect(persistenceCtorCalls).toBe(0)
     // BYTE-IDENTITY: deep-equal to the legacy reader's own output over the
-    // identical file — the legacy reader honors the repo hook with NO trust
-    // gate (the exact §2 behavior the feature gates only when the knob is ON).
+    // identical file — the OFF path returns EXACTLY `loadCommandHookBindings`.
+    // T04: the legacy reader stamps INERT repo provenance (`source:"project",
+    // needsReview:true`) since `<cwd>/settings.json` is attacker-shippable; the
+    // flag is ignored by the runner unless the trust gate is armed, so the
+    // RUNTIME stays byte-identical (the repo hook still arms with NO trust gate).
     const legacy = await loadCommandHookBindings(join(repoCwd, "settings.json"))
     expect(bindings).toEqual(legacy)
-    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+    expect(bindings).toEqual([
+      { event: "PreToolUse", command: MALICIOUS, matcher: "Bash", source: "project", needsReview: true },
+    ])
   })
 
   test("(d) OFF: loose-truthy spellings of the gate stay on the legacy branch", async () => {
@@ -264,7 +273,7 @@ describe("WIRE default-OFF byte-identity — knob unset ⇒ legacy path, zero ce
       // touch (proving the strict gate, not an accidental truthy coercion).
       expect(centralReadCalls).toBe(0)
       expect(persistenceCtorCalls).toBe(0)
-      expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+      expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash", source: "project", needsReview: true }])
     }
   })
 })
@@ -308,10 +317,10 @@ describe("§P7 (ticket-05-①) — interactive trust prompt elevates untrusted�
     // prompted with the dropped layers, then the SAME hook armed (re-resolved as trusted).
     expect(asked?.cwd).toBe(realRepoCwd)
     expect(asked?.droppedLayers.length).toBeGreaterThan(0)
-    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash", source: "project", needsReview: true }])
     // persisted: a SECOND resolve (no prompt) now sees the repo as trusted.
     const second = await resolveCommandHookBindings(repoCwd, deps())
-    expect(second).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+    expect(second).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash", source: "project", needsReview: true }])
   })
 
   test("confirmTrust DECLINES ⇒ settings stay dropped + trust NOT persisted", async () => {

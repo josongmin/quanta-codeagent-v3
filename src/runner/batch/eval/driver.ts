@@ -310,9 +310,11 @@ export const benchOptIns = (): {
   sotaOn: boolean
 } => {
   // QUANTA_BENCH_SOTA=1 enables the full SOTA++ recommended posture in one flag:
-  // lspNav + localize-phase=5 + issue-hint=agentless. Individual flags still
-  // override SOTA defaults (explicit wins). Measurement: use SOTA as the baseline
-  // for competitive runs; leave unset for byte-identical historical comparison.
+  //   lspNav + localize-phase=5 + issue-hint=agentless + expected-actual +
+  //   repro-test=5 + retry-transient=3 + repo-map.
+  // Individual flags still override SOTA defaults (explicit wins via ?? / ||).
+  // Measurement: use SOTA as the baseline for competitive runs; leave unset for
+  // byte-identical historical comparison.
   const sotaOn = gateOn(process.env, "QUANTA_BENCH_SOTA")
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
@@ -375,9 +377,10 @@ export const benchOptIns = (): {
   const issueHint = issueHintMode !== "off"
   // Expected/Actual extraction is gated SEPARATELY (false-positive-prone in
   // prose). Default-OFF even when parent issueHint is enabled. Accept-list:
-  // `1` / `on` only.
+  // `1` / `on` only. SOTA default-ON: structured expected/actual evidence
+  // complements the agentless issue-hint and grounds the localization signal.
   const eaRaw = process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL
-  const issueHintExpectedActual = eaRaw === "1" || eaRaw === "on"
+  const issueHintExpectedActual = sotaOn || eaRaw === "1" || eaRaw === "on"
   return {
     lspNav,
     subagent,
@@ -760,7 +763,10 @@ const installReproTestHint = async (
   sandbox: string,
   llm: LLMPort,
 ): Promise<string | undefined> => {
-  const reproK = parseBenchReproTestK(process.env.QUANTA_BENCH_REPRO_TEST)
+  // SOTA default: K=5 repro-test candidates when QUANTA_BENCH_SOTA=1 and the
+  // explicit flag is unset. Explicit QUANTA_BENCH_REPRO_TEST wins via ??.
+  const sotaRepro = gateOn(process.env, "QUANTA_BENCH_SOTA") ? 5 : undefined
+  const reproK = parseBenchReproTestK(process.env.QUANTA_BENCH_REPRO_TEST) ?? sotaRepro
   if (reproK === undefined) return undefined
   const selection = await prepareReproTest(instance, sandbox, reproK, { llm })
   if (selection === null || selection.selected === null) return undefined
@@ -856,6 +862,9 @@ export const buildConfig = (
   if (opt.sotaOn) {
     setKnobOverride("QUANTA_READ_OUTLINE", "1")
     setKnobOverride("QUANTA_TEST_RUNNER", "1")
+    // QUANTA_REPO_MAP: now bench-surface-enabled (repo-map.ts); set it live so
+    // the knob system picks it up when wireOptionalAgentPorts reads the env.
+    setKnobOverride("QUANTA_REPO_MAP", "1")
   }
   const lspNavTools = opt.lspNav ? lspNavToolList() : []
   // DIP factory: bench driver runs against the default port surface; the
@@ -1359,8 +1368,11 @@ export const runInstance = async (
   }
 
   // Resolve maxAttempts. Precedence: deps.measurementStability.maxAttempts
-  // (test seam) > QUANTA_BENCH_RETRY_TRANSIENT env > 1 (no retry).
-  const envAttempts = parseRetryTransientEnv(process.env.QUANTA_BENCH_RETRY_TRANSIENT)
+  // (test seam) > QUANTA_BENCH_RETRY_TRANSIENT env > SOTA default (3) > 1.
+  // SOTA default=3: transient failures (empty patch, infra fail) are cheap to
+  // retry and significantly improve reliability on flaky instances.
+  const sotaAttempts = gateOn(process.env, "QUANTA_BENCH_SOTA") ? 3 : undefined
+  const envAttempts = parseRetryTransientEnv(process.env.QUANTA_BENCH_RETRY_TRANSIENT) ?? sotaAttempts
   const maxAttempts = Math.max(
     1,
     Math.floor(deps.measurementStability?.maxAttempts ?? envAttempts ?? 1),
