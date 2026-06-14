@@ -17,6 +17,7 @@
 import { networkInterfaces } from "node:os"
 import type { Server, ServerWebSocket } from "bun"
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
+import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import {
   encodeSessionTransportMessage,
   type SessionTransport,
@@ -38,18 +39,19 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, gateDisabled, isSessionForbidden, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
 import { type CanvasEmitterHandle, createCanvasEmitter } from "./canvas-emitter"
+import { peekFollowerVerb } from "./follower-verb-frame"
 import {
   buildWebKnobCatalog,
   catalogByGroup,
   resolveCatalogValues,
   webSafeKnobValue,
 } from "./knob-catalog-wire"
-import { renderReadout } from "./readout"
 import {
   createObservabilityEmitter,
   type ObservabilityEmitterHandle,
 } from "./observability-emitter"
 import { openThreadStore } from "./persistence-sqlite"
+import { renderReadout } from "./readout"
 import {
   createSessionRegistry,
   type RegisteredSession,
@@ -795,6 +797,13 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    * `QUANTA_WEB_AGENT_STATE=1`.
    */
   readonly userInputPorts?: UserInputPorts
+  /**
+   * T02 — optional thread-follower co-control dispatcher. Gate OFF
+   * (`QUANTA_THIN_CLIENT_DISPATCH` unset) ⇒ absent ⇒ a `followerVerb` frame
+   * falls through to the session bridge (and no conversation-action port is
+   * wired, byte-identical). Populated by `./index.ts` from the session facade.
+   */
+  readonly followerCoControl?: FollowerCoControlDispatcher
 }
 
 /**
@@ -1102,6 +1111,18 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
                 : { decision: "cancelled" },
             )
             return
+          }
+          // T02 — a `followerVerb` frame (steer/interrupt/set-queue-mode) from a
+          // 2nd client is CONSUMED here (NOT a SessionCommand): route it to the
+          // co-control dispatcher whose sinks drive the live conversation-action
+          // surface. Gate OFF ⇒ `followerCoControl` absent ⇒ the frame falls
+          // through to the bridge (byte-identical). Approvals ride approval.respond.
+          if (config.followerCoControl !== undefined) {
+            const verb = peekFollowerVerb(raw)
+            if (verb !== null) {
+              config.followerCoControl.dispatch(verb)
+              return
+            }
           }
         }
         ws.data.adapter?.pushMessage(raw)

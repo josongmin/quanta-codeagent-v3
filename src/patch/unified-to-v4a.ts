@@ -26,9 +26,33 @@ export const isUnifiedDiff = (text: string): boolean => {
 const stripGitPrefix = (p: string): string =>
   p.startsWith("a/") || p.startsWith("b/") ? p.slice(2) : p
 
-/** True iff line begins a new file section in a unified diff. */
+/** True iff line begins a new file section in a unified diff.
+ *  NOTE: this is ONLY safe for the outer loop context where we know we are
+ *  looking at potential file headers, NOT inside hunk bodies. For the inner
+ *  while loops, use isTrueFileBoundary which requires lookahead. */
 const isFileBoundary = (line: string): boolean =>
   line.startsWith("--- ") || line.startsWith("diff --git ")
+
+/**
+ * Lookahead-aware file boundary check for use inside hunk body while loops.
+ *
+ * A line that starts with '--- ' is ONLY a true file boundary if the
+ * immediately following line starts with '+++ '. Without this lookahead,
+ * any content line whose text starts with '-- ' (SQL/Haskell/Lua comments,
+ * YAML '---' separators, etc.) would prematurely terminate the hunk body,
+ * silently discarding all remaining hunk lines.
+ *
+ * A line starting with 'diff --git ' is always a true file boundary.
+ */
+const isTrueFileBoundary = (lines: string[], i: number): boolean => {
+  const l = lines[i] ?? ""
+  if (l.startsWith("diff --git ")) return true
+  if (l.startsWith("--- ")) {
+    const next = lines[i + 1] ?? ""
+    return next.startsWith("+++ ")
+  }
+  return false
+}
 
 /** Convert a unified diff string to V4A format. Returns best-effort V4A even
  *  on malformed input — parsePatch will throw PatchParseError if the result
@@ -75,13 +99,13 @@ export const unifiedDiffToV4A = (text: string): string => {
       if (isDel) {
         out.push(PATCH_SENTINELS.deleteFile + filePath)
         // Delete op has no body in V4A — skip hunk content
-        while (i < lines.length && !isFileBoundary(lines[i] ?? "")) i++
+        while (i < lines.length && !isTrueFileBoundary(lines, i)) i++
         continue
       }
 
       if (isAdd) {
         out.push(PATCH_SENTINELS.addFile + filePath)
-        while (i < lines.length && !isFileBoundary(lines[i] ?? "")) {
+        while (i < lines.length && !isTrueFileBoundary(lines, i)) {
           const l = lines[i] ?? ""
           i++
           if (l.startsWith("@@ ") || l === "@@") continue // skip hunk header
@@ -93,7 +117,7 @@ export const unifiedDiffToV4A = (text: string): string => {
 
       // Normal update
       out.push(PATCH_SENTINELS.updateFile + filePath)
-      while (i < lines.length && !isFileBoundary(lines[i] ?? "")) {
+      while (i < lines.length && !isTrueFileBoundary(lines, i)) {
         const l = lines[i] ?? ""
         i++
         if (l.startsWith("@@ ") || l === "@@") {

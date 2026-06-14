@@ -12,6 +12,11 @@
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt, HookBus } from "@/agent"
 import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
+import {
+  type ConversationActionSurface,
+  createConversationActionSurface,
+} from "@/agent/conversation-action-surface"
+import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import type { ObjectivePort } from "@/agent/objective"
 import {
   type ObservabilityHookBus,
@@ -20,6 +25,7 @@ import {
 } from "@/agent/observability-wire"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
+import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import {
   type AssemblerEnv,
   buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler,
@@ -83,6 +89,16 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * is not registered ⇒ the agent cannot ask on web (byte-identical).
    */
   readonly userInput?: WebUserInputPortHandle
+  /**
+   * T02 — thread-follower co-control dispatcher for a web 2nd-client. Present
+   * only when `QUANTA_THIN_CLIENT_DISPATCH` is opted in: the server routes a
+   * decoded `followerVerb` frame (steer/interrupt/set-queue-mode) here, and its
+   * sinks drive the SAME conversation-action surface wired into this session's
+   * `AgentConfig` (steer → inject into the lease holder's running turn — never a
+   * 2nd writer). Gate OFF ⇒ undefined ⇒ follower frames fall through (the surface
+   * is not wired either, byte-identical). Approvals ride `approval.respond`.
+   */
+  readonly followerCoControl?: FollowerCoControlDispatcher
 }
 
 /**
@@ -140,6 +156,41 @@ const observabilitySlots = (observability: {
       : {}),
     ...(handle.shadowVerify !== undefined ? { shadowVerify: handle.shadowVerify } : {}),
   }
+}
+
+/**
+ * T02 — build the thread-follower co-control slot for the web daemon. Gated on
+ * `QUANTA_THIN_CLIENT_DISPATCH`: mints the conversation-action surface (the
+ * lease-safe mid-turn inject path — the jun-09 CLI↔web parity gap) + the session
+ * inbound-mode ref + the dispatcher whose sinks drive them. Extracted from the
+ * factory closure (mirrors {@link observabilitySlots}) to keep it under biome's
+ * cognitive-complexity cap. Gate OFF ⇒ undefined ⇒ no port wired (the loop never
+ * polls, byte-identical). `relayApproval` is a no-op: a web follower's approve/
+ * deny rides `approval.respond` (the resolver runs the live HARD_DENY re-check);
+ * an approval verb routed to `dispatch()` is rejected.
+ */
+const buildFollowerCoControlSlot = (
+  env: Record<string, string | undefined>,
+): { surface: ConversationActionSurface; dispatcher: FollowerCoControlDispatcher } | undefined => {
+  if (!isFollowerCoControlEnabled(env)) return undefined
+  const surface = createConversationActionSurface()
+  const inbound: { current: InboundMode } = {
+    current: parseInboundMode(env.QUANTA_INBOUND_MODE) ?? "queue",
+  }
+  const dispatcher = new FollowerCoControlDispatcher({
+    plan: {},
+    sinks: {
+      inject: (t) => surface.pushUserMessage(t),
+      interrupt: (r) => surface.pushCancel(r),
+      setQueueMode: (m) => {
+        inbound.current = m
+      },
+      relayApproval: () => {
+        /* approvals ride approval.respond, not the follower frame */
+      },
+    },
+  })
+  return { surface, dispatcher }
 }
 
 /** Surface wrapper over the shared host assembler (ADR-0303 thin-surface):
@@ -250,9 +301,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // `onAgentState` wired ⇒ the stream tap is never installed (no capture,
     // byte-identical) + no facade port ⇒ the server forwards no `agentState`
     // frames.
-    const agentState = gateOn(env, "QUANTA_WEB_AGENT_STATE")
-      ? createAgentStateSource()
-      : undefined
+    const agentState = gateOn(env, "QUANTA_WEB_AGENT_STATE") ? createAgentStateSource() : undefined
     // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port (mirror of the
     // agent-state OUTBOUND tap). Minted ONLY when the agent-state source exists
     // (same gate): a request/resolve frame rides the same agent-state channel,
@@ -264,6 +313,9 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       agentState !== undefined
         ? createWebUserInputPort({ capture: (ev) => agentState.sink.capture(ev) })
         : undefined
+    // T02 — thread-follower co-control slot for a web 2nd-client (gate
+    // QUANTA_THIN_CLIENT_DISPATCH). Absent ⇒ no conversation-action port wired.
+    const follower = buildFollowerCoControlSlot(env)
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),
@@ -290,6 +342,14 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       // web (the tool registers iff this is present). Absent ⇒ tool not
       // registered (byte-identical).
       ...(userInput !== undefined ? { userInputPort: userInput.port } : {}),
+      // T02 — wire the conversation-action port + active-turn ref so a web
+      // follower's steer lands as a mid-turn injection (the loop polls the port).
+      ...(follower !== undefined
+        ? {
+            conversationActionPort: follower.surface.port,
+            activeTurnRef: follower.surface.activeTurnRef,
+          }
+        : {}),
       ...observabilitySlots(observability),
     }
     const turnAssembler = buildInteractiveTurnAssembler()
@@ -335,6 +395,14 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     if (userInput !== undefined) {
       Object.defineProperty(facade, "userInput", {
         get: () => userInput,
+        enumerable: true,
+      })
+    }
+    // T02 — expose the follower co-control dispatcher so the server can route a
+    // decoded `followerVerb` frame to it. Gate OFF ⇒ undefined ⇒ no routing.
+    if (follower !== undefined) {
+      Object.defineProperty(facade, "followerCoControl", {
+        get: () => follower.dispatcher,
         enumerable: true,
       })
     }

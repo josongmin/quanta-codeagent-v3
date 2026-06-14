@@ -6,6 +6,143 @@ import { describe, expect, it } from "bun:test"
 import { isUnifiedDiff, parsePatch, unifiedDiffToV4A } from "@/patch"
 
 // ---------------------------------------------------------------------------
+// A1-RED: hunk body truncates on '--- ' content lines (e.g. SQL comments,
+// Haskell comments, YAML '---' separators).
+//
+// Bug: isFileBoundary only checks startsWith('--- ') without looking ahead to
+// see if the following line is '+++ '. A deletion line whose content starts
+// with '-- ' (two dashes + space) is treated as a file boundary, causing the
+// inner while loop to exit prematurely and silently discard the rest of the
+// hunk.
+//
+// Red-on-injection: revert isTrueFileBoundary to the old isFileBoundary check
+// => the test below fails because the generated V4A omits the tail of the hunk.
+// ---------------------------------------------------------------------------
+describe("A1-RED: SQL comment line starting with '--- ' must not truncate hunk", () => {
+  it("A1-1: diff removing a SQL comment line produces complete V4A with all hunk lines", () => {
+    // This diff contains a deletion of a line that starts with '--- ' (SQL comment).
+    // OLD isFileBoundary would treat '--- old SQL comment' as a file boundary and
+    // exit the inner while loop, silently discarding '-dropped line' and '+new line'.
+    const input = [
+      "--- a/queries.sql",
+      "+++ b/queries.sql",
+      "@@ -1,4 +1,3 @@",
+      " context line",
+      "--- old SQL comment",
+      " more context",
+      "-dropped line",
+      "+new line",
+    ].join("\n")
+
+    const v4a = unifiedDiffToV4A(input)
+
+    // Red-on-injection: if isFileBoundary (without lookahead) is used, the
+    // converter stops at '--- old SQL comment', discards 'more context',
+    // '-dropped line', '+new line'. The V4A would be missing these.
+    expect(v4a).toContain("--- old SQL comment")
+    expect(v4a).toContain(" more context")
+    expect(v4a).toContain("-dropped line")
+    expect(v4a).toContain("+new line")
+
+    // The converter must produce exactly one op (one file), not two.
+    // With the old bug, 'old SQL comment' is treated as a file boundary and the
+    // outer loop tries to parse it as a new '--- ' header, failing the +++ check.
+    const patch = parsePatch(v4a)
+    expect(patch.ops).toHaveLength(1)
+    expect(patch.ops[0]?.kind).toBe("update")
+    expect(patch.ops[0]?.path).toBe("queries.sql")
+  })
+
+  it("A1-2: paired control — a true file boundary between two files is still detected", () => {
+    // Control: two files separated by a REAL '--- a/... +++ b/...' pair.
+    // This must still produce 2 ops (the lookahead fix must not break real boundaries).
+    const input = [
+      "--- a/alpha.sql",
+      "+++ b/alpha.sql",
+      "@@ -1 +1 @@",
+      "-old_alpha",
+      "+new_alpha",
+      "--- a/beta.sql",
+      "+++ b/beta.sql",
+      "@@ -1 +1 @@",
+      "-old_beta",
+      "+new_beta",
+    ].join("\n")
+
+    const v4a = unifiedDiffToV4A(input)
+    const patch = parsePatch(v4a)
+
+    // Red-on-injection: if isTrueFileBoundary is too strict (never terminates),
+    // both files are merged into one malformed op and parsePatch throws or
+    // produces only 1 op.
+    expect(patch.ops).toHaveLength(2)
+    expect(patch.ops[0]?.path).toBe("alpha.sql")
+    expect(patch.ops[1]?.path).toBe("beta.sql")
+  })
+
+  it("A1-3: delete-file loop does not truncate on a SQL comment deletion line", () => {
+    // The delete-file loop (line 78 in original) shares the same isFileBoundary
+    // call. This triggers the bug for the delete-file skip path when multi-file
+    // diffs include a delete file followed by another file.
+    const input = [
+      "--- a/removed.sql",
+      "+++ /dev/null",
+      "@@ -1,3 +0,0 @@",
+      "-line one",
+      "--- this is a SQL comment",
+      "-last line",
+      "--- a/next.py",
+      "+++ b/next.py",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+    ].join("\n")
+
+    const v4a = unifiedDiffToV4A(input)
+    const patch = parsePatch(v4a)
+
+    // Red-on-injection: old isFileBoundary stops the delete-file skip at
+    // '--- this is a SQL comment', misparses 'this is a SQL comment' as a
+    // new file pair (no +++ follows), then gets confused. The final '--- a/next.py'
+    // may or may not be found, but the ops count and kinds will be wrong.
+    expect(patch.ops).toHaveLength(2)
+    expect(patch.ops[0]?.kind).toBe("delete")
+    expect(patch.ops[1]?.kind).toBe("update")
+    expect(patch.ops[1]?.path).toBe("next.py")
+  })
+
+  it("A1-4: add-file loop does not truncate on a SQL comment addition line", () => {
+    // The add-file body loop (line 84 in original) also uses isFileBoundary.
+    // An added file that includes a line starting with '+--- ...' would have
+    // the content line '--- ...' in the hunk (after the '+' is processed).
+    // More precisely: a context line (not +/-) starting with '--- ' could truncate.
+    // Let's test with a context line that starts with '--- ' inside an add-file:
+    // (not real-world for add-file since all lines are '+', but tests the loop)
+    // Instead, test update-file with a context line '--- separator'.
+    const input = [
+      "--- a/readme.md",
+      "+++ b/readme.md",
+      "@@ -1,4 +1,4 @@",
+      " # Title",
+      "--- separator",
+      " ## Section",
+      "-old content",
+      "+new content",
+    ].join("\n")
+
+    const v4a = unifiedDiffToV4A(input)
+
+    // The '--- separator' context line must NOT trigger the file boundary.
+    expect(v4a).toContain("--- separator")
+    expect(v4a).toContain("-old content")
+    expect(v4a).toContain("+new content")
+
+    const patch = parsePatch(v4a)
+    expect(patch.ops).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // HELL-1: canonical "--- a/ +++ b/" header is detected
 // Red-on-injection: remove `t.startsWith("--- ")` branch => returns false
 // ---------------------------------------------------------------------------

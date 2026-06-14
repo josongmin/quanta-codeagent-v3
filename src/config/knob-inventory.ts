@@ -1567,6 +1567,16 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "shared/thin-client-route.ts",
   },
   {
+    envKey: "QUANTA_INBOUND_MODE",
+    kind: "enum",
+    default: "queue",
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Inbound message delivery mode while a turn is in flight (queue | weave | interrupt). Seeds the session inbound-mode ref (CLI /inbound + T02 follower set-queue-mode mutate it).",
+    readSite: "apps/web-daemon/runtime-factory.ts",
+  },
+  {
     envKey: "QUANTA_CRASH_RESUME",
     kind: "bool",
     default: false,

@@ -20,8 +20,10 @@
  * sidecar binaries independent of `import.meta.main` quirks.
  */
 
+import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
+import { isFollowerCoControlEnabled } from "@/agent/thread-follower"
+import { type SupportedReadModels, supported } from "@/protocol/session"
 import type { RuntimeFacade } from "@/sdk/runtime"
-import { supported, type SupportedReadModels } from "@/protocol/session"
 import { errMessage, gateOn } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import {
@@ -29,8 +31,8 @@ import {
   type CanvasPorts,
   type ObservabilityPorts,
   startWebDaemon,
-  type WebDaemonServerConfig,
   type UserInputPorts,
+  type WebDaemonServerConfig,
 } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
@@ -79,7 +81,10 @@ const resolveObservableFactory = async (
   if (
     !gateOn(env, "QUANTA_OBSERVABILITY") &&
     !gateOn(env, "QUANTA_WEB_CANVAS") &&
-    !gateOn(env, "QUANTA_WEB_AGENT_STATE")
+    !gateOn(env, "QUANTA_WEB_AGENT_STATE") &&
+    // T02 — the follower co-control dispatcher also needs the ONE shared facade
+    // so the server can route follower frames into the live session.
+    !isFollowerCoControlEnabled(env)
   ) {
     return { runtimeFactory: baseFactory, facade: undefined }
   }
@@ -169,6 +174,14 @@ const buildUserInputPorts = (
   return { handle: facade.userInput }
 }
 
+/** T02 — project the session facade's follower co-control dispatcher (if the
+ *  `QUANTA_THIN_CLIENT_DISPATCH` gate minted one) so the server can route a
+ *  decoded `followerVerb` frame to it. Absent ⇒ undefined ⇒ follower frames fall
+ *  through (byte-identical). */
+const buildFollowerCoControl = (
+  facade: ObservableRuntimeFacade | undefined,
+): FollowerCoControlDispatcher | undefined => facade?.followerCoControl
+
 const buildSupportedReadModels = (args: {
   readonly observabilityPorts: ObservabilityPorts | undefined
   readonly canvasPorts: CanvasPorts | undefined
@@ -213,6 +226,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // Gate OFF ⇒ undefined ⇒ the server has no port to resolve into AND the tool
   // was never registered (byte-identical legacy).
   const userInputPorts = buildUserInputPorts(observableFacade)
+  const followerCoControl = buildFollowerCoControl(observableFacade)
   const supportedReadModels = buildSupportedReadModels({
     observabilityPorts,
     canvasPorts,
@@ -233,6 +247,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     ...(canvasPorts !== undefined ? { canvasPorts } : {}),
     ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),
     ...(userInputPorts !== undefined ? { userInputPorts } : {}),
+    ...(followerCoControl !== undefined ? { followerCoControl } : {}),
   }
 
   // Port-collision fallback: if the requested port is taken (EADDRINUSE

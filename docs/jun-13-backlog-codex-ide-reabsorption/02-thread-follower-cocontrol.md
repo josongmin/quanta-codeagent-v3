@@ -59,6 +59,12 @@ Codex IDE는 한 라이브 스레드를 **보조(follower) 클라이언트가 �
 - **lease-safety 통합 헬게이트**(실 conversation-action transport + 실 `decideAction`): steer→lease holder 주입, turn-id mismatch→reject(잘못된 턴 기록 0), interrupt→cancel control. **별도 writer 안 됨** 증명.
 - 테스트: 코어 29 + 통합 3, 두 보안 가드 모두 mutation teeth 확인. tsc 0. knob-inventory describe 갱신.
 
-**🟡 DEFERRED (미완·정직 표기, 100% 주장 안 함):**
-- **라이브 2nd-client relay transport**: approval-relay effect는 `approval.respond` 세션커맨드에 매핑되나, 실제 보조 클라이언트(web/ide)가 세션 IPC로 verb 발행→thread별 `FollowerVerbTracker` 디스패치하는 **라이브 배선은 미완**. 프로토콜+가드는 실 오라클로 검증됨. CLI `/steer`·`/interrupt`는 operator(단일 클라) 실현이라 lease-safe 메커니즘을 실 CLI 루프 transport로 증명하나, 진짜 auxiliary-client 연결은 미전달.
-- mid-turn steer가 **모델 출력에 반영**되는 PTY e2e는 결정론 replay로 불가(모델이 반응 못 함) → 실 `decideAction` 경계로 lease-safe 주입을 대신 증명.
+**🟢 LIVE DISPATCHER (추가 랜딩):**
+- `src/agent/thread-follower/dispatch.ts` `FollowerCoControlDispatcher` — verb→effect를 실 sink(inject/interrupt/setQueueMode/relayApproval)에 묶는 라이브 apply seam. 2-cadence: FIRE verb(steer/interrupt/queue-mode)는 즉발; **approval relay만 request/response/timeout**(openApproval=요청+deadline, relayApproval=응답, 늦으면 stale-drop, sweep=fail-safe DENY fallback). `tests/unit/thread-follower-dispatch-live-hellgate.test.ts` 9개가 **실 collaborator로 end-to-end 관통**(실 conversation-action surface+실 decideAction+실 resolveApproval+실 hardDenyReader). UC3 dispatcher 경로도 mutation red-on-injection 확인.
+
+**🟢 웹 2nd-client transport — 풀 라이브 (4/4 verb):**
+- conversation-action surface를 `@/agent/conversation-action-surface`로 **hoist**(slice fence상 웹 데몬이 `apps/cli/**` 못 import → 공용 슬라이스로 승격; CLI 경로는 thin re-export로 byte-identical). surface-coupling 라쳇 green.
+- 웹 데몬 [runtime-factory.ts](src/apps/web-daemon/runtime-factory.ts): `QUANTA_THIN_CLIENT_DISPATCH` 게이트로 surface+inbound ref+`FollowerCoControlDispatcher` mint, `conversationActionPort`+`activeTurnRef`를 AgentConfig에 배선, dispatcher를 facade에 노출.
+- [server.ts](src/apps/web-daemon/server.ts): `followerVerb` WS 프레임을 세션브리지 앞에서 peek([follower-verb-frame.ts](src/apps/web-daemon/follower-verb-frame.ts) `peekFollowerVerb`)→`dispatcher.dispatch`→실 surface inject. [index.ts](src/apps/web-daemon/index.ts): eager-mint 게이트에 follower 추가+dispatcher 스레딩.
+- 결과: 웹 2nd-client가 steer-turn/interrupt-turn/set-queue-mode를 `followerVerb` 프레임으로 **실 transport 관통**(steer=lease holder 주입, 별도 writer 0). approval-relay는 `approval.respond`+LIVE HARD_DENY 재검. **4/4 verb 웹 LIVE.** decoder hellgate가 프레임→dispatcher→실 surface inject end-to-end 증명.
+- mid-turn steer→모델출력 PTY e2e는 결정론 replay로 불가 → 실 `decideAction`/실 surface 경계로 대체증명.
