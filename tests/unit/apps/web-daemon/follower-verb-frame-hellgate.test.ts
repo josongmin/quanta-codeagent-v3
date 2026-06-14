@@ -59,11 +59,8 @@ describe("web follower frame → dispatcher → real conversation-action surface
       setQueueMode: (m) => {
         inbound.current = m
       },
-      relayApproval: () => {
-        throw new Error("approvals ride approval.respond, not the frame")
-      },
     }
-    return { surface, inbound, d: new FollowerCoControlDispatcher({ sinks, plan: {} }) }
+    return { surface, inbound, d: new FollowerCoControlDispatcher({ sinks }) }
   }
 
   test("a web follower steer frame INJECTS into the lease holder's running turn", () => {

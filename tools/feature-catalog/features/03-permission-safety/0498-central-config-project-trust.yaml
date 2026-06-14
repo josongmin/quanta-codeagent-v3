@@ -39,6 +39,7 @@ evidence:
     - src/config/trust-store.ts
     - src/config/types.ts
     - src/agent/command-hooks/settings-loader.ts
+    - src/config/managed-path.ts
   adrs:
     - docs/decisions/0498-central-config-loader-project-trust.md
   tests:
@@ -46,6 +47,7 @@ evidence:
       - tests/unit/central-config-trust-hellgate.test.ts
       - tests/unit/central-config-trust-store-hellgate.test.ts
       - tests/unit/central-config-off-byte-identity-hellgate.test.ts
+      - tests/unit/managed-settings-path-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -53,6 +55,7 @@ knobs:
   - QUANTA_CONFIG_DIR
   - QUANTA_SETTING_SOURCES
   - QUANTA_TRUSTED_PATHS
+  - QUANTA_MANAGED_SETTINGS_PATH
 deliberate_hold: null
 notes: |
   closed port — runtime-config / command-hooks가 @/config 인터페이스에 의존하고

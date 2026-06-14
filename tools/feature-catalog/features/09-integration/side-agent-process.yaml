@@ -3,22 +3,22 @@ title: Side-agent OS-PROCESS daemon V1 — forked child + supervised backoff res
 section: 9
 subsystem: Side-agent (§4.3, Codex side-agent fleet 흡수)
 order: 168
-maturity: L2
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [none]
 monitoring: n-a
 modes: [daemon]
-configurable: planned
+configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:core", "absorbed:codex"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on: [background-side-agent]
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-15"
   evidence:
-    cli: "export-/test-only seam — no live CLI consumer constructs the supervisor. The QUANTA_SIDE_AGENT_PROCESS gate flips runtimeConfig().sideAgentProcess (src/shared/runtime-config.ts:1536 gateOn) but maybeWireSideAgent (agent-config-assembler.ts:510) does NOT yet read it — it mints only the in-process registry. Live consumers of nodeProcessForkPort/createSupervisedProcessDaemon are the two tests."
+    cli: "LIVE-wired: assembleAgentConfig reads runtimeConfig().sideAgentProcess (agent-config-assembler.ts:535) and mints cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({...}) (:536) — a forked-child OS-process registry backed by nodeProcessForkPort + runCharterPassLLM, reachable from src/apps/cli/index.ts. QUANTA_SIDE_AGENT_PROCESS on ⇒ side-agent runs as a supervised OS child."
     web: "no web affordance — internal OS-process daemon; not produced on any web event."
 purpose: |
   §4.3 OS-PROCESS side-agent daemon V1 — Codex side-agent fleet 흡수. ADR-0483의
@@ -54,43 +54,44 @@ purpose: |
 evidence:
   code:
     - src/side-agent/process.ts
+    - src/side-agent/process-registry.ts
+    - src/side-agent/worker-charter-runner.ts
     - src/host/runtime/side-agent-fork-port.ts
+    - src/host/runtime/agent-config-assembler.ts
   adrs: [522]
   tests:
     unit:
       - tests/unit/side-agent-process-supervisor-hellgate.test.ts
+      - tests/unit/side-agent-process-registry-hellgate.test.ts
+      - tests/unit/side-agent-assembler-process-wire-hellgate.test.ts
     integration:
       - tests/integration/side-agent-process-os-fork-e2e.test.ts
+      - tests/integration/side-agent-process-llm-charter-e2e.test.ts
+      - tests/integration/side-agent-ipc-kill-mid-result-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_SIDE_AGENT_PROCESS
     where: src/shared/runtime-config-knobs.ts
     default: false
-    purpose: '§4.3 opt-in (gateOn) that flips runtimeConfig().sideAgentProcess; absent ⇒ side-agent registry runs IN-PROCESS (byte-identical). V1 core only — NOT a launchctl/systemd manager. NOTE: the live composition-root branch that reads this gate (fork-backed registry) is not yet wired (see deliberate_hold).'
+    purpose: '§4.3 opt-in (gateOn) that flips runtimeConfig().sideAgentProcess; absent ⇒ side-agent registry runs IN-PROCESS (byte-identical). On ⇒ assembleAgentConfig mints a forked-child OS-process registry (agent-config-assembler.ts:535-536). V1 core only — NOT a launchctl/systemd manager.'
 deliberate_hold:
   reason: |
-    Export-/test-only seam. The V1 core (`src/side-agent/process.ts`) + the real
-    OS adapter (`src/host/runtime/side-agent-fork-port.ts`) are LIVE-tested — the
-    integration test forks a genuine child via `nodeProcessForkPort` — but NO live
-    CLI/web consumer constructs `createSupervisedProcessDaemon`. The
-    `QUANTA_SIDE_AGENT_PROCESS` gate already flips `runtimeConfig().sideAgentProcess`
-    (src/shared/runtime-config.ts:1536 gateOn), yet `maybeWireSideAgent` (agent-config-assembler.ts:510,
-    owned by the side-agent host-wiring lane) still mints ONLY the in-process
-    registry and does not read `sideAgentProcess`. Turning the gate on today has no
-    runtime effect beyond the config boolean. Honest cli/web = na, configurable =
-    planned (knob defined, no consumer branch).
+    LIVE-wired as of jun-15 (the L2→L4 promotion): assembleAgentConfig reads
+    runtimeConfig().sideAgentProcess (agent-config-assembler.ts:535) and mints
+    cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({...}) — a
+    forked-child OS-process registry (process-registry.ts) running the real
+    LLM-backed bounded charter pass (worker-charter-runner.ts) per child. The
+    RESIDUAL deferrals are transport/packaging depth only: dedicated unix-socket
+    transport (V1 uses the default Node IPC structured-message pipe), launchctl/
+    systemd unit generation, and a multi-daemon OS manager.
   promotion_path: |
-    Extend `maybeWireSideAgent` (src/host/runtime/agent-config-assembler.ts) with a
-    `runtimeConfig().sideAgentProcess` branch that mints the side-agent registry
-    backed by `createSupervisedProcessDaemon` + `nodeProcessForkPort` (a forked-child
-    per daemon) instead of the in-process per-wake runner. On landing: flip
-    surface_integration.cli → full with the import-graph evidence string,
-    configurable → integrated, and drop this hold.
+    Land a dedicated unix-socket transport + launchctl/systemd unit generation +
+    multi-daemon OS manager to retire the residual transport/packaging deferrals.
 notes: |
-  L2: pure supervisor core + real OS fork adapter + IPC union + exponential-backoff
-  respawn, fully mockable (fake fork + manual scheduler) and proven over a REAL fork
-  (integration e2e). NOT live-wired — see deliberate_hold (the composition-root bind
-  in maybeWireSideAgent is the named promotion path, owned by a separate lane).
+  L4: pure supervisor core + real OS fork adapter + IPC union + exponential-backoff
+  respawn + the multi-daemon process-registry, LIVE-wired through assembleAgentConfig
+  (QUANTA_SIDE_AGENT_PROCESS ⇒ cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry)
+  and proven over a REAL fork (integration e2e) + the LLM charter pass + IPC kill-mid-result.
   V1 transport = default Node IPC pipe (structured-message channel satisfies the
   audit's "socket IPC"); dedicated unix-socket transport + launchctl/systemd unit
   generation + multi-daemon OS manager are explicit depth follow-ups. NO-THROW handle:

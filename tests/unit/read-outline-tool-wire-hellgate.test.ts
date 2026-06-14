@@ -17,6 +17,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fakeParser, type ParsedFile, type ParseOutcome } from "@/retrieval"
 import { __resetRuntimeConfig } from "@/shared"
+import { __resetKnobOverrides } from "@/shared/knob-overrides"
 import type { ToolContext, ToolResult } from "@/tool"
 import { makeReadTool } from "@/tool/read"
 
@@ -33,6 +34,7 @@ const mkFile = (name: string, body: string): { dir: string; path: string } => {
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
   delete process.env.QUANTA_READ_OUTLINE
+  __resetKnobOverrides()
   __resetRuntimeConfig()
 })
 
@@ -76,7 +78,9 @@ describe("read outline tool wire hellgate", () => {
   })
 
   test("knob OFF ⇒ outline:true degrades to line-range read + note, NO-THROW", async () => {
-    // knob unset.
+    // knob unset — also clear the live-override store so a prior buildConfig call
+    // that set QUANTA_READ_OUTLINE=1 via setKnobOverride doesn't leak through.
+    __resetKnobOverrides()
     __resetRuntimeConfig()
     const { dir, path } = mkFile("foo.ts", FILE_BODY)
     const fp = fakeParser(

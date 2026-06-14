@@ -1587,6 +1587,16 @@ const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "apps/web-daemon/runtime-factory.ts",
   },
   {
+    envKey: "QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS",
+    kind: "int",
+    default: 0,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "T02 follower approval-relay deadline (ms). >0 ⇒ an unanswered relayed approval times out to a fail-safe DENY + a late follower decision is dropped (no stale-decision). 0/unset ⇒ pass-through (no timeout).",
+    readSite: "apps/web-daemon/server.ts",
+  },
+  {
     envKey: "QUANTA_CRASH_RESUME",
     kind: "bool",
     default: false,

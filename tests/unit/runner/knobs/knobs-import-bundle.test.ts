@@ -31,6 +31,7 @@ import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
 import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
+import { issueHintExpectedActualKnob } from "@/runner/knobs/knobs/issue-hint-expected-actual"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { mcpToolAnnotationsKnob } from "@/runner/knobs/knobs/mcp-tool-annotations"
@@ -41,11 +42,14 @@ import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
 import { ratelimitNoticeKnob } from "@/runner/knobs/knobs/ratelimit-notice"
+import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
+import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { taskBudgetKnob } from "@/runner/knobs/knobs/task-budget"
+import { testRunnerKnob } from "@/runner/knobs/knobs/test-runner"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
@@ -57,6 +61,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(gitDirectiveKnob),
   asAnyKnob(hooksKnob),
   asAnyKnob(issueHintKnob),
+  asAnyKnob(issueHintExpectedActualKnob),
   asAnyKnob(localizePhaseKnob),
   asAnyKnob(lspKnob),
   asAnyKnob(mcpToolAnnotationsKnob),
@@ -67,11 +72,14 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(personaKnob),
   asAnyKnob(policyMergeKnob),
   asAnyKnob(ratelimitNoticeKnob),
+  asAnyKnob(readOutlineKnob),
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproTestKnob),
+  asAnyKnob(retryTransientKnob),
   asAnyKnob(skillsKnob),
   asAnyKnob(subagentKnob),
   asAnyKnob(taskBudgetKnob),
+  asAnyKnob(testRunnerKnob),
   asAnyKnob(workingStateKnob),
 ]
 

@@ -38,6 +38,7 @@ evidence:
     - src/agent/branch-search/seed.ts
     - src/agent/branch-search/tool.ts
     - src/agent/branch-search-runner.ts
+    - src/runner/knobs/knobs/branch-search.ts
   adrs: [84]
   tests:
     unit: [tests/unit/branch-search.test.ts]

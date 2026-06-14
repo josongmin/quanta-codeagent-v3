@@ -7,12 +7,12 @@
  * no provider, `raw-line-reader` is byte-identical.
  *
  * Slice-fence: this leaf imports only `@/agent/mention-injection` (the
- * `MentionKind` / `SymbolLookupLspPort` types) + `@/shared` idioms +
- * node builtins. It does NOT import the agent loop or `@/llm`.
+ * `MentionKind` / `SymbolLookupLspPort` types) + `@/shared` idioms (incl.
+ * `@/shared/ignore-matcher` for the recursive file walk) + node builtins.
+ * It does NOT import the agent loop or `@/llm`.
  */
 
 export { atAutocompleteEnabled } from "./env"
-export { createFileLister, type FileListerOptions } from "./file-list"
 export { matchTier, rankByTier } from "./fuzzy"
 export type { AtCandidate, AtCandidateProvider } from "./port"
 export {
@@ -20,6 +20,10 @@ export {
   createCompositeAtProvider,
   type NamedEntry,
 } from "./provider"
+export {
+  createRecursiveFileLister,
+  type RecursiveFileListerOptions,
+} from "./recursive-file-list"
 export {
   type AcceptEdit,
   type AtState,

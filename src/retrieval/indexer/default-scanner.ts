@@ -22,12 +22,13 @@
 
 import { createHash } from "node:crypto"
 import { type Dirent, promises as fsp } from "node:fs"
-import { join, relative, sep } from "node:path"
+import { join, relative } from "node:path"
 import type { CodeParserPort } from "@/retrieval/code-parser"
 import { err, ok, type Result, runtimeConfig } from "@/shared"
 import { chunkFile } from "./chunker"
 import { chunkFileSyntactic } from "./chunker-syntactic"
 import { DeltaTracker, type FileStamp } from "./delta-tracker"
+import { globToRegex, type IgnoreMatcher, loadIgnore, toPosix } from "@/shared/ignore-matcher"
 import type { CodebaseIndexer, ScanOptions } from "./port"
 import type {
   ChunkerOptions,
@@ -91,129 +92,9 @@ const chunkOneFile = async (
   return chunkFile(input, opts.chunker)
 }
 
-/** Convert a relative path to forward-slash form regardless of platform. */
-const toPosix = (p: string): string => (sep === "/" ? p : p.split(sep).join("/"))
-
-/** Translate a glob (subset: `**`, `*`, `?`, literal) to a RegExp anchored
- *  at the workspace root. We accept the dialect `src/**\/*.ts` — sufficient
- *  for the canonical default. Out-of-dialect callers can pass a wider glob
- *  like `**\/*` and filter post-hoc with their own predicate (future hook). */
-const globToRegex = (glob: string): RegExp => {
-  let out = "^"
-  let i = 0
-  while (i < glob.length) {
-    const c = glob[i] as string
-    if (c === "*") {
-      if (glob[i + 1] === "*") {
-        // `**` matches across directory boundaries.
-        out += ".*"
-        i += 2
-        // Eat a trailing `/` after `**` so `src/**\/foo` matches `src/foo`.
-        if (glob[i] === "/") i++
-        continue
-      }
-      // `*` matches anything except `/`.
-      out += "[^/]*"
-      i++
-      continue
-    }
-    if (c === "?") {
-      out += "[^/]"
-      i++
-      continue
-    }
-    if (c === ".") {
-      out += "\\."
-      i++
-      continue
-    }
-    out += c.replace(/[\\$+()[\]{}|^]/g, "\\$&")
-    i++
-  }
-  out += "$"
-  return new RegExp(out)
-}
-
-interface IgnoreMatcher {
-  isIgnored(relPath: string): boolean
-  shouldDescend(relDir: string): boolean
-}
-
-/** Parse a `.gitignore`-style file body. Empty lines + `#` comments are
- *  skipped; lines starting with `!` are re-include rules. Returns a
- *  matcher that walks the rules in declaration order — last match wins.
- *  Subset of gitignore semantics: prefix `/` anchors to root, trailing
- *  `/` matches directories, `**` matches across boundaries, otherwise
- *  the pattern is a substring match against any path segment. */
-const parseIgnore = (body: string): IgnoreMatcher => {
-  type Rule = {
-    readonly regex: RegExp
-    readonly negate: boolean
-    readonly dirOnly: boolean
-    readonly rawPattern: string
-    readonly anchored: boolean
-  }
-  const rules: Rule[] = []
-  for (const raw of body.split("\n")) {
-    const line = raw.trim()
-    if (line === "" || line.startsWith("#")) continue
-    let pat = line
-    const negate = pat.startsWith("!")
-    if (negate) pat = pat.slice(1)
-    const dirOnly = pat.endsWith("/")
-    if (dirOnly) pat = pat.slice(0, -1)
-    if (pat === "") continue
-    // Anchored at root vs match-anywhere.
-    const anchored = pat.startsWith("/")
-    if (anchored) pat = pat.slice(1)
-    const regexSrc = anchored
-      ? `^${globToRegex(pat).source.slice(1, -1)}(?:/.*)?$`
-      : `(?:^|/)${globToRegex(pat).source.slice(1, -1)}(?:/.*)?$`
-    rules.push({ regex: new RegExp(regexSrc), negate, dirOnly, rawPattern: pat, anchored })
-  }
-  const isIgnored = (relPath: string): boolean => {
-    let ignored = false
-    for (const r of rules) {
-      if (r.regex.test(relPath)) ignored = !r.negate
-    }
-    return ignored
-  }
-  const mayNeedDescend = (relDir: string): boolean => {
-    const dirPrefix = relDir === "" ? "" : `${relDir}/`
-    return rules.some((r) => {
-      if (!r.negate) return false
-      if (!r.anchored && !r.rawPattern.includes("/")) return true
-      if (/[*?]/.test(r.rawPattern)) return true
-      return r.rawPattern === relDir || r.rawPattern.startsWith(dirPrefix)
-    })
-  }
-  return {
-    isIgnored,
-    shouldDescend: (relDir: string): boolean => !isIgnored(relDir) || mayNeedDescend(relDir),
-  }
-}
-
-const EMPTY_MATCHER: IgnoreMatcher = {
-  isIgnored: () => false,
-  shouldDescend: () => true,
-}
-
-/** Load and combine ignore files present at `root`. Missing files are
- *  silently ignored (matches Cursor / git behaviour). */
-const loadIgnore = async (root: string, honor: boolean): Promise<IgnoreMatcher> => {
-  if (!honor) return EMPTY_MATCHER
-  const bodies: string[] = []
-  for (const name of [".gitignore", ".quantaignore"]) {
-    try {
-      const buf = await fsp.readFile(join(root, name), "utf8")
-      bodies.push(buf)
-    } catch {
-      // ENOENT / EACCES — silently skip.
-    }
-  }
-  if (bodies.length === 0) return EMPTY_MATCHER
-  return parseIgnore(bodies.join("\n"))
-}
+// `toPosix`, `globToRegex`, `IgnoreMatcher`, `loadIgnore` — the gitignore
+// dialect — now live in `@/shared/ignore-matcher` (shared with the CLI `@`
+// autocomplete recursive lister). Imported above; behaviour is unchanged.
 
 interface FileVisit {
   readonly absPath: string

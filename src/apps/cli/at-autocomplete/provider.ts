@@ -5,19 +5,29 @@
  * OPTIONAL injected list callbacks — see RFC §4.2 design-honesty note: those
  * registries expose `lookup` but no `list`, so until a `list()` lands they
  * are graceful-empty). Kind selection mirrors the parser cascade
- * (`parser.ts:183-189`): a `/` in the query ⇒ file; an uppercase leading
- * char ⇒ symbol; otherwise the kebab kinds (skill/plugin/app) PLUS a
- * lowercase file probe (covers `@foo.ts`).
+ * (`parser.ts:183-189`): a `/` in the query ⇒ file only; an uppercase leading
+ * char ⇒ symbol + file (so `@README` still resolves); otherwise a file probe
+ * (covers `@foo.ts`) PLUS the kebab kinds (skill/plugin/app). Multi-kind
+ * results are concatenated FILES-FIRST so the dropdown's primary purpose
+ * (`@path`) is never starved out of the visible window by many matching
+ * skills (the prior files-last order buried them past the cap).
  *
- * Each kind's candidates are ranked by the deterministic 2-tier
- * `rankByTier` (RFC §4.5) against the query — prefix before substring,
- * stable. The `score` field carries the tier so a downstream renderer that
- * re-sorts stays consistent. NO-THROW: a thrown sub-lister contributes `[]`.
+ * Each kind's candidates are ranked by the deterministic 3-tier
+ * `rankByTier` (RFC §4.5) against the query — exact before prefix before substring,
+ * stable. This INCLUDES file candidates: the recursive lister
+ * (`recursive-file-list.ts`) indexes the whole workspace then ranks the
+ * matches with the SAME primitive, so a bare `@driver` reaches a deep
+ * `src/.../driver.ts`. The `score` field carries the tier so a downstream
+ * renderer that re-sorts stays consistent. NO-THROW: a thrown sub-lister
+ * contributes `[]`.
  */
 
-import { createFileLister, type FileListerOptions } from "./file-list"
 import { rankByTier } from "./fuzzy"
 import type { AtCandidate, AtCandidateProvider } from "./port"
+import {
+  createRecursiveFileLister,
+  type RecursiveFileListerOptions,
+} from "./recursive-file-list"
 import { createSymbolLister, type SymbolListerOptions } from "./symbol-list"
 
 /** A name + description registry entry the kebab listers consume. */
@@ -40,11 +50,16 @@ export interface CompositeAtProviderDeps {
   readonly listPlugins?: () => readonly NamedEntry[]
   /** OPTIONAL app catalog list callback. Absent ⇒ no app candidates. */
   readonly listApps?: () => readonly NamedEntry[]
-  /** Per-kind candidate cap. Default 8 (= `MAX_VISIBLE_CANDIDATES`). */
+  /** Per-kind candidate cap for the kebab kinds (skill/plugin/app) + symbols.
+   *  Default 8 (= `MAX_VISIBLE_CANDIDATES`). */
   readonly maxPerKind?: number
+  /** File candidate cap. Larger than `maxPerKind` so the dropdown can scroll
+   *  past the visible window + show a "+N more" signal. Default 50. */
+  readonly maxFileResults?: number
 }
 
 const DEFAULT_MAX = 8
+const DEFAULT_FILE_MAX = 50
 
 /** First line of a description (CRLF-tolerant) — mirrors the resolver
  *  `firstLineOf` idiom so detail columns match the resolve surface. */
@@ -93,8 +108,14 @@ export const createCompositeAtProvider = (deps: CompositeAtProviderDeps): AtCand
     typeof deps.maxPerKind === "number" && Number.isFinite(deps.maxPerKind) && deps.maxPerKind > 0
       ? Math.trunc(deps.maxPerKind)
       : DEFAULT_MAX
-  const fileOpts: FileListerOptions = { fileRoot: deps.fileRoot, maxResults: max }
-  const fileLister = createFileLister(fileOpts)
+  const fileMax =
+    typeof deps.maxFileResults === "number" &&
+    Number.isFinite(deps.maxFileResults) &&
+    deps.maxFileResults > 0
+      ? Math.trunc(deps.maxFileResults)
+      : DEFAULT_FILE_MAX
+  const fileOpts: RecursiveFileListerOptions = { fileRoot: deps.fileRoot, maxResults: fileMax }
+  const fileLister = createRecursiveFileLister(fileOpts)
   const symbolOpts: SymbolListerOptions = {
     maxResults: max,
     ...(deps.symbolLookup !== undefined ? { symbolLookup: deps.symbolLookup } : {}),
@@ -115,18 +136,27 @@ export const createCompositeAtProvider = (deps: CompositeAtProviderDeps): AtCand
     list: async (query: string, signal?: AbortSignal): Promise<readonly AtCandidate[]> => {
       if (typeof query !== "string") return []
       // Kind inference mirrors the parser cascade (parser.ts:183-189).
+      // A slash ⇒ path browse ⇒ files only (kebab/symbol names carry no slash).
       if (query.includes("/")) {
         return safe(() => fileLister(query, signal))
       }
+      // Uppercase-leading ⇒ symbol intent (ClassName), BUT still probe files:
+      // a repo's `@README` / `@Makefile` / `@LICENSE` are real files and must
+      // not be swallowed by the symbol route. Symbols lead each round; files
+      // interleave so both stay reachable (regression: uppercase was symbol-
+      // only and these files never surfaced).
       if (/^[A-Z]/.test(query)) {
-        return safe(() => symbolLister(query, signal))
+        const [symbols, ufiles] = await Promise.all([
+          safe(() => symbolLister(query, signal)),
+          safe(() => fileLister(query, signal)),
+        ])
+        return [...symbols, ...ufiles]
       }
-      // Lowercase / empty: kebab kinds + a lowercase file probe (covers
-      // `@foo.ts`). Run in parallel and concat in deterministic kind order.
-      // EVERY lister is wrapped in `safe` — the kebab `deps.list*()` callbacks
-      // run SYNCHRONOUSLY, so a throw there (or inside `listKebab`) must NOT
-      // reject the whole batch and wipe the file candidates. `safe` keeps each
-      // kind's failure isolated to that kind (NO-THROW contract, RFC §6.1).
+      // Lowercase / empty: a file probe (covers `@foo.ts`) PLUS the kebab
+      // kinds. EVERY lister is wrapped in `safe` — the kebab `deps.list*()`
+      // callbacks run SYNCHRONOUSLY, so a throw there (or inside `listKebab`)
+      // must NOT reject the whole batch and wipe the file candidates. `safe`
+      // keeps each kind's failure isolated (NO-THROW contract, RFC §6.1).
       const [files, skills, plugins, apps] = await Promise.all([
         safe(() => fileLister(query, signal)),
         safe(async () =>
@@ -137,7 +167,12 @@ export const createCompositeAtProvider = (deps: CompositeAtProviderDeps): AtCand
         ),
         safe(async () => (deps.listApps ? listKebab(deps.listApps(), query, "app", max) : [])),
       ])
-      return [...skills, ...plugins, ...apps, ...files]
+      // Files FIRST so the dropdown's primary purpose (`@path`) is never
+      // starved out of the visible window by many matching skills/plugins
+      // (the prior `[...skills, ...files]` order buried files past the cap).
+      // Concatenation (not round-robin) keeps each kind's rows grouped under a
+      // single section header instead of spamming a header per row.
+      return [...files, ...skills, ...plugins, ...apps]
     },
   }
 }

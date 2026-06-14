@@ -245,12 +245,13 @@ describe("hellgate — QUANTA_KNOBS_PRESET edges", () => {
     expect(state.preset).toBeUndefined()
   })
 
-  test("preset='   ' (whitespace only) ⇒ surfaced verbatim (operator typo is operator-visible)", () => {
-    // Resolver does not trim — the operator's literal string is captured so
-    // they see exactly what they exported. The framework will drop it as
-    // unknown preset.
+  test("preset='   ' (whitespace only) ⇒ treated as unset (trimmed → undefined)", () => {
+    // The selector now trims and treats whitespace-only as unset, consistent
+    // with the empty-string case above — a whitespace preset would be dropped
+    // as an unknown preset anyway, so surfacing `undefined` is cleaner than
+    // echoing the typo into the telemetry preset field.
     const state = resolveBenchKnobs({ envVars: { QUANTA_KNOBS_PRESET: "   " } })
-    expect(state.preset).toBe("   ")
+    expect(state.preset).toBeUndefined()
   })
 
   test("preset name 1024 chars long ⇒ surfaced verbatim, no crash", () => {

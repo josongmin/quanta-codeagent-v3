@@ -35,10 +35,12 @@ evidence:
     - src/tool/reflect/reflect.ts
     - src/tool/reflect/port.ts
     - src/tool/index.ts
+    - src/agent/tier1/reflect.ts
   adrs: [504]
   tests:
     unit:
       - tests/unit/reflect-tool-hellgate.test.ts
+      - tests/unit/reflect-consult-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

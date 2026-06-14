@@ -66,6 +66,7 @@ evidence:
     - src/observability/vocabulary.ts
     - src/apps/bench/eval/driver.ts
     - src/shared/runtime-config.ts
+    - src/tool/plan/current-plan.ts
   adrs: [95, 96, 97]
   tests:
     unit:

@@ -1,0 +1,40 @@
+id: streaming-cancellation-primitive
+title: Streaming-cancellation controller — typed cancel-cause + AbortSignal round-trip (ADR-0183, built-not-wired)
+section: 1
+subsystem: Loop 스트리밍 취소 — typed cancel controller (Default-OFF seam)
+order: 455
+maturity: L2
+status: new
+ui_surfaces: [none]
+monitoring: none
+modes: [n-a]
+configurable: planned
+owners: ["@songmin"]
+labels: [surface:core, default-off]
+depends_on: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-15"
+  evidence:
+    cli: "built-not-wired — no production consumer; only doc-comment references (mid-turn-interruption/types.ts, branch-search/verify.ts). The live user-abort path goes through mid-turn-interruption's local MidTurnCancelCause, NOT this slice."
+    web: "no surface affordance; pure in-process cancel primitive."
+purpose: 'ADR-0183 streaming-cancellation primitive: a typed CancelController carrying a closed cancel-cause union (budget-breach | verify-guard | user-abort) that round-trips to a standard AbortSignal (toAbortSignal()) + orchestrates cleanup. Built + hellgate-tested but DELIBERATELY UNWIRED — callers opt in by threading toAbortSignal() into existing StreamInput.signal; without that wire, behaviour is byte-identical. Catalogued (not hidden) so the orphan is visible with its reason.'
+evidence:
+  code:
+    - src/agent/streaming-cancellation/default.ts
+    - src/agent/streaming-cancellation/llm-stream-cancel.ts
+    - src/agent/streaming-cancellation/types.ts
+    - src/agent/streaming-cancellation/index.ts
+  adrs: [183]
+  tests:
+    unit:
+      - tests/unit/streaming-cancellation-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'Built-but-unwired pure-infra primitive: no gate knob, no production consumer (only doc-comment refs), single slice-local unit hellgate. ADR-0183 envisioned callers (budget-breach/verify-guard/user-abort) but the live user-abort path uses mid-turn-interruption''s local cause-union instead, so this sibling is parked.'
+  promotion_path: 'Thread CancelController.toAbortSignal() into the loop StreamInput.signal at the budget-breach / verify-guard / user-abort sites; then promote to L3/L4.'
+notes: 'Registered as an L2 deliberate-hold for VISIBILITY (catalog philosophy: orphans catalogued-not-hidden with a reason), not because it is live. The dir/test "ADR-0177" labels are stale (0177 was renumbered); the real ADR is 0183.'

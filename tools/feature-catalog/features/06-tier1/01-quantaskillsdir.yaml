@@ -39,6 +39,7 @@ evidence:
     - src/agent/tier1/skill.ts
     - src/runner/assemble/skill.ts
     - src/apps/cli/internal.ts
+    - src/runner/knobs/knobs/skills.ts
   adrs: []
   tests:
     unit: [tests/unit/skill.test.ts, tests/unit/skill-frontmatter-parse.test.ts, tests/unit/skill-discover-errors.test.ts, tests/unit/skill-discover-size-cap.test.ts]

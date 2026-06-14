@@ -37,6 +37,7 @@ evidence:
     - src/agent/prompt.ts
     - src/apps/cli/internal.ts
     - src/apps/cli/repl.ts
+    - src/runner/knobs/knobs/persona.ts
   adrs: ["docs/decisions/0068-persona-slot.md"]
   tests:
     unit:

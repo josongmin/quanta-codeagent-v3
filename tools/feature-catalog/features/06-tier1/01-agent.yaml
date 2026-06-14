@@ -48,6 +48,7 @@ evidence:
     - src/agent/tier1/subagent.ts
     - src/agent/tier1/subagent-bg.ts
     - src/runner/assemble/subagent.ts
+    - src/runner/knobs/knobs/subagent.ts
   adrs: []
   tests:
     unit: [tests/unit/subagent.test.ts, tests/unit/subagent-runner.test.ts, tests/unit/subagent-6-tools-hellgate.test.ts, tests/unit/subagent-tools-6-contracts.test.ts, tests/unit/subagent-slice-boundary.test.ts]

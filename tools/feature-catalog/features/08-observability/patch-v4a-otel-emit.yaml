@@ -40,6 +40,8 @@ evidence:
     - src/patch/types.ts
     - src/patch/parser.ts
     - src/tool/apply-patch.ts
+    - src/observability/patch-trace/index.ts
+    - src/observability/patch-trace/otel-patch-trace.ts
     - src/apps/cli/help-render.ts
     - src/shared/runtime-config.ts
   adrs: [28, 32]

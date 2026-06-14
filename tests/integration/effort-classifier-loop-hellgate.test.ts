@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { mkdtempSync, rmSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -73,11 +74,13 @@ const withEffortEnv = async (value: "on" | undefined, run: () => Promise<void>):
   const prev = process.env.QUANTA_EFFORT_AUTO
   if (value === undefined) delete process.env.QUANTA_EFFORT_AUTO
   else process.env.QUANTA_EFFORT_AUTO = value
+  __resetRuntimeConfig()
   try {
     await run()
   } finally {
     if (prev === undefined) delete process.env.QUANTA_EFFORT_AUTO
     else process.env.QUANTA_EFFORT_AUTO = prev
+    __resetRuntimeConfig()
   }
 }
 

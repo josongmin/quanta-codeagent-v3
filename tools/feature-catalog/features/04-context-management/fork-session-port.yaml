@@ -43,10 +43,13 @@ evidence:
     - src/agent/fork-session/default-forker.ts
     - src/agent/fork-session/index.ts
     - src/apps/cli/fork-checkpoint-cmd.ts
+    - src/tool/shadow/fork.ts
+    - src/agent/tier1/fork-session.ts
   adrs: [221]
   tests:
     unit:
       - tests/unit/agent/fork-session-port-hellgate.test.ts
+      - tests/unit/tool/shadow-fork-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

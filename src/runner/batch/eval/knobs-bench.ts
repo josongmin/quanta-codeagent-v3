@@ -35,6 +35,9 @@ import {
   knobsForSurface,
   resolveKnobs,
 } from "@/runner/knobs"
+// Side-effect: registers all bench/agent knobs so knobsForSurface("bench")
+// returns a populated map. Safe to import multiple times (module cached once).
+import "@/runner/knobs/knobs"
 import { gateOn } from "@/shared"
 
 export interface BenchKnobState {
@@ -176,18 +179,25 @@ export interface BenchPosture {
   readonly liveOverrides: readonly string[]
   /** Resolved preset name (telemetry/debug; undefined when none selected). */
   readonly preset: string | undefined
+  /** True when the SOTA super-preset (agentless-v1) is active — via
+   *  QUANTA_BENCH_SOTA=1 alias or QUANTA_BENCH_PRESET=agentless-v1. */
+  readonly sotaOn: boolean
 }
 
 const isTrue = (v: unknown): v is true => v === true
 const isNumber = (v: unknown): v is number => typeof v === "number"
 const isLocalizeValue = (v: unknown): v is { phase1Turns: number } =>
-  typeof v === "object" && v !== null && "phase1Turns" in v &&
+  typeof v === "object" &&
+  v !== null &&
+  "phase1Turns" in v &&
   typeof (v as { phase1Turns: unknown }).phase1Turns === "number"
 const isBranchValue = (v: unknown): v is { defaultN: number; config: BranchSearchConfig } =>
   typeof v === "object" && v !== null && "config" in v
 const isIssueMode = (v: unknown): v is "agentless" | "regex" => v === "agentless" || v === "regex"
 const isReproValue = (v: unknown): v is { samples: number } =>
-  typeof v === "object" && v !== null && "samples" in v &&
+  typeof v === "object" &&
+  v !== null &&
+  "samples" in v &&
   typeof (v as { samples: unknown }).samples === "number"
 const isRepoMapValue = (v: unknown): v is { enabled: true } =>
   typeof v === "object" && v !== null && (v as { enabled?: unknown }).enabled === true
@@ -216,7 +226,8 @@ export const benchPostureFromState = (
   const repro = readKnobValue(state, "repro-test", isReproValue)
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
   const liveOverrides: string[] = []
-  if (readKnobValue(state, "read-outline", isTrue) === true) liveOverrides.push("QUANTA_READ_OUTLINE")
+  if (readKnobValue(state, "read-outline", isTrue) === true)
+    liveOverrides.push("QUANTA_READ_OUTLINE")
   if (readKnobValue(state, "test-runner", isTrue) === true) liveOverrides.push("QUANTA_TEST_RUNNER")
   if (readKnobValue(state, "repo-map", isRepoMapValue) !== undefined)
     liveOverrides.push("QUANTA_REPO_MAP")
@@ -233,5 +244,6 @@ export const benchPostureFromState = (
     retryTransient,
     liveOverrides,
     preset: state.preset,
+    sotaOn: state.preset === "agentless-v1",
   }
 }

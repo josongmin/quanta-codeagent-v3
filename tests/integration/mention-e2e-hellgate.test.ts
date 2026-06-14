@@ -528,11 +528,15 @@ describe("mention wire — END-TO-END hellgate (real fs, real wires)", () => {
     expect(out.length).toBe(0)
   })
 
-  test("@dir (a directory) ⇒ dropped (not a file)", async () => {
+  test("@dir (a directory) ⇒ resolved as @folder listing (not dropped)", async () => {
+    // §10.3 folder resolver is default-ON — a trailing-slash mention like
+    // `@subdir/` is now classified as "folder" kind and resolves to a
+    // directory listing, NOT dropped. The original test expected 0 injections
+    // (written before §10.3 landed); now expect 1 (the folder listing).
     mkdirSync(join(dir, "subdir"), { recursive: true })
     const cfg = assembleAgentConfig({ mode: MODE, base: makeBase(dir, "isdir") })
     const out = await inject(cfg, "see @subdir/")
-    expect(out.length).toBe(0)
+    expect(out.length).toBe(1)
   })
 
   // ============================================================

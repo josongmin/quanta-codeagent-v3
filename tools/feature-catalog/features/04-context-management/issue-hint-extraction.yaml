@@ -47,6 +47,7 @@ evidence:
     - src/agent/issue-hint/agentless-localize.ts
     - src/agent/issue-hint/types.ts
     - src/apps/bench/eval/driver.ts
+    - src/runner/knobs/knobs/issue-hint.ts
   adrs: []
   tests:
     unit:

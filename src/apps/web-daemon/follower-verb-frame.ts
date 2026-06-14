@@ -18,10 +18,12 @@
  * through to the session bridge exactly as before (byte-identical when the gate
  * is off, since the server only calls this under the gate).
  *
- * Approval decisions are DELIBERATELY not carried here: a web follower's
- * approve/deny rides the existing `approval.respond` SessionCommand (which runs
- * the LIVE HARD_DENY re-check at the resolver), so this frame covers only the
- * FIRE verbs (steer-turn / interrupt-turn / set-queue-mode).
+ * Verb routing (in `server.ts`): a `command-approval-decision` verb is routed to
+ * the follower approval-relay TIMEOUT coordinator (deadline/stale + the resolver's
+ * LIVE HARD_DENY re-check, which fires `approval.respond`); the FIRE verbs
+ * (steer-turn / interrupt-turn / set-queue-mode) go to the dispatcher. This
+ * decoder validates only the OUTER envelope for BOTH — `planFollowerVerb` /
+ * the coordinator own content validation.
  */
 import type { FollowerVerb } from "@/agent/thread-follower"
 

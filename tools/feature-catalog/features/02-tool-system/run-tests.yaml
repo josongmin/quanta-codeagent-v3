@@ -42,6 +42,7 @@ evidence:
     - src/tool/testrun/tool.ts
     - src/tool/testrun/detect.ts
     - src/tool/testrun/parse.ts
+    - src/runner/knobs/knobs/test-runner.ts
   adrs: [532]
   tests:
     unit:
@@ -49,3 +50,7 @@ evidence:
       - tests/unit/tool/testrun/parse-node.test.ts
       - tests/unit/tool/testrun/detect.test.ts
       - tests/unit/tool/testrun/run-tests-real-e2e.test.ts
+    integration: []
+    contract: []
+knobs: ["test-runner"]
+deliberate_hold: null

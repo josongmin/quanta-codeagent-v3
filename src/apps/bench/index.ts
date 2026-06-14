@@ -22,6 +22,13 @@
  *                                                  cache for the next run;
  *                                                  requires --swebench)
  *   --dry-run                                      load+count+print plan, NO LLM
+ *   --list-presets                                 print bench presets + exit
+ *   QUANTA_BENCH_PRESET=<name>                     posture preset (value, NOT
+ *                                                  on/off): agentless-v1 /
+ *                                                  everything-v1 / baseline.
+ *                                                  Individual QUANTA_BENCH_*
+ *                                                  override. QUANTA_BENCH_SOTA=1
+ *                                                  = alias for agentless-v1.
  *   --model <id> | QUANTA_MODEL                    model id
  *   QUANTA_PROVIDER / ANTHROPIC_API_KEY / OPENAI_API_KEY  provider pick
  *   QUANTA_SWEBENCH_PYTHON=1                        grade via official Python
@@ -71,6 +78,7 @@ import {
   selectInstances,
   writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
+import { KNOB_PRESETS } from "@/runner/knobs"
 import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
   aggregate,
@@ -655,9 +663,31 @@ const DEFAULT_BENCH_TIMEOUT_MS = 120_000
  *
  * Mirrors `apps/agent/index.ts`'s `runMain(deps: MainDeps)` pattern.
  */
+/** Render the available bench presets + their contents from the SSOT
+ *  (`KNOB_PRESETS`) so the listing can never drift from what actually resolves.
+ *  Triggered by `--list-presets`. */
+const printPresetList = (): void => {
+  logger.info("Bench presets — select with QUANTA_BENCH_PRESET=<name> (value, not on/off).")
+  logger.info("Individual QUANTA_BENCH_* env vars override a preset's values.")
+  logger.info("QUANTA_BENCH_SOTA=1 is a back-compat alias for agentless-v1.")
+  logger.info("")
+  for (const [name, knobs] of Object.entries(KNOB_PRESETS)) {
+    const body = Object.entries(knobs)
+      .map(([id, v]) => `${id}=${v}`)
+      .join(", ")
+    logger.info(`  ${name.padEnd(16)} ${body === "" ? "(no-op baseline)" : body}`)
+  }
+}
+
 export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
+
+  if (argFlag("--list-presets")) {
+    printPresetList()
+    exitFn(0)
+    return
+  }
 
   const corpusRoot = argValue("--corpus") ?? process.env.QUANTA_SWEBENCH_CORPUS_ROOT ?? ""
   const n = argPositiveInt("--n", 1)

@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0439 §4.5 — Deterministic 2-tier candidate ranking.
+ * RFC-12 / ADR-0439 §4.5 — Deterministic 3-tier candidate ranking.
  *
  * NO new fuzzy heuristic (the `no-heuristics-only-validated` rule). This is
  * the SAME prefix-match idiom the slash palette uses
@@ -7,8 +7,10 @@
  * with a conservative substring fallback so a mid-name match still surfaces.
  *
  * Tiering (the ONLY ranking signal — no weighted score is invented):
- *   - tier 0 — `value` starts with `query` (case-insensitive).
- *   - tier 1 — `value` merely contains `query` (case-insensitive).
+ *   - tier 0 — `value` EQUALS `query` (case-insensitive). An exact `@index`
+ *     floats the file literally named `index.ts`-basename above prefix kin.
+ *   - tier 1 — `value` starts with `query` (case-insensitive).
+ *   - tier 2 — `value` merely contains `query` (case-insensitive).
  *   - no match ⇒ filtered out entirely.
  *
  * Stable order: tier ASC, then ORIGINAL input index ASC. Two values in the
@@ -22,8 +24,9 @@ export const matchTier = (value: string, query: string): number => {
   if (query === "") return 0
   const v = value.toLowerCase()
   const q = query.toLowerCase()
-  if (v.startsWith(q)) return 0
-  if (v.includes(q)) return 1
+  if (v === q) return 0 // exact (case-insensitive)
+  if (v.startsWith(q)) return 1 // prefix
+  if (v.includes(q)) return 2 // substring
   return -1
 }
 

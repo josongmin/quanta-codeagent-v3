@@ -18,6 +18,7 @@ import { networkInterfaces } from "node:os"
 import type { Server, ServerWebSocket } from "bun"
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
+import { createFollowerApprovalCoordinator } from "@/agent/thread-follower"
 import {
   encodeSessionTransportMessage,
   type SessionTransport,
@@ -836,6 +837,15 @@ export const peekPlanInputAnswer = (
   }
 }
 
+/** Parse QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS — the ms deadline for a follower to
+ *  respond to a pending approval. 0 / unset / invalid ⇒ 0 (DISABLED ⇒ the
+ *  coordinator passes relays straight through, byte-identical to no timeout). */
+export const parseFollowerApprovalTimeoutMs = (raw: string | undefined): number => {
+  if (raw === undefined) return 0
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 0 ? n : 0
+}
+
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
   // ONE shared session for the whole daemon lifetime. New WS connections
@@ -864,6 +874,55 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     logger.info("web-daemon: thread persistence enabled", {
       sessionId: sharedSession.sessionId,
     })
+  }
+
+  // T02 — follower approval-relay TIMEOUT coordinator. Present iff the follower
+  // co-control gate minted a dispatcher. `respond` routes a follower's decision
+  // through the SAME `approval.respond` command a local client uses (→ the host
+  // resolver's LIVE HARD_DENY re-check). The deadline is OPT-IN via
+  // QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS (0/unset ⇒ pass-through, byte-identical):
+  // when set, an unanswered approval times out to a fail-safe DENY and a late
+  // follower relay is dropped (no stale-decision). The sweep timer + the
+  // requested/resolved subscription run only when the deadline is enabled.
+  const followerApprovalTimeoutMs = parseFollowerApprovalTimeoutMs(
+    process.env.QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS,
+  )
+  const followerApproval =
+    config.followerCoControl !== undefined
+      ? createFollowerApprovalCoordinator({
+          respond: (id, decision, steer) => {
+            void sharedSession.approval
+              .respond(id, decision, steer !== undefined ? { steer } : undefined)
+              .catch((error) =>
+                logger.warn("web-daemon: follower approval respond failed", {
+                  error: errMessage(error),
+                }),
+              )
+          },
+          now: () => Date.now(),
+          timeoutMs: followerApprovalTimeoutMs,
+        })
+      : undefined
+  let followerApprovalUnsub: (() => void) | null = null
+  let followerSweepTimer: ReturnType<typeof setInterval> | null = null
+  if (followerApproval !== undefined && followerApprovalTimeoutMs > 0) {
+    followerApprovalUnsub = sharedSession.subscribe((event) => {
+      if (event.type === "approval.requested") followerApproval.open(event.approval.approvalId)
+      else if (event.type === "approval.resolved") followerApproval.close(event.approvalId)
+    })
+    // Sweep at ~quarter-deadline granularity (min 250ms) so a timed-out approval
+    // is denied promptly. `unref` so the timer never keeps the process alive.
+    followerSweepTimer = setInterval(
+      () => {
+        followerApproval.sweep()
+        // Evict terminal entries each tick so the tracker map stays bounded on a
+        // long-lived shared-session daemon (the kernel reducer guards a late
+        // pruned-relay double-resolve, so aggressive prune is safe).
+        followerApproval.prune()
+      },
+      Math.max(250, Math.floor(followerApprovalTimeoutMs / 4)),
+    )
+    followerSweepTimer.unref?.()
   }
 
   // Bearer-auth gate shared by every authenticated route (WS upgrade + the
@@ -1120,7 +1179,13 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
           if (config.followerCoControl !== undefined) {
             const verb = peekFollowerVerb(raw)
             if (verb !== null) {
-              config.followerCoControl.dispatch(verb)
+              if (verb.kind === "command-approval-decision") {
+                // Approval decisions ride the TIMEOUT coordinator (deadline/stale
+                // + the resolver's live HARD_DENY re-check), NOT the FIRE path.
+                followerApproval?.relay(verb.approvalId, verb.decision, verb.steer)
+              } else {
+                config.followerCoControl.dispatch(verb)
+              }
               return
             }
           }
@@ -1193,6 +1258,16 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       if (unsubPersist !== null) {
         unsubPersist()
         unsubPersist = null
+      }
+      // T02 — tear down the follower approval coordinator's subscription + sweep
+      // timer so neither fires against a closed session.
+      if (followerApprovalUnsub !== null) {
+        followerApprovalUnsub()
+        followerApprovalUnsub = null
+      }
+      if (followerSweepTimer !== null) {
+        clearInterval(followerSweepTimer)
+        followerSweepTimer = null
       }
       threadStore?.close()
       await runtime.close().catch((error: unknown) => {

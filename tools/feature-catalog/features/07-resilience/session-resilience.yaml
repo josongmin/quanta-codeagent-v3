@@ -3,14 +3,14 @@ title: Session resilience — persisted crash-resume marker (§13.2) + aggregate
 section: 7
 subsystem: 세션 영속 복원력 — 하드-크래시 턴 재개 + store-level 손상 진단
 order: 102
-maturity: L3
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
-configurable: planned
+configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:core", "resilience-primitive", "built-not-wired"]
+labels: ["surface:core", "resilience-primitive"]
 depends_on: [session-cwd-missing-exit, conversation-checkpoint]
 surface_integration:
   cli: full
@@ -77,13 +77,16 @@ evidence:
   code:
     - src/session/crash-resume.ts
     - src/session/store-health.ts
-  adrs: [525]
+    - src/runner/orchestrate/crash-resume-wire.ts
+    - src/runner/orchestrate/session-turn-driver.ts
+  adrs: [525, 528]
   tests:
     unit:
       - tests/unit/session/crash-resume.test.ts
       - tests/unit/session/store-health.test.ts
     integration:
       - tests/integration/crash-resume-hellgate.test.ts
+      - tests/integration/crash-resume-wire-hellgate.test.ts
     contract: []
 knobs:
   - name: QUANTA_CRASH_RESUME
@@ -92,25 +95,18 @@ knobs:
     purpose: §13.2 persisted interrupted-turn marker — arm crash-detect + resume offer (opt-in, default-OFF byte-identical degrade). store-health has NO knob (it is an explicit-call diagnostic, not a gated behavior).
 deliberate_hold:
   reason: |
-    Built-but-not-wired. Both modules are export-only via the @/session barrel
-    (src/session/index.ts) and the QUANTA_CRASH_RESUME knob is registered in
-    src/config/knob-inventory.ts, but NO live consumer (apps/cli / host) calls
-    markSessionInterrupted, detectInterruptedSessions, buildCrashResumeOffer, or
-    checkSessionStoreHealth (grep over src/ outside the module + barrel + types
-    + knob-inventory returns RC=1). This matches the jun-09 integration-audit
-    finding that flagged §13.2 crash-resume as built-but-not-wired. The slice is
-    fully tested (unit + a §13.2 CROWN JEWEL hellgate) and contract-sealed, so
-    promotion is wiring-only, not a rebuild — hence ui_surfaces/cli/web = n-a/na
-    rather than an overclaimed "full".
+    crash-resume (§13.2) is LIVE-wired as of ADR-0528 (the L3→L4 promotion):
+    `@/runner/orchestrate/crash-resume-wire` `withCrashResumeMarker` brackets the
+    single live turn chokepoint `runSessionTurn` (session-turn-driver.ts:24
+    imports it) and repl.ts startup calls bootstrapCrashResumeOffers +
+    selectCrashResumeReinject — see the audited cli evidence string. The RESIDUAL
+    deferral is narrow: store-health (§13.1, `checkSessionStoreHealth`) is still
+    export-only (a /doctor-style or empty-list trigger is the follow-up), and the
+    crash-resume OFFER→web card consumes the same event (web surface follow-up).
   promotion_path: |
-    (1) crash-resume: the host restart bootstrap calls
-    detectInterruptedSessions(listSessions()) → buildCrashResumeOffer per hit
-    and surfaces the offer (CLI prompt / TUI banner), re-injecting
-    buildCrashResumeMessage as a role:"user" continuation on accept; flip
-    surface_integration.cli → full and configurable → integrated.
-    (2) store-health: a /doctor-style command (or the "list came back empty AND
-    the dir is non-empty" trigger) calls checkSessionStoreHealth() and renders
-    report.guidance to stderr.
+    store-health: a /doctor-style command (or the "list came back empty AND the
+    dir is non-empty" trigger) calls checkSessionStoreHealth() and renders
+    report.guidance to stderr. web: render the crash-resume offer as a web card.
 notes: |
   Distinct from the sibling resume-family entries: `session-cwd-missing-exit`
   guards the cwd at the resume boundary, `resume-tool-pairing-reconcile` repairs
@@ -119,9 +115,7 @@ notes: |
   STORE-HEALTH plane: surviving a HARD crash (not a clean resume) and detecting
   when the whole store — not one file — is unreadable.
 
-  Maturity L3 (not L4): the implementation is real, tested, and contract-sealed
-  but has no live callsite yet, so the operational wiring/monitoring axes are
-  genuinely thin. Leaving it L4 with a deliberate_hold would still be honest,
-  but L3 better reflects "slice exists + tested, integration pending" without
-  tripping the L4-owners/operational expectations. owners set so the
-  promotion path has an accountable owner.
+  Maturity L4: crash-resume (§13.2) is real, tested (unit + a §13.2 CROWN JEWEL
+  hellgate + the ADR-0528 wire hellgate), and LIVE-wired through runSessionTurn +
+  repl.ts startup. store-health (§13.1) is the remaining export-only diagnostic
+  (its /doctor trigger is the named residual in deliberate_hold).

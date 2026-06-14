@@ -11,6 +11,7 @@ import {
   benchOptIns,
   buildConfig as buildRunnerConfig,
   composeWithReproHint,
+  DEFAULT_POLICY,
   enumerateRepoSources,
   type IssueHintMode,
   knobsForReport,
@@ -21,11 +22,13 @@ import {
   parseLocalizePhaseEnv,
   prepareIssueHint,
   prepareReproTest,
+  projectOutcome,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
   resolveBenchKnobs,
   type RunInstanceDeps as SharedRunInstanceDeps,
+  runRetryLoop,
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
@@ -199,14 +202,16 @@ const installReproTestHint = async (
   sandbox: string,
   llm: LLMPort,
 ): Promise<string | undefined> => {
-  const reproK = parseBenchReproTestK(process.env.QUANTA_BENCH_REPRO_TEST)
+  // Unified posture: K resolves from the preset/env via the knob framework
+  // (preset `agentless-v1` ⇒ K=5; explicit QUANTA_BENCH_REPRO_TEST overrides).
+  const reproK = benchOptIns().reproTestK
   if (reproK === undefined) return undefined
   const selection = await prepareReproTest(instance, sandbox, reproK, { llm })
   if (selection === null || selection.selected === null) return undefined
   try {
     await Bun.write(`${sandbox}/${REPRO_FILE_NAME}`, selection.selected)
     return REPRO_HINT_MESSAGE
-  } catch {
+  } catch (_writeErr) {
     return undefined
   }
 }
@@ -356,7 +361,7 @@ const okResult = (
   ...extra,
 })
 
-export const runInstance = async (
+const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
@@ -433,5 +438,50 @@ export const runInstance = async (
     clearTimeout(deadline)
     w.observer?.close()
     await cleanupSandbox(sandbox)
+  }
+}
+
+/**
+ * Public entry-point with the transient-retry wrapper (measurement-stability).
+ *
+ * `maxAttempts` precedence: `deps.measurementStability?.maxAttempts` (test seam)
+ * > unified posture `retryTransient` (preset/env via the knob framework — preset
+ * `agentless-v1` ⇒ 3; explicit `QUANTA_BENCH_RETRY_TRANSIENT` overrides) > 1.
+ *
+ * Byte-identical fence: when `maxAttempts === 1` (default, no preset/env) the
+ * wrapper calls `runInstanceOnce` EXACTLY ONCE and returns its result verbatim
+ * (no `budget` stamp) — identical to the pre-wrapper single-pass shape and
+ * wall-clock. Only the multi-attempt path stamps `budget`.
+ *
+ * Unlike the (dead) runner-driver wrapper this DELIBERATELY does NOT scale the
+ * per-attempt timeout by knob `costMultiplier`: those multipliers are a
+ * matrix-budget construct (e.g. repro-test=40) and using them as a wall-clock
+ * multiplier balloons an `agentless-v1` instance ~15× unexpectedly. Per-attempt
+ * timeout stays operator-controlled (`--timeout` / `QUANTA_BENCH_TIMEOUT_MS`).
+ */
+export const runInstance = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+): Promise<InstanceResult> => {
+  const maxAttempts = Math.max(
+    1,
+    Math.floor(deps.measurementStability?.maxAttempts ?? benchOptIns().retryTransient ?? 1),
+  )
+  if (maxAttempts === 1) return runInstanceOnce(instance, deps)
+
+  const policy = deps.measurementStability?.policy ?? DEFAULT_POLICY
+  const { result, loop } = await runRetryLoop(
+    async () => runInstanceOnce(instance, deps),
+    maxAttempts,
+    policy,
+  )
+  return {
+    ...result,
+    budget: {
+      baseTimeoutMs: deps.timeoutMs,
+      adaptedTimeoutMs: deps.timeoutMs,
+      attempts: loop.attempts,
+      attemptOutcomes: loop.outcomes.map(projectOutcome),
+    },
   }
 }

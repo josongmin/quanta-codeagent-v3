@@ -149,6 +149,27 @@ describe.skipIf(!PTY_AVAILABLE)("CLI input-layer e2e (PTY)", () => {
   )
 
   test(
+    "#1 @-dropdown scrolls past the visible window to reach later files",
+    async () => {
+      // 12 files all match `@zfile` ⇒ more than the 8-row window. Scrolling
+      // down must surface a "+N above" marker AND a high-index file, proving
+      // the sliding window + full-list nav (not capped at 8). Regression guard
+      // for entries 9+ being permanently unreachable.
+      for (let i = 0; i < 12; i += 1) {
+        writeFileSync(join(cwd, `zfile${String(i).padStart(2, "0")}.txt`), "x")
+      }
+      const c = await boot()
+      c.send("@zfile")
+      await c.waitFor("zfile00", T) // dropdown open, top of list
+      await c.waitFor("more", T) // overflow indicator: not all fit in the window
+      for (let i = 0; i < 9; i += 1) c.send("\x1b[B") // ↓ ×9 — scroll into the tail
+      await c.waitFor("above", T) // window scrolled (top items now off-screen)
+      await c.waitFor("zfile11", T) // the last file is reachable
+    },
+    T,
+  )
+
+  test(
     "#12 ctrl+a (home) inserts at the line START",
     async () => {
       const c = await boot()

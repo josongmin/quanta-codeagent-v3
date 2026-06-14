@@ -74,6 +74,7 @@ evidence:
     - src/tool/read/outline.ts
     - src/tool/read/index.ts
     - src/shared/runtime-config.ts
+    - src/runner/knobs/knobs/read-outline.ts
   adrs: ["docs/plans/jun-6-syntax-aware-chunking.md", 277]
   tests:
     unit:

@@ -59,6 +59,12 @@ Codex IDE는 한 라이브 스레드를 **보조(follower) 클라이언트가 �
 - **lease-safety 통합 헬게이트**(실 conversation-action transport + 실 `decideAction`): steer→lease holder 주입, turn-id mismatch→reject(잘못된 턴 기록 0), interrupt→cancel control. **별도 writer 안 됨** 증명.
 - 테스트: 코어 29 + 통합 3, 두 보안 가드 모두 mutation teeth 확인. tsc 0. knob-inventory describe 갱신.
 
+**🟢 approval-relay TIMEOUT 라이브 (100점 클로저, 2026-06-15):**
+- `src/agent/thread-follower/approval-coordinator.ts` `createFollowerApprovalCoordinator` — T02 "request/response/timeout"의 프로덕션 home. tracker(타이밍코어)+주입 `respond` sink+`now` clock. open(deadline 등록)/relay(in-time→respond, late→stale-drop)/sweep(fail-safe DENY)/close(타 경로 resolve 마킹)/prune(bounded). `timeoutMs<=0`=DISABLED pass-through(byte-identical). 디스패처는 FIRE-verb 전용으로 슬림(openApproval/relayApproval/sweep 제거→코디네이터로 이전, dead-code 0).
+- **웹 라이브 배선**(server.ts startWebDaemon): `respond`=`session.approval.respond`(→커널 approval.respond→resolver의 LIVE HARD_DENY 재검). approval.requested→open, approval.resolved→close 구독; sweep+prune 타이머(timeoutMs>0일 때만); `command-approval-decision` followerVerb 프레임→coordinator.relay 라우팅; stop()서 unsub+timer 정리. 게이트=opt-in `QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS`(0=pass-through).
+- 🔴타이머-fired approval.respond가 실제로 동작함 검증: 승인대기 중엔 single-writer lease가 **풀려있음**(turn.run의 runWith 완료 후 awaiting_approval)→타이머 deny가 lease 획득·resolve 성공(데드락X). double-resolve는 커널 reducer(pendingApproval=null→unknown_approval reject)+lease가 가드(코디네이터 stale-drop은 belt-and-suspenders).
+- 적대어딧(2어디터): 실결함=tracker 누수(daemon이 prune 미호출)→sweep 타이머에 prune() 추가; honesty 프로즈("not wired/forward-API") 정정. 코디네이터 hellgate 11(타이밍/stale/disabled/prune+실resolver HARD_DENY+timeout end-to-end).
+
 **🟢 LIVE DISPATCHER (추가 랜딩):**
 - `src/agent/thread-follower/dispatch.ts` `FollowerCoControlDispatcher` — verb→effect를 실 sink(inject/interrupt/setQueueMode/relayApproval)에 묶는 라이브 apply seam. 2-cadence: FIRE verb(steer/interrupt/queue-mode)는 즉발; **approval relay만 request/response/timeout**(openApproval=요청+deadline, relayApproval=응답, 늦으면 stale-drop, sweep=fail-safe DENY fallback). `tests/unit/thread-follower-dispatch-live-hellgate.test.ts` 9개가 **실 collaborator로 end-to-end 관통**(실 conversation-action surface+실 decideAction+실 resolveApproval+실 hardDenyReader). UC3 dispatcher 경로도 mutation red-on-injection 확인.
 

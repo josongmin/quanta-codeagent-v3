@@ -50,9 +50,11 @@ evidence:
     - src/tool/debug/dap-client.ts
     - src/tool/debug/dap-codec.ts
     - src/tool/debug/cdp-inspect.ts
+    - src/tool/debug/cdp-client.ts
   adrs: [531]
   tests:
     unit:
+      - tests/unit/tool/debug/cdp-inspect-hellgate.test.ts
       - tests/unit/tool/debug/dap-codec.test.ts
       - tests/unit/tool/debug/dap-client.test.ts
       - tests/unit/tool/debug/dap-inspect-driver-hellgate.test.ts

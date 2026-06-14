@@ -37,10 +37,12 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/diff-preview.ts
+    - src/runner/action-diff.ts
   adrs: []
   tests:
     unit:
       - tests/unit/cli/diff-preview.test.ts
+      - tests/unit/cli/compute-action-diff.test.ts
     integration: []
     contract: []
 knobs:

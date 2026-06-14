@@ -41,6 +41,7 @@ evidence:
     - src/agent/issue-hint/extract-expected-actual.ts
     - src/agent/issue-hint/compose.ts
     - src/agent/issue-hint/index.ts
+    - src/runner/knobs/knobs/issue-hint-expected-actual.ts
   adrs: []
   tests:
     unit:

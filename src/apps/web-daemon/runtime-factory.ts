@@ -165,9 +165,9 @@ const observabilitySlots = (observability: {
  * inbound-mode ref + the dispatcher whose sinks drive them. Extracted from the
  * factory closure (mirrors {@link observabilitySlots}) to keep it under biome's
  * cognitive-complexity cap. Gate OFF ⇒ undefined ⇒ no port wired (the loop never
- * polls, byte-identical). `relayApproval` is a no-op: a web follower's approve/
- * deny rides `approval.respond` (the resolver runs the live HARD_DENY re-check);
- * an approval verb routed to `dispatch()` is rejected.
+ * polls, byte-identical). FIRE verbs only — a follower's approve/deny rides the
+ * approval coordinator wired in `startWebDaemon` (timeout/stale + the resolver's
+ * live HARD_DENY re-check); an approval verb routed to `dispatch()` is rejected.
  */
 const buildFollowerCoControlSlot = (
   env: Record<string, string | undefined>,
@@ -178,15 +178,11 @@ const buildFollowerCoControlSlot = (
     current: parseInboundMode(env.QUANTA_INBOUND_MODE) ?? "queue",
   }
   const dispatcher = new FollowerCoControlDispatcher({
-    plan: {},
     sinks: {
       inject: (t) => surface.pushUserMessage(t),
       interrupt: (r) => surface.pushCancel(r),
       setQueueMode: (m) => {
         inbound.current = m
-      },
-      relayApproval: () => {
-        /* approvals ride approval.respond, not the follower frame */
       },
     },
   })

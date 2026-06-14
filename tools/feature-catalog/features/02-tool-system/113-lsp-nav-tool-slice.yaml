@@ -40,6 +40,7 @@ evidence:
     - src/tool/lsp_nav/index.ts
     - src/tool/lsp_nav/formatters.ts
     - src/tool/lsp_nav/types.ts
+    - src/runner/knobs/knobs/lsp.ts
   adrs: []
   tests:
     unit:

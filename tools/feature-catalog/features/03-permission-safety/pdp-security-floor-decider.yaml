@@ -1,0 +1,38 @@
+id: pdp-security-floor-decider
+title: PDP security-floor decider — capability-driven universal always-confirm (jun-10 P2-T3)
+section: 3
+subsystem: Policy Decision Point — pure surface-agnostic always-confirm floor (@/permission)
+order: 4
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, security-touched]
+depends_on: [hitl-4-tier-gate, infertooltier-secure-by-default-fallback]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-15"
+  evidence:
+    cli: "decideFloor consulted at the dispatch admissibility seam (src/agent/admissibility-gate.ts), reachable from src/apps/cli/index.ts; its only user-visible effect is whether a confirm prompt fires universally"
+    web: "pure tier-classification primitive; no user-visible affordance of its own (the resulting confirm reaches web via the approval card)"
+purpose: 'The PDP first pure decider — the SECURITY FLOOR. Separates the permission DECISION (pure, surface-agnostic SSOT) from ENFORCEMENT (the dispatch chokepoint). Answers ONE question: does an always-confirm tier apply UNIVERSALLY (every surface, regardless of hitl.enabled opt-in)? Un-blocks always-confirm secure-by-default: inferToolTier collapses TWO reasons a tool is always-confirm — INHERENTLY SENSITIVE (git push/deploy => confirm everywhere) vs NEEDS-SANDBOX (a profile-less bash self-reports always-confirm for ALL commands => must defer to the sandbox/mode layer, not a blanket confirm). The capability spec splits them as DATA: a tool opts INTO the floor by declaring capability.confirm:"sensitive". decideFloor reads that data — "sensitive" + always-confirm => universal-floor; else => defer (byte-identical to today mode-policy/opt-in). NO IO, NO surface knowledge.'
+evidence:
+  code:
+    - src/permission/pdp.ts
+    - src/agent/admissibility-gate.ts
+    - src/tool/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/permission/pdp-decide-floor.test.ts
+      - tests/unit/permission/sensitive-tool-capability-ratchet.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Pure decider — no knob (armed by per-tool capability DATA via ToolCapability.confirm, src/tool/types.ts). A ratchet test (sensitive-tool-capability-ratchet) pins which tools may declare confirm:"sensitive". hand-off-required is NOT this decider concern.'

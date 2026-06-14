@@ -25,6 +25,7 @@ evidence:
   code:
     - src/agent/working-state.ts
     - src/tool/update-working-state.ts
+    - src/runner/knobs/knobs/working-state.ts
   adrs: [21]
   tests:
     unit: []

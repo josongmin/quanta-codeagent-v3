@@ -13,15 +13,15 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [thin-client-dispatch, slash-command-registry]
 config_refs:
-  env: ["QUANTA_THIN_CLIENT_DISPATCH"]
+  env: ["QUANTA_THIN_CLIENT_DISPATCH", "QUANTA_INBOUND_MODE", "QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS"]
 surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-06-13"
+  verified: "2026-06-15"
   evidence:
     cli: "/steer (lease-safe weave inject via pushUserMessage) + /interrupt (lease-bypass cancel via pushCancel) registered in registry-session.ts, reachable from src/apps/cli/index.ts; /inbound invert applies the per-message queue↔weave invert"
-    web: "steer-turn + interrupt-turn LIVE over the real web transport: a 2nd-client sends a `followerVerb` WS frame → server.ts peekFollowerVerb → FollowerCoControlDispatcher.dispatch → the conversation-action surface wired into the daemon session's AgentConfig (runtime-factory, gate QUANTA_THIN_CLIENT_DISPATCH; surface hoisted to @/agent for the slice fence). approval-relay rides `approval.respond` → resolveApproval with the LIVE HARD_DENY re-check (host resolver). set-queue-mode is dispatched but inert on web (the daemon loop has no mid-turn raw-line routing reading the inbound ref; CLI consumes it). The dispatcher's own openApproval/relayApproval/sweep (timeout/stale discipline) is a TESTED protocol capability NOT wired to the web approval path — approvals ride approval.respond — documented forward-API for a future dedicated follower approval channel. steer no-active-turn drops cleanly (no crash). Proven end-to-end against REAL collaborators."
+    web: "ALL follower verbs LIVE over the real web transport. A 2nd-client sends a `followerVerb` WS frame → server.ts peekFollowerVerb → routed: FIRE verbs (steer-turn/interrupt-turn/set-queue-mode) → FollowerCoControlDispatcher.dispatch → the conversation-action surface wired into the daemon session's AgentConfig (runtime-factory, gate QUANTA_THIN_CLIENT_DISPATCH; surface hoisted to @/agent for the slice fence). command-approval-decision → the LIVE approval-relay TIMEOUT coordinator (createFollowerApprovalCoordinator, wired in startWebDaemon): open on approval.requested, relay→session.approval.respond→resolveApproval's LIVE HARD_DENY re-check, a sweep timer fires a fail-safe DENY on deadline (opt-in QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS; 0=pass-through), a late relay is dropped (no stale-decision), close on approval.resolved + per-tick prune keep the tracker bounded. set-queue-mode is dispatched but inert on web (the daemon loop has no mid-turn raw-line routing reading the inbound ref; CLI consumes it). steer no-active-turn drops cleanly (no crash). Proven end-to-end against REAL collaborators (resolver + session)."
 purpose: |
   A FOLLOWER (auxiliary client — a second window / web / ide) co-controls ONE live
   thread via timeout-bounded verbs. planFollowerVerb maps each verb onto an EXISTING
@@ -42,6 +42,7 @@ evidence:
     - src/agent/thread-follower/index.ts
     - src/agent/inbound-mode.ts
     - src/agent/conversation-action-surface.ts
+    - src/agent/thread-follower/approval-coordinator.ts
     - src/apps/cli/slash/registry-session.ts
     - src/apps/web-daemon/follower-verb-frame.ts
     - src/apps/web-daemon/runtime-factory.ts
@@ -53,6 +54,7 @@ evidence:
     unit:
       - tests/unit/thread-follower-cocontrol-hellgate.test.ts
       - tests/unit/thread-follower-dispatch-live-hellgate.test.ts
+      - tests/unit/thread-follower-approval-coordinator-hellgate.test.ts
       - tests/unit/apps/cli/thread-follower-surface-integration-hellgate.test.ts
       - tests/unit/apps/web-daemon/follower-verb-frame-hellgate.test.ts
       - tests/unit/host/runtime-approval-harddeny-relay-recheck-hellgate.test.ts
@@ -60,4 +62,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: "Web 2nd-client steer/interrupt LIVE via followerVerb frame; approval rides approval.respond + LIVE resolver HARD_DENY. set-queue-mode inert on web (no daemon inbound-routing consumer). Dispatcher timeout/stale-relay API (openApproval/relayApproval/sweep) tested but NOT wired to the web approval path = forward-API for a future follower approval channel. steer no-active-turn drops cleanly (regression-guarded). steer=inject (no second writer)."
+notes: "Web 2nd-client ALL verbs LIVE via followerVerb frame: FIRE verbs→dispatcher→conv-action surface; command-approval-decision→LIVE approval-relay TIMEOUT coordinator (open/relay→approval.respond+resolver HARD_DENY/sweep fail-safe DENY/late-drop/prune-bounded), opt-in QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS (0=pass-through). set-queue-mode inert on web (no daemon inbound-routing consumer). steer no-active-turn drops cleanly (regression-guarded). steer=inject (no second writer). Double-resolve guarded by kernel reducer."

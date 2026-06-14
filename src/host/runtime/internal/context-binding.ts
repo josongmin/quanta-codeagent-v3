@@ -318,11 +318,11 @@ const ensureSessionId = (base: RuntimeBase): RuntimeBase =>
 
 const getSessionId = (base: RuntimeBase): string => base.sessionId ?? crypto.randomUUID()
 
-const DEFAULT_RUNTIME_ENV: Readonly<Record<string, string | undefined>> = process.env
-
 const wireRuntimePorts = (
   base: RuntimeBase,
-  env: Readonly<Record<string, string | undefined>> = DEFAULT_RUNTIME_ENV,
+  // Evaluated at call time so `process.env = {...}` replacements in tests
+  // (which swap the binding, not the object) don't leave a stale reference.
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): RuntimeBase => {
   const wired = sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
   // T01 — resolve QUANTA_ITEM_STREAM here (env in scope) and stamp it onto the

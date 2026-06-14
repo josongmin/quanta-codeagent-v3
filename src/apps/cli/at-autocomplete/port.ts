@@ -22,7 +22,7 @@ import type { MentionKind } from "@/agent/mention-injection"
  * `label` is the dropdown display name; `detail` is the dim right column
  * (relative path / signature / description first line). `score` — when the
  * provider supplies it — is the stable sort key (lower = earlier; RFC §4.5
- * 2-tier `0=prefix, 1=substring`). Renderers never compute their own score.
+ * 3-tier `0=exact, 1=prefix, 2=substring`). Renderers never compute their own score.
  */
 export interface AtCandidate {
   readonly kind: MentionKind

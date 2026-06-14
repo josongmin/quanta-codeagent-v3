@@ -7,7 +7,14 @@
  */
 
 export {
+  createFollowerApprovalCoordinator,
+  type FollowerApprovalCoordinator,
+  type FollowerApprovalCoordinatorDeps,
+  type FollowerApprovalResponder,
   type FollowerApprovalTimeout,
+  type FollowerRelayResult,
+} from "./approval-coordinator"
+export {
   type FollowerCoControlDeps,
   FollowerCoControlDispatcher,
   type FollowerCoControlSinks,

@@ -509,10 +509,24 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
     const atListRows = (): string[] => {
       const cands = state.at.candidates
       if (cands.length === 0) return []
-      const visible = cands.slice(0, MAX_VISIBLE_CANDIDATES)
-      const extra = cands.length - visible.length
+      // Sliding window: show MAX_VISIBLE_CANDIDATES rows that always contain the
+      // selection. `start` clamps so the window stays in-bounds; entries above
+      // / below it are summarised with "+N" markers so nothing is silently
+      // hidden (and, with full-list nav, everything stays reachable).
+      const total = cands.length
+      const win = MAX_VISIBLE_CANDIDATES
+      const sel = state.at.selectedIdx
+      let start = 0
+      if (total > win) {
+        start = Math.max(0, Math.min(sel - Math.floor(win / 2), total - win))
+        if (sel < 0) start = 0
+      }
+      const visible = cands.slice(start, start + win)
+      const above = start
+      const below = total - (start + visible.length)
       const labelW = Math.max(1, ...visible.map((c) => stringColumns(c.label)))
       const rows: string[] = []
+      if (above > 0) rows.push(`${GRAY}  … +${above} above${RESET}`)
       let lastKind: AtCandidate["kind"] | null = null
       visible.forEach((c, i) => {
         if (c.kind !== lastKind) {
@@ -520,15 +534,15 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
           lastKind = c.kind
         }
         const labelPadded = c.label + " ".repeat(Math.max(0, labelW - stringColumns(c.label)))
-        const sel = i === state.at.selectedIdx
-        const labelStyled = sel
+        const isSel = start + i === sel
+        const labelStyled = isSel
           ? `  ${REVERSE}${CYAN}${labelPadded}${RESET}`
           : `  ${CYAN}${labelPadded}${RESET}`
         const detail = c.detail ?? ""
         const detailStyled = detail !== "" ? `  ${GRAY}${detail}${RESET}` : ""
         rows.push(`${labelStyled}${detailStyled}`)
       })
-      if (extra > 0) rows.push(`${GRAY}  … +${extra} more${RESET}`)
+      if (below > 0) rows.push(`${GRAY}  … +${below} more${RESET}`)
       return rows
     }
 
@@ -1078,7 +1092,10 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       // the slash/history nav). Only entered when the dropdown is active, which
       // requires `opts.atProvider` (default-OFF ⇒ this whole block is skipped).
       if (state.at.active) {
-        const visible = Math.min(state.at.candidates.length, MAX_VISIBLE_CANDIDATES)
+        // Navigate the FULL candidate list (the render window scrolls to keep
+        // the selection visible — see atListRows), so entries past the visible
+        // window are reachable instead of stranded.
+        const total = state.at.candidates.length
         if (k.name === "escape") {
           dismissAt(state.at)
           redraw()
@@ -1098,11 +1115,11 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
           }
           // Enter with no selection: fall through to the normal submit below.
         } else if (k.name === "down") {
-          state.at.selectedIdx = selectNext(state.at, visible)
+          state.at.selectedIdx = selectNext(state.at, total)
           redraw()
           return
         } else if (k.name === "up") {
-          state.at.selectedIdx = selectPrev(state.at, visible)
+          state.at.selectedIdx = selectPrev(state.at, total)
           redraw()
           return
         } else if (k.name === "backspace") {

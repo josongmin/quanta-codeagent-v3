@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { RecordingStream } from "./_harness"
 
@@ -76,11 +77,13 @@ const withFastApplyEnv = async (
   const prev = process.env.QUANTA_FAST_APPLY
   if (value === undefined) delete process.env.QUANTA_FAST_APPLY
   else process.env.QUANTA_FAST_APPLY = value
+  __resetRuntimeConfig()
   try {
     await run()
   } finally {
     if (prev === undefined) delete process.env.QUANTA_FAST_APPLY
     else process.env.QUANTA_FAST_APPLY = prev
+    __resetRuntimeConfig()
   }
 }
 

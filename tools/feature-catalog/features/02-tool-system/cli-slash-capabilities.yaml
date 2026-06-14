@@ -51,10 +51,14 @@ evidence:
     - src/apps/cli/slash/registry-app.ts
     - src/capability/registry.ts
     - src/capability/resolve.ts
+    - src/capability/descriptor.ts
+    - src/capability/probe-all.ts
   adrs: [503]
   tests:
     unit:
       - tests/unit/cli/slash-commands-capabilities.test.ts
+      - tests/unit/capability/descriptor-and-registry.test.ts
+      - tests/unit/capability/capability-probe-bootstrap-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

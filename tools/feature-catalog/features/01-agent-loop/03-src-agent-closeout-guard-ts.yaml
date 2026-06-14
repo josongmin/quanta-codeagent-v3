@@ -27,6 +27,7 @@ evidence:
     - src/agent/guards/closeout-guard.ts
     - src/agent/prompt.ts
     - src/agent/loop.ts
+    - src/runner/knobs/knobs/closeout-guard.ts
   adrs: [17]
   tests:
     unit:

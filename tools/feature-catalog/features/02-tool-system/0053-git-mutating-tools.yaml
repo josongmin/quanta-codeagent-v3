@@ -35,11 +35,14 @@ evidence:
     - src/tool/git/commit.ts
     - src/tool/git/branch-switch.ts
     - src/tool/git/_shared.ts
+    - src/tool/git/push.ts
+    - src/tool/git/stage.ts
   adrs: [53]
   tests:
     unit:
       - tests/unit/tool/git-commit.test.ts
       - tests/unit/tool/git-branch-switch.test.ts
+      - tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

@@ -60,6 +60,7 @@ evidence:
     - src/agent/tier1/worktree.ts
     - src/agent/worktree-slot.ts
     - src/tool/worktree/cwd-override.ts
+    - src/tool/worktree/index.ts
   adrs: [523]
   tests:
     unit:

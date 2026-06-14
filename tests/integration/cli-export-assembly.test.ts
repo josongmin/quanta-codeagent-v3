@@ -109,7 +109,9 @@ afterEach(() => {
  */
 const assemble = async (cwd: string) => {
   const logs: string[] = []
-  const slog = new StructuredLogger({ sink: (line) => logs.push(line) })
+  // debug level so capability-gate logs (subagent.on, skills.on etc.) that
+  // buildToolingCore emits via slog.debug() are captured.
+  const slog = new StructuredLogger({ level: "debug", sink: (line) => logs.push(line) })
 
   const provider = pickProvider()
   const persona = pickPersona()
@@ -121,6 +123,7 @@ const assemble = async (cwd: string) => {
     features.lspTools,
     features.lspNavTools,
     features.gitToolList,
+    features.astGrepTools,
     slog,
   )
   // Observability default-OFF (no --observe-dir): plain StdoutStream, no run ctx.
@@ -297,7 +300,7 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     }
     const cfg = assembleConfig([{ role: "user", content: [{ type: "text", text: "go" }] }], {
       llm,
-      registry: buildTooling([], [], [], [], new StructuredLogger()).registry,
+      registry: buildTooling([], [], [], [], [], new StructuredLogger()).registry,
       stream: { emit: () => undefined },
       permission: { mode: "default" },
       system: buildSystemPrompt(workspace, { persona: "default" }),
@@ -352,7 +355,7 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
 
     const cfg = assembleConfig([{ role: "user", content: [{ type: "text", text: "go" }] }], {
       llm,
-      registry: buildTooling([], [], [], [], new StructuredLogger()).registry,
+      registry: buildTooling([], [], [], [], [], new StructuredLogger()).registry,
       stream: { emit: () => undefined },
       permission: { mode: "default" },
       system: buildSystemPrompt(workspace, { persona: "default" }),

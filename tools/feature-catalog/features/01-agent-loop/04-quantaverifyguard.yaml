@@ -28,6 +28,7 @@ evidence:
     - src/apps/cli/internal.ts
     - src/runner/assemble/verify.ts
     - src/agent/verify-guard.ts
+    - src/runner/knobs/knobs/must-pass.ts
   adrs: [13]
   tests:
     unit: [tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]

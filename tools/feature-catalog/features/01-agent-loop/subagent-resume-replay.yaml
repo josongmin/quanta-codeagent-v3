@@ -1,0 +1,44 @@
+id: subagent-resume-replay
+title: Subagent resume/replay — idempotent re-drive of interrupted child handles (built-not-wired)
+section: 1
+subsystem: 서브에이전트 복원 — interrupted handle 재개 + tool-history replay (Default-OFF seam)
+order: 456
+maturity: L2
+status: new
+ui_surfaces: [none]
+monitoring: none
+modes: [n-a]
+configurable: planned
+owners: ["@songmin"]
+labels: [surface:core, default-off]
+depends_on: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-15"
+  evidence:
+    cli: "built-not-wired — no consumer of resumeInterruptedHandles across src/ (not via path nor the @/agent barrel). Opt-in seam: a surface/host wires the resumer over the subagent run-ledger."
+    web: "no surface affordance; pure in-process resume/replay primitive."
+purpose: 'Subagent crash-resume + tool-replay primitive. resumeInterruptedHandles re-drives child-agent handles that were interrupted (hard crash / restart) using a recorded tool-history: idempotency (a tool call already recorded as completed is NOT re-executed — replay returns the stored result), policy (which handles are resumable), and tool-replay (feed the stored tool outcomes back so the child continues from where it died rather than re-running side-effecting tools). Built + hellgate-tested (resume + replay) but DELIBERATELY UNWIRED — no host constructs the resumer yet; absent wiring is byte-identical. Catalogued (not hidden) so the orphan is visible with its reason.'
+evidence:
+  code:
+    - src/agent/subagent-resume/resumer.ts
+    - src/agent/subagent-resume/idempotency.ts
+    - src/agent/subagent-resume/policy.ts
+    - src/agent/subagent-resume/replay.ts
+    - src/agent/subagent-resume/tool-history.ts
+    - src/agent/subagent-resume/tool-replay.ts
+    - src/agent/subagent-resume/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/subagent-resume-hellgate.test.ts
+      - tests/unit/subagent-resume-replay-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'Built-but-unwired: no consumer of resumeInterruptedHandles in src/ (neither by path nor barrel), no gate knob. The idempotent re-drive + tool-replay core is fully hellgate-tested but no host call site constructs the resumer over a subagent run-ledger.'
+  promotion_path: 'Wire the resumer into the subagent run-ledger / restart bootstrap (detect interrupted child handles → resumeInterruptedHandles with the recorded tool-history); then promote to L3/L4.'
+notes: 'Sibling of session crash-resume (session-resilience §13.2) but for CHILD-AGENT handles: the durability axis is the recorded tool-history, and the crux is idempotency (no double side-effect on replay).'

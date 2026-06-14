@@ -48,6 +48,7 @@ evidence:
     - src/agent/repro-test/select.ts
     - src/agent/repro-test/types.ts
     - src/apps/bench/eval/driver.ts
+    - src/runner/knobs/knobs/repro-test.ts
   adrs: []
   tests:
     unit:
