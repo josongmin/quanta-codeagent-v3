@@ -81,7 +81,9 @@ const MODE = "interactive" as const
 const FILE = "QUANTA_MENTION_FILE"
 const SYMBOL = "QUANTA_MENTION_SYMBOL"
 const SKILL = "QUANTA_MENTION_SKILL"
-const KNOBS = [FILE, SYMBOL, SKILL] as const
+const FOLDER = "QUANTA_MENTION_FOLDER"
+const GIT = "QUANTA_MENTION_GIT"
+const KNOBS = [FILE, SYMBOL, SKILL, FOLDER, GIT] as const
 
 /** Pull every `<mention …>` injected text block into one joined haystack. */
 const allText = (messages: readonly { content: unknown }[]): string =>
@@ -534,9 +536,16 @@ describe("mention wire — END-TO-END hellgate (real fs, real wires)", () => {
     // directory listing, NOT dropped. The original test expected 0 injections
     // (written before §10.3 landed); now expect 1 (the folder listing).
     mkdirSync(join(dir, "subdir"), { recursive: true })
+    // Seed a file inside the directory so the listing body is non-empty and
+    // we can assert its content appears in the injected fragment.
+    writeFileSync(join(dir, "subdir", "hello.ts"), "")
     const cfg = assembleAgentConfig({ mode: MODE, base: makeBase(dir, "isdir") })
     const out = await inject(cfg, "see @subdir/")
     expect(out.length).toBe(1)
+    const text = allText(out)
+    expect(text).toContain("kind: folder")
+    expect(text).toContain("target: subdir/")
+    expect(text).toContain("hello.ts")
   })
 
   // ============================================================

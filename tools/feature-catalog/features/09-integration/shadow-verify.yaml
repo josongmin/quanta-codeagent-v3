@@ -3,14 +3,14 @@ title: ADR-0396 Shadow Verify — apply-before-show in a scratch overlay (Wave 1
 section: 9
 subsystem: Pre-apply verification (shadow overlay)
 order: 396
-maturity: L2
-status: new
-ui_surfaces: [none]
+maturity: L4
+status: stable
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: none
+modes: [interactive, headless]
+configurable: integrated
 owners: ["@songmin"]
-labels: [surface:core]
+labels: [surface:core, default-off]
 depends_on: []
 surface_integration:
   cli: full
@@ -44,18 +44,8 @@ evidence:
   tests:
     unit:
       - tests/unit/shadow-verify-hellgate.test.ts
-knobs: []
-deliberate_hold:
-  reason: |
-    Wave 1 ships the closed port contract + the dependency-injected runner only.
-    The scratch/applier/checker are injected ports satisfied by fakes in tests;
-    no real git-worktree provider, V4A applier, or LSP-diagnostics adapter exists
-    yet, and the slice is not wired into the loop or registered as an LLM tool.
-  promotion_path: |
-    Wave 2 (separate ADR): real ShadowScratchPort (git worktree) + ShadowApplyPort
-    (V4A/unified-diff applier) + ShadowCheckPort (LSP diagnostics + targeted test
-    runner) adapters, then loop / LLM-tool wiring with patch-annotated diagnostic
-    rendering. Promote to L3+ once an end-to-end wire exists.
+knobs: ["QUANTA_SHADOW_VERIFY"]
+deliberate_hold: null
 notes: |
   TDD RED→GREEN→REFACTOR. 22 hellgate cases (HELL-SV-01..20) / 80 expects.
   Slice fence: NO imports from @/agent core, @/apps, @/lsp, @/tool, @/patch,

@@ -3,14 +3,14 @@ title: Prompt-keyword + tool-failure effort escalation classifier
 section: 9
 subsystem: Effort axis (ADR-0417 gap A1)
 order: 417
-maturity: L2
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:core", "default-off", "ports-only"]
+labels: ["surface:core", "default-off"]
 depends_on: []
 surface_integration:
   cli: full
@@ -63,21 +63,8 @@ knobs:
     default: 'high'
     purpose: 'tier voted by a tool-failure-accumulation signal'
 config_refs:
-  env: []
-deliberate_hold:
-  reason: |
-    PORTS ONLY this wave. The `AgentConfig.effortClassifier` slot is present
-    but inert — no consumer triggers it. `src/agent/loop.ts` and
-    `prompt-pipeline.ts` are deliberately NOT modified (keeps blast-radius
-    small + avoids collision with sibling worktrees). Default-OFF: absent slot
-    ⇒ byte-identical to the pre-ADR path (RFC §1.2).
-  promotion_path: |
-    A follow-up ADR wires the loop to (1) feed each seed user message to
-    `onUserPrompt`, (2) feed dispatch tool failures to `onToolFailure`, and
-    (3) fold `currentRecommendation().level` into the per-turn effort
-    resolution (precedence below an explicit skill/session override). Surfacing
-    the recommendation on a status line / OTel attribute is part of the same
-    wire.
+  env: [QUANTA_EFFORT_AUTO]
+deliberate_hold: null
 notes: |
   ADR-0417 absorption gap A1. Sibling to `src/agent/effort.ts` (the sealed
   5-tier axis) — this slice consumes that vocabulary, never re-defines it. All

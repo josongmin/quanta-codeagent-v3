@@ -6,9 +6,10 @@ order: 94
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: integrated
 modes: [n-a]
 configurable: n-a
+telemetry_keys: ["plan_queue.enqueue.total", "plan_queue.enqueue.collapsed.total", "plan_queue.drain.total", "plan_queue.clear.total", "plan_queue.mutate.total"]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, held-promotion, tier:core]
 depends_on: [mid-turn-steering, queued-follow-ups]
@@ -34,10 +35,12 @@ purpose: |
 evidence:
   code:
     - src/agent/plan-queue.ts
+    - src/observability/metrics/instrument-plan-queue.ts
   adrs: [128]
   tests:
     unit:
       - tests/unit/plan-queue-hellgate.test.ts
+      - tests/unit/plan-queue-hardening-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

@@ -3,7 +3,7 @@ title: ADR-0406 Composition-root observability wire (Objective + RunLedger + App
 section: 9
 subsystem: Long-running work observability (ADR-0394/0395/0396/0400/0401/0403 closeout)
 order: 404
-maturity: L3
+maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -81,27 +81,7 @@ knobs:
     purpose: 'observability ports wire ON (composition-root gate, strict "on")'
 config_refs:
   env: [QUANTA_OBSERVABILITY]
-deliberate_hold:
-  reason: |
-    `ObservabilityHookBus` adapter is not wired into the composition root
-    yet — AgentConfig has no first-class HookBus slot at the surface entry,
-    so attribution is silently skipped when the gate is on. The four ports
-    still wire (Objective + ShadowVerify on AgentConfig slots; RunLedger +
-    ApprovalSM live on the wire handle for future consumers).
-  promotion_path: |
-    Follow-up slice threads the surface's `HookBus` into `wireObservability`
-    via a tiny adapter (~10 LOC):
-        wireObservability({
-          enabled: env.QUANTA_OBSERVABILITY === "on",
-          repoRoot: process.cwd(),
-          hookBus: {
-            subscribe: (event, handler) => {
-              bus.on(event, handler as never)
-              return () => undefined
-            },
-          },
-        })
-    Once landed, `post_tool_use` events drive ledger start/touch/settle.
+deliberate_hold: null
 notes: |
   Closeout wire for the wave-1/2 observability ADR cluster — the four sealed
   ports finally have a single composition-root home. Surface diff is < 25

@@ -136,6 +136,26 @@ describe("buildReport — knobs section", () => {
     const round = JSON.parse(JSON.stringify(report)) as typeof report
     expect(round.knobs).toEqual(knobs)
   })
+
+  test("per-instance repro-test telemetry is emitted when present", () => {
+    const report = buildReport({ model: "m", provider: "p", n: 1, timestamp: "t" }, [
+      {
+        ...mkResult("a", false),
+        reproTest: {
+          installed: false,
+          reason: "execution_failed",
+          samples: 3,
+          reproducedCount: 0,
+        },
+      },
+    ])
+    expect(report.perInstance[0]?.reproTest).toEqual({
+      installed: false,
+      reason: "execution_failed",
+      samples: 3,
+      reproducedCount: 0,
+    })
+  })
 })
 
 // ── collectBenchKnobsTelemetry: env → BenchReportKnobs adapter ──────────────

@@ -24,7 +24,7 @@ import {
   type FailureClassification,
 } from "./corpus/failure-classifier"
 import { resolvedTotals } from "./observe"
-import type { BenchInstanceBudget, InstanceResult } from "./types"
+import type { BenchInstanceBudget, BenchReproTestTelemetry, InstanceResult } from "./types"
 
 export interface BenchReportMeta {
   model: string
@@ -58,6 +58,8 @@ export interface PerInstanceReport {
    *  measurement-stability slice (default: omitted ⇒ byte-identical to the
    *  pre-feature JSON report shape). */
   budget?: BenchInstanceBudget
+  /** Repro-test generation/install telemetry. Omitted when the knob was off. */
+  reproTest?: BenchReproTestTelemetry
 }
 
 export interface BenchReport {
@@ -123,6 +125,7 @@ export const buildReport = (
         ...(r.error !== undefined ? { error: r.error } : {}),
         ...(c.termination !== "passed" ? { failure: c } : {}),
         ...(r.budget !== undefined ? { budget: r.budget } : {}),
+        ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
       }
     }),
     knobs,

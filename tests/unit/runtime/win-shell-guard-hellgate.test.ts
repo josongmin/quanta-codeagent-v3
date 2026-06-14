@@ -5,8 +5,8 @@
  * branch — on Windows it would spawn a nonexistent `bash` and fail with an
  * opaque ENOENT (silent mis-behavior). This locks:
  *
- *   1. BYTE-IDENTITY: on every non-win32 platform the base argv is exactly
- *      `["bash","-lc",command]` (legacy hardcode) regardless of QUANTA_WIN_SHELL.
+ *   1. non-win32 uses a resolved absolute bash executable before any OS
+ *      sandbox wrapper gets a chance to scrub PATH.
  *   2. win32 default ⇒ explicit typed `{kind:"error"}` decision (NOT a silent
  *      bash spawn).
  *   3. win32 + QUANTA_WIN_SHELL=cmd ⇒ explicit cmd.exe fallback argv.
@@ -15,23 +15,34 @@
  *      NOT spawn a process.
  */
 import { afterEach, describe, expect, test } from "bun:test"
-import { buildBaseShellArgv, resolveWinShellMode } from "@/runtime"
-import { runShell } from "@/runtime"
+import { buildBaseShellArgv, resolveWinShellMode, runShell } from "@/runtime"
 
 describe("P16 — buildBaseShellArgv (pure)", () => {
-  test("non-win32 is byte-identical to the legacy hardcode (every platform, EVERY winShell mode incl. ADR-0529 auto/bash/pwsh)", () => {
+  test("non-win32 uses resolved absolute bash for every winShell mode", () => {
     const platforms: NodeJS.Platform[] = ["darwin", "linux", "freebsd", "openbsd", "sunos", "aix"]
-    // ADR-0529 invariant #1: `platform !== "win32"` ⇒ ["bash","-lc",cmd] REGARDLESS
-    // of QUANTA_WIN_SHELL — must hold for the NEW modes too, not just error/cmd.
     for (const p of platforms) {
       for (const mode of ["error", "cmd", "auto", "bash", "pwsh"] as const) {
-        const d = buildBaseShellArgv("echo hi", p, mode)
+        const d = buildBaseShellArgv("echo hi", p, mode, {
+          bash: "/abs/bash",
+          pwsh: null,
+          cmd: null,
+        })
         expect(d.kind).toBe("argv")
         // The winShell mode must be IGNORED off win32.
-        expect(d.kind === "argv" && d.argv).toEqual(["bash", "-lc", "echo hi"])
+        expect(d.kind === "argv" && d.argv).toEqual(["/abs/bash", "-lc", "echo hi"])
         expect(d.kind === "argv" && d.dialect).toBe("posix")
       }
     }
+  })
+
+  test("non-win32 refuses when no absolute bash is available", () => {
+    const d = buildBaseShellArgv("echo hi", "darwin", "error", {
+      bash: null,
+      pwsh: null,
+      cmd: null,
+    })
+    expect(d.kind).toBe("error")
+    expect(d.kind === "error" && d.reason).toContain("bash executable unavailable")
   })
 
   test("win32 default (error mode) refuses with a typed error carrying an actionable reason", () => {

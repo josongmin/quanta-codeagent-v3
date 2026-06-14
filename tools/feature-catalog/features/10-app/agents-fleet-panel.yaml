@@ -46,6 +46,7 @@ evidence:
   tests:
     unit:
       - tests/unit/cli/agents-fleet-panel.test.ts
+      - tests/unit/cli/agents-fleet-panel-hardening-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

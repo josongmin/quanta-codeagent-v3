@@ -26,11 +26,12 @@ purpose: 'Default-OFF bench knob that flips cfg.localizePhase (the agentless loc
 evidence:
   code:
     - src/runner/knobs/knobs/localize-phase.ts
-  adrs: []
+  adrs: [535]
   tests:
     unit:
       - tests/unit/runner/knobs/localize-phase.test.ts
-    integration: []
+    integration:
+      - tests/unit/runner/knobs/localize-phase-hellgate.test.ts
     contract: []
 knobs: ["localize-phase"]
 deliberate_hold: null

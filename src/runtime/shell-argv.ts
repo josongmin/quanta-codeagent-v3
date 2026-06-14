@@ -17,6 +17,7 @@
  * Pure — no I/O, no env read in {@link buildBaseShellArgv} (the caller resolves
  * the knob + probe and passes them in). Same inputs ⇒ same output.
  */
+import { existsSync } from "node:fs"
 
 /** Operator-selected Windows shell behavior (resolved from `QUANTA_WIN_SHELL`).
  *   - `"error"` : default — refuse to spawn, surface a typed error (P16).
@@ -47,11 +48,15 @@ export interface ShellProbe {
 
 /** The legacy POSIX shell prefix — kept as a named const so the byte-identity
  *  guarantee is greppable and a future refactor cannot drift it silently. */
-export const POSIX_SHELL_ARGV = (command: string): string[] => ["bash", "-lc", command]
+export const POSIX_SHELL_ARGV = (command: string, shell = "bash"): string[] => [
+  shell,
+  "-lc",
+  command,
+]
 
-const posixDecision = (command: string): ShellArgvDecision => ({
+const posixDecision = (command: string, shell = "bash"): ShellArgvDecision => ({
   kind: "argv",
-  argv: POSIX_SHELL_ARGV(command),
+  argv: POSIX_SHELL_ARGV(command, shell),
   dialect: "posix",
 })
 const pwshDecision = (command: string, exe: string): ShellArgvDecision => ({
@@ -80,6 +85,13 @@ const winError = (): ShellArgvDecision => ({
     "(e.g. QUANTA_WIN_SHELL=cmd for cmd.exe), or run under WSL/Git-Bash.",
 })
 
+const posixError = (): ShellArgvDecision => ({
+  kind: "error",
+  reason:
+    "posix: bash executable unavailable — PATH lookup and platform fallback did not resolve " +
+    "an absolute shell path before sandbox wrapping.",
+})
+
 /**
  * Resolve the win32 shell mode from `QUANTA_WIN_SHELL`. Pure; default `"error"`
  * (refuse loudly). Recognizes `cmd|auto|bash|pwsh` (case-insensitive, trimmed) —
@@ -100,8 +112,9 @@ export const resolveWinShellMode = (
  * @param command  the shell command text.
  * @param platform `process.platform` (or a test override).
  * @param winShell win32-only mode (default `"error"`). Ignored off win32.
- * @param probe    discovered shell paths — REQUIRED for `auto` (the ladder
- *                 picks from it). Ignored off win32 and for non-auto modes.
+ * @param probe    discovered shell paths. REQUIRED off win32 so callers do
+ *                 not rely on a bare `bash` lookup after sandbox wrapping;
+ *                 REQUIRED for win32 `auto` (the ladder picks from it).
  */
 export const buildBaseShellArgv = (
   command: string,
@@ -110,8 +123,8 @@ export const buildBaseShellArgv = (
   probe?: ShellProbe,
 ): ShellArgvDecision => {
   if (platform !== "win32") {
-    // BYTE-IDENTICAL legacy path for every non-Windows host (now tagged posix).
-    return posixDecision(command)
+    if (probe?.bash === undefined || probe.bash === null) return posixError()
+    return posixDecision(command, probe.bash)
   }
   switch (winShell) {
     case "cmd":
@@ -125,7 +138,7 @@ export const buildBaseShellArgv = (
     case "auto": {
       // POSIX-FIRST ladder. No probe ⇒ cannot discover ⇒ refuse (never guess).
       if (probe === undefined) return winError()
-      if (probe.bash !== null) return posixDecision(command)
+      if (probe.bash !== null) return posixDecision(command, probe.bash)
       if (probe.pwsh !== null) return pwshDecision(command, probe.pwsh)
       if (probe.cmd !== null) return cmdDecision(command)
       return winError()
@@ -139,6 +152,36 @@ export const buildBaseShellArgv = (
 /** Default `which` — Bun resolves a binary name against PATH (null when absent). */
 const bunWhich = (name: string): string | null => Bun.which(name)
 
+const POSIX_BASH_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
+  darwin: ["/bin/bash"],
+  linux: ["/usr/bin/bash", "/bin/bash"],
+  freebsd: ["/usr/local/bin/bash", "/bin/bash"],
+  openbsd: ["/usr/local/bin/bash", "/bin/bash"],
+  netbsd: ["/usr/pkg/bin/bash", "/usr/local/bin/bash", "/bin/bash"],
+  sunos: ["/usr/bin/bash", "/bin/bash"],
+  aix: ["/usr/bin/bash", "/bin/bash"],
+}
+
+const firstExisting = (
+  paths: readonly string[],
+  exists: (path: string) => boolean,
+): string | null => {
+  for (const path of paths) {
+    if (exists(path)) return path
+  }
+  return null
+}
+
+const resolvePosixBash = (
+  which: (name: string) => string | null,
+  exists: (path: string) => boolean,
+  platform: NodeJS.Platform,
+): string | null => {
+  const found = which("bash")
+  if (found !== null) return found
+  return firstExisting(POSIX_BASH_FALLBACKS[platform] ?? [], exists)
+}
+
 /**
  * Discover the available shells on the current host. IMPURE (PATH lookup via the
  * injected `which`, defaulting to `Bun.which`) — kept separate from the pure
@@ -148,8 +191,10 @@ const bunWhich = (name: string): string | null => Bun.which(name)
  */
 export const discoverShells = (
   which: (name: string) => string | null = bunWhich,
+  exists: (path: string) => boolean = existsSync,
+  platform: NodeJS.Platform = process.platform,
 ): ShellProbe => ({
-  bash: which("bash"),
+  bash: resolvePosixBash(which, exists, platform),
   pwsh: which("pwsh") ?? which("powershell"),
   cmd: which("cmd.exe") ?? which("cmd"),
 })

@@ -41,6 +41,7 @@ evidence:
   tests:
     unit:
       - tests/unit/cli/cost-panel.test.ts
+      - tests/unit/cli/cost-panel-hardening-hellgate.test.ts
     integration: []
     contract: []
 knobs:

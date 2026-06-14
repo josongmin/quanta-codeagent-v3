@@ -149,24 +149,14 @@ export const runShell = async (
   // The session-wide slot still runs on top of the per-call result so a
   // session policy that further constrains the call still applies. Order:
   //   per-call wrap → slot wrap → snapshot restore.
-  // P16 (jun-08 §P16) — platform-aware base shell argv. On every non-win32
-  // host the decision is BYTE-IDENTICAL to the legacy `["bash","-lc",command]`
-  // hardcode (no env read, no allocation change). On win32 the legacy code
-  // would spawn a nonexistent `bash` and fail with an opaque ENOENT; instead we
-  // surface an EXPLICIT typed `ShellResult` (exitCode 127 + actionable stderr)
-  // unless the operator opted into the cmd.exe fallback via QUANTA_WIN_SHELL=cmd.
-  // The env is read ONLY when `process.platform === "win32"` so the common path
-  // stays a pure pass-through.
+  // P16/ADR-0529 — platform-aware base shell argv. POSIX hosts resolve bash to
+  // an absolute executable BEFORE sandbox wrapping, so Seatbelt/bwrap cannot
+  // turn a bare `bash` into an opaque execvp failure by changing PATH. Win32
+  // still refuses by default unless the operator opts into a shell mode.
   const winMode = process.platform === "win32" ? resolveWinShellMode() : "error"
-  // ADR-0529 — only the `auto` ladder needs a PATH probe; discover shells lazily
-  // ONLY on win32+auto (every other path, incl. all non-win32, never spawns a
-  // `which` — byte-identical to P16). `bash`/`pwsh`/`cmd` modes pick directly.
-  const argvDecision = buildBaseShellArgv(
-    command,
-    process.platform,
-    winMode,
-    winMode === "auto" ? discoverShells() : undefined,
-  )
+  const shellProbe =
+    process.platform !== "win32" || winMode === "auto" ? discoverShells() : undefined
+  const argvDecision = buildBaseShellArgv(command, process.platform, winMode, shellProbe)
   if (argvDecision.kind === "error") {
     // No-throw: a clear, deterministic failure result instead of a silent spawn
     // error. Mirrors the os-sandbox no-throw contract (exitCode 127 = "cannot

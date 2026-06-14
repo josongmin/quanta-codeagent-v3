@@ -38,6 +38,7 @@ evidence:
     - src/apps/cli/at-autocomplete/env.ts
     - src/apps/cli/at-autocomplete/provider.ts
     - src/apps/cli/at-autocomplete/recursive-file-list.ts
+    - src/shared/ignore-matcher.ts
     - src/apps/cli/at-autocomplete/symbol-list.ts
     - src/apps/cli/at-autocomplete/fuzzy.ts
     - src/apps/cli/at-autocomplete/state-machine.ts

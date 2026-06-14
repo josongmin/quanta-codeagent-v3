@@ -24,12 +24,13 @@ purpose: 'Closes the agent self-visibility gap ("지금 thinking 모드 몇이�
 evidence:
   code:
     - src/tool/session_config.ts
-  adrs: []
+  adrs: [534]
   tests:
     unit:
       - tests/unit/tool/session-config.test.ts
     integration:
       - tests/unit/tool/session-config-dispatch.integration.test.ts
+      - tests/unit/tool/session-config-tool-hellgate.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

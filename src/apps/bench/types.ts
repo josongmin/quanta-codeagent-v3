@@ -1,5 +1,6 @@
 export type {
   Attempt,
+  BenchReproTestTelemetry,
   BenchSummary,
   Instance,
   InstanceResult,

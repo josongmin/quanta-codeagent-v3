@@ -39,6 +39,7 @@ evidence:
   tests:
     unit:
       - tests/unit/skill/skill-args-hellgate.test.ts
+      - tests/unit/skill/skill-args-hardening-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

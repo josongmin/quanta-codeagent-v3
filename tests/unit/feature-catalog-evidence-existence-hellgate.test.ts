@@ -74,7 +74,10 @@ describe("feature-catalog evidence existence (durable anti-rot lock)", () => {
 
     // Surface the full list on failure so the fix is mechanical.
     expect(errors, errors.join("\n")).toEqual([])
-  })
+    // Catalog grew past ~980 entries; the per-path fs.stat sweep (thousands of
+    // stats) needs more than the 5s default — bump so this anti-rot lock stays a
+    // real disk check, not a timeout flake.
+  }, 30000)
 })
 
 describe("evidence-existence checker — red-on-injection (has teeth)", () => {

@@ -288,6 +288,7 @@ const makeStubDeps = (
       lspTools: [],
       lspNavTools: [],
       gitToolList: [],
+      astGrepTools: [],
     }),
     loadImageBlock: () =>
       ({ kind: "image", data: "", mimeType: "image/png" }) as unknown as ReturnType<
@@ -576,8 +577,8 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
       })
       const depsWithReviewer: SetupSessionDeps = {
         ...deps,
-        buildTooling: ((mcp, lsp, lspNav, git, slog, taskRegistry) => {
-          const t = deps.buildTooling(mcp, lsp, lspNav, git, slog, taskRegistry)
+        buildTooling: ((mcp, lsp, lspNav, git, astGrep, slog, taskRegistry) => {
+          const t = deps.buildTooling(mcp, lsp, lspNav, git, astGrep, slog, taskRegistry)
           return { ...t, subagentConfig: { maxDepth: 2 } } as typeof t
         }) as SetupSessionDeps["buildTooling"],
         materializeReviewerAgent: () =>
@@ -687,6 +688,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
       resolveResume: async () => ({
         sessionId: "seed-session",
@@ -760,6 +762,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
     }
     await setupSession(withMcp)
@@ -786,6 +789,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
       // ADR-0292 — wire the real builder so the test sees a populated surface.
       buildMcpSurfaceInfo,

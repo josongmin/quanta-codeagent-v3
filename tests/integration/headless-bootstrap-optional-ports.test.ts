@@ -5,7 +5,6 @@ import { join } from "node:path"
 import { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "@/apps/headless"
 import { openHeadlessRuntimeSession } from "@/apps/headless/session-bridge"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
-import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { defaultTools } from "@/tool"
 
 const root = mkdtempSync(join(tmpdir(), "headless-bootstrap-ports-"))
@@ -101,13 +100,11 @@ const withEnvValue = async (
   const prev = process.env[key]
   if (value === undefined) delete process.env[key]
   else process.env[key] = value
-  __resetRuntimeConfig()
   try {
     await run()
   } finally {
     if (prev === undefined) delete process.env[key]
     else process.env[key] = prev
-    __resetRuntimeConfig()
   }
 }
 

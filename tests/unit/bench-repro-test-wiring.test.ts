@@ -21,6 +21,7 @@ import {
   composeWithReproHint,
   parseBenchReproTestK,
   prepareReproTest,
+  prepareReproTestDetailed,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
 } from "../../src/apps/bench/eval/driver"
@@ -174,6 +175,77 @@ describe("prepareReproTest", () => {
     })
     expect(sel?.selected).toBeNull()
     expect(sel?.reproducedCount).toBe(0)
+  })
+
+  test("detailed telemetry: disabled knob records disabled reason", async () => {
+    const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", undefined, {
+      llm: new StubLLM(),
+    })
+    expect(detail.selection).toBeNull()
+    expect(detail.telemetry).toEqual({ installed: false, reason: "disabled" })
+  })
+
+  test("detailed telemetry: generator throw records generation_failed", async () => {
+    const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 3, {
+      llm: new StubLLM(),
+      generate: async () => {
+        throw new Error("provider down")
+      },
+    })
+    expect(detail.selection).toBeNull()
+    expect(detail.telemetry).toEqual({
+      installed: false,
+      reason: "generation_failed",
+      samples: 0,
+      reproducedCount: 0,
+    })
+  })
+
+  test("detailed telemetry: all exec_failed samples records execution_failed", async () => {
+    const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 3, {
+      llm: new StubLLM(),
+      writeFile: async () => {},
+      exec: async () => {
+        throw new Error("python: command not found")
+      },
+    })
+    expect(detail.selection?.selected).toBeNull()
+    expect(detail.telemetry).toEqual({
+      installed: false,
+      reason: "execution_failed",
+      samples: 3,
+      reproducedCount: 0,
+    })
+  })
+
+  test("detailed telemetry: no reproduced candidate records sample counts", async () => {
+    const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
+      llm: new StubLLM(),
+      writeFile: async () => {},
+      exec: async () => ({ code: 0, stdout: "Issue resolved\n", stderr: "" }),
+    })
+    expect(detail.selection?.selected).toBeNull()
+    expect(detail.telemetry).toEqual({
+      installed: false,
+      reason: "no_reproduced_candidate",
+      samples: 2,
+      reproducedCount: 0,
+    })
+  })
+
+  test("detailed telemetry: selected candidate records sample counts without claiming install", async () => {
+    const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
+      llm: new StubLLM(),
+      writeFile: async () => {},
+      exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+    })
+    expect(detail.selection?.selected).toBe('print("Issue reproduced")')
+    expect(detail.telemetry).toEqual({
+      installed: false,
+      reason: "not_installed",
+      samples: 2,
+      reproducedCount: 2,
+    })
   })
 })
 

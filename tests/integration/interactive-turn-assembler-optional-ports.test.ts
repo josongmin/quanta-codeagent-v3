@@ -5,7 +5,6 @@ import { join } from "node:path"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
-import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { RecordingStream } from "./_harness"
 
@@ -91,13 +90,11 @@ const withEnvValue = async (
   const prev = process.env[key]
   if (value === undefined) delete process.env[key]
   else process.env[key] = value
-  __resetRuntimeConfig()
   try {
     await run()
   } finally {
     if (prev === undefined) delete process.env[key]
     else process.env[key] = prev
-    __resetRuntimeConfig()
   }
 }
 

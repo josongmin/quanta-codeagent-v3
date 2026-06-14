@@ -22,19 +22,20 @@ import {
   parseLocalizePhaseEnv,
   prepareIssueHint,
   prepareReproTest,
+  prepareReproTestDetailed,
   projectOutcome,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
   resolveBenchKnobs,
-  type RunInstanceDeps as SharedRunInstanceDeps,
   runRetryLoop,
+  type RunInstanceDeps as SharedRunInstanceDeps,
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import type { Instance, InstanceResult } from "../types"
+import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
 import { buildRepairContext } from "./repair/context"
@@ -68,6 +69,7 @@ export {
   parseLocalizePhaseEnv,
   prepareIssueHint,
   prepareReproTest,
+  prepareReproTestDetailed,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
@@ -197,22 +199,44 @@ const runAgentViaSdk = async (
   }
 }
 
+interface InstallReproTestResult {
+  readonly hint: string | undefined
+  readonly telemetry: BenchReproTestTelemetry | undefined
+}
+
+const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTelemetry => ({
+  installed: false,
+  reason: "write_failed",
+  ...(base.samples !== undefined ? { samples: base.samples } : {}),
+  ...(base.reproducedCount !== undefined ? { reproducedCount: base.reproducedCount } : {}),
+})
+
 const installReproTestHint = async (
   instance: Instance,
   sandbox: string,
   llm: LLMPort,
-): Promise<string | undefined> => {
+): Promise<InstallReproTestResult> => {
   // Unified posture: K resolves from the preset/env via the knob framework
   // (preset `agentless-v1` ⇒ K=5; explicit QUANTA_BENCH_REPRO_TEST overrides).
   const reproK = benchOptIns().reproTestK
-  if (reproK === undefined) return undefined
-  const selection = await prepareReproTest(instance, sandbox, reproK, { llm })
-  if (selection === null || selection.selected === null) return undefined
+  if (reproK === undefined) return { hint: undefined, telemetry: undefined }
+  const preparation = await prepareReproTestDetailed(instance, sandbox, reproK, { llm })
+  const { selection, telemetry } = preparation
+  if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
+  const path = `${sandbox}/${REPRO_FILE_NAME}`
   try {
-    await Bun.write(`${sandbox}/${REPRO_FILE_NAME}`, selection.selected)
-    return REPRO_HINT_MESSAGE
+    await Bun.write(path, selection.selected)
+    return {
+      hint: REPRO_HINT_MESSAGE,
+      telemetry: {
+        installed: true,
+        path,
+        samples: selection.samples.length,
+        reproducedCount: selection.reproducedCount,
+      },
+    }
   } catch (_writeErr) {
-    return undefined
+    return { hint: undefined, telemetry: writeFailedTelemetry(telemetry) }
   }
 }
 
@@ -361,6 +385,10 @@ const okResult = (
   ...extra,
 })
 
+const reproResultExtra = (
+  reproTest: BenchReproTestTelemetry | undefined,
+): Partial<InstanceResult> => (reproTest === undefined ? {} : { reproTest })
+
 const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -371,6 +399,7 @@ const runInstanceOnce = async (
   const startedAt = Date.now()
   let phase: Phase = { patch: "", turns: 0 }
   let w: Wiring = { stream: new NullStream() }
+  let reproTest: BenchReproTestTelemetry | undefined
   try {
     w = buildWiring(instance, deps.observe)
     await copyRepo(instance, sandbox)
@@ -389,7 +418,9 @@ const runInstanceOnce = async (
 
     const hintMode = benchOptIns().issueHintMode
     const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, { llm: deps.llm })
-    const reproHint = await installReproTestHint(instance, sandbox, deps.llm)
+    const reproInstall = await installReproTestHint(instance, sandbox, deps.llm)
+    const reproHint = reproInstall.hint
+    reproTest = reproInstall.telemetry
 
     phase =
       deps.repair !== undefined && instance.swebench !== undefined
@@ -406,7 +437,7 @@ const runInstanceOnce = async (
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
 
     const v = await verify(instance, phase.patch, sandbox, deps)
-    const extra: Partial<InstanceResult> = {}
+    const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
     if (deps.observe && w.observer) {
       extra.verdict = "ok"
       extra.durationMs = Date.now() - startedAt
@@ -425,6 +456,7 @@ const runInstanceOnce = async (
         turns: phase.turns,
         verdict: "degraded",
         error: `observation failed (strict): ${error.message}`,
+        ...reproResultExtra(reproTest),
       }
     }
     return {
@@ -433,6 +465,7 @@ const runInstanceOnce = async (
       patch: phase.patch,
       turns: phase.turns,
       error: errMessage(error),
+      ...reproResultExtra(reproTest),
     }
   } finally {
     clearTimeout(deadline)

@@ -24,7 +24,7 @@ describe("ADR-0529 — win32 auto ladder (pure, darwin-testable)", () => {
       cmd: "C:\\Windows\\System32\\cmd.exe",
     })
     expect(d.kind).toBe("argv")
-    expect(d.kind === "argv" && d.argv).toEqual(["bash", "-lc", "echo hi"])
+    expect(d.kind === "argv" && d.argv).toEqual(["C:\\Git\\usr\\bin\\bash.exe", "-lc", "echo hi"])
     expect(d.kind === "argv" && d.dialect).toBe("posix")
   })
 
@@ -65,7 +65,11 @@ describe("ADR-0529 — win32 auto ladder (pure, darwin-testable)", () => {
   })
 
   test("explicit bash / pwsh modes pick that dialect with the exact argv (no probe)", () => {
-    const b = buildBaseShellArgv("echo hi", "win32", "bash")
+    const b = buildBaseShellArgv("echo hi", "win32", "bash", {
+      bash: "C:\\Git\\usr\\bin\\bash.exe",
+      pwsh: null,
+      cmd: null,
+    })
     expect(b.kind === "argv" && b.argv).toEqual(["bash", "-lc", "echo hi"])
     expect(b.kind === "argv" && b.dialect).toBe("posix")
     const p = buildBaseShellArgv("echo hi", "win32", "pwsh")
@@ -81,10 +85,24 @@ describe("ADR-0529 — win32 auto ladder (pure, darwin-testable)", () => {
     ])
   })
 
-  test("non-win32 carries dialect:posix (argv byte-identical to legacy)", () => {
-    const d = buildBaseShellArgv("echo hi", "darwin")
-    expect(d.kind === "argv" && d.argv).toEqual(["bash", "-lc", "echo hi"])
+  test("non-win32 uses the resolved absolute bash path", () => {
+    const d = buildBaseShellArgv("echo hi", "darwin", "error", {
+      bash: "/bin/bash",
+      pwsh: null,
+      cmd: null,
+    })
+    expect(d.kind === "argv" && d.argv).toEqual(["/bin/bash", "-lc", "echo hi"])
     expect(d.kind === "argv" && d.dialect).toBe("posix")
+  })
+
+  test("non-win32 without a resolved bash path ⇒ typed error", () => {
+    const d = buildBaseShellArgv("echo hi", "darwin", "error", {
+      bash: null,
+      pwsh: null,
+      cmd: null,
+    })
+    expect(d.kind).toBe("error")
+    expect(d.kind === "error" && d.reason).toContain("bash executable unavailable")
   })
 
   test("resolveWinShellMode parses the extended vocab (auto/bash/pwsh), unknown ⇒ error", () => {
@@ -105,8 +123,20 @@ describe("ADR-0529 — win32 auto ladder (pure, darwin-testable)", () => {
     const p2 = discoverShells((n) => (n === "powershell" ? "C:\\ps.exe" : null))
     expect(p2.pwsh).toBe("C:\\ps.exe")
     // cmd falls back to bare "cmd" when "cmd.exe" is absent (teeth on that branch):
-    const p3 = discoverShells((n) => (n === "cmd" ? "C:\\bare-cmd" : null))
+    const p3 = discoverShells(
+      (n) => (n === "cmd" ? "C:\\bare-cmd" : null),
+      () => false,
+    )
     expect(p3.cmd).toBe("C:\\bare-cmd")
     expect(p3.bash).toBeNull()
+  })
+
+  test("discoverShells resolves a deterministic platform bash fallback when PATH lookup misses", () => {
+    const probe = discoverShells(
+      () => null,
+      (path) => path === "/bin/bash",
+      "darwin",
+    )
+    expect(probe.bash).toBe("/bin/bash")
   })
 })

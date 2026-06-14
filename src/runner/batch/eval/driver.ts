@@ -43,10 +43,15 @@ import type { PermissionContext } from "@/permission"
 import { errMessage, gateOn } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { astGrepTool, buildDefaultTools, ToolRegistry } from "@/tool"
 import type { Tool } from "@/tool"
+import { astGrepTool, buildDefaultTools, ToolRegistry } from "@/tool"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
-import type { BenchAttemptOutcome, Instance, InstanceResult } from "../types"
+import type {
+  BenchAttemptOutcome,
+  BenchReproTestTelemetry,
+  Instance,
+  InstanceResult,
+} from "../types"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
@@ -603,6 +608,91 @@ export const REPRO_HINT_MESSAGE = [
   '"Other issues", or nothing), your fix is incorrect and you must iterate.',
 ].join("\n")
 
+export interface PrepareReproTestDetailedResult {
+  readonly selection: ReproTestSelection | null
+  readonly telemetry: BenchReproTestTelemetry
+}
+
+const countReproduced = (samples: readonly { outcome: string }[]): number =>
+  samples.filter((s) => s.outcome === "reproduced").length
+
+const selectionTelemetry = (selection: ReproTestSelection): BenchReproTestTelemetry => {
+  const samples = selection.samples.length
+  const reproducedCount = selection.reproducedCount
+  if (selection.selected !== null) {
+    return { installed: false, reason: "not_installed", samples, reproducedCount }
+  }
+  if (samples > 0 && selection.samples.every((sample) => sample.outcome === "exec_failed")) {
+    return { installed: false, reason: "execution_failed", samples, reproducedCount }
+  }
+  return { installed: false, reason: "no_reproduced_candidate", samples, reproducedCount }
+}
+
+export const prepareReproTestDetailed = async (
+  instance: Instance,
+  sandbox: string,
+  k: number | undefined,
+  deps: PrepareReproTestDeps,
+): Promise<PrepareReproTestDetailedResult> => {
+  if (k === undefined || k < 1) {
+    return { selection: null, telemetry: { installed: false, reason: "disabled" } }
+  }
+  if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
+    return { selection: null, telemetry: { installed: false, reason: "empty_problem" } }
+  }
+  const config: ReproTestConfig = { samples: k }
+  const generate = deps.generate ?? generateReproTests
+  const execute = deps.execute ?? executeReproTests
+  const select = deps.select ?? selectReproTest
+  const execPort = deps.exec ?? execArgv
+  const writeFile =
+    deps.writeFile ??
+    (async (path: string, content: string): Promise<void> => {
+      await Bun.write(path, content)
+    })
+  let tests: readonly string[]
+  try {
+    tests = await generate({ issue: instance.problemStatement, llm: deps.llm, config })
+  } catch {
+    return {
+      selection: null,
+      telemetry: { installed: false, reason: "generation_failed", samples: 0, reproducedCount: 0 },
+    }
+  }
+  if (tests.length === 0) {
+    return {
+      selection: null,
+      telemetry: { installed: false, reason: "generation_empty", samples: 0, reproducedCount: 0 },
+    }
+  }
+  let samples: Awaited<ReturnType<typeof executeReproTests>>
+  try {
+    samples = await execute({
+      tests,
+      repoRoot: sandbox,
+      exec: execPort,
+      writeFile,
+      config,
+    })
+  } catch {
+    return {
+      selection: null,
+      telemetry: { installed: false, reason: "execution_failed", samples: 0, reproducedCount: 0 },
+    }
+  }
+  const selection = select(samples)
+  const telemetry: BenchReproTestTelemetry =
+    samples.length > 0
+      ? selectionTelemetry(selection)
+      : {
+          installed: false,
+          reason: "no_reproduced_candidate",
+          samples: 0,
+          reproducedCount: countReproduced(samples),
+        }
+  return { selection, telemetry }
+}
+
 /**
  * Pre-agent reproduction-test generation + selection + sandbox install.
  *
@@ -623,41 +713,8 @@ export const prepareReproTest = async (
   k: number | undefined,
   deps: PrepareReproTestDeps,
 ): Promise<ReproTestSelection | null> => {
-  if (k === undefined || k < 1) return null
-  if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
-    return null
-  }
-  const config: ReproTestConfig = { samples: k }
-  const generate = deps.generate ?? generateReproTests
-  const execute = deps.execute ?? executeReproTests
-  const select = deps.select ?? selectReproTest
-  const execPort = deps.exec ?? execArgv
-  const writeFile =
-    deps.writeFile ??
-    (async (path: string, content: string): Promise<void> => {
-      await Bun.write(path, content)
-    })
-  let tests: readonly string[]
-  try {
-    tests = await generate({ issue: instance.problemStatement, llm: deps.llm, config })
-  } catch {
-    return null
-  }
-  if (tests.length === 0) return null
-  let samples: Awaited<ReturnType<typeof executeReproTests>>
-  try {
-    samples = await execute({
-      tests,
-      repoRoot: sandbox,
-      exec: execPort,
-      writeFile,
-      config,
-    })
-  } catch {
-    return null
-  }
-  const selection = select(samples)
-  return selection
+  const detailed = await prepareReproTestDetailed(instance, sandbox, k, deps)
+  return detailed.selection
 }
 
 /**
@@ -675,22 +732,44 @@ export const prepareReproTest = async (
  *   write `<sandbox>/reproduce_issue.py` ⇒ on success return REPRO_HINT_MESSAGE
  *   on disk write failure ⇒ undefined (byte-identical to K-unset)
  */
+interface InstallReproTestResult {
+  readonly hint: string | undefined
+  readonly telemetry: BenchReproTestTelemetry | undefined
+}
+
+const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTelemetry => ({
+  installed: false,
+  reason: "write_failed",
+  ...(base.samples !== undefined ? { samples: base.samples } : {}),
+  ...(base.reproducedCount !== undefined ? { reproducedCount: base.reproducedCount } : {}),
+})
+
 const installReproTestHint = async (
   instance: Instance,
   sandbox: string,
   llm: LLMPort,
-): Promise<string | undefined> => {
+): Promise<InstallReproTestResult> => {
   // Unified posture: K resolves from the preset/env via the knob framework
   // (preset `agentless-v1` ⇒ K=5; explicit QUANTA_BENCH_REPRO_TEST overrides).
   const reproK = benchOptIns().reproTestK
-  if (reproK === undefined) return undefined
-  const selection = await prepareReproTest(instance, sandbox, reproK, { llm })
-  if (selection === null || selection.selected === null) return undefined
+  if (reproK === undefined) return { hint: undefined, telemetry: undefined }
+  const preparation = await prepareReproTestDetailed(instance, sandbox, reproK, { llm })
+  const { selection, telemetry } = preparation
+  if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
+  const path = `${sandbox}/${REPRO_FILE_NAME}`
   try {
-    await Bun.write(`${sandbox}/${REPRO_FILE_NAME}`, selection.selected)
-    return REPRO_HINT_MESSAGE
+    await Bun.write(path, selection.selected)
+    return {
+      hint: REPRO_HINT_MESSAGE,
+      telemetry: {
+        installed: true,
+        path,
+        samples: selection.samples.length,
+        reproducedCount: selection.reproducedCount,
+      },
+    }
   } catch {
-    return undefined
+    return { hint: undefined, telemetry: writeFailedTelemetry(telemetry) }
   }
 }
 
@@ -1099,6 +1178,10 @@ const okResult = (
   ...extra,
 })
 
+const reproResultExtra = (
+  reproTest: BenchReproTestTelemetry | undefined,
+): Partial<InstanceResult> => (reproTest === undefined ? {} : { reproTest })
+
 /**
  * Run one instance once: sandbox → (setup) → agent → verify → diff. Always
  * cleans up the temp dir. Never throws for an instance-level failure — it is
@@ -1124,6 +1207,7 @@ export const runInstanceOnce = async (
   const startedAt = Date.now()
   let phase: Phase = { patch: "", turns: 0 }
   let w: Wiring = { stream: new NullStream() }
+  let reproTest: BenchReproTestTelemetry | undefined
   try {
     w = buildWiring(instance, deps.observe)
     await copyRepo(instance, sandbox)
@@ -1157,7 +1241,9 @@ export const runInstanceOnce = async (
 
     // Repro-test (Agentless §3.3.1) — default-OFF; env-gated. See
     // `installReproTestHint` for details.
-    const reproHint = await installReproTestHint(instance, sandbox, deps.llm)
+    const reproInstall = await installReproTestHint(instance, sandbox, deps.llm)
+    const reproHint = reproInstall.hint
+    reproTest = reproInstall.telemetry
 
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
     // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
@@ -1191,7 +1277,7 @@ export const runInstanceOnce = async (
     // the instance deadline fires instead of cascading into the next instance.
     const v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
 
-    const extra: Partial<InstanceResult> = {}
+    const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
     if (deps.observe && w.observer) {
       extra.verdict = "ok"
       extra.durationMs = Date.now() - startedAt
@@ -1210,6 +1296,7 @@ export const runInstanceOnce = async (
         turns: phase.turns,
         verdict: "degraded",
         error: `observation failed (strict): ${e.message}`,
+        ...reproResultExtra(reproTest),
       }
     }
     return {
@@ -1218,6 +1305,7 @@ export const runInstanceOnce = async (
       patch: phase.patch,
       turns: phase.turns,
       error: errMessage(e),
+      ...reproResultExtra(reproTest),
     }
   } finally {
     clearTimeout(deadline)
@@ -1344,6 +1432,7 @@ export {
   readKnobValue,
   resolveBenchKnobs,
 } from "./knobs-bench"
+export { runRetryLoop } from "./retry-policy"
 export type { AttemptOutcome, RetryPolicy }
 /** Re-export the classifier + policy types so apps/bench callers can wire
  *  custom policies (test seam) or inspect outcomes without reaching into the
@@ -1351,4 +1440,3 @@ export type { AttemptOutcome, RetryPolicy }
 // Re-export the observation usage tap so test fixtures and other internals can
 // continue to use bench's typed surface unchanged.
 export { BenchObserver, classifyOutcome, DEFAULT_POLICY, parseRetryTransientEnv, UsageTap }
-export { runRetryLoop } from "./retry-policy"

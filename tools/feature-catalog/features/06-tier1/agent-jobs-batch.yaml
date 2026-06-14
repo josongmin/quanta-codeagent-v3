@@ -3,8 +3,8 @@ title: CSV batch-job runner (`agent_jobs`) — row-indexed fan-out over subagent
 section: 6
 subsystem: Tier-1 batch fan-out — one CSV row = one subagent task
 order: 463
-maturity: L2
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [cli]
 monitoring: integrated
 modes: [interactive, headless, batch, daemon, ci-bot]
@@ -67,15 +67,17 @@ knobs:
     purpose: zod-compiled per-row result validator (fail-closed on malformed descriptor)
 deliberate_hold:
   reason: |
-    Default-OFF seam. NOT wired into apps/agent or apps/cli. InMemoryJobStore
-    ships as test fake + ephemeral-job production store; sqlite adapter and the
-    real SubagentRunner-backed RowDispatchPort are composition-root follow-ups.
+    LIVE as of the L2->L4 truth-up (prior "NOT wired" hold is STALE): the LLM
+    tool `spawn_agents_on_csv` is registered behind QUANTA_SPAWN_AGENTS_CSV
+    (src/apps/cli/internal.ts:374 -> config.subagent.enableSpawnAgentsCsv ->
+    src/agent/tier1/subagent.ts spawnAgentsCsvTool), the `quanta batch`
+    subcommand is routed at src/apps/cli/index.ts:220 -> runBatchCmd over the
+    real SubagentRunner-backed RowDispatchPort + sqlite/in-mem store, and the
+    dispatch adapter (src/agent/batch-jobs-dispatch.ts) is shared by both. The
+    RESIDUAL is web-surface parity only: no web-daemon batch verb yet.
   promotion_path: |
-    Composition-root integration TODOs (ADR-0463): (1) sqlite JobStorePort
-    adapter mirroring agent_jobs/agent_job_items tables + (job_id,status,
-    row_index) index; (2) RowDispatchPort adapter wrapping SubagentRunner
-    (parses child final text -> structured value); (3) /agent-jobs CLI surface
-    (submit/status/export).
+    Add a web-daemon batch verb (submit/status/export) for surface parity with
+    the CLI `quanta batch` + `spawn_agents_on_csv` tool.
 notes: |
   26-case hellgate seals: CSV parse (headers/rows/empty/header-only/
   malformed-ragged Err/non-string Err), happy path (all done + completed/empty

@@ -46,6 +46,30 @@ export interface InstanceUsage {
   outputTokens: number
 }
 
+export type BenchReproTestReason =
+  | "disabled"
+  | "empty_problem"
+  | "generation_failed"
+  | "generation_empty"
+  | "execution_failed"
+  | "no_reproduced_candidate"
+  | "write_failed"
+  | "not_installed"
+
+export type BenchReproTestTelemetry =
+  | {
+      installed: true
+      path: string
+      samples: number
+      reproducedCount: number
+    }
+  | {
+      installed: false
+      reason: BenchReproTestReason
+      samples?: number
+      reproducedCount?: number
+    }
+
 /** Outcome of running one instance once. */
 export interface InstanceResult {
   id: string
@@ -83,6 +107,9 @@ export interface InstanceResult {
    * means no knob raised the budget — byte-identical to the pre-feature wall-clock.
    */
   budget?: BenchInstanceBudget
+  /** Agentless repro-test generation/install telemetry. Omitted when the
+   *  repro-test knob is off; present when the driver attempted the pipeline. */
+  reproTest?: BenchReproTestTelemetry
 }
 
 /** Structured per-attempt outcome shape echoed onto the report. Mirrors the
