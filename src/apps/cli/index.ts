@@ -287,6 +287,22 @@ const main = async (): Promise<void> => {
     process.exit(await runMcpServerCmd(mcpArgv))
   }
 
+  // ADR-0312 — `quanta webhook` GitHub-webhook HOST subcommand (inbound HTTP →
+  // verified-HMAC + dedup + mention-filter → reactor-watch IPC). SECURITY/RCE-
+  // adjacent inbound-network surface: gated on `QUANTA_GITHUB_WEBHOOK=1` (strict
+  // `=== '1'`); unset ⇒ the command exits 64 and binds NOTHING (default-OFF byte-
+  // identical — a bare `quanta` run never reaches this). The composition root
+  // (`webhook-server-setup.ts`) drains the live `createWebhookEventSource`
+  // pipeline into `publishReactorWatchTrigger`; dynamic import keeps it off the
+  // common startup path. Mirrors the `mcp-server` route: `--help` and the
+  // gate-off / missing-secret paths return BEFORE any bind, and SIGINT/SIGTERM
+  // stop the listener + poll pump cleanly.
+  if (process.argv[2] === "webhook") {
+    const webhookArgv = process.argv.slice(3)
+    const { runWebhookServerCmd } = await import("./webhook-server-setup")
+    process.exit(await runWebhookServerCmd(webhookArgv))
+  }
+
   // Tier-2 absorption #2-1: built-in slash commands short-circuit BEFORE any
   // LLM / session plumbing. The gate matches only `/<letter>...` so legacy
   // path-mode resume arguments and bare `--flag` invocations still fall

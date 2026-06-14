@@ -1,5 +1,6 @@
 import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import { errMessage, logger } from "@/shared"
+import { maybeProposeRadarCard } from "../radar-producer-hook"
 import { freshRecovery } from "../recovery"
 import { buildWorkMetricsResources, turnSpanAttrs } from "../session-resources"
 import { interruptedCategory } from "../stop-category"
@@ -21,6 +22,12 @@ export const executeTurnWithObservability = async (args: {
   let turnSpanStatus: "ok" | "error" | "aborted" = "ok"
   let flushKind: "tools" | "completed" | "aborted" | "interrupted" | "error" | "refusal" = "error"
   let result: TurnResult
+  // ADR-0231 (wire phase) — capture the turn-start wall-clock ONLY when the
+  // radar producer hook is wired, so the default-OFF path reads no extra
+  // clock (strict byte-identity). `undefined` ⇒ the radar block is absent ⇒
+  // the finally never samples.
+  const radarTurnStartMs =
+    args.ctx.cfg.radar !== undefined ? Date.now() : undefined
   try {
     if (args.ctx.turnDiffSession !== undefined) {
       await args.ctx.turnDiffSession.startTurn(args.turn)
@@ -55,6 +62,20 @@ export const executeTurnWithObservability = async (args: {
       })
     } catch (flushErr) {
       logger.warn(`loop.flushTurnObservability: ${errMessage(flushErr)}`)
+    }
+    // ADR-0231 (wire phase) — radar proposal-queue producer hook. Absent
+    // block (`cfg.radar === undefined`) ⇒ the guard above left
+    // `radarTurnStartMs` undefined and this never runs (byte-identical). When
+    // wired, deposit a heuristic card ONLY on a COMPLETED turn (the hook
+    // enforces the `flushKind` gate too) — the hook NEVER throws.
+    if (args.ctx.cfg.radar !== undefined && radarTurnStartMs !== undefined) {
+      maybeProposeRadarCard(args.ctx.cfg.radar, {
+        lastTaskDurationMs: Date.now() - radarTurnStartMs,
+        flushKind,
+        ...(args.ctx.cfg.sessionId !== undefined
+          ? { sessionId: args.ctx.cfg.sessionId }
+          : {}),
+      })
     }
     endSpan(turnSpan, turnSpanStatus, attrs({}))
   }

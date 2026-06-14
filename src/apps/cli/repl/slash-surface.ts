@@ -160,6 +160,11 @@ export type ReplSlashCtx = Partial<{
    *  the panel reflects the CURRENT registry. Absent ⇒ `/agents` prints "not
    *  wired in this surface". */
   agents: () => readonly import("../agents-fleet-panel").AgentFleetRow[]
+  /** ADR-0231 `/radar` — the live radar proposal-queue store (SAME instance the
+   *  loop's producer hook writes). Absent ⇒ `/radar` prints "not wired". */
+  radar: import("@/radar").RadarStore
+  /** ADR-0231 — `/radar prune` cutoff (ms). Absent ⇒ command defaults to 24h. */
+  radarPruneOlderThanMs: number
 }>
 
 export interface BuildReplSlashCtxArgs {
@@ -176,6 +181,13 @@ export interface BuildReplSlashCtxArgs {
    *  ctx slot is omitted and `/agents` prints "not wired" (default-OFF
    *  byte-identical). Optional so existing call sites/tests need no change. */
   taskRegistry?: import("@/subagent").TaskRegistry | undefined
+  /** ADR-0231 `/radar` — the gated radar proposal-queue store. Surface-compose
+   *  threads the SAME instance it wires into `AgentConfig.radar.store` ONLY when
+   *  `QUANTA_RADAR` is on; absent/omitted ⇒ the `radar` ctx slot is omitted and
+   *  `/radar` prints "not wired" (default-OFF byte-identical). */
+  radar?: import("@/radar").RadarStore | undefined
+  /** ADR-0231 — `/radar prune` cutoff (ms). Absent ⇒ command defaults to 24h. */
+  radarPruneOlderThanMs?: number | undefined
   /** Returns the live transcript reference so slash surfaces never read a
    *  stale `history` binding. */
   getHistory: () => readonly Message[]
@@ -442,6 +454,8 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     brief,
     contextUsage,
     taskRegistry,
+    radar,
+    radarPruneOlderThanMs,
   } = args
   const newSlots = buildNewSlotAdapters(args)
   return {
@@ -492,6 +506,10 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     ...(taskRegistry !== undefined
       ? { agents: () => taskRegistry.list().map(toAgentFleetRow) }
       : {}),
+    // ADR-0231 — `/radar` live store + prune cutoff. Absent store ⇒ slot
+    // omitted ⇒ `/radar` "not wired" (default-OFF byte-identical).
+    ...(radar !== undefined ? { radar } : {}),
+    ...(radarPruneOlderThanMs !== undefined ? { radarPruneOlderThanMs } : {}),
     // ADR-0291 — 8 new slots; each gated by presence so omitting an
     // upstream port produces a byte-identical "not wired" projection.
     ...spreadNewSlots(newSlots),
@@ -522,6 +540,10 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.brief !== undefined ? { brief: s.brief } : {}),
   ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
   ...(s.agents !== undefined ? { agents: s.agents } : {}),
+  ...(s.radar !== undefined ? { radar: s.radar } : {}),
+  ...(s.radarPruneOlderThanMs !== undefined
+    ? { radarPruneOlderThanMs: s.radarPruneOlderThanMs }
+    : {}),
 })
 
 /** Project the ADR-0291 slots. 1:1 spread; presence-gated for

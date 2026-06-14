@@ -62,6 +62,7 @@ import type { PlanExitOutcome } from "./plan-exit"
 import type { PlanExitPort } from "./plan-exit-flow"
 import type { PlanQueueStore } from "./plan-queue"
 import type { AgentMode } from "./prompt"
+import type { RadarProducerBlock } from "./radar-producer-hook"
 import type { RepoRules } from "./repo-rules"
 import type { RunLedgerPort } from "./run-ledger"
 import type { ModePolicy } from "./run-mode"
@@ -190,6 +191,18 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * threadId semantics).
    */
   memoryConsolidator?: MemoryConsolidatorBlock
+  /**
+   * ADR-0231 (wire phase) — radar proposal-queue producer hook. Absent ⇒ NO
+   * radar sampling runs at any turn boundary (byte-identical for every legacy
+   * caller — RFC §1.2 default-OFF; the same "turn-end pure hook, absent ⇒
+   * byte-identical" precedent as {@link memoryConsolidator}). When present
+   * (the composition root mints it behind `QUANTA_RADAR`), the loop calls
+   * `maybeProposeRadarCard(block, ...)` in the turn finally, which deposits a
+   * heuristic-derived card on `block.store` ONLY when the turn COMPLETED and
+   * the pure idle/long-task heuristic fires. A radar fault is logged +
+   * swallowed — it can never derail the turn. See {@link RadarProducerBlock}.
+   */
+  radar?: RadarProducerBlock
   /**
    * Compaction tuning. Absent ⇒ compaction is skipped entirely (existing
    * suites with no compaction config are unaffected). See

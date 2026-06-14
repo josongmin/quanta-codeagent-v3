@@ -5,33 +5,24 @@
  * that drops `/tmp` from the OS sandbox read scope. Locks:
  *
  *   1. DEFAULT-OFF byte-identity: absent / `excludeTmpdir:false` ⇒ the compiled
- *      Seatbelt profile is BYTE-IDENTICAL to the Codex-verbatim baseline (the
- *      `/tmp` literal is present, sexp still closes correctly).
- *   2. Behavior: `excludeTmpdir:true` ⇒ the `(literal "/tmp")` line is OMITTED
- *      AND the rest of the profile (including the block-closing paren) stays
- *      valid — only `/tmp` is removed, every other literal survives.
- *   3. e2e wire hellgate: QUANTA_SANDBOX_EXCLUDE_TMPDIR drives
- *      buildCliOsSandbox → slot.wrap → the REAL spawn argv (SBPL profile) so the
- *      knob actually reaches the kernel-facing profile, not just the type.
- *   4. knob default-OFF at the wire: unset env ⇒ argv byte-identical to the
- *      no-knob slot.
+ *      Seatbelt profile is BYTE-IDENTICAL to the verbatim baseline and has no
+ *      tmp deny rule.
+ *   2. Behavior: `excludeTmpdir:true` ⇒ an explicit tmp read deny is added
+ *      while the global read allow and the rest of the profile stay valid.
+ *   3. wrap hellgate: `wrapShellArgv` embeds the compiled SBPL into the real
+ *      spawn argv so the policy reaches the kernel-facing profile.
  */
-import { afterEach, describe, expect, test } from "bun:test"
-import { __resetShellSandbox } from "@/runtime"
-import { compileSeatbeltProfile, renderVerbatim } from "@/runtime/os-sandbox"
-import { buildCliOsSandbox } from "../../../src/apps/cli/sandbox-wire"
+import { describe, expect, test } from "bun:test"
+import { compileSeatbeltProfile, renderVerbatim, wrapShellArgv } from "@/runtime/os-sandbox"
 
 const WS = "/ws"
-const envOf = (overrides: Record<string, string>): NodeJS.ProcessEnv =>
-  ({ ...overrides }) as NodeJS.ProcessEnv
-
-afterEach(() => __resetShellSandbox())
 
 describe("§12.6 — compileSeatbeltProfile default-OFF byte-identity", () => {
   test("absent excludeTmpdir → byte-identical to Codex-verbatim fixture (read-only)", () => {
     const actual = compileSeatbeltProfile({ profile: "read-only" }, WS)
     expect(actual).toBe(renderVerbatim("read-only", WS))
-    expect((actual as string).includes('(literal "/tmp")')).toBe(true)
+    expect((actual as string).includes("(allow file-read*)")).toBe(true)
+    expect((actual as string).includes("exclude tmp reads")).toBe(false)
   })
 
   test("excludeTmpdir:false → byte-identical to absent", () => {
@@ -45,18 +36,20 @@ describe("§12.6 — compileSeatbeltProfile default-OFF byte-identity", () => {
 })
 
 describe("§12.6 — excludeTmpdir:true drops /tmp only", () => {
-  test("the /tmp literal is removed and nothing else is", () => {
+  test("the tmp deny rule is added and nothing else is", () => {
     const baseline = compileSeatbeltProfile({ profile: "workspace-write" }, WS) as string
     const excluded = compileSeatbeltProfile(
       { profile: "workspace-write", excludeTmpdir: true },
       WS,
     ) as string
-    expect(baseline.includes('(literal "/tmp")')).toBe(true)
-    expect(excluded.includes('(literal "/tmp")')).toBe(false)
-    // Every other line is preserved: removing the one `/tmp` line is the ONLY
-    // difference (the diff is exactly one line shorter and otherwise equal).
-    const baseLines = baseline.split("\n").filter((l) => l !== '  (literal "/tmp")')
-    expect(excluded.split("\n")).toEqual(baseLines)
+    const expectedLines = baseline.split("\n")
+    expectedLines.splice(
+      expectedLines.indexOf(";; workspace + extra writes"),
+      0,
+      ";; exclude tmp reads",
+      '(deny file-read* (subpath "/tmp") (subpath "/private/tmp"))',
+    )
+    expect(excluded.split("\n")).toEqual(expectedLines)
   })
 
   test("the system-framework read block still closes correctly (valid sexp)", () => {
@@ -64,61 +57,55 @@ describe("§12.6 — excludeTmpdir:true drops /tmp only", () => {
       { profile: "read-only", excludeTmpdir: true },
       WS,
     ) as string
-    // The block's final literal still carries the closing paren.
-    expect(excluded.includes('(literal "/private/etc/localtime"))')).toBe(true)
+    expect(excluded.includes('(deny file-read* (subpath "/tmp") (subpath "/private/tmp"))')).toBe(
+      true,
+    )
     // Balanced parens overall (cheap structural sanity).
     const opens = (excluded.match(/\(/g) ?? []).length
     const closes = (excluded.match(/\)/g) ?? []).length
     expect(opens).toBe(closes)
   })
 
-  test("/etc neighbor literal survives the /tmp removal", () => {
+  test("global read allow survives the tmp deny", () => {
     const excluded = compileSeatbeltProfile(
       { profile: "read-only", excludeTmpdir: true },
       WS,
     ) as string
-    expect(excluded.includes('(literal "/etc")')).toBe(true)
+    expect(excluded.includes("(allow file-read*)")).toBe(true)
   })
 })
 
 /* ================================================================== */
-/*  e2e wire hellgate — knob → slot.wrap → real spawn argv (SBPL)      */
+/*  wrap hellgate — policy → real spawn argv (SBPL)                    */
 /* ================================================================== */
 
-describe("§12.6 — QUANTA_SANDBOX_EXCLUDE_TMPDIR end-to-end through sandbox-wire", () => {
+describe("§12.6 — excludeTmpdir through wrapShellArgv", () => {
   const darwinDeps = { platform: "darwin" as const, sandboxExecPath: "/usr/bin/sandbox-exec" }
 
-  test("HELL-TMP-E2E: knob ON → the SBPL in the wrapped argv omits /tmp", async () => {
-    const slot = buildCliOsSandbox(
-      envOf({ QUANTA_SANDBOX: "read-only", QUANTA_SANDBOX_EXCLUDE_TMPDIR: "1" }),
+  test("HELL-TMP-E2E: policy ON → the SBPL in the wrapped argv denies tmp reads", () => {
+    const wrapped = wrapShellArgv(
+      ["bash", "-lc", "echo hi"],
+      WS,
+      { profile: "read-only", excludeTmpdir: true },
       darwinDeps,
     )
-    expect(slot).toBeDefined()
-    expect(slot?.policy.excludeTmpdir).toBe(true)
-    const wrapped = await (slot as NonNullable<typeof slot>).wrap(["bash", "-lc", "echo hi"], WS)
-    // The SBPL profile is the 3rd argv element ([sandbox-exec, "-p", <SBPL>, ...]).
     const sbpl = wrapped.argv[2] ?? ""
     expect(wrapped.sandboxApplied).toBe(true)
-    expect(sbpl.includes('(literal "/tmp")')).toBe(false)
-    // It's still a real profile (workspace read line present).
-    expect(sbpl.includes(`(subpath "${WS}")`)).toBe(true)
+    expect(sbpl.includes('(deny file-read* (subpath "/tmp") (subpath "/private/tmp"))')).toBe(true)
+    // It's still a real read-only profile.
+    expect(sbpl.includes("(allow file-read*)")).toBe(true)
   })
 
-  test("HELL-TMP-E2E2: knob OFF (unset) → wrapped argv SBPL keeps /tmp (byte-identical default)", async () => {
-    const off = buildCliOsSandbox(envOf({ QUANTA_SANDBOX: "read-only" }), darwinDeps)
-    expect(off?.policy.excludeTmpdir).toBeUndefined()
-    const wrappedOff = await (off as NonNullable<typeof off>).wrap(["bash", "-lc", "echo hi"], WS)
-    const sbplOff = wrappedOff.argv[2] ?? ""
-    expect(sbplOff.includes('(literal "/tmp")')).toBe(true)
-    // And the OFF profile equals the verbatim baseline (no drift from the knob).
-    expect(sbplOff).toBe(renderVerbatim("read-only", WS))
-  })
-
-  test("HELL-TMP-E2E3: knob=0 → treated as OFF (keeps /tmp)", async () => {
-    const slot = buildCliOsSandbox(
-      envOf({ QUANTA_SANDBOX: "read-only", QUANTA_SANDBOX_EXCLUDE_TMPDIR: "0" }),
+  test("HELL-TMP-E2E2: policy OFF → wrapped argv SBPL has no tmp deny (byte-identical default)", () => {
+    const wrappedOff = wrapShellArgv(
+      ["bash", "-lc", "echo hi"],
+      WS,
+      { profile: "read-only" },
       darwinDeps,
     )
-    expect(slot?.policy.excludeTmpdir).toBeUndefined()
+    const sbplOff = wrappedOff.argv[2] ?? ""
+    expect(sbplOff.includes("exclude tmp reads")).toBe(false)
+    // And the OFF profile equals the verbatim baseline (no drift from the knob).
+    expect(sbplOff).toBe(renderVerbatim("read-only", WS))
   })
 })

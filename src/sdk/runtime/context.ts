@@ -82,6 +82,12 @@ export interface RuntimeFacadeComposeOptions {
   /** ADR-0400 shadow-verify port. When set, the loop registers the
    *  `shadow_verify` LLM tool (CLI parity with the web surface). */
   readonly shadowVerify?: AgentConfig["shadowVerify"]
+  /** ADR-0231 (wire phase) — radar proposal-queue producer block. When set
+   *  (the composition root mints it behind `QUANTA_RADAR`), the built
+   *  `AgentConfig.radar` carries it and the loop deposits a heuristic card at
+   *  each COMPLETED turn boundary. Absent ⇒ slot omitted ⇒ no sampling
+   *  (byte-identical). */
+  readonly radar?: AgentConfig["radar"]
 }
 
 export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {
@@ -200,6 +206,7 @@ const PASS_THROUGH_COMPOSE_KEYS = [
   "gitObservability",
   "conversationActionPort",
   "activeTurnRef",
+  "radar",
 ] as const satisfies readonly (keyof RuntimeFacadeComposeOptions & keyof RuntimeContextPatch)[]
 
 const applyRuntimeFacadeComposeOptions = (

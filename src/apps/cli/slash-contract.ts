@@ -212,6 +212,16 @@ export interface SlashContext {
    *  the rest of the presence-gated panels). The wire maps `TaskRecord`
    *  → {@link AgentFleetRow}; this slot never imports `@/subagent` VALUES. */
   readonly agents?: (() => readonly AgentFleetRow[]) | undefined
+  /** ADR-0231 `/radar` — the radar proposal-queue store. The SAME instance the
+   *  agent loop's producer hook writes to (`AgentConfig.radar.store`), threaded
+   *  by surface-compose ONLY when `QUANTA_RADAR` is on so list/adopt/dismiss/
+   *  engage/prune act on the live queue. Absent ⇒ `/radar` prints "not wired in
+   *  this surface" + exit 0 (default-OFF byte-identical, parity with `/agents`).
+   *  Duck-typed via `@/radar` so this contract never imports radar VALUES. */
+  readonly radar?: import("@/radar").RadarStore | undefined
+  /** ADR-0231 — `/radar prune` cutoff (ms). Cards older than this by
+   *  `createdAtMs` are expired. Absent ⇒ the command defaults to 24h. */
+  readonly radarPruneOlderThanMs?: number | undefined
   /** Ticket 18 (V1) — READ-ONLY background-turn portal view. `/background`
    *  lists / reattaches (print-only) / cancels detached turns. Present iff
    *  `QUANTA_BG_TURN` is on AND the surface built a portal; absent ⇒

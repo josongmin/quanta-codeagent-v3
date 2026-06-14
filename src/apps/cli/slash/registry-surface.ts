@@ -480,6 +480,85 @@ const agentsCmd: SlashCommand = {
   },
 }
 
+/** `/radar` (ADR-0231) — the radar proposal-queue operator surface. Lists the
+ *  active cards the producer hook has deposited and lets the operator
+ *  adopt/dismiss/engage/prune them, sharing the SAME `RadarStore` instance the
+ *  agent loop's producer hook writes to (`ctx.radar`, threaded from
+ *  surface-compose's gated `buildRadarStore`). Subcommands:
+ *    - `list` (default) — render every `"active"` card (id/kind/title).
+ *    - `adopt <id>`     — `setStatus(id,"adopted")` (drops from listActive).
+ *    - `dismiss <id>`   — `setStatus(id,"dismissed")` (drops from listActive).
+ *    - `engage <id>`    — `recordEngagement(id)` (++count; stays active).
+ *    - `prune`          — expire cards older than `QUANTA_RADAR_PRUNE_MS`
+ *                         (default 24h) by `createdAtMs`.
+ *  Absent slot ⇒ "not wired in this surface" + exit 0 (default-OFF
+ *  byte-identical, parity with `/agents`). */
+const radarCmd: SlashCommand = {
+  name: "/radar",
+  describe:
+    "Radar proposal queue (list/adopt <id>/dismiss <id>/engage <id>/prune). Opt-in: QUANTA_RADAR=1",
+  category: "loop",
+  async run(args, ctx) {
+    const radar = ctx.radar
+    if (radar === undefined) {
+      ctx.out("/radar: not wired in this surface\n")
+      return 0
+    }
+    const sub = args[0] ?? "list"
+    if (sub === "list") {
+      const active = radar.listActive()
+      if (active.length === 0) {
+        ctx.out("/radar: no active cards\n")
+        return 0
+      }
+      const lines = active.map(
+        (c) => `  [${c.id}] (${c.kind}) ${c.title} — engaged ${c.engagementCount}×`,
+      )
+      ctx.out(`Radar — ${active.length} active card(s):\n${lines.join("\n")}\n`)
+      return 0
+    }
+    if (sub === "adopt" || sub === "dismiss") {
+      const id = args[1]
+      if (id === undefined) {
+        ctx.err(`/radar: ${sub} requires a card id (try '/radar list')\n`)
+        return 1
+      }
+      const status = sub === "adopt" ? "adopted" : "dismissed"
+      const r = radar.setStatus(id, status)
+      if (!r.ok) {
+        ctx.err(`/radar: ${sub} failed for '${id}': ${r.error}\n`)
+        return 1
+      }
+      ctx.out(`/radar: card '${id}' ${status}\n`)
+      return 0
+    }
+    if (sub === "engage") {
+      const id = args[1]
+      if (id === undefined) {
+        ctx.err(`/radar: engage requires a card id (try '/radar list')\n`)
+        return 1
+      }
+      const r = radar.recordEngagement(id)
+      if (!r.ok) {
+        ctx.err(`/radar: engage failed for '${id}': ${r.error}\n`)
+        return 1
+      }
+      ctx.out(`/radar: card '${id}' engaged (count ${r.value.engagementCount})\n`)
+      return 0
+    }
+    if (sub === "prune") {
+      const now = ctx.now?.() ?? Date.now()
+      const pruned = radar.prune(ctx.radarPruneOlderThanMs ?? 24 * 60 * 60 * 1000, now)
+      ctx.out(`/radar: pruned ${pruned} expired card(s)\n`)
+      return 0
+    }
+    ctx.err(
+      `/radar: unknown subcommand '${sub}' (try list | adopt <id> | dismiss <id> | engage <id> | prune)\n`,
+    )
+    return 1
+  },
+}
+
 /** `/voice-live` (ADR-0442) — live bidirectional spoken dialog. The surface
  *  populates `ctx.voiceLive` ONLY when the opt-in gate (`QUANTA_VOICE_LIVE`)
  *  is set AND the host is a TTY; that builder constructs the live
@@ -913,6 +992,10 @@ export const buildSurfaceSlashCommands = (
   historyCmd,
   branchesCmd,
   agentsCmd,
+  // ADR-0231 — `/radar` proposal queue. Always in the registry; the command
+  // itself prints "not wired" + exit 0 when `ctx.radar` is absent (default-OFF
+  // byte-identical, parity with /agents).
+  radarCmd,
   // Ticket 18 (V1) — `/background` manages turns moved to the background (Ctrl+B).
   // Always in the registry; the command itself prints "not wired" + exit 0 when
   // `ctx.background` is absent (default-OFF byte-identical, parity with /agents).

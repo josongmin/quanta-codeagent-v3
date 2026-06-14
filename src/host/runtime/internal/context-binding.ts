@@ -151,6 +151,9 @@ interface RuntimeContextSnapshot {
   readonly conversationActionPort?: AgentConfig["conversationActionPort"]
   readonly activeTurnRef?: AgentConfig["activeTurnRef"]
   readonly shadowVerify?: AgentConfig["shadowVerify"]
+  /** ADR-0231 (wire phase) — radar proposal-queue producer block, folded onto
+   *  the built `AgentConfig.radar` so the loop samples at each COMPLETED turn. */
+  readonly radar?: AgentConfig["radar"]
   /** H16 — the live cross-session dream trigger (auto path's SAME instance),
    *  surfaced so the REPL can wire `/dream`. Present only when
    *  `QUANTA_AUTO_DREAM=1` produced a trigger. */
@@ -196,6 +199,7 @@ type RuntimeContextPatch = Partial<
     | "conversationActionPort"
     | "activeTurnRef"
     | "shadowVerify"
+    | "radar"
   >
 >
 
@@ -675,6 +679,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("conversationActionPort", base.conversationActionPort),
   ...whenDefined("activeTurnRef", base.activeTurnRef),
   ...whenDefined("shadowVerify", base.shadowVerify),
+  ...whenDefined("radar", base.radar),
   ...whenDefined("dreamTrigger", base.dreamTrigger),
 })
 

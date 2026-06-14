@@ -41,6 +41,7 @@ import {
 } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import { PATCH_SENTINELS } from "@/patch/types"
+import { InMemoryRadarStore, JsonlFileRadarStore, type RadarStore } from "@/radar"
 import { parseEnvFlag } from "@/runner/assemble"
 import type {
   RuntimeFacadeComposeOptions,
@@ -61,6 +62,7 @@ import {
   createCompositeAtProvider,
 } from "../at-autocomplete"
 import type { DreamSlashState } from "../dream-cmd"
+import { DEFAULT_IDLE_MS } from "../idle-monitor"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import { loadKeybindings } from "../keybindings/load"
@@ -145,6 +147,39 @@ export interface PromptUxOpts {
  *  longer reimplements the env-flag semantics inline — the prior local copy
  *  diverged (unknown values were treated as truthy). One source of truth now. */
 const isEnvTruthy = (raw: string | undefined): boolean => parseEnvFlag(raw, false)
+
+/** ADR-0231 — default long-task threshold (ms) the radar idle/long-task
+ *  heuristic uses when `QUANTA_RADAR_TASK_MS` is unset. 30s mirrors the
+ *  "this turn took a while, a review may help" intent of the sample heuristic. */
+const DEFAULT_RADAR_TASK_DURATION_MS = 30_000
+
+/** ADR-0231 — resolve the long-task threshold (ms) from `QUANTA_RADAR_TASK_MS`.
+ *  Invalid / unset ⇒ {@link DEFAULT_RADAR_TASK_DURATION_MS}. */
+const radarTaskDurationThresholdMs = (env: NodeJS.ProcessEnv): number => {
+  const raw = env.QUANTA_RADAR_TASK_MS
+  if (raw === undefined) return DEFAULT_RADAR_TASK_DURATION_MS
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_RADAR_TASK_DURATION_MS
+}
+
+/** ADR-0231 — build the gated radar proposal-queue store. Returns `undefined`
+ *  when `QUANTA_RADAR` is off (default-OFF byte-identical: neither the slash
+ *  slot nor the producer block is wired). When on, a `JsonlFileRadarStore`
+ *  (persistent, 0600) iff `QUANTA_RADAR_FILE` is set, else an
+ *  `InMemoryRadarStore`. `crypto.randomUUID` ids in production (stable across
+ *  restarts is not required for the in-memory adapter). */
+const buildRadarStore = (env: NodeJS.ProcessEnv): RadarStore | undefined => {
+  if (!gateOn(env, "QUANTA_RADAR")) return undefined
+  const filePath = env.QUANTA_RADAR_FILE
+  if (filePath !== undefined && filePath.length > 0) {
+    return new JsonlFileRadarStore({
+      filePath,
+      mintId: () => crypto.randomUUID(),
+      onWarn: (msg) => logger.warn(msg),
+    })
+  }
+  return new InMemoryRadarStore({ mintId: () => crypto.randomUUID() })
+}
 
 /** `/retry-with` — parse `QUANTA_RETRY_MODELS` (comma-separated model ids) into
  *  {@link ModelCandidate}s for the current provider. The current model is
@@ -973,7 +1008,33 @@ export const composeSurfaceWires = (
   const backgroundPortal = gateOn(envSource, "QUANTA_BG_TURN")
     ? createBackgroundTurnPortal()
     : undefined
+  // ADR-0231 — radar proposal queue. Env-gated `QUANTA_RADAR`: builds ONE store
+  // (JsonlFileRadarStore when `QUANTA_RADAR_FILE` is set, else in-memory) shared
+  // by BOTH the `/radar` slash surface AND the loop's producer hook
+  // (`AgentConfig.radar.store`) — a SINGLE instance, so a card the hook deposits
+  // is visible to `/radar list` and an `/radar adopt` flips the SAME card the
+  // loop sees. Absent gate ⇒ `undefined` ⇒ neither the slash slot nor the
+  // producer block is wired (default-OFF byte-identical; zero sampling).
+  const radarStore: RadarStore | undefined = buildRadarStore(envSource)
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
+    // ADR-0231 — thread the producer block ONLY when the store is wired. The
+    // idle source is adapted from the CLI idle monitor: when the monitor reports
+    // idle, surface the resolved threshold as the idle-ms reading so the pure
+    // heuristic's `idleMs >= idleThresholdMs` arm passes; otherwise 0 (declines).
+    // This never fires silently — a non-idle monitor yields 0 ⇒ no proposal.
+    ...(radarStore !== undefined
+      ? {
+          radar: {
+            store: radarStore,
+            idleThresholdMs: setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS,
+            taskDurationThresholdMs: radarTaskDurationThresholdMs(envSource),
+            idleMsForTurn: () =>
+              setup.idleMonitor.isIdle()
+                ? (setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS)
+                : 0,
+          } satisfies RuntimeFacadeComposeOptions["radar"],
+        }
+      : {}),
     granularRegistry,
     onPromptAssembled: promptAssembled.sink,
     ...(registryToolMapper !== undefined ? { registryToolMapper } : {}),
@@ -1110,6 +1171,10 @@ export const composeSurfaceWires = (
     // Ticket 17 `/agents` — thread the session's lifecycle subagent registry
     // (already in hand for the lifecycle pills) so `/agents` reads live tasks.
     taskRegistry: setup.lifecycleTaskRegistry,
+    // ADR-0231 — `/radar` live store: the SAME instance wired into
+    // `AgentConfig.radar.store` above, so the slash surface and the loop's
+    // producer hook share ONE queue. Absent ⇒ slot omitted ⇒ "not wired".
+    ...(radarStore !== undefined ? { radar: radarStore } : {}),
     getHistory: () => state.history,
     startSideConversation: async (args) => {
       if (sideConversationStart === undefined) {

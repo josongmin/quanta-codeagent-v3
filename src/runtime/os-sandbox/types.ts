@@ -5,9 +5,9 @@
  *
  * Mirrors Cursor `cursorsandbox` profiles and Codex `sandbox_mode` 3-mode.
  *  - `off`                    : byte-identical legacy passthrough (default)
- *  - `read-only`              : FS read-only, no network, no new-binary exec
+ *  - `read-only`              : FS read-only, no network
  *  - `workspace-write`        : FS write inside `workspace`, read outside,
- *                               no network, no exec of new binaries
+ *                               no network
  *  - `workspace-write-net`    : workspace-write + network allow
  *  - `danger-full-access`     : explicit opt-in pass-through (warning surfaced)
  */

@@ -410,6 +410,11 @@ export type {
   PreCompactRequestQuery,
   StopReason,
 } from "./types"
+export {
+  maybeProposeRadarCard,
+  type MaybeProposeRadarCardArgs,
+  type RadarProducerBlock,
+} from "./radar-producer-hook"
 export { embedUntrusted, escapeBoundary } from "./untrusted"
 export {
   createVerifyGuardState,

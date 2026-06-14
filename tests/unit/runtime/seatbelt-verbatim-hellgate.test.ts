@@ -33,10 +33,17 @@ describe("ADR-0199 — Seatbelt verbatim parity (HELL-SB-01..04, 10)", () => {
     expect(actual).toBe(expected)
   })
 
-  test("HELL-SB-02: workspace-write profile contains workspace path exactly twice (read + write)", () => {
+  test("HELL-SB-02: workspace-write profile contains workspace write path exactly once", () => {
     const out = compileSeatbeltProfile({ profile: "workspace-write" }, WS) as string
     const occurrences = out.match(/\(subpath "\/ws"\)/g) ?? []
-    expect(occurrences.length).toBe(2)
+    expect(occurrences.length).toBe(1)
+  })
+
+  test("HELL-SB-02b: read-only permits process-exec so the sandboxed shell can start", () => {
+    const out = compileSeatbeltProfile({ profile: "read-only" }, WS) as string
+    expect(out.includes("(allow process-exec)")).toBe(true)
+    expect(out.includes("(deny network*)")).toBe(true)
+    expect(out.includes("(allow file-write*")).toBe(false)
   })
 
   test('HELL-SB-03: workspace path with `"` and `\\` escapes cleanly — no premature sexp close', () => {

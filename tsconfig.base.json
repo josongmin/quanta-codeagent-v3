@@ -41,6 +41,8 @@
       "@/storage/*": ["./src/storage/*"],
       "@/stream": ["./src/stream/index.ts"],
       "@/stream/*": ["./src/stream/*"],
+      "@/activity": ["./src/activity/index.ts"],
+      "@/activity/*": ["./src/activity/*"],
       "@/permission": ["./src/permission/index.ts"],
       "@/permission/*": ["./src/permission/*"],
       "@/runtime": ["./src/runtime/index.ts"],
