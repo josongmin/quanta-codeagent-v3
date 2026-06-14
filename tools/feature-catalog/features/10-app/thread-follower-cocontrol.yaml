@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-13"
   evidence:
     cli: "/steer (lease-safe weave inject via pushUserMessage) + /interrupt (lease-bypass cancel via pushCancel) registered in registry-session.ts, reachable from src/apps/cli/index.ts; /inbound invert applies the per-message queue↔weave invert"
-    web: "the HARD_DENY relay re-check is LIVE for ANY approval.respond (incl. a web/ide follower) at the real resolver (context-binding.ts resolveApproval); the dedicated follower-verb transport frame (2nd-client steer/interrupt over session IPC → a per-thread FollowerVerbTracker) is the documented follow-up — protocol core + guard are tested with the real oracle"
+    web: "2 of 4 follower verbs LIVE over the real web transport: interrupt-turn (turn.cancel lease-bypass fast-path) + approval-relay (approval.respond → resolveApproval with the LIVE HARD_DENY re-check). steer-turn/set-queue-mode need the web daemon's conversation-action port (today wired only in CLI surface-compose; jun-09 web parity). FollowerCoControlDispatcher unifies all 4 + the timeout/stale discipline, proven end-to-end against REAL collaborators (conversation-action surface + approval resolver); its web feeder is gated on that same parity"
 purpose: |
   A FOLLOWER (auxiliary client — a second window / web / ide) co-controls ONE live
   thread via timeout-bounded verbs. planFollowerVerb maps each verb onto an EXISTING
@@ -38,6 +38,7 @@ evidence:
   code:
     - src/agent/thread-follower/types.ts
     - src/agent/thread-follower/timeout.ts
+    - src/agent/thread-follower/dispatch.ts
     - src/agent/thread-follower/index.ts
     - src/agent/inbound-mode.ts
     - src/apps/cli/slash/registry-session.ts
@@ -46,7 +47,9 @@ evidence:
   tests:
     unit:
       - tests/unit/thread-follower-cocontrol-hellgate.test.ts
+      - tests/unit/thread-follower-dispatch-live-hellgate.test.ts
       - tests/unit/apps/cli/thread-follower-surface-integration-hellgate.test.ts
+      - tests/unit/host/runtime-approval-harddeny-relay-recheck-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

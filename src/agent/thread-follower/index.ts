@@ -7,6 +7,13 @@
  */
 
 export {
+  type FollowerApprovalTimeout,
+  type FollowerCoControlDeps,
+  FollowerCoControlDispatcher,
+  type FollowerCoControlSinks,
+  type FollowerDispatchOutcome,
+} from "./dispatch"
+export {
   type FollowerVerbEnvelope,
   FollowerVerbTracker,
   type ResolveOutcome,
