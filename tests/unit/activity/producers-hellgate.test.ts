@@ -50,10 +50,12 @@ describe("workflowToActivity", () => {
     expect(s.byId.get("run/step/v2")?.status).toBe("skipped")
   })
 
-  test("A3 — entering a new phase CLOSES the prior phase (done)", () => {
+  test("A3 — prior phase settles; its status is DERIVED from children (Find=done)", () => {
     const s = snap()
-    expect(s.byId.get("run/phase/Find")?.status).toBe("done")
-    expect(s.byId.get("run/phase/Verify")?.status).toBe("running") // last phase still open
+    expect(s.byId.get("run/phase/Find")?.status).toBe("done") // child f1 done
+    // Verify is the open (last) phase; its children are failed+skipped (none
+    // running) so it stays as the asserted in-progress `running`.
+    expect(s.byId.get("run/phase/Verify")?.status).toBe("running")
   })
 
   test("A4 — a step before any phase attaches to the run root", () => {
@@ -65,12 +67,36 @@ describe("workflowToActivity", () => {
     expect(s.childIds.get("r")).toEqual(["r/step/s"])
   })
 
-  test("A5 — workflowCloseActivity settles last phase + run", () => {
-    const close = workflowCloseActivity({ runId: "run", label: "review" }, false, "Verify", 999)
+  test("A5 — workflowCloseActivity derives last phase from events; honest fail", () => {
+    // No manual phase name — close reads the last phase_enter ("Verify") itself.
+    const close = workflowCloseActivity(events, { runId: "run", label: "review" }, false, 999)
     const s = materialize(reduceAll([...workflowToActivity(events, { runId: "run", label: "review" }), ...close]))
-    expect(s.byId.get("run")?.status).toBe("failed")
     expect(s.byId.get("run")?.endedAt).toBe(999)
-    expect(s.byId.get("run/phase/Verify")?.status).toBe("done")
+    // Verify is closed (done signal) but has a failed child ⇒ DERIVES failed.
+    expect(s.byId.get("run/phase/Verify")?.status).toBe("failed")
+    // run closed + a failed descendant ⇒ failed.
+    expect(s.byId.get("run")?.status).toBe("failed")
+  })
+
+  test("A6 — a start-less step_skipped is still VISIBLE (not silently dropped)", () => {
+    const s = materialize(
+      reduceAll([...workflowToActivity([{ type: "step_skipped", id: "s9" }], { runId: "r", label: "w" })]),
+    )
+    expect(s.byId.get("r/step/s9")?.status).toBe("skipped") // opened then skipped
+  })
+
+  test("A7 — `/` in a phase name cannot break id namespacing", () => {
+    const s = materialize(
+      reduceAll([
+        ...workflowToActivity(
+          [{ type: "phase_enter", name: "a/b" }, { type: "step_start", id: "s", label: "x" }],
+          { runId: "run", label: "w" },
+        ),
+      ]),
+    )
+    // the phase name is url-encoded, so "a/b" becomes one segment, not two
+    expect(s.childIds.get("run")).toEqual(["run/phase/a%2Fb"])
+    expect(s.childIds.get("run/phase/a%2Fb")).toEqual(["run/step/s"])
   })
 })
 

@@ -2,15 +2,18 @@
  * Producer: workflow events → activity events (jun-15 P0-a, gap G3).
  *
  * Maps the executor's `WorkflowEvent` stream (`@/workflow`) into spine events
- * WITHOUT importing the workflow engine's values — it takes the plain event
- * array (the executor already exposes `WorkflowResult.events` + a live
- * `WorkflowSink`). The run becomes an L0 `workflow` root; `phase_enter` opens an
- * L1 `phase` (and closes the prior one); each `step_*` is an L2 `agent` under
- * the current phase.
+ * WITHOUT importing the workflow engine's values (the `WorkflowEventLike` shape
+ * is mirrored structurally). The run is an L0 `workflow` root; `phase_enter`
+ * opens an L1 `phase` (and CLOSES the prior one — "we moved on"); each `step_*`
+ * is an L2 `agent` under the current phase.
  *
- * Pure + deterministic: same event order ⇒ same activity event order. NO engine
- * coupling beyond the `WorkflowEvent` shape (structurally mirrored, so the
- * activity slice does not value-import `@/workflow`).
+ * Honesty: closing a phase emits a TERMINAL `done` (= "this phase is settled").
+ * The spine's derived-status pass turns that into `failed` if a child step
+ * failed — so a phase with a failed step never reads green. (The producer does
+ * NOT decide done-vs-failed; the spine derives it from children.)
+ *
+ * Pure + deterministic. Ids are namespaced AND url-encoded so a `/` in a phase
+ * name or step id can never break the hierarchy or alias a sibling.
  */
 
 import type { AgentActivityEvent } from "../types"
@@ -31,13 +34,18 @@ export interface WorkflowToActivityOpts {
   readonly startedAt?: number
 }
 
-const phaseId = (runId: string, name: string): string => `${runId}/phase/${name}`
-const stepId = (runId: string, id: string): string => `${runId}/step/${id}`
+/** Url-encode a dynamic id segment so `/` (or any reserved char) in a phase
+ *  name / step id cannot break the `runId/phase/...` namespacing. */
+const seg = (s: string): string => encodeURIComponent(s)
+const phaseId = (runId: string, name: string): string => `${seg(runId)}/phase/${seg(name)}`
+const stepId = (runId: string, id: string): string => `${seg(runId)}/step/${seg(id)}`
 
 /**
  * Translate a workflow event sequence into spine events. Emits the run root
- * first; tracks the current phase so steps attach to it. Steps emitted before
- * any phase attach directly to the run root.
+ * first; tracks the current phase so steps attach to it. Steps before any phase
+ * attach to the run root. A `step_complete`/`step_skipped` whose `step_start`
+ * was never seen still OPENS the node (so a pre-skipped / cache-hit step is
+ * visible, never silently dropped).
  */
 export const workflowToActivity = (
   events: readonly WorkflowEventLike[],
@@ -47,7 +55,7 @@ export const workflowToActivity = (
     {
       type: "node_open",
       node: {
-        id: opts.runId,
+        id: `${seg(opts.runId)}`,
         parentId: null,
         kind: "workflow",
         label: opts.label,
@@ -56,64 +64,66 @@ export const workflowToActivity = (
       },
     },
   ]
+  const runRoot = seg(opts.runId)
   let currentPhase: string | null = null
+  const ensureStep = (id: string, label: string): string => {
+    const sid = stepId(opts.runId, id)
+    out.push({
+      type: "node_open",
+      node: { id: sid, parentId: currentPhase ?? runRoot, kind: "agent", label, status: "running" },
+    })
+    return sid
+  }
   for (const e of events) {
     switch (e.type) {
       case "phase_enter": {
-        // A new phase implies the previous one finished.
         if (currentPhase !== null) {
           out.push({ type: "node_status", id: currentPhase, status: "done" })
         }
         const pid = phaseId(opts.runId, e.name)
         out.push({
           type: "node_open",
-          node: { id: pid, parentId: opts.runId, kind: "phase", label: e.name, status: "running" },
+          node: { id: pid, parentId: runRoot, kind: "phase", label: e.name, status: "running" },
         })
         currentPhase = pid
         break
       }
       case "step_start":
-        out.push({
-          type: "node_open",
-          node: {
-            id: stepId(opts.runId, e.id),
-            parentId: currentPhase ?? opts.runId,
-            kind: "agent",
-            label: e.label,
-            status: "running",
-          },
-        })
+        ensureStep(e.id, e.label)
         break
       case "step_complete":
-        out.push({
-          type: "node_status",
-          id: stepId(opts.runId, e.id),
-          status: e.ok ? "done" : "failed",
-        })
+        // Idempotent open guarantees the node exists even without a prior start.
+        out.push({ type: "node_status", id: ensureStep(e.id, e.id), status: e.ok ? "done" : "failed" })
         break
       case "step_skipped":
-        out.push({ type: "node_status", id: stepId(opts.runId, e.id), status: "skipped" })
+        out.push({ type: "node_status", id: ensureStep(e.id, e.id), status: "skipped" })
         break
     }
   }
   return out
 }
 
-/** Emit the run-close transition (the executor's `WorkflowResult.ok` is a
- *  separate signal from the event stream). Closes the last open phase too. */
+/**
+ * Emit the run-close transition. Derives the LAST phase from the same event
+ * stream (no fragile caller-supplied phase name), closes it, then settles the
+ * run root. The spine derives done-vs-failed for both from their children, so
+ * passing `ok` only stamps the explicit run outcome when the run has no steps.
+ */
 export const workflowCloseActivity = (
+  events: readonly WorkflowEventLike[],
   opts: WorkflowToActivityOpts,
   ok: boolean,
-  lastPhaseName?: string,
   endedAt?: number,
 ): readonly AgentActivityEvent[] => {
   const out: AgentActivityEvent[] = []
-  if (lastPhaseName !== undefined) {
-    out.push({ type: "node_status", id: phaseId(opts.runId, lastPhaseName), status: "done" })
+  let lastPhase: string | undefined
+  for (const e of events) if (e.type === "phase_enter") lastPhase = e.name
+  if (lastPhase !== undefined) {
+    out.push({ type: "node_status", id: phaseId(opts.runId, lastPhase), status: "done" })
   }
   out.push({
     type: "node_status",
-    id: opts.runId,
+    id: seg(opts.runId),
     status: ok ? "done" : "failed",
     ...(endedAt !== undefined ? { at: endedAt } : {}),
   })

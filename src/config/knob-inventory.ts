@@ -1059,6 +1059,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
       "Bench: named preset selector (value, NOT on/off) — e.g. agentless-v1 / everything-v1 / baseline. Picks a frozen versioned bundle from KNOB_PRESETS; individual QUANTA_BENCH_* env vars override preset values. QUANTA_BENCH_SOTA=1 is a back-compat alias for agentless-v1.",
     readSite: "runner/batch/eval/knobs-bench.ts",
   },
+  {
+    envKey: "QUANTA_BENCH_CONCURRENCY",
+    kind: "int",
+    default: 1,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: max instances processed concurrently (default 1 = serial, byte-identical). >1 overlaps patch-gen across instances; Docker grading stays serialised by the python-swebench mutex (arm64-safe). Also settable via --concurrency. For parallel grading use an x86 backend (ADR-0536).",
+    readSite: "apps/bench/index.ts",
+  },
 ]
 
 /** P1 cluster — memory pipeline (memory-factory.ts), @-mention resolver caps

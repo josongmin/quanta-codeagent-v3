@@ -32,6 +32,19 @@ export interface LoadSelectedInstancesResult {
 export interface RunBatchOptions {
   instances: readonly Instance[]
   runInstance: (instance: Instance) => Promise<InstanceResult>
+  /**
+   * Max instances processed concurrently. Default 1 ⇒ fully serial,
+   * byte-identical to the pre-concurrency path (same order, one `runInstance`
+   * in flight at a time). >1 ⇒ patch-gen overlaps across instances.
+   *
+   * SAFETY: this parallelises the WHOLE `runInstance` (patch-gen + grading).
+   * patch-gen is LLM/network-bound and parallelises freely. The Docker GRADING
+   * step is serialised independently by a process-global mutex in
+   * `python-swebench.ts` (arm64 daemon wedges on concurrent large image pulls),
+   * so a high `concurrency` overlaps patch-gen while grading stays one-at-a-time.
+   * For genuinely parallel grading use an x86 backend (ADR-0536), not this knob.
+   */
+  concurrency?: number
 }
 
 export interface RunBatchResult {
@@ -78,12 +91,38 @@ export const computeExitCode = (results: readonly InstanceResult[]): number => {
   return 0
 }
 
-/** Run the selected instances serially and compute the canonical batch exit code. */
-export const runBatch = async (opts: RunBatchOptions): Promise<RunBatchResult> => {
-  const results: InstanceResult[] = []
-  for (const instance of opts.instances) {
-    results.push(await opts.runInstance(instance))
+/** Order-preserving bounded-concurrency map. `results[i]` always corresponds to
+ *  `items[i]` regardless of completion order. `limit<=1` ⇒ a single worker
+ *  drains the queue in index order = byte-identical to a serial `for await`.
+ *  Exported so both bench paths (custom-corpus `runBatch` + dataset-mode loop)
+ *  share ONE concurrency primitive. */
+export const mapWithConcurrency = async <T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> => {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next
+      next += 1
+      if (i >= items.length) return
+      results[i] = await fn(items[i] as T, i)
+    }
   }
+  const workers = Math.max(1, Math.min(Math.floor(limit), items.length || 1))
+  await Promise.all(Array.from({ length: workers }, () => worker()))
+  return results
+}
+
+/** Run the selected instances (serial by default; `opts.concurrency>1` overlaps
+ *  patch-gen — grading stays serialised by the python-swebench mutex) and
+ *  compute the canonical batch exit code. */
+export const runBatch = async (opts: RunBatchOptions): Promise<RunBatchResult> => {
+  const results = await mapWithConcurrency(opts.instances, opts.concurrency ?? 1, (instance) =>
+    opts.runInstance(instance),
+  )
   return { results, exitCode: computeExitCode(results) }
 }
 

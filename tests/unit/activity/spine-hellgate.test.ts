@@ -150,14 +150,23 @@ describe("materialize — tree + aggregate + determinism", () => {
     { type: "node_status", id: "a2", status: "stuck", stuck: { reason: "waiting_approval" } },
   ]
 
-  test("D1 — aggregate: agents excludes phase, counts running/stuck/tokens", () => {
+  test("D1 — aggregate: agents = agent-kind headcount; running/stuck = WORKER leaves", () => {
     const s = snap(fixture)
-    // agent-kinds: run(workflow) + a1 + a2 = 3 ; p1(phase) excluded
+    // agent-kinds: run(workflow) + a1 + a2 = 3 ; p1(phase) excluded from headcount
     expect(s.aggregate.agents).toBe(3)
-    expect(s.aggregate.running).toBe(1) // only run is still running (a1 done, a2 stuck)
-    expect(s.aggregate.stuck).toBe(1) // a2
-    expect(s.aggregate.tokens).toBe(150)
+    // running/stuck count LEAF workers only — run/p1 are containers (a stuck
+    // child makes them derive `stuck`, but counting them would double-count).
+    expect(s.aggregate.running).toBe(0) // a1 done, a2 stuck ⇒ no running worker
+    expect(s.aggregate.stuck).toBe(1) // a2 (the only stuck leaf)
+    expect(s.aggregate.tokens).toBe(150) // global total
     expect(s.aggregate.toolCalls).toBe(3)
+  })
+
+  test("D1b — container status is DERIVED honest: a stuck child makes run/phase stuck", () => {
+    const s = snap(fixture)
+    expect(s.byId.get("p1")?.status).toBe("stuck") // phase derives from a2(stuck)
+    expect(s.byId.get("run")?.status).toBe("stuck") // run derives from p1(stuck)
+    expect(s.byId.get("a1")?.status).toBe("done") // leaf keeps asserted
   })
 
   test("D2 — tree nesting: run→p1→[a1,a2]", () => {
@@ -187,5 +196,86 @@ describe("materialize — tree + aggregate + determinism", () => {
     const s = materialize(emptyActivityState())
     expect(s.roots).toEqual([])
     expect(s.aggregate).toEqual({ agents: 0, running: 0, stuck: 0, tokens: 0, toolCalls: 0 })
+  })
+})
+
+// ── E. hardening (adversarial audit R1–R3) ──────────────────────────────
+
+describe("spine hardening", () => {
+  test("E1 — re-opening a ROOT does not duplicate it (producer reconnect)", () => {
+    const s = snap([open("r", null, "workflow"), open("r", null, "workflow", "again")])
+    expect(s.roots).toEqual(["r"]) // exactly once
+    expect(s.byId.get("r")?.label).toBe("again") // presentational refresh
+  })
+
+  test("E2 — F1: a producer id/parent of ' root' cannot pollute the root bucket", () => {
+    // The literal sentinel string must not alias the internal root order.
+    const s = snap([open("real", null, "workflow"), open("x", " root", "agent")])
+    expect(s.roots).toEqual(["real"]) // ' root'-parented node is NOT a root
+    expect(s.childIds.get(" root")).toEqual(["x"]) // it is a child of the literal id
+  })
+
+  test("E3 — F2: reviving a settled node CLEARS the stale endedAt", () => {
+    const s = snap([
+      open("a", null, "agent"),
+      { type: "node_status", id: "a", status: "done", at: 100 },
+      { type: "node_status", id: "a", status: "running", at: 200 },
+    ])
+    const n = s.byId.get("a")
+    expect(n?.status).toBe("running")
+    expect(n?.endedAt).toBeUndefined() // not "running with an end time"
+  })
+
+  test("E4 — F3: a negative metric delta is ignored (counter never goes negative)", () => {
+    const s = snap([
+      open("a", null, "agent"),
+      { type: "node_metric", id: "a", tokensDelta: 10 },
+      { type: "node_metric", id: "a", tokensDelta: -50 },
+    ])
+    expect(s.byId.get("a")?.tokens).toBe(10)
+    expect(s.aggregate.tokens).toBe(10) // never negative in the header
+  })
+
+  test("E5 — daemon/reactor/remote/scheduled count toward the agent headcount", () => {
+    const s = snap([
+      open("w", null, "workflow"),
+      open("d", null, "daemon"),
+      open("rc", null, "reactor"),
+      open("rm", null, "remote"),
+      open("sc", null, "scheduled"),
+      open("p", null, "phase"), // NOT an agent
+    ])
+    expect(s.aggregate.agents).toBe(5) // phase excluded
+  })
+
+  test("E6 — terminal-only transition does NOT back-stamp startedAt", () => {
+    const s = snap([open("a", null, "agent"), { type: "node_status", id: "a", status: "done", at: 9 }])
+    expect(s.byId.get("a")?.startedAt).toBeUndefined() // never started ⇒ no start time
+    expect(s.byId.get("a")?.endedAt).toBe(9)
+  })
+
+  test("E7 — structural sharing across a STATUS transition (not just metric)", () => {
+    const st = reduceAll([open("a", null, "agent")])
+    const before = materialize(st)
+    reduceActivity(st, { type: "node_status", id: "a", status: "done" })
+    expect(before.byId.get("a")?.status).toBe("running") // earlier snapshot frozen
+    expect(materialize(st).byId.get("a")?.status).toBe("done")
+  })
+
+  test("E8 — order-invariance: interleaving metrics/status differently ⇒ same totals", () => {
+    const a = snap([
+      open("r", null, "workflow"),
+      open("x", "r", "agent"),
+      { type: "node_metric", id: "x", tokensDelta: 10 },
+      { type: "node_status", id: "x", status: "done" },
+    ])
+    const b = snap([
+      open("r", null, "workflow"),
+      open("x", "r", "agent"),
+      { type: "node_status", id: "x", status: "done" },
+      { type: "node_metric", id: "x", tokensDelta: 10 },
+    ])
+    expect(a.aggregate).toEqual(b.aggregate)
+    expect(a.byId.get("x")?.tokens).toBe(b.byId.get("x")?.tokens)
   })
 })

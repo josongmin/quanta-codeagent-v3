@@ -72,9 +72,18 @@ SSO, ssh-agent).
 
 | backend | infra | speed | when |
 |---|---|---|---|
-| **`sb-cli`** (default, **P0**) | none — HTTP to api.swebench.com | their cluster | zero infra; we already emit the exact `predictions.jsonl` format. Free/quota. |
-| `ssh:<host>` (**P1**) | BYO x86 box | native, `max_workers=N` | privacy/scale; no per-run provisioning |
-| `ec2` / `modal` (**P2**) | autoscaled | fan-out, minutes | full 500 at scale |
+| `sb-cli` (**probed 2026-06-15 — NOT viable on free tier**) | none — HTTP to api.swebench.com | n/a | see note below |
+| **`ssh:<host>`** (**now P0**) | BYO x86 box (one) | native, `max_workers=N` | the real zero-to-grading path; no per-run provisioning |
+| `ec2` / `modal` (**P1/P2**) | autoscaled | fan-out, minutes | full 500 at scale, repeated runs |
+
+> **sb-cli probe result (2026-06-15).** sb-cli is real and accepts submissions, BUT a free
+> key (generated via `gen-api-key`/`verify-api-key`) **produces no verdicts** — every eval
+> RUN fails (`Failed runs: 1`, no reason exposed), confirmed across **verified AND lite**,
+> with **both our patches AND the official GOLD patch**. `get-quotas` lists only
+> `swe-bench_lite` + `swe-bench-m` (no `verified`), but even lite-gold fails. ⇒ the free tier
+> does not grade for us (tier limitation or undocumented submission requirement we could not
+> resolve in-band). **sb-cli is parked**; revisit only if a working authorization/tier is
+> obtained. The viable remote path is self-host (`ssh`/`ec2`).
 
 ### 3. Remote-access layer (SSH backend)
 
@@ -191,12 +200,13 @@ advisory:
 
 ## Phasing
 
-- **P0** (small, highest value): `cli.ts` subcommand skeleton + `grade --backend sb-cli` +
-  analyze `diff`/`explain`/`leaderboard`. ⇒ full-500 remote grading with **zero infra**
-  (patch-gen local in parallel, grading outsourced to api.swebench.com).
-- **P1**: `ssh:<host>` backend + remote-access layer (§3) + `cost` aggregation +
-  parallel patch-gen knob.
-- **P2**: `ec2`/`modal` provisioning (§4) incl. spot, baked AMI, K-way fan-out, TTL guard.
+- **P0** (revised after the sb-cli probe): `cli.ts` subcommand skeleton + **`grade --backend
+  ssh:<host>`** (self-host one BYO x86 box) + analyze `diff`/`explain`/`leaderboard`. ⇒
+  native-speed Verified grading on a box you rent once; patch-gen local in parallel.
+  (Original "P0 = sb-cli zero-infra" is **dropped** — the free tier produces no verdicts;
+  see §2 note.)
+- **P1**: `ec2` provisioning (§4, single box) + `cost` aggregation + parallel patch-gen knob.
+- **P2**: `ec2`/`modal` autoscale — spot, baked AMI, K-way fan-out, TTL guard.
 - **P3**: `--mode full` (remote patch-gen + grading, §6) — gated behind the full hardening
   set (ephemeral key + IMDSv2/hop-1 + SSM + observe redaction + TTL + budget cap).
 

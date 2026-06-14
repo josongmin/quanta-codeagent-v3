@@ -74,6 +74,7 @@ import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import {
   loadSelectedInstances,
+  mapWithConcurrency,
   runBatch,
   selectInstances,
   writeArtifacts as writeBatchArtifacts,
@@ -158,6 +159,21 @@ const argPositiveInt = (flag: string, fallback: number): number => {
   }
   const n = Number.parseInt(raw.trim(), 10)
   return Number.isSafeInteger(n) && n > 0 ? n : fallback
+}
+
+/** Resolve instance-level concurrency: `--concurrency <N>` flag >
+ *  `QUANTA_BENCH_CONCURRENCY` env > 1 (serial, byte-identical). Parallelises
+ *  patch-gen across instances; Docker grading stays serialised by the
+ *  python-swebench mutex (arm64-safe). */
+const resolveConcurrency = (): number => {
+  const flag = argValue("--concurrency")
+  if (flag !== undefined) return argPositiveInt("--concurrency", 1)
+  const env = process.env.QUANTA_BENCH_CONCURRENCY
+  if (env !== undefined && /^\d+$/.test(env.trim())) {
+    const n = Number.parseInt(env.trim(), 10)
+    if (Number.isSafeInteger(n) && n > 0) return n
+  }
+  return 1
 }
 
 /** Compact failure tag for the console FAIL line. Returns "" when the
@@ -435,12 +451,15 @@ const runDatasetMode = async (
     logger.info(`bench: repair rounds enabled (maxRounds=${repair.maxRounds})`)
   }
 
-  const results: InstanceResult[] = []
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL ?? "https://github.com/"
   const taskDeps = { llm, cfg, pythonSwebench, repair, obs, repoBaseUrl }
-  for (const task of selected) {
-    results.push(await runSwebenchTask(task, taskDeps))
-  }
+  // Concurrency>1 overlaps patch-gen across tasks; Docker grading stays
+  // serialised by the python-swebench mutex. Default 1 ⇒ byte-identical serial.
+  const concurrency = resolveConcurrency()
+  if (concurrency > 1) logger.info(`bench: patch-gen concurrency=${concurrency} (grading serialised)`)
+  const results = await mapWithConcurrency(selected, concurrency, (task) =>
+    runSwebenchTask(task, taskDeps),
+  )
 
   await writeArtifacts(
     argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
@@ -637,6 +656,7 @@ const runCustomCorpusMode = async (
   const { results } = await runBatch({
     instances,
     runInstance: (instance) => resolveInstance(instance, base, cfg.n, obs),
+    concurrency: resolveConcurrency(),
   })
   // D-fix: write `--predictions` / `--report` from BOTH bench modes.
   await writeArtifacts(

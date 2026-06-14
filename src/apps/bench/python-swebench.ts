@@ -244,6 +244,66 @@ export const buildArgv = (
  * crash all resolve to `{ resolved: false, log: <why> }` so the caller can
  * fall back to its local testCmd path.
  */
+/**
+ * Process-global grading mutex. When `runBatch` overlaps patch-gen across
+ * instances (`QUANTA_BENCH_CONCURRENCY>1`), this serialises the actual
+ * `run_evaluation` Docker spawns so only ONE grading runs at a time — arm64
+ * Docker's daemon wedges when several large eval images pull concurrently
+ * (observed: max_workers=4 wedged it). patch-gen still overlaps; only the
+ * Docker section bottlenecks. At concurrency 1 this is a no-op (an
+ * already-resolved chain). NOT a limiter for x86 parallel grading — that path
+ * uses run_evaluation's own `max_workers` on a remote box (ADR-0536).
+ */
+let gradingChain: Promise<unknown> = Promise.resolve()
+const withGradingLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const prev = gradingChain
+  let release: () => void = () => {}
+  gradingChain = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await prev.catch(() => {}) // wait for the previous grading; ignore its outcome
+  try {
+    return await fn()
+  } finally {
+    release()
+  }
+}
+
+/** The harness reached its run summary ⇒ grading actually completed (vs a
+ *  Docker/network crash before any verdict). */
+const harnessReachedSummary = (out: string): boolean =>
+  out.includes("Instances submitted:") || out.includes("Instances completed:")
+
+/** Run `run_evaluation` (under the grading mutex) with a single transient-crash
+ *  retry. Extracted from `evaluateWithPythonSwebench` to keep that function
+ *  under the cognitive-complexity ceiling. A genuine patch fail keeps exit=0 +
+ *  a populated report, so the retry (exit!=0 AND no resolved AND no summary)
+ *  never re-runs a real fail. The 5s settle races the abort signal (the
+ *  per-instance deadline can cancel it mid-sleep). */
+const gradeWithRetry = async (
+  spawn: Spawn,
+  argv: string[],
+  work: string,
+  opts: PySwebenchOpts,
+): Promise<{ run: SpawnResult; resolvedIds: string[]; retried: boolean }> => {
+  const timeout = opts.timeoutMs ?? 1800000
+  let run = await withGradingLock(() => spawn(argv, work, timeout))
+  let resolvedIds = await collectResolvedIds(work)
+  let retried = false
+  if (run.code !== 0 && resolvedIds.length === 0 && !harnessReachedSummary(run.stdout)) {
+    try {
+      await abortableSleep(5000, opts.signal)
+      retried = true
+      run = await withGradingLock(() => spawn(argv, work, timeout))
+      resolvedIds = await collectResolvedIds(work)
+    } catch (e) {
+      if (abortReasonOf(e) === null) throw e
+      // Cancelled mid-settle: keep the first (failed) run, mark NOT retried.
+    }
+  }
+  return { run, resolvedIds, retried }
+}
+
 export const evaluateWithPythonSwebench = async (
   instance: Instance,
   prediction: string,
@@ -298,31 +358,7 @@ export const evaluateWithPythonSwebench = async (
     const datasetName = opts.datasetName ?? SWEBENCH_VERIFIED_DATASET
     const harnessCfg = opts.harnessConfig ?? resolveHarnessConfig()
     const argv = buildArgv(python, predictionsPath, runId, meta.instanceId, datasetName, harnessCfg)
-    // Transient-crash retry: exit != 0 AND the harness never reached its
-    // summary marker = Docker/network/image-pull glitch. Settle 5s + retry
-    // once. Genuine patch fails keep exit=0 with a populated report, so this
-    // never re-runs a real fail.
-    const harnessReachedSummary = (out: string): boolean =>
-      out.includes("Instances submitted:") || out.includes("Instances completed:")
-    let run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
-    let resolvedIds = await collectResolvedIds(work)
-    let retried = false
-    if (run.code !== 0 && resolvedIds.length === 0 && !harnessReachedSummary(run.stdout)) {
-      // T01 (audit L5 M-8): the 5s transient-crash settle now RACES the abort
-      // signal instead of blocking. If the per-instance deadline fires during
-      // the settle (or was already past), skip the retry entirely and surface
-      // the first run — previously the eval driver's deadline could not stop
-      // this sleep, cascading the timeout into the next instance.
-      try {
-        await abortableSleep(5000, opts.signal)
-        retried = true
-        run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
-        resolvedIds = await collectResolvedIds(work)
-      } catch (e) {
-        if (abortReasonOf(e) === null) throw e
-        // Cancelled mid-settle: keep the first (failed) run, mark NOT retried.
-      }
-    }
+    const { run, resolvedIds, retried } = await gradeWithRetry(spawn, argv, work, opts)
     const resolved = resolvedIds.includes(meta.instanceId)
     const gradingCompleted = harnessReachedSummary(run.stdout)
     const tail = (s: string): string => s.slice(-1500)

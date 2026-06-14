@@ -493,7 +493,7 @@ const agentsCmd: SlashCommand = {
  *                         (default 24h) by `createdAtMs`.
  *  Absent slot ⇒ "not wired in this surface" + exit 0 (default-OFF
  *  byte-identical, parity with `/agents`). */
-const radarCmd: SlashCommand = {
+export const radarCmd: SlashCommand = {
   name: "/radar",
   describe:
     "Radar proposal queue (list/adopt <id>/dismiss <id>/engage <id>/prune). Opt-in: QUANTA_RADAR=1",

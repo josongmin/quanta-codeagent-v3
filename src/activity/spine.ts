@@ -118,22 +118,27 @@ export const reduceActivity = (state: ActivityState, event: AgentActivityEvent):
       const node = state.nodes.get(event.id)
       if (node === undefined) return state // NO-THROW: drop unknown id
       const closing = TERMINAL.has(event.status)
-      state.nodes.set(event.id, {
-        ...node,
-        status: event.status,
-        // stuck annotation lives only while stuck; any other status clears it.
-        ...(event.status === "stuck"
-          ? { stuck: event.stuck ?? { reason: "unknown" } }
-          : { stuck: undefined }),
-        // Stamp startedAt on the first non-terminal transition if open had none.
-        ...(event.at !== undefined && node.startedAt === undefined && !closing
-          ? { startedAt: event.at }
-          : {}),
-        // Closing stamps endedAt; RE-OPENING (a non-terminal transition after a
-        // close) CLEARS the stale endedAt so a revived node is never "running
-        // with an end time".
-        ...(closing ? { endedAt: event.at ?? node.endedAt } : { endedAt: undefined }),
-      })
+      // Drop the fields we MANAGE (stuck/endedAt) so we can conditionally
+      // re-add them — under exactOptionalPropertyTypes a key must be OMITTED,
+      // not set to undefined. `startedAt` rides along in `rest` (preserved).
+      const { stuck: _drop, endedAt: _dropEnd, ...rest } = node
+      // `stuck` lives only while stuck; any other status clears it (omitted).
+      const withStuck: ActivityNode =
+        event.status === "stuck"
+          ? { ...rest, status: event.status, stuck: event.stuck ?? { reason: "unknown" } }
+          : { ...rest, status: event.status }
+      // Stamp startedAt on the first non-terminal transition if open had none.
+      const withStart: ActivityNode =
+        event.at !== undefined && node.startedAt === undefined && !closing
+          ? { ...withStuck, startedAt: event.at }
+          : withStuck
+      // Closing stamps endedAt; reviving (non-terminal after a close) leaves it
+      // omitted so a running node never carries a stale end time.
+      const closeAt = event.at ?? node.endedAt
+      state.nodes.set(
+        event.id,
+        closing && closeAt !== undefined ? { ...withStart, endedAt: closeAt } : withStart,
+      )
       return state
     }
     case "node_metric": {
@@ -208,7 +213,10 @@ const computeEffectiveStatuses = (
   return memo
 }
 
-const computeAggregate = (nodes: ReadonlyMap<string, ActivityNode>): ActivityAggregate => {
+const computeAggregate = (
+  nodes: ReadonlyMap<string, ActivityNode>,
+  childIds: ReadonlyMap<string, readonly string[]>,
+): ActivityAggregate => {
   let agents = 0
   let running = 0
   let stuck = 0
@@ -217,8 +225,12 @@ const computeAggregate = (nodes: ReadonlyMap<string, ActivityNode>): ActivityAgg
   for (const n of nodes.values()) {
     if (AGENT_KINDS.has(n.kind)) {
       agents += 1
-      if (n.status === "running") running += 1
-      if (n.status === "stuck") stuck += 1
+      // running/stuck count actual WORKERS — agent-kind LEAVES — not container
+      // runs (a workflow run shows `stuck` because a child is stuck; counting
+      // both would double-count one blocked situation).
+      const isLeaf = (childIds.get(n.id)?.length ?? 0) === 0
+      if (isLeaf && n.status === "running") running += 1
+      if (isLeaf && n.status === "stuck") stuck += 1
     }
     tokens += n.tokens
     toolCalls += n.toolCalls
@@ -243,6 +255,6 @@ export const materialize = (state: ActivityState): ActivitySnapshot => {
     roots: [...state.rootOrder],
     byId,
     childIds,
-    aggregate: computeAggregate(byId),
+    aggregate: computeAggregate(byId, childIds),
   }
 }

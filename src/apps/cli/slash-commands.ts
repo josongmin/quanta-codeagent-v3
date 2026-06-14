@@ -23,7 +23,7 @@
 
 import { APP_SLASH_COMMANDS } from "./slash/registry-app"
 import { SESSION_SLASH_COMMANDS } from "./slash/registry-session"
-import { buildSurfaceSlashCommands } from "./slash/registry-surface"
+import { buildSurfaceSlashCommands, radarCmd } from "./slash/registry-surface"
 import type { SlashCommand } from "./slash-contract"
 import { createSlashRuntime, isSlashCommand } from "./slash-engine"
 
@@ -53,3 +53,6 @@ export const describeSlashCommand = slashRuntime.describe
 export const slashCompleter = slashRuntime.complete
 export const runSlashCommand = slashRuntime.run
 export { isSlashCommand }
+/** ADR-0231 — re-exported for the radar wire hellgate (direct cmd invocation
+ *  against a synthetic `SlashContext`). */
+export { radarCmd }
