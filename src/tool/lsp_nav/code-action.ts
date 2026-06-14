@@ -164,7 +164,7 @@ export const lspCodeActionTool = (port: CodeActionPort): Tool<LspCodeActionInput
     let actions: readonly CodeActionPortAction[] | null
     try {
       actions = await port.resolveCodeActions(
-        parsed.data.path,
+        abs,
         parsed.data.line - 1,
         parsed.data.character - 1,
         parsed.data.kind,

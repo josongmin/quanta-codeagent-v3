@@ -135,11 +135,12 @@ describe("SRC-2: probe failure is not cached permanently (B2 source ratchet)", (
 })
 
 describe("SRC-4: multi-line match text has newlines replaced (B4 source ratchet)", () => {
-  test("source replaces embedded newlines in m.text before formatting", () => {
-    // Red-on-injection: remove the .replace(/\\n/g, ...) call → multi-line
+  test("source replaces embedded newlines (CRLF-aware) in m.text before formatting", () => {
+    // Red-on-injection: remove the .replace(/\r?\n/g, ...) call → multi-line
     // matches produce multiple output lines per match, breaking the file:line:
-    // one-per-line contract.
-    expect(AST_GREP_SRC).toMatch(/\.replace\(\/\\n\/g/)
+    // one-per-line contract. Also: bare /\n/g leaves \r on Windows-style files,
+    // garbling ANSI terminal output (F-B4-crlf-stray-cr fix).
+    expect(AST_GREP_SRC).toMatch(/\.replace\(\/\\r\?\\n\/g/)
   })
 
   test("source uses a visible marker (↵) or takes first line for multi-line text", () => {
@@ -166,11 +167,11 @@ describe("SRC-7: stdout is capped before JSON.parse (B7 source ratchet)", () => 
     expect(AST_GREP_SRC).toContain("slice(0, MAX_STDOUT_BYTES)")
   })
 
-  test("source passes --max-count flag to ast-grep (at-source cap)", () => {
-    // Red-on-injection: remove --max-count from parts array →
-    // ast-grep streams unlimited output; the stdout cap is the only defense;
-    // with large repos OOM may still occur before the cap fires (streaming).
-    expect(AST_GREP_SRC).toContain("--max-count")
+  test("source does NOT pass unrecognised flags to ast-grep (F-B7 fix)", () => {
+    // Red-on-injection: restore `parts.push("--max-count", ...)` →
+    // Clap CLIs error on unrecognised arguments (exit 2), making every invocation
+    // fail with a misleading error. The stdout-slice guard is the correct OOM cap.
+    expect(AST_GREP_SRC).not.toContain("--max-count")
   })
 })
 

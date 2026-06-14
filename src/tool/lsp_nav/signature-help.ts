@@ -107,7 +107,7 @@ export const lspSignatureHelpTool = (port: SignatureHelpPort): Tool<LspSignature
     let sigs: readonly SignatureHelpPortInfo[] | null
     try {
       sigs = await port.signatureHelp(
-        parsed.data.path,
+        abs,
         parsed.data.line - 1,
         parsed.data.character - 1,
         ctx.signal,

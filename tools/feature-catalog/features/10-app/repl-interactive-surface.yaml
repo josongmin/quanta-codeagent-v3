@@ -43,6 +43,7 @@ evidence:
     - src/apps/cli/internal.ts
     - src/apps/cli/status-pills.ts
     - src/shared/runtime-config.ts
+    - src/apps/cli/repl/session-picker.ts
   adrs: []
   tests:
     unit:

@@ -662,10 +662,15 @@ export const lspEnabled = (): boolean =>
  *  `QUANTA_LSP_TOOLS=full`. With the knob unset the registry is byte-identical. */
 export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "full"
 
-/** Structural AST search via ast-grep (opt-in via `QUANTA_AST_GREP=1`).
- *  Requires `ast-grep` CLI (`brew install ast-grep`). Default-OFF: with the
- *  knob unset the tool surface is byte-identical. */
-export const astGrepEnabled = (): boolean => readCliKnob("QUANTA_AST_GREP", "bool") ?? false
+/** Structural AST search via ast-grep (opt-in via `QUANTA_AST_GREP=1` or
+ *  `QUANTA_AST_GREP=full`). Requires `ast-grep` CLI (`brew install ast-grep`).
+ *  Default-OFF: with the knob unset the tool surface is byte-identical.
+ *
+ *  NOTE: `"full"` is accepted as an alias for parity with `QUANTA_LSP_TOOLS=full`
+ *  (see `lspNavEnabled`). It is NOT in GATE_TRUTHY so it would silently resolve
+ *  to `false` via `readCliKnob("bool")`; the explicit OR guard below captures it. */
+export const astGrepEnabled = (): boolean =>
+  process.env.QUANTA_AST_GREP === "full" || (readCliKnob("QUANTA_AST_GREP", "bool") ?? false)
 
 /** Codex `may-20-codex-signal.md` absorption (ADR-0016). First-class
  *  git tools (diff/status/log/blame) are NOT in `defaultTools` to keep the

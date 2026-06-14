@@ -485,13 +485,13 @@ const stopClient = (client: LspClient, label: string): Promise<void> =>
 /** Stateless `CodeActionPort` — opens a fresh `LspClient` per call, uses
  *  it, then closes it. `lsp_code_action` is read-only (enumeration only)
  *  but the adapter also wires `applyEdit` for future apply tools. */
-const lspCodeActionPort = (cwd: string): CodeActionPort => {
+const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
   return {
     resolveCodeActions: async (file, line, col, kind, signal) => {
       const spec = specFor(file)
       if (!spec) return null
       if (!(await isAvailable(spec.bin))) return null
-      const client = spec.create(cwd)
+      const client = spec.create(getCwd())
       try {
         await client.start()
       } catch (e) {
@@ -524,7 +524,8 @@ const lspCodeActionPort = (cwd: string): CodeActionPort => {
       const file = firstUri.replace(/^file:\/\//, "")
       const spec = specFor(file)
       if (!spec) throw new Error(`lsp_code_action: no server for ${file}`)
-      const client = spec.create(cwd)
+      if (!(await isAvailable(spec.bin))) return
+      const client = spec.create(getCwd())
       try {
         await client.start()
         await new DefaultCodeActionAdapter(client).applyEdit(edit, signal)
@@ -538,12 +539,12 @@ const lspCodeActionPort = (cwd: string): CodeActionPort => {
 /** Stateless `FormatPort` — opens a fresh `LspClient` per call, uses it,
  *  then closes it. Safe: formatting is read-only at the port level (edits
  *  are surfaced, not applied). */
-const lspFormatPort = (cwd: string): FormatPort => ({
+const lspFormatPort = (getCwd: () => string): FormatPort => ({
   format: async (file, range, signal) => {
     const spec = specFor(file)
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
-    const client = spec.create(cwd)
+    const client = spec.create(getCwd())
     try {
       await client.start()
     } catch (e) {
@@ -564,12 +565,12 @@ const lspFormatPort = (cwd: string): FormatPort => ({
 
 /** Stateless `SignatureHelpPort` — opens a fresh `LspClient` per call,
  *  uses it, then closes it. Read-only, concurrency-safe. */
-const lspSignatureHelpPort = (cwd: string): SignatureHelpPort => ({
+const lspSignatureHelpPort = (getCwd: () => string): SignatureHelpPort => ({
   signatureHelp: async (file, line, col, signal) => {
     const spec = specFor(file)
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
-    const client = spec.create(cwd)
+    const client = spec.create(getCwd())
     try {
       await client.start()
     } catch (e) {
@@ -599,7 +600,7 @@ const lspSignatureHelpPort = (cwd: string): SignatureHelpPort => ({
 export const lspNavToolList = (): Tool[] => [
   ...buildLspNavTools(lspNavProvider()),
   lspRenameApplyTool(lspRenameApplyPort(process.cwd())) as Tool,
-  lspCodeActionTool(lspCodeActionPort(process.cwd())) as Tool,
-  lspFormatTool(lspFormatPort(process.cwd())) as Tool,
-  lspSignatureHelpTool(lspSignatureHelpPort(process.cwd())) as Tool,
+  lspCodeActionTool(lspCodeActionPort(() => process.cwd())) as Tool,
+  lspFormatTool(lspFormatPort(() => process.cwd())) as Tool,
+  lspSignatureHelpTool(lspSignatureHelpPort(() => process.cwd())) as Tool,
 ]

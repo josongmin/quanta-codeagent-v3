@@ -32,7 +32,11 @@ export type Provider = LLMProvider
  *  entry points (`cli`, `bench`, `eval`) previously each duplicated. */
 export const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-6",
-  openai: "gpt-5-mini",
+  // jun-15: default bumped `gpt-5-mini` → `gpt-5.4`. The bare `gpt-5.4` slug is
+  // not in MODEL_CONTEXT_WINDOWS but routes through the `gpt-5` family fallback
+  // (provider-metadata.ts) so the 400k window / reasoning catalog resolve cleanly
+  // with no table edit. Override with `--model` / `QUANTA_MODEL=<slug>`.
+  openai: "gpt-5.4",
   // ChatGPT-OAuth subscription path. The Codex-only `gpt-5-codex` slug is
   // rejected by chatgpt.com backend ("not supported when using Codex with
   // a ChatGPT account"). jun-10: bumped `gpt-5` → `gpt-5.4` — the bare

@@ -58,13 +58,14 @@ export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval
    *  mode-preserving + staleness-guarded). ABSENT ⇒ whole-call approve, byte-
    *  identical to the pre-T05 behavior.
    *
-   *  WIRING STATUS (honest): the CLI inline-confirm surface applies per-hunk
-   *  DIRECTLY via the executor (it holds the previewed before/after) and does
-   *  NOT route through this command. This protocol field is the carrier for the
-   *  DEFERRED (web/SDK) out-of-band approval path; that path does not yet capture
-   *  the pending mutation's before/after on resolve, so a host setting this field
-   *  there currently has NO effect (documented follow-up — not silently honored).
-   *  Ignored on a `deny`. */
+   *  WIRING STATUS (jun-15, LANDED both surfaces): the CLI inline-confirm surface
+   *  applies per-hunk directly via the executor; the web/SDK out-of-band path
+   *  routes THIS field through `scheduler → host.resolveApproval` to the runtime
+   *  controller, which (gate `QUANTA_HUNK_APPROVAL` ON) applies the subset against
+   *  the REQUEST-time baseline it captured at mint (drift ⇒ stale, no write) and
+   *  mints a `deny_and_steer` lease so the whole-call tool does NOT also re-run.
+   *  A subset covering EVERY hunk / a non-previewable action / gate-off ⇒ whole-
+   *  call grant, byte-identical. Ignored on a `deny`. */
   readonly selectedHunks?: readonly string[]
   /** ADR-0512 P3 — corrective steer for a `deny` of a skill-scope ESCALATION
    *  (the `deny_and_steer` verb): a non-empty message telling the model what to

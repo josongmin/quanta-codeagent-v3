@@ -23,7 +23,6 @@ import {
   type AgentlessLocalizeDeps,
   type AgentlessLocalizeResult,
   agentlessLocalize,
-  type BranchSearchConfig,
   buildSystemPrompt,
   composeAgentlessHint,
   composeIssueHint,
@@ -44,13 +43,20 @@ import type { PermissionContext } from "@/permission"
 import { errMessage, gateOn } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { astGrepTool, buildDefaultTools, ToolRegistry } from "@/tool"
+import type { Tool } from "@/tool"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type { BenchAttemptOutcome, Instance, InstanceResult } from "../types"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
-import { knobsForReport, resolveBenchKnobs } from "./knobs-bench"
+import {
+  type BenchIssueHintMode,
+  type BenchPosture,
+  benchPostureFromState,
+  knobsForReport,
+  resolveBenchKnobs,
+} from "./knobs-bench"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type {
@@ -232,12 +238,6 @@ const SWEBENCH_DIRECTIVE = [
  *  comment block without an accompanying measurement-integrity ADR.
  */
 
-/** Per-branch verify budget for bench branch_search (60s — same shape as the
- *  IDE preset; bench is unattended but each candidate's own `runAgent` carries
- *  the dominant timeout via `deps.timeoutMs`, this only caps each shell-out
- *  verifier inside the slice). */
-const BENCH_BRANCH_TIMEOUT_MS = 60_000
-
 /** Parse `QUANTA_BENCH_BRANCH_SEARCH` to a positive integer K>=2. Returns
  *  `undefined` for every other shape (absent / `"0"` / `"1"` / negative /
  *  non-integer / NaN / garbage / empty / whitespace) — the gate is *strict*
@@ -288,111 +288,28 @@ export const parseBenchBranchSearchK = (raw: string | undefined): number | undef
  *                     failure the wiring falls back to `regex`.
  *
  * Strict accept-list — anything else (`true`, `yes`, garbage) ⇒ `off`. */
-export type IssueHintMode = "off" | "regex" | "agentless"
+export type IssueHintMode = BenchIssueHintMode
 
-export const benchOptIns = (): {
-  lspNav: boolean
-  subagent: AgentConfig["subagent"] | undefined
-  skills: AgentConfig["skills"] | undefined
-  localizePhase: AgentConfig["localizePhase"] | undefined
-  branchSearch: BranchSearchConfig | undefined
-  issueHint: boolean
-  /** Resolved tri-state. `"off"` ⇒ flag unset/unknown; `"regex"` ⇒ `1`/`on`;
-   *  `"agentless"` ⇒ `agentless`. The legacy boolean `issueHint` above
-   *  remains for back-compat with the wiring tests; `issueHintMode` is the
-   *  forward-looking field used by `prepareIssueHint`. */
-  issueHintMode: IssueHintMode
-  /** Opt-in toggle for the expected/actual extractor. Default false; only
-   *  true when `QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL=1|on`. Independent
-   *  of `issueHintMode` — can be set even when the parent gate is off (in
-   *  which case it has no effect because no hint runs at all). */
-  issueHintExpectedActual: boolean
-  sotaOn: boolean
-} => {
-  // QUANTA_BENCH_SOTA=1 enables the full SOTA++ recommended posture in one flag:
-  //   lspNav + localize-phase=5 + issue-hint=agentless + expected-actual +
-  //   repro-test=5 + retry-transient=3 + repo-map.
-  // Individual flags still override SOTA defaults (explicit wins via ?? / ||).
-  // Measurement: use SOTA as the baseline for competitive runs; leave unset for
-  // byte-identical historical comparison.
-  const sotaOn = gateOn(process.env, "QUANTA_BENCH_SOTA")
-  // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
-  // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
-  const lspNav = sotaOn || process.env.QUANTA_LSP_TOOLS === "full" || gateOn(process.env, "QUANTA_BENCH_LSP")
-  // Subagent: bench-only `QUANTA_BENCH_SUBAGENT=1`. Empty block ⇒ runner default
-  // applies (no per-bench maxDepth tuning — keep the surface minimal until a
-  // measured reason appears).
-  const subagent: AgentConfig["subagent"] | undefined = gateOn(process.env, "QUANTA_BENCH_SUBAGENT")
-    ? {}
-    : undefined
-  // Skills: bench-only `QUANTA_BENCH_SKILLS=1`. Empty block ⇒ bundled system
-  // skills ONLY (ADR-0045) — bench never points at a user dir (measurement
-  // integrity). `changedPaths` is left unset (full inventory).
-  const skills: AgentConfig["skills"] | undefined = gateOn(process.env, "QUANTA_BENCH_SKILLS")
-    ? {}
-    : undefined
-  // Localize-phase (Agentless absorption — Tier 0): bench-only
-  // `QUANTA_BENCH_LOCALIZE_PHASE=<int>`. The value is the number of leading
-  // turns to block mutating tools. Domain: positive integer 1..20 (cap is a
-  // measurement-integrity guard; >20 would force pure-exploration on a
-  // maxTurns=30 SWE-bench run and starve the repair phase). Any other value
-  // (absent, 0, negative, NaN, >20, non-integer) ⇒ `undefined` (guard OFF).
-  // NOT auto-activated for `instance.swebench` — over-correction risk; opt-in
-  // is explicit.
-  const localizePhase =
-    parseLocalizePhaseEnv(process.env.QUANTA_BENCH_LOCALIZE_PHASE) ??
-    (sotaOn ? { phase1Turns: 5 } : undefined)
-  // ADR-0084 branch-search (Agentless N-best, K candidates). Strict integer
-  // gate (see parseBenchBranchSearchK); K<2 / non-integer / out-of-range ⇒
-  // undefined (key omitted by buildConfig, byte-identical to baseline).
-  // Verifier kinds: ["tsc"] — the slice's natural fallback. Isolation: "tmpdir"
-  // — bench sandboxes from createSandbox may not be git repos. NOT auto-enabled
-  // for instance.swebench — explicit opt-in only (K× cost discipline).
-  const k = parseBenchBranchSearchK(process.env.QUANTA_BENCH_BRANCH_SEARCH)
-  const branchSearch: BranchSearchConfig | undefined =
-    k !== undefined
-      ? {
-          defaultN: k,
-          defaultVerifierKinds: ["tsc"],
-          timeoutPerBranchMs: BENCH_BRANCH_TIMEOUT_MS,
-          isolation: "tmpdir",
-        }
-      : undefined
-  // Issue-text hint injection (Agentless paper, localization +5pp).
-  //
-  // Verbatim-evidence policy (post-upgrade): when on, the `regex` mode emits
-  // VERBATIM extracted evidence (code fence bodies, traceback blocks, errors
-  // with `: message` tails, refs) rather than count-summaries. The flag
-  // accept-list itself is unchanged.
-  //
-  //   - `1` / `on`         ⇒ regex extractor (verbatim-evidence format)
-  //   - `agentless`        ⇒ LLM-driven Stage-1 localization (Agentless paper)
-  //   - anything else      ⇒ off (default OFF preserves byte-identical
-  //                              measurement until explicit opt-in)
-  const v = process.env.QUANTA_BENCH_ISSUE_HINT
-  const issueHintMode: IssueHintMode =
-    v === "agentless" ? "agentless" : v === "1" || v === "on" ? "regex" : sotaOn ? "agentless" : "off"
-  // Back-compat: the old `issueHint` boolean stays true for BOTH `regex` and
-  // `agentless` modes (anything that produces a non-empty hint block).
-  const issueHint = issueHintMode !== "off"
-  // Expected/Actual extraction is gated SEPARATELY (false-positive-prone in
-  // prose). Default-OFF even when parent issueHint is enabled. Accept-list:
-  // `1` / `on` only. SOTA default-ON: structured expected/actual evidence
-  // complements the agentless issue-hint and grounds the localization signal.
-  const eaRaw = process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL
-  const issueHintExpectedActual = sotaOn || eaRaw === "1" || eaRaw === "on"
-  return {
-    lspNav,
-    subagent,
-    skills,
-    localizePhase,
-    branchSearch,
-    issueHint,
-    issueHintMode,
-    issueHintExpectedActual,
-    sotaOn,
-  }
-}
+/**
+ * SWE-bench A/B posture resolver — now a THIN PROJECTION over the unified
+ * preset/knob framework (`resolveBenchKnobs` → `benchPostureFromState`), NOT a
+ * pile of raw `process.env` reads. This is the chokepoint both `buildConfig`
+ * (config fields) and the apps driver (`issueHintMode` / `reproTestK` /
+ * `retryTransient`) consume, so a selected preset (`QUANTA_BENCH_PRESET=...`,
+ * or the `QUANTA_BENCH_SOTA=1` alias) ACTUALLY drives the run — and the same
+ * resolved state feeds the telemetry report, so report == applied by
+ * construction (no more report-lie).
+ *
+ * Layering (handled inside `resolveBenchKnobs`): explicit `QUANTA_BENCH_*` env
+ * var > preset value > knob default. With no preset and no env, every field is
+ * OFF/undefined — byte-identical to the historical baseline.
+ *
+ * The legacy `parseBenchBranchSearchK` / `parseLocalizePhaseEnv` exports below
+ * are retained for the unit/hellgate tests that pin the parsers directly; the
+ * production parse now happens inside the framework knobs (verbatim-migrated).
+ */
+export const benchOptIns = (): BenchPosture =>
+  benchPostureFromState(resolveBenchKnobs({ envVars: process.env }), process.env)
 
 /** Pure parser for the `QUANTA_BENCH_LOCALIZE_PHASE` env var. Exported for
  *  direct unit testing — keeps the resolver above one-line readable.
@@ -763,10 +680,9 @@ const installReproTestHint = async (
   sandbox: string,
   llm: LLMPort,
 ): Promise<string | undefined> => {
-  // SOTA default: K=5 repro-test candidates when QUANTA_BENCH_SOTA=1 and the
-  // explicit flag is unset. Explicit QUANTA_BENCH_REPRO_TEST wins via ??.
-  const sotaRepro = gateOn(process.env, "QUANTA_BENCH_SOTA") ? 5 : undefined
-  const reproK = parseBenchReproTestK(process.env.QUANTA_BENCH_REPRO_TEST) ?? sotaRepro
+  // Unified posture: K resolves from the preset/env via the knob framework
+  // (preset `agentless-v1` ⇒ K=5; explicit QUANTA_BENCH_REPRO_TEST overrides).
+  const reproK = benchOptIns().reproTestK
   if (reproK === undefined) return undefined
   const selection = await prepareReproTest(instance, sandbox, reproK, { llm })
   if (selection === null || selection.selected === null) return undefined
@@ -855,21 +771,22 @@ export const buildConfig = (
   // registration is harmless without a server. Default-OFF preserves
   // byte-identical bench behavior.
   const opt = benchOptIns()
-  // SOTA preset: wire QUANTA_READ_OUTLINE + QUANTA_TEST_RUNNER as live-channel
-  // overrides when QUANTA_BENCH_SOTA=1. setKnobOverride invalidates the
-  // runtimeConfig cache so subsequent reads pick up the new values. These are
-  // idempotent (set to the same value on every buildConfig call for a SOTA run).
-  if (opt.sotaOn) {
-    setKnobOverride("QUANTA_READ_OUTLINE", "1")
-    setKnobOverride("QUANTA_TEST_RUNNER", "1")
-    // QUANTA_REPO_MAP: now bench-surface-enabled (repo-map.ts); set it live so
-    // the knob system picks it up when wireOptionalAgentPorts reads the env.
-    setKnobOverride("QUANTA_REPO_MAP", "1")
+  // Runtime-config-bridged knobs (read-outline / test-runner / repo-map): these
+  // are NOT AgentConfig fields — they are read at wire time via `runtimeConfig()`
+  // inside `wireOptionalAgentPorts`. The unified posture resolves them from the
+  // preset/env into `opt.liveOverrides` (envKeys to enable); we push each into
+  // the live-override store so the subsequent wire-time read picks it up.
+  // setKnobOverride invalidates the runtimeConfig cache and is idempotent (set
+  // to the same value on every buildConfig call). Empty list ⇒ no-op ⇒
+  // byte-identical to the pre-preset path.
+  for (const envKey of opt.liveOverrides) {
+    setKnobOverride(envKey, "1")
   }
   const lspNavTools = opt.lspNav ? lspNavToolList() : []
+  const astGrepToolList = gateOn(process.env, "QUANTA_AST_GREP") ? [astGrepTool as Tool] : []
   // DIP factory: bench driver runs against the default port surface; the
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
-  const registry = new ToolRegistry([...buildDefaultTools(), ...lspNavTools])
+  const registry = new ToolRegistry([...buildDefaultTools(), ...lspNavTools, ...astGrepToolList])
   const permission: PermissionContext = { mode: "acceptEdits" }
   const base = `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
@@ -1311,8 +1228,9 @@ export const runInstanceOnce = async (
 
 /** Project `AttemptOutcome` (the retry-policy enum) into `BenchAttemptOutcome`
  *  (the wire shape on `InstanceResult.budget`). Same union, mirrored here so
- *  the bench-types module doesn't have to depend on `retry-policy.ts`. */
-const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
+ *  the bench-types module doesn't have to depend on `retry-policy.ts`.
+ *  Exported so the apps/bench driver's retry wrapper stamps an identical shape. */
+export const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
   if (o.kind === "pass") return { kind: "pass" }
   if (o.kind === "empty-patch") {
     return o.reason !== undefined
@@ -1368,14 +1286,13 @@ export const runInstance = async (
   }
 
   // Resolve maxAttempts. Precedence: deps.measurementStability.maxAttempts
-  // (test seam) > QUANTA_BENCH_RETRY_TRANSIENT env > SOTA default (3) > 1.
-  // SOTA default=3: transient failures (empty patch, infra fail) are cheap to
+  // (test seam) > unified posture `retryTransient` (preset/env via the knob
+  // framework; preset `agentless-v1` ⇒ 3, explicit QUANTA_BENCH_RETRY_TRANSIENT
+  // overrides) > 1. Transient failures (empty patch, infra fail) are cheap to
   // retry and significantly improve reliability on flaky instances.
-  const sotaAttempts = gateOn(process.env, "QUANTA_BENCH_SOTA") ? 3 : undefined
-  const envAttempts = parseRetryTransientEnv(process.env.QUANTA_BENCH_RETRY_TRANSIENT) ?? sotaAttempts
   const maxAttempts = Math.max(
     1,
-    Math.floor(deps.measurementStability?.maxAttempts ?? envAttempts ?? 1),
+    Math.floor(deps.measurementStability?.maxAttempts ?? benchOptIns().retryTransient ?? 1),
   )
   const policy = deps.measurementStability?.policy ?? DEFAULT_POLICY
 
@@ -1417,10 +1334,16 @@ export const runInstance = async (
 /** Re-export the adaptive-timeout helpers so apps/bench's matrix budget tools
  *  can reuse the exact same projection. */
 export { computeAdaptedTimeout, MAX_TIMEOUT_MS, sumCostMultipliers } from "./adaptive-timeout"
-export type { BenchKnobState } from "./knobs-bench"
+export type { BenchIssueHintMode, BenchKnobState, BenchPosture } from "./knobs-bench"
 // Knob wiring helpers — re-exported for the report path + tests so callers
 // don't have to import from two siblings.
-export { applyBenchKnobs, knobsForReport, readKnobValue, resolveBenchKnobs } from "./knobs-bench"
+export {
+  applyBenchKnobs,
+  benchPostureFromState,
+  knobsForReport,
+  readKnobValue,
+  resolveBenchKnobs,
+} from "./knobs-bench"
 export type { AttemptOutcome, RetryPolicy }
 /** Re-export the classifier + policy types so apps/bench callers can wire
  *  custom policies (test seam) or inspect outcomes without reaching into the
@@ -1428,3 +1351,4 @@ export type { AttemptOutcome, RetryPolicy }
 // Re-export the observation usage tap so test fixtures and other internals can
 // continue to use bench's typed surface unchanged.
 export { BenchObserver, classifyOutcome, DEFAULT_POLICY, parseRetryTransientEnv, UsageTap }
+export { runRetryLoop } from "./retry-policy"

@@ -116,13 +116,12 @@ export const lspFormatTool = (port: FormatPort): Tool<LspFormatInput> => ({
     try {
       const r = parsed.data.range
       // exactOptionalPropertyTypes — only pass `range` when present.
-      // Pass the original (relative) path to the port — abs was used only for
-      // the FS-jail check above (parity with signature-help / code-action).
+      // Use abs (the jailed absolute path) — same as all other nav tools.
       if (r === undefined) {
-        edits = await port.format(parsed.data.path, undefined, ctx.signal)
+        edits = await port.format(abs, undefined, ctx.signal)
       } else {
         edits = await port.format(
-          parsed.data.path,
+          abs,
           {
             start: { line: r.startLine - 1, character: r.startCharacter - 1 },
             end: { line: r.endLine - 1, character: r.endCharacter - 1 },

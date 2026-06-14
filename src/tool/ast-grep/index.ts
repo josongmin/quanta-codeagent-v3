@@ -121,9 +121,11 @@ export const astGrepTool = defineTool<Input>({
       parts.push("--lang", sq(input.language))
     }
     // B7 fix: cap output at source to avoid buffering millions of JSON matches.
-    // --max-count is supported by ast-grep ≥0.20; older versions silently ignore
-    // unknown flags (harmless), so we always pass it.
-    parts.push("--max-count", String(MAX_MATCHES))
+    // NOTE: ast-grep `sg run` has no per-result count flag (unlike ripgrep).
+    // Clap CLIs error on unrecognised arguments (exit 2), so any unknown flag
+    // would break every invocation on all installed versions. The stdout-slice
+    // guard below (MAX_STDOUT_BYTES) is the correct OOM defence — it truncates
+    // the raw string before JSON.parse and reports a clear error on truncation.
     parts.push("--json")
     if (jailedPath !== undefined) {
       parts.push(sq(jailedPath))
@@ -154,11 +156,11 @@ export const astGrepTool = defineTool<Input>({
     }
 
     // B7 fix: cap the raw stdout string before JSON.parse to bound RAM usage.
-    // If ast-grep emits more than MAX_STDOUT_BYTES despite --max-count (e.g. on
-    // an older version that ignores the flag), we truncate here. The truncated
-    // JSON will fail to parse; the catch block reports ok:false with a clear
-    // error rather than OOM.
-    const rawStdout = r.stdout.length > MAX_STDOUT_BYTES
+    // This stdout-slice is the sole OOM guard (no per-result count CLI flag in
+    // ast-grep). Truncated JSON will fail to parse; the catch block below
+    // reports ok:false with a clear error rather than crashing the process.
+    const truncated = r.stdout.length > MAX_STDOUT_BYTES
+    const rawStdout = truncated
       ? r.stdout.slice(0, MAX_STDOUT_BYTES)
       : r.stdout
     const stdout = rawStdout.trim()
@@ -188,11 +190,13 @@ export const astGrepTool = defineTool<Input>({
     const lines = shown.map((m) => {
       const line = m.range?.start?.line ?? 0
       // B4 fix: ast-grep can match multi-line constructs (e.g. entire function
-      // bodies). m.text may contain embedded '\n' characters. After .trim(),
-      // those internal newlines remain, breaking the file:line: one-per-line
-      // contract when lines.join('\n') is called. Replace internal newlines
-      // with a visible marker so each match stays on exactly one output line.
-      const text = (m.text ?? "").replace(/\n/g, "↵").trim()
+      // bodies). m.text may contain embedded '\n' or '\r\n' characters. After
+      // .trim(), those internal newlines remain, breaking the file:line:
+      // one-per-line contract when lines.join('\n') is called. Replace internal
+      // newlines (CRLF or LF) with a visible marker so each match stays on
+      // exactly one output line. Use \r?\n to strip the \r before replacing the
+      // \n, preventing a stray \r from corrupting ANSI terminal output.
+      const text = (m.text ?? "").replace(/\r?\n/g, "↵").trim()
       return `${m.file}:${line + 1}: ${text}`
     })
 
@@ -201,6 +205,11 @@ export const astGrepTool = defineTool<Input>({
         ? `\n... ${matches.length - MAX_MATCHES} more matches`
         : ""
 
-    yield { type: "result", result: { ok: true, output: lines.join("\n") + more } }
+    let output = lines.join("\n") + more
+    if (truncated) {
+      output += "\n(warning: output was truncated at 2 MB — result may be incomplete)"
+    }
+
+    yield { type: "result", result: { ok: true, output } }
   },
 })

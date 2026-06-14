@@ -1,10 +1,13 @@
 /**
  * `session-picker` — TTY startup session selector.
  *
- * Extracted from `repl.ts` so that the ADR-0297 surface fence (no direct
- * `process.stderr.isTTY` / `process.env.<KEY>` reads in repl.ts) can hold.
- * All process-global reads are localised here, in the helper that actually
- * performs the side-effectful selection logic.
+ * Extracted from `repl.ts` so that the TTY-based session-list check
+ * (`process.stderr.isTTY`) and the session-scoped `process.argv` mutation
+ * live in one helper rather than inline in `runRepl`. Note: `repl.ts` still
+ * reads `process.env` directly at several call sites (composeSurfaceWires,
+ * crashResumeEnabled, bootstrapCrashResumeOffers, buildSessionLoopOptions
+ * env, etc.) — this extraction does NOT create a full process-env fence for
+ * repl.ts; it only isolates the isTTY + argv side-effects of the picker.
  */
 
 import { homedir } from "node:os"

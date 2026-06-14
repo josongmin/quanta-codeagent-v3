@@ -185,6 +185,11 @@ export interface SessionHost {
     /** ADR-0512 P3 — corrective steer for a `deny` of a skill-scope escalation
      *  (`deny_and_steer`). Absent ⇒ a plain decline. */
     readonly steer?: string
+    /** T05 — the web/SDK operator's per-hunk choice (`h1`, `h2`, …) on an
+     *  `approve` of a previewable mutation. A PROPER SUBSET applies only those
+     *  hunks (atomic, staleness-guarded) + suppresses the whole-call tool via a
+     *  deny_and_steer lease. Absent / covers-all ⇒ whole-call, byte-identical. */
+    readonly selectedHunks?: readonly string[]
   }): Promise<void> | void
   setIdentityMode?(mode: string): Promise<void> | void
   setToolProfile?(profile: string): Promise<void> | void

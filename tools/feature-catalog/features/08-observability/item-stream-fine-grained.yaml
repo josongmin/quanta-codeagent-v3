@@ -1,0 +1,41 @@
+id: item-stream-fine-grained
+title: T01 fine-grained item/* streaming — one ItemStreamProjector → both planes
+section: 8
+subsystem: observability — fine-grained item/* wire plane (Codex app-server parity)
+order: 610
+maturity: L4
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless, daemon, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, default-off]
+depends_on: [item-lifecycle-stream]
+config_refs:
+  env: [QUANTA_ITEM_STREAM]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-14"
+  evidence:
+    cli: "session.v1 plane — createTurnStreamPort runs a fresh ItemStreamProjector per turn, emitting additive item.* events on the session protocol consumed by the CLI attach renderer"
+    web: "web agent-state plane — wireItemStreamTap (final decorator) feeds a separate projector instance emitting agent-state item.* messages; drift ratchet proves both planes emit byte-identical cores"
+purpose: 'T01 — project a turn INTERIOR as discrete fine-grained items (Codex app-server parity): item.started → 0..N typed deltas → item.completed, closed taxonomy (reasoning/commandExecution/fileChange/tool) + curated tool-name→item-type classifier (unrecognised ⇒ neutral `tool`, never mislabelled). A SINGLE stateful ItemStreamProjector turns the in-proc AgentEvent stream into ItemStreamCores; the two wire transports (session.v1 item.* via createTurnStreamPort, web agent-state item.* via wireItemStreamTap) each own an INSTANCE fed the same event order, so both emit byte-identical cores (drift ratchet). Default-OFF behind QUANTA_ITEM_STREAM: unset ⇒ no projector at either seam ⇒ byte-identical legacy turn-granular wire. abort/pause leave open items OPEN (never fabricate a completed).'
+evidence:
+  code:
+    - src/shared/item-stream.ts
+    - src/stream/item-stream-projector.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/item-stream-projector-hellgate.test.ts
+      - tests/unit/item-stream-projection-drift-hellgate.test.ts
+      - tests/unit/item-stream-session-wire-hellgate.test.ts
+      - tests/unit/item-stream-tap-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: [QUANTA_ITEM_STREAM]
+deliberate_hold: null
+notes: 'Two wiring seams from one CORE: session plane = createTurnStreamPort (src/host/runtime/internal/context-binding.ts); web plane = wireItemStreamTap (src/agent/optional-ports.ts, alongside wireItemLifecycleStream). Gate SSOT = itemStreamEnabled (src/shared/item-stream.ts). DISTINCT from item-lifecycle-stream / QUANTA_ITEM_LIFECYCLE (coarse in-proc AgentEvents) — this is the fine-grained WIRE plane. Removing this feature ⇒ also drop QUANTA_ITEM_STREAM from src/config/knob-inventory.ts.'

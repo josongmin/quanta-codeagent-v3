@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises"
+import { isAbsolute, join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
 import type { ConfirmDecision } from "@/agent/confirm-decision"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
@@ -24,6 +26,7 @@ import {
   type ToolAction,
 } from "@/permission"
 import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
+import { type ActionDiff, computeActionDiff } from "@/runner/action-diff"
 import { wireInteractiveKnobs } from "@/runner/assemble"
 import type {
   IdentityModeSessionState,
@@ -31,6 +34,8 @@ import type {
   SystemSource,
   ToolProfileSessionState,
 } from "@/runner/assemble/session-state"
+import { splitHunks } from "@/runner/diff-ops"
+import { applyHunkSelection } from "@/runner/hunk-apply"
 import { persistTurn } from "@/runner/orchestrate/persist-turn"
 import { buildSharedExecutionPlaneRuntimeAugments } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
@@ -40,7 +45,7 @@ import type {
   RuntimeAgentTurnDeps,
 } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
-import { itemStreamEnabled } from "@/shared"
+import { itemStreamEnabled, runtimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { ItemStreamProjector } from "@/stream"
 import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
@@ -824,6 +829,13 @@ interface PendingRuntimeApprovalRecord {
    *  this is defense-in-depth: it guarantees NO approve path — local or relayed —
    *  can ever mint a grant for a dangerous command. */
   readonly action: ToolAction
+  /** T05 (web/SDK per-hunk apply) — the `(path, before, after)` captured at MINT
+   *  time (gate `QUANTA_HUNK_APPROVAL` ON + previewable action with ≥2 hunks).
+   *  `before` is the REQUEST-time file baseline, so an out-of-band approve that
+   *  arrives after the file drifted is detected as stale by `applyHunkSelection`
+   *  (recomputing at resolve would silently lose that drift signal). Absent ⇒
+   *  the approve takes the whole-call grant path, byte-identical to pre-T05. */
+  readonly actionDiff?: ActionDiff
 }
 
 /** T03 (audit L5 H-1/M-3) — an approval grant is an opaque, single-use LEASE
@@ -995,6 +1007,92 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
     return false
   }
 
+  // ── T05 (web/SDK per-hunk partial apply) ──────────────────────────────
+  // Relative action paths resolve against the session root so the request-time
+  // read + the apply write hit the same file (mirrors the CLI compose reader).
+  const hunkCwd = (): string => base.cwd ?? process.cwd()
+  const resolveHunkPath = (p: string): string => (isAbsolute(p) ? p : join(hunkCwd(), p))
+
+  /** Capture the REQUEST-time `(path, before, after)` for a previewable mutation
+   *  with ≥2 hunks. `undefined` ⇒ not per-hunk eligible (single hunk / apply_patch
+   *  / shape mismatch) ⇒ the approve stays whole-call. */
+  const captureHunkBaseline = async (action: ToolAction): Promise<ActionDiff | undefined> => {
+    const diff = await computeActionDiff(action, {
+      readFile: (p) => readFile(resolveHunkPath(p), "utf8"),
+    })
+    if (diff === undefined) return undefined
+    if (splitHunks(diff.before, diff.after).length < 2) return undefined
+    return diff
+  }
+
+  /** Apply the operator's accepted hunk subset against the REQUEST-time baseline
+   *  (`@/runner/hunk-apply`: atomic, mode-preserving, staleness-guarded — file
+   *  drift since the preview ⇒ no write). Returns the `steer` for a
+   *  `deny_and_steer` lease (the whole-call tool will NOT re-run; the model is
+   *  told exactly what landed), or `"whole"` when the subset covers EVERY hunk
+   *  (⇒ caller takes the normal whole-call grant). */
+  const applyHunkSubset = async (
+    diff: ActionDiff,
+    selected: readonly string[],
+  ): Promise<{ readonly steer: string } | "whole"> => {
+    const ids = splitHunks(diff.before, diff.after).map((h) => h.id)
+    const sel = selected.filter((s) => ids.includes(s))
+    if (sel.length === ids.length) return "whole" // all accepted ⇒ normal grant
+    const rejected = ids.filter((i) => !sel.includes(i))
+    if (sel.length === 0) {
+      return {
+        steer: `Operator rejected all ${ids.length} proposed hunks; no changes were applied.`,
+      }
+    }
+    const res = await applyHunkSelection({
+      path: resolveHunkPath(diff.path),
+      before: diff.before,
+      after: diff.after,
+      selectedHunkIds: sel,
+    })
+    if (res.status === "applied") {
+      return {
+        steer: `Operator accepted ${sel.length}/${ids.length} hunks (${sel.join(", ")}) and rejected ${rejected.join(", ")}. The file now reflects ONLY the accepted hunks — do not re-apply the rejected ones.`,
+      }
+    }
+    if (res.status === "stale") {
+      return {
+        steer: `The file changed since the diff was shown (${res.reason}); no hunks were applied — re-read it before editing.`,
+      }
+    }
+    return { steer: `Partial apply failed (${res.reason}); no hunks were applied.` }
+  }
+
+  /** T05 — resolve a web/SDK `approve` carrying `selectedHunks`. Applies the
+   *  accepted subset + mints a `deny_and_steer` lease (so the whole-call tool
+   *  does NOT re-run) ⇒ returns true. Returns false (caller takes the normal
+   *  whole-call grant) when not per-hunk eligible: no `selectedHunks`, gate off,
+   *  an escalation (skill-scope axis, not per-hunk), no captured baseline
+   *  (single-hunk / non-previewable), or the subset covers EVERY hunk. */
+  const resolvePartialHunkApprove = async (
+    approvalId: string,
+    record: PendingRuntimeApprovalRecord,
+    isEscalation: boolean,
+    selectedHunks: readonly string[] | undefined,
+  ): Promise<boolean> => {
+    if (
+      selectedHunks === undefined ||
+      record.actionDiff === undefined ||
+      isEscalation ||
+      !runtimeConfig().hunkApproval
+    ) {
+      return false
+    }
+    const outcome = await applyHunkSubset(record.actionDiff, selectedHunks)
+    if (outcome === "whole") return false
+    leases.set(approvalId, {
+      approvalId,
+      actionKey: record.actionKey,
+      decision: { decision: "deny_and_steer", steer: outcome.steer },
+    })
+    return true
+  }
+
   const onConfirm: NonNullable<AgentConfig["onConfirm"]> = async (action) => {
     const actionKey = actionKeyOf(base.registry, action)
     const leased = claimLease(actionKey)
@@ -1044,6 +1142,14 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       // normal confirm ⇒ byte-identical.
       ...escalationScopeFields(action),
     }
+    // T05 — capture the request-time per-hunk baseline for the deferred (web/SDK)
+    // path ONLY. Gated (`QUANTA_HUNK_APPROVAL`) + best-effort: off ⇒ undefined ⇒
+    // approve is whole-call, byte-identical to pre-T05. Computed here (not at
+    // resolve) so a later out-of-band approve detects file drift as stale.
+    const actionDiff =
+      actionKey !== SHELL_EXTRACT_FAILED && runtimeConfig().hunkApproval
+        ? await captureHunkBaseline(action)
+        : undefined
     // A throwing shell extraction has no stable key; record the sentinel string
     // form only for diagnostics — it can never match a future lease, and it is
     // marked non-grantable so a session-scoped approve can't stand on it.
@@ -1053,6 +1159,7 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         actionKey === SHELL_EXTRACT_FAILED ? `${action.tool}|<shell-extract-failed>` : actionKey,
       grantable: actionKey !== SHELL_EXTRACT_FAILED,
       action,
+      ...(actionDiff !== undefined ? { actionDiff } : {}),
     })
     throw new RuntimeApprovalRequiredError(approval)
   }
@@ -1093,12 +1200,17 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         for (const approvalId of pendingAtEntry) pending.delete(approvalId)
       }
     },
-    resolveApproval: (
+    resolveApproval: async (
       approvalId: string,
       decision: "approve" | "deny",
       // #20 — `session_prefix` widens the deferred approve scope (prefix grant).
-      opts?: { readonly scope?: "once" | "session" | "session_prefix"; readonly steer?: string },
-    ): void => {
+      // T05 — `selectedHunks` carries the web/SDK operator's per-hunk choice.
+      opts?: {
+        readonly scope?: "once" | "session" | "session_prefix"
+        readonly steer?: string
+        readonly selectedHunks?: readonly string[]
+      },
+    ): Promise<void> => {
       const record = pending.get(approvalId)
       if (record === undefined) return
       pending.delete(approvalId)
@@ -1118,6 +1230,17 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         // effect as a normal deny. Defense-in-depth: the dispatch gate already
         // denies such commands before they reach this prompt.
         if (hardDenyReason(record.action) !== null) return
+        // T05 — web/SDK per-hunk partial apply. The `selectedHunks !== undefined`
+        // guard SHORT-CIRCUITS before the await, so a normal approve (no hunks)
+        // mints its lease SYNCHRONOUSLY — pre-existing sync `resolveApproval`
+        // callers stay byte-identical. Helper return true ⇒ a subset was applied +
+        // a deny_and_steer lease minted (whole-call tool will NOT re-run) ⇒ done.
+        if (
+          opts?.selectedHunks !== undefined &&
+          (await resolvePartialHunkApprove(approvalId, record, isEscalation, opts.selectedHunks))
+        ) {
+          return
+        }
         const leaseDecision: ConfirmDecision | undefined = isEscalation
           ? { decision: "allow", ...(opts?.scope !== undefined ? { scope: opts.scope } : {}) }
           : undefined
@@ -1496,13 +1619,18 @@ const createRuntimeSessionHost = (args: {
       )
       return toSessionHostTurnResult(result)
     },
-    resolveApproval: async ({ approvalId, decision, scope, steer }) => {
+    resolveApproval: async ({ approvalId, decision, scope, steer, selectedHunks }) => {
       // ADR-0512 P3 — forward the escalation's once/session scope + corrective
       // steer so the lease can carry the operator's rich decision. Both are
-      // `undefined` for a normal approval ⇒ byte-identical grant.
-      approvalProtocol.resolveApproval(approvalId, decision, {
+      // `undefined` for a normal approval ⇒ byte-identical grant. T05 — forward
+      // `selectedHunks` for the web/SDK per-hunk partial apply; the controller's
+      // resolve is async when it applies a subset, so AWAIT it (a whole-call /
+      // gate-off resolve sets its lease synchronously before any await — the
+      // pre-existing sync callers stay byte-identical).
+      await approvalProtocol.resolveApproval(approvalId, decision, {
         ...(scope !== undefined ? { scope } : {}),
         ...(steer !== undefined ? { steer } : {}),
+        ...(selectedHunks !== undefined ? { selectedHunks } : {}),
       })
     },
     setIdentityMode: async (mode) => {

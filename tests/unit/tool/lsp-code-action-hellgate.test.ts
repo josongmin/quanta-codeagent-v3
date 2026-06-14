@@ -161,7 +161,10 @@ describe("lsp_code_action — input validation", () => {
 /* ------------------------------------------------------------------ */
 
 describe("lsp_code_action — port conversion", () => {
-  test("HELL-C7: input {line:5, character:8} ⇒ port called with (line=4,col=7)", async () => {
+  test("HELL-C7: input {line:5, character:8} ⇒ port called with abs path and (line=4,col=7)", async () => {
+    // Red-on-injection: change port call from abs to parsed.data.path →
+    // the FS-jail check is performed on a different path than what hits the LSP
+    // server (process.cwd() vs ctx.cwd), defeating the security invariant.
     const port = fakePort()
     await collect(lspCodeActionTool(port), {
       path: "src/x.ts",
@@ -169,7 +172,9 @@ describe("lsp_code_action — port conversion", () => {
       character: 8,
     })
     expect(port.resolveCalls).toHaveLength(1)
-    expect(port.resolveCalls[0]).toEqual({ file: "src/x.ts", line: 4, col: 7 })
+    // The port must receive the abs path (ctx.cwd + relative path), not the
+    // bare relative path — resolveJailed resolves against ctx.cwd ("/work/proj").
+    expect(port.resolveCalls[0]).toEqual({ file: "/work/proj/src/x.ts", line: 4, col: 7 })
   })
 
   test("HELL-C8: optional kind passed through", async () => {

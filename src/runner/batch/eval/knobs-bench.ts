@@ -26,7 +26,7 @@
  * contract independently of `buildConfig`.
  */
 
-import type { AgentConfig } from "@/agent"
+import type { AgentConfig, BranchSearchConfig } from "@/agent"
 import {
   type ApplyContext,
   applyKnobs,
@@ -35,13 +35,15 @@ import {
   knobsForSurface,
   resolveKnobs,
 } from "@/runner/knobs"
+import { gateOn } from "@/shared"
 
 export interface BenchKnobState {
   /** Bench-surface registry view (frozen by the framework). */
   readonly knobs: ReadonlyMap<string, Knob>
   /** Layered-resolution result, in registry iteration order. */
   readonly values: KnobValueMap
-  /** Optional preset name (env: `QUANTA_KNOBS_PRESET`). */
+  /** Resolved preset name. Precedence: `QUANTA_BENCH_PRESET` >
+   *  `QUANTA_BENCH_SOTA=1` alias (→ `agentless-v1`) > legacy `QUANTA_KNOBS_PRESET`. */
   readonly preset: string | undefined
   /** Registered-but-inactive knob ids (no value resolved + no default). */
   readonly inactive: readonly string[]
@@ -60,12 +62,21 @@ export interface ResolveBenchKnobsArgs {
  *  framework's `resolveKnobs` being a pure function over its inputs). */
 export const resolveBenchKnobs = (args: ResolveBenchKnobsArgs): BenchKnobState => {
   const knobs = knobsForSurface("bench")
-  const preset = args.envVars.QUANTA_KNOBS_PRESET
+  // Preset selector precedence (value-taking, NOT on/off):
+  //   1. QUANTA_BENCH_PRESET=<name>      — the canonical selector.
+  //   2. QUANTA_BENCH_SOTA=1             — back-compat alias for `agentless-v1`.
+  //   3. QUANTA_KNOBS_PRESET=<name>      — legacy framework-wide spelling.
+  // Empty string at any layer is treated as unset (whitespace-safe handled by
+  // the trim below before the resolver sees it).
+  const sotaAlias = gateOn(args.envVars, "QUANTA_BENCH_SOTA") ? "agentless-v1" : undefined
+  const rawPreset =
+    args.envVars.QUANTA_BENCH_PRESET ?? sotaAlias ?? args.envVars.QUANTA_KNOBS_PRESET
+  const preset = rawPreset !== undefined && rawPreset.trim() !== "" ? rawPreset.trim() : undefined
   const resolveArgs: Parameters<typeof resolveKnobs>[0] = {
     surface: "bench",
     knobs,
     envVars: args.envVars,
-    ...(preset !== undefined && preset !== "" ? { preset } : {}),
+    ...(preset !== undefined ? { preset } : {}),
   }
   const values = resolveKnobs(resolveArgs)
   const inactive: string[] = []
@@ -75,7 +86,7 @@ export const resolveBenchKnobs = (args: ResolveBenchKnobsArgs): BenchKnobState =
   return {
     knobs,
     values,
-    preset: preset !== undefined && preset !== "" ? preset : undefined,
+    preset,
     inactive,
   }
 }
@@ -121,4 +132,106 @@ export const knobsForReport = (
     out[id] = { value: kv.value, source: kv.source }
   }
   return out
+}
+
+/** Bench issue-hint mode tri-state. `"off"` = no hint; `"regex"` = legacy
+ *  verbatim-evidence extractor; `"agentless"` = LLM Stage-1 localization. */
+export type BenchIssueHintMode = "off" | "regex" | "agentless"
+
+/**
+ * The bench A/B posture, derived ENTIRELY from a resolved {@link BenchKnobState}
+ * (preset + env layered) — NOT from raw `process.env`. This is the SINGLE
+ * source that drives BOTH the agent config (`buildConfig`) and the telemetry
+ * report, which makes "report ≠ applied" (the old split-brain report-lie)
+ * structurally impossible: the same resolver feeds both.
+ *
+ * Every field maps to a registered bench framework knob:
+ *   - config-fold knobs (lsp/subagent/skills/localize-phase/branch-search) →
+ *     the corresponding AgentConfig slot.
+ *   - out-of-band knobs (issue-hint / issue-hint-expected-actual / repro-test /
+ *     retry-transient) → consumed by the driver's hint/repro/retry orchestration.
+ *   - runtime-config-bridged knobs (read-outline / test-runner / repo-map) →
+ *     `liveOverrides` envKeys the driver pushes into `setKnobOverride` so the
+ *     wire-time `runtimeConfig()` read picks them up.
+ *
+ * Byte-identical fence: with no preset and no `QUANTA_BENCH_*` env, `state`
+ * carries no values, so every field is OFF/undefined and `liveOverrides` is
+ * empty — identical to the pre-preset all-OFF posture.
+ */
+export interface BenchPosture {
+  readonly lspNav: boolean
+  readonly subagent: AgentConfig["subagent"] | undefined
+  readonly skills: AgentConfig["skills"] | undefined
+  readonly localizePhase: AgentConfig["localizePhase"] | undefined
+  readonly branchSearch: BranchSearchConfig | undefined
+  readonly issueHint: boolean
+  readonly issueHintMode: BenchIssueHintMode
+  readonly issueHintExpectedActual: boolean
+  /** Agentless §3.3.1 reproduction-test K (undefined ⇒ no repro pre-compute). */
+  readonly reproTestK: number | undefined
+  /** Transient-failure retry cap (undefined ⇒ single attempt). */
+  readonly retryTransient: number | undefined
+  /** envKeys to push into the runtime-config live-override store (read at wire
+   *  time): a subset of QUANTA_READ_OUTLINE / QUANTA_TEST_RUNNER / QUANTA_REPO_MAP. */
+  readonly liveOverrides: readonly string[]
+  /** Resolved preset name (telemetry/debug; undefined when none selected). */
+  readonly preset: string | undefined
+}
+
+const isTrue = (v: unknown): v is true => v === true
+const isNumber = (v: unknown): v is number => typeof v === "number"
+const isLocalizeValue = (v: unknown): v is { phase1Turns: number } =>
+  typeof v === "object" && v !== null && "phase1Turns" in v &&
+  typeof (v as { phase1Turns: unknown }).phase1Turns === "number"
+const isBranchValue = (v: unknown): v is { defaultN: number; config: BranchSearchConfig } =>
+  typeof v === "object" && v !== null && "config" in v
+const isIssueMode = (v: unknown): v is "agentless" | "regex" => v === "agentless" || v === "regex"
+const isReproValue = (v: unknown): v is { samples: number } =>
+  typeof v === "object" && v !== null && "samples" in v &&
+  typeof (v as { samples: unknown }).samples === "number"
+const isRepoMapValue = (v: unknown): v is { enabled: true } =>
+  typeof v === "object" && v !== null && (v as { enabled?: unknown }).enabled === true
+
+/**
+ * Project a resolved {@link BenchKnobState} into the {@link BenchPosture}.
+ *
+ * @param env  used ONLY for the legacy `QUANTA_LSP_TOOLS=full` alias (the same
+ *             gate the CLI uses), OR-ed with the `lsp` knob. Every other field
+ *             comes from `state` so preset values flow through.
+ */
+export const benchPostureFromState = (
+  state: BenchKnobState,
+  env: NodeJS.ProcessEnv,
+): BenchPosture => {
+  const lspNav = readKnobValue(state, "lsp", isTrue) === true || env.QUANTA_LSP_TOOLS === "full"
+  const subagent = readKnobValue(state, "subagent", isTrue) === true ? {} : undefined
+  const skills = readKnobValue(state, "skills", isTrue) === true ? {} : undefined
+  const lp = readKnobValue(state, "localize-phase", isLocalizeValue)
+  const localizePhase = lp !== undefined ? { phase1Turns: lp.phase1Turns } : undefined
+  const bs = readKnobValue(state, "branch-search", isBranchValue)
+  const branchSearch = bs !== undefined ? bs.config : undefined
+  const issueHintMode: BenchIssueHintMode = readKnobValue(state, "issue-hint", isIssueMode) ?? "off"
+  const issueHintExpectedActual =
+    readKnobValue(state, "issue-hint-expected-actual", isTrue) === true
+  const repro = readKnobValue(state, "repro-test", isReproValue)
+  const retryTransient = readKnobValue(state, "retry-transient", isNumber)
+  const liveOverrides: string[] = []
+  if (readKnobValue(state, "read-outline", isTrue) === true) liveOverrides.push("QUANTA_READ_OUTLINE")
+  if (readKnobValue(state, "test-runner", isTrue) === true) liveOverrides.push("QUANTA_TEST_RUNNER")
+  if (readKnobValue(state, "repo-map", isRepoMapValue) !== undefined)
+    liveOverrides.push("QUANTA_REPO_MAP")
+  return {
+    lspNav,
+    subagent,
+    skills,
+    localizePhase,
+    branchSearch,
+    issueHint: issueHintMode !== "off",
+    issueHintMode,
+    issueHintExpectedActual,
+    reproTestK: repro !== undefined ? repro.samples : undefined,
+    retryTransient,
+    liveOverrides,
+    preset: state.preset,
+  }
 }

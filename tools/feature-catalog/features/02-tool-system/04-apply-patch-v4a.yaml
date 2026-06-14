@@ -30,11 +30,14 @@ evidence:
     - src/patch/parser.ts
     - src/patch/applier.ts
     - src/patch/index.ts
+    - src/patch/unified-to-v4a.ts
   adrs: [28]
   tests:
     unit:
       - tests/unit/patch/parser.test.ts
       - tests/unit/patch/applier.test.ts
+      - tests/unit/patch/unified-to-v4a-hellgate.test.ts
+      - tests/unit/patch/unified-to-v4a-scenarios.test.ts
     integration:
       - tests/unit/patch/integration.test.ts
     contract: []

@@ -1,0 +1,37 @@
+id: vscode-chatsessions-surface
+title: VS Code chatSessions editor surface — 3rd surface (PURE session.v1 adapter + thin provider)
+section: 9
+subsystem: VS Code extension surface — chatSessions editor integration
+order: 607
+maturity: L3
+status: new
+ui_surfaces: [ide]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:ide, default-off]
+depends_on: [portable-session-v1]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-14"
+purpose: 'T07 — adds the VS Code `chatSessions` editor as a THIRD quanta surface (alongside CLI and web), consuming the portable session.v1 protocol (@/protocol/session + @/ipc/session) with ZERO core changes. Layering enforces core-decoupling: chat-session-adapter.ts = PURE session.v1 consumer (no `vscode` import) — ChatSessionProjection projects one thread into a structural ChatSessionItemView + de-duped change events, ChatSessionRegistry aggregates live threads + injected createSession entry; status.ts = PURE session.v1 lifecycle → version-stable chat status (Idle/InProgress/Failed), exhaustive switch guards against rendering a new status as Idle (UI-lie); provider.ts = the ONLY file importing `vscode` — thin shell re-shaping ChatSessionItemView into vscode.ChatSessionItem + mapping the stable status onto the proposed vscode.ChatSessionStatus enum. Status derives from the SERVER turn lifecycle ONLY (turn.started/completed/failed + coarse session.state.updated) — never optimistically flips on submit (avoids UI-lie if a turn is rejected). awaiting_approval ⇒ InProgress.'
+evidence:
+  code:
+    - surfaces/vscode/src/chat-session-adapter.ts
+    - surfaces/vscode/src/status.ts
+    - surfaces/vscode/src/provider.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/surfaces/vscode/chat-session-adapter-hellgate.test.ts
+      - tests/unit/surfaces/vscode/core-no-vscode-leak-ratchet.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'provider.ts (the vscode-importing shell) is verified only by a packaged-extension run, not host-free unit tests, and the chatSessionsProvider proposed API is UNSTABLE. The app-server createSession host wiring + in-editor conversationEditor (turn request/response rendering) are not yet landed; this surface lists/creates/derives-status only. Hence L3.'
+  promotion_path: 'land the app-server createSession host wiring + conversationEditor turn I/O, add a packaged-extension integration smoke for provider.ts, pin the proposed-API enum mapping; then promote to L4.'
+notes: 'evidence.code references files under surfaces/ (not src/) — first surface package outside src/. fc check-changed matches added .ts paths literally against evidence.code (no src/-only filter), so these satisfy the gate. reachability.ts wiring scorer is src/-only and will not credit these — expected for a surface package (web-frontend precedent in web-agent-state-channel.yaml does the same). Core-leak invariant (no src/ file imports vscode) is ratchet-guarded by core-no-vscode-leak-ratchet.test.ts (red-on-injection). Activation = VS Code manifest (enabledApiProposals chatSessionsProvider + contributes.chatSessions), not a runtime env knob.'

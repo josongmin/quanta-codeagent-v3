@@ -116,20 +116,28 @@ describe("lsp_format — input validation", () => {
 /* ------------------------------------------------------------------ */
 
 describe("lsp_format — port conversion", () => {
-  test("HELL-C7: omit range ⇒ format called with file only (no 'range' key)", async () => {
+  test("HELL-C7: omit range ⇒ format called with abs path only (no 'range' key)", async () => {
+    // Red-on-injection: change port call from abs to parsed.data.path →
+    // the FS-jail is checked on a different path than what hits the LSP server;
+    // a relative path in ensureOpen() resolves against process.cwd() (not ctx.cwd).
     const port = fakePort()
     await collect(lspFormatTool(port), { path: "x.ts" })
     expect(port.calls).toHaveLength(1)
-    expect(port.calls[0]).toEqual({ file: "x.ts" })
+    // ctx.cwd is "/work/proj"; resolveJailed("x.ts", "/work/proj") = "/work/proj/x.ts"
+    expect(port.calls[0]).toEqual({ file: "/work/proj/x.ts" })
     expect("range" in (port.calls[0] ?? {})).toBe(false)
   })
 
-  test("HELL-C8: range present ⇒ converted to 0-based on both endpoints", async () => {
+  test("HELL-C8: range present ⇒ abs path + 0-based on both endpoints", async () => {
+    // Red-on-injection: change abs to parsed.data.path in the range branch →
+    // the whole-file branch uses abs but the range branch uses relative path,
+    // creating divergent security posture within the same tool.
     const port = fakePort()
     await collect(lspFormatTool(port), {
       path: "x.ts",
       range: { startLine: 2, startCharacter: 3, endLine: 5, endCharacter: 1 },
     })
+    expect(port.calls[0]?.file).toBe("/work/proj/x.ts")
     expect(port.calls[0]?.range).toEqual({
       start: { line: 1, character: 2 },
       end: { line: 4, character: 0 },

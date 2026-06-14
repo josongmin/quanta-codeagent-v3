@@ -965,8 +965,8 @@ const BENCH: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe:
-      "Bench: SOTA++ recommended posture bundle (lspNav + localize-5 + agentless issue-hint + expected-actual + repro-test-5 + retry-transient-3 + repo-map). Individual flags override; unset ⇒ byte-identical historical baseline.",
-    readSite: "runner/batch/eval/driver.ts",
+      "Bench: DEPRECATED back-compat alias for the agentless-v1 preset. Prefer QUANTA_BENCH_PRESET=agentless-v1. =1 resolves the full recommended posture (lsp + localize-5 + agentless issue-hint + expected-actual + repro-test-5 + retry-transient-3 + repo-map + read-outline + test-runner). Individual QUANTA_BENCH_* override; unset ⇒ byte-identical baseline.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_LSP",
@@ -1048,6 +1048,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe: "Bench: transient retry cap.",
     readSite: "runner/batch/eval/driver.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_PRESET",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: named preset selector (value, NOT on/off) — e.g. agentless-v1 / everything-v1 / baseline. Picks a frozen versioned bundle from KNOB_PRESETS; individual QUANTA_BENCH_* env vars override preset values. QUANTA_BENCH_SOTA=1 is a back-compat alias for agentless-v1.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
 ]
 

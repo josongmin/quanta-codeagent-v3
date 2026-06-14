@@ -673,6 +673,9 @@ export const dispatchSessionCommand = async (
           // normal approval ⇒ byte-identical grant.
           ...(command.scope !== undefined ? { scope: command.scope } : {}),
           ...(command.steer !== undefined ? { steer: command.steer } : {}),
+          // T05 — forward the web/SDK operator's per-hunk choice so the host can
+          // apply only the accepted subset. Absent ⇒ whole-call, byte-identical.
+          ...(command.selectedHunks !== undefined ? { selectedHunks: command.selectedHunks } : {}),
         })
         return { state: nextState, events: immediateEvents }
       case "turn.run":

@@ -116,14 +116,19 @@ describe("lsp_signature_help — input validation", () => {
 /* ------------------------------------------------------------------ */
 
 describe("lsp_signature_help — port conversion", () => {
-  test("HELL-C6: 1-based input ⇒ 0-based port args", async () => {
+  test("HELL-C6: 1-based input ⇒ 0-based port args; port receives abs path", async () => {
+    // Red-on-injection: change port call from abs to parsed.data.path →
+    // the FS-jail is checked against a different path than what hits the LSP
+    // server; a relative path resolves against process.cwd() in ensureOpen(),
+    // not ctx.cwd, bypassing the security invariant.
     const port = fakePort()
     await collect(lspSignatureHelpTool(port), {
       path: "src/x.ts",
       line: 9,
       character: 12,
     })
-    expect(port.calls[0]).toEqual({ file: "src/x.ts", line: 8, col: 11 })
+    // ctx.cwd defaults to "/work/proj" in the helper above.
+    expect(port.calls[0]).toEqual({ file: "/work/proj/src/x.ts", line: 8, col: 11 })
   })
 
   test("HELL-C7: tool forwards ctx.signal to signatureHelp", async () => {

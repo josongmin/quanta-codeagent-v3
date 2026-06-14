@@ -61,7 +61,9 @@ evidence:
     - src/agent/command-hooks/sandbox-exec.ts
     - src/agent/command-hooks/install.ts
     - src/agent/command-hooks/index.ts
+    - src/agent/command-hooks/review-store.ts
     - src/apps/agent/index.ts
+    - src/apps/cli/hooks-cmd.ts
   adrs:
     - docs/decisions/0454-command-hooks.md
     - docs/decisions/0459-command-hooks-composition-root-wire.md
@@ -69,9 +71,15 @@ evidence:
     unit:
       - tests/unit/command-hooks-hellgate.test.ts
       - tests/unit/apps/agent/command-hooks-wire-hellgate.test.ts
+      - tests/unit/command-hooks-trust-gate-hellgate.test.ts
+      - tests/unit/command-hooks-trust-gate-migration-e2e.test.ts
     integration: []
     contract: []
 knobs:
+  - name: QUANTA_HOOK_TRUST_GATE
+    type: 'env'
+    default: 'false'
+    notes: 'T04 trust gate. "1" ⇒ hold imported/repo-shipped hooks (needsReview, provenance-stamped by loadCommandHookBindings) until approved via the /hooks slash; the runner review port reads the on-disk approval ledger fail-closed (key recomputed from record ⇒ tamper-proof). Unset ⇒ default-OFF byte-identical.'
   - name: CommandHookConfig.enabled
     type: 'boolean?'
     default: 'false'

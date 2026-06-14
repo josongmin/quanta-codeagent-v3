@@ -27,14 +27,20 @@ evidence:
     - src/permission/outcome.ts
     - src/permission/reviewer.ts
     - src/permission/index.ts
+    - src/permission/approval-ladder.ts
+    - src/permission/auto-approval-review-observer.ts
+    - src/apps/cli/repl/reviewer-policy.ts
   adrs: [29]
   tests:
     unit:
       - tests/unit/permission/outcome.test.ts
       - tests/unit/permission/reviewer.test.ts
       - tests/unit/permission.test.ts
+      - tests/unit/approval-ladder-hellgate.test.ts
+      - tests/unit/guardian-auto-approval-reviewer-hellgate.test.ts
+      - tests/unit/apps/cli/reviewer-policy.test.ts
     integration: []
     contract: []
-knobs: []
+knobs: [QUANTA_AUTO_REVIEW, QUANTA_APPROVAL_LADDER]
 deliberate_hold: null
-notes: 'admissibility-gate(ADR-0026)와의 결선은 follow-up. ReviewerPort 미주입 시 기존 1300+ 테스트 byte-identical.'
+notes: 'admissibility-gate(ADR-0026)와의 결선은 follow-up. ReviewerPort 미주입 시 기존 1300+ 테스트 byte-identical. T03(jun-13 codex-ide) delta: named approval-ladder SSOT(APPROVAL_LADDER 6-name rungs; guardian-approvals = 유일 reviewer:agent rung) gated by QUANTA_AUTO_REVIEW/QUANTA_APPROVAL_LADDER + emitAutoApprovalReview started/completed observability seam(default-OFF, observer throw swallow). reviewer-policy.ts = CLI default-reviewer 선택 consumer.'

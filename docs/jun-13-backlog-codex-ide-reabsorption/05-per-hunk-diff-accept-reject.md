@@ -1,6 +1,15 @@
 # T05 — per-hunk diff accept/reject
 
-**현황:** 🟡 PARTIAL · **ROI:** ★★ · **게이트:** `QUANTA_HUNK_APPROVAL`(default-OFF)
+**현황:** ✅ LANDED (2026-06-15, CLI + web/SDK 양 surface) · **ROI:** ★★ · **게이트:** `QUANTA_HUNK_APPROVAL`(default-OFF)
+
+## 구현 요약 (LANDED)
+- **CLI 경로**(선행 랜딩): `diff-ops#splitHunks/applySelectedHunks`(pure) + `runner/hunk-apply#applyHunkSelection`(atomic·mode보존·staleness) + `apps/cli/repl/hunk-select`(parse/render) + inline-confirm `[h]` verb.
+- **web/SDK 경로 closure**(이번): `computeActionDiff`+input helpers를 `@/apps/cli/diff-preview`→**`@/runner/action-diff`로 호이스트**(host가 슬라이스펜스로 apps/cli 못 import → @/runner 공용집; diff-preview는 re-export로 back-compat). `ApprovalRespondCommand.selectedHunks`가 `scheduler(approval.respond)→kernel/session/ports#resolveApproval→host wrapper→runtime controller`로 흐름.
+- **controller(`context-binding.ts`)**: ① **mint 시점** request-time `(path,before,after)` 캡처(gate ON+≥2hunk; resolve서 재계산 안 함=drift 감지 보존) → record.actionDiff. ② **resolve(approve)**: `resolvePartialHunkApprove`가 subset이면 `applyHunkSelection`로 부분적용 + **`deny_and_steer` lease**(ADR-0076 보편 verb라 normal-mutation도 claimLease가 그대로 반환 → whole-call 도구 재실행 차단). all⇒whole-call grant, none/stale⇒무write+steer.
+- **순서/안전**: HARD_DENY 재검(T02) 이후 → 위험액션 부분적용 0. escalation은 skip(skill-scope 축). `selectedHunks!==undefined &&` short-circuit으로 normal approve는 동기 lease(기존 sync 호출자 byte-identical). default-OFF byte-identical.
+- **테스트**: `tests/unit/host/runtime-approval-hunk-partial-apply-hellgate.test.ts` 7케이스(subset fresh-readback + deny_and_steer 억제 + gate-off control + all/none + stale + non-previewable + single-hunk). 헬게이트 RED→GREEN. typecheck 0, 회귀 177/0. (complexity warn: resolveApproval 27→30, warn-level 비차단; 추가추출은 swept 보안fn 리스크라 보류.)
+
+## 무엇 (코퍼스 증거)
 
 ## 무엇 (코퍼스 증거)
 Codex/Claude Code IDE 둘 다 에디터 커맨드 `acceptProposedDiff`/`rejectProposedDiff`로 **제안 diff를 hunk 단위로 선택 수락/거부**. Codex는 `apply-review-section-changes`, `review-diff`, `review-patch`로 review 섹션 단위 적용도.
