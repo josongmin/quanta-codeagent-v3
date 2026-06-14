@@ -9,6 +9,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `SignatureHelpPort` ───────────────────────────────
@@ -89,6 +90,18 @@ export const lspSignatureHelpTool = (port: SignatureHelpPort): Tool<LspSignature
     if (ctx.signal.aborted) {
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
+    }
+    // S14 FS-jail (parity with the nav tools): refuse path escapes before any
+    // language-server contact, so a reverse-MCP client can't read out-of-jail.
+    let abs: string
+    try {
+      abs = resolveJailed(parsed.data.path, ctx.cwd)
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
     }
     yield { type: "progress", message: `lsp_signature_help: querying ${parsed.data.path}` }
     let sigs: readonly SignatureHelpPortInfo[] | null

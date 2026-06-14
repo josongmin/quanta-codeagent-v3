@@ -16,6 +16,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `FormatPort` ──────────────────────────────────────
@@ -97,12 +98,26 @@ export const lspFormatTool = (port: FormatPort): Tool<LspFormatInput> => ({
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
     }
+    // S14 FS-jail (parity with the nav tools): refuse path escapes before any
+    // language-server contact.
+    let abs: string
+    try {
+      abs = resolveJailed(parsed.data.path, ctx.cwd)
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
+    }
     const scope = parsed.data.range ? "range format" : "format"
     yield { type: "progress", message: `lsp_format: ${scope} ${parsed.data.path}` }
     let edits: readonly FormatPortTextEdit[] | null
     try {
       const r = parsed.data.range
       // exactOptionalPropertyTypes — only pass `range` when present.
+      // Pass the original (relative) path to the port — abs was used only for
+      // the FS-jail check above (parity with signature-help / code-action).
       if (r === undefined) {
         edits = await port.format(parsed.data.path, undefined, ctx.signal)
       } else {

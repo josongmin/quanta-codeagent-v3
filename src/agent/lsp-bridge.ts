@@ -1,7 +1,10 @@
 import { extname } from "node:path"
 import {
   ClangdAdapter,
+  DefaultCodeActionAdapter,
+  DefaultFormatAdapter,
   DefaultRenameApplyAdapter,
+  DefaultSignatureHelpAdapter,
   GoplsAdapter,
   type LspClient,
   LspRequestError,
@@ -12,14 +15,20 @@ import {
 } from "@/lsp"
 import { errMessage, logger } from "@/shared"
 import type { StaticEvidence as EvidenceStatic } from "@/tool"
+import type { CodeActionPort } from "@/lsp"
+import type { FormatPort } from "@/lsp"
+import type { SignatureHelpPort } from "@/lsp"
 import {
   lspNavTools as buildLspNavTools,
   type DiagnosticsProvider,
   type DiagnosticsSession,
   diagnosticsTool,
+  lspCodeActionTool,
+  lspFormatTool,
   type LspNavProvider,
   type LspNavSession,
   lspRenameApplyTool,
+  lspSignatureHelpTool,
   type RenameApplyPort,
   type Tool,
 } from "@/tool"
@@ -468,9 +477,121 @@ const lspRenameApplyPort = (cwd: string): RenameApplyPort => {
   }
 }
 
+/** Best-effort stop helper — logs at debug level if stop throws (clean
+ *  degrade on a broken pipe, already-stopped server, etc.). */
+const stopClient = (client: LspClient, label: string): Promise<void> =>
+  client.stop().catch((e: unknown) => logger.debug(`lsp: stop failed (${label})`, { error: errMessage(e) }))
+
+/** Stateless `CodeActionPort` — opens a fresh `LspClient` per call, uses
+ *  it, then closes it. `lsp_code_action` is read-only (enumeration only)
+ *  but the adapter also wires `applyEdit` for future apply tools. */
+const lspCodeActionPort = (cwd: string): CodeActionPort => {
+  return {
+    resolveCodeActions: async (file, line, col, kind, signal) => {
+      const spec = specFor(file)
+      if (!spec) return null
+      if (!(await isAvailable(spec.bin))) return null
+      const client = spec.create(cwd)
+      try {
+        await client.start()
+      } catch (e) {
+        logger.warn("lsp: failed to start language server (code-action)", {
+          bin: spec.bin,
+          error: errMessage(e),
+        })
+        await stopClient(client, "code-action/start-fail")
+        return null
+      }
+      try {
+        return await new DefaultCodeActionAdapter(client).resolveCodeActions(
+          file,
+          line,
+          col,
+          kind,
+          signal,
+        )
+      } finally {
+        await stopClient(client, "code-action")
+      }
+    },
+    applyEdit: async (edit, signal) => {
+      // applyEdit is not used by lsp_code_action (enumeration only) but the
+      // port contract requires it. A dedicated apply tool can reuse this port.
+      if (edit.changes.length === 0) return
+      // Pick the first file's spec to open a server for the apply.
+      const firstUri = edit.changes[0]?.uri
+      if (!firstUri) return
+      const file = firstUri.replace(/^file:\/\//, "")
+      const spec = specFor(file)
+      if (!spec) throw new Error(`lsp_code_action: no server for ${file}`)
+      const client = spec.create(cwd)
+      try {
+        await client.start()
+        await new DefaultCodeActionAdapter(client).applyEdit(edit, signal)
+      } finally {
+        await stopClient(client, "code-action/apply")
+      }
+    },
+  }
+}
+
+/** Stateless `FormatPort` — opens a fresh `LspClient` per call, uses it,
+ *  then closes it. Safe: formatting is read-only at the port level (edits
+ *  are surfaced, not applied). */
+const lspFormatPort = (cwd: string): FormatPort => ({
+  format: async (file, range, signal) => {
+    const spec = specFor(file)
+    if (!spec) return null
+    if (!(await isAvailable(spec.bin))) return null
+    const client = spec.create(cwd)
+    try {
+      await client.start()
+    } catch (e) {
+      logger.warn("lsp: failed to start language server (format)", {
+        bin: spec.bin,
+        error: errMessage(e),
+      })
+      await stopClient(client, "format/start-fail")
+      return null
+    }
+    try {
+      return await new DefaultFormatAdapter(client).format(file, range, signal)
+    } finally {
+      await stopClient(client, "format")
+    }
+  },
+})
+
+/** Stateless `SignatureHelpPort` — opens a fresh `LspClient` per call,
+ *  uses it, then closes it. Read-only, concurrency-safe. */
+const lspSignatureHelpPort = (cwd: string): SignatureHelpPort => ({
+  signatureHelp: async (file, line, col, signal) => {
+    const spec = specFor(file)
+    if (!spec) return null
+    if (!(await isAvailable(spec.bin))) return null
+    const client = spec.create(cwd)
+    try {
+      await client.start()
+    } catch (e) {
+      logger.warn("lsp: failed to start language server (signature-help)", {
+        bin: spec.bin,
+        error: errMessage(e),
+      })
+      await stopClient(client, "signature-help/start-fail")
+      return null
+    }
+    try {
+      return await new DefaultSignatureHelpAdapter(client).signatureHelp(file, line, col, signal)
+    } finally {
+      await stopClient(client, "signature-help")
+    }
+  },
+})
+
 /**
- * Build the LSP-backed nav tool set (8 read-only nav tools + 1 mutating
- * `lsp_rename_apply` = 9). The CLI appends these to the registry only when
+ * Build the LSP-backed nav tool set (10 read-only nav tools + 1 mutating
+ * `lsp_rename_apply` + 1 `lsp_code_action` + 1 `lsp_format` + 1
+ * `lsp_signature_help` = 14). The CLI appends these to the registry only when
  * `QUANTA_LSP_TOOLS=full` is set; with the knob unset the tool surface is
  * unchanged (default-OFF, byte-identical). Nothing here spawns a server until
  * a tool is actually called.
@@ -478,4 +599,7 @@ const lspRenameApplyPort = (cwd: string): RenameApplyPort => {
 export const lspNavToolList = (): Tool[] => [
   ...buildLspNavTools(lspNavProvider()),
   lspRenameApplyTool(lspRenameApplyPort(process.cwd())) as Tool,
+  lspCodeActionTool(lspCodeActionPort(process.cwd())) as Tool,
+  lspFormatTool(lspFormatPort(process.cwd())) as Tool,
+  lspSignatureHelpTool(lspSignatureHelpPort(process.cwd())) as Tool,
 ]

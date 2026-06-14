@@ -30,6 +30,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
+import { __resetLspAvailabilityCacheForTest } from "@/agent/lsp-bridge"
 import type { McpServerCmdDeps } from "@/apps/cli/mcp-server-setup"
 import { runMcpServerCmd } from "@/apps/cli/mcp-server-setup"
 import type { Tool } from "@/tool"
@@ -142,10 +143,13 @@ const LIST_REQUESTS = [
 const collectToolNames = (responses: JsonRpcResponse[]): Set<string> => {
   const names = new Set<string>()
   for (const r of responses) for (const t of r.result?.tools ?? []) names.add(t.name)
-  const lastPage = responses.find((r) => r.id === 4)
-  // id=4 used cursor:100; if it returned a page WITH a nextCursor, >150 tools
-  // are exposed and our 0/50/100 sweep is no longer exhaustive.
-  expect(lastPage?.result?.nextCursor).toBeUndefined()
+  // EXHAUSTIVENESS: the exposed surface fits one page (≤50), so the first
+  // tools/list (id=2) carries NO nextCursor and id=2 alone is the complete set.
+  // If the surface ever grows past 50, this fires loudly → add paging to the
+  // driver rather than silently missing tools (vacuous-pass guard). This is an
+  // honest single-page proof, not a >150 tripwire.
+  const firstPage = responses.find((r) => r.id === 2)
+  expect(firstPage?.result?.nextCursor).toBeUndefined()
   return names
 }
 
@@ -170,7 +174,15 @@ const fakeSession = (): LspNavSession => ({
   hover: async () => null,
   typeDefinition: async () => null,
   implementation: async () => null,
-  documentSymbol: async () => null,
+  documentSymbol: async (): Promise<NavSymbolInfo[]> => [
+    {
+      name: "DocSym",
+      kind: "function",
+      range: { start: { line: 12, character: 0 }, end: { line: 12, character: 30 } },
+      selectionRange: { start: { line: 12, character: 3 }, end: { line: 12, character: 9 } }, // → :13:4
+      uri: "file:///fake/x.ts",
+    },
+  ],
   workspaceSymbol: async (): Promise<NavSymbolInfo[]> => [
     {
       name: "WidgetFactory",
@@ -247,7 +259,10 @@ describe("T06 LSP-as-MCP bridge", () => {
     const { exit, responses } = await driveMcp(baseEnv({}), LIST_REQUESTS, fakeDeps)
     expect(exit).toBe(0)
     const names = collectToolNames(responses)
-    // Unconditional sanity: the server DID expose its normal read-only surface.
+    // Unconditional sanity: the normal read-only surface is INTACT (not merely
+    // non-empty — a known base tool must be present, else the merge silently
+    // replaced/degraded the registry on the OFF path).
+    expect(names.has("read")).toBe(true)
     expect(names.size).toBeGreaterThan(0)
     // The narrowing assertion: no LSP nav tool leaked without the gate.
     expect(names.has("lsp_references")).toBe(false)
@@ -294,6 +309,9 @@ describe("T06 LSP-as-MCP bridge", () => {
     )
     const call = responses.find((r) => r.id === 2)
     expect(call?.error?.code).toBe(-32602) // not exposed — never dispatched
+    // Pin the error to the WHITELIST FENCE specifically (not a generic bad-params
+    // -32602): the message names the tool as not-exposed/mutating-risk.
+    expect(call?.error?.message ?? "").toContain("not exposed")
     const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
     expect(text).not.toContain("RENAMED") // the mutating execute never ran
   })
@@ -346,6 +364,10 @@ describe("T06 LSP-as-MCP bridge", () => {
     expect(call?.error).toBeUndefined() // base tool is exposed read-only
     const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
     expect(text).not.toContain("not assignable")
+    // POSITIVE: the null provider's actual answer — proves the gate-OFF branch
+    // really ran the null provider (not a vacuous-empty pass) so the scripted
+    // error in the gate-ON test is attributable to the bridge's override.
+    expect(text).toContain("no language server configured")
   })
 
   // UC3 — workspace symbols real effect.
@@ -364,11 +386,18 @@ describe("T06 LSP-as-MCP bridge", () => {
     expect(call?.error).toBeUndefined()
     const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
     expect(text).toContain("WidgetFactory")
-    expect(text).toContain("widget.ts:10")
+    // selectionRange (line 9 char 6 → :10:7), NOT range (char 0 → :10:1) — pins
+    // the formatter reads selectionRange, killing a range↔selectionRange swap.
+    expect(text).toContain("widget.ts:10:7")
   })
 
   // UC6 — LSP not-ready / no binary: the REAL bridge tools degrade gracefully
   // (no JSON-RPC error, no crash, clean exit) instead of failing the pump.
+  // DETERMINISM (R-final audit): the binary probe is PATH+process-cache sensitive,
+  // so a dev box WITH typescript-language-server installed would flip the path and
+  // the assertion could fail. We neutralize PATH to "" and reset the per-process
+  // availability cache so the probe deterministically MISSES on every machine —
+  // exercising the real unavailable branch hermetically.
   test("real bridge with no language server: graceful unavailable, no crash", async () => {
     const reqs = [
       { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
@@ -379,9 +408,20 @@ describe("T06 LSP-as-MCP bridge", () => {
         params: { name: "lsp_references", arguments: { path: "src/x.ts", line: 1, character: 1 } },
       },
     ]
-    // No fakeDeps ⇒ the production builder wires the real provider; with no
-    // typescript-language-server on PATH the provider yields null ⇒ unavailable.
-    const { exit, responses } = await driveMcp(baseEnv({ QUANTA_LSP_MCP: "1" }), reqs)
+    const savedPath = process.env.PATH
+    __resetLspAvailabilityCacheForTest()
+    process.env.PATH = ""
+    let result: Awaited<ReturnType<typeof driveMcp>>
+    try {
+      // No fakeDeps ⇒ the production builder wires the real provider; with PATH=""
+      // the language-server binary probe misses ⇒ provider yields null ⇒ unavailable.
+      result = await driveMcp(baseEnv({ QUANTA_LSP_MCP: "1" }), reqs)
+    } finally {
+      if (savedPath === undefined) delete process.env.PATH
+      else process.env.PATH = savedPath
+      __resetLspAvailabilityCacheForTest()
+    }
+    const { exit, responses } = result
     expect(exit).toBe(0)
     const call = responses.find((r) => r.id === 2)
     expect(call).toBeDefined()
@@ -431,6 +471,9 @@ describe("T06 LSP-as-MCP bridge", () => {
     )
     const call = responses.find((r) => r.id === 2)
     expect(call?.error?.code).toBe(-32602)
+    expect(call?.error?.message ?? "").toContain("not exposed") // attributable to the filter
+    const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
+    expect(text).not.toContain("RENAMED")
   })
 
   // Gate vocabulary (R2 audit): a loose-FALSY value must read as OFF, same as
@@ -440,5 +483,92 @@ describe("T06 LSP-as-MCP bridge", () => {
     const names = collectToolNames(responses)
     expect(names.has("lsp_references")).toBe(false)
     expect(names.has("lsp_workspace_symbol")).toBe(false)
+  })
+
+  // COVERAGE (R-final audit): lsp_document_symbol was asserted present in
+  // tools/list but never DISPATCHED — a wrong session-method wiring would be
+  // invisible. Drive it with a scripted documentSymbol payload.
+  test("tools/call lsp_document_symbol returns the scripted document symbol", async () => {
+    const reqs = [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "lsp_document_symbol", arguments: { path: "src/x.ts" } },
+      },
+    ]
+    const { responses } = await driveMcp(baseEnv({ QUANTA_LSP_MCP: "1" }), reqs, fakeDeps)
+    const call = responses.find((r) => r.id === 2)
+    expect(call?.error).toBeUndefined()
+    const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
+    expect(text).toContain("DocSym")
+    expect(text).toContain("x.ts:13:4")
+  })
+
+  // SECURITY (R-final audit): the bridge exposes read-only lsp_code_action /
+  // lsp_signature_help. They MUST jail their path (like the nav tools) so an
+  // external MCP client can't read a file outside the cwd jail. A jail-escaping
+  // path must be REFUSED before any language-server contact. Driven on the REAL
+  // builder (these tools own the real ports). The jail check fires before the
+  // availability probe, so the refusal is deterministic regardless of binaries.
+  test("bridge: lsp_code_action refuses a jail-escaping path (no out-of-jail read)", async () => {
+    const reqs = [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "lsp_code_action",
+          arguments: { path: "../../../../../../../../etc/evil.ts", line: 1, character: 1 },
+        },
+      },
+    ]
+    const { responses } = await driveMcp(baseEnv({ QUANTA_LSP_MCP: "1" }), reqs)
+    const call = responses.find((r) => r.id === 2)
+    expect(call?.error).toBeUndefined() // graceful ok:false, not a protocol error
+    const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
+    expect(text.toLowerCase()).toContain("jail")
+  })
+  test("bridge: lsp_signature_help refuses a jail-escaping path", async () => {
+    const reqs = [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "lsp_signature_help",
+          arguments: { path: "/etc/shadow.ts", line: 1, character: 1 },
+        },
+      },
+    ]
+    const { responses } = await driveMcp(baseEnv({ QUANTA_LSP_MCP: "1" }), reqs)
+    const call = responses.find((r) => r.id === 2)
+    expect(call?.error).toBeUndefined()
+    const text = call?.result?.content?.map((c) => c.text ?? "").join("\n") ?? ""
+    expect(text.toLowerCase()).toContain("jail")
+  })
+
+  // NO-THROW contract (R-final audit): mergeLspBridgeTools runs OUTSIDE the
+  // assemble try/catch. A throwing builder must NOT reject runMcpServerCmd — it
+  // must degrade to the base registry and still serve (exit 0, base tools, no
+  // LSP tools). Proven via a deps seam whose builder throws.
+  test("bridge builder throw degrades gracefully (no-throw): server still serves base tools", async () => {
+    const throwingDeps: McpServerCmdDeps = {
+      lspToolsForBridge: () => {
+        throw new Error("boom: builder exploded")
+      },
+    }
+    const { exit, responses } = await driveMcp(
+      baseEnv({ QUANTA_LSP_MCP: "1" }),
+      LIST_REQUESTS,
+      throwingDeps,
+    )
+    expect(exit).toBe(0) // NEVER rejects
+    const names = collectToolNames(responses)
+    expect(names.has("read")).toBe(true) // base surface intact
+    expect(names.has("lsp_references")).toBe(false) // bridge degraded off
   })
 })

@@ -11,12 +11,14 @@
  *  tool consumes a duck-typed structural mirror declared HERE so the fence
  *  holds. Test fakes satisfy both structurally — they are byte-compatible.
  *
- *  Plane-clean: imports only `zod`, `../types` (`Tool`, `ToolContext`,
- *  `ToolEvent`), and the in-file mirror port. No `@/agent`, `@/permission`,
- *  `@/lsp`, `@/storage`. */
+ *  Plane-clean: imports `zod`, `../types` (`Tool`, `ToolContext`, `ToolEvent`),
+ *  the in-file mirror port, and `@/storage`'s FS-jail (same as the nav tools in
+ *  `index.ts` — a lower slice, fence-allowed). No `@/agent`, `@/permission`,
+ *  `@/lsp`. */
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `CodeActionPort` (`@/lsp/ports/code-action-port`) ──
@@ -143,6 +145,20 @@ export const lspCodeActionTool = (port: CodeActionPort): Tool<LspCodeActionInput
     if (ctx.signal.aborted) {
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
+    }
+    // S14 FS-jail (parity with the nav tools): resolve the tool-supplied path
+    // against ctx.cwd and REFUSE escapes BEFORE any language-server contact, so a
+    // caller (e.g. an external reverse-MCP client) cannot read a file outside the
+    // jail via the server's didOpen. The jailed absolute path is what we query.
+    let abs: string
+    try {
+      abs = resolveJailed(parsed.data.path, ctx.cwd)
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
     }
     yield { type: "progress", message: `lsp_code_action: querying ${parsed.data.path}` }
     let actions: readonly CodeActionPortAction[] | null

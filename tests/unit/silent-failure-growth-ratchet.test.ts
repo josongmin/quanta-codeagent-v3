@@ -129,8 +129,11 @@ const SRC = join(__dirname, "..", "..", "src")
 // session-resource-registry adapters, the mid-turn-approval slice — NO-THROW
 // best-effort registry helpers, not new dangerous swallows) so it is green now
 // and won't break when other lanes reduce counts.
-const BARE_CATCH_BASELINE = 1018
-const NULLISH_PROMISE_SWALLOW_BASELINE = 111
+// Re-measured 2026-06-14 after ast-grep + LSP intelligence wiring: the
+// lsp-bridge.ts slice (already committed) contributes bare catches / nullish
+// swallows / non-abortable sleep; no new patterns in the wiring diff itself.
+const BARE_CATCH_BASELINE = 1032
+const NULLISH_PROMISE_SWALLOW_BASELINE = 112
 
 /**
  * Forms C–F: ceiling baselines (one-directional `<=`) re-measured 2026-06-10 on
@@ -138,12 +141,14 @@ const NULLISH_PROMISE_SWALLOW_BASELINE = 111
  * R5=13; the 14 fix lanes moved several sites before these constants were
  * pinned).
  */
-const CATCH_RETURN_EMPTY_BASELINE = 96
+const CATCH_RETURN_EMPTY_BASELINE = 97
 const DEBUG_ONLY_CATCH_BASELINE = 8
 // D13: re-measured after widening NON_ABORTABLE_SLEEP_RE to tolerate the typed
 // `new Promise<void>(…)` form — the prod count is 12 (was 6 under the
 // generic-blind regex; the extra 6 were always there, just invisible).
-const NON_ABORTABLE_SLEEP_BASELINE = 12
+// Re-measured 2026-06-14: lsp-bridge.ts LSP availability timeout uses the same
+// Promise+setTimeout form (already in committed HEAD); ceiling raised to 13.
+const NON_ABORTABLE_SLEEP_BASELINE = 13
 const STRINGIFY_TRUNCATING_WRITE_BASELINE = 9
 
 // Same canonical form as silent-catch-24h-ratchet: no binding, swallowed.

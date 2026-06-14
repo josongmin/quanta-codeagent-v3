@@ -99,6 +99,7 @@ import { logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
+  astGrepTool,
   gitTools,
   mcpResourcesTools,
   pollDeferredTool,
@@ -660,6 +661,11 @@ export const lspEnabled = (): boolean =>
  *  `defaultTools` — they expand the tool surface, so opt-in only via
  *  `QUANTA_LSP_TOOLS=full`. With the knob unset the registry is byte-identical. */
 export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "full"
+
+/** Structural AST search via ast-grep (opt-in via `QUANTA_AST_GREP=1`).
+ *  Requires `ast-grep` CLI (`brew install ast-grep`). Default-OFF: with the
+ *  knob unset the tool surface is byte-identical. */
+export const astGrepEnabled = (): boolean => readCliKnob("QUANTA_AST_GREP", "bool") ?? false
 
 /** Codex `may-20-codex-signal.md` absorption (ADR-0016). First-class
  *  git tools (diff/status/log/blame) are NOT in `defaultTools` to keep the
@@ -1223,6 +1229,9 @@ export interface Features {
   /** ADR-0016: first-class git tools (4). Default-OFF; appended to
    *  registry when `QUANTA_GIT_TOOLS=1`. */
   gitToolList: Tool[]
+  /** Structural AST search via ast-grep (`QUANTA_AST_GREP=1`). Default-OFF;
+   *  appended to extraTools when the gate is on. */
+  astGrepTools: Tool[]
 }
 
 /** B1 (jun-04) — the stable elicitation-lease context id the inbound-sampling
@@ -1498,6 +1507,8 @@ export const loadFeatures = async (
   const gitToolList: Tool[] = gitToolsEnabled()
     ? gitTools(undefined, gitCoChangeEnabled() ? { coChange: true } : {})
     : []
+  // Structural AST search via ast-grep (QUANTA_AST_GREP=1). Default-OFF.
+  const astGrepTools: Tool[] = astGrepEnabled() ? [astGrepTool as Tool] : []
 
   if (planMode) slog.info("plan.mode.on")
   if (metrics) slog.info("metrics.on")
@@ -1508,6 +1519,7 @@ export const loadFeatures = async (
   if (lspTools.length > 0) slog.info("lsp.diagnostics.on")
   if (lspNavTools.length > 0) slog.info("lsp.nav.on", { count: lspNavTools.length })
   if (gitToolList.length > 0) slog.info("git.tools.on", { count: gitToolList.length })
+  if (astGrepTools.length > 0) slog.info("ast.grep.on")
   return {
     planMode,
     metrics,
@@ -1519,6 +1531,7 @@ export const loadFeatures = async (
     lspTools,
     lspNavTools,
     gitToolList,
+    astGrepTools,
   }
 }
 
@@ -1623,6 +1636,7 @@ export const buildTooling = (
   lspTools: Tool[],
   lspNavTools: Tool[],
   gitToolList: Tool[],
+  astGrepTools: Tool[],
   slog: StructuredLogger,
   /** Optional surface-provided {@link TaskRegistry} threaded into the
    *  subagent config so the surface (CLI lifecycle pills) shares the same
@@ -1681,6 +1695,7 @@ export const buildTooling = (
     ...asyncDeferredTools,
     ...(askUserTool !== null ? [askUserTool] : []),
     ...(fetchRulesTool !== null ? [fetchRulesTool] : []),
+    ...astGrepTools,
   ]
   return buildToolingCore({
     store,

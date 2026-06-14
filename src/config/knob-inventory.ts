@@ -395,23 +395,6 @@ const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
-    // T06 (jun-13 Codex-IDE reabsorption) — reverse-MCP LSP bridge. When the
-    // `quanta mcp-server` is running, expose the EXISTING read-only LSP tools
-    // (the base `diagnostics` upgraded to the real provider + the `lsp_*` nav
-    // family) so an external/CLI client gets real code intelligence without an
-    // IDE. Read at the reverse-MCP composition root (mcp-server-setup.ts),
-    // NOT a manifest tool gate — the tools are already catalogued under
-    // QUANTA_LSP / QUANTA_LSP_TOOLS; this gate only governs their reverse-MCP
-    // exposure path. Default-OFF.
-    envKey: "QUANTA_LSP_MCP",
-    kind: "bool",
-    default: false,
-    group: "mcp",
-    home: "runtime-config",
-    describe: "Reverse-MCP server: expose read-only LSP tools (diagnostics/references/symbols).",
-    readSite: "apps/cli/mcp-server-setup.ts",
-  },
-  {
     envKey: "QUANTA_RETRIEVAL_HYBRID",
     kind: "bool",
     default: false,
@@ -702,15 +685,6 @@ const RUNNER: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "Diff visible line cap.",
     readSite: "runner/diff-ops.ts",
-  },
-  {
-    envKey: "QUANTA_HUNK_APPROVAL",
-    kind: "bool",
-    default: false,
-    group: "diff",
-    home: "runtime-config",
-    describe: "Per-hunk diff accept/reject in the approval prompt (T05; opt-in).",
-    readSite: "apps/cli/repl/runtime-context-compose.ts",
   },
 ]
 

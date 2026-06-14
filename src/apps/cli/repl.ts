@@ -18,7 +18,6 @@ import { createIdleMonitor } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
 import {
-  argvPrompt,
   buildAutoTitlePort,
   buildLLMWithByok,
   buildSkillsConfig,
@@ -26,11 +25,9 @@ import {
   buildTooling,
   composeLLM,
   loadFeatures,
-  newSessionFlag,
   pickIdentity,
   pickPersona,
   resolveResume,
-  resumePath,
 } from "./internal"
 import { createRejectCounter } from "./reject-counter"
 import type { CliFeatureConfig } from "./repl/cli-feature-config"
@@ -48,6 +45,7 @@ import {
   deriveMcpPillServers,
 } from "./repl/factories"
 import { buildMcpSurfaceInfo } from "./repl/mcp-surface-wire"
+import { maybePickSession } from "./repl/session-picker"
 import { runSessionLoop } from "./repl/session-loop"
 import { buildSessionLoopOptions } from "./repl/session-loop-options"
 import { setupSession } from "./repl/session-setup"
@@ -275,61 +273,6 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
     }
   },
   installPills,
-}
-
-/** Show a numbered session picker at startup when the user hasn't passed any
- *  resume/new-session flags. If the user picks a previous session, injects
- *  `--resume <id>` into process.argv so setupSession picks it up via the
- *  normal resumePath() path. TTY-only; no-op in piped/one-shot/headless mode. */
-const maybePickSession = async (): Promise<void> => {
-  if (!process.stderr.isTTY) return
-  if (resumePath() !== undefined) return
-  if (newSessionFlag()) return
-  if (argvPrompt().length > 0) return
-
-  const sessions = (await listSessions({ includeArchived: false })).slice(0, 10)
-  if (sessions.length === 0) return
-
-  const home = process.env.HOME ?? ""
-  const shorten = (p: string) =>
-    home && p.startsWith(home) ? `~${p.slice(home.length)}` : p
-  // Relative-time display thresholds (durations in ms, not timers) — named so
-  // the no-magic-timeout scanner sees bound constants, not stray wall-clock.
-  const MINUTE_MS = 60_000
-  const HOUR_MS = 60 * MINUTE_MS
-  const DAY_MS = 24 * HOUR_MS
-  const relTime = (ms: number): string => {
-    const d = Date.now() - ms
-    if (d < MINUTE_MS) return "just now"
-    if (d < HOUR_MS) return `${Math.round(d / MINUTE_MS)}m ago`
-    if (d < DAY_MS) return `${Math.round(d / HOUR_MS)}h ago`
-    return `${Math.round(d / DAY_MS)}d ago`
-  }
-
-  process.stderr.write("\x1b[2mRecent sessions:\x1b[0m\n")
-  for (let i = 0; i < sessions.length; i++) {
-    const s = sessions[i]!
-    const title = s.title.length > 44 ? `${s.title.slice(0, 41)}…` : s.title
-    const age = relTime(s.lastTouched)
-    process.stderr.write(
-      `  \x1b[2m[${i + 1}]\x1b[0m ${title}  \x1b[2m${shorten(s.cwd)}  ${age}\x1b[0m\n`,
-    )
-  }
-  process.stderr.write("  \x1b[2m[N]\x1b[0m New session\n")
-
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
-  const ans = (
-    await rl.question(
-      `\x1b[2mResume a session? [1-${sessions.length} or Enter for new]: \x1b[0m`,
-    )
-  ).trim()
-  rl.close()
-
-  if (ans === "" || ans.toLowerCase() === "n") return
-  const num = parseInt(ans, 10)
-  if (!isNaN(num) && num >= 1 && num <= sessions.length) {
-    process.argv.push("--resume", sessions[num - 1]!.id)
-  }
 }
 
 /** Thin orchestrator over the 6 helpers under `src/apps/cli/repl/`:

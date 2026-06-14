@@ -283,6 +283,18 @@ export {
   openAiImagePort,
 } from "./image-gen"
 export type {
+  CodeActionPort,
+  CodeActionPortAction,
+  CodeActionPortDocumentEdit,
+  CodeActionPortKind,
+  CodeActionPortPos,
+  CodeActionPortRange,
+  CodeActionPortTextEdit,
+  CodeActionPortWorkspaceEdit,
+  FormatPort,
+  FormatPortPos,
+  FormatPortRange,
+  FormatPortTextEdit,
   LspNavProvider,
   LspNavSession,
   NavHover,
@@ -298,10 +310,16 @@ export type {
   RenameApplyPortRange,
   RenameApplyPortTextEdit,
   RenameApplyPortWorkspaceEdit,
+  SignatureHelpPort,
+  SignatureHelpPortInfo,
+  SignatureHelpPortParameter,
 } from "./lsp_nav"
 export {
+  lspCodeActionTool,
+  lspFormatTool,
   lspNavTools,
   lspRenameApplyTool,
+  lspSignatureHelpTool,
   nullLspNavProvider,
 } from "./lsp_nav"
 // N3 — MCP resource/prompt tools (`mcp_list_resources` / `mcp_read_resource` /

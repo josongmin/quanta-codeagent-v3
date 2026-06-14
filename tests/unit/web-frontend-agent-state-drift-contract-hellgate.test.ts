@@ -81,10 +81,11 @@ describe("agent-state drift contract: frontend copy === canonical daemon SSOT", 
     const frontendKinds = extractAgentStateKinds(readText(FRONTEND_PROTOCOL_PATH))
     const canonical = new Set<string>(AGENT_STATE_MESSAGE_KINDS)
 
-    // Sanity: the extractor actually found the 9 members (a regex that matched
+    // Sanity: the extractor actually found the 12 members (a regex that matched
     // nothing would make the both-directions loops vacuously pass).
-    expect(frontendKinds.size).toBe(9)
-    expect(canonical.size).toBe(9)
+    // Count = 9 original + 3 item.* kinds (item.started / item.delta / item.completed).
+    expect(frontendKinds.size).toBe(12)
+    expect(canonical.size).toBe(12)
 
     // Diagnostic-friendly: sorted-array compare prints the exact missing/extra.
     expect([...frontendKinds].sort()).toEqual([...canonical].sort())

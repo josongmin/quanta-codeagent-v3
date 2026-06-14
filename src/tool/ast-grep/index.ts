@@ -23,6 +23,13 @@ type Input = z.infer<typeof schema>
 
 const MAX_MATCHES = 50
 
+/** Timeout for the availability probe (fast binary exec — ≤10 s is generous). */
+const PROBE_TIMEOUT_MS = 10_000
+/** Timeout for a full structural search pass. 30 s caps runaway regex/AST walks;
+ *  most repo-wide searches complete in <5 s. Bounded by the CLI turn abort
+ *  signal which supersedes this in practice. */
+const SEARCH_TIMEOUT_MS = 30_000
+
 // Module-level probe cache: undefined = not yet probed, true = available,
 // string = error message (ast-grep not installed or broken).
 let probeResult: true | string | undefined = undefined
@@ -35,7 +42,7 @@ async function probeAstGrep(cwd: string): Promise<string | undefined> {
   if (probeResult !== undefined) {
     return probeResult === true ? undefined : probeResult
   }
-  const r = await runShell("ast-grep --version", { cwd, timeoutMs: 10_000 })
+  const r = await runShell("ast-grep --version", { cwd, timeoutMs: PROBE_TIMEOUT_MS })
   if (r.exitCode === 0) {
     probeResult = true
     return undefined
@@ -75,7 +82,11 @@ export const astGrepTool = defineTool<Input>({
       parts.push(sq(input.path))
     }
 
-    const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal, timeoutMs: 30_000 })
+    const r = await runShell(parts.join(" "), {
+      cwd: ctx.cwd,
+      signal: ctx.signal,
+      timeoutMs: SEARCH_TIMEOUT_MS,
+    })
 
     if (r.timedOut) {
       yield { type: "result", result: { ok: false, output: "ast-grep timed out after 30s" } }

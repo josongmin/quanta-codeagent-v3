@@ -22,9 +22,9 @@ describe("LSP rename bridge — registration", () => {
     expect(names).toContain("lsp_rename_apply")
   })
 
-  test("HELL-A2: rename is additive — 10 nav tools + 1 rename = 11", () => {
+  test("HELL-A2: rename is additive — 10 nav tools + 1 rename + 3 adr-0141 = 14", () => {
     const tools = lspNavToolList()
-    expect(tools).toHaveLength(11)
+    expect(tools).toHaveLength(14)
   })
 
   test("HELL-B3: lsp_rename_apply is mutating + always-confirm + not concurrency-safe", () => {

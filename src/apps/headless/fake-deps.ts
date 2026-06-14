@@ -76,6 +76,7 @@ export const buildFakeBootstrapDeps = (
       lspTools: [],
       lspNavTools: [],
       gitToolList: [],
+      astGrepTools: [],
     }),
     // Typed stub — bootstrap only calls it when `runtime.pendingImagePaths`
     // is non-empty (default `[]` ⇒ never). Headless never reads disk.

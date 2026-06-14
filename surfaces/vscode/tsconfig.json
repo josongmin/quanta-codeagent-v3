@@ -1,0 +1,10 @@
+{
+  "//": "Self-contained typecheck for the VS Code surface. It is DELIBERATELY excluded from the core graph (root tsconfig include = src/tests/tools) so provider.ts's `vscode` import never reaches core. The pure adapter is additionally typechecked transitively via the hellgate test under tests/.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [],
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

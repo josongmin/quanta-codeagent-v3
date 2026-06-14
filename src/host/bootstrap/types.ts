@@ -91,6 +91,7 @@ export interface BootstrapFeatures {
   readonly lspTools: Tool[]
   readonly lspNavTools: Tool[]
   readonly gitToolList: Tool[]
+  readonly astGrepTools: Tool[]
 }
 
 /** Per-surface MCP pill descriptor — the host only forwards rows from
@@ -193,6 +194,7 @@ export type BuildToolingFactory = (
   lspTools: Tool[],
   lspNavTools: Tool[],
   gitToolList: Tool[],
+  astGrepTools: Tool[],
   slog: StructuredLogger,
   taskRegistry: TaskRegistry | undefined,
   metrics?: Metrics,

@@ -261,9 +261,19 @@ const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Pr
   // from `config.registry`) can find the bridged tools on `tools/call`.
   // Reassign ONLY when the gate is on — the OFF path leaves `config` (and its
   // registry) the exact object `assembleAgentConfig` returned, so default-OFF is
-  // LITERALLY byte-identical (no spread, no new object).
+  // LITERALLY byte-identical (no spread, no new object). The merge is wrapped:
+  // `mergeLspBridgeTools` runs OUTSIDE the assemble try/catch, and a throwing
+  // builder must NOT break runMcpServerCmd's NO-THROW contract — degrade to the
+  // base registry (server still serves its read-only surface) and log to stderr.
   if (gateOn(process.env, "QUANTA_LSP_MCP")) {
-    config = { ...config, registry: await mergeLspBridgeTools(config, deps?.lspToolsForBridge, io) }
+    try {
+      config = {
+        ...config,
+        registry: await mergeLspBridgeTools(config, deps?.lspToolsForBridge, io),
+      }
+    } catch (e) {
+      io.err(`quanta mcp-server: LSP bridge disabled (build failed): ${errMessage(e)}\n`)
+    }
   }
   const registry = config.registry
   const knownNames = new Set(registry.specs().map((s) => s.name))

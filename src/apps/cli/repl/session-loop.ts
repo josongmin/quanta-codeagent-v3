@@ -33,6 +33,7 @@ import {
   maybeStartPlaybookTriggerWire,
   type PlaybookTriggerWireHandle,
 } from "./playbook-trigger-wire"
+import { readCliKnob } from "../cli-knobs-accessor"
 import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
 import { maybeCreatePromptSuggestionWire } from "./prompt-suggestion-wire"
 import { normalizeCliPromptInput } from "./prompt-types"
@@ -842,7 +843,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     const automationSlotForTicker =
       liveAutomationSlot !== undefined
         ? wireInboxBannerOntoSlot(liveAutomationSlot, {
-            enabled: gateOn(process.env, "QUANTA_AUTOMATION_INBOX"),
+            enabled: readCliKnob("QUANTA_AUTOMATION_INBOX", "bool") ?? false,
           }).slot
         : undefined
     const automationTicker =

@@ -115,7 +115,7 @@
 | [T04](04-hooks-trust-gate-and-model.md) | hooks 신뢰게이트(`needsReview`) + per-hook model | ✅ (per-hook model=N/A defer) | ★★ | 보안갭 + 기능갭 |
 | [T05](05-per-hunk-diff-accept-reject.md) | per-hunk diff accept/reject | 🟡 | ★★ | 입자도 갭, diff-ops 위 |
 | [T06](06-lsp-as-mcp-bridge.md) | LSP-as-MCP 브릿지 | 🟡 | ★★ | IDE 없이 코드 인텔리전스 |
-| [T07](07-chatsessions-editor-extension.md) | VS Code `chatSessions` 에디터 확장 | ❌ | ★(전략) | 에디터 surface 자체 부재 |
+| [T07](07-chatsessions-editor-extension.md) | VS Code `chatSessions` 에디터 확장 | ✅ LANDED (jun-13) | ★(전략) | 에디터 surface 자체 부재 → PURE adapter(surfaces/vscode)+코어-누출 라쳇; app-server 진입점·conversationEditor는 follow-up |
 | [T08](08-model-refusal-recovery.md) | model-refusal 복구(fork+re-prompt) | ✅ LANDED | ★★ | CC IDE 2.1.170 신규; quanta는 terminal error만 → fork/neutralize+1회 재프롬프트(default-OFF, provider-agnostic seam) |
 
 ### 티켓 안 만든 후순위 꼬리 (의식적 defer — silent cap 아님)

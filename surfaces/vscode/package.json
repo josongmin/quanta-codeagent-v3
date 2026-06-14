@@ -1,0 +1,36 @@
+{
+  "name": "quanta-vscode-chat-sessions",
+  "displayName": "quanta — Chat Sessions",
+  "description": "Surfaces quanta agent threads as native VS Code Chat Sessions (id/label/status). Thin adapter over session.v1 — the quanta core has zero VS Code coupling.",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "quanta",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "enabledApiProposals": [
+    "chatSessionsProvider"
+  ],
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "activationEvents": [
+    "onChatSession:quanta-thread"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "chatSessions": [
+      {
+        "type": "quanta-thread",
+        "name": "quanta",
+        "displayName": "quanta",
+        "description": "quanta agent threads"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p ./tsconfig.json",
+    "typecheck": "tsc -p ./tsconfig.json --noEmit"
+  }
+}

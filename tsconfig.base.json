@@ -114,7 +114,8 @@
       "@/remote": ["./src/remote/index.ts"],
       "@/remote/*": ["./src/remote/*"],
       "@/apps/cli": ["./src/apps/cli/index.ts"],
-      "@/apps/cli/*": ["./src/apps/cli/*"]
+      "@/apps/cli/*": ["./src/apps/cli/*"],
+      "@surfaces/vscode/*": ["./surfaces/vscode/src/*"]
     }
   }
 }

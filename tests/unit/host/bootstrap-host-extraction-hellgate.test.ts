@@ -132,6 +132,7 @@ const makeFakeDeps = (overrides: Partial<SessionBootstrapDeps> = {}): SessionBoo
       lspTools: [],
       lspNavTools: [],
       gitToolList: [],
+      astGrepTools: [],
     }),
     loadImageBlock: () => ({ kind: "image", data: "", mimeType: "image/png" }) as never,
     pickIdentity: () => undefined,
@@ -537,7 +538,7 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
         taskRegistry: fakeTaskRegistry,
         followUpQueue: undefined,
       }),
-      buildTooling: (_mcp, _lsp, _lspNav, _git, _slog, taskRegistry) => {
+      buildTooling: (_mcp, _lsp, _lspNav, _git, _astGrep, _slog, taskRegistry) => {
         toolingCalledWith = taskRegistry
         return {
           store: undefined,

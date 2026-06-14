@@ -1,6 +1,25 @@
 # T07 — VS Code `chatSessions` 에디터 확장 (전략)
 
-**현황:** ❌ CONFIRMED-GAP · **ROI:** ★ (전략적, 大공수) · **게이트:** N/A(신규 surface)
+**현황:** ✅ LANDED (adapter+ratchet, 2026-06-13) · **ROI:** ★ (전략적, 大공수) · **게이트:** N/A(신규 surface)
+
+> **LANDED 노트 (2026-06-13):** 사용자 opt-in("ㄱㄱㄱ") 후 착수. 선결 T01/T02는 이미
+> LANDED 확인(처음 slash-vs-dot grep로 false-gap 오판→정정). PURE 어댑터 surface로 구현:
+> `surfaces/vscode/src/{chat-session-adapter,status}.ts`(vscode 심볼 0, session.v1만 소비)
+> + thin glue `provider.ts`(유일한 `vscode` import). 헬게이트 e2e가 **실 session.v1
+> 라운드트립**(`@/ipc/session` bridge+client) 관통: UC1 ChatSessionItem(id/label/status),
+> UC2 status 전이(turn.* 경로 + coarse state.updated 경로 + 실패), UC3 신규세션(factory seam),
+> UC4 코어-누출 라쳇(`tests/unit/surfaces/vscode/core-no-vscode-leak-ratchet.test.ts`,
+> red-on-injection 검증). status는 서버 turn lifecycle서만 파생(낙관적 flip 없음=UI-lie 회피).
+> tsconfig path `@surfaces/vscode/*` 등록. proposed-API 버전종속은 `status.ts`(stable enum)
+> ↔ `provider.ts#STATUS_TO_VSCODE`(버전 enum 재매핑)로 격리.
+>
+> **잔여(follow-up):** ① 실제 spawn 가능한 `quanta app-server` CLI 진입점 — 현재는 host가
+> 주입하는 `createSession()` factory seam만 정의(어댑터↔실행 경계). 왜: 확장이 엔진을
+> 띄우려면 진입점 필요. ROI: 확장 실사용 게이팅. ② conversationEditor(task=에디터 탭) +
+> code lens + addToThread(선택영역 컨텍스트) — index §2.6 "T07 의존" 항목. 왜: 네이티브
+> 에디터 통합 깊이. ROI: chatSessions 위 UX 완성도. ③ T01 item-level delta를 패널에 rich
+> 렌더(현재 어댑터는 status/label까지; item.* 소비 seam은 열려있음). 왜: 북극성 agent-state
+> 가시성. ④ follower(T02) co-control 핫키를 패널 액션으로 노출.
 
 ## 무엇 (코퍼스 증거)
 Codex IDE(`openai.chatgpt`)는 VS Code **네이티브 Agent/Chat Sessions API** provider로 등록:

@@ -252,6 +252,12 @@ const RULES: readonly Rule[] = [
         "CLI sub-command surface (`/version` `/release-notes`) — `deps.env ?? process.env` DI fallback at the composition root; downstream resolveVersion/repoUrl accept env explicitly. Same posture as repo-info.ts / login-cmd.ts.",
       "apps/cli/bug-cmd.ts":
         "CLI sub-command surface (`/bug`) — `deps.env ?? process.env` DI fallback at the composition root; same posture as version-cmd.ts.",
+      "apps/cli/preflight.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param; the gate is read via `gateOn(env, ...)` on that param. Same DI-boundary posture as config-migration-notice.ts.",
+      "apps/cli/hooks-cmd.ts":
+        "CLI slash-command composition root (/hooks) — reads `process.env` once at command-run time to resolve user-config directory; same posture as login-cmd.ts.",
+      "apps/cli/init-scaffold.ts":
+        "Injection-first: `env: Readonly<...> = process.env` DI fallback at the init-scaffold composition root (EDITOR resolution); tests inject explicit env. Same posture as raw-line-reader-editor.ts.",
     },
   },
   {

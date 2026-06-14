@@ -420,6 +420,7 @@ export const bootstrapSession = async (
       features.lspTools,
       features.lspNavTools,
       features.gitToolList,
+      features.astGrepTools,
       slog,
       lifecycleTaskRegistry,
       features.metrics,

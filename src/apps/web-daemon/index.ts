@@ -66,6 +66,7 @@ const parseAuthToken = (raw: string | undefined): string | undefined => {
  */
 const resolveObservableFactory = async (
   baseFactory: () => Promise<RuntimeFacade>,
+  env: Record<string, string | undefined> = process.env,
 ): Promise<{
   readonly runtimeFactory: () => Promise<RuntimeFacade>
   readonly facade: ObservableRuntimeFacade | undefined
@@ -76,9 +77,9 @@ const resolveObservableFactory = async (
   // session host) with the served session. ALL gates OFF ⇒ the lazy factory
   // passes through unchanged + facade is undefined (byte-identical).
   if (
-    !gateOn(process.env, "QUANTA_OBSERVABILITY") &&
-    !gateOn(process.env, "QUANTA_WEB_CANVAS") &&
-    !gateOn(process.env, "QUANTA_WEB_AGENT_STATE")
+    !gateOn(env, "QUANTA_OBSERVABILITY") &&
+    !gateOn(env, "QUANTA_WEB_CANVAS") &&
+    !gateOn(env, "QUANTA_WEB_AGENT_STATE")
   ) {
     return { runtimeFactory: baseFactory, facade: undefined }
   }

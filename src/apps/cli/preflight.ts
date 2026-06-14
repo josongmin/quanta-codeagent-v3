@@ -41,7 +41,7 @@ import {
   parsePatch,
 } from "@/patch"
 import type { ToolAction } from "@/permission"
-import { errMessage } from "@/shared"
+import { errMessage, gateOn } from "@/shared"
 // The SAME matchers the `edit` tool runs — reused so a preview verdict can never
 // drift from the real apply. `@/tool/edit` is a library slice; `apps/cli` (the
 // entrypoint) is allowed to import it (the slice fence only blocks the reverse).
@@ -51,12 +51,13 @@ import { type LineRange, validateLineRanges } from "@/tool/edit/line-range"
 
 /** Whether the approval-time applicability pre-flight runs. Default ON when the
  *  CLI seeds `QUANTA_PREFLIGHT_CHECK=1` (see `CLI_FEATURE_GATES` in
- *  `apps/cli/index.ts`); explicit `"0"` (any value ≠ "1") disables it so the
- *  confirm prompt is byte-identical to the pre-#19 path. Non-CLI surfaces never
- *  seed the gate ⇒ they never call this. */
+ *  `apps/cli/index.ts`); any truthy vocab (`1`/`on`/`true`/`yes`) enables it.
+ *  An explicit `"0"` / falsy value disables it so the confirm prompt is
+ *  byte-identical to the pre-#19 path. Non-CLI surfaces never seed the gate ⇒
+ *  they never call this. */
 export const preflightCheckEnabled = (
   env: Record<string, string | undefined> = process.env,
-): boolean => env.QUANTA_PREFLIGHT_CHECK === "1"
+): boolean => gateOn(env, "QUANTA_PREFLIGHT_CHECK")
 
 export interface PreflightOptions {
   /** Session cwd — relative paths in the action resolve against it (mirrors the

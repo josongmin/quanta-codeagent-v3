@@ -195,9 +195,12 @@ describe("UC3 — relay-approve HARD_DENY re-check (red-on-injection)", () => {
 
 describe("exhaustiveness + gate", () => {
   test("ALL_FOLLOWER_VERB_KINDS covers every verb kind & is frozen", () => {
-    expect([...ALL_FOLLOWER_VERB_KINDS].sort()).toEqual(
-      ["command-approval-decision", "interrupt-turn", "set-queue-mode", "steer-turn"].sort(),
-    )
+    expect(([...ALL_FOLLOWER_VERB_KINDS] as string[]).sort()).toEqual([
+      "command-approval-decision",
+      "interrupt-turn",
+      "set-queue-mode",
+      "steer-turn",
+    ])
     expect(Object.isFrozen(ALL_FOLLOWER_VERB_KINDS)).toBe(true)
   })
   test("isFollowerCoControlEnabled reuses QUANTA_THIN_CLIENT_DISPATCH (default-OFF)", () => {

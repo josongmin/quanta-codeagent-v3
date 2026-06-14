@@ -564,6 +564,14 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "Structured deny-reason surfacing gate.",
   },
   {
+    envKey: "QUANTA_HUNK_APPROVAL",
+    kind: "bool",
+    default: false,
+    group: "approval",
+    describe:
+      "T05 per-hunk diff accept/reject — CLI confirm offers an [h]unk-select verb for mutations with ≥2 hunks; accepted subset is applied atomically. Default OFF (byte-identical to whole-call approve/deny).",
+  },
+  {
     envKey: "QUANTA_SANDBOX_ESCALATION",
     kind: "bool",
     default: false,

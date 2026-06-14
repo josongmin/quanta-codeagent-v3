@@ -377,22 +377,6 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     readSite: "mode-cycle.ts",
   },
   {
-    envKey: "QUANTA_MIDTURN_CAPTURE",
-    kind: "bool",
-    default: true,
-    group: "input",
-    describe: "Mid-turn keystroke capture (CLI default-ON via seed; =0 disables).",
-    readSite: "repl/session-loop.ts",
-  },
-  {
-    envKey: "QUANTA_MIDTURN_VISIBLE",
-    kind: "bool",
-    default: true,
-    group: "input",
-    describe: "Visible mid-turn input lane (CLI default-ON via seed; =0 disables).",
-    readSite: "repl/session-loop.ts",
-  },
-  {
     envKey: "QUANTA_PREFLIGHT_CHECK",
     kind: "bool",
     default: true,
@@ -669,7 +653,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "bool",
     default: false,
     group: "mcp",
-    describe: "Expose quanta AS an MCP server over stdio (strict =1; RCE surface, read-only by default).",
+    describe:
+      "Expose quanta AS an MCP server over stdio (strict =1; RCE surface, read-only by default).",
     readSite: "mcp-server-setup.ts",
   },
   {
@@ -679,6 +664,22 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     group: "mcp",
     describe:
       "Comma list of extra tools the reverse-MCP server exposes (validated against the registry; each call is still permission-gated).",
+    readSite: "mcp-server-setup.ts",
+  },
+  // T06 (jun-13 Codex-IDE reabsorption) — reverse-MCP LSP bridge. Co-homed with
+  // its parent gates above (same composition root, mcp-server-setup.ts) so the
+  // three reverse-MCP gates live in ONE registry and the web /knobs catalog
+  // shows them consistently (all CLI-process-only). Exposes the EXISTING
+  // read-only LSP tools (base `diagnostics` upgraded to the real provider + the
+  // `lsp_*` nav family) — NOT a manifest tool gate; the tools are already
+  // catalogued under QUANTA_LSP / QUANTA_LSP_TOOLS, this only governs reverse-MCP
+  // exposure.
+  {
+    envKey: "QUANTA_LSP_MCP",
+    kind: "bool",
+    default: false,
+    group: "mcp",
+    describe: "Reverse-MCP server: expose read-only LSP tools (diagnostics/references/symbols).",
     readSite: "mcp-server-setup.ts",
   },
   {

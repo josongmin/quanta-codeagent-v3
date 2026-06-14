@@ -26,6 +26,7 @@
  */
 
 import { readFile } from "node:fs/promises"
+import { errMessage } from "@/shared"
 import { writeFileAtomic } from "@/storage/atomic-write"
 import { applySelectedHunks, splitHunks } from "./diff-ops"
 
@@ -115,7 +116,7 @@ export const applyHunkSelection = async (
   try {
     await write(req.path, content)
   } catch (e) {
-    return { status: "error", reason: `write failed: ${(e as Error)?.message ?? String(e)}` }
+    return { status: "error", reason: `write failed: ${errMessage(e)}` }
   }
   return { status: "applied", appliedHunkIds, content }
 }
