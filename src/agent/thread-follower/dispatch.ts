@@ -24,11 +24,23 @@
  *     timed-out approval: a fail-safe DENY (the stored fallback verb), so an
  *     unanswered approval closes safely rather than hanging.
  *
- * The HARD_DENY re-check rides the relay through {@link planFollowerVerb} (the
- * composition root injects the real `@/permission` hardDenyReason + the proposed-
- * action resolver), so a relay-approve of a dangerous command is rejected
- * fail-closed BEFORE the sink is touched — defense-in-depth alongside the live
- * re-check at the resolver itself.
+ * PRODUCTION WIRING (be precise — do not overclaim):
+ *   - The LIVE web 2nd-client path is FIRE verbs only: the daemon decodes a
+ *     `followerVerb` frame and calls {@link dispatch} (see
+ *     `apps/web-daemon/server.ts`). The daemon constructs this with `plan: {}`
+ *     (no HARD_DENY oracle) because the FIRE verbs need none.
+ *   - A web follower's APPROVE/DENY rides the existing `approval.respond`
+ *     SessionCommand, where the LIVE HARD_DENY re-check lives (the resolver in
+ *     `host/runtime/internal/context-binding.ts`). So {@link openApproval} /
+ *     {@link relayApproval} / {@link sweep} — and the planner-level HARD_DENY
+ *     relay guard they would exercise — are NOT wired into the current web path.
+ *     They are a TESTED protocol capability (the request/response/timeout +
+ *     stale-decision discipline of T02) for a FUTURE dedicated follower approval
+ *     channel. NO production wire-point exists yet (a future channel would call
+ *     openApproval on approval mint, route the follower's decision through
+ *     relayApproval, and drive sweep from a timer). The HARD_DENY relay guard in
+ *     {@link planFollowerVerb} only fires when a caller injects both
+ *     `hardDenyReason` + `resolveProposedAction`; today only the hellgate does.
  *
  * DEFAULT-OFF: the transport only constructs + feeds this when
  * `isFollowerCoControlEnabled(env)` (the QUANTA_THIN_CLIENT_DISPATCH gate) holds.

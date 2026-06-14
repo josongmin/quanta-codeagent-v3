@@ -35,6 +35,7 @@ describe("peekFollowerVerb — decode contract", () => {
       JSON.stringify({ kind: "followerVerb" }), // no verb
       JSON.stringify({ kind: "followerVerb", verb: 42 }),
       JSON.stringify({ kind: "followerVerb", verb: { noKind: true } }),
+      JSON.stringify({ kind: "followerVerb", verb: [1, 2, 3] }), // verb is an array
       JSON.stringify([1, 2, 3]),
       "not json {",
       "null",

@@ -171,7 +171,7 @@ export const astGrepTool = defineTool<Input>({
     let matches: Array<{ file: string; range: { start: { line: number } }; text: string }>
     try {
       matches = JSON.parse(stdout)
-    } catch {
+    } catch (_e) {
       yield {
         type: "result",
         result: { ok: false, output: `ast-grep returned non-JSON output: ${stdout.slice(0, 200)}` },

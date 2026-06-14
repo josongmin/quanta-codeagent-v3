@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-13"
   evidence:
     cli: "/steer (lease-safe weave inject via pushUserMessage) + /interrupt (lease-bypass cancel via pushCancel) registered in registry-session.ts, reachable from src/apps/cli/index.ts; /inbound invert applies the per-message queue↔weave invert"
-    web: "ALL 4 follower verbs LIVE over the real web transport. steer-turn/interrupt-turn/set-queue-mode: a web 2nd-client sends a `followerVerb` WS frame → server.ts peekFollowerVerb → FollowerCoControlDispatcher → the conversation-action surface wired into the daemon session's AgentConfig (runtime-factory, gated QUANTA_THIN_CLIENT_DISPATCH). approval-relay: approval.respond → resolveApproval with the LIVE HARD_DENY re-check. The conversation-action surface was hoisted to @/agent so the daemon can mint it (slice fence). Proven end-to-end against REAL collaborators."
+    web: "steer-turn + interrupt-turn LIVE over the real web transport: a 2nd-client sends a `followerVerb` WS frame → server.ts peekFollowerVerb → FollowerCoControlDispatcher.dispatch → the conversation-action surface wired into the daemon session's AgentConfig (runtime-factory, gate QUANTA_THIN_CLIENT_DISPATCH; surface hoisted to @/agent for the slice fence). approval-relay rides `approval.respond` → resolveApproval with the LIVE HARD_DENY re-check (host resolver). set-queue-mode is dispatched but inert on web (the daemon loop has no mid-turn raw-line routing reading the inbound ref; CLI consumes it). The dispatcher's own openApproval/relayApproval/sweep (timeout/stale discipline) is a TESTED protocol capability NOT wired to the web approval path — approvals ride approval.respond — documented forward-API for a future dedicated follower approval channel. steer no-active-turn drops cleanly (no crash). Proven end-to-end against REAL collaborators."
 purpose: |
   A FOLLOWER (auxiliary client — a second window / web / ide) co-controls ONE live
   thread via timeout-bounded verbs. planFollowerVerb maps each verb onto an EXISTING
@@ -60,4 +60,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: "🟡 live 2nd-client follower-verb transport frame deferred; HARD_DENY relay re-check is LIVE for all approval.respond at the real resolver. steer=inject (no second writer), reconciles the CLI↔web parity self-contradiction."
+notes: "Web 2nd-client steer/interrupt LIVE via followerVerb frame; approval rides approval.respond + LIVE resolver HARD_DENY. set-queue-mode inert on web (no daemon inbound-routing consumer). Dispatcher timeout/stale-relay API (openApproval/relayApproval/sweep) tested but NOT wired to the web approval path = forward-API for a future follower approval channel. steer no-active-turn drops cleanly (regression-guarded). steer=inject (no second writer)."

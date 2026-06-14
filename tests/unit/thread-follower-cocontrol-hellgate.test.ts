@@ -181,9 +181,13 @@ describe("UC3 — relay-approve HARD_DENY re-check (red-on-injection)", () => {
   })
 
   test("guard only re-checks when BOTH resolver+oracle wired (no oracle ⇒ forwards)", () => {
-    // Without the oracle the planner cannot re-check; it forwards (a surface that
-    // never wired the gate). This documents the seam — NOT a bypass, because the
-    // composition root ALWAYS wires the real oracle.
+    // Without the oracle the planner cannot re-check; it forwards. This documents
+    // the seam. NOTE (precise): this planner-level relay guard is NOT the live
+    // web protection — the web daemon builds the dispatcher with `plan: {}` and a
+    // follower approve/deny rides `approval.respond`, where the LIVE HARD_DENY
+    // re-check lives (host resolver, covered by
+    // runtime-approval-harddeny-relay-recheck-hellgate). This guard is the tested
+    // protocol capability for a future dedicated follower approval channel.
     expect(
       planFollowerVerb(
         { kind: "command-approval-decision", approvalId: "danger", decision: "approve" },
@@ -267,6 +271,24 @@ describe("UC4 — STALE-DECISION guard (the headline invariant)", () => {
     t.register({ verbId: "v1", issuedAt: 0, deadlineAt: 100, verb: verb("x") })
     expect(t.sweep(50)).toEqual([])
     expect(t.resolve("v1", 60).kind).toBe("apply")
+  })
+
+  test("a non-finite deadline is REJECTED at register (no never-timeout stale-apply)", () => {
+    const t = new FollowerVerbTracker()
+    expect(t.register({ verbId: "v1", issuedAt: 0, deadlineAt: Number.NaN, verb: verb("x") })).toBe(
+      false,
+    )
+    expect(
+      t.register({
+        verbId: "v2",
+        issuedAt: 0,
+        deadlineAt: Number.POSITIVE_INFINITY,
+        verb: verb("y"),
+      }),
+    ).toBe(false)
+    // Neither was registered ⇒ resolving them is unknown_verb (not a live apply).
+    expect(t.resolve("v1", 1_000_000)).toEqual({ kind: "stale", reason: "unknown_verb" })
+    expect(t.pendingCount()).toBe(0)
   })
 
   test("duplicate register is ignored — cannot reset a deadline", () => {

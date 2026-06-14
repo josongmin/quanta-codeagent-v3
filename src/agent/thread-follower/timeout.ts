@@ -84,6 +84,12 @@ export class FollowerVerbTracker {
     ) {
       return false
     }
+    // Reject a non-finite deadline. `#isPast` treats a non-finite deadline as
+    // "never past" (a fail-safe against a garbage CLOCK), but a verb registered
+    // with `deadlineAt = NaN/Infinity` would then NEVER time out — so an
+    // arbitrarily late response would later apply as fresh (a stale-decision
+    // apply, the opposite of safe). Refuse the registration up front.
+    if (!Number.isFinite(envelope.deadlineAt)) return false
     if (this.#entries.has(envelope.verbId)) return false
     this.#entries.set(envelope.verbId, { envelope, status: "pending" })
     return true

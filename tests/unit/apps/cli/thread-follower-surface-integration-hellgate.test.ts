@@ -12,8 +12,9 @@
  * ([[jun-09-cli-web-parity-plan-and-existing-mechanism]] 🔴): a follower
  * `steer-turn` becomes an INJECTION into the lease holder's running turn — NEVER
  * a second writer. When the turn id has moved on (a new turn started) the steer
- * is REJECTED rather than written into the wrong turn, and with no active turn it
- * degrades cleanly instead of contending on the single-writer lease.
+ * is REJECTED rather than written into the wrong turn. (The no-active-turn case —
+ * a steer is dropped cleanly, never enqueued with an empty turn id — is covered
+ * by thread-follower-dispatch-live-hellgate.)
  */
 import { describe, expect, test } from "bun:test"
 import { decideAction } from "@/agent/conversation-action"

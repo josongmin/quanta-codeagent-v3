@@ -82,6 +82,25 @@ describe("dispatcher FIRE verbs → real conversation-action transport", () => {
     )
   })
 
+  test("steer with NO active turn is DROPPED cleanly (no empty-id enqueue → no loop crash)", () => {
+    // Regression (adversarial audit): a follower steer while the session is idle
+    // must NOT enqueue a `user_message` with an empty expectedTurnId — that would
+    // throw SteerInputInvalidError out of the uncaught pollConversationAction →
+    // decideAction path and crash the session. The surface drops it instead.
+    const surface = createConversationActionSurface()
+    surface.activeTurnRef.current = { currentTurn: null, isInterrupted: false }
+    const sinks: FollowerCoControlSinks = {
+      inject: (t) => surface.pushUserMessage(t),
+      interrupt: (r) => surface.pushCancel(r),
+      setQueueMode: () => {},
+      relayApproval: () => {},
+    }
+    const d = new FollowerCoControlDispatcher({ sinks, plan: {} })
+    expect(d.dispatch({ kind: "steer-turn", text: "while idle" }).kind).toBe("applied")
+    // Nothing enqueued ⇒ the loop never sees a doomed empty-id action.
+    expect(surface.port.next()).toBeUndefined()
+  })
+
   test("UC5 set-queue-mode → mutates the inbound-mode ref", () => {
     const { inbound, d } = wire()
     expect(d.dispatch({ kind: "set-queue-mode", mode: "weave" }).kind).toBe("applied")

@@ -113,15 +113,19 @@ export const createConversationActionSurface = (): ConversationActionSurface => 
     },
     pushUserMessage(input: string): void {
       // §steer — `decideAction`'s `user_message` path delegates to `steer()`,
-      // which MANDATES an `expectedTurnId` (unlike cancel/summarize, whose
-      // optimistic check is opt-in). Capture the LIVE turn id at push time from
-      // the holder we own: if a new turn started before the loop drains this,
-      // the id mismatches and the loop REJECTS (optimistic concurrency) instead
-      // of injecting into the wrong turn. No active turn ⇒ `""` ⇒ steer rejects
-      // `no_active_turn` (never throws). The inbound router only routes weave
-      // here when a turn is active, so the common path carries a real id.
-      const expectedTurnId = activeTurnRef.current.currentTurn?.turnId ?? ""
-      queue.push({ kind: "user_message", input, expectedTurnId })
+      // which MANDATES a NON-EMPTY `expectedTurnId` (it THROWS `SteerInput
+      // InvalidError` on an empty one — a programming-error, not a policy
+      // rejection). A steer can only inject into a LIVE turn, so with NO active
+      // turn there is nothing to target: DROP it. (The inbound-router weave path
+      // never reaches here without a turn, but the DIRECT callers — CLI `/steer`
+      // and the web follower dispatcher — can fire while idle; enqueuing an
+      // empty-id action would throw out of the uncaught `pollConversationAction`
+      // → `decideAction` path and crash the session.) Capture the LIVE turn id:
+      // if a new turn started before the loop drains this, the id mismatches and
+      // the loop REJECTS (optimistic concurrency) instead of a wrong-turn write.
+      const currentTurn = activeTurnRef.current.currentTurn
+      if (currentTurn === null) return
+      queue.push({ kind: "user_message", input, expectedTurnId: currentTurn.turnId })
     },
     pending(): number {
       return queue.length

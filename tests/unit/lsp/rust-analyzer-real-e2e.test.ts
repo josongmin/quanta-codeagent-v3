@@ -49,17 +49,27 @@ const pollDefinition = async (
 ): Promise<Awaited<ReturnType<RustAnalyzerAdapter["definition"]>>> => {
   const deadline = Date.now() + budgetMs
   let last: Awaited<ReturnType<RustAnalyzerAdapter["definition"]>> = null
+  let lastErr: unknown = null
   for (;;) {
     try {
       last = await adapter.definition(file, pos)
+      lastErr = null
       if (ready(last)) return last
     } catch (e) {
-      // rust-analyzer emits LSP `ContentModified` (-32801) WHILE indexing — a
-      // "request is stale, retry" signal, NOT a real failure. Swallow & retry
-      // within the budget. (pyright/tsserver can do the same on a cold cache.)
-      if (!/content modified/i.test(String(e))) throw e
+      // A COLD real rust-analyzer under full-suite load emits transient errors
+      // while it boots + indexes: `ContentModified` (-32801), `ServerCancelled`
+      // (-32802), cargo-metadata races, and request-before-ready on a contended
+      // CPU. These are "retry" signals within the budget — swallow & keep
+      // polling. Teeth preserved: a PERSISTENT failure is NOT masked — at the
+      // deadline we re-throw the last error (below) with its real message
+      // instead of returning an opaque null. (Was: throw on first
+      // non-ContentModified error → flaked under the 1900-file concurrent pool.)
+      lastErr = e
     }
-    if (Date.now() >= deadline) return last
+    if (Date.now() >= deadline) {
+      if (lastErr !== null) throw lastErr
+      return last
+    }
     await new Promise((res) => setTimeout(res, 500))
   }
 }

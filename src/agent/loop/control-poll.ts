@@ -150,12 +150,28 @@ export const pollConversationAction = async (
     })
     return { kind: "none" }
   }
-  const outcome = decideAction(
-    action,
-    cfg.activeTurnRef.current,
-    { maxInputBytes: 64 * 1024 },
-    Date.now(),
-  )
+  // `decideAction` THROWS `SteerInputInvalidError` on a programming-error action
+  // SHAPE (an empty `expectedTurnId`/`reason`/`subagentId`). Today every surface
+  // push pre-validates, but that invariant is spread across 5+ call sites + a raw
+  // `queue.push`; a single future slip would crash the whole session here (this
+  // is the UNCAUGHT loop path). Mirror the `port.next()` guard above + the port
+  // contract ("a programming-error throw at the boundary collapses to no action")
+  // so the bug CLASS is structurally sealed, not just today's known producer.
+  let outcome: ReturnType<typeof decideAction>
+  try {
+    outcome = decideAction(
+      action,
+      cfg.activeTurnRef.current,
+      { maxInputBytes: 64 * 1024 },
+      Date.now(),
+    )
+  } catch (e) {
+    cfg.stream.emit({
+      type: "error",
+      message: `conversationAction decideAction failed: ${errMessage(e)}`,
+    })
+    return { kind: "none" }
+  }
   if (outcome.kind === "rejected") return handleRejectedAction(cfg, action, outcome.reason)
   if (outcome.kind === "accepted_injection") {
     return {
