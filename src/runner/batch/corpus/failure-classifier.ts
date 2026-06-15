@@ -24,6 +24,7 @@ import { getCachePathRe } from "./cache-pathspecs"
  *  exactly one bucket. */
 export type TerminationType =
   | "passed"
+  | "generation_error"
   | "grader_invalid"
   | "harness_error"
   | "hung_stream"
@@ -93,6 +94,7 @@ const computeTermination = (
 ): TerminationType => {
   if (r.passed) return "passed"
   if (r.verdict === "grader_invalid") return "grader_invalid"
+  if (isGenerationError(r.error)) return "generation_error"
   if (r.error !== undefined) return "harness_error"
   if (events === null) return "unknown"
   const end = lastSessionEnd(events)
@@ -103,6 +105,12 @@ const computeTermination = (
   if (reason === "max_turns") return "max_turns_exhausted"
   return "completed_unresolved"
 }
+
+const isGenerationError = (error: string | undefined): boolean =>
+  error !== undefined &&
+  /agent stopped with (?:error|refusal)|LLM stream failed|usage_limit_reached|usage limit|rate[_ -]?limit|429 Too Many Requests/i.test(
+    error,
+  )
 
 /** Collect `b/<path>` from every `diff --git` header in a unified diff. */
 const diffHeaderPaths = (patch: string): string[] => {
@@ -203,7 +211,7 @@ export const classify = (r: InstanceResult): FailureClassification => {
   const events = readTrajectory(r.patchPath)
   const termination = computeTermination(r, events)
   const signals: FailureSignal[] = []
-  if (r.patch.trim() === "") signals.push("empty_patch")
+  if (r.patch.trim() === "" && termination !== "generation_error") signals.push("empty_patch")
   else if (isDirtyCacheLeak(r.patch)) signals.push("dirty_cache_leak")
   if (distinctEditedFiles(r.patch) >= DRIFT_THRESHOLD) signals.push("multi_file_drift")
   if (events !== null) {

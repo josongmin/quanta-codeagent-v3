@@ -152,6 +152,11 @@ describe("classifyOutcome — verdict-driven infra-fail", () => {
     expect(classifyOutcome(result)).toEqual({ kind: "infra-fail", reason: "observation failed" })
   })
 
+  test("verdict=grader_invalid ⇒ infra-fail", () => {
+    const result = mkResult({ verdict: "grader_invalid", error: "gold sanity failed" })
+    expect(classifyOutcome(result)).toEqual({ kind: "infra-fail", reason: "gold sanity failed" })
+  })
+
   test("verdict=env_prep_failed without error ⇒ uses verdict as reason", () => {
     const result = mkResult({ verdict: "env_prep_failed" })
     const out = classifyOutcome(result)
@@ -161,6 +166,18 @@ describe("classifyOutcome — verdict-driven infra-fail", () => {
 })
 
 describe("classifyOutcome — empty-patch", () => {
+  test("agent/provider generation failure with empty patch ⇒ generation-fail, not empty-patch", () => {
+    const result = mkResult({
+      patch: "",
+      passed: false,
+      error:
+        "LLM stream failed after retries: chatgpt-oauth responses request failed: 429 Too Many Requests — usage_limit_reached",
+    })
+    const out = classifyOutcome(result)
+    expect(out.kind).toBe("generation-fail")
+    if (out.kind === "generation-fail") expect(out.reason).toContain("usage_limit_reached")
+  })
+
   test("error contains 'empty prediction' ⇒ empty-patch", () => {
     const result = mkResult({ error: "agent emitted empty prediction" })
     const out = classifyOutcome(result)
@@ -326,6 +343,20 @@ describe("runRetryLoop — orchestrator", () => {
     expect(loop.outcomes[0]?.kind).toBe("empty-patch")
     expect(loop.outcomes[1]?.kind).toBe("pass")
     expect(result.passed).toBe(true)
+  })
+
+  test("generation-fail on first attempt ⇒ default policy stops without retry", async () => {
+    let calls = 0
+    const { loop } = await runRetryLoop(async () => {
+      calls += 1
+      return mkResult({
+        patch: "",
+        error: "agent stopped with error before verification: usage_limit_reached",
+      })
+    }, 3)
+    expect(calls).toBe(1)
+    expect(loop.attempts).toBe(1)
+    expect(loop.outcomes[0]?.kind).toBe("generation-fail")
   })
 
   test("3 consecutive empty-patch, max=3 ⇒ exhausts and stops", async () => {

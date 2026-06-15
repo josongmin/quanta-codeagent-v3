@@ -186,9 +186,8 @@ export interface MetricsArtifact {
   snapshot: ReturnType<Metrics["snapshot"]>
 }
 
-const verdictOf = (
-  r: InstanceResult,
-): "ok" | "degraded" | "env_prep_failed" | "grader_invalid" => r.verdict ?? "ok"
+const verdictOf = (r: InstanceResult): "ok" | "degraded" | "env_prep_failed" | "grader_invalid" =>
+  r.verdict ?? "ok"
 
 /**
  * C8 — THE single operator-visible denominator (ADR-0010 strict→degraded).

@@ -55,6 +55,18 @@ describe("classify — termination axis", () => {
     expect(classify(r)).toEqual({ termination: "passed", signals: [] })
   })
 
+  test("verdict=grader_invalid → termination:grader_invalid", () => {
+    const r: InstanceResult = {
+      id: "x",
+      passed: false,
+      patch: "",
+      turns: 0,
+      verdict: "grader_invalid",
+      error: "gold sanity failed",
+    }
+    expect(classify(r).termination).toBe("grader_invalid")
+  })
+
   test("InstanceResult.error set → harness_error (no trajectory read needed)", () => {
     const r: InstanceResult = {
       id: "x",
@@ -64,6 +76,20 @@ describe("classify — termination axis", () => {
       error: "setup failed (code 1): /bin/sh: bad command",
     }
     expect(classify(r).termination).toBe("harness_error")
+  })
+
+  test("provider generation error → generation_error, not empty_patch", () => {
+    const r: InstanceResult = {
+      id: "x",
+      passed: false,
+      patch: "",
+      turns: 0,
+      error:
+        "LLM stream failed after retries: chatgpt-oauth responses request failed: 429 Too Many Requests — usage_limit_reached",
+    }
+    const c = classify(r)
+    expect(c.termination).toBe("generation_error")
+    expect(c.signals).not.toContain("empty_patch")
   })
 
   test("session_end aborted + turns=0 → hung_stream", () => {

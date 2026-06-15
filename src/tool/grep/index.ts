@@ -112,9 +112,7 @@ export const grepTool = defineTool<Input>({
             type: "result",
             result: {
               ok: false,
-              output:
-                "grep path must name one existing file or directory; " +
-                `received: ${input.path}`,
+              output: `grep path must name one existing file or directory; received: ${input.path}`,
             },
           }
           return

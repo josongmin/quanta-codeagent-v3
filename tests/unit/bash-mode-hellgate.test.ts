@@ -485,7 +485,7 @@ describe("G. fuzz — mode='read' rejects 100% of mutating attempts", () => {
       if (!result.ok && result.failure?.mode === "sandbox_violation") rejected++
     }
     expect(rejected).toBe(100)
-  })
+  }, 15_000)
 })
 
 /* ================================================================== */

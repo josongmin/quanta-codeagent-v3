@@ -18,9 +18,14 @@ const applyGoldPatch = async (
   const patch = instance.goldPatch
   if (patch === undefined || patch === "") return { ok: true }
   await Bun.write(join(sandbox, GOLD_PATCH_FILE), patch)
-  const applied = await exec(`git apply --whitespace=nowarn ${GOLD_PATCH_FILE}`, sandbox, timeoutMs, {
-    ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
-  })
+  const applied = await exec(
+    `git apply --whitespace=nowarn ${GOLD_PATCH_FILE}`,
+    sandbox,
+    timeoutMs,
+    {
+      ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+    },
+  )
   if (applied.code === 0) return { ok: true }
   return {
     ok: false,

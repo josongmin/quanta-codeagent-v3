@@ -84,8 +84,7 @@ export const compileSeatbeltProfile = (
   // Writes: read-only skips workspace writes but still honors explicit scoped
   // extraWritePaths, used for caller-owned scratch dirs such as TMPDIR.
   if (policy.profile !== "read-only" || extraWrites.length > 0) {
-    const writeSubpaths: string[] =
-      policy.profile !== "read-only" ? [`(subpath "${escWs}")`] : []
+    const writeSubpaths: string[] = policy.profile !== "read-only" ? [`(subpath "${escWs}")`] : []
     for (const p of extraWrites) {
       const escaped = escapeSbpl(p)
       writeSubpaths.push(`(literal "${escaped}")`, `(subpath "${escaped}")`)

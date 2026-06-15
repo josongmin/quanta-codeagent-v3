@@ -3,11 +3,13 @@ import { chmodSync, mkdtempSync, rmSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runEnvPrep, verify } from "@/apps/bench/eval"
+import { runInstance } from "@/apps/bench/eval"
 import { buildConfig } from "@/apps/bench/eval/driver"
+import { runEnvPrep } from "@/apps/bench/eval/env-prep"
+import { verify } from "@/apps/bench/eval/verdict"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
 import type { Instance } from "@/runner/batch/types"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 
 class NoopLLM implements LLMPort {
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
@@ -91,5 +93,35 @@ describe("bench localEnv + gold sanity", () => {
     const out = await validateGoldPatch(instance, { timeoutMs: 30000 })
     expect(out.ok).toBe(false)
     if (!out.ok) expect(out.error).toContain("gold patch did not resolve")
+  })
+
+  test("runInstance marks failed reference validation as grader_invalid", async () => {
+    await writeFile(join(dir, "answer.txt"), "bad\n", "utf8")
+    const badGold = [
+      "diff --git a/answer.txt b/answer.txt",
+      "--- a/answer.txt",
+      "+++ b/answer.txt",
+      "@@ -1 +1 @@",
+      "-bad",
+      "+still-bad",
+      "",
+    ].join("\n")
+    const instance: Instance = {
+      id: "bad-gold-run",
+      repoPath: dir,
+      problemStatement: "noop",
+      testCmd: 'test "$(cat answer.txt)" = good',
+      goldPatch: badGold,
+    }
+
+    const out = await runInstance(instance, {
+      llm: new NoopLLM(),
+      maxTurns: 1,
+      timeoutMs: 30000,
+      goldSanity: { mode: "on-fail" },
+    })
+    expect(out.passed).toBe(false)
+    expect(out.verdict).toBe("grader_invalid")
+    expect(out.error).toContain("gold patch did not resolve")
   })
 })

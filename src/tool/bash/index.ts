@@ -13,7 +13,6 @@ import {
   renderStaleReminder,
   staleAfterBash,
 } from "../stale-read-guard"
-import { lowerSimpleHereDocForReadMode } from "./heredoc-lowering"
 import type {
   HITLTier,
   SandboxViolationReason,
@@ -24,6 +23,7 @@ import type {
   ToolResultEvidence,
 } from "../types"
 import { resolveBashCwd } from "../worktree/cwd-override"
+import { lowerSimpleHereDocForReadMode } from "./heredoc-lowering"
 import { getBashPerCallSandboxFactory } from "./per-call-factory"
 import { getBashSandboxEscalationHandler } from "./sandbox-escalation-wire"
 
@@ -455,6 +455,41 @@ const buildBackgroundResult = (
   return gen()
 }
 
+const buildReadModeBackgroundUnsupportedResult = (): ToolEvent => ({
+  type: "result",
+  result: {
+    ok: false,
+    output: "[sandbox unavailable]\nread-mode-background-unsupported",
+    failure: {
+      mode: "sandbox_unavailable",
+      reason: "read-mode-background-unsupported",
+    },
+  },
+})
+
+const buildTimeoutBackgroundResult = (
+  input: Input,
+  mode: "read" | "write",
+  cmd: string,
+  shown: string,
+  ctx: ToolContext,
+  cwd: string,
+): AsyncIterable<ToolEvent> => {
+  if (mode === "read") {
+    return (async function* (): AsyncGenerator<ToolEvent> {
+      yield buildReadModeBackgroundUnsupportedResult()
+    })()
+  }
+  return buildBackgroundResult(
+    getBashBgRegistry(),
+    cmd,
+    shown,
+    input.timeout_ms ?? DEFAULT_BG_TIMEOUT_MS,
+    ctx.signal,
+    cwd,
+  )
+}
+
 /** RFC jun-6 — the shell result shape `maybeEscalate` consumes/returns (a
  *  structural subset of `ShellResult`, kept local so this slice never imports
  *  `@/runtime/types`). */
@@ -641,28 +676,7 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // delegate to the bg-registry path. The default `"kill"` falls through to
   // the legacy `runShell` branch BYTE-IDENTICALLY.
   if (input.timeout_behavior === "background") {
-    if (mode === "read") {
-      yield {
-        type: "result",
-        result: {
-          ok: false,
-          output: "[sandbox unavailable]\nread-mode-background-unsupported",
-          failure: {
-            mode: "sandbox_unavailable",
-            reason: "read-mode-background-unsupported",
-          },
-        },
-      }
-      return
-    }
-    yield* buildBackgroundResult(
-      getBashBgRegistry(),
-      cmd,
-      shown,
-      input.timeout_ms ?? DEFAULT_BG_TIMEOUT_MS,
-      ctx.signal,
-      effectiveCwd,
-    )
+    yield* buildTimeoutBackgroundResult(input, mode, cmd, shown, ctx, effectiveCwd)
     return
   }
 

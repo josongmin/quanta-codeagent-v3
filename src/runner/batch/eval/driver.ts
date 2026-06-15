@@ -35,6 +35,7 @@ import {
   type ReproTestSelection,
   type ReproWriteFilePort,
   runAgent,
+  type StopReason,
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
@@ -829,6 +830,9 @@ export const composeWithReproHint = (
   return `${reproHint}\n\n${baseText}`
 }
 
+const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
+  instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -928,7 +932,7 @@ export const buildConfig = (
       messages,
       system: buildSystemPrompt(sandbox),
       cwd: sandbox,
-      ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+      ...localEnvSlotOf(instance),
       maxTurns: deps.maxTurns,
       signal,
       onConfirm: async () => false,
@@ -963,6 +967,8 @@ export const buildConfig = (
 interface Phase {
   patch: string
   turns: number
+  stopReason?: StopReason
+  agentError?: string
 }
 
 /**
@@ -976,6 +982,7 @@ interface Phase {
  */
 class LastVerifyCmdTap implements StreamPort {
   lastVerifyCmd: string | undefined
+  lastErrorMessage: string | undefined
   constructor(private readonly downstream: StreamPort) {}
   emit(event: AgentEvent): void {
     if (event.type === "tool_call") {
@@ -991,6 +998,8 @@ class LastVerifyCmdTap implements StreamPort {
         // validator falls back to reproPath / degenerate when cmd is unset).
         this.lastVerifyCmd = "test_runner"
       }
+    } else if (event.type === "error") {
+      this.lastErrorMessage = event.message
     }
     this.downstream.emit(event)
   }
@@ -1098,32 +1107,33 @@ const runAgentPhase = async (
   reproHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
+  let stopReason: StopReason | undefined
+  let agentError: string | undefined
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
+      const tap = new LastVerifyCmdTap(w.stream)
       // Knob telemetry: emit once per phase entry (matches the contract
       // documented on `emitKnobsApplied`). The single-pass path bypasses
       // `runAgentOnce`, so the emit lives here directly.
-      emitKnobsApplied(w.stream, process.env)
+      emitKnobsApplied(tap, process.env)
       const outcome = await runAgent(
-        buildConfig(
-          instance,
-          deps,
-          sandbox,
-          signal,
-          w.stream,
-          undefined,
-          precomputedHint,
-          reproHint,
-        ),
+        buildConfig(instance, deps, sandbox, signal, tap, undefined, precomputedHint, reproHint),
       )
       turns = outcome.turns
+      stopReason = outcome.reason
+      agentError = tap.lastErrorMessage
     },
   )
-  return { patch, turns }
+  return {
+    patch,
+    turns,
+    ...(stopReason !== undefined ? { stopReason } : {}),
+    ...(agentError !== undefined ? { agentError } : {}),
+  }
 }
 
 /**
@@ -1201,12 +1211,51 @@ const reproResultExtra = (
   reproTest: BenchReproTestTelemetry | undefined,
 ): Partial<InstanceResult> => (reproTest === undefined ? {} : { reproTest })
 
-const shouldValidateGold = (
-  deps: RunInstanceDeps,
-  agentPassed: boolean,
-): boolean =>
-  deps.goldSanity !== undefined &&
-  (deps.goldSanity.mode === "always" || agentPassed === false)
+const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolean =>
+  deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
+
+const agentPhaseError = (phase: Phase): string | undefined => {
+  if (phase.stopReason === "error") {
+    return phase.agentError ?? "agent stopped with error before verification"
+  }
+  if (phase.stopReason === "refusal") return "agent stopped with refusal before verification"
+  if (phase.stopReason === "budget_exhausted") {
+    return "agent exhausted token budget before verification"
+  }
+  return undefined
+}
+
+const generationFailureResult = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly generationError: string
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly deps: RunInstanceDeps
+  readonly wiring: Wiring
+  readonly startedAt: number
+}): InstanceResult => {
+  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  if (args.deps.observe && args.wiring.observer) {
+    extra.verdict = "ok"
+    extra.durationMs = Date.now() - args.startedAt
+    extra.patchPath = emitPatch(
+      args.deps.observe,
+      args.instance,
+      args.wiring.observer,
+      args.phase.patch,
+    )
+    const usage = args.wiring.usage?.total()
+    if (usage) extra.usage = usage
+  }
+  return {
+    id: args.instance.id,
+    passed: false,
+    patch: args.phase.patch,
+    turns: args.phase.turns,
+    error: args.generationError,
+    ...extra,
+  }
+}
 
 /**
  * Run one instance once: sandbox → (setup) → agent → verify → diff. Always
@@ -1298,6 +1347,18 @@ export const runInstanceOnce = async (
             reproHint,
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
+    const generationError = agentPhaseError(phase)
+    if (generationError !== undefined) {
+      return generationFailureResult({
+        instance,
+        phase,
+        generationError,
+        reproTest,
+        deps,
+        wiring: w,
+        startedAt,
+      })
+    }
     // T01 (audit L5 H-5): thread the per-instance deadline signal into verify so
     // the official harness grading + its transient-crash retry sleep stop when
     // the instance deadline fires instead of cascading into the next instance.
@@ -1358,6 +1419,7 @@ export const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
       ? { kind: "empty-patch", reason: o.reason }
       : { kind: "empty-patch" }
   }
+  if (o.kind === "generation-fail") return { kind: "generation-fail", reason: o.reason }
   if (o.kind === "timeout") return { kind: "timeout" }
   if (o.kind === "real-fail") return { kind: "real-fail", subkind: o.subkind }
   return { kind: "infra-fail", reason: o.reason }

@@ -11,10 +11,17 @@ import { z } from "zod"
 import { applyLocalEnv, DEFAULT_ENV_ALLOWLIST, scrubEnv } from "@/runtime"
 import { errMessage } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
-import { detectToolchain } from "./detect"
-import { parseCargo, parseCtest, parseGoJson, parseNodeTest, parsePytest, parsePythonUnittest } from "./parse"
-import type { TestRunResult, Toolchain } from "./types"
 import type { Tool, ToolContext, ToolEvent } from "../types"
+import { detectToolchain } from "./detect"
+import {
+  parseCargo,
+  parseCtest,
+  parseGoJson,
+  parseNodeTest,
+  parsePytest,
+  parsePythonUnittest,
+} from "./parse"
+import type { TestRunResult, Toolchain } from "./types"
 
 /** Process carrier (injectable so the parsers/dispatch are unit-testable without
  *  spawning; the real port uses Bun.spawn). */
@@ -33,7 +40,10 @@ const MAX_STREAM_BYTES = 8 * 1024 * 1024 // 8 MiB
 
 /** Read a stream up to a byte cap, then stop pulling (the child's writes block
  *  / are dropped — we already have enough to parse the verdict + failures). */
-const readCapped = async (stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<string> => {
+const readCapped = async (
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<string> => {
   const reader = stream.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
@@ -78,8 +88,14 @@ export const defaultTestRunPort: TestRunPort = {
 }
 
 const schema = z.object({
-  cwd: z.string().optional().describe("Project root (defaults to the session cwd). Detection reads its marker files."),
-  command: z.array(z.string()).optional().describe("Override the detected test command (argv). Output is parsed generically."),
+  cwd: z
+    .string()
+    .optional()
+    .describe("Project root (defaults to the session cwd). Detection reads its marker files."),
+  command: z
+    .array(z.string())
+    .optional()
+    .describe("Override the detected test command (argv). Output is parsed generically."),
 })
 type Input = z.infer<typeof schema>
 
@@ -90,7 +106,12 @@ const err = (output: string): ToolEvent => ({
 
 /** Apply the toolchain's parser to the combined output. unittest writes to
  *  STDERR, go/cargo mostly to STDOUT — so parsers see both. */
-const parseFor = (tc: Toolchain, stdout: string, stderr: string, exitCode: number): TestRunResult => {
+const parseFor = (
+  tc: Toolchain,
+  stdout: string,
+  stderr: string,
+  exitCode: number,
+): TestRunResult => {
   const combined = `${stdout}\n${stderr}`
   let r: TestRunResult
   switch (tc.parser) {
@@ -114,7 +135,12 @@ const parseFor = (tc: Toolchain, stdout: string, stderr: string, exitCode: numbe
       break
     default:
       // generic: no structured parse — exit code is the only verdict.
-      r = { runner: "generic", passed: 0, failed: exitCode === 0 ? [] : [{ name: "(suite failed — see output)" }], ok: exitCode === 0 }
+      r = {
+        runner: "generic",
+        passed: 0,
+        failed: exitCode === 0 ? [] : [{ name: "(suite failed — see output)" }],
+        ok: exitCode === 0,
+      }
   }
   // FALSE-GREEN SAFETY NET (adversarial-audit): a NON-ZERO exit with no parsed
   // failures means the suite failed for a reason the parser didn't model (a
@@ -140,7 +166,12 @@ export const runToolchain = async (
     const { stdout, stderr, exitCode } = await port.run(tc.command, cwd, signal, localEnv)
     return parseFor(tc, stdout, stderr, exitCode)
   } catch {
-    return { runner: tc.parser, passed: 0, failed: [{ name: "(test run faulted — see logs)" }], ok: false }
+    return {
+      runner: tc.parser,
+      passed: 0,
+      failed: [{ name: "(test run faulted — see logs)" }],
+      ok: false,
+    }
   }
 }
 
@@ -230,7 +261,9 @@ export const makeRunTestsTool = (deps: RunTestsDeps = {}): Tool<Input> => {
         toolchain = await detectToolchain(cwd, existsPort).catch(() => null)
       }
       if (toolchain === null) {
-        yield err("run_tests: no recognized test toolchain (looked for Cargo.toml / go.mod / pyproject.toml / setup.py / package.json). Pass `command` to run an explicit suite.")
+        yield err(
+          "run_tests: no recognized test toolchain (looked for Cargo.toml / go.mod / pyproject.toml / setup.py / package.json). Pass `command` to run an explicit suite.",
+        )
         return
       }
       try {

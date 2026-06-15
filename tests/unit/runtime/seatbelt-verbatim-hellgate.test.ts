@@ -47,10 +47,13 @@ describe("ADR-0199 — Seatbelt verbatim parity (HELL-SB-01..04, 10)", () => {
   })
 
   test("HELL-SB-02c: read-only honors explicit scoped extraWritePaths only", () => {
-    const out = compileSeatbeltProfile({
-      profile: "read-only",
-      extraWritePaths: ["/var/quanta-scope"],
-    }, WS) as string
+    const out = compileSeatbeltProfile(
+      {
+        profile: "read-only",
+        extraWritePaths: ["/var/quanta-scope"],
+      },
+      WS,
+    ) as string
     expect(out.includes('(subpath "/ws")')).toBe(false)
     expect(
       out.includes(
@@ -60,10 +63,13 @@ describe("ADR-0199 — Seatbelt verbatim parity (HELL-SB-01..04, 10)", () => {
   })
 
   test("HELL-SB-02d: /tmp extraWritePaths include the /private/tmp Seatbelt alias", () => {
-    const out = compileSeatbeltProfile({
-      profile: "read-only",
-      extraWritePaths: ["/tmp/quanta-scope"],
-    }, WS) as string
+    const out = compileSeatbeltProfile(
+      {
+        profile: "read-only",
+        extraWritePaths: ["/tmp/quanta-scope"],
+      },
+      WS,
+    ) as string
     const writeLine = out.split("\n").find((l) => l.startsWith("(allow file-write*"))
     expect(writeLine).toContain('(literal "/tmp/quanta-scope")')
     expect(writeLine).toContain('(subpath "/tmp/quanta-scope")')

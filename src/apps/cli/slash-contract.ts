@@ -212,6 +212,11 @@ export interface SlashContext {
    *  the rest of the presence-gated panels). The wire maps `TaskRecord`
    *  → {@link AgentFleetRow}; this slot never imports `@/subagent` VALUES. */
   readonly agents?: (() => readonly AgentFleetRow[]) | undefined
+  /** jun-15 P0-b `/activity` — the session Activity Spine store. The SAME
+   *  instance the loop's `run_workflow` writes its live run into, so `/activity`
+   *  shows workflows + agents + daemons in one tree. Absent ⇒ ephemeral
+   *  fleet-only view. Duck-typed so this contract never imports activity VALUES. */
+  readonly activityStore?: import("@/activity").ActivityStore | undefined
   /** ADR-0231 `/radar` — the radar proposal-queue store. The SAME instance the
    *  agent loop's producer hook writes to (`AgentConfig.radar.store`), threaded
    *  by surface-compose ONLY when `QUANTA_RADAR` is on so list/adopt/dismiss/

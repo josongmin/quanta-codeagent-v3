@@ -1171,6 +1171,10 @@ export const composeSurfaceWires = (
     // Ticket 17 `/agents` — thread the session's lifecycle subagent registry
     // (already in hand for the lifecycle pills) so `/agents` reads live tasks.
     taskRegistry: setup.lifecycleTaskRegistry,
+    // jun-15 P0-b `/activity` — the SAME Activity Spine store `run_workflow`
+    // writes its live run into (threaded onto the subagent config via
+    // buildTooling), so the slash view and the loop share ONE spine.
+    activityStore: setup.lifecycleActivityStore,
     // ADR-0231 — `/radar` live store: the SAME instance wired into
     // `AgentConfig.radar.store` above, so the slash surface and the loop's
     // producer hook share ONE queue. Absent ⇒ slot omitted ⇒ "not wired".

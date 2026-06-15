@@ -258,21 +258,24 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   return `uvx --quiet --python ${py} --with pytest --with-editable . pytest -x --no-header ${parts.join(" ")}`
 }
 
-export const toInstance = (task: SwebenchTask, repoPath: string): Instance => ({
-  id: task.instanceId,
-  repoPath,
-  problemStatement: task.problemStatement,
-  testCmd: synthesizeTestCmd(task.raw),
-  ...(str(task.raw.patch) !== undefined ? { goldPatch: str(task.raw.patch) } : {}),
-  swebench: {
-    instanceId: task.instanceId,
-    repo: task.repo,
-    baseCommit: task.baseCommit,
-    ...(task.environmentSetupCommit !== undefined
-      ? { environmentSetupCommit: task.environmentSetupCommit }
-      : {}),
-  },
-})
+export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
+  const goldPatch = str(task.raw.patch)
+  return {
+    id: task.instanceId,
+    repoPath,
+    problemStatement: task.problemStatement,
+    testCmd: synthesizeTestCmd(task.raw),
+    ...(goldPatch !== undefined ? { goldPatch } : {}),
+    swebench: {
+      instanceId: task.instanceId,
+      repo: task.repo,
+      baseCommit: task.baseCommit,
+      ...(task.environmentSetupCommit !== undefined
+        ? { environmentSetupCommit: task.environmentSetupCommit }
+        : {}),
+    },
+  }
+}
 
 /** One official SWE-bench prediction row (exact shape consumed by
  *  `swebench.harness.run_evaluation`). */

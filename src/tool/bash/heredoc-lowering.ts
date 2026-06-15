@@ -11,7 +11,7 @@ interface HereDocHeader {
 
 const unchanged = (command: string): HereDocLowering => ({ command, lowered: false })
 
-const shellSingleQuote = (value: string): string => `'${value.replace(/'/g, `'\"'\"'`)}'`
+const shellSingleQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`
 
 const parseQuotedDelimiter = (
   line: string,
@@ -51,47 +51,56 @@ const parseDelimiter = (
   return parseUnquotedDelimiter(line, start)
 }
 
-const parseHeader = (line: string): HereDocHeader | undefined => {
+interface ScanState {
+  readonly index: number
+  readonly quote: "'" | '"' | undefined
+  readonly outside: boolean
+}
+
+const scanShellChar = (line: string, index: number, quote: "'" | '"' | undefined): ScanState => {
+  const ch = line[index]
+  if (quote === "'") return { index, quote: ch === "'" ? undefined : quote, outside: false }
+  if (quote === '"') {
+    if (ch === "\\" && index + 1 < line.length) return { index: index + 1, quote, outside: false }
+    return { index, quote: ch === '"' ? undefined : quote, outside: false }
+  }
+  if (ch === "\\" && index + 1 < line.length) {
+    return { index: index + 1, quote: undefined, outside: false }
+  }
+  if (ch === "'" || ch === '"') return { index, quote: ch, outside: false }
+  return { index, quote: undefined, outside: true }
+}
+
+const findHereDocOperator = (
+  line: string,
+): { readonly index: number; readonly stripTabs: boolean } | undefined => {
   let quote: "'" | '"' | undefined
   for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i]
-
-    if (quote === "'") {
-      if (ch === "'") quote = undefined
-      continue
+    const scan = scanShellChar(line, i, quote)
+    quote = scan.quote
+    i = scan.index
+    if (!scan.outside) continue
+    if (line[i] === "<" && line[i + 1] === "<" && line[i + 2] !== "<") {
+      return { index: i, stripTabs: line[i + 2] === "-" }
     }
-    if (quote === '"') {
-      if (ch === "\\" && i + 1 < line.length) {
-        i += 1
-        continue
-      }
-      if (ch === '"') quote = undefined
-      continue
-    }
-
-    if (ch === "\\" && i + 1 < line.length) {
-      i += 1
-      continue
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch
-      continue
-    }
-    if (ch !== "<" || line[i + 1] !== "<" || line[i + 2] === "<") continue
-
-    const stripTabs = line[i + 2] === "-"
-    let cursor = i + (stripTabs ? 3 : 2)
-    while (cursor < line.length && /\s/.test(line[cursor] ?? "")) cursor += 1
-
-    const delimiter = parseDelimiter(line, cursor)
-    if (delimiter === undefined || delimiter.value.length === 0) return undefined
-    if (line.slice(delimiter.end).trim().length > 0) return undefined
-
-    const prefix = line.slice(0, i).trimEnd()
-    if (prefix.length === 0) return undefined
-    return { prefix, delimiter: delimiter.value, stripTabs }
   }
   return undefined
+}
+
+const parseHeader = (line: string): HereDocHeader | undefined => {
+  const operator = findHereDocOperator(line)
+  if (operator === undefined) return undefined
+
+  let cursor = operator.index + (operator.stripTabs ? 3 : 2)
+  while (cursor < line.length && /\s/.test(line[cursor] ?? "")) cursor += 1
+
+  const delimiter = parseDelimiter(line, cursor)
+  if (delimiter === undefined || delimiter.value.length === 0) return undefined
+  if (line.slice(delimiter.end).trim().length > 0) return undefined
+
+  const prefix = line.slice(0, operator.index).trimEnd()
+  if (prefix.length === 0) return undefined
+  return { prefix, delimiter: delimiter.value, stripTabs: operator.stripTabs }
 }
 
 const bodyLineFor = (line: string, stripTabs: boolean): string =>

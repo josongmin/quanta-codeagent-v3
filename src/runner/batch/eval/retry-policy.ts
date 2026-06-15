@@ -43,6 +43,10 @@ import type { InstanceResult } from "../types"
 /**
  * Closed enum of possible per-attempt outcomes, ranked by retry intent:
  *   - `pass`         — agent succeeded. Stop (success).
+ *   - `generation-fail` — the agent loop itself stopped with a provider/model
+ *                      error before producing a candidate patch. Stop by
+ *                      default; quota/rate-limit errors are not improved by
+ *                      immediate bench retries.
  *   - `empty-patch`  — agent never produced a diff. Almost always an LLM /
  *                      provider problem (rate limit, OAuth drop, stream
  *                      error caught by the LLM port). Retry is safe.
@@ -64,6 +68,7 @@ import type { InstanceResult } from "../types"
 export type AttemptOutcome =
   | { readonly kind: "pass" }
   | { readonly kind: "empty-patch"; readonly reason?: string }
+  | { readonly kind: "generation-fail"; readonly reason: string }
   | { readonly kind: "timeout" }
   | {
       readonly kind: "real-fail"
@@ -84,6 +89,7 @@ export interface RetryPolicy {
 /**
  * The bench's frozen default policy:
  *   - empty-patch  ⇒ retry (LLM/API transient)
+ *   - generation-fail ⇒ DO NOT retry (provider quota/rate-limit waste guard)
  *   - infra-fail   ⇒ retry (harness transient)
  *   - timeout      ⇒ DO NOT retry (ambiguous; budget already exhausted)
  *   - real-fail    ⇒ DO NOT retry (model signal — measurement integrity)
@@ -105,7 +111,9 @@ export const DEFAULT_POLICY: RetryPolicy = {
     if (outcome.kind === "infra-fail") {
       return { reason: outcome.reason }
     }
-    // timeout: ambiguous — default is NO retry. real-fail / pass: terminal.
+    // generation-fail: usually quota/rate-limit or model refusal; immediate
+    // retries waste budget. timeout: ambiguous — default is NO retry.
+    // real-fail / pass: terminal.
     return undefined
   },
 }
@@ -119,14 +127,15 @@ export const DEFAULT_POLICY: RetryPolicy = {
  *   2. `result.verdict === "env_prep_failed"`          ⇒ infra-fail (T4)
  *   3. `result.verdict === "degraded"`                 ⇒ infra-fail (recorder)
  *   4. `result.verdict === "grader_invalid"`           ⇒ infra-fail
- *   4. `error` contains "empty prediction"             ⇒ empty-patch
- *   5. `error` contains "no patch produced"            ⇒ empty-patch
- *   6. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
- *   7. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
- *   8. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
- *   9. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
- *  10. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
- *  11. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
+ *   4. `error` matches provider/model generation failure ⇒ generation-fail
+ *   5. `error` contains "empty prediction"             ⇒ empty-patch
+ *   6. `error` contains "no patch produced"            ⇒ empty-patch
+ *   7. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
+ *   8. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
+ *   9. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
+ *  10. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
+ *  11. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
+ *  12. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
  *
  * The classifier is pure; the bench driver may call it AFTER `runInstance`
  * to decide whether to loop.
@@ -152,6 +161,13 @@ const classifyByVerdict = (result: InstanceResult): AttemptOutcome | undefined =
  *  `classifyOutcome` to keep complexity under the biome cap. */
 const classifyByErrorString = (err: string): AttemptOutcome | undefined => {
   if (err === "") return undefined
+  if (
+    /agent stopped with (?:error|refusal)|LLM stream failed|usage_limit_reached|usage limit|rate[_ -]?limit|429 Too Many Requests/i.test(
+      err,
+    )
+  ) {
+    return { kind: "generation-fail", reason: err }
+  }
   if (err.includes("empty prediction") || err.includes("no patch produced")) {
     return { kind: "empty-patch", reason: err }
   }

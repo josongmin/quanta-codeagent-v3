@@ -126,6 +126,7 @@ export interface InstanceResult {
 export type BenchAttemptOutcome =
   | { kind: "pass" }
   | { kind: "empty-patch"; reason?: string }
+  | { kind: "generation-fail"; reason: string }
   | { kind: "timeout" }
   | {
       kind: "real-fail"

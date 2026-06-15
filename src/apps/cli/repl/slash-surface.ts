@@ -160,6 +160,9 @@ export type ReplSlashCtx = Partial<{
    *  the panel reflects the CURRENT registry. Absent ⇒ `/agents` prints "not
    *  wired in this surface". */
   agents: () => readonly import("../agents-fleet-panel").AgentFleetRow[]
+  /** jun-15 P0-b `/activity` — the session Activity Spine store (shared with the
+   *  loop's `run_workflow` writer). Absent ⇒ ephemeral fleet-only view. */
+  activityStore: import("@/activity").ActivityStore
   /** ADR-0231 `/radar` — the live radar proposal-queue store (SAME instance the
    *  loop's producer hook writes). Absent ⇒ `/radar` prints "not wired". */
   radar: import("@/radar").RadarStore
@@ -181,6 +184,10 @@ export interface BuildReplSlashCtxArgs {
    *  ctx slot is omitted and `/agents` prints "not wired" (default-OFF
    *  byte-identical). Optional so existing call sites/tests need no change. */
   taskRegistry?: import("@/subagent").TaskRegistry | undefined
+  /** jun-15 P0-b `/activity` — session Activity Spine store (shared with the
+   *  loop's `run_workflow` writer). Absent ⇒ `/activity` falls back to an
+   *  ephemeral fleet-only view. */
+  activityStore?: import("@/activity").ActivityStore | undefined
   /** ADR-0231 `/radar` — the gated radar proposal-queue store. Surface-compose
    *  threads the SAME instance it wires into `AgentConfig.radar.store` ONLY when
    *  `QUANTA_RADAR` is on; absent/omitted ⇒ the `radar` ctx slot is omitted and
@@ -454,6 +461,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     brief,
     contextUsage,
     taskRegistry,
+    activityStore,
     radar,
     radarPruneOlderThanMs,
   } = args
@@ -508,6 +516,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
       : {}),
     // ADR-0231 — `/radar` live store + prune cutoff. Absent store ⇒ slot
     // omitted ⇒ `/radar` "not wired" (default-OFF byte-identical).
+    ...(activityStore !== undefined ? { activityStore } : {}),
     ...(radar !== undefined ? { radar } : {}),
     ...(radarPruneOlderThanMs !== undefined ? { radarPruneOlderThanMs } : {}),
     // ADR-0291 — 8 new slots; each gated by presence so omitting an
@@ -540,6 +549,7 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.brief !== undefined ? { brief: s.brief } : {}),
   ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
   ...(s.agents !== undefined ? { agents: s.agents } : {}),
+  ...(s.activityStore !== undefined ? { activityStore: s.activityStore } : {}),
   ...(s.radar !== undefined ? { radar: s.radar } : {}),
   ...(s.radarPruneOlderThanMs !== undefined
     ? { radarPruneOlderThanMs: s.radarPruneOlderThanMs }

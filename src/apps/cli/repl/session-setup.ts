@@ -137,6 +137,9 @@ export interface SessionSetupResult {
   readonly searchPipelineDispose: Tooling["searchPipelineDispose"]
   readonly lifecyclePills: LifecyclePills
   readonly lifecycleTaskRegistry: TaskRegistry | undefined
+  /** jun-15 P0-b — session Activity Spine store; `/activity` reads it +
+   *  `run_workflow` writes its live run into the SAME instance. */
+  readonly lifecycleActivityStore: import("@/activity").ActivityStore
   readonly lifecycleFollowUpQueue: FollowUpQueue | undefined
   readonly sessionId: string
   readonly history: readonly Message[]
@@ -347,6 +350,7 @@ export const setupSession = async (
     searchPipelineDispose: boot.tooling.searchPipelineDispose,
     lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,
+    lifecycleActivityStore: boot.lifecycleActivityStore,
     lifecycleFollowUpQueue: boot.lifecycleFollowUpQueue,
     sessionId: boot.sessionId,
     history: boot.history,

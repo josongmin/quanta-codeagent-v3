@@ -32,13 +32,13 @@ import {
   type RunInstanceDeps as SharedRunInstanceDeps,
   UsageTap,
 } from "@/runner/batch/eval/driver"
+import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
-import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type { RunOnceResult } from "./repair/types"
@@ -244,10 +244,13 @@ const installReproTestHint = async (
 interface Phase {
   patch: string
   turns: number
+  stopReason?: AgentOutcome["reason"]
+  agentError?: string
 }
 
 class LastVerifyCmdTap implements StreamPort {
   lastVerifyCmd: string | undefined
+  lastErrorMessage: string | undefined
 
   constructor(private readonly downstream: StreamPort) {}
 
@@ -262,6 +265,8 @@ class LastVerifyCmdTap implements StreamPort {
       } else if (event.name === "test_runner") {
         this.lastVerifyCmd = "test_runner"
       }
+    } else if (event.type === "error") {
+      this.lastErrorMessage = event.message
     }
     this.downstream.emit(event)
   }
@@ -301,19 +306,22 @@ const runAgentPhase = async (
   reproHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
+  let stopReason: AgentOutcome["reason"] | undefined
+  let agentError: string | undefined
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
+      const tap = new LastVerifyCmdTap(w.stream)
       const outcome = await runAgentViaSdk(
         buildRunnerConfig(
           instance,
           deps,
           sandbox,
           signal,
-          w.stream,
+          tap,
           undefined,
           precomputedHint,
           reproHint,
@@ -321,9 +329,16 @@ const runAgentPhase = async (
         deps.runtimeFactory,
       )
       turns = outcome.turns
+      stopReason = outcome.reason
+      agentError = tap.lastErrorMessage
     },
   )
-  return { patch, turns }
+  return {
+    patch,
+    turns,
+    ...(stopReason !== undefined ? { stopReason } : {}),
+    ...(agentError !== undefined ? { agentError } : {}),
+  }
 }
 
 const runRepairPhase = async (
@@ -390,12 +405,51 @@ const reproResultExtra = (
   reproTest: BenchReproTestTelemetry | undefined,
 ): Partial<InstanceResult> => (reproTest === undefined ? {} : { reproTest })
 
-const shouldValidateGold = (
-  deps: RunInstanceDeps,
-  agentPassed: boolean,
-): boolean =>
-  deps.goldSanity !== undefined &&
-  (deps.goldSanity.mode === "always" || agentPassed === false)
+const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolean =>
+  deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
+
+const agentPhaseError = (phase: Phase): string | undefined => {
+  if (phase.stopReason === "error") {
+    return phase.agentError ?? "agent stopped with error before verification"
+  }
+  if (phase.stopReason === "refusal") return "agent stopped with refusal before verification"
+  if (phase.stopReason === "budget_exhausted") {
+    return "agent exhausted token budget before verification"
+  }
+  return undefined
+}
+
+const generationFailureResult = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly generationError: string
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly deps: RunInstanceDeps
+  readonly wiring: Wiring
+  readonly startedAt: number
+}): InstanceResult => {
+  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  if (args.deps.observe && args.wiring.observer) {
+    extra.verdict = "ok"
+    extra.durationMs = Date.now() - args.startedAt
+    extra.patchPath = emitPatch(
+      args.deps.observe,
+      args.instance,
+      args.wiring.observer,
+      args.phase.patch,
+    )
+    const usage = args.wiring.usage?.total()
+    if (usage) extra.usage = usage
+  }
+  return {
+    id: args.instance.id,
+    passed: false,
+    patch: args.phase.patch,
+    turns: args.phase.turns,
+    error: args.generationError,
+    ...extra,
+  }
+}
 
 const runInstanceOnce = async (
   instance: Instance,
@@ -443,6 +497,19 @@ const runInstanceOnce = async (
             reproHint,
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
+
+    const generationError = agentPhaseError(phase)
+    if (generationError !== undefined) {
+      return generationFailureResult({
+        instance,
+        phase,
+        generationError,
+        reproTest,
+        deps,
+        wiring: w,
+        startedAt,
+      })
+    }
 
     let v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
     const extra: Partial<InstanceResult> = reproResultExtra(reproTest)

@@ -457,12 +457,15 @@ const activityCmd: SlashCommand = {
   describe: "Unified activity tree (agents/workflows/daemons) with inline why-stuck",
   category: "loop",
   async run(_args, ctx) {
-    if (ctx.agents === undefined) {
+    if (ctx.agents === undefined && ctx.activityStore === undefined) {
       ctx.out("/activity: not wired in this surface\n")
       return 0
     }
-    const store = createActivityStore()
-    store.emitAll(fleetToActivity(ctx.agents()))
+    // Render the SESSION spine when present (so live `run_workflow` runs +
+    // daemons show), refreshing the in-process subagent fleet into it each call.
+    // Absent ⇒ an ephemeral fleet-only view (byte-identical to a fresh store).
+    const store = ctx.activityStore ?? createActivityStore()
+    if (ctx.agents !== undefined) store.emitAll(fleetToActivity(ctx.agents()))
     const now = ctx.now?.() ?? Date.now()
     ctx.out(`${renderActivity(store.snapshot(), { now }).join("\n")}\n`)
     return 0
