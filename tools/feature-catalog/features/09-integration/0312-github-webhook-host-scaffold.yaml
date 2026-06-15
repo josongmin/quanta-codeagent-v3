@@ -40,6 +40,7 @@ purpose: |
 evidence:
   code:
     - src/integrations/github/webhook-server.ts
+    - src/integrations/github/webhook-secret-resolver.ts
     - src/integrations/github/signature-verify.ts
     - src/apps/cli/webhook-server-setup.ts
     - src/apps/cli/index.ts
@@ -50,16 +51,23 @@ evidence:
       - tests/unit/integrations/github/signature-verify-attack-hellgate.test.ts
     integration:
       - tests/integration/github-webhook-host-cli-hellgate.test.ts
+      - tests/integration/github-webhook-multi-secret-hellgate.test.ts
     contract: []
-knobs: [QUANTA_GITHUB_WEBHOOK, QUANTA_GITHUB_WEBHOOK_SECRET, QUANTA_GITHUB_WEBHOOK_PORT, QUANTA_GITHUB_WEBHOOK_SESSION]
+knobs: [QUANTA_GITHUB_WEBHOOK, QUANTA_GITHUB_WEBHOOK_SECRET, QUANTA_GITHUB_WEBHOOK_SECRETS, QUANTA_GITHUB_WEBHOOK_SECRETS_FILE, QUANTA_GITHUB_WEBHOOK_PORT, QUANTA_GITHUB_WEBHOOK_SESSION]
 deliberate_hold:
   reason: |
     LIVE host landed (jun-15): host runtime = Bun.serve (zero-dep, matches
     mcp-server). `quanta webhook` drains createWebhookEventSource.poll() →
-    publishReactorWatchTrigger. RESIDUAL = depth only: per-installation secret
-    STORE (today one shared QUANTA_GITHUB_WEBHOOK_SECRET) + optional S3 staging.
+    publishReactorWatchTrigger. Multi-installation secret STORE landed (jun-15):
+    a SecretResolverPort selects the HMAC secret by URL PATH (/webhook/<appKey>)
+    BEFORE the body is parsed (webhook-secret-resolver.ts) — N GitHub Apps on one
+    host, each with its own secret, via QUANTA_GITHUB_WEBHOOK_SECRETS (inline
+    'k=s,k=s') or QUANTA_GITHUB_WEBHOOK_SECRETS_FILE (JSON). Backward-compat: no
+    map ⇒ single QUANTA_GITHUB_WEBHOOK_SECRET, byte-identical. RESIDUAL = depth
+    only: optional cloud host packaging / S3 staging.
   promotion_path: |
-    Add a multi-installation secret store + (optional) cloud host packaging.
+    (Optional) cloud host packaging / staging — the multi-installation secret
+    store is now LIVE.
 notes: |
   Signature-verify lives at the integration-package boundary (not in
   `src/security/`) because the verifier is webhook-shaped — it expects the

@@ -44,16 +44,6 @@ export type { LoadPrContextOpts } from "./pr-context-loader"
 export { loadPrContext } from "./pr-context-loader"
 export type { PrOutputSink, PrOutputSinkOpts } from "./pr-output-sink"
 export { createPrOutputSink } from "./pr-output-sink"
-export type {
-  LoadWebhookSecretConfigDeps,
-  WebhookSecretConfig,
-  WebhookSecretMode,
-} from "./webhook-secret-resolver"
-export {
-  extractAppKey,
-  loadWebhookSecretConfig,
-  WEBHOOK_PATH_PREFIX,
-} from "./webhook-secret-resolver"
 export { verifyHubSignature256 } from "./signature-verify"
 export type {
   FsPort,
@@ -73,6 +63,16 @@ export type {
   TrustScope,
 } from "./types"
 export { ALL_GH_EVENT_KINDS, asIdempotencyKey } from "./types"
+export type {
+  LoadWebhookSecretConfigDeps,
+  WebhookSecretConfig,
+  WebhookSecretMode,
+} from "./webhook-secret-resolver"
+export {
+  extractAppKey,
+  loadWebhookSecretConfig,
+  WEBHOOK_PATH_PREFIX,
+} from "./webhook-secret-resolver"
 export type {
   SecretResolverPort,
   WebhookEventSource,

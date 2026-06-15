@@ -151,10 +151,7 @@ const parseInlineSecretMap = (
 
 /** Parse the JSON-file `{ "key": "secret" }` form. Hostile / wrong-shape JSON
  *  collapses to an empty map (logged), never throws. */
-const parseJsonSecretMap = (
-  text: string,
-  onError?: (msg: string) => void,
-): Map<string, string> => {
+const parseJsonSecretMap = (text: string, onError?: (msg: string) => void): Map<string, string> => {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -190,31 +187,40 @@ const parseJsonSecretMap = (
  * delivery must arrive on a keyed `/webhook/<key>` path, so a bare `/webhook`
  * or an unknown key fails closed (401, no parse).
  */
-export const loadWebhookSecretConfig = (
-  deps: LoadWebhookSecretConfigDeps,
-): WebhookSecretConfig => {
+/** Read the JSON-file map variant via the injected reader (slice stays
+ *  fs-free). Returns an empty map on any read/parse fault (all logged). */
+const loadFileSecretMap = (
+  filePath: string,
+  readFile: ((path: string) => string) | undefined,
+  onError?: (msg: string) => void,
+): Map<string, string> => {
+  if (readFile === undefined) {
+    onError?.(`webhook secrets file configured but no file reader available`)
+    return new Map()
+  }
+  let text: string
+  try {
+    text = readFile(filePath.trim())
+  } catch {
+    onError?.(`webhook secrets file: cannot read`)
+    return new Map()
+  }
+  return parseJsonSecretMap(text, onError)
+}
+
+export const loadWebhookSecretConfig = (deps: LoadWebhookSecretConfigDeps): WebhookSecretConfig => {
   const { env, onError } = deps
   const inline = env[INLINE_ENV]
   const filePath = env[FILE_ENV]
   const inlineConfigured = typeof inline === "string" && inline.trim().length > 0
   const fileConfigured = typeof filePath === "string" && filePath.trim().length > 0
 
+  // Inline map wins over the file map; either configures `map` mode.
   let map = new Map<string, string>()
   if (inlineConfigured) {
     map = parseInlineSecretMap(inline as string, onError)
   } else if (fileConfigured) {
-    if (deps.readFile === undefined) {
-      onError?.(`webhook secrets file configured but no file reader available`)
-    } else {
-      let text: string | undefined
-      try {
-        text = deps.readFile((filePath as string).trim())
-      } catch {
-        onError?.(`webhook secrets file: cannot read`)
-        text = undefined
-      }
-      if (text !== undefined) map = parseJsonSecretMap(text, onError)
-    }
+    map = loadFileSecretMap(filePath as string, deps.readFile, onError)
   }
 
   if (map.size > 0) {

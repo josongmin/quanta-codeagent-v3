@@ -179,7 +179,7 @@ const validateOpts = (opts: WebhookEventSourceOpts): void => {
   const hasSecret = typeof opts.secret === "string" && opts.secret.length > 0
   if (!hasResolver && !hasSecret) {
     throw new Error(
-      "createWebhookEventSource: a non-empty secret or a secretResolver is required (no open bypass)",
+      "createWebhookEventSource: secret must be a non-empty string, or a secretResolver must be provided (no open bypass)",
     )
   }
   if (opts.clockPort === undefined || opts.clockPort === null) {
