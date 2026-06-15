@@ -21,16 +21,15 @@
  */
 
 import { copyFile, mkdir, readFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import writeFileAtomic from "write-file-atomic"
-import { errMessage, QuantaError } from "@/shared"
+import { errMessage, QuantaError, quantaHomeDir } from "@/shared"
 import type { AgentMode } from "../prompt"
 import type { StickyModelLoadResult, StickyModelSetResult, StickyModelStore } from "./port"
 
 /** Default path: `~/.quanta/sticky-model.json`. Pure function of homedir;
  *  exposed so tests can override via the `path` option without re-deriving. */
-export const defaultStickyModelPath = (): string => join(homedir(), ".quanta", "sticky-model.json")
+export const defaultStickyModelPath = (): string => join(quantaHomeDir(), "sticky-model.json")
 
 /** Surfaced via {@link StickyModelLoadResult.error} when the on-disk file
  *  exists but cannot be parsed as a top-level JSON object of `{ string:

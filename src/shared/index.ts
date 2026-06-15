@@ -83,6 +83,7 @@ export {
 export type { NoThrowErrorSink } from "./no-throw-dispatch"
 export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-throw-dispatch"
 export { omitUndef } from "./optional"
+export { quantaHomeDir, quantaHomePath } from "./quanta-home"
 export { RECONCILE_PLACEHOLDER_TEXT, reconcileToolPairing } from "./reconcile-tool-pairing"
 export type { RunContext } from "./run-context"
 export type { PtyBackend, RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"

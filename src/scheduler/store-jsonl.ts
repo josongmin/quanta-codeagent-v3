@@ -31,8 +31,8 @@
 
 import { createHash } from "node:crypto"
 import { appendFile, mkdir, readFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { quantaHomeDir } from "@/shared"
 import {
   type Automation,
   type AutomationStatus,
@@ -80,7 +80,7 @@ const FILE_NAME = "automations.jsonl"
 
 const resolveBaseDir = (opts: JsonlAutomationStoreOpts | undefined): string => {
   if (opts?.baseDir !== undefined && opts.baseDir.length > 0) return opts.baseDir
-  return join(homedir(), ".quanta", "scheduler")
+  return join(quantaHomeDir(), "scheduler")
 }
 
 /** Per-workspace directory for the given store config. */

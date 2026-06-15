@@ -1,6 +1,5 @@
-import { homedir } from "node:os"
 import { join } from "node:path"
-import { runtimeConfig } from "@/shared"
+import { quantaHomeDir, runtimeConfig } from "@/shared"
 import { defaultSessionRootProvider, type SessionRootProvider } from "./root-port"
 
 /**
@@ -17,7 +16,7 @@ import { defaultSessionRootProvider, type SessionRootProvider } from "./root-por
  * it would change every existing call site's path resolution.
  */
 export const sessionsRoot = (): string =>
-  runtimeConfig().sessionsDir ?? join(homedir(), ".quanta", "sessions")
+  runtimeConfig().sessionsDir ?? join(quantaHomeDir(), "sessions")
 
 /**
  * Async, provider-aware root resolver. Surface-agnostic seam — the CLI

@@ -76,8 +76,8 @@
  *     so tests can drive deterministic TTL expiry.
  */
 
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { quantaHomeDir } from "@/shared"
 import {
   createJsonStateFile,
   type JsonStateFile,
@@ -116,7 +116,7 @@ const GLOBAL_PROJECT_KEY = "*"
 /** Default state file path: `~/.quanta/grants.json`. The SOTA reference uses
  *  the OS keyring; we ship a file first (encrypted-at-rest follow-up tracked
  *  in the feature catalog under future work). */
-export const defaultTrustScopeStatePath = (): string => join(homedir(), ".quanta", "grants.json")
+export const defaultTrustScopeStatePath = (): string => join(quantaHomeDir(), "grants.json")
 
 /** Default project-overlay path inside a project root. */
 export const defaultProjectOverlayPath = (projectRoot: string): string =>

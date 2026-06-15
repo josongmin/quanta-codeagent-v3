@@ -160,7 +160,10 @@ export const computeActionSignature = (input: {
 export const defaultStateFilePath = (): string => {
   const cfg = runtimeConfig()
   if (cfg.permissionStateFile !== undefined) return cfg.permissionStateFile
-  const home = cfg.quantaHome ?? join(homedir(), ".quanta")
+  // Unified home root: QUANTA_CONFIG_DIR (canonical) ?? QUANTA_HOME (alias) ??
+  // ~/.quanta. Resolved from the injected `cfg` so test-injected runtime config
+  // is honored (rather than the global quantaHomeDir() singleton).
+  const home = cfg.centralConfigDir ?? cfg.quantaHome ?? join(homedir(), ".quanta")
   return join(home, "permission-state.json")
 }
 

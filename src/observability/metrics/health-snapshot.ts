@@ -25,10 +25,9 @@
  */
 
 import { mkdir as fsMkdir, rename as fsRename, writeFile as fsWriteFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
 
-import { errMessage, QuantaError } from "@/shared"
+import { errMessage, QuantaError, quantaHomeDir } from "@/shared"
 
 import type { ObservabilityBag } from "./observability-helper"
 
@@ -158,12 +157,12 @@ export const buildHealthSnapshot = (
 
 /** Default snapshot path = `${os.homedir()}/.quanta/health.json`. Exposed so
  *  the helper (and operator docs) can refer to one canonical location. */
-export const defaultHealthSnapshotPath = (): string => join(homedir(), ".quanta", "health.json")
+export const defaultHealthSnapshotPath = (): string => join(quantaHomeDir(), "health.json")
 
 const resolveSnapshotPath = (raw?: string): string => {
   if (raw === undefined || raw === "") return defaultHealthSnapshotPath()
   if (isAbsolute(raw)) return raw
-  return join(homedir(), ".quanta", raw)
+  return join(quantaHomeDir(), raw)
 }
 
 /** Stable JSON serializer — fixed key order so two snapshots with the same

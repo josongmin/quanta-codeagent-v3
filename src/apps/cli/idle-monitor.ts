@@ -30,8 +30,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { quantaHomeDir } from "@/shared"
 
 export const DEFAULT_IDLE_MS = 60_000
 const DEFAULT_SNOOZE_MS = 300_000
@@ -82,7 +82,7 @@ interface SnoozeRecord {
   snoozedUntil: number
 }
 
-const defaultSnoozeFile = (): string => join(homedir(), ".quanta", "snooze")
+const defaultSnoozeFile = (): string => join(quantaHomeDir(), "snooze")
 
 const readSnoozeFile = (path: string): number | null => {
   if (!existsSync(path)) return null

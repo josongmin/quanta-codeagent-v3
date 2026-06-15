@@ -1,6 +1,10 @@
 # ADR-0536 — Unified `quanta-bench` CLI + remote grading (sb-cli / SSH / AWS) + analysis layer
 
-- Status: **P0 implemented** (2026-06-15) — `src/apps/bench/cli.ts` (run/grade/diff/explain/leaderboard/presets) + `remote/` (ssh + ec2 backends) + `analyze/` (verdicts/diff/explain/leaderboard). 51 unit tests (cli 8 + remote 22 + analyze 21). `package.json` `bench` → `cli.ts`. P1/P2/P3 pending.
+- Status: **P0+P1+P2 implemented, P3 gated** (2026-06-15).
+  - P0: `src/apps/bench/cli.ts` (run/grade/diff/explain/leaderboard/presets) + `remote/` (ssh + ec2) + `analyze/` (verdicts/diff/explain/leaderboard). `package.json` `bench` → `cli.ts`.
+  - P1: `analyze/cost.ts` (token/$/wall-clock from report.usage or observe trajectory; honest caveat when no usage) + `cost` subcommand.
+  - P2: `remote/fanout.ts` (K-way shard → concurrent grade → merge; fault-tolerant) wired via `grade --shards N`.
+  - P3: `--mode full` SURFACE + gate only — refused without `--allow-remote-secrets`, and the executor is deliberately DEFERRED (refuses with a §6-hardening pointer) so no insecure half-executor ships. RED-first throughout; 67 tests (cli 8 + remote 22 + fanout 8 + analyze 21 + cost 8) + a subprocess **e2e** (`tests/integration/bench-cli-e2e.test.ts`). P3 executor = remaining work.
 - Date: 2026-06-15
 - Supersedes/relates: bench harness (`src/apps/bench`), ADR-0014 (local validator), jun-15 preset unification
 

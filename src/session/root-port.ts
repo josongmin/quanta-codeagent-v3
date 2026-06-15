@@ -1,6 +1,5 @@
-import { homedir } from "node:os"
 import { join } from "node:path"
-import { runtimeConfig } from "@/shared"
+import { quantaHomeDir, runtimeConfig } from "@/shared"
 
 /**
  * Surface-agnostic session-root port (Audit-W blocker #2).
@@ -47,7 +46,7 @@ export interface SessionRootProvider {
  */
 export const defaultSessionRootProvider: SessionRootProvider = {
   async resolve(): Promise<string> {
-    return runtimeConfig().sessionsDir ?? join(homedir(), ".quanta", "sessions")
+    return runtimeConfig().sessionsDir ?? join(quantaHomeDir(), "sessions")
   },
 }
 

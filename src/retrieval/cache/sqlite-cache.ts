@@ -17,9 +17,8 @@
  */
 import { Database } from "bun:sqlite"
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { omitUndef } from "@/shared"
+import { omitUndef, quantaHomeDir } from "@/shared"
 import type { EmbedCache } from "./port"
 import type { EmbedCacheHit } from "./types"
 
@@ -36,7 +35,7 @@ export interface SqliteEmbedCacheOptions {
   readonly now?: () => number
 }
 
-const defaultPath = (): string => join(homedir(), ".quanta", "embed-cache.db")
+const defaultPath = (): string => join(quantaHomeDir(), "embed-cache.db")
 
 const ensureParentDir = (file: string): void => {
   const dir = dirname(file)

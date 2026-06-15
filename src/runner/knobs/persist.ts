@@ -18,12 +18,13 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { quantaHomeDir } from "@/shared"
 import { type AtomicWriteSync, defaultAtomicWriteSync, writeFileAtomic } from "@/storage"
 
-const DEFAULT_DIR = join(homedir(), ".quanta")
-const DEFAULT_FILE = join(DEFAULT_DIR, "knobs.json")
+/** `<quantaHome>/knobs.json` — evaluated per-call so it honors the unified home
+ *  root (QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta) and test config resets. */
+const defaultKnobConfigFile = (): string => join(quantaHomeDir(), "knobs.json")
 
 export interface KnobConfigFile {
   readonly version: 1
@@ -32,7 +33,7 @@ export interface KnobConfigFile {
 }
 
 export const readKnobConfig = async (
-  path: string = DEFAULT_FILE,
+  path: string = defaultKnobConfigFile(),
 ): Promise<KnobConfigFile | null> => {
   let raw: string
   try {
@@ -63,7 +64,7 @@ export const readKnobConfig = async (
 
 export const writeKnobConfig = async (
   defaults: Readonly<Record<string, string>>,
-  path: string = DEFAULT_FILE,
+  path: string = defaultKnobConfigFile(),
   sync: AtomicWriteSync = defaultAtomicWriteSync,
 ): Promise<void> => {
   const data: KnobConfigFile = {
@@ -98,7 +99,7 @@ export const writeKnobConfig = async (
  *  file reads as `null` (unchanged contract) and degrades to overrides-only. */
 export const saveKnobConfigMerged = async (
   overrides: Readonly<Record<string, string>>,
-  path: string = DEFAULT_FILE,
+  path: string = defaultKnobConfigFile(),
   sync: AtomicWriteSync = defaultAtomicWriteSync,
 ): Promise<void> => {
   const existing = await readKnobConfig(path)

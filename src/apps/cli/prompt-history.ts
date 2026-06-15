@@ -27,8 +27,8 @@
  */
 
 import { appendFile, mkdir, readFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { quantaHomeDir } from "@/shared"
 
 export interface PromptHistory {
   push(line: string): void
@@ -55,7 +55,7 @@ export interface PromptHistoryOptions {
   ephemeral?: boolean
 }
 
-const DEFAULT_PATH = (): string => join(homedir(), ".quanta", "history")
+const DEFAULT_PATH = (): string => join(quantaHomeDir(), "history")
 const DEFAULT_MAX = 1000
 
 /** Synchronous bootstrap: read+normalize the file once on construction. We do

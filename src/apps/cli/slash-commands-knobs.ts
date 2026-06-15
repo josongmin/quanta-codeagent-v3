@@ -30,7 +30,6 @@
  *     as `KnobParseError` AND re-thrown — surfaced as stderr + exit 1
  */
 
-import { homedir } from "node:os"
 import { join } from "node:path"
 import {
   type AnyKnob,
@@ -41,7 +40,7 @@ import {
   resolveKnobs,
   saveKnobConfigMerged,
 } from "@/runner/knobs"
-import { errMessage } from "@/shared"
+import { errMessage, quantaHomeDir } from "@/shared"
 import { setCliKnobOverride } from "./cli-knobs-accessor"
 import {
   buildKnobCatalog,
@@ -500,7 +499,7 @@ const doHelp = (args: readonly string[], ctx: SlashContext): number => {
  *  static instance suitable for the standard single-session REPL. */
 const DEFAULT_OVERRIDES: Record<string, string> = {}
 
-const defaultConfigPath = (): string => join(homedir(), ".quanta", "knobs.json")
+const defaultConfigPath = (): string => join(quantaHomeDir(), "knobs.json")
 
 const defaultResolve = (): KnobValueMap =>
   resolveKnobs({

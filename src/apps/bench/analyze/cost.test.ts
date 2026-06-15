@@ -79,7 +79,7 @@ describe("cost — observe backfill", () => {
       perInstance: [{ id: "psf__requests-5414", passed: true }],
     })
     const observeDir = join(dir, "observe")
-    mkdtempSyncSafe(observeDir)
+    mkdirSync(observeDir, { recursive: true })
     // quanta.trajectory.v1 shape: events with ts + inputTokens/outputTokens.
     const lines = [
       { ts: 1000, kind: "llm", data: { inputTokens: 100, outputTokens: 40 } },
@@ -113,9 +113,3 @@ describe("cost — no usage anywhere (the honest-caveat scenario)", () => {
     expect(rendered).toMatch(/no token usage|observability|not recorded/)
   })
 })
-
-// mkdtemp doesn't take an exact path; small helper to create a known subdir.
-function mkdtempSyncSafe(path: string): void {
-  // biome-ignore lint/style/noNonNullAssertion: test helper
-  require("node:fs").mkdirSync(path, { recursive: true })
-}

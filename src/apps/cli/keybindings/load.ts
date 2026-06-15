@@ -19,8 +19,8 @@
  */
 
 import { readFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { quantaHomeDir } from "@/shared"
 import { DEFAULT_KEYBINDINGS } from "./defaults"
 import { normalizeKeySpec } from "./normalize"
 import { ACTION_SET, type KeyAction, type KeybindingMap, type KeySpec } from "./types"
@@ -28,7 +28,7 @@ import { ACTION_SET, type KeyAction, type KeybindingMap, type KeySpec } from "./
 /** Same prototype-pollution boundary as `knobs/resolve.ts:34`. */
 const PROTO_KEYS: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"])
 
-export const DEFAULT_KEYBINDINGS_PATH = join(homedir(), ".quanta", "keybindings.json")
+export const DEFAULT_KEYBINDINGS_PATH = join(quantaHomeDir(), "keybindings.json")
 
 export interface LoadResult {
   /** Always usable: the default map merged with any valid file overrides. */
