@@ -67,7 +67,7 @@ export type SpawnFn = (
 /** Real {@link SpawnFn} via `Bun.spawn` — argv-array (no shell ⇒ no injection). */
 export const defaultSpawn: SpawnFn = async (cmd, args, opts) => {
   const proc = Bun.spawn([cmd, ...args], {
-    cwd: opts?.cwd,
+    ...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
     stdin: opts?.input === undefined ? "ignore" : new TextEncoder().encode(opts.input),
     stdout: "pipe",
     stderr: "pipe",

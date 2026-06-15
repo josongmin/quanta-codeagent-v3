@@ -49,6 +49,7 @@ evidence:
     unit:
       - tests/unit/integrations/github/signature-verify.test.ts
       - tests/unit/integrations/github/signature-verify-attack-hellgate.test.ts
+      - tests/unit/integrations/github/webhook-secret-resolver.test.ts
     integration:
       - tests/integration/github-webhook-host-cli-hellgate.test.ts
       - tests/integration/github-webhook-multi-secret-hellgate.test.ts
