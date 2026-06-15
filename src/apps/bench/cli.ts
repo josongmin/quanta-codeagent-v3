@@ -59,10 +59,12 @@ const argValue = (flag: string): string | undefined => {
 }
 const hasFlag = (flag: string): boolean => process.argv.includes(flag)
 
-/** Print a multi-line block one line at a time — `logger.info` renders an
- *  embedded `\n` as `?`, so render* outputs must be split. */
+/** Print a render* block (diff / explain / leaderboard markdown) to raw stdout
+ *  — NOT via `logger.info`, which prefixes `[info]`, mangles embedded `\n` to
+ *  `?`, and de-dups repeated lines (which silently swallowed identical
+ *  gold/agent file lines in `explain`). Raw output is also copy-pasteable. */
 const printBlock = (s: string): void => {
-  for (const line of s.split("\n")) logger.info(line)
+  process.stdout.write(`${s}\n`)
 }
 
 /** Value-taking flags — their following token is a value, NOT a positional. */
