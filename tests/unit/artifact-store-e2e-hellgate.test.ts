@@ -89,6 +89,29 @@ describe("artifact tools — register/list/get/destroy round-trip", () => {
     const r = await run(get, {})
     expect(r.ok).toBe(false)
   })
+
+  test("ATTACK: a hostile oversized path/label/mediaType is render-truncated (no token explosion)", async () => {
+    const tools = artifactTools(reg())
+    const register = byName(tools, "artifact_register")
+    const list = byName(tools, "artifact_list")
+    const get = byName(tools, "artifact_get")
+    const huge = "/jail/".concat("A".repeat(1_000_000)) // 1MB path
+    const hugeLabel = "L".repeat(500_000)
+    const r = await run(register, {
+      kind: "image",
+      path: huge,
+      media_type: "image/png",
+      label: hugeLabel,
+    })
+    expect(r.ok).toBe(true)
+    const listed = await run(list, {})
+    // Each rendered field is bounded; the whole line is far below the raw 1.5MB.
+    expect(listed.output.length).toBeLessThan(2000)
+    expect(listed.output).toContain("…(1000006)") // path length marker
+    expect(listed.output).toContain("…(500000)") // label length marker
+    const got = await run(get, { id: "art-1" })
+    expect(got.output.length).toBeLessThan(2000)
+  })
 })
 
 describe("artifact tools — default-OFF registration", () => {

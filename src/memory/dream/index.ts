@@ -27,6 +27,7 @@ export type {
   DreamWriteTargetPort,
 } from "./port"
 export {
+  DREAM_TEAM_CONTENT_MAX_BYTES,
   DREAM_TEAM_FILENAME,
   DREAM_TEAM_SUBDIR,
   type DreamFsPort,

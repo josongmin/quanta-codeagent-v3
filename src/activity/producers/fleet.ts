@@ -9,7 +9,7 @@
  * `stopped`).
  */
 
-import type { AgentActivityEvent, ActivityStatus } from "../types"
+import type { ActivityStatus, AgentActivityEvent } from "../types"
 
 /** Structural mirror of `AgentFleetRow` (no `@/subagent` value import). */
 export interface FleetRowLike {

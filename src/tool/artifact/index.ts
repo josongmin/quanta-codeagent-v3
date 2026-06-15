@@ -63,9 +63,18 @@ const err = (output: string, failure: ToolFailure): ToolResult => ({
   failure,
 })
 
+/** Per-field render cap (chars). A hostile / oversized `path` / `label` /
+ *  `mediaType` (the registry stores them verbatim) must not explode the
+ *  `list` / `get` tool output into the transcript. Truncate each rendered field
+ *  to a bounded length with an explicit ellipsis marker. The id (registry-minted,
+ *  short) and the preview URL are NOT truncated. */
+const RENDER_FIELD_MAX = 256
+const clampField = (s: string): string =>
+  s.length > RENDER_FIELD_MAX ? `${s.slice(0, RENDER_FIELD_MAX)}…(${s.length})` : s
+
 const renderArtifact = (a: ArtifactView): string => {
-  const label = a.label !== undefined && a.label.length > 0 ? ` "${a.label}"` : ""
-  return `  ${a.id}${label} [${a.kind}, ${a.mediaType}] → ${previewUrlOf(a.id)}  (${a.path})`
+  const label = a.label !== undefined && a.label.length > 0 ? ` "${clampField(a.label)}"` : ""
+  return `  ${a.id}${label} [${a.kind}, ${clampField(a.mediaType)}] → ${previewUrlOf(a.id)}  (${clampField(a.path)})`
 }
 
 export const artifactRegisterInputSchema = z.object({

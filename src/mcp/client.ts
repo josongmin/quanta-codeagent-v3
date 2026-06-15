@@ -62,6 +62,17 @@ const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const MAX_TOOLS_LIST_PAGES = 256
 
+/** ADVERSARIAL inbound-DoS bound (jun-06) — the maximum number of inbound
+ *  `sampling/createMessage` requests serviced concurrently. A malicious MCP
+ *  server can fire an unbounded stream of inbound sampling requests; each can
+ *  fan out to a consent prompt + an LLM completion, so without a cap they spawn
+ *  unbounded in-flight async tasks (memory) and unbounded inference (cost). At
+ *  the cap the client replies with a JSON-RPC `busy` error rather than spawning
+ *  another task — back-pressure the server can observe. 8 is generous for any
+ *  legitimate server (sampling is interactive, consent-gated) while bounding a
+ *  flood. */
+const MAX_INBOUND_SAMPLING_IN_FLIGHT = 8
+
 /** Max chars of joined tool-result text we hand back from `callTool`. A
  *  malicious/buggy MCP server returning a huge text blob would otherwise flow
  *  unbounded into memory and the model prompt (DOS). Mirrors the repo-wide
@@ -390,6 +401,14 @@ export class McpClient {
   private exited = false
   private unsubscribeMessage: (() => void) | null = null
   private unsubscribeExit: (() => void) | null = null
+  /** ADVERSARIAL inbound-DoS bound (jun-06) — the number of inbound
+   *  `sampling/createMessage` requests currently being serviced. Each inbound
+   *  sampling request can fan out to a consent prompt + an LLM completion; a
+   *  hostile server that fires thousands concurrently would otherwise spawn
+   *  thousands of in-flight async tasks (unbounded promises + inference spend).
+   *  When this reaches {@link MAX_INBOUND_SAMPLING_IN_FLIGHT} the client replies
+   *  with a JSON-RPC `busy` error INSTEAD of spawning another task. */
+  private inboundSamplingInFlight = 0
   /** H18 — a shared in-flight mid-session re-auth (invalidate → fresh bearer →
    *  carrier rebuild). `null` when idle; set while a re-auth runs so concurrent
    *  401s coalesce into a single rebuild rather than racing the carrier swap. */
@@ -1215,8 +1234,25 @@ export class McpClient {
    *  client refused rather than being left hanging. Never throws — the router
    *  contract is total and a rejecting custom handler is mapped to a decline. */
   private handleInboundSampling(id: number | string, method: string, params: unknown): void {
+    // ADVERSARIAL inbound-DoS bound — refuse (with observable back-pressure)
+    // once too many inbound sampling requests are already in flight, rather
+    // than spawning an unbounded number of consent/LLM tasks. The server gets a
+    // typed `busy` error and can retry; it cannot wedge us into OOM/spend.
+    if (this.inboundSamplingInFlight >= MAX_INBOUND_SAMPLING_IN_FLIGHT) {
+      this.send({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32000, message: "sampling: too many in-flight requests" },
+      })
+      return
+    }
+    this.inboundSamplingInFlight++
+    const done = (): void => {
+      this.inboundSamplingInFlight--
+    }
     void routeSampling(this.samplingHandler, method, params).then(
       (response: SamplingResponse) => {
+        done()
         if (response.kind === "result") {
           this.send({ jsonrpc: "2.0", id, result: response.result })
         } else {
@@ -1230,6 +1266,7 @@ export class McpClient {
       // Defensive: routeSampling is no-throw, but if it ever rejects we still
       // answer rather than drop the request.
       () => {
+        done()
         this.send({
           jsonrpc: "2.0",
           id,

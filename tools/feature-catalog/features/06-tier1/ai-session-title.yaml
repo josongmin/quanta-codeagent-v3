@@ -28,10 +28,13 @@ purpose: |
   composition root kicks `createAutoTitlePort(...).maybeTitle(sessionId,
   firstPrompt)` off WITHOUT awaiting it. A cheap injected `LLMPort` (pinned to
   `QUANTA_SESSION_TITLE_MODEL`, mirroring the `QUANTA_COMPACT_MODEL` precedent)
-  summarizes the first user prompt into a ≤6-word title, sanitized (whitespace
-  collapsed, wrapping quotes dropped, clamped to maxWords + MAX_TITLE_CHARS),
-  and written to `SessionMeta.title` via the injected `rename` adapter over
-  `renameSession`.
+  summarizes the first user prompt into a ≤6-word title, sanitized (NON-
+  whitespace C0/C1 control chars stripped — NUL/BEL/BS/ESC-ANSI/DEL/C1, a
+  terminal-escape / NUL-injection guard against a hostile model output writing
+  control bytes into the session metadata record; whitespace control chars kept
+  as word boundaries; whitespace collapsed, wrapping quotes dropped, clamped to
+  maxWords + MAX_TITLE_CHARS), and written to `SessionMeta.title` via the
+  injected `rename` adapter over `renameSession`.
 
   Three hard invariants, locked by the hellgate battery:
   (1) Default-OFF — the port is built ONLY when `QUANTA_SESSION_AUTO_TITLE` is

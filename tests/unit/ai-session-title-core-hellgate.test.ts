@@ -120,6 +120,37 @@ describe("ai-session-title — happy path", () => {
     expect(out.length).toBeLessThanOrEqual(MAX_TITLE_CHARS)
   })
 
+  // ── TITLE-INJECTION: a hostile model output carrying control chars ──────────
+  // `\s+` collapse handles whitespace but leaves NON-whitespace control chars
+  // (NUL, BEL, BS, ESC/ANSI, DEL, C1) intact — those would inject terminal
+  // escapes / a NUL into the session metadata record. They MUST be stripped.
+  const ESC = String.fromCharCode(0x1b) // ESC (ANSI lead-in)
+  const NUL = String.fromCharCode(0x00)
+  const BEL = String.fromCharCode(0x07)
+  const BS = String.fromCharCode(0x08)
+  const DEL = String.fromCharCode(0x7f)
+  const C1 = String.fromCharCode(0x9b) // C1 CSI
+
+  test("sanitizeTitle strips NUL / BEL / BS / ESC-ANSI / DEL / C1 control chars", () => {
+    const hostile = `My${NUL} Title${ESC}[2J${BEL}${BS} here${DEL}${C1}`
+    const out = sanitizeTitle(hostile, 6)
+    // No control byte survives.
+    for (const ch of [ESC, NUL, BEL, BS, DEL, C1]) expect(out.includes(ch)).toBe(false)
+    // The printable text remains (the ANSI lead-in ESC is gone ⇒ "[2J" is inert text).
+    expect(out).toContain("My")
+    expect(out).toContain("Title")
+  })
+
+  test("a title that is ENTIRELY control chars ⇒ '' (caller skips the write)", () => {
+    expect(sanitizeTitle(`${ESC}${BEL}${NUL}${C1}`, 6)).toBe("")
+  })
+
+  test("whitespace control chars stay word boundaries (newline ⇒ space, not fusion)", () => {
+    // \n is U+000A — a WHITESPACE control char, deliberately NOT stripped, so the
+    // `\s+` collapse turns it into a separator rather than fusing the words.
+    expect(sanitizeTitle("One\nTwo\tThree", 6)).toBe("One Two Three")
+  })
+
   test("empty/whitespace model output ⇒ no rename (nothing usable)", async () => {
     const llm = new FakeLLM(textScript("   \n  "))
     const rename = new FakeRename()

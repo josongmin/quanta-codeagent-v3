@@ -69,6 +69,62 @@ describe("renderNotebook — base64 image strip (token-explosion guard)", () => 
     expect(s).toContain("<Figure>")
     expect(s).toContain("image output: image/jpeg")
   })
+
+  test("a CHUNKED 10MB image (string[] form) → placeholder, blob NEVER joined or emitted", () => {
+    // nbformat permits `data["image/png"]` as a `string[]`. A 10MB image split
+    // into 10k chunks must be elided WITHOUT concatenating the chunks into one
+    // giant string (the DoS the per-output cap does not bound). We assert the
+    // payload is absent AND the byte estimate matches the un-joined total.
+    const chunk = "Q".repeat(1_000) // 1000 base64 chars
+    const chunks = Array.from({ length: 10_000 }, () => chunk) // 10M chars total
+    const nb = JSON.stringify({
+      cells: [
+        {
+          cell_type: "code",
+          source: "show(img)",
+          outputs: [{ output_type: "display_data", data: { "image/png": chunks } }],
+        },
+      ],
+    })
+    const s = renderNotebook(nb, OPTS) as string
+    // Payload absent — not a single 1000-char chunk leaked.
+    expect(s.includes(chunk)).toBe(false)
+    expect(s).toContain("image output: image/png")
+    // 10_000_000 chars, no padding → 10_000_000 * 3/4 = 7_500_000 bytes.
+    expect(s).toContain("7500000 bytes elided")
+    // The rendered doc is tiny — the multi-MB blob was NEVER materialized.
+    expect(s.length).toBeLessThan(2_000)
+  })
+
+  test("a chunked base64 with trailing `==` padding estimates the correct decoded size", () => {
+    // Padding lives only on the LAST chunk; estimate must subtract it.
+    const chunks = ["AAAA", "BB=="] // 8 chars, 2 pad → 8*3/4 - 2 = 4 bytes
+    const nb = JSON.stringify({
+      cells: [
+        {
+          cell_type: "code",
+          source: "x",
+          outputs: [{ output_type: "display_data", data: { "image/gif": chunks } }],
+        },
+      ],
+    })
+    const s = renderNotebook(nb, OPTS) as string
+    expect(s).toContain("4 bytes elided")
+  })
+
+  test("a non-string/non-array image value → 0 bytes (fail-soft, never throws)", () => {
+    const nb = JSON.stringify({
+      cells: [
+        {
+          cell_type: "code",
+          source: "x",
+          outputs: [{ output_type: "display_data", data: { "image/png": { weird: true } } }],
+        },
+      ],
+    })
+    const s = renderNotebook(nb, OPTS) as string
+    expect(s).toContain("image output: image/png, 0 bytes elided")
+  })
 })
 
 describe("renderNotebook — source array join + line numbering", () => {
@@ -205,5 +261,44 @@ describe("renderNotebook — fail-soft on odd shapes (NO THROW)", () => {
     const s = renderNotebook(nb, OPTS) as string
     expect(s).toContain("[cell 0 · unknown]")
     expect(s.includes("[output]")).toBe(false)
+  })
+})
+
+// ── Document-level DoS caps (the per-OUTPUT cap does NOT bound these) ──────────
+// A hostile notebook materializes the FULL rendered string in memory BEFORE the
+// read pipeline's offset/limit ever pages it. The per-output char cap leaves two
+// holes: (a) a notebook with millions of cells, and (b) a single cell carrying
+// tens of thousands of (individually-capped) outputs whose SUM is unbounded.
+describe("renderNotebook — document-level DoS caps", () => {
+  test("a notebook with 200k cells renders only MAX_NOTEBOOK_CELLS + an elision marker", () => {
+    const cells = Array.from({ length: 200_000 }, () => ({
+      cell_type: "code",
+      source: ["x = 1\n"],
+    }))
+    const s = renderNotebook(JSON.stringify({ cells }), OPTS) as string
+    // The 5k-cell cap keeps the render bounded — NOT a multi-megabyte string.
+    expect(s.length).toBeLessThan(1_000_000)
+    expect(s).toContain("[cell 4999 · code]")
+    expect(s.includes("[cell 5000 · code]")).toBe(false)
+    expect(s).toContain("195000 more cell(s) elided")
+  })
+
+  test("a single cell with 50k capped outputs is bounded by MAX_OUTPUTS_PER_CELL", () => {
+    const outputs = Array.from({ length: 50_000 }, () => ({
+      output_type: "stream",
+      text: "y".repeat(2_000),
+    }))
+    const nb = JSON.stringify({ cells: [{ cell_type: "code", source: ["spam()\n"], outputs }] })
+    const s = renderNotebook(nb, { includeOutputs: true, maxOutputChars: 2000 }) as string
+    // 64 outputs × ≤2000 chars ≪ the 100MB a naive render would produce.
+    expect(s.length).toBeLessThan(200_000)
+    expect(s).toContain("more output(s) elided")
+  })
+
+  test("a notebook AT the cell cap (5000) renders every cell, no elision marker", () => {
+    const cells = Array.from({ length: 5_000 }, () => ({ cell_type: "code", source: ["a\n"] }))
+    const s = renderNotebook(JSON.stringify({ cells }), OPTS) as string
+    expect(s).toContain("[cell 4999 · code]")
+    expect(s.includes("more cell(s) elided")).toBe(false)
   })
 })

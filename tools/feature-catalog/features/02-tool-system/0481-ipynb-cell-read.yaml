@@ -38,6 +38,15 @@ purpose: |
   by a `«image output: image/png, N bytes elided»` placeholder — the base64 is
   NEVER emitted (byte length is ESTIMATED, never decoded ⇒ O(1), DoS-safe).
 
+  DoS caps (jun-6 adversarial harden): the per-output 2000-char cap does NOT
+  bound the WHOLE document — a hostile notebook with millions of cells, or a
+  single cell carrying tens of thousands of (individually-capped) outputs,
+  materializes a multi-megabyte / 100MB+ render in memory BEFORE the read
+  pipeline's offset/limit ever pages it. Two document-level caps close this:
+  `MAX_NOTEBOOK_CELLS` (5000) and `MAX_OUTPUTS_PER_CELL` (64), each appending a
+  one-line elision marker (`[… N more cell(s) elided]` / `«N more output(s)
+  elided»`) so the truncation is visible and never silent.
+
   Auto-applies for `.ipynb` ONLY. The `isNotebook(path)` extension gate is the
   sole diverter: every other extension short-circuits and returns the raw text
   UNCHANGED, so all non-notebook reads are byte-identical to the pre-ADR path.

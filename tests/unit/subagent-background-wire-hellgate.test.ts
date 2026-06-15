@@ -17,7 +17,7 @@
  * surgical wire surface so a later refactor cannot silently un-wire it.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { buildSessionFeatures } from "@/agent/features"
 import {
   type BackgroundSubagentScheduler,
@@ -27,6 +27,7 @@ import { buildSubagentBgBlock } from "@/agent/tier1"
 import type { AgentConfig, FeaturesConfig } from "@/agent/types"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import type { StreamPort } from "@/stream"
 import type { SubagentResult, SubagentRunner } from "@/subagent"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -109,5 +110,63 @@ describe("subagent-background wire — hellgate", () => {
     const id = scheduler.fork({ task: "wire-check" })
     expect(scheduler.poll(id)?.status).toBe("running")
     expect(scheduler.list().some((e) => e.id === id)).toBe(true)
+  })
+})
+
+// ADR-0487 — reachability: the QUANTA_FORCE_BACKGROUND knob (read by
+// `buildSubagentBgBlock` via `runtimeConfig()`) gates the 4th tool, and the
+// QUANTA_SUBAGENT_QUEUE knob flips the scheduler's over-cap behavior from
+// throw-at-cap to park-as-queued. Both default-OFF byte-identical.
+describe("subagent-background reachability — force-background + admission queue", () => {
+  const FB = "QUANTA_FORCE_BACKGROUND"
+  let savedFb: string | undefined
+  beforeEach(() => {
+    savedFb = process.env[FB]
+    delete process.env[FB]
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    if (savedFb === undefined) delete process.env[FB]
+    else process.env[FB] = savedFb
+    __resetRuntimeConfig()
+  })
+
+  test("QUANTA_FORCE_BACKGROUND OFF ⇒ exactly the 3 tools (NO subagent_force_background)", () => {
+    const scheduler = defaultBackgroundSubagentScheduler({ runner: inertRunner })
+    const cfg = baseCfg({ subagentBackground: { scheduler } })
+    const names = buildSubagentBgBlock(cfg).map((t) => t.name)
+    expect(names).toEqual(["subagent_fork", "subagent_poll", "subagent_await"])
+  })
+
+  test("QUANTA_FORCE_BACKGROUND=1 ⇒ the 4th tool subagent_force_background registers", () => {
+    process.env[FB] = "1"
+    __resetRuntimeConfig()
+    const scheduler = defaultBackgroundSubagentScheduler({ runner: inertRunner })
+    const cfg = baseCfg({ subagentBackground: { scheduler } })
+    const names = buildSubagentBgBlock(cfg).map((t) => t.name)
+    expect(names).toContain("subagent_force_background")
+    expect(names).toHaveLength(4)
+  })
+
+  test("admissionQueue OFF ⇒ over-cap fork THROWS cap-exceeded (byte-identical pre-queue)", () => {
+    const scheduler = defaultBackgroundSubagentScheduler({ runner: inertRunner })
+    // Default maxConcurrent = 3 ⇒ the 4th fork is over cap.
+    scheduler.fork({ task: "a" })
+    scheduler.fork({ task: "b" })
+    scheduler.fork({ task: "c" })
+    expect(() => scheduler.fork({ task: "d" })).toThrow(/cap-exceeded/)
+  })
+
+  test("admissionQueue ON ⇒ over-cap fork ADMITS (parks as queued, no throw)", () => {
+    const scheduler = defaultBackgroundSubagentScheduler({
+      runner: inertRunner,
+      admissionQueue: true,
+    })
+    scheduler.fork({ task: "a" })
+    scheduler.fork({ task: "b" })
+    scheduler.fork({ task: "c" })
+    // The 4th does NOT throw — it is admitted onto the FIFO queue.
+    const queuedId = scheduler.fork({ task: "d" })
+    expect(scheduler.poll(queuedId)?.status).toBe("queued")
   })
 })

@@ -133,3 +133,66 @@ describe("snapshotToNotice — no-leak: numbers + reset only, never a header VAL
     expect(notice.type).toBe("ratelimit_snapshot")
   })
 })
+
+describe("proactiveDelayMs — fuzz: a hostile snapshot never drives an absurd delay", () => {
+  // Even if a snapshot somehow carried out-of-band numbers (e.g. a future store
+  // wired before the parser, or a direct construction), the POLICY must still
+  // return a finite, non-negative, clamped delay — never NaN / negative / > cap.
+  const mulberry32 = (seed: number) => () => {
+    seed |= 0
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  // Draw from a hostile numeric set incl. the absurd / signed-zero / non-finite edge.
+  const HOSTILE = [
+    0,
+    -0,
+    1,
+    -1,
+    500,
+    -500,
+    5_000,
+    60_000,
+    60_001,
+    1e15,
+    1e308,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.NaN,
+    Number.MAX_SAFE_INTEGER,
+  ]
+
+  test("8000 hostile snapshots ⇒ delay always finite, in [0, 60000]", () => {
+    const rng = mulberry32(0xbadbeef)
+    const pick = () => HOSTILE[Math.floor(rng() * HOSTILE.length)] as number
+    let iterations = 0
+    for (let i = 0; i < 8_000; i++) {
+      iterations++
+      const d = proactiveDelayMs(
+        snap({
+          tokensRemaining: pick(),
+          tokensResetMs: pick(),
+          requestsRemaining: pick(),
+          requestsResetMs: pick(),
+        }),
+      )
+      expect(Number.isFinite(d)).toBe(true)
+      expect(d).toBeGreaterThanOrEqual(0)
+      expect(d).toBeLessThanOrEqual(60_000)
+      expect(Number.isNaN(d)).toBe(false)
+    }
+    expect(iterations).toBe(8_000)
+  })
+
+  test("empty bucket with a NaN reset ⇒ 0 (not NaN)", () => {
+    expect(proactiveDelayMs(snap({ tokensRemaining: 0, tokensResetMs: Number.NaN }))).toBe(0)
+  })
+
+  test("empty bucket with +Infinity reset ⇒ 0 (not Infinity)", () => {
+    expect(
+      proactiveDelayMs(snap({ tokensRemaining: 0, tokensResetMs: Number.POSITIVE_INFINITY })),
+    ).toBe(0)
+  })
+})

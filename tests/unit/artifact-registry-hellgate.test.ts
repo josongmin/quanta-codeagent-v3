@@ -16,6 +16,7 @@ import {
   ARTIFACT_URL_SCHEME,
   type ArtifactSpec,
   createArtifactRegistry,
+  DEFAULT_ARTIFACT_REGISTRY_MAX,
   monotonicIdFactory,
   previewUrl,
 } from "@/artifact"
@@ -111,5 +112,101 @@ describe("artifact registry — previewUrl scheme", () => {
   test("monotonicIdFactory honors the prefix + never repeats", () => {
     const f = monotonicIdFactory("img")
     expect([f(), f(), f()]).toEqual(["img-1", "img-2", "img-3"])
+  })
+})
+
+describe("artifact registry — UNBOUNDED-GROWTH cap (FIFO eviction)", () => {
+  /** A capped registry with a deterministic clock + id factory. */
+  const capped = (maxEntries: number) =>
+    createArtifactRegistry({
+      now: () => 1,
+      idFactory: monotonicIdFactory("art"),
+      maxEntries,
+    })
+
+  test("ATTACK: 5000 registrations into a cap-3 store never grows past 3 (no leak)", () => {
+    const reg = capped(3)
+    for (let i = 0; i < 5000; i++) reg.register(spec({ path: `/jail/out/${i}.png` }))
+    // Only the 3 most-recently registered survive; the store is bounded.
+    expect(reg.list()).toHaveLength(3)
+    expect(reg.list().map((a) => a.id)).toEqual(["art-4998", "art-4999", "art-5000"])
+  })
+
+  test("an EVICTED artifact's get returns a clean not-found (undefined), never a crash", () => {
+    const reg = capped(2)
+    const a = reg.register(spec())
+    reg.register(spec({ path: "/b" }))
+    reg.register(spec({ path: "/c" })) // evicts `a` (oldest)
+    expect(reg.get(a.id)).toBeUndefined() // clean not-found
+    expect(reg.list()).toHaveLength(2)
+    expect(reg.list().some((x) => x.id === a.id)).toBe(false)
+  })
+
+  test("FIFO order: the OLDEST-inserted is evicted first (not the newest)", () => {
+    const reg = capped(2)
+    const a = reg.register(spec({ path: "/a" }))
+    const b = reg.register(spec({ path: "/b" }))
+    const c = reg.register(spec({ path: "/c" })) // a evicted
+    expect(reg.get(a.id)).toBeUndefined()
+    expect(reg.get(b.id)?.id).toBe(b.id)
+    expect(reg.get(c.id)?.id).toBe(c.id)
+  })
+
+  test("destroy frees a slot so it does NOT count toward the cap", () => {
+    const reg = capped(2)
+    const a = reg.register(spec({ path: "/a" }))
+    const b = reg.register(spec({ path: "/b" }))
+    expect(reg.destroy(a.id)).toBe(true)
+    // With a freed, a 3rd register fits without evicting b.
+    const c = reg.register(spec({ path: "/c" }))
+    expect(reg.get(b.id)?.id).toBe(b.id) // survived
+    expect(reg.get(c.id)?.id).toBe(c.id)
+    expect(reg.list()).toHaveLength(2)
+  })
+
+  test("finite <1 cap (0, negative) clamps to 1 (always holds most-recent, never empty)", () => {
+    for (const bad of [0, -5]) {
+      const reg = capped(bad)
+      reg.register(spec({ path: "/a" }))
+      const b = reg.register(spec({ path: "/b" }))
+      expect(reg.list()).toHaveLength(1) // clamped to 1
+      expect(reg.list()[0]?.id).toBe(b.id) // most-recent retained
+    }
+  })
+
+  test("INFINITY cap falls back to the finite documented default (not unbounded)", () => {
+    const reg = createArtifactRegistry({
+      now: () => 1,
+      idFactory: monotonicIdFactory("art"),
+      maxEntries: Number.POSITIVE_INFINITY,
+    })
+    // Register exactly DEFAULT+1 and assert it bounded to DEFAULT.
+    for (let i = 0; i < DEFAULT_ARTIFACT_REGISTRY_MAX + 1; i++) {
+      reg.register(spec({ path: `/p/${i}` }))
+    }
+    expect(reg.list()).toHaveLength(DEFAULT_ARTIFACT_REGISTRY_MAX)
+  })
+
+  test("default cap (no maxEntries) is the documented finite bound", () => {
+    const reg = createArtifactRegistry({ now: () => 1, idFactory: monotonicIdFactory("art") })
+    for (let i = 0; i < DEFAULT_ARTIFACT_REGISTRY_MAX + 5; i++) {
+      reg.register(spec({ path: `/p/${i}` }))
+    }
+    expect(reg.list()).toHaveLength(DEFAULT_ARTIFACT_REGISTRY_MAX)
+  })
+
+  test("a duplicate/forged id OVERWRITES (Map.set) — no double-count, store stays bounded", () => {
+    // A pathological idFactory that always mints the same id: the store must not
+    // count it twice nor grow; it overwrites the single slot.
+    const reg = createArtifactRegistry({
+      now: () => 1,
+      idFactory: () => "art-DUP",
+      maxEntries: 3,
+    })
+    reg.register(spec({ path: "/a" }))
+    reg.register(spec({ path: "/b" }))
+    reg.register(spec({ path: "/c" }))
+    expect(reg.list()).toHaveLength(1)
+    expect(reg.get("art-DUP")?.path).toBe("/c") // last write wins
   })
 })

@@ -17,11 +17,11 @@
  */
 import {
   DEFAULT_MAX_WORKERS,
+  defaultSpawn,
   type GradeBackend,
   type GradeOptions,
   type GradeOutcome,
   type SpawnFn,
-  defaultSpawn,
 } from "./backend"
 import { createSshBackend } from "./ssh"
 
@@ -100,7 +100,9 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   const ttlMinutes = cfg.ttlMinutes ?? DEFAULTS.ttlMinutes
   const keep = cfg.keep ?? false
 
-  const aws = (args: readonly string[]): Promise<{ code: number; stdout: string; stderr: string }> =>
+  const aws = (
+    args: readonly string[],
+  ): Promise<{ code: number; stdout: string; stderr: string }> =>
     spawn("aws", ["--region", region, ...args])
 
   /** Stage 0: ensure the SG exists + :22 ingress from current public IP. */
@@ -133,7 +135,9 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
         "text",
       ])
       if (created.code !== 0) {
-        throw new Error(`[ec2-backend] create-security-group failed (code ${created.code}): ${created.stderr}`)
+        throw new Error(
+          `[ec2-backend] create-security-group failed (code ${created.code}): ${created.stderr}`,
+        )
       }
       sgId = oneLine(created.stdout)
     }
@@ -208,7 +212,9 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   const waitForHost = async (iid: string): Promise<string> => {
     const wait = await aws(["ec2", "wait", "instance-running", "--instance-ids", iid])
     if (wait.code !== 0) {
-      throw new Error(`[ec2-backend] wait instance-running failed (code ${wait.code}): ${wait.stderr}`)
+      throw new Error(
+        `[ec2-backend] wait instance-running failed (code ${wait.code}): ${wait.stderr}`,
+      )
     }
     const desc = await aws([
       "ec2",

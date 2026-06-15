@@ -117,7 +117,8 @@ const modelNameFromPredictions = (path: string): string | undefined => {
 
 const buildBackend = (spec: string, modelName: string | undefined): GradeBackend => {
   const mwRaw = argValue("--max-workers")
-  const maxWorkers = mwRaw !== undefined && Number.isInteger(Number(mwRaw)) ? Number(mwRaw) : undefined
+  const maxWorkers =
+    mwRaw !== undefined && Number.isInteger(Number(mwRaw)) ? Number(mwRaw) : undefined
   const common = {
     ...(modelName !== undefined ? { modelName } : {}),
     ...(maxWorkers !== undefined ? { maxWorkers } : {}),
@@ -180,7 +181,9 @@ const cmdExplain = (): void => {
   const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
   const instance = argValue("--instance")
   if (dataset === undefined || instance === undefined) {
-    logger.info("usage: quanta-bench explain --dataset <instances.jsonl> --instance <id> [--patch <agent.patch>]")
+    logger.info(
+      "usage: quanta-bench explain --dataset <instances.jsonl> --instance <id> [--patch <agent.patch>]",
+    )
     process.exit(2)
   }
   const patch = argValue("--patch")
@@ -195,7 +198,9 @@ const cmdExplain = (): void => {
 const cmdLeaderboard = (): void => {
   const reports = positionals()
   if (reports.length === 0) {
-    logger.info("usage: quanta-bench leaderboard <report.json> [more.json …] [--preset name] [--title T]")
+    logger.info(
+      "usage: quanta-bench leaderboard <report.json> [more.json …] [--preset name] [--title T]",
+    )
     process.exit(2)
   }
   const preset = argValue("--preset") ?? "agentless-v1"
@@ -240,7 +245,7 @@ const main = async (): Promise<void> => {
   // the historical `index.ts --swebench …` entry).
   if (sub === undefined || sub.startsWith("-") || !KNOWN_SUBCOMMANDS.has(sub)) {
     if (sub === "help" || sub === "--help" || sub === "-h") {
-      logger.info(HELP)
+      printBlock(HELP)
       return
     }
     const { runMain } = await import("./index")
@@ -270,11 +275,18 @@ const main = async (): Promise<void> => {
       cmdPresets()
       return
     default:
-      logger.info(HELP)
+      printBlock(HELP)
   }
 }
 
-main().catch((err) => {
-  logger.info(`quanta-bench error: ${errMessage(err)}`)
-  process.exit(1)
-})
+// Only run when invoked directly (not when imported by a test) so unit tests
+// can exercise the helpers without launching the CLI.
+if (import.meta.main) {
+  main().catch((err) => {
+    logger.info(`quanta-bench error: ${errMessage(err)}`)
+    process.exit(1)
+  })
+}
+
+// Exported for unit tests (pure CLI-arg helpers — the routing-bug surface).
+export { buildBackend, modelNameFromPredictions, positionals }

@@ -348,6 +348,27 @@ describe("/logout revoke wiring (knob-gated, NO-THROW)", () => {
     expect(await tokenExists(dir)).toBe(false)
   })
 
+  test("revoke is issued BEFORE the local delete (token file still present at revoke time)", async () => {
+    await seedToken(dir)
+    // A fetch stub that, at the moment the revoke POST fires, observes whether
+    // the on-disk token file still exists. revoke-before-delete ⇒ it MUST still
+    // be there (the local delete has not run yet).
+    let tokenPresentAtRevoke: boolean | undefined
+    const fetchPort: FetchPort = async () => {
+      tokenPresentAtRevoke = await tokenExists(dir)
+      return new Response("", { status: 200 })
+    }
+    const cmd = buildLogoutCmd({
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
+      revokeOnLogout: true,
+      fetchPort,
+    })
+    const cap = makeCtx(dir)
+    expect(await cmd.run([], cap.ctx)).toBe(0)
+    expect(tokenPresentAtRevoke).toBe(true) // revoke ran while the token was still local
+    expect(await tokenExists(dir)).toBe(false) // and the delete still happened after
+  })
+
   test("NO token leaks into log/box even on success (token only in wire body)", async () => {
     await seedToken(dir)
     const { fetchPort, calls } = makeFetch({ kind: "ok" })

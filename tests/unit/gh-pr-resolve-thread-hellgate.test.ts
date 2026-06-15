@@ -21,7 +21,11 @@
  */
 import { describe, expect, test } from "bun:test"
 import { type GhRunner, ghPrResolveThreadTool } from "@/tool/gh"
-import { RESOLVE_THREAD_MUTATION, UNRESOLVED_THREADS_QUERY } from "@/tool/gh/pr-resolve-thread"
+import {
+  isUnsafeHeadRef,
+  RESOLVE_THREAD_MUTATION,
+  UNRESOLVED_THREADS_QUERY,
+} from "@/tool/gh/pr-resolve-thread"
 import type { GitRunner, GitRunResult } from "@/tool/git/types"
 import type { ToolEvent } from "@/tool/types"
 
@@ -341,5 +345,59 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     const scrubbed = mod.scrubEnv(["PATH", "GH_TOKEN"])
     expect(scrubbed.OPENAI_API_KEY).toBeUndefined()
     expect(scrubbed.ANTHROPIC_API_KEY).toBeUndefined()
+  })
+
+  // ── headRefName arg-injection (SECURITY) — the GraphQL response drives git argv ──
+
+  test("HELL-17: a `-`-leading headRefName from GraphQL is REJECTED — NO git command runs", async () => {
+    // The server returns a poisoned head ref. It would land in `git fetch origin
+    // <ref>` argv and be parsed as a flag (`--upload-pack=…`) — flag-injection.
+    const gh = ghRunner({
+      threads: threadsJson("--upload-pack=touch /tmp/pwned", [{ id: "T_a" }]),
+    })
+    const git = gitRunner({ aheadCounts: [2], rebaseCode: 0 })
+    const events = await drain(
+      ghPrResolveThreadTool(gh, git).execute(
+        { pr: 1, threadId: "T_a", rebaseOnDivergence: true },
+        ctx(),
+      ),
+    )
+    const out = resultOf(events)
+    expect(out?.ok).toBe(false)
+    expect(out?.failure?.reason).toBe("bad_head_ref")
+    // The load-bearing assertion: NOT ONE git command was issued with the
+    // poisoned ref — fail-closed BEFORE any argv is built.
+    expect(git.calls.length).toBe(0)
+    // …and the resolve mutation never ran either.
+    expect(gh.argv.some((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))).toBe(false)
+  })
+
+  test("HELL-18: a whitespace/control-char headRefName is REJECTED before git argv", async () => {
+    const gh = ghRunner({ threads: threadsJson("feat/x y", [{ id: "T_a" }]) })
+    const git = gitRunner({ aheadCounts: [2], rebaseCode: 0 })
+    const events = await drain(
+      ghPrResolveThreadTool(gh, git).execute(
+        { pr: 1, threadId: "T_a", rebaseOnDivergence: true },
+        ctx(),
+      ),
+    )
+    expect(resultOf(events)?.failure?.reason).toBe("bad_head_ref")
+    expect(git.calls.length).toBe(0)
+  })
+
+  test("HELL-19: isUnsafeHeadRef — flag/whitespace/control unsafe, normal branch safe", () => {
+    // Unsafe: leading dash (flag-injection), whitespace, control char, empty.
+    expect(isUnsafeHeadRef("-x")).toBe(true)
+    expect(isUnsafeHeadRef("--upload-pack=evil")).toBe(true)
+    expect(isUnsafeHeadRef(`feat/a${String.fromCharCode(1)}b`)).toBe(true) // SOH control
+    expect(isUnsafeHeadRef("feat/a\nb")).toBe(true)
+    expect(isUnsafeHeadRef("feat/a\tb")).toBe(true)
+    expect(isUnsafeHeadRef("feat/a b")).toBe(true)
+    expect(isUnsafeHeadRef("")).toBe(true)
+    // Safe: ordinary branch names, INTERIOR dashes/slashes are fine.
+    expect(isUnsafeHeadRef("feat/foo-bar")).toBe(false)
+    expect(isUnsafeHeadRef("main")).toBe(false)
+    expect(isUnsafeHeadRef("release/1.2.3")).toBe(false)
+    expect(isUnsafeHeadRef("user/fix-the-bug")).toBe(false)
   })
 })

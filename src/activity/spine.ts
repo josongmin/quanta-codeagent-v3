@@ -146,10 +146,20 @@ export const reduceActivity = (state: ActivityState, event: AgentActivityEvent):
       if (node === undefined) return state // NO-THROW
       // Counters are monotonic non-negative: deltas are additive work. A
       // non-finite OR non-positive delta is ignored (no NaN/negative poisoning).
-      const dt = Number.isFinite(event.tokensDelta) && (event.tokensDelta as number) > 0 ? (event.tokensDelta as number) : 0
-      const dc = Number.isFinite(event.toolCallsDelta) && (event.toolCallsDelta as number) > 0 ? (event.toolCallsDelta as number) : 0
+      const dt =
+        Number.isFinite(event.tokensDelta) && (event.tokensDelta as number) > 0
+          ? (event.tokensDelta as number)
+          : 0
+      const dc =
+        Number.isFinite(event.toolCallsDelta) && (event.toolCallsDelta as number) > 0
+          ? (event.toolCallsDelta as number)
+          : 0
       if (dt === 0 && dc === 0) return state
-      state.nodes.set(event.id, { ...node, tokens: node.tokens + dt, toolCalls: node.toolCalls + dc })
+      state.nodes.set(event.id, {
+        ...node,
+        tokens: node.tokens + dt,
+        toolCalls: node.toolCalls + dc,
+      })
       return state
     }
     default: {

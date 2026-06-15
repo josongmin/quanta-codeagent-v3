@@ -226,7 +226,30 @@ type DivergenceOutcome =
   | { kind: "ok" } // local == origin/<head>, OR a single clean rebase landed
   | { kind: "head_moved" } // diverged + rebaseOnDivergence:false (no git mutation)
   | { kind: "rebase_conflict" } // rebase conflicted → aborted, fail-closed
+  | { kind: "bad_head_ref"; ref: string } // headRefName from GraphQL is arg-injection-unsafe
   | { kind: "git_failed"; detail: string }
+
+/** SECURITY — `headRefName` arrives from the GraphQL RESPONSE (a network trust
+ *  boundary), then flows straight into `git fetch origin <ref>` argv. A
+ *  `-`-leading ref (`--upload-pack=…`, `--exec=…`) would be parsed by git as a
+ *  FLAG — arg-injection — and an embedded whitespace / control char is never a
+ *  valid git branch ref anyway. Reject such a head ref BEFORE any git argv is
+ *  built (same fail-closed posture as `normalizeRef` for the positional PR ref).
+ *  The `origin/<ref>` forms in rev-list/rebase can't be `-`-leading, but the
+ *  bare `git fetch origin <ref>` can — so this is the load-bearing guard. */
+export const isUnsafeHeadRef = (ref: string): boolean => {
+  if (ref.length === 0) return true
+  if (ref.startsWith("-")) return true
+  // No whitespace — a git branch ref never contains a space/tab/newline; its
+  // presence signals a poisoned value, not a real branch. (Interior dashes are
+  // fine: `feat/foo-bar` is a normal branch; only a LEADING dash flag-injects.)
+  if (/\s/.test(ref)) return true
+  // No ASCII control chars (0x00-0x1f) — git refs forbid them outright.
+  for (let i = 0; i < ref.length; i++) {
+    if (ref.charCodeAt(i) < 0x20) return true
+  }
+  return false
+}
 
 /** Has the local branch diverged from `origin/<headRef>`? A rev-list of
  *  `HEAD..origin/<headRef>` with ANY output ⇒ the remote moved ahead. */
@@ -259,6 +282,10 @@ const handleDivergence = async (
   rebaseOnDivergence: boolean,
   ctx: ToolContext,
 ): Promise<DivergenceOutcome> => {
+  // SECURITY — `headRef` came from the GraphQL response (network trust boundary);
+  // reject an arg-injection-unsafe ref BEFORE it reaches ANY git argv (the bare
+  // `git fetch origin <ref>` below would parse a `-`-leading value as a flag).
+  if (isUnsafeHeadRef(headRef)) return { kind: "bad_head_ref", ref: headRef }
   // 1. fetch the remote head (read-only network; needed to compare local vs remote)
   const fetched = await git.run(["fetch", "origin", headRef], ctx.cwd, ctx.signal)
   if (fetched.exitCode !== 0) {
@@ -311,6 +338,18 @@ const divergenceBlock = (div: DivergenceOutcome, headRef: string): ToolEvent | n
             "rebase onto the updated PR head CONFLICTED — aborted (no thread " +
             "resolved). Resolve the conflict manually, then retry.",
           failure: { mode: "rejected", reason: "rebase_conflict" },
+        },
+      }
+    case "bad_head_ref":
+      return {
+        type: "result",
+        result: {
+          ok: false,
+          output:
+            `refusing to operate on PR head '${div.ref}': the head ref name returned ` +
+            "by GitHub is not a safe git ref (leading dash / whitespace / control " +
+            "char) — it would be parsed as a flag. No git command was run.",
+          failure: { mode: "rejected", reason: "bad_head_ref" },
         },
       }
     default:

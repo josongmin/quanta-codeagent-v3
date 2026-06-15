@@ -508,3 +508,104 @@ describe("jun-06 RFC §9 default-OFF byte-identical", () => {
     for (const c of clients) await c.stop()
   })
 })
+
+// --- §10 concurrency: many parked calls during a gap settle EXACTLY ONCE -----
+//
+// The no-throw-during-gap surface is also a CONCURRENCY surface: N callers can
+// be mid-`proxyResources` while the supervisor reconnects. Each must settle
+// exactly once (no double-resolve, no lost wake, no hang) and — because
+// `select(this.client)` is re-evaluated AFTER the queue wait — each must bind to
+// the RECOVERED client, never the dead one. A stop() that races the parked
+// callers must wake them all to a typed `transport` failure (never a hang).
+
+describe("jun-06 RFC §10 concurrent parked calls", () => {
+  it("10 queue-mode calls parked during a gap all resolve once to the RECOVERED client", async () => {
+    const clock = makeClock()
+    const first = makeFakeClient("first", { supportsResources: true, tag: "first" })
+    const second = makeFakeClient("second", { supportsResources: true, tag: "second" })
+    const seq = [first, second]
+    let i = 0
+    const sup = await McpReconnectSupervisor.create(
+      CONFIG,
+      baseDeps(clock, () => (seq[i++] ?? second).client, {
+        pendingPolicy: "queue",
+        queueWaitMaxMs: 1_000_000,
+      }),
+    )
+    first.crash("boom")
+    expect(sup.snapshot().state).toBe("backing-off")
+
+    // Fan out 10 concurrent listResources while backing-off (all park).
+    const pending = Array.from({ length: 10 }, () => sup.listResources())
+    // Recover: fire the restart → swaps in `second`.
+    clock.advance(DEFAULT_BACKOFF_POLICY.fastRetryBaseMs)
+    for (let f = 0; f < 4; f++) await Promise.resolve()
+    expect(sup.snapshot().state).toBe("healthy")
+
+    const results = await Promise.all(pending)
+    expect(results).toHaveLength(10)
+    for (const r of results) {
+      expect(r.ok).toBe(true)
+      // bound to the RECOVERED client, never the dead `first`.
+      if (r.ok) expect(r.value[0]?.name).toBe("second")
+    }
+    // No traffic ever reached the dead client during the gap.
+    expect(first.resourceCalls).toEqual([])
+    await sup.stop()
+  })
+
+  it("stop() racing parked callers wakes them ALL to transport (no hang, no double-resolve)", async () => {
+    const clock = makeClock()
+    const live = makeFakeClient("c0", { supportsResources: true })
+    const sup = await McpReconnectSupervisor.create(
+      CONFIG,
+      baseDeps(clock, () => live.client, { pendingPolicy: "queue", queueWaitMaxMs: 1_000_000 }),
+    )
+    live.crash("boom")
+    expect(sup.snapshot().state).toBe("backing-off")
+
+    const pending = Array.from({ length: 5 }, () => sup.listResources())
+    await sup.stop() // releaseWaiters while NOT healthy → every waiter rejects
+    const results = await Promise.all(pending)
+    for (const r of results) {
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.reason).toBe("transport")
+    }
+  })
+})
+
+// --- §11 queue wake onto a client that LOST the method ⇒ unsupported ---------
+//
+// A parked queue-mode call wakes after recovery and re-resolves `select` against
+// the CURRENT (recovered) client. If that client dropped the capability across
+// the restart, the proxy must return a typed `unsupported` — NOT `transport`
+// (recovery DID happen) and NEVER a throw / null-deref.
+
+describe("jun-06 RFC §11 queue wake onto drifted client", () => {
+  it("a parked call recovering onto a method-less client returns unsupported", async () => {
+    const clock = makeClock()
+    const withRes = makeFakeClient("first", { supportsResources: true })
+    const noRes = makeFakeClient("c0") // resources method-set omitted
+    const seq = [withRes, noRes]
+    let i = 0
+    const sup = await McpReconnectSupervisor.create(
+      CONFIG,
+      baseDeps(clock, () => (seq[i++] ?? noRes).client, {
+        pendingPolicy: "queue",
+        queueWaitMaxMs: 1_000_000,
+      }),
+    )
+    withRes.crash("boom")
+    expect(sup.snapshot().state).toBe("backing-off")
+
+    const pending = sup.listResources() // parks
+    clock.advance(DEFAULT_BACKOFF_POLICY.fastRetryBaseMs) // restart → noRes
+    for (let f = 0; f < 4; f++) await Promise.resolve()
+    expect(sup.snapshot().state).toBe("healthy")
+
+    const r = await pending
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe("unsupported")
+    await sup.stop()
+  })
+})

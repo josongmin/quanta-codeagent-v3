@@ -7,6 +7,40 @@
  * from the producers. Pure-of-I/O leaf: imports only its own files + node types.
  */
 
+export { type FleetRowLike, fleetRowToActivity, fleetToActivity } from "./producers/fleet"
+export {
+  type SideAgentSnapshotLike,
+  type SideAgentStatusLike,
+  sideAgentsToActivity,
+  sideAgentToActivity,
+} from "./producers/side-agent"
+export {
+  type WorkflowEventLike,
+  type WorkflowToActivityOpts,
+  workflowCloseActivity,
+  workflowToActivity,
+} from "./producers/workflow"
+export {
+  type ActivityTreeNode,
+  type FleetRow,
+  projectFleet,
+  projectTree,
+} from "./project"
+export { formatAge, type RenderActivityOpts, renderActivity } from "./render"
+export {
+  type ActivityState,
+  emptyActivityState,
+  materialize,
+  reduceActivity,
+  reduceAll,
+} from "./spine"
+export {
+  type ActivityStore,
+  createActivityStore,
+  createWorkflowSink,
+  type WorkflowSink,
+  type WorkflowSinkOpts,
+} from "./store"
 export type {
   ActivityAggregate,
   ActivityKind,
@@ -18,37 +52,3 @@ export type {
   Stuck,
   StuckReason,
 } from "./types"
-export {
-  type ActivityState,
-  emptyActivityState,
-  materialize,
-  reduceActivity,
-  reduceAll,
-} from "./spine"
-export {
-  type ActivityTreeNode,
-  type FleetRow,
-  projectFleet,
-  projectTree,
-} from "./project"
-export {
-  type WorkflowEventLike,
-  type WorkflowToActivityOpts,
-  workflowCloseActivity,
-  workflowToActivity,
-} from "./producers/workflow"
-export {
-  type ActivityStore,
-  createActivityStore,
-  createWorkflowSink,
-  type WorkflowSink,
-  type WorkflowSinkOpts,
-} from "./store"
-export { formatAge, type RenderActivityOpts, renderActivity } from "./render"
-export { type FleetRowLike, fleetRowToActivity, fleetToActivity } from "./producers/fleet"
-export {
-  type SideAgentSnapshotLike,
-  type SideAgentStatusLike,
-  sideAgentsToActivity,
-  sideAgentToActivity,
-} from "./producers/side-agent"

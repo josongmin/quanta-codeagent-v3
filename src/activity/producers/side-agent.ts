@@ -7,7 +7,7 @@
  * fleet line can show "woke 4×".
  */
 
-import type { AgentActivityEvent, ActivityStatus } from "../types"
+import type { ActivityStatus, AgentActivityEvent } from "../types"
 
 /** Mirror of `@/side-agent`'s `SideAgentStatus`. */
 export type SideAgentStatusLike = "running" | "stopped" | "failed" | "idle-reaped"
@@ -30,9 +30,7 @@ const STATUS: Readonly<Record<SideAgentStatusLike, ActivityStatus>> = {
   "idle-reaped": "stopped",
 }
 
-export const sideAgentToActivity = (
-  snap: SideAgentSnapshotLike,
-): readonly AgentActivityEvent[] => {
+export const sideAgentToActivity = (snap: SideAgentSnapshotLike): readonly AgentActivityEvent[] => {
   const status = STATUS[snap.status]
   const meta: Record<string, string> = { wakes: String(snap.wakesDone) }
   const open: AgentActivityEvent = {

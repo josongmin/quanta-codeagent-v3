@@ -182,18 +182,138 @@ describe("parseRateLimitSnapshot — NO-THROW on malformed / garbage", () => {
   })
 })
 
-describe("differential parity — reset band logic matches B3", () => {
-  // The snapshot's reset parser must agree byte-for-byte with B3's
+describe("parseRateLimitSnapshot — ABSURD-MAGNITUDE hardening (jun-6 audit findings)", () => {
+  // FINDING 1 (ABSURD-VALUE remaining): `Number.isInteger(1e308) === true`, so the
+  // pre-fix `Number.isInteger && >= 0` check let `"1e308"` / `"1e21"` poison the
+  // snapshot with a count far above any real quota (the 1e308 class the B3
+  // `parseRetryAfterMs` audit caught for delays). Counterexample BEFORE fix:
+  // requestsRemaining === 1e308.
+  test('COUNTEREXAMPLE: remaining "1e308" ⇒ field dropped (not 1e308)', () => {
+    const s = parseRateLimitSnapshot(
+      lookup({ "anthropic-ratelimit-tokens-remaining": "1e308" }),
+      now,
+    )
+    expect(s?.tokensRemaining).toBeUndefined()
+  })
+
+  test('remaining "1e21" (> MAX_SAFE_INTEGER) ⇒ dropped; a safe-int boundary is kept', () => {
+    expect(
+      parseRateLimitSnapshot(lookup({ "anthropic-ratelimit-tokens-remaining": "1e21" }), now)
+        ?.tokensRemaining,
+    ).toBeUndefined()
+    expect(
+      parseRateLimitSnapshot(
+        lookup({ "anthropic-ratelimit-tokens-remaining": String(Number.MAX_SAFE_INTEGER) }),
+        now,
+      )?.tokensRemaining,
+    ).toBe(Number.MAX_SAFE_INTEGER)
+  })
+
+  // FINDING 2 (ABSURD-DELAY reset): a hostile epoch `"1e308"` / `"9".repeat(20)`
+  // lands in the ms-epoch band as a finite-but-absurd delta that `finiteMs` (which
+  // only rejects NON-finite) let through. The snapshot is surfaced raw, so it must
+  // clamp. Counterexample BEFORE fix: tokensResetMs === 1e308.
+  test('COUNTEREXAMPLE: reset "1e308" ⇒ resetMs dropped (not 1e308)', () => {
+    const s = parseRateLimitSnapshot(lookup({ "anthropic-ratelimit-tokens-reset": "1e308" }), now)
+    expect(s?.tokensResetMs).toBeUndefined()
+  })
+
+  test('reset "9".repeat(20) (~1e20 epoch) ⇒ resetMs dropped (no ~1e20 ms delay)', () => {
+    const s = parseRateLimitSnapshot(
+      lookup({ "anthropic-ratelimit-tokens-reset": "9".repeat(20) }),
+      now,
+    )
+    expect(s?.tokensResetMs).toBeUndefined()
+  })
+
+  test("a legitimate reset just under the 1-year horizon is NOT clamped", () => {
+    // 364 days out, expressed as a relative delta-seconds (< 1e9 band).
+    const days364Secs = 364 * 24 * 60 * 60
+    const s = parseRateLimitSnapshot(
+      lookup({ "anthropic-ratelimit-tokens-reset": String(days364Secs) }),
+      now,
+    )
+    expect(s?.tokensResetMs).toBe(days364Secs * 1000)
+  })
+})
+
+describe("parseRateLimitSnapshot — seeded fuzz: NEVER NaN / negative / absurd", () => {
+  // Deterministic PRNG (mulberry32) — NO Math.random (project rule). The header
+  // VALUE is drawn from the full hostile alphabet; the snapshot's numeric fields
+  // must ALWAYS be a safe non-negative integer (remaining) / a finite reset within
+  // the 1-year horizon (reset) — or absent. Never NaN, never negative, never absurd.
+  const mulberry32 = (seed: number) => () => {
+    seed |= 0
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const ALPHABET = "0123456789.eE+-,xXabcInfity NaN:GMT"
+  const HORIZON = 365 * 24 * 60 * 60 * 1000
+
+  const assertCount = (v: number | undefined) => {
+    if (v === undefined) return
+    expect(Number.isSafeInteger(v)).toBe(true)
+    expect(v).toBeGreaterThanOrEqual(0)
+  }
+  const assertReset = (v: number | undefined) => {
+    if (v === undefined) return
+    expect(Number.isFinite(v)).toBe(true)
+    expect(v).toBeGreaterThanOrEqual(0)
+    expect(v).toBeLessThanOrEqual(HORIZON)
+    expect(Object.is(v, -0)).toBe(false)
+  }
+
+  test("10000 random header values never poison the snapshot", () => {
+    const rng = mulberry32(0xc0ffee)
+    const draw = () => {
+      const len = Math.floor(rng() * 30)
+      let s = ""
+      for (let i = 0; i < len; i++) s += ALPHABET[Math.floor(rng() * ALPHABET.length)]
+      return s
+    }
+    let iterations = 0
+    for (let i = 0; i < 10_000; i++) {
+      iterations++
+      const s = parseRateLimitSnapshot(
+        lookup({
+          "anthropic-ratelimit-tokens-remaining": draw(),
+          "anthropic-ratelimit-tokens-reset": draw(),
+          "x-ratelimit-remaining-requests": draw(),
+          "x-ratelimit-reset-requests": draw(),
+        }),
+        now,
+      )
+      if (s === undefined) continue
+      assertCount(s.requestsRemaining)
+      assertCount(s.tokensRemaining)
+      assertReset(s.requestsResetMs)
+      assertReset(s.tokensResetMs)
+      expect(Number.isFinite(s.observedAt)).toBe(true)
+    }
+    expect(iterations).toBe(10_000)
+  })
+})
+
+describe("differential parity — reset band logic matches B3 (shared numeric band)", () => {
+  // The snapshot's reset parser agrees byte-for-byte with B3's
   // `parseRateLimitResetHeader` (consulted via the exported `parseRetryAfterMs`
-  // through the `x-ratelimit-reset` key). This locks the duplication to the
-  // proven original.
+  // through the `x-ratelimit-reset` key) ON THE SHARED NUMERIC BAND. This locks
+  // the duplicated band split (epoch-ms / epoch-s / relative-s + past⇒undefined)
+  // to the proven original.
+  //
+  // EXCLUDED from this parity set (asserted as DELIBERATE divergences below):
+  //   - "1e308" — B3 leaks a finite-but-absurd 1e308 and relies on the downstream
+  //     60s retry clamp; the snapshot is surfaced raw so it clamps to undefined.
+  //   - an HTTP-date — B3's band parser has no date branch (NaN⇒drop); the
+  //     snapshot accepts it (strict superset).
   const cases = [
     "30",
     "60",
     "0",
     String(FIXED_NOW / 1000 + 90),
     String(FIXED_NOW + 7_500),
-    "1e308",
     "-1",
     "NaN",
     "",
@@ -216,4 +336,23 @@ describe("differential parity — reset band logic matches B3", () => {
       }
     })
   }
+
+  test("DELIBERATE divergence: 1e308 — B3 leaks 1e308, snapshot clamps to undefined", () => {
+    const b3 = parseRetryAfterMs(
+      (name) => (name.toLowerCase() === "x-ratelimit-reset" ? "1e308" : null),
+      now,
+    )
+    expect(b3).toBe(1e308) // B3's documented finite-but-absurd leak (downstream-clamped)
+    expect(parseRateLimitResetMs("1e308", now)).toBeUndefined() // snapshot is stricter at the boundary
+  })
+
+  test("DELIBERATE divergence: HTTP-date — B3 band drops it, snapshot accepts it", () => {
+    const at = new Date(FIXED_NOW + 20_000).toUTCString()
+    const b3 = parseRetryAfterMs(
+      (name) => (name.toLowerCase() === "x-ratelimit-reset" ? at : null),
+      now,
+    )
+    expect(b3).toBeUndefined() // B3 band parser has no date branch
+    expect(parseRateLimitResetMs(at, now)).toBe(20_000) // snapshot superset
+  })
 })

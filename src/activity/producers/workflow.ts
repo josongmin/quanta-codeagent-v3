@@ -40,7 +40,8 @@ export interface WorkflowToActivityOpts {
  *  streaming paths MUST agree (pinned by the store drift ratchet). */
 export const wfSeg = (s: string): string => encodeURIComponent(s)
 export const wfRunId = (runId: string): string => wfSeg(runId)
-export const wfPhaseId = (runId: string, name: string): string => `${wfSeg(runId)}/phase/${wfSeg(name)}`
+export const wfPhaseId = (runId: string, name: string): string =>
+  `${wfSeg(runId)}/phase/${wfSeg(name)}`
 export const wfStepId = (runId: string, id: string): string => `${wfSeg(runId)}/step/${wfSeg(id)}`
 const seg = wfSeg
 const phaseId = wfPhaseId
@@ -83,7 +84,13 @@ export const workflowToActivity = (
       started.add(id)
       out.push({
         type: "node_open",
-        node: { id: sid, parentId: currentPhase ?? runRoot, kind: "agent", label, status: "running" },
+        node: {
+          id: sid,
+          parentId: currentPhase ?? runRoot,
+          kind: "agent",
+          label,
+          status: "running",
+        },
       })
     }
     return sid
@@ -106,7 +113,11 @@ export const workflowToActivity = (
         ensureStep(e.id, e.label)
         break
       case "step_complete":
-        out.push({ type: "node_status", id: ensureStep(e.id, e.id), status: e.ok ? "done" : "failed" })
+        out.push({
+          type: "node_status",
+          id: ensureStep(e.id, e.id),
+          status: e.ok ? "done" : "failed",
+        })
         break
       case "step_skipped":
         out.push({ type: "node_status", id: ensureStep(e.id, e.id), status: "skipped" })

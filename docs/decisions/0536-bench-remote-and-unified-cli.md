@@ -1,6 +1,6 @@
 # ADR-0536 — Unified `quanta-bench` CLI + remote grading (sb-cli / SSH / AWS) + analysis layer
 
-- Status: Proposed
+- Status: **P0 implemented** (2026-06-15) — `src/apps/bench/cli.ts` (run/grade/diff/explain/leaderboard/presets) + `remote/` (ssh + ec2 backends) + `analyze/` (verdicts/diff/explain/leaderboard). 51 unit tests (cli 8 + remote 22 + analyze 21). `package.json` `bench` → `cli.ts`. P1/P2/P3 pending.
 - Date: 2026-06-15
 - Supersedes/relates: bench harness (`src/apps/bench`), ADR-0014 (local validator), jun-15 preset unification
 

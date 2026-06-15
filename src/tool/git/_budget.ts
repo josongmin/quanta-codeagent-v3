@@ -23,7 +23,20 @@
  *
  * The last two are forward-compat type slots; they MUST stay in the
  * interface so a future user wiring them in does not need a type bump.
+ *
+ * Wiring (ADR-0107 §wire): `withBudget` is the single LIVE consumer — it
+ * decorates a {@link GitRunner} so EVERY git invocation routed through the
+ * read-only tools (`git_log`, `git_churn`, `git_blame_heatmap`,
+ * `git_upstream_check`) enforces the budget uniformly:
+ *   - `maxWallTimeMs`  → fused AbortSignal via {@link applyBudget}
+ *   - `maxOutputBytes` → post-spawn stdout truncation
+ *   - `maxCommits`     → `-n <N>` arg clamp via {@link resolveMaxCommits}
+ * The composition root resolves the budget from a runtime knob and passes it
+ * into `gitTools(runner, { budget })`; absent ⇒ `withBudget` returns the SAME
+ * runner reference (no allocation, byte-identical contract).
  */
+
+import type { GitRunner } from "./types"
 
 export interface GitBudget {
   /** Cap on the number of commits the walker should process. Tools that
@@ -125,4 +138,114 @@ export const crossedTarget = (elapsedMs: number, budget: GitBudget | undefined):
   const target = budget?.targetDurationMs
   if (target === undefined || !Number.isFinite(target) || target <= 0) return false
   return elapsedMs > target
+}
+
+/** True iff the budget carries at least one ENFORCEABLE knob (`maxCommits` /
+ *  `maxWallTimeMs` / `maxOutputBytes`). `targetDurationMs` /
+ *  `consecutiveOverBudget` are telemetry/multi-run-only and do NOT make a
+ *  budget enforceable on a single call — a budget of only those is inert, so
+ *  {@link withBudget} returns the runner unchanged for byte-identity. */
+const hasEnforceableKnob = (budget: GitBudget): boolean => {
+  const positive = (v: number | undefined): boolean =>
+    v !== undefined && Number.isFinite(v) && v > 0
+  return (
+    positive(budget.maxCommits) || positive(budget.maxWallTimeMs) || positive(budget.maxOutputBytes)
+  )
+}
+
+/** Clamp a `git log ... -n <N>` arg list against the budget's `maxCommits`.
+ *  Returns the SAME array reference when there is no `-n` flag with a numeric
+ *  follower or no cap applies, so the common path allocates nothing. The clamp
+ *  reuses {@link resolveMaxCommits} (explicit `-n` value × cap × itself as the
+ *  default) so the smaller of the existing flag and the cap wins. */
+const clampCommitArgs = (
+  args: readonly string[],
+  budget: GitBudget | undefined,
+): readonly string[] => {
+  const cap = budget?.maxCommits
+  if (cap === undefined || !Number.isFinite(cap) || cap <= 0) return args
+  const idx = args.indexOf("-n")
+  if (idx < 0 || idx + 1 >= args.length) return args
+  const current = Number(args[idx + 1])
+  if (!Number.isFinite(current) || current <= 0) return args
+  const clamped = resolveMaxCommits(current, budget, current)
+  if (clamped === current) return args
+  const next = [...args]
+  next[idx + 1] = String(clamped)
+  return next
+}
+
+/**
+ * Decorate a {@link GitRunner} so every invocation enforces `budget`. This is
+ * the LIVE consumer of {@link applyBudget} / {@link resolveMaxCommits}: the
+ * composition root resolves a budget from a runtime knob and wraps the runner
+ * once, then `gitTools(wrapped)` builds all tools on top of it.
+ *
+ * Enforcement per call:
+ *   1. `maxCommits`     — clamp any `-n <N>` flag down to the cap.
+ *   2. `maxWallTimeMs`  — fuse a deadline AbortSignal onto the caller's signal;
+ *      whichever fires first kills the spawned git process.
+ *   3. `maxOutputBytes` — truncate the returned stdout to the cap (the spawn
+ *      already completed, so this bounds what the tool parses/returns, never
+ *      letting a runaway walk balloon the loop's memory).
+ *
+ * Default-OFF / inert-budget ⇒ returns the SAME runner reference (no wrapper
+ * allocation), so a deployment that does not set the knob is byte-identical.
+ * NO-THROW: delegates to the wrapped runner; the `applyBudget` cleanup runs in
+ * a `finally` so a long-lived parent signal never leaks a listener.
+ */
+export const withBudget = (runner: GitRunner, budget: GitBudget | undefined): GitRunner => {
+  if (budget === undefined || !hasEnforceableKnob(budget)) return runner
+  const cap = budget.maxOutputBytes
+  const capBytes = cap !== undefined && Number.isFinite(cap) && cap > 0 ? cap : undefined
+  return {
+    async run(args, cwd, signal) {
+      const clampedArgs = clampCommitArgs(args, budget)
+      const fused = applyBudget(signal, budget)
+      try {
+        const result = await runner.run(clampedArgs, cwd, fused.signal)
+        if (capBytes !== undefined && result.stdout.length > capBytes) {
+          return { ...result, stdout: result.stdout.slice(0, capBytes) }
+        }
+        return result
+      } finally {
+        fused.cleanup()
+      }
+    },
+  }
+}
+
+/**
+ * Resolve an optional {@link GitBudget} from a runtime env record. Pure +
+ * env-INJECTED (the slice never reads `process.env` itself — the composition
+ * root passes its already-loaded env), so the gate is hermetically testable.
+ *
+ * Each knob is an independent positive integer; a knob that is unset / blank /
+ * non-positive / non-finite is OMITTED. When NO knob yields an enforceable
+ * value the function returns `undefined`, so `gitTools(runner, { budget })`
+ * passes `undefined` and {@link withBudget} returns the SAME runner reference —
+ * byte-identical to the pre-budget registry. Knobs:
+ *   - `QUANTA_GIT_BUDGET_MAX_COMMITS`       → `maxCommits` (`-n` clamp)
+ *   - `QUANTA_GIT_BUDGET_WALL_MS`           → `maxWallTimeMs` (fused abort)
+ *   - `QUANTA_GIT_BUDGET_MAX_OUTPUT_BYTES`  → `maxOutputBytes` (stdout cap)
+ */
+export const resolveGitBudget = (
+  env: Readonly<Record<string, string | undefined>>,
+): GitBudget | undefined => {
+  const positiveInt = (raw: string | undefined): number | undefined => {
+    if (raw === undefined) return undefined
+    const n = Number.parseInt(raw, 10)
+    return Number.isFinite(n) && n > 0 ? n : undefined
+  }
+  const maxCommits = positiveInt(env.QUANTA_GIT_BUDGET_MAX_COMMITS)
+  const maxWallTimeMs = positiveInt(env.QUANTA_GIT_BUDGET_WALL_MS)
+  const maxOutputBytes = positiveInt(env.QUANTA_GIT_BUDGET_MAX_OUTPUT_BYTES)
+  if (maxCommits === undefined && maxWallTimeMs === undefined && maxOutputBytes === undefined) {
+    return undefined
+  }
+  return {
+    ...(maxCommits !== undefined ? { maxCommits } : {}),
+    ...(maxWallTimeMs !== undefined ? { maxWallTimeMs } : {}),
+    ...(maxOutputBytes !== undefined ? { maxOutputBytes } : {}),
+  }
 }

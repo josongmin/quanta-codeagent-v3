@@ -52,6 +52,7 @@ evidence:
       - tests/unit/integrations/github/webhook-secret-resolver.test.ts
     integration:
       - tests/integration/github-webhook-host-cli-hellgate.test.ts
+      - tests/integration/github-webhook-reactor-e2e-hellgate.test.ts
       - tests/integration/github-webhook-multi-secret-hellgate.test.ts
     contract: []
 knobs: [QUANTA_GITHUB_WEBHOOK, QUANTA_GITHUB_WEBHOOK_SECRET, QUANTA_GITHUB_WEBHOOK_SECRETS, QUANTA_GITHUB_WEBHOOK_SECRETS_FILE, QUANTA_GITHUB_WEBHOOK_PORT, QUANTA_GITHUB_WEBHOOK_SESSION]

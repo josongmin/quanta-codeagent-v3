@@ -1196,6 +1196,7 @@
         "!tests/unit/doctor-selfcheck-hellgate.test.ts",
         "!tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts",
         "!tests/integration/github-webhook-host-cli-hellgate.test.ts",
+        "!tests/integration/github-webhook-reactor-e2e-hellgate.test.ts",
         "!tests/integration/github-webhook-multi-secret-hellgate.test.ts"
       ],
       "linter": {

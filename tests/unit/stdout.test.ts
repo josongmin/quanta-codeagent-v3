@@ -49,6 +49,20 @@ describe("StdoutStream", () => {
     expect(captured[2]).toBe(`${DIM}— done (stop, 2 turns) —${RESET}\n`)
   })
 
+  test("output_progress interleaved between deltas does NOT break the text", () => {
+    // The live "· N tokens" counter (output_progress) fires between every
+    // assistant_text delta. It renders nothing in this sink, so it must NOT
+    // be treated as a text boundary — otherwise each token lands on its own
+    // line (one-line-per-token regression).
+    const s = new StdoutStream()
+    s.emit({ type: "assistant_text", delta: "어느 " })
+    s.emit({ type: "output_progress", outputTokens: 1, exact: false })
+    s.emit({ type: "assistant_text", delta: "지역 " })
+    s.emit({ type: "output_progress", outputTokens: 2, exact: false })
+    s.emit({ type: "assistant_text", delta: "날씨를" })
+    expect(out()).toBe("어느 지역 날씨를")
+  })
+
   test("no spurious flush newline when not currently in text", () => {
     const s = new StdoutStream()
     s.emit({ type: "turn_start", turn: 1 })

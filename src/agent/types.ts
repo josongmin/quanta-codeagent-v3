@@ -27,7 +27,13 @@ import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"
 import type { ShadowOdb } from "@/storage"
 import type { DecisionEmitter, StreamPort } from "@/stream"
-import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
+import type {
+  AppshotArtifactSink,
+  AppshotSlot,
+  ShellExecObserver,
+  ToolRegistry,
+  UserInputRequester,
+} from "@/tool"
 import type { WebSearchProvider } from "@/tool/web"
 import type { ApprovalStateMachinePort } from "./approval-state-machine"
 import type { AutoBackgroundConfig } from "./auto-background"
@@ -1733,6 +1739,24 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * can read this slot directly.
    */
   readonly objective?: ObjectivePort
+  /**
+   * G1 (RFC jun-6-appgen-appshot) — host-wired appshot verify-loop slot. When
+   * set, the per-session `buildAppshotBlock` (tier1) exposes `appshot_verify`
+   * over this port. The composition root (`agent-config-assembler`) assembles
+   * it ONLY when `QUANTA_APPSHOT=1` AND a real `BrowserPort` is wired (the slice
+   * binds render/screenshot → that BrowserPort, verify → the judge `llm`,
+   * scaffold → the jailed writer). Absent ⇒ no tool (byte-identical default-OFF).
+   * Caller-override-safe; a pre-set slot is preserved. */
+  appshot?: AppshotSlot
+  /**
+   * C1 — the SHARED per-session artifact registry (Canvas store), minted ONCE at
+   * the composition root (`buildBaseFromArgs`) when `QUANTA_ARTIFACT_STORE=1` and
+   * threaded here so the assembler can reuse the SAME instance as the appshot
+   * artifactSink — the final scaffold registers into the very registry the
+   * `artifact_*` tools read. Duck-typed to the single `register` method appshot
+   * needs (the `@/artifact` `ArtifactRegistry` matches structurally). Absent ⇒
+   * slot omitted (byte-identical). */
+  readonly artifactRegistry?: AppshotArtifactSink
   /**
    * ADR-0415 — Run Ledger port slot (ADR-0395 substrate consumer wire).
    *

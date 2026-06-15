@@ -62,6 +62,7 @@ export const SAMPLING_MAX_CONTENT_CHARS = 256 * 1024
  *  runs with the handler's own default). 1e6 is far above any legitimate
  *  completion length while bounding the worst-case requested budget. */
 export const SAMPLING_MAX_TOKENS = 1_000_000
+export const SAMPLING_MAX_TOKENS_CAP = SAMPLING_MAX_TOKENS
 
 /** Narrow a hostile/garbage `maxTokens` to a forwardable value, or `undefined`
  *  to DROP the field. Rejects NaN/Infinity/non-integer/<=0 and clamps an

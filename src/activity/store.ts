@@ -11,18 +11,8 @@
  * NO-THROW: feeding a malformed event degrades inside the pure reducer.
  */
 
-import {
-  type ActivityState,
-  emptyActivityState,
-  materialize,
-  reduceActivity,
-} from "./spine"
-import {
-  wfPhaseId,
-  wfRunId,
-  wfStepId,
-  type WorkflowEventLike,
-} from "./producers/workflow"
+import { type WorkflowEventLike, wfPhaseId, wfRunId, wfStepId } from "./producers/workflow"
+import { type ActivityState, emptyActivityState, materialize, reduceActivity } from "./spine"
 import type { ActivitySnapshot, AgentActivityEvent } from "./types"
 
 /** A live, mutable activity accumulator. */
@@ -89,7 +79,13 @@ export const createWorkflowSink = (store: ActivityStore, opts: WorkflowSinkOpts)
       started.add(id)
       store.emit({
         type: "node_open",
-        node: { id: sid, parentId: currentPhase ?? runRoot, kind: "agent", label, status: "running" },
+        node: {
+          id: sid,
+          parentId: currentPhase ?? runRoot,
+          kind: "agent",
+          label,
+          status: "running",
+        },
       })
     }
     return sid
@@ -98,7 +94,8 @@ export const createWorkflowSink = (store: ActivityStore, opts: WorkflowSinkOpts)
     emit: (e) => {
       switch (e.type) {
         case "phase_enter": {
-          if (currentPhase !== null) store.emit({ type: "node_status", id: currentPhase, status: "done" })
+          if (currentPhase !== null)
+            store.emit({ type: "node_status", id: currentPhase, status: "done" })
           const pid = wfPhaseId(opts.runId, e.name)
           store.emit({
             type: "node_open",
@@ -111,7 +108,11 @@ export const createWorkflowSink = (store: ActivityStore, opts: WorkflowSinkOpts)
           ensureStep(e.id, e.label)
           break
         case "step_complete":
-          store.emit({ type: "node_status", id: ensureStep(e.id, e.id), status: e.ok ? "done" : "failed" })
+          store.emit({
+            type: "node_status",
+            id: ensureStep(e.id, e.id),
+            status: e.ok ? "done" : "failed",
+          })
           break
         case "step_skipped":
           store.emit({ type: "node_status", id: ensureStep(e.id, e.id), status: "skipped" })
@@ -119,7 +120,8 @@ export const createWorkflowSink = (store: ActivityStore, opts: WorkflowSinkOpts)
       }
     },
     close: (ok, endedAt) => {
-      if (currentPhase !== null) store.emit({ type: "node_status", id: currentPhase, status: "done" })
+      if (currentPhase !== null)
+        store.emit({ type: "node_status", id: currentPhase, status: "done" })
       store.emit({
         type: "node_status",
         id: runRoot,

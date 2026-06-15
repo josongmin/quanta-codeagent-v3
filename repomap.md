@@ -250,6 +250,12 @@ Metrics, pricing, shell exec telemetry, and coverage ingestion/merging.
 ### `src/workflow/`
 Declarative workflow compile/execute/build layers.
 
+### `src/activity/`
+Agent Activity Spine — one canonical `AgentActivityEvent` model + pure
+reducer/projector (the zoomable fleet→run→agent tree) + producers (workflow /
+subagent / side-agent) + live store/`createWorkflowSink` + the `/activity`
+renderer. The single source every agent-state surface projects from.
+
 ### `src/rules/`
 Rule parser/matcher/store infrastructure.
 

@@ -12,6 +12,7 @@ export {
   type ArtifactRegistryOptions,
   type ArtifactSpec,
   createArtifactRegistry,
+  DEFAULT_ARTIFACT_REGISTRY_MAX,
   monotonicIdFactory,
   previewUrl,
 } from "./registry"

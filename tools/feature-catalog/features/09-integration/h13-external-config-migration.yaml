@@ -70,6 +70,7 @@ evidence:
       - tests/unit/external-config-migration-e2e-hellgate.test.ts
       - tests/unit/config-migration-persist-hellgate.test.ts
       - tests/unit/config-migration-persist-e2e-hellgate.test.ts
+      - tests/unit/config-migration-persist-harden-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -99,3 +100,19 @@ notes: |
   markdown written as a `.imported.md` sibling when native exists), ledger-
   throttled per sourceKey, and NO-THROW (a single item's failure is a typed
   MigrationWarning). The host resolves the knob + paths and calls in.
+
+  SECURITY (jun-06 adversarial hardening, config-migration-persist-harden-
+  hellgate): the persist write-gate treats converted config as UNTRUSTED.
+  (1) CODE-EXEC GUARD — an `.mcp.json` `command`/`args` token carrying a shell
+  metachar / control char / newline (a pipeline / substitution baked into a
+  token) is DROPPED with a typed warning, never written to the EXECUTABLE
+  `.mcp.json`; a pre-existing hostile entry is likewise not re-blessed on
+  rewrite. (2) FAIL-CLOSED — a present-but-unparseable existing settings.json /
+  .mcp.json (JSONC, hand-edit, partial, array-shaped) is REFUSED, never
+  clobbered to `{}` (mirrors the round-2 mcp-connector-wire `config-unreadable`);
+  the user's file is preserved + a warning emitted. (3) ATOMIC WRITE — every
+  config write is temp+fsync+rename (slice-internal, no `@/storage` cross-fence)
+  so a crash mid-write cannot leave a torn config. (4) DoS GUARD — a >4 MiB
+  competitor config is `skipped_malformed` before the byte-read. (5) PATH JAIL —
+  `safeStem` neutralizes `../` traversal in subagent/glob names (stays under
+  `.quanta/`). All five sealed red→green.

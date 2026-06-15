@@ -59,20 +59,13 @@ const fmtTokens = (n: number): string => {
 
 const headerLine = (s: ActivitySnapshot): string => {
   const a = s.aggregate
-  const parts = [
-    `${a.agents} agent${a.agents === 1 ? "" : "s"}`,
-    `${a.running} running`,
-  ]
+  const parts = [`${a.agents} agent${a.agents === 1 ? "" : "s"}`, `${a.running} running`]
   if (a.stuck > 0) parts.push(`${a.stuck} stuck`)
   parts.push(`${fmtTokens(a.tokens)} tok`)
   return `ACTIVITY  ${parts.join(" · ")}`
 }
 
-const nodeLine = (
-  snapshot: ActivitySnapshot,
-  id: string,
-  depth: number,
-): string => {
+const nodeLine = (snapshot: ActivitySnapshot, id: string, depth: number): string => {
   const n = snapshot.byId.get(id)
   if (n === undefined) return ""
   const indent = "  ".repeat(depth)

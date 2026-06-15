@@ -30,8 +30,14 @@ purpose: |
   Date.now/Math.random 없음):
     - `Artifact{id,kind,path,mediaType,label?,createdAt}`, closed `ArtifactKind`
       (image|spreadsheet|document|presentation|other).
-    - `createArtifactRegistry({now,idFactory})` → register/get/list/destroy
+    - `createArtifactRegistry({now,idFactory,maxEntries?})` → register/get/list/destroy
       (in-memory, list는 createdAt→id byteCompare 정렬 immutable 스냅샷).
+    - UNBOUNDED-GROWTH guard: `maxEntries`(기본 `DEFAULT_ARTIFACT_REGISTRY_MAX`=1000)
+      cap, 초과 시 oldest-inserted FIFO 축출. evicted id는 get/list에서 clean
+      not-found(throw 없음), destroy는 슬롯 즉시 해제. 비유한/<1 cap은 1로 clamp(또는
+      non-finite→default). 생성축 best-effort register가 긴 세션서 무한 누적 못 함.
+    - 도구 렌더(`src/tool/artifact`)는 path/label/mediaType 필드를 256자로 clamp
+      (`…(len)` 마커) — 적대적 oversized 필드의 transcript 토큰폭발 방지.
     - `previewUrl(a)` = `quanta-artifact://<id>` (안정 opaque 참조 — 파일 이동해도
       유효, fs 절대경로 transcript 누출 방지).
 

@@ -160,6 +160,49 @@ describe("interrupt-router: watchdog cap (can NEVER swallow a cancel)", () => {
     router.dispose()
   })
 
+  test("WATCHDOG-SWALLOW (regression): abort captured AFTER the window-open watchdog already expired is STILL bounded", () => {
+    // The defect: the cap was computed from window-OPEN. An abort-free section
+    // that runs past `maxMs` fires + disarms the window-open watchdog with
+    // nothing to deliver; a LATER mid-section abort then has no live timer and
+    // (pre-fix) was withheld FOREVER. The cap must bound the WITHHELD duration —
+    // i.e. start ticking when the abort is CAPTURED.
+    const { time, source, derived, router } = setup()
+    router.seam.begin() // never ends (pathological tool)
+    time.advance(MAX_MS) // abort-free past the window-open deadline
+    expect(derived.signal.aborted).toBe(false)
+    source.abort(new Error("late esc")) // captured now; a FRESH cap must arm
+    expect(derived.signal.aborted).toBe(false) // withheld (section still open)
+    time.advance(MAX_MS - 1)
+    expect(derived.signal.aborted).toBe(false) // within the fresh cap
+    time.advance(1) // hit the capture-relative deadline
+    expect(derived.signal.aborted).toBe(true) // force-delivered — NEVER swallowed
+    router.dispose()
+  })
+
+  test("watchdog bounds delivery from CAPTURE time, not window-open", () => {
+    const { time, source, derived, router } = setup()
+    router.seam.begin()
+    time.advance(30) // section runs 30ms abort-free
+    source.abort(new Error("esc")) // capture at t=30 ⇒ deadline t=30+MAX_MS
+    time.advance(MAX_MS - 1)
+    expect(derived.signal.aborted).toBe(false)
+    time.advance(1)
+    expect(derived.signal.aborted).toBe(true)
+    router.dispose()
+  })
+
+  test("late-capture re-arm: end() before the fresh cap delivers synchronously, no leaked timer / double", () => {
+    const { time, source, derived, router } = setup()
+    const cs = router.seam.begin()
+    time.advance(MAX_MS) // window-open watchdog era passes abort-free
+    source.abort(new Error("esc")) // fresh watchdog armed
+    cs.end() // synchronous honor cancels the fresh watchdog
+    expect(derived.signal.aborted).toBe(true)
+    expect(() => time.advance(MAX_MS * 4)).not.toThrow()
+    expect(time.pending()).toBe(0) // no leaked / double-firing timer
+    router.dispose()
+  })
+
   test("non-finite / negative maxMs collapses to 0 (deliver on next tick) — never a permanent hold", () => {
     const time = makeFakeTime()
     const source = new AbortController()
@@ -237,6 +280,21 @@ describe("interrupt-router: StatusBar events (§6.6)", () => {
     const { time, source, router } = setup({ observer })
     router.seam.begin()
     source.abort(new Error("esc"))
+    time.advance(MAX_MS)
+    expect(events).toEqual(["deferred", "honored:watchdog"])
+    router.dispose()
+  })
+
+  test("late-capture (post window-open watchdog) still emits exactly one deferred + honored(watchdog)", () => {
+    const events: string[] = []
+    const observer: InterruptRouterObserver = {
+      onDeferred: () => events.push("deferred"),
+      onHonored: (r) => events.push(`honored:${r}`),
+    }
+    const { time, source, router } = setup({ observer })
+    router.seam.begin()
+    time.advance(MAX_MS * 4) // abort-free, well past the window-open era
+    source.abort(new Error("esc")) // captured ⇒ fresh watchdog
     time.advance(MAX_MS)
     expect(events).toEqual(["deferred", "honored:watchdog"])
     router.dispose()

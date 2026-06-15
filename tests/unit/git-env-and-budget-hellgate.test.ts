@@ -12,7 +12,16 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { applyBudget, buildGitEnv, crossedTarget, resolveMaxCommits } from "@/tool/git"
+import {
+  applyBudget,
+  buildGitEnv,
+  crossedTarget,
+  type GitBudget,
+  gitTools,
+  resolveGitBudget,
+  resolveMaxCommits,
+  withBudget,
+} from "@/tool/git"
 import { gitLogTool } from "@/tool/git/log"
 import type { GitRunner, GitRunResult } from "@/tool/git/types"
 
@@ -281,5 +290,154 @@ describe("crossedTarget — telemetry signal (hellgate)", () => {
     expect(crossedTarget(50, undefined)).toBe(false)
     expect(crossedTarget(50, { targetDurationMs: 0 })).toBe(false)
     expect(crossedTarget(50, { targetDurationMs: Number.NaN })).toBe(false)
+  })
+})
+
+// ── Budget — withBudget LIVE consumer (ADR-0107 wire) ────────────────────
+
+/** Records every (args, cwd, signal) the wrapped runner is asked to run, and
+ *  returns a scripted stdout so output-cap behavior is observable. */
+class RecordingRunner implements GitRunner {
+  readonly calls: { args: readonly string[]; signal: AbortSignal | undefined }[] = []
+  constructor(private readonly stdout = "") {}
+  async run(args: readonly string[], _cwd: string, signal?: AbortSignal): Promise<GitRunResult> {
+    this.calls.push({ args, signal })
+    return { stdout: this.stdout, stderr: "", exitCode: 0 }
+  }
+}
+
+describe("withBudget — runner decorator (hellgate)", () => {
+  test("WIRE-1: undefined budget returns the SAME runner reference (byte-identical)", () => {
+    const base = new RecordingRunner()
+    expect(withBudget(base, undefined)).toBe(base)
+  })
+
+  test("WIRE-2: inert budget (only telemetry knobs) returns the SAME runner", () => {
+    const base = new RecordingRunner()
+    expect(withBudget(base, { targetDurationMs: 5, consecutiveOverBudget: 3 })).toBe(base)
+  })
+
+  test("WIRE-3: empty budget object returns the SAME runner", () => {
+    const base = new RecordingRunner()
+    expect(withBudget(base, {})).toBe(base)
+  })
+
+  test("WIRE-4: maxCommits clamps a `-n <N>` flag DOWN, never up", async () => {
+    const base = new RecordingRunner()
+    const wrapped = withBudget(base, { maxCommits: 5 })
+    await wrapped.run(["log", "-n", "200", "--format=%H"], "/repo")
+    expect(base.calls[0]?.args).toEqual(["log", "-n", "5", "--format=%H"])
+    // A `-n` already under the cap is left untouched (no needless realloc).
+    await wrapped.run(["log", "-n", "3"], "/repo")
+    expect(base.calls[1]?.args).toEqual(["log", "-n", "3"])
+  })
+
+  test("WIRE-5: maxCommits leaves args with no `-n` flag untouched", async () => {
+    const base = new RecordingRunner()
+    const wrapped = withBudget(base, { maxCommits: 5 })
+    await wrapped.run(["status", "--porcelain"], "/repo")
+    expect(base.calls[0]?.args).toEqual(["status", "--porcelain"])
+  })
+
+  test("WIRE-6: maxOutputBytes truncates stdout to the cap", async () => {
+    const base = new RecordingRunner("0123456789")
+    const wrapped = withBudget(base, { maxOutputBytes: 4 })
+    const r = await wrapped.run(["log"], "/repo")
+    expect(r.stdout).toBe("0123")
+  })
+
+  test("WIRE-7: maxOutputBytes leaves under-cap stdout untouched", async () => {
+    const base = new RecordingRunner("abc")
+    const wrapped = withBudget(base, { maxOutputBytes: 100 })
+    const r = await wrapped.run(["log"], "/repo")
+    expect(r.stdout).toBe("abc")
+  })
+
+  test("WIRE-8: maxWallTimeMs passes a FUSED (non-parent) signal to the runner", async () => {
+    const base = new RecordingRunner()
+    const parent = new AbortController()
+    const wrapped = withBudget(base, { maxWallTimeMs: 60_000 })
+    await wrapped.run(["log"], "/repo", parent.signal)
+    const passed = base.calls[0]?.signal
+    expect(passed).toBeDefined()
+    expect(passed).not.toBe(parent.signal) // fused, not pass-through
+  })
+
+  test("WIRE-9: maxWallTimeMs deadline fires → fused signal aborts the spawn", async () => {
+    let observed: AbortSignal | undefined
+    const slowRunner: GitRunner = {
+      async run(_args, _cwd, signal) {
+        observed = signal
+        await new Promise((r) => setTimeout(r, 30))
+        return { stdout: "", stderr: "", exitCode: 0 }
+      },
+    }
+    const wrapped = withBudget(slowRunner, { maxWallTimeMs: 1 })
+    await wrapped.run(["log"], "/repo")
+    expect(observed?.aborted).toBe(true)
+  })
+})
+
+// ── Budget — resolveGitBudget knob (ADR-0107 wire) ───────────────────────
+
+describe("resolveGitBudget — runtime knobs (hellgate)", () => {
+  test("WIRE-10: no knob set ⇒ undefined (default-OFF byte-identity)", () => {
+    expect(resolveGitBudget({})).toBeUndefined()
+  })
+
+  test("WIRE-11: each knob maps to its field; blanks/non-positive omitted", () => {
+    expect(
+      resolveGitBudget({
+        QUANTA_GIT_BUDGET_MAX_COMMITS: "50",
+        QUANTA_GIT_BUDGET_WALL_MS: "5000",
+        QUANTA_GIT_BUDGET_MAX_OUTPUT_BYTES: "1048576",
+      }),
+    ).toEqual({ maxCommits: 50, maxWallTimeMs: 5000, maxOutputBytes: 1048576 })
+    expect(resolveGitBudget({ QUANTA_GIT_BUDGET_MAX_COMMITS: "0" })).toBeUndefined()
+    expect(resolveGitBudget({ QUANTA_GIT_BUDGET_WALL_MS: "-1" })).toBeUndefined()
+    expect(resolveGitBudget({ QUANTA_GIT_BUDGET_MAX_OUTPUT_BYTES: "abc" })).toBeUndefined()
+  })
+
+  test("WIRE-12: a single valid knob yields a partial budget", () => {
+    expect(resolveGitBudget({ QUANTA_GIT_BUDGET_MAX_COMMITS: "7" })).toEqual({ maxCommits: 7 })
+  })
+})
+
+// ── Budget — gitTools factory wiring (ADR-0107 wire) ─────────────────────
+
+describe("gitTools — budget threads to walk tools only (hellgate)", () => {
+  const findTool = (tools: ReturnType<typeof gitTools>, name: string) => {
+    const tool = tools.find((t) => t.name === name)
+    if (tool === undefined) throw new Error(`tool not found: ${name}`)
+    return tool
+  }
+
+  test("WIRE-13: budget clamps git_log's `-n`; git_status is unaffected", async () => {
+    const base = new RecordingRunner()
+    const budget: GitBudget = { maxCommits: 3 }
+    const tools = gitTools(base, { budget })
+    const log = findTool(tools, "git_log")
+    // git_log default count is 10; the budget clamps the spawned `-n` to 3.
+    const ctx = { cwd: "/repo", signal: undefined } as never
+    for await (const _ of log.execute({}, ctx)) {
+      // drain
+    }
+    const logCall = base.calls.at(-1)
+    const nIdx = logCall?.args.indexOf("-n") ?? -1
+    expect(nIdx).toBeGreaterThanOrEqual(0)
+    expect(logCall?.args[nIdx + 1]).toBe("3")
+  })
+
+  test("WIRE-14: no budget ⇒ git_log spawns its default `-n` (byte-identical)", async () => {
+    const base = new RecordingRunner()
+    const tools = gitTools(base)
+    const log = findTool(tools, "git_log")
+    const ctx = { cwd: "/repo", signal: undefined } as never
+    for await (const _ of log.execute({}, ctx)) {
+      // drain
+    }
+    const logCall = base.calls.at(-1)
+    const nIdx = logCall?.args.indexOf("-n") ?? -1
+    expect(logCall?.args[nIdx + 1]).toBe("10")
   })
 })
