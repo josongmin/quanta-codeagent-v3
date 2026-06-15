@@ -451,6 +451,52 @@ const generationFailureResult = (args: {
   }
 }
 
+const noPatchResult = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly deps: RunInstanceDeps
+  readonly wiring: Wiring
+  readonly startedAt: number
+}): InstanceResult => {
+  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  if (args.deps.observe && args.wiring.observer) {
+    extra.verdict = "ok"
+    extra.durationMs = Date.now() - args.startedAt
+    extra.patchPath = emitPatch(
+      args.deps.observe,
+      args.instance,
+      args.wiring.observer,
+      args.phase.patch,
+    )
+    const usage = args.wiring.usage?.total()
+    if (usage) extra.usage = usage
+  }
+  return {
+    id: args.instance.id,
+    passed: false,
+    patch: args.phase.patch,
+    turns: args.phase.turns,
+    ...extra,
+  }
+}
+
+const terminalAgentResult = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly deps: RunInstanceDeps
+  readonly wiring: Wiring
+  readonly startedAt: number
+}): InstanceResult | undefined => {
+  const generationError = agentPhaseError(args.phase)
+  if (generationError !== undefined) {
+    return generationFailureResult({ ...args, generationError })
+  }
+  if (args.phase.patch.trim() === "") return noPatchResult(args)
+  return undefined
+}
+
 const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -498,18 +544,8 @@ const runInstanceOnce = async (
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
 
-    const generationError = agentPhaseError(phase)
-    if (generationError !== undefined) {
-      return generationFailureResult({
-        instance,
-        phase,
-        generationError,
-        reproTest,
-        deps,
-        wiring: w,
-        startedAt,
-      })
-    }
+    const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
+    if (terminal !== undefined) return terminal
 
     let v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
     const extra: Partial<InstanceResult> = reproResultExtra(reproTest)

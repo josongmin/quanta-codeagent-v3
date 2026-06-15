@@ -30,23 +30,21 @@ import {
   REPO_MAP_DEFAULT_MAX_DEPTH,
   REPO_MAP_DEFAULT_MAX_FILES,
 } from "@/agent"
+import { isTruthyToken } from "@/shared"
 import { registerKnob } from "../registry"
 import type { ApplyContext, Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive", "bench"]
 
-/** Enable-only boolean parse — `1`/`true`/`on` enable; anything else ⇒ inactive
- *  (byte-identical default-OFF). */
-const ENABLING = new Set(["1", "true", "on"])
-
 interface RepoMapValue {
   readonly enabled: true
 }
 
-const parseRepoMap = (raw: string | undefined): RepoMapValue | undefined => {
-  if (raw === undefined) return undefined
-  return ENABLING.has(raw.trim().toLowerCase()) ? { enabled: true } : undefined
-}
+/** Enable-only boolean parse via the gate-vocab SSOT (`1`/`true`/`on`/`yes`);
+ *  anything else ⇒ inactive (byte-identical default-OFF). Previously a
+ *  hand-rolled Set that was missing `yes` — diverged from every other gate. */
+const parseRepoMap = (raw: string | undefined): RepoMapValue | undefined =>
+  isTruthyToken(raw) ? { enabled: true } : undefined
 
 const applyRepoMap = (cfg: AgentConfig, _value: RepoMapValue, ctx: ApplyContext): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg

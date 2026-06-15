@@ -27,18 +27,29 @@ export interface FleetRow {
   readonly endedAt?: number
 }
 
+interface Rollup {
+  tokens: number
+  toolCalls: number
+  descendants: number
+  running: number
+  stuck: number
+}
+
+/** Fold ONE node into the accumulator. `isRoot` excludes the root from the
+ *  descendant/status counts (those describe the run's CHILDREN, e.g. "9/17"). */
+const accNode = (acc: Rollup, node: ActivityNode, isRoot: boolean): void => {
+  acc.tokens += node.tokens
+  acc.toolCalls += node.toolCalls
+  if (isRoot) return
+  acc.descendants += 1
+  if (node.status === "running") acc.running += 1
+  else if (node.status === "stuck") acc.stuck += 1
+}
+
 /** Walk a node + all descendants, accumulating counters/status counts. Pure;
- *  cycle-safe via a visited set (a malformed tree with a parent cycle can't
- *  infinite-loop the projection). */
-const rollup = (
-  snapshot: ActivitySnapshot,
-  rootId: string,
-): { tokens: number; toolCalls: number; descendants: number; running: number; stuck: number } => {
-  let tokens = 0
-  let toolCalls = 0
-  let descendants = 0
-  let running = 0
-  let stuck = 0
+ *  cycle-safe via a visited set (a malformed parent cycle can't infinite-loop). */
+const rollup = (snapshot: ActivitySnapshot, rootId: string): Rollup => {
+  const acc: Rollup = { tokens: 0, toolCalls: 0, descendants: 0, running: 0, stuck: 0 }
   const seen = new Set<string>()
   const stack: string[] = [rootId]
   while (stack.length > 0) {
@@ -47,16 +58,10 @@ const rollup = (
     seen.add(id)
     const node = snapshot.byId.get(id)
     if (node === undefined) continue
-    if (id !== rootId) {
-      descendants += 1
-      if (node.status === "running") running += 1
-      if (node.status === "stuck") stuck += 1
-    }
-    tokens += node.tokens
-    toolCalls += node.toolCalls
+    accNode(acc, node, id === rootId)
     for (const child of snapshot.childIds.get(id) ?? []) stack.push(child)
   }
-  return { tokens, toolCalls, descendants, running, stuck }
+  return acc
 }
 
 /** L0 fleet projection — one row per root, descendants rolled up. Order is the

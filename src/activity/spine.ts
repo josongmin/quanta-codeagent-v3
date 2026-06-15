@@ -109,6 +109,37 @@ const openNode = (state: ActivityState, init: NodeInit): void => {
   link(state, init.parentId, init.id)
 }
 
+/** Apply a status transition to a node, returning the REPLACEMENT node (never
+ *  mutated in place). `stuck`/`endedAt` are MANAGED here: stripped then
+ *  conditionally re-added so, under exactOptionalPropertyTypes, a cleared field
+ *  is OMITTED (not set to undefined). `startedAt` rides along in `rest`. */
+const applyStatus = (
+  node: ActivityNode,
+  event: Extract<AgentActivityEvent, { type: "node_status" }>,
+): ActivityNode => {
+  const closing = TERMINAL.has(event.status)
+  const { stuck: _drop, endedAt: _dropEnd, ...rest } = node
+  // `stuck` lives only while stuck; any other status clears it (omitted).
+  const base: ActivityNode =
+    event.status === "stuck"
+      ? { ...rest, status: event.status, stuck: event.stuck ?? { reason: "unknown" } }
+      : { ...rest, status: event.status }
+  // Stamp startedAt on the first non-terminal transition if open had none.
+  const withStart: ActivityNode =
+    event.at !== undefined && node.startedAt === undefined && !closing
+      ? { ...base, startedAt: event.at }
+      : base
+  // Closing stamps endedAt; reviving (non-terminal after a close) leaves it
+  // omitted so a running node never carries a stale end time.
+  const closeAt = event.at ?? node.endedAt
+  return closing && closeAt !== undefined ? { ...withStart, endedAt: closeAt } : withStart
+}
+
+/** Coerce a delta to an additive, monotonic, non-negative number (a non-finite
+ *  / non-positive delta ⇒ 0 — no NaN/negative poisoning of the counters). */
+const posDelta = (d: number | undefined): number =>
+  Number.isFinite(d) && (d as number) > 0 ? (d as number) : 0
+
 export const reduceActivity = (state: ActivityState, event: AgentActivityEvent): ActivityState => {
   switch (event.type) {
     case "node_open":
@@ -116,44 +147,14 @@ export const reduceActivity = (state: ActivityState, event: AgentActivityEvent):
       return state
     case "node_status": {
       const node = state.nodes.get(event.id)
-      if (node === undefined) return state // NO-THROW: drop unknown id
-      const closing = TERMINAL.has(event.status)
-      // Drop the fields we MANAGE (stuck/endedAt) so we can conditionally
-      // re-add them — under exactOptionalPropertyTypes a key must be OMITTED,
-      // not set to undefined. `startedAt` rides along in `rest` (preserved).
-      const { stuck: _drop, endedAt: _dropEnd, ...rest } = node
-      // `stuck` lives only while stuck; any other status clears it (omitted).
-      const withStuck: ActivityNode =
-        event.status === "stuck"
-          ? { ...rest, status: event.status, stuck: event.stuck ?? { reason: "unknown" } }
-          : { ...rest, status: event.status }
-      // Stamp startedAt on the first non-terminal transition if open had none.
-      const withStart: ActivityNode =
-        event.at !== undefined && node.startedAt === undefined && !closing
-          ? { ...withStuck, startedAt: event.at }
-          : withStuck
-      // Closing stamps endedAt; reviving (non-terminal after a close) leaves it
-      // omitted so a running node never carries a stale end time.
-      const closeAt = event.at ?? node.endedAt
-      state.nodes.set(
-        event.id,
-        closing && closeAt !== undefined ? { ...withStart, endedAt: closeAt } : withStart,
-      )
+      if (node !== undefined) state.nodes.set(event.id, applyStatus(node, event)) // else NO-THROW drop
       return state
     }
     case "node_metric": {
       const node = state.nodes.get(event.id)
-      if (node === undefined) return state // NO-THROW
-      // Counters are monotonic non-negative: deltas are additive work. A
-      // non-finite OR non-positive delta is ignored (no NaN/negative poisoning).
-      const dt =
-        Number.isFinite(event.tokensDelta) && (event.tokensDelta as number) > 0
-          ? (event.tokensDelta as number)
-          : 0
-      const dc =
-        Number.isFinite(event.toolCallsDelta) && (event.toolCallsDelta as number) > 0
-          ? (event.toolCallsDelta as number)
-          : 0
+      if (node === undefined) return state // NO-THROW: drop unknown id
+      const dt = posDelta(event.tokensDelta)
+      const dc = posDelta(event.toolCallsDelta)
       if (dt === 0 && dc === 0) return state
       state.nodes.set(event.id, {
         ...node,

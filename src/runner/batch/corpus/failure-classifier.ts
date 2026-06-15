@@ -95,7 +95,9 @@ const computeTermination = (
   if (r.passed) return "passed"
   if (r.verdict === "grader_invalid") return "grader_invalid"
   if (isGenerationError(r.error)) return "generation_error"
+  if (isAgentNoPatch(r)) return "completed_unresolved"
   if (r.error !== undefined) return "harness_error"
+  if (r.patch.trim() === "" && r.turns > 0) return "completed_unresolved"
   if (events === null) return "unknown"
   const end = lastSessionEnd(events)
   if (!end?.data) return "unknown"
@@ -111,6 +113,12 @@ const isGenerationError = (error: string | undefined): boolean =>
   /agent stopped with (?:error|refusal)|LLM stream failed|usage_limit_reached|usage limit|rate[_ -]?limit|429 Too Many Requests/i.test(
     error,
   )
+
+const isAgentNoPatch = (r: InstanceResult): boolean =>
+  r.turns > 0 &&
+  r.patch.trim() === "" &&
+  r.error !== undefined &&
+  /empty prediction|no patch produced/i.test(r.error)
 
 /** Collect `b/<path>` from every `diff --git` header in a unified diff. */
 const diffHeaderPaths = (patch: string): string[] => {

@@ -21,12 +21,14 @@
 import { readFileSync } from "node:fs"
 import { KNOB_PRESETS } from "@/runner/knobs"
 import { errMessage, logger, setTerminalIo } from "@/shared"
+import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
 import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
 import { loadVerdictsFromFile } from "./analyze/verdicts"
 import type { GradeBackend } from "./remote/backend"
 import { createEc2Backend } from "./remote/ec2"
+import { createFanoutBackend } from "./remote/fanout"
 import { createSshBackend } from "./remote/ssh"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
@@ -47,6 +49,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "diff",
   "explain",
   "leaderboard",
+  "cost",
   "presets",
   "help",
   "--help",
@@ -81,6 +84,9 @@ const VALUE_FLAGS = new Set([
   "--title",
   "--patch",
   "--instance",
+  "--shards",
+  "--observe-dir",
+  "--mode",
 ])
 
 /** Positional args after the subcommand (argv[2]), skipping flags AND the
@@ -115,7 +121,9 @@ const modelNameFromPredictions = (path: string): string | undefined => {
   }
 }
 
-const buildBackend = (spec: string, modelName: string | undefined): GradeBackend => {
+/** Build ONE backend instance for `spec` (ec2 | ssh:host). A fresh call mints a
+ *  fresh box (fanout uses this per shard). */
+const buildBaseBackend = (spec: string, modelName: string | undefined): GradeBackend => {
   const mwRaw = argValue("--max-workers")
   const maxWorkers =
     mwRaw !== undefined && Number.isInteger(Number(mwRaw)) ? Number(mwRaw) : undefined
@@ -139,7 +147,41 @@ const buildBackend = (spec: string, modelName: string | undefined): GradeBackend
   throw new Error(`unknown --backend "${spec}" (expected: ec2 | ssh:user@host)`)
 }
 
+/** Build the grading backend, wrapping in a K-way fan-out when `--shards > 1`
+ *  (each shard mints its own fresh box via `buildBaseBackend`). */
+const buildBackend = (spec: string, modelName: string | undefined): GradeBackend => {
+  const sRaw = argValue("--shards")
+  const shards = sRaw !== undefined && Number.isInteger(Number(sRaw)) ? Number(sRaw) : 1
+  if (shards > 1) {
+    return createFanoutBackend({ shards, makeBackend: () => buildBaseBackend(spec, modelName) })
+  }
+  return buildBaseBackend(spec, modelName)
+}
+
 const cmdGrade = async (): Promise<void> => {
+  // ADR-0536 §6 — full-remote mode (remote patch-gen + grading) runs the AGENT
+  // on a secret-bearing box (agent executes model-generated code). It is opt-in
+  // AND gated, and its executor is DELIBERATELY DEFERRED until the mandatory
+  // hardening lands (ephemeral minted key + IMDSv2/hop-1 + SSM no-inbound +
+  // observe-secret redaction). Shipping a half-built full-remote = a creds-leak
+  // path, so we refuse loudly instead. `grade-only` (default) is unaffected.
+  const mode = argValue("--mode") ?? "grade-only"
+  if (mode === "full") {
+    if (!hasFlag("--allow-remote-secrets")) {
+      logger.info(
+        "refused: --mode full runs patch-gen on the remote box and needs LLM secrets there. " +
+          "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6).",
+      )
+      process.exit(2)
+    }
+    logger.info(
+      "refused: --mode full executor is not yet implemented — it is pending the §6 security " +
+        "hardening (ephemeral minted key + IMDSv2 hop-1 + SSM no-inbound + observe redaction). " +
+        "Use the default grade-only mode (local patch-gen + remote grading) for now. See ADR-0536.",
+    )
+    process.exit(3)
+  }
+
   const predictions = argValue("--predictions")
   const backendSpec = argValue("--backend")
   const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
@@ -218,6 +260,23 @@ const cmdLeaderboard = (): void => {
   printBlock(renderLeaderboardMarkdown(rows, argValue("--title") ?? "SWE-bench leaderboard"))
 }
 
+const cmdCost = (): void => {
+  const [report] = positionals()
+  if (report === undefined) {
+    logger.info("usage: quanta-bench cost <report.json> [--observe-dir <dir>]")
+    process.exit(2)
+  }
+  const observeDir = argValue("--observe-dir")
+  printBlock(
+    renderCost(
+      costSummaryFromReport({
+        reportPath: report,
+        ...(observeDir !== undefined ? { observeDir } : {}),
+      }),
+    ),
+  )
+}
+
 const cmdPresets = (): void => {
   logger.info("Bench presets — select with QUANTA_BENCH_PRESET=<name> (value, NOT on/off):")
   for (const [name, knobs] of Object.entries(KNOB_PRESETS)) {
@@ -235,6 +294,7 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   diff         compare two run reports (A/B, regression)
   explain      agent-vs-gold failure analysis for one instance
   leaderboard  render a resolved/unresolved table from run report(s)
+  cost         token / $ / wall-clock summary for a run report
   presets      list bench presets
 
 Run a subcommand with no/invalid args to see its usage. No subcommand ⇒ 'run'.`
@@ -270,6 +330,9 @@ const main = async (): Promise<void> => {
       return
     case "leaderboard":
       cmdLeaderboard()
+      return
+    case "cost":
+      cmdCost()
       return
     case "presets":
       cmdPresets()

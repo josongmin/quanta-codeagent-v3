@@ -78,6 +78,26 @@ describe("classify — termination axis", () => {
     expect(classify(r).termination).toBe("harness_error")
   })
 
+  test("completed agent with empty patch and no trajectory → completed_unresolved + empty_patch", () => {
+    const r: InstanceResult = { id: "x", passed: false, patch: "", turns: 16 }
+    const c = classify(r)
+    expect(c.termination).toBe("completed_unresolved")
+    expect(c.signals).toContain("empty_patch")
+  })
+
+  test("legacy empty-prediction error after agent turns → completed_unresolved + empty_patch", () => {
+    const r: InstanceResult = {
+      id: "x",
+      passed: false,
+      patch: "",
+      turns: 16,
+      error: "empty prediction (agent produced no patch)",
+    }
+    const c = classify(r)
+    expect(c.termination).toBe("completed_unresolved")
+    expect(c.signals).toContain("empty_patch")
+  })
+
   test("provider generation error → generation_error, not empty_patch", () => {
     const r: InstanceResult = {
       id: "x",

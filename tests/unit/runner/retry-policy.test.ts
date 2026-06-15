@@ -195,6 +195,27 @@ describe("classifyOutcome — empty-patch", () => {
     expect(classifyOutcome(result).kind).toBe("empty-patch")
   })
 
+  test("completed agent turn with empty patch ⇒ real-fail, not retryable empty-patch", () => {
+    const result = mkResult({ patch: "", passed: false, turns: 16 })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "completed_unresolved",
+    })
+  })
+
+  test("legacy verifier empty-prediction after agent turns ⇒ real-fail, not retryable empty-patch", () => {
+    const result = mkResult({
+      patch: "",
+      passed: false,
+      turns: 16,
+      error: "empty prediction (agent produced no patch)",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "completed_unresolved",
+    })
+  })
+
   test("empty patch + non-classifying error ⇒ empty-patch with reason", () => {
     const result = mkResult({ patch: "", passed: false, error: "weird thing happened" })
     const out = classifyOutcome(result)
@@ -368,6 +389,20 @@ describe("runRetryLoop — orchestrator", () => {
     expect(calls).toBe(3)
     expect(loop.attempts).toBe(3)
     expect(loop.outcomes.every((o) => o.kind === "empty-patch")).toBe(true)
+  })
+
+  test("completed empty patch is terminal and does not retry", async () => {
+    let calls = 0
+    const { loop } = await runRetryLoop(async () => {
+      calls += 1
+      return mkResult({ passed: false, patch: "", turns: 16 })
+    }, 3)
+    expect(calls).toBe(1)
+    expect(loop.attempts).toBe(1)
+    expect(loop.outcomes[0]).toEqual({
+      kind: "real-fail",
+      subkind: "completed_unresolved",
+    })
   })
 
   test("real-fail on first attempt ⇒ no retry (signal)", async () => {

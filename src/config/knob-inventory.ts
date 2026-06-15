@@ -446,7 +446,7 @@ const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "LSP symbol mention resolver (default ON).",
-    readSite: "host/runtime/agent-config-assembler.ts",
+    readSite: "host/runtime/internal/mention-symbol-deps.ts",
   },
   {
     envKey: "QUANTA_AUTOMATION",
@@ -671,7 +671,7 @@ const RUNNER: readonly KnobInventoryEntry[] = [
   {
     envKey: "QUANTA_DIFF_MAX_BYTES",
     kind: "int",
-    default: 67108864,
+    default: 65536,
     group: "diff",
     home: "runtime-config",
     describe: "Diff content byte cap per file.",
@@ -685,6 +685,33 @@ const RUNNER: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "Diff visible line cap.",
     readSite: "runner/diff-ops.ts",
+  },
+  {
+    envKey: "QUANTA_GIT_BUDGET_MAX_COMMITS",
+    kind: "int",
+    default: undefined,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Git tool budget: max commits (`-n` clamp); unset ⇒ unbounded.",
+    readSite: "tool/git/_budget.ts",
+  },
+  {
+    envKey: "QUANTA_GIT_BUDGET_WALL_MS",
+    kind: "int",
+    default: undefined,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Git tool budget: wall-time abort (ms); unset ⇒ unbounded.",
+    readSite: "tool/git/_budget.ts",
+  },
+  {
+    envKey: "QUANTA_GIT_BUDGET_MAX_OUTPUT_BYTES",
+    kind: "int",
+    default: undefined,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Git tool budget: stdout byte cap; unset ⇒ unbounded.",
+    readSite: "tool/git/_budget.ts",
   },
 ]
 
@@ -1006,7 +1033,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
   },
   {
     envKey: "QUANTA_BENCH_BRANCH_SEARCH",
-    kind: "string",
+    kind: "int",
     default: undefined,
     group: "bench",
     home: "bench",
@@ -1029,7 +1056,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench: expected/actual extraction.",
-    readSite: "runner/batch/eval/driver.ts",
+    readSite: "runner/knobs/knobs/issue-hint-expected-actual.ts",
   },
   {
     envKey: "QUANTA_BENCH_REPRO_TEST",
@@ -1042,7 +1069,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
   },
   {
     envKey: "QUANTA_BENCH_RETRY_TRANSIENT",
-    kind: "string",
+    kind: "int",
     default: undefined,
     group: "bench",
     home: "bench",

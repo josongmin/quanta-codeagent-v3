@@ -47,9 +47,9 @@ import type { InstanceResult } from "../types"
  *                      error before producing a candidate patch. Stop by
  *                      default; quota/rate-limit errors are not improved by
  *                      immediate bench retries.
- *   - `empty-patch`  — agent never produced a diff. Almost always an LLM /
- *                      provider problem (rate limit, OAuth drop, stream
- *                      error caught by the LLM port). Retry is safe.
+ *   - `empty-patch`  — agent never produced a diff before doing useful work.
+ *                      A completed nonzero-turn trajectory with no diff is a
+ *                      real model fail, not a transient retry candidate.
  *   - `timeout`      — wall-clock deadline hit. Ambiguous — could be
  *                      legitimate (huge repo, slow turn) or transient (slow
  *                      external API). Default policy: do NOT retry. A caller
@@ -128,14 +128,15 @@ export const DEFAULT_POLICY: RetryPolicy = {
  *   3. `result.verdict === "degraded"`                 ⇒ infra-fail (recorder)
  *   4. `result.verdict === "grader_invalid"`           ⇒ infra-fail
  *   4. `error` matches provider/model generation failure ⇒ generation-fail
- *   5. `error` contains "empty prediction"             ⇒ empty-patch
- *   6. `error` contains "no patch produced"            ⇒ empty-patch
- *   7. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
- *   8. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
- *   9. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
- *  10. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
- *  11. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
- *  12. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
+ *   5. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
+ *   6. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
+ *   7. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
+ *   8. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
+ *   9. `patch === ""` AND turns > 0                    ⇒ real-fail / completed_unresolved
+ *  10. `error` contains "empty prediction"             ⇒ empty-patch
+ *  11. `error` contains "no patch produced"            ⇒ empty-patch
+ *  12. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
+ *  13. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
  *
  * The classifier is pure; the bench driver may call it AFTER `runInstance`
  * to decide whether to loop.
@@ -168,9 +169,6 @@ const classifyByErrorString = (err: string): AttemptOutcome | undefined => {
   ) {
     return { kind: "generation-fail", reason: err }
   }
-  if (err.includes("empty prediction") || err.includes("no patch produced")) {
-    return { kind: "empty-patch", reason: err }
-  }
   if (/operation timed out|SIGTERM|aborted by signal|abortcontroller|abort signal/i.test(err)) {
     return { kind: "timeout" }
   }
@@ -188,11 +186,15 @@ const classifyByErrorString = (err: string): AttemptOutcome | undefined => {
 
 /** Patch-state fallback. Used when neither verdict nor error string offers
  *  a definitive classification. */
-const classifyByPatchState = (patch: string, err: string): AttemptOutcome => {
-  if (patch !== "" && err !== "") {
+const classifyByPatchState = (patch: string, err: string, turns: number): AttemptOutcome => {
+  const hasPatch = patch.trim() !== ""
+  if (!hasPatch && turns > 0) {
     return { kind: "real-fail", subkind: "completed_unresolved" }
   }
-  if (patch === "") {
+  if (hasPatch && err !== "") {
+    return { kind: "real-fail", subkind: "completed_unresolved" }
+  }
+  if (!hasPatch) {
     return err !== "" ? { kind: "empty-patch", reason: err } : { kind: "empty-patch" }
   }
   return { kind: "real-fail", subkind: "completed_unresolved" }
@@ -206,7 +208,7 @@ export const classifyOutcome = (result: InstanceResult): AttemptOutcome => {
   const patch = typeof result.patch === "string" ? result.patch : ""
   const byErr = classifyByErrorString(err)
   if (byErr !== undefined) return byErr
-  return classifyByPatchState(patch, err)
+  return classifyByPatchState(patch, err, result.turns)
 }
 
 /**

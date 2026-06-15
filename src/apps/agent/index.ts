@@ -21,12 +21,13 @@
  *   • exit 0 on `--help` (after a usage dump to stdout).
  */
 
-import { readFile, realpath, writeFile } from "node:fs/promises"
+import { mkdir, readFile, realpath } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import * as readline from "node:readline/promises"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
 import { loadEnvFiles } from "@/shared/env-files"
+import { writeFileAtomic } from "@/storage"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
@@ -241,7 +242,14 @@ const makeTrustPersistence = (trustFilePath: string): TrustPersistencePort => ({
     }
   },
   save: async (records) => {
-    await writeFile(trustFilePath, JSON.stringify(records), "utf8")
+    // Security-load-bearing file (default-UNTRUSTED hydration). Two hardenings
+    // over the old naive `writeFile`: (1) ensure the config dir exists so a
+    // first-ever grant on a fresh `~/.quanta` (or a new QUANTA_CONFIG_DIR)
+    // doesn't ENOENT and break boot; (2) atomic temp+fsync+rename so a crash
+    // mid-write can't tear the trust file (parity with the sticky-model /
+    // permission / migration stores).
+    await mkdir(dirname(trustFilePath), { recursive: true })
+    await writeFileAtomic(trustFilePath, JSON.stringify(records))
   },
 })
 

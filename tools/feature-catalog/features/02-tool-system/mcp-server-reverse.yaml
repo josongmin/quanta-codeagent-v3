@@ -13,7 +13,7 @@ owners: ["@songmin"]
 labels: ["absorbed:codex", "surface:tool", "tier:tool-system"]
 depends_on: [mcp-transport-port-and-http-sse]
 config_refs:
-  env: [QUANTA_MCP_SERVER, QUANTA_MCP_SERVER_EXPOSE]
+  env: [QUANTA_MCP_SERVER, QUANTA_MCP_SERVER_EXPOSE, QUANTA_LSP_MCP]
   cli: ["mcp-server"]
 surface_integration:
   cli: full
@@ -80,6 +80,10 @@ knobs:
     where: src/apps/cli/mcp-server-setup.ts
     default: ""
     purpose: "Comma list of extra tools to expose beyond read-only. Each is validated against the registry (unknown ⇒ warned to stderr, dropped); an opted-in mutating tool STILL passes the full permission/jail pipeline on every call."
+  - name: QUANTA_LSP_MCP
+    where: src/apps/cli/mcp-server-setup.ts
+    default: false
+    purpose: "jun-13 T06 — merge the existing read-only LSP diagnostics/symbol tools into the reverse-MCP exposure (opt-in extension of this server's tool surface). Loose gate; mutating LSP tools stay force-opt-in only, so a stray truthy never widens the RCE surface."
 deliberate_hold: null
 notes: |
   Wired live: `src/apps/cli/index.ts` routes the `mcp-server` subcommand. web=na

@@ -1,0 +1,188 @@
+/**
+ * Cost / token / wall-clock summary for a bench run (ADR-0536 P1, pure).
+ *
+ * Token + wall-clock data come from two sources, in priority order:
+ *   1. the run `report.json` — `perInstance[].usage` (token counts) + `durationMs`
+ *      (present only when observability was on);
+ *   2. fallback `observe/` trajectory JSONL — `quanta.trajectory.v1` events carry
+ *      `inputTokens`/`outputTokens` (summed) + `ts` (wall-clock = last − first).
+ *
+ * When NEITHER source has token data the summary is honest about it (zeros +
+ * `instancesWithUsage:0`) and {@link renderCost} prints an explicit caveat
+ * rather than a misleading `$0.00`.
+ */
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+
+export interface ModelPricing {
+  /** USD per 1M input tokens. */
+  readonly inputPerMTok: number
+  /** USD per 1M output tokens. */
+  readonly outputPerMTok: number
+}
+
+/**
+ * Built-in price table — ESTIMATES (confirm against the provider's current
+ * pricing before trusting the dollar figures). Callers override via `pricing`.
+ */
+export const DEFAULT_PRICING: Readonly<Record<string, ModelPricing>> = {
+  // placeholder estimates (USD / 1M tok) — confirm:
+  "gpt-5.4": { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gpt-5": { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gpt-5-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
+}
+
+export interface InstanceCost {
+  readonly id: string
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly wallClockMs: number
+  readonly costUsd: number
+}
+
+export interface CostSummary {
+  readonly model: string
+  readonly perInstance: readonly InstanceCost[]
+  readonly totalInputTokens: number
+  readonly totalOutputTokens: number
+  readonly totalCostUsd: number
+  readonly totalWallClockMs: number
+  /** How many instances had REAL token data (in+out > 0). */
+  readonly instancesWithUsage: number
+}
+
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+
+/** Pull a usage `{input,output}` token pair from a `perInstance[].usage` object,
+ *  tolerating the common key spellings. */
+const usageTokens = (usage: unknown): { input: number; output: number } => {
+  if (typeof usage !== "object" || usage === null) return { input: 0, output: 0 }
+  const u = usage as Record<string, unknown>
+  const input = num(u.inputTokens) || num(u.input_tokens) || num(u.input) || num(u.promptTokens)
+  const output =
+    num(u.outputTokens) || num(u.output_tokens) || num(u.output) || num(u.completionTokens)
+  return { input, output }
+}
+
+/** Recursively sum every `inputTokens`/`outputTokens` numeric leaf in a value —
+ *  the trajectory events nest token counts under `data`. */
+const deepSumTokens = (v: unknown, acc: { input: number; output: number }): void => {
+  if (Array.isArray(v)) {
+    for (const item of v) deepSumTokens(item, acc)
+    return
+  }
+  if (typeof v !== "object" || v === null) return
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (k === "inputTokens") acc.input += num(val)
+    else if (k === "outputTokens") acc.output += num(val)
+    else deepSumTokens(val, acc)
+  }
+}
+
+/** Backfill tokens + wall-clock for one instance from its observe JSONL (any
+ *  `<instanceId>.<attempt>.jsonl` under `observeDir`). Returns zeros if absent. */
+const fromObserve = (
+  observeDir: string,
+  instanceId: string,
+): { input: number; output: number; wallClockMs: number } => {
+  if (!existsSync(observeDir)) return { input: 0, output: 0, wallClockMs: 0 }
+  let file: string | undefined
+  try {
+    file = readdirSync(observeDir).find(
+      (f) => f.startsWith(`${instanceId}.`) && f.endsWith(".jsonl"),
+    )
+  } catch {
+    return { input: 0, output: 0, wallClockMs: 0 }
+  }
+  if (file === undefined) return { input: 0, output: 0, wallClockMs: 0 }
+  const acc = { input: 0, output: 0 }
+  let minTs = Number.POSITIVE_INFINITY
+  let maxTs = Number.NEGATIVE_INFINITY
+  try {
+    for (const line of readFileSync(join(observeDir, file), "utf8").split("\n")) {
+      if (line.trim() === "") continue
+      let ev: unknown
+      try {
+        ev = JSON.parse(line)
+      } catch {
+        continue
+      }
+      deepSumTokens(ev, acc)
+      const ts = num((ev as { ts?: unknown }).ts)
+      if (ts > 0) {
+        minTs = Math.min(minTs, ts)
+        maxTs = Math.max(maxTs, ts)
+      }
+    }
+  } catch {
+    return { input: 0, output: 0, wallClockMs: 0 }
+  }
+  const wallClockMs =
+    Number.isFinite(minTs) && Number.isFinite(maxTs) ? Math.max(0, maxTs - minTs) : 0
+  return { input: acc.input, output: acc.output, wallClockMs }
+}
+
+export const costSummaryFromReport = (args: {
+  reportPath: string
+  observeDir?: string
+  pricing?: Record<string, ModelPricing>
+}): CostSummary => {
+  const report = JSON.parse(readFileSync(args.reportPath, "utf8")) as {
+    model?: string
+    perInstance?: Array<{ id?: string; usage?: unknown; durationMs?: unknown }>
+  }
+  const model = report.model ?? "unknown"
+  const pricing = args.pricing ?? DEFAULT_PRICING
+  const price = pricing[model]
+  const perInstance: InstanceCost[] = []
+  for (const pi of report.perInstance ?? []) {
+    const id = typeof pi.id === "string" ? pi.id : "?"
+    let { input, output } = usageTokens(pi.usage)
+    let wallClockMs = num(pi.durationMs)
+    if (input === 0 && output === 0 && args.observeDir !== undefined) {
+      const o = fromObserve(args.observeDir, id)
+      input = o.input
+      output = o.output
+      if (wallClockMs === 0) wallClockMs = o.wallClockMs
+    }
+    const costUsd =
+      price !== undefined
+        ? (input / 1e6) * price.inputPerMTok + (output / 1e6) * price.outputPerMTok
+        : 0
+    perInstance.push({ id, inputTokens: input, outputTokens: output, wallClockMs, costUsd })
+  }
+  return {
+    model,
+    perInstance,
+    totalInputTokens: perInstance.reduce((s, p) => s + p.inputTokens, 0),
+    totalOutputTokens: perInstance.reduce((s, p) => s + p.outputTokens, 0),
+    totalCostUsd: perInstance.reduce((s, p) => s + p.costUsd, 0),
+    totalWallClockMs: perInstance.reduce((s, p) => s + p.wallClockMs, 0),
+    instancesWithUsage: perInstance.filter((p) => p.inputTokens + p.outputTokens > 0).length,
+  }
+}
+
+export const renderCost = (s: CostSummary): string => {
+  const lines: string[] = [`=== Cost summary (model: ${s.model}) ===`, ""]
+  if (s.instancesWithUsage === 0) {
+    // Honest: do NOT present $0.00 as a real measurement.
+    lines.push(
+      "NO token usage recorded in the report or observe trajectories.",
+      "Enable observability (QUANTA_OBSERVABILITY=1) on the run to capture tokens/cost.",
+    )
+    return lines.join("\n")
+  }
+  lines.push("| instance | input | output | wall(s) | $ |", "| --- | ---: | ---: | ---: | ---: |")
+  for (const p of s.perInstance) {
+    lines.push(
+      `| ${p.id} | ${p.inputTokens} | ${p.outputTokens} | ${(p.wallClockMs / 1000).toFixed(1)} | ${p.costUsd.toFixed(4)} |`,
+    )
+  }
+  lines.push(
+    "",
+    `total: ${s.totalInputTokens} in + ${s.totalOutputTokens} out tokens | ` +
+      `$${s.totalCostUsd.toFixed(4)} | ${(s.totalWallClockMs / 1000).toFixed(1)}s wall | ` +
+      `(${s.instancesWithUsage}/${s.perInstance.length} instances had token data)`,
+  )
+  return lines.join("\n")
+}
