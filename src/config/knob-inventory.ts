@@ -1457,6 +1457,26 @@ const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/webhook-server-setup.ts",
   },
   {
+    envKey: "QUANTA_GITHUB_WEBHOOK_SECRETS",
+    kind: "string",
+    default: undefined,
+    group: "integration",
+    home: "runtime-config",
+    describe:
+      "Multi-installation HMAC secret map ('k1=s1,k2=s2'); each App posts to /webhook/<k> (PATH routing). Wins over single secret.",
+    readSite: "apps/cli/webhook-server-setup.ts",
+  },
+  {
+    envKey: "QUANTA_GITHUB_WEBHOOK_SECRETS_FILE",
+    kind: "string",
+    default: undefined,
+    group: "integration",
+    home: "runtime-config",
+    describe:
+      "Path to a JSON '{key:secret}' webhook secret map (alternative to QUANTA_GITHUB_WEBHOOK_SECRETS; inline wins).",
+    readSite: "apps/cli/webhook-server-setup.ts",
+  },
+  {
     envKey: "QUANTA_GITHUB_WEBHOOK_PORT",
     kind: "int",
     default: 8787,

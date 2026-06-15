@@ -74,9 +74,25 @@ export interface WebhookHandle {
   close(): Promise<void>
 }
 
+/**
+ * Pre-parse secret selector. Given the (still-untrusted, unparsed) request,
+ * return the HMAC secret to verify it against, or `undefined` when the request
+ * names no known installation (⇒ 401, the body is never parsed).
+ *
+ * MUST be resolvable from channels available BEFORE the body is parsed (the URL
+ * path) — see `webhook-secret-resolver.ts` for the PATH-routing design and why
+ * the installation id inside the payload cannot be trusted here.
+ */
+export type SecretResolverPort = (req: WebhookRequest) => string | undefined
+
 export interface WebhookEventSourceOpts {
   readonly transport: WebhookTransportPort
-  readonly secret: string
+  /** Single shared secret (legacy / single-installation). Provide this OR
+   *  {@link secretResolver}; the resolver wins if both are set. */
+  readonly secret?: string
+  /** Per-request secret selector for multi-installation hosting. When set, the
+   *  fixed `secret` is ignored. */
+  readonly secretResolver?: SecretResolverPort
   readonly clockPort: ClockPort
   readonly deliveryStore?: DeliveryStore
   readonly mentionFilter?: MentionFilter
@@ -100,6 +116,10 @@ export interface WebhookEventSource extends TriggerSourcePort {
  */
 export const createWebhookEventSource = (opts: WebhookEventSourceOpts): WebhookEventSource => {
   validateOpts(opts)
+  // Single-secret callers get a trivial constant resolver so the request path
+  // stays IDENTICAL whether or not multi-installation routing is configured.
+  const resolveSecret: SecretResolverPort =
+    opts.secretResolver ?? ((): string | undefined => opts.secret)
   const cap = Math.max(1, opts.queueCapacity ?? DEFAULT_QUEUE_CAPACITY)
   const deliveryStore = opts.deliveryStore ?? createDeliveryStore()
   const filter =
@@ -116,7 +136,7 @@ export const createWebhookEventSource = (opts: WebhookEventSourceOpts): WebhookE
   const handleRequest = async (req: WebhookRequest): Promise<WebhookResponse> => {
     return routeRequest({
       req,
-      secret: opts.secret,
+      resolveSecret,
       filter,
       deliveryStore,
       queue,
@@ -153,8 +173,14 @@ const validateOpts = (opts: WebhookEventSourceOpts): void => {
   if (opts.transport === undefined || opts.transport === null) {
     throw new Error("createWebhookEventSource: transport port required")
   }
-  if (typeof opts.secret !== "string" || opts.secret.length === 0) {
-    throw new Error("createWebhookEventSource: secret must be a non-empty string (no open bypass)")
+  // Boot-time open-bypass fence: at least one of a non-empty single secret or a
+  // resolver must be present (the resolver itself fails closed per-request).
+  const hasResolver = typeof opts.secretResolver === "function"
+  const hasSecret = typeof opts.secret === "string" && opts.secret.length > 0
+  if (!hasResolver && !hasSecret) {
+    throw new Error(
+      "createWebhookEventSource: a non-empty secret or a secretResolver is required (no open bypass)",
+    )
   }
   if (opts.clockPort === undefined || opts.clockPort === null) {
     throw new Error("createWebhookEventSource: clockPort required")
@@ -163,7 +189,7 @@ const validateOpts = (opts: WebhookEventSourceOpts): void => {
 
 interface RouteDeps {
   readonly req: WebhookRequest
-  readonly secret: string
+  readonly resolveSecret: SecretResolverPort
   readonly filter: MentionFilter
   readonly deliveryStore: DeliveryStore
   readonly queue: ProactiveTrigger[]
@@ -175,9 +201,15 @@ const routeRequest = (deps: RouteDeps): WebhookResponse => {
   const guard = checkRequestGuards(deps.req)
   if (guard !== undefined) return guard
 
-  if (
-    !verifyHubSignature256(deps.req.body, headerOf(deps.req, "x-hub-signature-256"), deps.secret)
-  ) {
+  // PATH-routed secret selection BEFORE any parse. An unknown installation key
+  // (or a missing/empty resolved secret) fails closed: 401, body never parsed —
+  // a forged payload cannot smuggle in an installation id to pick a secret.
+  const secret = deps.resolveSecret(deps.req)
+  if (typeof secret !== "string" || secret.length === 0) {
+    return { status: 401, body: "unknown installation" }
+  }
+
+  if (!verifyHubSignature256(deps.req.body, headerOf(deps.req, "x-hub-signature-256"), secret)) {
     return { status: 401, body: "invalid signature" }
   }
 
@@ -225,7 +257,11 @@ const routeRequest = (deps: RouteDeps): WebhookResponse => {
 }
 
 const checkRequestGuards = (req: WebhookRequest): WebhookResponse | undefined => {
-  if (req.path !== "/webhook") {
+  // Accept the bare legacy path AND keyed multi-installation paths
+  // (`/webhook/<appKey>`). The per-request resolver decides whether a given
+  // (accepted) path maps to a known secret; an unmapped key falls through to a
+  // 401 there, never a 404 here.
+  if (req.path !== "/webhook" && !req.path.startsWith("/webhook/")) {
     return { status: 404, body: "not found" }
   }
   if (req.method.toUpperCase() !== "POST") {

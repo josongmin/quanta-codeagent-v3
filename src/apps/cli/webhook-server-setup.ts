@@ -25,6 +25,7 @@
  * is no-throw by construction (a failed publish is logged, never re-thrown).
  */
 
+import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
@@ -33,8 +34,11 @@ import {
   createNodeWebhookTransport,
   createWebhookEventSource,
   type DeliveryStore,
+  loadWebhookSecretConfig,
+  type SecretResolverPort,
   type WebhookEventSource,
   type WebhookEventSourceOpts,
+  type WebhookSecretConfig,
   type WebhookTransportPort,
 } from "@/integrations/github"
 import type { ProactiveTrigger } from "@/reactor"
@@ -136,9 +140,20 @@ GATE
                                   binds nothing.
 
 CONFIG
-  QUANTA_GITHUB_WEBHOOK_SECRET     REQUIRED. The shared HMAC secret configured
-                                  on the GitHub webhook. Empty ⇒ exit 64, no
-                                  port is bound (no open bypass).
+  QUANTA_GITHUB_WEBHOOK_SECRET     The shared HMAC secret (single-installation).
+                                  REQUIRED unless a multi-installation map is
+                                  set below. Empty + no map ⇒ exit 64, no port
+                                  is bound (no open bypass).
+  QUANTA_GITHUB_WEBHOOK_SECRETS    Multi-installation map for hosting several
+                                  GitHub Apps on one host: 'key1=secret1,
+                                  key2=secret2'. Each App's webhook URL must
+                                  post to /webhook/<key> (PATH routing — the key
+                                  selects the secret BEFORE the body is parsed).
+                                  An unknown key ⇒ 401, body never parsed.
+  QUANTA_GITHUB_WEBHOOK_SECRETS_FILE
+                                  Alternative to the inline map: a path to a
+                                  JSON file '{ "key1": "secret1", ... }'. The
+                                  inline map wins if both are set.
   QUANTA_GITHUB_WEBHOOK_PORT       Listen port (default ${DEFAULT_PORT}).
   QUANTA_GITHUB_WEBHOOK_SESSION    Reactor session id to drive (default
                                   '${DEFAULT_SESSION}'). Also: --session <id>.
@@ -199,10 +214,21 @@ export const runWebhookServerCmd = async (
     return EXIT_USAGE
   }
 
-  // 3. Secret REQUIRED before any bind. Empty ⇒ refuse to boot (no open port).
-  const secret = process.env.QUANTA_GITHUB_WEBHOOK_SECRET
-  if (typeof secret !== "string" || secret.length === 0) {
-    io.err("github webhook server: QUANTA_GITHUB_WEBHOOK_SECRET is required (no open bypass)\n")
+  // 3. Secret REQUIRED before any bind. Resolve the secret CONFIG (single shared
+  //    secret OR a multi-installation map via QUANTA_GITHUB_WEBHOOK_SECRETS /
+  //    _FILE). Mode `none` (no secret of any kind configured, or a map that
+  //    parsed to zero usable entries) ⇒ refuse to boot (no open port). Secret
+  //    VALUES are never logged — only the mode + app-key count.
+  const secretConfig = loadWebhookSecretConfig({
+    env: process.env,
+    readFile: (p) => readFileSync(p, "utf8"),
+    onError: io.err,
+  })
+  if (secretConfig.mode === "none") {
+    io.err(
+      "github webhook server: no webhook SECRET configured " +
+        "(set QUANTA_GITHUB_WEBHOOK_SECRET, or QUANTA_GITHUB_WEBHOOK_SECRETS / _FILE) — no open bypass\n",
+    )
     return EXIT_USAGE
   }
 
@@ -220,7 +246,7 @@ export const runWebhookServerCmd = async (
   return await bindAndServe({
     io,
     deps,
-    secret,
+    secretConfig,
     port,
     sessionId,
     publish,
@@ -233,7 +259,7 @@ export const runWebhookServerCmd = async (
 interface ServeArgs {
   readonly io: WebhookServerCmdIo
   readonly deps: WebhookServerCmdDeps | undefined
-  readonly secret: string
+  readonly secretConfig: WebhookSecretConfig
   readonly port: number
   readonly sessionId: string
   readonly publish: PublishReactorWatchTriggerFn
@@ -258,9 +284,10 @@ const bindAndServe = async (a: ServeArgs): Promise<number> => {
     if (durable.ready !== undefined) await durable.ready
     const transport = (a.deps?.buildTransport ?? defaultBuildTransport)(a.port)
     const buildSource = a.deps?.buildSource ?? createWebhookEventSource
+    const secretResolver: SecretResolverPort = a.secretConfig.resolver
     source = buildSource({
       transport,
-      secret: a.secret,
+      secretResolver,
       clockPort: { now: () => Date.now() },
       deliveryStore: a.deliveryStore,
     })
@@ -270,7 +297,15 @@ const bindAndServe = async (a: ServeArgs): Promise<number> => {
     return EXIT_USAGE
   }
 
-  a.io.err(`quanta webhook · listening on :${a.port} → reactor session '${a.sessionId}'\n`)
+  // Credential-free boot summary: mode + installation COUNT (keys/values stay
+  // out of the log). `single` = legacy one-secret; `map` = N installations.
+  const secretSummary =
+    a.secretConfig.mode === "map"
+      ? `${a.secretConfig.appKeys.length} installation secret(s)`
+      : "single shared secret"
+  a.io.err(
+    `quanta webhook · listening on :${a.port} → reactor session '${a.sessionId}' (${secretSummary})\n`,
+  )
 
   // POLL→PUBLISH PUMP — the one new piece of host logic. Drain source.poll() on
   // a cancellable cadence; for each ProactiveTrigger, publish to the reactor.

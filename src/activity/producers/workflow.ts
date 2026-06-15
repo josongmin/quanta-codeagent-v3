@@ -72,12 +72,20 @@ export const workflowToActivity = (
   ]
   const runRoot = seg(opts.runId)
   let currentPhase: string | null = null
+  const started = new Set<string>()
+  // Open a step node. For a `step_start` the label is the real one. For a
+  // completion WITHOUT a prior start (cache-hit / pre-skipped), the id is the
+  // only label available — but a started step is NOT re-opened, so its real
+  // label is never clobbered by the idempotent re-open's label refresh.
   const ensureStep = (id: string, label: string): string => {
     const sid = stepId(opts.runId, id)
-    out.push({
-      type: "node_open",
-      node: { id: sid, parentId: currentPhase ?? runRoot, kind: "agent", label, status: "running" },
-    })
+    if (!started.has(id)) {
+      started.add(id)
+      out.push({
+        type: "node_open",
+        node: { id: sid, parentId: currentPhase ?? runRoot, kind: "agent", label, status: "running" },
+      })
+    }
     return sid
   }
   for (const e of events) {
@@ -98,7 +106,6 @@ export const workflowToActivity = (
         ensureStep(e.id, e.label)
         break
       case "step_complete":
-        // Idempotent open guarantees the node exists even without a prior start.
         out.push({ type: "node_status", id: ensureStep(e.id, e.id), status: e.ok ? "done" : "failed" })
         break
       case "step_skipped":

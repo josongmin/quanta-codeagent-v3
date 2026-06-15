@@ -79,12 +79,19 @@ export const createWorkflowSink = (store: ActivityStore, opts: WorkflowSinkOpts)
     },
   })
   let currentPhase: string | null = null
+  const started = new Set<string>()
+  // A started step is NOT re-opened on completion, so the idempotent re-open's
+  // label refresh never clobbers its real label with the id. A start-less
+  // completion (cache-hit / pre-skip) still opens once (id as the only label).
   const ensureStep = (id: string, label: string): string => {
     const sid = wfStepId(opts.runId, id)
-    store.emit({
-      type: "node_open",
-      node: { id: sid, parentId: currentPhase ?? runRoot, kind: "agent", label, status: "running" },
-    })
+    if (!started.has(id)) {
+      started.add(id)
+      store.emit({
+        type: "node_open",
+        node: { id: sid, parentId: currentPhase ?? runRoot, kind: "agent", label, status: "running" },
+      })
+    }
     return sid
   }
   return {
