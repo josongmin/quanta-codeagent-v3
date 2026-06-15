@@ -35,6 +35,10 @@ evidence:
   tests:
     unit:
       - tests/unit/runtime/guarded-spawn.test.ts
+      - tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+      - tests/unit/runtime/process-tree-kill-hellgate.test.ts
+      - tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts
+      - tests/unit/runtime/bash-bg-registry-behavior-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -43,3 +47,20 @@ notes: |
   구조적 cleanup invariant — 새 spawn site가 추가되어도 guard를 거치지 않으면 *lint
   + 리뷰* 에서 잡힌다는 의도. AbortSignal 전파, orphan 방지, exit code 표준화 모두
   guard 내부.
+  ADVERSARIAL COVERAGE (jun-15 audit truth-up): guarded-spawn.test.ts pins the
+  `withSpawnedChild` RAII contract (normal path NEVER kills + clears timer;
+  throw path kills EXACTLY once + rethrows the ORIGINAL error; cleanup never
+  split; positive-control proves the timer is real). The security-critical
+  `escalatingKill` invariants are sealed by the runtime hellgate battery (all
+  with red-on-injection):
+    - kill-escalation-and-worktree-retry: a SIGTERM-trapping child
+      (`trap '' TERM; sleep 30`) is SIGKILLed after the grace window.
+    - process-tree-kill-hellgate: whole descendant tree is reaped; AND the
+      load-bearing `pid > 0` guard — "pid 0 NEVER routes through signalTree"
+      (signalTree(0) would signal the CALLER's process group = self-terminate
+      the agent); red-on-injection drops `&& proc.pid > 0` and signalTree(0)
+      fires.
+    - single-pid-kill-ban: permanent guard banning the legacy single-PID kill
+      that would orphan forked children.
+    - bash-bg-registry-behavior: a COMPLETED/reaped shell is evicted WITHOUT
+      calling its killer (no SIGKILL of a RECYCLED pid 2s later).

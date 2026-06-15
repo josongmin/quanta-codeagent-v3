@@ -61,39 +61,53 @@ export const verify = async (
   if (instance.swebench) {
     const ps = deps.pythonSwebench
     if (ps?.evaluate === undefined) {
+      // When the Python harness is not wired, allow fallback to local testCmd ONLY
+      // when: (a) the instance has a real, non-trivial testCmd (not the production
+      // dataset's `testCmd:"true"` no-op), AND (b) the patch is non-empty.
+      // The `testCmd:"true"` sentinel is what the official SWE-bench dataset ships —
+      // falling through there would fake-pass every instance. An empty patch with a
+      // real testCmd would also produce misleading results (swebench F2P tests can
+      // pass on base). Both cases must refuse loudly.
+      const isNoopTestCmd =
+        instance.testCmd.trim() === "true" || instance.testCmd.trim() === ""
+      if (isNoopTestCmd || patch.trim() === "") {
+        return {
+          passed: false,
+          error:
+            "swebench instance requires the official Python harness — REFUSING to fake-grade via testCmd. Set QUANTA_SWEBENCH_PYTHON=1 with an importable swebench (QUANTA_SWEBENCH_PYTHON_BIN).",
+          command: `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`,
+          exitCode: 1,
+          failedTests: [],
+          logTail: "python swebench harness not wired — refused testCmd fake-grade",
+          reportPath: "",
+        }
+      }
+      // Real testCmd + non-empty patch: fall through to the local testCmd path below.
+    } else {
+      const evaluate = ps.evaluate
+      // T01 (audit L5 H-5): forward the per-instance signal into the harness opts
+      // so `evaluateWithPythonSwebench` can race its retry sleep against abort.
+      // The `opts` is `unknown` at this seam (the harness module owns its shape);
+      // we merge the signal as a typed extra without disturbing the rest.
+      const baseOpts = (ps.opts ?? {}) as Record<string, unknown>
+      const harnessOpts =
+        deps.signal !== undefined ? { ...baseOpts, signal: deps.signal } : baseOpts
+      const r = await evaluate(instance, patch, harnessOpts)
+      const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
+      // REAL patch fail (`gradingCompleted:true + resolved:false`) → no `error`
+      // (clean `passed:false`, classifier falls to `completed_unresolved`).
+      // INFRA fail (`gradingCompleted:false`) → set `error` → `harness_error`.
+      // Without this distinction every patch fail is misnamed harness_error.
+      const isInfraFailure = !r.resolved && !r.gradingCompleted
       return {
-        passed: false,
-        error:
-          "swebench instance requires the official Python harness — REFUSING to fake-grade via testCmd. Set QUANTA_SWEBENCH_PYTHON=1 with an importable swebench (QUANTA_SWEBENCH_PYTHON_BIN).",
-        command: `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`,
-        exitCode: 1,
+        passed: r.resolved,
+        ...(isInfraFailure ? { error: r.log.slice(0, 500) } : {}),
+        command,
+        exitCode: r.resolved ? 0 : 1,
         failedTests: [],
-        logTail: "python swebench harness not wired — refused testCmd fake-grade",
+        logTail: r.log.slice(-2000),
         reportPath: "",
       }
-    }
-    const evaluate = ps.evaluate
-    // T01 (audit L5 H-5): forward the per-instance signal into the harness opts
-    // so `evaluateWithPythonSwebench` can race its retry sleep against abort.
-    // The `opts` is `unknown` at this seam (the harness module owns its shape);
-    // we merge the signal as a typed extra without disturbing the rest.
-    const baseOpts = (ps.opts ?? {}) as Record<string, unknown>
-    const harnessOpts = deps.signal !== undefined ? { ...baseOpts, signal: deps.signal } : baseOpts
-    const r = await evaluate(instance, patch, harnessOpts)
-    const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
-    // REAL patch fail (`gradingCompleted:true + resolved:false`) → no `error`
-    // (clean `passed:false`, classifier falls to `completed_unresolved`).
-    // INFRA fail (`gradingCompleted:false`) → set `error` → `harness_error`.
-    // Without this distinction every patch fail is misnamed harness_error.
-    const isInfraFailure = !r.resolved && !r.gradingCompleted
-    return {
-      passed: r.resolved,
-      ...(isInfraFailure ? { error: r.log.slice(0, 500) } : {}),
-      command,
-      exitCode: r.resolved ? 0 : 1,
-      failedTests: [],
-      logTail: r.log.slice(-2000),
-      reportPath: "",
     }
   }
   // Empty-patch guard — when the agent produced no diff (LLM error, abort,

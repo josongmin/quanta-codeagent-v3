@@ -217,6 +217,7 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
       flush: () => undefined,
     } as never,
     lifecycleTaskRegistry: undefined,
+    lifecycleActivityStore: undefined as never,
     lifecycleFollowUpQueue: undefined,
     sessionId: "approval-flow-cli",
     history: [],

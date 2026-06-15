@@ -39,6 +39,7 @@ evidence:
     unit:
       - tests/unit/permission-access-check.test.ts
       - tests/unit/permission-stack-2-layer.test.ts
+      - tests/unit/permission/two-layer-path-traversal-hellgate.test.ts
       - tests/unit/envelope-permission-migration.test.ts
     integration: []
     contract: []
@@ -52,3 +53,12 @@ notes: |
     이면 manager는 abstain → 호출자는 legacy PermissionStack fallthrough.
   - 한 layer만 set이면 다른 layer는 DEFAULT (deny-by-default) → 부분 config는
     strictest 동작.
+  - SECURITY SEAL (jun-15 audit): `containsPath` (the lexical root-containment
+    primitive both layers route through, exported from the barrel) closed a
+    documented fail-OPEN regression — byte-prefix matching let
+    `/repo/../etc/passwd` and prefix-siblings (`/repository`) escape an
+    allow-root for `/repo`. two-layer-path-traversal-hellgate pins the `..`
+    traversal + prefix-sibling + relative-path fail-closed denials, including
+    the dangerous case where BOTH layers root the same allow; red-on-injection
+    verified (reverting to byte-prefix → sibling/escape cases leak). Symlink
+    -target escape stays the OS-sandbox layer's job (this is a lexical guard).

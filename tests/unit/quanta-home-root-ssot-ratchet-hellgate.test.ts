@@ -37,31 +37,12 @@ const RAW = /homedir\(\)\s*,\s*"\.quanta"/
 const ALLOWLIST: ReadonlyMap<string, string> = new Map([
   ["src/shared/quanta-home.ts", "THE resolver — the one place the root literal lives"],
   [
-    "src/host/runtime/agent-arg-builder.ts",
-    "composition-root QUANTA_CONFIG_DIR reader (DI env param; pairs with @/config)",
-  ],
-  [
-    "src/apps/agent/index.ts",
-    "composition-root QUANTA_CONFIG_DIR reader (central-config trust dir)",
-  ],
-  ["src/apps/cli/internal.ts", "composition-root QUANTA_CONFIG_DIR reader (central-config dir)"],
-  ["src/apps/cli/hooks-cmd.ts", "composition-root QUANTA_CONFIG_DIR reader (hooks write dir)"],
-  [
-    "src/apps/cli/webhook-server-setup.ts",
-    "composition-root QUANTA_CONFIG_DIR reader (delivery-dedup dump; raw-env exempt host entry)",
-  ],
-  [
-    "src/permission/permission-store.ts",
-    "resolves QUANTA_CONFIG_DIR ?? QUANTA_HOME via the injected runtimeConfig (not the global singleton)",
-  ],
-  [
     "src/runner/batch/corpus/paths.ts",
-    "bench QUANTA_HOME persistent-default (own override + macOS Library fallback)",
+    "bench: honors the unified root (CONFIG_DIR ?? HOME) but keeps its OWN macOS Library / ~/.quanta default (NOT quantaHomeDir's ~/.quanta) so /tmp-reaping persistence holds",
   ],
-  ["src/auth/chatgpt-oauth/paths.ts", "QUANTA_PREFS_HOME test-isolation seam (distinct override)"],
   [
-    "src/apps/web-daemon/persistence-sqlite.ts",
-    "web-daemon QUANTA_WEB_DB_DIR override (separate daemon process root)",
+    "src/auth/chatgpt-oauth/paths.ts",
+    "QUANTA_PREFS_HOME surface-prefs + test-isolation seam (distinct override domain, like CODEX_HOME)",
   ],
 ])
 

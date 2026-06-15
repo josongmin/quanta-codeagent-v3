@@ -144,15 +144,15 @@ export const makeInterruptRouter = (args: MakeInterruptRouterArgs): InterruptRou
       if (!pendingAbort) {
         pendingAbort = true
         observer?.onDeferred?.()
-        // The window-open watchdog may have already EXPIRED abort-free (it
-        // disarms when it fires with no pending abort). If so there is no live
-        // timer to deliver THIS capture, and `end()` may never come — re-arm a
-        // fresh watchdog bounded from capture time so a withheld abort is
-        // ALWAYS delivered within `maxMs` of capture (never swallowed).
-        if (cancelWatchdog === undefined) {
-          deadlineAt = now() + Math.max(0, Number.isFinite(maxMs) ? maxMs : 0)
-          armWatchdog()
-        }
+        // Always re-arm from CAPTURE time so the watchdog bounds the WITHHELD
+        // duration from when the abort was captured, never from window-open.
+        // Case A: the window-open watchdog already expired abort-free → no
+        //   live timer; `clearWatchdog()` is a no-op; fresh arm starts now.
+        // Case B: the window-open watchdog is still live → cancel it (it would
+        //   fire too early) and replace it with a capture-relative deadline.
+        clearWatchdog()
+        deadlineAt = now() + Math.max(0, Number.isFinite(maxMs) ? maxMs : 0)
+        armWatchdog()
       }
       return
     }

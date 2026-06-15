@@ -258,6 +258,12 @@ const RULES: readonly Rule[] = [
         "CLI slash-command composition root (/hooks) — reads `process.env` once at command-run time to resolve user-config directory; same posture as login-cmd.ts.",
       "apps/cli/init-scaffold.ts":
         "Injection-first: `env: Readonly<...> = process.env` DI fallback at the init-scaffold composition root (EDITOR resolution); tests inject explicit env. Same posture as raw-line-reader-editor.ts.",
+      "apps/bench/cli.ts":
+        "Bench CLI sub-command composition root — reads HOME + QUANTA_SWEBENCH_DATASET + QUANTA_BENCH_PRESET at launch time (same bootstrap posture as apps/bench/index.ts, which is already allowlisted); downstream logic receives resolved values, not live env.",
+      "apps/bench/remote/ssh.ts":
+        "Infrastructure HOME-expansion helper (`expandHome`) for tilde-prefix path resolution — pure string op, reads `process.env.HOME` only as a path component fallback; same posture as storage/shadow-odb/default.ts.",
+      "apps/cli/webhook-server-setup.ts":
+        "Webhook-server CLI composition root (`quanta webhook`) — reads QUANTA_GITHUB_WEBHOOK strict gate + secret config + port/session-id at launch; same DI posture as apps/cli/mcp-server-setup.ts.",
     },
   },
   {
@@ -310,6 +316,8 @@ const RULES: readonly Rule[] = [
         "Reconnect closes the STALE carrier LAST (`old?.close().catch(() => {})`) — a close-time error is non-fatal because the transport is already replaced; surfacing it would block the rebuilt path. Documented inline at the call site (same posture as stream/adapters/jsonl-recorder.ts).",
       "memory/dream/team-write-target.ts":
         "jun-06 atomic-write harden: temp-file cleanup on a FAILED rename (`unlink(tmp).catch(() => {})`) — the real rename error is about to be RETHROWN, so a cleanup failure is non-fatal and there is nothing to surface (same best-effort posture as tool/browser/session-holder.ts).",
+      "apps/bench/python-swebench.ts":
+        "Grading-lock chain: `await prev.catch(() => {})` waits for the PREVIOUS grading task and explicitly ignores its outcome — the lock is used for sequencing, not error detection, and the caller always receives the current task's result via the finally/release path. Documented inline.",
     },
   },
   {
@@ -486,6 +494,8 @@ const RULES: readonly Rule[] = [
         "BURN-DOWN: `compactedAt` provenance stamp on the recovery record — telemetry/provenance metadata, not model-facing replay text.",
       "agent/plugin-skill-extension/extender.ts":
         "BURN-DOWN: injected `opts?.at`; the literal `Date.now` is the default-factory fallback for the skill-activation timestamp.",
+      "agent/loop/turn-loop.ts":
+        "BURN-DOWN (ADR-0231 radar wire): `Date.now()` is the wall-clock sample for the radar proposal-queue producer hook (turn-duration telemetry). Captured ONLY when `cfg.radar` is wired (default-OFF); never reaches model-facing/persisted-replay output — same infra-timing posture as agent/loop/control-poll.ts.",
     },
   },
   {

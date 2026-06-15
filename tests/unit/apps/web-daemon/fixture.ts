@@ -327,6 +327,9 @@ export const createStubRuntimeFactory = (): {
         toolProfile: {
           set: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
         },
+        permission: {
+          set: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
+        },
         approval: {
           respond: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
         },

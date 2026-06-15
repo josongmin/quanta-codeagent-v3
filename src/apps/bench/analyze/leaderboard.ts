@@ -9,6 +9,7 @@
  * answers "is this instance solvable by us at all", so a single green wins.
  */
 
+import { byteCompare } from "@/shared/byte-compare"
 import type { RunVerdicts } from "./verdicts"
 
 export interface LeaderRow {
@@ -73,7 +74,7 @@ const table = (rows: readonly LeaderRow[]): string => {
   if (rows.length === 0) return "_(none)_"
   const header = "| instance | repo | preset | model |\n| --- | --- | --- | --- |"
   const body = [...rows]
-    .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+    .sort((a, b) => byteCompare(a.instanceId, b.instanceId))
     .map((r) => `| ${cell(r.instanceId)} | ${cell(r.repo)} | ${cell(r.preset)} | ${cell(r.model)} |`)
     .join("\n")
   return `${header}\n${body}`

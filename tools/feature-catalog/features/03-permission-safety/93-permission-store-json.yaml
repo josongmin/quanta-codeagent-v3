@@ -61,4 +61,24 @@ knobs:
     default: '~/.quanta/permission-state.json'
     purpose: 'override file path'
 deliberate_hold: null
-notes: 'No SQLite, no transactions — bounded state (small N per kind) makes RMW + debounced flush correct. JsonStateFile is generic by design (the state DOMAIN lives in the caller, the helper is parameterised by emptyState/serialize/parse).'
+notes: |
+  No SQLite, no transactions — bounded state (small N per kind) makes RMW +
+  debounced flush correct. JsonStateFile is generic by design (the state DOMAIN
+  lives in the caller, the helper is parameterised by emptyState/serialize/parse).
+  ADVERSARIAL COVERAGE (jun-15 audit): permission-store-hardening.test.ts IS the
+  adversarial battery despite not carrying a `hellgate` filename — atomic-write
+  hardening (orphan `.tmp` does not block a fresh write; partial `.tmp` cleaned
+  up — no orphan accumulation); schema versioning (future-version + string-
+  version + missing-version ⇒ quarantine to `.unsupported-vN`, never silent
+  accept; malformed nested ⇒ `.corrupt` sidecar + start empty, never crash);
+  actionSignature adversarial inputs (whitespace ⇒ DIFFERENT sig, nested-arg
+  canonicalization, positional array order significant, 32-hex shape);
+  concurrency (two stores flushing CONCURRENTLY ⇒ no torn JSON + ≥1 grant
+  survives; burst serializes through pendingFlush — no concurrent rename);
+  multi-process read-reconcile-MERGE / TOCTOU clobber (A+B grants both survive,
+  a peer denial survives a stale flush, a NEWER denial generation supersedes,
+  a locally-cleared grant is NOT resurrected by its own prior on-disk copy).
+  File mode is intentionally default (not 0o600): permission state (grants /
+  modes / denial ledger) is not a credential — the credential bundle has its own
+  0o600 store ([[token-store-atomic]]). Corrupt/tampered files are quarantined,
+  never trusted; the on-disk file is agent-authored and local.

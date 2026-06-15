@@ -46,28 +46,53 @@ swe-bench-verified-analysis/
 
 ## 분석 진행 상태
 
-| repo | 분석 완료 |
-|---|---|
-| django | ✅ 231 / 231 |
-| sympy | ⬜ 0 / 75 |
-| sphinx | ⬜ 0 / 44 |
-| matplotlib | ⬜ 0 / 34 |
-| scikit-learn | ⬜ 0 / 32 |
-| astropy | ⬜ 0 / 22 |
-| xarray | ⬜ 0 / 22 |
-| pytest | ⬜ 0 / 19 |
-| pylint | ⬜ 0 / 10 |
-| requests | ⬜ 0 / 8 |
-| seaborn | ⬜ 0 / 2 |
-| flask | ⬜ 0 / 1 |
+| repo | 기본 분석 | 정형화(type+tier+모범답안) |
+|---|---|---|
+| django | ✅ 231 / 231 | ✅ 231 / 231 |
+| sympy | ⬜ 0 / 75 | ⬜ |
+| sphinx | ⬜ 0 / 44 | ⬜ |
+| matplotlib | ⬜ 0 / 34 | ⬜ |
+| scikit-learn | ⬜ 0 / 32 | ⬜ |
+| astropy | ⬜ 0 / 22 | ⬜ |
+| xarray | ⬜ 0 / 22 | ⬜ |
+| pytest | ⬜ 0 / 19 | ⬜ |
+| pylint | ⬜ 0 / 10 | ⬜ |
+| requests | ⬜ 0 / 8 | ⬜ |
+| seaborn | ⬜ 0 / 2 | ⬜ |
+| flask | ⬜ 0 / 1 | ⬜ |
 
-## 각 md 구조
+## django 정형화 분포 (231개)
 
-- **문제 요약** — problem_statement 압축
-- **유형 분류** — 버그 카테고리 / 서브시스템 / 증상 타입 / 로컬라이제이션 신호
+분류 루브릭은 [TAXONOMY.md](TAXONOMY.md) (APR 문헌 + SWE-bench 난이도 실증연구 근거). 난이도는 에이전트 solve-rate가 아니라 **구조적 피처**로 매김(메모리제이션 confound 회피).
+
+**티어 × 유형 매트릭스:**
+
+| tier | DirectMap | ConstrReason | DomainBound | DesignRefactor | LocTrivial | DiffuseLoc | SpecInfer | GenValidate | 합 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| T1 존나쉬움 | 12 | 0 | 0 | 0 | 3 | 0 | 0 | 0 | 15 |
+| T2 쉬움 | 62 | 4 | 0 | 2 | 1 | 0 | 0 | 0 | 69 |
+| T3 중간 | 14 | 25 | 14 | 3 | 0 | 0 | 0 | 0 | 56 |
+| T4 약간어려움 | 2 | 33 | 29 | 5 | 0 | 2 | 2 | 1 | 74 |
+| T5 어려움 | 0 | 0 | 7 | 9 | 0 | 1 | 0 | 0 | 17 |
+| T6 매우어려움 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **합** | **90** | **62** | **50** | **19** | **4** | **3** | **2** | **1** | **231** |
+
+읽는 법: DirectMap은 T1-T2에, ConstraintReason은 T3-T4에, DomainBound·DesignRefactor는 T4-T5에 몰림 — 유형이 곧 난이도 예측자. T6 없음(django Verified는 >4시간 난이도 0).
+
+**Localization 축**: L0 149 / L1 51 / L2 4 / L3 27 — 이슈가 위치를 직접 지목하는 경우(L0)가 대부분, 멀티사이트 조율(L3) 27개.
+**Knowledge 의존**: K-Domain 188 / K-Gen 30 / K-API 13 — **81%가 django 내부지식 의존**(ORM/compiler/migrations/forms). django가 어려운 진짜 이유.
+
+## 각 md 구조 (정형화 후)
+
+frontmatter: `primary_type` / `tier` / `loc_axis` / `repair_strategy` / `knowledge` / `flags` (머신리더블) + gold_files·F2P·P2P.
+
+본문:
+- **문제 요약**
+- **유형 (정형화)** — 3축(Localization/Repair-Strategy/Knowledge) 점수 + primary type + APR 관점 근거
+- **난이도 티어** — 6티어 + 구조적 피처 근거 (공식 라벨과 다르면 왜)
 - **골드패치 분석** — 건드린 파일·함수 / 근본 원인 / 수정 요지
-- **검증 (test_patch)** — FAIL_TO_PASS가 체크하는 동작, 픽스 증명 방식
-- **공략 포인트** — 어디부터 볼지 / 함정·난이도 / 우리 에이전트가 막힐 지점
+- **검증 (test_patch)** — FAIL_TO_PASS 동작 / 픽스 증명 / overfit·regression 관점
+- **모범답안 (오라클 기반)** — 이상적 풀이 궤적 4단계: localize 경로 → 픽스(왜 올바른 일반화) → regression 안전 → 함정 회피
 
 ## 재현 / 사용법
 

@@ -192,10 +192,11 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
     const stored = buildXlsx({ sheets: [{ name: "Z", rows: [["secret", 42]] }] })
     const parts = partsOf(stored)
     const tampered = buildDeflateBombZip(
-      parts.map((p) => ({
-        entry: p,
-        uncompSizeOverride: p.path === "xl/workbook.xml" ? FOUR_GIB_LIE : undefined,
-      })),
+      parts.map((p) =>
+        p.path === "xl/workbook.xml"
+          ? { entry: p, uncompSizeOverride: FOUR_GIB_LIE }
+          : { entry: p },
+      ),
     )
     // Sanity: the tampered file is TINY on disk despite the 4 GiB claim — a real
     // compression bomb shape (otherwise nothing is being defended).
@@ -213,7 +214,7 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
     // The failure is the declared-size cap rejection (not a parse of bomb data).
     expect(r.output).toContain("exceeds cap")
     // Surfaced as a malformed-doc error to the model (no raw stack / no rows).
-    expect(r.failure?.modelVisibleError).toBe("xlsx_malformed")
+    expect(r.failure?.mode === "error" ? r.failure.modelVisibleError : undefined).toBe("xlsx_malformed")
   })
 
   test("docx_read: tampered document.xml declaring 4 GiB → typed error, no text, no OOM", async () => {
@@ -224,10 +225,11 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
     })
     const parts = partsOf(stored)
     const tampered = buildDeflateBombZip(
-      parts.map((p) => ({
-        entry: p,
-        uncompSizeOverride: p.path === "word/document.xml" ? FOUR_GIB_LIE : undefined,
-      })),
+      parts.map((p) =>
+        p.path === "word/document.xml"
+          ? { entry: p, uncompSizeOverride: FOUR_GIB_LIE }
+          : { entry: p },
+      ),
     )
     expect(tampered.length).toBeLessThan(64 * 1024)
     await writeFile(join(dir, "bomb.docx"), tampered)
@@ -237,7 +239,7 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
     expect(r.ok).toBe(false)
     expect(r.failure?.mode).toBe("error")
     expect(r.output).not.toContain("CLASSIFIED")
-    expect(r.failure?.modelVisibleError).toBe("docx_malformed")
+    expect(r.failure?.mode === "error" ? r.failure.modelVisibleError : undefined).toBe("docx_malformed")
   })
 })
 
@@ -283,7 +285,7 @@ describe("H15 — DEFLATE entry that GENUINELY inflates past the per-entry cap �
 
     expect(result.ok).toBe(false)
     expect(result.failure?.mode).toBe("error")
-    expect(result.failure?.modelVisibleError).toBe("xlsx_malformed")
+    expect(result.failure?.mode === "error" ? result.failure.modelVisibleError : undefined).toBe("xlsx_malformed")
   })
 })
 

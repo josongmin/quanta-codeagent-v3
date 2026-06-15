@@ -313,7 +313,7 @@ describe("W4 — observability + agent-state through the REAL daemon WS", () => 
     ledger.start({ id: "run-2", kind: "exec", owner: THREAD, title: "second run" })
     approvals.request({
       threadId: THREAD,
-      kind: "tool",
+      kind: "permission",
       reason: "needs confirmation",
       proposedAction: "rm -rf nothing",
       resumeStep: "after approval",

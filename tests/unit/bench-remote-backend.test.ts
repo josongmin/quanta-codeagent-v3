@@ -13,9 +13,9 @@
  */
 import { describe, expect, test } from "bun:test"
 import {
+  parseSwebenchReport,
   type SpawnFn,
   type SpawnResult,
-  parseSwebenchReport,
 } from "../../src/apps/bench/remote/backend"
 import { createEc2Backend } from "../../src/apps/bench/remote/ec2"
 import { createSshBackend } from "../../src/apps/bench/remote/ssh"
@@ -122,7 +122,11 @@ describe("ssh backend", () => {
   }
 
   test("name reflects host", () => {
-    const b = createSshBackend({ host: "ubuntu@9.9.9.9", keyPath: "/k", spawn: makeMockSpawn(() => ok()).spawn })
+    const b = createSshBackend({
+      host: "ubuntu@9.9.9.9",
+      keyPath: "/k",
+      spawn: makeMockSpawn(() => ok()).spawn,
+    })
     expect(b.name).toBe("ssh:ubuntu@9.9.9.9")
   })
 
@@ -130,7 +134,10 @@ describe("ssh backend", () => {
     const { issued } = await setup()
     // scp preds to ~/preds.jsonl
     const scpPreds = issued.find(
-      (i) => i.cmd === "scp" && i.args.includes("/tmp/preds.jsonl") && i.args.includes("ubuntu@1.2.3.4:~/preds.jsonl"),
+      (i) =>
+        i.cmd === "scp" &&
+        i.args.includes("/tmp/preds.jsonl") &&
+        i.args.includes("ubuntu@1.2.3.4:~/preds.jsonl"),
     )
     expect(scpPreds).toBeDefined()
     // scp dataset to ~/instances.jsonl
@@ -142,10 +149,14 @@ describe("ssh backend", () => {
     )
     expect(scpData).toBeDefined()
     // ssh run_evaluation streamed via bash -s; the script is in stdin
-    const sshRun = issued.find((i) => i.cmd === "ssh" && i.args.includes("bash") && i.input?.includes("run_evaluation"))
+    const sshRun = issued.find(
+      (i) => i.cmd === "ssh" && i.args.includes("bash") && i.input?.includes("run_evaluation"),
+    )
     expect(sshRun).toBeDefined()
     // scp report back happens last among scps
-    const scpBack = issued.find((i) => i.cmd === "scp" && i.args.some((a) => a.includes("quanta.run-xyz.json")))
+    const scpBack = issued.find(
+      (i) => i.cmd === "scp" && i.args.some((a) => a.includes("quanta.run-xyz.json")),
+    )
     expect(scpBack).toBeDefined()
   })
 
@@ -165,7 +176,9 @@ describe("ssh backend", () => {
       if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("READY")
       return ok()
     })
-    const outDir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "ssh-mw-"))
+    const outDir = require("node:fs").mkdtempSync(
+      require("node:path").join(require("node:os").tmpdir(), "ssh-mw-"),
+    )
     require("node:fs").writeFileSync(
       require("node:path").join(outDir, "quanta.r.json"),
       JSON.stringify(SAMPLE_REPORT),
@@ -214,7 +227,9 @@ describe("ssh backend", () => {
 
 describe("ec2 backend", () => {
   const setup = async (overrides?: { keep?: boolean }) => {
-    const outDir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "ec2-test-"))
+    const outDir = require("node:fs").mkdtempSync(
+      require("node:path").join(require("node:os").tmpdir(), "ec2-test-"),
+    )
     const reportPath = require("node:path").join(outDir, "quanta.run-ec2.json")
     const { spawn, issued } = makeMockSpawn((cmd, args) => {
       if (cmd === "curl" && args.includes("ifconfig.me")) return ok("203.0.113.7")
@@ -248,13 +263,21 @@ describe("ec2 backend", () => {
 
   test("full provisioning sequence: SG → run-instances → wait → grade(ssh) → terminate", async () => {
     const { issued } = await setup()
-    const awsVerbs = issued.filter((i) => i.cmd === "aws").map((i) => i.args.find((a) => !a.startsWith("-")) ?? i.args[1])
+    const awsVerbs = issued
+      .filter((i) => i.cmd === "aws")
+      .map((i) => i.args.find((a) => !a.startsWith("-")) ?? i.args[1])
     // create-security-group (since describe returned None)
-    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("create-security-group"))).toBe(true)
-    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("authorize-security-group-ingress"))).toBe(true)
+    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("create-security-group"))).toBe(
+      true,
+    )
+    expect(
+      issued.some((i) => i.cmd === "aws" && i.args.includes("authorize-security-group-ingress")),
+    ).toBe(true)
     expect(issued.some((i) => i.cmd === "aws" && i.args.includes("run-instances"))).toBe(true)
     expect(
-      issued.some((i) => i.cmd === "aws" && i.args.includes("wait") && i.args.includes("instance-running")),
+      issued.some(
+        (i) => i.cmd === "aws" && i.args.includes("wait") && i.args.includes("instance-running"),
+      ),
     ).toBe(true)
     // grading delegated to ssh against ubuntu@1.2.3.4
     expect(issued.some((i) => i.cmd === "ssh" && i.args.includes("ubuntu@1.2.3.4"))).toBe(true)
@@ -265,9 +288,42 @@ describe("ec2 backend", () => {
 
   test("authorize-ingress restricts :22 to the current public IP /32", async () => {
     const { issued } = await setup()
-    const auth = issued.find((i) => i.cmd === "aws" && i.args.includes("authorize-security-group-ingress"))
+    const auth = issued.find(
+      (i) => i.cmd === "aws" && i.args.includes("authorize-security-group-ingress"),
+    )
     expect(auth?.args).toContain("203.0.113.7/32")
     expect(auth?.args).toContain("22")
+  })
+
+  test("falls back to next instance type on InsufficientInstanceCapacity (no AZ pin)", async () => {
+    const launched: string[] = []
+    const { spawn } = makeMockSpawn((cmd, args) => {
+      if (cmd === "curl") return ok("203.0.113.7")
+      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
+      if (cmd === "aws" && args.includes("run-instances")) {
+        const it = args[args.indexOf("--instance-type") + 1] ?? ""
+        launched.push(it)
+        if (it === "c7i.8xlarge")
+          return { code: 254, stdout: "", stderr: "InsufficientInstanceCapacity" }
+        return ok("i-fallback")
+      }
+      if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
+      if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("READY")
+      return ok()
+    })
+    await createEc2Backend({ spawn, sleep: async () => {} })
+      .grade("/tmp/p.jsonl", { datasetPath: "/tmp/d.jsonl", runId: "r" })
+      .catch(() => undefined)
+    expect(launched[0]).toBe("c7i.8xlarge") // requested type tried first
+    expect(launched.length).toBeGreaterThan(1) // fell back after capacity error
+    // default launch must NOT pin a subnet/AZ (capacity resilience)
+    // (verified separately below)
+  })
+
+  test("does NOT pin --subnet-id by default (AZ flexibility)", async () => {
+    const { issued } = await setup()
+    const run = issued.find((i) => i.cmd === "aws" && i.args.includes("run-instances"))
+    expect(run?.args.includes("--subnet-id")).toBe(false)
   })
 
   // ── red-on-injection teeth: cost/security flags MUST be present ───────────
@@ -306,7 +362,9 @@ describe("ec2 backend", () => {
 
   test("keep:true skips terminate", async () => {
     const { issued } = await setup({ keep: true })
-    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("terminate-instances"))).toBe(false)
+    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("terminate-instances"))).toBe(
+      false,
+    )
   })
 
   test("grading result is the parsed report from the delegated ssh run", async () => {
@@ -316,7 +374,9 @@ describe("ec2 backend", () => {
   })
 
   test("re-uses an existing SG instead of creating (idempotent)", async () => {
-    const outDir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "ec2-sg-"))
+    const outDir = require("node:fs").mkdtempSync(
+      require("node:path").join(require("node:os").tmpdir(), "ec2-sg-"),
+    )
     const reportPath = require("node:path").join(outDir, "quanta.r.json")
     const { spawn, issued } = makeMockSpawn((cmd, args) => {
       if (cmd === "curl") return ok("203.0.113.7")
@@ -332,7 +392,9 @@ describe("ec2 backend", () => {
     })
     const backend = createEc2Backend({ spawn, sleep: async () => {} })
     await backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r", outDir })
-    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("create-security-group"))).toBe(false)
+    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("create-security-group"))).toBe(
+      false,
+    )
     const run = issued.find((i) => i.cmd === "aws" && i.args.includes("run-instances"))
     expect(run?.args).toContain("sg-existing")
   })
@@ -347,8 +409,20 @@ describe("ec2 backend", () => {
       if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("WAIT")
       return ok()
     })
-    const backend = createEc2Backend({ spawn, sleep: async () => {}, maxPolls: 2, pollIntervalMs: 1 })
-    await expect(backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r" })).rejects.toThrow()
-    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("terminate-instances") && i.args.includes("i-leak"))).toBe(true)
+    const backend = createEc2Backend({
+      spawn,
+      sleep: async () => {},
+      maxPolls: 2,
+      pollIntervalMs: 1,
+    })
+    await expect(
+      backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r" }),
+    ).rejects.toThrow()
+    expect(
+      issued.some(
+        (i) =>
+          i.cmd === "aws" && i.args.includes("terminate-instances") && i.args.includes("i-leak"),
+      ),
+    ).toBe(true)
   })
 })

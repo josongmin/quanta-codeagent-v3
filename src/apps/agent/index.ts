@@ -22,7 +22,6 @@
  */
 
 import { mkdir, readFile, realpath } from "node:fs/promises"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import * as readline from "node:readline/promises"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
@@ -66,7 +65,7 @@ import {
   formatHelp,
   parseAgentArgs,
 } from "@/host/runtime/agent-args"
-import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { errMessage, gateOn, logger, quantaHomeDir, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AssembleRequest } from "./assemble"
 
 export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests }
@@ -319,7 +318,7 @@ export const resolveCommandHookBindings = async (
   } catch {
     realCwd = cwd
   }
-  const userConfigDir = rc.centralConfigDir ?? join(homedir(), ".quanta")
+  const userConfigDir = quantaHomeDir()
   const persist = deps.makeTrustPersistence ?? makeTrustPersistence
   const store = await TrustStore.load(persist(join(userConfigDir, "trust.json")))
   const trustedFromEnv = canonicalizeTrustedPaths(

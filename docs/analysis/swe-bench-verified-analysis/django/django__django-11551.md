@@ -42,7 +42,7 @@ T4로 미는 구조적 피처:
 T5로 가지 않는 이유: 단일 파일·단일 함수(L0), patch가 ~30줄·1헌크로 scope가 작고, **has-repro**(이슈에 진리표+완성된 정답 코드 블록 제공)라는 강한 easiness 신호가 있다. overfit 위험도 낮다(아래). 공식 라벨보다 높은 건 시간라벨이 "분기 추론의 미묘함 + 넓은 P2P trap"을 포착하지 못하기 때문.
 
 ## 골드패치 분석
-- **건드린 파일·함수**: `django/contrib/admin/checks.py` → `ModelAdmin._check_list_display_item` 단 하나(1헌크).
+- **건드린 파일·함수**: `django/contrib/admin/checks.py` → `ModelAdminChecks._check_list_display_item` 단 하나(1헌크). (메서드 소유 클래스는 `ModelAdminChecks(BaseModelAdminChecks)`이며, `ModelAdmin`은 `django/contrib/admin/options.py`의 별개 클래스다 — 혼동 주의.)
 - **근본 원인**: 회귀 커밋 47016adb가 `elif hasattr(obj.model, item):` 선분기를 도입. `PositionField` 같은 디스크립터는 `__get__(instance=None)`에서 `AttributeError`를 던져 `hasattr(obj.model, item)`가 False가 되는데, 기존 로직은 이 False를 곧장 "필드 없음 → E108"로 conflation 했다. 즉 `get_field(item)`이 멀쩡히 필드를 반환할 수 있는데도 시도조차 하지 않았다. 또한 raise 케이스에서 M2M 검사를 빠뜨리는 부수 버그도 존재.
 - **수정 요지**: `hasattr` 선분기를 제거. 먼저 `field = obj.model._meta.get_field(item)`을 시도하고, `FieldDoesNotExist`면 그제서야 `field = getattr(obj.model, item)`을 시도, 그것마저 `AttributeError`면 E108을 반환한다. 둘 중 하나로 field를 확보하면 `isinstance(field, models.ManyToManyField)`로 E109 또는 `[]`(유효)를 반환. "field is None으로 케이스를 신호"하던 모호함을 제거하고, 실패 사유를 그 사유가 발생하는 `except` 블록 안에 가둬 진리표 12행을 전부 충족시킨다.
 

@@ -1,18 +1,6 @@
 import { spawn as spawnChild } from "node:child_process"
 import { chmod, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join as joinPath } from "node:path"
-import {
-  canonicalizeTrustedPaths,
-  filterMcpServersByPolicy,
-  type McpLaunchPolicy,
-  mergeDiskLayers,
-  osManagedSettingsPath,
-  parseSettingSources,
-  readDiskLayers,
-  type TrustRecord,
-  TrustStore,
-} from "@/config"
 import type { ElicitationPrompterFactory, SamplingWiringInput } from "@/agent"
 import {
   type AgentConfig,
@@ -32,6 +20,17 @@ import {
   generateState,
   resolveQuantaHome,
 } from "@/auth/chatgpt-oauth"
+import {
+  canonicalizeTrustedPaths,
+  filterMcpServersByPolicy,
+  type McpLaunchPolicy,
+  mergeDiskLayers,
+  osManagedSettingsPath,
+  parseSettingSources,
+  readDiskLayers,
+  type TrustRecord,
+  TrustStore,
+} from "@/config"
 import type { FetchPort, TokenRecord, TokenStorePort } from "@/connectors"
 import {
   buildMcpOAuthWiring,
@@ -95,7 +94,7 @@ import {
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { loadSessionById, renameSession } from "@/session"
-import { logger, type RunContext, runtimeConfig } from "@/shared"
+import { logger, quantaHomeDir, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
@@ -367,14 +366,16 @@ export const buildSubagentConfig = (
   // QUANTA_SUBAGENT; `QUANTA_SUBAGENT_BATCH=0` / `QUANTA_SUBAGENT_INTROSPECT=0`
   // disable individually. Zero-adapter: both ride the existing runner/registry.
   const enableBatchSpawn = enabled && (readCliKnob("QUANTA_SUBAGENT_BATCH", "bool", env) ?? true)
-  const enableIntrospect = enabled && (readCliKnob("QUANTA_SUBAGENT_INTROSPECT", "bool", env) ?? true)
+  const enableIntrospect =
+    enabled && (readCliKnob("QUANTA_SUBAGENT_INTROSPECT", "bool", env) ?? true)
   // §25.1 — `run_workflow` (LLM-authored declarative orchestration). DEFAULT-OFF
   // (gateOn ⇒ must be explicitly QUANTA_WORKFLOW=on/1): it fans out a tree of
   // subagents, so it opts in rather than riding the default subagent-ON seed.
   const enableWorkflow = enabled && (readCliKnob("QUANTA_WORKFLOW", "bool", env) ?? false)
   // GAP7-4 — `spawn_agents_on_csv` (CSV batch fan-out). DEFAULT-OFF (opt-in: it
   // spawns one child per row, so it does not ride the default subagent-ON seed).
-  const enableSpawnAgentsCsv = enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool", env) ?? false)
+  const enableSpawnAgentsCsv =
+    enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool", env) ?? false)
   return buildSubagentConfigCore({
     enabled,
     ...(depth !== undefined ? { maxDepth: depth } : {}),
@@ -1047,7 +1048,8 @@ export const readMcpConfig = async (
   const applyPolicy = (servers: McpServerConfig[]): McpServerConfig[] => {
     if (policy === undefined) return servers
     const { kept, dropped } = filterMcpServersByPolicy(servers, policy)
-    for (const d of dropped) slog.warn("mcp.governance.dropped", { server: d.name, reason: d.reason })
+    for (const d of dropped)
+      slog.warn("mcp.governance.dropped", { server: d.name, reason: d.reason })
     return [...kept]
   }
   const path = resolveMcpConfigPath(envSource)
@@ -1102,7 +1104,7 @@ export const resolveMcpLaunchPolicy = async (
     } catch {
       realCwd = process.cwd()
     }
-    const userConfigDir = rc.centralConfigDir ?? joinPath(homedir(), ".quanta")
+    const userConfigDir = quantaHomeDir()
     // Read-only trust persistence: `save` is a no-op — this path NEVER grants
     // trust (no prompt), it only honors grants the hooks flow / user persisted.
     const trustFile = joinPath(userConfigDir, "trust.json")

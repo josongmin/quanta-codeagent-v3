@@ -261,10 +261,12 @@ describe("spec-to-test generator hellgate (ADR-0253)", () => {
     asOk(generateSpecTest(spec))
     asOk(defaultSpecToTestGen.generate(spec))
     const after = readdirSync(dir).sort()
-    // tmpdir entries are unchanged — generator wrote nothing.
-    // (We don't compare mtime because OS may touch tmpdir for unrelated reasons;
-    //  we DO assert the entry set is byte-identical.)
-    expect(after).toEqual(before)
+    // Generator wrote no NEW files — concurrent tests may clean up their own
+    // tmpdir entries (worktree GC), so entries can shrink; we only fail if new
+    // entries appear (which would mean the generator did I/O).
+    const beforeSet = new Set(before)
+    const newEntries = after.filter((f) => !beforeSet.has(f))
+    expect(newEntries).toEqual([])
     expect(typeof beforeStat.isDirectory).toBe("function")
   })
 

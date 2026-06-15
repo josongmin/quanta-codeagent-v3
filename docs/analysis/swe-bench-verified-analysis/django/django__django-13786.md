@@ -34,7 +34,7 @@ flags: [regression-trap]
 
 이 티어로 미는 구조적 피처:
 - **S2 constraint-reasoning + K-Domain 조합** — 루브릭 T4 정의("constraint추론·소규모 refactor·도메인지식 중 하나")에 정확히 부합. localize는 L0로 매우 쉽지만, 픽스 정합성(제거 시맨틱 합성)이 비자명.
-- **regression-trap (넓은 P2P)** — PASS_TO_PASS 33개가 전부 `OptimizerTests`로, optimizer reduce 경로를 광범위하게 커버한다. 특히 `test_create_alter_model_options`는 옵션 **추가/덮어쓰기** 시맨틱을 검증하므로, 제거 로직을 잘못 넣으면(예: `ALTER_OPTION_KEYS` 한정 없이 무차별 pop) 즉시 깨진다. 이 P2P trap이 T4의 핵심 근거.
+- **regression-trap (넓은 P2P)** — PASS_TO_PASS 33개가 전부 `OptimizerTests`로, optimizer reduce 경로를 광범위하게 커버한다. 단, `ALTER_OPTION_KEYS` 한정성을 직접 강제하는 P2P는 없다: 유일한 AlterModelOptions reduce P2P인 `test_create_alter_model_options`는 키가 `operation.options` 안에 있어 pop 자체가 안 일어나므로 무차별 pop 구현에서도 GREEN(상세는 검증 절). T4의 근거는 P2P-trap의 실증이 아니라 **제거 시맨틱을 올바른 키-집합으로 합성해야 하는 S2 constraint-reasoning + K-Domain 난점**에 있다.
 
 공식 라벨과 다른 이유: 시간라벨은 "이 버그를 아는 코어 개발자의 구현시간"이라 hints가 있는 상태의 손쉬움을 반영하지만, **에이전트 관점의 정합성 위험(부분 제거 케이스2 + P2P 회귀)**은 시간라벨에 안 잡힌다. localize가 trivial(L0)이라 T5까지 가지는 않음 — 멀티파일/멀티헌크/overfit 고위험이 아니므로.
 
@@ -47,10 +47,10 @@ flags: [regression-trap]
 - **FAIL_TO_PASS (1개):** `test_create_model_and_remove_model_options (migrations.test_optimizer.OptimizerTests)`.
 - **픽스 증명:**
   - 케이스1: `CreateModel(options={'verbose_name': 'My Model'})` + `AlterModelOptions(options={})` → 기대 `CreateModel(fields=[])` (옵션 전부 제거). 버그 코드는 `verbose_name`이 잔존해 실패; 픽스는 빈 `operation.options` 때문에 `verbose_name`이 `ALTER_OPTION_KEYS` 루프에서 pop되어 통과.
-  - 케이스2 (부분 제거): `CreateModel(options={'verbose_name', 'verbose_name_plural'})` + `AlterModelOptions(options={'verbose_name': 'My Model'})` → 기대 `verbose_name`만 남고 `verbose_name_plural` 제거. `verbose_name_plural`이 `operation.options`에 없으므로 pop. 이 두 번째 단언이 "무차별 pop이 아니라 키-한정 교체"임을 강제한다.
+  - 케이스2 (부분 제거): `CreateModel(options={'verbose_name', 'verbose_name_plural'})` + `AlterModelOptions(options={'verbose_name': 'My Model'})` → 기대 `verbose_name`만 남고 `verbose_name_plural` 제거. `verbose_name_plural`이 `operation.options`에 없으므로 pop. 단, 이 케이스2는 `ALTER_OPTION_KEYS` **한정 여부를 구별하지 못한다**: 사용된 키 `verbose_name`·`verbose_name_plural`가 둘 다 `ALTER_OPTION_KEYS` 멤버라(base `models.py` L643-664), "operation.options에 없는 **모든** 키를 pop"하는 무차별 구현에서도 `verbose_name_plural`은 똑같이 pop되어 케이스2가 GREEN으로 통과한다. 케이스2가 실제로 차단하는 것은 "빈 dict면 옵션 통째로 비우기" 류 special-case(케이스2에서 `verbose_name`이 살아남아야 함)이지, `ALTER_OPTION_KEYS` 한정성이 아니다.
   - `assertOptimizesTo`로 optimizer를 실제로 돌려 squash 결과 operation 리스트가 기대치와 정확히 일치하는지 비교(effect 관찰형, 강한 단언).
 - **overfit 관점:** FAIL_TO_PASS가 1개로 얇아 보이나, 내부에 2개 단언(전체 제거 + 부분 제거)이 있어 special-case 패치(예: "빈 dict면 옵션 통째로 비우기")를 케이스2가 차단한다 → overfit-risk 플래그 미부여. 단, 입력공간(다양한 ALTER_OPTION_KEYS 조합) 전수는 아니므로 S4까지 가는 고위험은 아님.
-- **regression 관점:** PASS_TO_PASS 33개 전부 `OptimizerTests`. 특히 `test_create_alter_model_options`가 옵션 **추가/덮어쓰기** 시맨틱을 지키므로, 제거 로직이 추가 케이스를 침범하면 즉시 RED. 골드패치가 `ALTER_OPTION_KEYS ∩ (operation.options에 없는 키)`로 좁게 한정한 덕에 이 회귀를 피한다 → regression-trap 플래그 부여 근거.
+- **regression 관점:** PASS_TO_PASS 33개 전부 `OptimizerTests`. 골드패치가 `ALTER_OPTION_KEYS ∩ (operation.options에 없는 키)`로 좁게 한정한 것은 올바른 도메인 설계지만, **이 한정성을 강제하는 P2P 테스트는 실재하지 않는다.** 유일한 AlterModelOptions reduce 분기 P2P인 `test_create_alter_model_options`(base test `test_optimizer.py` L114-118)는 `CreateModel('Foo', fields=[])` + `AlterModelOptions(options={'verbose_name_plural': 'Foozes'})`로, 유일한 키 `verbose_name_plural`가 `operation.options` 안에 있어 `key not in operation.options` 조건에 안 걸린다 → 어떤 pop도 발생하지 않으므로 무차별 pop 구현에서도 GREEN. 나머지 32개는 AlterModelOptions 분기를 타지 않아 무영향. 즉 `ALTER_OPTION_KEYS` 밖 옵션 키가 reduce 분기를 통과하며 살아남아야 하는 P2P 케이스가 33개 어디에도 없으므로, regression-trap의 실증 근거는 없다(올바른 일반화이긴 하나 테스트가 강제하지는 않음).
 
 ## 모범답안 (오라클 기반)
 이상적 풀이 궤적 4단계:
@@ -64,5 +64,5 @@ flags: [regression-trap]
 4. **함정 회피:** 오라클 없는 에이전트의 오답 후보 —
    - (a) merge만 보고 "덮어쓰기"로 이해 → 제거 케이스 자체를 못 잡음(FAIL_TO_PASS RED).
    - (b) "빈 dict면 옵션 전체 비우기" 같은 special-case → 케이스2(부분 제거)에서 RED. 단언 2개가 이 overfit을 차단.
-   - (c) `ALTER_OPTION_KEYS` 한정 없이 `operation.options`에 없는 모든 키 pop → alter 소관 밖 옵션까지 삭제, `test_create_alter_model_options` 류 P2P 회귀.
+   - (c) `ALTER_OPTION_KEYS` 한정 없이 `operation.options`에 없는 모든 키 pop → alter 소관 밖 옵션까지 삭제하는 도메인상 잘못된 일반화. 단, 이 오답은 **테스트로는 적발되지 않는다**(test_patch 케이스1·2와 P2P 33개 모두 GREEN 통과) — `ALTER_OPTION_KEYS` 밖 키가 reduce 분기를 통과하며 살아남아야 하는 케이스가 부재하기 때문. 따라서 (c)는 회귀 RED 함정이 아니라 "테스트가 못 잡는 도메인 정합성 함정"이며, hints/`state_forwards` 참조로만 회피 가능.
    회피법: 추측으로 패치하지 말고 **`AlterModelOptions.state_forwards`의 제거 코드를 먼저 읽어 정답 키집합/조건을 그대로 차용**한다. 이미 검증된 시맨틱을 복제하는 것이 합성보다 안전하고, hints_text가 정확히 이 경로를 가리킨다.

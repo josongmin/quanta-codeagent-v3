@@ -17,6 +17,7 @@ import { mkdtempSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import {
   DEFAULT_MAX_WORKERS,
   type GradeBackend,
@@ -154,7 +155,7 @@ export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
     try {
       parsed = parseSwebenchReport(JSON.parse(await readFile(reportPath, "utf8")))
     } catch (err) {
-      throw new Error(`[ssh-backend] retrieved report ${reportPath} was not valid json: ${String(err)}`)
+      throw new Error(`[ssh-backend] retrieved report ${reportPath} was not valid json: ${errMessage(err)}`)
     }
 
     return { reportPath, ...parsed }

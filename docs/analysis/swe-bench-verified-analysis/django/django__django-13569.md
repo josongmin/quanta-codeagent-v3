@@ -36,7 +36,7 @@ flags: [regression-trap, has-repro]
 
 ## 골드패치 분석
 - **건드린 파일/함수**: `django/db/models/functions/math.py` → `Random` 클래스에 `get_group_by_cols(self, alias=None)` 추가.
-- **근본 원인**: `SQLCompiler.get_group_by`는 non-aggregate·non-ref order_by 표현식의 source 컬럼들(`expr.get_group_by_cols()` 기본 구현)을 GROUP BY에 추가한다. `Random`은 인자 없는 순수 SQL 함수(`RANDOM()`)지만 `Func`의 기본 `get_group_by_cols`가 자기 자신을 group-by 컬럼으로 돌려주기 때문에, `RANDOM()`이 GROUP BY 절에 끌려 들어가 모든 행이 매번 다른 랜덤 값으로 그룹핑되어 사실상 그룹이 전부 풀린다.
+- **근본 원인**: `SQLCompiler.get_group_by`는 non-aggregate·non-ref order_by 표현식의 source 컬럼들(`expr.get_group_by_cols()` 기본 구현)을 GROUP BY에 추가한다. `Random`은 인자 없는 순수 SQL 함수(`RANDOM()`)지만 이 기본 `get_group_by_cols`가 자기 자신을 group-by 컬럼으로 돌려주기 때문에, `RANDOM()`이 GROUP BY 절에 끌려 들어가 모든 행이 매번 다른 랜덤 값으로 그룹핑되어 사실상 그룹이 전부 풀린다. (여기서 기본 구현(`if not self.contains_aggregate: return [self]`)을 제공하는 클래스는 `Func`이 아니라 `BaseExpression`(expressions.py:349)이다 — `Func`(같은 파일 line 633)에는 `get_group_by_cols` 정의가 없고 이를 상속한다. `Random`은 `arity=0`이라 source expression이 없고 aggregate도 아니므로 `BaseExpression.get_group_by_cols`가 `[self]`=`[Random()]`을 반환한다.)
 - **수정 요지**: `Random.get_group_by_cols`를 오버라이드해 `[]`를 반환. "이 표현식은 어떤 컬럼도 GROUP BY에 기여하지 않는다"고 표현식 스스로 선언하게 만든다. 컴파일러 루프(`get_group_by`)는 손대지 않으므로, 다른 표현식·다른 DB 백엔드의 group-by 동작은 그대로 유지되고 Random만 국소적으로 제외된다.
 
 ## 검증 (test_patch)

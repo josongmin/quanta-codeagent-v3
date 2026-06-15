@@ -30,7 +30,13 @@ export const isNotebook = (path: string): boolean => /\.ipynb$/i.test(path)
  *  this count are dropped and a one-line truncation notice is appended, so the
  *  render stays bounded while the model is told it is incomplete. `read`'s outer
  *  `offset`/`limit` still pages the (now bounded) document. */
-export const MAX_NOTEBOOK_CELLS = 1000
+export const MAX_NOTEBOOK_CELLS = 5000
+
+/** Hard cap on the number of outputs rendered per cell. A single code cell
+ *  with tens of thousands of `stream` outputs (e.g. a print loop) would
+ *  produce an unbounded token blob even after the per-output char cap; this
+ *  cap bounds the SUM of outputs per cell to a safe finite ceiling. */
+export const MAX_OUTPUTS_PER_CELL = 64
 
 export interface NotebookRenderOpts {
   /** Append each code cell's textual outputs (stream/text-plain/error). Base64
@@ -158,11 +164,16 @@ const renderCell = (cell: unknown, index: number, opts: NotebookRenderOpts): str
   let block = body === "" ? header : `${header}\n${body}`
 
   if (opts.includeOutputs && Array.isArray(cell["outputs"]) && cell["outputs"].length > 0) {
+    const allOutputs = cell["outputs"]
+    const shownOutputs = Math.min(allOutputs.length, MAX_OUTPUTS_PER_CELL)
     const outLines: string[] = []
-    for (const out of cell["outputs"]) outLines.push(...renderOutput(out, opts))
+    for (let j = 0; j < shownOutputs; j++) outLines.push(...renderOutput(allOutputs[j], opts))
     const nonEmpty = outLines.filter((l) => l !== "")
     if (nonEmpty.length > 0) {
       block += `\n[output]\n${nonEmpty.join("\n")}`
+    }
+    if (allOutputs.length > shownOutputs) {
+      block += `\n… (${allOutputs.length - shownOutputs} more output(s) elided: output cap ${MAX_OUTPUTS_PER_CELL})`
     }
   }
   return block

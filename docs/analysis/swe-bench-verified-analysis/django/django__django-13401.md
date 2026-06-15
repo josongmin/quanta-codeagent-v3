@@ -52,9 +52,9 @@ flags: [regression-trap, has-repro, overfit-risk]
 - **FAIL_TO_PASS (1개)**: `test_abstract_inherited_fields` — docstring "Field instances from abstract models are not equal."
 - **동작**: 테스트가 `abstract=True`인 `AbstractModel`(field=IntegerField)과 이를 상속한 `InheritAbstractModel1/2`를 정의하고 `_meta.get_field('field')`로 세 필드를 꺼낸다.
   - **assertNotEqual 3쌍**: 추상↔상속1, 추상↔상속2, 상속1↔상속2 모두 비동등. 픽스 전엔 `creation_counter` 동일로 `==`였음 → `__eq__`의 model 조건 추가를 증명.
-  - **assertLess 3쌍**: 추상(no-model) < 상속1 < 상속2 순서. `__lt__`의 no-model-first 분기와 `(app_label, model_name)` tie-break를 증명.
+  - **assertLess 3쌍**: 추상 < 상속1 < 상속2 순서. 단, 추상 모델의 필드도 클래스 본문 정의 시 `contribute_to_class`가 호출되어 `self.model = AbstractModel`로 바인딩되므로 세 필드 모두 `.model`을 가진다(no-model 아님). 또한 상속 필드는 deepcopy되며 `creation_counter`를 보존해 세 필드의 카운터가 동률이다. 따라서 이 체인은 `__lt__`의 no-model-first 비대칭 분기(`hasattr` 불일치)를 전혀 타지 않고, 오직 카운터 동률 + 양쪽 model 보유 시의 `(app_label, model_name)` 튜플 분기로만 결정된다(알파벳순 `abstractmodel` < `inheritabstractmodel1` < `inheritabstractmodel2`). 즉 이 테스트가 증명하는 것은 tie-break 튜플 분기이며, no-model-first 분기는 본 테스트로 검증되지 않는 미커버 경로다.
   - **hash 3쌍 비동등**: `__hash__`가 model을 포함하도록 바뀐 것을 증명 → set 중복 제거 회귀 차단(원래 버그의 직접 표면).
-- **overfit 관점 (`overfit-risk`)**: FAIL_TO_PASS가 1개뿐이고 한 시나리오(abstract 상속)만 직접 검증. 에이전트가 `__eq__`만 고치고 `__hash__`/`__lt__`를 빠뜨려도 assertNotEqual 일부만 통과시키는 부분해가 가능하나, hash 단언이 함께 있어 `__hash__` 누락은 잡힌다. 다만 `__lt__`의 totality(@total_ordering 일관성)는 이 테스트로 완전 검증되지 않아, special-case 정렬식으로도 통과 가능한 여지가 있다.
+- **overfit 관점 (`overfit-risk`)**: FAIL_TO_PASS가 1개뿐이고 한 시나리오(abstract 상속)만 직접 검증. 에이전트가 `__eq__`만 고치면 base `__eq__`가 model을 무시했던 것과 달리 assertNotEqual 3쌍은 전부 통과한다. 그러나 base `__lt__`가 `creation_counter` 단독 비교(`self.creation_counter < other.creation_counter`)이고 세 필드의 카운터가 동률이라, `__lt__`를 안 고치면 assertLess 3쌍이 모두 `False`가 되어 *1차로* 실패한다. 즉 `__lt__` 누락을 잡는 주된 게이트는 hash 단언이 아니라 assertLess 단언이다. hash 단언은 `__hash__` 누락에 한해 그것을 잡는다. 다만 `__lt__`의 totality(@total_ordering 일관성)는 이 테스트로 완전 검증되지 않아, special-case 정렬식으로도 통과 가능한 여지가 있다.
 - **regression 관점 (`regression-trap`)**: PASS_TO_PASS의 "Fields are ordered based on their creation." (`BasicFieldTests`)가 model-first 정렬을 직접 금지. "Field instances can be pickled.", "Field.__hash__ 기반 set/dict 사용" 인접 동작들도 `__hash__` 변경에 민감 → creation_counter 우선·None-안전 해시를 유지해야 32개 P2P 전부 통과.
 
 ## 모범답안 (오라클 기반)

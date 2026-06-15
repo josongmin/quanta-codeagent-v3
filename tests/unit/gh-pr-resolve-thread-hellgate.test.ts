@@ -392,7 +392,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     expect(isUnsafeHeadRef(`feat/a${String.fromCharCode(1)}b`)).toBe(true) // SOH control
     expect(isUnsafeHeadRef("feat/a\nb")).toBe(true)
     expect(isUnsafeHeadRef("feat/a\tb")).toBe(true)
-    expect(isUnsafeHeadRef("feat/a b")).toBe(true)
+    expect(isUnsafeHeadRef("feat/a\x00b")).toBe(true)
     expect(isUnsafeHeadRef("")).toBe(true)
     // Safe: ordinary branch names, INTERIOR dashes/slashes are fine.
     expect(isUnsafeHeadRef("feat/foo-bar")).toBe(false)

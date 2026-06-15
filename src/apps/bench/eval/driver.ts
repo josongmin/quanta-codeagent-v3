@@ -545,7 +545,15 @@ const runInstanceOnce = async (
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
 
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
-    if (terminal !== undefined) return terminal
+    if (terminal !== undefined) {
+      // Gold sanity runs even on early terminal returns (no-patch / gen-error)
+      // because the agent always failed — the reference patch is still checkable.
+      if (shouldValidateGold(deps, false)) {
+        const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
+        if (!gold.ok) return { ...terminal, passed: false, verdict: "grader_invalid", error: gold.error }
+      }
+      return terminal
+    }
 
     let v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
     const extra: Partial<InstanceResult> = reproResultExtra(reproTest)

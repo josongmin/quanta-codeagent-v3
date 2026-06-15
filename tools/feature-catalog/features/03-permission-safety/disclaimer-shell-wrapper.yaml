@@ -27,9 +27,26 @@ evidence:
     - src/runtime/sandbox.ts
   adrs: [56]
   tests:
-    unit: [tests/unit/shell-disclaim.test.ts, tests/unit/sandbox.test.ts]
+    unit:
+      - tests/unit/shell-disclaim.test.ts
+      - tests/unit/runtime/disclaim-shell-argv-integrity-hellgate.test.ts
+      - tests/unit/sandbox.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'Tier-0 absorption #0-2. disclaimShell unset ⇒ argv byte-identical (bash -lc). fish/pwsh 미커버 (one-line extension).'
+notes: |
+  Tier-0 absorption #0-2. disclaimShell unset ⇒ argv byte-identical (bash -lc).
+  fish/pwsh 미커버 (one-line extension).
+  SECURITY SEAL (jun-15 audit): the wrapper is injection-safe by construction —
+  it returns an argv ARRAY with the command as a single trailing element (no
+  shell-string interpolation to break out of). disclaim-shell-argv-integrity-
+  hellgate pins the structural invariants the dotfile-skip guarantee rests on,
+  across hostile payloads (flag-shaped `--norc` / `-c rm -rf /`, metachars,
+  embedded newline, `source ~/.bashrc`, command-substitution): (1) the
+  dotfile-skip flags (`--noprofile --norc` / zsh `-f`) are present REGARDLESS
+  of command content — a payload can never suppress the skip; (2) a flag-shaped
+  command lands in the trailing slot, never displacing a real flag; (3) the
+  command stays exactly ONE un-split argv element after `-c`. Red-on-injection
+  verified (dropping `--norc` → 6 cases fail). A hijacked dotfile thus cannot
+  re-enter via a crafted command string.

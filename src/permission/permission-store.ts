@@ -52,8 +52,8 @@
  */
 
 import { createHash } from "node:crypto"
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
 import { createJsonStateFile, type ParseOutcome } from "./json-state-file"
 
@@ -152,19 +152,15 @@ export const computeActionSignature = (input: {
 }
 
 /** Resolve the default state file path. `QUANTA_PERMISSION_STATE` overrides;
- *  otherwise `<QUANTA_HOME>/permission-state.json` (or `~/.quanta/permission-
- *  state.json` if `QUANTA_HOME` is unset — mirrors the Codex convention).
- *
- *  Both env vars are read via `runtimeConfig()` (ADR-frozen — single
- *  legitimate `process.env` owner). */
+ *  otherwise `<unified home>/permission-state.json` where the home root is the
+ *  `quantaHomeDir()` SSOT (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`).
+ *  All resolved via `runtimeConfig()` (single legitimate `process.env` owner). */
 export const defaultStateFilePath = (): string => {
   const cfg = runtimeConfig()
   if (cfg.permissionStateFile !== undefined) return cfg.permissionStateFile
-  // Unified home root: QUANTA_CONFIG_DIR (canonical) ?? QUANTA_HOME (alias) ??
-  // ~/.quanta. Resolved from the injected `cfg` so test-injected runtime config
-  // is honored (rather than the global quantaHomeDir() singleton).
-  const home = cfg.centralConfigDir ?? cfg.quantaHome ?? join(homedir(), ".quanta")
-  return join(home, "permission-state.json")
+  // Unified home root SSOT: QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta
+  // (quantaHomeDir reads the same global runtimeConfig as `cfg` above).
+  return join(quantaHomeDir(), "permission-state.json")
 }
 
 /** Live mutable state. Public API returns frozen snapshots so the caller

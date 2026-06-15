@@ -17,7 +17,9 @@
  * may be blocked by the harness; that's by design. The executor + its security
  * invariants are fully unit-tested offline via an injected {@link SpawnFn}.
  */
-import { defaultSpawn, parseSwebenchReport, type SpawnFn } from "./backend"
+import { writeFileSync } from "node:fs"
+import { loadVerdicts } from "../analyze/verdicts"
+import { defaultSpawn, type SpawnFn } from "./backend"
 
 export interface FullRemoteConfig {
   /** Local quanta repo to rsync to the box (excludes node_modules/.git). */
@@ -140,8 +142,13 @@ export const createFullRemoteBackend = (
       ...(input !== undefined ? [{ input }] : []),
     )
 
-  /** Find-or-create the SG + authorize :22 from the current public IP. Without
-   *  this the box lands in the default SG (no inbound :22) ⇒ ssh times out. */
+  /** Find-or-create the SG + open :22. Without an attached SG the box lands in
+   *  the default SG (no inbound :22) ⇒ ssh times out.
+   *
+   *  Ingress is `0.0.0.0/0` (public) — the operator opted into it; SSH is
+   *  key-only (no password auth on the Ubuntu AMI) and the box is throwaway +
+   *  TTL-terminated, so public :22 is acceptable and avoids a brittle public-IP
+   *  lookup. Tighten via a tagged SG if you need IP-restricted. */
   const ensureSecurityGroup = async (): Promise<string> => {
     const found = await aws([
       "ec2",
@@ -153,8 +160,16 @@ export const createFullRemoteBackend = (
       "--output",
       "text",
     ])
+    // A FAILED describe is a connectivity/credentials problem — do NOT mask it by
+    // blindly creating (the SG likely already exists). Surface it; a re-run when
+    // the network recovers will find the existing SG.
+    if (found.code !== 0) {
+      throw new Error(
+        `[full-remote] could not reach EC2 (${region}) — network/credentials? : ${found.stderr.trim()}`,
+      )
+    }
     let sgId = oneLine(found.stdout)
-    if (found.code !== 0 || sgId === "" || sgId === "None") {
+    if (sgId === "" || sgId === "None") {
       const created = await aws([
         "ec2",
         "create-security-group",
@@ -176,10 +191,7 @@ export const createFullRemoteBackend = (
       }
       sgId = oneLine(created.stdout)
     }
-    const ipRes = await spawn("curl", ["-s", "ifconfig.me"])
-    const myIp = oneLine(ipRes.stdout)
-    if (myIp === "") throw new Error("[full-remote] could not determine public IP via ifconfig.me")
-    // Idempotent — a duplicate rule returns non-zero, which we tolerate.
+    // Open :22 publicly (idempotent — duplicate rule returns non-zero, tolerated).
     await aws([
       "ec2",
       "authorize-security-group-ingress",
@@ -190,7 +202,7 @@ export const createFullRemoteBackend = (
       "--port",
       "22",
       "--cidr",
-      `${myIp}/32`,
+      "0.0.0.0/0",
     ])
     return sgId
   }
@@ -208,19 +220,24 @@ export const createFullRemoteBackend = (
 
     log("[full-remote] ensuring security group (:22 from your IP)…")
     const sgId = await ensureSecurityGroup()
-    log("[full-remote] launching hardened spot box (IMDSv2 hop-1, TTL self-terminate)…")
-    // Stage 0/1: launch a hardened spot box.
-    const launch = await aws([
+
+    // Instance-type fallbacks on capacity errors. The subnet/AZ is DELIBERATELY
+    // NOT pinned unless the caller sets `subnetId` — pinning an AZ is the #1
+    // cause of `InsufficientInstanceCapacity`; letting AWS choose the AZ + a few
+    // type fallbacks makes the launch resilient.
+    const typeCandidates = [
+      ...new Set([cfg.instanceType ?? D.instanceType, "c7i.4xlarge", "c6i.8xlarge", "m6i.8xlarge"]),
+    ]
+    const launchArgs = (instanceType: string): string[] => [
       "ec2",
       "run-instances",
       "--image-id",
       cfg.ami ?? D.ami,
       "--instance-type",
-      cfg.instanceType ?? D.instanceType,
+      instanceType,
       "--key-name",
       cfg.keyName ?? D.keyName,
-      "--subnet-id",
-      cfg.subnetId ?? D.subnetId,
+      ...(cfg.subnetId !== undefined ? ["--subnet-id", cfg.subnetId] : []),
       "--security-group-ids",
       sgId,
       "--instance-market-options",
@@ -239,10 +256,30 @@ export const createFullRemoteBackend = (
       "Instances[0].InstanceId",
       "--output",
       "text",
-    ])
-    const iid = oneLine(launch.stdout)
-    if (launch.code !== 0 || iid === "" || iid === "None") {
+    ]
+
+    let iid = ""
+    let lastErr = ""
+    for (const it of typeCandidates) {
+      log(`[full-remote] launching hardened spot box (${it}, IMDSv2 hop-1, TTL)…`)
+      const launch = await aws(launchArgs(it))
+      const got = oneLine(launch.stdout)
+      if (launch.code === 0 && got !== "" && got !== "None") {
+        iid = got
+        break
+      }
+      lastErr = launch.stderr
+      if (/InsufficientInstanceCapacity|capacity/i.test(launch.stderr)) {
+        log(`[full-remote] no ${it} capacity — trying next type…`)
+        continue
+      }
+      // A non-capacity error won't be fixed by a different type ⇒ fail fast.
       throw new Error(`[full-remote] run-instances failed (code ${launch.code}): ${launch.stderr}`)
+    }
+    if (iid === "") {
+      throw new Error(
+        `[full-remote] no spot capacity across ${typeCandidates.join(", ")}: ${lastErr}`,
+      )
     }
 
     const terminate = async (): Promise<void> => {
@@ -353,34 +390,68 @@ export const createFullRemoteBackend = (
         `[full-remote] running patch-gen + grading on box (minutes). Watch live:\n` +
           `    ssh -i ${keyPath} ${host} 'tail -f ~/run.log'`,
       )
+      // `set -o pipefail` so a failed bench run propagates through the `tee`
+      // (otherwise the pipeline's exit code is tee's, always 0 — masking failures).
       const remoteRun = await sshTo(
         host,
-        `cd ~/quanta && QUANTA_BENCH_PRESET=${preset} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
+        `set -o pipefail; cd ~/quanta && QUANTA_BENCH_PRESET=${preset} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
           `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/.local/bin/uvx" ` +
           `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
           `--model ${model} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
       )
-      if (remoteRun.code !== 0) {
-        throw new Error(
-          `[full-remote] remote bench run failed (code ${remoteRun.code}): ${remoteRun.stderr}`,
-        )
+
+      log("[full-remote] run finished; fetching report…")
+      const fetched = await sshTo(host, "cat ~/report.json 2>/dev/null")
+      // The on-box `bench run` writes OUR report shape (perInstance[].passed) —
+      // loadVerdicts handles BOTH that and the swebench-harness shape.
+      let parsed = {
+        resolved: [] as string[],
+        unresolved: [] as string[],
+        errored: [] as string[],
+        emptyPatch: [] as string[],
+      }
+      let reportJson: unknown
+      try {
+        reportJson = JSON.parse(fetched.stdout)
+        const v = loadVerdicts(reportJson)
+        parsed = {
+          resolved: [...v.resolved],
+          unresolved: [...v.unresolved],
+          errored: [...v.errored],
+          emptyPatch: [...v.emptyPatch],
+        }
+      } catch {
+        // unparseable / missing report — diagnose below
       }
 
-      log("[full-remote] run done; fetching report + terminating box…")
-      const fetched = await sshTo(host, "cat ~/report.json")
-      let parsed: ReturnType<typeof parseSwebenchReport> = {
-        resolved: [],
-        unresolved: [],
-        errored: [],
-        emptyPatch: [],
+      // Save the report locally so it survives box termination.
+      const localReport = `/tmp/full-remote-report-${iid}.json`
+      if (fetched.stdout.trim() !== "") {
+        try {
+          writeFileSync(localReport, fetched.stdout)
+          log(`[full-remote] report saved: ${localReport}`)
+        } catch (_ignore) {
+          /* best-effort local save */
+        }
       }
-      try {
-        parsed = parseSwebenchReport(JSON.parse(fetched.stdout))
-      } catch {
-        // leave empty — surfaced as no verdicts
+
+      const empty =
+        parsed.resolved.length +
+          parsed.unresolved.length +
+          parsed.errored.length +
+          parsed.emptyPatch.length ===
+        0
+      if (empty) {
+        // No verdicts — pull the tail of the on-box run log so the failure is
+        // visible BEFORE we terminate the box.
+        const tail = await sshTo(host, "tail -40 ~/run.log 2>/dev/null")
+        log(`[full-remote] ⚠️ no verdicts in report (run exit ${remoteRun.code}). Box run.log tail:`)
+        log(tail.stdout || "(run.log empty)")
       }
+
+      log("[full-remote] terminating box…")
       await terminate()
-      return { reportPath: "~/report.json", ...parsed }
+      return { reportPath: localReport, ...parsed }
     } catch (err) {
       await terminate().catch(() => undefined)
       throw err

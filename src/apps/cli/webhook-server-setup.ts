@@ -26,7 +26,6 @@
  */
 
 import { readFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import {
   createBunWebhookTransport,
@@ -42,7 +41,7 @@ import {
   type WebhookTransportPort,
 } from "@/integrations/github"
 import type { ProactiveTrigger } from "@/reactor"
-import { errMessage, gateOnStrict } from "@/shared"
+import { errMessage, gateOnStrict, quantaHomeDirFrom } from "@/shared"
 import { publishReactorWatchTrigger } from "./reactor-watch-bridge"
 
 /** EX_USAGE — gate-off / missing-secret / bind fault (BSD sysexits). */
@@ -62,7 +61,7 @@ const DEFAULT_PUBLISH_TIMEOUT_MS = 10_000
  *  that dir, else `~/.quanta`. Survives a host restart so a re-delivered
  *  `X-GitHub-Delivery` is recognised and the trigger is NOT re-fired. */
 const deliveryDumpPath = (env: NodeJS.ProcessEnv): string =>
-  join(env.QUANTA_CONFIG_DIR ?? join(homedir(), ".quanta"), "webhook-deliveries.json")
+  join(quantaHomeDirFrom(env), "webhook-deliveries.json")
 
 /** Minimal IO seam — injected so the hellgate drives the command without
  *  touching real process streams. */

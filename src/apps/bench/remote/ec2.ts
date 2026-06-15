@@ -168,17 +168,20 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   /** Stage 1: run-instances SPOT with the validated params. */
   const launchInstance = async (sgId: string): Promise<string> => {
     const userData = buildUserData(ttlMinutes)
-    const res = await aws([
+    // Capacity resilience: do NOT pin a subnet/AZ unless the caller set one
+    // (pinning an AZ is the #1 cause of InsufficientInstanceCapacity), and fall
+    // back across instance types on a capacity error.
+    const typeCandidates = [...new Set([instanceType, "c7i.4xlarge", "c6i.8xlarge", "m6i.8xlarge"])]
+    const launchArgs = (it: string): string[] => [
       "ec2",
       "run-instances",
       "--image-id",
       ami,
       "--instance-type",
-      instanceType,
+      it,
       "--key-name",
       keyName,
-      "--subnet-id",
-      subnetId,
+      ...(cfg.subnetId !== undefined ? ["--subnet-id", subnetId] : []),
       "--security-group-ids",
       sgId,
       "--instance-market-options",
@@ -197,15 +200,19 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
       "Instances[0].InstanceId",
       "--output",
       "text",
-    ])
-    if (res.code !== 0) {
+    ]
+    let lastErr = ""
+    for (const it of typeCandidates) {
+      const res = await aws(launchArgs(it))
+      const iid = oneLine(res.stdout)
+      if (res.code === 0 && iid !== "" && iid !== "None") return iid
+      lastErr = res.stderr
+      if (/InsufficientInstanceCapacity|capacity/i.test(res.stderr)) continue
       throw new Error(`[ec2-backend] run-instances failed (code ${res.code}): ${res.stderr}`)
     }
-    const iid = oneLine(res.stdout)
-    if (iid === "" || iid === "None") {
-      throw new Error(`[ec2-backend] run-instances returned no instance id: ${res.stdout}`)
-    }
-    return iid
+    throw new Error(
+      `[ec2-backend] no spot capacity across ${typeCandidates.join(", ")}: ${lastErr}`,
+    )
   }
 
   /** Stage 2: wait running, fetch public IP. */

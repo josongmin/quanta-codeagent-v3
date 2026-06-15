@@ -92,9 +92,9 @@ const makeObservabilityPorts = (): ObservabilityPorts => ({
     clearInterval: () => undefined,
   },
   objective: {
-    snapshot: () => null,
+    toSnapshot: () => ({ objectives: [] }),
     subscribe: () => () => undefined,
-  },
+  } as never,
 })
 
 describe("web daemon end-to-end", () => {

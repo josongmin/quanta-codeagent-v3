@@ -605,13 +605,33 @@ const DEFAULT_SANDBOX: PermissionSandboxPolicy = Object.freeze({
 
 const DEFAULT_CONTROL: ControlPolicy = Object.freeze({ auditRequired: false })
 
+/** Read a pillar ONLY as an own enumerable/data property — NEVER through the
+ *  prototype chain.
+ *
+ *  SECURITY (prototype-pollution defense, mirrors `pricing-null-proto-guard`):
+ *  `profile?.approval` resolves via the prototype chain, so a poisoned
+ *  `Object.prototype.approval = {mode:"always", promptUser:false}` upstream
+ *  would make an absent-pillar profile (`{}`) read a PERMISSIVE value instead
+ *  of falling through `?? DEFAULT_*` to the strict frozen default — silently
+ *  defeating the security floor (no prompt / deny-all → allow-all /
+ *  readOnly → workspaceWrite). `Object.hasOwn` reads only own properties, so a
+ *  polluted prototype can never leak a pillar in. An own pillar that is
+ *  explicitly `undefined` still falls through to the strict default via `??`.
+ *  Profiles parsed from untrusted config thus cannot be silently widened by a
+ *  pollution sink elsewhere in the process. */
+const ownPillar = <K extends keyof PermissionProfile>(
+  profile: PermissionProfile | undefined,
+  key: K,
+): PermissionProfile[K] | undefined =>
+  profile !== undefined && Object.hasOwn(profile, key) ? profile[key] : undefined
+
 /** Project the approval pillar. Absent profile ⇒ strictest defaults. */
 export const inferApprovalPolicy = (profile?: PermissionProfile): PermissionApprovalPolicy =>
-  profile?.approval ?? DEFAULT_APPROVAL
+  ownPillar(profile, "approval") ?? DEFAULT_APPROVAL
 
 /** Project the network pillar. Absent profile ⇒ `deny-all` (no egress). */
 export const inferNetworkPolicy = (profile?: PermissionProfile): NetworkPolicy =>
-  profile?.network ?? DEFAULT_NETWORK
+  ownPillar(profile, "network") ?? DEFAULT_NETWORK
 
 /** Project the sandbox pillar. The `fallback` argument lets callers seed
  *  from a legacy single-enum policy when migrating — when the profile lacks
@@ -619,8 +639,8 @@ export const inferNetworkPolicy = (profile?: PermissionProfile): NetworkPolicy =
 export const inferSandboxPolicy = (
   profile?: PermissionProfile,
   fallback?: PermissionSandboxPolicy,
-): PermissionSandboxPolicy => profile?.sandbox ?? fallback ?? DEFAULT_SANDBOX
+): PermissionSandboxPolicy => ownPillar(profile, "sandbox") ?? fallback ?? DEFAULT_SANDBOX
 
 /** Project the control pillar. Absent profile ⇒ user-managed, audit OFF. */
 export const inferControlPolicy = (profile?: PermissionProfile): ControlPolicy =>
-  profile?.control ?? DEFAULT_CONTROL
+  ownPillar(profile, "control") ?? DEFAULT_CONTROL

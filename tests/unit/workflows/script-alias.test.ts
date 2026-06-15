@@ -46,8 +46,8 @@ describe("package.json agent script aliases", () => {
     }
   })
 
-  test("legacy bench alias unchanged (still bun run src/apps/bench/index.ts)", () => {
-    expect(PKG.scripts.bench).toBe("bun run src/apps/bench/index.ts")
+  test("legacy bench alias unchanged (still bun run src/apps/bench/cli.ts)", () => {
+    expect(PKG.scripts.bench).toBe("bun run src/apps/bench/cli.ts")
   })
 
   test("legacy start/dev aliases unchanged", () => {

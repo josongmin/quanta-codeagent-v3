@@ -18,9 +18,14 @@
  * process.env" invariant stays true.
  */
 
-import { homedir } from "node:os"
 import { join as joinPath } from "node:path"
-import { buildSystemPrompt, evidenceLspStatic, HookBus, reflectConsultFromLLM, wireOptionalAgentPorts } from "@/agent"
+import {
+  buildSystemPrompt,
+  evidenceLspStatic,
+  HookBus,
+  reflectConsultFromLLM,
+  wireOptionalAgentPorts,
+} from "@/agent"
 import {
   type CommandHookBinding,
   type CommandHookConfig,
@@ -106,7 +111,14 @@ import {
   selectEnvironment,
 } from "@/runtime"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { errMessage, gateOn, logger, type PtyBackend, runtimeConfig } from "@/shared"
+import {
+  errMessage,
+  gateOn,
+  logger,
+  type PtyBackend,
+  quantaHomeDirFrom,
+  runtimeConfig,
+} from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import {
   type AppshotPort,
@@ -610,7 +622,7 @@ export const installCommandHooksIntoBase = (
  *  ledger (user-config-dir scoped). Fail-closed — an unreadable / absent ledger
  *  means "nothing approved", so an un-reviewed imported hook never fires. */
 const hookReviewPort = (env: NodeJS.ProcessEnv): CommandHookReviewPort => {
-  const userConfigDir = env.QUANTA_CONFIG_DIR ?? joinPath(homedir(), ".quanta")
+  const userConfigDir = quantaHomeDirFrom(env)
   const path = defaultHookApprovalsPath(userConfigDir)
   return {
     isApproved: async (binding) => (await HookReviewStore.load(path)).isApproved(binding),

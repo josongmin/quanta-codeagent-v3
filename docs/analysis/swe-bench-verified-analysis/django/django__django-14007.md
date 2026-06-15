@@ -47,7 +47,7 @@ APR 관점에서 이 문제는 PAR/TBar류 템플릿(S1) 매칭이 안 된다 �
 - **건드린 파일/함수**: `django/db/models/sql/compiler.py` : `SQLInsertCompiler.execute_sql`
 - **근본 원인**: `execute_sql`이 `fetch_returned_insert_rows` / `fetch_returned_insert_columns` / `last_insert_id` 세 백엔드 분기에서 각각 곧바로 `return` 했다. SELECT 경로는 `get_converters`/`apply_converters`로 DB 값을 필드 컨버터에 통과시키지만, INSERT returning 경로에는 그 단계 자체가 없어 raw DB 값이 그대로 모델 attribute로 들어갔다.
 - **수정 요지**:
-  - 상단에 `opts = self.query.get_meta()`를 한 번 캐싱(분기마다 반복하던 `get_meta()` 정리).
+  - 상단에 `opts = self.query.get_meta()`를 호이스트. 이는 단순 중복제거가 아니다 — base에서 `get_meta()`는 분기마다 반복된 게 아니라 오직 `last_insert_id` 단일 분기에서만(그 안에서 `db_table`·`pk.column` 두 번) 호출됐다. 호이스트의 진짜 이유는, 새로 추가된 `cols = [field.get_col(opts.db_table) for field in self.returning_fields]` 라인이 `with cursor` 블록을 빠져나온 뒤(converter 후처리 단계)에 `opts`를 필요로 하기 때문이다. 즉 호이스트는 컨버터 후처리의 전제조건이다.
   - 세 분기의 즉시 `return`을 `rows` 로컬 변수에 대입하는 `if / elif / else`로 변경(`last_insert_id` 분기는 `opts.db_table`, `opts.pk.column` 사용).
   - `with cursor` 컨텍스트를 빠져나온 뒤, `self.returning_fields`에 대해 `field.get_col(opts.db_table)`로 컬럼 표현식 리스트 `cols`를 만들고 `self.get_converters(cols)` 호출.
   - `converters`가 있으면 `rows = list(self.apply_converters(rows, converters))`로 변환 후 `return rows`.

@@ -449,6 +449,7 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
       n += 1
       if (n === 1) return new Promise<void>(() => {}) // never settles (hang)
       landed.push(opts.trigger.evidence.value)
+      return undefined
     }
     const { io } = makeIo()
     const host = runHost(bound, flaky, io, "live-session", { publishTimeoutMs: 40 })
@@ -487,7 +488,10 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
       const b1t = makeLoopbackTransport()
       const spy1 = makeSpyPublish()
       const io1 = makeIo()
-      const h1 = runHost(b1t, spy1.fn, io1.io, "dd-session", { buildDeliveryStore: undefined })
+      // Explicit undefined overrides the in-memory hermetic default in runHost,
+      // letting the production durable store kick in (cross-restart dedup test).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const h1 = runHost(b1t, spy1.fn, io1.io, "dd-session", { buildDeliveryStore: undefined } as any)
       await waitUntil(() => b1t.port() !== 0)
       const r1 = await postWebhook(b1t.port(), body, headers)
       expect(r1.status).toBe(202)
@@ -501,7 +505,9 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
       const b2t = makeLoopbackTransport()
       const spy2 = makeSpyPublish()
       const io2 = makeIo()
-      const h2 = runHost(b2t, spy2.fn, io2.io, "dd-session", { buildDeliveryStore: undefined })
+      // Same explicit-undefined override for run 2 (same cross-restart test).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const h2 = runHost(b2t, spy2.fn, io2.io, "dd-session", { buildDeliveryStore: undefined } as any)
       await waitUntil(() => b2t.port() !== 0)
       const r2 = await postWebhook(b2t.port(), body, headers)
       // dedup short-circuits at the slice → 202 "duplicate", and crucially no publish

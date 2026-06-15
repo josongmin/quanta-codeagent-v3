@@ -1,6 +1,6 @@
 // ADR-0135 — Permission profile + file_system_sandbox_policy 2-layer.
 export type { AccessVerdict, CanAccessOpts } from "./access-check"
-export { canAccess } from "./access-check"
+export { canAccess, containsPath } from "./access-check"
 // jun-7-misc 03 (ADR-0497) — guardian per-action typed assessment collapse.
 export { collapseAssessment } from "./assessment-collapse"
 export type { ApprovalRecord, ApprovalReviewer, ApprovalReviewerOpts } from "./auto-approval-review"

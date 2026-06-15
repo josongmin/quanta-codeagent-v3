@@ -45,9 +45,26 @@ evidence:
   tests:
     unit:
       - tests/unit/permission/branch-only.test.ts
+      - tests/unit/permission/branch-only-bypass-hellgate.test.ts
       - tests/unit/apps/agent/mode-presets/ci-bot.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'Operator can override the default protected-branch list per mode policy.'
+notes: |
+  Operator can override the default protected-branch list per mode policy.
+  SECURITY SEAL (jun-15 audit): branch-only-bypass-hellgate pins THREE
+  documented audit fixes that had no regression test — protected-branch write
+  vectors that slip past the obvious refspec scan:
+    1. `-c alias.<x>=push` / glued `-calias.` / `--config-env=alias.*` CONFIG
+       INJECTION (Audit R2) — the visible subcommand is the alias, not `push`;
+       an unresolvable alias under branch-only fails closed.
+    2. `--all` / `--mirror` / `--tags` WHOLESALE push — pushes refs wholesale
+       (every branch incl. main) with NO positional refspec (distinct from the
+       H3 positional-glob case already covered by branch-only.test.ts).
+    3. bare destructive `reset --hard HEAD~N` / `--merge` / `--keep` on a
+       protected CURRENT branch (Audit L8 H1) — rewrites the protected branch's
+       OWN history without ever naming a protected ref.
+  Each is red-on-injection proven (disabling its guard flips DENY→ALLOW); the
+  battery also pins over-correction controls (legit `-c user.name` config, a
+  single feature-branch push, a feature-branch / soft reset all stay ALLOWED).

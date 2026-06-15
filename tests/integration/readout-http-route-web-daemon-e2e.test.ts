@@ -41,10 +41,10 @@ import type {
   SessionTransport,
 } from "@/ipc/session"
 import type {
-  SessionDispatchResult,
   SessionEvent,
   SessionSnapshotLite,
 } from "@/protocol/session"
+import type { SessionDispatchResult } from "@/sdk/runtime"
 import { supported } from "@/protocol/session"
 import { startWebDaemon } from "@/apps/web-daemon/server"
 import type { WebDaemonServerConfig } from "@/apps/web-daemon/server"
@@ -160,7 +160,7 @@ const createControllableFactory = (): {
       session = {
         sessionId: "ctl-session-1",
         snapshot: async () => snapshot,
-        subscribe: (listener) => {
+        subscribe: (listener: (event: SessionEvent) => void) => {
           listeners.add(listener)
           return () => listeners.delete(listener)
         },

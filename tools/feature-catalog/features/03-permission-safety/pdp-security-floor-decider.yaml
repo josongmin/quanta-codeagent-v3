@@ -31,8 +31,21 @@ evidence:
     unit:
       - tests/unit/permission/pdp-decide-floor.test.ts
       - tests/unit/permission/sensitive-tool-capability-ratchet.test.ts
-    integration: []
+    integration:
+      - tests/integration/always-confirm-secure-by-default-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'Pure decider — no knob (armed by per-tool capability DATA via ToolCapability.confirm, src/tool/types.ts). A ratchet test (sensitive-tool-capability-ratchet) pins which tools may declare confirm:"sensitive". hand-off-required is NOT this decider concern.'
+notes: |
+  Pure decider — no knob (armed by per-tool capability DATA via
+  ToolCapability.confirm, src/tool/types.ts). A ratchet test
+  (sensitive-tool-capability-ratchet) pins which tools may declare
+  confirm:"sensitive". hand-off-required is NOT this decider concern.
+  ADVERSARIAL COVERAGE (jun-15 audit truth-up): pdp-decide-floor already
+  asserts the EXHAUSTIVE truth table (universal-floor IFF
+  tier=always-confirm AND confirm=sensitive — every other cell defers);
+  always-confirm-secure-by-default-e2e exercises the FLOOR enforcement
+  end-to-end through the dispatch chokepoint, including the fail-closed
+  DENY when an always-confirm tool has no asker under bypass. The decider
+  is a pure 1-liner with no prototype-pollution surface (a poisoned
+  capability.confirm could only make the verdict STRICTER, never widen it).

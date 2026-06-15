@@ -16,9 +16,9 @@
 
 import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import type { SessionEvent } from "@/protocol/session"
+import { quantaHomeDir } from "@/shared"
 
 export interface ThreadInfo {
   readonly id: string
@@ -71,7 +71,7 @@ const SCHEMA = `
  * the parent directory is created with `mkdir -p` semantics.
  */
 export const openThreadStore = (): ThreadStore => {
-  const dir = process.env.QUANTA_WEB_DB_DIR ?? join(homedir(), ".quanta", "web-daemon")
+  const dir = process.env.QUANTA_WEB_DB_DIR ?? join(quantaHomeDir(), "web-daemon")
   mkdirSync(dir, { recursive: true })
   const dbPath = join(dir, "threads.db")
   const db = new Database(dbPath)

@@ -44,6 +44,7 @@ evidence:
   tests:
     unit:
       - tests/unit/permission-pillars.test.ts
+      - tests/unit/permission/permission-pillar-projection-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -54,3 +55,13 @@ notes: |
   - network.mode=allow-list with empty allowHosts ≡ deny-all (validation
     layer 권장 — 후속 ADR에서 결정).
   - control.managedBy=admin 시 setter API에서 reject (후속 wire-up).
+  - SECURITY HARDENING (jun-15): the `infer*Policy` projectors now read pillars
+    ONLY as own-properties (`Object.hasOwn` via `ownPillar`), never through the
+    prototype chain. Before, `profile?.approval` let a poisoned
+    `Object.prototype.approval = {mode:"always", promptUser:false}` upstream
+    silently widen an absent-pillar profile (`{}`) past the strict frozen
+    default — collapsing every pillar (no-prompt / allow-all / workspaceWrite /
+    admin). Mirrors `pricing-null-proto-guard`. Sealed by
+    permission-pillar-projection-hellgate.test.ts (prototype-pollution bypass +
+    frozen-default tamper + own-pillar passthrough); red-on-injection verified
+    (reverting `ownPillar` → 2 cases fail).

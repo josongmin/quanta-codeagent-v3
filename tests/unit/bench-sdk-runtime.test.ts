@@ -112,6 +112,7 @@ const runtimeFactory = async ({ host }: CreateRuntimeOptions): Promise<RuntimeFa
           },
         },
         identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+        permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
         transcript: {

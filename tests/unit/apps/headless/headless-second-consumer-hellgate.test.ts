@@ -109,6 +109,8 @@ const ALLOWED_PREFIXES: readonly string[] = [
   "@/tool",
   "@/observability",
   "@/shared",
+  // jun-15 — lifecycle bundle now creates an activity store (pure leaf module).
+  "@/activity",
   // Internal sibling files within the slice.
   "./",
   "../",

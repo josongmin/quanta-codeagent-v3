@@ -37,9 +37,9 @@ flags: [overfit-risk, regression-trap, has-repro]
 - **파일 1개·줄수 소규모(+2/-3 헌크 2개)**: scope 자체는 작아 T5/T6은 아니다.
 - **L1 localize**: has-repro(네이티브 traceback)가 1차 지점을 직접 줘서 아래쪽으로 압력. 단독이면 T2~T3.
 - **K-Domain + S2 추론**: ORM join-trim 불변식 추론이 T4 쪽으로 끌어올림.
-- **결정적 P2P/overfit trap**: 이 문제의 진짜 난이도. FAIL_TO_PASS인 `test_with_exclude`는 `isnull=False`라는 **단순 케이스**라 1차 한 줄(`_filtered_relations` 전파)만으로도 통과해버린다. 즉 주어진 테스트가 올바른 픽스를 **과소명세**한다(이론상 S4 성격). 에이전트는 join-trim 보강(`trim_start`)을 빠뜨려도 그린을 받아 "끝"이라 오판하기 쉽다 — 이 함정이 단순 T2/T3을 T4로 올리는 결정적 요인이다.
+- **두 헌크 강제 P2P**: FAIL_TO_PASS인 `test_with_exclude`(`isnull=False`)는 **두 헌크를 모두 강제한다** — `_filtered_relations` 전파 한 줄만 적용하면 PASS가 아니라 FAIL한다(실측: `AssertionError: <QuerySet []> != [<Author: Jane>]`). 가드 없이 FilteredRelation의 INNER JOIN(`title LIKE 'poem by alice'`)이 trim되면 서브쿼리가 `SELECT author_id FROM book WHERE id IS NOT NULL`(=책 가진 모든 author)이 되어 exclude가 Alice·Jane 둘 다 제외 → `[]`. 따라서 이 단일 테스트로도 join-trim 결함이 직접 노출되며, `trim_start` 보강이 FAIL_TO_PASS 통과의 필수 전제다. K-Domain + S2 추론(두 단계가 같은 negation-subquery 파이프라인임을 이해해야 함)이 T4 쪽으로 끌어올리는 요인이다.
 
-공식 라벨(시간)이 잡지 못하는 overfit-risk와 도메인 추론 비용 때문에 시간 prior보다 한 단계 높게 본다.
+공식 라벨(시간)이 잡지 못하는 도메인 추론 비용 때문에 시간 prior보다 한 단계 높게 본다.
 
 ## 골드패치 분석
 - **건드린 파일·함수**: `django/db/models/sql/query.py` 내 `Query.split_exclude`, `Query.trim_start` (단일 파일, 2 헌크).
@@ -54,7 +54,7 @@ flags: [overfit-risk, regression-trap, has-repro]
 - **FAIL_TO_PASS (1개)**: `test_with_exclude (filtered_relation.tests.FilteredRelationTests)`.
 - **동작**: `Author.objects.annotate(book_alice=FilteredRelation('book', condition=Q(book__title__iexact='poem by alice'))).exclude(book_alice__isnull=False)`를 실행하고 결과가 `[self.author2]`(Poem by Alice 책이 없는 author)인지 단언한다.
 - **픽스 증명**: 패치 전에는 alias 해석 단계에서 `FieldError`로 즉시 예외. 패치 후 (1) `_filtered_relations` 전파로 서브쿼리가 `book_alice`를 인식하고, (2) `trim_start` 보강으로 INNER JOIN 조건이 보존되어 `id IN (SELECT author_id FROM book WHERE title LIKE 'poem by alice')`의 negation이 올바르게 만들어진다 → author2만 반환.
-- **overfit 관점**: 이 테스트는 **약한 오라클**이다. `isnull=False` 케이스는 1차 한 줄(`_filtered_relations` 전파)만으로도 그린이 되므로, `trim_start` 보강 없이도 통과한다(이 단일 테스트로는 join-trim 결함을 직접 노출하지 못함). hints_text가 끝내 요청한 "잘못된 결과를 드러내는 추가 테스트"(예: `exclude(book_alice__title__contains='Jane')`)는 머지된 test_patch에 포함되지 않았다 — overfit-risk 플래그의 근거. 즉 골드패치는 테스트가 강제하는 것보다 더 일반적인(올바른) 수정을 했다.
+- **overfit 관점**: 이 오라클은 **약하지 않다 — 두 헌크를 모두 강제한다**. `isnull=False` 케이스도 두 픽스를 명백히 구별한다: 1차 한 줄(`_filtered_relations` 전파)만 적용하면 PASS가 아니라 FAIL한다(실측: `<QuerySet []> != [<Author: Jane>]`). `trim_start` 가드가 없으면 FilteredRelation의 INNER JOIN(`title LIKE 'poem by alice'` 조건)이 trim되어 서브쿼리가 `SELECT author_id FROM book WHERE id IS NOT NULL`(=책 가진 모든 author)이 되고, exclude가 Alice와 Jane 둘 다 제외 → `[]`. 즉 `trim_start` 보강 없이는 이 단일 테스트가 곧바로 join-trim 결함을 드러낸다. overfit-risk 플래그의 실제 근거는 따로 있다: hints_text가 끝내 요청한 "잘못된 결과를 드러내는 추가 테스트"(예: `exclude(book_alice__title__contains='Jane')`)가 머지된 test_patch에 포함되지 않았다는 점이다. 다만 "한 줄만으로 그린"이라는 인과는 측정으로 반증되므로, 골드패치의 두 헌크는 모두 이 테스트로 직접 강제된다.
 - **regression 관점**: PASS_TO_PASS 30개가 전부 `filtered_relation.tests` 모듈(`test_with_join`, `test_with_m2m*`, `test_exclude_relation_with_join`, `test_as_subquery`, `test_select_related*`, `test_union/intersection/difference` 등)이다. `trim_start` 가드 변경은 leading-join 트리밍 최적화에 직접 영향을 줘, filtered relation이 아닌 일반 join 경로(`test_with_join`, `test_exclude_relation_with_join`)나 subquery 경로(`test_as_subquery`)를 깨면 즉시 잡힌다 → regression-trap. `not first_join.filtered_relation` 조건이 비-filtered 경로에서 항상 True이므로 기존 동작을 보존한다는 점이 안전성의 핵심.
 
 ## 모범답안 (오라클 기반)
@@ -65,4 +65,4 @@ flags: [overfit-risk, regression-trap, has-repro]
 
 3. **regression 안전**: PASS_TO_PASS 30개가 `filtered_relation` 모듈 전체(일반 join/m2m/subquery/select_related/set-operations 포함)를 커버한다. `not first_join.filtered_relation` 가드는 filtered relation이 아닌 join에서 항상 True라 기존 트리밍 최적화를 그대로 유지 → `test_with_join`·`test_exclude_relation_with_join`·`test_as_subquery`가 안 깨짐. `_filtered_relations` 전파도 alias가 없는 쿼리에선 빈 딕셔너리라 무해. 이 두 불변(비-filtered 경로 byte-동일)을 지키는 게 안전성의 본질.
 
-4. **함정 회피**: 오라클 없는 에이전트의 최대 함정은 **조기 종료**다. FAIL_TO_PASS인 `test_with_exclude(isnull=False)`는 1차 한 줄만으로 그린이 되므로 `trim_start` 보강을 빠뜨려도 테스트가 통과한다. 에이전트는 "예외 사라짐 = 해결"로 오판하기 쉽다. 회피법: (a) 픽스 후 생성 SQL을 실제로 검사해 INNER JOIN과 그 조건이 보존되는지 확인하거나, (b) hints_text가 제시한 `exclude(book_alice__title__contains='Jane')` 같은 **구별용 입력**을 직접 만들어 silent-wrong을 드러내거나, (c) `split_exclude`/`trim_start`가 같은 negation-subquery 파이프라인의 두 단계임을 ORM 도메인 지식으로 이해해 두 곳을 함께 보는 것. 단일 약한 테스트의 그린에 안주하지 않는 것이 핵심.
+4. **함정 회피**: 오라클 없는 에이전트의 최대 함정은 **조기 종료**다. 단, 이 문제에서는 FAIL_TO_PASS `test_with_exclude(isnull=False)` 자체가 두 헌크를 모두 강제하므로(1차 한 줄만으로는 `<QuerySet []> != [<Author: Jane>]`로 FAIL) "예외 사라짐 = 해결"로 멈추면 테스트가 RED로 잡아준다 — 함정이 테스트 통과로 가려지지 않는다. 그러나 에이전트가 1차 한 줄만 적용하고 테스트를 돌리지 않거나(예외만 사라진 걸 보고 종료), 생성 SQL을 검사하지 않으면 여전히 silent-wrong을 놓친다. 회피법: (a) 픽스 후 반드시 `test_with_exclude`를 돌려 RED→GREEN을 확인하고, (b) 생성 SQL을 실제로 검사해 INNER JOIN과 그 조건이 보존되는지 확인하거나, (c) `split_exclude`/`trim_start`가 같은 negation-subquery 파이프라인의 두 단계임을 ORM 도메인 지식으로 이해해 두 곳을 함께 보는 것. (overfit-risk 자체의 근거는 hints_text가 요청한 `title__contains='Jane'` 구별 테스트가 머지본에 빠진 점이지, 주어진 테스트가 약하다는 게 아니다.)

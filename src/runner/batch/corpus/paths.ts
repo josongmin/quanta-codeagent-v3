@@ -12,14 +12,18 @@ import { runtimeConfig } from "@/shared"
  *
  * Precedence:
  *   1. `QUANTA_BENCH_HOME` env override (explicit operator choice)
- *   2. `<QUANTA_HOME>/bench` when `QUANTA_HOME` is set (shares the app home)
+ *   2. `<unified home>/bench` when an app-home root is explicitly set —
+ *      `QUANTA_CONFIG_DIR` (canonical) ?? `QUANTA_HOME` (alias). Matches the
+ *      quantaHomeDir() SSOT precedence, but WITHOUT its `~/.quanta` default so
+ *      the bench-specific macOS Library default below is preserved.
  *   3. macOS:  `~/Library/quanta-codeagent-v3/bench`
  *      other:  `~/.quanta/bench`
  */
 export const benchHome = (): string => {
   const cfg = runtimeConfig()
   if (cfg.benchHome) return cfg.benchHome
-  if (cfg.quantaHome) return join(cfg.quantaHome, "bench")
+  const explicitRoot = cfg.centralConfigDir ?? cfg.quantaHome
+  if (explicitRoot) return join(explicitRoot, "bench")
   const base =
     process.platform === "darwin"
       ? join(homedir(), "Library", "quanta-codeagent-v3")

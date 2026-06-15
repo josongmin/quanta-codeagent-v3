@@ -62,6 +62,11 @@ export const compileSeatbeltProfile = (
       .flatMap((p) => seatbeltPathAliases(p)),
   )
 
+  // Resolve extra read paths (same resolution rule as write paths).
+  const extraReads = unique(
+    (policy.extraReadPaths ?? []).map((p) => resolvePath(p, workspace)),
+  )
+
   const lines: string[] = [
     "(version 1)",
     "(deny default)",
@@ -79,6 +84,15 @@ export const compileSeatbeltProfile = (
   if (policy.excludeTmpdir === true) {
     lines.push(";; exclude tmp reads")
     lines.push('(deny file-read* (subpath "/tmp") (subpath "/private/tmp"))')
+  }
+
+  // Extra read paths (explicitly called-out; the global allow file-read* above
+  // already permits them but listing them makes the profile auditable).
+  if (extraReads.length > 0) {
+    lines.push(";; extra read paths")
+    for (const p of extraReads) {
+      lines.push(`(allow file-read* (subpath "${escapeSbpl(p)}"))`)
+    }
   }
 
   // Writes: read-only skips workspace writes but still honors explicit scoped

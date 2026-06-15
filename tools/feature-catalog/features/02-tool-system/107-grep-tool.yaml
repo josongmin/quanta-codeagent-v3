@@ -39,6 +39,8 @@ evidence:
   tests:
     unit:
       - tests/unit/grep.test.ts
+      - tests/unit/tool/grep-flags-hellgate.test.ts
+      - tests/unit/tool/grep-jail-escape-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

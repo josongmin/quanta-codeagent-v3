@@ -161,6 +161,47 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(a).toContain(".quanta")
   })
 
+  test("does NOT pin a subnet/AZ by default (capacity resilience)", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const launch = calls.find((c) => c.args.includes("run-instances"))
+    expect(launch?.args.includes("--subnet-id")).toBe(false)
+  })
+
+  test("falls back to the next instance type on InsufficientInstanceCapacity", async () => {
+    const launchedTypes: string[] = []
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      if (args.includes("describe-security-groups"))
+        return { code: 0, stdout: "sg-abc", stderr: "" }
+      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
+      if (args.includes("run-instances")) {
+        const it = args[args.indexOf("--instance-type") + 1] ?? ""
+        launchedTypes.push(it)
+        // first type out of capacity; second type succeeds
+        if (it === "c7i.8xlarge")
+          return {
+            code: 254,
+            stdout: "",
+            stderr: "An error occurred (InsufficientInstanceCapacity)",
+          }
+        return { code: 0, stdout: "i-fallback", stderr: "" }
+      }
+      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
+      if (cmd === "ssh" && args.some((a) => a.includes("READY")))
+        return { code: 0, stdout: "READY", stderr: "" }
+      if (cmd === "ssh" && args.some((a) => a.includes(".json")))
+        return { code: 0, stdout: "{}", stderr: "" }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn, instanceType: "c7i.8xlarge" })
+      .run()
+      .catch(() => undefined)
+    expect(launchedTypes[0]).toBe("c7i.8xlarge") // tried requested first
+    expect(launchedTypes.length).toBeGreaterThan(1) // fell back after capacity error
+  })
+
   test("dry-run plans WITHOUT spawning anything", async () => {
     const { fn, calls } = mockSpawn()
     const plan = await createFullRemoteBackend({ ...baseCfg, spawn: fn, dryRun: true }).run()
