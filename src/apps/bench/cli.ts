@@ -59,6 +59,45 @@ const argValue = (flag: string): string | undefined => {
 }
 const hasFlag = (flag: string): boolean => process.argv.includes(flag)
 
+/** Print a multi-line block one line at a time — `logger.info` renders an
+ *  embedded `\n` as `?`, so render* outputs must be split. */
+const printBlock = (s: string): void => {
+  for (const line of s.split("\n")) logger.info(line)
+}
+
+/** Value-taking flags — their following token is a value, NOT a positional. */
+const VALUE_FLAGS = new Set([
+  "--predictions",
+  "--backend",
+  "--dataset",
+  "--max-workers",
+  "--run-id",
+  "--key",
+  "--out",
+  "--region",
+  "--preset",
+  "--title",
+  "--patch",
+  "--instance",
+])
+
+/** Positional args after the subcommand (argv[2]), skipping flags AND the
+ *  value token that follows a value-flag (so `--preset x` doesn't leak `x`). */
+const positionals = (): string[] => {
+  const rest = process.argv.slice(3)
+  const out: string[] = []
+  for (let i = 0; i < rest.length; i++) {
+    const tok = rest[i]
+    if (tok === undefined) continue
+    if (tok.startsWith("-")) {
+      if (VALUE_FLAGS.has(tok)) i++ // skip its value
+      continue
+    }
+    out.push(tok)
+  }
+  return out
+}
+
 /** model_name_or_path from the first prediction row — names the harness report
  *  file `<model>.<runId>.json`, so the backend must poll for the right name. */
 const modelNameFromPredictions = (path: string): string | undefined => {
@@ -127,12 +166,12 @@ const cmdGrade = async (): Promise<void> => {
 }
 
 const cmdDiff = (): void => {
-  const [a, b] = process.argv.slice(3).filter((x) => !x.startsWith("-"))
+  const [a, b] = positionals()
   if (a === undefined || b === undefined) {
     logger.info("usage: quanta-bench diff <reportA.json> <reportB.json>")
     process.exit(2)
   }
-  logger.info(renderDiff(diffRuns(loadVerdictsFromFile(a), loadVerdictsFromFile(b))))
+  printBlock(renderDiff(diffRuns(loadVerdictsFromFile(a), loadVerdictsFromFile(b))))
 }
 
 const cmdExplain = (): void => {
@@ -148,11 +187,11 @@ const cmdExplain = (): void => {
     instanceId: instance,
     ...(patch !== undefined ? { agentPatchPath: patch } : {}),
   })
-  logger.info(e.summary)
+  printBlock(e.summary)
 }
 
 const cmdLeaderboard = (): void => {
-  const reports = process.argv.slice(3).filter((x) => !x.startsWith("-"))
+  const reports = positionals()
   if (reports.length === 0) {
     logger.info("usage: quanta-bench leaderboard <report.json> [more.json …] [--preset name] [--title T]")
     process.exit(2)
@@ -169,7 +208,7 @@ const cmdLeaderboard = (): void => {
     })()
     return rowsFromRun(v, { preset, model })
   })
-  logger.info(renderLeaderboardMarkdown(rows, argValue("--title") ?? "SWE-bench leaderboard"))
+  printBlock(renderLeaderboardMarkdown(rows, argValue("--title") ?? "SWE-bench leaderboard"))
 }
 
 const cmdPresets = (): void => {
