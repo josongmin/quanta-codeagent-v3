@@ -40,6 +40,10 @@ export interface Ec2BackendConfig {
   /** Keep the box alive after grading (debug). Default false ⇒ terminate. */
   readonly keep?: boolean
   readonly maxWorkers?: number
+  /** model_name_or_path baked into the predictions rows (report filename
+   *  `<model>.<runId>.json`). Forwarded to the internal ssh backend; default
+   *  "quanta". Set this when predictions use a different model name. */
+  readonly modelName?: string
   readonly spawn?: SpawnFn
   /** Injectable sleep (threaded into the ssh backend polling). */
   readonly sleep?: (ms: number) => Promise<void>
@@ -246,6 +250,7 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
         keyPath,
         maxWorkers,
         spawn,
+        ...(cfg.modelName ? { modelName: cfg.modelName } : {}),
         ...(cfg.sleep ? { sleep: cfg.sleep } : {}),
         ...(cfg.pollIntervalMs !== undefined ? { pollIntervalMs: cfg.pollIntervalMs } : {}),
         ...(cfg.maxPolls !== undefined ? { maxPolls: cfg.maxPolls } : {}),
