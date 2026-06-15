@@ -7,6 +7,7 @@ import {
   planSessionReplay,
   SessionDuplicateCommandError,
   type SessionTransport,
+  type SessionTransportConnectMessage,
   type SessionTransportMessage,
   tryDecodeSessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
@@ -210,13 +211,13 @@ describe("session transport connect-frame codec", () => {
   })
 
   test("round-trips a connect frame carrying explicit surface read-model coverage", () => {
-    const message: SessionTransportMessage = {
+    const message: SessionTransportConnectMessage = {
       kind: "connect",
       sessionId: "session-1",
       surfaceSubscription: {
         session: { status: "subscribed", protocol: "session.v1" },
         agentState: { status: "unsupported" },
-        canvas: { status: "supported", protocol: "canvas.v1" },
+        canvas: { status: "subscribed", protocol: "canvas.v1" },
         observability: { status: "unsupported" },
       },
     }

@@ -205,6 +205,7 @@ const makeStubDeps = (
         pills: stubPills as never,
         taskRegistry: undefined,
         followUpQueue: undefined,
+        activityStore: undefined as never,
       }
     },
     deriveMcpPillServers: (tools) => {
@@ -398,6 +399,7 @@ const installDefaultInternalMock = async (): Promise<void> => {
       lspTools: [],
       lspNavTools: [],
       gitToolList: [],
+      astGrepTools: [],
     }),
     resolveResume: async () => ({
       sessionId: "resolved-session",
@@ -834,6 +836,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
     }))
     const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")

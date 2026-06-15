@@ -13,7 +13,7 @@
 
 import { type WorkflowEventLike, wfPhaseId, wfRunId, wfStepId } from "./producers/workflow"
 import { type ActivityState, emptyActivityState, materialize, reduceActivity } from "./spine"
-import type { ActivitySnapshot, AgentActivityEvent } from "./types"
+import type { ActivityNode, ActivitySnapshot, AgentActivityEvent } from "./types"
 
 /** A live, mutable activity accumulator. */
 export interface ActivityStore {
@@ -36,6 +36,60 @@ export const createActivityStore = (): ActivityStore => {
     },
     snapshot: () => materialize(state),
   }
+}
+
+/** Replay ONE node into the seed store: open + counters + (leaf-only) status.
+ *  Container status is NOT re-emitted — `materialize` re-derives it from the
+ *  seeded children, which both reproduces the original and avoids stamping a
+ *  spurious `stuck:{unknown}` reason on a container that has none. */
+const seedNode = (store: ActivityStore, snapshot: ActivitySnapshot, n: ActivityNode): void => {
+  store.emit({
+    type: "node_open",
+    node: {
+      id: n.id,
+      parentId: n.parentId,
+      kind: n.kind,
+      label: n.label,
+      status: "running",
+      ...(n.startedAt !== undefined ? { at: n.startedAt } : {}),
+      ...(n.meta !== undefined ? { meta: n.meta } : {}),
+    },
+  })
+  if (n.tokens > 0 || n.toolCalls > 0) {
+    store.emit({
+      type: "node_metric",
+      id: n.id,
+      tokensDelta: n.tokens,
+      toolCallsDelta: n.toolCalls,
+    })
+  }
+  const isLeaf = (snapshot.childIds.get(n.id)?.length ?? 0) === 0
+  if (isLeaf && n.status !== "running") {
+    store.emit({
+      type: "node_status",
+      id: n.id,
+      status: n.status,
+      ...(n.stuck !== undefined ? { stuck: n.stuck } : {}),
+      ...(n.endedAt !== undefined ? { at: n.endedAt } : {}),
+    })
+  }
+}
+
+/** Replay a snapshot's nodes into a FRESH store — a non-mutating "view base".
+ *  Used by `/activity` to overlay the live fleet WITHOUT polluting the durable
+ *  session store (which only `run_workflow` writes). Nodes are emitted in
+ *  root→child preorder so the tree order is preserved; counters + leaf status
+ *  are restored and container statuses re-derive identically (round-trip safe). */
+export const seedStoreFromSnapshot = (snapshot: ActivitySnapshot): ActivityStore => {
+  const store = createActivityStore()
+  const visit = (id: string): void => {
+    const n = snapshot.byId.get(id)
+    if (n === undefined) return
+    seedNode(store, snapshot, n)
+    for (const child of snapshot.childIds.get(id) ?? []) visit(child)
+  }
+  for (const root of snapshot.roots) visit(root)
+  return store
 }
 
 /** Options for {@link createWorkflowSink}. */

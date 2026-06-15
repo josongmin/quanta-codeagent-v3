@@ -24,7 +24,12 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { createActivityStore, fleetToActivity, renderActivity } from "@/activity"
+import {
+  createActivityStore,
+  fleetToActivity,
+  renderActivity,
+  seedStoreFromSnapshot,
+} from "@/activity"
 import { errMessage, logger, runtimeConfig } from "@/shared"
 import { renderAgentFleet } from "../agents-fleet-panel"
 import { backgroundCmd } from "../background-cmd"
@@ -461,13 +466,18 @@ const activityCmd: SlashCommand = {
       ctx.out("/activity: not wired in this surface\n")
       return 0
     }
-    // Render the SESSION spine when present (so live `run_workflow` runs +
-    // daemons show), refreshing the in-process subagent fleet into it each call.
-    // Absent ⇒ an ephemeral fleet-only view (byte-identical to a fresh store).
-    const store = ctx.activityStore ?? createActivityStore()
-    if (ctx.agents !== undefined) store.emitAll(fleetToActivity(ctx.agents()))
+    // Build a TRANSIENT view: seed from the durable session spine (live
+    // `run_workflow` runs + daemons) WITHOUT mutating it, then overlay the
+    // current in-process subagent fleet. Pulling the fleet into the shared
+    // store would leak LRU-evicted subagents forever; seeding a fresh view each
+    // call keeps the durable store pristine and the fleet current.
+    const view =
+      ctx.activityStore !== undefined
+        ? seedStoreFromSnapshot(ctx.activityStore.snapshot())
+        : createActivityStore()
+    if (ctx.agents !== undefined) view.emitAll(fleetToActivity(ctx.agents()))
     const now = ctx.now?.() ?? Date.now()
-    ctx.out(`${renderActivity(store.snapshot(), { now }).join("\n")}\n`)
+    ctx.out(`${renderActivity(view.snapshot(), { now }).join("\n")}\n`)
     return 0
   },
 }

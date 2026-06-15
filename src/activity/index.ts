@@ -38,6 +38,7 @@ export {
   type ActivityStore,
   createActivityStore,
   createWorkflowSink,
+  seedStoreFromSnapshot,
   type WorkflowSink,
   type WorkflowSinkOpts,
 } from "./store"

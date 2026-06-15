@@ -16,6 +16,7 @@
 import type { LLMPort } from "@/llm"
 import type { GitDirectiveEmitter } from "../../agent/git-directives"
 import type { Tool } from "../types"
+import { type GitBudget, withBudget } from "./_budget"
 import { gitBlameTool } from "./blame"
 import { gitBlameHeatmapTool } from "./blame-heatmap"
 import { gitBranchSwitchTool } from "./branch-switch"
@@ -50,10 +51,14 @@ export interface GitToolsOpts {
    *  the tool is NOT constructed and NOT in the registry, byte-identical legacy.
    *  The composition root flips this on the `QUANTA_GIT_CO_CHANGE` gate. */
   readonly coChange?: boolean
+  /** ADR-0107 — GitBudget applied to read-only walk tools (log/churn/blame/
+   *  upstream). When supplied, `withBudget` wraps the runner; absent ⇒ the raw
+   *  runner is used, byte-identical to the pre-budget path. */
+  readonly budget?: GitBudget
 }
 
 // ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
-export { applyBudget, crossedTarget, type GitBudget, resolveMaxCommits } from "./_budget"
+export { applyBudget, crossedTarget, type GitBudget, resolveGitBudget, resolveMaxCommits, withBudget } from "./_budget"
 export { gitBlameTool } from "./blame"
 export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { type GitBranchSwitchToolOpts, gitBranchSwitchTool } from "./branch-switch"
@@ -126,7 +131,12 @@ export { gitUpstreamCheckTool } from "./upstream"
  *  ADR-0220 wire — `opts.gitDirectiveEmitter` flows ONLY to the mutating
  *  tools (commit, branch-switch). Read-only tools never emit (no closed
  *  directive kind exists for read-only ops). Absent ⇒ byte-identical. */
-export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpts = {}): Tool[] => [
+export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpts = {}): Tool[] => {
+  // ADR-0107 §wire — budget-constrained runner for read-only walk tools.
+  // When budget is absent or has no enforceable knob, withBudget returns the
+  // same runner reference (byte-identical: no extra allocation).
+  const walkedRunner = withBudget(runner, opts.budget)
+  return [
   gitDiffTool(runner) as Tool,
   // Diff→prose AUTHORING (Codex `yeet` / Cursor compose). Read-only, tier
   // "none" — these author a commit message / PR body but never mutate. Default-
@@ -139,13 +149,13 @@ export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpt
       ]
     : []),
   gitStatusTool(runner) as Tool,
-  gitLogTool(runner) as Tool,
-  gitBlameTool(runner) as Tool,
+  gitLogTool(walkedRunner) as Tool,
+  gitBlameTool(walkedRunner) as Tool,
   // Stage-1 fault-localization signals (read-only, concurrency-safe).
-  gitChurnTool(runner) as Tool,
-  gitBlameHeatmapTool(runner) as Tool,
+  gitChurnTool(walkedRunner) as Tool,
+  gitBlameHeatmapTool(walkedRunner) as Tool,
   // Upstream-divergence check (read-only, v0 chat=branch absorption, #5).
-  gitUpstreamCheckTool(runner) as Tool,
+  gitUpstreamCheckTool(walkedRunner) as Tool,
   // Isolated diff reviewer (read-only, Claude Desktop `reviewDiff` absorption,
   // ADR-0111). Sub-agent runner is host-injected via ctx.reviewerAgent.
   gitReviewDiffTool(runner) as Tool,
@@ -167,5 +177,6 @@ export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpt
   // safe). Default-OFF: registered ONLY when `opts.coChange` is true
   // (QUANTA_GIT_CO_CHANGE gate). Absent/false ⇒ omitted (byte-identical legacy
   // 12-tool registry). Appended LAST so the legacy ordering is untouched.
-  ...(opts.coChange === true ? [gitCoChangeTool(runner) as Tool] : []),
-]
+  ...(opts.coChange === true ? [gitCoChangeTool(walkedRunner) as Tool] : []),
+  ]
+}

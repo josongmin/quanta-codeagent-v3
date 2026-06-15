@@ -45,7 +45,7 @@ const debugProgram = async (
   const prog = join(dir, "prog.py")
   writeFileSync(prog, src)
   const target = opts.program ?? prog
-  const bps =
+  const bps: { line: number; condition?: string }[] =
     opts.breakpoints ??
     (opts.lines ?? (opts.line !== undefined ? [opts.line] : [])).map((line) => ({ line }))
   const tool = makeDebugInspectTool()

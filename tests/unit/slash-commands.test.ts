@@ -98,7 +98,9 @@ describe("BUILTINS table", () => {
       "/working-state",
       "/history",
       "/branches",
+      "/activity",
       "/agents",
+      "/radar",
       "/background",
       // #21 — `/init` is CLI-surface default-ON (opt-OUT via QUANTA_INIT_SLASH=0);
       // the unit env leaves the knob unset ⇒ registered between /background and

@@ -1,5 +1,6 @@
 [
   "abort-signal-compose",
+  "activity-spine",
   "agent",
   "agent-cli-args-parser",
   "agent-config-assembler",
@@ -210,7 +211,6 @@
   "llm-streaming-events",
   "localize-calibration-corpus",
   "localize-phase-guard",
-  "localize-phase-knob",
   "localize-tool",
   "localsandbox",
   "loop-trio-integration",
@@ -363,7 +363,6 @@
   "seam",
   "seatbelt-profile-compiler",
   "semantic-index-real-embedder",
-  "session-config-tool",
   "session-cwd-missing-exit",
   "session-envelope-encoder",
   "session-index-store",

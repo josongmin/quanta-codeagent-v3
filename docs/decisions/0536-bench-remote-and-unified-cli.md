@@ -4,7 +4,9 @@
   - P0: `src/apps/bench/cli.ts` (run/grade/diff/explain/leaderboard/presets) + `remote/` (ssh + ec2) + `analyze/` (verdicts/diff/explain/leaderboard). `package.json` `bench` → `cli.ts`.
   - P1: `analyze/cost.ts` (token/$/wall-clock from report.usage or observe trajectory; honest caveat when no usage) + `cost` subcommand.
   - P2: `remote/fanout.ts` (K-way shard → concurrent grade → merge; fault-tolerant) wired via `grade --shards N`.
-  - P3: `--mode full` SURFACE + gate only — refused without `--allow-remote-secrets`, and the executor is deliberately DEFERRED (refuses with a §6-hardening pointer) so no insecure half-executor ships. RED-first throughout; 67 tests (cli 8 + remote 22 + fanout 8 + analyze 21 + cost 8) + a subprocess **e2e** (`tests/integration/bench-cli-e2e.test.ts`). P3 executor = remaining work.
+  - P3: `remote/full.ts` full-remote executor IMPLEMENTED via the hellgate protocol — gated behind `--allow-remote-secrets`, ships ONLY the stripped short-lived `access_token` over ssh STDIN (`stripToAccessToken` drops refresh_token/id_token), IMDSv2 hop-1 + TTL + always-terminate, `--dry-run` plans safely. Adversarial self-audit caught 2 (R1: rsync now excludes `.env`/`.quanta`; R2: real `__HOST__`-not-substituted bug the mock hid → threads resolved IP). 7 security-teeth hellgate tests.
+  - ⚠️ LIVE full-remote is BLOCKED BY THE HARNESS safety classifier (shipping an LLM credential to an external box running model-generated code = hard block, not clearable by a permission rule). Validates the §6 risk: the live run must be triggered by the operator outside the agent sandbox. The executor + invariants are proven offline (injected spawn).
+  - RED-first throughout; 74 tests (cli 8 + remote 22 + fanout 8 + full 7 + analyze 21 + cost 8) + subprocess **e2e** (`tests/integration/bench-cli-e2e.test.ts`).
 - Date: 2026-06-15
 - Supersedes/relates: bench harness (`src/apps/bench`), ADR-0014 (local validator), jun-15 preset unification
 

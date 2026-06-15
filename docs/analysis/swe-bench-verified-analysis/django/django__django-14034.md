@@ -8,29 +8,62 @@ created_at: 2021-02-22T19:32:50Z
 fail_to_pass: 1
 pass_to_pass: 12
 gold_files: [django/forms/boundfield.py]
+primary_type: T-SpecInference
+tier: T4
+loc_axis: L0
+repair_strategy: S5 (+S2)
+knowledge: K-Domain
+flags: [underspecified, regression-trap, has-repro]
 ---
 
 # django__django-14034
 
 ## 문제 요약
-`MultiValueField`에서 `require_all_fields=False`로 두고 일부 서브필드만 `required=True`로 지정해도, 렌더링된 HTML의 모든 서브위젯 `<input>`에 `required` 속성이 붙어버린다. 사용자는 서브필드별 `required` 설정이 HTML 속성에도 반영되어, optional한 서브필드는 `required` 없이 렌더되기를 기대했다. (검증/`is_valid()` 동작 자체는 정상이며, 트래픽 끝의 합의대로 이 티켓은 "렌더링 시 required 속성" 문제로 좁혀졌다.)
+`MultiValueField`에서 `require_all_fields=False`로 두고 일부 서브필드만 `required=True`로 지정해도, 렌더링된 HTML의 모든 서브위젯 `<input>`에 `required` 속성이 일괄로 붙는다. 사용자는 서브필드별 `required` 설정이 HTML 속성에도 반영되어 optional 서브필드는 `required` 없이 렌더되기를 기대했다. problem_statement는 `is_valid()` 버그처럼 서술되지만, 힌트 스레드 후반(Jacob/David 합의)에서 검증 로직은 정상이고 — required MVF에 전 서브필드 공란이면 통과하는 동작은 의도된 것이며 기존 테스트도 있음 — 티켓 범위가 "MVF가 required이면서 require_all_fields=False일 때 서브위젯별로 HTML required 속성을 매핑한다"로 재정의되었다.
 
-## 유형 분류
-- 버그 카테고리: 누락처리 (서브필드 단위 required를 위젯 속성에 반영하지 않음) / API-contract
-- 서브시스템: django forms (BoundField 위젯 속성 빌드, MultiValueField/MultiWidget)
-- 증상 타입: 잘못된 출력 (HTML 렌더링이 의도와 다름; silent-wrong)
-- 로컬라이제이션 신호: 힌트에서 `boundfield.py`의 `build_widget_attrs`가 명시적으로 지목됨 — "This code looks at the field required status rather than subwidgets". 필드 전체의 `required`만 보고 개별 서브위젯을 구분하지 못한다는 점이 핵심 단서.
+## 유형 (정형화)
+
+**L (Localization) = L0 — Pinpointed.**
+힌트가 수정 지점을 직접 지목한다: "Possible culprit? ...boundfield.py#L221 / Does this method also need to account for the require_all_fields value on MultiValueField?"와 "This code looks at the field required status rather than subwidgets." `boundfield.py`의 `build_widget_attrs`가 grep 한 방으로 단일 진입점. 탐색 노력 거의 없음.
+
+**S (Repair Strategy) = S5 Spec-Inference (+S2 Constraint-Reasoning).**
+이게 dominant인 이유: 픽스의 핵심 난점이 "어디/어떻게 코드를 짜나"가 아니라 **"의도된 동작이 무엇인가를 먼저 재구성"**하는 데 있다. 코드만 보면 `attrs['required']=True`가 버그인지 의도인지 결정되지 않고, problem_statement는 `is_valid()`가 틀렸다고 잘못 명세한다(underspecified). 올바른 스펙은 Carlton/Jacob/David의 트래픽 결론과 docs("When require_all_fields set to False, Field.required can be set to False for individual fields to make them optional")에서 재구성해야만 나온다 — "required MVF = 이 서브필드 집합을 통째로 건너뛸 수 있나? / require_all_fields=False면 개별 서브필드는 자기 required를 존중한다". 즉 SpecRover류로 스펙을 먼저 확정해야 픽스 형태가 정해진다. 일단 스펙이 정해지면 조건식 `subwidget.use_required_attribute(self.initial) and subfield.required`를 불변식·엣지(초기값/required 조합)를 따져 합성하는 부분이 S2 보조다.
+
+**K (Knowledge) = K-Domain.**
+django forms 내부 모델 지식이 병목: `MultiValueField.require_all_fields` 의미론, `MultiWidget`/서브위젯 `widgets` 배열, `BoundField`가 위젯 attrs를 빌드하는 시점·경로, `widget.use_required_attribute(initial)` 계약, `field.fields`와 `widget.widgets`의 1:1 대응. 일반 파이썬 추론으로는 안 풀린다.
+
+**Primary type = T-SpecInference.**
+L0(찾기는 쉬움)·K-Domain이 동반되지만 dominant는 S5다. 진짜 어려움이 "이슈가 잘못 명세한 동작을 트래픽·docs에서 올바른 스펙으로 되살리는 것"에 있고, 그 스펙 확정이 over-fix(validation 수정)를 막는 결정적 분기점이기 때문. K-Domain만으로 T-DomainBound로 보지 않는 이유는, 도메인지식은 위치를 찾고 나면 보조적이고 병목이 스펙 추론이라는 점.
+
+## 난이도 티어
+**Tier = T4 (약간 어려움).**
+
+이 티어로 미는 구조적 피처:
+- **단일 파일·단일 함수** (`boundfield.py:build_widget_attrs`), gold patch 1파일 ~11줄 추가 + import 1줄 → scope 자체는 작음(이건 T2 쪽 신호).
+- 하지만 **S5 spec-inference + underspecified**: problem_statement가 증상을 `is_valid()` 버그로 오도해, 표면만 읽으면 `MultiValueField.clean`으로 파고들어 검증 로직을 over-fix한다. 정답 범위 수렴이 힌트 스레드의 합의를 정확히 읽어야만 가능 — 이게 T2/T3가 아니라 T4로 올리는 핵심.
+- **regression-trap (P2P=12)**: `test_clean`, `test_clean_disabled_multivalue`, `test_form_as_table`, `test_form_cleaned_data` 등 인접 동작이 넓게 묶여 있어, validation을 건드리면 즉시 깨진다. 픽스를 HTML 속성 경로로만 한정해야 통과.
+- **K-Domain**: 서브위젯 attrs 매핑·`use_required_attribute` 계약을 정확히 써야 함.
+
+공식 라벨("15 min - 1 hour")은 개발자가 합의된 스펙을 손에 쥔 뒤의 *구현* 시간이다. 에이전트 관점에서는 그 합의(스펙)를 스스로 복원해야 하고 over-fix 함정이 있어 시간라벨보다 어렵다 — 그래서 T3가 아닌 T4. 반대로 멀티파일·구조변경·overfit 고위험이 없어 T5까지는 가지 않는다.
 
 ## 골드패치 분석
-- 건드린 파일/함수: `django/forms/boundfield.py:BoundField.build_widget_attrs`
-- 근본 원인: `build_widget_attrs`는 `self.field.required`가 True면 무조건 `attrs['required'] = True`를 세팅했다. `MultiValueField`처럼 여러 서브필드를 가진 경우에도 부모 필드의 required만 보기 때문에, 각 서브위젯의 개별 required 의도가 무시된다.
-- 수정 요지: 필드가 `require_all_fields` 속성을 가지고 그 값이 False이며 위젯이 `MultiWidget`인 경우를 분기. 이 경우 `attrs['required']`를 일괄 세팅하지 않고, `zip(self.field.fields, widget.widgets)`로 서브필드/서브위젯을 짝지어 순회하면서 각 `subwidget.attrs['required']`를 `subwidget.use_required_attribute(self.initial) and subfield.required`로 개별 설정한다. 그 외 일반 케이스는 기존대로 `attrs['required'] = True`. import에 `MultiWidget` 추가.
+- **건드린 파일/함수**: `django/forms/boundfield.py` — `BoundField.build_widget_attrs` (+ 모듈 import에 `MultiWidget` 추가).
+- **근본 원인**: `build_widget_attrs`는 `widget.use_required_attribute(self.initial) and self.field.required and self.form.use_required_attribute`가 참이면 무조건 `attrs['required'] = True`를 부모 위젯 레벨에 세팅했다. `MultiValueField`처럼 서브필드/서브위젯이 여럿인 경우에도 부모 필드의 `required`만 보기 때문에, `require_all_fields=False`로 켜둔 개별 서브필드의 required 의도가 HTML 속성에서 전부 균일하게 뭉개진다.
+- **수정 요지**: 필드가 `require_all_fields` 속성을 갖고 그 값이 False이며 `isinstance(self.field.widget, MultiWidget)`인 경우를 분기. 이 경우 부모 `attrs`에 일괄 세팅하지 않고, `zip(self.field.fields, widget.widgets)`로 서브필드/서브위젯을 짝지어 순회하며 각 `subwidget.attrs['required']`를 `subwidget.use_required_attribute(self.initial) and subfield.required`로 **개별** 설정한다. 그 외 일반 케이스는 기존대로 `attrs['required'] = True`. 검증 경로(`MultiValueField.clean`)는 손대지 않는다.
 
 ## 검증 (test_patch)
-- FAIL_TO_PASS: `test_render_required_attributes` — `MultiValueField`(required=True, require_all_fields=False)에서 첫 서브필드만 `required=True`인 `PartiallyRequiredForm`을 렌더.
-- 증명 방식: `{'f_0':'Hello','f_1':''}` 입력으로 `is_valid()`가 True임을 확인하고, `assertInHTML`로 `f_0` input에는 `required`가 붙고 `f_1` input에는 `required`가 없음을 검증. 추가로 `{'f_0':'','f_1':''}`은 required 서브필드가 비어 `is_valid()`가 False임을 확인해, 검증 로직은 손대지 않으면서 HTML 속성만 서브필드별로 갈린다는 점을 증명.
+- **FAIL_TO_PASS (1개)**: `test_render_required_attributes (forms_tests.field_tests.test_multivaluefield.MultiValueFieldTest)`.
+  - `PartiallyRequiredField(MultiValueField)` + `PartiallyRequiredForm`을 신규 정의: `fields=(CharField(required=True), CharField(required=False))`, `required=True`, `require_all_fields=False`, `widget=MultiWidget([TextInput(), TextInput()])`.
+- **픽스 증명**: `{'f_0':'Hello','f_1':''}` 입력에서 `is_valid()`가 True임을 먼저 확인(검증 로직 무변경 증명) 후, `assertInHTML`로 `f_0` input에는 `required`가 붙고(`<input ... name="f_0" ... required ...>`) `f_1` input에는 `required`가 **없음**을 검증. 마지막으로 `{'f_0':'','f_1':''}`은 required 서브필드(`f_0`)가 비어 `is_valid()`가 False임을 확인 — 서브필드별 검증 의미는 보존됨.
+- **overfit 관점**: FAIL_TO_PASS가 1개로 얇다. 다만 테스트가 (a)양쪽 서브위젯 HTML required 유무를 따로 단언하고 (b)required 채움/공란 두 입력으로 is_valid를 양방향 단언하므로, `f_0`에만 무조건 required를 박는 식의 special-case 통과는 막힌다. 그래도 초기값(`initial`)이 있는 시나리오·required=False 서브필드가 첫 위치인 조합 등 미검증 입력공간은 남아 있어, 골드의 `use_required_attribute(self.initial)` 항이 빠진 부분픽스도 이 테스트만으론 통과 가능한 잔여 overfit 여지가 있다.
+- **regression 관점**: P2P 12개가 validation·렌더 전반(`test_clean*`, `test_form_as_table*`, `test_form_cleaned_data`, `test_*has_changed*`)을 덮는다. 픽스를 `clean`이 아닌 `build_widget_attrs`의 새 분기로만 한정했고, 비-MVF/`require_all_fields` 미보유 필드는 기존 `else` 경로(`attrs['required']=True`)로 byte-동일하게 흐르므로 인접 동작이 안 깨진다.
 
-## 공략 포인트 (뭘 조져야)
-- 어디부터 봐야 하나: `boundfield.py`의 `build_widget_attrs`가 단일 진입점. 힌트가 정확히 지목하므로 localization은 쉬운 편.
-- 함정/난이도 메모: (1) problem_statement는 `is_valid()` 버그처럼 읽히지만, 트래픽 끝 합의(Jacob/David 코멘트)대로 검증 로직(`MultiValueField.clean`)은 건드리면 안 됨 — required MVF에 전 서브필드 공란이면 통과하는 기존 동작은 정상이고 테스트도 있음. validation을 고치려 들면 PASS_TO_PASS(`test_clean` 등)가 깨진다. (2) `attrs['required']`(부모)가 아니라 `subwidget.attrs['required']`(서브위젯)에 써야 함. (3) `MultiWidget` import 누락 시 즉시 실패.
-- 우리 에이전트 관점: 막힐 지점은 "증상 서술과 실제 골드 수정 범위의 불일치". 문제문만 보면 `clean`/`is_valid`로 파고들어 over-fix하기 쉽다. 힌트 스레드 후반의 범위 축소 합의를 읽어야 정답 범위로 수렴하므로, problem_statement 표면이 아닌 hints_text의 최종 결론을 신뢰해야 한다.
+## 모범답안 (오라클 기반)
+
+1. **localize 경로**: problem_statement의 "모든 input에 required가 붙는다"는 HTML 증상 + 힌트의 직접 포인터("boundfield.py#L221", "looks at the field required status rather than subwidgets")를 따라간다. `grep build_widget_attrs django/forms/boundfield.py` 한 방으로 `BoundField.build_widget_attrs`에 도달. `attrs['required'] = True`가 부모 필드 `self.field.required`만 보고 서브위젯을 구분하지 않는 라인이 결함 지점.
+
+2. **픽스와 왜 올바른 일반화인가**: `require_all_fields` 속성 보유 + False + 위젯이 `MultiWidget`일 때만 새 경로로 분기하여, `zip(self.field.fields, widget.widgets)`로 각 `subwidget.attrs['required']`를 `subwidget.use_required_attribute(self.initial) and subfield.required`로 설정. 이게 special-case 박기가 아니라 올바른 일반화인 이유: 조건식이 (a)서브필드 자신의 `subfield.required`를 권위로 삼고(=docs가 명시한 "individual fields can be optional" 계약), (b)부모 케이스와 동일한 `use_required_attribute(self.initial)` 가드를 서브위젯 단위로 재적용해 초기값/hidden 위젯 등 기존 required-억제 의미를 보존하기 때문. 즉 임의 입력의 어떤 서브필드 조합에도 "required MVF + 서브필드별 required 존중"이라는 재구성된 스펙대로 동작한다.
+
+3. **regression 안전**: 분기 조건을 `hasattr(require_all_fields) and not require_all_fields and isinstance(widget, MultiWidget)`로 좁혀, 일반 단일 위젯 필드·`require_all_fields`가 True인 MVF는 모두 기존 `else: attrs['required']=True` 경로로 그대로 흐른다 → `test_form_as_table*` 등 기존 required 렌더가 보존. 검증 로직(`MultiValueField.clean`)은 절대 건드리지 않아 `test_clean`, `test_clean_disabled_multivalue`, `If insufficient data is provided, None is substituted.` 등 P2P가 안전. "required MVF 전체 공란 → 통과"는 기존 의도된 동작이므로 유지.
+
+4. **함정 회피**: 오라클 없는 에이전트가 틀릴 지점 두 가지. (1) **over-fix**: problem_statement가 `is_valid()`를 버그로 명세하므로 `MultiValueField.clean`을 고치려 들기 쉽다 → P2P `test_clean*`이 깨진다. 회피법은 hints_text 후반의 범위 축소 합의("avoid making changes to validation", "only handle ... set the required attribute on the widget")를 신뢰해 HTML 속성 경로로만 한정하는 것. (2) **잘못된 타깃 객체**: 부모 `attrs['required']`가 아니라 각 `subwidget.attrs['required']`에 써야 서브위젯별로 갈린다. 더해 `MultiWidget` import 누락 시 `NameError`로 즉시 실패하므로 import 추가를 잊지 말 것.

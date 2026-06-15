@@ -92,11 +92,15 @@ describe("writeArtifacts (D-fix)", () => {
       // exist for these synthetic results, so termination falls back to
       // "unknown" — that IS the deterministic contract.
       expect(report.perInstance[0]?.failure).toBeUndefined()
-      expect(report.perInstance[1]?.failure?.termination).toBe("unknown")
+      // "b" has empty patch + turns>0 → classifier identifies it as
+      // completed_unresolved (agent ran but produced no patch), NOT "unknown".
+      expect(report.perInstance[1]?.failure?.termination).toBe("completed_unresolved")
+      // "c" has a non-empty patch + no trajectory → falls back to "unknown".
       expect(report.perInstance[2]?.failure?.termination).toBe("unknown")
-      // Aggregated breakdown: 2 failed (both unknown), b's empty patch
-      // yields the empty_patch signal (c's non-empty patch doesn't).
-      expect(report.failureBreakdown.byTermination.unknown).toBe(2)
+      // Aggregated breakdown: 1 completed_unresolved, 1 unknown.
+      expect(report.failureBreakdown.byTermination.completed_unresolved).toBe(1)
+      expect(report.failureBreakdown.byTermination.unknown).toBe(1)
+      // b's empty patch yields the empty_patch signal (c's non-empty doesn't).
       expect(report.failureBreakdown.bySignal.empty_patch).toBe(1)
     } finally {
       rmSync(dir, { recursive: true, force: true })

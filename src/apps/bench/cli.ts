@@ -29,6 +29,7 @@ import { loadVerdictsFromFile } from "./analyze/verdicts"
 import type { GradeBackend } from "./remote/backend"
 import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
+import { createFullRemoteBackend } from "./remote/full"
 import { createSshBackend } from "./remote/ssh"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
@@ -160,26 +161,59 @@ const buildBackend = (spec: string, modelName: string | undefined): GradeBackend
 
 const cmdGrade = async (): Promise<void> => {
   // ADR-0536 §6 — full-remote mode (remote patch-gen + grading) runs the AGENT
-  // on a secret-bearing box (agent executes model-generated code). It is opt-in
-  // AND gated, and its executor is DELIBERATELY DEFERRED until the mandatory
-  // hardening lands (ephemeral minted key + IMDSv2/hop-1 + SSM no-inbound +
-  // observe-secret redaction). Shipping a half-built full-remote = a creds-leak
-  // path, so we refuse loudly instead. `grade-only` (default) is unaffected.
+  // on a credential-bearing box (agent executes model-generated code). Opt-in
+  // AND gated behind --allow-remote-secrets. The executor (createFullRemoteBackend)
+  // ships ONLY the stripped short-lived access_token over ssh STDIN (refresh/id
+  // dropped), enforces IMDSv2 hop-1 + TTL, and always terminates. NOTE: actually
+  // launching ships a credential across a trust boundary — the harness may block
+  // that at runtime (by design); --dry-run plans it safely. `grade-only` default
+  // is unaffected.
   const mode = argValue("--mode") ?? "grade-only"
   if (mode === "full") {
     if (!hasFlag("--allow-remote-secrets")) {
       logger.info(
-        "refused: --mode full runs patch-gen on the remote box and needs LLM secrets there. " +
-          "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6).",
+        "refused: --mode full runs patch-gen on the remote box and needs an LLM credential there. " +
+          "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6). " +
+          "Tip: --dry-run shows the plan without launching or shipping anything.",
       )
       process.exit(2)
     }
-    logger.info(
-      "refused: --mode full executor is not yet implemented — it is pending the §6 security " +
-        "hardening (ephemeral minted key + IMDSv2 hop-1 + SSM no-inbound + observe redaction). " +
-        "Use the default grade-only mode (local patch-gen + remote grading) for now. See ADR-0536.",
-    )
-    process.exit(3)
+    const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
+    if (dataset === undefined) {
+      logger.info(
+        "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run]",
+      )
+      process.exit(2)
+    }
+    const dry = hasFlag("--dry-run")
+    // Only read the on-disk credential when actually launching (dry-run never
+    // touches it). Stripped to access_token only inside the executor.
+    const authPath = `${process.env.HOME}/.quanta/auth/chatgpt.json`
+    const authJson = dry ? "{}" : readFileSync(authPath, "utf8")
+    const instance = argValue("--instance")
+    const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset")
+    const fullModel = argValue("--model")
+    const backend = createFullRemoteBackend({
+      repoDir: process.cwd(),
+      authJson,
+      datasetPath: dataset,
+      ...(instance !== undefined ? { instanceIds: instance.split(",") } : {}),
+      ...(preset !== undefined ? { preset } : {}),
+      ...(fullModel !== undefined ? { model: fullModel } : {}),
+      dryRun: dry,
+      keep: hasFlag("--keep"),
+      onLog: (m) => logger.info(m),
+    })
+    const res = await backend.run()
+    if (res.dryRun) {
+      printBlock(["=== full-remote plan (dry-run) ===", ...(res.plan ?? [])].join("\n"))
+    } else {
+      logger.info(
+        `full-remote done — resolved ${res.resolved?.length ?? 0} | unresolved ${res.unresolved?.length ?? 0}`,
+      )
+      for (const id of res.resolved ?? []) logger.info(`  ✅ ${id}`)
+    }
+    return
   }
 
   const predictions = argValue("--predictions")

@@ -96,6 +96,7 @@ const makeFakeDeps = (overrides: Partial<SessionBootstrapDeps> = {}): SessionBoo
       pills: { update: () => undefined },
       taskRegistry: undefined,
       followUpQueue: undefined,
+      activityStore: undefined as never,
     }),
     deriveMcpPillServers: () => [],
     buildCostPanelOrUndefined: () => undefined,
@@ -496,6 +497,7 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
       resolveResume: async () => ({
         sessionId: "any",
@@ -537,6 +539,7 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
         pills: { update: () => undefined },
         taskRegistry: fakeTaskRegistry,
         followUpQueue: undefined,
+        activityStore: undefined as never,
       }),
       buildTooling: (_mcp, _lsp, _lspNav, _git, _astGrep, _slog, taskRegistry) => {
         toolingCalledWith = taskRegistry
@@ -583,6 +586,7 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
       deriveMcpPillServers: () => {
         callCount += 1
@@ -635,6 +639,7 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
       buildTooling: () => {
         throw new Error("tooling boom")
@@ -688,6 +693,7 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
+        astGrepTools: [],
       }),
       resolveResume: async () => {
         throw loadErr

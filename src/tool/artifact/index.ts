@@ -18,6 +18,7 @@
  */
 
 import { z } from "zod"
+import { sliceWholeChars } from "@/shared/slice-whole-chars"
 import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "../types"
 
 /** Duck-typed mirror of `@/artifact`'s `ArtifactKind` (closed). */
@@ -70,7 +71,7 @@ const err = (output: string, failure: ToolFailure): ToolResult => ({
  *  short) and the preview URL are NOT truncated. */
 const RENDER_FIELD_MAX = 256
 const clampField = (s: string): string =>
-  s.length > RENDER_FIELD_MAX ? `${s.slice(0, RENDER_FIELD_MAX)}…(${s.length})` : s
+  s.length > RENDER_FIELD_MAX ? `${sliceWholeChars(s, RENDER_FIELD_MAX)}…(${s.length})` : s
 
 const renderArtifact = (a: ArtifactView): string => {
   const label = a.label !== undefined && a.label.length > 0 ? ` "${clampField(a.label)}"` : ""

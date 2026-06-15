@@ -140,11 +140,9 @@ describe("quanta-bench CLI e2e", () => {
     expect(out.toLowerCase()).toContain("--allow-remote-secrets")
   })
 
-  test("grade --mode full --allow-remote-secrets is gated (executor pending hardening)", async () => {
-    const { code, out } = await run(
+  test("grade --mode full --allow-remote-secrets --dry-run plans WITHOUT launching/shipping", async () => {
+    const { out } = await run(
       "grade",
-      "--predictions",
-      join(dir, "a.json"),
       "--backend",
       "ec2",
       "--dataset",
@@ -152,10 +150,11 @@ describe("quanta-bench CLI e2e", () => {
       "--mode",
       "full",
       "--allow-remote-secrets",
+      "--dry-run",
     )
-    expect(code).not.toBe(0)
-    // honest: full-remote executor deliberately deferred pending §6 hardening
-    expect(out.toLowerCase()).toMatch(/not yet|pending|hardening|§6|adr-0536/)
+    // executor wired: prints the plan, and the plan documents the access-token-only posture
+    expect(out.toLowerCase()).toContain("dry-run")
+    expect(out.toLowerCase()).toMatch(/access_token only|refresh.*dropped/)
   })
 
   test("grade with unknown backend errors out (non-zero)", async () => {

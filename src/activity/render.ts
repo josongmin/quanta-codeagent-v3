@@ -62,6 +62,7 @@ const headerLine = (s: ActivitySnapshot): string => {
   const parts = [`${a.agents} agent${a.agents === 1 ? "" : "s"}`, `${a.running} running`]
   if (a.stuck > 0) parts.push(`${a.stuck} stuck`)
   parts.push(`${fmtTokens(a.tokens)} tok`)
+  if (a.toolCalls > 0) parts.push(`${a.toolCalls} tool call${a.toolCalls === 1 ? "" : "s"}`)
   return `ACTIVITY  ${parts.join(" · ")}`
 }
 

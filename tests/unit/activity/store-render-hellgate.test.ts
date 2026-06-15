@@ -8,11 +8,13 @@
 
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentActivityEvent,
   createActivityStore,
   createWorkflowSink,
   materialize,
   reduceAll,
   renderActivity,
+  seedStoreFromSnapshot,
   type WorkflowEventLike,
   workflowCloseActivity,
   workflowToActivity,
@@ -173,5 +175,67 @@ describe("renderActivity", () => {
     const lines = renderActivity(build(events), { now: 0, maxRows: 4 })
     expect(lines.some((l) => l.includes("+6 more"))).toBe(true)
     expect(lines.filter((l) => l.includes("agent-")).length).toBe(4)
+  })
+
+  test("C7 — header surfaces tool-call total when > 0 (design parity)", () => {
+    const s = build([
+      { type: "node_open", node: { id: "a", parentId: null, kind: "agent", label: "x" } },
+      { type: "node_metric", id: "a", toolCallsDelta: 340 },
+    ])
+    expect(renderActivity(s, { now: 0 })[0]).toContain("340 tool calls")
+    // a run with no tool calls does NOT clutter the header
+    const none = build([{ type: "node_open", node: { id: "b", parentId: null, kind: "agent", label: "y" } }])
+    expect(renderActivity(none, { now: 0 })[0]).not.toContain("tool call")
+  })
+
+  test("C8 — idle status renders the 💤 glyph (daemon-between-wakes vocabulary)", () => {
+    const s = build([
+      { type: "node_open", node: { id: "d", parentId: null, kind: "daemon", label: "indexer" } },
+      { type: "node_status", id: "d", status: "idle" },
+    ])
+    expect(renderActivity(s, { now: 0 }).find((l) => l.includes("indexer"))).toContain("💤")
+  })
+})
+
+// ── D. seedStoreFromSnapshot — non-mutating view base ──────────────────────
+
+describe("seedStoreFromSnapshot", () => {
+  const fixture: AgentActivityEvent[] = [
+    { type: "node_open", node: { id: "run", parentId: null, kind: "workflow", label: "review", at: 5 } },
+    { type: "node_open", node: { id: "p1", parentId: "run", kind: "phase", label: "Find" } },
+    { type: "node_open", node: { id: "a1", parentId: "p1", kind: "agent", label: "find", meta: { m: "1" } } },
+    { type: "node_metric", id: "a1", tokensDelta: 120, toolCallsDelta: 3 },
+    { type: "node_status", id: "a1", status: "stuck", stuck: { reason: "waiting_approval", detail: "x" } },
+    { type: "node_open", node: { id: "a2", parentId: "p1", kind: "agent", label: "verify" } },
+    { type: "node_status", id: "a2", status: "done", at: 99 },
+  ]
+
+  test("D1 — round-trips a snapshot: byId / roots / childIds / aggregate identical", () => {
+    const original = materialize(reduceAll(fixture))
+    const seeded = seedStoreFromSnapshot(original).snapshot()
+    expect(seeded.roots).toEqual(original.roots)
+    expect([...seeded.childIds.entries()]).toEqual([...original.childIds.entries()])
+    expect(seeded.aggregate).toEqual(original.aggregate)
+    // node-level fidelity: status (incl. DERIVED container), counters, stuck, stamps
+    for (const [id, n] of original.byId) {
+      const s = seeded.byId.get(id)
+      expect(s?.status).toBe(n.status)
+      expect(s?.tokens).toBe(n.tokens)
+      expect(s?.stuck).toEqual(n.stuck)
+      expect(s?.startedAt).toBe(n.startedAt)
+      expect(s?.endedAt).toBe(n.endedAt)
+    }
+  })
+
+  test("D2 — the seed is INDEPENDENT: mutating it does not touch the source store", () => {
+    const source = createActivityStore()
+    source.emitAll(fixture)
+    const before = source.snapshot()
+    const view = seedStoreFromSnapshot(source.snapshot())
+    view.emit({ type: "node_open", node: { id: "extra", parentId: null, kind: "subagent", label: "live" } })
+    // the source is untouched (no "extra" leaked back) — the /activity non-pollution invariant
+    expect(source.snapshot().byId.has("extra")).toBe(false)
+    expect([...source.snapshot().byId.keys()]).toEqual([...before.byId.keys()])
+    expect(view.snapshot().byId.has("extra")).toBe(true)
   })
 })
