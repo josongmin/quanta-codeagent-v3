@@ -3,23 +3,23 @@ title: ADR-0230 Realtime WebSocket — 8-method port (Codex streaming)
 section: 2
 subsystem: Realtime streaming
 order: 230
-maturity: L1
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
-labels: [absorbed:codex, surface:core]
+labels: [absorbed:codex, surface:core, default-off]
 depends_on: []
 surface_integration:
   cli: full
-  web: na
+  web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-15"
   evidence:
-    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "Pure internal WS port primitive (port/adapter/sdp/codec), zero tree imports, audio marker-only; no user-visible affordance on any surface."
+    cli: "LIVE transport under /voice-live (QUANTA_VOICE_LIVE): src/realtime/voice-session/openai-realtime-adapter.ts builds a RealtimePort over createBunWebSocketAdapter; default-session.ts drives it; voice-live-wire.ts wires the session into the CLI. The root @/realtime port is the WS layer beneath ADR-0442 realtime-voice-session."
+    web: "LIVE on the web daemon — src/apps/web-daemon/server.ts + ws-adapter.ts consume the @/realtime port for the browser realtime channel (the prior 'zero tree imports' note was stale)."
 purpose: |
   Codex Desktop 8 realtime WS methods 흡수 (connect/send/onMessage/negotiate/
   audioStart/audioStop/close/status). Bun native `globalThis.WebSocket`
@@ -36,15 +36,23 @@ evidence:
     - src/realtime/sdp-negotiator.ts
     - src/realtime/audio-codec.ts
     - src/realtime/index.ts
+    - src/realtime/voice-session/openai-realtime-adapter.ts
+    - src/apps/cli/repl/voice-live-wire.ts
+    - src/apps/web-daemon/ws-adapter.ts
   adrs: [230]
   tests:
-    unit: [tests/unit/realtime/realtime-hellgate.test.ts]
+    unit:
+      - tests/unit/realtime/realtime-hellgate.test.ts
+      - tests/unit/realtime-list-voices.test.ts
 knobs: []
 deliberate_hold:
   reason: |
-    Actual WebRTC media handoff + real audio encode/decode 후속 슬라이스.
-    SDP는 text-level negotiation만, audio-codec은 marker만.
+    LIVE WS transport (jun-15 truth-up — the prior "0 tree imports" hold was
+    STALE; consumed by voice-session/openai-realtime-adapter + web-daemon
+    ws-adapter). RESIDUAL = media depth only: SDP is text-level negotiation and
+    audio-codec is marker-only (no real WebRTC RTCPeerConnection / Opus
+    encode-decode yet).
   promotion_path: |
-    Follow-up: WebRTC RTCPeerConnection adapter + Opus encoder/decoder
-    + voice slice (ADR-0202/0208)과 통합.
-notes: 'Default-OFF: 트리 어디서도 @/realtime import 0. 19 hellgate / 1058 expects.'
+    Add a WebRTC RTCPeerConnection adapter + real Opus encoder/decoder for
+    binary audio (the WS signalling/transport layer is already live).
+notes: 'LIVE under /voice-live (QUANTA_VOICE_LIVE) + web-daemon. 28 hellgate / 1078 expects. Default-OFF at the surface: QUANTA_VOICE_LIVE unset ⇒ no session constructed (byte-identical); the port itself self-gates via its consumers.'

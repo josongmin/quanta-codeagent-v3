@@ -8,6 +8,7 @@
  * NEVER throws — detection / spawn / parse faults collapse to ok:false.
  */
 import { z } from "zod"
+import { applyLocalEnv, DEFAULT_ENV_ALLOWLIST, scrubEnv } from "@/runtime"
 import { errMessage } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
 import { detectToolchain } from "./detect"
@@ -22,6 +23,7 @@ export interface TestRunPort {
     command: readonly string[],
     cwd: string,
     signal?: AbortSignal,
+    localEnv?: ToolContext["localEnv"],
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>
 }
 
@@ -56,10 +58,16 @@ const readCapped = async (stream: ReadableStream<Uint8Array>, maxBytes: number):
 }
 
 export const defaultTestRunPort: TestRunPort = {
-  async run(command, cwd, signal) {
+  async run(command, cwd, signal, localEnv) {
     const [cmd, ...args] = command
     if (cmd === undefined) return { stdout: "", stderr: "empty command", exitCode: -1 }
-    const child = Bun.spawn([cmd, ...args], { cwd, stdout: "pipe", stderr: "pipe", ...(signal ? { signal } : {}) })
+    const child = Bun.spawn([cmd, ...args], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: applyLocalEnv(scrubEnv(), localEnv, DEFAULT_ENV_ALLOWLIST),
+      ...(signal ? { signal } : {}),
+    })
     const [stdout, stderr, exitCode] = await Promise.all([
       readCapped(child.stdout, MAX_STREAM_BYTES),
       readCapped(child.stderr, MAX_STREAM_BYTES),
@@ -126,9 +134,10 @@ export const runToolchain = async (
   cwd: string,
   port: TestRunPort = defaultTestRunPort,
   signal?: AbortSignal,
+  localEnv?: ToolContext["localEnv"],
 ): Promise<TestRunResult> => {
   try {
-    const { stdout, stderr, exitCode } = await port.run(tc.command, cwd, signal)
+    const { stdout, stderr, exitCode } = await port.run(tc.command, cwd, signal, localEnv)
     return parseFor(tc, stdout, stderr, exitCode)
   } catch {
     return { runner: tc.parser, passed: 0, failed: [{ name: "(test run faulted — see logs)" }], ok: false }
@@ -142,11 +151,20 @@ const CANRUN_PROBE_TIMEOUT_MS = 5_000
 /** Probe whether a command runs successfully (exit 0) in `cwd`, with a 5s
  *  ceiling so a wedged interpreter can't stall detection. Used by the detector's
  *  `canRun` to prefer pytest when it is installed. NEVER throws. */
-export const commandRunsOk = async (command: readonly string[], cwd: string): Promise<boolean> => {
+export const commandRunsOk = async (
+  command: readonly string[],
+  cwd: string,
+  localEnv?: ToolContext["localEnv"],
+): Promise<boolean> => {
   const [cmd, ...args] = command
   if (cmd === undefined) return false
   try {
-    const proc = Bun.spawn([cmd, ...args], { cwd, stdout: "ignore", stderr: "ignore" })
+    const proc = Bun.spawn([cmd, ...args], {
+      cwd,
+      stdout: "ignore",
+      stderr: "ignore",
+      env: applyLocalEnv(scrubEnv(), localEnv, DEFAULT_ENV_ALLOWLIST),
+    })
     const code = await Promise.race([
       proc.exited,
       new Promise<number>((r) => setTimeout(() => r(-1), CANRUN_PROBE_TIMEOUT_MS)),
@@ -201,7 +219,10 @@ export const makeRunTestsTool = (deps: RunTestsDeps = {}): Tool<Input> => {
       const cwd = input.cwd ?? ctx.cwd
       // Detection probes marker files THROUGH the FS jail (baseDir = cwd); the
       // canRun probe lets it prefer pytest over unittest when pytest is installed.
-      const existsPort = { fileExists: (name: string) => fs.fileExists(name, cwd), canRun: (c: readonly string[]) => commandRunsOk(c, cwd) }
+      const existsPort = {
+        fileExists: (name: string) => fs.fileExists(name, cwd),
+        canRun: (c: readonly string[]) => commandRunsOk(c, cwd, ctx.localEnv),
+      }
       let toolchain: Toolchain | null
       if (input.command !== undefined && input.command.length > 0) {
         toolchain = { kind: "node", command: input.command, parser: "generic" }
@@ -213,7 +234,7 @@ export const makeRunTestsTool = (deps: RunTestsDeps = {}): Tool<Input> => {
         return
       }
       try {
-        const result = await runToolchain(toolchain, cwd, port, ctx.signal)
+        const result = await runToolchain(toolchain, cwd, port, ctx.signal, ctx.localEnv)
         yield { type: "result", result: { ok: result.ok, output: render(toolchain, result) } }
       } catch (e) {
         yield err(`run_tests: ${errMessage(e)}`)

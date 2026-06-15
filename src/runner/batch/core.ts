@@ -81,12 +81,12 @@ export const loadSelectedInstances = async (
   }
 }
 
-/** Exit code is 0 iff every selected instance passed and no degraded/env-prep verdict slipped in. */
+/** Exit code is 0 iff every selected instance passed with an ok verdict. */
 export const computeExitCode = (results: readonly InstanceResult[]): number => {
   if (results.length === 0) return 0
   for (const result of results) {
     if (!result.passed) return 1
-    if (result.verdict === "degraded" || result.verdict === "env_prep_failed") return 1
+    if ((result.verdict ?? "ok") !== "ok") return 1
   }
   return 0
 }

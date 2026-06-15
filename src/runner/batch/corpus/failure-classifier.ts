@@ -24,6 +24,7 @@ import { getCachePathRe } from "./cache-pathspecs"
  *  exactly one bucket. */
 export type TerminationType =
   | "passed"
+  | "grader_invalid"
   | "harness_error"
   | "hung_stream"
   | "max_turns_exhausted"
@@ -91,6 +92,7 @@ const computeTermination = (
   events: TrajectoryEvent[] | null,
 ): TerminationType => {
   if (r.passed) return "passed"
+  if (r.verdict === "grader_invalid") return "grader_invalid"
   if (r.error !== undefined) return "harness_error"
   if (events === null) return "unknown"
   const end = lastSessionEnd(events)

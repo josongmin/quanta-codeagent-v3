@@ -47,6 +47,11 @@ export type SubagentBlock = {
    *  the shared instance (host-side cleanup is owned by the loop's cleanup
    *  hook, ADR-0011). */
   taskRegistry?: import("../../subagent").TaskRegistry
+  /** jun-15 P0-b — OPT-IN session Activity Spine store. When the surface provides
+   *  one, the tier-1 `run_workflow` tool streams its live phases/steps into it so
+   *  `/activity` shows the running multi-agent workflow. Absent ⇒ no activity
+   *  recorded (byte-identical default-OFF). */
+  activityStore?: import("../../activity").ActivityStore
   /** B1 — OPT-IN tool-namespacing strategy threaded into the child
    *  {@link createSubagentRunner}. When set, a forked child's filtered tool
    *  registry is rewritten so the model sees SCOPED tool names

@@ -53,24 +53,31 @@ export const verify = async (
   sandbox: string,
   deps: VerifyDeps,
 ): Promise<VerifyOutcome> => {
-  if (deps.pythonSwebench && instance.swebench) {
-    const evaluate = deps.pythonSwebench.evaluate
-    if (evaluate === undefined) {
+  // A swebench instance MUST be graded by the official Python harness. There is
+  // NO testCmd fallback for it: the dataset sets `testCmd:"true"` (a no-op that
+  // exits 0), so falling through to the local testCmd path below would FAKE a
+  // PASS for every instance. Refuse loudly instead — a missing/unwired harness
+  // is an infra error (harness_error), never a silent green.
+  if (instance.swebench) {
+    const ps = deps.pythonSwebench
+    if (ps?.evaluate === undefined) {
       return {
         passed: false,
-        error: "python swebench evaluator not wired",
+        error:
+          "swebench instance requires the official Python harness — REFUSING to fake-grade via testCmd. Set QUANTA_SWEBENCH_PYTHON=1 with an importable swebench (QUANTA_SWEBENCH_PYTHON_BIN).",
         command: `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`,
         exitCode: 1,
         failedTests: [],
-        logTail: "python swebench evaluator not wired",
+        logTail: "python swebench harness not wired — refused testCmd fake-grade",
         reportPath: "",
       }
     }
+    const evaluate = ps.evaluate
     // T01 (audit L5 H-5): forward the per-instance signal into the harness opts
     // so `evaluateWithPythonSwebench` can race its retry sleep against abort.
     // The `opts` is `unknown` at this seam (the harness module owns its shape);
     // we merge the signal as a typed extra without disturbing the rest.
-    const baseOpts = (deps.pythonSwebench.opts ?? {}) as Record<string, unknown>
+    const baseOpts = (ps.opts ?? {}) as Record<string, unknown>
     const harnessOpts = deps.signal !== undefined ? { ...baseOpts, signal: deps.signal } : baseOpts
     const r = await evaluate(instance, patch, harnessOpts)
     const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
@@ -106,7 +113,9 @@ export const verify = async (
       reportPath: "",
     }
   }
-  const test = await exec(instance.testCmd, sandbox, deps.timeoutMs)
+  const test = await exec(instance.testCmd, sandbox, deps.timeoutMs, {
+    ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+  })
   // Pytest summary parsing — exit code alone is unreliable when the shell
   // wrapper got SIGTERM'd (exit 143) AFTER pytest already printed its
   // summary. Trust the explicit summary line when present:

@@ -35,10 +35,16 @@ export interface WorkflowToActivityOpts {
 }
 
 /** Url-encode a dynamic id segment so `/` (or any reserved char) in a phase
- *  name / step id cannot break the `runId/phase/...` namespacing. */
-const seg = (s: string): string => encodeURIComponent(s)
-const phaseId = (runId: string, name: string): string => `${seg(runId)}/phase/${seg(name)}`
-const stepId = (runId: string, id: string): string => `${seg(runId)}/step/${seg(id)}`
+ *  name / step id cannot break the `runId/phase/...` namespacing. Exported so
+ *  the streaming sink (`store.ts`) mints byte-identical ids — the batch and
+ *  streaming paths MUST agree (pinned by the store drift ratchet). */
+export const wfSeg = (s: string): string => encodeURIComponent(s)
+export const wfRunId = (runId: string): string => wfSeg(runId)
+export const wfPhaseId = (runId: string, name: string): string => `${wfSeg(runId)}/phase/${wfSeg(name)}`
+export const wfStepId = (runId: string, id: string): string => `${wfSeg(runId)}/step/${wfSeg(id)}`
+const seg = wfSeg
+const phaseId = wfPhaseId
+const stepId = wfStepId
 
 /**
  * Translate a workflow event sequence into spine events. Emits the run root

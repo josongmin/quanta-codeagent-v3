@@ -196,7 +196,9 @@ const logInstanceSummary = (result: InstanceResult): void => {
       ? " DEGRADED"
       : verdictValue === "env_prep_failed"
         ? " ENV_PREP_FAILED"
-        : ""
+        : verdictValue === "grader_invalid"
+          ? " GRADER_INVALID"
+          : ""
   const mark = result.passed ? "PASS" : "FAIL"
   const tag = failureTag(result)
   const extra = result.error ? ` (${result.error})` : ""
@@ -357,6 +359,9 @@ const runSwebenchTask = async (
         maxTurns: deps.cfg.maxTurns,
         timeoutMs: deps.cfg.timeoutMs,
         ...(deps.pythonSwebench !== undefined ? { pythonSwebench: deps.pythonSwebench } : {}),
+        ...(deps.pythonSwebench !== undefined && instance.goldPatch !== undefined
+          ? { goldSanity: { mode: "on-fail" } }
+          : {}),
         ...(deps.repair !== undefined ? { repair: deps.repair } : {}),
       },
       deps.cfg.n,
@@ -456,7 +461,8 @@ const runDatasetMode = async (
   // Concurrency>1 overlaps patch-gen across tasks; Docker grading stays
   // serialised by the python-swebench mutex. Default 1 ⇒ byte-identical serial.
   const concurrency = resolveConcurrency()
-  if (concurrency > 1) logger.info(`bench: patch-gen concurrency=${concurrency} (grading serialised)`)
+  if (concurrency > 1)
+    logger.info(`bench: patch-gen concurrency=${concurrency} (grading serialised)`)
   const results = await mapWithConcurrency(selected, concurrency, (task) =>
     runSwebenchTask(task, taskDeps),
   )
@@ -565,10 +571,17 @@ const maybeRunDatasetMode = async (
 const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
   if (!gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")) return undefined
   if (!(await isPythonSwebenchAvailable())) {
-    logger.info(
-      'QUANTA_SWEBENCH_PYTHON=1 but `python -c "import swebench"` failed — falling back to local testCmd verifier.',
+    // FAIL LOUD — no silent fake fallback. The operator explicitly asked for
+    // real grading (QUANTA_SWEBENCH_PYTHON=1); silently degrading to the
+    // testCmd="true" no-op would fake a PASS for every swebench instance.
+    // Abort so a broken harness can never be mistaken for a green run.
+    logger.error(
+      'QUANTA_SWEBENCH_PYTHON=1 but `python -c "import swebench"` failed (60s probe). ' +
+        "REFUSING to fake-grade. Fix QUANTA_SWEBENCH_PYTHON_BIN / install swebench, " +
+        "or unset QUANTA_SWEBENCH_PYTHON. Aborting.",
     )
-    return undefined
+    exitFn(1)
+    return undefined // unreachable in prod (exitFn = process.exit)
   }
   const datasetName =
     argValue("--dataset-name") ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? undefined

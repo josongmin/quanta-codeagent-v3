@@ -11,6 +11,7 @@
  * only when `config.subagent.enableWorkflow` is set (QUANTA_WORKFLOW).
  */
 
+import { type ActivityStore, createWorkflowSink } from "@/activity"
 import {
   type AgentRunPort,
   type BudgetPort,
@@ -32,6 +33,10 @@ export interface RunWorkflowToolDeps {
   readonly maxAgents?: number
   /** Optional shared token budget. */
   readonly budget?: BudgetPort
+  /** jun-15 P0-b — OPTIONAL session activity store. When present, the run streams
+   *  its phases/steps into the Agent Activity Spine so `/activity` shows the live
+   *  multi-agent run. ABSENT ⇒ no activity recorded (byte-identical default). */
+  readonly activityStore?: ActivityStore
 }
 
 /** One-line per-step summary for the model. */
@@ -76,13 +81,26 @@ export const createRunWorkflowTool = (deps: RunWorkflowToolDeps): Tool<WorkflowS
         yield { type: "result", result: { ok: false, output: `invalid workflow spec: ${detail}` } }
         return
       }
+      // jun-15 P0-b — bridge the run into the Activity Spine when a session store
+      // is injected. The sink maps each WorkflowEvent → spine event (same mapping
+      // as the batch producer; pinned by the store drift ratchet). NO behaviour
+      // change when absent.
+      const act =
+        deps.activityStore !== undefined
+          ? createWorkflowSink(deps.activityStore, {
+              runId: ctx.toolCallId ?? "workflow",
+              label: parsed.data.phases[0]?.name ?? "workflow",
+            })
+          : undefined
       const result = await runWorkflow(compileWorkflowSpec(parsed.data), {
         agentRun: deps.agentRun,
         ...(deps.concurrency !== undefined ? { concurrency: deps.concurrency } : {}),
         ...(deps.maxAgents !== undefined ? { maxAgents: deps.maxAgents } : {}),
         ...(deps.budget !== undefined ? { budget: deps.budget } : {}),
+        ...(act !== undefined ? { sink: { emit: (e) => act.emit(e) } } : {}),
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
       })
+      act?.close(result.ok)
       yield { type: "result", result: { ok: result.ok, output: summarize(parsed.data, result) } }
     },
   })

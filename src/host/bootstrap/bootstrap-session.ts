@@ -400,6 +400,7 @@ export const bootstrapSession = async (
       pills: lifecyclePills,
       taskRegistry: lifecycleTaskRegistry,
       followUpQueue: lifecycleFollowUpQueue,
+      activityStore: lifecycleActivityStore,
     } = deps.buildLifecycleBundle(featureCfg)
 
     // ADR-0432 — session budget meter for the self-edit memory write-guard.
@@ -425,6 +426,7 @@ export const bootstrapSession = async (
       lifecycleTaskRegistry,
       features.metrics,
       budgetMeter !== undefined ? () => budgetMeter.remainingPercent() : undefined,
+      lifecycleActivityStore,
     )
 
     const mcpSurface = deps.buildMcpSurfaceInfo({
@@ -546,6 +548,7 @@ export const bootstrapSession = async (
       mcpSurface,
       lifecyclePills,
       lifecycleTaskRegistry,
+      lifecycleActivityStore,
       lifecycleFollowUpQueue,
       sessionId,
       history,

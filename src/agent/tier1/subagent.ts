@@ -83,9 +83,17 @@ const toTaskOutputPolicy = (p: WaitTimeoutPolicy): TaskOutputTimeoutPolicy => ({
 const workflowTools = (
   enabled: boolean,
   runner: ReturnType<typeof createSubagentRunner>,
+  activityStore: import("@/activity").ActivityStore | undefined,
 ): Tool[] =>
   enabled
-    ? [createRunWorkflowTool({ agentRun: subagentRunnerToAgentRunPort(runner, { depth: 1 }) })]
+    ? [
+        createRunWorkflowTool({
+          agentRun: subagentRunnerToAgentRunPort(runner, { depth: 1 }),
+          // jun-15 P0-b — thread the session Activity Spine store so live runs
+          // feed `/activity`. Absent ⇒ omitted ⇒ byte-identical (no recording).
+          ...(activityStore !== undefined ? { activityStore } : {}),
+        }),
+      ]
     : []
 
 /** Build the subagent block from `config.subagent`. Returns `undefined` when
@@ -165,7 +173,7 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     agentTool,
     taskOutputTool,
     createTaskStopTool(reg),
-    ...workflowTools(config.subagent.enableWorkflow === true, runner),
+    ...workflowTools(config.subagent.enableWorkflow === true, runner, config.subagent.activityStore),
     // GAP7-4 — `spawn_agents_on_csv` over the SAME runner (one child per CSV row,
     // ephemeral in-memory store). Default-OFF (QUANTA_SPAWN_AGENTS_CSV).
     ...(config.subagent.enableSpawnAgentsCsv === true

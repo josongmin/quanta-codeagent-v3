@@ -66,6 +66,11 @@ export interface PerCallSandboxConfig {
   /** Path-existence probe used to verify `sandbox-exec` presence on macOS at
    *  construction time. Default {@link existsSync}. */
   readonly exists?: (path: string) => boolean
+  /** Per-call write holes for tools that need an ephemeral scratch dir while
+   *  preserving read-only semantics for the workspace and the rest of /tmp.
+   *  Used by bash mode="read" to support shell here-doc/tempfile mechanics via
+   *  a caller-owned TMPDIR. */
+  readonly extraWritePaths?: ReadonlyArray<string>
 }
 
 /**
@@ -113,7 +118,11 @@ export const defaultPerCallSandbox = (
           degradeReason: avail.reason,
         }
       }
-      return wrapShellArgv(argv, cwd, { profile }, { platform, sandboxExecPath })
+      const policy =
+        cfg.extraWritePaths !== undefined && cfg.extraWritePaths.length > 0
+          ? { profile, extraWritePaths: cfg.extraWritePaths }
+          : { profile }
+      return wrapShellArgv(argv, cwd, policy, { platform, sandboxExecPath })
     },
     availability: () => avail,
   }

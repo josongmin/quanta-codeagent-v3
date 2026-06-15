@@ -22,6 +22,10 @@ export interface SubagentConfigAssembleInput {
    *  into `buildSessionFeatures`. Unset ⇒ the loop mints a fresh one and
    *  behavior is byte-identical to today. */
   taskRegistry?: TaskRegistry | undefined
+  /** jun-15 P0-b — optional session Activity Spine store. Threaded onto the
+   *  subagent config so `run_workflow` streams its live phases/steps into the
+   *  `/activity` view. Unset ⇒ no recording (byte-identical). */
+  activityStore?: import("@/activity").ActivityStore | undefined
   /** ADR-0041 — when true, the six-tool parallel-worker router
    *  (`spawn_agent` / `wait_agent` / `close_agent` / `exec_command` /
    *  `write_stdin` / `send_input`) is assembled ALONGSIDE the trio (they share
@@ -62,6 +66,9 @@ export const buildSubagentConfigCore = (
   }
   if (input.taskRegistry !== undefined) {
     out.taskRegistry = input.taskRegistry
+  }
+  if (input.activityStore !== undefined) {
+    out.activityStore = input.activityStore
   }
   if (input.enable6Tools === true) {
     out.enable6Tools = true

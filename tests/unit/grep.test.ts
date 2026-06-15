@@ -64,6 +64,13 @@ describe("grepTool", () => {
     expect(result.output).toBe("1:const needle = 1")
   })
 
+  test("path argument rejects a whitespace-joined multi-path string before spawning rg", async () => {
+    const { result } = await collect({ pattern: "needle", path: "a.ts sub" })
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain("grep path must name one existing file or directory")
+    expect(result.output).toContain("received: a.ts sub")
+  })
+
   test("no matches returns ok with (no matches)", async () => {
     const { result } = await collect({ pattern: "zzz_absent_zzz" })
     expect(result.ok).toBe(true)

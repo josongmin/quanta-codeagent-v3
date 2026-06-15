@@ -60,6 +60,10 @@ function* walk(dir: string): Generator<string> {
 const isExempt = (path: string): boolean =>
   path.endsWith("src/apps/cli/cli-knobs-accessor.ts") ||
   path.endsWith("src/apps/cli/mcp-server-setup.ts") ||
+  // ADR-0312 — the reverse-webhook HOST entry, like mcp-server-setup, reads
+  // process.env at the composition root (strict QUANTA_GITHUB_WEBHOOK gate +
+  // secret/port/session) before any assembly. Same exemption class.
+  path.endsWith("src/apps/cli/webhook-server-setup.ts") ||
   path.includes("/apps/bench/") ||
   path.includes("/runner/batch/eval/") ||
   path.includes("/apps/agent/eval/")

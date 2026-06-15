@@ -24,6 +24,7 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { createActivityStore, fleetToActivity, renderActivity } from "@/activity"
 import { errMessage, logger, runtimeConfig } from "@/shared"
 import { renderAgentFleet } from "../agents-fleet-panel"
 import { backgroundCmd } from "../background-cmd"
@@ -445,6 +446,29 @@ const branchesCmd: SlashCommand = {
  *  output is deterministic under test. Absent slot ⇒ "not wired" + exit 0
  *  (default-OFF byte-identical). Closes the agent-state observability north-star
  *  for the fleet of background subagents. */
+/** `/activity` (jun-15 P0-b) — the unified Activity tree (Agent Activity Spine).
+ *  Builds a spine snapshot from the live in-process fleet (`ctx.agents`) and
+ *  renders the zoomable L0→L2 tree with glyphs + inline why-stuck. Today this
+ *  surfaces the subagent fleet; workflow runs + side-agent daemons feed the
+ *  SAME spine once their producers are wired (P0-b cont.), so this view scales
+ *  to all agent kinds without a new surface. Absent slot ⇒ "not wired" + exit 0. */
+const activityCmd: SlashCommand = {
+  name: "/activity",
+  describe: "Unified activity tree (agents/workflows/daemons) with inline why-stuck",
+  category: "loop",
+  async run(_args, ctx) {
+    if (ctx.agents === undefined) {
+      ctx.out("/activity: not wired in this surface\n")
+      return 0
+    }
+    const store = createActivityStore()
+    store.emitAll(fleetToActivity(ctx.agents()))
+    const now = ctx.now?.() ?? Date.now()
+    ctx.out(`${renderActivity(store.snapshot(), { now }).join("\n")}\n`)
+    return 0
+  },
+}
+
 const agentsCmd: SlashCommand = {
   name: "/agents",
   describe:
@@ -991,6 +1015,7 @@ export const buildSurfaceSlashCommands = (
   workingStateCmd,
   historyCmd,
   branchesCmd,
+  activityCmd,
   agentsCmd,
   // ADR-0231 — `/radar` proposal queue. Always in the registry; the command
   // itself prints "not wired" + exit 0 when `ctx.radar` is absent (default-OFF

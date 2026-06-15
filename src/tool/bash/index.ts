@@ -1,6 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { z } from "zod"
 import { maybeEmitPassiveVcs, type PassiveVcsHookCtx } from "@/git/passive-classify"
-import { type OsSandboxProfile, runShell } from "@/runtime"
+import { type OsSandboxProfile, runShell, type ShellOptions } from "@/runtime"
 import { type BashBgRegistry, getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { classifyCommandShape } from "@/security"
 import { statFile } from "@/storage"
@@ -10,6 +13,7 @@ import {
   renderStaleReminder,
   staleAfterBash,
 } from "../stale-read-guard"
+import { lowerSimpleHereDocForReadMode } from "./heredoc-lowering"
 import type {
   HITLTier,
   SandboxViolationReason,
@@ -99,6 +103,7 @@ const MAX_BG_PLACEHOLDER_OUTPUT = 30_000
  *  smaller `STDERR_TAIL_CAP` (2000) as a defense-in-depth backstop, so this
  *  cap only bounds the per-tool attachment size. */
 const STDERR_CAP = 4_000
+const READ_MODE_TMP_PREFIX = "quanta-bash-read-"
 
 /**
  * ADR-0297 — sandbox-driven HITL. The previous `ALWAYS_CONFIRM_PATTERNS`
@@ -221,6 +226,7 @@ const deriveSandboxViolation = (
  *                              this ToolResult and return (fail-closed). */
 const acquirePerCallPort = (
   mode: "read" | "write",
+  opts?: { readonly extraWritePaths?: ReadonlyArray<string> },
 ):
   | {
       readonly port: ReturnType<ReturnType<typeof getBashPerCallSandboxFactory>>
@@ -232,7 +238,10 @@ const acquirePerCallPort = (
     }
   | { readonly port?: undefined; readonly unavailableResult?: undefined } => {
   if (mode !== "read") return {}
-  const port = getBashPerCallSandboxFactory()("read-only")
+  const port = getBashPerCallSandboxFactory()(
+    "read-only",
+    opts?.extraWritePaths !== undefined ? { extraWritePaths: opts.extraWritePaths } : undefined,
+  )
   const avail = port.availability()
   if (!avail.supported) {
     return {
@@ -244,6 +253,35 @@ const acquirePerCallPort = (
     }
   }
   return { port }
+}
+
+interface ReadModeTempScope {
+  readonly path: string
+  readonly localEnv: NonNullable<ShellOptions["localEnv"]>
+  readonly extraWritePaths: readonly string[]
+  readonly cleanup: () => void
+}
+
+const withTrailingSlash = (path: string): string => (path.endsWith("/") ? path : `${path}/`)
+
+/** Shells implement here-docs and Python/Ruby/etc. implement tempfiles by
+ *  writing under TMPDIR. A strict read-only Seatbelt profile therefore needs a
+ *  narrow caller-owned scratch directory, not broad `/tmp` write access. */
+const createReadModeTempScope = (
+  mode: "read" | "write",
+  baseLocalEnv: ShellOptions["localEnv"],
+): ReadModeTempScope | undefined => {
+  if (mode !== "read") return undefined
+  const path = mkdtempSync(join(tmpdir(), READ_MODE_TMP_PREFIX))
+  return {
+    path,
+    extraWritePaths: [path],
+    localEnv: {
+      vars: { ...(baseLocalEnv?.vars ?? {}), TMPDIR: withTrailingSlash(path) },
+      pathPrepend: baseLocalEnv?.pathPrepend ?? [],
+    },
+    cleanup: () => rmSync(path, { recursive: true, force: true }),
+  }
 }
 
 /** A mutable holder the per-call wrap records its outcome into, so the bash
@@ -497,6 +535,7 @@ const runShellWithEscalation = async (
   // worktree is entered, else `ctx.cwd` (byte-identical legacy). Computed once in
   // `bashExecute` so the escalation re-run uses the SAME cwd.
   cwd: string,
+  sandboxLocalEnv?: NonNullable<ShellOptions["localEnv"]>,
 ): Promise<{ readonly result: EscalatableShellResult; readonly note?: string }> => {
   const wrapOutcome: PerCallWrapOutcome = { sandboxApplied: false }
   // Build the runShell options ONCE so an approved unsandboxed re-run can
@@ -511,8 +550,17 @@ const runShellWithEscalation = async (
     ...(ctx.localEnv ? { localEnv: ctx.localEnv } : {}),
   } as const
 
-  const r = await runShell(cmd, {
+  const sandboxShellOpts: ShellOptions = {
     ...baseShellOpts,
+    ...(sandboxLocalEnv !== undefined ? { localEnv: sandboxLocalEnv } : {}),
+  }
+  const sandboxCommand =
+    input.mode === "read" && perCallPort !== undefined
+      ? lowerSimpleHereDocForReadMode(cmd).command
+      : cmd
+
+  const r = await runShell(sandboxCommand, {
+    ...sandboxShellOpts,
     ...(perCallPort !== undefined
       ? { perCallWrap: buildPerCallWrap(perCallPort, wrapOutcome) }
       : {}),
@@ -593,6 +641,20 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // delegate to the bg-registry path. The default `"kill"` falls through to
   // the legacy `runShell` branch BYTE-IDENTICALLY.
   if (input.timeout_behavior === "background") {
+    if (mode === "read") {
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: "[sandbox unavailable]\nread-mode-background-unsupported",
+          failure: {
+            mode: "sandbox_unavailable",
+            reason: "read-mode-background-unsupported",
+          },
+        },
+      }
+      return
+    }
     yield* buildBackgroundResult(
       getBashBgRegistry(),
       cmd,
@@ -608,18 +670,34 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
 
   // ADR-0295 — mode="read" per-call sandbox short-circuit. The acquire helper
   // probes `availability()`; an unsupported host returns a fail-closed result.
-  const acq = acquirePerCallPort(mode)
-  if (acq.unavailableResult !== undefined) {
-    yield { type: "result", result: acq.unavailableResult }
-    return
-  }
-  const perCallPort = acq.port
+  const tempScope = createReadModeTempScope(mode, ctx.localEnv)
+  let escalated: { readonly result: EscalatableShellResult; readonly note?: string }
+  try {
+    const acq = acquirePerCallPort(
+      mode,
+      tempScope !== undefined ? { extraWritePaths: tempScope.extraWritePaths } : undefined,
+    )
+    if (acq.unavailableResult !== undefined) {
+      yield { type: "result", result: acq.unavailableResult }
+      return
+    }
+    const perCallPort = acq.port
 
-  // PR-5 / ADR-0081 + ADR-0235 + RFC jun-6 — run the command (forwarding the
-  // optional observer / snapshot / proxy / local-env seams) AND offer the
-  // user-gated sandbox-block escalation when a `mode="read"` sandboxed call
-  // exits nonzero. The helper keeps `bashExecute` under the complexity cap.
-  const escalated = await runShellWithEscalation(cmd, ctx, input, perCallPort, effectiveCwd)
+    // PR-5 / ADR-0081 + ADR-0235 + RFC jun-6 — run the command (forwarding the
+    // optional observer / snapshot / proxy / local-env seams) AND offer the
+    // user-gated sandbox-block escalation when a `mode="read"` sandboxed call
+    // exits nonzero. The helper keeps `bashExecute` under the complexity cap.
+    escalated = await runShellWithEscalation(
+      cmd,
+      ctx,
+      input,
+      perCallPort,
+      effectiveCwd,
+      tempScope?.localEnv,
+    )
+  } finally {
+    tempScope?.cleanup()
+  }
 
   const { status, body } = formatRunBody(escalated.result)
   const escalationNote = escalated.note

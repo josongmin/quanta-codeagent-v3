@@ -46,6 +46,31 @@ describe("ADR-0199 — Seatbelt verbatim parity (HELL-SB-01..04, 10)", () => {
     expect(out.includes("(allow file-write*")).toBe(false)
   })
 
+  test("HELL-SB-02c: read-only honors explicit scoped extraWritePaths only", () => {
+    const out = compileSeatbeltProfile({
+      profile: "read-only",
+      extraWritePaths: ["/var/quanta-scope"],
+    }, WS) as string
+    expect(out.includes('(subpath "/ws")')).toBe(false)
+    expect(
+      out.includes(
+        '(allow file-write* (literal "/var/quanta-scope") (subpath "/var/quanta-scope"))',
+      ),
+    ).toBe(true)
+  })
+
+  test("HELL-SB-02d: /tmp extraWritePaths include the /private/tmp Seatbelt alias", () => {
+    const out = compileSeatbeltProfile({
+      profile: "read-only",
+      extraWritePaths: ["/tmp/quanta-scope"],
+    }, WS) as string
+    const writeLine = out.split("\n").find((l) => l.startsWith("(allow file-write*"))
+    expect(writeLine).toContain('(literal "/tmp/quanta-scope")')
+    expect(writeLine).toContain('(subpath "/tmp/quanta-scope")')
+    expect(writeLine).toContain('(literal "/private/tmp/quanta-scope")')
+    expect(writeLine).toContain('(subpath "/private/tmp/quanta-scope")')
+  })
+
   test('HELL-SB-03: workspace path with `"` and `\\` escapes cleanly — no premature sexp close', () => {
     const tricky = `/we"ird\\path`
     const out = compileSeatbeltProfile({ profile: "workspace-write" }, tricky) as string

@@ -5,6 +5,7 @@
  * `@/apps/bench` / `@/apps/agent` imports (enforced by biome + hellgate).
  */
 
+import { createActivityStore } from "@/activity"
 import type { AgentConfig } from "@/agent"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
@@ -54,6 +55,7 @@ export const buildFakeBootstrapDeps = (
       pills: { update: () => undefined },
       taskRegistry: undefined,
       followUpQueue: undefined,
+      activityStore: createActivityStore(),
     }),
     deriveMcpPillServers: () => [],
     buildCostPanelOrUndefined: () => undefined,

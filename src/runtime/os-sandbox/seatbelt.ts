@@ -17,7 +17,7 @@ import type { SandboxPolicy } from "./types"
  *   (allow file-read*)
  *   ;; per-profile FS rules
  *   (allow file-read* (subpath "<workspace>") ...extraReadPaths)
- *   (allow file-write* (subpath "<workspace>") ...extraWritePaths)   ; not on read-only
+ *   (allow file-write* (subpath "<workspace>") ...extraWritePaths)   ; read-only only honors explicit extraWritePaths
  *   ;; network
  *   (deny network*)  ; or (allow network*)
  *
@@ -56,7 +56,11 @@ export const compileSeatbeltProfile = (
   const allowNetwork = policy.profile === "workspace-write-net" || policy.allowNetwork === true
 
   // Resolve extra write paths — absolute kept verbatim, relative joined to workspace.
-  const extraWrites = (policy.extraWritePaths ?? []).map((p) => resolvePath(p, workspace))
+  const extraWrites = unique(
+    (policy.extraWritePaths ?? [])
+      .map((p) => resolvePath(p, workspace))
+      .flatMap((p) => seatbeltPathAliases(p)),
+  )
 
   const lines: string[] = [
     "(version 1)",
@@ -77,10 +81,15 @@ export const compileSeatbeltProfile = (
     lines.push('(deny file-read* (subpath "/tmp") (subpath "/private/tmp"))')
   }
 
-  // Writes: skipped entirely for read-only.
-  if (policy.profile !== "read-only") {
-    const writeSubpaths: string[] = [`(subpath "${escWs}")`]
-    for (const p of extraWrites) writeSubpaths.push(`(subpath "${escapeSbpl(p)}")`)
+  // Writes: read-only skips workspace writes but still honors explicit scoped
+  // extraWritePaths, used for caller-owned scratch dirs such as TMPDIR.
+  if (policy.profile !== "read-only" || extraWrites.length > 0) {
+    const writeSubpaths: string[] =
+      policy.profile !== "read-only" ? [`(subpath "${escWs}")`] : []
+    for (const p of extraWrites) {
+      const escaped = escapeSbpl(p)
+      writeSubpaths.push(`(literal "${escaped}")`, `(subpath "${escaped}")`)
+    }
     lines.push(";; workspace + extra writes")
     lines.push(`(allow file-write* ${writeSubpaths.join(" ")})`)
   }
@@ -101,4 +110,23 @@ const resolvePath = (p: string, workspace: string): string => {
   if (p.startsWith("/")) return p
   const ws = workspace.endsWith("/") ? workspace.slice(0, -1) : workspace
   return `${ws}/${p}`
+}
+
+const unique = (paths: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const path of paths) {
+    if (seen.has(path)) continue
+    seen.add(path)
+    out.push(path)
+  }
+  return out
+}
+
+const seatbeltPathAliases = (path: string): string[] => {
+  if (path === "/tmp") return [path, "/private/tmp"]
+  if (path.startsWith("/tmp/")) return [path, `/private${path}`]
+  if (path === "/private/tmp") return [path, "/tmp"]
+  if (path.startsWith("/private/tmp/")) return [path, path.slice("/private".length)]
+  return [path]
 }

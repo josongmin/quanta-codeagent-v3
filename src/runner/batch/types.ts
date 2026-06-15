@@ -6,6 +6,8 @@
  * are local to the app and intentionally minimal.
  */
 
+import type { LocalEnvSelection } from "@/runtime"
+
 /** Official SWE-bench instance metadata, present only for instances loaded
  *  from the real `swebench.verified` corpus. Consumed by the optional Python
  *  harness verifier (python-swebench.ts) — the local testCmd path ignores it. */
@@ -30,6 +32,8 @@ export interface Instance {
   problemStatement: string
   /** Optional one-time setup (deps, build) run inside the sandbox copy. */
   setupCmd?: string
+  /** Declared command environment applied to agent shell tools and bench execs. */
+  localEnv?: LocalEnvSelection
   /** Command whose exit code 0 == resolved. Run inside the sandbox copy. */
   testCmd: string
   /** Reference patch (informational; not applied by the TS harness). */
@@ -83,12 +87,14 @@ export interface InstanceResult {
   /**
    * Observation verdict (RFC-0002 §3/§8/§12). `"degraded"` ⇒ the trajectory
    * recorder failed under strict (eval) mode; `"env_prep_failed"` ⇒ T4
-   * harness env pre-prep (setupCmd) failed BEFORE the agent ran. Both are
+   * harness env pre-prep (setupCmd) failed BEFORE the agent ran;
+   * `"grader_invalid"` ⇒ the selected verifier rejected the reference patch,
+   * so the instance is not a fair measurement item. All non-`"ok"` verdicts are
    * EXCLUDED from `resolved/total` (the agent never got a fair shot). Absent
    * ⇒ `"ok"` (default-off runs never set this, preserving byte-identical
    * behavior).
    */
-  verdict?: "ok" | "degraded" | "env_prep_failed"
+  verdict?: "ok" | "degraded" | "env_prep_failed" | "grader_invalid"
   /** Absolute path of the captured `.patch` file (only when observing). */
   patchPath?: string
   /** Wall-clock instance duration in ms (only when observing). */

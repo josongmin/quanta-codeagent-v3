@@ -55,6 +55,7 @@ import type {
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
+import { validateGoldPatch } from "./gold-sanity"
 import {
   type BenchIssueHintMode,
   type BenchPosture,
@@ -161,6 +162,18 @@ export interface RunInstanceDeps {
     /** Custom retry policy (default: `DEFAULT_POLICY` — only empty-patch +
      *  infra-fail are retried). */
     policy?: RetryPolicy
+  }
+  /**
+   * Reference-patch sanity check. When enabled, the runner validates
+   * `instance.goldPatch` with the SAME verifier used for the agent patch. If
+   * the reference patch is rejected, the instance is marked
+   * `verdict:"grader_invalid"` and excluded from resolved/total. Default-OFF;
+   * callers that load a corpus with trustworthy gold patches opt in.
+   */
+  goldSanity?: {
+    /** `"on-fail"` validates only when the agent patch failed; `"always"`
+     *  validates every gold-bearing instance. Omitted ⇒ `"on-fail"`. */
+    mode?: "on-fail" | "always"
   }
 }
 
@@ -644,7 +657,12 @@ export const prepareReproTestDetailed = async (
   const generate = deps.generate ?? generateReproTests
   const execute = deps.execute ?? executeReproTests
   const select = deps.select ?? selectReproTest
-  const execPort = deps.exec ?? execArgv
+  const execPort =
+    deps.exec ??
+    ((argv, cwd, timeoutMs) =>
+      execArgv(argv, cwd, timeoutMs, {
+        ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+      }))
   const writeFile =
     deps.writeFile ??
     (async (path: string, content: string): Promise<void> => {
@@ -910,6 +928,7 @@ export const buildConfig = (
       messages,
       system: buildSystemPrompt(sandbox),
       cwd: sandbox,
+      ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
       maxTurns: deps.maxTurns,
       signal,
       onConfirm: async () => false,
@@ -1182,6 +1201,13 @@ const reproResultExtra = (
   reproTest: BenchReproTestTelemetry | undefined,
 ): Partial<InstanceResult> => (reproTest === undefined ? {} : { reproTest })
 
+const shouldValidateGold = (
+  deps: RunInstanceDeps,
+  agentPassed: boolean,
+): boolean =>
+  deps.goldSanity !== undefined &&
+  (deps.goldSanity.mode === "always" || agentPassed === false)
+
 /**
  * Run one instance once: sandbox → (setup) → agent → verify → diff. Always
  * cleans up the temp dir. Never throws for an instance-level failure — it is
@@ -1275,11 +1301,18 @@ export const runInstanceOnce = async (
     // T01 (audit L5 H-5): thread the per-instance deadline signal into verify so
     // the official harness grading + its transient-crash retry sleep stop when
     // the instance deadline fires instead of cascading into the next instance.
-    const v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
+    let v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
 
     const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
+    if (shouldValidateGold(deps, v.passed)) {
+      const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
+      if (!gold.ok) {
+        v = { ...v, passed: false, error: gold.error }
+        extra.verdict = "grader_invalid"
+      }
+    }
     if (deps.observe && w.observer) {
-      extra.verdict = "ok"
+      extra.verdict ??= "ok"
       extra.durationMs = Date.now() - startedAt
       extra.patchPath = emitPatch(deps.observe, instance, w.observer, phase.patch)
       emitVerify(w.observer, v)

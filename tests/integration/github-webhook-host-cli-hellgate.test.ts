@@ -19,22 +19,25 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
+import { mkdtempSync, rmSync } from "node:fs"
 import { createServer, request as httpRequest, type Server } from "node:http"
-import { type AddressInfo } from "node:net"
-
+import type { AddressInfo } from "node:net"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
+  type PublishReactorWatchTriggerFn,
+  runWebhookServerCmd,
+  type WebhookServerCmdDeps,
+  type WebhookServerCmdIo,
+} from "@/apps/cli/webhook-server-setup"
+import {
+  createDeliveryStore,
   type WebhookHandle,
   type WebhookRequest,
   type WebhookResponse,
   type WebhookTransportPort,
 } from "@/integrations/github"
 import type { ProactiveTrigger } from "@/reactor"
-import {
-  runWebhookServerCmd,
-  type PublishReactorWatchTriggerFn,
-  type WebhookServerCmdDeps,
-  type WebhookServerCmdIo,
-} from "@/apps/cli/webhook-server-setup"
 
 // ── Constants ────────────────────────────────────────────────────────────
 const SECRET = "host-cli-webhook-secret"
@@ -189,11 +192,16 @@ const runHost = (
   publish: PublishReactorWatchTriggerFn,
   io: WebhookServerCmdIo,
   sessionId = "test-session",
+  extra?: Partial<WebhookServerCmdDeps>,
 ): { done: Promise<number>; stop: () => void } => {
   const deps: WebhookServerCmdDeps = {
     buildTransport: () => bound.transport,
     publish,
     pollIntervalMs: 5,
+    // Hermetic default: in-memory dedup (no real-fs write). Tests that need the
+    // DURABLE cross-restart behaviour pass `extra.buildDeliveryStore`.
+    buildDeliveryStore: () => createDeliveryStore(),
+    ...extra,
   }
   const prev = process.env.QUANTA_GITHUB_WEBHOOK_SESSION
   process.env.QUANTA_GITHUB_WEBHOOK_SESSION = sessionId
@@ -257,9 +265,7 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
     expect(call?.sessionId).toBe("wire-session")
     expect(call?.trigger.reason).toBe("pr_comment")
     expect(call?.trigger.evidence.kind).toBe("url")
-    expect(call?.trigger.evidence.value).toBe(
-      `https://github.com/octo/widget/pull/${PR_NUMBER}`,
-    )
+    expect(call?.trigger.evidence.value).toBe(`https://github.com/octo/widget/pull/${PR_NUMBER}`)
     expect(call?.trigger.simulatedMessage).toContain("@alice")
   })
 
@@ -273,7 +279,11 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
 
     const body = issueCommentPayload("@quanta hi")
     const forged = `sha256=${createHmac("sha256", "attacker").update(body).digest("hex")}`
-    const res = await postWebhook(bound.port(), body, deliveryHeaders(body, "forged-1", { sig: forged }))
+    const res = await postWebhook(
+      bound.port(),
+      body,
+      deliveryHeaders(body, "forged-1", { sig: forged }),
+    )
     expect(res.status).toBe(401)
 
     // let any (erroneous) pump cycle run, then assert nothing leaked
@@ -292,7 +302,11 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
     await waitUntil(() => bound.port() !== 0)
 
     const body = issueCommentPayload("@quanta hi")
-    const res = await postWebhook(bound.port(), body, deliveryHeaders(body, "nosig-1", { sig: null }))
+    const res = await postWebhook(
+      bound.port(),
+      body,
+      deliveryHeaders(body, "nosig-1", { sig: null }),
+    )
     expect(res.status).toBe(401)
 
     await new Promise<void>((r) => setTimeout(r, 30))
@@ -420,5 +434,86 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
     expect(code).toBe(0)
     expect(out.join("")).toContain("quanta webhook")
     expect(bound.port()).toBe(0)
+  })
+
+  // B2 (audit) — a publish that NEVER settles must not wedge the pump: the
+  // bounded publish-timeout logs + continues so a SUBSEQUENT trigger still
+  // lands. RED-on-injection: remove the timeout race ⇒ the hung publish blocks
+  // the loop forever and the 2nd event never publishes (test times out / fails).
+  test("PUMP LIVENESS: a hung publish times out and the next trigger still publishes", async () => {
+    process.env[GATE] = "1"
+    process.env[SECRET_ENV] = SECRET
+    const landed: string[] = []
+    let n = 0
+    const flaky: PublishReactorWatchTriggerFn = (opts) => {
+      n += 1
+      if (n === 1) return new Promise<void>(() => {}) // never settles (hang)
+      landed.push(opts.trigger.evidence.value)
+    }
+    const { io } = makeIo()
+    const host = runHost(bound, flaky, io, "live-session", { publishTimeoutMs: 40 })
+    await waitUntil(() => bound.port() !== 0)
+    const b1 = issueCommentPayload("@quanta first")
+    await postWebhook(bound.port(), b1, deliveryHeaders(b1, "live-1"))
+    const b2 = issueCommentPayload("@quanta second")
+    await postWebhook(bound.port(), b2, deliveryHeaders(b2, "live-2"))
+    // the 2nd publish must land despite the 1st hanging (pump not wedged)
+    await waitUntil(() => landed.length >= 1, 4000)
+    host.stop()
+    const code = await host.done
+    expect(code).toBe(0)
+    expect(landed.length).toBe(1) // exactly the 2nd; the 1st timed out + dropped
+  })
+
+  // B1 (audit) — durable delivery dedup MUST survive a host restart: a GitHub
+  // re-delivery (same X-GitHub-Delivery) after reboot is recognised and the
+  // trigger is NOT re-fired. RED-on-injection: swap the durable store for the
+  // ephemeral one ⇒ the 2nd run re-publishes (dedup state lost on restart).
+  test("DURABLE DEDUP across restart: re-delivered id after reboot is NOT re-fired", async () => {
+    process.env[GATE] = "1"
+    process.env[SECRET_ENV] = SECRET
+    // Drive the PRODUCTION DEFAULT store (no buildDeliveryStore injection) via an
+    // isolated QUANTA_CONFIG_DIR — so this also LOCKS that production picks the
+    // DURABLE flavour. RED-on-injection: revert the prod default to
+    // createDeliveryStore() ⇒ run 2 re-fires ⇒ this test fails.
+    const dir = mkdtempSync(join(tmpdir(), "wh-dedup-"))
+    const savedCfgDir = process.env.QUANTA_CONFIG_DIR
+    process.env.QUANTA_CONFIG_DIR = dir
+    const body = issueCommentPayload("@quanta review")
+    const headers = deliveryHeaders(body, "redeliver-1")
+    try {
+      // RUN 1 — fresh listener (a real boot), accept the delivery, publish once,
+      // flush durable state to disk (production default durable store).
+      const b1t = makeLoopbackTransport()
+      const spy1 = makeSpyPublish()
+      const io1 = makeIo()
+      const h1 = runHost(b1t, spy1.fn, io1.io, "dd-session", { buildDeliveryStore: undefined })
+      await waitUntil(() => b1t.port() !== 0)
+      const r1 = await postWebhook(b1t.port(), body, headers)
+      expect(r1.status).toBe(202)
+      await waitUntil(() => spy1.calls.length >= 1)
+      h1.stop()
+      await h1.done
+      expect(spy1.calls.length).toBe(1)
+
+      // RUN 2 — fresh listener (simulated RESTART), SAME config dir. The SAME
+      // delivery id must be recognised as already-seen ⇒ NO new publish.
+      const b2t = makeLoopbackTransport()
+      const spy2 = makeSpyPublish()
+      const io2 = makeIo()
+      const h2 = runHost(b2t, spy2.fn, io2.io, "dd-session", { buildDeliveryStore: undefined })
+      await waitUntil(() => b2t.port() !== 0)
+      const r2 = await postWebhook(b2t.port(), body, headers)
+      // dedup short-circuits at the slice → 202 "duplicate", and crucially no publish
+      expect(r2.status).toBe(202)
+      await new Promise<void>((r) => setTimeout(r, 60))
+      h2.stop()
+      await h2.done
+      expect(spy2.calls.length).toBe(0) // the teeth: restart did NOT re-fire
+    } finally {
+      if (savedCfgDir === undefined) delete process.env.QUANTA_CONFIG_DIR
+      else process.env.QUANTA_CONFIG_DIR = savedCfgDir
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

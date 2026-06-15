@@ -205,6 +205,10 @@ export type BuildToolingFactory = (
    *  guard was inert). Absent ⇒ byte-identical (the surface shim leaves the slot
    *  undefined and `buildMemoryExtras` builds no guard). */
   budgetRemainingPercent?: () => number,
+  /** jun-15 P0-b — the session Activity Spine store the bootstrap threads from
+   *  the lifecycle bundle so `run_workflow` records its live run into the SAME
+   *  instance `/activity` renders. Absent ⇒ no recording (byte-identical). */
+  activityStore?: import("@/activity").ActivityStore,
 ) => Tooling
 
 /** Resolve default-OFF feature flags + bridged MCP/LSP/git tools from the
@@ -339,6 +343,9 @@ export interface SessionBootstrapDeps {
     pills: BootstrapLifecyclePills
     taskRegistry: TaskRegistry | undefined
     followUpQueue: FollowUpQueue | undefined
+    /** jun-15 P0-b — session Activity Spine store shared by `run_workflow`
+     *  (writer) and `/activity` (reader). */
+    activityStore: import("@/activity").ActivityStore
   }
   readonly deriveMcpPillServers: (
     mcpTools: ReadonlyArray<{ name: string }>,
@@ -457,6 +464,8 @@ export interface SessionBootstrapResult {
   readonly mcpSurface: BootstrapMcpSurface | undefined
   readonly lifecyclePills: BootstrapLifecyclePills
   readonly lifecycleTaskRegistry: TaskRegistry | undefined
+  /** jun-15 P0-b — session Activity Spine store (shared writer/reader). */
+  readonly lifecycleActivityStore: import("@/activity").ActivityStore
   readonly lifecycleFollowUpQueue: FollowUpQueue | undefined
   readonly sessionId: string
   readonly history: readonly Message[]

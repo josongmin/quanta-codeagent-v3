@@ -24,7 +24,9 @@ export const runEnvPrep = async (
   timeoutMs: number,
 ): Promise<EnvPrepResult> => {
   if (!instance.setupCmd) return { ok: true }
-  const setup = await exec(instance.setupCmd, sandbox, timeoutMs)
+  const setup = await exec(instance.setupCmd, sandbox, timeoutMs, {
+    ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+  })
   if (setup.code === 0) return { ok: true }
   return { ok: false, code: setup.code, stderr: setup.stderr }
 }

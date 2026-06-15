@@ -10,12 +10,8 @@
  * ── What we can and cannot do locally ─────────────────────────────────────
  * Official grading (FAIL_TO_PASS / PASS_TO_PASS over the gold `test_patch`)
  * is only valid inside the official `swebench.harness.run_evaluation` Docker
- * harness. That is environment-blocked here, so this adapter deliberately
- * does NOT attempt local grading: `toInstance` sets `testCmd: "true"` (a
- * no-op) and the real, gradeable signal is the captured `.patch`, emitted as
- * an official-format `predictions.jsonl` for the user to feed to the Docker
- * harness. We ignore the dataset's `patch` / `test_patch` / `FAIL_TO_PASS` /
- * `PASS_TO_PASS` fields for exactly this reason.
+ * harness. The adapter preserves the upstream gold `patch` as metadata for
+ * evaluator sanity checks, but it is never included in the agent prompt.
  *
  * Dependency-light per the bench brief / RFC §3.1: git runs via a tiny local
  * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
@@ -267,6 +263,7 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => ({
   repoPath,
   problemStatement: task.problemStatement,
   testCmd: synthesizeTestCmd(task.raw),
+  ...(str(task.raw.patch) !== undefined ? { goldPatch: str(task.raw.patch) } : {}),
   swebench: {
     instanceId: task.instanceId,
     repo: task.repo,

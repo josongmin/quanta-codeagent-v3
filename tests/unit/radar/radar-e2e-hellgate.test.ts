@@ -30,19 +30,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  type AgentConfig,
-  maybeProposeRadarCard,
-  type RadarProducerBlock,
-  runAgent,
-} from "@/agent"
+import { type AgentConfig, maybeProposeRadarCard, type RadarProducerBlock, runAgent } from "@/agent"
+import { radarCmd, type SlashContext } from "@/apps/cli/slash-commands"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
 import { InMemoryRadarStore, JsonlFileRadarStore, type RadarStore } from "@/radar"
 import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { radarCmd, type SlashContext } from "@/apps/cli/slash-commands"
 
 /* ===================================================================== */
 /* test doubles                                                          */
@@ -141,7 +136,11 @@ afterEach(() => {
 describe("HELL-RW-01 producer fires on a completed turn (gate-ON)", () => {
   test("a completed turn deposits a next-step card (fresh-readback)", async () => {
     const store = new InMemoryRadarStore()
-    const cfg = baseCfg({ llm: new FakeLLM([completed("done")]), cwd: dir, radar: firingBlock(store) })
+    const cfg = baseCfg({
+      llm: new FakeLLM([completed("done")]),
+      cwd: dir,
+      radar: firingBlock(store),
+    })
     const outcome = await runAgent(cfg)
     expect(outcome.reason).toBe("completed")
     // Fresh-readback from the SAME store the loop wrote.
@@ -154,6 +153,30 @@ describe("HELL-RW-01 producer fires on a completed turn (gate-ON)", () => {
     expect(card?.kind).toBe("next-step")
     expect(card?.title).toBe("Review the long task that just finished")
     expect(card?.status).toBe("active")
+  })
+})
+
+describe("HELL-RW-12 SEAM: non-completed turn through the REAL loop declines", () => {
+  test("an ERROR turn (reaches the finally, flushKind!=completed) mints nothing", async () => {
+    const store = new InMemoryRadarStore()
+    // A throwing LLM makes runTurn throw → executeTurnWithObservability's FINALLY
+    // still runs (flushKind stays "error") → the radar hook IS invoked with a
+    // non-completed kind. This drives the REAL turn-loop seam (not the hook
+    // directly like RW-03), so it proves the loop passes the ACTUAL flushKind.
+    class ThrowingLLM implements LLMPort {
+      readonly model = "test-model"
+      // biome-ignore lint/correctness/useYield: throws before yielding (error turn)
+      async *stream(): AsyncIterable<StreamEvent> {
+        throw new Error("boom (error turn)")
+      }
+    }
+    const cfg = baseCfg({ llm: new ThrowingLLM(), cwd: dir, radar: firingBlock(store) })
+    const outcome = await runAgent(cfg)
+    expect(outcome.reason).not.toBe("completed")
+    // The teeth: firing thresholds, but an error turn mints nothing.
+    // RED-on-injection: hardcode flushKind:"completed" at the turn-loop hook call
+    // (turn-loop.ts) ⇒ a card is minted on the error turn ⇒ this goes red.
+    expect(store.listActive().length).toBe(0)
   })
 })
 
@@ -250,7 +273,12 @@ describe("HELL-RW-05 /radar list renders the live card", () => {
 describe("HELL-RW-06 /radar adopt flips status", () => {
   test("adopt drops the card from listActive", async () => {
     const store = new InMemoryRadarStore()
-    const card = store.proposeCard({ kind: "suggestion", title: "t", description: "d", createdAtMs: 1 })
+    const card = store.proposeCard({
+      kind: "suggestion",
+      title: "t",
+      description: "d",
+      createdAtMs: 1,
+    })
     expect(store.listActive().length).toBe(1)
     const { code, out } = await runRadar(store, ["adopt", card.id])
     expect(code).toBe(0)
@@ -269,7 +297,12 @@ describe("HELL-RW-06 /radar adopt flips status", () => {
 describe("HELL-RW-07 /radar dismiss flips status", () => {
   test("dismiss drops the card from listActive", async () => {
     const store = new InMemoryRadarStore()
-    const card = store.proposeCard({ kind: "warning", title: "t", description: "d", createdAtMs: 1 })
+    const card = store.proposeCard({
+      kind: "warning",
+      title: "t",
+      description: "d",
+      createdAtMs: 1,
+    })
     const { code, out } = await runRadar(store, ["dismiss", card.id])
     expect(code).toBe(0)
     expect(out).toContain("dismissed")
@@ -280,7 +313,12 @@ describe("HELL-RW-07 /radar dismiss flips status", () => {
 describe("HELL-RW-08 /radar engage increments count", () => {
   test("engage bumps engagementCount and leaves the card active", async () => {
     const store = new InMemoryRadarStore()
-    const card = store.proposeCard({ kind: "suggestion", title: "t", description: "d", createdAtMs: 1 })
+    const card = store.proposeCard({
+      kind: "suggestion",
+      title: "t",
+      description: "d",
+      createdAtMs: 1,
+    })
     const { code, out } = await runRadar(store, ["engage", card.id])
     expect(code).toBe(0)
     expect(out).toContain("engaged")
@@ -337,7 +375,11 @@ describe("HELL-RW-11 shared-instance: loop store IS the /radar store", () => {
   test("a card the loop minted is adopted via the SAME slash-wired store", async () => {
     const store = new InMemoryRadarStore()
     // 1) The loop deposits a card.
-    const cfg = baseCfg({ llm: new FakeLLM([completed("done")]), cwd: dir, radar: firingBlock(store) })
+    const cfg = baseCfg({
+      llm: new FakeLLM([completed("done")]),
+      cwd: dir,
+      radar: firingBlock(store),
+    })
     await runAgent(cfg)
     const active = store.listActive()
     expect(active.length).toBe(1)

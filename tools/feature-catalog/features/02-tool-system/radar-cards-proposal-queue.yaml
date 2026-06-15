@@ -3,23 +3,23 @@ title: ADR-0231 Radar Cards — background proposal queue MVP (Claude CoworkRada
 section: 2
 subsystem: Background task proposal engine
 order: 231
-maturity: L1
-status: new
-ui_surfaces: [n-a]
+maturity: L4
+status: stable
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
-labels: [absorbed:claude, surface:core]
+labels: [absorbed:claude, surface:cli, default-off]
 depends_on: []
 surface_integration:
-  cli: missing
+  cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-15"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
-    web: "background proposal queue has a planned UI affordance (desktop panel) but it is unbuilt; no web component renders RadarCards and no event bridges them, does not reach the browser"
+    cli: "LIVE end-to-end behind QUANTA_RADAR: producer hook (src/agent/radar-producer-hook.ts) fires at the turn boundary (src/agent/loop/turn-loop.ts finally, completed-turn only) depositing idle/long-task cards into the store; surface-compose builds the gated store once and threads the SAME instance into both AgentConfig.radar.store (via RuntimeFacadeComposeOptions pass-through, sdk/runtime/context.ts) and the /radar slash command (registry-surface.ts radarCmd: list/adopt/dismiss/engage/prune). Default-OFF: gate unset ⇒ no producer sampling + /radar 'not wired' (byte-identical)."
+    web: "background proposal queue desktop panel still unbuilt; no web component renders RadarCards yet (CLI /radar is the live surface)"
 purpose: |
   Claude Desktop CoworkRadar 흡수 (MVP scope) — background에서 task
   suggestion을 active proposal로 큐잉. 8-field RadarCard (id/kind/title/
@@ -38,16 +38,22 @@ evidence:
     - src/radar/headless-stub.ts
     - src/radar/heuristics/idle-long-task.ts
     - src/radar/index.ts
+    - src/agent/radar-producer-hook.ts
+    - src/agent/loop/turn-loop.ts
+    - src/apps/cli/slash/registry-surface.ts
+    - src/apps/cli/repl/surface-compose.ts
   adrs: [231]
   tests:
-    unit: [tests/unit/radar/radar-hellgate.test.ts]
-knobs: []
+    unit:
+      - tests/unit/radar/radar-hellgate.test.ts
+      - tests/unit/radar/radar-e2e-hellgate.test.ts
+knobs: [QUANTA_RADAR, QUANTA_RADAR_FILE, QUANTA_RADAR_TASK_MS, QUANTA_RADAR_PRUNE_MS]
 deliberate_hold:
   reason: |
-    Full heuristic suite + UI 통합 + OTel engagement signal emit 후속.
-    MVP는 engine + port + adapter + 1 sample heuristic만.
+    LIVE end-to-end (jun-15): producer hook + /radar surface + gated store wired
+    via RuntimeFacadeComposeOptions pass-through. RESIDUAL = depth only: more
+    heuristics (idle-stuck / branch-stale) + a web/desktop panel + an engagement
+    OTel emit (`quanta.radar.engagement`).
   promotion_path: |
-    Follow-up: 추가 heuristic (long-running task / idle-stuck / branch-stale 등)
-    + UI surface (CLI banner + desktop panel) + engagement OTel emit
-    (`quanta.radar.engagement` metric).
-notes: '20 hellgate / 72 expects. Default-OFF: store 미주입 시 byte-identical.'
+    Add further heuristics, a web RadarCard panel, and the engagement metric emit.
+notes: '20 store hellgate + 14 e2e hellgate (producer hook fresh-readback, /radar list/adopt/dismiss/engage/prune, jsonl 0600 + replay no-double-write, default-OFF byte-identity). red-on-injection: neuter proposeCard ⇒ producer case RED. Default-OFF: QUANTA_RADAR unset ⇒ no sampling + /radar not-wired (byte-identical).'

@@ -21,7 +21,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, sep } from "node:path"
 import { __resetShellSandbox } from "@/runtime"
-import type { PerCallSandboxPort } from "@/runtime/os-sandbox"
+import { DEFAULT_SANDBOX_EXEC_PATH, type PerCallSandboxPort } from "@/runtime/os-sandbox"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { bashTool } from "@/tool/bash"
 import { __setBashPerCallSandboxFactory } from "@/tool/bash/per-call-factory"
@@ -163,6 +163,34 @@ describe("B. mode='read' allows read commands via per-call sandbox wrap", () => 
     const { result } = await collect({ command: "echo hi", mode: "read" }, ctx(dir))
     expect(result.ok).toBe(true)
     expect(capturedPolicy).toBe("read-only")
+  })
+
+  test("HELL-B4: live darwin read-mode supports here-doc while still denying workspace writes", async () => {
+    if (process.platform !== "darwin" || !existsSync(DEFAULT_SANDBOX_EXEC_PATH)) return
+
+    const workspace = mkdtempSync(join(tmpdir(), "bash-read-hdoc-"))
+    try {
+      writeFileSync(join(workspace, "seed.txt"), "seed\n")
+      const hdoc = [
+        "python - <<'PY'",
+        "from pathlib import Path",
+        "print(Path('seed.txt').read_text().strip())",
+        "PY",
+      ].join("\n")
+      const { result: ok } = await collect({ command: hdoc, mode: "read" }, ctx(workspace))
+      expect(ok.ok).toBe(true)
+      expect(ok.output).toContain("seed")
+
+      const { result: denied } = await collect(
+        { command: "touch should-not-exist", mode: "read" },
+        ctx(workspace),
+      )
+      expect(denied.ok).toBe(false)
+      expect(denied.failure?.mode).toBe("sandbox_violation")
+      expect(existsSync(join(workspace, "should-not-exist"))).toBe(false)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
   })
 })
 
@@ -335,6 +363,26 @@ describe("D. mode='write' (default) → legacy byte-identical", () => {
 /* ================================================================== */
 
 describe("E. unsupported platform → typed sandbox_unavailable", () => {
+  test("HELL-E0: mode='read' + background is fail-closed, not unsandboxed", async () => {
+    let wrapCalled = false
+    const fakePort: PerCallSandboxPort = {
+      wrap: (argv) => {
+        wrapCalled = true
+        return { argv: [...argv], sandboxApplied: true }
+      },
+      availability: () => ({ supported: true }),
+    }
+    __setBashPerCallSandboxFactory(() => fakePort)
+    const { result } = await collect(
+      { command: "echo should-not-run", mode: "read", timeout_behavior: "background" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain("read-mode-background-unsupported")
+    expect(result.failure?.mode).toBe("sandbox_unavailable")
+    expect(wrapCalled).toBe(false)
+  })
+
   test("HELL-E1: mode='read' + unavailable port → typed sandbox_unavailable", async () => {
     const fakePort: PerCallSandboxPort = {
       wrap: (argv) => ({ argv: [...argv], sandboxApplied: false }),

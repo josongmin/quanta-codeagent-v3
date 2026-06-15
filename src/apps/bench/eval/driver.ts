@@ -38,6 +38,7 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
+import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type { RunOnceResult } from "./repair/types"
@@ -389,6 +390,13 @@ const reproResultExtra = (
   reproTest: BenchReproTestTelemetry | undefined,
 ): Partial<InstanceResult> => (reproTest === undefined ? {} : { reproTest })
 
+const shouldValidateGold = (
+  deps: RunInstanceDeps,
+  agentPassed: boolean,
+): boolean =>
+  deps.goldSanity !== undefined &&
+  (deps.goldSanity.mode === "always" || agentPassed === false)
+
 const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -436,10 +444,17 @@ const runInstanceOnce = async (
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
 
-    const v = await verify(instance, phase.patch, sandbox, deps)
+    let v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
     const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
+    if (shouldValidateGold(deps, v.passed)) {
+      const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
+      if (!gold.ok) {
+        v = { ...v, passed: false, error: gold.error }
+        extra.verdict = "grader_invalid"
+      }
+    }
     if (deps.observe && w.observer) {
-      extra.verdict = "ok"
+      extra.verdict ??= "ok"
       extra.durationMs = Date.now() - startedAt
       extra.patchPath = emitPatch(deps.observe, instance, w.observer, phase.patch)
       emitVerify(w.observer, v)

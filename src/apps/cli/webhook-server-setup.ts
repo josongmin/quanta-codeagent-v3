@@ -25,16 +25,20 @@
  * is no-throw by construction (a failed publish is logged, never re-thrown).
  */
 
-import { errMessage, gateOnStrict } from "@/shared"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import {
   createBunWebhookTransport,
+  createDurableDeliveryStore,
   createNodeWebhookTransport,
   createWebhookEventSource,
+  type DeliveryStore,
   type WebhookEventSource,
   type WebhookEventSourceOpts,
   type WebhookTransportPort,
 } from "@/integrations/github"
 import type { ProactiveTrigger } from "@/reactor"
+import { errMessage, gateOnStrict } from "@/shared"
 import { publishReactorWatchTrigger } from "./reactor-watch-bridge"
 
 /** EX_USAGE — gate-off / missing-secret / bind fault (BSD sysexits). */
@@ -46,6 +50,15 @@ const DEFAULT_SESSION = "webhook"
 /** Poll cadence (ms) — how often the pump drains `source.poll()`. Low enough to
  *  feel live; the queue itself is the buffer, so a missed beat just batches. */
 const DEFAULT_POLL_INTERVAL_MS = 250
+
+/** Per-publish liveness backstop (ms) — see {@link WebhookServerCmdDeps.publishTimeoutMs}. */
+const DEFAULT_PUBLISH_TIMEOUT_MS = 10_000
+
+/** Durable delivery-dedup dump path (audit B1). `QUANTA_CONFIG_DIR` override ⇒
+ *  that dir, else `~/.quanta`. Survives a host restart so a re-delivered
+ *  `X-GitHub-Delivery` is recognised and the trigger is NOT re-fired. */
+const deliveryDumpPath = (env: NodeJS.ProcessEnv): string =>
+  join(env.QUANTA_CONFIG_DIR ?? join(homedir(), ".quanta"), "webhook-deliveries.json")
 
 /** Minimal IO seam — injected so the hellgate drives the command without
  *  touching real process streams. */
@@ -75,6 +88,16 @@ export interface WebhookServerCmdDeps {
   readonly publish?: PublishReactorWatchTriggerFn
   /** Poll cadence override (ms). Default {@link DEFAULT_POLL_INTERVAL_MS}. */
   readonly pollIntervalMs?: number
+  /** Delivery-dedup store override. Default = a DURABLE store (audit B1): a
+   *  long-lived host MUST persist delivery-id dedup so a GitHub re-delivery
+   *  after a restart is not re-fired. The hellgate injects an in-memory or
+   *  tmp-path store. */
+  readonly buildDeliveryStore?: () => DeliveryStore
+  /** Per-publish liveness backstop (ms): a publish that never settles (e.g. a
+   *  reactor that accepts the socket but never closes it) must not wedge the
+   *  pump. NOT a perf tuning knob — a generous ceiling. Default
+   *  {@link DEFAULT_PUBLISH_TIMEOUT_MS}. */
+  readonly publishTimeoutMs?: number
 }
 
 const defaultIo = (): WebhookServerCmdIo => ({
@@ -89,8 +112,7 @@ const defaultIo = (): WebhookServerCmdIo => ({
 /** Default transport: prefer Bun.serve under Bun, fall back to node:http. The
  *  Bun builder throws if not under Bun, so we probe the global first. */
 const defaultBuildTransport = (port: number): WebhookTransportPort => {
-  const hasBun =
-    typeof (globalThis as { Bun?: { serve?: unknown } }).Bun?.serve === "function"
+  const hasBun = typeof (globalThis as { Bun?: { serve?: unknown } }).Bun?.serve === "function"
   return hasBun ? createBunWebhookTransport({ port }) : createNodeWebhookTransport({ port })
 }
 
@@ -188,8 +210,24 @@ export const runWebhookServerCmd = async (
   const sessionId = parseSessionId(argv, process.env)
   const publish: PublishReactorWatchTriggerFn = deps?.publish ?? publishReactorWatchTrigger
   const pollIntervalMs = deps?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+  const publishTimeoutMs = deps?.publishTimeoutMs ?? DEFAULT_PUBLISH_TIMEOUT_MS
+  // B1 — durable dedup store (a long-lived host MUST persist; default real-fs
+  // at the config dir). Injected override in tests.
+  const deliveryStore: DeliveryStore =
+    deps?.buildDeliveryStore?.() ??
+    createDurableDeliveryStore({ persistPath: deliveryDumpPath(process.env), onError: io.err })
 
-  return await bindAndServe({ io, deps, secret, port, sessionId, publish, pollIntervalMs })
+  return await bindAndServe({
+    io,
+    deps,
+    secret,
+    port,
+    sessionId,
+    publish,
+    pollIntervalMs,
+    publishTimeoutMs,
+    deliveryStore,
+  })
 }
 
 interface ServeArgs {
@@ -200,19 +238,31 @@ interface ServeArgs {
   readonly sessionId: string
   readonly publish: PublishReactorWatchTriggerFn
   readonly pollIntervalMs: number
+  readonly publishTimeoutMs: number
+  readonly deliveryStore: DeliveryStore
 }
+
+/** Duck-typed durable-store probe — the in-memory store has neither `ready` nor
+ *  `flush`; the durable one has both. */
+const asDurable = (s: DeliveryStore): { ready?: Promise<void>; flush?: () => Promise<void> } =>
+  s as { ready?: Promise<void>; flush?: () => Promise<void> }
 
 const bindAndServe = async (a: ServeArgs): Promise<number> => {
   // Build the transport + source. Any throw here (bind EADDRINUSE, empty-secret
   // re-check in the slice) is caught — NO-THROW contract: log + exit 64.
   let source: WebhookEventSource
   try {
+    // B1 — hydrate the durable dedup store from disk BEFORE serving so a
+    // re-delivery after a restart is recognised on the very first request.
+    const durable = asDurable(a.deliveryStore)
+    if (durable.ready !== undefined) await durable.ready
     const transport = (a.deps?.buildTransport ?? defaultBuildTransport)(a.port)
     const buildSource = a.deps?.buildSource ?? createWebhookEventSource
     source = buildSource({
       transport,
       secret: a.secret,
       clockPort: { now: () => Date.now() },
+      deliveryStore: a.deliveryStore,
     })
     await source.start()
   } catch (e) {
@@ -220,9 +270,7 @@ const bindAndServe = async (a: ServeArgs): Promise<number> => {
     return EXIT_USAGE
   }
 
-  a.io.err(
-    `quanta webhook · listening on :${a.port} → reactor session '${a.sessionId}'\n`,
-  )
+  a.io.err(`quanta webhook · listening on :${a.port} → reactor session '${a.sessionId}'\n`)
 
   // POLL→PUBLISH PUMP — the one new piece of host logic. Drain source.poll() on
   // a cancellable cadence; for each ProactiveTrigger, publish to the reactor.
@@ -239,7 +287,24 @@ const bindAndServe = async (a: ServeArgs): Promise<number> => {
     }
     for (const trigger of triggers) {
       try {
-        await a.publish({ sessionId: a.sessionId, trigger })
+        // B2 — bound each publish: a sink that never settles (reactor accepts
+        // the socket but never closes it) must not wedge the pump and silently
+        // drop every later trigger. On timeout: log + continue.
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), a.publishTimeoutMs)
+          if (typeof (timer as { unref?: () => void }).unref === "function") {
+            ;(timer as { unref: () => void }).unref()
+          }
+        })
+        const outcome = await Promise.race([
+          Promise.resolve(a.publish({ sessionId: a.sessionId, trigger })).then(() => "ok" as const),
+          timeout,
+        ])
+        if (timer !== undefined) clearTimeout(timer)
+        if (outcome === "timeout") {
+          a.io.err(`quanta webhook: publish timed out after ${a.publishTimeoutMs}ms (dropped)\n`)
+        }
       } catch (e) {
         a.io.err(`quanta webhook: publish failed: ${errMessage(e)}\n`)
       }
@@ -288,6 +353,16 @@ const bindAndServe = async (a: ServeArgs): Promise<number> => {
       // drainOnce is itself no-throw, but belt-and-braces.
     }
     await source.stop()
+    // B1 — flush any pending durable dedup save so the on-disk dump is current
+    // before exit (a redelivery after this shutdown must be recognised).
+    const durable = asDurable(a.deliveryStore)
+    if (durable.flush !== undefined) {
+      try {
+        await durable.flush()
+      } catch (e) {
+        a.io.err(`quanta webhook: delivery-store flush failed: ${errMessage(e)}\n`)
+      }
+    }
     process.off("SIGINT", onSig)
     process.off("SIGTERM", onSig)
   }

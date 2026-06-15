@@ -348,6 +348,9 @@ export const buildSubagentConfig = (
    *  (which, under bun's cross-file test concurrency, races other suites that
    *  touch QUANTA_SUBAGENT* — the flake this carve-out removes). */
   env: Readonly<Record<string, string | undefined>> = process.env,
+  /** jun-15 P0-b — session Activity Spine store, threaded onto the subagent
+   *  config so `run_workflow` feeds `/activity`. Unset ⇒ no recording. */
+  activityStore?: import("@/activity").ActivityStore,
 ): AgentConfig["subagent"] | undefined => {
   const enabled = readCliKnob("QUANTA_SUBAGENT", "bool", env) ?? true
   const depth = readCliKnob("QUANTA_SUBAGENT_MAX_DEPTH", "int", env)
@@ -376,6 +379,7 @@ export const buildSubagentConfig = (
     enabled,
     ...(depth !== undefined ? { maxDepth: depth } : {}),
     ...(taskRegistry !== undefined ? { taskRegistry } : {}),
+    ...(activityStore !== undefined ? { activityStore } : {}),
     ...(enable6Tools ? { enable6Tools: true } : {}),
     ...(conc !== undefined ? { maxConcurrent: conc } : {}),
     ...(enableBatchSpawn ? { enableBatchSpawn: true } : {}),
@@ -1655,6 +1659,11 @@ export const buildTooling = (
    *  even when `QUANTA_MEMORY_WRITE_GUARD_PCT` is set (fail-open, byte-identical
    *  for callers that do not wire a meter). */
   budgetRemainingPercent?: () => number,
+  /** jun-15 P0-b — session Activity Spine store, threaded onto the subagent
+   *  config so `run_workflow` streams live phases/steps into `/activity`. The
+   *  surface passes the SAME instance it hands the slash surface. Unset ⇒ no
+   *  recording (byte-identical). */
+  activityStore?: import("@/activity").ActivityStore,
 ): Tooling => {
   const store = buildStore()
   const embedder = buildEmbedder(store)
@@ -1669,7 +1678,7 @@ export const buildTooling = (
         }
   const searchWire = buildSearchPipelineFromEnv(process.env, process.cwd(), searchMetrics)
   const memoryConfig = buildMemoryConfig(store)
-  const subagentConfig = buildSubagentConfig(subagentTaskRegistry)
+  const subagentConfig = buildSubagentConfig(subagentTaskRegistry, process.env, activityStore)
   const skillsConfig = buildSkillsConfig()
   const compactionBreakerConfig = buildCompactionBreakerConfig()
   const verifyGuardConfig = buildVerifyGuardConfig()

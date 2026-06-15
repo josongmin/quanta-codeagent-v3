@@ -1,3 +1,4 @@
+import { type ActivityStore, createActivityStore } from "@/activity"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
 import { TaskRegistry } from "@/subagent"
 import {
@@ -21,6 +22,10 @@ export interface LifecycleBundle {
   pills: LifecyclePills
   taskRegistry: TaskRegistry | undefined
   followUpQueue: FollowUpQueue | undefined
+  /** jun-15 P0-b — the session Activity Spine store. ALWAYS created (cheap, a
+   *  Map): `/activity` reads it and `run_workflow` writes its live run into it,
+   *  so both share ONE instance. */
+  activityStore: ActivityStore
 }
 
 export const buildLifecycleBundle = (featureCfg: CliFeatureConfig): LifecycleBundle => {
@@ -40,7 +45,7 @@ export const buildLifecycleBundle = (featureCfg: CliFeatureConfig): LifecycleBun
     hideFollowUp: pillsCfg.hideFollowUp,
     hideMcp: pillsCfg.hideMcp,
   })
-  return { pills, taskRegistry, followUpQueue }
+  return { pills, taskRegistry, followUpQueue, activityStore: createActivityStore() }
 }
 
 /** Derive the per-server MCP pill state from the bridged tools list. The

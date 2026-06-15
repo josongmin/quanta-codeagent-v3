@@ -134,6 +134,13 @@ const pythonCandidates = (): readonly string[] => {
   return override ? [override, "python", "python3"] : ["python", "python3"]
 }
 
+/** `import swebench` is HEAVY — it eagerly pulls in docker/datasets/etc. and
+ *  measures ~10s cold even on an idle box, spiking past a 15s budget under any
+ *  CPU contention (multiple bench/test sessions). A too-tight probe silently
+ *  falls back to the FAKE `testCmd:"true"` grader (every patch "passes"), so the
+ *  budget is deliberately generous. Observed 9–13s idle ⇒ 60s headroom. */
+const IMPORT_PROBE_TIMEOUT_MS = 60_000
+
 /**
  * Detect the official Python harness. True iff some interpreter can
  * `import swebench`. Never throws (any spawn failure ⇒ false). The probe is
@@ -144,7 +151,7 @@ export const isPythonSwebenchAvailable = async (opts: PySwebenchOpts = {}): Prom
   const spawn = opts.spawn ?? defaultSpawn
   for (const py of pythonCandidates()) {
     try {
-      const r = await spawn([py, "-c", "import swebench"], ".", 15000)
+      const r = await spawn([py, "-c", "import swebench"], ".", IMPORT_PROBE_TIMEOUT_MS)
       if (r.code === 0) return true
     } catch {
       // try the next interpreter
@@ -157,7 +164,7 @@ export const isPythonSwebenchAvailable = async (opts: PySwebenchOpts = {}): Prom
 const resolvePython = async (spawn: Spawn): Promise<string | null> => {
   for (const py of pythonCandidates()) {
     try {
-      const r = await spawn([py, "-c", "import swebench"], ".", 15000)
+      const r = await spawn([py, "-c", "import swebench"], ".", IMPORT_PROBE_TIMEOUT_MS)
       if (r.code === 0) return py
     } catch {
       // try the next interpreter

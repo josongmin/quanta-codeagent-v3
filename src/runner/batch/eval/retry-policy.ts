@@ -118,6 +118,7 @@ export const DEFAULT_POLICY: RetryPolicy = {
  *   1. `result.passed === true`                        ⇒ pass
  *   2. `result.verdict === "env_prep_failed"`          ⇒ infra-fail (T4)
  *   3. `result.verdict === "degraded"`                 ⇒ infra-fail (recorder)
+ *   4. `result.verdict === "grader_invalid"`           ⇒ infra-fail
  *   4. `error` contains "empty prediction"             ⇒ empty-patch
  *   5. `error` contains "no patch produced"            ⇒ empty-patch
  *   6. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
@@ -139,6 +140,9 @@ const classifyByVerdict = (result: InstanceResult): AttemptOutcome | undefined =
   }
   if (result.verdict === "degraded") {
     return { kind: "infra-fail", reason: result.error ?? "observation degraded" }
+  }
+  if (result.verdict === "grader_invalid") {
+    return { kind: "infra-fail", reason: result.error ?? "grader_invalid" }
   }
   return undefined
 }

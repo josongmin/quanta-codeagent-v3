@@ -37,6 +37,14 @@ export {
   workflowCloseActivity,
   workflowToActivity,
 } from "./producers/workflow"
+export {
+  type ActivityStore,
+  createActivityStore,
+  createWorkflowSink,
+  type WorkflowSink,
+  type WorkflowSinkOpts,
+} from "./store"
+export { formatAge, type RenderActivityOpts, renderActivity } from "./render"
 export { type FleetRowLike, fleetRowToActivity, fleetToActivity } from "./producers/fleet"
 export {
   type SideAgentSnapshotLike,

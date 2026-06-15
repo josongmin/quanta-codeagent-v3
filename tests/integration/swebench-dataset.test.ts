@@ -170,6 +170,7 @@ describe("swebench-dataset", () => {
         base_commit: baseCommit,
         problem_statement:
           "The add(a, b) function in math.js returns a - b but must return a + b. Fix it.",
+        patch: "diff --git a/math.js b/math.js\n",
       }),
     )[0]
     expect(task).toBeDefined()
@@ -182,9 +183,13 @@ describe("swebench-dataset", () => {
 
     const instance = toInstance(task, repoPath)
     expect(instance.testCmd).toBe("true")
+    expect(instance.goldPatch).toBe("diff --git a/math.js b/math.js\n")
     const result = await runInstance(instance, {
       ...DEPS,
       llm: new FixingLLM("math.js", "return a - b", "return a + b"),
+      pythonSwebench: {
+        evaluate: async () => ({ resolved: true, gradingCompleted: true, log: "resolved" }),
+      },
     })
     expect(result.error).toBeUndefined()
     expect(result.patch).toContain("return a + b")

@@ -144,13 +144,22 @@ describe("hellgate — python-swebench path bypasses the local empty-patch guard
     expect(out.command).toContain("astropy__astropy-12907")
   })
 
-  test("python-harness wired but evaluator missing ⇒ explicit not-wired error (NOT empty-patch error)", async () => {
+  test("swebench instance with NO python harness ⇒ refuse-fake-grade error (NOT a testCmd fake-pass)", async () => {
+    // No `pythonSwebench` at all ⇒ a swebench instance must NOT fall through to
+    // the testCmd="true" no-op (which would fake a PASS). It refuses loudly.
+    const out = await verify(swInstance, "", SANDBOX, { timeoutMs: 1000 })
+    expect(out.passed).toBe(false)
+    expect(out.error).toContain("REFUSING to fake-grade")
+    expect(out.error).not.toContain("empty prediction")
+  })
+
+  test("python-harness wired but evaluator missing ⇒ refuse-fake-grade error (NOT empty-patch error)", async () => {
     const out = await verify(swInstance, "", SANDBOX, {
       timeoutMs: 1000,
       pythonSwebench: { opts: {} }, // evaluator missing
     })
     expect(out.passed).toBe(false)
-    expect(out.error).toBe("python swebench evaluator not wired")
+    expect(out.error).toContain("REFUSING to fake-grade")
     expect(out.error).not.toContain("empty prediction")
   })
 

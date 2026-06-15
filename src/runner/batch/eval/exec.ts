@@ -17,13 +17,20 @@
  * word-splitting would corrupt the `:(exclude,top)…` magic. LLM-controlled
  * inputs MUST flow through the agent's `bash` tool, NOT through this helper.
  */
-import { scrubEnv } from "@/runtime"
+import { applyLocalEnv, DEFAULT_ENV_ALLOWLIST, type LocalEnvSelection, scrubEnv } from "@/runtime"
 
 export interface ExecResult {
   code: number
   stdout: string
   stderr: string
 }
+
+export interface ExecOptions {
+  readonly localEnv?: LocalEnvSelection
+}
+
+const execEnv = (options: ExecOptions | undefined): NodeJS.ProcessEnv =>
+  applyLocalEnv(scrubEnv(), options?.localEnv, DEFAULT_ENV_ALLOWLIST)
 
 /**
  * Minimal `bash -c` exec via Bun.spawn with a hard timeout. C9: children are
@@ -38,12 +45,17 @@ export interface ExecResult {
  * — never LLM- or user-controlled text. For trusted argv-form invocations
  * (git pathspec, etc.) use {@link execArgv} instead.
  */
-export const exec = async (cmd: string, cwd: string, timeoutMs: number): Promise<ExecResult> => {
+export const exec = async (
+  cmd: string,
+  cwd: string,
+  timeoutMs: number,
+  options?: ExecOptions,
+): Promise<ExecResult> => {
   const proc = Bun.spawn(["bash", "-c", cmd], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: scrubEnv(),
+    env: execEnv(options),
   })
   const timer = setTimeout(() => proc.kill(), timeoutMs)
   try {
@@ -67,12 +79,13 @@ export const execArgv = async (
   argv: readonly string[],
   cwd: string,
   timeoutMs: number,
+  options?: ExecOptions,
 ): Promise<ExecResult> => {
   const proc = Bun.spawn([...argv], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: scrubEnv(),
+    env: execEnv(options),
   })
   const timer = setTimeout(() => proc.kill(), timeoutMs)
   try {

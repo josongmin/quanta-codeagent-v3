@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { z } from "zod"
 import { runShell } from "@/runtime"
 import { FsJailError, resolveJailed } from "@/storage"
@@ -106,6 +107,18 @@ export const grepTool = defineTool<Input>({
     if (input.path !== undefined) {
       try {
         jailedPath = resolveJailed(input.path, ctx.cwd)
+        if (!existsSync(jailedPath)) {
+          yield {
+            type: "result",
+            result: {
+              ok: false,
+              output:
+                "grep path must name one existing file or directory; " +
+                `received: ${input.path}`,
+            },
+          }
+          return
+        }
       } catch (e) {
         if (e instanceof FsJailError) {
           yield { type: "result", result: { ok: false, output: e.message } }

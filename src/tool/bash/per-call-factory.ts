@@ -16,12 +16,22 @@ import type { SandboxProfile } from "@/runtime/os-sandbox/types"
  * input is `"read"`. Default `mode: "write"` never reaches this code, so
  * existing sessions are byte-identical.
  */
-export type PerCallSandboxFactory = (profile: SandboxProfile) => PerCallSandboxPort
+export interface PerCallSandboxFactoryOpts {
+  readonly extraWritePaths?: ReadonlyArray<string>
+}
+
+export type PerCallSandboxFactory = (
+  profile: SandboxProfile,
+  opts?: PerCallSandboxFactoryOpts,
+) => PerCallSandboxPort
 
 let installed: PerCallSandboxFactory | undefined
 
 /** Production default — closed over `defaultPerCallSandbox`. */
-const productionFactory: PerCallSandboxFactory = (profile) => defaultPerCallSandbox(profile)
+const productionFactory: PerCallSandboxFactory = (profile, opts) =>
+  defaultPerCallSandbox(profile, {
+    ...(opts?.extraWritePaths !== undefined ? { extraWritePaths: opts.extraWritePaths } : {}),
+  })
 
 /** Read the factory the bash tool consults on mode='read'. */
 export const getBashPerCallSandboxFactory = (): PerCallSandboxFactory =>
