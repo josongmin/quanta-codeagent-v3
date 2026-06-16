@@ -497,13 +497,37 @@ const terminalAgentResult = (args: {
   return undefined
 }
 
+/**
+ * OFF (`bench-in-loop-exec` false, mini-swe posture) skips the host-python
+ * repro-test hint: the agent isn't told to run tests, so a repro script is dead
+ * weight. ON ⇒ install (byte-identical). Pure so the posture flip has teeth.
+ */
+export const benchInstallsReproHint = (inLoopExec: boolean): boolean => inLoopExec
+
+/**
+ * OFF forces single-pass (the repair loop re-runs the agent's verify against the
+ * same unrunnable host env). ON + swebench + a repair config ⇒ repair phase
+ * (byte-identical). Pure so the posture flip has teeth.
+ */
+export const benchRunsRepairPhase = (
+  hasRepair: boolean,
+  isSwebench: boolean,
+  inLoopExec: boolean,
+): boolean => hasRepair && isSwebench && inLoopExec
+
 const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
   const sandbox = await createSandbox(instance)
   const abort = new AbortController()
-  const deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
+  // The per-instance wall-clock deadline bounds the AGENT SOLVE only — NOT env
+  // setup (copyRepo + setupCmd + hint/repro install), which have their own
+  // timeouts (runEnvPrep). Starting the timer here (pre-setup) let cold-start
+  // overhead eat the agent's think budget and abort it mid-solve under
+  // concurrency (observed: 68% spurious aborts). The timer is armed below, once
+  // setup is done, so the agent always gets the full `timeoutMs`.
+  let deadline: ReturnType<typeof setTimeout> | undefined
   const startedAt = Date.now()
   let phase: Phase = { patch: "", turns: 0 }
   let w: Wiring = { stream: new NullStream() }
@@ -524,21 +548,41 @@ const runInstanceOnce = async (
       }
     }
 
-    const hintMode = benchOptIns().issueHintMode
+    const posture = benchOptIns()
+    const hintMode = posture.issueHintMode
     const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, { llm: deps.llm })
-    const reproInstall = await installReproTestHint(instance, sandbox, deps.llm)
+    // `bench-in-loop-exec` OFF (mini-swe posture): skip the host-python repro-test
+    // hint — the agent isn't told to run tests, so a repro script is dead weight.
+    // ON ⇒ byte-identical to the pre-knob path.
+    const reproInstall = benchInstallsReproHint(posture.inLoopExec)
+      ? await installReproTestHint(instance, sandbox, deps.llm)
+      : { hint: undefined, telemetry: undefined }
     const reproHint = reproInstall.hint
     reproTest = reproInstall.telemetry
 
+    // Setup is done — arm the solve deadline now so the agent gets the full
+    // `timeoutMs` of think time (see note where `deadline` is declared).
+    deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
+
+    // `bench-in-loop-exec` OFF ⇒ force single-pass (the repair loop re-runs the
+    // agent's verify against the same unrunnable host env). ON ⇒ byte-identical.
+    const repair = deps.repair
+    const runRepair = benchRunsRepairPhase(
+      repair !== undefined,
+      instance.swebench !== undefined,
+      posture.inLoopExec,
+    )
+    // `&& repair !== undefined` is implied by `runRepair` (the predicate's first
+    // term) — kept only so TS narrows `repair` to NonNullable for the call.
     phase =
-      deps.repair !== undefined && instance.swebench !== undefined
+      runRepair && repair !== undefined
         ? await runRepairPhase(
             instance,
             deps,
             sandbox,
             abort.signal,
             w,
-            deps.repair,
+            repair,
             precomputedHint,
             reproHint,
           )

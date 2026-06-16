@@ -333,8 +333,36 @@ const safeSend = (sink: MetricSink | undefined, sample: MetricSample): void => {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Process-default sink (mirror of spans.ts `setSpanSink`) — the missing metric
+// egress seam. There is no global metrics registry; instruments construct fresh
+// `defaultMetricsRegistry()`s at many sites, almost always WITHOUT an explicit
+// sink. This module-level default lets a HOST (composition root) route ALL such
+// registries to one transport (e.g. the OTLP exporter) in one call, without
+// threading a sink through every factory. An EXPLICIT `opts.sink` still wins;
+// absent (default) ⇒ `null` ⇒ byte-identical snapshot-only behavior.
+// ---------------------------------------------------------------------------
+let processDefaultSink: MetricSink | null = null
+
+/** Register the process-default {@link MetricSink}. Pass `null` to clear.
+ *  Hosts call this once at startup; `defaultMetricsRegistry()` picks it up when
+ *  the caller passes no explicit sink. */
+export const setDefaultMetricSink = (sink: MetricSink | null): void => {
+  processDefaultSink = sink
+}
+
+/** Read the process-default sink (diagnostics + tests). */
+export const getDefaultMetricSink = (): MetricSink | null => processDefaultSink
+
+/** Test-only reset — clears the process-default sink so one test's wiring can
+ *  never leak into the next (the registry is global module state). */
+export const __resetDefaultMetricSink = (): void => {
+  processDefaultSink = null
+}
+
 export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): MetricsRegistry => {
-  const sink = opts.sink
+  // Explicit sink wins; otherwise fall back to the process-default (null ⇒ none).
+  const sink = opts.sink ?? processDefaultSink ?? undefined
   const now = opts.now ?? Date.now
   const histogramMaxObservations = sanitizeHistogramMaxObservations(opts.histogramMaxObservations)
   // Buckets are validated for shape (numeric, ascending recommended) but not

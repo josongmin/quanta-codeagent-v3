@@ -14,6 +14,7 @@
  */
 
 import "./advisor"
+import "./bench-in-loop-exec"
 import "./branch-search"
 import "./closeout-critic"
 import "./closeout-guard"

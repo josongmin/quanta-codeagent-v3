@@ -215,6 +215,46 @@ const SWEBENCH_DIRECTIVE = [
 ].join("\n")
 
 /**
+ * Edit-and-submit variant of {@link SWEBENCH_DIRECTIVE} — used when the
+ * `bench-in-loop-exec` knob is OFF (`opt.inLoopExec === false`, mini-swe posture).
+ *
+ * Keeps every source-discipline rule (source-only, smallest change, no test
+ * edits, no git-checkout, V4A format) but DELETES the "Reproduce first" and the
+ * "MANDATORY ... run the repository's existing test(s) ... iterate" clauses. On
+ * instances whose host test-env is incompatible with the pinned deps, that
+ * mandate is unsatisfiable (`python -m pytest` → collection error), so the model
+ * flails until budget exhaustion and aborts with an empty patch. The grader runs
+ * the tests in the correct per-instance docker env at grading time, so in-loop
+ * execution is not required to produce a correct patch.
+ */
+const SWEBENCH_DIRECTIVE_NOEXEC = [
+  "",
+  "",
+  "You are fixing a real defect in this repository; an automated grader runs",
+  "hidden tests against ONLY your source changes. Hard rules:",
+  "- Change library/source code ONLY. NEVER create, edit, or delete any test",
+  "  file or anything under a tests/ or test/ dir — the grader supplies its own",
+  "  tests; your test edits are discarded and only waste turns.",
+  "- Make the SMALLEST correct change. Use `edit` for targeted hunks. Do NOT",
+  "  rewrite or reformat whole files; do NOT `write` over an existing file.",
+  "- NEVER run `git checkout`/`reset`/`clean`/`stash`/`restore`, re-clone, or",
+  "  any command that discards your own edits. Your final git diff IS the",
+  "  submission — do not let bash commands wipe it.",
+  "- Infer the EXACT required behavior (signatures, error messages, return",
+  "  values, edge cases) from the issue and match it precisely — a fix that is",
+  "  close but not exact still fails the hidden test.",
+  "- The automated grader runs the repository's tests for you in a correct",
+  "  environment. Do NOT run the test suite, pytest, or tox yourself — this repo",
+  "  is checked out without its test dependencies, so test commands will fail",
+  "  spuriously and only waste turns. Make the smallest correct source change",
+  "  and stop; an unverified edit is fine — the grader decides.",
+  "- Keep the final diff minimal and isolated to the fix.",
+  "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
+  "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
+  "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
+].join("\n")
+
+/**
  * BENCH-INTENTIONAL OPT-OUTS (Codex absorption Phases 0-8 + Round 3):
  * the SWE-bench grader is byte-sensitive (the official Python harness diffs
  * the agent's patch against the reference), so the bench harness deliberately
@@ -893,7 +933,12 @@ export const buildConfig = (
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
   // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
   // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
-  const baseText = instance.swebench ? `${base}${SWEBENCH_DIRECTIVE}` : base
+  // `bench-in-loop-exec` knob (default-ON ⇒ byte-identical): ON uses the
+  // test-running SWEBENCH_DIRECTIVE; OFF (mini-swe posture) swaps to the
+  // edit-and-submit SWEBENCH_DIRECTIVE_NOEXEC.
+  const baseText = instance.swebench
+    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}`
+    : base
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
   //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
@@ -952,7 +997,12 @@ export const buildConfig = (
       // gives one budget slot per branch (presence + must-pass) so a single run
       // can hit both before the cap; SWE-bench prioritizes measurement integrity
       // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
-      ...(instance.swebench ? { verifyGuard: { mustPass: true, maxTrips: 2 } } : {}),
+      // Gated additionally on `opt.inLoopExec`: the mini-swe (OFF) posture
+      // edits-and-submits, so a "must verify" guard is moot (and would push the
+      // agent at the same unrunnable host test-env). ON ⇒ byte-identical.
+      ...(instance.swebench && opt.inLoopExec
+        ? { verifyGuard: { mustPass: true, maxTrips: 2 } }
+        : {}),
       // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
       // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
       ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),

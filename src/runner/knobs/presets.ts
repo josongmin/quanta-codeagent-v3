@@ -46,6 +46,24 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "test-runner": "1",
     "retry-transient": "3",
   },
+  // agentless-v1 + the mini-swe (edit-and-submit) posture. Identical localization
+  // stack (lsp/localize-phase/issue-hint/repo-map/read-outline) but turns OFF
+  // in-loop test execution: drops `repro-test` (host-python repro directive) and
+  // `test-runner` (the run-tests tool), and sets `bench-in-loop-exec:off` so the
+  // driver emits SWEBENCH_DIRECTIVE_NOEXEC + no verifyGuard + single-pass + no
+  // repro hint. For instances whose host test-env is incompatible the agent
+  // can't run tests anyway; the grader runs them in the correct docker env.
+  // A NEW frozen preset — agentless-v1 is untouched.
+  "agentless-v2-safe": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+  },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.
   "everything-v1": {

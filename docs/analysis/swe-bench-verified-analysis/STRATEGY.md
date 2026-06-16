@@ -201,7 +201,13 @@ bench solve path 매핑 결과(`src/apps/bench/` -> `src/runner/batch/eval/drive
 - **진짜 공백**: `FaultEvidencePacket + OwnerLocalization + VerificationPlan`
 - **구조상 주의**: 새 behavior를 `agentless-v1`에 in-place로 얹지 말 것.
 
-### 🔴 RCA: LSP nav grounding은 django에서 작동 불가 (시도→폐기, 코드 revert됨)
+### ✅ UPDATE: LSP nav grounding django서 FIXED — 진짜원인=config에 pythonPath 누락
+
+아래 "작동 불가" 결론은 **오진**이었다. 진짜 원인: pyright가 `workspaceFolders` 받으면 `workspace/configuration` pull하는데 **응답에 `pythonPath`가 없어** workspace env를 못 잡고 모든 요청 hang. + `workspace/didChangeConfiguration` push도 필요(VS Code식). 둘 다 주니 **django cross-file go-to-def 0~3초 resolve**(pool open 3s, ValidationError→exceptions.py 10ms). FIX = `pyright.ts buildWorkspaceConfiguration`(pythonPath venv우선+extraPaths:[cwd]+autoSearchPaths) + `base.ts` initialized 후 push. 가드 = `tests/integration/pyright-cross-file-resolution.test.ts`(real pyright, teeth). 즉 위 매핑표의 "LSP ❌django실패"는 이제 **✅**로 정정 — LSP가 symbol-owner(②)+localization을 실제로 풀 수 있음(behavioral ⅔는 여전히 SCG 영역).
+
+---
+
+### ~~🔴 RCA: LSP nav grounding은 django에서 작동 불가~~ (오진, 위 UPDATE 참조)
 
 "LSP go-to-def/find-refs로 cross-file 내부 grounding"을 K-Domain 레버로 구현 시도 → 실 pyright+실 django 측정이 전제를 무너뜨림. 근본원인 사슬(전부 실측 확정):
 

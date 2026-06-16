@@ -1068,6 +1068,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/batch/eval/driver.ts",
   },
   {
+    envKey: "QUANTA_BENCH_IN_LOOP_EXEC",
+    kind: "bool",
+    default: true,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: in-loop test execution (default-ON ⇒ byte-identical). Explicit 0/off/false ⇒ mini-swe posture (SWEBENCH_DIRECTIVE_NOEXEC, no verifyGuard, single-pass, no repro hint; the grader runs the tests). Used by preset agentless-v2-safe.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_RETRY_TRANSIENT",
     kind: "int",
     default: undefined,

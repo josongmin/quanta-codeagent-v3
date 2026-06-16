@@ -174,6 +174,15 @@ export interface BenchPosture {
   readonly reproTestK: number | undefined
   /** Transient-failure retry cap (undefined ⇒ single attempt). */
   readonly retryTransient: number | undefined
+  /**
+   * In-loop test execution (default TRUE = today's byte-identical behavior).
+   * TRUE ⇒ the agent is told to run the repo's tests inside its own solve loop
+   * (SWEBENCH_DIRECTIVE + verifyGuard + repair phase + repro hint). FALSE ⇒
+   * mini-swe posture: edit-and-submit, the grader runs the tests
+   * (SWEBENCH_DIRECTIVE_NOEXEC, no verifyGuard, single-pass, no repro hint).
+   * OFF ONLY when the `bench-in-loop-exec` knob explicitly resolves `false`.
+   */
+  readonly inLoopExec: boolean
   /** envKeys to push into the runtime-config live-override store (read at wire
    *  time): a subset of QUANTA_READ_OUTLINE / QUANTA_TEST_RUNNER / QUANTA_REPO_MAP. */
   readonly liveOverrides: readonly string[]
@@ -185,6 +194,7 @@ export interface BenchPosture {
 }
 
 const isTrue = (v: unknown): v is true => v === true
+const isFalse = (v: unknown): v is false => v === false
 const isNumber = (v: unknown): v is number => typeof v === "number"
 const isLocalizeValue = (v: unknown): v is { phase1Turns: number } =>
   typeof v === "object" &&
@@ -225,6 +235,10 @@ export const benchPostureFromState = (
     readKnobValue(state, "issue-hint-expected-actual", isTrue) === true
   const repro = readKnobValue(state, "repro-test", isReproValue)
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
+  // Default-TRUE fence: only an explicit `false` from the knob flips it OFF.
+  // Unset / any non-false value ⇒ undefined ⇒ inLoopExec stays true (today's
+  // exact behavior).
+  const inLoopExec = readKnobValue(state, "bench-in-loop-exec", isFalse) !== false
   const liveOverrides: string[] = []
   if (readKnobValue(state, "read-outline", isTrue) === true)
     liveOverrides.push("QUANTA_READ_OUTLINE")
@@ -242,6 +256,7 @@ export const benchPostureFromState = (
     issueHintExpectedActual,
     reproTestK: repro !== undefined ? repro.samples : undefined,
     retryTransient,
+    inLoopExec,
     liveOverrides,
     preset: state.preset,
     sotaOn: state.preset === "agentless-v1",

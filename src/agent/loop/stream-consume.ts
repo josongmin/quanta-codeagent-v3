@@ -14,7 +14,7 @@ import {
 } from "@/observability"
 import { abortReasonOf, errMessage, LLMError, runtimeConfig } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
-import { buildTtftAttrs } from "../loop-helpers"
+import { buildSamplingSpanAttrs, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
 import { streamingTurn } from "../streaming-dispatch"
@@ -72,6 +72,9 @@ async function* teeUsage(
   // count so the next turn's compaction trigger anchors on the provider's truth.
   tokenBaselineBox: TurnState["tokenBaseline"],
   sentEstimate: number,
+  // Capture the provider's usage event so the sampling SPAN can carry model +
+  // token attrs (the event otherwise only reaches the recorder/collector).
+  onUsage?: (ev: Extract<StreamEvent, { type: "usage" }>) => void,
 ): AsyncIterable<StreamEvent> {
   const guarded =
     config.streamWatchdog !== undefined && config.streamTimeoutPolicy !== undefined
@@ -81,6 +84,7 @@ async function* teeUsage(
     if (ev.type === "usage") {
       emitUsage(config, ev, recorder, collector, taskSpend)
       captureTokenBaseline(tokenBaselineBox, ev, sentEstimate)
+      onUsage?.(ev)
     }
     if (ev.type === "llm_continuation") emitLlmContinuation(config, ev)
     if (ev.type === "output_progress") {
@@ -120,6 +124,14 @@ export const streamConsume = async (
   config.budgetMeter?.tick("model_call")
   const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
+  // gen_ai.* span enrichment: capture the provider's usage (model + tokens) and
+  // the finish reason so the sampling span answers which-model / how-many-tokens
+  // / why-stopped — not just TTFT. Absent on early abort ⇒ omitted (empty-safe).
+  let capturedUsage: SamplingUsage | undefined
+  let capturedFinish: string | undefined
+  const captureUsage = (ev: Extract<StreamEvent, { type: "usage" }>): void => {
+    capturedUsage = samplingUsageFromEvent(ev)
+  }
   const stop = recorder?.llmStream()
   const stickyModelId = await readStickyModelForMode(config)
   const turnLlm = applyEffortClassifierFloor(
@@ -189,6 +201,7 @@ export const streamConsume = async (
         taskSpend,
         state.tokenBaseline,
         estimateTokens(messages),
+        captureUsage,
       ),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
       isReadOnly: (name) => config.registry.isReadOnly(name),
@@ -201,6 +214,7 @@ export const streamConsume = async (
       samplingStatus = "aborted"
       return { aborted: true }
     }
+    capturedFinish = outcome.stopReason
     return {
       message: outcome.message,
       stopReason: outcome.stopReason,
@@ -227,6 +241,6 @@ export const streamConsume = async (
     turnTimingCapture.markStreamEnd()
     const timing = turnTimingCapture.snapshot()
     onTurnTiming?.(timing)
-    endSpan(samplingSpan, samplingStatus, attrs(buildTtftAttrs(timing)))
+    endSpan(samplingSpan, samplingStatus, attrs(buildSamplingSpanAttrs(timing, capturedUsage, capturedFinish)))
   }
 }

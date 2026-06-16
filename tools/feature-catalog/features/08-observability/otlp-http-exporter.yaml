@@ -3,7 +3,7 @@ title: OTLP/HTTP exporter — `QUANTA_OTEL_ENDPOINT` realtime ship (외부 SDK z
 section: 8
 subsystem: observability — realtime OTLP/JSON span+metric ship (hand-rolled wire)
 order: 268
-maturity: L2
+maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -19,12 +19,12 @@ config_refs:
     - QUANTA_OTEL_BATCH_SIZE
     - QUANTA_OTEL_FLUSH_MS
 surface_integration:
-  cli: missing
+  cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-06-16"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    cli: "LIVE (jun-16): src/apps/cli/index.ts main() calls wireOtelSpanExport() → installOtelSpanExportFromEnv(process.env) at boot. When QUANTA_OTEL_ENDPOINT is set it registers an exporter-backed SpanSink (createExporterSpanSink, src/observability/otel-span-export.ts) so the loop's startSpan/endSpan ship to the OTLP collector; Default-OFF no-op otherwise. Closes the prior built-not-wired gap — setSpanSink had ZERO prod callers, so the knob was inert."
     web: "pure internal OTLP/JSON exporter library posting spans/metrics to an external collector; no UI affordance on any surface"
 purpose: |
   in-tree OTel scaffold (`metrics/otel-sink.ts`, `tracing/otel-tracer.ts`,
@@ -63,10 +63,14 @@ purpose: |
 evidence:
   code:
     - src/observability/otel-exporter.ts
+    - src/observability/otel-span-export.ts
+    - src/observability/metrics/in-memory-registry.ts
+    - src/apps/cli/index.ts
   adrs: [268]
   tests:
     unit:
       - tests/unit/observability/otel-exporter-hellgate.test.ts
+      - tests/unit/observability/otel-span-export-wiring-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -102,7 +106,61 @@ notes: |
   1KB attribute pass-through / env-unset returns undefined / env-set wires
   triple / sink adapter forwarding.
 
+  AUTO-ATTACH WIRE (jun-16): the follow-up "composition root auto-attach" is now
+  DONE for BOTH spans AND metrics. `src/observability/otel-span-export.ts` adds:
+   - `createExporterSpanSink(exporter)` — a `SpanSink` (spans.ts) forwarding each
+     closed span to `exporter.recordSpan` with a per-run traceId + a LIFO
+     open-span stack for parent linkage.
+   - `installOtelSpanExportFromEnv(env)` — host entry: when QUANTA_OTEL_ENDPOINT
+     is set it `attachOtelExporterFromEnv` then `setSpanSink(...)` AND
+     `setDefaultMetricSink(exporterMetricSink(exporter))`. Idempotent (declines
+     if a span sink is already registered); teardown restores both prior sinks.
+  Metric egress uses a NEW process-default sink seam mirroring `setSpanSink`:
+  `setDefaultMetricSink` in `metrics/in-memory-registry.ts` — every sink-less
+  `defaultMetricsRegistry()` (the common case; there is no global registry)
+  picks it up, so one host call routes ALL metrics to the exporter. An explicit
+  `opts.sink` still wins; default `null` ⇒ byte-identical. Wired at
+  `src/apps/cli/index.ts` boot. Sealed by otel-span-export-wiring-hellgate.test.ts
+  (env→span→/v1/traces POST, env→metric→/v1/metrics POST, parent linkage, OFF
+  byte-identical, idempotent); red-on-injection verified for both span + metric.
+
+  4-LENS AUDIT (jun-16) — fixes applied:
+   - traceId minted PER ROOT span (open-stack empty ⇒ new trace), NOT once per
+     process — else every session/turn of a long-lived REPL/daemon collapsed into
+     ONE unbounded trace (collector span-cap truncation). Children inherit. Sealed
+     + red-on-injection.
+   - onEnd uses splice(idx, 1) (remove ONLY the closed frame), not splice(idx)
+     which dropped every still-open sibling above it — corrupting the tree under
+     concurrent tool dispatch / concurrent subagents (out-of-LIFO close). Sealed +
+     red-on-injection.
+   - Final flush: the interactive REPL FALLS THROUGH main() ⇒ beforeExit fires ⇒
+     teardown flushes. process.exit() subcommand paths (batch/headless) rely on the
+     unref'd 5s timer, losing at most the final sub-interval batch.
+   - tests/setup.ts global afterEach resets both sinks (forcing function vs
+     cross-file global-sink leak).
+  COVERAGE BUILDOUT (jun-16, iterative):
+   - SPAN ATTRS: the run_sampling_request span now carries gen_ai.* model + token
+     usage + finish reason (was TTFT-only). teeUsage captures the provider usage
+     event → buildSamplingSpanAttrs (loop-helpers.ts) → endSpan. Sealed by
+     spans-e2e.test.ts ("carries gen_ai model + token + finish attrs") +
+     red-on-injection. Empty-safe on early abort.
+   - MULTI-SURFACE: installOtelSpanExportFromEnv now wired at ALL THREE process
+     entries — CLI (apps/cli/index.ts), headless/batch/ci-bot agent
+     (apps/agent/index.ts import.meta.main), and the web-daemon
+     (apps/web-daemon/index.ts main() + AWAITED teardown in shutdown, so the
+     daemon's final flush actually completes). In-process subagents inherit the
+     parent's global sink (idempotent guard ⇒ no re-install).
+  KNOWN RESIDUALS (honest, larger scope):
+   - METRIC coverage thin in PROD: this seam routes sink-less defaultMetricsRegistry()s,
+     but the only prod consumer is the decision-counter registry (turn-summary.ts,
+     gated by QUANTA_DECISION_METRICS). The richer instrument layer (tool/cost/error
+     via withFullObservability) has ZERO prod callers (PRE-EXISTING gap) — those do
+     not export yet. Spans are comprehensive; metrics are decision-counter-only.
+   - Subagent parent-linkage across CONCURRENT in-process fan-out needs context
+     propagation (W3C / AsyncLocalStorage); the LIFO stack is correct for serial
+     nesting only. The OS-process side-agent (src/side-agent) is a V1 fork-core,
+     not a wired prod surface.
+
   Non-goals: OTLP/protobuf serialization (collector는 universally JSON at
   `/v1/{traces,metrics}` accept), `@opentelemetry/*` runtime auto-install,
-  OTel Context API 재구현 (in-process tracer가 이미 함), composition root
-  auto-attach (opt-in wire는 follow-up — slice는 leaf-only 유지).
+  OTel Context API 재구현 (in-process tracer가 이미 함).

@@ -334,6 +334,58 @@ const defaultEmitterFor = (
 export const buildTtftAttrs = (timing: TurnTiming): Record<string, number> =>
   timing.ttftMs !== null ? { [GEN_AI_ATTRS.response.timeToFirstTokenMs]: timing.ttftMs } : {}
 
+/** Usage captured from the provider's `usage` stream event (model + tokens). */
+export interface SamplingUsage {
+  readonly model: string
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens?: number
+  readonly cacheCreationTokens?: number
+}
+
+/** Project a provider `usage` stream event into the {@link SamplingUsage} shape
+ *  (omitting absent cache fields). Keeps the hot stream-consume callback a plain
+ *  one-liner — the conditional shaping lives here, not inline in the loop. */
+export const samplingUsageFromEvent = (ev: {
+  readonly model: string
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens?: number
+  readonly cacheCreationTokens?: number
+}): SamplingUsage => ({
+  model: ev.model,
+  inputTokens: ev.inputTokens,
+  outputTokens: ev.outputTokens,
+  ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+  ...(ev.cacheCreationTokens !== undefined ? { cacheCreationTokens: ev.cacheCreationTokens } : {}),
+})
+
+/** gen_ai.* attributes for a `run_sampling_request` span: TTFT (existing) PLUS
+ *  the response model, token usage, and finish reason when available. The
+ *  sampling span previously carried only TTFT — so a trace could not answer
+ *  "which model / how many tokens / why did it stop" per LLM call. Empty-safe:
+ *  omits any field whose source was absent (no usage event ⇒ early abort; no
+ *  finish reason). All keys are canonical `GEN_AI_ATTRS` so `attrs()` accepts
+ *  them. */
+export const buildSamplingSpanAttrs = (
+  timing: TurnTiming,
+  usage?: SamplingUsage,
+  finishReason?: string,
+): Record<string, string | number> => {
+  const out: Record<string, string | number> = { ...buildTtftAttrs(timing) }
+  if (usage !== undefined) {
+    out[GEN_AI_ATTRS.response.model] = usage.model
+    out[GEN_AI_ATTRS.usage.inputTokens] = usage.inputTokens
+    out[GEN_AI_ATTRS.usage.outputTokens] = usage.outputTokens
+    if (usage.cacheReadTokens !== undefined)
+      out[GEN_AI_ATTRS.usage.cacheReadInputTokens] = usage.cacheReadTokens
+    if (usage.cacheCreationTokens !== undefined)
+      out[GEN_AI_ATTRS.usage.cacheCreationInputTokens] = usage.cacheCreationTokens
+  }
+  if (finishReason !== undefined) out[GEN_AI_ATTRS.response.finishReason] = finishReason
+  return out
+}
+
 // ─── ADR-0240 §B — Automation engine tick wire ─────────────────────────
 
 /** Handle returned by `startAutomationEngineTicker`. Idempotent stop. */

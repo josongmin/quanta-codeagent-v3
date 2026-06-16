@@ -3,6 +3,16 @@
 로컬(arm64 Docker, official Python harness) 정식 채점으로 **resolved** 된 인스턴스 기록.
 preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹션.
 
+> **머신리더블 SSOT = [`swebench-leaderboard.yaml`](swebench-leaderboard.yaml)** (run 블록별 resolved 리스트). 이 md는 사람이 보는 큐레이션 뷰 — 전체 resolved 인스턴스는 yaml 참조.
+
+## 📊 easy django T1+T2 batch (2026-06-16, scaffold-fixed) — 39 resolved
+
+우리 정형화 분석의 easy 티어(T1 존나쉬움 + T2 쉬움) django 84개 블라인드 런. **bench 스캐폴드 2버그 구조수정 후** 측정:
+deadline을 env-setup 후 arm + 기본 per-instance 타임아웃 2분→10분 + bench stale-read-guard off
+([driver.ts](../src/apps/bench/eval/driver.ts), [index.ts](../src/apps/bench/index.ts)).
+**효과: abort 74%(39/53) → 0%.** 같은 gpt-5.4가 mini-swe-agent 수준으로 회복 — quanta가 틀렸던 django-12039·12304가 수정 후 PASS(스캐폴드 탓 확정, 모델 아님).
+confirmed **resolved 39 django** (remaining 런 진행 중, 전체 목록은 yaml).
+
 - harness: `QUANTA_SWEBENCH_PYTHON=1` + prebuilt amd64 이미지 pull → 에뮬레이션 실행 (max_workers=1)
 - grading 신뢰도: ★★★ (가짜 testCmd=true 아님, 실제 FAIL_TO_PASS 통과)
 

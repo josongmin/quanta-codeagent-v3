@@ -684,9 +684,13 @@ const runCustomCorpusMode = async (
   await finalizeObserve(obs, results)
 }
 
-/** Default per-instance wall-clock cap (2 min). Overridable via the
- *  `QUANTA_BENCH_TIMEOUT_MS` runtime-config field (`cfg.benchTimeoutMs`). */
-const DEFAULT_BENCH_TIMEOUT_MS = 120_000
+/** Default per-instance wall-clock cap for the AGENT SOLVE (10 min). This is a
+ *  runaway BACKSTOP, not the real budget — `maxTurns` (60) is the agent's turn
+ *  budget. The old 2-min value was a tight solve budget that, combined with the
+ *  pre-fix timer placement (which also counted env setup), aborted ~68% of
+ *  instances mid-work under concurrency. Sized to maxTurns (~10s/turn headroom).
+ *  Overridable via `QUANTA_BENCH_TIMEOUT_MS` (`cfg.benchTimeoutMs`). */
+const DEFAULT_BENCH_TIMEOUT_MS = 600_000
 
 /**
  * Test seam — `runMain` accepts an injectable `exit` so unit tests can
@@ -714,9 +718,21 @@ const printPresetList = (): void => {
   }
 }
 
+/** Bench runs ONE agent in an isolated per-instance sandbox — there is no other
+ *  writer, so the stale-read freshness guard (a multi-writer safety control)
+ *  only fires spuriously on the agent's OWN sequential edits (observed: ~50
+ *  `stale_precondition` rejections wasting turns + blocking corrections). Default
+ *  it OFF for bench; an operator who sets `QUANTA_STALE_READ_GUARD` explicitly
+ *  (to anything) keeps their choice. Pure + injectable so the contract is
+ *  unit-testable without spawning the CLI. */
+export const applyBenchEnvDefaults = (env: Record<string, string | undefined>): void => {
+  if (env.QUANTA_STALE_READ_GUARD === undefined) env.QUANTA_STALE_READ_GUARD = "off"
+}
+
 export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
+  applyBenchEnvDefaults(process.env)
 
   if (argFlag("--list-presets")) {
     printPresetList()

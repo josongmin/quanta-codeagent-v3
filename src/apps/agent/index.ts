@@ -66,6 +66,7 @@ import {
   parseAgentArgs,
 } from "@/host/runtime/agent-args"
 import { errMessage, gateOn, logger, quantaHomeDir, runtimeConfig, setTerminalIo } from "@/shared"
+import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import type { AssembleRequest } from "./assemble"
 
 export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests }
@@ -533,6 +534,15 @@ const liftToAssembleRequest = (
 // We guard so `import "./index"` in tests does NOT trigger the real loop.
 // `import.meta.main` is the Bun-native check (also true under `bun run`).
 if (import.meta.main) {
+  // OTLP span export (ADR-0268) — boot wire for the headless/batch/ci-bot agent
+  // process (separate from the CLI binary). Installed here (not in runMain) so
+  // the tested `runMain(deps)` stays env-pure; Default-OFF no-op unless
+  // QUANTA_OTEL_ENDPOINT is set. The unref'd flush timer ships steady-state; a
+  // best-effort final flush drains on natural exit.
+  const otelExport = installOtelSpanExportFromEnv(process.env)
+  process.on("beforeExit", () => {
+    void otelExport.teardown()
+  })
   runMain().catch((e) => {
     process.stderr.write(`fatal: ${errMessage(e)}\n`)
     // ADR-0303 — honor a typed launcher error's exit code (e.g.

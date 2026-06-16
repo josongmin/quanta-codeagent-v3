@@ -29,7 +29,7 @@ import {
   type SpanStatus,
   setSpanSink,
 } from "@/observability"
-import { QUANTA_ATTRS } from "@/observability/vocabulary"
+import { GEN_AI_ATTRS, QUANTA_ATTRS } from "@/observability/vocabulary"
 import { defaultTools, ToolRegistry } from "@/tool"
 import {
   FakeLLM,
@@ -60,6 +60,10 @@ interface CloseEvent {
   status: SpanStatus
   durationMs: number
   toolStatus?: unknown
+  model?: unknown
+  inputTokens?: unknown
+  outputTokens?: unknown
+  finishReason?: unknown
 }
 
 const recordingSink = (): {
@@ -89,6 +93,10 @@ const recordingSink = (): {
         status,
         durationMs,
         toolStatus: a[QUANTA_ATTRS.tool.status],
+        model: a[GEN_AI_ATTRS.response.model],
+        inputTokens: a[GEN_AI_ATTRS.usage.inputTokens],
+        outputTokens: a[GEN_AI_ATTRS.usage.outputTokens],
+        finishReason: a[GEN_AI_ATTRS.response.finishReason],
       })
     },
   }
@@ -200,6 +208,38 @@ describe("spans e2e — Codex 10-step tree (core 4)", () => {
       expect(e.durationMs).toBeGreaterThanOrEqual(0)
       expect(Number.isInteger(e.durationMs)).toBe(true)
     }
+  })
+
+  test("the run_sampling_request span carries gen_ai model + token + finish attrs", async () => {
+    const { sink, events } = recordingSink()
+    setSpanSink(sink)
+
+    // A turn whose stream emits a `usage` event (model + tokens) then stops.
+    const llm = new FakeLLM([
+      [
+        { type: "text_delta", delta: "hi" },
+        { type: "usage", model: "claude-test-4", inputTokens: 1234, outputTokens: 56 },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const outcome = await runAgent(
+      baseConfig(llm, registry, stream, dir, { mode: "acceptEdits" }, 5),
+    )
+    expect(outcome.reason).toBe("completed")
+
+    const sampling = events.find(
+      (e): e is CloseEvent => e.kind === "end" && e.name === SPAN_NAMES.runSamplingRequest,
+    )
+    expect(sampling).toBeDefined()
+    // gen_ai.* enrichment — previously the sampling span carried ONLY TTFT.
+    // RED-ON-INJECTION: reverting stream-consume's capture (buildSamplingSpanAttrs
+    // → buildTtftAttrs) drops all four of these.
+    expect(sampling?.model).toBe("claude-test-4")
+    expect(sampling?.inputTokens).toBe(1234)
+    expect(sampling?.outputTokens).toBe(56)
+    expect(sampling?.finishReason).toBe("end_turn")
   })
 
   test("default-OFF regression: no sink ⇒ zero recorded events (byte-identical)", async () => {

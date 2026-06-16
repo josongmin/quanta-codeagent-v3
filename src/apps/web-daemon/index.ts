@@ -25,6 +25,7 @@ import { isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import { type SupportedReadModels, supported } from "@/protocol/session"
 import type { RuntimeFacade } from "@/sdk/runtime"
 import { errMessage, gateOn } from "@/shared"
+import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import {
   type AgentStatePorts,
@@ -205,6 +206,12 @@ const buildSupportedReadModels = (args: {
  * than to boot a daemon that cannot serve a session.
  */
 export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDaemonHandle> => {
+  // OTLP span export (ADR-0268) — same boot wire as the CLI, for the daemon
+  // process. When QUANTA_OTEL_ENDPOINT is set, the daemon's session spans ship
+  // to the collector; Default-OFF no-op otherwise. Torn down in `shutdown`
+  // (an awaitable path, so the final flush actually completes — unlike a
+  // best-effort beforeExit).
+  const otelExport = installOtelSpanExportFromEnv(process.env)
   const baseFactory =
     overrides?.runtimeFactory ?? (await import("./runtime-factory")).buildProductionRuntimeFactory()
 
@@ -293,6 +300,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
     try {
       await handle.stop()
+      await otelExport.teardown() // final flush + restore sink (awaited — no loss)
     } finally {
       // Exit code 0 — graceful shutdown is the happy path.
       void sig

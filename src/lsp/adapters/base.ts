@@ -717,6 +717,16 @@ export class LspClient implements LspPort {
         }
       }
       this.sendNotification("initialized", {})
+      // PUSH the settings too (not just answer the pull). pyright (matching the
+      // VS Code client) only fully applies `pythonPath` / analysis settings —
+      // and therefore only resolves cross-file imports — once it sees a
+      // `workspace/didChangeConfiguration`. With the pull-response alone it
+      // hangs every request. Skipped when no config is configured (other langs).
+      if (Object.keys(this.workspaceConfiguration).length > 0) {
+        this.sendNotification("workspace/didChangeConfiguration", {
+          settings: this.workspaceConfiguration,
+        })
+      }
     } finally {
       signal?.removeEventListener("abort", onAbort)
     }
@@ -1449,11 +1459,7 @@ export class LspClient implements LspPort {
     }
   }
 
-  private onServerRequest(msg: {
-    id: number | string
-    method: string
-    params?: unknown
-  }): void {
+  private onServerRequest(msg: { id: number | string; method: string; params?: unknown }): void {
     switch (msg.method) {
       case "workspace/configuration": {
         const items = (msg.params as WorkspaceConfigurationParams | undefined)?.items

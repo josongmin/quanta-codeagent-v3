@@ -6,6 +6,7 @@ import { loadEnvFiles } from "./dotenv"
 import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
+import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
 import { renderVersion } from "./version-cmd"
@@ -158,6 +159,21 @@ const remoteTimeoutOverride = (raw: string | undefined): { defaultTimeoutMs?: nu
 // completes that split by moving the orchestration body itself out of the
 // entrypoint, leaving `index.ts` as the assembly orchestrator only.
 
+/**
+ * OTLP span export (ADR-0268) — the missing last mile. Wires the agent loop's
+ * spans to an OTel collector when QUANTA_OTEL_ENDPOINT is set; Default-OFF no-op
+ * (no sink registered, byte-identical) otherwise. The exporter's flush timer is
+ * `unref`'d so this never keeps the process alive; a best-effort final flush
+ * drains the tail on natural exit (the periodic timer already shipped
+ * steady-state spans, so process.exit paths lose at most one batch).
+ */
+const wireOtelSpanExport = (): void => {
+  const otelExport = installOtelSpanExportFromEnv(process.env)
+  process.on("beforeExit", () => {
+    void otelExport.teardown()
+  })
+}
+
 const main = async (): Promise<void> => {
   // S1 — OS sandbox wire-up. Reads `QUANTA_SANDBOX` ONCE at boot (after
   // dotenv load so `.env.local` overrides are honored). Default-OFF: when
@@ -165,6 +181,7 @@ const main = async (): Promise<void> => {
   // `runShell` is byte-identical to pre-S1. Degraded backends surface a
   // one-line stderr warning before the first sandboxed command runs.
   await installCliSandbox()
+  wireOtelSpanExport()
 
   // Early route: `quanta session …` is fully handled by the subcommand
   // dispatcher and never touches the agent loop / REPL wiring below.
