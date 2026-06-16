@@ -40,35 +40,47 @@ describe("stripToAccessToken (security crux)", () => {
     expect(out).not.toContain("REFRESH-super-secret-long-lived")
     expect(out).not.toContain("IDTOK-secret")
   })
+
+  test("THROWS (fail-fast) when access_token is absent/empty — never ships a useless token", () => {
+    // Without this guard the box gets a token with no access_token → 0 turns /
+    // empty patch after a full provision cycle (a silent, expensive waste).
+    expect(() => stripToAccessToken(JSON.stringify({ refresh_token: "r", id_token: "i" }))).toThrow(
+      /access_token/,
+    )
+    expect(() => stripToAccessToken(JSON.stringify({ access_token: "" }))).toThrow(/access_token/)
+  })
 })
 
-/** Mock spawn recording every command + its stdin input. */
-const mockSpawn = (): {
-  fn: SpawnFn
-  calls: Array<{ cmd: string; args: string[]; input?: string }>
-} => {
+/** Mock spawn recording every command + its stdin input. With
+ *  `{ emptyReport: true }` the report-fetch (and any `.json` ssh) returns empty
+ *  stdout — the "box produced no report" scenario. */
+const mockSpawn = (
+  o: { emptyReport?: boolean } = {},
+): { fn: SpawnFn; calls: Array<{ cmd: string; args: string[]; input?: string }> } => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+  const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+  // Split ssh routing into a sub-helper so cognitive complexity stays flat.
+  const routeSsh = (args: string[]): SpawnResult => {
+    if (args.some((a) => a.includes("bun") && a.includes("READY"))) return ok("READY") // readiness
+    if (args.some((a) => a.includes("cat ") || a.includes(".json")))
+      return ok(o.emptyReport ? "" : JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
+    return ok("")
+  }
+  const route = (cmd: string, args: string[]): SpawnResult => {
+    if (args.includes("describe-security-groups")) return ok("sg-abc")
+    if (cmd === "curl") return ok("9.9.9.9")
+    if (args.includes("run-instances")) return ok("i-deadbeef")
+    if (args.includes("describe-instances")) return ok("1.2.3.4")
+    if (cmd === "ssh") return routeSsh(args)
+    return ok("")
+  }
   const fn: SpawnFn = async (cmd, args, opts): Promise<SpawnResult> => {
     calls.push({
       cmd,
       args: [...args],
       ...(opts?.input !== undefined ? { input: opts.input } : {}),
     })
-    // Give run-instances / describe an instance id + ip; report fetch returns a report.
-    if (args.includes("describe-security-groups")) return { code: 0, stdout: "sg-abc", stderr: "" }
-    if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
-    if (args.includes("run-instances")) return { code: 0, stdout: "i-deadbeef", stderr: "" }
-    if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
-    // cloud-init readiness probe
-    if (cmd === "ssh" && args.some((a) => a.includes("bun") && a.includes("READY")))
-      return { code: 0, stdout: "READY", stderr: "" }
-    if (cmd === "ssh" && args.some((a) => a.includes("cat ") || a.includes(".json")))
-      return {
-        code: 0,
-        stdout: JSON.stringify({ resolved_ids: ["psf__requests-5414"] }),
-        stderr: "",
-      }
-    return { code: 0, stdout: "", stderr: "" }
+    return route(cmd, [...args])
   }
   return { fn, calls }
 }
@@ -217,5 +229,56 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const plan = await createFullRemoteBackend({ ...baseCfg, spawn: fn, dryRun: true }).run()
     expect(calls.length).toBe(0) // nothing executed
     expect(JSON.stringify(plan)).toMatch(/dry|plan/i)
+  })
+
+  // The on-box `bench run` reads `--instance` as a comma-OR filter
+  // (see bench-instance-filter.test.ts), so multi-instance MUST pass ALL ids.
+  const runCmd = (calls: Array<{ cmd: string; args: string[] }>): string =>
+    calls
+      .find((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run")))
+      ?.args.join(" ") ?? ""
+
+  test("multi-instance subset ships ALL ids to --instance (not just the first)", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({
+      ...baseCfg,
+      instanceIds: ["psf__requests-5414", "django__django-12345"],
+      spawn: fn,
+    })
+      .run()
+      .catch(() => undefined)
+    const cmd = runCmd(calls)
+    // TEETH: regressing to a single id (or dropping the join) fails here.
+    expect(cmd).toContain("psf__requests-5414")
+    expect(cmd).toContain("django__django-12345")
+  })
+
+  test("shell-quotes preset/model so a crafted value can't break out of the remote command", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({
+      ...baseCfg,
+      preset: "evil; touch /pwned",
+      model: "m`whoami`",
+      spawn: fn,
+    })
+      .run()
+      .catch(() => undefined)
+    const cmd = runCmd(calls)
+    // TEETH (shell injection): the metacharacters must be inside single quotes,
+    // NOT bare in the command. A bare `=evil; touch` would execute the injection.
+    expect(cmd).not.toContain("=evil; touch /pwned") // bare (would execute) — absent
+    expect(cmd).toContain("'evil; touch /pwned'") // single-quoted — inert
+    expect(cmd).not.toContain("--model m`whoami`") // bare (would execute) — absent
+    expect(cmd).toContain("--model 'm`whoami`'") // single-quoted — inert
+  })
+
+  test("does NOT return a reportPath when the box produced no report file", async () => {
+    // empty report stdout ⇒ nothing saved locally; a returned path would be a
+    // dangling ENOENT for the caller.
+    const { fn } = mockSpawn({ emptyReport: true })
+    const res = await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => ({ reportPath: "SHOULD-NOT-HAPPEN" }) as { reportPath?: string })
+    expect(res.reportPath).toBeUndefined()
   })
 })

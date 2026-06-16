@@ -171,6 +171,25 @@ describe("ssh backend", () => {
     expect(script).toContain("--dataset_name ~/instances.jsonl")
   })
 
+  test("run_id with `$` is substituted LITERALLY (no replace-pattern corruption)", async () => {
+    // A string `.replace("RUNID", id)` interprets `$&`/`$1` in `id` as patterns;
+    // the fix uses a function replacer. fanout appends `-s${i}`, so a `$`-bearing
+    // run_id is plausible. TEETH: regressing to a string replacer corrupts this.
+    const outDir = require("node:fs").mkdtempSync(
+      require("node:path").join(require("node:os").tmpdir(), "ssh-dollar-"),
+    )
+    const { spawn, issued } = makeMockSpawn((cmd, args) => {
+      if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("READY")
+      return ok()
+    })
+    const backend = createSshBackend({ host: "u@h", keyPath: "/k", spawn, sleep: async () => {} })
+    await backend
+      .grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "run-$&-$1", outDir })
+      .catch(() => undefined)
+    const script = issued.find((i) => i.input?.includes("run_evaluation"))?.input ?? ""
+    expect(script).toContain("--run_id run-$&-$1")
+  })
+
   test("opts.maxWorkers overrides the default in the remote command", async () => {
     const { spawn, issued } = makeMockSpawn((cmd, args) => {
       if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("READY")

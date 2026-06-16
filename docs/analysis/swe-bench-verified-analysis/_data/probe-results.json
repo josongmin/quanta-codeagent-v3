@@ -1,0 +1,65 @@
+[
+  {
+    "id": "django__django-15280",
+    "repo": "django/django",
+    "gold_files": [
+      "django/db/models/fields/related_descriptors.py"
+    ],
+    "answer": "{\"files\":[\"django/db/models/query.py\"],\"symbols\":[\"prefetch_one_level\"],\"fix\":\"When wiring prefetched related objects back onto already-loaded parent instances, Django reuses an existing instance from the identity map/prefetch cache path and leaves its deferred-field state from the outer queryset intact. Update the prefetch assignment/merge logic in prefetch_one_level so that when the same model instance is populated from the inner prefetched queryset, its loaded field state (__dict__/deferred fields) is refreshed or copied from the prefetched instance rather than preserving the parent's deferred-field mask.\"}"
+  },
+  {
+    "id": "matplotlib__matplotlib-14623",
+    "repo": "matplotlib/matplotlib",
+    "gold_files": [
+      "lib/matplotlib/axes/_base.py",
+      "lib/matplotlib/ticker.py",
+      "lib/mpl_toolkits/mplot3d/axes3d.py"
+    ],
+    "answer": "{\"files\":[\"lib/matplotlib/axes/_base.py\",\"lib/matplotlib/axis.py\"],\"symbols\":[\"_AxesBase.set_ylim\",\"Axis._set_lim\"],\"fix\":\"Preserve the user-supplied limit order when setting view limits on log axes. In Axis._set_lim (used by set_xlim/set_ylim), validate/log-transform the endpoints without sorting them by magnitude, and let the resulting view interval keep vmax < vmin so _AxesBase.set_ylim can invert a log axis the same way as a linear axis.\"}"
+  },
+  {
+    "id": "sympy__sympy-22080",
+    "repo": "sympy/sympy",
+    "gold_files": [
+      "sympy/printing/codeprinter.py",
+      "sympy/printing/precedence.py"
+    ],
+    "answer": "{\"files\":[\"sympy/utilities/lambdify.py\"],\"symbols\":[\"LambdaPrinter._print_Mod\",\"lambdify\"],\"fix\":\"Ensure Mod is always emitted with explicit grouping/call semantics in the pure-python printer path used by modules=[] so unary/binary multipliers are not folded into the left operand by Python's % precedence. Update the Mod printer to parenthesize/generated expression consistently (e.g. use mod(...) or fully wrapped operands) so expr*Mod(a,b) and -Mod(a,b) round-trip correctly under lambdify(modules=[]).\"}"
+  },
+  {
+    "id": "pylint-dev__pylint-6386",
+    "repo": "pylint-dev/pylint",
+    "gold_files": [
+      "pylint/config/argument.py",
+      "pylint/config/arguments_manager.py",
+      "pylint/config/utils.py",
+      "pylint/lint/base_options.py"
+    ],
+    "answer": "{\"files\":[\"pylint/config/arguments_manager.py\",\"pylint/lint/base_options.py\"],\"symbols\":[\"_ArgumentsManager._add_parser_option\",\"base_options\"],\"fix\":\"Ensure the CLI builder treats the verbose flag as a boolean/count-style option when adding its short form, so '-v' uses 'store_true'/'count' and no metavar/argument is attached. Update the verbose option definition accordingly so help text no longer shows a required VERBOSE value for the short option.\"}"
+  },
+  {
+    "id": "pydata__xarray-3095",
+    "repo": "pydata/xarray",
+    "gold_files": [
+      "xarray/core/indexing.py",
+      "xarray/core/variable.py"
+    ],
+    "answer": "{\"files\":[\"xarray/core/variable.py\"],\"symbols\":[\"IndexVariable.copy\",\"IndexVariable._copy\"],\"fix\":\"Adjust IndexVariable copying to preserve unicode/bytes index dtypes instead of rebuilding the underlying pandas.Index through an object-typed path during shallow/deep copy. Keep the fast path that reuses/copies the existing index/values so copy(), copy(deep=True), copy.copy(), and copy.deepcopy() return IndexVariable instances with the original '<U*' dtype.\"}"
+  },
+  {
+    "id": "pallets__flask-5014",
+    "repo": "pallets/flask",
+    "gold_files": [
+      "src/flask/blueprints.py"
+    ],
+    "answer": "{\"files\":[\"src/flask/blueprints.py\"],\"symbols\":[\"Blueprint.__init__\"],\"fix\":\"Add validation in Blueprint.__init__ to reject an empty name (and likely other falsey names) by raising ValueError before storing the name. This ensures invalid blueprint names fail fast instead of causing downstream routing/registration issues.\"}"
+  },
+  {
+    "id": "pylint-dev__pylint-6903",
+    "repo": "pylint-dev/pylint",
+    "gold_files": [
+      "pylint/lint/run.py"
+    ],
+    "answer": "{\"files\":[\"pylint/lint/run.py\"],\"symbols\":[\"_query_cpu\"],\"fix\":\"Clamp the detected CPU count to at least 1 in _query_cpu(), especially for the cgroup cpu.shares fallback where int(2/1024) becomes 0 in Kubernetes. Return max(1, computed_value) (and similarly guard other computed branches) so --jobs=0 never passes 0 to multiprocessing.\"}"
+  }
+]

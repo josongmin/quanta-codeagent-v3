@@ -113,3 +113,28 @@ describe("cost — no usage anywhere (the honest-caveat scenario)", () => {
     expect(rendered).toMatch(/no token usage|observability|not recorded/)
   })
 })
+
+describe("cost — pricing unknown for the model (the OTHER silent-$0 trap)", () => {
+  test("tokens present but model not in pricing → caveat, NOT a fake $0.00 total", () => {
+    const reportPath = writeReport({
+      model: "gpt-7-unpriced",
+      perInstance: [{ id: "a", passed: true, usage: { inputTokens: 1_000_000, outputTokens: 0 } }],
+    })
+    const s = costSummaryFromReport({ reportPath, pricing: PRICING }) // PRICING lacks gpt-7-unpriced
+    // tokens ARE recorded — so this is NOT the "no usage" branch...
+    expect(s.instancesWithUsage).toBe(1)
+    expect(s.pricingKnown).toBe(false)
+    const rendered = renderCost(s).toLowerCase()
+    // TEETH: must flag the missing price, NOT present "$0.0000" as a real cost.
+    expect(rendered).toMatch(/no pricing|pricing.*unknown|unknown.*pricing|gpt-7-unpriced/)
+  })
+
+  test("pricingKnown is true when the model IS priced", () => {
+    const reportPath = writeReport({
+      model: "gpt-5.4",
+      perInstance: [{ id: "a", usage: { inputTokens: 1_000_000, outputTokens: 0 } }],
+    })
+    const s = costSummaryFromReport({ reportPath, pricing: PRICING })
+    expect(s.pricingKnown).toBe(true)
+  })
+})

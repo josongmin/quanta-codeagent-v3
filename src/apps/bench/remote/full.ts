@@ -82,6 +82,15 @@ const REDACTED = "REDACTED-not-shipped-to-remote"
 
 export const stripToAccessToken = (authJson: string): string => {
   const parsed = JSON.parse(authJson) as Record<string, unknown>
+  // Fail fast: a token file with no usable access_token would still ship (with
+  // REDACTED placeholders) and the box would run 0 turns / empty patch after a
+  // full provision cycle — an expensive silent waste. Catch it before launch.
+  if (typeof parsed.access_token !== "string" || parsed.access_token === "") {
+    throw new Error(
+      "[full-remote] auth json has no usable access_token — cannot run patch-gen on the box " +
+        "(re-login locally: `quanta /login`).",
+    )
+  }
   const safe: Record<string, unknown> = {}
   for (const k of ["access_token", "account_id", "expires_at", "last_refresh", "plan_type"]) {
     if (parsed[k] !== undefined) safe[k] = parsed[k]
@@ -113,6 +122,12 @@ export const PHANTOM_DEPS = [
 ] as const
 
 const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
+
+/** Single-quote a value for safe interpolation into a remote bash command
+ *  string. Without this, a preset/model/instance-id containing a space, `;`,
+ *  `$(...)`, backtick, or `|` would break out of the intended command (the
+ *  token is piped over STDIN and is safe, but these env/flag values are not). */
+const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 
 const userData = (ttl: number): string =>
   [
@@ -485,9 +500,11 @@ export const createFullRemoteBackend = (
 
       // Run patch-gen + grading ON the box (full remote). Tee to ~/run.log so the
       // operator can watch live from another terminal.
+      // `--instance` is a comma-OR filter on the box (see matchesInstanceFilter):
+      // ALL ids go through, shell-quoted as one arg.
       const idsFlag =
         cfg.instanceIds && cfg.instanceIds.length > 0
-          ? ` --instance ${cfg.instanceIds.join(",")}`
+          ? ` --instance ${shq(cfg.instanceIds.join(","))}`
           : ""
       log(
         `[full-remote] running patch-gen + grading on box (minutes). Watch live:\n` +
@@ -497,13 +514,13 @@ export const createFullRemoteBackend = (
       // (otherwise the pipeline's exit code is tee's, always 0 — masking failures).
       const remoteRun = await sshTo(
         host,
-        `set -o pipefail; cd ~/quanta && QUANTA_BENCH_PRESET=${preset} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
+        `set -o pipefail; cd ~/quanta && QUANTA_BENCH_PRESET=${shq(preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
           `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
           // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
           // arch-aware default is "none" (slow local conda build).
           `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 ` +
           `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
-          `--model ${model} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
+          `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
       )
 
       log("[full-remote] run finished; fetching report…")
@@ -530,11 +547,15 @@ export const createFullRemoteBackend = (
         // unparseable / missing report — diagnose below
       }
 
-      // Save the report locally so it survives box termination.
-      const localReport = `/tmp/full-remote-report-${iid}.json`
+      // Save the report locally so it survives box termination. Only set
+      // `savedReport` when a file was actually written — otherwise the result's
+      // reportPath would be a dangling ENOENT for the caller.
+      let savedReport: string | undefined
       if (fetched.stdout.trim() !== "") {
+        const localReport = `/tmp/full-remote-report-${iid}.json`
         try {
           writeFileSync(localReport, fetched.stdout)
+          savedReport = localReport
           log(`[full-remote] report saved: ${localReport}`)
         } catch (_ignore) {
           /* best-effort local save */
@@ -557,7 +578,7 @@ export const createFullRemoteBackend = (
 
       log("[full-remote] terminating box…")
       await terminate()
-      return { reportPath: localReport, ...parsed }
+      return { ...(savedReport !== undefined ? { reportPath: savedReport } : {}), ...parsed }
     } catch (err) {
       await terminate().catch(() => undefined)
       throw err

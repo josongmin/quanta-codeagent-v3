@@ -49,6 +49,10 @@ export interface CostSummary {
   readonly totalWallClockMs: number
   /** How many instances had REAL token data (in+out > 0). */
   readonly instancesWithUsage: number
+  /** Whether the model has a known price. When false, costUsd is 0 not because
+   *  the run was free but because we have no pricing — renderCost says so
+   *  instead of presenting a fake `$0.00`. */
+  readonly pricingKnown: boolean
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
@@ -159,6 +163,7 @@ export const costSummaryFromReport = (args: {
     totalCostUsd: perInstance.reduce((s, p) => s + p.costUsd, 0),
     totalWallClockMs: perInstance.reduce((s, p) => s + p.wallClockMs, 0),
     instancesWithUsage: perInstance.filter((p) => p.inputTokens + p.outputTokens > 0).length,
+    pricingKnown: price !== undefined,
   }
 }
 
@@ -172,17 +177,26 @@ export const renderCost = (s: CostSummary): string => {
     )
     return lines.join("\n")
   }
+  // When the model has no price, show `—` for $ instead of a misleading $0.0000.
+  const money = (v: number): string => (s.pricingKnown ? v.toFixed(4) : "—")
   lines.push("| instance | input | output | wall(s) | $ |", "| --- | ---: | ---: | ---: | ---: |")
   for (const p of s.perInstance) {
     lines.push(
-      `| ${p.id} | ${p.inputTokens} | ${p.outputTokens} | ${(p.wallClockMs / 1000).toFixed(1)} | ${p.costUsd.toFixed(4)} |`,
+      `| ${p.id} | ${p.inputTokens} | ${p.outputTokens} | ${(p.wallClockMs / 1000).toFixed(1)} | ${money(p.costUsd)} |`,
     )
   }
   lines.push(
     "",
     `total: ${s.totalInputTokens} in + ${s.totalOutputTokens} out tokens | ` +
-      `$${s.totalCostUsd.toFixed(4)} | ${(s.totalWallClockMs / 1000).toFixed(1)}s wall | ` +
+      `$${money(s.totalCostUsd)} | ${(s.totalWallClockMs / 1000).toFixed(1)}s wall | ` +
       `(${s.instancesWithUsage}/${s.perInstance.length} instances had token data)`,
   )
+  if (!s.pricingKnown) {
+    lines.push(
+      "",
+      `⚠️ NO pricing for model "${s.model}" — $ shown as "—" (NOT $0). ` +
+        "Pass --pricing or add the model to DEFAULT_PRICING for real cost.",
+    )
+  }
   return lines.join("\n")
 }

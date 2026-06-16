@@ -6,7 +6,12 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { writeFileSync } from "node:fs"
-import { buildBackend, modelNameFromPredictions, positionals } from "../../src/apps/bench/cli"
+import {
+  argValue,
+  buildBackend,
+  modelNameFromPredictions,
+  positionals,
+} from "../../src/apps/bench/cli"
 
 let savedArgv: string[]
 beforeEach(() => {
@@ -34,6 +39,21 @@ describe("bench CLI dispatch", () => {
   test("positionals: empty when only flags", () => {
     setArgv("diff", "--dataset", "x")
     expect(positionals()).toEqual([])
+  })
+
+  test("positionals: --model value does NOT leak as a positional report path", () => {
+    // BUG: --model was missing from VALUE_FLAGS, so `gpt-5.4` was treated as a
+    // second report file ⇒ leaderboard crashed with ENOENT on "gpt-5.4".
+    setArgv("leaderboard", "report.json", "--model", "gpt-5.4")
+    expect(positionals()).toEqual(["report.json"])
+  })
+
+  test("argValue reads both `--flag value` AND `--flag=value` forms", () => {
+    setArgv("grade", "--preset", "agentless-v1", "--region=ap-northeast-2")
+    expect(argValue("--preset")).toBe("agentless-v1") // space form (back-compat)
+    // BUG: indexOf(flag) never matched the `=`-form ⇒ silently undefined.
+    expect(argValue("--region")).toBe("ap-northeast-2")
+    expect(argValue("--missing")).toBeUndefined()
   })
 
   test("buildBackend ssh:host → ssh backend", () => {

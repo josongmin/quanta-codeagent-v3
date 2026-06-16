@@ -54,6 +54,21 @@ export interface RunBatchResult {
 
 const hasPath = (path: string | undefined): path is string => path !== undefined && path !== ""
 
+/** Match an instance id against a `--instance` filter. The filter is a
+ *  comma-separated list of substrings; an id matches if it contains ANY part.
+ *  A single value (no comma) is plain substring match — byte-identical to the
+ *  pre-2026-06-16 behavior. Comma support fixes multi-instance subset runs
+ *  (full-remote passes `ids.join(",")`, which the old single-substring filter
+ *  matched against zero ids — no id contains a literal comma). */
+export const matchesInstanceFilter = (id: string, filter: string): boolean => {
+  const parts = filter
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p !== "")
+  if (parts.length === 0) return true
+  return parts.some((p) => id.includes(p))
+}
+
 /** Apply the optional id-substring filter + the limit slice. Filter runs
  *  BEFORE limit so selection stays byte-identical to the bench CLI. */
 export const selectInstances = (
@@ -63,7 +78,7 @@ export const selectInstances = (
 ): Instance[] => {
   const filtered =
     filter !== undefined && filter !== ""
-      ? all.filter((instance) => instance.id.includes(filter))
+      ? all.filter((instance) => matchesInstanceFilter(instance.id, filter))
       : [...all]
   if (limit === null || limit === undefined) return filtered
   return filtered.slice(0, limit)

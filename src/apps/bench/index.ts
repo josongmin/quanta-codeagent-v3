@@ -75,6 +75,7 @@ import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM 
 import {
   loadSelectedInstances,
   mapWithConcurrency,
+  matchesInstanceFilter,
   runBatch,
   selectInstances,
   writeArtifacts as writeBatchArtifacts,
@@ -415,11 +416,12 @@ const runDatasetMode = async (
     exitFn(0)
     return
   }
-  // `--instance <substr>` filters by instance id before the limit slice.
+  // `--instance <substr[,substr...]>` filters by instance id (comma = OR) before
+  // the limit slice.
   const instanceFilter = argValue("--instance")
   const tasks =
     instanceFilter !== undefined && instanceFilter !== ""
-      ? parsed.filter((t) => t.instanceId.includes(instanceFilter))
+      ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
       : parsed
   const selected = cfg.limit ? tasks.slice(0, cfg.limit) : tasks
 

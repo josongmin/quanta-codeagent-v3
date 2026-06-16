@@ -57,9 +57,14 @@ const KNOWN_SUBCOMMANDS = new Set([
   "-h",
 ])
 
+/** Read a value flag in BOTH `--flag value` and `--flag=value` forms. The
+ *  `=`-form previously fell through `indexOf` and was silently ignored. */
 const argValue = (flag: string): string | undefined => {
   const i = process.argv.indexOf(flag)
-  return i >= 0 ? process.argv[i + 1] : undefined
+  if (i >= 0) return process.argv[i + 1]
+  const pref = `${flag}=`
+  const eq = process.argv.find((a) => a.startsWith(pref))
+  return eq !== undefined ? eq.slice(pref.length) : undefined
 }
 const hasFlag = (flag: string): boolean => process.argv.includes(flag)
 
@@ -88,6 +93,7 @@ const VALUE_FLAGS = new Set([
   "--shards",
   "--observe-dir",
   "--mode",
+  "--model",
 ])
 
 /** Positional args after the subcommand (argv[2]), skipping flags AND the
@@ -386,4 +392,4 @@ if (import.meta.main) {
 }
 
 // Exported for unit tests (pure CLI-arg helpers — the routing-bug surface).
-export { buildBackend, modelNameFromPredictions, positionals }
+export { argValue, buildBackend, modelNameFromPredictions, positionals }

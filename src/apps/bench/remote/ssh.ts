@@ -20,12 +20,12 @@ import { join } from "node:path"
 import { errMessage } from "@/shared"
 import {
   DEFAULT_MAX_WORKERS,
+  defaultSpawn,
   type GradeBackend,
   type GradeOptions,
   type GradeOutcome,
-  type SpawnFn,
-  defaultSpawn,
   parseSwebenchReport,
+  type SpawnFn,
 } from "./backend"
 
 export interface SshBackendConfig {
@@ -77,7 +77,7 @@ const buildRemoteGradeScript = (maxWorkers: number): string =>
   [
     "set -eu",
     "UVX=$(command -v uvx || echo ~/.local/bin/uvx)",
-    "nohup \"$UVX\" --from swebench --python 3.11 python -m swebench.harness.run_evaluation \\",
+    'nohup "$UVX" --from swebench --python 3.11 python -m swebench.harness.run_evaluation \\',
     "  --predictions_path ~/preds.jsonl \\",
     "  --run_id RUNID \\",
     `  --max_workers ${maxWorkers} \\`,
@@ -117,10 +117,14 @@ export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
 
     // 3) ssh run_evaluation (nohup background). The run_id is substituted into
     //    the streamed script (the script body is piped to `bash -s` via stdin).
-    const script = buildRemoteGradeScript(maxWorkers).replace("RUNID", opts.runId)
+    // Function replacer (not a string): a string replacement would interpret
+    // `$` sequences in run_id (`$&`, `$1`, …) as patterns and corrupt the id.
+    const script = buildRemoteGradeScript(maxWorkers).replace("RUNID", () => opts.runId)
     const run = await spawn("ssh", [...flags, cfg.host, "bash", "-s"], { input: script })
     if (run.code !== 0) {
-      throw new Error(`[ssh-backend] remote run_evaluation start failed (code ${run.code}): ${run.stderr}`)
+      throw new Error(
+        `[ssh-backend] remote run_evaluation start failed (code ${run.code}): ${run.stderr}`,
+      )
     }
 
     // 4) poll until the report file exists on the box.
@@ -155,7 +159,9 @@ export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
     try {
       parsed = parseSwebenchReport(JSON.parse(await readFile(reportPath, "utf8")))
     } catch (err) {
-      throw new Error(`[ssh-backend] retrieved report ${reportPath} was not valid json: ${errMessage(err)}`)
+      throw new Error(
+        `[ssh-backend] retrieved report ${reportPath} was not valid json: ${errMessage(err)}`,
+      )
     }
 
     return { reportPath, ...parsed }
