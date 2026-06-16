@@ -51,6 +51,40 @@ import이 idle 9~13s라 부하 시 초과해 fake로 폴백하던 버그) + sweb
 | pytest-dev__pytest-5787 | pytest | harness_error(경합) | **unresolved (진짜 model miss)** — 인프라 아님 |
 | sympy-dev__sympy-12489 | sympy | code 143 SIGTERM(경합) | **empty patch** — patch-gen 실패(채점 무관, 재생성 필요) |
 
+## 🤖 mini-swe-agent baseline (표준 스캐폴드, gpt-5.4 via 로그인)
+
+quanta(agentless-v1)와 **별개 스캐폴드**인 mini-swe-agent v2를 같은 gpt-5.4(로그인)로 돌린 per-instance 해결여부.
+스캐폴드 차이가 결과를 가르는지 비교용 칼럼. `✅`=resolved, `❌`=unresolved, 빈칸=미시도.
+
+- 실행: `~/swe-bench-tools/mini-login.sh -y -l 0 --exit-immediately -t "<problem_statement>"` (base_commit 워크트리 cwd)
+  - 로그인 경로: mini(litellm) → `_data/oauth-proxy.ts`(:8765) → quanta `createLLM("chatgpt-oauth")` → gpt-5.4 (raw key 불요)
+- 채점: mini 패치 → `mini-predictions.jsonl` → **공식 swebench harness**(`run_evaluation`, arm64 에뮬, max_workers=1, namespace=swebench) — quanta 칼럼과 **동일 grader**라 apples-to-apples. 산출물: `docs/analysis/swe-bench-verified-analysis/_data/mini-picks10-{predictions.jsonl,report.json}`.
+
+### picks-10 — mini 5/10 vs quanta(agentless-v1) 5/10 → **인스턴스 단위 1:1 동일**
+
+mini가 10개 전부 골드 파일 적중(picks=light 티어). resolved/unresolved 분할이 quanta와 정확히 일치 — 스캐폴드(mini vs 우리 harness 강제)가 결과를 안 가르고 **모델+localization이 결정**.
+
+| instance | repo | mini | quanta | 근거 |
+|---|---|---|---|---|
+| psf__requests-5414 | requests | ✅ | ✅ | both resolved |
+| pallets__flask-5014 | flask | ✅ | ✅ | both resolved |
+| sympy__sympy-13480 | sympy | ✅ | ✅ | both resolved |
+| sympy__sympy-16886 | sympy | ✅ | ✅ | both resolved |
+| pytest-dev__pytest-7982 | pytest | ✅ | ✅ | both resolved |
+| pylint-dev__pylint-4970 | pylint | ❌ | ❌ | both miss — 가드 위치 near-miss(gold=`run()` early-return) |
+| pylint-dev__pylint-8898 | pylint | ❌ | ❌ | both miss — brace-aware 파서 필요, 1파일만 수정(gold 3파일) |
+| pytest-dev__pytest-5787 | pytest | ❌ | ❌ | both miss — chained-exception 직렬화 미완성 |
+| sympy__sympy-12489 | sympy | ❌ | ❌ | both miss — Permutation 서브클래싱 대폭 미달 |
+| sphinx-doc__sphinx-8595 | sphinx | ⛔ | ⛔ | **grading false-neg**: 골드 패치도 이 harness서 fail(env 불일치). 양쪽 모델 무죄, 점수서 제외 |
+
+**합계: mini 5/10 resolved (= 5/9 patch-bearing), quanta와 동일.**
+
+### hard mislocation 케이스 (별도)
+
+| instance | repo | mini | quanta | 근거 | date |
+|---|---|---|---|---|---|
+| django__django-15280 | django | ❌ | ❌ | mini가 `django/utils/deconstruct.py`(@deconstructible) 수정 — gold `related_descriptors.get_prefetch_queryset`와 무관 서브시스템(gross mislocation). FAIL_TO_PASS `1 query != 0` 잔존. 골드픽스는 동일 셋업서 GREEN(채점 유효). blind/grep도 같은 mislocation. | 2026-06-16 |
+
 ## 메모
 - baseline 비교용: 과거 기록은 gpt-5/gpt-5-mini(OPENAI_API_KEY). 현재 기록은 chatgpt-oauth gpt-5.4라 직접 비교 주의.
 - `QUANTA_SWEBENCH_PYTHON_BIN`은 절대경로 필수(sandbox cwd spawn → 상대경로 ENOENT).

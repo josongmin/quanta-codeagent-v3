@@ -39,7 +39,7 @@ const loadLedger = async (): Promise<QuarantineLedger> => {
   return { maxCount: raw.maxCount, entries: raw.entries }
 }
 
-const runBunTest = async (args: string[]): Promise<string> => {
+const runBunTest = async (args: string[]): Promise<{ output: string; exitCode: number }> => {
   const proc = Bun.spawn(["bun", "test", ...args], {
     stdout: "pipe",
     stderr: "pipe",
@@ -49,26 +49,45 @@ const runBunTest = async (args: string[]): Promise<string> => {
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
-  await proc.exited
-  return `${out}\n${err}`
+  const exitCode = await proc.exited
+  return { output: `${out}\n${err}`, exitCode }
 }
 
-/** Re-run ONE test in true isolation; true iff it passes alone (⇒ flake). */
-const passesInIsolation = async (f: ParsedFailure): Promise<boolean> => {
-  if (!f.file) return false
-  const out = await runBunTest([f.file, "-t", f.leaf])
-  const r = parseBunTestOutput(out)
-  // A flake passes alone: zero fails/errors AND at least one test actually ran.
-  return r.fail === 0 && r.error === 0 && r.pass > 0
+/** "flake": passes when run alone. "real": still fails alone. "inconclusive":
+ *  the `-t` pattern matched NOTHING (e.g. a name with regex-special chars) — we
+ *  CANNOT confirm a flake, so it must NOT be silently treated as one. */
+type IsolationVerdict = "flake" | "real" | "inconclusive"
+
+/** Re-run ONE test in true isolation and classify it. */
+const classifyInIsolation = async (f: ParsedFailure): Promise<IsolationVerdict> => {
+  if (!f.file) return "inconclusive"
+  const { output } = await runBunTest([f.file, "-t", f.leaf])
+  const r = parseBunTestOutput(output)
+  // `-t` matched nothing ⇒ the isolation didn't actually exercise the test.
+  if (r.pass === 0 && r.fail === 0 && r.error === 0) return "inconclusive"
+  // passes alone (and at least one test ran) ⇒ flake.
+  if (r.fail === 0 && r.error === 0 && r.pass > 0) return "flake"
+  return "real"
 }
 
 const cmdRun = async (paths: string[]): Promise<number> => {
   const targets = paths.length > 0 ? paths : ["tests/unit", "tests/integration"]
   console.log(`[resilient] full run: bun test ${targets.join(" ")}`)
-  const full = parseBunTestOutput(await runBunTest(targets))
+  const { output, exitCode } = await runBunTest(targets)
+  const full = parseBunTestOutput(output)
   console.log(`[resilient] ${full.pass} pass · ${full.fail} fail · ${full.error} error`)
 
   if (full.failures.length === 0) {
+    // A bun-level failure (compile error / crash / no-tests-found) yields a
+    // non-zero exit with NO parsed test failures — never report that "clean".
+    if (exitCode !== 0) {
+      console.error(
+        `[resilient] ✗ bun exited ${exitCode} with no parsed test failures — likely a ` +
+          `compile error / crash / empty match. Surfacing (not 'clean'). Tail:`,
+      )
+      console.error(output.split("\n").slice(-15).join("\n"))
+      return 1
+    }
     console.log("[resilient] ✓ clean — no failures")
     return 0
   }
@@ -77,13 +96,17 @@ const cmdRun = async (paths: string[]): Promise<number> => {
   const real: ParsedFailure[] = []
   const knownFlake: ParsedFailure[] = []
   const newFlake: ParsedFailure[] = []
+  const inconclusive: ParsedFailure[] = []
 
   console.log(`[resilient] isolating ${full.failures.length} failure(s)…`)
   for (const f of full.failures) {
-    const flaky = await passesInIsolation(f)
-    if (!flaky) {
+    const verdict = await classifyInIsolation(f)
+    if (verdict === "real") {
       real.push(f)
       console.log(`  ✗ REAL    ${f.file} :: ${f.leaf}`)
+    } else if (verdict === "inconclusive") {
+      inconclusive.push(f)
+      console.log(`  ? INCONCLUSIVE ${f.file} :: ${f.leaf}  (-t matched no test — cannot confirm flake)`)
     } else if (isQuarantined(f, ledger)) {
       knownFlake.push(f)
       console.log(`  ~ flake   ${f.file} :: ${f.leaf}  (known-quarantined)`)
@@ -94,16 +117,14 @@ const cmdRun = async (paths: string[]): Promise<number> => {
   }
 
   console.log(
-    `[resilient] real=${real.length} known-flake=${knownFlake.length} new-flake=${newFlake.length}`,
+    `[resilient] real=${real.length} known-flake=${knownFlake.length} new-flake=${newFlake.length} inconclusive=${inconclusive.length}`,
   )
-  if (real.length > 0) {
-    console.error(`[resilient] ✗ ${real.length} REAL failure(s) — blocking.`)
-    return 1
-  }
-  if (newFlake.length > 0) {
+  // Anything we could not positively classify as a known flake BLOCKS — a flake
+  // claim must be earned (isolated-green + in the ledger), never assumed.
+  if (real.length > 0 || newFlake.length > 0 || inconclusive.length > 0) {
     console.error(
-      `[resilient] ✗ ${newFlake.length} NEW flake(s) not in the ledger — add to ` +
-        `tools/test-resilience/quarantine.json (with resourceClass + reason) or fix. Blocking.`,
+      `[resilient] ✗ blocking: ${real.length} real, ${newFlake.length} new-flake, ` +
+        `${inconclusive.length} inconclusive. New flakes ⇒ add to quarantine.json (resourceClass + reason) or fix.`,
     )
     return 1
   }

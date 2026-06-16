@@ -5,6 +5,7 @@
  * cargo + rust-analyzer are absent. Verified 2026-06-10.
  */
 import { describe, expect, test } from "bun:test"
+import { gateOn } from "@/shared"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -19,7 +20,15 @@ const has = (bin: string, ...a: string[]): boolean => {
     return false
   }
 }
-const D = has("cargo", "--version") && has("rust-analyzer", "--version") ? describe : describe.skip
+// SOTA ① real-on-demand lane: real rust-analyzer+cargo thunders under the
+// parallel suite (same root cause as evidence-lsp-bridge-real-e2e). Runs only
+// when QUANTA_REAL_TOOLCHAIN_E2E is set (`bun run test:real-toolchain`, serial).
+const D =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
+  has("cargo", "--version") &&
+  has("rust-analyzer", "--version")
+    ? describe
+    : describe.skip
 
 D("buildEvidence — REAL keystone fusion (cargo failure + rust-analyzer static)", () => {
   test("one call returns a packet fusing the real failure + real LSP static", async () => {

@@ -8,6 +8,7 @@
  * stays green). Verified 2026-06-10 with rust-analyzer 1.95.0.
  */
 import { describe, expect, test } from "bun:test"
+import { gateOn } from "@/shared"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -20,7 +21,12 @@ const has = (bin: string, arg = "--version"): boolean => {
     return false
   }
 }
-const D = has("rust-analyzer") && has("cargo") ? describe : describe.skip
+// SOTA ① real-on-demand lane: real rust-analyzer thunders under the parallel
+// suite. Runs only when QUANTA_REAL_TOOLCHAIN_E2E is set (`test:real-toolchain`).
+const D =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && has("rust-analyzer") && has("cargo")
+    ? describe
+    : describe.skip
 
 const MAIN_RS = [
   "fn add(a: i32, b: i32) -> i32 {", // line 0

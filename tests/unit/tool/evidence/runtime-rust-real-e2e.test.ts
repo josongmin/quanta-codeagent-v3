@@ -8,6 +8,7 @@
  * AUTO-SKIPS without cargo + lldb-dap. Verified 2026-06-10.
  */
 import { describe, expect, test } from "bun:test"
+import { gateOn } from "@/shared"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -31,7 +32,12 @@ const lldbAvailable = (): boolean => {
     return false
   }
 }
-const D = has("cargo", "--version") && lldbAvailable() ? describe : describe.skip
+// SOTA ① real-on-demand lane: real cargo + lldb-dap thunders under the parallel
+// suite. Runs only when QUANTA_REAL_TOOLCHAIN_E2E is set (`test:real-toolchain`).
+const D =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && has("cargo", "--version") && lldbAvailable()
+    ? describe
+    : describe.skip
 
 const LIB_RS = [
   "pub fn compute(n: i32) -> i32 { let mut t = 0; for i in 0..n { t += i; } t }",
