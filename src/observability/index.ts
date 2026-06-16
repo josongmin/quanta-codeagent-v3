@@ -21,6 +21,7 @@ export {
 export { log, StructuredLogger } from "./logger"
 export { buildMemoryTelemetry, MEMORY_TELEMETRY_KEYS } from "./memory-telemetry"
 export { Metrics, metrics } from "./metrics"
+export { instrumentToolsForExport } from "./metrics/instrument-tool"
 export { costUsd, PRICING_VERSION, type Provider, providerOf } from "./pricing"
 export { buildShellOtelObserver } from "./shell-exec-otel"
 export {

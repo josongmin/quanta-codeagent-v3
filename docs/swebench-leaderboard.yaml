@@ -11,11 +11,14 @@ runs:
   scaffold: 'fixed: deadline armed after env-setup; default per-instance timeout 2min->10min; bench stale-read-guard off'
   scaffold_effect: abort 74% (39/53, pre-fix) -> 0% (post-fix)
   status: snapshot 39/84 confirmed-resolved (remaining 런 진행중 — 미확인분 채점되면 증가)
-  resolved_count: 41
+  resolved_count: 46
   resolved:
   - instance_id: django__django-10880
     repo: django
     turns: 18
+  - instance_id: django__django-10914
+    repo: django
+    turns: 19
   - instance_id: django__django-11066
     repo: django
     turns: 17
@@ -31,12 +34,27 @@ runs:
   - instance_id: django__django-11133
     repo: django
     turns: 17
+  - instance_id: django__django-11163
+    repo: django
+    turns: 4
+  - instance_id: django__django-11179
+    repo: django
+    turns: 19
+  - instance_id: django__django-11239
+    repo: django
+    turns: 19
+  - instance_id: django__django-11451
+    repo: django
+    turns: 4
+  - instance_id: django__django-11603
+    repo: django
+    turns: 12
+  - instance_id: django__django-11880
+    repo: django
+    turns: 14
   - instance_id: django__django-11951
     repo: django
     turns: 20
-  - instance_id: django__django-12039
-    repo: django
-    turns: 24
   - instance_id: django__django-12050
     repo: django
     turns: 13
@@ -49,9 +67,6 @@ runs:
   - instance_id: django__django-12276
     repo: django
     turns: 22
-  - instance_id: django__django-12304
-    repo: django
-    turns: 15
   - instance_id: django__django-12419
     repo: django
     turns: 25

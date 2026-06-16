@@ -13,7 +13,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
  *  out forever — even on a 3-line file). Prefer the task's own venv (the bench
  *  sandbox creates one), then a PATH interpreter, then the bare name so pyright
  *  can still try its own discovery. */
-const resolvePythonInterpreter = (cwd: string): string => {
+export const resolvePythonInterpreter = (cwd: string): string => {
   for (const rel of [
     ".venv/bin/python",
     ".venv/bin/python3",

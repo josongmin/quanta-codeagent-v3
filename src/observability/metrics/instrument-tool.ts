@@ -15,6 +15,7 @@
 
 // biome-ignore lint/style/noRestrictedImports: type-only import (erased at compile time) — no runtime slice coupling; the AST slice-boundary scanner exempts type imports.
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { defaultMetricsRegistry, getDefaultMetricSink } from "./in-memory-registry"
 import type { MetricsRegistry } from "./port"
 
 const safe = (metrics: MetricsRegistry, fn: () => void): void => {
@@ -75,3 +76,22 @@ export const instrumentTools = (
   metrics: MetricsRegistry,
   opts?: Omit<ToolInstrumentOpts, "toolLabel">,
 ): Tool[] => tools.map((t) => instrumentTool(t, metrics, opts))
+
+/**
+ * Composition-root convenience: wrap tools with per-call metric instrumentation
+ * ONLY when OTLP/metric export is LIVE — i.e. a process-default metric sink has
+ * been registered by `installOtelSpanExportFromEnv` (which runs when
+ * QUANTA_OTEL_ENDPOINT is set). When no sink is registered (the common case /
+ * export OFF) the tools are returned VERBATIM — byte-identical, zero wrapping
+ * cost. Each call builds a sink-less `defaultMetricsRegistry()` that inherits
+ * the process-default sink, so `tool.call.total` + `tool.call.duration_ms` ship
+ * to the collector. This is how the otherwise-unwired tool instrument layer
+ * reaches the exporter without threading a registry through the whole
+ * composition. `instrumentTool` is a transparent spread+delegate proxy, so the
+ * wrapped tools behave identically (every event is yielded through).
+ */
+export const instrumentToolsForExport = (tools: ReadonlyArray<Tool>): Tool[] => {
+  // Lazy import-free check: the sink + registry live in the same metrics slice.
+  if (getDefaultMetricSink() === null) return [...tools]
+  return instrumentTools(tools, defaultMetricsRegistry())
+}

@@ -95,6 +95,20 @@ mini가 10개 전부 골드 파일 적중(picks=light 티어). resolved/unresolv
 |---|---|---|---|---|---|
 | django__django-15280 | django | ❌ | ❌ | mini가 `django/utils/deconstruct.py`(@deconstructible) 수정 — gold `related_descriptors.get_prefetch_queryset`와 무관 서브시스템(gross mislocation). FAIL_TO_PASS `1 query != 0` 잔존. 골드픽스는 동일 셋업서 GREEN(채점 유효). blind/grep도 같은 mislocation. | 2026-06-16 |
 
+## 🟢 floor 검증 — `agentless-v2-safe` preset (bench-in-loop-exec OFF, 2026-06-16)
+
+스캐폴드 구조수정 2탄: **in-loop 테스트 실행 강제(SWEBENCH_DIRECTIVE "MANDATORY run tests")를 제거**하는 `bench-in-loop-exec` knob + `agentless-v2-safe` preset. host test-env이 incompatible한 인스턴스(pytest-7982 등)에서 에이전트가 못 돌리는 테스트를 강제당해 flail→abort하던 경로를 끊음(edit-and-submit=mini-swe posture; 채점기가 도커서 테스트 실행).
+
+**검증 (pytest-7982, abort→RESOLVED):**
+
+| preset | 결과 |
+|---|---|
+| agentless-v1 (in-loop ON) | ❌ ABORT — 16턴 pytest collection-error flail, empty_patch |
+| **agentless-v2-safe (floor OFF)** | ✅ **RESOLVED** — 9턴, pytest 호출 0, 475B 패치(src/_pytest/pathlib.py=골드), 공식 harness 통과 |
+
+구현: default-ON knob(미설정=byte-identical), `SWEBENCH_DIRECTIVE_NOEXEC` 분기 + verifyGuard/repro/repair 게이트(runner buildConfig + apps runInstanceOnce), 7 hellgate teeth + 438 bench유닛 0회귀 + 3렌즈 적대어딧. 산출물 `_data/floor-validate-pytest7982.json`. agentless-v1 frozen 미접촉. 계획 `~/.claude/plans/bench-exec-posture.md`.
+잔여: sphinx-8595(grading false-neg)/pylint-8898(model miss) + 전체 picks-10 v2safe A/B는 transport throttle 풀린 창에서.
+
 ## 메모
 - baseline 비교용: 과거 기록은 gpt-5/gpt-5-mini(OPENAI_API_KEY). 현재 기록은 chatgpt-oauth gpt-5.4라 직접 비교 주의.
 - `QUANTA_SWEBENCH_PYTHON_BIN`은 절대경로 필수(sandbox cwd spawn → 상대경로 ENOENT).

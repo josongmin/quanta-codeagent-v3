@@ -1,6 +1,6 @@
 import { type AgentConfig, type MemoryToolsDeps, type MemoryWriteGuard, memoryTools } from "@/agent"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
-import type { StructuredLogger } from "@/observability"
+import { instrumentToolsForExport, type StructuredLogger } from "@/observability"
 import type { OsSandboxProfile } from "@/runtime"
 import { buildDefaultTools, type Tool, type ToolOrigin, ToolRegistry } from "@/tool"
 
@@ -215,7 +215,11 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
     [input.gitToolList, "git"],
   ])
   const registry = new ToolRegistry(
-    [
+    // ADR-0268 metric egress: wrap each tool with a per-call counter+duration
+    // instrument WHEN OTLP export is live (process-default metric sink set);
+    // byte-identical (verbatim tools) otherwise. `instrumentTool` spreads the
+    // tool so names are preserved — `originMap` (keyed by name) still matches.
+    instrumentToolsForExport([
       ...buildDefaultTools({
         ...(input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {}),
         ...(input.structuredPatch === true ? { structuredPatch: true } : {}),
@@ -226,7 +230,7 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
       ...input.lspNavTools,
       ...input.gitToolList,
       ...(input.extraTools ?? []),
-    ],
+    ]),
     originMap,
   )
   return {

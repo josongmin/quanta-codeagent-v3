@@ -65,13 +65,21 @@ evidence:
     - src/observability/otel-exporter.ts
     - src/observability/otel-span-export.ts
     - src/observability/metrics/in-memory-registry.ts
+    - src/observability/metrics/instrument-tool.ts
+    - src/agent/loop-helpers.ts
+    - src/agent/loop/stream-consume.ts
+    - src/runner/assemble/tooling.ts
     - src/apps/cli/index.ts
+    - src/apps/agent/index.ts
+    - src/apps/web-daemon/index.ts
   adrs: [268]
   tests:
     unit:
       - tests/unit/observability/otel-exporter-hellgate.test.ts
       - tests/unit/observability/otel-span-export-wiring-hellgate.test.ts
-    integration: []
+      - tests/unit/observability/instrument-tools-for-export-hellgate.test.ts
+    integration:
+      - tests/integration/spans-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_OTEL_ENDPOINT
@@ -150,12 +158,32 @@ notes: |
      (apps/web-daemon/index.ts main() + AWAITED teardown in shutdown, so the
      daemon's final flush actually completes). In-process subagents inherit the
      parent's global sink (idempotent guard ⇒ no re-install).
+   - METRIC instruments (TOOLS): tool.call.total + tool.call.duration_ms now
+     export. `instrumentToolsForExport(tools)` (instrument-tool.ts) wraps the tool
+     array WHEN the process-default metric sink is live (export ON), verbatim
+     otherwise (byte-identical) — wired at BOTH ToolRegistry assembly chokepoints
+     (runner/assemble/tooling.ts + host/runtime/agent-arg-builder.ts). instrumentTool
+     is a transparent spread+delegate proxy (names preserved ⇒ originMap-safe).
+     Sealed by instrument-tools-for-export-hellgate.test.ts (gate OFF=verbatim,
+     ON=wrapped+emits, no-leak) + red-on-injection.
+  METRIC INSTRUMENT COVERAGE (jun-16 audit-grounded): of withFullObservability's
+  bag, only TOOLS had a clean high-value prod wrap (done above). The rest:
+   - budget / scheduler / lsp / planQueue / shadowOdb: their components are
+     OPT-IN and NOT assembled in the default prod composition (AgentConfig
+     fields stay undefined) — there is nothing to instrument; wiring them is
+     moot until those features are themselves wired.
+   - llm provider: `instrumentLlmProvider` wraps the RAW `LlmProvider` (providerId
+     + model), not the composed `LLMPort` that composeLLMCore returns (type/layer
+     mismatch). AND the run_sampling_request SPAN already carries per-call model +
+     token + ttft + finish (Item 1) — so the llm-call telemetry is covered by the
+     trace; a separate llm metric instrument is low marginal value.
   KNOWN RESIDUALS (honest, larger scope):
-   - METRIC coverage thin in PROD: this seam routes sink-less defaultMetricsRegistry()s,
-     but the only prod consumer is the decision-counter registry (turn-summary.ts,
-     gated by QUANTA_DECISION_METRICS). The richer instrument layer (tool/cost/error
-     via withFullObservability) has ZERO prod callers (PRE-EXISTING gap) — those do
-     not export yet. Spans are comprehensive; metrics are decision-counter-only.
+   - COST / ERROR / MEMORY metrics flow through OTHER subsystems (work-metrics /
+     taskSpend / recorder / memory-telemetry), NOT the bag instruments — routing
+     those to OTLP is a separate, fragmented metric-unification project.
+   - Subagent parent-linkage across CONCURRENT in-process fan-out needs context
+     propagation (W3C / AsyncLocalStorage); the LIFO stack is correct for serial
+     nesting only.
    - Subagent parent-linkage across CONCURRENT in-process fan-out needs context
      propagation (W3C / AsyncLocalStorage); the LIFO stack is correct for serial
      nesting only. The OS-process side-agent (src/side-agent) is a V1 fork-core,

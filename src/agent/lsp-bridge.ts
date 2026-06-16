@@ -1,4 +1,5 @@
 import { extname } from "node:path"
+import type { CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
 import {
   ClangdAdapter,
   DefaultCodeActionAdapter,
@@ -15,18 +16,15 @@ import {
 } from "@/lsp"
 import { errMessage, logger } from "@/shared"
 import type { StaticEvidence as EvidenceStatic } from "@/tool"
-import type { CodeActionPort } from "@/lsp"
-import type { FormatPort } from "@/lsp"
-import type { SignatureHelpPort } from "@/lsp"
 import {
   lspNavTools as buildLspNavTools,
   type DiagnosticsProvider,
   type DiagnosticsSession,
   diagnosticsTool,
-  lspCodeActionTool,
-  lspFormatTool,
   type LspNavProvider,
   type LspNavSession,
+  lspCodeActionTool,
+  lspFormatTool,
   lspRenameApplyTool,
   lspSignatureHelpTool,
   type RenameApplyPort,
@@ -183,15 +181,35 @@ const NEVER_ABORTED: AbortSignal = new AbortController().signal
 interface SharedPyrightNavSession {
   readonly key: string
   readonly client: LspClient
-  readonly startPromise: Promise<void>
+  // Reassigned once after construction (placeholder → real start()), so not readonly.
+  startPromise: Promise<void>
   readonly preparedFiles: Set<string>
-  readonly preparingFiles: Map<string, Promise<void>>
+  readonly preparingFiles: Map<string, Promise<boolean>>
   refs: number
-  idleTimer?: ReturnType<typeof setTimeout>
+  idleTimer?: ReturnType<typeof setTimeout> | undefined
   destroyed: boolean
 }
 
 const sharedPyrightSessions = new Map<string, SharedPyrightNavSession>()
+
+/** Factory for the pooled pyright client — overridable so tests can inject a
+ *  scriptable fake instead of spawning a real `pyright-langserver`. */
+type PyrightClientFactory = (cwd: string) => LspClient
+let pyrightClientFactory: PyrightClientFactory = (cwd) => PYRIGHT.create(cwd)
+
+/** TEST-ONLY: swap the pooled-client factory (pass null to restore the real one). */
+export const __setPyrightClientFactoryForTest = (factory: PyrightClientFactory | null): void => {
+  pyrightClientFactory = factory ?? ((cwd) => PYRIGHT.create(cwd))
+}
+
+/** TEST-ONLY: shrink the warm-up budget/retry so the exhaustion path is reachable
+ *  in a unit test (the real 90s budget is impractical). null = production timing. */
+let pyrightWarmupTimingForTest: { budgetMs: number; retryMs: number } | null = null
+export const __setPyrightWarmupTimingForTest = (
+  t: { budgetMs: number; retryMs: number } | null,
+): void => {
+  pyrightWarmupTimingForTest = t
+}
 
 const stopSharedPyrightClient = async (
   entry: SharedPyrightNavSession,
@@ -273,10 +291,64 @@ const scheduleSharedPyrightIdleStop = (entry: SharedPyrightNavSession): void => 
   entry.idleTimer.unref?.()
 }
 
+/** Thrown when a handle is used after its pooled session was torn down (fatal
+ *  error / idle stop). NOT a transport error, so {@link isFatalSharedSessionError}
+ *  returns false and it does NOT re-trigger teardown — the nav tool just surfaces
+ *  a clean failure and the agent moves on, instead of hammering a dead client. */
+const SHARED_SESSION_CLOSED = "lsp shared session closed"
+
 const releaseSharedPyrightSession = async (entry: SharedPyrightNavSession): Promise<void> => {
-  if (entry.destroyed) return
+  // Decrement FIRST — even when destroyed — so the ref counter stays accurate
+  // (a teardown that fires while refs>0 must not strand the count). Only the
+  // idle-stop scheduling is gated on a live entry.
   entry.refs = Math.max(0, entry.refs - 1)
-  if (entry.refs === 0) scheduleSharedPyrightIdleStop(entry)
+  if (!entry.destroyed && entry.refs === 0) scheduleSharedPyrightIdleStop(entry)
+}
+
+/** Poll the import probe until pyright resolves it (server is warm) or the
+ *  budget is exhausted. Returns true = verified-ready (or no probe); false =
+ *  exhausted without a resolve (caller must NOT mark the file prepared, so the
+ *  next call re-attempts instead of querying a never-indexed file forever). */
+/** One readiness probe. Returns true if pyright resolved the probe symbol (warm).
+ *  Re-throws FATAL transport errors (so the loop aborts → session torn down);
+ *  any other failure is a transient "still indexing" → false (keep polling). */
+const warmupProbeOnce = async (
+  entry: SharedPyrightNavSession,
+  filePath: string,
+  probe: { line: number; character: number },
+  signal: AbortSignal | undefined,
+): Promise<boolean> => {
+  try {
+    const defs = await entry.client.definition(filePath, probe, signal)
+    return defs !== null && defs.length > 0
+  } catch (e) {
+    if (isFatalSharedSessionError(e)) throw e
+    return false
+  }
+}
+
+const runPyrightWarmup = async (
+  entry: SharedPyrightNavSession,
+  filePath: string,
+  signal: AbortSignal | undefined,
+): Promise<boolean> => {
+  await entry.client.prime(filePath, signal)
+  const probe = await readPyrightImportProbe(filePath)
+  if (probe === null) return true
+  const budgetMs = pyrightWarmupTimingForTest?.budgetMs ?? PYRIGHT_READY_TIMEOUT_MS
+  const retryMs = pyrightWarmupTimingForTest?.retryMs ?? PYRIGHT_READY_RETRY_MS
+  const deadline = Date.now() + budgetMs
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error(`pyright warm-up aborted for ${filePath}`)
+    if (await warmupProbeOnce(entry, filePath, probe, signal)) return true
+    await sleep(retryMs, signal ?? NEVER_ABORTED)
+  }
+  logger.warn("lsp: pyright warm-up budget exhausted; keeping shared session alive", {
+    cwd: entry.key,
+    file: filePath,
+    timeoutMs: budgetMs,
+  })
+  return false
 }
 
 const warmSharedPyrightFile = async (
@@ -293,34 +365,10 @@ const warmSharedPyrightFile = async (
     await inFlight
     return
   }
-  const prep = (async () => {
-    await entry.client.prime(filePath, signal)
-    const probe = await readPyrightImportProbe(filePath)
-    if (probe === null) return
-    const deadline = Date.now() + PYRIGHT_READY_TIMEOUT_MS
-    let lastError: unknown = null
-    while (Date.now() < deadline) {
-      if (signal?.aborted) throw new Error(`pyright warm-up aborted for ${filePath}`)
-      try {
-        const defs = await entry.client.definition(filePath, probe, signal)
-        if (defs !== null && defs.length > 0) return
-      } catch (e) {
-        lastError = e
-        if (isFatalSharedSessionError(e)) throw e
-      }
-      await sleep(PYRIGHT_READY_RETRY_MS, signal ?? NEVER_ABORTED)
-    }
-    logger.warn("lsp: pyright warm-up budget exhausted; keeping shared session alive", {
-      cwd: entry.key,
-      file: filePath,
-      timeoutMs: PYRIGHT_READY_TIMEOUT_MS,
-      ...(lastError !== null ? { error: errMessage(lastError) } : {}),
-    })
-  })()
+  const prep = runPyrightWarmup(entry, filePath, signal)
   entry.preparingFiles.set(filePath, prep)
   try {
-    await prep
-    entry.preparedFiles.add(filePath)
+    if (await prep) entry.preparedFiles.add(filePath)
   } finally {
     entry.preparingFiles.delete(filePath)
   }
@@ -330,6 +378,9 @@ const withSharedPyrightCall = async <T>(
   entry: SharedPyrightNavSession,
   call: () => Promise<T>,
 ): Promise<T> => {
+  // A sibling handle may have torn the session down (fatal error / idle stop).
+  // Don't drive a stopped client — fail soft with a non-fatal sentinel.
+  if (entry.destroyed) throw new Error(SHARED_SESSION_CLOSED)
   try {
     return await call()
   } catch (e) {
@@ -350,14 +401,17 @@ const pooledPyrightNavSession = (entry: SharedPyrightNavSession): LspNavSession 
     signal: AbortSignal | undefined,
     call: () => Promise<T>,
   ): Promise<T> => {
+    if (entry.destroyed) throw new Error(SHARED_SESSION_CLOSED)
     await warmSharedPyrightFile(entry, filePath, signal)
     return withSharedPyrightCall(entry, call)
   }
   return {
-    definition: (file, pos, signal) => withFile(file, signal, () => entry.client.definition(file, pos, signal)),
+    definition: (file, pos, signal) =>
+      withFile(file, signal, () => entry.client.definition(file, pos, signal)),
     references: (file, pos, includeDeclaration, signal) =>
       withFile(file, signal, () => entry.client.references(file, pos, includeDeclaration, signal)),
-    hover: (file, pos, signal) => withFile(file, signal, () => entry.client.hover(file, pos, signal)),
+    hover: (file, pos, signal) =>
+      withFile(file, signal, () => entry.client.hover(file, pos, signal)),
     typeDefinition: (file, pos, signal) =>
       withFile(file, signal, () => entry.client.typeDefinition(file, pos, signal)),
     implementation: (file, pos, signal) =>
@@ -384,13 +438,13 @@ const openSharedPyrightNavSession = async (
   const key = cwd
   let entry = sharedPyrightSessions.get(key)
   if (!entry) {
-    const client = PYRIGHT.create(cwd)
+    const client = pyrightClientFactory(cwd)
     entry = {
       key,
       client,
       startPromise: Promise.resolve(),
       preparedFiles: new Set<string>(),
-      preparingFiles: new Map<string, Promise<void>>(),
+      preparingFiles: new Map<string, Promise<boolean>>(),
       refs: 0,
       destroyed: false,
     }
@@ -604,7 +658,10 @@ export const evidenceLspStatic =
   ): Promise<EvidenceStatic | null> => {
     const session = await (provider ?? lspNavProvider()).open(file, cwd, signal)
     if (session === null) return null
-    const toLoc = (l: { uri: string; range: { start: { line: number } } }): { file: string; line: number } => ({
+    const toLoc = (l: {
+      uri: string
+      range: { start: { line: number } }
+    }): { file: string; line: number } => ({
       file: l.uri.replace(/^file:\/\//, ""),
       line: l.range.start.line + 1,
     })
@@ -728,7 +785,9 @@ const lspRenameApplyPort = (cwd: string): RenameApplyPort => {
 /** Best-effort stop helper — logs at debug level if stop throws (clean
  *  degrade on a broken pipe, already-stopped server, etc.). */
 const stopClient = (client: LspClient, label: string): Promise<void> =>
-  client.stop().catch((e: unknown) => logger.debug(`lsp: stop failed (${label})`, { error: errMessage(e) }))
+  client
+    .stop()
+    .catch((e: unknown) => logger.debug(`lsp: stop failed (${label})`, { error: errMessage(e) }))
 
 /** Stateless `CodeActionPort` — opens a fresh `LspClient` per call, uses
  *  it, then closes it. `lsp_code_action` is read-only (enumeration only)

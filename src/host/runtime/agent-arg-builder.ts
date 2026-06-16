@@ -19,6 +19,7 @@
  */
 
 import { join as joinPath } from "node:path"
+import { instrumentToolsForExport } from "@/observability"
 import {
   buildSystemPrompt,
   evidenceLspStatic,
@@ -1000,7 +1001,10 @@ const buildBaseRegistry = (args: {
    *  `null` ⇒ no reflect port (byte-identical). */
   readonly llm: LLMPort | null
 }): ToolRegistry =>
-  new ToolRegistry([
+  // ADR-0268 metric egress — wrap tools with per-call instruments WHEN OTLP
+  // export is live (process-default metric sink set); byte-identical otherwise.
+  new ToolRegistry(
+    instrumentToolsForExport([
     ...buildDefaultTools({
       ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
       ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
@@ -1021,7 +1025,8 @@ const buildBaseRegistry = (args: {
     // unbounded; the tool closes over THIS registry instance — the same one a
     // future `defineToolAsync` caller would register deferred work into.
     ...buildAsyncDeferredTools(),
-  ])
+    ]),
+  )
 
 /** ADR-0287 — build the `poll_deferred` tool over a freshly-constructed
  *  {@link DefaultDeferredResultRegistry} when async-tools are enabled. Returns
