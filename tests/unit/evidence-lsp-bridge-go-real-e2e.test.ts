@@ -7,10 +7,11 @@
  * Python/Rust). AUTO-SKIPS without `go` + `gopls`. Verified 2026-06-10.
  */
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
+import { gateOn } from "@/shared"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 
@@ -22,7 +23,13 @@ const has = (b: string, ...a: string[]): boolean => {
   }
 }
 // gopls has no `--version` flag (it errors), but `gopls version` is the probe.
-const D = has("go", "version") && has("gopls", "version") ? describe : describe.skip
+// SOTA ① — real-on-demand lane (see evidence-lsp-bridge-real-e2e.test.ts): real
+// gopls thunders under the parallel suite, so this runs only when
+// QUANTA_REAL_TOOLCHAIN_E2E is set (`bun run test:real-toolchain`, serial).
+const D =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && has("go", "version") && has("gopls", "version")
+    ? describe
+    : describe.skip
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evbridge-go-")))

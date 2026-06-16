@@ -173,6 +173,253 @@ export const __resetLspAvailabilityCacheForTest = (): void => {
   availabilityCache.clear()
 }
 
+const PYRIGHT_NAV_IDLE_TTL_MS = 30 * 60_000
+const PYRIGHT_READY_TIMEOUT_MS = 90_000
+const PYRIGHT_READY_RETRY_MS = 1_000
+const PYRIGHT_IMPORT_SCAN_LINE_CAP = 200
+/** Fallback for abort-aware sleeps when no turn signal is threaded. */
+const NEVER_ABORTED: AbortSignal = new AbortController().signal
+
+interface SharedPyrightNavSession {
+  readonly key: string
+  readonly client: LspClient
+  readonly startPromise: Promise<void>
+  readonly preparedFiles: Set<string>
+  readonly preparingFiles: Map<string, Promise<void>>
+  refs: number
+  idleTimer?: ReturnType<typeof setTimeout>
+  destroyed: boolean
+}
+
+const sharedPyrightSessions = new Map<string, SharedPyrightNavSession>()
+
+const stopSharedPyrightClient = async (
+  entry: SharedPyrightNavSession,
+  label: string,
+): Promise<void> => {
+  if (entry.idleTimer !== undefined) {
+    clearTimeout(entry.idleTimer)
+    entry.idleTimer = undefined
+  }
+  if (entry.destroyed) return
+  entry.destroyed = true
+  sharedPyrightSessions.delete(entry.key)
+  await entry.client.stop().catch((e: unknown) => {
+    logger.debug(`lsp: stop failed (${label})`, { error: errMessage(e) })
+  })
+}
+
+/** TEST-ONLY: tear down every pooled pyright nav session so unit files cannot
+ *  leak a warm daemon across cases or worker reuse. */
+export const __resetSharedPyrightSessionsForTest = async (): Promise<void> => {
+  const entries = [...sharedPyrightSessions.values()]
+  sharedPyrightSessions.clear()
+  for (const entry of entries) await stopSharedPyrightClient(entry, "pyright-nav/reset")
+}
+
+const isFatalSharedSessionError = (e: unknown): boolean => {
+  if (e instanceof LspRequestError) return false
+  const msg = errMessage(e).toLowerCase()
+  return (
+    msg.includes("transport") ||
+    msg.includes("server stopped") ||
+    msg.includes("server exited") ||
+    msg.includes("stdout pump died")
+  )
+}
+
+const normalizeImportSymbol = (raw: string): string | null => {
+  const trimmed = raw.replace(/[()]/g, "").trim()
+  if (trimmed.length === 0 || trimmed === "*") return null
+  const base = trimmed.split(/\s+as\s+/i)[0]?.trim() ?? ""
+  return base.length > 0 ? base : null
+}
+
+const findPyrightImportProbe = (source: string): { line: number; character: number } | null => {
+  const lines = source.split(/\r?\n/)
+  for (let i = 0; i < lines.length && i < PYRIGHT_IMPORT_SCAN_LINE_CAP; i++) {
+    const line = lines[i] ?? ""
+    const fromMatch = line.match(/^\s*from\s+[\w.]+\s+import\s+(.+)$/)
+    const importMatch = line.match(/^\s*import\s+(.+)$/)
+    const body = fromMatch?.[1] ?? importMatch?.[1]
+    if (!body) continue
+    for (const piece of body.split(",")) {
+      const symbol = normalizeImportSymbol(piece)
+      if (!symbol) continue
+      const character = line.indexOf(symbol)
+      if (character >= 0) return { line: i, character }
+    }
+  }
+  return null
+}
+
+const readPyrightImportProbe = async (
+  filePath: string,
+): Promise<{ line: number; character: number } | null> => {
+  try {
+    return findPyrightImportProbe(await Bun.file(filePath).text())
+  } catch {
+    return null
+  }
+}
+
+const scheduleSharedPyrightIdleStop = (entry: SharedPyrightNavSession): void => {
+  if (entry.destroyed || entry.refs !== 0) return
+  if (entry.idleTimer !== undefined) clearTimeout(entry.idleTimer)
+  entry.idleTimer = setTimeout(() => {
+    if (entry.refs !== 0) return
+    void stopSharedPyrightClient(entry, "pyright-nav/idle-ttl")
+  }, PYRIGHT_NAV_IDLE_TTL_MS)
+  entry.idleTimer.unref?.()
+}
+
+const releaseSharedPyrightSession = async (entry: SharedPyrightNavSession): Promise<void> => {
+  if (entry.destroyed) return
+  entry.refs = Math.max(0, entry.refs - 1)
+  if (entry.refs === 0) scheduleSharedPyrightIdleStop(entry)
+}
+
+const warmSharedPyrightFile = async (
+  entry: SharedPyrightNavSession,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<void> => {
+  if (entry.preparedFiles.has(filePath)) {
+    await entry.client.prime(filePath, signal)
+    return
+  }
+  const inFlight = entry.preparingFiles.get(filePath)
+  if (inFlight) {
+    await inFlight
+    return
+  }
+  const prep = (async () => {
+    await entry.client.prime(filePath, signal)
+    const probe = await readPyrightImportProbe(filePath)
+    if (probe === null) return
+    const deadline = Date.now() + PYRIGHT_READY_TIMEOUT_MS
+    let lastError: unknown = null
+    while (Date.now() < deadline) {
+      if (signal?.aborted) throw new Error(`pyright warm-up aborted for ${filePath}`)
+      try {
+        const defs = await entry.client.definition(filePath, probe, signal)
+        if (defs !== null && defs.length > 0) return
+      } catch (e) {
+        lastError = e
+        if (isFatalSharedSessionError(e)) throw e
+      }
+      await sleep(PYRIGHT_READY_RETRY_MS, signal ?? NEVER_ABORTED)
+    }
+    logger.warn("lsp: pyright warm-up budget exhausted; keeping shared session alive", {
+      cwd: entry.key,
+      file: filePath,
+      timeoutMs: PYRIGHT_READY_TIMEOUT_MS,
+      ...(lastError !== null ? { error: errMessage(lastError) } : {}),
+    })
+  })()
+  entry.preparingFiles.set(filePath, prep)
+  try {
+    await prep
+    entry.preparedFiles.add(filePath)
+  } finally {
+    entry.preparingFiles.delete(filePath)
+  }
+}
+
+const withSharedPyrightCall = async <T>(
+  entry: SharedPyrightNavSession,
+  call: () => Promise<T>,
+): Promise<T> => {
+  try {
+    return await call()
+  } catch (e) {
+    if (isFatalSharedSessionError(e)) void stopSharedPyrightClient(entry, "pyright-nav/fatal")
+    throw e
+  }
+}
+
+const pooledPyrightNavSession = (entry: SharedPyrightNavSession): LspNavSession => {
+  let released = false
+  const stop = async (): Promise<void> => {
+    if (released) return
+    released = true
+    await releaseSharedPyrightSession(entry)
+  }
+  const withFile = async <T>(
+    filePath: string,
+    signal: AbortSignal | undefined,
+    call: () => Promise<T>,
+  ): Promise<T> => {
+    await warmSharedPyrightFile(entry, filePath, signal)
+    return withSharedPyrightCall(entry, call)
+  }
+  return {
+    definition: (file, pos, signal) => withFile(file, signal, () => entry.client.definition(file, pos, signal)),
+    references: (file, pos, includeDeclaration, signal) =>
+      withFile(file, signal, () => entry.client.references(file, pos, includeDeclaration, signal)),
+    hover: (file, pos, signal) => withFile(file, signal, () => entry.client.hover(file, pos, signal)),
+    typeDefinition: (file, pos, signal) =>
+      withFile(file, signal, () => entry.client.typeDefinition(file, pos, signal)),
+    implementation: (file, pos, signal) =>
+      withFile(file, signal, () => entry.client.implementation(file, pos, signal)),
+    documentSymbol: (file, signal) =>
+      withFile(file, signal, () => entry.client.documentSymbol(file, signal)),
+    workspaceSymbol: (query, signal) =>
+      withSharedPyrightCall(entry, () => entry.client.workspaceSymbol(query, signal)),
+    prepareRename: (file, pos, signal) =>
+      withFile(file, signal, () => entry.client.prepareRename(file, pos, signal)),
+    incomingCalls: (file, pos, signal) =>
+      withFile(file, signal, () => entry.client.incomingCalls(file, pos, signal)),
+    outgoingCalls: (file, pos, signal) =>
+      withFile(file, signal, () => entry.client.outgoingCalls(file, pos, signal)),
+    stop,
+  }
+}
+
+const openSharedPyrightNavSession = async (
+  filePath: string,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<LspNavSession | null> => {
+  const key = cwd
+  let entry = sharedPyrightSessions.get(key)
+  if (!entry) {
+    const client = PYRIGHT.create(cwd)
+    entry = {
+      key,
+      client,
+      startPromise: Promise.resolve(),
+      preparedFiles: new Set<string>(),
+      preparingFiles: new Map<string, Promise<void>>(),
+      refs: 0,
+      destroyed: false,
+    }
+    entry.startPromise = client.start(signal).catch(async (e) => {
+      await stopSharedPyrightClient(entry as SharedPyrightNavSession, "pyright-nav/start-fail")
+      throw e
+    })
+    sharedPyrightSessions.set(key, entry)
+  }
+  if (entry.idleTimer !== undefined) {
+    clearTimeout(entry.idleTimer)
+    entry.idleTimer = undefined
+  }
+  entry.refs += 1
+  try {
+    await entry.startPromise
+    await warmSharedPyrightFile(entry, filePath, signal)
+    return pooledPyrightNavSession(entry)
+  } catch (e) {
+    await releaseSharedPyrightSession(entry)
+    logger.warn("lsp: failed to ready shared pyright nav session", {
+      cwd,
+      file: filePath,
+      error: errMessage(e),
+    })
+    return null
+  }
+}
+
 /** The real provider: extension → server, with graceful unavailability. */
 export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
   unavailableReason: (filePath) => {
@@ -290,9 +537,10 @@ const adaptToNavSession = (client: LspClient): LspNavSession => ({
 })
 
 /** The real nav provider: extension → server, with graceful unavailability.
- *  Mirrors {@link lspDiagnosticsProvider} exactly — reuses the same
- *  `specFor` + `isAvailable` machinery so a single per-process binary probe
- *  serves both diagnostics and nav. */
+ *  Reuses the same `specFor` + `isAvailable` machinery as diagnostics so a
+ *  single per-process binary probe serves both surfaces. Pyright upgrades to
+ *  one shared warm workspace session per cwd (idle-TTL pooled); the other
+ *  servers keep the historical fresh-per-call behavior. */
 export const lspNavProvider = (): LspNavProvider => ({
   unavailableReason: (filePath) => {
     const spec = specFor(filePath)
@@ -304,6 +552,7 @@ export const lspNavProvider = (): LspNavProvider => ({
     const spec = specFor(filePath)
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
+    if (spec === PYRIGHT) return openSharedPyrightNavSession(filePath, cwd, signal)
     const client = spec.create(cwd)
     try {
       await client.start(signal)
@@ -336,13 +585,12 @@ export const lspNavProvider = (): LspNavProvider => ({
  * the tool ctx — an aborted turn bails promptly instead of riding out the
  * budget's retry sleeps against a live LSP child.
  * Best-effort + NEVER-throws (the builder also `safe()`-wraps it): a missing
- * server / no symbol / abort ⇒ null, never a crash. A fresh server is spawned
- * per call (acceptable for an opt-in, always-confirm tool).
+ * server / no symbol / abort ⇒ null, never a crash. Session lifetime is owned
+ * by the provider: pyright may reuse a warm pooled workspace, other servers
+ * stay fresh-per-call.
  */
 /** Delay between column-scan sweeps while the server is still indexing. */
 const EVIDENCE_LSP_RETRY_DELAY_MS = 500
-/** Fallback for the abort-aware {@link sleep} when no turn signal is threaded. */
-const NEVER_ABORTED: AbortSignal = new AbortController().signal
 /** Re-reads `aborted` on every call — a plain inline check would be narrowed
  *  to `false` by TS after the first test, but awaits can flip it mid-loop. */
 const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true

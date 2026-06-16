@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
+import { gateOn } from "@/shared"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 
@@ -20,7 +21,18 @@ const has = (b: string, ...a: string[]): boolean => {
     return false
   }
 }
-const D = has("cargo", "--version") && has("rust-analyzer", "--version") ? describe : describe.skip
+// SOTA ① — real-on-demand lane. This spawns a REAL rust-analyzer + cargo, which
+// under the full parallel suite (2000+ files) gets CPU-starved and returns empty
+// hover ⇒ flake. It now runs ONLY in the opt-in serial lane (`bun run
+// test:real-toolchain`, which sets QUANTA_REAL_TOOLCHAIN_E2E=1 --parallel=1); the
+// default suite skips it. The SAME fusion logic is covered deterministically by
+// evidence-lsp-bridge-replay-deterministic.test.ts (REPLAYED lspStatic port).
+const D =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
+  has("cargo", "--version") &&
+  has("rust-analyzer", "--version")
+    ? describe
+    : describe.skip
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evbridge-")))

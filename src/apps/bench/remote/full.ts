@@ -234,8 +234,11 @@ export const createFullRemoteBackend = (
       }
       sgId = oneLine(created.stdout)
     }
-    // Open :22 publicly (idempotent — duplicate rule returns non-zero, tolerated).
-    await aws([
+    // Open :22 publicly. A DUPLICATE rule returns non-zero (tolerated — already
+    // open). A REAL failure (wrong VPC / perms) fails fast: otherwise the box
+    // launches into an SG with no :22 and the only symptom is a misleading
+    // ssh/cloud-init timeout minutes later.
+    const auth = await aws([
       "ec2",
       "authorize-security-group-ingress",
       "--group-id",
@@ -247,6 +250,11 @@ export const createFullRemoteBackend = (
       "--cidr",
       "0.0.0.0/0",
     ])
+    if (auth.code !== 0 && !/Duplicate/i.test(auth.stderr)) {
+      throw new Error(
+        `[full-remote] authorize :22 ingress failed (code ${auth.code}): ${auth.stderr}`,
+      )
+    }
     return sgId
   }
 

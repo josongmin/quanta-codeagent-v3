@@ -145,12 +145,20 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     // Authorize :22 from the current public IP only. ifconfig.me ⇒ public IP.
     const ipRes = await spawn("curl", ["-s", "ifconfig.me"])
     const myIp = oneLine(ipRes.stdout)
-    if (myIp === "") {
-      throw new Error("[ec2-backend] could not determine public IP via ifconfig.me")
+    // Validate it's actually an IPv4 — a failed/proxied curl can return an HTML
+    // error page whose first token is non-empty but not an IP, which would build
+    // a bogus `--cidr` and (since authorize errors were swallowed) leave the box
+    // unreachable with only a misleading later timeout to show for it.
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(myIp)) {
+      throw new Error(
+        `[ec2-backend] could not determine a valid public IP via ifconfig.me (got "${myIp.slice(0, 60)}")`,
+      )
     }
-    // Idempotent: a duplicate rule returns non-zero (InvalidPermission.Duplicate)
-    // which we tolerate — the rule already being present is the desired state.
-    await aws([
+    // Idempotent: a DUPLICATE rule returns non-zero (InvalidPermission.Duplicate),
+    // which we tolerate — the rule already being present is the desired state. A
+    // REAL failure (wrong VPC / perms) must fail fast: otherwise the box launches
+    // into an SG with no :22 and the only symptom is a 5-min ready-poll timeout.
+    const auth = await aws([
       "ec2",
       "authorize-security-group-ingress",
       "--group-id",
@@ -162,6 +170,11 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
       "--cidr",
       `${myIp}/32`,
     ])
+    if (auth.code !== 0 && !/Duplicate/i.test(auth.stderr)) {
+      throw new Error(
+        `[ec2-backend] authorize :22 ingress failed (code ${auth.code}): ${auth.stderr}`,
+      )
+    }
     return sgId
   }
 

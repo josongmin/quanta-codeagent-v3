@@ -272,6 +272,20 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(cmd).toContain("--model 'm`whoami`'") // single-quoted — inert
   })
 
+  test("authorize-ingress REAL failure fails fast (not a misleading downstream error)", async () => {
+    // Self-audit R2: a real authorize failure used to be swallowed → box with no
+    // :22 → misleading ssh/cloud-init timeout. Fail fast at the SG stage.
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      if (args.includes("describe-security-groups")) return { code: 0, stdout: "sg", stderr: "" }
+      if (args.includes("authorize-security-group-ingress"))
+        return { code: 255, stdout: "", stderr: "An error occurred (UnauthorizedOperation)" }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
+      /authoriz|ingress/i,
+    )
+  })
+
   test("does NOT return a reportPath when the box produced no report file", async () => {
     // empty report stdout ⇒ nothing saved locally; a returned path would be a
     // dangling ENOENT for the caller.

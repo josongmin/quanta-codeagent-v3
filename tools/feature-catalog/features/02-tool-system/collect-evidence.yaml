@@ -62,3 +62,4 @@ evidence:
       - tests/unit/tool/evidence/runtime-rust-real-e2e.test.ts
       - tests/unit/tool/evidence/runtime-jest-real-e2e.test.ts
       - tests/unit/evidence-lsp-bridge-real-e2e.test.ts
+      - tests/unit/evidence-lsp-bridge-replay-deterministic.test.ts

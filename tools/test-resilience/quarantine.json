@@ -1,0 +1,12 @@
+{
+  "_comment": "Known-flaky tests under the full parallel suite (2000+ files). Each PASSES in true isolation (-t) — the flake is parallelism/resource contention, NOT a code defect. maxCount is a one-directional ratchet: lower it as flakes are structurally fixed (replay seam for external-server, test-isolation for timing). NEVER raise without a recorded reason. HISTORY: started at 4 (2 LSP external-server + 1 node-repl timing); the 2 LSP entries were RETIRED by SOTA ① (real rust-analyzer tests gated behind QUANTA_REAL_TOOLCHAIN_E2E serial lane + deterministic replay coverage in evidence-lsp-bridge-replay-deterministic.test.ts) — ratchet lowered 4 -> 2.",
+  "maxCount": 2,
+  "entries": [
+    {
+      "file": "tests/unit/runtime/node-repl-timeout-reap-hellgate.test.ts",
+      "name": "a healthy exec still completes",
+      "resourceClass": "timing",
+      "reason": "intra-file interference: the sibling timeout-reap tests spawn/kill real node children, pressuring the real `node -i` REPL stdout flush so the best-effort content capture (line 95) loses the race. Passes with -t isolation (4/4). Fix path: per-test child isolation or make content check non-fatal (its own comment says ok:true+reusability is the deterministic proof)."
+    }
+  ]
+}

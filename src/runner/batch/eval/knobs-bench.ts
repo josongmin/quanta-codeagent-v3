@@ -247,3 +247,5 @@ export const benchPostureFromState = (
     sotaOn: state.preset === "agentless-v1",
   }
 }
+
+

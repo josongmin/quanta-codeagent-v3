@@ -221,6 +221,10 @@ export interface LspClientOptions {
   cwd?: string
   /** Per-request timeout (also bounds the diagnostics wait). Default 8000ms. */
   requestTimeoutMs?: number
+  /** Optional workspace roots advertised during `initialize`. */
+  workspaceFolders?: readonly string[]
+  /** Client-side config surfaced via `workspace/configuration` requests. */
+  workspaceConfiguration?: Readonly<Record<string, unknown>>
 }
 
 /** Per-server identity supplied by the concrete adapter (its only variance). */
@@ -252,6 +256,15 @@ interface PublishDiagnosticsParams {
 }
 interface InitializeResult {
   serverInfo?: { name: string; version?: string }
+}
+
+interface WorkspaceFolder {
+  uri: string
+  name: string
+}
+
+interface WorkspaceConfigurationParams {
+  items?: Array<{ section?: string }>
 }
 
 interface PendingRequest {
@@ -599,6 +612,11 @@ const mapWorkspaceSymbolEntry = (s: RawSymbolInformation | RawWorkspaceSymbol): 
 
 const isResponse = (m: JsonRpcMessage): m is JsonRpcResponse => "id" in m && !("method" in m)
 
+const isRequest = (
+  m: JsonRpcMessage,
+): m is { jsonrpc: "2.0"; id: number | string; method: string; params?: unknown } =>
+  "id" in m && "method" in m
+
 const isNotification = (
   m: JsonRpcMessage,
 ): m is { jsonrpc: "2.0"; method: string; params?: unknown } => "method" in m && !("id" in m)
@@ -614,6 +632,8 @@ export class LspClient implements LspPort {
   private readonly command: string[]
   private readonly cwd: string
   private readonly requestTimeoutMs: number
+  private readonly workspaceFolders: readonly string[]
+  private readonly workspaceConfiguration: Readonly<Record<string, unknown>>
   private readonly spec: LspClientSpec
 
   private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
@@ -622,10 +642,10 @@ export class LspClient implements LspPort {
   private readonly pending = new Map<number, PendingRequest>()
   private readonly diagnosticsByUri = new Map<string, Diagnostic[]>()
   private readonly diagnosticsWaiters = new Map<string, Array<(d: Diagnostic[]) => void>>()
-  /** URIs that have been opened via `textDocument/didOpen`. Used to dedup
-   *  re-opens across multiple nav calls on the same file, and to drive the
-   *  matching `didClose` on `stop()`. */
-  private readonly opened = new Set<string>()
+  /** Open-document cache for long-lived sessions. Tracks the last synced text
+   *  and LSP version so a reused client emits `didChange` instead of serving
+   *  stale buffers after an on-disk edit. */
+  private readonly opened = new Map<string, { version: number; text: string }>()
   private readPump: Promise<void> | null = null
   private stderrPump: Promise<void> | null = null
   private stopped = false
@@ -637,6 +657,8 @@ export class LspClient implements LspPort {
     this.command = options.command ?? spec.defaultCommand
     this.cwd = options.cwd ?? process.cwd()
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.workspaceFolders = options.workspaceFolders ?? []
+    this.workspaceConfiguration = options.workspaceConfiguration ?? {}
   }
 
   async start(signal?: AbortSignal): Promise<void> {
@@ -668,7 +690,14 @@ export class LspClient implements LspPort {
           processId: process.pid,
           clientInfo: { name: "quanta-codeagent", version: "0.1.0" },
           rootUri: pathToFileURL(this.cwd).href,
+          ...(this.workspaceFolders.length > 0
+            ? { workspaceFolders: this.workspaceFolders.map((dir) => this.toWorkspaceFolder(dir)) }
+            : {}),
           capabilities: {
+            workspace: {
+              configuration: true,
+              workspaceFolders: true,
+            },
             textDocument: {
               publishDiagnostics: { relatedInformation: false },
               synchronization: { didSave: false, dynamicRegistration: false },
@@ -700,14 +729,20 @@ export class LspClient implements LspPort {
 
     this.diagnosticsByUri.delete(uri)
     const arrival = this.waitForDiagnostics(uri)
-
-    this.sendNotification("textDocument/didOpen", {
-      textDocument: { uri, languageId: this.spec.languageIdFor(filePath), version: 1, text },
-    })
+    this.syncOpenDocument(filePath, uri, text)
 
     const diags = await arrival
     this.sendNotification("textDocument/didClose", { textDocument: { uri } })
+    this.opened.delete(uri)
     return diags
+  }
+
+  /** Prime a file into the live session without issuing a nav RPC. Useful for
+   *  warm-up/readiness paths that want `didOpen` / `didChange` semantics but
+   *  choose their own follow-up probe. */
+  async prime(filePath: string, signal?: AbortSignal): Promise<void> {
+    if (!this.proc) throw new Error("LspClient.prime called before start()")
+    await this.ensureOpen(filePath, signal)
   }
 
   // --- Nav RPC -----------------------------------------------------------
@@ -1100,7 +1135,7 @@ export class LspClient implements LspPort {
     // Close every doc we lazily opened so the server's per-URI state is freed
     // even if the caller never explicitly closed. Done before shutdown so the
     // server is still alive to accept the notifications.
-    for (const uri of this.opened) {
+    for (const uri of this.opened.keys()) {
       this.sendNotification("textDocument/didClose", { textDocument: { uri } })
     }
     this.opened.clear()
@@ -1221,19 +1256,15 @@ export class LspClient implements LspPort {
     return Bun.file(filePath).text()
   }
 
-  /** Idempotent `textDocument/didOpen`. The URI is added to {@link opened}
-   *  on first call so subsequent nav RPCs on the same file skip the open. */
+  /** Idempotent `textDocument/didOpen`. The first open sends `didOpen`; later
+   *  calls compare the on-disk text and emit `didChange` only when the buffer
+   *  actually diverged. */
   private async ensureOpen(filePath: string, signal?: AbortSignal): Promise<string> {
     throwIfAborted(signal, `LSP didOpen "${filePath}"`)
     const uri = pathToFileURL(filePath).href
-    if (this.opened.has(uri)) return uri
     const text = await this.readFileText(filePath)
     throwIfAborted(signal, `LSP didOpen "${filePath}"`)
-    this.sendNotification("textDocument/didOpen", {
-      textDocument: { uri, languageId: this.spec.languageIdFor(filePath), version: 1, text },
-    })
-    this.opened.add(uri)
-    return uri
+    return this.syncOpenDocument(filePath, uri, text)
   }
 
   /** Issue a request and convert "method not supported" errors to a `null`
@@ -1409,8 +1440,50 @@ export class LspClient implements LspPort {
       this.resolvePending(msg)
       return
     }
+    if (isRequest(msg)) {
+      this.onServerRequest(msg)
+      return
+    }
     if (isNotification(msg) && msg.method === "textDocument/publishDiagnostics") {
       this.onPublishDiagnostics(msg.params)
+    }
+  }
+
+  private onServerRequest(msg: {
+    id: number | string
+    method: string
+    params?: unknown
+  }): void {
+    switch (msg.method) {
+      case "workspace/configuration": {
+        const items = (msg.params as WorkspaceConfigurationParams | undefined)?.items
+        const result = Array.isArray(items)
+          ? items.map((item) => this.resolveWorkspaceConfiguration(item.section))
+          : []
+        this.sendServerResult(msg.id, result)
+        return
+      }
+      case "workspace/workspaceFolders":
+        this.sendServerResult(
+          msg.id,
+          this.workspaceFolders.length > 0
+            ? this.workspaceFolders.map((dir) => this.toWorkspaceFolder(dir))
+            : null,
+        )
+        return
+      case "client/registerCapability":
+      case "client/unregisterCapability":
+      case "window/workDoneProgress/create":
+      case "workspace/codeLens/refresh":
+      case "workspace/diagnostic/refresh":
+      case "workspace/inlayHint/refresh":
+      case "workspace/inlineValue/refresh":
+      case "workspace/semanticTokens/refresh":
+        this.sendServerResult(msg.id, null)
+        return
+      default:
+        logger.debug("lsp: unhandled server request", { method: msg.method })
+        this.sendServerError(msg.id, -32601, `unsupported client request "${msg.method}"`)
     }
   }
 
@@ -1435,6 +1508,48 @@ export class LspClient implements LspPort {
       this.diagnosticsWaiters.delete(p.uri)
       for (const w of waiters) w(mapped)
     }
+  }
+
+  private syncOpenDocument(filePath: string, uri: string, text: string): string {
+    const existing = this.opened.get(uri)
+    if (!existing) {
+      this.sendNotification("textDocument/didOpen", {
+        textDocument: { uri, languageId: this.spec.languageIdFor(filePath), version: 1, text },
+      })
+      this.opened.set(uri, { version: 1, text })
+      return uri
+    }
+    if (existing.text === text) return uri
+    const version = existing.version + 1
+    this.sendNotification("textDocument/didChange", {
+      textDocument: { uri, version },
+      contentChanges: [{ text }],
+    })
+    this.opened.set(uri, { version, text })
+    return uri
+  }
+
+  private resolveWorkspaceConfiguration(section: string | undefined): unknown {
+    if (!section || section.length === 0) return this.workspaceConfiguration
+    let cur: unknown = this.workspaceConfiguration
+    for (const part of section.split(".")) {
+      if (typeof cur !== "object" || cur === null || Array.isArray(cur)) return null
+      cur = (cur as Record<string, unknown>)[part]
+    }
+    return cur ?? null
+  }
+
+  private toWorkspaceFolder(dir: string): WorkspaceFolder {
+    const name = basename(dir)
+    return { uri: pathToFileURL(dir).href, name: name.length > 0 ? name : dir }
+  }
+
+  private sendServerResult(id: number | string, result: unknown): void {
+    this.send({ jsonrpc: "2.0", id, result })
+  }
+
+  private sendServerError(id: number | string, code: number, message: string): void {
+    this.send({ jsonrpc: "2.0", id, error: { code, message } })
   }
 
   private watchExit(): void {

@@ -314,6 +314,57 @@ describe("ec2 backend", () => {
     expect(auth?.args).toContain("22")
   })
 
+  // Self-audit R2: a REAL authorize failure (wrong VPC / perms) used to be
+  // swallowed as if it were a tolerable duplicate-rule error → the box launched
+  // into an SG with no :22 and the ONLY symptom was a misleading 5-min
+  // ready-poll timeout. Fail fast on the expensive path instead.
+  test("authorize-ingress REAL failure fails fast (not a misleading poll-timeout)", async () => {
+    const { spawn } = makeMockSpawn((cmd, args) => {
+      if (cmd === "curl") return ok("203.0.113.7")
+      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
+      if (cmd === "aws" && args.includes("authorize-security-group-ingress"))
+        return { code: 255, stdout: "", stderr: "An error occurred (UnauthorizedOperation)" }
+      return ok()
+    })
+    const backend = createEc2Backend({ spawn, sleep: async () => {}, maxPolls: 2 })
+    await expect(
+      backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r" }),
+    ).rejects.toThrow(/authoriz|ingress/i)
+  })
+
+  test("authorize-ingress DUPLICATE error is tolerated (rule already present)", async () => {
+    const { spawn, issued } = makeMockSpawn((cmd, args) => {
+      if (cmd === "curl") return ok("203.0.113.7")
+      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
+      if (cmd === "aws" && args.includes("authorize-security-group-ingress"))
+        return { code: 255, stdout: "", stderr: "InvalidPermission.Duplicate: rule already exists" }
+      if (cmd === "aws" && args.includes("run-instances")) return ok("i-1")
+      if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
+      return ok()
+    })
+    const backend = createEc2Backend({
+      spawn,
+      sleep: async () => {},
+      maxPolls: 1,
+      pollIntervalMs: 1,
+    })
+    await backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r" }).catch(() => undefined)
+    // TEETH: authorize did NOT throw ⇒ provisioning proceeded to run-instances.
+    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("run-instances"))).toBe(true)
+  })
+
+  test("non-IP curl output (proxy/error page) fails fast with a clear public-IP message", async () => {
+    const { spawn } = makeMockSpawn((cmd, args) => {
+      if (cmd === "curl") return ok("<html>502 Bad Gateway</html>") // not an IP
+      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
+      return ok()
+    })
+    const backend = createEc2Backend({ spawn, sleep: async () => {} })
+    await expect(
+      backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r" }),
+    ).rejects.toThrow(/public IP/i)
+  })
+
   test("falls back to next instance type on InsufficientInstanceCapacity (no AZ pin)", async () => {
     const launched: string[] = []
     const { spawn } = makeMockSpawn((cmd, args) => {
