@@ -75,14 +75,42 @@ const D = {
  * `access_token` + non-secret account fields. The long-lived `refresh_token`
  * and `id_token` are dropped so a box compromise can't mint fresh credentials.
  */
+/** Placeholder for the long-lived secrets we refuse to ship. The token-store
+ *  loader only requires `refresh_token`/`id_token` to be NON-EMPTY strings — it
+ *  never uses them for a short run (access_token is valid + never refreshed). */
+const REDACTED = "REDACTED-not-shipped-to-remote"
+
 export const stripToAccessToken = (authJson: string): string => {
   const parsed = JSON.parse(authJson) as Record<string, unknown>
   const safe: Record<string, unknown> = {}
   for (const k of ["access_token", "account_id", "expires_at", "last_refresh", "plan_type"]) {
     if (parsed[k] !== undefined) safe[k] = parsed[k]
   }
+  // The loader hard-requires non-empty refresh_token + id_token fields. Satisfy
+  // the shape with REDACTED placeholders so the REAL long-lived secrets stay
+  // home — for a short run the access_token never expires, so refresh (which
+  // would need the real value) is never invoked.
+  safe.refresh_token = REDACTED
+  safe.id_token = REDACTED
   return JSON.stringify(safe)
 }
+
+/**
+ * Packages `src/` imports that are NOT declared in package.json/bun.lock (they
+ * survive locally only because they sit in a dev's node_modules). A clean
+ * `bun install` on a fresh box misses them, so full-remote `bun add`s them.
+ * All pure-JS (no native ABI) so they install cleanly on the linux box.
+ * FIXME: these belong in the repo's package.json — a fresh clone breaks without
+ * them. (Discovered 2026-06-16 via the full-remote clean-box run.)
+ */
+export const PHANTOM_DEPS = [
+  "turndown",
+  "@secretlint/core",
+  "@secretlint/secretlint-rule-preset-recommend",
+  "@secretlint/types",
+  "write-file-atomic",
+  "csv-parse",
+] as const
 
 const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
 
@@ -327,36 +355,108 @@ export const createFullRemoteBackend = (
           "[full-remote] box never became ssh-reachable + bun-ready (check SG :22 / cloud-init)",
         )
 
-      log("[full-remote] bootstrapped. Rsyncing repo (excl node_modules/.git/.env/.quanta)…")
-      // Bootstrap: sync repo + deps. Exclude node_modules/.git AND any local
-      // secret stores (.env / .quanta) so we never ship UNRELATED credentials.
+      log(
+        "[full-remote] bootstrapped. Syncing src/ + config (SURGICAL — the monorepo's apps/crates/native are GBs and the bench needs only src)…",
+      )
+      // The repo is a monorepo (top-level apps/ alone is ~4GB). The bench agent
+      // imports ONLY `src/` (via `@/*` aliases). Ship src/ minus stale `*.js`
+      // build artifacts, plus the root config files, then `bun install`. Whole-
+      // repo rsync overran the ssh connection ("Connection reset by peer").
+      const sshOpts = `ssh -i ${keyPath} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15`
+      await sshTo(host, "mkdir -p ~/quanta")
       const rsynced = await spawn("rsync", [
         "-az",
+        "--partial",
         "--exclude",
         "node_modules",
         "--exclude",
-        ".git",
+        "*.js", // stale compiled mirrors — bun runs the .ts directly
         "--exclude",
-        ".env",
-        "--exclude",
-        ".env.*",
+        "*.test.ts", // tests not needed to RUN the agent
         "--exclude",
         ".quanta",
         "-e",
-        `ssh -i ${keyPath} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15`,
-        `${cfg.repoDir}/`,
-        `${host}:~/quanta/`,
+        sshOpts,
+        `${cfg.repoDir}/src/`,
+        `${host}:~/quanta/src/`,
       ])
       if (rsynced.code !== 0) {
-        throw new Error(`[full-remote] rsync failed (code ${rsynced.code}): ${rsynced.stderr}`)
+        throw new Error(`[full-remote] rsync src failed (code ${rsynced.code}): ${rsynced.stderr}`)
       }
-      log("[full-remote] rsynced repo; running bun install on box…")
-      const installed = await sshTo(host, "cd ~/quanta && ~/.bun/bin/bun install 2>&1 | tail -3")
+      // Root config files needed for `bun install` + `@/*` path aliases.
+      const scpCfg = await spawn("scp", [
+        "-i",
+        keyPath,
+        "-o",
+        "ConnectTimeout=15",
+        `${cfg.repoDir}/package.json`,
+        `${cfg.repoDir}/bun.lock`,
+        `${cfg.repoDir}/tsconfig.json`,
+        `${cfg.repoDir}/tsconfig.base.json`,
+        `${cfg.repoDir}/bunfig.toml`,
+        `${host}:~/quanta/`,
+      ])
+      if (scpCfg.code !== 0) {
+        throw new Error(`[full-remote] scp config failed (code ${scpCfg.code}): ${scpCfg.stderr}`)
+      }
+      log("[full-remote] synced src + config; running bun install on box (full deps, ~1-2min)…")
+      // `set -o pipefail` so a FAILED install propagates through the `tail`
+      // (without it the pipeline exit is tail's 0 — masking a partial install).
+      const installed = await sshTo(
+        host,
+        "set -o pipefail; cd ~/quanta && ~/.bun/bin/bun install 2>&1 | tail -25",
+      )
       if (installed.code !== 0) {
         throw new Error(
-          `[full-remote] bun install failed (code ${installed.code}): ${installed.stdout}${installed.stderr}`,
+          `[full-remote] bun install failed (code ${installed.code}):\n${installed.stdout}${installed.stderr}`,
         )
       }
+      // PHANTOM DEPS: the repo imports several packages that are NOT declared in
+      // package.json/bun.lock (they only exist in a dev's local node_modules), so
+      // a clean install misses them and the bench dies with "Cannot find package".
+      // We can't ship the macOS node_modules (native ABI ≠ linux), so install the
+      // known phantoms on the box (all pure-JS). FIXME: declare these in the repo's
+      // package.json — a fresh `bun install` breaks without them.
+      const phantoms = PHANTOM_DEPS.join(" ")
+      log(`[full-remote] installing phantom deps (undeclared in package.json): ${phantoms}…`)
+      const added = await sshTo(
+        host,
+        `set -o pipefail; cd ~/quanta && ~/.bun/bin/bun add ${phantoms} 2>&1 | tail -15`,
+      )
+      if (added.code !== 0) {
+        throw new Error(
+          `[full-remote] bun add (phantom deps) failed (code ${added.code}):\n${added.stdout}${added.stderr}`,
+        )
+      }
+
+      // Grading toolchain: the bench grades via QUANTA_SWEBENCH_PYTHON_BIN, which
+      // must be the `swebench-python` SHIM (uvx --from swebench python "$@"), NOT
+      // raw uvx (uvx can't take `-c "import swebench"`). The shim lives in tools/
+      // locally (not shipped), so create it on the box + WARM the uvx cache so the
+      // 60s import-probe doesn't time out on swebench's first (multi-second) pull.
+      log(
+        "[full-remote] creating swebench-python shim + warming uvx swebench cache (first pull ~30-60s)…",
+      )
+      // Write the shim via ssh STDIN (verbatim — no printf/escaping hell). `$HOME`
+      // and `$@` stay literal in the file; bash expands them at shim RUN time.
+      const shim =
+        '#!/usr/bin/env bash\nexec "$HOME/.local/bin/uvx" --from swebench --python 3.11 --quiet python "$@"\n'
+      const wrote = await sshTo(host, "cat > ~/swebench-python && chmod +x ~/swebench-python", shim)
+      if (wrote.code !== 0) {
+        throw new Error(
+          `[full-remote] writing swebench-python shim failed (code ${wrote.code}): ${wrote.stderr}`,
+        )
+      }
+      const warm = await sshTo(
+        host,
+        'set -o pipefail; ~/swebench-python -c "import swebench; print(swebench.__version__)" 2>&1 | tail -3',
+      )
+      if (warm.code !== 0) {
+        throw new Error(
+          `[full-remote] swebench toolchain warm failed (code ${warm.code}):\n${warm.stdout}${warm.stderr}`,
+        )
+      }
+
       const scpDs = await spawn("scp", [
         "-i",
         keyPath,
@@ -373,7 +473,10 @@ export const createFullRemoteBackend = (
       log("[full-remote] shipping stripped token (access_token only) over ssh stdin…")
       const shipped = await sshTo(
         host,
-        "mkdir -p ~/.quanta/auth && cat > ~/.quanta/auth/chatgpt.json",
+        // chmod 600: quanta's auth loader REFUSES a token file with loose perms
+        // (umask makes `cat >` create it 0664) — without this the agent aborts
+        // with 0 turns / empty patch ("token file has loose permissions").
+        "mkdir -p ~/.quanta/auth && cat > ~/.quanta/auth/chatgpt.json && chmod 600 ~/.quanta/auth/chatgpt.json",
         stripToAccessToken(cfg.authJson),
       )
       if (shipped.code !== 0) {
@@ -395,7 +498,10 @@ export const createFullRemoteBackend = (
       const remoteRun = await sshTo(
         host,
         `set -o pipefail; cd ~/quanta && QUANTA_BENCH_PRESET=${preset} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
-          `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/.local/bin/uvx" ` +
+          `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
+          // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
+          // arch-aware default is "none" (slow local conda build).
+          `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 ` +
           `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
           `--model ${model} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
       )

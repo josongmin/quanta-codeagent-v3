@@ -41,7 +41,7 @@ Django 4.2 업그레이드 이후, Window 함수를 참조하는 annotation 위�
 
 ## 골드패치 분석
 - **건드린 파일/함수**: `django/db/models/sql/query.py` : `Query.get_aggregation` (3 헌크).
-- **근본 원인**: 4.2의 aggregate pruning 최적화는 바깥 쿼리를 별도 subquery로 감싸 평면화를 막는 조건으로 `is_sliced` / `has_existing_aggregation` / `refs_subquery` / `qualify` / `distinct` / `combinator`만 나열했다. 윈도우 함수를 참조하는 집계 케이스는 이 조건에서 빠져 있어, 평면화된 단일 SELECT에서 집계 함수가 윈도우 함수 호출을 직접 감싸게 되고 — SQL 표준상 금지 — PostgreSQL이 `GroupingError`로 거부한다.
+- **근본 원인**: 4.2의 aggregate pruning 최적화는 바깥 쿼리를 별도 subquery로 감싸 평면화를 막는 조건으로 `isinstance(self.group_by, tuple)` / `is_sliced` / `has_existing_aggregation` / `refs_subquery` / `qualify` / `distinct` / `combinator`를 나열했다. 윈도우 함수를 참조하는 집계 케이스는 이 조건에서 빠져 있어, 평면화된 단일 SELECT에서 집계 함수가 윈도우 함수 호출을 직접 감싸게 되고 — SQL 표준상 금지 — PostgreSQL이 `GroupingError`로 거부한다.
 - **수정 요지**:
   1. `refs_window = False` 플래그 도입(`refs_subquery` 옆에 동형 추가).
   2. aggregate 참조 루프에서 `refs_window |= any(getattr(self.annotations[ref], "contains_over_clause", True) for ref in aggregate.get_refs())` — 참조된 annotation이 over-clause(윈도우)를 포함하면 True. `getattr` 기본값을 **`True`**로 둬 속성을 노출하지 않는 표현식도 보수적으로 wrapping하도록 fail-safe.
@@ -60,6 +60,6 @@ Django 4.2 업그레이드 이후, Window 함수를 참조하는 annotation 위�
 
 2. **픽스와 올바른 일반화인 이유**: "집계는 윈도우 함수를 같은 레벨에서 감쌀 수 없다 → 윈도우를 참조하면 바깥을 subquery로 감싸야 한다"는 불변식을 세운다. 윈도우 여부를 표현식 트리에서 일반적으로 판별하는 신호가 `contains_over_clause`다 → `refs_subquery`와 동형으로 `refs_window` 플래그를 계산하고 wrapping 조건에 `or refs_window`를 더한다. isinstance(Window) 특수처리가 아니라 `contains_over_clause` 속성을 보는 것이 올바른 일반화인 이유: `Coalesce(Window(...))`처럼 윈도우가 다른 표현식에 중첩된 경우, 임의 깊이의 over-clause를 포함한 복합 표현식까지 모두 커버하기 때문. `getattr(..., True)` 기본값은 속성 미노출 표현식도 보수적으로 감싸 거짓음성(미-wrapping → 깨진 SQL)을 막는 fail-safe.
 
-3. **regression 안전**: 기존 wrapping 조건(`is_sliced`/`has_existing_aggregation`/`refs_subquery`/`qualify`/`distinct`/`combinator`)을 한 글자도 수정하지 않고 OR 항 하나만 추가 → 윈도우를 참조하지 않는 모든 경로는 byte-동일하게 동작. 이로써 `test_referenced_subquery_requires_wrapping`(3-select 유지), `test_non_aggregate_annotation_pruned`(불필요 annotation 제거 유지), 다수 `aggregation_default_*`·GROUP BY P2P가 보존된다. 새 플래그 계산은 `aggregate.get_refs()`가 비면 no-op이라 부작용 없음.
+3. **regression 안전**: 기존 wrapping 조건(`isinstance(self.group_by, tuple)`/`is_sliced`/`has_existing_aggregation`/`refs_subquery`/`qualify`/`distinct`/`combinator`)을 한 글자도 수정하지 않고 OR 항 하나만 추가 → 윈도우를 참조하지 않는 모든 경로는 byte-동일하게 동작. 이로써 `test_referenced_subquery_requires_wrapping`(3-select 유지), `test_non_aggregate_annotation_pruned`(불필요 annotation 제거 유지), 다수 `aggregation_default_*`·GROUP BY P2P가 보존된다. 새 플래그 계산은 `aggregate.get_refs()`가 비면 no-op이라 부작용 없음.
 
 4. **함정 회피**: 오라클 없는 에이전트가 틀릴 지점 — (a) `getattr`의 기본값을 `False`로 두면 `contains_over_clause`를 노출 안 하는 표현식에서 wrapping이 누락되어 일부 케이스가 다시 깨진다(보수적 `True`가 정답). (b) wrapping 조건절에만 `or refs_window`를 넣고 위쪽 참조 루프에서 플래그 계산을 빠뜨리면 항상 False라 동작 안 하는 부분-수정에 빠진다(두 곳을 같이 고쳐야 함). (c) 단 1개의 FAIL_TO_PASS만 보고 `isinstance(annotation, Window)` 특수처리로 overfit하면 중첩/복합 윈도우 표현식을 놓치고 일반화에 실패한다 — `contains_over_clause` 일반 속성을 봐야 한다. (d) 에러 메시지 grep만으로 ORM 컴파일러에 닿지 못하면 엉뚱한 곳을 고친다 → `aggregate()`→`get_aggregation` 호출경로 추적 + 인접 `refs_subquery` 패턴 모방이 막힘 없는 길.

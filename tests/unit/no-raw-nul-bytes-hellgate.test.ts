@@ -51,5 +51,9 @@ describe("source integrity — no raw NUL (0x00) bytes", () => {
       )
     }
     expect(offenders).toEqual([])
-  })
+    // Generous wall-clock: this walks every src/tests/docs file. Under the full
+    // parallel suite (2000+ files) CPU starvation can stretch a ~2s scan past
+    // bun's 5s default and flake it — the assertion is unchanged, only the
+    // wall-clock budget. Verified green in isolation (~2s).
+  }, 60_000)
 })

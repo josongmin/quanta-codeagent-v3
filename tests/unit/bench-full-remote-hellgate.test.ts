@@ -27,15 +27,16 @@ const FULL_AUTH = JSON.stringify({
 })
 
 describe("stripToAccessToken (security crux)", () => {
-  test("keeps access_token + account fields, DROPS refresh_token & id_token", () => {
+  test("keeps real access_token; REAL refresh_token/id_token never shipped (placeholders only)", () => {
     const out = stripToAccessToken(FULL_AUTH)
     const parsed = JSON.parse(out) as Record<string, unknown>
     expect(parsed.access_token).toBe("ACCESS-xyz")
     expect(parsed.account_id).toBe("acct-123")
     expect(parsed.expires_at).toBe("2026-06-24T00:00:00Z")
-    // TEETH: the long-lived secrets are gone from BOTH the keys and the text.
-    expect("refresh_token" in parsed).toBe(false)
-    expect("id_token" in parsed).toBe(false)
+    // TEETH: the loader requires refresh_token/id_token fields, so they're present
+    // — but as REDACTED placeholders, NEVER the real long-lived secret values.
+    expect(parsed.refresh_token).not.toBe("REFRESH-super-secret-long-lived")
+    expect(parsed.id_token).not.toBe("IDTOK-secret")
     expect(out).not.toContain("REFRESH-super-secret-long-lived")
     expect(out).not.toContain("IDTOK-secret")
   })
@@ -157,8 +158,17 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       .catch(() => undefined)
     const rsync = calls.find((c) => c.cmd === "rsync")
     const a = rsync?.args.join(" ") ?? ""
-    expect(a).toContain(".env")
+    // teeth (the "Connection reset" bug): ship ONLY src/ (the monorepo's
+    // top-level apps/crates/native are GBs the bench never needs), minus stale
+    // *.js build mirrors — NOT the whole repo root.
+    expect(a).toContain("/src/")
+    expect(a).toContain("*.js")
+    expect(a).toContain("node_modules")
+    // .quanta (local secret store) is never shipped.
     expect(a).toContain(".quanta")
+    // root config (package.json/tsconfig) goes via scp for bun install + @/* aliases.
+    const scp = calls.find((c) => c.cmd === "scp" && c.args.some((x) => x.includes("package.json")))
+    expect(scp).toBeDefined()
   })
 
   test("does NOT pin a subnet/AZ by default (capacity resilience)", async () => {

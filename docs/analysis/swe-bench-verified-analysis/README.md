@@ -46,41 +46,51 @@ swe-bench-verified-analysis/
 
 ## 분석 진행 상태
 
-| repo | 기본 분석 | 정형화(type+tier+모범답안) |
-|---|---|---|
-| django | ✅ 231 / 231 | ✅ 231 / 231 |
-| sympy | ⬜ 0 / 75 | ⬜ |
-| sphinx | ⬜ 0 / 44 | ⬜ |
-| matplotlib | ⬜ 0 / 34 | ⬜ |
-| scikit-learn | ⬜ 0 / 32 | ⬜ |
-| astropy | ⬜ 0 / 22 | ⬜ |
-| xarray | ⬜ 0 / 22 | ⬜ |
-| pytest | ⬜ 0 / 19 | ⬜ |
-| pylint | ⬜ 0 / 10 | ⬜ |
-| requests | ⬜ 0 / 8 | ⬜ |
-| seaborn | ⬜ 0 / 2 | ⬜ |
-| flask | ⬜ 0 / 1 | ⬜ |
+| repo | 정형화(type+tier+모범답안) |
+|---|---|
+| django | ✅ 231 / 231 |
+| sympy | ✅ 75 / 75 |
+| sphinx | ✅ 44 / 44 |
+| matplotlib | ✅ 34 / 34 |
+| scikit-learn | ✅ 32 / 32 |
+| astropy | ✅ 22 / 22 |
+| xarray | ✅ 22 / 22 |
+| pytest | ✅ 19 / 19 |
+| pylint | ✅ 10 / 10 |
+| requests | ✅ 8 / 8 |
+| seaborn | ✅ 2 / 2 |
+| flask | ✅ 1 / 1 |
+| **전체** | **✅ 500 / 500** |
 
-## django 정형화 분포 (231개)
+하드 티어(T5 + 추론무거운 T4) 84개는 별도 **적대적 인과검증 패스** 완료 — inverted-causality·wrong-owner·off-by-one 등 인과오류 자동 정정. 상세 [_data/causal-audit-workflow.js](_data/causal-audit-workflow.js).
+
+## 정형화 분포 (전체 500개)
 
 분류 루브릭은 [TAXONOMY.md](TAXONOMY.md) (APR 문헌 + SWE-bench 난이도 실증연구 근거). 난이도는 에이전트 solve-rate가 아니라 **구조적 피처**로 매김(메모리제이션 confound 회피).
 
-**티어 × 유형 매트릭스:**
+**레포 × 티어:**
 
-| tier | DirectMap | ConstrReason | DomainBound | DesignRefactor | LocTrivial | DiffuseLoc | SpecInfer | GenValidate | 합 |
-|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| T1 존나쉬움 | 12 | 0 | 0 | 0 | 3 | 0 | 0 | 0 | 15 |
-| T2 쉬움 | 62 | 4 | 0 | 2 | 1 | 0 | 0 | 0 | 69 |
-| T3 중간 | 14 | 25 | 14 | 3 | 0 | 0 | 0 | 0 | 56 |
-| T4 약간어려움 | 2 | 33 | 29 | 5 | 0 | 2 | 2 | 1 | 74 |
-| T5 어려움 | 0 | 0 | 7 | 9 | 0 | 1 | 0 | 0 | 17 |
-| T6 매우어려움 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| **합** | **90** | **62** | **50** | **19** | **4** | **3** | **2** | **1** | **231** |
+| repo | T1 존나쉬움 | T2 쉬움 | T3 중간 | T4 약간어려움 | T5 어려움 | T6 매우어려움 | 합 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| django | 15 | 69 | 56 | 74 | 17 | 0 | 231 |
+| sympy | 5 | 20 | 31 | 17 | 2 | 0 | 75 |
+| sphinx | 1 | 11 | 18 | 10 | 4 | 0 | 44 |
+| matplotlib | 0 | 9 | 16 | 9 | 0 | 0 | 34 |
+| scikit-learn | 1 | 17 | 12 | 1 | 1 | 0 | 32 |
+| astropy | 0 | 6 | 10 | 5 | 0 | 1 | 22 |
+| xarray | 1 | 7 | 11 | 2 | 1 | 0 | 22 |
+| pytest | 2 | 5 | 8 | 4 | 0 | 0 | 19 |
+| pylint | 0 | 3 | 4 | 2 | 1 | 0 | 10 |
+| requests | 0 | 6 | 2 | 0 | 0 | 0 | 8 |
+| seaborn | 0 | 0 | 0 | 2 | 0 | 0 | 2 |
+| flask | 0 | 1 | 0 | 0 | 0 | 0 | 1 |
+| **합** | **25** | **154** | **168** | **126** | **26** | **1** | **500** |
 
-읽는 법: DirectMap은 T1-T2에, ConstraintReason은 T3-T4에, DomainBound·DesignRefactor는 T4-T5에 몰림 — 유형이 곧 난이도 예측자. T6 없음(django Verified는 >4시간 난이도 0).
+**유형(primary_type) 분포:** ConstraintReason 201 / DirectMap 172 / DomainBound 75 / DesignRefactor 27 / SpecInference 13 / LocTrivial 7 / DiffuseLoc 4 / GenValidate 1.
 
-**Localization 축**: L0 149 / L1 51 / L2 4 / L3 27 — 이슈가 위치를 직접 지목하는 경우(L0)가 대부분, 멀티사이트 조율(L3) 27개.
-**Knowledge 의존**: K-Domain 188 / K-Gen 30 / K-API 13 — **81%가 django 내부지식 의존**(ORM/compiler/migrations/forms). django가 어려운 진짜 이유.
+**Knowledge 의존:** K-Domain **412 / 500 (82%)** / K-Gen 62 / K-API 26 — SWE-bench Verified의 본질은 일반 코딩이 아니라 **프레임워크 내부지식**(ORM/compiler/autodoc/assumptions). 우리 에이전트 grounding의 핵심 타깃.
+
+> 읽는 법: ConstraintReason(올바른 식·조건을 추론 합성)이 최다 유형(40%) — "어디"보다 "정확히 무엇"이 난점. T6(매우어려움)은 astropy 1건뿐 — 공식 >4시간 라벨 3건 중 나머지는 구조적 피처상 T5 이하로 재배정됨(시간≠에이전트 난이도).
 
 ## 각 md 구조 (정형화 후)
 
