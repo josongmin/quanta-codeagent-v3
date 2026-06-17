@@ -41,12 +41,13 @@ export const runRepairRounds = async (
   let turnsTotal = r0.turns
   history.push({ round: 0, patch: r0.patch, validated: v0.ok })
   if (v0.ok || maxRounds <= 0) {
-    return finalize(history, turnsTotal, v0.ok, r0.patch)
+    return finalize(history, turnsTotal, v0.ok, r0.patch, isFalseGreen(v0))
   }
 
   let prevRun: RunOnceResult = r0
   let prevValidator: ValidatorResult = v0
   let validated = false
+  let falseGreen = false
   for (let i = 1; i <= maxRounds; i++) {
     const seed = args.buildContext({
       problem: args.problem,
@@ -62,11 +63,19 @@ export const runRepairRounds = async (
     prevValidator = vi
     if (vi.ok) {
       validated = true
+      falseGreen = isFalseGreen(vi)
       break
     }
   }
-  return finalize(history, turnsTotal, validated, prevRun.patch)
+  return finalize(history, turnsTotal, validated, prevRun.patch, falseGreen)
 }
+
+/** OBSERVE-ONLY measurement: the round CLEARED (ok by exit code) yet the typed
+ *  rail predicate was evaluable AND did not match — the false green a
+ *  predicate-aware gate would have caught. Fail-open: an unevaluable/absent
+ *  predicate is NOT a false green (never penalizes). */
+const isFalseGreen = (v: ValidatorResult): boolean =>
+  v.ok && v.predicate?.evaluable === true && v.predicate.matched === false
 
 const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<ValidatorResult> => {
   // T-302: when a primary rail is set, IT is the gate — the agent's own
@@ -101,10 +110,12 @@ const finalize = (
   turns: number,
   validated: boolean,
   patch: string,
+  primaryFalseGreen: boolean,
 ): RunRepairRoundsResult => ({
   patch,
   turns,
   rounds: history.length,
   validated,
+  primaryFalseGreen,
   history,
 })

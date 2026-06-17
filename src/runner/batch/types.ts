@@ -143,6 +143,14 @@ export interface InstanceResult {
   primaryRailPresent?: boolean
   requiredVerificationCovered?: boolean
   /**
+   * T-3 OBSERVE-ONLY — the repair round that cleared (ok by exit code) had a typed
+   * rail predicate that was evaluable AND mismatched: the `primary_false_green`
+   * the predicate-aware gate (T-4) would have caught. Repair path only; absent ⇒
+   * null (metric unavailable). Quantifies the value of turning the predicate into
+   * a hard gate WITHOUT yet doing so (observe-first).
+   */
+  primaryFalseGreen?: boolean
+  /**
    * T-401 — deterministic PatchHygieneReport over the final cumulative diff
    * (stray added files, owner-outside, file count). Computed only when the
    * `patch-hygiene` knob is on AND observing; ABSENT ⇒ byte-identical report.

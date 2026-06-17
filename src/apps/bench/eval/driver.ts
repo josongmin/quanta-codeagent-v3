@@ -259,6 +259,10 @@ interface Phase {
   /** T-601 — did a repair round clear the (primary-rail) validator? Repair path
    *  only; undefined on single-pass. Derives `primaryRailRedAfterRepair`. */
   validated?: boolean
+  /** T-3 OBSERVE-ONLY — clearing round went green on exit code while its typed
+   *  rail predicate was evaluable AND mismatched (the false green a
+   *  predicate-aware gate would catch). Repair path only. */
+  primaryFalseGreen?: boolean
 }
 
 // Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
@@ -357,6 +361,7 @@ const runRepairPhase = async (
   let turns = 0
   let finalPatch = ""
   let repairValidated = false
+  let repairFalseGreen = false
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -388,9 +393,15 @@ const runRepairPhase = async (
       turns = out.turns
       finalPatch = out.patch
       repairValidated = out.validated
+      repairFalseGreen = out.primaryFalseGreen
     },
   )
-  return { patch: patch !== "" ? patch : finalPatch, turns, validated: repairValidated }
+  return {
+    patch: patch !== "" ? patch : finalPatch,
+    turns,
+    validated: repairValidated,
+    primaryFalseGreen: repairFalseGreen,
+  }
 }
 
 const okResult = (
@@ -663,6 +674,7 @@ const runInstanceOnce = async (
         extra.requiredVerificationCovered =
           verificationPlan !== undefined &&
           verificationPlan.required.some((s) => s.successPredicate !== undefined)
+        if (phase.primaryFalseGreen !== undefined) extra.primaryFalseGreen = phase.primaryFalseGreen
       }
       // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
       // byte-identical report.json when OFF). Telemetry-first: emit, don't deny.

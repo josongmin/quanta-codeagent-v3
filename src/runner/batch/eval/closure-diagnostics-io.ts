@@ -70,6 +70,7 @@ export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFa
       // T-3 closure measurement (absent ⇒ null ⇒ metric unavailable, not "false").
       primaryRailPresent: r.primaryRailPresent ?? null,
       requiredVerificationCovered: r.requiredVerificationCovered ?? null,
+      primaryFalseGreen: r.primaryFalseGreen ?? null,
     }
   })
 

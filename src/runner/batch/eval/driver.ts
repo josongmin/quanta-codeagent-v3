@@ -1081,6 +1081,11 @@ interface Phase {
    *  the repair path; undefined on single-pass. Used to derive
    *  `primaryRailRedAfterRepair` for the escalation decision (telemetry). */
   validated?: boolean
+  /** T-3 OBSERVE-ONLY — the clearing round went green on exit code while its typed
+   *  rail predicate was evaluable AND mismatched (the false green a predicate-aware
+   *  gate would catch). Repair path only; undefined on single-pass ⇒ measurement
+   *  null (no rail ⇒ no false-green signal). */
+  primaryFalseGreen?: boolean
 }
 
 /**
@@ -1257,6 +1262,7 @@ const runRepairPhase = async (
   let turns = 0
   let finalPatch = ""
   let repairValidated = false
+  let repairFalseGreen = false
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -1288,13 +1294,19 @@ const runRepairPhase = async (
       turns = out.turns
       finalPatch = out.patch
       repairValidated = out.validated
+      repairFalseGreen = out.primaryFalseGreen
     },
   )
   // `patch` (from withGitSnapshot's final diff) is the canonical capture; if
   // available we prefer it (it reflects the worktree at end of all rounds).
   // `finalPatch` is the orchestrator's view of the last round's diff — they
   // agree by construction (continue-from-patched-tree, single sandbox).
-  return { patch: patch !== "" ? patch : finalPatch, turns, validated: repairValidated }
+  return {
+    patch: patch !== "" ? patch : finalPatch,
+    turns,
+    validated: repairValidated,
+    primaryFalseGreen: repairFalseGreen,
+  }
 }
 
 const okResult = (
@@ -1567,6 +1579,9 @@ export const runInstanceOnce = async (
         extra.requiredVerificationCovered =
           verificationPlan !== undefined &&
           verificationPlan.required.some((s) => s.successPredicate !== undefined)
+        // primaryFalseGreen only meaningful on the repair path (rail was gated);
+        // single-pass ⇒ phase.primaryFalseGreen undefined ⇒ omitted ⇒ measurement null.
+        if (phase.primaryFalseGreen !== undefined) extra.primaryFalseGreen = phase.primaryFalseGreen
       }
       // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
       // + observe-only ⇒ byte-identical report.json when the knob is OFF. The first

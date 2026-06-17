@@ -169,6 +169,14 @@ export interface RunRepairRoundsResult {
   /** True ⇒ a round's validator returned ok; false ⇒ all rounds exhausted
    *  without ok (the final patch is still handed to the official grader). */
   validated: boolean
+  /** T-3 OBSERVE-ONLY measurement: the round that CLEARED the loop (ok by exit
+   *  code) had a typed rail predicate that was EVALUABLE but did NOT match — i.e.
+   *  the rail went green on exit code while the typed proof says it should not
+   *  have. This is the `primary_false_green` signal that quantifies how often a
+   *  predicate-aware gate (T-4) WOULD have caught a false green. Does NOT change
+   *  `validated` in v1 (fail-open / observe-first). False when no round cleared or
+   *  the predicate was unevaluable/matched. */
+  primaryFalseGreen: boolean
   /** Per-round bookkeeping (for observability/tests). */
   history: readonly RoundResult[]
 }
