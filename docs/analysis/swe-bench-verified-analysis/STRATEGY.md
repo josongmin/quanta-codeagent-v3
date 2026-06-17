@@ -203,7 +203,20 @@ bench solve path 매핑 결과(`src/apps/bench/` -> `src/runner/batch/eval/drive
 
 ### ✅ UPDATE: LSP nav grounding django서 FIXED — 진짜원인=config에 pythonPath 누락
 
-아래 "작동 불가" 결론은 **오진**이었다. 진짜 원인: pyright가 `workspaceFolders` 받으면 `workspace/configuration` pull하는데 **응답에 `pythonPath`가 없어** workspace env를 못 잡고 모든 요청 hang. + `workspace/didChangeConfiguration` push도 필요(VS Code식). 둘 다 주니 **django cross-file go-to-def 0~3초 resolve**(pool open 3s, ValidationError→exceptions.py 10ms). FIX = `pyright.ts buildWorkspaceConfiguration`(pythonPath venv우선+extraPaths:[cwd]+autoSearchPaths) + `base.ts` initialized 후 push. 가드 = `tests/integration/pyright-cross-file-resolution.test.ts`(real pyright, teeth). 즉 위 매핑표의 "LSP ❌django실패"는 이제 **✅**로 정정 — LSP가 symbol-owner(②)+localization을 실제로 풀 수 있음(behavioral ⅔는 여전히 SCG 영역).
+아래 "작동 불가" 결론은 **오진**이었다. 진짜 원인: pyright가 `workspaceFolders` 받으면 `workspace/configuration` pull하는데 **응답에 `pythonPath`가 없어** workspace env를 못 잡고 모든 요청 hang. + `workspace/didChangeConfiguration` push도 필요(VS Code식). 둘 다 주니 **django cross-file go-to-def 0~3초 resolve**(pool open 3s, ValidationError→exceptions.py 10ms). FIX = `pyright.ts buildWorkspaceConfiguration`(pythonPath venv우선+extraPaths:[cwd]+autoSearchPaths) + `base.ts` initialized 후 push. 가드 = `tests/integration/pyright-cross-file-resolution.test.ts`(real pyright, teeth).
+
+#### 🔬 LSP grounding capability 경계 (실측, 과대주장 정정)
+
+"LSP가 symbol-owner ⅓ 푼다"는 **과대주장**이었다. 실 pyright+실 django로 심볼 종류별 측정:
+
+| crux 심볼 종류 | LSP go-to-def | 증거 |
+|---|---|---|
+| **import된 top-level 심볼** (클래스/예외/함수) | ✅ resolve | FieldDoesNotExist→exceptions.py:L9, Exists→expressions.py:L1588, ValidationError→exceptions.py:L133 |
+| **동적객체의 메서드/attribute** (`opts.get_path_to_parent`, `_meta.x`) | ❌ **null** | 15563 linchpin 미해결 — pyright가 `opts`=Options 타입추론 실패(django ORM 동적성) |
+
+**하드(T4/T5) 분류 (측정된 패턴 기반 추정)**: LSP-addressable **16** (crux=import 클래스: 12325·13315·14034·14170·14631·15268·16560 등) vs dynamic-method **36** (LSP 못 풂: 11551·11740·13128·15563 등). 즉 LSP는 하드의 **~31%(symbol-cruxed 중)** 만 닿고, **대다수 K-Domain 케이스(동적 메서드 체인·_meta)는 pyright 타입추론 한계로 grounding 불가** → 그게 SCG(자체 PTA/타입추론)가 필요한 정확한 이유.
+
+> 정정: 위 매핑표 "LSP ✅"는 **import 케이스에만** 유효. behavioral ⅔ + dynamic-method K-Domain은 여전히 SCG 영역.
 
 ---
 

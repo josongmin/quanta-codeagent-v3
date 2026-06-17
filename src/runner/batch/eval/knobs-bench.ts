@@ -227,7 +227,15 @@ export const benchPostureFromState = (
   const subagent = readKnobValue(state, "subagent", isTrue) === true ? {} : undefined
   const skills = readKnobValue(state, "skills", isTrue) === true ? {} : undefined
   const lp = readKnobValue(state, "localize-phase", isLocalizeValue)
-  const localizePhase = lp !== undefined ? { phase1Turns: lp.phase1Turns } : undefined
+  // LSP-nav grounding steer: DEFAULT-ON whenever nav tools are on — the steer is
+  // what makes the model actually CALL go-to-def/find-refs (measured ~0% usage
+  // without it). Coupled to `lspNav`; suppressed only by an explicit
+  // `lsp-steer:off` (the A/B baseline). Pointless without nav, so nav-gated.
+  const lspGroundingSteer = lspNav && readKnobValue(state, "lsp-steer", isFalse) !== false
+  const localizePhase =
+    lp !== undefined
+      ? { phase1Turns: lp.phase1Turns, ...(lspGroundingSteer ? { lspGroundingSteer: true } : {}) }
+      : undefined
   const bs = readKnobValue(state, "branch-search", isBranchValue)
   const branchSearch = bs !== undefined ? bs.config : undefined
   const issueHintMode: BenchIssueHintMode = readKnobValue(state, "issue-hint", isIssueMode) ?? "off"

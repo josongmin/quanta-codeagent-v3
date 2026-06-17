@@ -46,6 +46,24 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "test-runner": "1",
     "retry-transient": "3",
   },
+  // LSP-nav GROUNDING steer (`lsp-steer`) is DEFAULT-ON whenever `lsp:1` (see
+  // benchPostureFromState) — agentless-v1 already steers `lsp_definition`/
+  // `lsp_references`. This preset is the A/B BASELINE: identical to agentless-v1
+  // but with the steer explicitly OFF, so `--preset agentless-v1` vs this one is
+  // a clean single-variable measure of the steer's effect (no env-forwarding
+  // needed on the remote box — full-remote forwards `--preset` only).
+  "agentless-v1-nosteer": {
+    lsp: "1",
+    "lsp-steer": "off",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+  },
   // agentless-v1 + the mini-swe (edit-and-submit) posture. Identical localization
   // stack (lsp/localize-phase/issue-hint/repo-map/read-outline) but turns OFF
   // in-loop test execution: drops `repro-test` (host-python repro directive) and

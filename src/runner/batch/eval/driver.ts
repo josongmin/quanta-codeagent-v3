@@ -39,6 +39,7 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
+import { LSP_GROUNDING_STEER } from "@/agent/localize-phase-guard"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { errMessage, gateOn } from "@/shared"
@@ -936,8 +937,19 @@ export const buildConfig = (
   // `bench-in-loop-exec` knob (default-ON ⇒ byte-identical): ON uses the
   // test-running SWEBENCH_DIRECTIVE; OFF (mini-swe posture) swaps to the
   // edit-and-submit SWEBENCH_DIRECTIVE_NOEXEC.
+  // LSP-nav GROUNDING steer (agentless-v2 / `lsp-steer`). The localize-phase
+  // guard ALSO carries this steer, but ONLY fires it when the model attempts an
+  // early edit during Phase 1 — a localize-first agent explores with read/grep
+  // for the whole phase and NEVER sees it (measured: 0 occurrences, 0 lsp_*
+  // calls in a real run). So we surface it as an ALWAYS-PRESENT directive line
+  // too, gated on the SAME `lspGroundingSteer` flag (not `lspNav`, so the
+  // frozen agentless-v1 prompt stays byte-identical and the v1↔v2 A/B is clean).
+  const lspSteerLine =
+    instance.swebench && opt.localizePhase?.lspGroundingSteer === true
+      ? `\n-${LSP_GROUNDING_STEER}`
+      : ""
   const baseText = instance.swebench
-    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}`
+    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}`
     : base
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here

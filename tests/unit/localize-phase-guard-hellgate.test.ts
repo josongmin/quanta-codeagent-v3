@@ -285,6 +285,34 @@ describe("localize-phase-guard hellgate (25+ adversarial cases)", () => {
     expect(a).not.toBe(c)
   })
 
+  // ── G-8L: LSP-nav grounding steer (measured gap: ~0% nav usage in bench) ──
+  // DEFAULT-OFF: byte-identical to frozen agentless-v1.
+  test("G-8L-off: default (lspSteer omitted/false) has NO lsp_* steer — v1 frozen", () => {
+    const def = buildLocalizePhaseForceMessage(0, 5)
+    expect(def).toBe(buildLocalizePhaseForceMessage(0, 5, false))
+    expect(def).not.toContain("lsp_definition")
+    expect(def).not.toContain("lsp_references")
+    // decide() passes it through: no cfg.lspGroundingSteer ⇒ no steer.
+    const d = decideLocalizePhase({ toolName: "edit", state: { turn: 0 }, cfg: { phase1Turns: 5 } })
+    expect(d.text).not.toContain("lsp_definition")
+  })
+  // OPT-IN (agentless-v2): red-on-injection — steer MUST name lsp_definition
+  // (owner resolution) + lsp_references (multi-file co-change), still a nudge.
+  test("G-8L-on: lspSteer=true steers to lsp_definition + lsp_references", () => {
+    const m = buildLocalizePhaseForceMessage(0, 5, true)
+    expect(m).toContain("lsp_definition")
+    expect(m).toContain("lsp_references")
+    expect(m.toLowerCase()).toContain("true owner")
+    expect(m).toContain("grep") // nudge, not a hard gate — text search stays
+    // decide() threads cfg.lspGroundingSteer:
+    const d = decideLocalizePhase({
+      toolName: "edit",
+      state: { turn: 0 },
+      cfg: { phase1Turns: 5, lspGroundingSteer: true },
+    })
+    expect(d.text).toContain("lsp_references")
+  })
+
   // ── G-9: pass decision has no `text` (exactOptionalPropertyTypes) ────────
   test("G-9a: pass decision has block:false (and text omitted, not undefined)", () => {
     const d = decideLocalizePhase({ toolName: "read", state: { turn: 0 }, cfg: { phase1Turns: 3 } })

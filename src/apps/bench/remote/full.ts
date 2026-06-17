@@ -160,6 +160,15 @@ export const createFullRemoteBackend = (
   const ttl = cfg.ttlMinutes ?? D.ttlMinutes
   const preset = cfg.preset ?? D.preset
   const model = cfg.model ?? D.model
+  // Patch-gen concurrency on the remote box (c7i.8xlarge = 32 vCPU). Default 6 —
+  // the binding limit is the shared gpt-5.4 login rate, not box CPU. Serial
+  // (the prior implicit default) ran ~10 min/instance and risked the TTL on a
+  // 12+ instance run. Overridable via QUANTA_FULL_REMOTE_CONCURRENCY; clamped to
+  // [1, 16]. Forwarded to the remote `bench run` via QUANTA_BENCH_CONCURRENCY.
+  const concurrency = Math.max(
+    1,
+    Math.min(16, Math.trunc(Number(process.env.QUANTA_FULL_REMOTE_CONCURRENCY)) || 6),
+  )
   const keep = cfg.keep ?? false
   const log = cfg.onLog ?? (() => {})
 
@@ -262,7 +271,7 @@ export const createFullRemoteBackend = (
     `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} spot (IMDSv2 hop-1, shutdown -h +${ttl})`,
     `[dry-run] would rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
     "[dry-run] would ship STRIPPED token over ssh stdin (access_token only; refresh/id dropped)",
-    `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset})`,
+    `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset}, concurrency=${concurrency})`,
     "[dry-run] would scp report+observe back, then terminate the box",
   ]
 
@@ -526,7 +535,7 @@ export const createFullRemoteBackend = (
           `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
           // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
           // arch-aware default is "none" (slow local conda build).
-          `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 ` +
+          `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
           `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
           `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
       )

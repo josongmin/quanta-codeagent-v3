@@ -99,6 +99,7 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   const diskGb = cfg.diskGb ?? DEFAULTS.diskGb
   const ttlMinutes = cfg.ttlMinutes ?? DEFAULTS.ttlMinutes
   const keep = cfg.keep ?? false
+  const sleep = cfg.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
 
   const aws = (
     args: readonly string[],
@@ -253,6 +254,43 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     return ip
   }
 
+  /** Stage 2.5: wait for sshd to accept connections AND cloud-init (docker + uv
+   *  bootstrap) to finish. `instance-running` only means the VM booted — sshd
+   *  and the user-data install run AFTER that, so delegating to scp immediately
+   *  fails with "connection refused" (TCP reachable, no listener yet). Poll ssh
+   *  until a trivial command succeeds, then block on `cloud-init status --wait`
+   *  so docker/uv are present before grading. */
+  const sshReadyArgs = (ip: string, remoteCmd: string): string[] => [
+    "-i",
+    keyPath,
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+    "-o",
+    "ConnectTimeout=8",
+    "-o",
+    "BatchMode=yes",
+    `ubuntu@${ip}`,
+    remoteCmd,
+  ]
+  const waitForSsh = async (ip: string): Promise<void> => {
+    const maxAttempts = 90 // 90 × 5s = 7.5 min ceiling (cloud-init apt+docker install)
+    for (let i = 0; i < maxAttempts; i++) {
+      const r = await spawn("ssh", sshReadyArgs(ip, "echo READY"))
+      if (r.code === 0 && /READY/.test(r.stdout)) {
+        // sshd is up — now block until the user-data bootstrap (docker + uv) is done.
+        await spawn("ssh", sshReadyArgs(ip, "cloud-init status --wait >/dev/null 2>&1 || true"))
+        return
+      }
+      await sleep(5000)
+    }
+    throw new Error(
+      `[ec2-backend] ssh not ready on ${ip} after ${maxAttempts} attempts (~7.5m). ` +
+        `Box may be slow to bootstrap or :22 blocked.`,
+    )
+  }
+
   /** Stage 6: terminate + confirm. */
   const terminate = async (iid: string): Promise<void> => {
     const term = await aws(["ec2", "terminate-instances", "--instance-ids", iid])
@@ -270,6 +308,7 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     const iid = await launchInstance(sgId)
     try {
       const ip = await waitForHost(iid)
+      await waitForSsh(ip) // sshd + cloud-init bootstrap ready before scp/grade
       // Stages 3–5: delegate to the ssh backend against the fresh box.
       const ssh = createSshBackend({
         host: `ubuntu@${ip}`,

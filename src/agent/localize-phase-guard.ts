@@ -42,6 +42,11 @@ export const createLocalizePhaseState = (): LocalizePhaseState => ({ turn: 0 })
 export interface LocalizePhaseConfig {
   /** Phase-1 turn count. Integer >= 1; absent / invalid ⇒ guard OFF. */
   phase1Turns?: number
+  /** Append the LSP-nav grounding steer ({@link LSP_GROUNDING_STEER}) to the
+   *  Phase-1 block message. DEFAULT-ON in bench whenever LSP nav is on (set by
+   *  `benchPostureFromState`); suppressed by `QUANTA_BENCH_LSP_STEER=off` (the
+   *  A/B baseline). Absent here ⇒ the original (pre-steer) message. */
+  lspGroundingSteer?: boolean
 }
 
 /**
@@ -89,10 +94,34 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   "apply_patch_structured",
 ])
 
+/** Opt-in LSP-nav GROUNDING sentence appended to the Phase-1 nudge.
+ *
+ *  Measured gap (easy-django bench transcripts): the nav tools are wired +
+ *  sandbox-rooted + live, but the model reaches for them in ~0% of runs,
+ *  defaulting to grep — which causes the two failure modes seen in the hard-tier
+ *  causal audit: (1) OWNER MISLOCATION (text match lands on the wrong
+ *  class/override; `lsp_definition` resolves the method that actually runs) and
+ *  (2) MISSED MULTI-FILE CO-CHANGE (`lsp_references` surfaces every call site
+ *  that must change together). A NUDGE, not a hard gate — pyright over-reports
+ *  on Django dynamics, so we never block on it.
+ *
+ *  In bench this ships DEFAULT-ON (coupled to LSP nav in `benchPostureFromState`);
+ *  the A/B baseline is `QUANTA_BENCH_LSP_STEER=off`, which suppresses it so the
+ *  Phase-1 message reverts to the original (pre-steer) text. The builder default
+ *  (`lspSteer=false`) keeps the original message for any non-bench caller. */
+export const LSP_GROUNDING_STEER =
+  " Before editing a symbol you found by text search, confirm its TRUE owner with `lsp_definition` (go-to-definition — a text match often points to the wrong class or an override, not the method that actually runs) and use `lsp_references` (find-references) to surface every call site that may have to change together for a multi-file fix."
+
 /** The forcing nudge injected when a mutating tool is attempted in Phase 1.
- *  Builder, not constant — the turn header `(turn N/M)` needs interpolation. */
-export const buildLocalizePhaseForceMessage = (turn: number, phase1Turns: number): string =>
-  `Phase 1 (localization, turn ${turn + 1}/${phase1Turns}): edits are blocked until you have identified the exact file and function to modify. Use \`search_codebase\` for broad repo search, \`localize\` for fault localization, then \`read\`, \`grep\`, or \`glob\` to confirm the candidate location. Re-confirm by reading the candidate location, then proceed.`
+ *  Builder, not constant — the turn header `(turn N/M)` needs interpolation.
+ *  `lspSteer` (default false) appends {@link LSP_GROUNDING_STEER}; false keeps
+ *  the byte-identical frozen-`agentless-v1` message. */
+export const buildLocalizePhaseForceMessage = (
+  turn: number,
+  phase1Turns: number,
+  lspSteer = false,
+): string =>
+  `Phase 1 (localization, turn ${turn + 1}/${phase1Turns}): edits are blocked until you have identified the exact file and function to modify. Use \`search_codebase\` for broad repo search, \`localize\` for fault localization, then \`read\`, \`grep\`, or \`glob\` to confirm the candidate location.${lspSteer ? LSP_GROUNDING_STEER : ""} Re-confirm by reading the candidate location, then proceed.`
 
 /** Is `phase1Turns` a positive integer (the only ACTIVE configuration)? Any
  *  other value (undefined, 0, negative, NaN, Infinity, non-integer) ⇒ FALSE
@@ -139,5 +168,8 @@ export const decideLocalizePhase = (args: {
   if (state.turn >= phase1Turns) return { block: false }
   // Phase 1 — only mutating tools are blocked; everything else passes.
   if (!MUTATING_TOOL_NAMES.has(toolName)) return { block: false }
-  return { block: true, text: buildLocalizePhaseForceMessage(state.turn, phase1Turns) }
+  return {
+    block: true,
+    text: buildLocalizePhaseForceMessage(state.turn, phase1Turns, cfg.lspGroundingSteer === true),
+  }
 }

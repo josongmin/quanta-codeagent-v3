@@ -99,7 +99,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v1"
     const opt = benchOptIns()
     expect(opt.lspNav).toBe(true)
-    expect(opt.localizePhase).toEqual({ phase1Turns: 5 })
+    expect(opt.localizePhase).toEqual({ phase1Turns: 5, lspGroundingSteer: true })
     expect(opt.issueHintMode).toBe("agentless")
     expect(opt.issueHintExpectedActual).toBe(true)
     expect(opt.reproTestK).toBe(5)
@@ -108,7 +108,9 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     // Config-fold: LSP nav tools actually appear in the registry.
     const cfg = buildOnce()
     expect(hasLspTool(cfg)).toBe(true)
-    expect(cfg.localizePhase).toEqual({ phase1Turns: 5 })
+    // posture (opt) AND built config (cfg) both carry the default-on steer — the
+    // anti-report-lie invariant: what's reported == what drives the agent.
+    expect(cfg.localizePhase).toEqual({ phase1Turns: 5, lspGroundingSteer: true })
     // Live-override bridge: runtime-config knobs pushed into the store.
     expect(getKnobOverride("QUANTA_READ_OUTLINE")).toBe("1")
     expect(getKnobOverride("QUANTA_TEST_RUNNER")).toBe("1")
@@ -140,14 +142,14 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.lspNav).toBe(true)
     expect(opt.subagent).toEqual({})
     expect(opt.skills).toEqual({})
-    expect(opt.localizePhase).toEqual({ phase1Turns: 5 })
+    expect(opt.localizePhase).toEqual({ phase1Turns: 5, lspGroundingSteer: true })
   })
 
   // PRESET-4: explicit env var OVERRIDES a preset value (layer precedence).
   test("PRESET-4: explicit QUANTA_BENCH_LOCALIZE_PHASE overrides the preset", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v1"
     process.env.QUANTA_BENCH_LOCALIZE_PHASE = "3"
-    expect(benchOptIns().localizePhase).toEqual({ phase1Turns: 3 })
+    expect(benchOptIns().localizePhase).toEqual({ phase1Turns: 3, lspGroundingSteer: true })
   })
 
   // PRESET-5: no preset + no env ⇒ byte-identical all-OFF baseline. The
