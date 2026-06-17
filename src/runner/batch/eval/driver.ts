@@ -93,6 +93,7 @@ import {
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { buildVerificationPlan } from "@/agent/verification-plan"
 import { buildPatchHygiene } from "./patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -1220,6 +1221,7 @@ const runRepairPhase = async (
   repair: NonNullable<RunInstanceDeps["repair"]>,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  primaryRailCmd: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -1249,6 +1251,7 @@ const runRepairPhase = async (
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
+        ...(primaryRailCmd !== undefined ? { primaryRailCmd } : {}),
       })
       turns = out.turns
       finalPatch = out.patch
@@ -1434,6 +1437,21 @@ export const runInstanceOnce = async (
     const reproHint = reproInstall.hint
     reproTest = reproInstall.telemetry
 
+    // T-302 primary-rail SELECTION (default-OFF, knob `primary-rail`). When a repro
+    // was installed AND it reproduced the bug on the unpatched base
+    // (`reproducedCount > 0` ⇒ red-on-injection), that repro IS the primary rail:
+    // buildVerificationPlan only promotes it to primaryRail because baseValidatedRed
+    // is true (a non-red repro would be demoted to optional ⇒ null rail ⇒ no
+    // enforcement). The rail's cmd then GATES the repair loop (see runValidate):
+    // the agent's own verify can no longer clear a round — the false-green killer
+    // fires. Knob OFF or no red repro ⇒ undefined ⇒ byte-identical agent gate.
+    const primaryRailCmd =
+      benchOptIns().primaryRail && reproTest?.installed === true && reproTest.reproducedCount > 0
+        ? (buildVerificationPlan({
+            reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true },
+          }).primaryRail?.cmd ?? undefined)
+        : undefined
+
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
     // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
     // ABSENT ⇒ existing single-pass path verbatim (byte-identical: same calls,
@@ -1459,6 +1477,7 @@ export const runInstanceOnce = async (
             deps.repair,
             precomputedHint,
             reproHint,
+            primaryRailCmd,
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })

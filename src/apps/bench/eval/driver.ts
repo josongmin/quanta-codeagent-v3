@@ -33,7 +33,9 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
+import { buildPatchHygiene } from "@/runner/batch/eval/patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
+import { buildVerificationPlan } from "@/agent/verification-plan"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
@@ -343,6 +345,7 @@ const runRepairPhase = async (
   repair: NonNullable<RunInstanceDeps["repair"]>,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  primaryRailCmd: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -372,6 +375,7 @@ const runRepairPhase = async (
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
+        ...(primaryRailCmd !== undefined ? { primaryRailCmd } : {}),
       })
       turns = out.turns
       finalPatch = out.patch
@@ -553,6 +557,19 @@ const runInstanceOnce = async (
     const reproHint = reproInstall.hint
     reproTest = reproInstall.telemetry
 
+    // T-302 primary-rail SELECTION (default-OFF, knob `primary-rail`). A repro that
+    // reproduced the bug on the unpatched base (`reproducedCount > 0` ⇒ red-on-
+    // injection) IS the primary rail — buildVerificationPlan only promotes it
+    // because baseValidatedRed is true. Its cmd then GATES the repair loop (the
+    // agent's own verify can no longer clear a round = false-green killer). Knob
+    // OFF / no red repro ⇒ undefined ⇒ byte-identical agent-command gate.
+    const primaryRailCmd =
+      posture.primaryRail && reproTest?.installed === true && reproTest.reproducedCount > 0
+        ? (buildVerificationPlan({
+            reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true },
+          }).primaryRail?.cmd ?? undefined)
+        : undefined
+
     // Setup is done — arm the solve deadline now so the agent gets the full
     // `timeoutMs` of think time (see note where `deadline` is declared).
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
@@ -578,6 +595,7 @@ const runInstanceOnce = async (
             repair,
             precomputedHint,
             reproHint,
+            primaryRailCmd,
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
 
@@ -614,6 +632,14 @@ const runInstanceOnce = async (
       if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
       if (phase.editCount !== undefined) extra.editCount = phase.editCount
       if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
+      // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
+      // byte-identical report.json when OFF). Telemetry-first: emit, don't deny.
+      if (posture.patchHygiene && instance.swebench !== undefined) {
+        const ownerHint = relFromSandbox(sandbox, phase.firstEditFile)
+        extra.patchHygiene = buildPatchHygiene(phase.patch, {
+          ...(ownerHint !== undefined ? { ownerFiles: [ownerHint] } : {}),
+        })
+      }
     }
     return okResult(instance, phase, v, extra)
   } catch (error) {

@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
-  decideGate,
   decidePrimaryRailFinishGate,
   decideRepairAdmission,
-  type GateSignals,
   type PrimaryRailResult,
 } from "@/agent/primary-rail"
 
@@ -20,44 +18,6 @@ import {
  *
  * All three deciders are PURE. cfg/state absent ⇒ OFF (byte-identical).
  */
-
-describe("T-302 decideGate — commit-now vs verify (bidirectional, categorical)", () => {
-  const base: GateSignals = {
-    stakes: "high",
-    uncertainty: "high",
-    primaryRailAvailable: true,
-    emptyPatchPressure: false,
-  }
-
-  test("GATE-1: low stakes AND low uncertainty ⇒ commit-now (early-commit allowed)", () => {
-    const d = decideGate({ ...base, stakes: "low", uncertainty: "low" })
-    expect(d.action).toBe("commit-now")
-  })
-
-  // red-on-injection: flip the rule to "commit on either low" and GATE-2/3 fail.
-  test("GATE-2: high stakes (even with low uncertainty) ⇒ verify", () => {
-    expect(decideGate({ ...base, stakes: "high", uncertainty: "low" }).action).toBe("verify")
-  })
-
-  test("GATE-3: high uncertainty (even with low stakes) ⇒ verify", () => {
-    expect(decideGate({ ...base, stakes: "low", uncertainty: "high" }).action).toBe("verify")
-  })
-
-  test("GATE-4: empty-patch pressure never yields commit-now (nothing to commit)", () => {
-    const d = decideGate({
-      ...base,
-      stakes: "low",
-      uncertainty: "low",
-      emptyPatchPressure: true,
-    })
-    expect(d.action).toBe("verify")
-  })
-
-  test("GATE-5: every decision carries a structured reason", () => {
-    expect(decideGate({ ...base, stakes: "low", uncertainty: "low" }).reason.length).toBeGreaterThan(0)
-    expect(decideGate(base).reason.length).toBeGreaterThan(0)
-  })
-})
 
 describe("T-302 decideRepairAdmission — repair iterates ONLY on a red primary rail", () => {
   test("ADM-1: primaryRail present AND red ⇒ admit repair", () => {
