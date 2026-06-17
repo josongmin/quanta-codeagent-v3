@@ -37,6 +37,7 @@ import { buildPatchHygiene } from "@/runner/batch/eval/patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
+import { decideEscalation } from "@/agent/repair-escalation"
 import { buildVerificationPlan } from "@/agent/verification-plan"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
@@ -254,6 +255,9 @@ interface Phase {
   firstEditFile?: string
   editCount?: number
   turnsToFirstEdit?: number
+  /** T-601 — did a repair round clear the (primary-rail) validator? Repair path
+   *  only; undefined on single-pass. Derives `primaryRailRedAfterRepair`. */
+  validated?: boolean
 }
 
 // Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
@@ -351,6 +355,7 @@ const runRepairPhase = async (
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
+  let repairValidated = false
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -381,9 +386,10 @@ const runRepairPhase = async (
       })
       turns = out.turns
       finalPatch = out.patch
+      repairValidated = out.validated
     },
   )
-  return { patch: patch !== "" ? patch : finalPatch, turns }
+  return { patch: patch !== "" ? patch : finalPatch, turns, validated: repairValidated }
 }
 
 const okResult = (
@@ -663,7 +669,7 @@ const runInstanceOnce = async (
       // owner-resolve threaded ⇒ packet `partial` (honest); owner_recall still
       // measurable offline from the stage-1 ranking vs the gold owner.
       if (
-        (posture.faultEvidence || posture.ownerAdmission) &&
+        (posture.faultEvidence || posture.repairEscalation) &&
         instance.swebench !== undefined &&
         localizeCandidates.length > 0
       ) {
@@ -672,8 +678,22 @@ const runInstanceOnce = async (
           score: localizeCandidates.length - i,
         }))
         const packet = buildFaultEvidencePacket({ issueText: instance.problemStatement, stage1Files })
-        if (posture.faultEvidence) extra.faultEvidence = packet
-        if (posture.ownerAdmission) extra.ownerAdmission = decideOwnerAdmission({ packet })
+        // owner-admission rides the fault-evidence knob (pure read of the packet).
+        if (posture.faultEvidence) {
+          extra.faultEvidence = packet
+          extra.ownerAdmission = decideOwnerAdmission({ packet })
+        }
+        // T-601 escalation (telemetry only — does NOT activate branch-search).
+        if (posture.repairEscalation) {
+          extra.repairEscalation = decideEscalation({
+            candidates: packet.candidates.map((c) => ({
+              file: c.file,
+              score: c.score,
+              sources: c.sources,
+            })),
+            primaryRailRedAfterRepair: primaryRailCmd !== undefined && phase.validated === false,
+          })
+        }
       }
     }
     return okResult(instance, phase, v, extra)

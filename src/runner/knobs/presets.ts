@@ -82,6 +82,30 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "off",
   },
+  // jun-17 proof-driven closure bundle: agentless-v1 + ALL six closure knobs ON.
+  // This is the EXPERIMENTAL A/B ARM (not a claimed winner) — it turns on the
+  // typed-artifact rails (fault-evidence/verification-plan/primary-rail/
+  // patch-hygiene/no-patch-breaker/repair-escalation) so a `--preset agentless-v2`
+  // vs `agentless-v1` run measures the bundle's effect. primary-rail is the only
+  // BEHAVIORAL knob (gates the repair validator on a red-on-base repro); the rest
+  // are observe-only telemetry feeding closure-diagnostics. FROZEN once measured.
+  "agentless-v2": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+  },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.
   "everything-v1": {

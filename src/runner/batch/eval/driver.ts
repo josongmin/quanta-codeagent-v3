@@ -95,6 +95,7 @@ import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
+import { decideEscalation } from "@/agent/repair-escalation"
 import { buildVerificationPlan } from "@/agent/verification-plan"
 import { buildPatchHygiene } from "./patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
@@ -1063,6 +1064,10 @@ interface Phase {
   firstEditFile?: string
   editCount?: number
   turnsToFirstEdit?: number
+  /** T-601 — did a repair round clear the (primary-rail) validator? Only set on
+   *  the repair path; undefined on single-pass. Used to derive
+   *  `primaryRailRedAfterRepair` for the escalation decision (telemetry). */
+  validated?: boolean
 }
 
 /**
@@ -1238,6 +1243,7 @@ const runRepairPhase = async (
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
+  let repairValidated = false
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -1268,13 +1274,14 @@ const runRepairPhase = async (
       })
       turns = out.turns
       finalPatch = out.patch
+      repairValidated = out.validated
     },
   )
   // `patch` (from withGitSnapshot's final diff) is the canonical capture; if
   // available we prefer it (it reflects the worktree at end of all rounds).
   // `finalPatch` is the orchestrator's view of the last round's diff — they
   // agree by construction (continue-from-patched-tree, single sandbox).
-  return { patch: patch !== "" ? patch : finalPatch, turns }
+  return { patch: patch !== "" ? patch : finalPatch, turns, validated: repairValidated }
 }
 
 const okResult = (
@@ -1554,7 +1561,7 @@ export const runInstanceOnce = async (
       // owner-resolve threaded ⇒ packet is `partial`, which is honest; owner_recall
       // is still measurable from the stage-1 ranking offline vs the gold owner).
       if (
-        (benchOptIns().faultEvidence || benchOptIns().ownerAdmission) &&
+        (benchOptIns().faultEvidence || benchOptIns().repairEscalation) &&
         instance.swebench !== undefined &&
         localizeCandidates.length > 0
       ) {
@@ -1563,8 +1570,25 @@ export const runInstanceOnce = async (
           score: localizeCandidates.length - i,
         }))
         const packet = buildFaultEvidencePacket({ issueText: instance.problemStatement, stage1Files })
-        if (benchOptIns().faultEvidence) extra.faultEvidence = packet
-        if (benchOptIns().ownerAdmission) extra.ownerAdmission = decideOwnerAdmission({ packet })
+        // owner-admission rides the fault-evidence knob (it's a pure read of the
+        // packet — T-201/T-202 share the one artifact chain; no separate knob).
+        if (benchOptIns().faultEvidence) {
+          extra.faultEvidence = packet
+          extra.ownerAdmission = decideOwnerAdmission({ packet })
+        }
+        // T-601 escalation (telemetry). primaryRailRedAfterRepair: the repair loop
+        // ran a primary rail (primaryRailCmd set) and it never cleared (validated
+        // false). Single-pass / no-rail ⇒ false (no escalation signal).
+        if (benchOptIns().repairEscalation) {
+          extra.repairEscalation = decideEscalation({
+            candidates: packet.candidates.map((c) => ({
+              file: c.file,
+              score: c.score,
+              sources: c.sources,
+            })),
+            primaryRailRedAfterRepair: primaryRailCmd !== undefined && phase.validated === false,
+          })
+        }
       }
     }
     return okResult(instance, phase, v, extra)

@@ -164,6 +164,13 @@ export interface InstanceResult {
    * observing. Feeds sibling_coverage_expected_rate / miss_rate. Telemetry-only.
    */
   ownerAdmission?: import("@/agent/owner-admission").OwnerAdmission
+  /**
+   * T-601 — RepairEscalationDecision (escalate to multi-owner / branch-search,
+   * with a structured reason). Emitted only when the `repair-escalation` knob is
+   * on AND observing. Telemetry-only — does NOT activate branch-search/subagent
+   * (that behavioral wiring is a later measure-first step). ABSENT ⇒ byte-identical.
+   */
+  repairEscalation?: import("@/agent/repair-escalation").EscalationDecision
 }
 
 /** Structured per-attempt outcome shape echoed onto the report. Mirrors the
