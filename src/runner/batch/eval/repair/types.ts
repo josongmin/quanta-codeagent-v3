@@ -132,6 +132,14 @@ export interface RunRepairRoundsArgs {
   sandbox: string
   exec: ExecFn
   timeoutMs: number
+  /** T-302 primary-rail enforcement (default-OFF). When set (driver passes the
+   *  VerificationPlan's `primaryRail.cmd`), the per-round validator gate runs
+   *  THIS command instead of the agent's own `lastVerifyCmd`/repro — so a
+   *  NON-primary green can no longer clear the loop (the false-green killer) and
+   *  repair iterates only while the primary rail is red. ABSENT ⇒ byte-identical
+   *  (agent-command gate). The rail is selected from PUBLIC evidence only
+   *  (repro/owner-test/smoke) upstream, so the no-leak invariant is preserved. */
+  primaryRailCmd?: string
 }
 
 /** Orchestrator result. The cumulative `patch` is what the bench runner then

@@ -69,15 +69,22 @@ export const runRepairRounds = async (
 }
 
 const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<ValidatorResult> => {
+  // T-302: when a primary rail is set, IT is the gate — the agent's own
+  // `lastVerifyCmd`/repro can no longer clear the round (a non-primary green is
+  // not proof). The validator clears only when the primary rail passes; an
+  // unset rail (default) falls back to the agent-command gate, byte-identical.
   // exactOptionalPropertyTypes: conditionally include optional fields only when
   // present — never set them to explicit `undefined`.
-  const validateArgs = {
-    sandbox: args.sandbox,
-    exec: args.exec,
-    timeoutMs: args.timeoutMs,
-    ...(r.lastVerifyCmd !== undefined ? { cmd: r.lastVerifyCmd } : {}),
-    ...(r.reproPath !== undefined ? { reproPath: r.reproPath } : {}),
-  }
+  const validateArgs =
+    args.primaryRailCmd !== undefined
+      ? { sandbox: args.sandbox, exec: args.exec, timeoutMs: args.timeoutMs, cmd: args.primaryRailCmd }
+      : {
+          sandbox: args.sandbox,
+          exec: args.exec,
+          timeoutMs: args.timeoutMs,
+          ...(r.lastVerifyCmd !== undefined ? { cmd: r.lastVerifyCmd } : {}),
+          ...(r.reproPath !== undefined ? { reproPath: r.reproPath } : {}),
+        }
   return args.validate(validateArgs)
 }
 
