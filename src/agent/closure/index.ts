@@ -9,5 +9,6 @@
  * returns verdicts.
  */
 
-export type { ExecObservation, PredicateResult, SuccessPredicate } from "./types"
+export type { ExecObservation, PredicateResult, PrimaryRailStep, SuccessPredicate } from "./types"
 export { evaluateSuccessPredicate } from "./evaluate-success-predicate"
+export { buildPrimaryRailStep } from "./primary-rail-step"

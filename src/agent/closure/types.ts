@@ -39,3 +39,16 @@ export interface PredicateResult {
   readonly matched: boolean
   readonly mismatchReason?: string
 }
+
+/**
+ * The selected primary rail as a TYPED step (T-2): the command to run, how its
+ * proof is read, and the typed proof obligation. Replaces the string-only
+ * `primaryRailCmd` so the validator can evaluate the {@link SuccessPredicate}
+ * (T-1) instead of trusting an exit code. `cmd` construction (e.g. `python
+ * "<repro>"`) is the adapter's job; the SHAPE is core.
+ */
+export interface PrimaryRailStep {
+  readonly cmd: string
+  readonly authority: "execution" | "structure" | "exact-diff"
+  readonly successPredicate: SuccessPredicate
+}

@@ -17,7 +17,7 @@
  * DIRECTIVE gating).
  */
 
-import type { ExecObservation, PredicateResult, SuccessPredicate } from "@/agent/closure"
+import type { ExecObservation, PredicateResult, PrimaryRailStep, SuccessPredicate } from "@/agent/closure"
 
 /** Caller-facing config (mirror the optional-feature pattern). */
 export interface RepairConfig {
@@ -147,14 +147,14 @@ export interface RunRepairRoundsArgs {
   sandbox: string
   exec: ExecFn
   timeoutMs: number
-  /** T-302 primary-rail enforcement (default-OFF). When set (driver passes the
-   *  VerificationPlan's `primaryRail.cmd`), the per-round validator gate runs
-   *  THIS command instead of the agent's own `lastVerifyCmd`/repro — so a
-   *  NON-primary green can no longer clear the loop (the false-green killer) and
-   *  repair iterates only while the primary rail is red. ABSENT ⇒ byte-identical
-   *  (agent-command gate). The rail is selected from PUBLIC evidence only
-   *  (repro/owner-test/smoke) upstream, so the no-leak invariant is preserved. */
-  primaryRailCmd?: string
+  /** T-302/T-2 primary-rail enforcement (default-OFF). When set (driver passes the
+   *  VerificationPlan's selected primary rail as a TYPED step), the per-round
+   *  validator gate runs `step.cmd` instead of the agent's own `lastVerifyCmd`/
+   *  repro — so a NON-primary green can no longer clear the loop — AND evaluates
+   *  `step.successPredicate` over the observed output (T-1, observe-only in v1).
+   *  ABSENT ⇒ byte-identical (agent-command gate). The rail is selected from
+   *  PUBLIC evidence only (repro/owner-test/smoke) upstream (no-leak preserved). */
+  primaryRailStep?: PrimaryRailStep
 }
 
 /** Orchestrator result. The cumulative `patch` is what the bench runner then

@@ -95,6 +95,7 @@ import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
+import { buildPrimaryRailStep, type PrimaryRailStep } from "@/agent/closure"
 import { decideEscalation } from "@/agent/repair-escalation"
 import {
   buildVerificationPlan,
@@ -1251,7 +1252,7 @@ const runRepairPhase = async (
   repair: NonNullable<RunInstanceDeps["repair"]>,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
-  primaryRailCmd: string | undefined,
+  primaryRailStep: PrimaryRailStep | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -1282,7 +1283,7 @@ const runRepairPhase = async (
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
-        ...(primaryRailCmd !== undefined ? { primaryRailCmd } : {}),
+        ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
       })
       turns = out.turns
       finalPatch = out.patch
@@ -1498,8 +1499,8 @@ export const runInstanceOnce = async (
             ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
           })
         : undefined
-    const primaryRailCmd = benchOptIns().primaryRail
-      ? (verificationPlan?.primaryRail?.cmd ?? undefined)
+    const primaryRailStep = benchOptIns().primaryRail
+      ? buildPrimaryRailStep(verificationPlan?.primaryRail)
       : undefined
 
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
@@ -1527,7 +1528,7 @@ export const runInstanceOnce = async (
             deps.repair,
             precomputedHint,
             reproHint,
-            primaryRailCmd,
+            primaryRailStep,
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
@@ -1603,7 +1604,7 @@ export const runInstanceOnce = async (
               score: c.score,
               sources: c.sources,
             })),
-            primaryRailRedAfterRepair: primaryRailCmd !== undefined && phase.validated === false,
+            primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
           })
         }
       }

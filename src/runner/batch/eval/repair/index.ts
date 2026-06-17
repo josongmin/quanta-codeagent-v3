@@ -76,8 +76,16 @@ const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<Valid
   // exactOptionalPropertyTypes: conditionally include optional fields only when
   // present — never set them to explicit `undefined`.
   const validateArgs =
-    args.primaryRailCmd !== undefined
-      ? { sandbox: args.sandbox, exec: args.exec, timeoutMs: args.timeoutMs, cmd: args.primaryRailCmd }
+    args.primaryRailStep !== undefined
+      ? {
+          sandbox: args.sandbox,
+          exec: args.exec,
+          timeoutMs: args.timeoutMs,
+          cmd: args.primaryRailStep.cmd,
+          // T-1 wired: evaluate the rail's typed predicate over the observed
+          // output (observe-only in v1 — validator records, does NOT flip ok).
+          successPredicate: args.primaryRailStep.successPredicate,
+        }
       : {
           sandbox: args.sandbox,
           exec: args.exec,

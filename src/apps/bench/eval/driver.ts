@@ -38,6 +38,7 @@ import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { decideEscalation } from "@/agent/repair-escalation"
+import { buildPrimaryRailStep, type PrimaryRailStep } from "@/agent/closure"
 import { buildVerificationPlan, extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
@@ -351,7 +352,7 @@ const runRepairPhase = async (
   repair: NonNullable<RunInstanceDeps["repair"]>,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
-  primaryRailCmd: string | undefined,
+  primaryRailStep: PrimaryRailStep | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -382,7 +383,7 @@ const runRepairPhase = async (
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
-        ...(primaryRailCmd !== undefined ? { primaryRailCmd } : {}),
+        ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
       })
       turns = out.turns
       finalPatch = out.patch
@@ -588,8 +589,8 @@ const runInstanceOnce = async (
             ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
           })
         : undefined
-    const primaryRailCmd = posture.primaryRail
-      ? (verificationPlan?.primaryRail?.cmd ?? undefined)
+    const primaryRailStep = posture.primaryRail
+      ? buildPrimaryRailStep(verificationPlan?.primaryRail)
       : undefined
 
     // Setup is done — arm the solve deadline now so the agent gets the full
@@ -617,7 +618,7 @@ const runInstanceOnce = async (
             repair,
             precomputedHint,
             reproHint,
-            primaryRailCmd,
+            primaryRailStep,
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
 
@@ -693,7 +694,7 @@ const runInstanceOnce = async (
               score: c.score,
               sources: c.sources,
             })),
-            primaryRailRedAfterRepair: primaryRailCmd !== undefined && phase.validated === false,
+            primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
           })
         }
       }
