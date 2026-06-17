@@ -31,17 +31,23 @@ export interface IssueDeclaredExpected {
 const EXPECT_RE =
   /\b(?:should|must|expected to|ought to)\s+(?:print|output|return|give|produce|render|show|be|display|yield)\b/i
 
-/** "should ... `LITERAL`" / "should ... 'LITERAL'" — value is the delimited span
- *  appearing shortly AFTER an expect verb. Backticks or single/double quotes. */
+/** "should <verb> `LITERAL`" — the literal must DIRECTLY follow the verb (only
+ *  whitespace / `:` / `=` between). This deliberately EXCLUDES preposition-object
+ *  literals like "should be returned by `solveset`" (here `solveset` is a
+ *  referenced symbol, NOT the expected value) — the false positive that real
+ *  issue text (sympy-18211) produced with a looser gap. Backticks or quotes. */
 const EXPECT_LITERAL_RE =
-  /\b(?:should|must|expected to|ought to)\s+(?:print|output|return|give|produce|render|show|be|display|yield)\b[^\n`'"]{0,40}?[`'"]([^`'"\n]{1,200})[`'"]/i
+  /\b(?:should|must|expected to|ought to)\s+(?:print|output|returns?|gives?|produces?|renders?|shows?|be|equals?|displays?|yields?)\s*[:=]?\s*[`'"]([^`'"\n]{1,200})[`'"]/i
 
 /** Explicit "Expected[ output]: `LITERAL`" / "Expected[ output]: LITERAL" label. */
 const EXPECTED_LABEL_RE = /\bexpected(?:\s+(?:output|result|value))?\s*[::]\s*[`'"]?([^`'"\n]{1,200}?)[`'"]?\s*(?:\n|$)/i
 
-/** Explicit empty-output declaration. */
+/** Explicit empty-output declaration. Two shapes:
+ *  (1) "should <verb> nothing / no <X> / empty"  (direct empty object)
+ *  (2) "should stop <subj> from <verbing>"       (e.g. pylint-4970:
+ *      "should stop pylint from checking duplicate code" = emit nothing). */
 const EMPTY_DECL_RE =
-  /\b(?:should|must|expected to|ought to)\s+(?:print|output|report|return|emit|produce|give|show)\s+(?:nothing|no\s+(?:output|duplicates?|results?|errors?|warnings?|messages?)|empty|an?\s+empty)\b/i
+  /\b(?:should|must|expected to|ought to)\s+(?:(?:print|output|report|return|emit|produce|give|show)\s+(?:nothing|no\s+(?:output|duplicates?|results?|errors?|warnings?|messages?)|empty|an?\s+empty)|stop\s+\w+\s+from\s+(?:checking|reporting|flagging|emitting|printing|warning|raising))\b/i
 
 /** LaTeX markers in a captured value. */
 const LATEX_RE = /(?:\\(?:left|right|frac|begin|mathrm|operatorname|cdot|times|sqrt|sum|int)\b|\\[a-zA-Z]+\{|[\^_]\{)/
