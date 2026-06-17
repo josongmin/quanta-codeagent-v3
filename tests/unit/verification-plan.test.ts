@@ -14,7 +14,7 @@ describe("buildVerificationPlan", () => {
     })
     expect(p.primaryRail?.kind).toBe("repro")
     expect(p.primaryRail?.cmd).toBe("python reproduce_issue.py")
-    expect(p.required[0]).toEqual(p.primaryRail)
+    expect(p.required[0]).toBe(p.primaryRail ?? undefined)
     expect(p.baseValidatedRed).toBe(true)
   })
 
@@ -60,7 +60,7 @@ describe("buildVerificationPlan", () => {
     expect(buildVerificationPlan(i)).toEqual(buildVerificationPlan(i))
   })
 
-  const VALID_PREDICATE_KINDS = new Set([
+  const VALID_PREDICATE_KINDS = new Set<string>([
     "stdout_exact_empty",
     "stdout_contains",
     "stderr_absent",
@@ -70,6 +70,7 @@ describe("buildVerificationPlan", () => {
     "test_exit_zero",
     "selected_test_passes",
   ])
+  const VALID_AUTHORITIES: readonly string[] = ["execution", "structure", "exact-diff"]
 
   test("every required step carries a typed successPredicate + authority", () => {
     const p = buildVerificationPlan({
@@ -80,7 +81,7 @@ describe("buildVerificationPlan", () => {
     for (const step of p.required) {
       expect(step.successPredicate).toBeDefined()
       expect(VALID_PREDICATE_KINDS.has(step.successPredicate?.type ?? "")).toBe(true)
-      expect(["execution", "structure", "exact-diff"]).toContain(step.authority)
+      expect(VALID_AUTHORITIES).toContain(step.authority ?? "")
     }
   })
 
