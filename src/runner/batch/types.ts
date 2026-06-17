@@ -133,6 +133,15 @@ export interface InstanceResult {
    * long the agent explored before committing to a file). Observe-only.
    */
   turnsToFirstEdit?: number
+  /**
+   * T-401 — deterministic PatchHygieneReport over the final cumulative diff
+   * (stray added files, owner-outside, file count). Computed only when the
+   * `patch-hygiene` knob is on AND observing; ABSENT ⇒ byte-identical report.
+   * Consumed offline by the closure-diagnostics sidecar (stray_file_rate /
+   * out_of_scope_file_rate). Telemetry-first: emitting the report does NOT gate
+   * the run — the deny path is a later measure-first step.
+   */
+  patchHygiene?: import("./eval/patch-hygiene").PatchHygieneReport
 }
 
 /** Structured per-attempt outcome shape echoed onto the report. Mirrors the

@@ -93,6 +93,7 @@ import {
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { buildPatchHygiene } from "./patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
@@ -1488,6 +1489,17 @@ export const runInstanceOnce = async (
       if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
       if (phase.editCount !== undefined) extra.editCount = phase.editCount
       if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
+      // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
+      // + observe-only ⇒ byte-identical report.json when the knob is OFF. The first
+      // mutating edit (if any) is the only owner signal we have here, so it seeds
+      // the owner set; absent ⇒ owner-outside telemetry suppressed (empty), never
+      // flagging every file. Telemetry-first: we EMIT the report, we do NOT deny.
+      if (benchOptIns().patchHygiene && instance.swebench !== undefined) {
+        const ownerHint = relFromSandbox(sandbox, phase.firstEditFile)
+        extra.patchHygiene = buildPatchHygiene(phase.patch, {
+          ...(ownerHint !== undefined ? { ownerFiles: [ownerHint] } : {}),
+        })
+      }
     }
     return okResult(instance, phase, v, extra)
   } catch (e) {
