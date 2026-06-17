@@ -39,4 +39,11 @@ describe("buildFacts — closure measurement signals", () => {
     expect(facts[0]?.primaryRailPresent).toBeNull()
     expect(facts[0]?.requiredVerificationCovered).toBeNull()
   })
+
+  test("primaryFalseGreen flows through (true / false / absent⇒null)", () => {
+    // red-on-injection: drop the `primaryFalseGreen` mapping in buildFacts ⇒ these fail.
+    expect(buildFacts([res({ primaryFalseGreen: true })])[0]?.primaryFalseGreen).toBe(true)
+    expect(buildFacts([res({ primaryFalseGreen: false })])[0]?.primaryFalseGreen).toBe(false)
+    expect(buildFacts([res({})])[0]?.primaryFalseGreen).toBeNull()
+  })
 })

@@ -1579,9 +1579,12 @@ export const runInstanceOnce = async (
         extra.requiredVerificationCovered =
           verificationPlan !== undefined &&
           verificationPlan.required.some((s) => s.successPredicate !== undefined)
-        // primaryFalseGreen only meaningful on the repair path (rail was gated);
-        // single-pass ⇒ phase.primaryFalseGreen undefined ⇒ omitted ⇒ measurement null.
-        if (phase.primaryFalseGreen !== undefined) extra.primaryFalseGreen = phase.primaryFalseGreen
+        // primaryFalseGreen is only meaningful when a primary RAIL was actually
+        // gated (the predicate runs on the rail). Repair-without-rail (e.g.
+        // verification-plan knob on but no rail selected) ⇒ omit ⇒ measurement null
+        // (NOT false — emitting false would spuriously enlarge the rate denominator).
+        if (primaryRailStep !== undefined && phase.primaryFalseGreen !== undefined)
+          extra.primaryFalseGreen = phase.primaryFalseGreen
       }
       // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
       // + observe-only ⇒ byte-identical report.json when the knob is OFF. The first

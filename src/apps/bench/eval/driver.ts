@@ -674,7 +674,10 @@ const runInstanceOnce = async (
         extra.requiredVerificationCovered =
           verificationPlan !== undefined &&
           verificationPlan.required.some((s) => s.successPredicate !== undefined)
-        if (phase.primaryFalseGreen !== undefined) extra.primaryFalseGreen = phase.primaryFalseGreen
+        // Only meaningful when a primary RAIL was gated; repair-without-rail ⇒ omit
+        // ⇒ null (emitting false would skew the rate denominator). Mirrors runner.
+        if (primaryRailStep !== undefined && phase.primaryFalseGreen !== undefined)
+          extra.primaryFalseGreen = phase.primaryFalseGreen
       }
       // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
       // byte-identical report.json when OFF). Telemetry-first: emit, don't deny.
