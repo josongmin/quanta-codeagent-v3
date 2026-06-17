@@ -80,7 +80,18 @@ export const decideOwnerAdmission = (input: OwnerAdmissionInput): OwnerAdmission
     }
   }
 
-  const [top, second] = candidates
+  const top = candidates[0]
+  if (!top) {
+    // unreachable given the length check above; narrows the noUncheckedIndexedAccess type.
+    return {
+      admit: false,
+      owner: null,
+      coverageExpectation: "cross-owner",
+      siblingCoverageExpected: true,
+      reason: "no fault candidates — evidence-first, no owner admitted",
+    }
+  }
+  const second = candidates[1]
   const lead = second ? top.score - second.score : Number.POSITIVE_INFINITY
 
   // Multiple plausible owners with no clear leader ⇒ need more evidence. Do not
