@@ -535,20 +535,79 @@ export const createFullRemoteBackend = (
         `[full-remote] running patch-gen + grading on box (minutes). Watch live:\n` +
           `    ssh -i ${keyPath} ${host} 'tail -f ~/run.log'`,
       )
+      // DETACHED run + reconnect-tolerant poll (RCA 2026-06-17): previously this
+      // was a SINGLE blocking ssh session held open for the whole multi-minute
+      // run. A local network blip (wifi/NAT idle drop) over those minutes makes
+      // ssh exit 255 AND SIGHUPs the remote pipeline — the run is lost with an
+      // EMPTY run.log even though the box is perfectly healthy (verified live: box
+      // up, disk 1%, no OOM; only the laptop→box TCP session dropped). Fix: launch
+      // the bench under `setsid` fully detached (own session, stdin</dev/null, no
+      // controlling terminal ⇒ SIGHUP-immune), record the exit code to a sentinel
+      // file, and POLL with fresh short-lived ssh connections. Any single poll that
+      // fails is retried on the next tick, so a transient blip costs one interval,
+      // not the whole run. Token is a FILE on the box (chmod 600) so detaching the
+      // session does not lose auth.
       // `set -o pipefail` so a failed bench run propagates through the `tee`
       // (otherwise the pipeline's exit code is tee's, always 0 — masking failures).
-      const remoteRun = await sshTo(
-        host,
+      const benchCmd =
         `set -o pipefail; cd ~/quanta && QUANTA_BENCH_PRESET=${shq(preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
-          `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
-          // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
-          // arch-aware default is "none" (slow local conda build).
-          `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
-          `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
-          `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
-      )
+        `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
+        // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
+        // arch-aware default is "none" (slow local conda build).
+        `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
+        `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
+        `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json`
+      // Launch detached: setsid + </dev/null + redirected stdio ⇒ survives the
+      // launching ssh disconnecting. `~/run.exit` appears only when the pipeline
+      // is fully done (sentinel); its contents are the pipeline exit code.
+      const launchCmd =
+        `rm -f ~/run.exit; cd ~/quanta && setsid bash -c ${shq(
+          `{ ${benchCmd} ; } > ~/run.log 2>&1; echo $? > ~/run.exit`,
+        )} </dev/null >/dev/null 2>&1 & echo LAUNCHED`
+      const launched = await sshTo(host, launchCmd)
+      if (launched.code !== 0 || !launched.stdout.includes("LAUNCHED")) {
+        throw new Error(
+          `[full-remote] failed to launch detached bench (code ${launched.code}): ${launched.stderr}`,
+        )
+      }
 
-      log("[full-remote] run finished; fetching report…")
+      // Poll until the sentinel appears. Reconnect-tolerant: a failed poll ssh is
+      // not fatal — we just wait and retry. Bounded by `pollDeadlineMs` so a truly
+      // hung box can't poll forever (the outer process `timeout` is the backstop).
+      const pollIntervalMs = 20_000
+      const pollDeadlineMs = 40 * 60_000 // 40 min — generous for a 3-instance light wave
+      const pollStart = Date.now()
+      let runExit = "unknown"
+      let consecutivePollFails = 0
+      for (;;) {
+        await sleep(pollIntervalMs)
+        const probe = await sshTo(
+          host,
+          `if [ -f ~/run.exit ]; then echo "DONE $(cat ~/run.exit)"; else echo RUNNING; fi`,
+        )
+        if (probe.code !== 0) {
+          consecutivePollFails++
+          // Transient blip — tolerate. Only give up if the box is unreachable for
+          // a long stretch (12 consecutive ~20s fails ≈ 4 min).
+          if (consecutivePollFails >= 12) {
+            log("[full-remote] ⚠️ box unreachable for ~4min during poll — giving up on this run")
+            break
+          }
+          continue
+        }
+        consecutivePollFails = 0
+        const done = probe.stdout.match(/DONE\s+(\S+)/)
+        if (done) {
+          runExit = done[1] ?? "?"
+          break
+        }
+        if (Date.now() - pollStart > pollDeadlineMs) {
+          log("[full-remote] ⚠️ poll deadline exceeded — fetching whatever report exists")
+          break
+        }
+      }
+
+      log(`[full-remote] run finished (exit ${runExit}); fetching report…`)
       const fetched = await sshTo(host, "cat ~/report.json 2>/dev/null")
       // The on-box `bench run` writes OUR report shape (perInstance[].passed) —
       // loadVerdicts handles BOTH that and the swebench-harness shape.
@@ -597,7 +656,7 @@ export const createFullRemoteBackend = (
         // No verdicts — pull the tail of the on-box run log so the failure is
         // visible BEFORE we terminate the box.
         const tail = await sshTo(host, "tail -40 ~/run.log 2>/dev/null")
-        log(`[full-remote] ⚠️ no verdicts in report (run exit ${remoteRun.code}). Box run.log tail:`)
+        log(`[full-remote] ⚠️ no verdicts in report (run exit ${runExit}). Box run.log tail:`)
         log(tail.stdout || "(run.log empty)")
       }
 

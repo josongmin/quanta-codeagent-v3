@@ -29,7 +29,7 @@ Before Wave 0, run one non-ticketed preflight to reconcile preset namespace and 
 
 | ID | Title | What closes | Pri | Size | Deps | Posture |
 |---|---|---|---|---|---|---|
-| T-101 | closure diagnostic rail + report sidecar | owner/proof metrics absent | P0 | M | — | offline |
+| T-101 ✅DONE | closure diagnostic rail + report sidecar | owner/proof metrics absent | P0 | M | — | offline |
 | T-201 | `FaultEvidencePacket` builder | no typed owner-context artifact | P1 | L | T-101 | OFF (`fault-evidence`) |
 | T-202 | owner admission + first-edit telemetry | file-localized but owner-unpinned edits | P1 | M | T-201 | rides W1 gate |
 | T-301 | `VerificationPlan` builder | no typed proof plan | P1 | L | T-101, T-202 | OFF (`verification-plan`) |
