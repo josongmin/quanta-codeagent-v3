@@ -46,13 +46,27 @@ describe("assembleClosureBundle — SSOT", () => {
   })
 
   test("owner is derived from the SAME evidence packet (internal consistency)", () => {
-    // The owner decision must reflect the assembled evidence — when the owner
-    // admits, its `owner` path is one of the evidence candidates.
-    const b = assembleClosureBundle(baseInput())
-    if (b.owner.admit && b.owner.owner !== null) {
-      const candidateFiles = b.evidence.candidates.map((c) => c.file)
-      expect(candidateFiles).toContain(b.owner.owner)
-    }
+    // Corroborate `a.py` (2 sources: stage1 + issueFiles, with a lead over b.py)
+    // so the owner ADMITS — otherwise the assertion below is vacuous.
+    const b = assembleClosureBundle(
+      baseInput({
+        evidence: {
+          issueText: "fix the printer in a.py",
+          stage1Files: [
+            { file: "a.py", score: 10 },
+            { file: "b.py", score: 1 },
+          ],
+          issueFiles: ["a.py"],
+        },
+      }),
+    )
+    // not vacuous: the owner must actually admit a single corroborated owner.
+    expect(b.owner.admit).toBe(true)
+    expect(b.owner.owner).not.toBeNull()
+    // and that admitted owner MUST be one of the assembled evidence candidates
+    // (same packet) — red-on-injection if owner were derived from other evidence.
+    const candidateFiles = b.evidence.candidates.map((c) => c.file)
+    expect(candidateFiles).toContain(b.owner.owner)
   })
 
   test("no repro ⇒ plan rail falls back to owner-near test (not a synth repro)", () => {
