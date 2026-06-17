@@ -11,11 +11,36 @@ Build a typed `VerificationPlan` artifact with:
 - `optional` steps
 - `baseValidatedRed` for any synthesized repro promoted to a required rail
 
+Each `required` step in v1 must be a proof contract, not just a command:
+
+- `kind`
+- `authority` (`execution` | `structure` | `exact-diff`)
+- `target`
+- `successPredicate`
+- optional `failurePredicate`
+
+Initial closed `successPredicate` shapes:
+
+- `stdout_exact_empty`
+- `stdout_contains`
+- `stderr_absent`
+- `symbolic_repr_equals`
+- `ast_or_dom_shape`
+- `latex_or_string_exact`
+- `test_exit_zero`
+- `selected_test_passes`
+
 Selection authority is public evidence only:
 
 - selected repro script when present
 - owner-near test
 - touched-module smoke
+- **issue-declared expected output (public)** — when the problem statement exposes a
+  concrete expected/observed output, encode it as the `successPredicate` of a required
+  step (e.g. `latex_or_string_exact`, `symbolic_repr_equals`, `stdout_exact_empty`).
+  This is the gap-B (spec-fidelity) rail: the issue text is public input, never oracle.
+  Pairs with T-601 `spec_literal_available_but_not_followed` — T-601 detects the signal,
+  T-301 turns it into the proof contract.
 
 No hidden labels, no gold patch hints, and no same-model self-critique counted as required verification.
 
@@ -39,6 +64,8 @@ No hidden labels, no gold patch hints, and no same-model self-critique counted a
 - [ ] Required verification sources are execution or structural evidence only; any self-critique remains advisory.
 - [ ] Planner output is serialisable onto bench reports / artifacts.
 - [ ] Planner OFF => byte-identical prompt path.
+- [ ] Every required step has a typed `successPredicate`; "run command and inspect loosely" is not a valid contract.
+- [ ] Planner can represent exact output/fallback/shape contracts when public evidence exposes them.
 
 ## Proof rail
 
