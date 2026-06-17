@@ -1559,6 +1559,15 @@ export const runInstanceOnce = async (
       if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
       if (phase.editCount !== undefined) extra.editCount = phase.editCount
       if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
+      // T-3 closure measurement signals (observe-only; gated on the same closure
+      // knobs as the plan telemetry ⇒ byte-identical report when off). Drive the
+      // `primary_rail_present_rate` / `required_verification_coverage` metrics.
+      if (benchOptIns().verificationPlan || benchOptIns().primaryRail) {
+        extra.primaryRailPresent = primaryRailStep !== undefined
+        extra.requiredVerificationCovered =
+          verificationPlan !== undefined &&
+          verificationPlan.required.some((s) => s.successPredicate !== undefined)
+      }
       // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
       // + observe-only ⇒ byte-identical report.json when the knob is OFF. The first
       // mutating edit (if any) is the only owner signal we have here, so it seeds

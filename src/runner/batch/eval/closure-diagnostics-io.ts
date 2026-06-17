@@ -67,6 +67,9 @@ export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFa
       editCount: r.editCount ?? null,
       turnsToFirstEdit: r.turnsToFirstEdit ?? null,
       reproReproduced: reproReproducedOf(r),
+      // T-3 closure measurement (absent ⇒ null ⇒ metric unavailable, not "false").
+      primaryRailPresent: r.primaryRailPresent ?? null,
+      requiredVerificationCovered: r.requiredVerificationCovered ?? null,
     }
   })
 

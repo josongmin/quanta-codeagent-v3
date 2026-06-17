@@ -655,6 +655,15 @@ const runInstanceOnce = async (
       if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
       if (phase.editCount !== undefined) extra.editCount = phase.editCount
       if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
+      // T-3 closure measurement signals (observe-only; gated on the closure knobs
+      // ⇒ byte-identical report when off). Drive primary_rail_present_rate /
+      // required_verification_coverage.
+      if (posture.verificationPlan || posture.primaryRail) {
+        extra.primaryRailPresent = primaryRailStep !== undefined
+        extra.requiredVerificationCovered =
+          verificationPlan !== undefined &&
+          verificationPlan.required.some((s) => s.successPredicate !== undefined)
+      }
       // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
       // byte-identical report.json when OFF). Telemetry-first: emit, don't deny.
       if (posture.patchHygiene && instance.swebench !== undefined) {

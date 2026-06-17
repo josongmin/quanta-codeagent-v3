@@ -134,6 +134,15 @@ export interface InstanceResult {
    */
   turnsToFirstEdit?: number
   /**
+   * T-3 closure measurement (observe-only, knob-gated ⇒ byte-identical when off).
+   * `primaryRailPresent`: a typed primary rail was selected for this run.
+   * `requiredVerificationCovered`: the VerificationPlan has ≥1 required step
+   * carrying a typed successPredicate. Consumed offline by closure-diagnostics for
+   * `primary_rail_present_rate` / `required_verification_coverage`.
+   */
+  primaryRailPresent?: boolean
+  requiredVerificationCovered?: boolean
+  /**
    * T-401 — deterministic PatchHygieneReport over the final cumulative diff
    * (stray added files, owner-outside, file count). Computed only when the
    * `patch-hygiene` knob is on AND observing; ABSENT ⇒ byte-identical report.
