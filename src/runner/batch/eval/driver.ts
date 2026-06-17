@@ -94,6 +94,7 @@ import {
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
+import { decideGate } from "@/agent/gate-decision"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { buildPrimaryRailStep, type PrimaryRailStep } from "@/agent/closure"
 import { decideEscalation } from "@/agent/repair-escalation"
@@ -1618,8 +1619,32 @@ export const runInstanceOnce = async (
         // owner-admission rides the fault-evidence knob (it's a pure read of the
         // packet — T-201/T-202 share the one artifact chain; no separate knob).
         if (benchOptIns().faultEvidence) {
+          const owner = decideOwnerAdmission({ packet })
           extra.faultEvidence = packet
-          extra.ownerAdmission = decideOwnerAdmission({ packet })
+          extra.ownerAdmission = owner
+          // T-4 gate telemetry (OBSERVE-ONLY): compute the gate decision
+          // (commit-fast vs verify-first) from PUBLIC signals and RECORD whether
+          // verify-first was entered (gate_enter_rate). The decision is NOT acted
+          // on in v1 — behavior wiring (commit-fast short-circuit / verify-first
+          // enforcement) is a measurement-gated follow-up. No hidden-oracle inputs.
+          const railFileCount = (phase.patch.match(/^diff --git /gm) ?? []).length
+          const gate = decideGate({
+            stakes: {
+              patchFileCount: railFileCount,
+              crossFile: railFileCount > 1,
+              destructive: false,
+            },
+            uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
+            signal: {
+              reproAvailable: verificationPlan?.baseValidatedRed === true,
+              lspAvailable: benchOptIns().lspNav === true,
+            },
+            commitFast: {
+              issueProvidesFix: issueDeclaredExpected !== undefined,
+              highConfidenceSingleOwner: owner.admit,
+            },
+          })
+          extra.gateEntered = gate.action === "verify"
         }
         // T-601 escalation (telemetry). primaryRailRedAfterRepair: the repair loop
         // ran a primary rail (primaryRailCmd set) and it never cleared (validated

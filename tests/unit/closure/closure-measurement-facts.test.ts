@@ -46,4 +46,10 @@ describe("buildFacts — closure measurement signals", () => {
     expect(buildFacts([res({ primaryFalseGreen: false })])[0]?.primaryFalseGreen).toBe(false)
     expect(buildFacts([res({})])[0]?.primaryFalseGreen).toBeNull()
   })
+
+  test("gateEntered flows through (true / false / absent⇒null)", () => {
+    expect(buildFacts([res({ gateEntered: true })])[0]?.gateEntered).toBe(true)
+    expect(buildFacts([res({ gateEntered: false })])[0]?.gateEntered).toBe(false)
+    expect(buildFacts([res({})])[0]?.gateEntered).toBeNull()
+  })
 })

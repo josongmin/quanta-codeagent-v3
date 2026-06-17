@@ -151,6 +151,12 @@ export interface InstanceResult {
    */
   primaryFalseGreen?: boolean
   /**
+   * T-4 OBSERVE-ONLY — the gate decision was verify-first (true) vs commit-now
+   * (false), computed from public signals. Drives `gate_enter_rate`. Recorded, not
+   * acted on in v1 (behavior wiring is measurement-gated). Absent ⇒ null.
+   */
+  gateEntered?: boolean
+  /**
    * T-401 — deterministic PatchHygieneReport over the final cumulative diff
    * (stray added files, owner-outside, file count). Computed only when the
    * `patch-hygiene` knob is on AND observing; ABSENT ⇒ byte-identical report.

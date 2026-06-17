@@ -36,6 +36,7 @@ import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
 import { buildPatchHygiene } from "@/runner/batch/eval/patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
+import { decideGate } from "@/agent/gate-decision"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { buildPrimaryRailStep, type PrimaryRailStep } from "@/agent/closure"
@@ -707,8 +708,25 @@ const runInstanceOnce = async (
         const packet = buildFaultEvidencePacket({ issueText: instance.problemStatement, stage1Files })
         // owner-admission rides the fault-evidence knob (pure read of the packet).
         if (posture.faultEvidence) {
+          const owner = decideOwnerAdmission({ packet })
           extra.faultEvidence = packet
-          extra.ownerAdmission = decideOwnerAdmission({ packet })
+          extra.ownerAdmission = owner
+          // T-4 gate telemetry (OBSERVE-ONLY): record verify-first vs commit-now
+          // (gate_enter_rate). Not acted on in v1. Mirrors the runner driver.
+          const railFileCount = (phase.patch.match(/^diff --git /gm) ?? []).length
+          const gate = decideGate({
+            stakes: { patchFileCount: railFileCount, crossFile: railFileCount > 1, destructive: false },
+            uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
+            signal: {
+              reproAvailable: verificationPlan?.baseValidatedRed === true,
+              lspAvailable: posture.lspNav === true,
+            },
+            commitFast: {
+              issueProvidesFix: issueDeclaredExpected !== undefined,
+              highConfidenceSingleOwner: owner.admit,
+            },
+          })
+          extra.gateEntered = gate.action === "verify"
         }
         // T-601 escalation (telemetry only — does NOT activate branch-search).
         if (posture.repairEscalation) {
