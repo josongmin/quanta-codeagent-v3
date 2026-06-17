@@ -39,7 +39,7 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
-import { LSP_GROUNDING_STEER } from "@/agent/localize-phase-guard"
+import { LSP_GROUNDING_STEER, SPEC_FIDELITY_STEER } from "@/agent/localize-phase-guard"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { errMessage, gateDisabled, gateOn } from "@/shared"
@@ -96,7 +96,10 @@ import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { decideEscalation } from "@/agent/repair-escalation"
-import { buildVerificationPlan } from "@/agent/verification-plan"
+import {
+  buildVerificationPlan,
+  extractIssueDeclaredExpected,
+} from "@/agent/verification-plan"
 import { buildPatchHygiene } from "./patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -965,8 +968,17 @@ export const buildConfig = (
     instance.swebench && opt.localizePhase?.lspGroundingSteer === true
       ? `\n-${LSP_GROUNDING_STEER}`
       : ""
+  // gap-B spec-fidelity steer: fires ONLY when the knob is on AND the issue
+  // declares a concrete expected output (fail-closed — co-change cases without a
+  // stated output are NOT nudged toward minimality). Off ⇒ "" ⇒ byte-identical.
+  const specSteerLine =
+    instance.swebench &&
+    opt.specFidelitySteer === true &&
+    extractIssueDeclaredExpected(instance.problemStatement) !== undefined
+      ? `\n-${SPEC_FIDELITY_STEER}`
+      : ""
   const baseText = instance.swebench
-    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}`
+    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${specSteerLine}`
     : base
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
@@ -1473,13 +1485,18 @@ export const runInstanceOnce = async (
     // enforcement). The rail's cmd then GATES the repair loop (see runValidate):
     // the agent's own verify can no longer clear a round — the false-green killer
     // fires. Knob OFF or no red repro ⇒ undefined ⇒ byte-identical agent gate.
+    // gap-B: extract the issue-declared expected output (public, fail-closed) so
+    // the verification plan can carry a typed exact-output predicate AND the
+    // spec-fidelity steer can fire only when a concrete spec exists.
+    const issueDeclaredExpected = extractIssueDeclaredExpected(instance.problemStatement)
     const verificationPlan =
       (benchOptIns().primaryRail || benchOptIns().verificationPlan) && instance.swebench !== undefined
-        ? buildVerificationPlan(
-            reproTest?.installed === true && reproTest.reproducedCount > 0
+        ? buildVerificationPlan({
+            ...(reproTest?.installed === true && reproTest.reproducedCount > 0
               ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
-              : {},
-          )
+              : {}),
+            ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
+          })
         : undefined
     const primaryRailCmd = benchOptIns().primaryRail
       ? (verificationPlan?.primaryRail?.cmd ?? undefined)

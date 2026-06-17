@@ -203,6 +203,9 @@ export interface BenchPosture {
   readonly noPatchBreaker: boolean
   /** T-601: multi-owner escalation decision (closed reason taxonomy). */
   readonly repairEscalation: boolean
+  /** gap-B: spec-fidelity steer (minimal-literal-fix; fires only when the issue
+   *  declares an exact expected output). */
+  readonly specFidelitySteer: boolean
 }
 
 const isTrue = (v: unknown): v is true => v === true
@@ -273,6 +276,7 @@ export const benchPostureFromState = (
   const patchHygiene = readKnobValue(state, "patch-hygiene", isTrue) === true
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
+  const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
   return {
     lspNav,
     subagent,
@@ -294,6 +298,7 @@ export const benchPostureFromState = (
     patchHygiene,
     noPatchBreaker,
     repairEscalation,
+    specFidelitySteer,
   }
 }
 

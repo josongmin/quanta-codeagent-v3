@@ -1186,6 +1186,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
       "Bench (T-601): explicit RepairEscalationDecision (continue-single-owner / collect-more-evidence / branch-search / multi-owner-plan) from typed artifacts, with a closed reason taxonomy; widen to multi-site only on explicit cross-owner evidence. Default-OFF ⇒ byte-identical.",
     readSite: "runner/batch/eval/knobs-bench.ts",
   },
+  {
+    envKey: "QUANTA_BENCH_SPEC_FIDELITY_STEER",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (gap-B): spec-fidelity steer — when the issue declares a concrete expected output (extractIssueDeclaredExpected), append a minimal-literal-fix steer; fail-closed (no spec ⇒ no steer, so co-change cases are not nudged). Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
 ]
 
 /** P1 cluster — memory pipeline (memory-factory.ts), @-mention resolver caps

@@ -112,6 +112,17 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 export const LSP_GROUNDING_STEER =
   " Before editing a symbol you found by text search, confirm its TRUE owner with `lsp_definition` (go-to-definition — a text match often points to the wrong class or an override, not the method that actually runs) and use `lsp_references` (find-references) to surface every call site that may have to change together for a multi-file fix."
 
+/** gap-B spec-fidelity steer. Appended to the bench prompt ONLY when the
+ *  `spec-fidelity-steer` knob is on AND the issue declares a concrete expected
+ *  output (`extractIssueDeclaredExpected` ≠ undefined). Two sentences, no
+ *  gold/oracle/hidden-label reference — it points the model back at the ISSUE's
+ *  own stated output and biases toward the minimal literal fix (the 6/7
+ *  strategy-failure class: pylint-4970 sentinel, sympy-18763 over-eng, …).
+ *  Fail-closed gating (no declared output ⇒ not appended) keeps co-change cases
+ *  (sympy-15976 / sympy-21930) un-nudged toward minimality. */
+export const SPEC_FIDELITY_STEER =
+  " When the issue states a concrete expected output, treat that exact stated output as the authoritative specification for your fix. Prefer the smallest literal change that makes the stated output correct over a broader or cleverer generalization."
+
 /** The forcing nudge injected when a mutating tool is attempted in Phase 1.
  *  Builder, not constant — the turn header `(turn N/M)` needs interpolation.
  *  `lspSteer` (default false) appends {@link LSP_GROUNDING_STEER}; false keeps

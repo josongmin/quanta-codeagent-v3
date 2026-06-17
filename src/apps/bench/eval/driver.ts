@@ -38,7 +38,7 @@ import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { decideEscalation } from "@/agent/repair-escalation"
-import { buildVerificationPlan } from "@/agent/verification-plan"
+import { buildVerificationPlan, extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
@@ -578,13 +578,15 @@ const runInstanceOnce = async (
     // because baseValidatedRed is true. Its cmd then GATES the repair loop (the
     // agent's own verify can no longer clear a round = false-green killer). Knob
     // OFF / no red repro ⇒ undefined ⇒ byte-identical agent-command gate.
+    const issueDeclaredExpected = extractIssueDeclaredExpected(instance.problemStatement)
     const verificationPlan =
       (posture.primaryRail || posture.verificationPlan) && instance.swebench !== undefined
-        ? buildVerificationPlan(
-            reproTest?.installed === true && reproTest.reproducedCount > 0
+        ? buildVerificationPlan({
+            ...(reproTest?.installed === true && reproTest.reproducedCount > 0
               ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
-              : {},
-          )
+              : {}),
+            ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
+          })
         : undefined
     const primaryRailCmd = posture.primaryRail
       ? (verificationPlan?.primaryRail?.cmd ?? undefined)
