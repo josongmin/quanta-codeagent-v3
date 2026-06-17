@@ -158,14 +158,12 @@ runs:
   auth: chatgpt-oauth
   grading: official swebench python harness, arm64 docker (remote/full.ts full-remote)
   scope: easy tier (T1+T2) light repos (pytest/sympy/requests/flask/pylint), parallel 2-box waves; yaml is a durable UNION (never regresses on /tmp rotation)
-  resolved_count: 31
+  resolved_count: 32
   resolved:
   - instance_id: pallets__flask-5014
     repo: flask
-    turns: 23
   - instance_id: psf__requests-1142
     repo: requests
-    turns: 60
   - instance_id: psf__requests-1766
     repo: requests
   - instance_id: psf__requests-1921
@@ -174,23 +172,23 @@ runs:
     repo: requests
   - instance_id: pylint-dev__pylint-6903
     repo: pylint
+  - instance_id: pylint-dev__pylint-7277
+    repo: pylint
+    turns: 28
   - instance_id: pytest-dev__pytest-5262
     repo: pytest
   - instance_id: pytest-dev__pytest-5809
     repo: pytest
   - instance_id: pytest-dev__pytest-6202
     repo: pytest
-    turns: 60
   - instance_id: pytest-dev__pytest-7205
     repo: pytest
-    turns: 23
   - instance_id: pytest-dev__pytest-7982
     repo: pytest
   - instance_id: pytest-dev__pytest-8399
     repo: pytest
   - instance_id: sympy__sympy-13372
     repo: sympy
-    turns: 31
   - instance_id: sympy__sympy-13480
     repo: sympy
   - instance_id: sympy__sympy-13647
@@ -223,7 +221,6 @@ runs:
     repo: sympy
   - instance_id: sympy__sympy-23534
     repo: sympy
-    turns: 59
   - instance_id: sympy__sympy-23824
     repo: sympy
   - instance_id: sympy__sympy-24539
