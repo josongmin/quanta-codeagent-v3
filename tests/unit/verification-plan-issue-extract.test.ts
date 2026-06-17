@@ -83,6 +83,14 @@ describe("extractIssueDeclaredExpected — precision-first", () => {
       )?.kind,
     ).toBe("stdout-empty")
   })
+
+  test("FP guard: 'Expected: <unquoted prose>' ⇒ undefined (label needs a delimited value)", () => {
+    // Adversarial audit lens-2: the optional-quote branch captured bare prose.
+    expect(extractIssueDeclaredExpected("Expected: the function works correctly")).toBeUndefined()
+    expect(extractIssueDeclaredExpected("Expected result: nothing changes in output")).toBeUndefined()
+    // …but a DELIMITED labelled value still extracts.
+    expect(extractIssueDeclaredExpected("Expected output: `[1, 2, 3]`")?.value).toBe("[1, 2, 3]")
+  })
 })
 
 describe("buildVerificationPlan — issueDeclaredExpected mapping", () => {
