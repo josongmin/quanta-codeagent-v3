@@ -42,6 +42,14 @@ const issueExpectedPredicate = (
         predicate: { type: "stdout_contains", substring: expected.value },
         authority: "execution",
       }
+    case "stdout-empty":
+      // The issue declares the correct behavior is to emit NOTHING. `value` is a
+      // human description (the empty-ness is the contract), so it is NOT used as a
+      // substring — the predicate is the exact-empty stdout shape.
+      return {
+        predicate: { type: "stdout_exact_empty" },
+        authority: "execution",
+      }
     default:
       // "latex" or unspecified ⇒ exact string equality.
       return {

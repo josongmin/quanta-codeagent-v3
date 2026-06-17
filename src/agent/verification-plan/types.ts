@@ -81,11 +81,15 @@ export interface VerificationPlanInput {
    * successPredicate of the primary/required step (gap-B spec-fidelity rail).
    * This is public INPUT — never a hidden oracle / gold label.
    *
-   * - `latex`    ⇒ `latex_or_string_exact`
-   * - `symbolic` ⇒ `symbolic_repr_equals`
-   * - `stdout`   ⇒ `stdout_contains`
+   * - `latex`        ⇒ `latex_or_string_exact`
+   * - `symbolic`     ⇒ `symbolic_repr_equals`
+   * - `stdout`       ⇒ `stdout_contains`
+   * - `stdout-empty` ⇒ `stdout_exact_empty` (the issue declares the correct
+   *                    behavior is to emit NOTHING — e.g. pylint
+   *                    `min-similarity-lines=0` should report no duplicates;
+   *                    `value` carries the human description, not a substring).
    */
-  issueDeclaredExpected?: { value: string; kind?: "latex" | "symbolic" | "stdout" }
+  issueDeclaredExpected?: { value: string; kind?: "latex" | "symbolic" | "stdout" | "stdout-empty" }
   /** Required-step cap (default 3). */
   maxRequired?: number
 }

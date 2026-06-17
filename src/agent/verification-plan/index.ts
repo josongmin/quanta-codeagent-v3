@@ -4,6 +4,11 @@
  * modules) without reaching into `./build` / `./types`.
  */
 export { buildVerificationPlan } from "./build"
+export {
+  extractIssueDeclaredExpected,
+  type IssueDeclaredExpected,
+  type IssueDeclaredKind,
+} from "./extract-issue-declared-expected"
 export type {
   SuccessPredicate,
   VerificationAuthority,
