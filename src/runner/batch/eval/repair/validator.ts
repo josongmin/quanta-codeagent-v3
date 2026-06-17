@@ -20,6 +20,8 @@
  * Bun and Node `string.slice`. The tail is taken from the END (the failure
  * tends to be at the tail of test runner output).
  */
+import { evaluateSuccessPredicate } from "@/agent/closure"
+import type { ExecObservation } from "@/agent/closure"
 import type { ValidateArgs, ValidatorResult } from "./types"
 
 const DEFAULT_TAIL = 2000
@@ -33,10 +35,22 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
     return { ok: false, failTail: "" }
   }
   const r = await args.exec(cmd, args.sandbox, args.timeoutMs)
-  if (r.code === 0) return { ok: true }
+
+  // T-1 OBSERVE-ONLY: record the observation + typed predicate verdict. This NEVER
+  // changes `ok` in v1 — the exit-code decision below is byte-identical to before.
+  // The predicate is fail-open by construction (evaluator returns evaluable:false
+  // for anything it can't confidently judge). Recorded for diagnostics / repair
+  // seed pressure; behavior-changing gating is a later ticket gated on measurement.
+  const observed: ExecObservation = { exitCode: r.code, stdout: r.stdout, stderr: r.stderr }
+  const predicate =
+    args.successPredicate !== undefined
+      ? evaluateSuccessPredicate(observed, args.successPredicate)
+      : undefined
+
+  if (r.code === 0) return { ok: true, observed, ...(predicate !== undefined ? { predicate } : {}) }
   const combined = `${r.stdout}\n${r.stderr}`
   const failTail = combined.length > tailBound ? combined.slice(-tailBound) : combined
-  return { ok: false, failTail }
+  return { ok: false, failTail, observed, ...(predicate !== undefined ? { predicate } : {}) }
 }
 
 const pickCmd = (args: ValidateArgs): string | undefined => {

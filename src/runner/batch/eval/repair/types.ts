@@ -17,6 +17,8 @@
  * DIRECTIVE gating).
  */
 
+import type { ExecObservation, PredicateResult, SuccessPredicate } from "@/agent/closure"
+
 /** Caller-facing config (mirror the optional-feature pattern). */
 export interface RepairConfig {
   /** Max additional repair rounds after the initial attempt. Default 2 ⇒ up
@@ -34,6 +36,13 @@ export interface ValidatorResult {
    *  the next-round seed message. Empty when ok or when no command was
    *  available to validate. */
   failTail?: string
+  /** T-1 OBSERVE-ONLY: what the validator command produced, and the typed
+   *  predicate verdict over it (when a `successPredicate` was supplied). These
+   *  are RECORDED for diagnostics / repair-seed pressure; in v1 they do NOT
+   *  change `ok` (the exit-code decision stands). `predicate.evaluable===false`
+   *  ⇒ fail-open: the predicate is advisory and never overrides `ok`. */
+  observed?: ExecObservation
+  predicate?: PredicateResult
 }
 
 /** One repair round's bookkeeping (observability/golden, not the score). */
@@ -92,6 +101,12 @@ export interface ValidateArgs {
   timeoutMs: number
   /** Bound on captured tail bytes from stdout+stderr (default 2000). */
   tailBytes?: number
+  /** T-1 OBSERVE-ONLY: typed proof obligation for the rail's cmd. When present,
+   *  the validator evaluates it over the observed output and RECORDS the verdict
+   *  in `ValidatorResult.predicate` — but does NOT change `ok` in v1 (fail-open;
+   *  the exit-code decision stands). Pure-core evaluation; the predicate type is
+   *  the closure engine's. */
+  successPredicate?: SuccessPredicate
 }
 
 /** Pure-function context builder: given the running diff + the latest
