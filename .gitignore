@@ -77,6 +77,9 @@ appshot-reach-*/
 # Claude Code subagent worktrees (per-agent isolation)
 .claude/worktrees/
 
+# Extracted Claude desktop corpus binaries (192MB+; not for git)
+scripts/_corpus/cc-base/
+
 # SWE-bench smoke live-run artifacts (baseline is picks.jsonl, not these)
 tests/smoke/swebench/predictions.jsonl
 tests/smoke/swebench/bench-report.json
