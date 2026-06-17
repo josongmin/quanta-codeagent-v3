@@ -45,17 +45,29 @@ evidence:
     - src/apps/cli/fork-checkpoint-cmd.ts
     - src/tool/shadow/fork.ts
     - src/agent/tier1/fork-session.ts
-  adrs: [221]
+    # ADR-0284 fork-session-wire — composition-root wire that RESOLVED the prior hold
+    - src/agent/fork-session-wire/index.ts
+    - src/agent/fork-session-wire/default-checkpoint-base.ts
+    - src/host/runtime/agent-arg-builder.ts # resolveForkSession (the actual gate)
+    - src/apps/cli/repl/slash-surface.ts # maybeForkSession → forkSession flag
+  adrs: [201, 226, 284]
   tests:
     unit:
       - tests/unit/agent/fork-session-port-hellgate.test.ts
       - tests/unit/tool/shadow-fork-hellgate.test.ts
     integration: []
     contract: []
+# Gate is NOT an env knob. `resolveForkSession(enable: boolean)` (agent-arg-builder)
+# wires the fork only when the per-surface `forkSession` flag is true — CLI REPL sets
+# it via `maybeForkSession(args)` (slash-surface.ts); headless hardcodes false.
+# DRIFT: the `QUANTA_FORK_SESSION=on` mentions in fork-session-wire/{index,
+# default-checkpoint-base}.ts are STALE DOC-COMMENTS — that env var is never read.
+# SCOPE: bench (full-remote/batch eval) does NOT populate the ConversationCheckpointStore,
+# so a bench trajectory is NOT forkable — this is a CLI-REPL-scoped feature.
 knobs: []
-deliberate_hold:
-  reason: 'Composition-root wiring (ctx.forkSession 슬롯) 는 후속 PR — 현재는 port + CLI + hellgate 만 land. REPL surface 가 `defaultForker({ base, shadowOdb, workspaceRoot })` 로 instantiate 하면 즉시 활성.'
-  promotion_path: 'REPL surface 에서 (1) `ConversationCheckpointStore` + `defaultSessionForker` 인스턴스, (2) `defaultShadowOdb` 인스턴스, (3) `defaultForker({...})` 조립, (4) `slashCtx.forkSession = { port, activeSessionId }` 슬롯 채움. 그 4-line wire 만 추가하면 L4.'
+resolved_hold:
+  was: 'Composition-root wiring (ctx.forkSession 슬롯) 는 후속 PR — port + CLI + hellgate 만 land 했었음.'
+  resolved_by: 'ADR-0284 fork-session-wire (defaultCheckpointBaseWire) + agent-arg-builder resolveForkSession + CLI slash-surface maybeForkSession. CLI REPL 에서 `forkSession` flag 로 활성; `/fork-checkpoint` 슬래시가 라우팅.'
 notes: |
   - 8-arm closed ForkError union (ADR-0201 4 + ADR-0226 4 신규):
     `checkpoint-not-found` / `store-full` / `lineage-cycle` / `duplicate-id`

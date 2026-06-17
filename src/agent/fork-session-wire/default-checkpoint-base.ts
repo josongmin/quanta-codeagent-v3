@@ -14,8 +14,10 @@
  * `@/agent/loop`, NO `@/agent/dispatch`, NO `@/llm`, NO `@/tool`.
  *
  * Default-OFF: nothing in this slice runs unless the host explicitly calls
- * {@link defaultCheckpointBaseWire}. The composition root (apps/agent) gates
- * the call on `QUANTA_FORK_SESSION=on`.
+ * {@link defaultCheckpointBaseWire}. The composition root gates the call on the
+ * per-surface `forkSession` request flag (see `resolveForkSession` in
+ * agent-arg-builder) — CLI REPL sets it via `maybeForkSession(args)`. There is
+ * NO `QUANTA_FORK_SESSION` env var; the prior comment naming one was stale.
  *
  * Contracts (4):
  *   1. NO-THROW on the public surface for operational failures — every
