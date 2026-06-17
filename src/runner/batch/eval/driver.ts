@@ -1445,12 +1445,17 @@ export const runInstanceOnce = async (
     // enforcement). The rail's cmd then GATES the repair loop (see runValidate):
     // the agent's own verify can no longer clear a round — the false-green killer
     // fires. Knob OFF or no red repro ⇒ undefined ⇒ byte-identical agent gate.
-    const primaryRailCmd =
-      benchOptIns().primaryRail && reproTest?.installed === true && reproTest.reproducedCount > 0
-        ? (buildVerificationPlan({
-            reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true },
-          }).primaryRail?.cmd ?? undefined)
+    const verificationPlan =
+      (benchOptIns().primaryRail || benchOptIns().verificationPlan) && instance.swebench !== undefined
+        ? buildVerificationPlan(
+            reproTest?.installed === true && reproTest.reproducedCount > 0
+              ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
+              : {},
+          )
         : undefined
+    const primaryRailCmd = benchOptIns().primaryRail
+      ? (verificationPlan?.primaryRail?.cmd ?? undefined)
+      : undefined
 
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
     // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
@@ -1518,6 +1523,10 @@ export const runInstanceOnce = async (
         extra.patchHygiene = buildPatchHygiene(phase.patch, {
           ...(ownerHint !== undefined ? { ownerFiles: [ownerHint] } : {}),
         })
+      }
+      // T-301 verification-plan telemetry (knob-gated, observe-only).
+      if (benchOptIns().verificationPlan && verificationPlan !== undefined) {
+        extra.verificationPlan = verificationPlan
       }
     }
     return okResult(instance, phase, v, extra)

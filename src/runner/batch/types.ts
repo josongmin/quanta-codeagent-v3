@@ -142,6 +142,14 @@ export interface InstanceResult {
    * the run — the deny path is a later measure-first step.
    */
   patchHygiene?: import("./eval/patch-hygiene").PatchHygieneReport
+  /**
+   * T-301 — the typed VerificationPlan computed for this run (primaryRail +
+   * required/optional steps + per-step successPredicate). Emitted only when the
+   * `verification-plan` knob is on AND observing; ABSENT ⇒ byte-identical report.
+   * Consumed offline by closure-diagnostics (primary_rail_present_rate /
+   * success_predicate_present_rate). Telemetry-only — does not gate the run.
+   */
+  verificationPlan?: import("@/agent/verification-plan").VerificationPlan
 }
 
 /** Structured per-attempt outcome shape echoed onto the report. Mirrors the
