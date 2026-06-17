@@ -96,6 +96,7 @@ import {
 } from "./corpus"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { finalizeRun, runInstance } from "./eval"
+import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
@@ -469,12 +470,25 @@ const runDatasetMode = async (
     runSwebenchTask(task, taskDeps),
   )
 
+  const reportPath = argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json")
   await writeArtifacts(
     argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
-    argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json"),
+    reportPath,
     results,
     { provider: meta.provider, model: meta.model, n: cfg.n },
   )
+  // T-101 closure diagnostics — OFFLINE sibling artifact, default-OFF so the
+  // no-knob path is byte-identical. EVAL-ONLY: the oracle (dataset gold/F2P) is
+  // read here post-run, never threaded into the agent loop. Best-effort.
+  if (gateOn(process.env, "QUANTA_BENCH_CLOSURE_DIAG")) {
+    try {
+      const dataset = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET
+      const sc = writeClosureSidecar(reportPath, results, dataset)
+      logger.info(`closure diagnostics: ${sc}`)
+    } catch (e) {
+      logger.info(`closure diagnostics skipped: ${errMessage(e)}`)
+    }
+  }
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
 }

@@ -1,0 +1,157 @@
+/**
+ * T-101 — closure diagnostic rail (OFFLINE sidecar).
+ *
+ * Computes "closure quality" metrics for a bench run BEFORE any score claim:
+ * owner recall, first-edit owner match, stray-file rate, no-patch exhaustion,
+ * and (once later waves instrument them) gate/verify/primary-rail metrics.
+ *
+ * ⚠️ EVAL-ONLY. The {@link ClosureOracle} (gold files / FAIL_TO_PASS) is a
+ * post-hoc measurement input. This module MUST NOT be imported by any runtime
+ * routing / prompt-rendering path — it exists purely to score a finished run.
+ * The compute layer is a PURE function over in-memory facts (no fs, no env) so
+ * it is unit-testable and can never leak the oracle into the agent loop.
+ *
+ * Metrics not yet instrumented by the current driver degrade to
+ * `{ available: false, value: null }` — never an invented number. They flip to
+ * available automatically once the corresponding `ClosureRunFact` field is
+ * populated by a later wave (T-202 firstEdit, T-301/T-302 gate/verify, etc.).
+ */
+
+/** Post-hoc gold signal for one instance. EVAL-ONLY — never a runtime input. */
+export interface ClosureOracle {
+  instanceId: string
+  /** Repo-relative paths the gold patch touched (the true owner set). */
+  goldFiles: readonly string[]
+  failToPass: readonly string[]
+}
+
+/**
+ * Run-derived facts for one instance (NO oracle). Fields typed `| null` /
+ * optional are populated by later waves; absent ⇒ that metric is "unavailable".
+ */
+export interface ClosureRunFact {
+  instanceId: string
+  /** Grader verdict; null when the instance was not graded. */
+  resolved: boolean | null
+  /** Repo-relative files in the agent's final patch, in diff order. */
+  patchFiles: readonly string[]
+  /** Subset of the patch that is out-of-scope junk (e.g. created `test.html.Z`). */
+  strayFiles: readonly string[]
+  emptyPatch: boolean
+  /** `session_end.reason` (e.g. "max_turns", "completed", "aborted"). */
+  endReason: string | null
+  /** First mutating tool_call target path (stream-tap, T-202). null ⇒ uncaptured. */
+  firstEditFile?: string | null
+  // ── later-wave instrumentation (absent until wired) ──────────────────────
+  gateEntered?: boolean | null
+  gateBypassed?: boolean | null
+  verifyRounds?: number | null
+  synthReproBaseRed?: boolean | null
+  primaryRailPresent?: boolean | null
+  primaryFalseGreen?: boolean | null
+  requiredVerificationCovered?: boolean | null
+  outOfScopeFiles?: boolean | null
+}
+
+export type InstanceClass =
+  | "resolved"
+  | "model_miss"
+  | "no_patch_exhausted"
+  | "empty_patch_other"
+  | "ungraded"
+
+export interface ClosureMetric {
+  /** Mean over the available denominator, or null when unavailable. */
+  value: number | null
+  /** True iff at least one instance contributed (denominator > 0). */
+  available: boolean
+  /** Denominator size. */
+  n: number
+}
+
+export interface ClosurePerInstance {
+  instanceId: string
+  class: InstanceClass
+  /** null when no oracle / no patch to judge. */
+  ownerHit: boolean | null
+  firstEditOwnerMatch: boolean | null
+}
+
+export interface ClosureDiagnostics {
+  total: number
+  metrics: Record<string, ClosureMetric>
+  perInstance: ClosurePerInstance[]
+}
+
+/** Mean of present (non-null/undefined) values; booleans count as 0/1. */
+const metricOf = (vals: ReadonlyArray<boolean | number | null | undefined>): ClosureMetric => {
+  const present = vals.filter((v): v is boolean | number => v !== null && v !== undefined)
+  if (present.length === 0) return { value: null, available: false, n: 0 }
+  const sum = present.reduce<number>((a, v) => a + (typeof v === "boolean" ? (v ? 1 : 0) : v), 0)
+  return { value: sum / present.length, available: true, n: present.length }
+}
+
+const classify = (f: ClosureRunFact): InstanceClass => {
+  if (f.emptyPatch) return f.endReason === "max_turns" ? "no_patch_exhausted" : "empty_patch_other"
+  if (f.resolved === true) return "resolved"
+  if (f.resolved === false) return "model_miss"
+  return "ungraded"
+}
+
+/**
+ * Pure compute over (run facts, eval oracle). Deterministic, fs/env-free.
+ * `oracleMap` keyed by instanceId; instances without an oracle entry are
+ * excluded from owner-recall denominators (we can't judge owner without gold).
+ */
+export const computeClosureDiagnostics = (
+  facts: ReadonlyArray<ClosureRunFact>,
+  oracleMap: ReadonlyMap<string, ClosureOracle>,
+): ClosureDiagnostics => {
+  const goldSetOf = (id: string): Set<string> | null => {
+    const o = oracleMap.get(id)
+    return o ? new Set(o.goldFiles) : null
+  }
+
+  const perInstance: ClosurePerInstance[] = facts.map((f) => {
+    const gold = goldSetOf(f.instanceId)
+    const ownerHit =
+      gold && f.patchFiles.length > 0 ? gold.has(f.patchFiles[0] as string) : null
+    const firstEditOwnerMatch =
+      gold && f.firstEditFile != null ? gold.has(f.firstEditFile) : null
+    return { instanceId: f.instanceId, class: classify(f), ownerHit, firstEditOwnerMatch }
+  })
+
+  // Owner recall over patch-bearing instances that have an oracle.
+  const owned = facts.filter((f) => f.patchFiles.length > 0 && oracleMap.has(f.instanceId))
+  const recallAt = (k: number): ClosureMetric =>
+    metricOf(
+      owned.map((f) => {
+        const gold = goldSetOf(f.instanceId) as Set<string>
+        return f.patchFiles.slice(0, k).some((p) => gold.has(p))
+      }),
+    )
+
+  const patchBearing = facts.filter((f) => f.patchFiles.length > 0)
+  const firstEditDenom = facts.filter((f) => f.firstEditFile != null && oracleMap.has(f.instanceId))
+
+  const metrics: Record<string, ClosureMetric> = {
+    "owner_recall@1": recallAt(1),
+    "owner_recall@3": recallAt(3),
+    first_edit_owner_match: metricOf(
+      firstEditDenom.map((f) => (goldSetOf(f.instanceId) as Set<string>).has(f.firstEditFile as string)),
+    ),
+    stray_file_rate: metricOf(patchBearing.map((f) => f.strayFiles.length > 0)),
+    no_patch_exhausted_rate: metricOf(perInstance.map((p) => p.class === "no_patch_exhausted")),
+    // later-wave instrumentation — unavailable until the driver populates the field
+    primary_rail_present_rate: metricOf(facts.map((f) => f.primaryRailPresent)),
+    primary_false_green_rate: metricOf(facts.map((f) => f.primaryFalseGreen)),
+    required_verification_coverage: metricOf(facts.map((f) => f.requiredVerificationCovered)),
+    gate_enter_rate: metricOf(facts.map((f) => f.gateEntered)),
+    gate_bypass_rate: metricOf(facts.map((f) => f.gateBypassed)),
+    verify_rounds_per_run: metricOf(facts.map((f) => f.verifyRounds)),
+    synth_repro_base_red_rate: metricOf(facts.map((f) => f.synthReproBaseRed)),
+    out_of_scope_file_rate: metricOf(facts.map((f) => f.outOfScopeFiles)),
+  }
+
+  return { total: facts.length, metrics, perInstance }
+}

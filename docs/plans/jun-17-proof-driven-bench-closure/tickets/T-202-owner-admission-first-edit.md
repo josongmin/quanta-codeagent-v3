@@ -15,10 +15,18 @@ Also record whether the first mutating edit matched the admitted owner.
 
 - new `src/agent/fault-evidence/owner-admission.ts`
 - `src/runner/batch/eval/driver.ts`
+- `src/apps/bench/eval/driver.ts` — prod wrapper / stream-tap host (firstEdit capture)
+- `src/agent/stream-callbacks.ts` — first mutating tool_call observation seam
 - `src/runner/batch/types.ts`
 - `src/runner/batch/report.ts`
 - new `tests/unit/owner-admission.test.ts`
 - new `tests/integration/bench-owner-admission.test.ts`
+
+> `firstEditOwnerMatch` is recorded HERE but the first-mutating-edit event is
+> captured at the stream-tap seam (`src/apps/bench/eval/driver.ts` +
+> `src/agent/stream-callbacks.ts`), shared with T-302. It is NOT derivable from
+> the final diff. The runner-core driver (`src/runner/batch/eval/driver.ts`) is
+> the engine; the apps wrapper hosts the production stream tap — both are touched.
 
 ## Acceptance criteria
 
