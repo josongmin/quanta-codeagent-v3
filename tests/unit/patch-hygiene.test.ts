@@ -25,6 +25,19 @@ describe("buildPatchHygiene", () => {
     expect(r.violation).toBe(false)
   })
 
+  // Load-bearing allowlist teeth (audit lens-3): a name that WOULD be junk
+  // (`.orig` ∈ JUNK_EXT) is exempted ONLY by the allowlist short-circuit — delete
+  // `if (allow.has(basename(f))) return false` in patch-hygiene.ts and this fails,
+  // while the control (same junk ext, NOT allowlisted) must still be denied. The
+  // prior reproduce_issue.py test could not catch a broken allowlist (that name is
+  // not junk to begin with), so this pair makes the allowlist branch testable.
+  test("allowlist exempts an otherwise-junk name; non-allowlisted junk still denied (control)", () => {
+    const diff = block("keep.orig", true) + block("other.orig", true)
+    const r = buildPatchHygiene(diff, { allowlist: ["keep.orig"] })
+    expect(r.strayAddedFiles).toEqual(["other.orig"]) // allowlisted one exempted, control denied
+    expect(r.violation).toBe(true)
+  })
+
   test("a newly-added SOURCE file is not stray", () => {
     const r = buildPatchHygiene(block("django/new_module.py", true))
     expect(r.violation).toBe(false)
