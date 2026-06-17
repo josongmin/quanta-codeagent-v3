@@ -33,6 +33,13 @@ export const evaluateSuccessPredicate = (
   observed: ExecObservation,
   predicate: SuccessPredicate,
 ): PredicateResult => {
+  // Top guard: the FAIL-OPEN / never-throws contract must hold for ANY input,
+  // including a malformed predicate (e.g. one built from JSON/LLM output that lost
+  // its required fields). A throw here would be a hard-fail = the false-RED the
+  // whole design forbids. Non-object / missing discriminant ⇒ advisory.
+  if (predicate === null || typeof predicate !== "object" || typeof predicate.type !== "string") {
+    return advisory("malformed predicate (no discriminant)")
+  }
   switch (predicate.type) {
     // ── execution-grounded: confidently judged from exit / stdout ──────────
     case "test_exit_zero":
@@ -40,11 +47,15 @@ export const evaluateSuccessPredicate = (
     case "selected_test_passes":
       // the selector already narrowed the cmd upstream; a zero exit is the proof.
       return matched(observed.exitCode === 0, `selected test exit ${observed.exitCode} != 0`)
-    case "stdout_contains":
+    case "stdout_contains": {
+      // Defensive: a malformed predicate missing `substring` must NOT throw (the
+      // reason string would eagerly `.slice` undefined) — fail-open to advisory.
+      if (typeof predicate.substring !== "string") return advisory("stdout_contains missing substring")
       return matched(
         observed.stdout.includes(predicate.substring),
         `stdout missing substring ${JSON.stringify(predicate.substring.slice(0, 80))}`,
       )
+    }
     case "stdout_exact_empty":
       return matched(observed.stdout.trim() === "", "stdout is not empty")
 

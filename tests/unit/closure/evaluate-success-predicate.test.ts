@@ -88,4 +88,22 @@ describe("evaluateSuccessPredicate — FAIL-OPEN (advisory in v1)", () => {
     const r = evaluateSuccessPredicate(obs(0), { type: "totally_bogus" } as unknown as SuccessPredicate)
     expect(r.evaluable).toBe(false)
   })
+
+  test("🔴 never-throws contract: malformed predicates ⇒ advisory, not throw", () => {
+    // stdout_contains missing substring (eager .slice would throw without the guard).
+    expect(() =>
+      evaluateSuccessPredicate(obs(0, "x"), { type: "stdout_contains" } as unknown as SuccessPredicate),
+    ).not.toThrow()
+    expect(
+      evaluateSuccessPredicate(obs(0, "x"), { type: "stdout_contains" } as unknown as SuccessPredicate)
+        .evaluable,
+    ).toBe(false)
+    // null / non-object predicate ⇒ advisory, not throw.
+    expect(() =>
+      evaluateSuccessPredicate(obs(0), null as unknown as SuccessPredicate),
+    ).not.toThrow()
+    expect(evaluateSuccessPredicate(obs(0), undefined as unknown as SuccessPredicate).evaluable).toBe(
+      false,
+    )
+  })
 })
