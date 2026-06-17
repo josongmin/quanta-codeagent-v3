@@ -39,8 +39,27 @@ const EXPECT_RE =
 const EXPECT_LITERAL_RE =
   /\b(?:should|must|expected to|ought to)\s+(?:print|output|returns?|gives?|produces?|renders?|shows?|be|equals?|displays?|yields?)\s*[:=]?\s*[`'"]([^`'"\n]{1,200})[`'"]/i
 
-/** Explicit "Expected[ output]: `LITERAL`" / "Expected[ output]: LITERAL" label. */
-const EXPECTED_LABEL_RE = /\bexpected(?:\s+(?:output|result|value))?\s*[::]\s*[`'"]?([^`'"\n]{1,200}?)[`'"]?\s*(?:\n|$)/i
+/** Explicit "Expected[ output]: `LITERAL`" label — the value MUST be delimited
+ *  (backtick/quote). The earlier optional-quote branch captured UNQUOTED prose
+ *  ("Expected: the function works correctly") as a spec — a false positive that
+ *  fires the steer on issues with no concrete declared output. Requiring
+ *  delimiters mirrors EXPECT_LITERAL_RE's precision and costs no recall (real
+ *  declared-output issues quote the value). */
+const EXPECTED_LABEL_RE = /\bexpected(?:\s+(?:output|result|value))?\s*[::]\s*[`'"]([^`'"\n]{1,200})[`'"]/i
+
+/** Desired output declared inside a FENCED CODE BLOCK after an explicit
+ *  desired-output marker ("should be:", "better to be ... to:", "expected
+ *  output:"). Captures the block body (≤400 chars) after the marker+`:`+fence;
+ *  the body is then scanned for a QUOTED literal ({@link QUOTED_IN_BODY}). This
+ *  is the common repr/LaTeX issue shape (sympy-18763) the inline patterns miss.
+ *  The marker is REQUIRED so an example/input block (no desired-output marker)
+ *  never matches — fail-closed. */
+const CODEBLOCK_MARKER_RE =
+  /\b(?:should be|better to be|would be better|ought to be|expected output|correct output)\b[^\n]{0,80}?:\s*```[a-zA-Z]*\s*([\s\S]{0,400}?)```/i
+
+/** First delimited literal inside a captured code-block body. A block with NO
+ *  quoted literal yields nothing (avoids grabbing bare example CODE as output). */
+const QUOTED_IN_BODY = /[`'"]([^`'"\n]{1,200})[`'"]/
 
 /** Explicit empty-output declaration. Two shapes:
  *  (1) "should <verb> nothing / no <X> / empty"  (direct empty object)
@@ -105,6 +124,21 @@ export const extractIssueDeclaredExpected = (
   if (labelled?.[1] !== undefined && isMeaningful(labelled[1])) {
     const value = labelled[1].trim()
     return { kind: classify(value), value }
+  }
+
+  // 4) Desired output in a FENCED CODE BLOCK after a desired-output marker
+  //    ("should be:", "better to be ... to:", "expected output:"). The marker
+  //    anchors the block AFTER it, so an earlier "gives:"/example block (the
+  //    INCORRECT current output) is skipped. Fail-closed twice: the marker is
+  //    required, AND a QUOTED literal must exist in the block (bare example code
+  //    yields nothing). Recall lift for sympy-18763-class repr/LaTeX issues.
+  const cb = CODEBLOCK_MARKER_RE.exec(problemStatement)
+  if (cb?.[1] !== undefined) {
+    const q = QUOTED_IN_BODY.exec(cb[1])
+    if (q?.[1] !== undefined && isMeaningful(q[1])) {
+      const value = q[1].trim()
+      return { kind: classify(value), value }
+    }
   }
 
   return undefined
