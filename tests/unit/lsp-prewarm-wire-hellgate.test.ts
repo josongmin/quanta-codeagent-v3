@@ -1,15 +1,15 @@
 /**
  * Wire hellgate — RFC jun-17 `QUANTA_LSP_PREWARM` is LIVE at the agent
- * composition root (`buildBaseFromArgs`) and DOUBLE-GATED on the nav tools being
- * enabled. A dead seam (slot never set) would leave `config.lspPrewarm`
- * undefined and the session-start background warm could never fire.
+ * composition root (`buildBaseFromArgs`). The prewarm is DEFAULT-ON, GATED on
+ * the nav tools being enabled, with a `=0` off-switch. A dead seam (slot never
+ * set) would leave `config.lspPrewarm` undefined and the warm could never fire.
  *
- *   LP-01  prewarm unset ⇒ slot ABSENT (default-OFF byte-identical).
- *   LP-02  prewarm=1 but nav DISABLED ⇒ ABSENT (the second gate: warming a
- *          server whose tools aren't exposed is wasted work).
- *   LP-03  prewarm=1 + QUANTA_LSP_TOOLS=full ⇒ enabled true.
- *   LP-04  prewarm=1 + QUANTA_BENCH_LSP=1 ⇒ enabled true.
- *   LP-05  nav enabled but prewarm unset ⇒ ABSENT (the first gate).
+ *   LP-01  nav OFF + prewarm unset ⇒ ABSENT (nav gate; byte-identical legacy).
+ *   LP-02  nav OFF + prewarm=1 ⇒ ABSENT (nav gate dominates — no wasted warm).
+ *   LP-03  nav ON (QUANTA_LSP_TOOLS=full) + prewarm unset ⇒ ENABLED (default-on).
+ *   LP-04  nav ON (QUANTA_BENCH_LSP=1) + prewarm unset ⇒ ENABLED (default-on).
+ *   LP-05  nav ON + QUANTA_LSP_PREWARM=0 ⇒ ABSENT (off-switch / A/B cold arm).
+ *   LP-06  nav ON + QUANTA_LSP_PREWARM=1 ⇒ ENABLED (explicit on).
  */
 import { afterEach, describe, expect, it } from "bun:test"
 import { buildBaseFromArgs } from "@/../src/apps/agent/index"
@@ -32,35 +32,41 @@ const clear = (): void => {
 const base = (): { lspPrewarm?: { enabled: boolean } } =>
   buildBaseFromArgs({ mode: "interactive", dials: {} }) as { lspPrewarm?: { enabled: boolean } }
 
-describe("RFC jun-17 wire — QUANTA_LSP_PREWARM double-gate at the composition root", () => {
-  it("LP-01: prewarm unset ⇒ slot absent", () => {
+describe("RFC jun-17 wire — QUANTA_LSP_PREWARM default-on, nav-gated, =0 off-switch", () => {
+  it("LP-01: nav off + prewarm unset ⇒ absent (nav gate)", () => {
     clear()
     expect(base().lspPrewarm).toBeUndefined()
   })
 
-  it("LP-02: prewarm=1 but nav disabled ⇒ absent (second gate)", () => {
+  it("LP-02: nav off + prewarm=1 ⇒ absent (nav gate dominates)", () => {
     clear()
     process.env.QUANTA_LSP_PREWARM = "1"
     expect(base().lspPrewarm).toBeUndefined()
   })
 
-  it("LP-03: prewarm=1 + QUANTA_LSP_TOOLS=full ⇒ enabled", () => {
+  it("LP-03: nav on (QUANTA_LSP_TOOLS=full) + prewarm unset ⇒ enabled (default-on)", () => {
     clear()
-    process.env.QUANTA_LSP_PREWARM = "1"
     process.env.QUANTA_LSP_TOOLS = "full"
     expect(base().lspPrewarm?.enabled).toBe(true)
   })
 
-  it("LP-04: prewarm=1 + QUANTA_BENCH_LSP=1 ⇒ enabled", () => {
+  it("LP-04: nav on (QUANTA_BENCH_LSP=1) + prewarm unset ⇒ enabled (default-on)", () => {
     clear()
-    process.env.QUANTA_LSP_PREWARM = "1"
     process.env.QUANTA_BENCH_LSP = "1"
     expect(base().lspPrewarm?.enabled).toBe(true)
   })
 
-  it("LP-05: nav enabled but prewarm unset ⇒ absent (first gate)", () => {
+  it("LP-05: nav on + QUANTA_LSP_PREWARM=0 ⇒ absent (off-switch / A/B cold arm)", () => {
     clear()
     process.env.QUANTA_LSP_TOOLS = "full"
+    process.env.QUANTA_LSP_PREWARM = "0"
     expect(base().lspPrewarm).toBeUndefined()
+  })
+
+  it("LP-06: nav on + QUANTA_LSP_PREWARM=1 ⇒ enabled (explicit on)", () => {
+    clear()
+    process.env.QUANTA_LSP_TOOLS = "full"
+    process.env.QUANTA_LSP_PREWARM = "1"
+    expect(base().lspPrewarm?.enabled).toBe(true)
   })
 })

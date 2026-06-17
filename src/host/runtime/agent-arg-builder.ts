@@ -114,6 +114,7 @@ import {
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import {
   errMessage,
+  gateDisabled,
   gateOn,
   logger,
   type PtyBackend,
@@ -518,19 +519,20 @@ const resolvePrewarmSlot = (
     : {}
 
 // RFC jun-17 (code-intelligence warm backend) — project `QUANTA_LSP_PREWARM`
-// into `AgentConfig.lspPrewarm`. Gated TWICE: the prewarm flag must be on AND
-// the nav tools must actually be exposed (`QUANTA_LSP_TOOLS=full`, matching
-// `lspNavEnabled`, OR the bench-only `QUANTA_BENCH_LSP`) — warming a server
-// whose tools are not registered is wasted work. Default-OFF: either gate off
-// ⇒ `{}` ⇒ slot omitted ⇒ NO background warm (byte-identical legacy). The
-// session signal is not available at config-build time, so `warmSignal` is left
-// to the (bench-side) caller / future wiring; the orchestrator self-terminates
-// via evict / idle-TTL without it.
+// into `AgentConfig.lspPrewarm`. DEFAULT-ON, but GATED on the nav tools actually
+// being exposed (`QUANTA_LSP_TOOLS=full`, matching `lspNavEnabled`, OR the
+// bench-only `QUANTA_BENCH_LSP`) — warming a server whose tools are not
+// registered is wasted work, so with nav OFF the slot is omitted (byte-identical
+// legacy). With nav ON the warm fires unless explicitly killed via
+// `QUANTA_LSP_PREWARM=0` (`gateDisabled` off-switch, also the bench A/B cold
+// arm). The session signal is not available at config-build time, so
+// `warmSignal` is left to the (bench-side) caller; the orchestrator
+// self-terminates via evict / idle-TTL.
 const resolveLspPrewarmSlot = (
   env: NodeJS.ProcessEnv,
 ): { lspPrewarm?: NonNullable<AssembleRequest["base"]["lspPrewarm"]> } => {
   const navEnabled = env.QUANTA_LSP_TOOLS === "full" || gateOn(env, "QUANTA_BENCH_LSP")
-  if (!navEnabled || !gateOn(env, "QUANTA_LSP_PREWARM")) return {}
+  if (!navEnabled || gateDisabled(env, "QUANTA_LSP_PREWARM")) return {}
   return { lspPrewarm: { enabled: true } }
 }
 

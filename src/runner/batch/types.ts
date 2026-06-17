@@ -116,6 +116,13 @@ export interface InstanceResult {
   /** Agentless repro-test generation/install telemetry. Omitted when the
    *  repro-test knob is off; present when the driver attempted the pipeline. */
   reproTest?: BenchReproTestTelemetry
+  /**
+   * T-202 — repo-relative path of the FIRST mutating edit observed on the
+   * stream (not the final diff). Populated by the bench driver's first-edit
+   * stream tap; ABSENT (default) ⇒ byte-identical report. Consumed offline by
+   * the closure-diagnostics sidecar for `first_edit_owner_match`.
+   */
+  firstEditFile?: string
 }
 
 /** Structured per-attempt outcome shape echoed onto the report. Mirrors the

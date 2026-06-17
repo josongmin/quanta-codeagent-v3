@@ -16,18 +16,16 @@ import {
   type ClosureRunFact,
   computeClosureDiagnostics,
 } from "./closure-diagnostics"
+import { buildPatchHygiene } from "./patch-hygiene"
 
 const GIT_FILE = /^diff --git a\/(\S+) b\/\S+/gm
 /** Repo-relative paths a unified diff touches, in diff order. */
 export const patchFiles = (diff: string): string[] =>
   [...diff.matchAll(GIT_FILE)].map((m) => m[1] as string)
 
-/** Heuristic stray-file detector (telemetry only — the authoritative gate is
- *  T-401 patch-hygiene). Catches build/junk artifacts (e.g. `test.html.Z`,
- *  `*.orig`/`*.rej`) that polluted #16642's diff. */
-const STRAY = /\.(Z|br|orig|rej|bak|swp|tmp)$/i
-export const strayFilesOf = (files: readonly string[]): string[] =>
-  files.filter((f) => STRAY.test(f) || /(^|\/)test\.html\./.test(f))
+/** Stray-file detection reuses the authoritative T-401 patch-hygiene checker
+ *  so the diagnostic sidecar and the (later) hygiene gate agree by construction. */
+export const strayFilesOf = (diff: string): string[] => buildPatchHygiene(diff).strayAddedFiles
 
 /** session_end-style reason inferred from per-attempt outcomes (until the
  *  stream tap threads the real reason in a later wave). */
@@ -49,10 +47,12 @@ export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFa
       instanceId: r.id,
       resolved: fair ? r.passed : null,
       patchFiles: pf,
-      strayFiles: strayFilesOf(pf),
+      strayFiles: strayFilesOf(r.patch ?? ""),
       emptyPatch: (r.patch ?? "") === "",
       endReason: endReasonOf(r),
-      firstEditFile: null, // populated by T-202 stream tap
+      // firstEditFile flows from the T-202 stream tap when present on the result;
+      // absent ⇒ null ⇒ first_edit_owner_match stays unavailable (no false signal).
+      firstEditFile: r.firstEditFile ?? null,
     }
   })
 

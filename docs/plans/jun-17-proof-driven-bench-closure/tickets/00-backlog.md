@@ -30,13 +30,20 @@ Before Wave 0, run one non-ticketed preflight to reconcile preset namespace and 
 | ID | Title | What closes | Pri | Size | Deps | Posture |
 |---|---|---|---|---|---|---|
 | T-101 ✅DONE | closure diagnostic rail + report sidecar | owner/proof metrics absent | P0 | M | — | offline |
-| T-201 | `FaultEvidencePacket` builder | no typed owner-context artifact | P1 | L | T-101 | OFF (`fault-evidence`) |
+| T-201 🟡CORE | `FaultEvidencePacket` builder | no typed owner-context artifact | P1 | L | T-101 | OFF (`fault-evidence`) |
 | T-202 | owner admission + first-edit telemetry | file-localized but owner-unpinned edits | P1 | M | T-201 | rides W1 gate |
-| T-301 | `VerificationPlan` builder | no typed proof plan | P1 | L | T-101, T-202 | OFF (`verification-plan`) |
-| T-302 | primary-rail enforcement + gate decision + repair admission | repair uses generic verify noise / no explicit commit-vs-verify gate | P0 | L | T-301 | OFF (`primary-rail`) |
-| T-401 | patch hygiene gate + stray-file report | over-wide / polluted diffs | P0 | M | T-202 | OFF (`patch-hygiene`) |
-| T-501 | post-localization commit rail + no-patch exhausted verdict | `#9296`-class over-exploration / missing commit-fast inverse rail | P1 | M | T-202 | OFF (`no-patch-breaker`) |
-| T-601 | multi-owner escalation decision | multi-site widening is ad hoc | P1 | M | T-202, T-301, T-401 | OFF (`repair-escalation`) |
+| T-301 🟡CORE | `VerificationPlan` builder | no typed proof plan | P1 | L | T-101, T-202 | OFF (`verification-plan`) |
+| T-302 🟡CORE | primary-rail enforcement + gate decision + repair admission | repair uses generic verify noise / no explicit commit-vs-verify gate | P0 | L | T-301 | OFF (`primary-rail`) |
+| T-401 🟡CORE | patch hygiene gate + stray-file report | over-wide / polluted diffs | P0 | M | T-202 | OFF (`patch-hygiene`) |
+| T-501 🟡CORE | post-localization commit rail + no-patch exhausted verdict | `#9296`-class over-exploration / missing commit-fast inverse rail | P1 | M | T-202 | OFF (`no-patch-breaker`) |
+| T-601 🟡CORE | multi-owner escalation decision | multi-site widening is ad hoc | P1 | M | T-202, T-301, T-401 | OFF (`repair-escalation`) |
+
+> Legend: ✅DONE = core + wiring + tests landed · 🟡CORE = pure typed-artifact
+> core + unit teeth landed (default-OFF, no driver wiring yet) · blank = open.
+> **Integration wave (remaining):** wire 🟡CORE modules into the live driver
+> behind their knobs (gather inputs, gate repair/verify-guard, emit to report),
+> + T-202 first-edit stream tap, + knob-inventory registration, + T-701 preset
+> freeze. One coherent driver pass (avoids 6-ticket seam collisions).
 | T-701 | freeze `agentless-v2` preset + leaderboard/report integration | no measured preset contract for the bundle / preset namespace truth unresolved | P1 | M | T-302, T-401, T-501, T-601 | preset |
 
 ## Conditional, not ticketed yet

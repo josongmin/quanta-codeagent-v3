@@ -361,11 +361,11 @@ const HOST: readonly KnobInventoryEntry[] = [
   {
     envKey: "QUANTA_LSP_PREWARM",
     kind: "bool",
-    default: false,
+    default: true,
     group: "host-gate",
     home: "runtime-config",
     describe:
-      "Session-start background LSP workspace prewarm (RFC jun-17). Double-gated: also requires the nav tools (QUANTA_LSP_TOOLS=full / QUANTA_BENCH_LSP).",
+      "Session-start background LSP workspace prewarm (RFC jun-17). DEFAULT-ON when the nav tools are enabled (QUANTA_LSP_TOOLS=full / QUANTA_BENCH_LSP); off-switch via `=0` (gateDisabled), which is also the cold arm for the bench A/B.",
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {

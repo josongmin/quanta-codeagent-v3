@@ -42,7 +42,7 @@ import {
 import { LSP_GROUNDING_STEER } from "@/agent/localize-phase-guard"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { errMessage, gateOn } from "@/shared"
+import { errMessage, gateDisabled, gateOn } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Tool } from "@/tool"
@@ -993,11 +993,12 @@ export const buildConfig = (
       // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not
       // leak a `pyright-langserver` child for the 30-min idle-TTL window (the
       // idle-TTL is an interactive-reuse affordance, useless to a one-shot
-      // bench instance). Prewarm is gated SEPARATELY on `QUANTA_LSP_PREWARM` so
-      // the cold-vs-warm A/B stays clean; the run `signal` is the warm abort so
+      // bench instance). Prewarm is DEFAULT-ON with nav (warm the localize-phase
+      // workspace); the cold arm of the A/B is `QUANTA_LSP_PREWARM=0`
+      // (`gateDisabled` off-switch). The run `signal` is the warm abort so
       // session end cancels an in-flight warm instead of riding the budget.
       ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
-      ...(opt.lspNav && gateOn(process.env, "QUANTA_LSP_PREWARM")
+      ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
         ? { lspPrewarm: { enabled: true, warmSignal: signal } }
         : {}),
       ...localEnvSlotOf(instance),

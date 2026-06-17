@@ -1,0 +1,54 @@
+id: lsp-warm-backend-prewarm
+title: Code-intelligence warm backend — session-start LSP prewarm + first-call join + engine-swap pool
+section: 9
+subsystem: LSP — engine-agnostic warm-workspace pool + background prewarm + bench evict
+order: 17
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: none
+modes: [interactive, batch]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_LSP_PREWARM", "QUANTA_LSP_TOOLS", "QUANTA_BENCH_LSP"]
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-on", "startup-latency", "lsp"]
+depends_on: [assemble-tooling-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-17"
+  evidence:
+    cli: "session bootstrap fire-and-forgets the background warm (maybeStartLspPrewarm in agent/loop/session-bootstrap.ts, reachable from the CLI loop); the nav tools it warms are the QUANTA_LSP_TOOLS=full surface."
+    web: "Pure latency/lifecycle primitive over the language-server subprocess — no user-visible render on any surface."
+purpose: 'RFC jun-17 — pyright 첫 LSP 호출의 2~6초 cold stall을 세 가지로 해소: (1) 세션 시작 background prewarm(Python workspace면 fire-and-forget로 workspace 선행 부팅 — session start는 절대 지연 안 함), (2) first-call join(첫 실호출이 warm 완료면 즉시, 진행 중이면 동일 cwd-key 공유 세션의 startPromise에 join — 새 promise 발명 안 함), (3) 호출 시 pre-open progress로 침묵 stall 제거. 핵심 구조 변경: lsp-bridge의 pyright-하드코딩 warm/pool 층을 제네릭 `SharedWorkspacePool` + 좁은 `WarmBackend`(id/supports/createClient/ensureFileReady 4점)로 분리 — lifecycle(cwd-key 맵/refcount/idle-TTL/join/fatal teardown/evict)은 엔진 무관, 엔진특화는 readiness 판정 한 점뿐이라 basedpyright/rust-analyzer 등으로 교체 가능. 불변식: open()은 READY 세션만 반환(premature+뒤indexing 금지 — 첫 def/hover correctness 보존, jun-16 pythonPath/didChangeConfiguration 경로 무손상). bench는 세션종료 시 HARD-evict(per-instance sandbox cwd당 pyright child 누수 봉인; tombstone으로 fire-and-forget prewarm의 late-creation 레이스까지 reap). DEFAULT-ON when nav enabled, off-switch=`QUANTA_LSP_PREWARM=0`(bench A/B cold arm). 실측(real pyright): cold 1.8s → warm-hit 1~4ms.'
+evidence:
+  code:
+    - src/agent/lsp-workspace-pool.ts
+    - src/agent/lsp-bridge.ts
+    - src/agent/loop/session-bootstrap.ts
+    - src/agent/loop/session-lifecycle.ts
+    - src/agent/mention-injection/anchor-synth.ts
+    - src/agent/types.ts
+    - src/host/runtime/agent-arg-builder.ts
+    - src/runner/batch/eval/driver.ts
+    - src/tool/lsp_nav/index.ts
+  adrs: [15]
+  tests:
+    unit:
+      - tests/unit/lsp-warm-pool-hellgate.test.ts
+      - tests/unit/lsp-prewarm-orchestration-hellgate.test.ts
+      - tests/unit/lsp-prewarm-wire-hellgate.test.ts
+      - tests/unit/lsp-nav-prewarm-ux-hellgate.test.ts
+      - tests/unit/lsp-pyright-pool-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_LSP_PREWARM
+    default: 'on'
+    purpose: 'Session-start background LSP workspace prewarm. DEFAULT-ON when nav tools are enabled (QUANTA_LSP_TOOLS=full / QUANTA_BENCH_LSP); read at the composition root via `resolveLspPrewarmSlot` (interactive, `!gateDisabled`) and the bench driver (`!gateDisabled`). Off-switch `=0` is the cold arm for the bench cold-vs-warm A/B. With nav OFF the slot is omitted (byte-identical legacy).'
+  - name: evictLspPoolOnEnd
+    default: 'off (on for bench)'
+    purpose: 'AgentConfig flag: HARD-evict pooled LSP workspaces at session end. Set by the bench driver whenever LSP nav is on (per-instance sandbox cwd must not leak a language-server child for the idle-TTL window). Interactive leaves the workspace on the pool 30-min idle-TTL for cross-turn reuse.'
+notes: 'ADR-0015 (LSP nav 흡수) 하위. 적대어딧 4R(concurrency/gate-security/refactor-equiv/fix-verify)에서 leak-race(fire-and-forget prewarm vs evict)·aborted-prewarm-boot·warmFile-dead-client 3실버그 적발→수정(hardEvicted tombstone + 조기 abort 가드 + destroyed 가드). real-pyright 헬게이트(evict-mid-boot/fatal-child-kill+recovery/18-concurrent-opens/refcount-churn/abort-mid-warm/broken-anchor) leak 0 검증. v1 비목표: diagnostics pooled 전환, TS/rust/go warm 확장, 실시간 elapsed warm-status 스트리밍.'

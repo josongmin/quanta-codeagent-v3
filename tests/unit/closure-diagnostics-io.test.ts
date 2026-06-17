@@ -28,13 +28,12 @@ describe("closure-diagnostics-io", () => {
     expect(patchFiles("")).toEqual([])
   })
 
-  test("strayFilesOf flags junk artifacts, not real source", () => {
-    expect(strayFilesOf(["pkg/a.py", "test.html.Z", "x.orig", "y.rej"])).toEqual([
-      "test.html.Z",
-      "x.orig",
-      "y.rej",
-    ])
-    expect(strayFilesOf(["django/core/paginator.py"])).toEqual([])
+  test("strayFilesOf (via T-401 hygiene) flags added junk, not real source", () => {
+    const diff =
+      "diff --git a/test.html.Z b/test.html.Z\nnew file mode 100644\n" +
+      "diff --git a/django/core/paginator.py b/django/core/paginator.py\n--- a/django/core/paginator.py\n+++ b/django/core/paginator.py\n"
+    expect(strayFilesOf(diff)).toEqual(["test.html.Z"])
+    expect(strayFilesOf("diff --git a/django/core/paginator.py b/django/core/paginator.py\n")).toEqual([])
   })
 
   test("buildFacts maps max_turns empty patch to the #9296 class signal", () => {
