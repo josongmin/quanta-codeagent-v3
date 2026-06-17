@@ -35,6 +35,8 @@ import {
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
 import { buildPatchHygiene } from "@/runner/batch/eval/patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
+import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
+import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { buildVerificationPlan } from "@/agent/verification-plan"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
@@ -547,7 +549,14 @@ const runInstanceOnce = async (
 
     const posture = benchOptIns()
     const hintMode = posture.issueHintMode
-    const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, { llm: deps.llm })
+    // T-201: capture agentless ranked candidates from the same localization pass.
+    let localizeCandidates: readonly string[] = []
+    const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, {
+      llm: deps.llm,
+      onCandidates: (files) => {
+        localizeCandidates = files
+      },
+    })
     // `bench-in-loop-exec` OFF (mini-swe posture): skip the host-python repro-test
     // hint — the agent isn't told to run tests, so a repro script is dead weight.
     // ON ⇒ byte-identical to the pre-knob path.
@@ -648,6 +657,23 @@ const runInstanceOnce = async (
       // T-301 verification-plan telemetry (knob-gated, observe-only).
       if (posture.verificationPlan && verificationPlan !== undefined) {
         extra.verificationPlan = verificationPlan
+      }
+      // T-201/T-202 fault-evidence packet + owner-admission (knob-gated, observe-only).
+      // Built from the agentless localizer's ranked candidates (rank→score). No LSP
+      // owner-resolve threaded ⇒ packet `partial` (honest); owner_recall still
+      // measurable offline from the stage-1 ranking vs the gold owner.
+      if (
+        (posture.faultEvidence || posture.ownerAdmission) &&
+        instance.swebench !== undefined &&
+        localizeCandidates.length > 0
+      ) {
+        const stage1Files = localizeCandidates.map((file, i) => ({
+          file,
+          score: localizeCandidates.length - i,
+        }))
+        const packet = buildFaultEvidencePacket({ issueText: instance.problemStatement, stage1Files })
+        if (posture.faultEvidence) extra.faultEvidence = packet
+        if (posture.ownerAdmission) extra.ownerAdmission = decideOwnerAdmission({ packet })
       }
     }
     return okResult(instance, phase, v, extra)

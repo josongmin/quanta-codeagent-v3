@@ -150,6 +150,20 @@ export interface InstanceResult {
    * success_predicate_present_rate). Telemetry-only — does not gate the run.
    */
   verificationPlan?: import("@/agent/verification-plan").VerificationPlan
+  /**
+   * T-201 — FaultEvidencePacket built from the agentless localizer's ranked
+   * candidates (same pass, no extra LLM call). Emitted only when the
+   * `fault-evidence` knob is on AND observing; ABSENT ⇒ byte-identical. Consumed
+   * offline by closure-diagnostics for owner_recall@1/@3 (compared to gold owner
+   * OFFLINE — no runtime leak). Telemetry-only.
+   */
+  faultEvidence?: import("@/agent/fault-evidence").FaultEvidencePacket
+  /**
+   * T-202 — OwnerAdmission decision over the FaultEvidencePacket (admit / sibling
+   * coverage expectation). Emitted only when the `owner-admission` knob is on AND
+   * observing. Feeds sibling_coverage_expected_rate / miss_rate. Telemetry-only.
+   */
+  ownerAdmission?: import("@/agent/owner-admission").OwnerAdmission
 }
 
 /** Structured per-attempt outcome shape echoed onto the report. Mirrors the

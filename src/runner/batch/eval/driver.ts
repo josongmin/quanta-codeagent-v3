@@ -93,6 +93,8 @@ import {
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
+import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { buildVerificationPlan } from "@/agent/verification-plan"
 import { buildPatchHygiene } from "./patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
@@ -539,6 +541,13 @@ export interface PrepareIssueHintDeps {
   /** Soft timeout (ms) for the LLM localization call. On expiry the wiring
    *  falls back to the regex extractor. Default 30_000. */
   readonly timeoutMs?: number
+  /** T-201 observer seam (optional, no-op by default). When the agentless
+   *  localizer produces ranked candidate files, they are handed here BEFORE
+   *  being collapsed into the hint string — so the caller can build a
+   *  FaultEvidencePacket from the SAME localization pass (no second LLM call).
+   *  Pure observation: does not affect the returned hint. Fires only in
+   *  agentless mode with a non-empty result. */
+  readonly onCandidates?: (files: readonly string[]) => void
 }
 
 const DEFAULT_PREPARE_TIMEOUT_MS = 30_000
@@ -601,6 +610,10 @@ export const prepareIssueHint = async (
     // hint when an issue body contains explicit paths.
     return regexFallback()
   }
+  // T-201: surface the ranked candidates to the observer (no-op when unset) so a
+  // FaultEvidencePacket can be built from THIS localization pass — never a second
+  // LLM call. Pure observation; the returned hint is unchanged.
+  deps.onCandidates?.(result.files)
   return composeAgentlessHint(result)
 }
 
@@ -1429,7 +1442,15 @@ export const runInstanceOnce = async (
     // hint (the issue text doesn't change across rounds; re-asking the LLM
     // would just waste budget).
     const hintMode = benchOptIns().issueHintMode
-    const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, { llm: deps.llm })
+    // T-201: capture the agentless localizer's ranked candidates from the SAME
+    // pass (observer seam — no second LLM call). Empty unless agentless mode runs.
+    let localizeCandidates: readonly string[] = []
+    const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, {
+      llm: deps.llm,
+      onCandidates: (files) => {
+        localizeCandidates = files
+      },
+    })
 
     // Repro-test (Agentless §3.3.1) — default-OFF; env-gated. See
     // `installReproTestHint` for details.
@@ -1527,6 +1548,23 @@ export const runInstanceOnce = async (
       // T-301 verification-plan telemetry (knob-gated, observe-only).
       if (benchOptIns().verificationPlan && verificationPlan !== undefined) {
         extra.verificationPlan = verificationPlan
+      }
+      // T-201/T-202 fault-evidence packet + owner-admission (knob-gated, observe-only).
+      // Built from the agentless localizer's ranked candidates (rank→score, no LSP
+      // owner-resolve threaded ⇒ packet is `partial`, which is honest; owner_recall
+      // is still measurable from the stage-1 ranking offline vs the gold owner).
+      if (
+        (benchOptIns().faultEvidence || benchOptIns().ownerAdmission) &&
+        instance.swebench !== undefined &&
+        localizeCandidates.length > 0
+      ) {
+        const stage1Files = localizeCandidates.map((file, i) => ({
+          file,
+          score: localizeCandidates.length - i,
+        }))
+        const packet = buildFaultEvidencePacket({ issueText: instance.problemStatement, stage1Files })
+        if (benchOptIns().faultEvidence) extra.faultEvidence = packet
+        if (benchOptIns().ownerAdmission) extra.ownerAdmission = decideOwnerAdmission({ packet })
       }
     }
     return okResult(instance, phase, v, extra)
