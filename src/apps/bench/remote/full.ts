@@ -129,6 +129,39 @@ const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
  *  token is piped over STDIN and is safe, but these env/flag values are not). */
 const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 
+/** Keys set EXPLICITLY in the remote command — excluded from the generic forward
+ *  to avoid double-assignment. */
+const EXPLICIT_BOX_ENV: ReadonlySet<string> = new Set([
+  "QUANTA_BENCH_PRESET",
+  "QUANTA_BENCH_CONCURRENCY",
+  "QUANTA_BENCH_RECORD_TRAJECTORY",
+])
+
+/**
+ * Build the `KEY=val ` prefix that forwards the operator's local bench knobs
+ * (every set, non-empty `QUANTA_BENCH_*` except the explicitly-handled ones) into
+ * the remote box command. PURE — deterministic over the given env. Sorted for a
+ * stable command string. Each value is shell-quoted.
+ *
+ * WHY this exists as a tested seam: without forwarding, env-only knobs that are
+ * NOT bundled in any preset (QUANTA_BENCH_SPEC_FIDELITY_STEER /
+ * QUANTA_BENCH_VERIFICATION_PLAN / …) never reach the box, so a remote experiment
+ * arm is SILENTLY INERT and the whole A/B reads as a null effect (jun-16
+ * env-forwarding bug class). The test pins that the experiment knobs survive.
+ */
+export const buildForwardedBenchEnv = (env: NodeJS.ProcessEnv): string =>
+  Object.keys(env)
+    .filter(
+      (k) =>
+        k.startsWith("QUANTA_BENCH_") &&
+        !EXPLICIT_BOX_ENV.has(k) &&
+        env[k] !== undefined &&
+        env[k] !== "",
+    )
+    .sort()
+    .map((k) => `${k}=${shq(env[k] as string)} `)
+    .join("")
+
 const userData = (ttl: number): string =>
   [
     "#!/bin/bash",
@@ -545,6 +578,15 @@ export const createFullRemoteBackend = (
       const trajectoryRecordEnv = recordTrajectory
         ? `QUANTA_BENCH_RECORD_TRAJECTORY="$HOME/quanta/bench-trajectory.jsonl" `
         : ""
+      // Forward the operator's local bench knobs (every `QUANTA_BENCH_*`) to the
+      // box so a REMOTE arm exercises the SAME posture as a local one. Without
+      // this, knobs set only via env — e.g. QUANTA_BENCH_SPEC_FIDELITY_STEER /
+      // QUANTA_BENCH_VERIFICATION_PLAN (NOT bundled in any preset) — never reach
+      // the box, so the remote experiment arm is SILENTLY INERT (jun-16
+      // env-forwarding bug class; an entire A/B campaign can read as null effect).
+      // The explicitly-set keys below are excluded to avoid double-assignment.
+      // Scope = `QUANTA_BENCH_*` only: bench feature flags, never secrets.
+      const forwardedBenchEnv = buildForwardedBenchEnv(process.env)
       // `set -o pipefail` so a failed bench run propagates through the `tee`
       // (otherwise the pipeline's exit code is tee's, always 0 — masking failures).
       //
@@ -563,6 +605,9 @@ export const createFullRemoteBackend = (
           // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
           // arch-aware default is "none" (slow local conda build).
           `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
+          // Forwarded operator bench knobs (QUANTA_BENCH_*) — makes remote arms
+          // exercise the same posture as local; without it env-only knobs are inert.
+          forwardedBenchEnv +
           // Optional LLM-trajectory recording (default-OFF). When the operator
           // sets QUANTA_BENCH_RECORD_TRAJECTORY locally, propagate it to the box
           // so the run records a replayable cassette (fetched back below) — makes
