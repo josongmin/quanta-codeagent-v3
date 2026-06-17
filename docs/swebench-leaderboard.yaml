@@ -151,3 +151,76 @@ runs:
   - instance_id: django__django-14765
     repo: django
     turns: 18
+- run_id: easy-light-t1t2-2026-06-17
+  date: '2026-06-17'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, arm64 docker (remote/full.ts full-remote)
+  scope: easy tier (T1+T2) light repos (pytest/sympy/requests/flask/pylint), parallel 2-box waves; yaml is durable union (never regresses on /tmp rotation)
+  resolved_count: 24
+  resolved:
+  - instance_id: pallets__flask-5014
+    repo: flask
+    turns: 23
+  - instance_id: psf__requests-1142
+    repo: requests
+    turns: 60
+  - instance_id: psf__requests-1921
+    repo: requests
+  - instance_id: psf__requests-5414
+    repo: requests
+  - instance_id: pylint-dev__pylint-6903
+    repo: pylint
+    turns: 19
+  - instance_id: pytest-dev__pytest-5262
+    repo: pytest
+    turns: 36
+  - instance_id: pytest-dev__pytest-5809
+    repo: pytest
+    turns: 39
+  - instance_id: pytest-dev__pytest-6202
+    repo: pytest
+    turns: 60
+  - instance_id: pytest-dev__pytest-7205
+    repo: pytest
+    turns: 23
+  - instance_id: pytest-dev__pytest-7982
+    repo: pytest
+  - instance_id: sympy__sympy-13372
+    repo: sympy
+    turns: 31
+  - instance_id: sympy__sympy-13480
+    repo: sympy
+  - instance_id: sympy__sympy-13647
+    repo: sympy
+  - instance_id: sympy__sympy-14711
+    repo: sympy
+  - instance_id: sympy__sympy-15017
+    repo: sympy
+    turns: 50
+  - instance_id: sympy__sympy-15809
+    repo: sympy
+    turns: 43
+  - instance_id: sympy__sympy-16450
+    repo: sympy
+    turns: 57
+  - instance_id: sympy__sympy-16766
+    repo: sympy
+    turns: 44
+  - instance_id: sympy__sympy-16886
+    repo: sympy
+  - instance_id: sympy__sympy-17655
+    repo: sympy
+    turns: 34
+  - instance_id: sympy__sympy-19637
+    repo: sympy
+    turns: 33
+  - instance_id: sympy__sympy-22914
+    repo: sympy
+  - instance_id: sympy__sympy-23534
+    repo: sympy
+    turns: 59
+  - instance_id: sympy__sympy-23824
+    repo: sympy
+    turns: 35
