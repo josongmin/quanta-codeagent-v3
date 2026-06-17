@@ -49,8 +49,8 @@ export {
   DEFAULT_COMMAND_HOOK_TIMEOUT_MS,
   defaultHookApprovalsPath,
   type HookApprovalRecord,
-  hookBindingKey,
   HookReviewStore,
+  hookBindingKey,
   installCommandHooks,
   loadCommandHookBindings,
   mapClaudeEvent,
@@ -259,7 +259,12 @@ export {
   type ThreadMemoryMode,
 } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
-export { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
+export {
+  isMutatingToolBlockedInMode,
+  modeBlockReason,
+  mutatingToolKind,
+  resolveAgentMode,
+} from "./mode"
 export {
   loadNamedAgents,
   MAX_AGENT_FILES,
@@ -282,6 +287,11 @@ export {
 } from "./plan-exit"
 export type { AgentMode, TurnContext, TurnContextInput } from "./prompt"
 export { buildSystemPrompt, buildTurnContext, escapeReminderBoundary } from "./prompt"
+export {
+  type MaybeProposeRadarCardArgs,
+  maybeProposeRadarCard,
+  type RadarProducerBlock,
+} from "./radar-producer-hook"
 export { RECOVERY_CAPS } from "./recovery"
 export {
   loadRepoRules,
@@ -410,11 +420,6 @@ export type {
   PreCompactRequestQuery,
   StopReason,
 } from "./types"
-export {
-  maybeProposeRadarCard,
-  type MaybeProposeRadarCardArgs,
-  type RadarProducerBlock,
-} from "./radar-producer-hook"
 export { embedUntrusted, escapeBoundary } from "./untrusted"
 export {
   createVerifyGuardState,

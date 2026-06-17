@@ -4,11 +4,52 @@
  * a repro becomes the primaryRail/required ONLY after it proved RED on the
  * unpatched base — otherwise it is demoted to optional (never a false-green gate).
  */
-import type { VerificationPlan, VerificationPlanInput, VerificationStep } from "./types"
+import type {
+  SuccessPredicate,
+  VerificationAuthority,
+  VerificationPlan,
+  VerificationPlanInput,
+  VerificationStep,
+} from "./types"
 
 const DEFAULT_MAX_REQUIRED = 3
 
 export type { VerificationPlan, VerificationPlanInput } from "./types"
+
+/**
+ * Default (execution-authority) success contract for a step that carries no
+ * issue-declared exact output. A repro is "selected_test_passes"; owner tests
+ * and module smoke assert a zero exit.
+ */
+const defaultSuccessPredicate = (kind: VerificationStep["kind"]): SuccessPredicate =>
+  kind === "repro" ? { type: "selected_test_passes" } : { type: "test_exit_zero" }
+
+/**
+ * Encode a PUBLIC issue-declared expected output as a typed exact-output
+ * contract. This is the gap-B spec-fidelity rail — public input, never oracle.
+ */
+const issueExpectedPredicate = (
+  expected: NonNullable<VerificationPlanInput["issueDeclaredExpected"]>,
+): { predicate: SuccessPredicate; authority: VerificationAuthority } => {
+  switch (expected.kind) {
+    case "symbolic":
+      return {
+        predicate: { type: "symbolic_repr_equals", expectedRepr: expected.value },
+        authority: "structure",
+      }
+    case "stdout":
+      return {
+        predicate: { type: "stdout_contains", substring: expected.value },
+        authority: "execution",
+      }
+    default:
+      // "latex" or unspecified ⇒ exact string equality.
+      return {
+        predicate: { type: "latex_or_string_exact", expected: expected.value },
+        authority: "exact-diff",
+      }
+  }
+}
 
 export const buildVerificationPlan = (input: VerificationPlanInput): VerificationPlan => {
   const maxRequired = input.maxRequired ?? DEFAULT_MAX_REQUIRED
@@ -46,6 +87,24 @@ export const buildVerificationPlan = (input: VerificationPlanInput): Verificatio
   }
   // a repro that did NOT validate red is demoted to optional — never required.
   if (reproStep && reproStep !== primaryRail) optional.push(reproStep)
+
+  // Attach a typed successPredicate + authority to every required step. The
+  // primary/required step gets the issue-declared exact-output contract when the
+  // public problem statement exposes one; the rest default to execution proofs.
+  const issueExpected = input.issueDeclaredExpected
+    ? issueExpectedPredicate(input.issueDeclaredExpected)
+    : undefined
+  for (let i = 0; i < required.length; i++) {
+    const step = required[i]
+    if (!step) continue
+    if (i === 0 && issueExpected) {
+      step.successPredicate = issueExpected.predicate
+      step.authority = issueExpected.authority
+    } else {
+      step.successPredicate = defaultSuccessPredicate(step.kind)
+      step.authority = "execution"
+    }
+  }
 
   return { primaryRail, required, optional, baseValidatedRed }
 }

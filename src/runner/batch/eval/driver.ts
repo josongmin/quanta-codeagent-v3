@@ -93,6 +93,7 @@ import {
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
 export interface RunInstanceDeps {
@@ -1043,6 +1044,10 @@ interface Phase {
   turns: number
   stopReason?: StopReason
   agentError?: string
+  /** T-202/F6 stream-tap signals (single-pass path only). */
+  firstEditFile?: string
+  editCount?: number
+  turnsToFirstEdit?: number
 }
 
 /**
@@ -1054,30 +1059,9 @@ interface Phase {
  * record the tool name (no command string is associated) so the validator can
  * still fall back to the agent's `reproPath` (or return degenerate).
  */
-class LastVerifyCmdTap implements StreamPort {
-  lastVerifyCmd: string | undefined
-  lastErrorMessage: string | undefined
-  constructor(private readonly downstream: StreamPort) {}
-  emit(event: AgentEvent): void {
-    if (event.type === "tool_call") {
-      if (event.name === "bash") {
-        const input = event.input
-        if (typeof input === "object" && input !== null && "command" in input) {
-          const cmd = (input as { command: unknown }).command
-          if (typeof cmd === "string" && cmd !== "") this.lastVerifyCmd = cmd
-        }
-      } else if (event.name === "test_runner") {
-        // test_runner has no shell-equivalent string; treat the tool-call name
-        // as a sentinel so the orchestrator knows the agent DID verify (the
-        // validator falls back to reproPath / degenerate when cmd is unset).
-        this.lastVerifyCmd = "test_runner"
-      }
-    } else if (event.type === "error") {
-      this.lastErrorMessage = event.message
-    }
-    this.downstream.emit(event)
-  }
-}
+// Bench stream tap (`BenchStreamTap` + `editTargetOf` + `relFromSandbox`) is
+// the SSOT in `./stream-tap` — both this runner core and the prod SDK wrapper
+// (`apps/bench/eval/driver.ts`) import it (see the import block above).
 
 /**
  * Emit ONE `knobs_applied` event onto the given stream, carrying the
@@ -1148,7 +1132,7 @@ const runAgentOnce = async (
   precomputedHint: string | undefined,
   reproHint: string | undefined,
 ): Promise<RunOnceResult> => {
-  const tap = new LastVerifyCmdTap(w.stream)
+  const tap = new BenchStreamTap(w.stream)
   // Knob telemetry (2026-05-26): emit ONE `knobs_applied` event per
   // runAgent invocation. In the repair orchestrator each round calls this
   // helper, so each round produces its own trajectory line (the env doesn't
@@ -1183,13 +1167,16 @@ const runAgentPhase = async (
   let turns = 0
   let stopReason: StopReason | undefined
   let agentError: string | undefined
+  let firstEditFile: string | undefined
+  let editCount: number | undefined
+  let turnsToFirstEdit: number | undefined
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const tap = new LastVerifyCmdTap(w.stream)
+      const tap = new BenchStreamTap(w.stream)
       // Knob telemetry: emit once per phase entry (matches the contract
       // documented on `emitKnobsApplied`). The single-pass path bypasses
       // `runAgentOnce`, so the emit lives here directly.
@@ -1200,6 +1187,9 @@ const runAgentPhase = async (
       turns = outcome.turns
       stopReason = outcome.reason
       agentError = tap.lastErrorMessage
+      firstEditFile = relFromSandbox(sandbox, tap.firstEditFile)
+      editCount = tap.editCount
+      turnsToFirstEdit = tap.turnsToFirstEdit
     },
   )
   return {
@@ -1207,6 +1197,9 @@ const runAgentPhase = async (
     turns,
     ...(stopReason !== undefined ? { stopReason } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
+    ...(firstEditFile !== undefined ? { firstEditFile } : {}),
+    ...(editCount !== undefined ? { editCount } : {}),
+    ...(turnsToFirstEdit !== undefined ? { turnsToFirstEdit } : {}),
   }
 }
 
@@ -1490,6 +1483,11 @@ export const runInstanceOnce = async (
       emitVerify(w.observer, v)
       const usage = w.usage?.total()
       if (usage) extra.usage = usage
+      // T-202/F6 closure signals — only attached when observing, so non-observe
+      // report.json stays byte-identical. Consumed offline by closure-diagnostics.
+      if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
+      if (phase.editCount !== undefined) extra.editCount = phase.editCount
+      if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
     }
     return okResult(instance, phase, v, extra)
   } catch (e) {

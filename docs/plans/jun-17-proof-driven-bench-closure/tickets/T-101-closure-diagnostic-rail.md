@@ -17,6 +17,12 @@ Add an offline diagnostic sidecar for bench runs that measures closure quality b
 - `synth_repro_base_red_rate`
 - `stray_file_rate`
 - `no_patch_exhausted_rate`
+- `sibling_coverage_expected_rate`
+- `sibling_coverage_miss_rate`
+- `spec_literal_signal_rate`
+- `spec_literal_follow_rate`
+- `success_predicate_present_rate`
+- `primary_success_predicate_mismatch_rate`
 
 The oracle input is evaluation-only and MUST NOT be loaded by runtime routing or prompt rendering.
 
@@ -37,6 +43,8 @@ The oracle input is evaluation-only and MUST NOT be loaded by runtime routing or
 - [ ] Sidecar can classify `#9296`-style empty-patch runs separately from model-miss runs.
 - [ ] `first_edit_owner_match` is derived from the first observed mutating edit event, not guessed from the final diff alone.
 - [ ] Gate-bypass / gate-enter events are reported separately so under-verify and over-verify regressions are distinguishable.
+- [ ] Sidecar can distinguish "sibling coverage was expected" from "sibling coverage was actually touched".
+- [ ] Sidecar can report when an exact spec literal signal existed but the chosen verification contract did not reflect it.
 
 ## Proof rail
 

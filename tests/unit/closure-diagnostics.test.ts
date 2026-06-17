@@ -42,15 +42,42 @@ describe("computeClosureDiagnostics", () => {
 
   const facts: ClosureRunFact[] = [
     // resolved, first+only edited file is the gold owner
-    fact({ instanceId: "resolved-1", resolved: true, patchFiles: ["pkg/a.py"], firstEditFile: "pkg/a.py" }),
+    fact({
+      instanceId: "resolved-1",
+      resolved: true,
+      patchFiles: ["pkg/a.py"],
+      firstEditFile: "pkg/a.py",
+    }),
     // model-miss: edited the WRONG file (owner miss) — non-empty patch, resolved=false
-    fact({ instanceId: "miss-owner", resolved: false, patchFiles: ["pkg/wrong.py"], firstEditFile: "pkg/wrong.py" }),
+    fact({
+      instanceId: "miss-owner",
+      resolved: false,
+      patchFiles: ["pkg/wrong.py"],
+      firstEditFile: "pkg/wrong.py",
+    }),
     // model-miss multi-site: got ONE of two gold owners (recall@1 hit via first file, but unresolved)
-    fact({ instanceId: "miss-multi", resolved: false, patchFiles: ["pkg/base.py"], firstEditFile: "pkg/base.py" }),
+    fact({
+      instanceId: "miss-multi",
+      resolved: false,
+      patchFiles: ["pkg/base.py"],
+      firstEditFile: "pkg/base.py",
+    }),
     // #9296 class: empty patch + max_turns → no_patch_exhausted, NOT model_miss
-    fact({ instanceId: "nopatch-9296", resolved: false, patchFiles: [], emptyPatch: true, endReason: "max_turns" }),
+    fact({
+      instanceId: "nopatch-9296",
+      resolved: false,
+      patchFiles: [],
+      emptyPatch: true,
+      endReason: "max_turns",
+    }),
     // resolved-ish but with a stray file polluting the diff
-    fact({ instanceId: "stray-1", resolved: true, patchFiles: ["pkg/r.py"], strayFiles: ["test.html.Z"], firstEditFile: "pkg/r.py" }),
+    fact({
+      instanceId: "stray-1",
+      resolved: true,
+      patchFiles: ["pkg/r.py"],
+      strayFiles: ["test.html.Z"],
+      firstEditFile: "pkg/r.py",
+    }),
   ]
 
   const d = computeClosureDiagnostics(facts, oracleMap)
@@ -88,7 +115,14 @@ describe("computeClosureDiagnostics", () => {
   })
 
   test("not-yet-instrumented gate metrics degrade to unavailable (value null), never invented", () => {
-    for (const k of ["gate_enter_rate", "gate_bypass_rate", "verify_rounds_per_run", "synth_repro_base_red_rate", "primary_false_green_rate", "primary_rail_present_rate"]) {
+    for (const k of [
+      "gate_enter_rate",
+      "gate_bypass_rate",
+      "verify_rounds_per_run",
+      "synth_repro_base_red_rate",
+      "primary_false_green_rate",
+      "primary_rail_present_rate",
+    ]) {
       expect(d.metrics[k]?.available).toBe(false)
       expect(d.metrics[k]?.value).toBeNull()
     }
@@ -104,11 +138,70 @@ describe("computeClosureDiagnostics", () => {
 
   test("gate metrics become available once instrumented (forward-compat)", () => {
     const instrumented = computeClosureDiagnostics(
-      [fact({ instanceId: "resolved-1", resolved: true, patchFiles: ["pkg/a.py"], gateEntered: true, gateBypassed: false, verifyRounds: 2 })],
+      [
+        fact({
+          instanceId: "resolved-1",
+          resolved: true,
+          patchFiles: ["pkg/a.py"],
+          gateEntered: true,
+          gateBypassed: false,
+          verifyRounds: 2,
+        }),
+      ],
       oracleMap,
     )
     expect(instrumented.metrics.gate_enter_rate.available).toBe(true)
     expect(instrumented.metrics.gate_enter_rate.value).toBeCloseTo(1)
     expect(instrumented.metrics.verify_rounds_per_run.value).toBeCloseTo(2)
+  })
+
+  describe("F6 exploration-efficiency", () => {
+    test("edit_count_per_run / turns_to_first_edit are raw means (no thresholds)", () => {
+      const d6 = computeClosureDiagnostics(
+        [
+          fact({ instanceId: "a", patchFiles: ["pkg/a.py"], editCount: 6, turnsToFirstEdit: 12 }),
+          fact({ instanceId: "b", patchFiles: ["pkg/b.py"], editCount: 2, turnsToFirstEdit: 4 }),
+        ],
+        new Map(),
+      )
+      expect(d6.metrics.edit_count_per_run.value).toBeCloseTo(4) // (6+2)/2
+      expect(d6.metrics.turns_to_first_edit.value).toBeCloseTo(8) // (12+4)/2
+    })
+
+    test("repro_red_but_unresolved_rate: among reproduced repros, the unresolved fraction", () => {
+      const d6 = computeClosureDiagnostics(
+        [
+          // had a base-RED repro, still missed → contributes 1 (the #10914 signal)
+          fact({
+            instanceId: "miss",
+            resolved: false,
+            patchFiles: ["x.py"],
+            reproReproduced: true,
+          }),
+          // had a repro and resolved → contributes 0
+          fact({ instanceId: "win", resolved: true, patchFiles: ["y.py"], reproReproduced: true }),
+          // no repro → excluded from the denominator entirely
+          fact({
+            instanceId: "norepro",
+            resolved: false,
+            patchFiles: ["z.py"],
+            reproReproduced: null,
+          }),
+        ],
+        new Map(),
+      )
+      expect(d6.metrics.repro_red_but_unresolved_rate.n).toBe(2)
+      expect(d6.metrics.repro_red_but_unresolved_rate.value).toBeCloseTo(1 / 2)
+    })
+
+    test("F6 metrics unavailable when uninstrumented (null, never invented)", () => {
+      const d6 = computeClosureDiagnostics(
+        [fact({ instanceId: "a", patchFiles: ["x.py"] })],
+        new Map(),
+      )
+      expect(d6.metrics.edit_count_per_run.available).toBe(false)
+      expect(d6.metrics.turns_to_first_edit.available).toBe(false)
+      expect(d6.metrics.repro_red_but_unresolved_rate.available).toBe(false)
+    })
   })
 })

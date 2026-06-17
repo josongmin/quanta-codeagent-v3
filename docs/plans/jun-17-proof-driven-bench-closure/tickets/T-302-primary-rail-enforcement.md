@@ -9,6 +9,7 @@ Upgrade bench closeout / repair semantics so they respect the selected `primaryR
 - `GateDecision` chooses `commit-now` or `verify`, using structural signals rather than free-form model preference
 - verify sources are limited to external evidence: `primaryRail`, structure resolution, and exact patch hygiene facts
 - `mustPass` is satisfied only by the selected primary rail
+- non-primary green is advisory only
 - `repair` is allowed only when a primary rail exists and is red
 - green external signal stops the loop immediately
 - missing primary rail => no repair round
@@ -37,6 +38,8 @@ This is the ticket that keeps `repair` from over-correcting on the wrong command
 - [ ] Additional verify / repair rounds are hard-capped by repair budget; v1 stops after green or after the default two extra repair rounds beyond round 0.
 - [ ] `bench-in-loop-exec:off` keeps the existing single-pass / no-verify posture.
 - [ ] Regression fixture covers the `django__django-10914` class: PASS baseline must not turn into FAIL because of a non-primary repair seed.
+- [ ] Primary-rail success is evaluated against the step's typed `successPredicate`, not an informal green impression.
+- [ ] `spec_literal_available_but_not_followed` may force `verify`, but it does not let same-model critique clear the gate.
 
 ## Proof rail
 

@@ -1116,6 +1116,66 @@ const BENCH: readonly KnobInventoryEntry[] = [
       "Bench: max instances processed concurrently (default 1 = serial, byte-identical). >1 overlaps patch-gen across instances; Docker grading stays serialised by the python-swebench mutex (arm64-safe). Also settable via --concurrency. For parallel grading use an x86 backend (ADR-0536).",
     readSite: "apps/bench/index.ts",
   },
+  {
+    envKey: "QUANTA_BENCH_FAULT_EVIDENCE",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (T-201): emit a typed FaultEvidencePacket (bounded owner-context: paths/symbols only, no raw source) instead of raw-source hint blobs. Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_VERIFICATION_PLAN",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (T-301): build a typed VerificationPlan (primary rail + required/optional steps with typed successPredicates) instead of relying on the agent's ad-hoc verify command. Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_PRIMARY_RAIL",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (T-302): enforce the planner-selected primary rail as the done-gate (non-primary green never clears; repair iterates while primary RED; categorical commit-vs-verify gate). Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_PATCH_HYGIENE",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (T-401): run a typed PatchHygieneReport over the candidate diff (stray added files deny, owner-outside telemetry-only). Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_NO_PATCH_BREAKER",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (T-501): post-localization commit rail (force a best-edit commit when budget is mostly spent with no edit) + explicit no-patch `exhausted` verdict at budget end. Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_REPAIR_ESCALATION",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (T-601): explicit RepairEscalationDecision (continue-single-owner / collect-more-evidence / branch-search / multi-owner-plan) from typed artifacts, with a closed reason taxonomy; widen to multi-site only on explicit cross-owner evidence. Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
 ]
 
 /** P1 cluster — memory pipeline (memory-factory.ts), @-mention resolver caps

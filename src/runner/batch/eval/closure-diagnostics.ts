@@ -42,6 +42,14 @@ export interface ClosureRunFact {
   endReason: string | null
   /** First mutating tool_call target path (stream-tap, T-202). null ⇒ uncaptured. */
   firstEditFile?: string | null
+  /** F6 — count of file-mutating tool_calls (churn). null ⇒ uncaptured. */
+  editCount?: number | null
+  /** F6 — turn index of the first mutating edit (localize latency). null ⇒ uncaptured. */
+  turnsToFirstEdit?: number | null
+  /** F6 — agent had a base-RED reproduction available (repro-test reproduced).
+   *  Pairs with `resolved` to surface the #10914-class signal: a working repro
+   *  yet an unresolved miss (execution feedback present, localize still wrong). */
+  reproReproduced?: boolean | null
   // ── later-wave instrumentation (absent until wired) ──────────────────────
   gateEntered?: boolean | null
   gateBypassed?: boolean | null
@@ -114,10 +122,8 @@ export const computeClosureDiagnostics = (
 
   const perInstance: ClosurePerInstance[] = facts.map((f) => {
     const gold = goldSetOf(f.instanceId)
-    const ownerHit =
-      gold && f.patchFiles.length > 0 ? gold.has(f.patchFiles[0] as string) : null
-    const firstEditOwnerMatch =
-      gold && f.firstEditFile != null ? gold.has(f.firstEditFile) : null
+    const ownerHit = gold && f.patchFiles.length > 0 ? gold.has(f.patchFiles[0] as string) : null
+    const firstEditOwnerMatch = gold && f.firstEditFile != null ? gold.has(f.firstEditFile) : null
     return { instanceId: f.instanceId, class: classify(f), ownerHit, firstEditOwnerMatch }
   })
 
@@ -133,15 +139,26 @@ export const computeClosureDiagnostics = (
 
   const patchBearing = facts.filter((f) => f.patchFiles.length > 0)
   const firstEditDenom = facts.filter((f) => f.firstEditFile != null && oracleMap.has(f.instanceId))
+  // F6 — #10914-class churn: among runs that HAD a reproduced (base-RED) repro,
+  // the fraction that still ended unresolved. A raw rate, NOT a thresholded
+  // judgement — execution feedback was present yet the miss survived (the signal
+  // that localize, not fix-precision, was the bottleneck).
+  const reproRedDenom = facts.filter((f) => f.reproReproduced === true && f.resolved !== null)
 
   const metrics: Record<string, ClosureMetric> = {
     "owner_recall@1": recallAt(1),
     "owner_recall@3": recallAt(3),
     first_edit_owner_match: metricOf(
-      firstEditDenom.map((f) => (goldSetOf(f.instanceId) as Set<string>).has(f.firstEditFile as string)),
+      firstEditDenom.map((f) =>
+        (goldSetOf(f.instanceId) as Set<string>).has(f.firstEditFile as string),
+      ),
     ),
     stray_file_rate: metricOf(patchBearing.map((f) => f.strayFiles.length > 0)),
     no_patch_exhausted_rate: metricOf(perInstance.map((p) => p.class === "no_patch_exhausted")),
+    // F6 exploration-efficiency (raw means / rate — no arbitrary thresholds):
+    edit_count_per_run: metricOf(facts.map((f) => f.editCount)),
+    turns_to_first_edit: metricOf(facts.map((f) => f.turnsToFirstEdit)),
+    repro_red_but_unresolved_rate: metricOf(reproRedDenom.map((f) => f.resolved === false)),
     // later-wave instrumentation — unavailable until the driver populates the field
     primary_rail_present_rate: metricOf(facts.map((f) => f.primaryRailPresent)),
     primary_false_green_rate: metricOf(facts.map((f) => f.primaryFalseGreen)),

@@ -33,9 +33,9 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
+import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
-import type { AgentEvent, StreamPort } from "@/stream"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
@@ -246,31 +246,15 @@ interface Phase {
   turns: number
   stopReason?: AgentOutcome["reason"]
   agentError?: string
+  /** T-202/F6 stream-tap signals (single-pass path only). */
+  firstEditFile?: string
+  editCount?: number
+  turnsToFirstEdit?: number
 }
 
-class LastVerifyCmdTap implements StreamPort {
-  lastVerifyCmd: string | undefined
-  lastErrorMessage: string | undefined
-
-  constructor(private readonly downstream: StreamPort) {}
-
-  emit(event: AgentEvent): void {
-    if (event.type === "tool_call") {
-      if (event.name === "bash") {
-        const input = event.input
-        if (typeof input === "object" && input !== null && "command" in input) {
-          const cmd = (input as { command: unknown }).command
-          if (typeof cmd === "string" && cmd !== "") this.lastVerifyCmd = cmd
-        }
-      } else if (event.name === "test_runner") {
-        this.lastVerifyCmd = "test_runner"
-      }
-    } else if (event.type === "error") {
-      this.lastErrorMessage = event.message
-    }
-    this.downstream.emit(event)
-  }
-}
+// Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
+// above. This prod wrapper and the runner core share the one definition
+// (they previously each carried a drifting private copy).
 
 const runAgentOnce = async (
   instance: Instance,
@@ -283,7 +267,7 @@ const runAgentOnce = async (
   precomputedHint: string | undefined,
   reproHint: string | undefined,
 ): Promise<RunOnceResult> => {
-  const tap = new LastVerifyCmdTap(w.stream)
+  const tap = new BenchStreamTap(w.stream)
   const outcome = await runAgentViaSdk(
     buildRunnerConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint, reproHint),
     deps.runtimeFactory,
@@ -308,13 +292,16 @@ const runAgentPhase = async (
   let turns = 0
   let stopReason: AgentOutcome["reason"] | undefined
   let agentError: string | undefined
+  let firstEditFile: string | undefined
+  let editCount: number | undefined
+  let turnsToFirstEdit: number | undefined
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const tap = new LastVerifyCmdTap(w.stream)
+      const tap = new BenchStreamTap(w.stream)
       const outcome = await runAgentViaSdk(
         buildRunnerConfig(
           instance,
@@ -331,6 +318,9 @@ const runAgentPhase = async (
       turns = outcome.turns
       stopReason = outcome.reason
       agentError = tap.lastErrorMessage
+      firstEditFile = relFromSandbox(sandbox, tap.firstEditFile)
+      editCount = tap.editCount
+      turnsToFirstEdit = tap.turnsToFirstEdit
     },
   )
   return {
@@ -338,6 +328,9 @@ const runAgentPhase = async (
     turns,
     ...(stopReason !== undefined ? { stopReason } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
+    ...(firstEditFile !== undefined ? { firstEditFile } : {}),
+    ...(editCount !== undefined ? { editCount } : {}),
+    ...(turnsToFirstEdit !== undefined ? { turnsToFirstEdit } : {}),
   }
 }
 
@@ -594,7 +587,8 @@ const runInstanceOnce = async (
       // because the agent always failed — the reference patch is still checkable.
       if (shouldValidateGold(deps, false)) {
         const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
-        if (!gold.ok) return { ...terminal, passed: false, verdict: "grader_invalid", error: gold.error }
+        if (!gold.ok)
+          return { ...terminal, passed: false, verdict: "grader_invalid", error: gold.error }
       }
       return terminal
     }
@@ -615,6 +609,11 @@ const runInstanceOnce = async (
       emitVerify(w.observer, v)
       const usage = w.usage?.total()
       if (usage) extra.usage = usage
+      // T-202/F6 closure signals — only attached when observing, so non-observe
+      // report.json stays byte-identical. Consumed offline by closure-diagnostics.
+      if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
+      if (phase.editCount !== undefined) extra.editCount = phase.editCount
+      if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
     }
     return okResult(instance, phase, v, extra)
   } catch (error) {

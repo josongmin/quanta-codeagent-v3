@@ -31,6 +31,19 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 
 **결론**: easy 티어 미스의 병목 = gross localize가 아니라 **fix 정밀도**(constraint-reasoning·절제·multi-site 일관성). #10914·#15987은 trivial을 과구현하는 over-engineering 역방향 실패. → grep-천장 분석(동네 찾되 정밀 갭)과 일치, 코드그래프(find-refs/impact)는 #14315 multi-site엔 도움되나 나머지(정밀 synthesis/절제)는 grounding 밖.
 
+### 🔬 실행피드백 A/B — baseline 실패 6개만 재실행 (agentless-v1, 2026-06-17)
+
+위 78/84는 **baseline preset**(no agentless 도구). 그 실패 6개를 **agentless-v1**(lsp+localize-phase+issue-hint+repro-test 실행피드백)로만 재solve→EC2 채점:
+
+| | baseline | agentless-v1 | Δ |
+|---|---|---|---|
+| 실패6개 resolved | 0/6 | **3/6** | +3 |
+
+- ✅ 회복: `#15987`(over-engineer), `#16642`(wrong-logic), `#9296`(baseline은 max-turns 빈패치 → issue-hint+repro로 해결)
+- ❌ 잔존: `#10914`(1줄 global_settings = **localize 병목**, 53턴/6edit churn), `#14315`(**multi-site** base+postgresql), `#16667`(**repro 증상유효성** — 예외는 잡고 복구값 오류)
+
+**측정 인사이트**: 실행피드백(repro 루프)이 baseline 실패의 **50%를 회복**. 잔존 3개는 정확히 적대어딧이 짚은 3클래스(localize-miss / multi-site / repro-symptom-validity) — 즉 실행피드백은 **fix 정밀도는 잡아도 "어느 파일"(localize)·multi-site·repro 유효성은 못 잡음**. 다음 레버는 이 3축(코드그래프 find-refs proactive·repro expected-assert)이며 실행피드백 위에 직교로 쌓아야 함을 실측 확인.
+
 ## 📊 easy django T1+T2 batch (2026-06-16, scaffold-fixed) — 39 resolved
 
 우리 정형화 분석의 easy 티어(T1 존나쉬움 + T2 쉬움) django 84개 블라인드 런. **bench 스캐폴드 2버그 구조수정 후** 측정:

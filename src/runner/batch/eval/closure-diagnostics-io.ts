@@ -31,10 +31,20 @@ export const strayFilesOf = (diff: string): string[] => buildPatchHygiene(diff).
  *  stream tap threads the real reason in a later wave). */
 const endReasonOf = (r: InstanceResult): string | null => {
   const outs = r.budget?.attemptOutcomes ?? []
-  if (outs.some((o) => o.kind === "real-fail" && o.subkind === "max_turns_exhausted")) return "max_turns"
+  if (outs.some((o) => o.kind === "real-fail" && o.subkind === "max_turns_exhausted"))
+    return "max_turns"
   if (outs.some((o) => o.kind === "timeout")) return "timeout"
   if (outs.some((o) => o.kind === "infra-fail")) return "infra"
   return null
+}
+
+/** Whether the agentless repro-test pipeline produced a base-RED reproduction.
+ *  null ⇒ repro-test was off / never ran (signal unavailable, not "false"). */
+const reproReproducedOf = (r: InstanceResult): boolean | null => {
+  const t = r.reproTest
+  if (t === undefined) return null
+  if (!t.installed) return false
+  return (t.reproducedCount ?? 0) > 0
 }
 
 /** InstanceResult[] -> closure facts (no oracle). Verdict-excluded instances
@@ -53,6 +63,10 @@ export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFa
       // firstEditFile flows from the T-202 stream tap when present on the result;
       // absent ⇒ null ⇒ first_edit_owner_match stays unavailable (no false signal).
       firstEditFile: r.firstEditFile ?? null,
+      // F6 exploration-efficiency signals — absent ⇒ null ⇒ metric unavailable.
+      editCount: r.editCount ?? null,
+      turnsToFirstEdit: r.turnsToFirstEdit ?? null,
+      reproReproduced: reproReproducedOf(r),
     }
   })
 
@@ -96,7 +110,7 @@ export const diagnoseRun = (
 
 /** Sidecar path next to the report (`x.json` -> `x.closure-diagnostics.json`). */
 export const sidecarPath = (reportPath: string): string =>
-  reportPath.replace(/\.json$/i, "") + ".closure-diagnostics.json"
+  `${reportPath.replace(/\.json$/i, "")}.closure-diagnostics.json`
 
 /** Write the sibling artifact. Returns the path written. Never throws on a
  *  malformed run — callers gate this and treat failure as best-effort. */

@@ -8,6 +8,10 @@ Turn `FaultEvidencePacket` into an explicit owner-admission decision:
 
 - `high` confidence single owner -> inject one concise "first edit candidate" line
 - low confidence / multi-owner -> no forced owner, continue evidence-first
+- emit `coverageExpectation`:
+  - `single-site`
+  - `owner-family`
+  - `cross-owner`
 
 Also record whether the first mutating edit matched the admitted owner.
 
@@ -34,6 +38,8 @@ Also record whether the first mutating edit matched the admitted owner.
 - [ ] Ambiguous owner does not hard-block edits by itself.
 - [ ] Telemetry records admitted owner and `firstEditOwnerMatch`.
 - [ ] No new dispatch-time deny is introduced in this ticket.
+- [ ] `coverageExpectation=single-site` is the only case that may later qualify for commit-fast without extra sibling evidence.
+- [ ] `owner-family` / `cross-owner` cases are represented explicitly so later tickets can distinguish incomplete class-fix risk from ordinary owner ambiguity.
 
 ## Proof rail
 

@@ -191,6 +191,18 @@ export interface BenchPosture {
   /** True when the SOTA super-preset (agentless-v1) is active — via
    *  QUANTA_BENCH_SOTA=1 alias or QUANTA_BENCH_PRESET=agentless-v1. */
   readonly sotaOn: boolean
+  /** T-201: typed FaultEvidencePacket (bounded owner-context, no raw source). */
+  readonly faultEvidence: boolean
+  /** T-301: typed VerificationPlan (primary rail + typed successPredicates). */
+  readonly verificationPlan: boolean
+  /** T-302: primary-rail enforcement + commit-vs-verify gate + repair admission. */
+  readonly primaryRail: boolean
+  /** T-401: patch hygiene gate (stray-file deny, owner-outside telemetry). */
+  readonly patchHygiene: boolean
+  /** T-501: post-localization commit rail + no-patch exhausted verdict. */
+  readonly noPatchBreaker: boolean
+  /** T-601: multi-owner escalation decision (closed reason taxonomy). */
+  readonly repairEscalation: boolean
 }
 
 const isTrue = (v: unknown): v is true => v === true
@@ -253,6 +265,14 @@ export const benchPostureFromState = (
   if (readKnobValue(state, "test-runner", isTrue) === true) liveOverrides.push("QUANTA_TEST_RUNNER")
   if (readKnobValue(state, "repo-map", isRepoMapValue) !== undefined)
     liveOverrides.push("QUANTA_REPO_MAP")
+  // Proof-driven bench closure (jun-17) — each true ONLY when its knob resolves
+  // `true` (env / preset), else false. Default-OFF ⇒ byte-identical when unset.
+  const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
+  const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
+  const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
+  const patchHygiene = readKnobValue(state, "patch-hygiene", isTrue) === true
+  const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
+  const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   return {
     lspNav,
     subagent,
@@ -268,6 +288,12 @@ export const benchPostureFromState = (
     liveOverrides,
     preset: state.preset,
     sotaOn: state.preset === "agentless-v1",
+    faultEvidence,
+    verificationPlan,
+    primaryRail,
+    patchHygiene,
+    noPatchBreaker,
+    repairEscalation,
   }
 }
 

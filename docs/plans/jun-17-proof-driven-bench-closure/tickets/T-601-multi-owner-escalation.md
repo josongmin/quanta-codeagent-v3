@@ -19,6 +19,15 @@ The decision must be derived from:
 
 and always carry a structured `reason`.
 
+V1 reason taxonomy is closed and must include:
+
+- `owner_unresolved`
+- `cross_file_conflict`
+- `primary_rail_red_no_progress`
+- `hygiene_conflict`
+- `sibling_coverage_missing`
+- `spec_literal_available_but_not_followed`
+
 ## Touch files
 
 - new `src/agent/repair-escalation/types.ts`
@@ -34,7 +43,9 @@ and always carry a structured `reason`.
 - [ ] No escalation is triggered by same-model discomfort alone; artifact evidence must justify the action.
 - [ ] Branch-search / subagent are never activated without an explicit escalation decision.
 - [ ] Multi-owner evidence is reported, not hidden inside prompt prose.
-- [ ] V1 reason taxonomy is closed and explicit (for example: `owner_unresolved`, `cross_file_conflict`, `primary_rail_red_no_progress`, `hygiene_conflict`).
+- [ ] `sibling_coverage_missing` prevents `continue-single-owner` when the evidence packet says the defect class spans sibling producers/sites.
+- [ ] `spec_literal_available_but_not_followed` does not deny by itself, but it forces evidence-backed verify instead of free further exploration.
+- [ ] V1 reason taxonomy is closed and explicit.
 - [ ] Report artifact records the chosen escalation action and reason.
 
 ## Proof rail

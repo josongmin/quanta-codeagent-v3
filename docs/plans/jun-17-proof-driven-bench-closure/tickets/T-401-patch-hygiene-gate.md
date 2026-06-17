@@ -10,6 +10,9 @@ Add a deterministic `PatchHygieneReport` over the final cumulative diff:
 - patch file count
 - files outside admitted owner set
 - sanctioned generated files (`reproduce_issue.py`) allowlist
+- `ownerCoverageTouched`
+- `expectedSiblingCoverage`
+- `missingSiblingSites[]` (telemetry-only in v1)
 
 The report can feed `GateDecision`, but only with exact diff facts, never with vibe-based semantic-width judgments.
 
@@ -34,6 +37,7 @@ Everything else is telemetry first.
 - [ ] `#16642`-class stray additions such as `.Z` / `.br` fixture files are flagged deterministically.
 - [ ] Source-only diff remains the canonical patch capture.
 - [ ] "Patch too semantically wide" is telemetry only in v1, not an LLM critic deny.
+- [ ] Owner-family cases can report "expected sibling coverage" without turning semantic-width into a deny by itself.
 
 ## Proof rail
 

@@ -123,6 +123,16 @@ export interface InstanceResult {
    * the closure-diagnostics sidecar for `first_edit_owner_match`.
    */
   firstEditFile?: string
+  /**
+   * F6 — count of file-mutating tool_calls across the run (the #10914 churn
+   * signal: many edits without resolution). Stream-tap populated, observe-only.
+   */
+  editCount?: number
+  /**
+   * F6 — 1-based turn index of the first mutating edit (localize latency: how
+   * long the agent explored before committing to a file). Observe-only.
+   */
+  turnsToFirstEdit?: number
 }
 
 /** Structured per-attempt outcome shape echoed onto the report. Mirrors the

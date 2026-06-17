@@ -4,6 +4,15 @@
 **Scope:** turn the easy-django tail RCA into implementable, anti-heuristic bench work items.  
 **Status:** `DRAFT` -> tickets in [tickets/00-backlog.md](tickets/00-backlog.md)
 
+## Plan authority
+
+- This bundle is the **only SSOT** for the jun-17 closure implementation plan.
+- [jun-17-strategy-failure-fix-plan.md](../jun-17-strategy-failure-fix-plan.md) is a supporting oracle failure-analysis note:
+  - useful for ticket calibration
+  - not runtime policy
+  - not preset policy
+- Prompt-only steer experiments are conditional and secondary. The primary architecture is typed artifacts + exact gates.
+
 ## Root-cause snapshot
 
 - easy django 84 is now **78 resolved / 5 unresolved / 1 no-patch** on the authoritative EC2 x86 run.
@@ -42,6 +51,7 @@ Replace prompt-only nudges with typed artifacts and explicit gates:
 
 - `agentless-v1` is frozen. No in-place mutation. New behavior lands behind new bench knobs and eventually a new preset.
 - Runtime paths introduced by this bundle must **not** read `FAIL_TO_PASS`, `PASS_TO_PASS`, `test_patch`, or official grader reports as routing authority.
+- Runtime paths introduced by this bundle must **not** read oracle-only analysis notes, gold patches, or extracted oracle fixtures as routing authority.
 - The new bench artifact is named **`FaultEvidencePacket`**, not `EvidencePacket`, to avoid colliding with the existing multilang debugging packet in `src/tool/evidence/types.ts`.
 - Required verification must be grounded in external/public signals only:
   - execution results
@@ -59,6 +69,7 @@ Replace prompt-only nudges with typed artifacts and explicit gates:
   - no evidence-free rewrite rounds
 - Gate entry uses cheap structural signals (`stakes`, `uncertainty`, `signal availability`, `empty-patch pressure`), not free-form "verify vibe".
 - Broad score claims require official x86 harness artifacts (`report.json`, `predictions.jsonl`) plus the diagnostic sidecar; local arm64 smoke is not headline evidence.
+- Oracle material is allowed only for offline diagnostics, taxonomy calibration, and fixture design.
 
 ## Workstream map
 
@@ -91,6 +102,12 @@ Required diagnostic outputs:
 - `stray_file_rate`
 - `out_of_scope_file_rate`
 - `no_patch_exhausted_rate`
+- `sibling_coverage_expected_rate`
+- `sibling_coverage_miss_rate`
+- `spec_literal_signal_rate`
+- `spec_literal_follow_rate`
+- `success_predicate_present_rate`
+- `primary_success_predicate_mismatch_rate`
 
 Only after these stabilize do we compare official `resolved`.
 
@@ -108,6 +125,7 @@ Only after these stabilize do we compare official `resolved`.
 - New gates go through the bench knob registry, not ad-hoc `process.env` branching.
 - The bundle must degrade cleanly to today's behavior when its knobs are absent.
 - Deterministic signals beat heuristic critics. Any LLM critic is conditional work only after the artifact rails exist.
+- A verification step is not just a command. The planner must define what observation counts as success.
 - The gate is bidirectional:
   - high-stakes / ambiguous cases must verify
   - exact low-risk / high-confidence single-owner cases may commit early
@@ -121,6 +139,7 @@ Only after these stabilize do we compare official `resolved`.
 ## Conditional, not ticketed yet
 
 - Bench closeout-critic wiring for over-engineering review.
+- Prompt-only steer experiments such as `spec-fidelity-steer`, only after the artifact rails exist and only as isolated OFF-by-default measurements.
 - Additional regression-rail critics beyond the first `VerificationPlan`.
 - Historical `agentless-v2` / `agentless-v2-safe` namespace cleanup if T-701 preflight finds the label already overloaded in published artifacts.
 - Broader full-Verified rollout changes beyond easy-django and the existing smoke packs.
