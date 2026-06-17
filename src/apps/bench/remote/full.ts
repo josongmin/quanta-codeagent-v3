@@ -614,6 +614,12 @@ export const createFullRemoteBackend = (
           // a FAILED remote run replayable/forkable from any turn after the fact.
           trajectoryRecordEnv +
           `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
+          // `--observe-dir` ENABLES observe mode on the box so the per-instance
+          // report carries the observe-only telemetry (firstEditFile, verificationPlan,
+          // faultEvidence, and the T-3/T-4 closure measurement signals). Without it
+          // the report has only the base verdict fields and closure-diagnostics has
+          // nothing to read — the remote run produces no measurement.
+          `--observe-dir ~/observe ` +
           `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
       )
 
