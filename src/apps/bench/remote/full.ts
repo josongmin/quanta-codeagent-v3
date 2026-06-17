@@ -535,6 +535,16 @@ export const createFullRemoteBackend = (
         `[full-remote] running patch-gen + grading on box (minutes). Watch live:\n` +
           `    ssh -i ${keyPath} ${host} 'tail -f ~/run.log'`,
       )
+      // Propagate trajectory recording to the box when the operator opted in
+      // locally. Force a FIXED box-side path so the cassette can be fetched back
+      // deterministically (see below). Absent ⇒ empty ⇒ box run unchanged.
+      const recordTrajectory =
+        process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
+        process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
+        process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "0"
+      const trajectoryRecordEnv = recordTrajectory
+        ? `QUANTA_BENCH_RECORD_TRAJECTORY="$HOME/quanta/bench-trajectory.jsonl" `
+        : ""
       // `set -o pipefail` so a failed bench run propagates through the `tee`
       // (otherwise the pipeline's exit code is tee's, always 0 — masking failures).
       //
@@ -553,6 +563,11 @@ export const createFullRemoteBackend = (
           // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
           // arch-aware default is "none" (slow local conda build).
           `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
+          // Optional LLM-trajectory recording (default-OFF). When the operator
+          // sets QUANTA_BENCH_RECORD_TRAJECTORY locally, propagate it to the box
+          // so the run records a replayable cassette (fetched back below) — makes
+          // a FAILED remote run replayable/forkable from any turn after the fact.
+          trajectoryRecordEnv +
           `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
           `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
       )
@@ -574,6 +589,20 @@ export const createFullRemoteBackend = (
         }
       } catch (_ignore) {
         /* best-effort — patch text is a diagnostic nicety, not the run result */
+      }
+      // Fetch the LLM-trajectory cassette when recording was requested — makes a
+      // FAILED remote run replayable/forkable from any turn after the box dies.
+      if (recordTrajectory) {
+        try {
+          const cassette = await sshTo(host, "cat ~/quanta/bench-trajectory.jsonl 2>/dev/null")
+          if (cassette.code === 0 && cassette.stdout.trim() !== "") {
+            const localCassette = `/tmp/full-remote-trajectory-${iid}.jsonl`
+            writeFileSync(localCassette, cassette.stdout)
+            log(`[full-remote] trajectory cassette saved: ${localCassette}`)
+          }
+        } catch (_ignore) {
+          /* best-effort — replay cassette is a diagnostic, not the run result */
+        }
       }
       // The on-box `bench run` writes OUR report shape (perInstance[].passed) —
       // loadVerdicts handles BOTH that and the swebench-harness shape.

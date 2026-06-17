@@ -1024,6 +1024,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/batch/eval/driver.ts",
   },
   {
+    envKey: "QUANTA_BENCH_RECORD_TRAJECTORY",
+    kind: "string",
+    default: "",
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: record the run's LLM trajectory to a replayable JSONL cassette (DEFAULT-OFF). Unset/''/'0' ⇒ no recording (byte-identical). '1'|'on' ⇒ <cwd>/bench-trajectory.jsonl; any other value ⇒ that path. Enables replaying a FAILED run deterministically up to any turn and DIVERGING there (bench-native 'fork from a point'; the CLI fork_session feature is REPL-scoped and cannot reach bench trajectories). full-remote propagates it to the box + fetches the cassette back to /tmp/full-remote-trajectory-<box>.jsonl.",
+    readSite: "apps/bench/index.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_SKILLS",
     kind: "bool",
     default: false,

@@ -72,6 +72,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
+import { jsonlReplayStore, recordingLlmPort } from "@/llm/replay"
 import {
   loadSelectedInstances,
   mapWithConcurrency,
@@ -540,7 +541,34 @@ const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLM
     return null
   }
   const model = modelArg ?? DEFAULT_MODEL[provider]
-  return { provider, model, llm }
+  return { provider, model, llm: maybeRecordTrajectory(llm) }
+}
+
+/**
+ * Optional LLM-trajectory recording for bench runs (default-OFF).
+ *
+ * WHY: when a bench instance FAILS, we want to replay its exact LLM trajectory
+ * deterministically up to any turn and DIVERGE there — the bench-native "fork
+ * from a point" for cheaply testing a localization/strategy fix on a recorded
+ * failure WITHOUT re-running the whole expensive run. The CLI `fork_session`
+ * feature is REPL-scoped (ConversationCheckpointStore) and CANNOT reach a bench
+ * trajectory, so this is the only path that makes bench replay/fork possible.
+ *
+ * Single chokepoint: every bench LLM consumer (driver, localize, repro,
+ * verify-guard …) takes the port `resolveLLM` returns, so wrapping here records
+ * the ENTIRE run. The cassette is a JSONL replay store — replay it later with
+ * `replayLlmPort({ store, onMiss: "record-and-passthrough" })`.
+ *
+ * Gate: `QUANTA_BENCH_RECORD_TRAJECTORY`. Absent / "" / "0" ⇒ NO wrap
+ * (byte-identical). "1" | "on" ⇒ record to `<cwd>/bench-trajectory.jsonl`. Any
+ * other value ⇒ treated as the cassette path.
+ */
+export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
+  const raw = process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+  if (raw === undefined || raw === "" || raw === "0") return llm
+  const path =
+    raw === "1" || raw.toLowerCase() === "on" ? `${process.cwd()}/bench-trajectory.jsonl` : raw
+  return recordingLlmPort({ inner: llm, store: jsonlReplayStore({ path }) })
 }
 
 /** Official-dataset entrypoint. Returns true when it handled the run (so main
