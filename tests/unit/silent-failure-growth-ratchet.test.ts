@@ -142,7 +142,13 @@ const NULLISH_PROMISE_SWALLOW_BASELINE = 113
  * pinned).
  */
 const CATCH_RETURN_EMPTY_BASELINE = 98
-const DEBUG_ONLY_CATCH_BASELINE = 8
+// Re-measured 2026-06-17 (RFC jun-17 LSP warm backend): +1 for
+// `startBackgroundLspPrewarm` in agent/lsp-bridge.ts — a fire-and-forget
+// session-start prewarm whose failure is a documented best-effort skip (the
+// first real LSP call simply warms cold), never a stranded-work path, so a
+// `logger.debug` swallow is correct and the catch must not propagate (it is
+// invoked via `void`). Ceiling 8 → 9.
+const DEBUG_ONLY_CATCH_BASELINE = 9
 // D13: re-measured after widening NON_ABORTABLE_SLEEP_RE to tolerate the typed
 // `new Promise<void>(…)` form — the prod count is 12 (was 6 under the
 // generic-blind regex; the extra 6 were always there, just invisible).

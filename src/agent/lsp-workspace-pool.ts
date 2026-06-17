@@ -154,10 +154,9 @@ export class SharedWorkspacePool {
   async prewarm(anchorFile: string, cwd: string, signal?: AbortSignal): Promise<void> {
     if (!this.backend.supports(anchorFile)) return
     const session = await this.open(anchorFile, cwd, signal)
-    if (session)
-      await session.stop().catch((e) => {
-        logger.debug("lsp: prewarm session release failed", { cwd, error: errMessage(e) })
-      })
+    // The handle's stop() only decrements the refcount + (re)schedules the idle
+    // timer — both throw-free — so no error handling is needed here.
+    if (session) await session.stop()
   }
 
   /** Production teardown of ONE workspace (bench session end). TERMINAL +

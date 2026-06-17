@@ -179,13 +179,13 @@ export const createFullRemoteBackend = (
    *  goes over STDIN — never an argv. Short connect-timeout so a closed :22
    *  fails fast instead of the default ~2min hang.
    *
-   *  `ServerAliveInterval`/`ServerAliveCountMax`: `ConnectTimeout` only covers
-   *  CONNECTION ESTABLISHMENT. The long patch-gen+grading call holds the session
-   *  open for minutes; if the box dies MID-SESSION (spot reclaim, network
-   *  partition) plain ssh hangs on TCP keepalive (~2h) — observed once as a 65-min
-   *  driver hang that only the outer `timeout 5400` would have reaped. With
-   *  keepalive probes every 15s × 4 misses, a dead mid-session box tears the ssh
-   *  down in ~60s so the driver fails fast and the box gets TTL/terminate. */
+   *  NOTE on keepalive: a tight `ServerAliveInterval=15 / CountMax=4` (60s grace)
+   *  was tried to reap a one-off 65-min dead-box hang, but it KILLED healthy long
+   *  runs — during docker grading the box is CPU-saturated and sshd cannot answer
+   *  keepalive probes within 60s, so ssh tore down healthy sessions (`exit 255`,
+   *  empty run.log) on 2/2 grading calls. The long grading session must tolerate
+   *  a busy-but-alive box, so we do NOT set an aggressive keepalive here; the rare
+   *  truly-dead-box hang is bounded by the OUTER `timeout` the caller wraps. */
   const sshTo = (host: string, remoteCmd: string, input?: string) =>
     spawn(
       "ssh",
@@ -196,10 +196,6 @@ export const createFullRemoteBackend = (
         "StrictHostKeyChecking=accept-new",
         "-o",
         "ConnectTimeout=15",
-        "-o",
-        "ServerAliveInterval=15",
-        "-o",
-        "ServerAliveCountMax=4",
         host,
         remoteCmd,
       ],
