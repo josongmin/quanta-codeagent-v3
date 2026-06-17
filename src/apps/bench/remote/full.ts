@@ -641,6 +641,21 @@ export const createFullRemoteBackend = (
       } catch (_ignore) {
         /* best-effort — patch text is a diagnostic nicety, not the run result */
       }
+      // Fetch the closure-diagnostics SIDECAR (the closure measurement metrics —
+      // primary_false_green_rate / primary_rail_present_rate / gate_enter_rate /
+      // required_verification_coverage). The box writes it next to report.json when
+      // QUANTA_BENCH_CLOSURE_DIAG is on; report.json itself does NOT carry the
+      // metrics, so without this fetch the remote run produces no measurement.
+      try {
+        const sidecar = await sshTo(host, "cat ~/report.closure-diagnostics.json 2>/dev/null")
+        if (sidecar.code === 0 && sidecar.stdout.trim() !== "") {
+          const localSidecar = `/tmp/full-remote-closure-${iid}.json`
+          writeFileSync(localSidecar, sidecar.stdout)
+          log(`[full-remote] closure diagnostics saved: ${localSidecar}`)
+        }
+      } catch (_ignore) {
+        /* best-effort — the measurement sidecar is a diagnostic, not the verdict */
+      }
       // Fetch the LLM-trajectory cassette when recording was requested — makes a
       // FAILED remote run replayable/forkable from any turn after the box dies.
       if (recordTrajectory) {
