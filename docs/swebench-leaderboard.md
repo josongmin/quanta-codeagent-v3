@@ -5,6 +5,32 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 
 > **머신리더블 SSOT = [`swebench-leaderboard.yaml`](swebench-leaderboard.yaml)** (run 블록별 resolved 리스트). 이 md는 사람이 보는 큐레이션 뷰 — 전체 resolved 인스턴스는 yaml 참조.
 
+## 🏆 easy django T1+T2 — **78/84 resolved (92.9%)** · EC2 네이티브 채점 (2026-06-17)
+
+가장 완전한 authoritative 결과 (run_id `quanta-easy-django-ec2-2026-06-17`). 83개 패치(blind, gpt-5.4 chatgpt-oauth) 전부 **EC2 c7i x86 네이티브**로 공식 swebench harness 채점, **infra error 0**.
+
+- **resolved 78 / unresolved 5 / no-patch 1 = 84.** unresolved(진짜 model-miss): `#10914 #14315 #15987 #16642 #16667`. no-patch: `#9296`(max-turns).
+- **🔧 RCA 2건 구조해결**:
+  1. EC2 scp `connection refused` → `ec2.ts`가 `instance-running`만 기다리고 sshd/cloud-init 부팅 전에 scp → **ssh-ready + `cloud-init status --wait` 폴링 추가**([ec2.ts](../src/apps/bench/remote/ec2.ts)).
+  2. 1차 채점 76 infra-error → `max_workers=24`로 fresh 박스가 84 이미지 동시 pull → 리소스/pull exhaustion → **max_workers 6으로 낮춰 error 0.**
+- 채점 박스는 `--keep` 후 수동 terminate (비용 캡). 전체 resolved 목록 = yaml.
+
+### 실패 6개 RCA/정형화
+
+`#9296`는 **model-miss 아님** — `max_turns(60턴)+빈패치`: 자명한 4줄(`Paginator.__iter__`)을 60턴 안 커밋하고 탐색/verify만 돔 = 에이전트 over-exploration(하네스), 능력 아님. 재시도 대상.
+
+5개 model-miss는 전부 **"right neighborhood, wrong exact fix"** (localize는 맞고 정밀 synthesis/절제가 틀림):
+
+| # | 골드 | 에이전트 패치 | 실패유형 |
+|---|---|---|---|
+| 10914 | `global_settings.py` 1줄 (`FILE_UPLOAD_PERMISSIONS=0o644`) | `storage.py`에 umask chmod 로직 | **wrong-file + over-engineer** (1줄 상수변경을 권한로직으로 과해석) |
+| 14315 | base/client.py + **postgresql/client.py** (`env if env else None`) | base만 `if env is not None` | **multi-site 누락 + 로직오류** (`{}`→None 폴백 안 함) |
+| 15987 | `app_dir in [str(d) for d in dirs]` | `[Path(d).resolve() …]` | **over-engineer** (str() 한 줄 대신 .resolve() side-effect) |
+| 16642 | dict에 `br`/`compress` 추가 | `compress`만+`br` 이상 조건문 + **stray test.html.Z/.br** | **wrong-logic + 패치 오염** |
+| 16667 | `except OverflowError: return "0-0-0"` 별도 절 | `except (ValueError,OverflowError)` 합침 | **near-miss wrong-value** (예외 잡고 복구값 틀림) |
+
+**결론**: easy 티어 미스의 병목 = gross localize가 아니라 **fix 정밀도**(constraint-reasoning·절제·multi-site 일관성). #10914·#15987은 trivial을 과구현하는 over-engineering 역방향 실패. → grep-천장 분석(동네 찾되 정밀 갭)과 일치, 코드그래프(find-refs/impact)는 #14315 multi-site엔 도움되나 나머지(정밀 synthesis/절제)는 grounding 밖.
+
 ## 📊 easy django T1+T2 batch (2026-06-16, scaffold-fixed) — 39 resolved
 
 우리 정형화 분석의 easy 티어(T1 존나쉬움 + T2 쉬움) django 84개 블라인드 런. **bench 스캐폴드 2버그 구조수정 후** 측정:
@@ -108,6 +134,21 @@ mini가 10개 전부 골드 파일 적중(picks=light 티어). resolved/unresolv
 
 구현: default-ON knob(미설정=byte-identical), `SWEBENCH_DIRECTIVE_NOEXEC` 분기 + verifyGuard/repro/repair 게이트(runner buildConfig + apps runInstanceOnce), 7 hellgate teeth + 438 bench유닛 0회귀 + 3렌즈 적대어딧. 산출물 `_data/floor-validate-pytest7982.json`. agentless-v1 frozen 미접촉. 계획 `~/.claude/plans/bench-exec-posture.md`.
 잔여: sphinx-8595(grading false-neg)/pylint-8898(model miss) + 전체 picks-10 v2safe A/B는 transport throttle 풀린 창에서.
+
+## 🧭 grounding 축 — LSP-nav steer (default-ON, 2026-06-17)
+
+스캐폴드 구조수정 3탄(별개 축 = grounding). 측정으로 진짜 갭부터: agentless-v1은 LSP nav 도구(go-to-def/find-refs)를 sandbox-rooted로 **이미** 노출(false-gap)인데 **모델이 ~0%만 호출**(60 트래젝토리 0개). 하드셋 인과어딧의 owner-mislocation + multi-file co-change 미스가 여기서 옴. → localize-phase 가드 메시지에 LSP grounding steer를 **DEFAULT-ON**(nav 켜지면 자동, `QUANTA_BENCH_LSP_STEER=off`로 A/B baseline) 박음. nudge지 hard-gate 아님(django pyright 오탐 회피).
+
+**RCA-fix 2건(full-remote)**: ①serial patch-gen → `QUANTA_BENCH_CONCURRENCY=6`(13분/patch→~4분, TTL위험 해소) ②/tmp dataset 유실 → repo 안정경로.
+
+**A/B (하드 12 multi-site django, full-remote EC2 x86 네이티브 채점):**
+
+| arm | preset | resolved | LSP 사용 |
+|---|---|---|---|
+| **steer ON** | agentless-v1 | **4/12** (13121/13343/14631/15916), avg 50턴 | `lsp_definition` **27회, 9/12 traj** (0%→75%) |
+| steer OFF baseline | agentless-v1-nosteer | ⏳ 미완 | — |
+
+**확정**: steer가 **LSP 사용을 0%→75%로 끌어올림**(메커니즘 실효 측정). **resolved Δ는 미완** — baseline arm이 throttle + 동시런 경합으로 3회 실패(/tmp dataset·spot interrupt·gpt-5.4 throttle), clean 창 필요. 구현: `src/runner/knobs/knobs/lsp-steer.ts`, `knobs-bench.ts`(nav-coupled), `localize-phase-guard.ts`(steer 메시지), `presets.ts`(agentless-v1-nosteer baseline), `remote/full.ts`(concurrency). 테스트: localize 53 + wiring 3 + preset/knob 51 + full-remote 14 = 모두 green.
 
 ## 메모
 - baseline 비교용: 과거 기록은 gpt-5/gpt-5-mini(OPENAI_API_KEY). 현재 기록은 chatgpt-oauth gpt-5.4라 직접 비교 주의.

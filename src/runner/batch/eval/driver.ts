@@ -989,6 +989,17 @@ export const buildConfig = (
       messages,
       system: buildSystemPrompt(sandbox),
       cwd: sandbox,
+      // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
+      // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not
+      // leak a `pyright-langserver` child for the 30-min idle-TTL window (the
+      // idle-TTL is an interactive-reuse affordance, useless to a one-shot
+      // bench instance). Prewarm is gated SEPARATELY on `QUANTA_LSP_PREWARM` so
+      // the cold-vs-warm A/B stays clean; the run `signal` is the warm abort so
+      // session end cancels an in-flight warm instead of riding the budget.
+      ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
+      ...(opt.lspNav && gateOn(process.env, "QUANTA_LSP_PREWARM")
+        ? { lspPrewarm: { enabled: true, warmSignal: signal } }
+        : {}),
       ...localEnvSlotOf(instance),
       maxTurns: deps.maxTurns,
       signal,

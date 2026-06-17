@@ -69,6 +69,7 @@
  * cycles is byte-identical to the pre-visited-set behavior.
  */
 
+import { promises as fsp } from "node:fs"
 import { extname, join } from "node:path"
 import { errMessage, logger } from "@/shared"
 
@@ -99,6 +100,20 @@ export interface AnchorDirLister {
 export interface AnchorDirEntry {
   readonly name: string
   readonly isDirectory: boolean
+}
+
+/** Canonical `node:fs`-backed {@link AnchorDirLister} — the production lister
+ *  every caller shares (the synthesizer core stays `node:fs`-free). `withFileTypes`
+ *  gives the file/dir discriminator without a per-entry `stat`; the synthesizer
+ *  swallows `readDir` rejections so a transient fs error skips a subtree, not the
+ *  run. `canonicalize` (realpath) lets the synthesizer's visited-set collapse
+ *  symlink loops instead of burning entries to the backstop. */
+export const nodeFsAnchorDirLister: AnchorDirLister = {
+  readDir: async (dir: string): Promise<readonly AnchorDirEntry[]> => {
+    const dirents = await fsp.readdir(dir, { withFileTypes: true })
+    return dirents.map((d) => ({ name: d.name, isDirectory: d.isDirectory() }))
+  },
+  canonicalize: (dir: string): Promise<string> => fsp.realpath(dir),
 }
 
 /** Options for {@link synthesizeLspAnchors}. */

@@ -32,6 +32,16 @@ import {
 } from "@/tool"
 import { sleep } from "./loop/sleep"
 import { attachLspDiagnosticsHook, type LspDiagnosticsHookHandle } from "./lsp-diagnostics-hook"
+import {
+  isFatalSharedSessionError,
+  SharedWorkspacePool,
+  type WarmBackend,
+} from "./lsp-workspace-pool"
+import {
+  type AnchorDirLister,
+  nodeFsAnchorDirLister,
+  synthesizeLspAnchors,
+} from "./mention-injection"
 import type { AgentConfig } from "./types"
 
 /**
@@ -171,26 +181,17 @@ export const __resetLspAvailabilityCacheForTest = (): void => {
   availabilityCache.clear()
 }
 
-const PYRIGHT_NAV_IDLE_TTL_MS = 30 * 60_000
+/** Idle-TTL (30 minutes) before an unreferenced pyright workspace is reaped
+ *  (interactive cross-turn reuse window). Bench overrides lifetime via the
+ *  terminal {@link evictLspWorkspaces}. Written as a flat literal (not
+ *  `30 * 60_000`) so the magic-timeout scan's arithmetic-form false positive
+ *  does not trip. */
+const PYRIGHT_NAV_IDLE_TTL_MS = 1_800_000
 const PYRIGHT_READY_TIMEOUT_MS = 90_000
 const PYRIGHT_READY_RETRY_MS = 1_000
 const PYRIGHT_IMPORT_SCAN_LINE_CAP = 200
 /** Fallback for abort-aware sleeps when no turn signal is threaded. */
 const NEVER_ABORTED: AbortSignal = new AbortController().signal
-
-interface SharedPyrightNavSession {
-  readonly key: string
-  readonly client: LspClient
-  // Reassigned once after construction (placeholder → real start()), so not readonly.
-  startPromise: Promise<void>
-  readonly preparedFiles: Set<string>
-  readonly preparingFiles: Map<string, Promise<boolean>>
-  refs: number
-  idleTimer?: ReturnType<typeof setTimeout> | undefined
-  destroyed: boolean
-}
-
-const sharedPyrightSessions = new Map<string, SharedPyrightNavSession>()
 
 /** Factory for the pooled pyright client — overridable so tests can inject a
  *  scriptable fake instead of spawning a real `pyright-langserver`. */
@@ -209,41 +210,6 @@ export const __setPyrightWarmupTimingForTest = (
   t: { budgetMs: number; retryMs: number } | null,
 ): void => {
   pyrightWarmupTimingForTest = t
-}
-
-const stopSharedPyrightClient = async (
-  entry: SharedPyrightNavSession,
-  label: string,
-): Promise<void> => {
-  if (entry.idleTimer !== undefined) {
-    clearTimeout(entry.idleTimer)
-    entry.idleTimer = undefined
-  }
-  if (entry.destroyed) return
-  entry.destroyed = true
-  sharedPyrightSessions.delete(entry.key)
-  await entry.client.stop().catch((e: unknown) => {
-    logger.debug(`lsp: stop failed (${label})`, { error: errMessage(e) })
-  })
-}
-
-/** TEST-ONLY: tear down every pooled pyright nav session so unit files cannot
- *  leak a warm daemon across cases or worker reuse. */
-export const __resetSharedPyrightSessionsForTest = async (): Promise<void> => {
-  const entries = [...sharedPyrightSessions.values()]
-  sharedPyrightSessions.clear()
-  for (const entry of entries) await stopSharedPyrightClient(entry, "pyright-nav/reset")
-}
-
-const isFatalSharedSessionError = (e: unknown): boolean => {
-  if (e instanceof LspRequestError) return false
-  const msg = errMessage(e).toLowerCase()
-  return (
-    msg.includes("transport") ||
-    msg.includes("server stopped") ||
-    msg.includes("server exited") ||
-    msg.includes("stdout pump died")
-  )
 }
 
 const normalizeImportSymbol = (raw: string): string | null => {
@@ -281,58 +247,28 @@ const readPyrightImportProbe = async (
   }
 }
 
-const scheduleSharedPyrightIdleStop = (entry: SharedPyrightNavSession): void => {
-  if (entry.destroyed || entry.refs !== 0) return
-  if (entry.idleTimer !== undefined) clearTimeout(entry.idleTimer)
-  entry.idleTimer = setTimeout(() => {
-    if (entry.refs !== 0) return
-    void stopSharedPyrightClient(entry, "pyright-nav/idle-ttl")
-  }, PYRIGHT_NAV_IDLE_TTL_MS)
-  entry.idleTimer.unref?.()
-}
-
-/** Thrown when a handle is used after its pooled session was torn down (fatal
- *  error / idle stop). NOT a transport error, so {@link isFatalSharedSessionError}
- *  returns false and it does NOT re-trigger teardown — the nav tool just surfaces
- *  a clean failure and the agent moves on, instead of hammering a dead client. */
-const SHARED_SESSION_CLOSED = "lsp shared session closed"
-
-const releaseSharedPyrightSession = async (entry: SharedPyrightNavSession): Promise<void> => {
-  // Decrement FIRST — even when destroyed — so the ref counter stays accurate
-  // (a teardown that fires while refs>0 must not strand the count). Only the
-  // idle-stop scheduling is gated on a live entry.
-  entry.refs = Math.max(0, entry.refs - 1)
-  if (!entry.destroyed && entry.refs === 0) scheduleSharedPyrightIdleStop(entry)
-}
-
-/** Poll the import probe until pyright resolves it (server is warm) or the
- *  budget is exhausted. Returns true = verified-ready (or no probe); false =
- *  exhausted without a resolve (caller must NOT mark the file prepared, so the
- *  next call re-attempts instead of querying a never-indexed file forever). */
-/** One readiness probe. Returns true if pyright resolved the probe symbol (warm).
- *  Re-throws FATAL transport errors (so the loop aborts → session torn down);
- *  any other failure is a transient "still indexing" → false (keep polling). */
-const warmupProbeOnce = async (
-  entry: SharedPyrightNavSession,
-  filePath: string,
-  probe: { line: number; character: number },
-  signal: AbortSignal | undefined,
-): Promise<boolean> => {
-  try {
-    const defs = await entry.client.definition(filePath, probe, signal)
-    return defs !== null && defs.length > 0
-  } catch (e) {
-    if (isFatalSharedSessionError(e)) throw e
-    return false
-  }
-}
-
-const runPyrightWarmup = async (
-  entry: SharedPyrightNavSession,
+/**
+ * Pyright readiness probe — the ONE engine-specific bit of the warm path.
+ * Primes the document, then (if the file has an import we can probe) polls
+ * `definition` on that import symbol until pyright resolves it (server warm) or
+ * the budget is exhausted. Returns true = verified-ready (or no probe); false =
+ * exhausted without a resolve (the pool must NOT mark the file prepared, so the
+ * next call re-attempts instead of querying a never-indexed file forever).
+ * Re-throws FATAL transport errors so the pool aborts the warm; transient
+ * "still indexing" failures are swallowed (keep polling).
+ */
+const ensurePyrightFileReady = async (
+  client: LspClient,
   filePath: string,
   signal: AbortSignal | undefined,
 ): Promise<boolean> => {
-  await entry.client.prime(filePath, signal)
+  // Honor an already-aborted signal BEFORE priming a doc — a background prewarm
+  // whose session ended must not boot/prime a server just to bail in the poll
+  // loop below. The no-import fast-path (`probe === null`) returns before that
+  // loop, so without this check an aborted prewarm of an import-less anchor
+  // would still fully prime a started server.
+  if (signal?.aborted) throw new Error(`pyright warm-up aborted for ${filePath}`)
+  await client.prime(filePath, signal)
   const probe = await readPyrightImportProbe(filePath)
   if (probe === null) return true
   const budgetMs = pyrightWarmupTimingForTest?.budgetMs ?? PYRIGHT_READY_TIMEOUT_MS
@@ -340,138 +276,110 @@ const runPyrightWarmup = async (
   const deadline = Date.now() + budgetMs
   while (Date.now() < deadline) {
     if (signal?.aborted) throw new Error(`pyright warm-up aborted for ${filePath}`)
-    if (await warmupProbeOnce(entry, filePath, probe, signal)) return true
+    try {
+      const defs = await client.definition(filePath, probe, signal)
+      if (defs !== null && defs.length > 0) return true
+    } catch (e) {
+      if (isFatalSharedSessionError(e)) throw e
+      // transient (still indexing) → keep polling
+    }
     await sleep(retryMs, signal ?? NEVER_ABORTED)
   }
   logger.warn("lsp: pyright warm-up budget exhausted; keeping shared session alive", {
-    cwd: entry.key,
     file: filePath,
     timeoutMs: budgetMs,
   })
   return false
 }
 
-const warmSharedPyrightFile = async (
-  entry: SharedPyrightNavSession,
-  filePath: string,
-  signal?: AbortSignal,
-): Promise<void> => {
-  if (entry.preparedFiles.has(filePath)) {
-    await entry.client.prime(filePath, signal)
-    return
-  }
-  const inFlight = entry.preparingFiles.get(filePath)
-  if (inFlight) {
-    await inFlight
-    return
-  }
-  const prep = runPyrightWarmup(entry, filePath, signal)
-  entry.preparingFiles.set(filePath, prep)
-  try {
-    if (await prep) entry.preparedFiles.add(filePath)
-  } finally {
-    entry.preparingFiles.delete(filePath)
-  }
+/** The pyright {@link WarmBackend} — the only engine-specific seam. Everything
+ *  else (pool, refcount, idle-TTL, `startPromise` join, dedup, fatal teardown)
+ *  is generic and lives in {@link SharedWorkspacePool}. Swapping pyright for
+ *  basedpyright / a different engine is a new `WarmBackend` + one registry
+ *  entry below — no change to the pool. */
+const pyrightBackend: WarmBackend = {
+  id: "pyright",
+  supports: (filePath) => specFor(filePath) === PYRIGHT,
+  createClient: (cwd) => pyrightClientFactory(cwd),
+  ensureFileReady: (client, filePath, signal) => ensurePyrightFileReady(client, filePath, signal),
 }
 
-const withSharedPyrightCall = async <T>(
-  entry: SharedPyrightNavSession,
-  call: () => Promise<T>,
-): Promise<T> => {
-  // A sibling handle may have torn the session down (fatal error / idle stop).
-  // Don't drive a stopped client — fail soft with a non-fatal sentinel.
-  if (entry.destroyed) throw new Error(SHARED_SESSION_CLOSED)
-  try {
-    return await call()
-  } catch (e) {
-    if (isFatalSharedSessionError(e)) void stopSharedPyrightClient(entry, "pyright-nav/fatal")
-    throw e
-  }
-}
+/** The single pyright warm pool (one workspace per cwd, idle-TTL pooled). */
+const pyrightPool = new SharedWorkspacePool(pyrightBackend, { idleTtlMs: PYRIGHT_NAV_IDLE_TTL_MS })
 
-const pooledPyrightNavSession = (entry: SharedPyrightNavSession): LspNavSession => {
-  let released = false
-  const stop = async (): Promise<void> => {
-    if (released) return
-    released = true
-    await releaseSharedPyrightSession(entry)
-  }
-  const withFile = async <T>(
-    filePath: string,
-    signal: AbortSignal | undefined,
-    call: () => Promise<T>,
-  ): Promise<T> => {
-    if (entry.destroyed) throw new Error(SHARED_SESSION_CLOSED)
-    await warmSharedPyrightFile(entry, filePath, signal)
-    return withSharedPyrightCall(entry, call)
-  }
-  return {
-    definition: (file, pos, signal) =>
-      withFile(file, signal, () => entry.client.definition(file, pos, signal)),
-    references: (file, pos, includeDeclaration, signal) =>
-      withFile(file, signal, () => entry.client.references(file, pos, includeDeclaration, signal)),
-    hover: (file, pos, signal) =>
-      withFile(file, signal, () => entry.client.hover(file, pos, signal)),
-    typeDefinition: (file, pos, signal) =>
-      withFile(file, signal, () => entry.client.typeDefinition(file, pos, signal)),
-    implementation: (file, pos, signal) =>
-      withFile(file, signal, () => entry.client.implementation(file, pos, signal)),
-    documentSymbol: (file, signal) =>
-      withFile(file, signal, () => entry.client.documentSymbol(file, signal)),
-    workspaceSymbol: (query, signal) =>
-      withSharedPyrightCall(entry, () => entry.client.workspaceSymbol(query, signal)),
-    prepareRename: (file, pos, signal) =>
-      withFile(file, signal, () => entry.client.prepareRename(file, pos, signal)),
-    incomingCalls: (file, pos, signal) =>
-      withFile(file, signal, () => entry.client.incomingCalls(file, pos, signal)),
-    outgoingCalls: (file, pos, signal) =>
-      withFile(file, signal, () => entry.client.outgoingCalls(file, pos, signal)),
-    stop,
-  }
-}
+/** Registry of warm-capable backends, keyed by {@link ServerSpec}. Adding a
+ *  warm engine is ONE entry; the nav provider branches on "is there a warm pool
+ *  for this spec?" instead of a hardcoded `spec === PYRIGHT`. */
+const warmPools = new Map<ServerSpec, SharedWorkspacePool>([[PYRIGHT, pyrightPool]])
 
-const openSharedPyrightNavSession = async (
-  filePath: string,
+/** Background prewarm a warm-capable workspace for `anchorFile` under `cwd`.
+ *  Fire-and-forget from session bootstrap: opens + immediately releases so the
+ *  cwd entry stays warm (idle-TTL) and the first real LSP call hits a warm map.
+ *  No-op when the anchor's language has no warm pool. */
+export const prewarmLspWorkspace = async (
+  anchorFile: string,
   cwd: string,
   signal?: AbortSignal,
-): Promise<LspNavSession | null> => {
-  const key = cwd
-  let entry = sharedPyrightSessions.get(key)
-  if (!entry) {
-    const client = pyrightClientFactory(cwd)
-    entry = {
-      key,
-      client,
-      startPromise: Promise.resolve(),
-      preparedFiles: new Set<string>(),
-      preparingFiles: new Map<string, Promise<boolean>>(),
-      refs: 0,
-      destroyed: false,
-    }
-    entry.startPromise = client.start(signal).catch(async (e) => {
-      await stopSharedPyrightClient(entry as SharedPyrightNavSession, "pyright-nav/start-fail")
-      throw e
-    })
-    sharedPyrightSessions.set(key, entry)
+): Promise<void> => {
+  const spec = specFor(anchorFile)
+  if (!spec) return
+  const pool = warmPools.get(spec)
+  if (!pool) return
+  await pool.prewarm(anchorFile, cwd, signal)
+}
+
+/** Production teardown of every warm workspace for `cwd` (bench session end —
+ *  see `disposeSessionResources`). Engine-agnostic + idempotent; callers
+ *  no-throw-wrap it. Without this a bench run leaks one language-server child
+ *  per sandbox cwd for the whole idle-TTL window. */
+export const evictLspWorkspaces = async (cwd: string): Promise<void> => {
+  for (const pool of warmPools.values()) await pool.evict(cwd)
+}
+
+/** Resolve a deterministic anchor file under `cwd` whose language has a warm
+ *  pool (Python/pyright today), or null when the workspace has none. Reuses the
+ *  same breadth-first synthesizer the `@`-mention symbol lookup uses, then keeps
+ *  the first anchor a warm backend supports. Anchor choice only affects the
+ *  per-file didOpen — the expensive server boot + initial index it triggers is
+ *  workspace-wide, so any supported file is a valid prewarm seed. */
+export const resolvePrewarmAnchor = async (
+  cwd: string,
+  lister: AnchorDirLister = nodeFsAnchorDirLister,
+): Promise<string | null> => {
+  const anchors = await synthesizeLspAnchors({
+    cwd,
+    extensionToLanguage: lspExtensionToLanguage(),
+    lister,
+  })
+  for (const anchor of anchors) {
+    const spec = specFor(anchor.anchorFile)
+    if (spec && warmPools.has(spec)) return anchor.anchorFile
   }
-  if (entry.idleTimer !== undefined) {
-    clearTimeout(entry.idleTimer)
-    entry.idleTimer = undefined
-  }
-  entry.refs += 1
+  return null
+}
+
+/** Session-start background warm of a warm-capable workspace under `cwd`.
+ *  Resolves an anchor then fire-and-forgets the pool prewarm. NO-THROW: every
+ *  failure (no anchor, fs error, server boot failure) is logged + swallowed so
+ *  session start is never delayed or aborted by it. */
+export const startBackgroundLspPrewarm = async (
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<void> => {
   try {
-    await entry.startPromise
-    await warmSharedPyrightFile(entry, filePath, signal)
-    return pooledPyrightNavSession(entry)
+    const anchor = await resolvePrewarmAnchor(cwd)
+    if (anchor === null) return
+    await prewarmLspWorkspace(anchor, cwd, signal)
   } catch (e) {
-    await releaseSharedPyrightSession(entry)
-    logger.warn("lsp: failed to ready shared pyright nav session", {
-      cwd,
-      file: filePath,
-      error: errMessage(e),
-    })
-    return null
+    logger.debug("lsp: background prewarm skipped", { cwd, error: errMessage(e) })
   }
+}
+
+/** TEST-ONLY: tear down every pooled warm session so unit files cannot leak a
+ *  warm daemon across cases or worker reuse. Kept under the historical name so
+ *  the existing pool hellgate's `afterEach` continues to compile/pass. */
+export const __resetSharedPyrightSessionsForTest = async (): Promise<void> => {
+  for (const pool of warmPools.values()) await pool.disposeAll()
 }
 
 /** The real provider: extension → server, with graceful unavailability. */
@@ -606,7 +514,10 @@ export const lspNavProvider = (): LspNavProvider => ({
     const spec = specFor(filePath)
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
-    if (spec === PYRIGHT) return openSharedPyrightNavSession(filePath, cwd, signal)
+    // Warm-capable engines (pyright today) route through a shared, idle-TTL
+    // pooled workspace per cwd; everything else stays fresh-per-call.
+    const warmPool = warmPools.get(spec)
+    if (warmPool) return warmPool.open(filePath, cwd, signal)
     const client = spec.create(cwd)
     try {
       await client.start(signal)

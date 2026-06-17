@@ -496,6 +496,8 @@ const RULES: readonly Rule[] = [
         "BURN-DOWN: injected `opts?.at`; the literal `Date.now` is the default-factory fallback for the skill-activation timestamp.",
       "agent/loop/turn-loop.ts":
         "BURN-DOWN (ADR-0231 radar wire): `Date.now()` is the wall-clock sample for the radar proposal-queue producer hook (turn-duration telemetry). Captured ONLY when `cfg.radar` is wired (default-OFF); never reaches model-facing/persisted-replay output — same infra-timing posture as agent/loop/control-poll.ts.",
+      "agent/lsp-bridge.ts":
+        "INFRA TIMING (RFC jun-17): `Date.now()` in `ensurePyrightFileReady` is the language-server warm-up READINESS-POLL deadline (when to stop polling a cold pyright for an import resolve). Pure infra timing — never reaches model-facing/persisted/replayed output; the budget/retry are injectable for tests via `__setPyrightWarmupTimingForTest`. Same posture as agent/loop/control-poll.ts.",
     },
   },
   {

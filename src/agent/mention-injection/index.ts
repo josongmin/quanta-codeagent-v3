@@ -27,7 +27,7 @@ export type {
   SynthesizeAnchorsOptions,
   SynthesizedAnchor,
 } from "./anchor-synth"
-export { synthesizeLspAnchors } from "./anchor-synth"
+export { nodeFsAnchorDirLister, synthesizeLspAnchors } from "./anchor-synth"
 export { emitMentionEvents } from "./event-emitter"
 export { buildMentionInjectionMessages } from "./inject-messages"
 export { parseMentions } from "./parser"

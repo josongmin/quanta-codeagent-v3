@@ -55,14 +55,24 @@ export interface Ec2BackendConfig {
 
 const DEFAULTS = {
   region: "ap-northeast-2",
-  ami: "ami-0afe1fd15675c3f15",
-  instanceType: "c7i.8xlarge",
+  // Prebaked AMI (available 2026-06-17, swe-bench-tools/bake-ami.sh): docker +
+  // uv + all 84 easy-django swebench EVAL images pre-pulled into /var/lib/docker.
+  // Boxes boot ready → no cloud-init install, no ~150GB image pull → grade
+  // ~15min → ~3-5min. Stock fallback (clean Ubuntu): ami-0afe1fd15675c3f15.
+  ami: "ami-04c2cdd2e17b15779",
+  // 16 vCPU is plenty for the default grading concurrency (max_workers≈6) — the
+  // prior 8xlarge (32 vCPU) paid for idle cores. ~$0.24/hr spot vs ~$0.5/hr.
+  // Bump back to a larger type explicitly (--instance-type) only for high
+  // max_workers. See cost notes in docs/swebench-ec2-runbook.md.
+  instanceType: "c7i.4xlarge",
   keyName: "pickinstead_korea.pem",
   keyPath: "~/Downloads/pickinstead_korea.pem",
   subnetId: "subnet-9c13f1e7",
   vpcId: "vpc-4340a92a",
   sgName: "quanta-bench-sg",
-  diskGb: 600,
+  // 84 SWE-bench Verified django images ≈ 150 GB; 300 GB gp3 leaves headroom
+  // for build layers while halving the prior 600 GB EBS cost + speeding init.
+  diskGb: 300,
   ttlMinutes: 360,
 } as const
 
@@ -185,7 +195,9 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     // Capacity resilience: do NOT pin a subnet/AZ unless the caller set one
     // (pinning an AZ is the #1 cause of InsufficientInstanceCapacity), and fall
     // back across instance types on a capacity error.
-    const typeCandidates = [...new Set([instanceType, "c7i.4xlarge", "c6i.8xlarge", "m6i.8xlarge"])]
+    // Fall back across same-class, similarly-priced 16-vCPU types on a spot
+    // capacity error (NOT bigger/pricier ones — keep cost flat).
+    const typeCandidates = [...new Set([instanceType, "c6i.4xlarge", "m7i.4xlarge", "c7i.2xlarge"])]
     const launchArgs = (it: string): string[] => [
       "ec2",
       "run-instances",

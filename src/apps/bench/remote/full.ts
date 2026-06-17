@@ -177,7 +177,15 @@ export const createFullRemoteBackend = (
   const aws = (args: readonly string[]) => spawn("aws", ["--region", region, ...args])
   /** ssh helper bound to the resolved host (`ubuntu@<ip>`). Token, when given,
    *  goes over STDIN — never an argv. Short connect-timeout so a closed :22
-   *  fails fast instead of the default ~2min hang. */
+   *  fails fast instead of the default ~2min hang.
+   *
+   *  `ServerAliveInterval`/`ServerAliveCountMax`: `ConnectTimeout` only covers
+   *  CONNECTION ESTABLISHMENT. The long patch-gen+grading call holds the session
+   *  open for minutes; if the box dies MID-SESSION (spot reclaim, network
+   *  partition) plain ssh hangs on TCP keepalive (~2h) — observed once as a 65-min
+   *  driver hang that only the outer `timeout 5400` would have reaped. With
+   *  keepalive probes every 15s × 4 misses, a dead mid-session box tears the ssh
+   *  down in ~60s so the driver fails fast and the box gets TTL/terminate. */
   const sshTo = (host: string, remoteCmd: string, input?: string) =>
     spawn(
       "ssh",
@@ -188,6 +196,10 @@ export const createFullRemoteBackend = (
         "StrictHostKeyChecking=accept-new",
         "-o",
         "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=4",
         host,
         remoteCmd,
       ],

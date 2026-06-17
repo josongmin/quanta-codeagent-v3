@@ -15,9 +15,12 @@ SOTA++ 접근의 첫 병목은 더 큰 모델 호출이나 더 많은 retry가 �
 
 - `agentless-v1`은 그대로 보존한다.
 - 새 측정 posture는 `agentless-v2`로 분리한다.
-- `agentless-v2`의 핵심은 `FaultEvidencePacket -> OwnerLocalization -> VerificationPlan -> EscalationPolicy` 순서다.
+- `agentless-v2`의 핵심은 `FaultEvidencePacket -> OwnerLocalization -> VerificationPlan -> GateDecision(primaryRail) -> EscalationPolicy` 순서다.
+- commit-class action은 raw ReAct가 아니라 `GateDecision = commit-now | verify(sources)`로 라우팅한다.
+- required verification은 외부 evidence만 쓴다. 같은 모델의 재숙고 / self-critique는 advisory로만 둔다.
 - django 231은 우선순위 근거일 뿐 runtime routing source가 아니다.
 - official resolved를 주장하기 전에 owner metrics와 verification behavior가 먼저 좋아져야 한다.
+- preset freeze 전에 현재 `agentless-v2` / `agentless-v2-safe` / published leaderboard label truth를 먼저 정리한다.
 
 Non-goals:
 
@@ -71,6 +74,15 @@ Non-goals:
 - repo type이 달라져도 "무슨 파일을 고칠지"가 아니라 "무슨 공개 증거를 읽을지"만 달라져야 한다.
 - django bucket의 통계는 priority와 A/B target을 정하는 데만 쓰고, runtime decision에는 들어가지 않는다.
 
+## Runtime invariants
+
+- `ground-before-act`는 "더 생각"이 아니라 "외부 evidence로 먼저 고정"이다.
+- required verification source는 실행 결과, symbol/owner resolution, exact diff facts뿐이다. same-model self-judge는 required gate를 통과시킬 수 없다.
+- synthesized repro는 unpatched base에서 먼저 RED를 증명해야 required rail로 승격된다 (`red-on-injection`).
+- verify loop는 hard-cap이 있어야 한다. green external signal이면 즉시 멈추고, evidence 없는 rewrite 재시도는 돌리지 않는다.
+- gate는 cheap structural signal로만 들어간다: `stakes`, `uncertainty`, `signal availability`, `empty-patch / budget pressure`. "verify할 느낌" 같은 vibe는 금지다.
+- gate는 양방향이다. high-confidence single-owner / low-risk case는 commit-fast로 지나가고, high-stakes ambiguous case는 verify로 들어간다.
+
 ---
 
 ## P0 — Fault Evidence Packet (K-Domain 81% 정조준)
@@ -110,22 +122,23 @@ Non-goals:
 
 **주의**: P1을 "이슈텍스트 -> 심볼 직행 localizer"라고 부르면 Stage-1과 경계가 흐려진다. 진짜 빈틈은 Stage-2다.
 
-## P2 — Verification Plan + Overfit Critic
+## P2 — Verification Plan + GateDecision
 
-**기능**: 패치 직후 막연한 self-critique 한 번 더가 아니라, **typed verification plan**을 만든다.
+**기능**: 패치 직후 막연한 self-critique 한 번 더가 아니라, **typed verification plan + explicit gate decision**을 만든다.
 
 - repro test or fail-to-pass anchor
 - owner-near tests
 - touched module smoke
 - public API / adjacent valid-case check
+- commit-now vs verify(sources)
 
-그 위에 advisory critic을 얹어 "special-case 패치인지", "인접 정상 입력을 깨는지"를 본다.
+그 위에 advisory critic을 얹어 "special-case 패치인지", "인접 정상 입력을 깨는지"를 본다. 다만 critic은 어디까지나 advisory고, required gate를 통과시키는 신호가 되지는 않는다.
 
-**왜**: ConstraintReason 62개는 올바른 식·조건 합성이 본질이라 overfit 위험이 크다. open-loop 에이전트는 FAIL_TO_PASS 하나 맞추고 끝내는 패턴이 반복된다.
+**왜**: ConstraintReason 62개는 올바른 식·조건 합성이 본질이라 overfit 위험이 크다. open-loop 에이전트는 FAIL_TO_PASS 하나 맞추고 끝내거나, 반대로 같은 모델 재숙고를 길게 돌리다 drift하는 패턴이 반복된다.
 
 **ROI**: **중상**. 빈도 27%+이지만 failure cost가 크다.
 
-**주의**: 구조적으로는 새 프롬프트보다 기존 verify seam 위에 올려야 한다. `mustPass`는 pass/fail gate, critic은 advisory second opinion 역할이 맞다.
+**주의**: 구조적으로는 새 프롬프트보다 기존 verify seam 위에 올려야 한다. `mustPass`는 pass/fail gate, critic은 advisory second opinion 역할만 맡는다.
 
 ## P3 — Regression-Trap Selection
 
@@ -165,7 +178,7 @@ Non-goals:
 |---|---|---|--:|---|
 | **P0** | Fault Evidence Packet | K-Domain | 81% | 중 |
 | **P1** | Owner Localization (Stage-2) | L0/L1 | 86% | 중 |
-| **P2** | Verification Plan + Overfit Critic | ConstraintReason | 27%+ | 중 |
+| **P2** | Verification Plan + GateDecision | ConstraintReason | 27%+ | 중 |
 | **P3** | Regression-Trap Selection | 광 P2P/L3 | 일부·치명 | 중 |
 | **P4** | Escalation Policy | DesignRefactor/L3 | 8-12% | 어려움 |
 
@@ -351,7 +364,7 @@ interface OwnerEvidence {
 - `confidence=high`는 owner 후보 1개가 definition + issue symbol + source context 중 2개 이상으로 지지될 때만 준다.
 - `confidence=low`면 repair phase로 바로 넘기지 말고 escalation policy 입력으로 보낸다.
 
-### 2. VerificationPlan
+### 2. VerificationPlan + GateDecision
 
 입력:
 
@@ -365,6 +378,7 @@ interface OwnerEvidence {
 - `ownerNearTests`
 - `moduleSmoke`
 - `adjacentCases`
+- `gateDecision`
 
 enforcement:
 
@@ -375,8 +389,10 @@ enforcement:
 
 ```ts
 interface VerificationPlan {
+  primaryRail?: VerificationStep
   required: readonly VerificationStep[]
   optional: readonly VerificationStep[]
+  baseValidatedRed?: boolean
   overfitChecks: readonly OverfitCheck[]
   selectedBy: readonly SelectionReason[]
 }
@@ -392,13 +408,22 @@ interface OverfitCheck {
   kind: "literal-hardcode" | "adjacent-valid-case" | "negative-positive-pair" | "api-contract"
   evidence: string
 }
+
+interface GateDecision {
+  action: "commit-now" | "verify"
+  sources: readonly ("primary-rail" | "structure" | "patch-hygiene")[]
+  rationale: readonly ("stakes" | "uncertainty" | "signal-availability" | "empty-patch-pressure")[]
+}
 ```
 
 규칙:
 
 - `required`는 적게 유지한다. first version은 repro 1개 + owner-near 1개 + touched-module smoke 1개를 상한으로 둔다.
+- synthesized repro를 required rail로 올리려면 unpatched base에서 먼저 RED여야 한다.
 - 실패한 `required` step은 `mustPass`로 막고, `optional` 실패는 critic/advisory로만 기록한다.
+- self-critique는 `required`가 아니다. gate를 통과시키는 신호는 external evidence만 허용한다.
 - command 생성은 benchmark metadata가 아니라 repo 구조, touched files, public test naming에서 나온다.
+- `GateDecision`은 `commit-now`도 낼 수 있어야 한다. trivial / high-confidence 케이스에 verify를 무조건 강제하면 `#9296`류를 다시 만든다.
 
 ### 3. RepairEscalationPolicy
 
@@ -546,7 +571,7 @@ interface RepairEscalationDecision {
 - prompt에 "candidate"로 표시하고, 실제 개선은 `first_edit_owner_match`로 측정한다.
 - low confidence는 기존 localize-phase nudging을 유지한다.
 
-### M3 — VerificationPlan wiring
+### M3 — VerificationPlan + gate wiring
 
 권장 위치:
 
@@ -557,23 +582,26 @@ interface RepairEscalationDecision {
 작업:
 
 - chosen owner와 touched files에서 owner-near test 후보를 고른다.
-- explicit repro가 있으면 required step 1순위로 둔다.
+- explicit repro가 있으면 unpatched base에서 RED인지 먼저 확인하고, 그때만 required step 1순위로 둔다.
 - touched module smoke는 time budget 안에서 1개만 고른다.
+- `GateDecision = commit-now | verify(sources)`를 구조신호 기반으로 계산한다.
 - plan을 agent prompt에 싣되, command 실행 여부는 `test_runner`/verify guard가 관찰한다.
 
 통과 기준:
 
 - patch 이후 required verification이 0개인 run 비율이 낮아진다.
 - failed verification 후에도 "done"하는 케이스가 `mustPass`로 막힌다.
+- verify loop가 green에서 즉시 멈추고, default path에서 무한 evidence-free rewrite가 없다.
 - optional regression failure는 advisory로 남고 control flow를 과도하게 막지 않는다.
 
 첫 PR 범위:
 
 - command synthesis를 과하게 넓히지 않는다.
-- explicit repro가 있으면 그것만 required로 둔다.
+- explicit repro가 있고 base-RED가 확인되면 그것만 required로 둔다.
 - repro가 없으면 touched module smoke 1개만 required로 둔다.
+- same-model critic을 required signal로 승격하지 않는다.
 
-### M4 — EscalationPolicy + preset
+### M4 — EscalationPolicy + preset freeze
 
 권장 위치:
 
@@ -584,8 +612,9 @@ interface RepairEscalationDecision {
 작업:
 
 - `agentless-v1`은 그대로 둔다.
-- `agentless-v2`에 `fault-evidence`, `owner-localization`, `verification-plan`을 켠다.
+- `agentless-v2`에 `fault-evidence`, `owner-localization`, `verification-plan`, `primary-rail gate`를 켠다.
 - branch-search/subagent는 default-on으로 넣지 말고 escalation action으로만 호출한다.
+- freeze 전 `agentless-v2` / `agentless-v2-safe` / published row namespace를 먼저 정리한다.
 
 통과 기준:
 
@@ -603,7 +632,7 @@ interface RepairEscalationDecision {
 | agentless-v1 | 기존 SOTA posture | file-level localize 효과 |
 | agentless-v1 + packet render only | P0 단독 효과 | owner context 소비 여부 |
 | agentless-v1 + owner admission | P1 효과 | first edit owner match |
-| agentless-v1 + verification plan | P2/P3 효과 | unverified done 감소 |
+| agentless-v1 + gate (`verification-plan` + `primary-rail`) | P2/P3 효과 | unverified done 감소 / over-verify 억제 |
 | agentless-v2 | 통합 효과 | official resolved 상승 |
 
 주의:
@@ -620,10 +649,13 @@ interface RepairEscalationDecision {
 
 - packet은 좋아졌지만 agent가 읽지 않는다: prompt renderer가 너무 길거나 owner candidate가 약하게 표시된 경우.
 - owner recall은 좋아졌지만 resolved가 안 오른다: repair synthesis 또는 verification feedback loop가 병목.
+- synthesized repro가 vacuous-green이다: unpatched RED 증명이 없어서 가짜 rail을 믿은 경우.
 - resolved는 일부 오르지만 cost가 폭증한다: packet token budget, extra turns, test runtime을 줄여야 한다.
+- verify loop가 overthinking으로 바뀐다: green에서 안 멈추거나, evidence 없는 rewrite를 반복하는 경우.
 - django에서만 오른다: runtime decision에 django-specific signal이 섞였거나 validation set이 좁다.
 - branch-search가 점수를 올리지만 재현성이 떨어진다: escalation trigger가 너무 공격적이다.
 - optional regression check가 closeout을 과하게 막는다: optional/advisory와 required/must-pass 경계가 섞인 것이다.
+- gate가 free-form vibe가 된다: 구조신호 대신 모델 직감으로 verify 여부를 정한 경우.
 
 대응:
 

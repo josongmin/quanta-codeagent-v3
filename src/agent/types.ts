@@ -45,7 +45,6 @@ import type { CapEnforcer } from "./cap-enforcer"
 import type { GranularRegistryPort } from "./checkpoint/granular-registry"
 import type { CheckpointTriggerMode, DestructivenessOracle } from "./checkpoint-policy"
 import type { CloseoutCriticConfig } from "./closeout-critic"
-import type { RefusalFallbackConfig } from "./refusal-fallback"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
 import type { ConversationCheckpointStore } from "./conversation-checkpoint"
@@ -69,6 +68,7 @@ import type { PlanExitPort } from "./plan-exit-flow"
 import type { PlanQueueStore } from "./plan-queue"
 import type { AgentMode } from "./prompt"
 import type { RadarProducerBlock } from "./radar-producer-hook"
+import type { RefusalFallbackConfig } from "./refusal-fallback"
 import type { RepoRules } from "./repo-rules"
 import type { RunLedgerPort } from "./run-ledger"
 import type { ModePolicy } from "./run-mode"
@@ -336,6 +336,33 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
      *  the first turn. Independent of the loop's lifetime `signal`. */
     readonly warmSignal?: AbortSignal
   }
+  /**
+   * RFC jun-17 (code-intelligence warm backend) — session-start LSP workspace
+   * prewarm. ORTHOGONAL to {@link prewarm} (which warms the LLM/TTFM path); this
+   * warms the language-server workspace. Absent ⇒ NO background LSP prewarm and
+   * the loop is byte-identical. Present + `enabled` ⇒ session bootstrap
+   * FIRE-AND-FORGETS a background warm of the Python workspace's anchor file so
+   * the first LSP nav call joins a warm pool instead of paying the 2–6s cold
+   * pyright boot. Session start is NEVER delayed or aborted by it.
+   *
+   * Gated at the composition root by `QUANTA_LSP_PREWARM` AND the nav tools
+   * being enabled (`QUANTA_LSP_TOOLS=full` / `QUANTA_BENCH_LSP=1`) — warming a
+   * server whose tools are not even exposed would be wasted work.
+   */
+  lspPrewarm?: {
+    /** Master gate. Only `true` arms the background warm. */
+    readonly enabled: boolean
+    /** Abort signal (the session signal) so session end cancels an in-flight
+     *  background warm instead of riding out the readiness budget. */
+    readonly warmSignal?: AbortSignal
+  }
+  /**
+   * RFC jun-17 — evict pooled LSP workspaces at session end. Interactive relies
+   * on the pool's idle-TTL for cross-turn / cross-session reuse; BENCH sets this
+   * so a per-instance sandbox cwd does not leak a language-server child for the
+   * whole idle-TTL window. Absent/false ⇒ idle-TTL only (byte-identical).
+   */
+  evictLspPoolOnEnd?: boolean
   /**
    * jun-6 account-ratelimit-snapshot (gate `QUANTA_RATELIMIT_PROACTIVE`).
    * Optional injected collaborators for the PROACTIVE rate-limit path so the

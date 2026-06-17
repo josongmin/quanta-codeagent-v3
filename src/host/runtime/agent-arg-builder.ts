@@ -19,7 +19,6 @@
  */
 
 import { join as joinPath } from "node:path"
-import { instrumentToolsForExport } from "@/observability"
 import {
   buildSystemPrompt,
   evidenceLspStatic,
@@ -75,6 +74,7 @@ import type { AgentArgs, IdentityModeToken, ToolProfileToken } from "@/host/runt
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
+import { instrumentToolsForExport } from "@/observability"
 import {
   buildAutorunEligibility,
   buildDefinition,
@@ -516,6 +516,23 @@ const resolvePrewarmSlot = (
   parseEnvFlag(env.QUANTA_PREWARM, /* defaultOn */ false)
     ? { prewarm: { enabled: true, now: () => Date.now() } }
     : {}
+
+// RFC jun-17 (code-intelligence warm backend) — project `QUANTA_LSP_PREWARM`
+// into `AgentConfig.lspPrewarm`. Gated TWICE: the prewarm flag must be on AND
+// the nav tools must actually be exposed (`QUANTA_LSP_TOOLS=full`, matching
+// `lspNavEnabled`, OR the bench-only `QUANTA_BENCH_LSP`) — warming a server
+// whose tools are not registered is wasted work. Default-OFF: either gate off
+// ⇒ `{}` ⇒ slot omitted ⇒ NO background warm (byte-identical legacy). The
+// session signal is not available at config-build time, so `warmSignal` is left
+// to the (bench-side) caller / future wiring; the orchestrator self-terminates
+// via evict / idle-TTL without it.
+const resolveLspPrewarmSlot = (
+  env: NodeJS.ProcessEnv,
+): { lspPrewarm?: NonNullable<AssembleRequest["base"]["lspPrewarm"]> } => {
+  const navEnabled = env.QUANTA_LSP_TOOLS === "full" || gateOn(env, "QUANTA_BENCH_LSP")
+  if (!navEnabled || !gateOn(env, "QUANTA_LSP_PREWARM")) return {}
+  return { lspPrewarm: { enabled: true } }
+}
 
 // ADR-0455 jun-02 wire — load `.quanta/environment.toml` (Codex `.codex/
 // environments` fallback) from `cwd` up to the repo root and resolve the
@@ -1005,26 +1022,26 @@ const buildBaseRegistry = (args: {
   // export is live (process-default metric sink set); byte-identical otherwise.
   new ToolRegistry(
     instrumentToolsForExport([
-    ...buildDefaultTools({
-      ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
-      ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
-      ...buildGatedToolPorts(
-        args.env,
-        args.seams,
-        args.permissionPatternSlice,
-        args.fileHistorySlice,
-        args.llm,
-      ),
-    }),
-    ...(args.searchWire !== null ? [args.searchWire.tool] : []),
-    // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when
-    // `runtimeConfig().asyncTools` is true (QUANTA_ASYNC_TOOLS). Without it the
-    // registry is byte-identical and the LLM never sees the tool. The
-    // `DefaultDeferredResultRegistry` is bounded by `runtimeConfig().deferredCap`
-    // (QUANTA_DEFERRED_CAP) so a long session cannot grow the handle map
-    // unbounded; the tool closes over THIS registry instance — the same one a
-    // future `defineToolAsync` caller would register deferred work into.
-    ...buildAsyncDeferredTools(),
+      ...buildDefaultTools({
+        ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
+        ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
+        ...buildGatedToolPorts(
+          args.env,
+          args.seams,
+          args.permissionPatternSlice,
+          args.fileHistorySlice,
+          args.llm,
+        ),
+      }),
+      ...(args.searchWire !== null ? [args.searchWire.tool] : []),
+      // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when
+      // `runtimeConfig().asyncTools` is true (QUANTA_ASYNC_TOOLS). Without it the
+      // registry is byte-identical and the LLM never sees the tool. The
+      // `DefaultDeferredResultRegistry` is bounded by `runtimeConfig().deferredCap`
+      // (QUANTA_DEFERRED_CAP) so a long session cannot grow the handle map
+      // unbounded; the tool closes over THIS registry instance — the same one a
+      // future `defineToolAsync` caller would register deferred work into.
+      ...buildAsyncDeferredTools(),
     ]),
   )
 
@@ -1510,6 +1527,9 @@ export const buildBaseFromArgs = (
   // ADR-0452 jun-02 wire — `QUANTA_PREWARM` → `AgentConfig.prewarm` slot
   // (resolved by the extracted `resolvePrewarmSlot` helper; default-OFF).
   const prewarmSlot = resolvePrewarmSlot(env)
+  // RFC jun-17 — `QUANTA_LSP_PREWARM` → `AgentConfig.lspPrewarm` slot (double-
+  // gated on the nav tools being enabled; default-OFF).
+  const lspPrewarmSlot = resolveLspPrewarmSlot(env)
   // ADR-0404 + ADR-0415 — composition-root observability slots. Single helper
   // call: gate ON ⇒ mints the canonical HookBus (the same bus the loop emits
   // `post_tool_use` to), wires attribution onto it, and returns the four ports
@@ -1597,6 +1617,7 @@ export const buildBaseFromArgs = (
     // ADR-0452 — spread-ready prewarm slot (`{}` when off ⇒ no branch here,
     // keeps `buildBaseFromArgs` under biome's cognitive-complexity cap).
     ...prewarmSlot,
+    ...lspPrewarmSlot,
     // ADR-0455 — spread-ready local-env slot resolved at the (async) root and
     // carried on the partial (`{}` when absent ⇒ ambient env byte-identical;
     // shell.ts applies it via the existing `applyLocalEnv` seam, allowlist-

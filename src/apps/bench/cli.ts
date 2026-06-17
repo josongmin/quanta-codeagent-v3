@@ -18,7 +18,9 @@
  * `remote` grading = `grade --backend ec2` (the secure default: patch-gen stays
  * local, only grading is remote). Full remote patch-gen is ADR-0536 §6 (P3).
  */
-import { readFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { KNOB_PRESETS } from "@/runner/knobs"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
@@ -227,19 +229,54 @@ const cmdGrade = async (): Promise<void> => {
   const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
   if (predictions === undefined || backendSpec === undefined || dataset === undefined) {
     logger.info(
-      "usage: quanta-bench grade --predictions <p.jsonl> --backend <ec2|ssh:user@host> --dataset <instances.jsonl> [--max-workers N] [--run-id id] [--key path] [--keep]",
+      "usage: quanta-bench grade --predictions <p.jsonl> --backend <ec2|ssh:user@host> --dataset <instances.jsonl> [--max-workers N] [--run-id id] [--key path] [--keep] [--skip-resolved <prior-report.json>]",
     )
     process.exit(2)
   }
+  // Incremental grading: `--skip-resolved <prior-report.json>` drops predictions
+  // whose instance is already resolved in a prior swebench report, grades only
+  // the remainder, then merges the prior resolved set into the final tally. After
+  // a few fixes you re-grade ONLY the not-yet-resolved instances — most of the
+  // wall-clock (image pull + tests) is spent solely on what can still change.
+  let gradePredictions = predictions
+  let priorResolved: string[] = []
+  const skipReport = argValue("--skip-resolved")
+  if (skipReport !== undefined) {
+    const rep = JSON.parse(readFileSync(skipReport, "utf8")) as { resolved_ids?: unknown }
+    priorResolved = Array.isArray(rep.resolved_ids) ? (rep.resolved_ids as string[]) : []
+    const done = new Set(priorResolved)
+    const rows = readFileSync(predictions, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+    const remaining = rows.filter((l) => {
+      try {
+        return !done.has((JSON.parse(l) as { instance_id?: string }).instance_id ?? "")
+      } catch {
+        return true
+      }
+    })
+    gradePredictions = join(tmpdir(), `quanta-preds-incr-${Date.now()}.jsonl`)
+    writeFileSync(gradePredictions, `${remaining.join("\n")}\n`)
+    logger.info(
+      `incremental: ${priorResolved.length} already-resolved skipped, grading ${remaining.length}/${rows.length}`,
+    )
+  }
+
   const runId = argValue("--run-id") ?? `quanta-cli-${Date.now()}`
-  const backend = buildBackend(backendSpec, modelNameFromPredictions(predictions))
-  logger.info(`grading via ${backend.name}: ${predictions} (run_id=${runId})`)
+  const backend = buildBackend(backendSpec, modelNameFromPredictions(gradePredictions))
+  logger.info(`grading via ${backend.name}: ${gradePredictions} (run_id=${runId})`)
   const outDir = argValue("--out")
-  const out = await backend.grade(predictions, {
+  const out = await backend.grade(gradePredictions, {
     datasetPath: dataset,
     runId,
     ...(outDir !== undefined ? { outDir } : {}),
   })
+  const mergedResolved = [...new Set([...priorResolved, ...out.resolved])].sort()
+  if (priorResolved.length > 0) {
+    logger.info(
+      `merged with prior: resolved ${mergedResolved.length} (= ${priorResolved.length} prior + ${out.resolved.length} new)`,
+    )
+  }
   logger.info(
     `resolved ${out.resolved.length} | unresolved ${out.unresolved.length} | error ${out.errored.length} | empty ${out.emptyPatch.length}`,
   )

@@ -359,6 +359,16 @@ const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
+    envKey: "QUANTA_LSP_PREWARM",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Session-start background LSP workspace prewarm (RFC jun-17). Double-gated: also requires the nav tools (QUANTA_LSP_TOOLS=full / QUANTA_BENCH_LSP).",
+    readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
     envKey: "QUANTA_IMAGE_DOWNSAMPLE",
     kind: "bool",
     default: false,

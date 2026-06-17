@@ -168,6 +168,13 @@ async function* openOrEmitUnavailable(
   cwd: string,
   signal: AbortSignal,
 ): AsyncGenerator<ToolEvent, LspNavSession | null, undefined> {
+  // RFC jun-17 — break the "silent blocking" stall. `provider.open()` may take
+  // 2–6s on a cold language-server workspace (pyright boot + initial index) or
+  // join an in-flight background warm; without a progress event BEFORE it the
+  // wait looks like a hang. Emitting here (not inside `open`, whose signature
+  // stays a plain Promise) is the cheap fix; live elapsed-time streaming is a
+  // deferred follow-up (RFC §4.7).
+  yield { type: "progress", message: `${toolName}: initializing language server…` }
   let session: LspNavSession | null
   try {
     session = await provider.open(abs, cwd, signal)

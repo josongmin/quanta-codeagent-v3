@@ -13,6 +13,7 @@ import {
 } from "../control-op-handler"
 import type { buildSessionFeatures } from "../features"
 import { scanEnvelopeForRedactions } from "../loop-helpers"
+import { evictLspWorkspaces } from "../lsp-bridge"
 import { persistSession } from "../memory"
 import { buildPersistDeps } from "../session-resources"
 import type { StopCategory } from "../stop-category"
@@ -138,6 +139,21 @@ export const disposeSessionResources = async (args: {
     await getBashBgRegistry().killAll()
   } catch (e) {
     args.cfg.stream.emit({ type: "error", message: `bg-shell reap failed: ${errMessage(e)}` })
+  }
+  // RFC jun-17 — evict pooled LSP workspaces on session end when the surface
+  // opted in (bench). Interactive leaves them on the pool's idle-TTL for
+  // cross-turn reuse; bench MUST reap so a per-instance sandbox cwd does not
+  // leak a language-server child for the idle-TTL window. No-throw wrapped +
+  // idempotent (evict on an absent cwd is a no-op) like the sibling disposals.
+  if (args.cfg.evictLspPoolOnEnd === true) {
+    try {
+      await evictLspWorkspaces(args.cfg.cwd)
+    } catch (e) {
+      args.cfg.stream.emit({
+        type: "error",
+        message: `lsp workspace evict failed: ${errMessage(e)}`,
+      })
+    }
   }
 }
 

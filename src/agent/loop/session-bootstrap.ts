@@ -22,6 +22,7 @@ import {
   buildTurnDiffSession,
   wireHookPromptPending,
 } from "../loop-helpers"
+import { startBackgroundLspPrewarm } from "../lsp-bridge"
 import { AgentRecorder } from "../metrics"
 import {
   buildCloseoutGuard,
@@ -81,6 +82,19 @@ export const maybeRunSessionPrewarm = async (
   })
 }
 
+/**
+ * RFC jun-17 — kick off a session-start BACKGROUND warm of the LSP workspace.
+ * Fire-and-forget: returns immediately, the warm runs concurrently so session
+ * bootstrap is never delayed. Gated on `cfg.lspPrewarm.enabled` (set by the
+ * composition root only when `QUANTA_LSP_PREWARM` AND the nav tools are on).
+ * Absent/disabled ⇒ no-op, byte-identical. The orchestrator is NO-THROW, so an
+ * unhandled-rejection can never escape the `void`.
+ */
+export const maybeStartLspPrewarm = (cfg: AgentConfig): void => {
+  if (cfg.lspPrewarm?.enabled !== true) return
+  void startBackgroundLspPrewarm(cfg.cwd, cfg.lspPrewarm.warmSignal)
+}
+
 export const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
   const features = await buildSessionFeatures(config)
   if (config.onWorkingStateReady !== undefined) {
@@ -117,6 +131,8 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   cfg.llm = maybeWrapImageSanitizationRetry(cfg, wm)
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
   const ttfm = await maybeRunSessionPrewarm(cfg, recorder)
+  // RFC jun-17 — fire-and-forget background LSP workspace warm (default-OFF).
+  maybeStartLspPrewarm(cfg)
   const sessionId = cfg.sessionId ?? "default"
   const breaker = cfg.compactionBreaker?.disabled
     ? undefined

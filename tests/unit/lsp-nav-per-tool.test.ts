@@ -49,7 +49,9 @@ describe("lsp_definition", () => {
     const { progress, result } = await run(t, { path: "src/a.ts", line: 5, character: 7 })
     expect(trace.opened.filePath).toBe("/repo/src/a.ts")
     expect(trace.pos).toEqual({ line: 4, character: 6 })
-    expect(progress).toEqual(["analyzing src/a.ts"])
+    // RFC jun-17: a pre-open "initializing language server" progress event now
+    // precedes "analyzing …" so a cold-workspace open is never a silent block.
+    expect(progress).toEqual(["lsp_definition: initializing language server…", "analyzing src/a.ts"])
     expect(result.ok).toBe(true)
     expect(result.output).toContain("definition: 1 result(s)")
     expect(result.output).toContain("/abs/x.ts:10:5")
