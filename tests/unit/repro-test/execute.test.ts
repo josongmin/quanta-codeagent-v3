@@ -130,7 +130,7 @@ describe("executeReproTests", () => {
     )
     expect(writeCount).toBe(1)
     expect(execCount).toBe(1)
-    expect(out[0]).toEqual({ source: "", stdout: "", outcome: "unknown" })
+    expect(out[0]).toEqual({ source: "", stdout: "", stderr: "", outcome: "unknown" })
     expect(out[1]?.outcome).toBe("reproduced")
   })
 
