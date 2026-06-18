@@ -72,6 +72,12 @@ export type BenchReproTestTelemetry =
       reason: BenchReproTestReason
       samples?: number
       reproducedCount?: number
+      /** jun-18 DIAGNOSTIC (observe-only): per-sample outcome classification +
+       *  a tail of the first sample's stdout. Surfaces WHY base-red reproduction
+       *  is 0% (all `resolved` ⇒ LLM repro doesn't detect on base; `exec_failed`/
+       *  `other` ⇒ script crashed e.g. import error; `unknown` ⇒ no marker). */
+      sampleOutcomes?: readonly string[]
+      sampleStdoutTail?: string
     }
 
 /** Outcome of running one instance once. */
@@ -156,6 +162,26 @@ export interface InstanceResult {
    * acted on in v1 (behavior wiring is measurement-gated). Absent ⇒ null.
    */
   gateEntered?: boolean
+  /**
+   * T-4 OBSERVE-ONLY — the gate took the commit-now path instead of verify-first.
+   * Drives `gate_bypass_rate`. Absent ⇒ null.
+   */
+  gateBypassed?: boolean
+  /**
+   * T-4/T-301 — number of repair/verify rounds actually consumed when the
+   * verify-first path ran. Absent ⇒ null.
+   */
+  verifyRounds?: number
+  /**
+   * T-3/T-4 — the selected repro rail reproduced the bug on the unpatched base.
+   * Offline-only measurement for `synth_repro_base_red_rate`.
+   */
+  synthReproBaseRed?: boolean
+  /**
+   * T-6 — patch touched files outside the admitted owner set. Telemetry-first:
+   * exact diff fact only, never a semantic width judgment.
+   */
+  outOfScopeFiles?: boolean
   /**
    * T-401 — deterministic PatchHygieneReport over the final cumulative diff
    * (stray added files, owner-outside, file count). Computed only when the

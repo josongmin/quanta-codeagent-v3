@@ -39,7 +39,10 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
+import type { PrimaryRailStep } from "@/agent/closure"
 import { LSP_GROUNDING_STEER, SPEC_FIDELITY_STEER } from "@/agent/localize-phase-guard"
+import { decideEscalation } from "@/agent/repair-escalation"
+import { extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { errMessage, gateDisabled, gateOn } from "@/shared"
@@ -55,6 +58,7 @@ import type {
   InstanceResult,
 } from "../types"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
+import { buildClosureSession, buildPhasePatchHygiene } from "./closure-session"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { validateGoldPatch } from "./gold-sanity"
@@ -65,6 +69,7 @@ import {
   knobsForReport,
   resolveBenchKnobs,
 } from "./knobs-bench"
+import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type {
@@ -93,16 +98,6 @@ import {
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
-import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
-import { decideGate } from "@/agent/gate-decision"
-import { decideOwnerAdmission } from "@/agent/owner-admission"
-import { buildPrimaryRailStep, type PrimaryRailStep } from "@/agent/closure"
-import { decideEscalation } from "@/agent/repair-escalation"
-import {
-  buildVerificationPlan,
-  extractIssueDeclaredExpected,
-} from "@/agent/verification-plan"
-import { buildPatchHygiene } from "./patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
@@ -699,10 +694,15 @@ const selectionTelemetry = (selection: ReproTestSelection): BenchReproTestTeleme
   if (selection.selected !== null) {
     return { installed: false, reason: "not_installed", samples, reproducedCount }
   }
-  if (samples > 0 && selection.samples.every((sample) => sample.outcome === "exec_failed")) {
-    return { installed: false, reason: "execution_failed", samples, reproducedCount }
+  // jun-18 DIAGNOSTIC (observe-only): surface WHY 0% base-red reproduction.
+  const diag = {
+    sampleOutcomes: selection.samples.map((s) => s.outcome),
+    sampleStdoutTail: (selection.samples[0]?.stdout ?? "").slice(-400),
   }
-  return { installed: false, reason: "no_reproduced_candidate", samples, reproducedCount }
+  if (samples > 0 && selection.samples.every((sample) => sample.outcome === "exec_failed")) {
+    return { installed: false, reason: "execution_failed", samples, reproducedCount, ...diag }
+  }
+  return { installed: false, reason: "no_reproduced_candidate", samples, reproducedCount, ...diag }
 }
 
 export const prepareReproTestDetailed = async (
@@ -887,11 +887,10 @@ export const composeWithReproHint = (
   hintedBase: string,
   baseText: string,
   reproHint: string | undefined,
-): string => {
-  if (reproHint === undefined || reproHint === "") return hintedBase
-  if (hint !== "") return `${hint}\n\n${reproHint}\n\n${baseText}`
-  return `${reproHint}\n\n${baseText}`
-}
+): string =>
+  reproHint === undefined || reproHint === ""
+    ? hintedBase
+    : composePromptPrelude({ issueHint: hint, reproHint, baseText })
 
 const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
   instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}
@@ -927,6 +926,8 @@ export const buildConfig = (
    * verbatim {@link REPRO_HINT_MESSAGE} through here.
    */
   reproHint?: string,
+  /** Optional one-line owner hint rendered from the ClosureBundle. */
+  closureHint?: string,
 ) => {
   // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI) OR
   // the bench-only `QUANTA_BENCH_LSP=1`. When the language-server binary
@@ -1000,11 +1001,13 @@ export const buildConfig = (
             }),
           )
         : ""
-  const hintedBase = hint !== "" ? `${hint}\n\n${baseText}` : baseText
-  // Repro-test hint composition (Agentless §3.3.1). Default-OFF
-  // (undefined / "") ⇒ byte-identical to the pre-feature path.
-  const withRepro = composeWithReproHint(hint, hintedBase, baseText, reproHint)
-  const text = seedMsg !== undefined && seedMsg !== "" ? `${withRepro}\n\n${seedMsg}` : withRepro
+  const text = composePromptText({
+    issueHint: hint,
+    baseText,
+    ...(closureHint !== undefined ? { closureHint } : {}),
+    ...(reproHint !== undefined ? { reproHint } : {}),
+    ...(seedMsg !== undefined ? { seedMsg } : {}),
+  })
   const messages: Message[] = [
     {
       role: "user",
@@ -1087,6 +1090,8 @@ interface Phase {
    *  gate would catch). Repair path only; undefined on single-pass ⇒ measurement
    *  null (no rail ⇒ no false-green signal). */
   primaryFalseGreen?: boolean
+  /** Number of repair/verify rounds consumed when verify-first ran. */
+  verifyRounds?: number
 }
 
 /**
@@ -1170,6 +1175,7 @@ const runAgentOnce = async (
   timeoutMs: number,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  closureHint: string | undefined,
 ): Promise<RunOnceResult> => {
   const tap = new BenchStreamTap(w.stream)
   // Knob telemetry (2026-05-26): emit ONE `knobs_applied` event per
@@ -1179,7 +1185,17 @@ const runAgentOnce = async (
   // boundary marker).
   emitKnobsApplied(tap, process.env)
   const outcome = await runAgent(
-    buildConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint, reproHint),
+    buildConfig(
+      instance,
+      deps,
+      sandbox,
+      signal,
+      tap,
+      seedMsg,
+      precomputedHint,
+      reproHint,
+      closureHint,
+    ),
   )
   // Capture the cumulative diff CURRENTLY in the worktree (without resetting
   // the index): mirrors `withGitSnapshot`'s final diff step. `git` is
@@ -1202,6 +1218,7 @@ const runAgentPhase = async (
   w: Wiring,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  closureHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let stopReason: StopReason | undefined
@@ -1221,7 +1238,17 @@ const runAgentPhase = async (
       // `runAgentOnce`, so the emit lives here directly.
       emitKnobsApplied(tap, process.env)
       const outcome = await runAgent(
-        buildConfig(instance, deps, sandbox, signal, tap, undefined, precomputedHint, reproHint),
+        buildConfig(
+          instance,
+          deps,
+          sandbox,
+          signal,
+          tap,
+          undefined,
+          precomputedHint,
+          reproHint,
+          closureHint,
+        ),
       )
       turns = outcome.turns
       stopReason = outcome.reason
@@ -1258,12 +1285,14 @@ const runRepairPhase = async (
   repair: NonNullable<RunInstanceDeps["repair"]>,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  closureHint: string | undefined,
   primaryRailStep: PrimaryRailStep | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
   let repairValidated = false
   let repairFalseGreen = false
+  let repairRounds = 0
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -1284,6 +1313,7 @@ const runRepairPhase = async (
             deps.timeoutMs,
             precomputedHint,
             reproHint,
+            closureHint,
           ),
         validate: repair.validate ?? defaultValidate,
         buildContext: repair.buildContext ?? buildRepairContext,
@@ -1296,6 +1326,7 @@ const runRepairPhase = async (
       finalPatch = out.patch
       repairValidated = out.validated
       repairFalseGreen = out.primaryFalseGreen
+      repairRounds = out.rounds
     },
   )
   // `patch` (from withGitSnapshot's final diff) is the canonical capture; if
@@ -1307,6 +1338,7 @@ const runRepairPhase = async (
     turns,
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
+    ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
   }
 }
 
@@ -1474,7 +1506,8 @@ export const runInstanceOnce = async (
     // per instance, before any agent turn — repair rounds reuse the same
     // hint (the issue text doesn't change across rounds; re-asking the LLM
     // would just waste budget).
-    const hintMode = benchOptIns().issueHintMode
+    const posture = benchOptIns()
+    const hintMode = posture.issueHintMode
     // T-201: capture the agentless localizer's ranked candidates from the SAME
     // pass (observer seam — no second LLM call). Empty unless agentless mode runs.
     let localizeCandidates: readonly string[] = []
@@ -1502,19 +1535,28 @@ export const runInstanceOnce = async (
     // gap-B: extract the issue-declared expected output (public, fail-closed) so
     // the verification plan can carry a typed exact-output predicate AND the
     // spec-fidelity steer can fire only when a concrete spec exists.
-    const issueDeclaredExpected = extractIssueDeclaredExpected(instance.problemStatement)
-    const verificationPlan =
-      (benchOptIns().primaryRail || benchOptIns().verificationPlan) && instance.swebench !== undefined
-        ? buildVerificationPlan({
+    const stage1Files = localizeCandidates.map((file, i) => ({
+      file,
+      score: localizeCandidates.length - i,
+    }))
+    const closureSession =
+      instance.swebench !== undefined
+        ? buildClosureSession({
+            problemStatement: instance.problemStatement,
+            stage1Files,
             ...(reproTest?.installed === true && reproTest.reproducedCount > 0
               ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
               : {}),
-            ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
+            posture: {
+              lspNav: posture.lspNav,
+              primaryRail: posture.primaryRail,
+              faultEvidence: posture.faultEvidence,
+            },
           })
         : undefined
-    const primaryRailStep = benchOptIns().primaryRail
-      ? buildPrimaryRailStep(verificationPlan?.primaryRail)
-      : undefined
+    const verificationPlan = closureSession?.bundle.plan
+    const primaryRailStep = closureSession?.primaryRailStep
+    const closureHint = closureSession?.closureHint
 
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
     // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
@@ -1530,8 +1572,11 @@ export const runInstanceOnce = async (
     // pipeline (the legacy regex-on-`=1` path is also byte-identical
     // because `prepareIssueHint("regex")` returns the same string the
     // in-buildConfig regex would have produced).
+    const repairGateEligible =
+      deps.repair !== undefined && instance.swebench !== undefined && posture.inLoopExec
+    const enterVerifyPhase = repairGateEligible && closureSession?.bundle.gate.action === "verify"
     phase =
-      deps.repair !== undefined && instance.swebench !== undefined
+      enterVerifyPhase && deps.repair !== undefined
         ? await runRepairPhase(
             instance,
             deps,
@@ -1541,9 +1586,19 @@ export const runInstanceOnce = async (
             deps.repair,
             precomputedHint,
             reproHint,
+            closureHint,
             primaryRailStep,
           )
-        : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
+        : await runAgentPhase(
+            instance,
+            deps,
+            sandbox,
+            abort.signal,
+            w,
+            precomputedHint,
+            reproHint,
+            closureHint,
+          )
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
     if (terminal !== undefined) return terminal
 
@@ -1575,11 +1630,12 @@ export const runInstanceOnce = async (
       // T-3 closure measurement signals (observe-only; gated on the same closure
       // knobs as the plan telemetry ⇒ byte-identical report when off). Drive the
       // `primary_rail_present_rate` / `required_verification_coverage` metrics.
-      if (benchOptIns().verificationPlan || benchOptIns().primaryRail) {
+      if (posture.verificationPlan || posture.primaryRail) {
         extra.primaryRailPresent = primaryRailStep !== undefined
         extra.requiredVerificationCovered =
-          verificationPlan !== undefined &&
-          verificationPlan.required.some((s) => s.successPredicate !== undefined)
+          verificationPlan?.required.some((s) => s.successPredicate !== undefined) ?? false
+        if (verificationPlan !== undefined)
+          extra.synthReproBaseRed = verificationPlan.baseValidatedRed
         // primaryFalseGreen is only meaningful when a primary RAIL was actually
         // gated (the predicate runs on the rail). Repair-without-rail (e.g.
         // verification-plan knob on but no rail selected) ⇒ omit ⇒ measurement null
@@ -1587,78 +1643,44 @@ export const runInstanceOnce = async (
         if (primaryRailStep !== undefined && phase.primaryFalseGreen !== undefined)
           extra.primaryFalseGreen = phase.primaryFalseGreen
       }
+      if (repairGateEligible) {
+        extra.gateEntered = enterVerifyPhase
+        extra.gateBypassed = !enterVerifyPhase
+        if (phase.verifyRounds !== undefined) extra.verifyRounds = phase.verifyRounds
+      }
       // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
       // + observe-only ⇒ byte-identical report.json when the knob is OFF. The first
       // mutating edit (if any) is the only owner signal we have here, so it seeds
       // the owner set; absent ⇒ owner-outside telemetry suppressed (empty), never
       // flagging every file. Telemetry-first: we EMIT the report, we do NOT deny.
-      if (benchOptIns().patchHygiene && instance.swebench !== undefined) {
-        const ownerHint = relFromSandbox(sandbox, phase.firstEditFile)
-        extra.patchHygiene = buildPatchHygiene(phase.patch, {
-          ...(ownerHint !== undefined ? { ownerFiles: [ownerHint] } : {}),
-        })
+      const ownerHint = relFromSandbox(sandbox, phase.firstEditFile)
+      const hygiene =
+        instance.swebench !== undefined ? buildPhasePatchHygiene(phase.patch, ownerHint) : undefined
+      if (posture.patchHygiene && hygiene !== undefined) {
+        extra.patchHygiene = hygiene
+        extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
       }
       // T-301 verification-plan telemetry (knob-gated, observe-only).
-      if (benchOptIns().verificationPlan && verificationPlan !== undefined) {
+      if (posture.verificationPlan && verificationPlan !== undefined) {
         extra.verificationPlan = verificationPlan
       }
-      // T-201/T-202 fault-evidence packet + owner-admission (knob-gated, observe-only).
-      // Built from the agentless localizer's ranked candidates (rank→score, no LSP
-      // owner-resolve threaded ⇒ packet is `partial`, which is honest; owner_recall
-      // is still measurable from the stage-1 ranking offline vs the gold owner).
-      if (
-        (benchOptIns().faultEvidence || benchOptIns().repairEscalation) &&
-        instance.swebench !== undefined &&
-        localizeCandidates.length > 0
-      ) {
-        const stage1Files = localizeCandidates.map((file, i) => ({
-          file,
-          score: localizeCandidates.length - i,
-        }))
-        const packet = buildFaultEvidencePacket({ issueText: instance.problemStatement, stage1Files })
-        // owner-admission rides the fault-evidence knob (it's a pure read of the
-        // packet — T-201/T-202 share the one artifact chain; no separate knob).
-        if (benchOptIns().faultEvidence) {
-          const owner = decideOwnerAdmission({ packet })
-          extra.faultEvidence = packet
-          extra.ownerAdmission = owner
-          // T-4 gate telemetry (OBSERVE-ONLY): compute the gate decision
-          // (commit-fast vs verify-first) from PUBLIC signals and RECORD whether
-          // verify-first was entered (gate_enter_rate). The decision is NOT acted
-          // on in v1 — behavior wiring (commit-fast short-circuit / verify-first
-          // enforcement) is a measurement-gated follow-up. No hidden-oracle inputs.
-          const railFileCount = (phase.patch.match(/^diff --git /gm) ?? []).length
-          const gate = decideGate({
-            stakes: {
-              patchFileCount: railFileCount,
-              crossFile: railFileCount > 1,
-              destructive: false,
-            },
-            uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
-            signal: {
-              reproAvailable: verificationPlan?.baseValidatedRed === true,
-              lspAvailable: benchOptIns().lspNav === true,
-            },
-            commitFast: {
-              issueProvidesFix: issueDeclaredExpected !== undefined,
-              highConfidenceSingleOwner: owner.admit,
-            },
-          })
-          extra.gateEntered = gate.action === "verify"
-        }
-        // T-601 escalation (telemetry). primaryRailRedAfterRepair: the repair loop
-        // ran a primary rail (primaryRailCmd set) and it never cleared (validated
-        // false). Single-pass / no-rail ⇒ false (no escalation signal).
-        if (benchOptIns().repairEscalation) {
-          extra.repairEscalation = decideEscalation({
-            candidates: packet.candidates.map((c) => ({
-              file: c.file,
-              score: c.score,
-              sources: c.sources,
-            })),
-            primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
-          })
-        }
+      // T-201/T-202 fault-evidence packet + owner-admission reuse the SAME
+      // ClosureBundle snapshot as the gate/plan. Empty evidence degrades honestly
+      // (`partial` / `admit:false`); no separate ad hoc recomputation.
+      if (posture.faultEvidence && closureSession !== undefined) {
+        extra.faultEvidence = closureSession.bundle.evidence
+        extra.ownerAdmission = closureSession.bundle.owner
+      }
+      // T-601 escalation uses the SAME evidence packet the prompt/gate saw.
+      if (posture.repairEscalation && closureSession !== undefined) {
+        extra.repairEscalation = decideEscalation({
+          candidates: closureSession.bundle.evidence.candidates.map((c) => ({
+            file: c.file,
+            score: c.score,
+            sources: c.sources,
+          })),
+          primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
+        })
       }
     }
     return okResult(instance, phase, v, extra)
