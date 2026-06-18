@@ -8,6 +8,7 @@ import {
   type PatchHygieneReport,
   type PrimaryRailStep,
 } from "@/agent/closure"
+import { extractIssueHint } from "@/agent/issue-hint"
 import {
   extractIssueDeclaredExpected,
   type IssueDeclaredExpected,
@@ -35,14 +36,19 @@ export interface ClosureSessionState {
 export const buildClosureSession = (args: {
   problemStatement: string
   stage1Files: readonly Stage1RankedFile[]
+  issueFiles?: readonly string[]
+  ownerResolved?: readonly { file: string; forSymbol: string }[]
   reproScript?: { cmd: string; baseValidatedRed: boolean }
   posture: ClosureSessionPosture
 }): ClosureSessionState => {
   const issueDeclaredExpected = extractIssueDeclaredExpected(args.problemStatement)
+  const issueFiles = args.issueFiles ?? extractIssueHint(args.problemStatement).files
   const input: ClosureBundleInput = {
     evidence: {
       issueText: args.problemStatement,
       stage1Files: args.stage1Files,
+      ...(issueFiles.length > 0 ? { issueFiles } : {}),
+      ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
     },
     plan: {
       ...(args.reproScript !== undefined ? { reproScript: args.reproScript } : {}),

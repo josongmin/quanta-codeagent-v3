@@ -110,6 +110,33 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     // rail never gates (gate_enter_rate = n=0). CLI `--repair-rounds` overrides.
     "closure-repair": "3",
   },
+  // WS1 mini-parity (jun-18) — agentless-v2 with the round-0 prompt THINNED.
+  // Single-variable delta vs agentless-v2: `round0-minimal:1`. Everything else is
+  // byte-identical to v2, so a `--preset agentless-mini-parity` vs `agentless-v2`
+  // run isolates the effect of removing the round-0 repro-directive prose (the
+  // baseline penalty: mini-swe's clean round-0 matched quanta 1:1 on the easy
+  // tail and beat agentless-v1 on #10914). The repro is still generated and
+  // still gates the repair loop (primary-rail unchanged) — only its PROSE is
+  // deferred out of the first attempt. A NEW frozen preset — v1/v2 untouched.
+  "agentless-mini-parity": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "3",
+    "round0-minimal": "1",
+  },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.
   "everything-v1": {

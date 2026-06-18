@@ -252,27 +252,42 @@ export const buildArgv = (
  * fall back to its local testCmd path.
  */
 /**
- * Process-global grading mutex. When `runBatch` overlaps patch-gen across
- * instances (`QUANTA_BENCH_CONCURRENCY>1`), this serialises the actual
- * `run_evaluation` Docker spawns so only ONE grading runs at a time — arm64
- * Docker's daemon wedges when several large eval images pull concurrently
- * (observed: max_workers=4 wedged it). patch-gen still overlaps; only the
- * Docker section bottlenecks. At concurrency 1 this is a no-op (an
- * already-resolved chain). NOT a limiter for x86 parallel grading — that path
- * uses run_evaluation's own `max_workers` on a remote box (ADR-0536).
+ * Process-global grading semaphore. When `runBatch` overlaps patch-gen across
+ * instances (`QUANTA_BENCH_CONCURRENCY>1`), this bounds how many `run_evaluation`
+ * Docker grades run AT ONCE to `swebenchGradeConcurrency` (env
+ * `QUANTA_SWEBENCH_GRADE_CONCURRENCY`, default 1).
+ *
+ *   - Default 1 ⇒ strictly serial, byte-identical to the historical mutex —
+ *     arm64 Docker's daemon wedges when several large eval images pull
+ *     concurrently under emulation (observed: max_workers=4 wedged it).
+ *   - N>1 (x86 NATIVE full-remote EC2) ⇒ each task grades its DISTINCT instance
+ *     the moment its patch is ready, up to N concurrent grades, overlapping both
+ *     patch-gen and other grades. Distinct instances ⇒ distinct container names
+ *     ⇒ no collision. This removes the end-of-run serial grading tail.
+ *
+ * Live-counter design (no memoised limit): `gradeLimit()` is read on each
+ * acquire so a knob override / env set after import is honoured, and `release`
+ * wakes ALL parked waiters which re-check the bound and re-queue if still over —
+ * correct (never stalls) without a wake-race window. patch-gen is NOT under this
+ * lock; only the Docker grade section is bounded.
  */
-let gradingChain: Promise<unknown> = Promise.resolve()
+let gradeInFlight = 0
+const gradeWaiters: Array<() => void> = []
+const gradeLimit = (): number => Math.max(1, runtimeConfig().swebenchGradeConcurrency)
 const withGradingLock = async <T>(fn: () => Promise<T>): Promise<T> => {
-  const prev = gradingChain
-  let release: () => void = () => {}
-  gradingChain = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  await prev.catch(() => {}) // wait for the previous grading; ignore its outcome
+  while (gradeInFlight >= gradeLimit()) {
+    await new Promise<void>((resolve) => gradeWaiters.push(resolve))
+  }
+  gradeInFlight += 1
   try {
     return await fn()
   } finally {
-    release()
+    gradeInFlight -= 1
+    // Wake every parked waiter; each re-evaluates the bound in its while-loop and
+    // re-parks if still over. With small N + few waiters the herd is negligible,
+    // and it guarantees no stall when >1 permit frees logically at once.
+    const woken = gradeWaiters.splice(0)
+    for (const w of woken) w()
   }
 }
 

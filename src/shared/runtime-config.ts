@@ -975,6 +975,16 @@ export interface RuntimeConfig {
   /** SWE-bench grading parallelism (`QUANTA_SWEBENCH_MAX_WORKERS`). Absent ⇒
    *  the harness config computes `min(4, ceil(cpus * 0.75))`. */
   readonly swebenchMaxWorkers: number | undefined
+  /** How many `run_evaluation` Docker grades may run AT ONCE across overlapping
+   *  bench tasks (`QUANTA_SWEBENCH_GRADE_CONCURRENCY`). Default 1 ⇒ strictly
+   *  serial grading (arm64-safe: Docker's daemon wedges on parallel large image
+   *  pulls under emulation). On x86 NATIVE (full-remote EC2) set N>1 so each
+   *  task grades its DISTINCT instance the moment its patch is ready — grading
+   *  overlaps both patch-gen and other grades instead of queuing behind a global
+   *  mutex. Distinct from `swebenchMaxWorkers` (the per-invocation harness fan-out
+   *  for ONE multi-instance grade); this bounds how many separate single-instance
+   *  grades run concurrently in the pipelined `bench run` path. */
+  readonly swebenchGradeConcurrency: number
   /** SWE-bench image namespace (`QUANTA_SWEBENCH_NAMESPACE`). Absent ⇒ the
    *  harness config picks by arch ("none" ⇒ build locally; avoids x86 pulls
    *  that would emulate on arm64). */
@@ -1695,6 +1705,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_SWEBENCH_MAX_WORKERS"],
       "QUANTA_SWEBENCH_MAX_WORKERS",
     ),
+    swebenchGradeConcurrency:
+      parsePositiveInt(
+        env["QUANTA_SWEBENCH_GRADE_CONCURRENCY"],
+        "QUANTA_SWEBENCH_GRADE_CONCURRENCY",
+      ) ?? 1,
     swebenchNamespace: stringOrUndef(env["QUANTA_SWEBENCH_NAMESPACE"]),
     swebenchForceRebuild: parseBool(env["QUANTA_SWEBENCH_FORCE_REBUILD"]),
     swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),

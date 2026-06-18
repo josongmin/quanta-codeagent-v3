@@ -111,6 +111,21 @@ describe("bench retry-transient — scenario coverage", () => {
     expect(result.passed).toBe(true)
   })
 
+  test("grader_invalid ⇒ terminal, no retry", async () => {
+    let calls = 0
+    const { result, loop } = await runRetryLoop(async () => {
+      calls += 1
+      return mkResult({ verdict: "grader_invalid", error: "gold sanity failed" })
+    }, 3)
+    expect(calls).toBe(1)
+    expect(loop.attempts).toBe(1)
+    expect(loop.outcomes[0]).toEqual({
+      kind: "grader-invalid",
+      reason: "gold sanity failed",
+    })
+    expect(result.verdict).toBe("grader_invalid")
+  })
+
   test("empty → real-fail mid-loop ⇒ stops on real-fail (signal precedence)", async () => {
     const { result, loop } = await runRetryLoop(
       stepper([

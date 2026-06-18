@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
-import type { PrimaryRailStep } from "@/agent/closure"
+import { type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
+import { extractSymbols } from "@/agent/issue-hint/extract-symbols"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
@@ -600,11 +603,35 @@ const runInstanceOnce = async (
       file,
       score: localizeCandidates.length - i,
     }))
+    // WS2: LSP owner-sibling resolve fills `ownerResolved` — the stream the feeder
+    // audit confirmed NONE populated, which starved the T-601 escalation gate
+    // (#14315 parent/child override never reached the candidate set). Gated on the
+    // closure posture (faultEvidence + lspNav); BLIND (issue symbols + stage-1 +
+    // LSP only). Runs in the SETUP window (before `deadline` is armed below),
+    // bounded to a few files/symbols. `[]` (ran, found none) un-`partial`s the
+    // packet; `undefined` (LSP off) keeps the byte-identical stage-1-only path.
+    const ownerResolved =
+      instance.swebench !== undefined && posture.faultEvidence && posture.lspNav
+        ? await resolveOwnerSiblings()({
+            stage1Files,
+            issueSymbols: extractSymbols(instance.problemStatement).slice(0, 12),
+            cwd: sandbox,
+            readSource: (rel) => {
+              try {
+                return readFileSync(join(sandbox, rel), "utf8")
+              } catch {
+                return null
+              }
+            },
+            signal: abort.signal,
+          })
+        : undefined
     const closureSession =
       instance.swebench !== undefined
         ? buildClosureSession({
             problemStatement: instance.problemStatement,
             stage1Files,
+            ...(ownerResolved !== undefined ? { ownerResolved } : {}),
             ...(reproTest?.installed === true && reproTest.reproducedCount > 0
               ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
               : {}),

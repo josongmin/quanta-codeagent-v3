@@ -59,6 +59,9 @@ import type { InstanceResult } from "../types"
  *                      rejected it (`completed_unresolved`), or the loop
  *                      stalled (`verify_loop_stuck`), or turns exhausted.
  *                      This is the MODEL'S SIGNAL — never retried.
+ *   - `grader-invalid` — the selected verifier rejected the reference patch.
+ *                      Terminal: the dataset item is not a fair measurement
+ *                      target, so immediate retries cannot change the answer.
  *   - `infra-fail`   — anything else (harness crash, sandbox copy error,
  *                      python subprocess EACCES). Retry is safe.
  *
@@ -69,6 +72,7 @@ export type AttemptOutcome =
   | { readonly kind: "pass" }
   | { readonly kind: "empty-patch"; readonly reason?: string }
   | { readonly kind: "generation-fail"; readonly reason: string }
+  | { readonly kind: "grader-invalid"; readonly reason: string }
   | { readonly kind: "timeout" }
   | {
       readonly kind: "real-fail"
@@ -90,6 +94,7 @@ export interface RetryPolicy {
  * The bench's frozen default policy:
  *   - empty-patch  ⇒ retry (LLM/API transient)
  *   - generation-fail ⇒ DO NOT retry (provider quota/rate-limit waste guard)
+ *   - grader-invalid ⇒ DO NOT retry (dataset/verifier authority issue)
  *   - infra-fail   ⇒ retry (harness transient)
  *   - timeout      ⇒ DO NOT retry (ambiguous; budget already exhausted)
  *   - real-fail    ⇒ DO NOT retry (model signal — measurement integrity)
@@ -112,7 +117,8 @@ export const DEFAULT_POLICY: RetryPolicy = {
       return { reason: outcome.reason }
     }
     // generation-fail: usually quota/rate-limit or model refusal; immediate
-    // retries waste budget. timeout: ambiguous — default is NO retry.
+    // retries waste budget. grader-invalid: dataset/verifier issue. timeout:
+    // ambiguous — default is NO retry.
     // real-fail / pass: terminal.
     return undefined
   },
@@ -126,17 +132,17 @@ export const DEFAULT_POLICY: RetryPolicy = {
  *   1. `result.passed === true`                        ⇒ pass
  *   2. `result.verdict === "env_prep_failed"`          ⇒ infra-fail (T4)
  *   3. `result.verdict === "degraded"`                 ⇒ infra-fail (recorder)
- *   4. `result.verdict === "grader_invalid"`           ⇒ infra-fail
- *   4. `error` matches provider/model generation failure ⇒ generation-fail
- *   5. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
- *   6. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
- *   7. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
- *   8. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
- *   9. `patch === ""` AND turns > 0                    ⇒ real-fail / completed_unresolved
- *  10. `error` contains "empty prediction"             ⇒ empty-patch
- *  11. `error` contains "no patch produced"            ⇒ empty-patch
- *  12. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
- *  13. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
+ *   4. `result.verdict === "grader_invalid"`           ⇒ grader-invalid
+ *   5. `error` matches provider/model generation failure ⇒ generation-fail
+ *   6. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
+ *   7. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
+ *   8. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
+ *   9. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
+ *  10. `patch === ""` AND turns > 0                    ⇒ real-fail / completed_unresolved
+ *  11. `error` contains "empty prediction"             ⇒ empty-patch
+ *  12. `error` contains "no patch produced"            ⇒ empty-patch
+ *  13. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
+ *  14. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
  *
  * The classifier is pure; the bench driver may call it AFTER `runInstance`
  * to decide whether to loop.
@@ -152,7 +158,7 @@ const classifyByVerdict = (result: InstanceResult): AttemptOutcome | undefined =
     return { kind: "infra-fail", reason: result.error ?? "observation degraded" }
   }
   if (result.verdict === "grader_invalid") {
-    return { kind: "infra-fail", reason: result.error ?? "grader_invalid" }
+    return { kind: "grader-invalid", reason: result.error ?? "grader_invalid" }
   }
   return undefined
 }

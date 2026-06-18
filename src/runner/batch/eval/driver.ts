@@ -50,6 +50,7 @@ import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Tool } from "@/tool"
 import { astGrepTool, buildDefaultTools, ToolRegistry } from "@/tool"
+import { reproRunArgv } from "../corpus/dataset"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type {
   BenchAttemptOutcome,
@@ -57,7 +58,6 @@ import type {
   Instance,
   InstanceResult,
 } from "../types"
-import { reproRunArgv } from "../corpus/dataset"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { buildClosureSession, buildPhasePatchHygiene } from "./closure-session"
 import { runEnvPrep } from "./env-prep"
@@ -71,12 +71,6 @@ import {
   resolveBenchKnobs,
 } from "./knobs-bench"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
-import {
-  benchInstallsReproHint,
-  benchRunsRepairPhase,
-  benchShouldRunRepairPhase,
-  primaryRailRedAfterRepair,
-} from "./repair-phase-policy"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type {
@@ -86,6 +80,12 @@ import type {
   ValidatorResult,
 } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
+import {
+  benchInstallsReproHint,
+  benchRunsRepairPhase,
+  benchShouldRunRepairPhase,
+  primaryRailRedAfterRepair,
+} from "./repair-phase-policy"
 import {
   buildWiring,
   emitPatch,
@@ -775,7 +775,9 @@ export const prepareReproTestDetailed = async (
   // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
   const reproRepo = instance.swebench?.repo
   const buildArgv =
-    reproRepo !== undefined ? (scriptPath: string) => reproRunArgv(reproRepo, scriptPath) : undefined
+    reproRepo !== undefined
+      ? (scriptPath: string) => reproRunArgv(reproRepo, scriptPath)
+      : undefined
   let samples: Awaited<ReturnType<typeof executeReproTests>>
   try {
     samples = await execute({
@@ -1031,11 +1033,20 @@ export const buildConfig = (
             }),
           )
         : ""
+  // WS1 mini-parity (`round0-minimal`): at round 0 — the agent's FIRST attempt,
+  // identified by `seedMsg === undefined` (single-pass `runAgentPhase` and the
+  // repair loop's round-0 both seed with undefined) — suppress the bulky repro
+  // directive prose so the prompt is `issueHint + closureHint(one line) +
+  // baseText`, matching mini-swe's clean round-0 posture. The prose re-attaches
+  // on repair rounds ≥1 (seedMsg present ⇒ the primary rail already went red).
+  // Knob OFF (default) ⇒ effectiveReproHint === reproHint ⇒ byte-identical.
+  const round0ReproSuppressed = opt.round0Minimal === true && seedMsg === undefined
+  const effectiveReproHint = round0ReproSuppressed ? undefined : reproHint
   const text = composePromptText({
     issueHint: hint,
     baseText,
     ...(closureHint !== undefined ? { closureHint } : {}),
-    ...(reproHint !== undefined ? { reproHint } : {}),
+    ...(effectiveReproHint !== undefined ? { reproHint: effectiveReproHint } : {}),
     ...(seedMsg !== undefined ? { seedMsg } : {}),
   })
   const messages: Message[] = [
@@ -1795,6 +1806,7 @@ export const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
       : { kind: "empty-patch" }
   }
   if (o.kind === "generation-fail") return { kind: "generation-fail", reason: o.reason }
+  if (o.kind === "grader-invalid") return { kind: "grader-invalid", reason: o.reason }
   if (o.kind === "timeout") return { kind: "timeout" }
   if (o.kind === "real-fail") return { kind: "real-fail", subkind: o.subkind }
   return { kind: "infra-fail", reason: o.reason }
@@ -1865,6 +1877,7 @@ export const runInstance = async (
     ...(deps.pythonSwebench !== undefined ? { pythonSwebench: deps.pythonSwebench } : {}),
     ...(deps.observe !== undefined ? { observe: deps.observe } : {}),
     ...(deps.repair !== undefined ? { repair: deps.repair } : {}),
+    ...(deps.goldSanity !== undefined ? { goldSanity: deps.goldSanity } : {}),
   }
 
   // Byte-identical fast path: single attempt + adapted === base ⇒ run the

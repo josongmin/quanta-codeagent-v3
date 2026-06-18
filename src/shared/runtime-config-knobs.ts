@@ -1111,6 +1111,14 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "SWE-bench grading parallelism.",
   },
   {
+    envKey: "QUANTA_SWEBENCH_GRADE_CONCURRENCY",
+    kind: "int",
+    default: 1,
+    group: "bench",
+    describe:
+      "How many run_evaluation Docker grades run at once across overlapping bench tasks (default 1 = serial, arm64-safe; set >1 on x86 native to pipeline grading).",
+  },
+  {
     envKey: "QUANTA_SWEBENCH_NAMESPACE",
     kind: "string",
     default: undefined,

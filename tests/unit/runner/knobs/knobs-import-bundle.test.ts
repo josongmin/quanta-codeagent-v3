@@ -54,6 +54,7 @@ import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
+import { round0MinimalKnob } from "@/runner/knobs/knobs/round0-minimal"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { specFidelitySteerKnob } from "@/runner/knobs/knobs/spec-fidelity-steer"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
@@ -94,6 +95,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(retryTransientKnob),
+  asAnyKnob(round0MinimalKnob),
   asAnyKnob(skillsKnob),
   asAnyKnob(specFidelitySteerKnob),
   asAnyKnob(subagentKnob),

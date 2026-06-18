@@ -107,6 +107,15 @@ describe("DEFAULT_POLICY.shouldRetry — terminal kinds (never retry)", () => {
     )
     expect(decision).toBeUndefined()
   })
+
+  test("grader-invalid ⇒ NO retry (dataset authority issue)", () => {
+    const decision = DEFAULT_POLICY.shouldRetry(
+      { kind: "grader-invalid", reason: "gold sanity failed" },
+      1,
+      3,
+    )
+    expect(decision).toBeUndefined()
+  })
 })
 
 describe("DEFAULT_POLICY.shouldRetry — timeout (ambiguous, no retry by default)", () => {
@@ -141,7 +150,7 @@ describe("classifyOutcome — pass", () => {
   })
 })
 
-describe("classifyOutcome — verdict-driven infra-fail", () => {
+describe("classifyOutcome — verdict-driven terminal and infra classifications", () => {
   test("verdict=env_prep_failed ⇒ infra-fail", () => {
     const result = mkResult({ verdict: "env_prep_failed", error: "setupCmd died" })
     expect(classifyOutcome(result)).toEqual({ kind: "infra-fail", reason: "setupCmd died" })
@@ -152,9 +161,12 @@ describe("classifyOutcome — verdict-driven infra-fail", () => {
     expect(classifyOutcome(result)).toEqual({ kind: "infra-fail", reason: "observation failed" })
   })
 
-  test("verdict=grader_invalid ⇒ infra-fail", () => {
+  test("verdict=grader_invalid ⇒ grader-invalid", () => {
     const result = mkResult({ verdict: "grader_invalid", error: "gold sanity failed" })
-    expect(classifyOutcome(result)).toEqual({ kind: "infra-fail", reason: "gold sanity failed" })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "grader-invalid",
+      reason: "gold sanity failed",
+    })
   })
 
   test("verdict=env_prep_failed without error ⇒ uses verdict as reason", () => {
@@ -422,6 +434,24 @@ describe("runRetryLoop — orchestrator", () => {
       subkind: "completed_unresolved",
     })
     expect(result.passed).toBe(false)
+  })
+
+  test("grader-invalid on first attempt ⇒ no retry", async () => {
+    let calls = 0
+    const { result, loop } = await runRetryLoop(async () => {
+      calls += 1
+      return mkResult({
+        verdict: "grader_invalid",
+        error: "gold sanity failed",
+      })
+    }, 5)
+    expect(calls).toBe(1)
+    expect(loop.attempts).toBe(1)
+    expect(loop.outcomes[0]).toEqual({
+      kind: "grader-invalid",
+      reason: "gold sanity failed",
+    })
+    expect(result.verdict).toBe("grader_invalid")
   })
 
   test("timeout on first attempt ⇒ default policy stops", async () => {

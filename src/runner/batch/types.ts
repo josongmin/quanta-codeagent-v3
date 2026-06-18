@@ -163,8 +163,9 @@ export interface InstanceResult {
   primaryFalseGreen?: boolean
   /**
    * T-4 OBSERVE-ONLY — the gate decision was verify-first (true) vs commit-now
-   * (false), computed from public signals. Drives `gate_enter_rate`. Recorded, not
-   * acted on in v1 (behavior wiring is measurement-gated). Absent ⇒ null.
+   * (false), computed from public signals. Drives `gate_enter_rate`. By default it
+   * is telemetry-only; when the `primaryRail` closure path is enabled, the same
+   * decision also chooses single-pass vs verify-first repair. Absent ⇒ null.
    */
   gateEntered?: boolean
   /**
@@ -236,6 +237,7 @@ export type BenchAttemptOutcome =
   | { kind: "pass" }
   | { kind: "empty-patch"; reason?: string }
   | { kind: "generation-fail"; reason: string }
+  | { kind: "grader-invalid"; reason: string }
   | { kind: "timeout" }
   | {
       kind: "real-fail"

@@ -215,6 +215,10 @@ export interface BenchPosture {
   /** gap-B: spec-fidelity steer (minimal-literal-fix; fires only when the issue
    *  declares an exact expected output). */
   readonly specFidelitySteer: boolean
+  /** WS1 mini-parity: thin the round-0 prompt — suppress the repro directive
+   *  prose at round 0 (the agent's first attempt), re-attaching it only on
+   *  repair rounds ≥1. The one-line closure (first-edit) hint is kept. */
+  readonly round0Minimal: boolean
 }
 
 const isTrue = (v: unknown): v is true => v === true
@@ -287,6 +291,7 @@ export const benchPostureFromState = (
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
+  const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
   return {
     lspNav,
     subagent,
@@ -310,6 +315,7 @@ export const benchPostureFromState = (
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,
+    round0Minimal,
   }
 }
 

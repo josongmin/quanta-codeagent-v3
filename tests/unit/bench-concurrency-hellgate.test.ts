@@ -6,17 +6,19 @@
  *      ALWAYS returns results in input order (results[i] ↔ items[i]) regardless
  *      of completion order. `limit<=1` ⇒ strictly serial (byte-identical to the
  *      old `for await` loop).
- *   2. The python-swebench GRADING mutex serialises actual `run_evaluation`
- *      spawns even when many evaluations run concurrently — arm64 Docker wedges
- *      on parallel large image pulls, so grading must be one-at-a-time.
+ *   2. The python-swebench GRADING semaphore bounds actual `run_evaluation`
+ *      spawns to `QUANTA_SWEBENCH_GRADE_CONCURRENCY` (default 1 ⇒ one-at-a-time:
+ *      arm64 Docker wedges on parallel large image pulls). On x86 native a
+ *      higher bound pipelines grading; it must NEVER exceed the configured bound.
  *
- * Red-on-injection: drop the `withGradingLock` wrapper and test PART-2's
- * "max concurrent grading == 1" assertion fails (spawns overlap).
+ * Red-on-injection: drop the `withGradingLock` wrapper and PART-2's "peak == 1"
+ * (default) / "peak <= N" (configured) assertions fail (spawns overlap unbounded).
  */
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { evaluateWithPythonSwebench } from "../../src/apps/bench/python-swebench"
 import type { Instance } from "../../src/apps/bench/types"
 import { mapWithConcurrency } from "../../src/runner/batch/core"
+import { __resetKnobOverrides, setKnobOverride } from "../../src/shared/knob-overrides"
 
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -75,7 +77,9 @@ describe("mapWithConcurrency — order + bounded parallelism", () => {
   })
 })
 
-describe("grading mutex — run_evaluation spawns never overlap", () => {
+describe("grading semaphore — run_evaluation spawns bounded by GRADE_CONCURRENCY", () => {
+  afterEach(() => __resetKnobOverrides())
+
   const benchInstance = (id: string): Instance => ({
     id,
     repoPath: "/tmp/x",
@@ -84,17 +88,16 @@ describe("grading mutex — run_evaluation spawns never overlap", () => {
     swebench: { instanceId: id, repo: "x/x", baseCommit: "deadbeef" },
   })
 
-  test("N concurrent evaluations ⇒ at most ONE run_evaluation spawn at a time", async () => {
+  // Fire `ids` graded CONCURRENTLY (what concurrency>1 does) and report the peak
+  // number of run_evaluation spawns observed in flight at once. Each fake spawn
+  // holds for a tick so genuine overlap WOULD be observed if the bound were absent.
+  const peakConcurrentGrades = async (ids: string[]): Promise<{ peak: number; spawns: number }> => {
     let inFlight = 0
     let peak = 0
-    let runEvalSpawns = 0
-    // Fake spawn: only the run_evaluation argv reaches here (import-check is
-    // short-circuited via `probe`). Each spawn holds for a tick so genuine
-    // overlap WOULD be observed if the mutex were absent.
+    let spawns = 0
     const fakeSpawn = async (argv: string[]) => {
-      const isRunEval = argv.some((a) => a.includes("run_evaluation"))
-      if (isRunEval) {
-        runEvalSpawns += 1
+      if (argv.some((a) => a.includes("run_evaluation"))) {
+        spawns += 1
         inFlight += 1
         peak = Math.max(peak, inFlight)
         await tick(20)
@@ -102,18 +105,31 @@ describe("grading mutex — run_evaluation spawns never overlap", () => {
       }
       return { code: 0, stdout: "Instances completed: 1", stderr: "" }
     }
-    const opts = {
-      probe: async () => true, // import-check passes without spawning
-      spawn: fakeSpawn,
-      datasetName: "dummy",
-    }
-    // Fire 4 evaluations CONCURRENTLY (this is what concurrency>1 does).
+    const opts = { probe: async () => true, spawn: fakeSpawn, datasetName: "dummy" }
     await Promise.all(
-      ["a__1", "b__2", "c__3", "d__4"].map((id) =>
-        evaluateWithPythonSwebench(benchInstance(id), "diff --git a b\n+x", opts),
-      ),
+      ids.map((id) => evaluateWithPythonSwebench(benchInstance(id), "diff --git a b\n+x", opts)),
     )
-    expect(runEvalSpawns).toBe(4) // all four did grade
-    expect(peak).toBe(1) // ...but never two at once (mutex held)
+    return { peak, spawns }
+  }
+
+  test("default (no knob) ⇒ strictly serial: peak grade concurrency == 1", async () => {
+    const { peak, spawns } = await peakConcurrentGrades(["a__1", "b__2", "c__3", "d__4"])
+    expect(spawns).toBe(4) // all four graded
+    expect(peak).toBe(1) // ...but never two at once (default serial)
+  })
+
+  test("GRADE_CONCURRENCY=3 ⇒ overlaps up to 3, NEVER more", async () => {
+    setKnobOverride("QUANTA_SWEBENCH_GRADE_CONCURRENCY", "3")
+    const { peak, spawns } = await peakConcurrentGrades([
+      "a__1",
+      "b__2",
+      "c__3",
+      "d__4",
+      "e__5",
+      "f__6",
+    ])
+    expect(spawns).toBe(6) // all six graded
+    expect(peak).toBeGreaterThan(1) // actually pipelined (not accidentally serial)
+    expect(peak).toBeLessThanOrEqual(3) // ...but bounded by the configured limit
   })
 })

@@ -8,6 +8,7 @@ import { buildConfig } from "@/apps/bench/eval/driver"
 import { runEnvPrep } from "@/apps/bench/eval/env-prep"
 import { verify } from "@/apps/bench/eval/verdict"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { runInstance as runRunnerInstance } from "@/runner/batch/eval"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
 import type { Instance } from "@/runner/batch/types"
 
@@ -123,5 +124,70 @@ describe("bench localEnv + gold sanity", () => {
     expect(out.passed).toBe(false)
     expect(out.verdict).toBe("grader_invalid")
     expect(out.error).toContain("gold patch did not resolve")
+  })
+
+  test("runner runInstance upgrades an early terminal no-patch to grader_invalid", async () => {
+    await writeFile(join(dir, "answer.txt"), "bad\n", "utf8")
+    const badGold = [
+      "diff --git a/answer.txt b/answer.txt",
+      "--- a/answer.txt",
+      "+++ b/answer.txt",
+      "@@ -1 +1 @@",
+      "-bad",
+      "+still-bad",
+      "",
+    ].join("\n")
+    const instance: Instance = {
+      id: "runner-bad-gold-run",
+      repoPath: dir,
+      problemStatement: "noop",
+      testCmd: 'test "$(cat answer.txt)" = good',
+      goldPatch: badGold,
+    }
+
+    const out = await runRunnerInstance(instance, {
+      llm: new NoopLLM(),
+      maxTurns: 1,
+      timeoutMs: 30000,
+      goldSanity: { mode: "on-fail" },
+    })
+    expect(out.passed).toBe(false)
+    expect(out.verdict).toBe("grader_invalid")
+    expect(out.error).toContain("gold patch did not resolve")
+  })
+
+  test("runner retry wrapper preserves goldSanity and stops after grader_invalid", async () => {
+    await writeFile(join(dir, "answer.txt"), "bad\n", "utf8")
+    const badGold = [
+      "diff --git a/answer.txt b/answer.txt",
+      "--- a/answer.txt",
+      "+++ b/answer.txt",
+      "@@ -1 +1 @@",
+      "-bad",
+      "+still-bad",
+      "",
+    ].join("\n")
+    const instance: Instance = {
+      id: "runner-bad-gold-retry",
+      repoPath: dir,
+      problemStatement: "noop",
+      testCmd: 'test "$(cat answer.txt)" = good',
+      goldPatch: badGold,
+    }
+
+    const out = await runRunnerInstance(instance, {
+      llm: new NoopLLM(),
+      maxTurns: 1,
+      timeoutMs: 30000,
+      goldSanity: { mode: "on-fail" },
+      measurementStability: { maxAttempts: 3 },
+    })
+    expect(out.passed).toBe(false)
+    expect(out.verdict).toBe("grader_invalid")
+    expect(out.error).toContain("gold patch did not resolve")
+    expect(out.budget?.attempts).toBe(1)
+    expect(out.budget?.attemptOutcomes).toEqual([
+      { kind: "grader-invalid", reason: out.error as string },
+    ])
   })
 })
