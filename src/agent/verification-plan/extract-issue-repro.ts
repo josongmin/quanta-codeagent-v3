@@ -1,0 +1,82 @@
+/**
+ * Extract a reproduction snippet from a PUBLIC issue body (jun-18 closure
+ * repro-install lever). Measured gap: on hard SWE-bench instances the LLM-
+ * generated repro reaches `no_reproduced_candidate` (it runs but does not trigger
+ * the bug), so the primary rail never fires (`primary_rail_present_rate` = 0/7 on
+ * the oracle slice). Most issues, however, embed a Minimal Working Example — a
+ * fenced `python` block that DOES reproduce. Extracting that and seeding the
+ * repro pipeline with it (instead of generating from scratch) is the lever.
+ *
+ * Design — FAIL-CLOSED, precision over recall (same ethos as
+ * extract-issue-declared-expected): return a snippet ONLY when a fenced code
+ * block is confidently EXECUTABLE python (an `import` or a call) AND not merely a
+ * quoted OUTPUT block. Anything ambiguous ⇒ `undefined` — a wrong repro is worse
+ * than none (it would gate the rail on a script that does not reproduce).
+ *
+ * Pure + deterministic: no I/O, no LLM, no clock/random. The VALUE is the snippet
+ * (it becomes a runnable repro); precision matters because it IS executed.
+ */
+
+export interface IssueRepro {
+  /** The extracted python source (verbatim from the fenced block, trimmed). */
+  readonly code: string
+}
+
+/** Fenced code blocks: ```lang\n ... ``` (lang optional). CRLF-tolerant. */
+const FENCE_RE = /```([a-zA-Z0-9]*)\r?\n([\s\S]*?)```/g
+
+/** A block is EXECUTABLE python (a real MWE) when it imports or calls — not a
+ *  bare value / prose. Excludes pure-output blocks (a single quoted string, or a
+ *  `def _lambdifygenerated()` style generated-source dump). */
+const hasImport = (s: string): boolean => /^\s*(?:import\s+\w|from\s+[\w.]+\s+import)\b/m.test(s)
+const hasCall = (s: string): boolean => /\b[A-Za-z_][\w.]*\([^)]*\)/.test(s)
+
+/** Looks like a QUOTED OUTPUT block (e.g. `'def _lambdifygenerated():\n ...'`) —
+ *  the issue's "outputs:" example, NOT the repro. A block that is ENTIRELY one
+ *  quoted string is an output, not executable input. */
+const isQuotedOutput = (s: string): boolean => /^\s*['"][\s\S]*['"]\s*$/.test(s.trim())
+
+/** Interactive-prompt line (doctest `>>>`/`...` OR IPython `In [n]:`/`   ...:`). */
+const PROMPT_LINE = /^\s*(?:>>>|\.\.\.|In \[\d+\]:|\s*\.\.\.:|\s+\.\.\.:)/
+
+const isExecutablePython = (lang: string, body: string): boolean => {
+  const l = lang.toLowerCase()
+  // Only python-ish fences (or unlabelled, judged by content). Reject shell/json/etc.
+  if (l !== "" && !["python", "py", "python3", "pycon", "ipython", "py3"].includes(l)) return false
+  if (isQuotedOutput(body)) return false
+  // pycon/doctest/ipython prompt lines are executable too.
+  if (PROMPT_LINE.test(body)) return true
+  return hasImport(body) || hasCall(body)
+}
+
+/** Strip interactive prompts (doctest `>>>`/`...`, IPython `In [n]:`/`...:`) so
+ *  the body is a runnable script; the non-prompt lines are session OUTPUT and are
+ *  dropped (only when the block IS a prompt session). */
+const stripPrompts = (body: string): string => {
+  if (!PROMPT_LINE.test(body)) return body.trim()
+  return body
+    .split(/\r?\n/)
+    .filter((ln) => PROMPT_LINE.test(ln))
+    .map((ln) => ln.replace(/^\s*(?:>>>|\.\.\.|In \[\d+\]:|\s*\.\.\.:)\s?/, ""))
+    .join("\n")
+    .trim()
+}
+
+/**
+ * Returns the issue's reproduction snippet, or `undefined` when none is
+ * confidently present. Precision-first: the FIRST executable python fence wins
+ * (issues lead with the MWE, then show outputs); an unlabelled fence is admitted
+ * only if its content is executable python.
+ */
+export const extractIssueRepro = (problemStatement: string | undefined): IssueRepro | undefined => {
+  if (problemStatement === undefined || problemStatement.trim() === "") return undefined
+  for (const m of problemStatement.matchAll(FENCE_RE)) {
+    const lang = m[1] ?? ""
+    const body = m[2] ?? ""
+    if (isExecutablePython(lang, body)) {
+      const code = stripPrompts(body)
+      if (code.length > 0) return { code }
+    }
+  }
+  return undefined
+}
