@@ -210,12 +210,54 @@ describe("prepareReproTest", () => {
       },
     })
     expect(detail.selection?.selected).toBeNull()
-    expect(detail.telemetry).toEqual({
+    expect(detail.telemetry).toMatchObject({
       installed: false,
       reason: "execution_failed",
       samples: 3,
       reproducedCount: 0,
     })
+    // The exec-throw reason is now captured into the diagnostic stderr tail
+    // (never silent) — this is what attributed the original ENOENT.
+    const t = detail.telemetry as { sampleStderrTail?: string }
+    expect(t.sampleStderrTail).toContain("command not found")
+  })
+
+  test("WIRING: swebench instance ⇒ repro runs under uvx editable-install env (not bare python)", async () => {
+    const seen: (readonly string[])[] = []
+    await prepareReproTestDetailed(
+      mkInstance({
+        swebench: { instanceId: "sympy__sympy-1", repo: "sympy/sympy", baseCommit: "abc" },
+      }),
+      "/tmp/sb",
+      1,
+      {
+        llm: new StubLLM(),
+        writeFile: async () => {},
+        exec: async (argv) => {
+          seen.push(argv)
+          return { code: 0, stdout: "Issue reproduced\n", stderr: "" }
+        },
+      },
+    )
+    // The exec argv must be the uvx env wrapper — a bare `python3` here is the
+    // ModuleNotFoundError bug that made primary_rail_present_rate = 0.
+    expect(seen[0]?.[0]).toBe("uvx")
+    expect(seen[0]).toContain("--with-editable")
+    expect(seen[0]?.[seen[0].length - 2]).toBe("python")
+  })
+
+  test("WIRING: non-swebench fixture ⇒ repro runs bare python3 (no uvx)", async () => {
+    const seen: (readonly string[])[] = []
+    await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 1, {
+      llm: new StubLLM(),
+      writeFile: async () => {},
+      exec: async (argv) => {
+        seen.push(argv)
+        return { code: 0, stdout: "Issue reproduced\n", stderr: "" }
+      },
+    })
+    expect(seen[0]?.[0]).toBe("python3")
+    expect(seen[0]).not.toContain("uvx")
   })
 
   test("detailed telemetry: no reproduced candidate records sample counts", async () => {
@@ -225,7 +267,10 @@ describe("prepareReproTest", () => {
       exec: async () => ({ code: 0, stdout: "Issue resolved\n", stderr: "" }),
     })
     expect(detail.selection?.selected).toBeNull()
-    expect(detail.telemetry).toEqual({
+    // objectContaining: the telemetry also carries jun-18 diagnostic fields
+    // (sampleOutcomes / sampleStdoutTail / sampleStderrTail) which are tested
+    // separately; here we pin the stable classification fields.
+    expect(detail.telemetry).toMatchObject({
       installed: false,
       reason: "no_reproduced_candidate",
       samples: 2,

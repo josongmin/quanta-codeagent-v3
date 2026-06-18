@@ -215,6 +215,22 @@ const PYTHON_FOR_REPO: Readonly<Record<string, string>> = {
   "django/django": "3.9",
 }
 
+/**
+ * Build the argv to run a repro script under the SAME project env the synthesized
+ * `testCmd` uses. A bare `python3 <script>` on the box host cannot `import` the
+ * target project (it is NOT pip-installed there — only the per-instance Docker
+ * image and this uvx ephemeral env carry it), so every Agentless repro hit
+ * ModuleNotFoundError and the primary rail never fired. Mirrors
+ * `synthesizeTestCmd`'s env strategy: `uvx --with-editable .` installs the repo
+ * (from the sandbox cwd's setup.py/pyproject) + resolves transitive deps; the
+ * first sample pays the build, the rest hit uv's cache. `repo === ""` (non-
+ * SWE-bench fixtures) ⇒ caller should NOT use this (bare python3 is correct).
+ */
+export const reproRunArgv = (repo: string, scriptPath: string): readonly string[] => {
+  const py = PYTHON_FOR_REPO[repo] ?? "3.10"
+  return ["uvx", "--quiet", "--python", py, "--with-editable", ".", "python", scriptPath]
+}
+
 const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   const f2p = raw.FAIL_TO_PASS
   if (typeof f2p !== "string") return "true"

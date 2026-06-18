@@ -87,8 +87,15 @@ export interface ExecuteReproTestsArgs {
    *  (22.04+) ship `python3` only, with NO `python` symlink, so a hardcoded
    *  `python` made `Bun.spawn` throw ENOENT and every sample silently became
    *  `exec_failed`. Override (e.g. a venv python) when the project env lives
-   *  behind a specific interpreter. */
+   *  behind a specific interpreter. Ignored when {@link buildArgv} is set. */
   pythonBin?: string
+  /** Build the FULL argv to execute a repro script. Default `[pythonBin, path]`.
+   *  Production SWE-bench wiring overrides this to run the script under the SAME
+   *  project env the test command uses (`uvx --with-editable . python <path>`) —
+   *  a bare `python3` cannot `import` the project (it is not pip-installed on the
+   *  box host; only the uvx ephemeral env has it), so every repro hit
+   *  ModuleNotFoundError. The builder receives the script path and returns argv. */
+  buildArgv?: (scriptPath: string) => readonly string[]
 }
 
 /** Compact a thrown value to a single-line string for the stderr diagnostic. */
@@ -158,7 +165,8 @@ const executeOne = async (
     return { source, stdout: "", stderr: `[writeFile threw] ${errText(e)}`, outcome: "exec_failed" }
   }
   try {
-    const r = await args.exec([args.pythonBin ?? "python3", path], args.repoRoot, timeoutMs)
+    const argv = args.buildArgv !== undefined ? args.buildArgv(path) : [args.pythonBin ?? "python3", path]
+    const r = await args.exec(argv, args.repoRoot, timeoutMs)
     const stdout = typeof r.stdout === "string" ? r.stdout : ""
     const stderr = typeof r.stderr === "string" ? r.stderr : ""
     const code = typeof r.code === "number" ? r.code : -1

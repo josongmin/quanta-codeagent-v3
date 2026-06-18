@@ -57,6 +57,7 @@ import type {
   Instance,
   InstanceResult,
 } from "../types"
+import { reproRunArgv } from "../corpus/dataset"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { buildClosureSession, buildPhasePatchHygiene } from "./closure-session"
 import { runEnvPrep } from "./env-prep"
@@ -748,6 +749,15 @@ export const prepareReproTestDetailed = async (
       telemetry: { installed: false, reason: "generation_empty", samples: 0, reproducedCount: 0 },
     }
   }
+  // Run each repro under the SAME project env the testCmd uses. A bare
+  // `python3 <script>` on the box host cannot import the target project (it is
+  // not pip-installed there), so without this every Agentless repro hit
+  // ModuleNotFoundError and the primary rail never fired. For SWE-bench
+  // instances, build a `uvx --with-editable . python <script>` argv keyed on the
+  // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
+  const reproRepo = instance.swebench?.repo
+  const buildArgv =
+    reproRepo !== undefined ? (scriptPath: string) => reproRunArgv(reproRepo, scriptPath) : undefined
   let samples: Awaited<ReturnType<typeof executeReproTests>>
   try {
     samples = await execute({
@@ -756,6 +766,7 @@ export const prepareReproTestDetailed = async (
       exec: execPort,
       writeFile,
       config,
+      ...(buildArgv !== undefined ? { buildArgv } : {}),
     })
   } catch {
     return {
