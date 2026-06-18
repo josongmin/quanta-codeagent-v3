@@ -78,6 +78,11 @@ export type BenchReproTestTelemetry =
        *  `other` ⇒ script crashed e.g. import error; `unknown` ⇒ no marker). */
       sampleOutcomes?: readonly string[]
       sampleStdoutTail?: string
+      /** jun-18 DIAGNOSTIC: tail of the first sample's stderr. Attributes an
+       *  `exec_failed` outcome — ModuleNotFoundError ⇒ project not importable in
+       *  the box's python (env-shape bug, not a script bug); SyntaxError ⇒ bad
+       *  LLM script; empty ⇒ timeout. */
+      sampleStderrTail?: string
     }
 
 /** Outcome of running one instance once. */

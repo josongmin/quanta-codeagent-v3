@@ -698,6 +698,7 @@ const selectionTelemetry = (selection: ReproTestSelection): BenchReproTestTeleme
   const diag = {
     sampleOutcomes: selection.samples.map((s) => s.outcome),
     sampleStdoutTail: (selection.samples[0]?.stdout ?? "").slice(-400),
+    sampleStderrTail: (selection.samples[0]?.stderr ?? "").slice(-500),
   }
   if (samples > 0 && selection.samples.every((sample) => sample.outcome === "exec_failed")) {
     return { installed: false, reason: "execution_failed", samples, reproducedCount, ...diag }

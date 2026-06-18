@@ -72,6 +72,11 @@ export interface ReproTestSample {
   /** Stdout from execution on the original repo. Captured verbatim (no
    *  trimming) so downstream debug can see exactly what the script printed. */
   stdout: string
+  /** Stderr from execution. Captured so an `exec_failed` outcome can be
+   *  attributed (ModuleNotFoundError ⇒ project not importable in the exec env;
+   *  SyntaxError ⇒ bad LLM script; nothing ⇒ timeout). Empty string when the
+   *  exec port reported no stderr or threw before producing any. */
+  stderr?: string
   /** Outcome inferred from stdout. The last occurrence of a marker wins
    *  (so a script that says "Issue reproduced" then "Issue resolved" is
    *  classified `"resolved"`). */

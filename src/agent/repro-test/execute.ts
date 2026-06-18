@@ -140,20 +140,21 @@ const executeOne = async (
   args: ExecuteReproTestsArgs,
   timeoutMs: number,
 ): Promise<ReproTestSample> => {
-  if (source === "") return { source, stdout: "", outcome: "unknown" }
+  if (source === "") return { source, stdout: "", stderr: "", outcome: "unknown" }
   const path = args.tempPath !== undefined ? args.tempPath(i) : defaultTempPath(args.repoRoot, i)
   try {
     await args.writeFile(path, source)
   } catch {
-    return { source, stdout: "", outcome: "exec_failed" }
+    return { source, stdout: "", stderr: "", outcome: "exec_failed" }
   }
   try {
     const r = await args.exec(["python", path], args.repoRoot, timeoutMs)
     const stdout = typeof r.stdout === "string" ? r.stdout : ""
+    const stderr = typeof r.stderr === "string" ? r.stderr : ""
     const code = typeof r.code === "number" ? r.code : -1
-    return { source, stdout, outcome: classifyStdout(stdout, code) }
+    return { source, stdout, stderr, outcome: classifyStdout(stdout, code) }
   } catch {
-    return { source, stdout: "", outcome: "exec_failed" }
+    return { source, stdout: "", stderr: "", outcome: "exec_failed" }
   }
 }
 
