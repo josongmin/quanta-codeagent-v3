@@ -20,6 +20,7 @@
  * for observability/golden tests. Throws only if `runOnce` itself throws —
  * validator failures are normal and never throw.
  */
+import { classifyStdout } from "@/agent/repro-test/execute"
 import type {
   RoundResult,
   RunOnceResult,
@@ -41,13 +42,15 @@ export const runRepairRounds = async (
   let turnsTotal = r0.turns
   history.push({ round: 0, patch: r0.patch, validated: v0.ok })
   if (v0.ok || maxRounds <= 0) {
-    return finalize(history, turnsTotal, v0.ok, r0.patch, isFalseGreen(v0))
+    return finalize(history, turnsTotal, v0.ok, r0.patch, isFalseGreen(v0), isFalseRed(v0))
   }
 
   let prevRun: RunOnceResult = r0
   let prevValidator: ValidatorResult = v0
   let validated = false
   let falseGreen = false
+  // ANY round whose rail exit-code rejected a repro-says-resolved patch (RCA instrument).
+  let falseRed = isFalseRed(v0)
   for (let i = 1; i <= maxRounds; i++) {
     const predicateSummary = predicateSummaryOf(prevValidator)
     const seed = args.buildContext({
@@ -63,13 +66,14 @@ export const runRepairRounds = async (
     history.push({ round: i, patch: ri.patch, validated: vi.ok })
     prevRun = ri
     prevValidator = vi
+    if (isFalseRed(vi)) falseRed = true
     if (vi.ok) {
       validated = true
       falseGreen = isFalseGreen(vi)
       break
     }
   }
-  return finalize(history, turnsTotal, validated, prevRun.patch, falseGreen)
+  return finalize(history, turnsTotal, validated, prevRun.patch, falseGreen, falseRed)
 }
 
 /** OBSERVE-ONLY measurement: the round CLEARED (ok by exit code) yet the typed
@@ -78,6 +82,18 @@ export const runRepairRounds = async (
  *  predicate is NOT a false green (never penalizes). */
 const isFalseGreen = (v: ValidatorResult): boolean =>
   v.ok && v.predicate?.evaluable === true && v.predicate.matched === false
+
+/** OBSERVE-ONLY measurement (jun-18 RCA instrument): the round did NOT clear
+ *  (`ok:false`, exit-code ≠ 0 on the rail) YET the repro's OWN sentinel says the
+ *  bug is fixed (`classifyStdout(stdout) === "resolved"`). This is a false-RED:
+ *  the exit-code gate rejected a patch the repro itself reports as resolved,
+ *  forcing wasteful repair churn (measured: repair runs all rounds, 46→131 turns,
+ *  re-deriving the SAME correct patch). If this rate is high, the validator must
+ *  gate on the repro's sentinel (its actual Agentless contract) rather than the
+ *  incidental exit code. Records, never flips `ok` — the fix is the next step,
+ *  gated on THIS measurement (no blind loop change). */
+const isFalseRed = (v: ValidatorResult): boolean =>
+  !v.ok && v.observed !== undefined && classifyStdout(v.observed.stdout, v.observed.exitCode) === "resolved"
 
 const predicateSummaryOf = (v: ValidatorResult): string | undefined => {
   const predicate = v.predicate
@@ -121,11 +137,13 @@ const finalize = (
   validated: boolean,
   patch: string,
   primaryFalseGreen: boolean,
+  primaryFalseRed: boolean,
 ): RunRepairRoundsResult => ({
   patch,
   turns,
   rounds: history.length,
   validated,
   primaryFalseGreen,
+  primaryFalseRed,
   history,
 })

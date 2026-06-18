@@ -184,6 +184,13 @@ export interface RunRepairRoundsResult {
    *  `validated` in v1 (fail-open / observe-first). False when no round cleared or
    *  the predicate was unevaluable/matched. */
   primaryFalseGreen: boolean
+  /** jun-18 RCA OBSERVE-ONLY: ANY round whose rail (exit-code) rejected a patch
+   *  the repro's OWN sentinel reports as resolved (`classifyStdout==="resolved"`
+   *  yet `ok:false`). This is the false-RED that forces wasteful repair churn
+   *  (measured 46→131 turns re-deriving the same correct patch). If this rate is
+   *  high, the validator must gate on the repro sentinel (its Agentless contract),
+   *  not the incidental exit code. Records, never flips `validated`. */
+  primaryFalseRed: boolean
   /** Per-round bookkeeping (for observability/tests). */
   history: readonly RoundResult[]
 }

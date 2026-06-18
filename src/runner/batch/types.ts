@@ -162,6 +162,15 @@ export interface InstanceResult {
    */
   primaryFalseGreen?: boolean
   /**
+   * jun-18 RCA OBSERVE-ONLY — a repair round's rail (exit-code) rejected a patch
+   * the repro's OWN sentinel reports as resolved (false-RED). Drives
+   * `primary_false_red_rate`: if high, the validator must gate on the repro
+   * sentinel (its Agentless contract), not the incidental exit code — the
+   * suspected cause of repair's wasteful churn (46→131 turns, 9→7). Repair only;
+   * absent ⇒ null.
+   */
+  primaryFalseRed?: boolean
+  /**
    * T-4 OBSERVE-ONLY — the gate decision was verify-first (true) vs commit-now
    * (false), computed from public signals. Drives `gate_enter_rate`. By default it
    * is telemetry-only; when the `primaryRail` closure path is enabled, the same

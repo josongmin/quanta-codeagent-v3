@@ -71,6 +71,7 @@ export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFa
       primaryRailPresent: r.primaryRailPresent ?? null,
       requiredVerificationCovered: r.requiredVerificationCovered ?? null,
       primaryFalseGreen: r.primaryFalseGreen ?? null,
+      primaryFalseRed: r.primaryFalseRed ?? null,
       gateEntered: r.gateEntered ?? null,
       gateBypassed: r.gateBypassed ?? null,
       verifyRounds: r.verifyRounds ?? null,

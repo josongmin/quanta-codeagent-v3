@@ -57,6 +57,7 @@ export interface ClosureRunFact {
   synthReproBaseRed?: boolean | null
   primaryRailPresent?: boolean | null
   primaryFalseGreen?: boolean | null
+  primaryFalseRed?: boolean | null
   requiredVerificationCovered?: boolean | null
   outOfScopeFiles?: boolean | null
 }
@@ -162,6 +163,7 @@ export const computeClosureDiagnostics = (
     // later-wave instrumentation — unavailable until the driver populates the field
     primary_rail_present_rate: metricOf(facts.map((f) => f.primaryRailPresent)),
     primary_false_green_rate: metricOf(facts.map((f) => f.primaryFalseGreen)),
+    primary_false_red_rate: metricOf(facts.map((f) => f.primaryFalseRed)),
     required_verification_coverage: metricOf(facts.map((f) => f.requiredVerificationCovered)),
     gate_enter_rate: metricOf(facts.map((f) => f.gateEntered)),
     gate_bypass_rate: metricOf(facts.map((f) => f.gateBypassed)),

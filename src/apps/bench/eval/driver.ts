@@ -270,6 +270,9 @@ interface Phase {
    *  rail predicate was evaluable AND mismatched (the false green a
    *  predicate-aware gate would catch). Repair path only. */
   primaryFalseGreen?: boolean
+  /** jun-18 RCA OBSERVE-ONLY — a repair round's rail (exit-code) rejected a patch
+   *  the repro sentinel reports resolved (false-RED ⇒ wasteful churn). Repair only. */
+  primaryFalseRed?: boolean
   verifyRounds?: number
 }
 
@@ -384,6 +387,7 @@ const runRepairPhase = async (
   let finalPatch = ""
   let repairValidated = false
   let repairFalseGreen = false
+  let repairFalseRed = false
   let repairRounds = 0
   const patch = await withGitSnapshot(
     sandbox,
@@ -418,6 +422,7 @@ const runRepairPhase = async (
       finalPatch = out.patch
       repairValidated = out.validated
       repairFalseGreen = out.primaryFalseGreen
+      repairFalseRed = out.primaryFalseRed
       repairRounds = out.rounds
     },
   )
@@ -426,6 +431,7 @@ const runRepairPhase = async (
     turns,
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
+    primaryFalseRed: repairFalseRed,
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
   }
 }
@@ -751,6 +757,9 @@ const runInstanceOnce = async (
         // ⇒ null (emitting false would skew the rate denominator). Mirrors runner.
         if (primaryRailStep !== undefined && phase.primaryFalseGreen !== undefined)
           extra.primaryFalseGreen = phase.primaryFalseGreen
+        // jun-18 RCA instrument: false-RED (rail rejected a repro-says-resolved patch).
+        if (primaryRailStep !== undefined && phase.primaryFalseRed !== undefined)
+          extra.primaryFalseRed = phase.primaryFalseRed
       }
       if (repairGateEligible) {
         extra.gateEntered = gateDecisionVerify
