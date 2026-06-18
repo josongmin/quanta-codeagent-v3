@@ -106,7 +106,7 @@ describe("executeReproTests", () => {
     expect(calls[0]?.path).toBe("/sandbox/__repro_0.py")
     expect(calls[0]?.content).toBe('print("Issue reproduced")')
     expect(execCalls).toHaveLength(2)
-    expect(execCalls[0]?.argv).toEqual(["python", "/sandbox/__repro_0.py"])
+    expect(execCalls[0]?.argv).toEqual(["python3", "/sandbox/__repro_0.py"])
     expect(execCalls[0]?.cwd).toBe("/sandbox")
     expect(out).toHaveLength(2)
     expect(out[0]?.outcome).toBe("reproduced")
@@ -163,7 +163,26 @@ describe("executeReproTests", () => {
       }),
     )
     expect(out[0]?.outcome).toBe("exec_failed")
+    // The throw reason is captured into stderr (never silent) — this is what
+    // attributes a missing-binary ENOENT vs a crashed script on a remote box.
+    expect(out[0]?.stderr).toContain("python missing")
+    expect(out[0]?.stderr).toContain("[exec threw]")
     expect(out[1]?.outcome).toBe("reproduced")
+  })
+
+  test("pythonBin overrides the default python3 interpreter", async () => {
+    const seen: string[] = []
+    await executeReproTests(
+      mkArgs({
+        tests: ["a"],
+        pythonBin: "/venv/bin/python",
+        exec: async (argv) => {
+          seen.push(argv[0] ?? "")
+          return { code: 0, stdout: "Issue reproduced", stderr: "" }
+        },
+      }),
+    )
+    expect(seen[0]).toBe("/venv/bin/python")
   })
 
   test("AbortSignal triggered ⇒ stops dispatching", async () => {

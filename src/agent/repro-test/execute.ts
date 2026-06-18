@@ -83,7 +83,17 @@ export interface ExecuteReproTestsArgs {
    *  repo root. The path returned MUST live INSIDE `repoRoot` so the
    *  script's relative imports resolve. */
   tempPath?: (i: number) => string
+  /** Python interpreter to invoke. Default `python3` — modern Ubuntu boxes
+   *  (22.04+) ship `python3` only, with NO `python` symlink, so a hardcoded
+   *  `python` made `Bun.spawn` throw ENOENT and every sample silently became
+   *  `exec_failed`. Override (e.g. a venv python) when the project env lives
+   *  behind a specific interpreter. */
+  pythonBin?: string
 }
+
+/** Compact a thrown value to a single-line string for the stderr diagnostic. */
+const errText = (e: unknown): string =>
+  e instanceof Error ? `${e.name}: ${e.message}` : String(e)
 
 /** Classify stdout into a {@link ReproTestOutcome}, applying the
  *  last-marker-wins rule. `code` decides between `"exec_failed"` and
@@ -144,17 +154,21 @@ const executeOne = async (
   const path = args.tempPath !== undefined ? args.tempPath(i) : defaultTempPath(args.repoRoot, i)
   try {
     await args.writeFile(path, source)
-  } catch {
-    return { source, stdout: "", stderr: "", outcome: "exec_failed" }
+  } catch (e) {
+    return { source, stdout: "", stderr: `[writeFile threw] ${errText(e)}`, outcome: "exec_failed" }
   }
   try {
-    const r = await args.exec(["python", path], args.repoRoot, timeoutMs)
+    const r = await args.exec([args.pythonBin ?? "python3", path], args.repoRoot, timeoutMs)
     const stdout = typeof r.stdout === "string" ? r.stdout : ""
     const stderr = typeof r.stderr === "string" ? r.stderr : ""
     const code = typeof r.code === "number" ? r.code : -1
     return { source, stdout, stderr, outcome: classifyStdout(stdout, code) }
-  } catch {
-    return { source, stdout: "", stderr: "", outcome: "exec_failed" }
+  } catch (e) {
+    // The exec PORT threw (e.g. Bun.spawn ENOENT — the python binary is not on
+    // PATH) BEFORE the process produced any output. Capture the throw reason so
+    // an `exec_failed` is never silent again (the prior version dropped it,
+    // making a missing-binary indistinguishable from a crashed script).
+    return { source, stdout: "", stderr: `[exec threw] ${errText(e)}`, outcome: "exec_failed" }
   }
 }
 
