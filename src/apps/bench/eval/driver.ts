@@ -3,7 +3,6 @@ import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
-import { extractSymbols } from "@/agent/issue-hint/extract-symbols"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
@@ -614,7 +613,7 @@ const runInstanceOnce = async (
       instance.swebench !== undefined && posture.faultEvidence && posture.lspNav
         ? await resolveOwnerSiblings()({
             stage1Files,
-            issueSymbols: extractSymbols(instance.problemStatement).slice(0, 12),
+            issueText: instance.problemStatement,
             cwd: sandbox,
             readSource: (rel) => {
               try {

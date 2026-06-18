@@ -1119,6 +1119,14 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
       "How many run_evaluation Docker grades run at once across overlapping bench tasks (default 1 = serial, arm64-safe; set >1 on x86 native to pipeline grading).",
   },
   {
+    envKey: "QUANTA_BENCH_FULL_REMOTE_RELAUNCH",
+    kind: "int",
+    default: 1,
+    group: "bench",
+    describe:
+      "Extra full-remote box relaunches on an empty result (spot reclaim / ssh-255 loses the whole run). Default 1 = up to 2 attempts total.",
+  },
+  {
     envKey: "QUANTA_SWEBENCH_NAMESPACE",
     kind: "string",
     default: undefined,

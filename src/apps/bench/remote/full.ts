@@ -18,6 +18,7 @@
  * invariants are fully unit-tested offline via an injected {@link SpawnFn}.
  */
 import { writeFileSync } from "node:fs"
+import { errMessage } from "@/shared"
 import { loadVerdicts } from "../analyze/verdicts"
 import { defaultSpawn, type SpawnFn } from "./backend"
 
@@ -182,6 +183,55 @@ export interface FullRemoteResult {
   readonly emptyPatch?: readonly string[]
   readonly dryRun?: boolean
   readonly plan?: readonly string[]
+}
+
+/** A full-remote run produced NO verdicts at all — the box was lost (spot
+ *  reclaim, or the single blocking ssh that holds the run was torn down by a
+ *  keepalive timeout under grading load ⇒ `exit 255` before report.json
+ *  existed). Both modes surface here identically: an all-empty result. */
+export const isEmptyFullRemoteResult = (r: FullRemoteResult): boolean =>
+  !r.dryRun &&
+  (r.resolved?.length ?? 0) +
+    (r.unresolved?.length ?? 0) +
+    (r.errored?.length ?? 0) +
+    (r.emptyPatch?.length ?? 0) ===
+    0
+
+/**
+ * Caller-level relaunch retry — the resilience the executor comment promised
+ * ("Flaky/blip box loss is handled by CALLER-LEVEL retry, not by holding one
+ * box") but the CLI never implemented, so a single spot reclaim / ssh-255 drop
+ * silently lost the WHOLE run (observed: 53- and 4-instance shards both wiped).
+ *
+ * `makeBackend` mints a FRESH box per attempt (a relaunch, not a re-poll of the
+ * dead box — the prior box is already terminated). A thrown attempt (launch
+ * failure) is treated as empty and retried. A dry-run short-circuits (its
+ * verdict-less result is intentional, not a loss). Bounded by `maxRelaunch` so
+ * a genuinely-broken config can't loop forever.
+ */
+export const runWithRelaunch = async (
+  makeBackend: () => { run: () => Promise<FullRemoteResult> },
+  opts: { maxRelaunch: number; onLog?: (m: string) => void },
+): Promise<FullRemoteResult & { attempts: number }> => {
+  let last: FullRemoteResult = {}
+  const total = Math.max(0, opts.maxRelaunch) + 1
+  for (let attempt = 1; attempt <= total; attempt++) {
+    try {
+      last = await makeBackend().run()
+    } catch (err) {
+      opts.onLog?.(`[full-remote] attempt ${attempt} threw: ${errMessage(err)}`)
+      last = {}
+    }
+    if (last.dryRun) return { ...last, attempts: attempt }
+    if (!isEmptyFullRemoteResult(last)) return { ...last, attempts: attempt }
+    if (attempt < total) {
+      opts.onLog?.(
+        `[full-remote] ⚠️ empty result (attempt ${attempt}/${total}) — box lost (spot reclaim / ssh-255). Relaunching a fresh box…`,
+      )
+    }
+  }
+  opts.onLog?.(`[full-remote] exhausted ${total} attempt(s); giving up with empty result.`)
+  return { ...last, attempts: total }
 }
 
 export const createFullRemoteBackend = (

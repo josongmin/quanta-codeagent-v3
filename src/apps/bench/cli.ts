@@ -31,7 +31,7 @@ import { loadVerdictsFromFile } from "./analyze/verdicts"
 import type { GradeBackend } from "./remote/backend"
 import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
-import { createFullRemoteBackend } from "./remote/full"
+import { createFullRemoteBackend, runWithRelaunch } from "./remote/full"
 import { createSshBackend } from "./remote/ssh"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
@@ -201,18 +201,31 @@ const cmdGrade = async (): Promise<void> => {
     const instance = argValue("--instance")
     const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset")
     const fullModel = argValue("--model")
-    const backend = createFullRemoteBackend({
-      repoDir: process.cwd(),
-      authJson,
-      datasetPath: dataset,
-      ...(instance !== undefined ? { instanceIds: instance.split(",") } : {}),
-      ...(preset !== undefined ? { preset } : {}),
-      ...(fullModel !== undefined ? { model: fullModel } : {}),
-      dryRun: dry,
-      keep: hasFlag("--keep"),
-      onLog: (m) => logger.info(m),
-    })
-    const res = await backend.run()
+    // A spot reclaim or ssh-255 keepalive drop loses the WHOLE run (empty result
+    // before report.json exists). Relaunch a fresh box on an empty result —
+    // `QUANTA_BENCH_FULL_REMOTE_RELAUNCH` extra attempts (default 1). `--keep`
+    // boxes are NOT auto-relaunched-over since the prior box survives for
+    // inspection (relaunch would still mint a new box, so it stays correct).
+    const relaunchRaw = process.env.QUANTA_BENCH_FULL_REMOTE_RELAUNCH
+    const maxRelaunch =
+      relaunchRaw !== undefined && /^\d+$/.test(relaunchRaw.trim())
+        ? Number.parseInt(relaunchRaw.trim(), 10)
+        : 1
+    const makeBackend = () =>
+      createFullRemoteBackend({
+        repoDir: process.cwd(),
+        authJson,
+        datasetPath: dataset,
+        ...(instance !== undefined ? { instanceIds: instance.split(",") } : {}),
+        ...(preset !== undefined ? { preset } : {}),
+        ...(fullModel !== undefined ? { model: fullModel } : {}),
+        dryRun: dry,
+        keep: hasFlag("--keep"),
+        onLog: (m) => logger.info(m),
+      })
+    const res = dry
+      ? await makeBackend().run()
+      : await runWithRelaunch(makeBackend, { maxRelaunch, onLog: (m) => logger.info(m) })
     if (res.dryRun) {
       printBlock(["=== full-remote plan (dry-run) ===", ...(res.plan ?? [])].join("\n"))
     } else {

@@ -24,8 +24,10 @@ import { spawnSync } from "node:child_process"
 export interface OwnerSiblingArgs {
   /** Stage-1 ranked candidates (score-desc). Top `maxFiles` are probed. */
   readonly stage1Files: readonly { file: string; score: number }[]
-  /** Bounded issue symbols (from the FaultEvidencePacket). */
-  readonly issueSymbols: readonly string[]
+  /** The issue/problem text. Anchors are the symbols a localized owner DEFINES
+   *  that the issue actually MENTIONS (word-boundary) — so `runshell` in prose
+   *  anchors even when `extractSymbols` (backtick-only) returns nothing. */
+  readonly issueText: string
   /** Sandbox root — ripgrep search root + URI/path relativization. */
   readonly cwd: string
   /** Read a sandbox-relative source file; `null` when absent/unreadable. */
@@ -47,27 +49,25 @@ export interface OwnerSibling {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
+const DEF_RE = /^[ \t]*(?:async[ \t]+)?def[ \t]+(\w+)|^[ \t]*class[ \t]+(\w+)/gm
+
 /**
- * 0-based `{line, character}` of the DEFINITION site of `symbol` in `source`
- * (a `def`/`async def`/`class` line). `null` when not defined here — we only
- * expand siblings from a file that actually OWNS the symbol.
+ * Symbol names DEFINED in `source` (`def`/`async def`/`class`). Dunder names
+ * (`__init__`, …) are excluded — they're ubiquitous and would over-expand.
  */
-export const defSiteOf = (
-  source: string,
-  symbol: string,
-): { line: number; character: number } | null => {
-  const sym = escapeRe(symbol)
-  const re = new RegExp(`^\\s*(?:async\\s+)?def\\s+${sym}\\b|^\\s*class\\s+${sym}\\b`)
-  const lines = source.split("\n")
-  for (let i = 0; i < lines.length; i++) {
-    const ln = lines[i] ?? ""
-    if (re.test(ln)) {
-      const character = ln.indexOf(symbol)
-      if (character >= 0) return { line: i, character }
-    }
+export const defsInSource = (source: string): string[] => {
+  const out = new Set<string>()
+  for (const m of source.matchAll(DEF_RE)) {
+    const name = m[1] ?? m[2]
+    if (name && !name.startsWith("__")) out.add(name)
   }
-  return null
+  return [...out]
 }
+
+/** Word-boundary mention (so `runshell` in prose anchors, but `env` doesn't
+ *  match inside `environment`). */
+const issueMentions = (issueText: string, symbol: string): boolean =>
+  new RegExp(`\\b${escapeRe(symbol)}\\b`).test(issueText)
 
 const relFromPath = (path: string, cwd: string): string => {
   const base = cwd.endsWith("/") ? cwd : `${cwd}/`
@@ -113,11 +113,14 @@ export const resolveOwnerSiblings =
       if (out.length >= maxResults || args.signal?.aborted === true) break
       const source = args.readSource(sf.file)
       if (source === null) continue
-      for (const sym of args.issueSymbols) {
+      // Anchors = symbols this owner DEFINES that the issue text MENTIONS. Both
+      // conditions matter: "defines" keeps it to the owner's surface, "mentions"
+      // keeps it to what the bug is actually about (no over-expansion on every
+      // method). This is why `extractSymbols` (backtick-only) being empty on
+      // #14315 doesn't matter — `runshell` is in the prose and defined in base.
+      const anchors = defsInSource(source).filter((sym) => issueMentions(args.issueText, sym))
+      for (const sym of anchors) {
         if (out.length >= maxResults) break
-        // The localized file must OWN the symbol — otherwise a bare mention would
-        // pull in unrelated same-named definitions across the repo.
-        if (defSiteOf(source, sym) === null) continue
         for (const file of definers(sym)) {
           // sibling only: not the owner itself, not an already-localized file.
           if (file === "" || file === sf.file || stage1Set.has(file)) continue

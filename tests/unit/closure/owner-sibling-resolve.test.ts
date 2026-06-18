@@ -2,10 +2,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
-import { defSiteOf, resolveOwnerSiblings } from "@/agent/closure"
+import { defsInSource, resolveOwnerSiblings } from "@/agent/closure"
 
-// django-14315 shape: base + postgresql (and other backends) define the SAME
-// method. Localizing the parent must surface the sibling override sites.
+// django-14315 shape: base + postgresql (+ other backends) define the SAME
+// methods. The issue mentions `runshell` in PROSE (extractSymbols, backtick-only,
+// returns []). Anchoring on owner-def ∩ issue-mention recovers it.
 const BASE = "django/db/backends/base/client.py"
 const PG = "django/db/backends/postgresql/client.py"
 const MYSQL = "django/db/backends/mysql/client.py"
@@ -18,79 +19,87 @@ const baseSource = [
   "        pass",
 ].join("\n")
 
-// `listDefiners` stub: maps a symbol → files that define it (what ripgrep returns).
 const stubDefiners =
   (map: Record<string, string[]>) =>
   (symbol: string): string[] =>
     map[symbol] ?? []
 
-describe("defSiteOf", () => {
-  test("matches def / async def / class; returns the symbol column", () => {
-    expect(defSiteOf("class Foo:\n    def bar(self):\n        pass", "bar")).toEqual({
-      line: 1,
-      character: 8,
-    })
-    expect(defSiteOf("async def baz():\n    pass", "baz")).toEqual({ line: 0, character: 10 })
-    expect(defSiteOf("class Widget:\n    pass", "Widget")).toEqual({ line: 0, character: 6 })
+describe("defsInSource", () => {
+  test("extracts def / async def / class names; excludes dunder", () => {
+    const src = "class Foo:\n    def bar(self):\n        pass\n    def __init__(self):\n        pass\nasync def baz():\n    pass"
+    expect(defsInSource(src).sort()).toEqual(["Foo", "bar", "baz"])
   })
 
-  test("null when the symbol is not DEFINED here (a bare reference doesn't count)", () => {
-    expect(defSiteOf("x = settings_to_cmd_args_env()", "settings_to_cmd_args_env")).toBeNull()
-    expect(defSiteOf("# nothing", "bar")).toBeNull()
+  test("empty when nothing is defined", () => {
+    expect(defsInSource("x = 1\n# comment")).toEqual([])
   })
 })
 
-describe("resolveOwnerSiblings (WS2 grep-based feeder)", () => {
-  test("localizing the owner surfaces OTHER files defining the same symbol", async () => {
+describe("resolveOwnerSiblings (WS2 grep + issueText anchor)", () => {
+  test("anchor = owner-def ∩ issue-mention ⇒ siblings via the mentioned method", async () => {
     const out = await resolveOwnerSiblings()({
       stage1Files: [{ file: BASE, score: 5 }],
-      issueSymbols: ["settings_to_cmd_args_env"],
+      // mentions `runshell` (prose) but NOT settings_to_cmd_args_env
+      issueText: "database client runshell doesn't respect os.environ values",
       cwd: "/repo",
       readSource: (f) => (f === BASE ? baseSource : null),
-      listDefiners: stubDefiners({ settings_to_cmd_args_env: [BASE, PG, MYSQL] }),
+      listDefiners: stubDefiners({
+        runshell: [BASE, PG, MYSQL],
+        settings_to_cmd_args_env: [BASE, PG],
+      }),
     })
-    // BASE excluded (it's the owner / already localized); PG + MYSQL are siblings.
+    // runshell is the only anchor (defined in base + mentioned) ⇒ PG + MYSQL.
+    // settings_to_cmd_args_env is defined in base but NOT mentioned ⇒ not an anchor.
     expect(out).toEqual([
-      { file: PG, forSymbol: "settings_to_cmd_args_env" },
-      { file: MYSQL, forSymbol: "settings_to_cmd_args_env" },
+      { file: PG, forSymbol: "runshell" },
+      { file: MYSQL, forSymbol: "runshell" },
     ])
   })
 
-  test("owner-gated: a file that only MENTIONS the symbol (no def) expands nothing", async () => {
-    // base source defines settings_to_cmd_args_env but NOT `save`; even if the
-    // definer map has `save` hits, the owner doesn't own it ⇒ no expansion.
+  test("word-boundary mention: `env` in the issue does NOT match `environ`", async () => {
+    const src = "class C:\n    def env(self):\n        pass"
     const out = await resolveOwnerSiblings()({
-      stage1Files: [{ file: BASE, score: 5 }],
-      issueSymbols: ["save"],
+      stage1Files: [{ file: "a.py", score: 5 }],
+      issueText: "os.environ is not respected", // contains 'environ', not the word 'env'
       cwd: "/repo",
-      readSource: () => baseSource,
-      listDefiners: stubDefiners({ save: ["models/base.py", "forms/models.py"] }),
+      readSource: () => src,
+      listDefiners: stubDefiners({ env: ["a.py", "b.py"] }),
     })
     expect(out).toEqual([])
   })
 
-  test("self + already-localized files are excluded from siblings", async () => {
+  test("owner-gated: an issue-mentioned symbol the owner does NOT define expands nothing", async () => {
+    const out = await resolveOwnerSiblings()({
+      stage1Files: [{ file: BASE, score: 5 }],
+      issueText: "the save method is broken", // base doesn't define `save`
+      cwd: "/repo",
+      readSource: () => baseSource,
+      listDefiners: stubDefiners({ save: ["models/base.py"] }),
+    })
+    expect(out).toEqual([])
+  })
+
+  test("self + already-localized files are excluded", async () => {
     const out = await resolveOwnerSiblings()({
       stage1Files: [
         { file: BASE, score: 5 },
         { file: PG, score: 4 },
       ],
-      issueSymbols: ["settings_to_cmd_args_env"],
+      issueText: "runshell is broken",
       cwd: "/repo",
       readSource: () => baseSource,
-      listDefiners: stubDefiners({ settings_to_cmd_args_env: [BASE, PG, MYSQL] }),
+      listDefiners: stubDefiners({ runshell: [BASE, PG, MYSQL] }),
     })
-    // BASE + PG are both in stage1 (localized) ⇒ only MYSQL remains a sibling.
-    expect(out).toEqual([{ file: MYSQL, forSymbol: "settings_to_cmd_args_env" }])
+    expect(out).toEqual([{ file: MYSQL, forSymbol: "runshell" }])
   })
 
   test("dedup + bounded by maxResults", async () => {
     const out = await resolveOwnerSiblings()({
       stage1Files: [{ file: BASE, score: 5 }],
-      issueSymbols: ["settings_to_cmd_args_env"],
+      issueText: "runshell",
       cwd: "/repo",
       readSource: () => baseSource,
-      listDefiners: stubDefiners({ settings_to_cmd_args_env: ["a.py", "a.py", "b.py", "c.py"] }),
+      listDefiners: stubDefiners({ runshell: ["a.py", "a.py", "b.py", "c.py"] }),
       maxResults: 2,
     })
     expect(out.length).toBe(2)
@@ -100,10 +109,10 @@ describe("resolveOwnerSiblings (WS2 grep-based feeder)", () => {
   test("missing source skips the file (no crash)", async () => {
     const out = await resolveOwnerSiblings()({
       stage1Files: [{ file: BASE, score: 5 }],
-      issueSymbols: ["settings_to_cmd_args_env"],
+      issueText: "runshell",
       cwd: "/repo",
       readSource: () => null,
-      listDefiners: stubDefiners({ settings_to_cmd_args_env: [BASE, PG] }),
+      listDefiners: stubDefiners({ runshell: [BASE, PG] }),
     })
     expect(out).toEqual([])
   })
@@ -116,21 +125,20 @@ describe("resolveOwnerSiblings (WS2 grep-based feeder)", () => {
         { file: "b.py", score: 3 },
         { file: "c.py", score: 2 },
       ],
-      issueSymbols: ["x"],
+      issueText: "foo is broken",
       cwd: "/repo",
       readSource: (f) => {
         probed.push(f)
-        return "def x():\n    pass"
+        return "def foo():\n    pass"
       },
-      listDefiners: stubDefiners({ x: ["a.py", "b.py", "c.py", "z.py"] }),
+      listDefiners: stubDefiners({ foo: ["a.py", "b.py", "c.py", "z.py"] }),
       maxFiles: 2,
     })
     expect(probed).toEqual(["a.py", "b.py"])
   })
 
-  // Integration: the DEFAULT path (no listDefiners) runs real ripgrep over a tmp
-  // working tree — proves the grep pivot works end-to-end (the LSP path returned
-  // [] on real pyright; this is why we pivoted).
+  // Integration: DEFAULT path (real ripgrep) over a tmp tree — the grep pivot
+  // that replaced the inert LSP path, end-to-end.
   test("ripgrep default finds the sibling on a real tree (integration)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ws2-rg-"))
     try {
@@ -138,7 +146,7 @@ describe("resolveOwnerSiblings (WS2 grep-based feeder)", () => {
       writeFileSync(join(dir, "b.py"), "class B:\n    def settings_to_cmd_args_env(self):\n        pass\n")
       const out = await resolveOwnerSiblings()({
         stage1Files: [{ file: "a.py", score: 5 }],
-        issueSymbols: ["settings_to_cmd_args_env"],
+        issueText: "the settings_to_cmd_args_env method returns the wrong value",
         cwd: dir,
         readSource: (rel) => readFileSync(join(dir, rel), "utf8"),
       })

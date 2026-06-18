@@ -137,6 +137,26 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "closure-repair": "3",
     "round0-minimal": "1",
   },
+  // TEMP A/B arm (jun-18, local, NOT committed): agentless-v2 minus closure-repair
+  // — isolates the executor's effect on resolution (repair ON vs OFF, all else equal).
+  "agentless-v2-norepair": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    // NO closure-repair ⇒ rail selected but gate cannot enter verify-first ⇒ single-pass.
+  },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.
   "everything-v1": {

@@ -462,11 +462,16 @@ const runDatasetMode = async (
 
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL ?? "https://github.com/"
   const taskDeps = { llm, cfg, pythonSwebench, repair, obs, repoBaseUrl }
-  // Concurrency>1 overlaps patch-gen across tasks; Docker grading stays
-  // serialised by the python-swebench mutex. Default 1 ⇒ byte-identical serial.
+  // Concurrency>1 overlaps patch-gen across tasks. Docker grading runs up to
+  // `swebenchGradeConcurrency` at once (default 1 = serial / arm64-safe; >1 on
+  // x86 native pipelines grading — see python-swebench withGradingLock).
   const concurrency = resolveConcurrency()
-  if (concurrency > 1)
-    logger.info(`bench: patch-gen concurrency=${concurrency} (grading serialised)`)
+  if (concurrency > 1) {
+    const gradeConc = Math.max(1, runtimeConfig().swebenchGradeConcurrency)
+    logger.info(
+      `bench: patch-gen concurrency=${concurrency} (grading ${gradeConc > 1 ? `concurrency=${gradeConc}` : "serialised"})`,
+    )
+  }
   const results = await mapWithConcurrency(selected, concurrency, (task) =>
     runSwebenchTask(task, taskDeps),
   )
