@@ -78,6 +78,29 @@ describe("buildReproTestPrompt", () => {
     expect(prompt).toContain('"Other issues"')
     expect(prompt).toContain("Output only the Python source code")
   })
+
+  // SOTA oracle-reliability hardening (jun-18): the repro is the execution gate,
+  // so its marker must be a TRUSTWORTHY, deterministic signal. The prompt must
+  // steer the LLM away from the two malformations the RCA found: (a) printing the
+  // marker then crashing / exiting non-zero (false-RED), and (b) a wrong
+  // resolved/reproduced decision (false signal). These instructions complement
+  // the validator's sentinel-gating (which already ignores the incidental exit
+  // code) by making the marker itself reliable at the source.
+  test("hardening: marker must be the LAST line + no code after it (anti false-RED)", () => {
+    const prompt = buildReproTestPrompt("some bug")
+    expect(prompt.toLowerCase()).toContain("last line")
+    expect(prompt.toLowerCase()).toContain("do not")
+  })
+
+  test("hardening: decide resolved vs reproduced from the issue's EXPECTED vs ACTUAL", () => {
+    const prompt = buildReproTestPrompt("some bug")
+    expect(prompt.toLowerCase()).toContain("expected")
+  })
+
+  test("hardening: clean exit — no sys.exit / no raise after the marker", () => {
+    const prompt = buildReproTestPrompt("some bug")
+    expect(prompt).toContain("sys.exit")
+  })
 })
 
 describe("buildReproTestPrompt — MWE grounding (jun-18 repro-install lever)", () => {
