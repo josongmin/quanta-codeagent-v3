@@ -24,62 +24,82 @@ import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { type AnyKnob, allKnobs, asAnyKnob, registerKnob } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
+import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
 import { closeoutCriticKnob } from "@/runner/knobs/knobs/closeout-critic"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
+import { closureRepairKnob } from "@/runner/knobs/knobs/closure-repair"
 import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
+import { faultEvidenceKnob } from "@/runner/knobs/knobs/fault-evidence"
 import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
 import { issueHintExpectedActualKnob } from "@/runner/knobs/knobs/issue-hint-expected-actual"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
+import { lspSteerKnob } from "@/runner/knobs/knobs/lsp-steer"
 import { mcpToolAnnotationsKnob } from "@/runner/knobs/knobs/mcp-tool-annotations"
 import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
 import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
+import { noPatchBreakerKnob } from "@/runner/knobs/knobs/no-patch-breaker"
+import { patchHygieneKnob } from "@/runner/knobs/knobs/patch-hygiene"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
+import { primaryRailKnob } from "@/runner/knobs/knobs/primary-rail"
 import { ratelimitNoticeKnob } from "@/runner/knobs/knobs/ratelimit-notice"
 import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
+import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
+import { specFidelitySteerKnob } from "@/runner/knobs/knobs/spec-fidelity-steer"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { taskBudgetKnob } from "@/runner/knobs/knobs/task-budget"
 import { testRunnerKnob } from "@/runner/knobs/knobs/test-runner"
+import { verificationPlanKnob } from "@/runner/knobs/knobs/verification-plan"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(advisorKnob),
+  asAnyKnob(benchInLoopExecKnob),
   asAnyKnob(branchSearchKnob),
   asAnyKnob(closeoutCriticKnob),
   asAnyKnob(closeoutGuardKnob),
+  asAnyKnob(closureRepairKnob),
   asAnyKnob(composeAuthoringKnob),
+  asAnyKnob(faultEvidenceKnob),
   asAnyKnob(gitDirectiveKnob),
   asAnyKnob(hooksKnob),
   asAnyKnob(issueHintKnob),
   asAnyKnob(issueHintExpectedActualKnob),
   asAnyKnob(localizePhaseKnob),
   asAnyKnob(lspKnob),
+  asAnyKnob(lspSteerKnob),
   asAnyKnob(mcpToolAnnotationsKnob),
   asAnyKnob(memoryModeKnob),
   asAnyKnob(multiVoterKnob),
   asAnyKnob(mustPassKnob),
   asAnyKnob(networkProxyKnob),
+  asAnyKnob(noPatchBreakerKnob),
+  asAnyKnob(patchHygieneKnob),
   asAnyKnob(personaKnob),
   asAnyKnob(policyMergeKnob),
+  asAnyKnob(primaryRailKnob),
   asAnyKnob(ratelimitNoticeKnob),
   asAnyKnob(readOutlineKnob),
+  asAnyKnob(repairEscalationKnob),
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(retryTransientKnob),
   asAnyKnob(skillsKnob),
+  asAnyKnob(specFidelitySteerKnob),
   asAnyKnob(subagentKnob),
   asAnyKnob(taskBudgetKnob),
   asAnyKnob(testRunnerKnob),
+  asAnyKnob(verificationPlanKnob),
   asAnyKnob(workingStateKnob),
 ]
 

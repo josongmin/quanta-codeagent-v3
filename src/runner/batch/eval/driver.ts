@@ -71,6 +71,12 @@ import {
   resolveBenchKnobs,
 } from "./knobs-bench"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
+import {
+  benchInstallsReproHint,
+  benchRunsRepairPhase,
+  benchShouldRunRepairPhase,
+  primaryRailRedAfterRepair,
+} from "./repair-phase-policy"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type {
@@ -1497,7 +1503,7 @@ export const runInstanceOnce = async (
 ): Promise<InstanceResult> => {
   const sandbox = await createSandbox(instance)
   const abort = new AbortController()
-  const deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
+  let deadline: ReturnType<typeof setTimeout> | undefined
   const startedAt = Date.now()
   let phase: Phase = { patch: "", turns: 0 }
   let w: Wiring = { stream: new NullStream() }
@@ -1542,9 +1548,12 @@ export const runInstanceOnce = async (
       },
     })
 
-    // Repro-test (Agentless §3.3.1) — default-OFF; env-gated. See
-    // `installReproTestHint` for details.
-    const reproInstall = await installReproTestHint(instance, sandbox, deps.llm)
+    // `bench-in-loop-exec` OFF (mini-swe posture): skip the host-python repro-test
+    // hint — the agent isn't told to run tests, so a repro script is dead weight.
+    // ON ⇒ byte-identical to the pre-knob path.
+    const reproInstall = benchInstallsReproHint(posture.inLoopExec)
+      ? await installReproTestHint(instance, sandbox, deps.llm)
+      : { hint: undefined, telemetry: undefined }
     const reproHint = reproInstall.hint
     reproTest = reproInstall.telemetry
 
@@ -1582,6 +1591,10 @@ export const runInstanceOnce = async (
     const primaryRailStep = closureSession?.primaryRailStep
     const closureHint = closureSession?.closureHint
 
+    // Setup is done — arm the solve deadline now so the agent gets the full
+    // `timeoutMs` of think time (copy/setup/hint prep are outside the budget).
+    deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
+
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
     // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
     // ABSENT ⇒ existing single-pass path verbatim (byte-identical: same calls,
@@ -1608,11 +1621,23 @@ export const runInstanceOnce = async (
     const effectiveRepair =
       deps.repair ??
       (posture.repairRounds !== undefined ? { maxRounds: posture.repairRounds } : undefined)
-    const repairGateEligible =
-      effectiveRepair !== undefined && instance.swebench !== undefined && posture.inLoopExec
-    const enterVerifyPhase = repairGateEligible && closureSession?.bundle.gate.action === "verify"
+    const repairGateEligible = benchRunsRepairPhase(
+      effectiveRepair !== undefined,
+      instance.swebench !== undefined,
+      posture.inLoopExec,
+    )
+    const gateDecisionVerify = repairGateEligible && closureSession?.bundle.gate.action === "verify"
+    const runRepair =
+      effectiveRepair !== undefined &&
+      benchShouldRunRepairPhase({
+        eligible: repairGateEligible,
+        primaryRailEnabled: posture.primaryRail,
+        gateAction: closureSession?.bundle.gate.action,
+        primaryRailStep,
+        verificationPlan,
+      })
     phase =
-      enterVerifyPhase && effectiveRepair !== undefined
+      runRepair && effectiveRepair !== undefined
         ? await runRepairPhase(
             instance,
             deps,
@@ -1636,7 +1661,14 @@ export const runInstanceOnce = async (
             closureHint,
           )
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
-    if (terminal !== undefined) return terminal
+    if (terminal !== undefined) {
+      if (shouldValidateGold(deps, false)) {
+        const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
+        if (!gold.ok)
+          return { ...terminal, passed: false, verdict: "grader_invalid", error: gold.error }
+      }
+      return terminal
+    }
 
     // T01 (audit L5 H-5): thread the per-instance deadline signal into verify so
     // the official harness grading + its transient-crash retry sleep stop when
@@ -1680,8 +1712,8 @@ export const runInstanceOnce = async (
           extra.primaryFalseGreen = phase.primaryFalseGreen
       }
       if (repairGateEligible) {
-        extra.gateEntered = enterVerifyPhase
-        extra.gateBypassed = !enterVerifyPhase
+        extra.gateEntered = gateDecisionVerify
+        extra.gateBypassed = !gateDecisionVerify
         if (phase.verifyRounds !== undefined) extra.verifyRounds = phase.verifyRounds
       }
       // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
@@ -1715,7 +1747,11 @@ export const runInstanceOnce = async (
             score: c.score,
             sources: c.sources,
           })),
-          primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
+          primaryRailRedAfterRepair: primaryRailRedAfterRepair(
+            primaryRailStep,
+            phase.validated,
+            phase.primaryFalseGreen,
+          ),
         })
       }
     }
@@ -1741,7 +1777,7 @@ export const runInstanceOnce = async (
       ...reproResultExtra(reproTest),
     }
   } finally {
-    clearTimeout(deadline)
+    if (deadline !== undefined) clearTimeout(deadline)
     w.observer?.close()
     await cleanupSandbox(sandbox)
   }
