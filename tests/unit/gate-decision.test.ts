@@ -47,4 +47,35 @@ describe("decideGate", () => {
     const d = decideGate(sig({ commitFast: { issueProvidesFix: false, highConfidenceSingleOwner: true }, signal: { reproAvailable: true, lspAvailable: false } }))
     expect(d.action).toBe("verify")
   })
+
+  // CLOSURE-RUNNER CONSISTENCY: a reproducing repro is an execution rail the
+  // closure engine deliberately built (baseValidatedRed). Running it once is a
+  // single cheap confirmation (NOT an exploration loop — repair caps rounds), so
+  // it must not be discarded by the issue-provides-fix commit-fast shortcut. This
+  // MIRRORS the established single-owner rule (`highConfidenceSingleOwner &&
+  // !reproAvailable`): execution evidence overrides a declared-output heuristic.
+  // Without this the selected primary rail is wasted on exactly the instances the
+  // closure-driven runner exists to verify.
+  test("issue supplies fix BUT a repro rail is available → verify (don't waste the execution rail)", () => {
+    const d = decideGate(
+      sig({
+        commitFast: { issueProvidesFix: true, highConfidenceSingleOwner: false },
+        signal: { reproAvailable: true, lspAvailable: false },
+      }),
+    )
+    expect(d.action).toBe("verify")
+    if (d.action === "verify") expect(d.sources).toContain("repro")
+  })
+
+  // Paired control: issue-provides-fix WITHOUT a repro stays commit-now (the
+  // anti-over-verify shortcut is preserved when there's no cheap rail to run).
+  test("issue supplies fix and NO repro → still commit-now (shortcut preserved)", () => {
+    const d = decideGate(
+      sig({
+        commitFast: { issueProvidesFix: true, highConfidenceSingleOwner: false },
+        signal: { reproAvailable: false, lspAvailable: false },
+      }),
+    )
+    expect(d.action).toBe("commit-now")
+  })
 })

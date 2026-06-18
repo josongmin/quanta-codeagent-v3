@@ -46,11 +46,17 @@ const uncertain = (s: GateSignals): boolean =>
 
 export const decideGate = (s: GateSignals): GateDecision => {
   // ── commit-fast (anti over-verify) ──────────────────────────────────────
-  if (!highStakes(s) && !uncertain(s)) {
+  // A reproducing repro is an execution RAIL the closure engine deliberately
+  // built (baseValidatedRed). Running it is ONE cheap confirmation — not an
+  // exploration loop (repair caps rounds) — so it overrides BOTH commit-fast
+  // shortcuts: skipping it would waste the very rail the closure-driven runner
+  // exists to verify. (The single-owner branch already encoded this with
+  // `&& !reproAvailable`; the issue-provides-fix branch must be consistent.)
+  if (!highStakes(s) && !uncertain(s) && !s.signal.reproAvailable) {
     if (s.commitFast.issueProvidesFix) {
-      return { action: "commit-now", reason: "issue supplies the fix, single-file low-stakes — commit without exploration loop" }
+      return { action: "commit-now", reason: "issue supplies the fix, single-file low-stakes, no execution rail — commit without exploration loop" }
     }
-    if (s.commitFast.highConfidenceSingleOwner && !s.signal.reproAvailable) {
+    if (s.commitFast.highConfidenceSingleOwner) {
       return { action: "commit-now", reason: "high-confidence single owner, no cheap external signal to add — commit" }
     }
   }
