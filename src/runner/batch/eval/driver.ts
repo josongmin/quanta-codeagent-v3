@@ -42,7 +42,7 @@ import {
 import type { PrimaryRailStep } from "@/agent/closure"
 import { LSP_GROUNDING_STEER, SPEC_FIDELITY_STEER } from "@/agent/localize-phase-guard"
 import { decideEscalation } from "@/agent/repair-escalation"
-import { extractIssueDeclaredExpected } from "@/agent/verification-plan"
+import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { errMessage, gateDisabled, gateOn } from "@/shared"
@@ -734,9 +734,21 @@ export const prepareReproTestDetailed = async (
     (async (path: string, content: string): Promise<void> => {
       await Bun.write(path, content)
     })
+  // jun-18 closure repro-install lever: when the issue body embeds a confidently
+  // EXECUTABLE Minimal Working Example (the author's own reproduction), seed the
+  // generation with it so the model wraps that KNOWN-reproducing code in the
+  // sentinel scaffold instead of guessing a reproduction from prose. Fail-closed:
+  // `extractIssueRepro` returns undefined for anything ambiguous, in which case
+  // `mwe` is omitted and the generate prompt is byte-identical to the prior path.
   let tests: readonly string[]
   try {
-    tests = await generate({ issue: instance.problemStatement, llm: deps.llm, config })
+    const mwe = extractIssueRepro(instance.problemStatement)?.code
+    tests = await generate({
+      issue: instance.problemStatement,
+      llm: deps.llm,
+      config,
+      ...(mwe !== undefined ? { mwe } : {}),
+    })
   } catch {
     return {
       selection: null,

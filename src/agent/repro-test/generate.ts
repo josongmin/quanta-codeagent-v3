@@ -57,10 +57,40 @@ const SYSTEM_MSG = [
   "Reason calmly. Output Python source code ONLY — no explanations, no markdown fences.",
 ].join("\n")
 
+/** Optional grounding block injected when the issue body embeds a confidently
+ *  EXECUTABLE Minimal Working Example (extracted fail-closed by
+ *  `extractIssueRepro`). The MWE is the issue author's OWN reproduction — it is
+ *  known to trigger the bug — but it does NOT print the sentinel markers. We
+ *  hand it to the model as the SEED to wrap in the sentinel scaffold (Agentless
+ *  §3.3.1 grounding), instead of letting the model guess a reproduction from
+ *  prose. Empty/whitespace `mwe` ⇒ no block (byte-identical to the un-grounded
+ *  prompt). Returns the lines to splice before the trailing example. Pure. */
+const groundingBlock = (mwe: string | undefined): readonly string[] => {
+  if (typeof mwe !== "string" || mwe.trim() === "") return []
+  return [
+    "",
+    "# Known reproduction (the issue author's own minimal working example).",
+    "# This code is known to TRIGGER the bug but does NOT yet print the sentinel",
+    "# lines. Build your script AROUND this exact code: keep its imports and the",
+    "# call(s) that trigger the bug, then add the print-contract above so the",
+    "# script prints one of the three sentinel lines. Do NOT invent a different",
+    "# reproduction — adapt THIS one.",
+    "```python",
+    mwe,
+    "```",
+  ]
+}
+
 /** Build the user message. Paper format: issue text + explicit print-contract
  *  + a tiny example so the LLM emits the exact sentinel strings (not
- *  paraphrases like `"the issue was reproduced"`). */
-export const buildReproTestPrompt = (issue: string): string =>
+ *  paraphrases like `"the issue was reproduced"`).
+ *
+ *  When `mwe` is a non-empty extracted Minimal Working Example, a grounding
+ *  block is spliced in (see {@link groundingBlock}) so the model wraps the
+ *  KNOWN-reproducing code in the sentinel scaffold rather than guessing. When
+ *  `mwe` is undefined/empty the output is byte-identical to the pre-feature
+ *  prompt. */
+export const buildReproTestPrompt = (issue: string, mwe?: string): string =>
   [
     "Write a Python script that reproduces the bug described in the issue below.",
     "",
@@ -75,6 +105,7 @@ export const buildReproTestPrompt = (issue: string): string =>
     "",
     "# Issue",
     issue,
+    ...groundingBlock(mwe),
     "",
     "# Example output (illustrative — replace with code for THIS issue):",
     "from package import thing",
@@ -195,11 +226,16 @@ export const generateReproTests = async (args: {
   llm: LLMPort
   config?: ReproTestConfig
   signal?: AbortSignal
+  /** Extracted Minimal Working Example from the issue body (the author's own
+   *  reproduction). When present, grounds the prompt so the model wraps THIS
+   *  known-reproducing code in the sentinel scaffold instead of guessing.
+   *  Undefined/empty ⇒ byte-identical to the un-grounded prompt. */
+  mwe?: string
 }): Promise<readonly string[]> => {
-  const { issue, llm, signal } = args
+  const { issue, llm, signal, mwe } = args
   if (typeof issue !== "string" || issue.length === 0) return []
   const samples = resolveSamples(args.config?.samples)
-  const userText = buildReproTestPrompt(issue)
+  const userText = buildReproTestPrompt(issue, mwe)
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: userText }] }]
   const out: string[] = []
   for (let i = 0; i < samples; i++) {

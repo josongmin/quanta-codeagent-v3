@@ -80,6 +80,94 @@ describe("buildReproTestPrompt", () => {
   })
 })
 
+describe("buildReproTestPrompt — MWE grounding (jun-18 repro-install lever)", () => {
+  const baseIssue = "UnicodeError on http://.example.com"
+
+  test("no mwe ⇒ byte-identical to the pre-feature prompt", () => {
+    // The grounding lever MUST be invisible when no MWE is extracted. Both the
+    // implicit (omitted arg) and explicit-undefined/empty forms must equal the
+    // single-arg prompt exactly.
+    const baseline = buildReproTestPrompt(baseIssue)
+    expect(buildReproTestPrompt(baseIssue, undefined)).toBe(baseline)
+    expect(buildReproTestPrompt(baseIssue, "")).toBe(baseline)
+    expect(buildReproTestPrompt(baseIssue, "   \n  ")).toBe(baseline)
+  })
+
+  test("non-empty mwe ⇒ grounding block spliced AFTER the issue, BEFORE the example", () => {
+    const mwe = "from sympy import lambdify\nlambdify([], tuple([1]))"
+    const prompt = buildReproTestPrompt(baseIssue, mwe)
+    // The MWE code is present verbatim.
+    expect(prompt).toContain("from sympy import lambdify")
+    expect(prompt).toContain("lambdify([], tuple([1]))")
+    // The grounding instruction is present and tells the model to ADAPT the MWE.
+    expect(prompt).toContain("Known reproduction")
+    expect(prompt).toContain("adapt THIS one")
+    // Placement: after the issue body, before the illustrative example.
+    const iIssue = prompt.indexOf(baseIssue)
+    const iMwe = prompt.indexOf("from sympy import lambdify")
+    const iExample = prompt.indexOf("# Example output")
+    expect(iIssue).toBeGreaterThanOrEqual(0)
+    expect(iMwe).toBeGreaterThan(iIssue)
+    expect(iExample).toBeGreaterThan(iMwe)
+  })
+
+  test("sentinel contract survives MWE injection (the print-contract is still demanded)", () => {
+    // Even with grounding, the three sentinel strings + the "print EXACTLY ONE"
+    // contract MUST remain — a grounded MWE that displaced the contract would
+    // produce scripts that never print a marker.
+    const prompt = buildReproTestPrompt(baseIssue, "import os\nos.getcwd()")
+    expect(prompt).toContain('"Issue reproduced"')
+    expect(prompt).toContain('"Issue resolved"')
+    expect(prompt).toContain('"Other issues"')
+    expect(prompt).toContain("Print EXACTLY ONE")
+  })
+
+  test("MWE containing a markdown fence cannot break out of the grounding block", () => {
+    // Adversarial: an MWE that itself contains ``` must not let the model think
+    // the prompt's code block ended early. We still embed it; the sentinel
+    // contract precedes the block so the contract is never displaced. (We assert
+    // the contract + example markers still both appear after such an MWE.)
+    const nasty = "import x\n```\nprint('Issue resolved')\n```"
+    const prompt = buildReproTestPrompt(baseIssue, nasty)
+    expect(prompt).toContain("Print EXACTLY ONE")
+    expect(prompt).toContain("# Example output")
+  })
+})
+
+describe("generateReproTests — MWE forwarding (wiring proof)", () => {
+  test("mwe reaches the LLM user message (red-on-injection)", async () => {
+    const llm = new ScriptedLLM('print("Issue reproduced")')
+    const mwe = "from pkg import boom\nboom()"
+    await generateReproTests({ issue: "the bug", llm, config: { samples: 1 }, mwe })
+    const userText =
+      llm.lastInput?.messages?.[0]?.content?.[0] &&
+      "text" in (llm.lastInput.messages[0].content[0] as { text?: string })
+        ? (llm.lastInput.messages[0].content[0] as { text: string }).text
+        : ""
+    expect(userText).toContain("from pkg import boom")
+    expect(userText).toContain("Known reproduction")
+  })
+
+  test("no mwe ⇒ user message byte-identical to single-issue prompt", async () => {
+    const llm = new ScriptedLLM('print("Issue reproduced")')
+    await generateReproTests({ issue: "the bug", llm, config: { samples: 1 } })
+    const userText = (llm.lastInput?.messages?.[0]?.content?.[0] as { text: string }).text
+    expect(userText).toBe(buildReproTestPrompt("the bug"))
+  })
+
+  test("a crashing MWE value cannot break generation (mwe is data, not code)", async () => {
+    // The MWE is spliced as plain text — even a pathological value must not throw.
+    const llm = new ScriptedLLM('print("Issue reproduced")')
+    const out = await generateReproTests({
+      issue: "x",
+      llm,
+      config: { samples: 1 },
+      mwe: "```\n".repeat(50),
+    })
+    expect(out).toHaveLength(1)
+  })
+})
+
 describe("stripMarkdownFences", () => {
   test("strips ```python ... ``` fences", () => {
     const raw = ["```python", 'print("hi")', "```"].join("\n")

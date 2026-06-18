@@ -260,6 +260,58 @@ describe("prepareReproTest", () => {
     expect(seen[0]).not.toContain("uvx")
   })
 
+  test("WIRING: issue with an extractable MWE ⇒ MWE forwarded to generate (red-on-injection)", async () => {
+    // jun-18 closure repro-install lever: the issue author's own reproduction
+    // must be seeded into the generation so the model wraps it in the sentinel
+    // scaffold rather than guessing.
+    let seenMwe: string | undefined = "SENTINEL_NOT_CALLED"
+    const issueWithMwe = [
+      "The lambdify call drops the tuple.",
+      "",
+      "```python",
+      "from sympy import lambdify",
+      "lambdify([], tuple([1]))",
+      "```",
+    ].join("\n")
+    await prepareReproTestDetailed(mkInstance({ problemStatement: issueWithMwe }), "/tmp/sb", 1, {
+      llm: new StubLLM(),
+      writeFile: async () => {},
+      exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+      generate: async (args: { mwe?: string }) => {
+        seenMwe = args.mwe
+        return ['print("Issue reproduced")']
+      },
+    })
+    expect(seenMwe).toBeDefined()
+    expect(seenMwe).toContain("from sympy import lambdify")
+    expect(seenMwe).toContain("lambdify([], tuple([1]))")
+  })
+
+  test("WIRING: issue WITHOUT an extractable MWE ⇒ generate called with mwe omitted (byte-identical)", async () => {
+    // No fenced python ⇒ extractIssueRepro returns undefined ⇒ the `mwe` key is
+    // omitted entirely (not present-but-undefined) so the generate path is the
+    // pre-feature one.
+    let hadMweKey = true
+    let seenMwe: string | undefined = "X"
+    await prepareReproTestDetailed(
+      mkInstance({ problemStatement: "Plain prose issue, no code block at all." }),
+      "/tmp/sb",
+      1,
+      {
+        llm: new StubLLM(),
+        writeFile: async () => {},
+        exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+        generate: async (args: { mwe?: string }) => {
+          hadMweKey = "mwe" in args
+          seenMwe = args.mwe
+          return ['print("Issue reproduced")']
+        },
+      },
+    )
+    expect(hadMweKey).toBe(false)
+    expect(seenMwe).toBeUndefined()
+  })
+
   test("detailed telemetry: no reproduced candidate records sample counts", async () => {
     const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
       llm: new StubLLM(),

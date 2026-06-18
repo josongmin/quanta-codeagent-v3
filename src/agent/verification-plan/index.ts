@@ -9,6 +9,7 @@ export {
   type IssueDeclaredExpected,
   type IssueDeclaredKind,
 } from "./extract-issue-declared-expected"
+export { extractIssueRepro, type IssueRepro } from "./extract-issue-repro"
 export type {
   SuccessPredicate,
   VerificationAuthority,
