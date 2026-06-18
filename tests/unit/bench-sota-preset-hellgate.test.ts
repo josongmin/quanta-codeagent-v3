@@ -56,7 +56,11 @@ describe("bench SOTA preset hellgate — QUANTA_BENCH_SOTA=1", () => {
   test("SOTA-2: QUANTA_BENCH_SOTA=1 sets localizePhase to {phase1Turns:5}", () => {
     process.env.QUANTA_BENCH_SOTA = "1"
     const opt = benchOptIns()
-    expect(opt.localizePhase).toEqual({ phase1Turns: 5 })
+    // localizePhase ALSO carries `lspGroundingSteer:true` under SOTA (LSP-steer
+    // is DEFAULT-ON when lspNav is on, jun-17) — that's the LSP-steer suite's
+    // invariant, not this one. SOTA's contract is the phase1Turns=5 default, so
+    // assert that field directly (decoupled from the steer policy).
+    expect(opt.localizePhase?.phase1Turns).toBe(5)
   })
 
   // SOTA-3: issueHintMode must be "agentless" when SOTA is on and no explicit
@@ -115,7 +119,9 @@ describe("bench SOTA preset hellgate — QUANTA_BENCH_SOTA=1", () => {
     process.env.QUANTA_BENCH_SOTA = "1"
     process.env.QUANTA_BENCH_LOCALIZE_PHASE = "3"
     const opt = benchOptIns()
-    expect(opt.localizePhase).toEqual({ phase1Turns: 3 })
+    // (localizePhase also carries lspGroundingSteer:true under SOTA — assert the
+    // phase1Turns field directly, see SOTA-2.) The explicit override wins.
+    expect(opt.localizePhase?.phase1Turns).toBe(3)
     // Confirm we did NOT get the SOTA default of 5.
     expect(opt.localizePhase?.phase1Turns).not.toBe(5)
   })

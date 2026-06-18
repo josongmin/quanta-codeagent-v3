@@ -787,6 +787,10 @@ const runInstanceOnce = async (
             phase.validated,
             phase.primaryFalseGreen,
           ),
+          // WS2: feed the owner-admission sibling-coverage verdict so the gate can
+          // emit `sibling_coverage_missing` when an LSP-resolved co-change site
+          // (ownerResolved) sits unedited next to a single-site attempt.
+          siblingCoverageExpected: closureSession.bundle.owner.siblingCoverageExpected,
         })
       }
     }
