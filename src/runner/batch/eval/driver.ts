@@ -1596,18 +1596,30 @@ export const runInstanceOnce = async (
     // pipeline (the legacy regex-on-`=1` path is also byte-identical
     // because `prepareIssueHint("regex")` returns the same string the
     // in-buildConfig regex would have produced).
+    // The closure bundle's EXECUTION half. The verify-first repair loop is
+    // enabled either by the operator's `--repair-rounds` CLI override
+    // (`deps.repair`, which can also carry custom validate/buildContext) OR —
+    // when the caller didn't set it — by the PRESET's `closure-repair` knob
+    // (`posture.repairRounds`). The CLI override wins. Both absent ⇒ undefined ⇒
+    // byte-identical single-pass path. This is what makes `agentless-v2`'s
+    // selected rail (primary_rail_present_rate ≈ 0.82) actually GATE instead of
+    // being an inert judgment (gate_enter_rate was n=0 because deps.repair was
+    // disconnected from the preset).
+    const effectiveRepair =
+      deps.repair ??
+      (posture.repairRounds !== undefined ? { maxRounds: posture.repairRounds } : undefined)
     const repairGateEligible =
-      deps.repair !== undefined && instance.swebench !== undefined && posture.inLoopExec
+      effectiveRepair !== undefined && instance.swebench !== undefined && posture.inLoopExec
     const enterVerifyPhase = repairGateEligible && closureSession?.bundle.gate.action === "verify"
     phase =
-      enterVerifyPhase && deps.repair !== undefined
+      enterVerifyPhase && effectiveRepair !== undefined
         ? await runRepairPhase(
             instance,
             deps,
             sandbox,
             abort.signal,
             w,
-            deps.repair,
+            effectiveRepair,
             precomputedHint,
             reproHint,
             closureHint,

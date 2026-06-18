@@ -24,6 +24,7 @@ const DEFAULT_MAX = 12000
 
 const HEADER_PROBLEM = "Original problem (verbatim):"
 const HEADER_DIFF = "Your patch so far (cumulative):"
+const HEADER_PREDICATE = "Typed rail note:"
 const HEADER_FAIL = "Validation failed. Tail of failing output:"
 const NEXT_STEPS = [
   "Next steps (MANDATORY):",
@@ -55,6 +56,7 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
   let problem = args.problem
   let diff = args.cumulativeDiff
   let failTail = args.failTail
+  const predicateSummary = args.predicateSummary
 
   // Static overhead = headers + labels + next-steps + section separators.
   const compose = (p: string, d: string, f: string): string =>
@@ -66,6 +68,9 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
       "",
       HEADER_DIFF,
       d === "" ? "(no diff produced yet)" : d,
+      ...(predicateSummary !== undefined && predicateSummary !== ""
+        ? ["", HEADER_PREDICATE, predicateSummary]
+        : []),
       "",
       HEADER_FAIL,
       f === "" ? "(no failure output captured)" : f,

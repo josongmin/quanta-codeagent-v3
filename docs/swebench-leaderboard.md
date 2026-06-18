@@ -5,6 +5,26 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 
 > **머신리더블 SSOT = [`swebench-leaderboard.yaml`](swebench-leaderboard.yaml)** (run 블록별 resolved 리스트). 이 md는 사람이 보는 큐레이션 뷰 — 전체 resolved 인스턴스는 yaml 참조.
 
+## 🥇 easy django T1+T2 — **82/84 resolved (97.6%)** · closure-bundle 회복 (2026-06-18)
+
+위 78/84(baseline preset)에서 미해결이던 6개를 **agentless-v2**(closure 6-knob 전부 ON + LSP-steer, **코드변경 0**)로 EC2 full-remote 재solve → **4/6 회복**. run_id `easy-unresolved-recover-2026-06-18`.
+
+| | baseline 78/84 | agentless-v1 A/B | **agentless-v2 (이번)** | mini-swe baseline |
+|---|---|---|---|---|
+| 9296 (no-patch) | ❌ | ✅ | ✅ | ✅ |
+| 15987 (over-engineer) | ❌ | ✅ | ✅ | ✅ |
+| 16642 (패치오염) | ❌ | ✅ | ✅ | ✅ |
+| **10914 (localize-miss)** | ❌ | **❌** | **✅** ← v1이 못 잡던 거 | ✅ |
+| 14315 (multi-site) | ❌ | ❌ | ❌ | ❌ |
+| 16667 (repro symptom) | ❌ | ❌ | ❌ | ❌ |
+| **합계** | 0/6 | 3/6 | **4/6** | **4/6** |
+
+- **결과: easy django 78→82/84 (97.6%).** 잔존 2개 django(`#14315` multi-site, `#16667`) + light `pylint-4970`.
+- **핵심**: closure bundle(no-patch-breaker/patch-hygiene/repair-escalation)이 agentless-v1 A/B보다 **+1**(`#10914` localize-miss). localize 병목도 typed-rail repair-escalation으로 일부 뚫림.
+- **🤖 mini-swe baseline 교차검증 (2026-06-18, EC2 x86 native, error 0)**: 같은 6개를 표준 스캐폴드 mini-swe-agent(gpt-5.4 oauth)로 standalone 재solve → **4/6, quanta-v2와 인스턴스 단위 1:1 완전 동일**(✅10914 15987 16642 9296 / ❌14315 16667). 즉 (a) 잔존 2개는 **모델 천장**(mini도 같은 원인 실패: 14315=base/client.py 미접촉 multi-site 누락, 16667=`except (ValueError,OverflowError)` 합쳐 복구값 `"0-0-0"` 대신 near-miss). (b) **10914(localize-miss)를 mini는 baseline으로 잡음** — quanta-v1이 closure 없이 못 잡고 v2가 6-knob 전부 켜서 겨우 따라잡은 걸 mini는 맨몸으로 해결 → closure bundle의 10914 회복은 quanta 하네스가 baseline에서 더 어렵게 만든 걸 메운 측면. 산출물 `mini-swe-gpt5.4.mini-django6-2026-06-18.json`, patch-gen `/tmp/mini-django6/`.
+- 잔존 3개 RCA: `#14315`=multi-site repro 후보 0(base만 재현, postgresql co-change 미발견) / `#16667`=**in-loop repro env 미스매치**(host py3.9 vs django5.0 py≥3.10 → exec_failed 5/5) + near-miss wrong-value / `pylint-4970`=가드 위치 오배치(gold=`run()` early-return; repro는 resolved 3/5인데 채점 fail). → WAVE B 직교레버: find-refs co-change(14315) · repro python-version 정합(16667) · constraint-reasoning(4970).
+- 4개 전부 공식 harness `passed:true`(infra error 0, completed_unresolved 3). 박스 grade 후 terminate.
+
 ## 🏆 easy django T1+T2 — **78/84 resolved (92.9%)** · EC2 네이티브 채점 (2026-06-17)
 
 가장 완전한 authoritative 결과 (run_id `quanta-easy-django-ec2-2026-06-17`). 83개 패치(blind, gpt-5.4 chatgpt-oauth) 전부 **EC2 c7i x86 네이티브**로 공식 swebench harness 채점, **infra error 0**.

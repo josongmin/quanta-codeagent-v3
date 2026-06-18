@@ -17,7 +17,12 @@
  * DIRECTIVE gating).
  */
 
-import type { ExecObservation, PredicateResult, PrimaryRailStep, SuccessPredicate } from "@/agent/closure"
+import type {
+  ExecObservation,
+  PredicateResult,
+  PrimaryRailStep,
+  SuccessPredicate,
+} from "@/agent/closure"
 
 /** Caller-facing config (mirror the optional-feature pattern). */
 export interface RepairConfig {
@@ -119,6 +124,8 @@ export interface BuildRepairContextArgs {
   cumulativeDiff: string
   /** Bounded tail from the validator's failure (≤ ~2000 chars). */
   failTail: string
+  /** Advisory typed-rail mismatch summary for the next round's seed. */
+  predicateSummary?: string
   /** 1-based round number we are about to start (for prose only). */
   round: number
   /** Optional cap on total message bytes (default ~12k); the diff/tail are

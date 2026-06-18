@@ -49,10 +49,12 @@ export const runRepairRounds = async (
   let validated = false
   let falseGreen = false
   for (let i = 1; i <= maxRounds; i++) {
+    const predicateSummary = predicateSummaryOf(prevValidator)
     const seed = args.buildContext({
       problem: args.problem,
       cumulativeDiff: prevRun.patch,
       failTail: prevValidator.failTail ?? "",
+      ...(predicateSummary !== undefined ? { predicateSummary } : {}),
       round: i,
     })
     const ri = await args.runOnce(seed)
@@ -76,6 +78,14 @@ export const runRepairRounds = async (
  *  predicate is NOT a false green (never penalizes). */
 const isFalseGreen = (v: ValidatorResult): boolean =>
   v.ok && v.predicate?.evaluable === true && v.predicate.matched === false
+
+const predicateSummaryOf = (v: ValidatorResult): string | undefined => {
+  const predicate = v.predicate
+  if (predicate?.evaluable !== true || predicate.matched !== false) return undefined
+  return predicate.mismatchReason !== undefined
+    ? `Typed rail mismatch: ${predicate.mismatchReason}. Advisory only in v1; keep iterating until the same rail passes.`
+    : "Typed rail mismatch: the typed rail contract did not match. Advisory only in v1; keep iterating until the same rail passes."
+}
 
 const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<ValidatorResult> => {
   // T-302: when a primary rail is set, IT is the gate — the agent's own

@@ -72,6 +72,10 @@ export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFa
       requiredVerificationCovered: r.requiredVerificationCovered ?? null,
       primaryFalseGreen: r.primaryFalseGreen ?? null,
       gateEntered: r.gateEntered ?? null,
+      gateBypassed: r.gateBypassed ?? null,
+      verifyRounds: r.verifyRounds ?? null,
+      synthReproBaseRed: r.synthReproBaseRed ?? null,
+      outOfScopeFiles: r.outOfScopeFiles ?? null,
     }
   })
 

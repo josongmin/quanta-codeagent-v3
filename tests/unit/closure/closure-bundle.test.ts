@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { assembleClosureBundle } from "@/agent/closure"
 import type { ClosureBundleInput } from "@/agent/closure"
+import { assembleClosureBundle } from "@/agent/closure"
 
 /**
  * T-3 — ClosureBundle SSOT. The one artifact prompt/gate/repair/diagnostics
@@ -25,7 +25,7 @@ const baseInput = (over: Partial<ClosureBundleInput> = {}): ClosureBundleInput =
     stakes: { patchFileCount: 1, crossFile: false, destructive: false },
     uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
     signal: { reproAvailable: false, lspAvailable: true },
-    commitFast: { issueProvidesFix: false, highConfidenceSingleOwner: false },
+    issueProvidesFix: false,
   },
   ...over,
 })
@@ -82,10 +82,57 @@ describe("assembleClosureBundle — SSOT", () => {
           stakes: { patchFileCount: 3, crossFile: true, destructive: false },
           uncertainty: { sampleDisagreement: true, unresolvedSymbols: false },
           signal: { reproAvailable: false, lspAvailable: true },
-          commitFast: { issueProvidesFix: false, highConfidenceSingleOwner: false },
+          issueProvidesFix: false,
         },
       }),
     )
+    expect(b.gate.action).toBe("verify")
+  })
+
+  test("single-site owner + issue-provided fix ⇒ commit-fast is derived, not caller-injected", () => {
+    const b = assembleClosureBundle(
+      baseInput({
+        evidence: {
+          issueText: 'src/core.py should return "hello".',
+          stage1Files: [{ file: "src/core.py", score: 5 }],
+          issueFiles: ["src/core.py"],
+        },
+        gate: {
+          stakes: { patchFileCount: 1, crossFile: false, destructive: false },
+          uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
+          signal: { reproAvailable: false, lspAvailable: false },
+          issueProvidesFix: true,
+        },
+      }),
+    )
+    expect(b.owner.admit).toBe(true)
+    expect(b.owner.coverageExpectation).toBe("single-site")
+    expect(b.gate.action).toBe("commit-now")
+  })
+
+  test("owner-family suppresses issue-based commit-fast", () => {
+    const b = assembleClosureBundle(
+      baseInput({
+        evidence: {
+          issueText: 'src/encode.py should return "ok".',
+          stage1Files: [
+            { file: "src/encode.py", score: 5 },
+            { file: "src/decode.py", score: 3 },
+          ],
+          ownerResolved: [
+            { file: "src/encode.py", forSymbol: "encode" },
+            { file: "src/decode.py", forSymbol: "decode" },
+          ],
+        },
+        gate: {
+          stakes: { patchFileCount: 1, crossFile: false, destructive: false },
+          uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
+          signal: { reproAvailable: false, lspAvailable: true },
+          issueProvidesFix: true,
+        },
+      }),
+    )
+    expect(b.owner.coverageExpectation).toBe("owner-family")
     expect(b.gate.action).toBe("verify")
   })
 })

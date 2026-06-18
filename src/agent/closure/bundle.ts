@@ -15,12 +15,12 @@
 
 import { buildFaultEvidencePacket } from "@/agent/fault-evidence/build"
 import type { FaultEvidenceInput, FaultEvidencePacket } from "@/agent/fault-evidence/types"
-import { decideGate } from "@/agent/gate-decision"
 import type { GateDecision, GateSignals } from "@/agent/gate-decision"
-import { decideOwnerAdmission } from "@/agent/owner-admission"
+import { decideGate } from "@/agent/gate-decision"
 import type { OwnerAdmission } from "@/agent/owner-admission"
-import { buildVerificationPlan } from "@/agent/verification-plan"
+import { decideOwnerAdmission } from "@/agent/owner-admission"
 import type { VerificationPlan, VerificationPlanInput } from "@/agent/verification-plan"
+import { buildVerificationPlan } from "@/agent/verification-plan"
 
 export interface ClosureBundle {
   readonly evidence: FaultEvidencePacket
@@ -34,7 +34,9 @@ export interface ClosureBundleInput {
   /** Owner-admission lead-gap (forwarded to decideOwnerAdmission). */
   readonly ownerMinLeadGap?: number
   readonly plan: VerificationPlanInput
-  readonly gate: GateSignals
+  readonly gate: Omit<GateSignals, "commitFast"> & {
+    readonly issueProvidesFix: boolean
+  }
 }
 
 export const assembleClosureBundle = (input: ClosureBundleInput): ClosureBundle => {
@@ -44,6 +46,20 @@ export const assembleClosureBundle = (input: ClosureBundleInput): ClosureBundle 
     ...(input.ownerMinLeadGap !== undefined ? { minLeadGap: input.ownerMinLeadGap } : {}),
   })
   const plan = buildVerificationPlan(input.plan)
-  const gate = decideGate(input.gate)
+  const gate = decideGate({
+    stakes: input.gate.stakes,
+    uncertainty: {
+      sampleDisagreement:
+        input.gate.uncertainty.sampleDisagreement || owner.coverageExpectation !== "single-site",
+      unresolvedSymbols: input.gate.uncertainty.unresolvedSymbols,
+    },
+    signal: input.gate.signal,
+    commitFast: {
+      issueProvidesFix:
+        input.gate.issueProvidesFix && owner.admit && owner.coverageExpectation === "single-site",
+      highConfidenceSingleOwner:
+        owner.admit && owner.owner !== null && owner.coverageExpectation === "single-site",
+    },
+  })
   return { evidence, owner, plan, gate }
 }

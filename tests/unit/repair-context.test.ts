@@ -123,6 +123,21 @@ describe("buildRepairContext (pure repair seed builder)", () => {
     expect(iNext).toBeGreaterThan(iFail)
   })
 
+  test("predicate mismatch summary is surfaced before the validator tail when provided", () => {
+    const out = buildRepairContext({
+      problem: SMALL_PROBLEM,
+      cumulativeDiff: "DIFF_TEXT",
+      failTail: "FAIL_TEXT",
+      predicateSummary: "Typed rail mismatch: stdout missing substring `expected output`.",
+      round: 1,
+    })
+    const iPredicate = out.indexOf("Typed rail note:")
+    const iFail = out.indexOf("Validation failed. Tail of failing output:")
+    expect(iPredicate).toBeGreaterThan(-1)
+    expect(iFail).toBeGreaterThan(iPredicate)
+    expect(out).toContain("stdout missing substring")
+  })
+
   test("empty diff and empty failTail yield a sensible placeholder, not a blank section", () => {
     const out = buildRepairContext({
       problem: SMALL_PROBLEM,

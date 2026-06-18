@@ -105,6 +105,10 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
+    // EXECUTION half: the gate's verify-first path runs up to 3 repair rounds
+    // (re-run the primary rail, re-seed the agent). Without this the selected
+    // rail never gates (gate_enter_rate = n=0). CLI `--repair-rounds` overrides.
+    "closure-repair": "3",
   },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.

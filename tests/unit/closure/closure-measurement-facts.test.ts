@@ -29,7 +29,9 @@ describe("buildFacts — closure measurement signals", () => {
   })
 
   test("false signal is preserved (rail computed but absent ⇒ false, not null)", () => {
-    const facts = buildFacts([res({ primaryRailPresent: false, requiredVerificationCovered: false })])
+    const facts = buildFacts([
+      res({ primaryRailPresent: false, requiredVerificationCovered: false }),
+    ])
     expect(facts[0]?.primaryRailPresent).toBe(false)
     expect(facts[0]?.requiredVerificationCovered).toBe(false)
   })
@@ -51,5 +53,11 @@ describe("buildFacts — closure measurement signals", () => {
     expect(buildFacts([res({ gateEntered: true })])[0]?.gateEntered).toBe(true)
     expect(buildFacts([res({ gateEntered: false })])[0]?.gateEntered).toBe(false)
     expect(buildFacts([res({})])[0]?.gateEntered).toBeNull()
+  })
+
+  test("gateBypassed flows through (true / false / absent⇒null)", () => {
+    expect(buildFacts([res({ gateBypassed: true })])[0]?.gateBypassed).toBe(true)
+    expect(buildFacts([res({ gateBypassed: false })])[0]?.gateBypassed).toBe(false)
+    expect(buildFacts([res({})])[0]?.gateBypassed).toBeNull()
   })
 })

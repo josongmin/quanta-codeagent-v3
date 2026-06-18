@@ -1,9 +1,12 @@
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
+import type { PrimaryRailStep } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
+import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { LLMPort, Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
+import { buildClosureSession, buildPhasePatchHygiene } from "@/runner/batch/eval/closure-session"
 import {
   applyBenchKnobs,
   type BenchKnobState,
@@ -33,14 +36,7 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
-import { buildPatchHygiene } from "@/runner/batch/eval/patch-hygiene"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
-import { buildFaultEvidencePacket } from "@/agent/fault-evidence"
-import { decideGate } from "@/agent/gate-decision"
-import { decideOwnerAdmission } from "@/agent/owner-admission"
-import { decideEscalation } from "@/agent/repair-escalation"
-import { buildPrimaryRailStep, type PrimaryRailStep } from "@/agent/closure"
-import { buildVerificationPlan, extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
@@ -264,6 +260,7 @@ interface Phase {
    *  rail predicate was evaluable AND mismatched (the false green a
    *  predicate-aware gate would catch). Repair path only. */
   primaryFalseGreen?: boolean
+  verifyRounds?: number
 }
 
 // Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
@@ -280,10 +277,21 @@ const runAgentOnce = async (
   timeoutMs: number,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  closureHint: string | undefined,
 ): Promise<RunOnceResult> => {
   const tap = new BenchStreamTap(w.stream)
   const outcome = await runAgentViaSdk(
-    buildRunnerConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint, reproHint),
+    buildRunnerConfig(
+      instance,
+      deps,
+      sandbox,
+      signal,
+      tap,
+      seedMsg,
+      precomputedHint,
+      reproHint,
+      closureHint,
+    ),
     deps.runtimeFactory,
   )
   const patch = await gitStageAndDiffCached(sandbox, timeoutMs)
@@ -302,6 +310,7 @@ const runAgentPhase = async (
   w: Wiring,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  closureHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let stopReason: AgentOutcome["reason"] | undefined
@@ -326,6 +335,7 @@ const runAgentPhase = async (
           undefined,
           precomputedHint,
           reproHint,
+          closureHint,
         ),
         deps.runtimeFactory,
       )
@@ -357,12 +367,14 @@ const runRepairPhase = async (
   repair: NonNullable<RunInstanceDeps["repair"]>,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
+  closureHint: string | undefined,
   primaryRailStep: PrimaryRailStep | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
   let repairValidated = false
   let repairFalseGreen = false
+  let repairRounds = 0
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -383,6 +395,7 @@ const runRepairPhase = async (
             deps.timeoutMs,
             precomputedHint,
             reproHint,
+            closureHint,
           ),
         validate: repair.validate ?? defaultValidate,
         buildContext: repair.buildContext ?? buildRepairContext,
@@ -395,6 +408,7 @@ const runRepairPhase = async (
       finalPatch = out.patch
       repairValidated = out.validated
       repairFalseGreen = out.primaryFalseGreen
+      repairRounds = out.rounds
     },
   )
   return {
@@ -402,6 +416,7 @@ const runRepairPhase = async (
     turns,
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
+    ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
   }
 }
 
@@ -591,19 +606,28 @@ const runInstanceOnce = async (
     // because baseValidatedRed is true. Its cmd then GATES the repair loop (the
     // agent's own verify can no longer clear a round = false-green killer). Knob
     // OFF / no red repro ⇒ undefined ⇒ byte-identical agent-command gate.
-    const issueDeclaredExpected = extractIssueDeclaredExpected(instance.problemStatement)
-    const verificationPlan =
-      (posture.primaryRail || posture.verificationPlan) && instance.swebench !== undefined
-        ? buildVerificationPlan({
+    const stage1Files = localizeCandidates.map((file, i) => ({
+      file,
+      score: localizeCandidates.length - i,
+    }))
+    const closureSession =
+      instance.swebench !== undefined
+        ? buildClosureSession({
+            problemStatement: instance.problemStatement,
+            stage1Files,
             ...(reproTest?.installed === true && reproTest.reproducedCount > 0
               ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
               : {}),
-            ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
+            posture: {
+              lspNav: posture.lspNav,
+              primaryRail: posture.primaryRail,
+              faultEvidence: posture.faultEvidence,
+            },
           })
         : undefined
-    const primaryRailStep = posture.primaryRail
-      ? buildPrimaryRailStep(verificationPlan?.primaryRail)
-      : undefined
+    const verificationPlan = closureSession?.bundle.plan
+    const primaryRailStep = closureSession?.primaryRailStep
+    const closureHint = closureSession?.closureHint
 
     // Setup is done — arm the solve deadline now so the agent gets the full
     // `timeoutMs` of think time (see note where `deadline` is declared).
@@ -612,15 +636,16 @@ const runInstanceOnce = async (
     // `bench-in-loop-exec` OFF ⇒ force single-pass (the repair loop re-runs the
     // agent's verify against the same unrunnable host env). ON ⇒ byte-identical.
     const repair = deps.repair
-    const runRepair = benchRunsRepairPhase(
+    const repairGateEligible = benchRunsRepairPhase(
       repair !== undefined,
       instance.swebench !== undefined,
       posture.inLoopExec,
     )
+    const enterVerifyPhase = repairGateEligible && closureSession?.bundle.gate.action === "verify"
     // `&& repair !== undefined` is implied by `runRepair` (the predicate's first
     // term) — kept only so TS narrows `repair` to NonNullable for the call.
     phase =
-      runRepair && repair !== undefined
+      enterVerifyPhase && repair !== undefined
         ? await runRepairPhase(
             instance,
             deps,
@@ -630,9 +655,19 @@ const runInstanceOnce = async (
             repair,
             precomputedHint,
             reproHint,
+            closureHint,
             primaryRailStep,
           )
-        : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
+        : await runAgentPhase(
+            instance,
+            deps,
+            sandbox,
+            abort.signal,
+            w,
+            precomputedHint,
+            reproHint,
+            closureHint,
+          )
 
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
     if (terminal !== undefined) {
@@ -673,72 +708,45 @@ const runInstanceOnce = async (
       if (posture.verificationPlan || posture.primaryRail) {
         extra.primaryRailPresent = primaryRailStep !== undefined
         extra.requiredVerificationCovered =
-          verificationPlan !== undefined &&
-          verificationPlan.required.some((s) => s.successPredicate !== undefined)
+          verificationPlan?.required.some((s) => s.successPredicate !== undefined) ?? false
+        if (verificationPlan !== undefined)
+          extra.synthReproBaseRed = verificationPlan.baseValidatedRed
         // Only meaningful when a primary RAIL was gated; repair-without-rail ⇒ omit
         // ⇒ null (emitting false would skew the rate denominator). Mirrors runner.
         if (primaryRailStep !== undefined && phase.primaryFalseGreen !== undefined)
           extra.primaryFalseGreen = phase.primaryFalseGreen
       }
+      if (repairGateEligible) {
+        extra.gateEntered = enterVerifyPhase
+        extra.gateBypassed = !enterVerifyPhase
+        if (phase.verifyRounds !== undefined) extra.verifyRounds = phase.verifyRounds
+      }
       // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
       // byte-identical report.json when OFF). Telemetry-first: emit, don't deny.
-      if (posture.patchHygiene && instance.swebench !== undefined) {
-        const ownerHint = relFromSandbox(sandbox, phase.firstEditFile)
-        extra.patchHygiene = buildPatchHygiene(phase.patch, {
-          ...(ownerHint !== undefined ? { ownerFiles: [ownerHint] } : {}),
-        })
+      const ownerHint = relFromSandbox(sandbox, phase.firstEditFile)
+      const hygiene =
+        instance.swebench !== undefined ? buildPhasePatchHygiene(phase.patch, ownerHint) : undefined
+      if (posture.patchHygiene && hygiene !== undefined) {
+        extra.patchHygiene = hygiene
+        extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
       }
       // T-301 verification-plan telemetry (knob-gated, observe-only).
       if (posture.verificationPlan && verificationPlan !== undefined) {
         extra.verificationPlan = verificationPlan
       }
-      // T-201/T-202 fault-evidence packet + owner-admission (knob-gated, observe-only).
-      // Built from the agentless localizer's ranked candidates (rank→score). No LSP
-      // owner-resolve threaded ⇒ packet `partial` (honest); owner_recall still
-      // measurable offline from the stage-1 ranking vs the gold owner.
-      if (
-        (posture.faultEvidence || posture.repairEscalation) &&
-        instance.swebench !== undefined &&
-        localizeCandidates.length > 0
-      ) {
-        const stage1Files = localizeCandidates.map((file, i) => ({
-          file,
-          score: localizeCandidates.length - i,
-        }))
-        const packet = buildFaultEvidencePacket({ issueText: instance.problemStatement, stage1Files })
-        // owner-admission rides the fault-evidence knob (pure read of the packet).
-        if (posture.faultEvidence) {
-          const owner = decideOwnerAdmission({ packet })
-          extra.faultEvidence = packet
-          extra.ownerAdmission = owner
-          // T-4 gate telemetry (OBSERVE-ONLY): record verify-first vs commit-now
-          // (gate_enter_rate). Not acted on in v1. Mirrors the runner driver.
-          const railFileCount = (phase.patch.match(/^diff --git /gm) ?? []).length
-          const gate = decideGate({
-            stakes: { patchFileCount: railFileCount, crossFile: railFileCount > 1, destructive: false },
-            uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
-            signal: {
-              reproAvailable: verificationPlan?.baseValidatedRed === true,
-              lspAvailable: posture.lspNav === true,
-            },
-            commitFast: {
-              issueProvidesFix: issueDeclaredExpected !== undefined,
-              highConfidenceSingleOwner: owner.admit,
-            },
-          })
-          extra.gateEntered = gate.action === "verify"
-        }
-        // T-601 escalation (telemetry only — does NOT activate branch-search).
-        if (posture.repairEscalation) {
-          extra.repairEscalation = decideEscalation({
-            candidates: packet.candidates.map((c) => ({
-              file: c.file,
-              score: c.score,
-              sources: c.sources,
-            })),
-            primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
-          })
-        }
+      if (posture.faultEvidence && closureSession !== undefined) {
+        extra.faultEvidence = closureSession.bundle.evidence
+        extra.ownerAdmission = closureSession.bundle.owner
+      }
+      if (posture.repairEscalation && closureSession !== undefined) {
+        extra.repairEscalation = decideEscalation({
+          candidates: closureSession.bundle.evidence.candidates.map((c) => ({
+            file: c.file,
+            score: c.score,
+            sources: c.sources,
+          })),
+          primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
+        })
       }
     }
     return okResult(instance, phase, v, extra)

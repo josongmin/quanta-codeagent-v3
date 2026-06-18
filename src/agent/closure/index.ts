@@ -9,8 +9,11 @@
  * returns verdicts.
  */
 
-export type { ExecObservation, PredicateResult, PrimaryRailStep, SuccessPredicate } from "./types"
-export { evaluateSuccessPredicate } from "./evaluate-success-predicate"
-export { buildPrimaryRailStep } from "./primary-rail-step"
-export { assembleClosureBundle } from "./bundle"
 export type { ClosureBundle, ClosureBundleInput } from "./bundle"
+export { assembleClosureBundle } from "./bundle"
+export { evaluateSuccessPredicate } from "./evaluate-success-predicate"
+export type { PatchHygieneReport } from "./patch-hygiene"
+export { buildPatchHygiene, HYGIENE_ALLOWLIST } from "./patch-hygiene"
+export { buildPrimaryRailStep } from "./primary-rail-step"
+export { renderClosurePrompt } from "./render"
+export type { ExecObservation, PredicateResult, PrimaryRailStep, SuccessPredicate } from "./types"

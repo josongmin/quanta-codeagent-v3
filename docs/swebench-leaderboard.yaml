@@ -225,3 +225,35 @@ runs:
     repo: sympy
   - instance_id: sympy__sympy-24539
     repo: sympy
+- run_id: easy-unresolved-recover-2026-06-18
+  date: '2026-06-18'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, full-remote (remote/full.ts, EC2 c7i.8xlarge x86 native, on-box local grade)
+  scope: targeted re-solve of the 6 previously-unresolved easy-django + pylint-4970 (light), agentless-v2 closure bundle (no code change)
+  note: 'closure bundle (no-patch-breaker/patch-hygiene/repair-escalation + LSP) recovered 4/7 incl django-10914 (localize-miss the agentless-v1 A/B could NOT get). residual 3 = multi-site (14315) / repro-env-mismatch+near-miss (16667) / guard-placement (pylint-4970). box terminated post-grade.'
+  resolved_count: 4
+  resolved:
+  - instance_id: django__django-9296
+    repo: django
+    turns: 38
+  - instance_id: django__django-10914
+    repo: django
+    turns: 41
+  - instance_id: django__django-15987
+    repo: django
+    turns: 44
+  - instance_id: django__django-16642
+    repo: django
+    turns: 27
+  unresolved:
+  - instance_id: django__django-14315
+    repo: django
+    reason: multi-site (base/client.py + postgresql/client.py co-change); repro found no reproduced candidate
+  - instance_id: django__django-16667
+    repo: django
+    reason: repro env mismatch (host py3.9 vs django5.0 needs py>=3.10, exec_failed) + near-miss wrong recovery value
+  - instance_id: pylint-dev__pylint-4970
+    repo: pylint
+    reason: guard placed in wrong function (gold = run() early-return); repro shows resolved 3/5 but grading fails
