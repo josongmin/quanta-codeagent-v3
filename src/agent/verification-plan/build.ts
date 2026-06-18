@@ -18,11 +18,16 @@ export type { VerificationPlan, VerificationPlanInput } from "./types"
 
 /**
  * Default (execution-authority) success contract for a step that carries no
- * issue-declared exact output. A repro is "selected_test_passes"; owner tests
- * and module smoke assert a zero exit.
+ * issue-declared exact output. A REPRO's contract is its Agentless stdout marker
+ * ("Issue resolved"), NOT its incidental exit code — so the predicate is
+ * `stdout_contains "Issue resolved"`, consistent with both the base reproduction
+ * check (classifyStdout) and the validator's sentinel-gating (jun-18 RCA fix).
+ * Owner tests and module smoke assert a zero exit.
  */
 const defaultSuccessPredicate = (kind: VerificationStep["kind"]): SuccessPredicate =>
-  kind === "repro" ? { type: "selected_test_passes" } : { type: "test_exit_zero" }
+  kind === "repro"
+    ? { type: "stdout_contains", substring: "Issue resolved" }
+    : { type: "test_exit_zero" }
 
 /**
  * Encode a PUBLIC issue-declared expected output as a typed exact-output
