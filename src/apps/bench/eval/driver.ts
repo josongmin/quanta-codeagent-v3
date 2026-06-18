@@ -36,6 +36,12 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
+import {
+  benchInstallsReproHint,
+  benchRunsRepairPhase,
+  benchShouldRunRepairPhase,
+  primaryRailRedAfterRepair,
+} from "@/runner/batch/eval/repair-phase-policy"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
@@ -64,6 +70,8 @@ export {
   applyBenchKnobs,
   BenchObserver,
   benchOptIns,
+  benchInstallsReproHint,
+  benchRunsRepairPhase,
   buildRunnerConfig as buildConfig,
   composeWithReproHint,
   enumerateRepoSources,
@@ -530,24 +538,6 @@ const terminalAgentResult = (args: {
   return undefined
 }
 
-/**
- * OFF (`bench-in-loop-exec` false, mini-swe posture) skips the host-python
- * repro-test hint: the agent isn't told to run tests, so a repro script is dead
- * weight. ON ⇒ install (byte-identical). Pure so the posture flip has teeth.
- */
-export const benchInstallsReproHint = (inLoopExec: boolean): boolean => inLoopExec
-
-/**
- * OFF forces single-pass (the repair loop re-runs the agent's verify against the
- * same unrunnable host env). ON + swebench + a repair config ⇒ repair phase
- * (byte-identical). Pure so the posture flip has teeth.
- */
-export const benchRunsRepairPhase = (
-  hasRepair: boolean,
-  isSwebench: boolean,
-  inLoopExec: boolean,
-): boolean => hasRepair && isSwebench && inLoopExec
-
 const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -635,17 +625,37 @@ const runInstanceOnce = async (
 
     // `bench-in-loop-exec` OFF ⇒ force single-pass (the repair loop re-runs the
     // agent's verify against the same unrunnable host env). ON ⇒ byte-identical.
-    const repair = deps.repair
+    //
+    // The closure bundle's EXECUTION half: the verify-first repair loop is enabled
+    // by the operator's `--repair-rounds` CLI override (`deps.repair`, which can
+    // carry custom validate/buildContext) OR — when the caller didn't set it — by
+    // the PRESET's `closure-repair` knob (`posture.repairRounds`). CLI wins; both
+    // absent ⇒ undefined ⇒ byte-identical single-pass. Without this an
+    // `agentless-v2` run SELECTS a primary rail (primary_rail_present_rate ≈ 0.82)
+    // but NEVER gates (gate_enter_rate was n=0) because repair was disconnected
+    // from the preset — the rail was an inert judgment, not an executor.
+    const repair =
+      deps.repair ??
+      (posture.repairRounds !== undefined ? { maxRounds: posture.repairRounds } : undefined)
     const repairGateEligible = benchRunsRepairPhase(
       repair !== undefined,
       instance.swebench !== undefined,
       posture.inLoopExec,
     )
-    const enterVerifyPhase = repairGateEligible && closureSession?.bundle.gate.action === "verify"
+    const gateDecisionVerify = repairGateEligible && closureSession?.bundle.gate.action === "verify"
+    const runRepair =
+      repair !== undefined &&
+      benchShouldRunRepairPhase({
+        eligible: repairGateEligible,
+        primaryRailEnabled: posture.primaryRail,
+        gateAction: closureSession?.bundle.gate.action,
+        primaryRailStep,
+        verificationPlan,
+      })
     // `&& repair !== undefined` is implied by `runRepair` (the predicate's first
     // term) — kept only so TS narrows `repair` to NonNullable for the call.
     phase =
-      enterVerifyPhase && repair !== undefined
+      runRepair && repair !== undefined
         ? await runRepairPhase(
             instance,
             deps,
@@ -717,8 +727,8 @@ const runInstanceOnce = async (
           extra.primaryFalseGreen = phase.primaryFalseGreen
       }
       if (repairGateEligible) {
-        extra.gateEntered = enterVerifyPhase
-        extra.gateBypassed = !enterVerifyPhase
+        extra.gateEntered = gateDecisionVerify
+        extra.gateBypassed = !gateDecisionVerify
         if (phase.verifyRounds !== undefined) extra.verifyRounds = phase.verifyRounds
       }
       // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
@@ -745,7 +755,11 @@ const runInstanceOnce = async (
             score: c.score,
             sources: c.sources,
           })),
-          primaryRailRedAfterRepair: primaryRailStep !== undefined && phase.validated === false,
+          primaryRailRedAfterRepair: primaryRailRedAfterRepair(
+            primaryRailStep,
+            phase.validated,
+            phase.primaryFalseGreen,
+          ),
         })
       }
     }
