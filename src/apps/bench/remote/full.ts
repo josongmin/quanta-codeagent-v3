@@ -600,7 +600,14 @@ export const createFullRemoteBackend = (
       // not live trial-and-error.
       const remoteRun = await sshTo(
         host,
-        `set -o pipefail; cd ~/quanta && QUANTA_BENCH_PRESET=${shq(preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
+        // Prepend uv's install dir to PATH so the in-process repro executor can
+        // find `uvx` (the Agentless repro runs under `uvx --with-editable .` to
+        // import the project). uv installs to ~/.local/bin; a non-interactive ssh
+        // `bun run` does NOT source ~/.profile, so without this `Bun.spawn(["uvx"])`
+        // throws "Executable not found in $PATH" and every repro is exec_failed.
+        // scrubEnv() allowlists the PATH key, so this value propagates to the
+        // repro exec's spawned env. (Same reason bun is invoked by absolute path.)
+        `set -o pipefail; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; QUANTA_BENCH_PRESET=${shq(preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
           `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
           // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
           // arch-aware default is "none" (slow local conda build).
