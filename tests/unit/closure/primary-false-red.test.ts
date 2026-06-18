@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { runRepairRounds } from "@/runner/batch/eval/repair/index"
+import { validate as realValidate } from "@/runner/batch/eval/repair/validator"
 import type { RunOnceResult, ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/types"
 
 /**
@@ -82,5 +83,58 @@ describe("runRepairRounds — primaryFalseRed (RCA observe-only)", () => {
       validate: validatorReturning(failWithStdout("Issue resolved\n")),
     })
     expect(out.primaryFalseRed).toBe(true)
+  })
+})
+
+/**
+ * END-TO-END: the REAL validator (not a mock) through runRepairRounds. This is
+ * the actual proof that the sentinel-gating fix eliminates the false-RED — a
+ * repro that prints "Issue resolved" but exits ≠0 now CLEARS the round at round 0
+ * (no wasteful churn), whereas the legacy exit-code gate would have re-seeded.
+ */
+describe("runRepairRounds — REAL validator sentinel-gating (false-RED eliminated end-to-end)", () => {
+  const railBase = {
+    config: { maxRounds: 3 },
+    problem: "fix it",
+    buildContext: () => "seed",
+    sandbox: "/tmp/sb",
+    timeoutMs: 1000,
+    validate: realValidate,
+    // The rail makes the validator run `args.primaryRailStep.cmd` (the repro) and
+    // attach the sentinel predicate — exactly the production wiring.
+    primaryRailStep: {
+      cmd: 'python "reproduce_issue.py"',
+      authority: "execution" as const,
+      successPredicate: { type: "stdout_contains" as const, substring: "Issue resolved" },
+    },
+    runOnce: async (_seed: string | undefined): Promise<RunOnceResult> => ({
+      patch: "diff --git a/x b/x\n",
+      turns: 1,
+    }),
+  }
+
+  test("🔴 repro prints 'Issue resolved' but exits 1 ⇒ round CLEARS at round 0 (was a false-RED)", async () => {
+    let execCalls = 0
+    const out = await runRepairRounds({
+      ...railBase,
+      // exit 1 (a warning-turned-error) but the repro's own marker says resolved.
+      exec: async () => {
+        execCalls += 1
+        return { code: 1, stdout: "DeprecationWarning...\nIssue resolved\n", stderr: "warn" }
+      },
+    })
+    expect(out.validated).toBe(true)
+    expect(out.rounds).toBe(1) // cleared at round 0 — NO wasteful re-seed
+    expect(execCalls).toBe(1) // validated exactly once, no churn
+    expect(out.primaryFalseRed).toBe(false) // the fix removed the false-RED
+  })
+
+  test("repro prints 'Issue reproduced' (still broken) ⇒ does NOT clear, churns to maxRounds", async () => {
+    const out = await runRepairRounds({
+      ...railBase,
+      exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+    })
+    expect(out.validated).toBe(false)
+    expect(out.rounds).toBe(4) // round 0 + 3 repair rounds, never cleared (correct)
   })
 })

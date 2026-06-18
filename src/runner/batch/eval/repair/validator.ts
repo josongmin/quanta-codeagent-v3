@@ -37,11 +37,11 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
   }
   const r = await args.exec(cmd, args.sandbox, args.timeoutMs)
 
-  // T-1 OBSERVE-ONLY: record the observation + typed predicate verdict. This NEVER
-  // changes `ok` in v1 — the exit-code decision below is byte-identical to before.
-  // The predicate is fail-open by construction (evaluator returns evaluable:false
-  // for anything it can't confidently judge). Recorded for diagnostics / repair
-  // seed pressure; behavior-changing gating is a later ticket gated on measurement.
+  // T-1: record the observation + typed predicate verdict. The PREDICATE stays
+  // observe-only (it never decides `ok`); the `ok` decision is the repro SENTINEL
+  // (below) when present, else the legacy exit code. The predicate is fail-open by
+  // construction (evaluator returns evaluable:false for anything it can't
+  // confidently judge). Recorded for diagnostics / repair seed pressure.
   const observed: ExecObservation = { exitCode: r.code, stdout: r.stdout, stderr: r.stderr }
   const predicate =
     args.successPredicate !== undefined
