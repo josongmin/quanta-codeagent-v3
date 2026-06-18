@@ -74,3 +74,43 @@ describe("validator — observe-only predicate", () => {
     expect(r).toEqual({ ok: false, failTail: "" })
   })
 })
+
+/**
+ * jun-18 RCA fix — REPRO-SENTINEL gating. The repro's Agentless contract is the
+ * stdout marker, not the incidental exit code (base reproduction is classified by
+ * marker via classifyStdout; the patched check MUST be consistent). Confirmed
+ * locally: a well-formed repro prints "Issue resolved" + exit 0 on a correct
+ * patch, but malformed repros print "resolved" yet exit ≠0 — the false-RED that
+ * forced wasteful churn (46→131 turns re-deriving the same correct patch). The
+ * sentinel overrides the exit code; when NO sentinel is present the legacy
+ * exit-code decision is byte-identical (non-repro verify cmds unaffected).
+ */
+describe("validator — repro-sentinel gating (RCA fix)", () => {
+  test("🔴 exit ≠0 BUT stdout 'Issue resolved' ⇒ ok:true (false-RED eliminated)", async () => {
+    const r = await validate(base({ exec: fakeExec(1, "warn...\nIssue resolved\n", "DeprecationWarning") }))
+    expect(r.ok).toBe(true)
+  })
+
+  test("exit 0 BUT stdout 'Issue reproduced' ⇒ ok:false (repro says NOT fixed — false-green caught)", async () => {
+    const r = await validate(base({ exec: fakeExec(0, "Issue reproduced\n") }))
+    expect(r.ok).toBe(false)
+  })
+
+  test("exit 0 + stdout 'Other issues' ⇒ ok:false (repro blew up, not resolved)", async () => {
+    const r = await validate(base({ exec: fakeExec(0, "Other issues: boom\n") }))
+    expect(r.ok).toBe(false)
+  })
+
+  test("last-marker-wins: 'reproduced' then 'resolved' ⇒ ok:true", async () => {
+    const r = await validate(base({ exec: fakeExec(1, "Issue reproduced\n...fixed...\nIssue resolved\n") }))
+    expect(r.ok).toBe(true)
+  })
+
+  test("NO sentinel + exit 0 ⇒ ok:true (byte-identical fallback)", async () => {
+    expect((await validate(base({ exec: fakeExec(0, "3 passed") }))).ok).toBe(true)
+  })
+
+  test("NO sentinel + exit 1 ⇒ ok:false (byte-identical fallback)", async () => {
+    expect((await validate(base({ exec: fakeExec(1, "1 failed") }))).ok).toBe(false)
+  })
+})

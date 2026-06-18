@@ -22,6 +22,7 @@
  */
 import { evaluateSuccessPredicate } from "@/agent/closure"
 import type { ExecObservation } from "@/agent/closure"
+import { classifyStdout } from "@/agent/repro-test/execute"
 import type { ValidateArgs, ValidatorResult } from "./types"
 
 const DEFAULT_TAIL = 2000
@@ -47,10 +48,29 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
       ? evaluateSuccessPredicate(observed, args.successPredicate)
       : undefined
 
-  if (r.code === 0) return { ok: true, observed, ...(predicate !== undefined ? { predicate } : {}) }
   const combined = `${r.stdout}\n${r.stderr}`
   const failTail = combined.length > tailBound ? combined.slice(-tailBound) : combined
-  return { ok: false, failTail, observed, ...(predicate !== undefined ? { predicate } : {}) }
+  const ok = (result: boolean): ValidatorResult =>
+    result
+      ? { ok: true, observed, ...(predicate !== undefined ? { predicate } : {}) }
+      : { ok: false, failTail, observed, ...(predicate !== undefined ? { predicate } : {}) }
+
+  // jun-18 RCA fix — REPRO-SENTINEL gating. A repro is an Agentless script whose
+  // CONTRACT is the stdout marker ("Issue resolved"/"reproduced"/"Other issues"),
+  // not its incidental exit code. The base reproduction check classifies by the
+  // SAME `classifyStdout` marker — so the patched resolution check MUST be
+  // consistent, else a repro that prints "Issue resolved" but exits ≠0 (a
+  // warning-turned-error, post-marker cleanup, …) is a FALSE-RED that forces
+  // wasteful repair churn (measured: 46→131 turns re-deriving the same correct
+  // patch). When a marker is present the marker decides; a non-repro verify cmd
+  // (pytest, …) carries no marker ⇒ classifyStdout is unknown/exec_failed ⇒ the
+  // legacy exit-code decision below is byte-identical.
+  const outcome = classifyStdout(r.stdout, r.code)
+  if (outcome === "resolved") return ok(true)
+  if (outcome === "reproduced" || outcome === "other") return ok(false)
+
+  // No repro sentinel — legacy exit-code decision (byte-identical to pre-fix).
+  return ok(r.code === 0)
 }
 
 const pickCmd = (args: ValidateArgs): string | undefined => {
