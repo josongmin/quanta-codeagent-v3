@@ -6,19 +6,18 @@
  *      ALWAYS returns results in input order (results[i] ↔ items[i]) regardless
  *      of completion order. `limit<=1` ⇒ strictly serial (byte-identical to the
  *      old `for await` loop).
- *   2. The python-swebench GRADING semaphore bounds actual `run_evaluation`
- *      spawns to `QUANTA_SWEBENCH_GRADE_CONCURRENCY` (default 1 ⇒ one-at-a-time:
- *      arm64 Docker wedges on parallel large image pulls). On x86 native a
- *      higher bound pipelines grading; it must NEVER exceed the configured bound.
+ *   2. The python-swebench GRADING mutex serialises actual `run_evaluation`
+ *      spawns — ALWAYS one-at-a-time, NOT configurable. Concurrent on-box grading
+ *      false-negatives correct patches (2026-06-19: GRADE_CONCURRENCY=6 scored
+ *      0/5 vs 4/5 serial), so grading is intentionally serial.
  *
  * Red-on-injection: drop the `withGradingLock` wrapper and PART-2's "peak == 1"
- * (default) / "peak <= N" (configured) assertions fail (spawns overlap unbounded).
+ * assertion fails (spawns overlap).
  */
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { evaluateWithPythonSwebench } from "../../src/apps/bench/python-swebench"
 import type { Instance } from "../../src/apps/bench/types"
 import { mapWithConcurrency } from "../../src/runner/batch/core"
-import { __resetKnobOverrides, setKnobOverride } from "../../src/shared/knob-overrides"
 
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -77,9 +76,7 @@ describe("mapWithConcurrency — order + bounded parallelism", () => {
   })
 })
 
-describe("grading semaphore — run_evaluation spawns bounded by GRADE_CONCURRENCY", () => {
-  afterEach(() => __resetKnobOverrides())
-
+describe("grading mutex — run_evaluation spawns are ALWAYS serial", () => {
   const benchInstance = (id: string): Instance => ({
     id,
     repoPath: "/tmp/x",
@@ -112,21 +109,13 @@ describe("grading semaphore — run_evaluation spawns bounded by GRADE_CONCURREN
     return { peak, spawns }
   }
 
-  test("default (no knob) ⇒ strictly serial: peak grade concurrency == 1", async () => {
+  test("N concurrent evaluations ⇒ at most ONE run_evaluation spawn at a time", async () => {
+    // Concurrent on-box grading false-negatives correct patches (2026-06-19:
+    // GRADE_CONCURRENCY=6 scored 0/5 vs 4/5 serial, 3 gold-identical), so grading
+    // is intentionally serial and NOT configurable. Red-on-injection: drop the
+    // withGradingLock wrapper and peak jumps to 4.
     const { peak, spawns } = await peakConcurrentGrades(["a__1", "b__2", "c__3", "d__4"])
     expect(spawns).toBe(4) // all four graded
-    expect(peak).toBe(1) // ...but never two at once (default serial)
-  })
-
-  test("FOOTGUN CLOSED: a stray GRADE_CONCURRENCY=3 is IGNORED — grading stays serial", async () => {
-    // Concurrent on-box grading false-negatives correct patches (2026-06-19:
-    // GRADE_CONCURRENCY=6 scored 0/5 vs 4/5 serial, 3 gold-identical). gradeLimit
-    // is HARD-CLAMPED to 1, so even setting the knob can't re-enable it — a
-    // warning comment isn't a guard, the code must refuse. Red-on-injection:
-    // un-clamp gradeLimit (read the knob) and peak jumps to 3, re-arming the bug.
-    setKnobOverride("QUANTA_SWEBENCH_GRADE_CONCURRENCY", "3")
-    const { peak, spawns } = await peakConcurrentGrades(["a__1", "b__2", "c__3", "d__4"])
-    expect(spawns).toBe(4) // all graded
-    expect(peak).toBe(1) // ...but STILL serial despite the knob (footgun hard-disabled)
+    expect(peak).toBe(1) // ...but never two at once (mutex held)
   })
 })

@@ -252,41 +252,33 @@ export const buildArgv = (
  * fall back to its local testCmd path.
  */
 /**
- * Process-global grading semaphore — ALWAYS SERIAL (limit hard-pinned to 1).
+ * Process-global grading mutex — serialises the actual `run_evaluation` Docker
+ * spawns. When `runBatch` overlaps patch-gen across instances
+ * (`QUANTA_BENCH_CONCURRENCY>1`), only ONE grade runs at a time.
  *
- * ⚠️ Concurrent on-box grading was PROVEN to FALSE-NEGATIVE correct patches
- * (2026-06-19: GRADE_CONCURRENCY=6 scored 0/5; the SAME 5 patches re-graded
- * serially scored 4/5, with 3 byte-identical to gold + git-apply-clean).
- * Separate `run_evaluation` processes race the shared run_id image cache/cleanup
- * ("Removed N images") and yank each other's containers — the assumption that
- * "distinct instances ⇒ distinct containers ⇒ safe" was WRONG.
+ * ⚠️ Grading is INTENTIONALLY serial and NOT configurable. Concurrent on-box
+ * grading was PROVEN to FALSE-NEGATIVE correct patches (2026-06-19:
+ * GRADE_CONCURRENCY=6 scored 0/5; the SAME 5 patches re-graded serially scored
+ * 4/5, with 3 byte-identical to gold + git-apply-clean). Separate `run_evaluation`
+ * processes race the shared run_id image cache/cleanup ("Removed N images") and
+ * yank each other's containers. For PARALLEL grading use the grade-only path's
+ * swebench-native `--max_workers` (harness-internal, concurrency-safe), NEVER a
+ * per-process lock here. patch-gen still overlaps freely — that's safe.
  *
- * So `gradeLimit()` is HARD-CLAMPED to 1: a stray `QUANTA_SWEBENCH_GRADE_CONCURRENCY>1`
- * is IGNORED (a warning comment isn't a guard — the code must refuse it). The
- * knob/field are retained only so the value is recorded; they no longer change
- * behavior. For PARALLEL grading use the grade-only path's swebench-native
- * `--max_workers` (harness-internal, concurrency-safe), NOT this per-process lock.
- * patch-gen still overlaps freely (QUANTA_BENCH_CONCURRENCY) — that's safe.
+ * At concurrency 1 this is a no-op (an already-resolved chain).
  */
-let gradeInFlight = 0
-const gradeWaiters: Array<() => void> = []
-// HARD-CLAMPED to 1 — see above. Do NOT read the knob here; concurrent grading
-// false-negatives. (Knob still parsed into runtimeConfig for telemetry only.)
-const gradeLimit = (): number => 1
+let gradingChain: Promise<unknown> = Promise.resolve()
 const withGradingLock = async <T>(fn: () => Promise<T>): Promise<T> => {
-  while (gradeInFlight >= gradeLimit()) {
-    await new Promise<void>((resolve) => gradeWaiters.push(resolve))
-  }
-  gradeInFlight += 1
+  const prev = gradingChain
+  let release: () => void = () => {}
+  gradingChain = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await prev.catch(() => {}) // wait for the previous grading; ignore its outcome
   try {
     return await fn()
   } finally {
-    gradeInFlight -= 1
-    // Wake every parked waiter; each re-evaluates the bound in its while-loop and
-    // re-parks if still over. With small N + few waiters the herd is negligible,
-    // and it guarantees no stall when >1 permit frees logically at once.
-    const woken = gradeWaiters.splice(0)
-    for (const w of woken) w()
+    release()
   }
 }
 

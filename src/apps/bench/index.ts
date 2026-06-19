@@ -463,9 +463,8 @@ const runDatasetMode = async (
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL ?? "https://github.com/"
   const taskDeps = { llm, cfg, pythonSwebench, repair, obs, repoBaseUrl }
   // Concurrency>1 overlaps patch-gen across tasks. Docker grading is ALWAYS
-  // SERIAL (python-swebench gradeLimit hard-clamped to 1) — concurrent grading
-  // false-negatives correct patches (2026-06-19). QUANTA_SWEBENCH_GRADE_CONCURRENCY
-  // is inert.
+  // SERIAL (python-swebench withGradingLock mutex) — concurrent grading
+  // false-negatives correct patches (2026-06-19).
   const concurrency = resolveConcurrency()
   if (concurrency > 1) {
     logger.info(`bench: patch-gen concurrency=${concurrency} (grading serialised)`)
