@@ -54,6 +54,40 @@ describe("closure-diagnostics-io", () => {
     expect(f.endReason).toBe("max_turns")
   })
 
+  test("buildFacts derives over_budget/new_def/cross_file from patchBudget (jun-19)", () => {
+    const over: InstanceResult = {
+      id: "over",
+      passed: false,
+      patch: "diff --git a/x.py b/x.py\n",
+      turns: 1,
+      patchBudget: {
+        budget: {
+          sourceFiles: 2,
+          newFiles: 0,
+          newDefs: 1,
+          crossFile: true,
+          filesOutsideOwner: ["y.py"],
+          runtimeExpandingCalls: 0,
+        },
+        withinBudget: false,
+        overBudgetReasons: ["new-def budget=0"],
+        escalate: true,
+      },
+    }
+    const [f] = buildFacts([over])
+    expect(f.overBudget).toBe(true)
+    expect(f.newDef).toBe(true)
+    expect(f.crossFile).toBe(true)
+  })
+
+  test("buildFacts: absent patchBudget ⇒ budget facts null (metric unavailable, not false)", () => {
+    const r: InstanceResult = { id: "none", passed: true, patch: "diff --git a/x b/x\n", turns: 1 }
+    const [f] = buildFacts([r])
+    expect(f.overBudget).toBeNull()
+    expect(f.newDef).toBeNull()
+    expect(f.crossFile).toBeNull()
+  })
+
   test("buildFacts treats verdict-excluded instances as ungraded (resolved=null)", () => {
     const r: InstanceResult = {
       id: "degraded",
