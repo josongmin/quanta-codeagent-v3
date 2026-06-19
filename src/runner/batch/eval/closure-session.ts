@@ -68,7 +68,11 @@ export const buildClosureSession = (args: {
   const primaryRailStep = args.posture.primaryRail
     ? buildPrimaryRailStep(bundle.plan.primaryRail)
     : undefined
-  const closureHint = args.posture.faultEvidence ? renderClosurePrompt(bundle.owner) : undefined
+  // Pass the feeder's resolved sibling files so the round-0 hint can list every
+  // co-change site (WS2 widen at round 0 — the round that always runs).
+  const closureHint = args.posture.faultEvidence
+    ? renderClosurePrompt(bundle.owner, (args.ownerResolved ?? []).map((o) => o.file))
+    : undefined
   return {
     input,
     bundle,

@@ -382,6 +382,7 @@ const runRepairPhase = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
   primaryRailStep: PrimaryRailStep | undefined,
+  siblingOwners: readonly string[],
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -412,7 +413,11 @@ const runRepairPhase = async (
             closureHint,
           ),
         validate: repair.validate ?? defaultValidate,
-        buildContext: repair.buildContext ?? buildRepairContext,
+        // WS2 widen: bind sibling co-change owners into every repair seed (the
+        // gate's `sibling_coverage_missing` record made actionable for the
+        // model). Empty list ⇒ byte-identical to the base builder.
+        buildContext: (ctxArgs) =>
+          (repair.buildContext ?? buildRepairContext)({ ...ctxArgs, siblingOwners }),
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
@@ -699,6 +704,9 @@ const runInstanceOnce = async (
             reproHint,
             closureHint,
             primaryRailStep,
+            // WS2 widen: the blind LSP/grep sibling owners (empty when feeder off
+            // or no sibling) — co-change pressure injected into repair seeds.
+            ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
           )
         : await runAgentPhase(
             instance,
@@ -795,10 +803,11 @@ const runInstanceOnce = async (
             phase.validated,
             phase.primaryFalseGreen,
           ),
-          // WS2: feed the owner-admission sibling-coverage verdict so the gate can
-          // emit `sibling_coverage_missing` when an LSP-resolved co-change site
-          // (ownerResolved) sits unedited next to a single-site attempt.
-          siblingCoverageExpected: closureSession.bundle.owner.siblingCoverageExpected,
+          // WS2: the gate keys off the SAME unsliced ownerResolved the seed-widen
+          // uses (see the runRepairPhase call) — NOT the post-maxCandidates-slice
+          // packet candidates — so the gate's telemetry can't disagree with the
+          // actual widen behavior on a sibling ranked out of the top-K.
+          siblingFiles: ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
         })
       }
     }

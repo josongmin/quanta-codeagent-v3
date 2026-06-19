@@ -48,10 +48,12 @@ describe("WS2 structural exit (feeder → owner-family → sibling_coverage_miss
         ownerResolved: resolved,
         posture: { lspNav: true, primaryRail: true, faultEvidence: true },
       })
-      expect(session.bundle.owner.siblingCoverageExpected).toBe(true)
-      expect(session.bundle.evidence.candidates.map((c) => c.file)).toContain("pg.py")
+      // pg.py enters the packet with owner-resolve provenance (the feeder signal
+      // the gate keys off — not the overloaded owner-admission boolean).
+      const pg = session.bundle.evidence.candidates.find((c) => c.file === "pg.py")
+      expect(pg?.sources).toContain("owner-resolve")
 
-      // 3. gate: rail red + owner-family ⇒ sibling_coverage_missing over the sibling.
+      // 3. gate: rail red + feeder siblingFiles ⇒ sibling_coverage_missing.
       const esc = decideEscalation({
         candidates: session.bundle.evidence.candidates.map((c) => ({
           file: c.file,
@@ -59,7 +61,7 @@ describe("WS2 structural exit (feeder → owner-family → sibling_coverage_miss
           sources: c.sources,
         })),
         primaryRailRedAfterRepair: true,
-        siblingCoverageExpected: session.bundle.owner.siblingCoverageExpected,
+        siblingFiles: resolved.map((o) => o.file),
       })
       expect(esc.escalate).toBe(true)
       expect(esc.reason).toContain("sibling_coverage_missing")

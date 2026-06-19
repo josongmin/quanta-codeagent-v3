@@ -81,6 +81,7 @@ import {
   selectInstances,
   writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
+import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
 import { KNOB_PRESETS } from "@/runner/knobs"
 import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
@@ -97,7 +98,6 @@ import {
 } from "./corpus"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { finalizeRun, runInstance } from "./eval"
-import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"

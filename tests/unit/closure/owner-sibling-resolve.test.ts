@@ -50,9 +50,10 @@ describe("resolveOwnerSiblings (WS2 grep + issueText anchor)", () => {
     })
     // runshell is the only anchor (defined in base + mentioned) ⇒ PG + MYSQL.
     // settings_to_cmd_args_env is defined in base but NOT mentioned ⇒ not an anchor.
+    // Sorted (deterministic): mysql < postgresql.
     expect(out).toEqual([
-      { file: PG, forSymbol: "runshell" },
       { file: MYSQL, forSymbol: "runshell" },
+      { file: PG, forSymbol: "runshell" },
     ])
   })
 
@@ -154,5 +155,35 @@ describe("resolveOwnerSiblings (WS2 grep + issueText anchor)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  test("ubiquitous anchor (defined in > UBIQUITY_CAP files) is dropped as noise", async () => {
+    const many = Array.from({ length: 20 }, (_, i) => `f${i}.py`) // 20 > 16 cap
+    const out = await resolveOwnerSiblings()({
+      stage1Files: [{ file: "owner.py", score: 5 }],
+      issueText: "the save method is broken",
+      cwd: "/repo",
+      readSource: () => "class C:\n    def save(self):\n        pass",
+      listDefiners: stubDefiners({ save: ["owner.py", ...many] }),
+    })
+    expect(out).toEqual([]) // ubiquitous method ⇒ non-discriminating ⇒ no flood
+  })
+
+  test("dedup against FULL stage1: a lower-ranked localized file is not re-added", async () => {
+    const out = await resolveOwnerSiblings()({
+      stage1Files: [
+        { file: "owner.py", score: 9 },
+        { file: "a.py", score: 8 },
+        { file: "b.py", score: 7 },
+        { file: "low.py", score: 1 }, // rank 4 — outside maxFiles=3 but still localized
+      ],
+      issueText: "runshell is broken",
+      cwd: "/repo",
+      readSource: (f) => (f === "owner.py" ? "class C:\n    def runshell(self):\n        pass" : null),
+      listDefiners: stubDefiners({ runshell: ["owner.py", "low.py", "sibling.py"] }),
+      maxFiles: 3,
+    })
+    // low.py is in the FULL stage1 list ⇒ already localized ⇒ excluded as sibling.
+    expect(out).toEqual([{ file: "sibling.py", forSymbol: "runshell" }])
   })
 })

@@ -257,3 +257,69 @@ runs:
   - instance_id: pylint-dev__pylint-4970
     repo: pylint
     reason: guard placed in wrong function (gold = run() early-return); repro shows resolved 3/5 but grading fails
+- run_id: easy-untried-sympy-ondemand-2026-06-18
+  date: '2026-06-18'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, full-remote (remote/full.ts, EC2 c7i.8xlarge x86 native ON-DEMAND, on-box local grade)
+  scope: fresh untried easy (<15min) sympy, 6 instances. ON-DEMAND (spot reclaimed both prior boxes in 4-17min — ap-northeast-2 capacity crunch). Validated live-streaming + grade-concurrency=6 + relaunch (no relaunch needed: on-demand did not reclaim).
+  mini_swe_crosscheck: 'mini-swe-agent (same gpt-5.4 oauth, SAME on-demand EC2-native grader) = 2/6 resolved (19954, 21847). vs quanta 3/6 (18763, 19954, 19495). both-pass: 19954. quanta-only: 18763, 19495 (exec-feedback win). mini-only: 21847 (quanta over-engineered 112turns/2092B wrong patch; mini edit-and-submit got it — SCAFFOLD loss, same over-engineer病 as django-10914/15987). both-fail: 24562, 20916 (gpt-5.4 model ceiling). Lever: quanta needs RESTRAINT (v2 turn-explosion/over-engineer self-sabotages); v2-safe candidate for 21847.'
+  resolved_count: 3
+  resolved:
+  - instance_id: sympy__sympy-18763
+    repo: sympy
+    turns: 113
+  - instance_id: sympy__sympy-19954
+    repo: sympy
+    turns: 63
+  - instance_id: sympy__sympy-19495
+    repo: sympy
+    turns: 142
+  unresolved:
+  - instance_id: sympy__sympy-21847
+    repo: sympy
+    reason: completed_unresolved (112 turns, 2092B patch — wrong fix)
+  - instance_id: sympy__sympy-24562
+    repo: sympy
+    reason: completed_unresolved (125 turns)
+  - instance_id: sympy__sympy-20916
+    repo: sympy
+    reason: verify_loop_stuck (38 turns)
+- run_id: easy-untried-django15-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, EC2 backend grade-only, spot terminated (cost-capped)
+  scope: 'fresh untried easy (<15min) django, 15 instances. 7 patch-bearing → 3 resolved. 2 contaminated (stray reproduce_issue.py/pytest.log) cleaned→source-only→apply OK but still model-miss. 8 turns-0 (NOT checkout — base_commit present, full clone): 2 recovered at concurrency-3 (throttle confirmed partial), 6 ''SDK session completed without an outcome'' (separate bug, deferred).'
+  resolved_count: 3
+  resolved:
+  - instance_id: django__django-11299
+    repo: django
+    turns: 60
+  - instance_id: django__django-12304
+    repo: django
+    turns: 107
+  - instance_id: django__django-12209
+    repo: django
+    turns: 91
+  unresolved:
+  - instance_id: django__django-11820
+    repo: django
+    reason: completed_unresolved (model miss)
+  - instance_id: django__django-12125
+    repo: django
+    reason: completed_unresolved (model miss)
+  - instance_id: django__django-13112
+    repo: django
+    reason: completed_unresolved (model miss)
+  - instance_id: django__django-11490
+    repo: django
+    reason: cleaned stray files, apply OK, still model-miss
+  - instance_id: django__django-12308
+    repo: django
+    reason: cleaned stray files, apply OK, still model-miss
+  - instance_id: django__django-10999
+    repo: django
+    reason: completed_unresolved (recovered at concurrency-3, model miss)

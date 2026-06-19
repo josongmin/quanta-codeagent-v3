@@ -129,6 +129,22 @@ quanta(agentless-v1)와 **별개 스캐폴드**인 mini-swe-agent v2를 같은 g
   - 로그인 경로: mini(litellm) → `_data/oauth-proxy.ts`(:8765) → quanta `createLLM("chatgpt-oauth")` → gpt-5.4 (raw key 불요)
 - 채점: mini 패치 → `mini-predictions.jsonl` → **공식 swebench harness**(`run_evaluation`, arm64 에뮬, max_workers=1, namespace=swebench) — quanta 칼럼과 **동일 grader**라 apples-to-apples. 산출물: `docs/analysis/swe-bench-verified-analysis/_data/mini-picks10-{predictions.jsonl,report.json}`.
 
+### untried-sympy-6 — mini 2/6 vs quanta(agentless-v2) 3/6 → **상호보완 + quanta 과구현 자폭 1건** (2026-06-18)
+
+fresh untried easy(<15min) sympy 6개를 quanta agentless-v2(on-demand EC2)와 mini-swe(같은 gpt-5.4 oauth, **동일 on-demand EC2-native grader**)로 교차채점. picks-10의 "1:1 동일"과 달리 **갈림**:
+
+| instance | quanta v2 | mini | 해석 |
+|---|---|---|---|
+| 19954 | ✅ | ✅ | both-pass |
+| 18763 | ✅ | ❌ | quanta 우위 (exec-feedback) |
+| 19495 | ✅ (142턴) | ❌ | quanta 우위 (느리지만 적중) |
+| **21847** | **❌** (112턴/2092B) | **✅** | **🔴 quanta 스캐폴드 손실 — 과구현이 자폭, mini edit-and-submit이 적중** |
+| 24562 | ❌ | ❌ | **모델 천장** (gpt-5.4 both-fail) |
+| 20916 | ❌ | ❌ | **모델 천장** |
+
+- **both-fail 2개 = 모델 천장** (스캐폴드 무죄). **21847 = quanta 과구현 病** — django-10914/15987과 같은 클래스(trivial을 거대패치로 과해석). v2의 turn-explosion/repair-escalation이 오히려 자폭. 
+- **레버: quanta는 절제(over-engineering 억제)가 필요.** v2가 mini보다 +1(exec-feedback 효과)이지만 과구현으로 -1. **v2-safe(in-loop exec off, edit-and-submit posture)가 21847류를 살릴 후보.** 산출물: yaml run `easy-untried-sympy-ondemand-2026-06-18`.
+
 ### picks-10 — mini 5/10 vs quanta(agentless-v1) 5/10 → **인스턴스 단위 1:1 동일**
 
 mini가 10개 전부 골드 파일 적중(picks=light 티어). resolved/unresolved 분할이 quanta와 정확히 일치 — 스캐폴드(mini vs 우리 harness 강제)가 결과를 안 가르고 **모델+localization이 결정**.

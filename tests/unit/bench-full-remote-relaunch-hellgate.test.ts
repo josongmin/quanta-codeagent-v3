@@ -1,120 +1,158 @@
 /**
- * Hellgate: full-remote caller-level relaunch retry.
+ * Hellgate: full-remote INSTANCE-AWARE relaunch retry.
  *
  * RCA (2026-06-18): a full-remote run is held by ONE blocking ssh on a SPOT box.
- * Two loss modes wipe the ENTIRE run, identically, as an all-empty result:
- *   - AWS spot reclaim (box terminated mid-run), and
- *   - ssh-255: under grading CPU saturation sshd misses keepalive ⇒ the blocking
- *     ssh is torn down before report.json exists.
- * The executor comment promised "CALLER-LEVEL retry" but the CLI never did it,
- * so a single blip silently lost 53- and 4-instance shards. `runWithRelaunch`
- * mints a FRESH box per empty/thrown attempt, bounded so a broken config can't
- * loop forever, and never retries a dry-run (its verdict-less result is intended).
+ * A spot reclaim / ssh-255 drop kills the box mid-run. The first fix relaunched
+ * on an ALL-EMPTY result only — but grade-concurrency pipelines grading across
+ * the run, so a mid-run death leaves a PARTIAL report. The all-or-nothing check
+ * missed that: the lost instances were silently under-counted (reported as if
+ * the run only ever had the few that finished).
  *
- * Red-on-injection: set maxRelaunch=0 (or drop the empty-check) and TEST-2's
- * "recovers after a transient empty" assertion fails — total loss returns.
+ * `runWithRelaunch` reconciles against the EXPECTED instance set: each attempt
+ * re-runs ONLY the instances still missing a verdict (resolved/unresolved/
+ * errored/emptyPatch), on a fresh box, merging results. So a 49/50 partial loss
+ * re-runs 1 (not 50), a total loss re-runs all, and anything still missing after
+ * the bound is SURFACED in `missing` (never silently dropped).
+ *
+ * Red-on-injection: drop the partial-loss reconcile (relaunch on all-empty only)
+ * and TEST "partial loss re-runs only the missing" fails — the lost instance is
+ * neither recovered nor reported.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  type FullRemoteResult,
-  isEmptyFullRemoteResult,
-  runWithRelaunch,
-} from "../../src/apps/bench/remote/full"
+import { coveredInstances, runWithRelaunch } from "../../src/apps/bench/remote/full"
 
-const ok = (resolved: string[]): FullRemoteResult => ({ resolved, unresolved: [], reportPath: "/x" })
-const empty = (): FullRemoteResult => ({ resolved: [], unresolved: [], errored: [], emptyPatch: [] })
-
-describe("isEmptyFullRemoteResult", () => {
-  test("all-empty ⇒ true; any verdict ⇒ false; dry-run ⇒ false (not a loss)", () => {
-    expect(isEmptyFullRemoteResult(empty())).toBe(true)
-    expect(isEmptyFullRemoteResult(ok(["a__1"]))).toBe(false)
-    expect(isEmptyFullRemoteResult({ unresolved: ["b__2"] })).toBe(false)
-    expect(isEmptyFullRemoteResult({ emptyPatch: ["c__3"] })).toBe(false)
-    // dry-run carries no verdicts but must NOT be treated as a lost run
-    expect(isEmptyFullRemoteResult({ dryRun: true, plan: ["..."] })).toBe(false)
+describe("coveredInstances", () => {
+  test("union of all four verdict categories", () => {
+    const c = coveredInstances({
+      resolved: ["a__1"],
+      unresolved: ["b__2"],
+      errored: ["c__3"],
+      emptyPatch: ["d__4"],
+    })
+    expect([...c].sort()).toEqual(["a__1", "b__2", "c__3", "d__4"])
+  })
+  test("empty result covers nothing (total box loss)", () => {
+    expect(coveredInstances({}).size).toBe(0)
   })
 })
 
-describe("runWithRelaunch — fresh box per empty/thrown attempt", () => {
-  test("clean first run ⇒ exactly ONE box minted, no relaunch", async () => {
-    let made = 0
-    const res = await runWithRelaunch(
-      () => {
-        made += 1
-        return { run: async () => ok(["a__1"]) }
+describe("runWithRelaunch — instance-aware, fresh box per loss", () => {
+  test("clean first run ⇒ ONE box, no relaunch, nothing missing", async () => {
+    const calls: string[][] = []
+    const out = await runWithRelaunch(
+      (ids) => {
+        calls.push([...ids])
+        return { run: async () => ({ resolved: ["a__1"], unresolved: ["b__2"] }) }
       },
-      { maxRelaunch: 2 },
+      { expected: ["a__1", "b__2"], maxRelaunch: 2 },
     )
-    expect(made).toBe(1)
-    expect(res.attempts).toBe(1)
-    expect(res.resolved).toEqual(["a__1"])
+    expect(calls.length).toBe(1)
+    expect(calls[0]).toEqual(["a__1", "b__2"]) // first attempt runs the whole set
+    expect(out.attempts).toBe(1)
+    expect(out.resolved).toEqual(["a__1"])
+    expect(out.missing).toEqual([])
   })
 
-  test("recovers after a transient empty: empty → empty → success (3 fresh boxes)", async () => {
-    const outcomes = [empty(), empty(), ok(["a__1", "b__2"])]
-    let made = 0
-    const res = await runWithRelaunch(
-      () => {
-        const i = made++
-        return { run: async () => outcomes[i]! }
+  test("PARTIAL loss: 4 expected, box dies after 2 ⇒ relaunch runs ONLY the missing 2", async () => {
+    const calls: string[][] = []
+    const out = await runWithRelaunch(
+      (ids) => {
+        calls.push([...ids])
+        return {
+          run: async () =>
+            calls.length === 1
+              ? // attempt 1: box died mid-grade — only c,d got verdicts
+                { resolved: ["c__3"], unresolved: ["d__4"], reportPath: "/r1" }
+              : // attempt 2 (the relaunch): the missing a,b now graded
+                { resolved: ["a__1"], unresolved: ["b__2"], reportPath: "/r2" },
+        }
       },
-      { maxRelaunch: 2 },
+      { expected: ["a__1", "b__2", "c__3", "d__4"], maxRelaunch: 2 },
     )
-    expect(made).toBe(3) // relaunched twice
-    expect(res.attempts).toBe(3)
-    expect(res.resolved).toEqual(["a__1", "b__2"]) // ...and banked the recovered run
+    expect(calls.length).toBe(2)
+    expect(calls[0]).toEqual(["a__1", "b__2", "c__3", "d__4"]) // attempt 1 = full set
+    expect(calls[1]).toEqual(["a__1", "b__2"]) // relaunch = ONLY the lost two (no waste)
+    expect(out.resolved.sort()).toEqual(["a__1", "c__3"]) // merged across attempts
+    expect(out.unresolved.sort()).toEqual(["b__2", "d__4"])
+    expect(out.missing).toEqual([]) // nothing silently dropped
+    expect(out.reportPaths).toEqual(["/r1", "/r2"])
+    expect(out.attempts).toBe(2)
   })
 
-  test("a THROWN attempt (launch failure) is retried, not fatal", async () => {
-    const runs: Array<() => Promise<FullRemoteResult>> = [
-      async () => {
-        throw new Error("no spot capacity")
+  test("TOTAL loss then success: empty attempt re-runs the full set", async () => {
+    const calls: string[][] = []
+    const out = await runWithRelaunch(
+      (ids) => {
+        calls.push([...ids])
+        return {
+          run: async () => (calls.length === 1 ? {} : { resolved: ["a__1", "b__2"] }),
+        }
       },
-      async () => ok(["a__1"]),
-    ]
-    let made = 0
-    const res = await runWithRelaunch(() => ({ run: runs[made++]! }), { maxRelaunch: 2 })
-    expect(made).toBe(2)
-    expect(res.resolved).toEqual(["a__1"])
+      { expected: ["a__1", "b__2"], maxRelaunch: 2 },
+    )
+    expect(calls.length).toBe(2)
+    expect(calls[1]).toEqual(["a__1", "b__2"]) // total loss ⇒ re-run everything
+    expect(out.resolved).toEqual(["a__1", "b__2"])
+    expect(out.missing).toEqual([])
   })
 
-  test("bounded: all-empty exhausts at maxRelaunch+1 attempts, never loops forever", async () => {
-    let made = 0
-    const res = await runWithRelaunch(
-      () => {
-        made += 1
-        return { run: async () => empty() }
+  test("a THROWN attempt re-runs the same remaining set, not fatal", async () => {
+    const calls: string[][] = []
+    const out = await runWithRelaunch(
+      (ids) => {
+        calls.push([...ids])
+        return {
+          run: async () => {
+            if (calls.length === 1) throw new Error("no spot capacity")
+            return { resolved: ["a__1"] }
+          },
+        }
       },
-      { maxRelaunch: 2 },
+      { expected: ["a__1"], maxRelaunch: 2 },
     )
-    expect(made).toBe(3) // 1 + 2 relaunches, then stop
-    expect(res.attempts).toBe(3)
-    expect(isEmptyFullRemoteResult(res)).toBe(true) // gives up honestly (no fake verdicts)
+    expect(calls.length).toBe(2)
+    expect(out.resolved).toEqual(["a__1"])
   })
 
-  test("maxRelaunch=0 ⇒ single attempt, an empty stays lost (the pre-fix behavior)", async () => {
-    let made = 0
-    const res = await runWithRelaunch(
+  test("bounded + SURFACES loss: persistent total loss stops and reports `missing`", async () => {
+    let calls = 0
+    const out = await runWithRelaunch(
       () => {
-        made += 1
-        return { run: async () => empty() }
+        calls += 1
+        return { run: async () => ({}) }
       },
-      { maxRelaunch: 0 },
+      { expected: ["a__1", "b__2"], maxRelaunch: 2 },
     )
-    expect(made).toBe(1)
-    expect(res.attempts).toBe(1)
+    expect(calls).toBe(3) // 1 + 2 relaunches, then stop (no infinite loop)
+    expect(out.attempts).toBe(3)
+    expect(out.resolved).toEqual([])
+    expect(out.missing.sort()).toEqual(["a__1", "b__2"]) // NOT silently 0 — surfaced
   })
 
-  test("dry-run short-circuits: never relaunched despite carrying no verdicts", async () => {
-    let made = 0
-    const res = await runWithRelaunch(
+  test("maxRelaunch=0 ⇒ single attempt; a partial loss is surfaced, not retried", async () => {
+    let calls = 0
+    const out = await runWithRelaunch(
       () => {
-        made += 1
-        return { run: async () => ({ dryRun: true, plan: ["plan"] }) }
+        calls += 1
+        return { run: async () => ({ resolved: ["a__1"] }) } // b__2 lost
       },
-      { maxRelaunch: 3 },
+      { expected: ["a__1", "b__2"], maxRelaunch: 0 },
     )
-    expect(made).toBe(1) // a dry-run is intentional, not a loss to retry
-    expect(res.dryRun).toBe(true)
+    expect(calls).toBe(1)
+    expect(out.resolved).toEqual(["a__1"])
+    expect(out.missing).toEqual(["b__2"]) // still surfaced even with no retry
+  })
+
+  test("errored/emptyPatch count as covered (a verdict, not a box loss) — not retried", async () => {
+    let calls = 0
+    const out = await runWithRelaunch(
+      () => {
+        calls += 1
+        return { run: async () => ({ errored: ["a__1"], emptyPatch: ["b__2"] }) }
+      },
+      { expected: ["a__1", "b__2"], maxRelaunch: 3 },
+    )
+    expect(calls).toBe(1) // both got a verdict ⇒ nothing missing ⇒ no relaunch
+    expect(out.missing).toEqual([])
   })
 })

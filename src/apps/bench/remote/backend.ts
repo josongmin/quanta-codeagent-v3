@@ -57,11 +57,21 @@ export interface SpawnResult {
  * aws, curl, ...) through this seam, so tests mock it and assert the exact argv
  * without spawning anything. `input` is fed to the child's stdin (for `ssh
  * bash -s` heredoc-style streaming).
+ *
+ * `onData`: when set, stdout is delivered INCREMENTALLY as it arrives (each
+ * decoded chunk) AND still accumulated into the returned `stdout`. This is the
+ * real-time-progress seam — a long remote `bench run` is otherwise a black box
+ * (the full stdout only lands when the ssh returns, minutes later). Absent ⇒
+ * buffer-until-exit (byte-identical to the prior behavior).
  */
 export type SpawnFn = (
   cmd: string,
   args: readonly string[],
-  opts?: { readonly cwd?: string; readonly input?: string },
+  opts?: {
+    readonly cwd?: string
+    readonly input?: string
+    readonly onData?: (chunk: string) => void
+  },
 ) => Promise<SpawnResult>
 
 /** Real {@link SpawnFn} via `Bun.spawn` — argv-array (no shell ⇒ no injection). */
@@ -72,10 +82,21 @@ export const defaultSpawn: SpawnFn = async (cmd, args, opts) => {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
+  // Streaming path: tee stdout to `onData` chunk-by-chunk while accumulating the
+  // full text (needed for downstream parsing). Without onData, the simple
+  // buffer-until-exit read is byte-identical to before.
+  const readStdout = async (): Promise<string> => {
+    if (opts?.onData === undefined) return new Response(proc.stdout).text()
+    const decoder = new TextDecoder()
+    let acc = ""
+    for await (const bytes of proc.stdout as ReadableStream<Uint8Array>) {
+      const chunk = decoder.decode(bytes, { stream: true })
+      acc += chunk
+      opts.onData(chunk)
+    }
+    return acc
+  }
+  const [stdout, stderr] = await Promise.all([readStdout(), new Response(proc.stderr).text()])
   const code = await proc.exited
   return { code, stdout, stderr }
 }

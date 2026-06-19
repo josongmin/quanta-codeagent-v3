@@ -4,6 +4,32 @@ import { buildRepairContext } from "../../src/apps/bench/eval/repair/context"
 const SMALL_PROBLEM = "Fix the `foo()` function so that `foo(0)` returns 1 instead of 0."
 
 describe("buildRepairContext (pure repair seed builder)", () => {
+  test("WS2 widen: siblingOwners ⇒ co-change section (deduped); empty ⇒ byte-identical", () => {
+    const base = buildRepairContext({ problem: "p", cumulativeDiff: "", failTail: "boom", round: 1 })
+    expect(base).not.toContain("Co-change sites")
+
+    const widened = buildRepairContext({
+      problem: "p",
+      cumulativeDiff: "",
+      failTail: "boom",
+      round: 1,
+      siblingOwners: [
+        "django/db/backends/postgresql/client.py",
+        "django/db/backends/postgresql/client.py", // dup
+        "django/db/backends/mysql/client.py",
+      ],
+    })
+    expect(widened).toContain("Co-change sites")
+    expect(widened).toContain("- django/db/backends/postgresql/client.py")
+    expect(widened).toContain("- django/db/backends/mysql/client.py")
+    // deduped: postgresql listed exactly once
+    expect(widened.split("postgresql/client.py").length - 1).toBe(1)
+    // empty list ⇒ byte-identical to the no-sibling seed
+    expect(
+      buildRepairContext({ problem: "p", cumulativeDiff: "", failTail: "boom", round: 1, siblingOwners: [] }),
+    ).toBe(base)
+  })
+
   test("round number appears in the first line", () => {
     const out = buildRepairContext({
       problem: SMALL_PROBLEM,

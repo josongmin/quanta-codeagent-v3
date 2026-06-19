@@ -6,7 +6,9 @@ import { describe, expect, test } from "bun:test"
 import { decideEscalation } from "@/agent/repair-escalation"
 
 describe("decideEscalation", () => {
-  const strongA = { file: "a.py", score: 5, sources: ["stage1", "owner-resolve"] }
+  // Corroborated by ≥2 streams but NOT owner-resolve, so these exercise the LEGACY
+  // strong≥2 gate without tripping the feeder sibling branch (owner-resolve).
+  const strongA = { file: "a.py", score: 5, sources: ["stage1", "issue-file"] }
   const strongB = { file: "b.py", score: 4, sources: ["stage1", "issue-file"] }
 
   test("≥2 corroborated owners + rail red → escalate", () => {
@@ -19,7 +21,7 @@ describe("decideEscalation", () => {
     expect(decideEscalation({ candidates: [strongA, strongB], primaryRailRedAfterRepair: false }).escalate).toBe(false)
   })
 
-  test("single corroborated owner → no widen", () => {
+  test("single corroborated (non-sibling) owner → no widen", () => {
     expect(decideEscalation({ candidates: [strongA], primaryRailRedAfterRepair: true }).escalate).toBe(false)
   })
 
@@ -32,59 +34,48 @@ describe("decideEscalation", () => {
   })
 })
 
-// WS2 — sibling_coverage_missing gate (the #14315 multi-site lever). When
-// owner-admission flags an owner-family (an LSP-resolved co-change sibling sits
-// in evidence), a single-site attempt that left the rail red is INCOMPLETE.
+// WS2 — sibling_coverage_missing gate (the #14315 multi-site lever). Keys off the
+// FEEDER's unsliced `siblingFiles` (the SAME list the repair-seed widen injects),
+// so the gate's record can't disagree with the widen behavior. A single-site
+// attempt that left the rail red is then INCOMPLETE.
 describe("decideEscalation — sibling_coverage_missing (WS2)", () => {
-  const parent = { file: "django/db/backends/base/client.py", score: 5, sources: ["stage1", "owner-resolve"] }
-  const childSibling = { file: "django/db/backends/postgresql/client.py", score: 4, sources: ["owner-resolve"] }
+  const PG = "django/db/backends/postgresql/client.py"
+  const MYSQL = "django/db/backends/mysql/client.py"
 
-  test("owner-family + owner-resolve sibling + rail red → escalate with the sibling in the plan", () => {
-    const d = decideEscalation({
-      candidates: [parent, childSibling],
-      primaryRailRedAfterRepair: true,
-      siblingCoverageExpected: true,
-    })
+  test("siblingFiles + rail red → sibling_coverage_missing over the siblings", () => {
+    const d = decideEscalation({ candidates: [], primaryRailRedAfterRepair: true, siblingFiles: [PG, MYSQL] })
     expect(d.escalate).toBe(true)
     expect(d.reason).toContain("sibling_coverage_missing")
-    expect(d.owners).toContain("django/db/backends/postgresql/client.py")
+    expect(d.owners).toContain(PG)
   })
 
-  test("TEETH: a SINGLE owner-resolve sibling escalates under the flag (legacy ≥2 gate would NOT)", () => {
-    // Without the flag this is exactly the "single corroborated owner → no widen"
-    // case. The sibling gate fires before the strong≥2 gate — that's the win.
-    const flagged = decideEscalation({
-      candidates: [childSibling],
+  test("TEETH: a SINGLE sibling file escalates (legacy strong≥2 gate would NOT)", () => {
+    // The legacy gate needs ≥2 strong owners → no widen. The feeder-keyed sibling
+    // gate fires on the single co-change site, with no candidates at all.
+    const d = decideEscalation({ candidates: [], primaryRailRedAfterRepair: true, siblingFiles: [PG] })
+    expect(d.escalate).toBe(true)
+    expect(d.reason).toContain("sibling_coverage_missing")
+  })
+
+  test("rail not red ⇒ no widen even with siblings present", () => {
+    expect(
+      decideEscalation({ candidates: [], primaryRailRedAfterRepair: false, siblingFiles: [PG] }).escalate,
+    ).toBe(false)
+  })
+
+  test("no siblingFiles ⇒ falls through to the legacy strong≥2 gate (no sibling reason)", () => {
+    const d = decideEscalation({
+      candidates: [
+        { file: "x.py", score: 9, sources: ["stage1"] },
+        { file: "y.py", score: 9, sources: ["stage1"] },
+      ],
       primaryRailRedAfterRepair: true,
-      siblingCoverageExpected: true,
     })
-    const legacy = decideEscalation({ candidates: [childSibling], primaryRailRedAfterRepair: true })
-    expect(flagged.escalate).toBe(true)
-    expect(flagged.reason).toContain("sibling_coverage_missing")
-    expect(legacy.escalate).toBe(false) // same input, no flag ⇒ legacy no-widen
+    expect(d.escalate).toBe(false)
+    expect(d.reason).not.toContain("sibling_coverage_missing")
   })
 
-  test("rail-red precondition still holds: flag does NOT widen when rail is green", () => {
-    expect(
-      decideEscalation({
-        candidates: [parent, childSibling],
-        primaryRailRedAfterRepair: false,
-        siblingCoverageExpected: true,
-      }).escalate,
-    ).toBe(false)
-  })
-
-  test("no candidates ⇒ flag does not manufacture a spurious escalation", () => {
-    expect(
-      decideEscalation({ candidates: [], primaryRailRedAfterRepair: true, siblingCoverageExpected: true })
-        .escalate,
-    ).toBe(false)
-  })
-
-  test("regression: siblingCoverageExpected=false ⇒ byte-identical legacy gate", () => {
-    expect(
-      decideEscalation({ candidates: [parent], primaryRailRedAfterRepair: true, siblingCoverageExpected: false })
-        .escalate,
-    ).toBe(false) // single owner, no flag ⇒ legacy no-widen
+  test("no candidates and no siblings ⇒ no escalation", () => {
+    expect(decideEscalation({ candidates: [], primaryRailRedAfterRepair: true }).escalate).toBe(false)
   })
 })

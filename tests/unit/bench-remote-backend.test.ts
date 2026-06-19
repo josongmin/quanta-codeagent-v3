@@ -245,7 +245,7 @@ describe("ssh backend", () => {
 // ── ec2 backend ────────────────────────────────────────────────────────────
 
 describe("ec2 backend", () => {
-  const setup = async (overrides?: { keep?: boolean }) => {
+  const setup = async (overrides?: { keep?: boolean; onDemand?: boolean }) => {
     const outDir = require("node:fs").mkdtempSync(
       require("node:path").join(require("node:os").tmpdir(), "ec2-test-"),
     )
@@ -256,7 +256,11 @@ describe("ec2 backend", () => {
       if (cmd === "aws" && args.includes("create-security-group")) return ok("sg-abc123")
       if (cmd === "aws" && args.includes("run-instances")) return ok("i-0deadbeef")
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
-      if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("READY")
+      // waitForSsh probes `ssh … echo READY` and gates on /READY/ in stdout (the
+      // committed ssh-ready + cloud-init poll); the old mock only handled a
+      // `test -f` probe ⇒ empty stdout ⇒ 90 retries ⇒ throw. Match the real probe.
+      if (cmd === "ssh" && args.some((a) => a.includes("echo READY") || a.includes("test -f")))
+        return ok("READY")
       if (cmd === "scp" && args.some((a) => a === reportPath)) {
         require("node:fs").writeFileSync(reportPath, JSON.stringify(SAMPLE_REPORT))
         return ok()
@@ -267,6 +271,7 @@ describe("ec2 backend", () => {
       spawn,
       sleep: async () => {},
       ...(overrides?.keep ? { keep: true } : {}),
+      ...(overrides?.onDemand ? { onDemand: true } : {}),
     })
     const outcome = await backend.grade("/tmp/preds.jsonl", {
       datasetPath: "/tmp/instances.jsonl",
@@ -373,18 +378,22 @@ describe("ec2 backend", () => {
       if (cmd === "aws" && args.includes("run-instances")) {
         const it = args[args.indexOf("--instance-type") + 1] ?? ""
         launched.push(it)
-        if (it === "c7i.8xlarge")
+        if (it === "c7i.4xlarge")
           return { code: 254, stdout: "", stderr: "InsufficientInstanceCapacity" }
         return ok("i-fallback")
       }
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
-      if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("READY")
+      // waitForSsh probes `ssh … echo READY` and gates on /READY/ in stdout (the
+      // committed ssh-ready + cloud-init poll); the old mock only handled a
+      // `test -f` probe ⇒ empty stdout ⇒ 90 retries ⇒ throw. Match the real probe.
+      if (cmd === "ssh" && args.some((a) => a.includes("echo READY") || a.includes("test -f")))
+        return ok("READY")
       return ok()
     })
     await createEc2Backend({ spawn, sleep: async () => {} })
       .grade("/tmp/p.jsonl", { datasetPath: "/tmp/d.jsonl", runId: "r" })
       .catch(() => undefined)
-    expect(launched[0]).toBe("c7i.8xlarge") // requested type tried first
+    expect(launched[0]).toBe("c7i.4xlarge") // requested type (the cost-down default) tried first
     expect(launched.length).toBeGreaterThan(1) // fell back after capacity error
     // default launch must NOT pin a subnet/AZ (capacity resilience)
     // (verified separately below)
@@ -398,11 +407,22 @@ describe("ec2 backend", () => {
 
   // ── red-on-injection teeth: cost/security flags MUST be present ───────────
 
-  test("run-instances uses SPOT market (drop this → on-demand cost regression)", async () => {
+  test("run-instances uses SPOT market by default (drop this → on-demand cost regression)", async () => {
     const { issued } = await setup()
     const run = issued.find((i) => i.cmd === "aws" && i.args.includes("run-instances"))
     expect(run?.args).toContain("--instance-market-options")
     expect(run?.args.some((a) => a.includes('"MarketType":"spot"'))).toBe(true)
+  })
+
+  test("onDemand:true drops the spot market option (capacity-crunch escape hatch)", async () => {
+    const { issued } = await setup({ onDemand: true })
+    const run = issued.find((i) => i.cmd === "aws" && i.args.includes("run-instances"))
+    // No market option ⇒ AWS default = on-demand = no reclaim. Spot reclaimed
+    // grade boxes in 4–17 min during the ap-northeast-2 capacity crunch.
+    expect(run?.args).not.toContain("--instance-market-options")
+    expect(run?.args.some((a) => a.includes("MarketType"))).toBe(false)
+    // ...rest of the hardening unchanged.
+    expect(run?.args.some((a) => a.includes("HttpTokens=required"))).toBe(true)
   })
 
   test("run-instances enforces IMDSv2 HttpTokens=required (drop this → metadata-credential theft)", async () => {
@@ -424,10 +444,10 @@ describe("ec2 backend", () => {
   test("run-instances pins the validated AMI + instance type + spot defaults", async () => {
     const { issued } = await setup()
     const run = issued.find((i) => i.cmd === "aws" && i.args.includes("run-instances"))
-    expect(run?.args).toContain("ami-0afe1fd15675c3f15")
-    expect(run?.args).toContain("c7i.8xlarge")
+    expect(run?.args).toContain("ami-04c2cdd2e17b15779")
+    expect(run?.args).toContain("c7i.4xlarge")
     expect(run?.args).toContain("pickinstead_korea.pem")
-    expect(run?.args.some((a) => a.includes('"VolumeSize":600'))).toBe(true)
+    expect(run?.args.some((a) => a.includes('"VolumeSize":300'))).toBe(true)
   })
 
   test("keep:true skips terminate", async () => {
@@ -453,7 +473,8 @@ describe("ec2 backend", () => {
       if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-existing")
       if (cmd === "aws" && args.includes("run-instances")) return ok("i-1")
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.1.1.1")
-      if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("READY")
+      if (cmd === "ssh" && args.some((a) => a.includes("echo READY") || a.includes("test -f")))
+        return ok("READY")
       if (cmd === "scp" && args.some((a) => a === reportPath)) {
         require("node:fs").writeFileSync(reportPath, JSON.stringify(SAMPLE_REPORT))
         return ok()

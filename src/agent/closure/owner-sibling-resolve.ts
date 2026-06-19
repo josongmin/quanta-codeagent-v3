@@ -49,6 +49,13 @@ export interface OwnerSibling {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
+/** A symbol defined in MORE than this many files is treated as ubiquitous (a
+ *  common method, not an override family) and dropped as a non-discriminating
+ *  anchor. Override families — one method overridden across a class hierarchy —
+ *  are small in practice (single digits, e.g. 5 django db-backend clients), so a
+ *  generous cap excludes only genuine noise (`save` ~25 files, `get` ~38). */
+const UBIQUITY_CAP = 16
+
 const DEF_RE = /^[ \t]*(?:async[ \t]+)?def[ \t]+(\w+)|^[ \t]*class[ \t]+(\w+)/gm
 
 /**
@@ -76,21 +83,25 @@ const relFromPath = (path: string, cwd: string): string => {
 
 /** Default definer lookup: ripgrep `def <sym>` / `class <sym>` over .py files. */
 const ripgrepDefiners =
-  (cwd: string) =>
+  (cwd: string, signal?: AbortSignal) =>
   (symbol: string): readonly string[] => {
     const sym = escapeRe(symbol)
     const pattern = `^\\s*(async\\s+)?def\\s+${sym}\\b|^\\s*class\\s+${sym}\\b`
     const res = spawnSync(
       "rg",
       ["-l", "--no-messages", "--type", "py", pattern, cwd],
-      // status 1 = no match (fine); a timeout/spawn error ⇒ empty (graceful).
-      { encoding: "utf8", timeout: 8_000 },
+      // status 1 = no match (fine). A timeout/spawn error returns [] (lossy but
+      // acceptable: rg over a django tree is ~0.3s, far under the 8s cap).
+      // `signal` lets the setup-window abort interrupt a blocking rg.
+      { encoding: "utf8", timeout: 8_000, ...(signal !== undefined ? { signal } : {}) },
     )
     if (res.error || typeof res.stdout !== "string") return []
     return res.stdout
       .split("\n")
       .filter((l) => l.trim() !== "")
       .map((p) => relFromPath(p, cwd))
+      .sort() // `rg -l` order is NONdeterministic (parallel traversal) — sort for
+    // reproducible truncation/results run-to-run.
   }
 
 /**
@@ -102,15 +113,22 @@ export const resolveOwnerSiblings =
   async (args: OwnerSiblingArgs): Promise<OwnerSibling[]> => {
     const maxFiles = args.maxFiles ?? 3
     const maxResults = args.maxResults ?? 8
-    const definers = args.listDefiners ?? ripgrepDefiners(args.cwd)
+    const definers = args.listDefiners ?? ripgrepDefiners(args.cwd, args.signal)
     const out: OwnerSibling[] = []
     const seen = new Set<string>()
 
     const stage1Top = args.stage1Files.slice(0, maxFiles)
-    const stage1Set = new Set(stage1Top.map((f) => f.file))
+    // Dedup against the FULL stage-1 list (not just the probed top-K): a sibling
+    // that is itself a lower-ranked localized candidate must not be re-added (it
+    // would double-count its stage-1 score AND the owner-resolve boost).
+    const stage1Set = new Set(args.stage1Files.map((f) => f.file))
 
+    // Collect one bucket of sibling candidates per (owner, anchor) — each bucket
+    // sorted+deduped (deterministic). Then round-robin across buckets so one noisy
+    // anchor can't starve the others, bounded by maxResults.
+    const buckets: OwnerSibling[][] = []
     for (const sf of stage1Top) {
-      if (out.length >= maxResults || args.signal?.aborted === true) break
+      if (args.signal?.aborted === true) break
       const source = args.readSource(sf.file)
       if (source === null) continue
       // Anchors = symbols this owner DEFINES that the issue text MENTIONS. Both
@@ -120,17 +138,32 @@ export const resolveOwnerSiblings =
       // #14315 doesn't matter — `runshell` is in the prose and defined in base.
       const anchors = defsInSource(source).filter((sym) => issueMentions(args.issueText, sym))
       for (const sym of anchors) {
-        if (out.length >= maxResults) break
-        for (const file of definers(sym)) {
+        const defs = [...new Set(definers(sym))].sort()
+        // A symbol defined in MORE than UBIQUITY_CAP files is NON-DISCRIMINATING —
+        // a ubiquitous method (`save` ~25 django files, `get` ~38), not an override
+        // family. Including it would flood ownerResolved with noise at the top
+        // owner-resolve boost (+3, the strongest), outranking the real owner. An
+        // override family (e.g. `runshell` across 5 backend clients) stays well
+        // under the cap. This is an anchor-DISCRIMINATION bound, distinct from
+        // `maxResults` (the output size bound) — they must not be the same number.
+        if (defs.length > UBIQUITY_CAP) continue
+        const bucket = defs
           // sibling only: not the owner itself, not an already-localized file.
-          if (file === "" || file === sf.file || stage1Set.has(file)) continue
-          const key = `${file}|${sym}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          out.push({ file, forSymbol: sym })
-          if (out.length >= maxResults) break
-        }
+          .filter((file) => file !== "" && file !== sf.file && !stage1Set.has(file))
+          .map((file) => ({ file, forSymbol: sym }))
+        if (bucket.length > 0) buckets.push(bucket)
       }
+    }
+
+    // Round-robin drain across buckets; dedup by file; bound by maxResults.
+    let idx = 0
+    while (out.length < maxResults && buckets.some((b) => b.length > 0)) {
+      const bucket = buckets[idx % buckets.length]
+      idx++
+      const item = bucket?.shift()
+      if (item === undefined || seen.has(item.file)) continue
+      seen.add(item.file)
+      out.push(item)
     }
     return out
   }

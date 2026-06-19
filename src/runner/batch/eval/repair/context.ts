@@ -25,6 +25,8 @@ const DEFAULT_MAX = 12000
 const HEADER_PROBLEM = "Original problem (verbatim):"
 const HEADER_DIFF = "Your patch so far (cumulative):"
 const HEADER_PREDICATE = "Typed rail note:"
+const HEADER_SIBLINGS =
+  "Co-change sites — these files override the SAME method and very likely need the same fix. A single-site edit is INCOMPLETE; apply the change to each:"
 const HEADER_FAIL = "Validation failed. Tail of failing output:"
 const NEXT_STEPS = [
   "Next steps (MANDATORY):",
@@ -57,6 +59,8 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
   let diff = args.cumulativeDiff
   let failTail = args.failTail
   const predicateSummary = args.predicateSummary
+  // Bounded, deduped sibling list (a handful of file paths — never truncated).
+  const siblingOwners = [...new Set(args.siblingOwners ?? [])]
 
   // Static overhead = headers + labels + next-steps + section separators.
   const compose = (p: string, d: string, f: string): string =>
@@ -65,6 +69,9 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
       "",
       HEADER_PROBLEM,
       p,
+      ...(siblingOwners.length > 0
+        ? ["", HEADER_SIBLINGS, siblingOwners.map((file) => `- ${file}`).join("\n")]
+        : []),
       "",
       HEADER_DIFF,
       d === "" ? "(no diff produced yet)" : d,

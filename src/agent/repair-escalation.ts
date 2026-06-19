@@ -18,12 +18,12 @@ export interface EscalationInput {
   primaryRailRedAfterRepair: boolean
   /** Minimum score for a "strong" owner. */
   minOwnerScore?: number
-  /** WS2: owner-admission flagged an owner-family / cross-owner — a co-change
-   *  site (e.g. a parent/child override sibling resolved via LSP `ownerResolved`)
-   *  exists in the evidence. A single-site edit that left the rail red is then
-   *  INCOMPLETE, so widen with reason `sibling_coverage_missing` instead of
-   *  declaring the single owner done. Absent/false ⇒ legacy strong-owner gate. */
-  siblingCoverageExpected?: boolean
+  /** WS2: the feeder's resolved co-change sibling files — the SAME unsliced
+   *  `ownerResolved` list the repair-seed widen uses. Keyed here (not off the
+   *  post-`maxCandidates`-slice packet candidates) so the gate's telemetry can't
+   *  disagree with the actual seed-widen behavior on a sibling ranked out of the
+   *  top-K. Empty ⇒ legacy strong≥2 gate. */
+  siblingFiles?: readonly string[]
 }
 
 export interface EscalationDecision {
@@ -46,27 +46,21 @@ export const decideEscalation = (input: EscalationInput): EscalationDecision => 
   if (!input.primaryRailRedAfterRepair) {
     return { escalate: false, owners: [], reason: "primary rail not red after repair — no widening" }
   }
-  // WS2 sibling-coverage gate (the #14315 multi-site lever). owner-admission saw
-  // an owner-family / cross-owner — a co-change site (an LSP-resolved parent/child
-  // override sibling) sits in the evidence. The single-site attempt left the rail
-  // red, so it is INCOMPLETE: block continue-single-owner and emit a multi-owner
-  // plan over the owner-resolve (sibling) candidates + any strong owners. Fires
-  // BEFORE the strong≥2 gate because one corroborated owner + a known sibling is
-  // exactly the case the legacy gate misses (it needs two strong owners).
-  if (input.siblingCoverageExpected === true) {
-    const siblings = input.candidates.filter((c) => c.sources.includes("owner-resolve"))
-    const owners = [...new Set([...strong, ...siblings].map((c) => c.file))]
-    if (owners.length > 0) {
-      return {
-        escalate: true,
-        owners,
-        reason:
-          siblings.length > 0
-            ? `sibling_coverage_missing — owner-family co-change site(s) ${siblings
-                .map((c) => c.file)
-                .join(", ")} present; single-site edit insufficient`
-            : "sibling_coverage_missing — owner-family expected; single-site edit insufficient",
-      }
+  // WS2 sibling-coverage gate (the #14315 multi-site lever). Keys off the FEEDER's
+  // unsliced `siblingFiles` (the SAME list the repair-seed widen injects) — so the
+  // gate's record can never disagree with the actual seed-widen behavior, and it's
+  // not vulnerable to a real sibling being ranked out of the top-K packet
+  // candidates. The single-site attempt left the rail red, so it is INCOMPLETE:
+  // emit a multi-owner plan over those siblings + any strong owners. Fires BEFORE
+  // the strong≥2 gate because one owner + a known sibling is exactly the case the
+  // legacy gate misses (it needs two strong owners).
+  const siblings = [...new Set(input.siblingFiles ?? [])]
+  if (siblings.length > 0) {
+    const owners = [...new Set([...strong.map((c) => c.file), ...siblings])]
+    return {
+      escalate: true,
+      owners,
+      reason: `sibling_coverage_missing — co-change site(s) ${siblings.join(", ")} present; single-site edit insufficient`,
     }
   }
   if (strong.length < 2) {

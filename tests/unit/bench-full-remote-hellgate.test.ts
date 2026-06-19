@@ -127,6 +127,25 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(argstr).toContain("--security-group-ids")
   })
 
+  test("market: default is SPOT; onDemand:true drops the spot market option", async () => {
+    const launchArgs = async (cfg: Parameters<typeof createFullRemoteBackend>[0]) => {
+      const { fn, calls } = mockSpawn()
+      await createFullRemoteBackend({ ...cfg, spawn: fn })
+        .run()
+        .catch(() => undefined)
+      return calls.find((c) => c.args.includes("run-instances"))?.args.join(" ") ?? ""
+    }
+    // Default ⇒ spot (cheap, reclaimable).
+    expect(await launchArgs(baseCfg)).toContain('{"MarketType":"spot"}')
+    // On-demand ⇒ NO market option (AWS default = on-demand = no reclaim). This
+    // is the capacity-crunch escape hatch (spot reclaimed c7i in 4–17 min).
+    const onDemandArgs = await launchArgs({ ...baseCfg, onDemand: true })
+    expect(onDemandArgs).not.toContain("MarketType")
+    expect(onDemandArgs).not.toContain("instance-market-options")
+    // ...but the rest of the hardening is unchanged.
+    expect(onDemandArgs).toContain("HttpTokens=required")
+  })
+
   test("ALWAYS terminates the box — even when the remote run throws", async () => {
     const calls: Array<{ cmd: string; args: string[] }> = []
     const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {

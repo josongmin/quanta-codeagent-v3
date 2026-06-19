@@ -54,6 +54,11 @@ export interface FullRemoteConfig {
   readonly diskGb?: number
   readonly ttlMinutes?: number
   readonly keep?: boolean
+  /** Launch ON-DEMAND instead of spot. Spot is ~3× cheaper but AWS reclaims it
+   *  on capacity pressure — observed in ap-northeast-2 reclaiming c7i boxes in
+   *  4–17 min, killing runs faster than relaunch can recover. On-demand has no
+   *  reclaim. Default false (spot). */
+  readonly onDemand?: boolean
 }
 
 const D = {
@@ -185,53 +190,122 @@ export interface FullRemoteResult {
   readonly plan?: readonly string[]
 }
 
-/** A full-remote run produced NO verdicts at all — the box was lost (spot
- *  reclaim, or the single blocking ssh that holds the run was torn down by a
- *  keepalive timeout under grading load ⇒ `exit 255` before report.json
- *  existed). Both modes surface here identically: an all-empty result. */
-export const isEmptyFullRemoteResult = (r: FullRemoteResult): boolean =>
-  !r.dryRun &&
-  (r.resolved?.length ?? 0) +
-    (r.unresolved?.length ?? 0) +
-    (r.errored?.length ?? 0) +
-    (r.emptyPatch?.length ?? 0) ===
-    0
+/** Every instance that earned ANY verdict in `r` — resolved / unresolved /
+ *  errored / emptyPatch. The COMPLEMENT (an expected instance absent from all
+ *  four) is a box-loss: spot reclaim or ssh-255 killed the box before that
+ *  instance's verdict was written. A grade-concurrency pipeline spreads grading
+ *  across the run, so a mid-run death leaves a PARTIAL report — exactly the case
+ *  the old all-or-nothing empty-check missed (silent under-count). */
+export const coveredInstances = (r: FullRemoteResult): Set<string> =>
+  new Set<string>([
+    ...(r.resolved ?? []),
+    ...(r.unresolved ?? []),
+    ...(r.errored ?? []),
+    ...(r.emptyPatch ?? []),
+  ])
+
+export interface RelaunchOutcome {
+  readonly resolved: string[]
+  readonly unresolved: string[]
+  readonly errored: string[]
+  readonly emptyPatch: string[]
+  /** Local report paths, one per attempt that produced a report (newest last). */
+  readonly reportPaths: string[]
+  readonly attempts: number
+  /** Expected instances that NEVER earned a verdict across all attempts — a
+   *  genuine loss the operator must see (NOT silently counted as resolved=0). */
+  readonly missing: string[]
+}
 
 /**
- * Caller-level relaunch retry — the resilience the executor comment promised
- * ("Flaky/blip box loss is handled by CALLER-LEVEL retry, not by holding one
- * box") but the CLI never implemented, so a single spot reclaim / ssh-255 drop
- * silently lost the WHOLE run (observed: 53- and 4-instance shards both wiped).
+ * Caller-level, INSTANCE-AWARE relaunch — the resilience the executor comment
+ * promised ("Flaky/blip box loss is handled by CALLER-LEVEL retry") but the CLI
+ * never implemented, so a spot reclaim / ssh-255 drop silently lost the WHOLE
+ * run (observed: 53- and 4-instance shards wiped).
  *
- * `makeBackend` mints a FRESH box per attempt (a relaunch, not a re-poll of the
- * dead box — the prior box is already terminated). A thrown attempt (launch
- * failure) is treated as empty and retried. A dry-run short-circuits (its
- * verdict-less result is intentional, not a loss). Bounded by `maxRelaunch` so
- * a genuinely-broken config can't loop forever.
+ * Each attempt mints a FRESH box (a relaunch, not a re-poll of the dead box) and
+ * runs ONLY the instances still missing a verdict — so a 49/50 partial loss
+ * re-runs 1 instance, not 50, AND a mid-run death can never be silently
+ * under-counted (the missing instance is retried, then surfaced in `missing` if
+ * still lost). A thrown attempt (launch failure) re-runs the same remaining set.
+ * Bounded by `maxRelaunch` so a genuinely-broken config can't loop forever.
  */
 export const runWithRelaunch = async (
-  makeBackend: () => { run: () => Promise<FullRemoteResult> },
-  opts: { maxRelaunch: number; onLog?: (m: string) => void },
-): Promise<FullRemoteResult & { attempts: number }> => {
-  let last: FullRemoteResult = {}
+  makeBackend: (instanceIds: readonly string[]) => { run: () => Promise<FullRemoteResult> },
+  opts: { expected: readonly string[]; maxRelaunch: number; onLog?: (m: string) => void },
+): Promise<RelaunchOutcome> => {
+  const acc = {
+    resolved: new Set<string>(),
+    unresolved: new Set<string>(),
+    errored: new Set<string>(),
+    emptyPatch: new Set<string>(),
+  }
+  const reportPaths: string[] = []
   const total = Math.max(0, opts.maxRelaunch) + 1
-  for (let attempt = 1; attempt <= total; attempt++) {
+  let remaining = [...opts.expected]
+  let attempt = 0
+  while (remaining.length > 0 && attempt < total) {
+    attempt += 1
+    let r: FullRemoteResult = {}
     try {
-      last = await makeBackend().run()
+      r = await makeBackend(remaining).run()
     } catch (err) {
       opts.onLog?.(`[full-remote] attempt ${attempt} threw: ${errMessage(err)}`)
-      last = {}
+      r = {}
     }
-    if (last.dryRun) return { ...last, attempts: attempt }
-    if (!isEmptyFullRemoteResult(last)) return { ...last, attempts: attempt }
-    if (attempt < total) {
+    if (r.reportPath !== undefined) reportPaths.push(r.reportPath)
+    for (const id of r.resolved ?? []) acc.resolved.add(id)
+    for (const id of r.unresolved ?? []) acc.unresolved.add(id)
+    for (const id of r.errored ?? []) acc.errored.add(id)
+    for (const id of r.emptyPatch ?? []) acc.emptyPatch.add(id)
+    const covered = coveredInstances({
+      resolved: [...acc.resolved],
+      unresolved: [...acc.unresolved],
+      errored: [...acc.errored],
+      emptyPatch: [...acc.emptyPatch],
+    })
+    remaining = opts.expected.filter((id) => !covered.has(id))
+    if (remaining.length > 0 && attempt < total) {
       opts.onLog?.(
-        `[full-remote] ⚠️ empty result (attempt ${attempt}/${total}) — box lost (spot reclaim / ssh-255). Relaunching a fresh box…`,
+        `[full-remote] ⚠️ ${remaining.length}/${opts.expected.length} instance(s) lost (spot reclaim / ssh-255) — relaunching ONLY the missing on a fresh box (attempt ${attempt + 1}/${total})…`,
       )
     }
   }
-  opts.onLog?.(`[full-remote] exhausted ${total} attempt(s); giving up with empty result.`)
-  return { ...last, attempts: total }
+  if (remaining.length > 0) {
+    opts.onLog?.(
+      `[full-remote] exhausted ${total} attempt(s); ${remaining.length} instance(s) still lost: ${remaining.join(", ")}`,
+    )
+  }
+  return {
+    resolved: [...acc.resolved],
+    unresolved: [...acc.unresolved],
+    errored: [...acc.errored],
+    emptyPatch: [...acc.emptyPatch],
+    reportPaths,
+    attempts: attempt,
+    missing: remaining,
+  }
+}
+
+/**
+ * Reassemble a byte/chunk stream into COMPLETE lines and `emit` each one (blank
+ * lines dropped). A trailing partial line (no newline yet) is held in the buffer
+ * until its newline arrives — so a line split across two stdout chunks
+ * ("Instances comp" + "leted: 1\n") is emitted ONCE, intact, not as fragments.
+ * This is what makes the streamed remote-run feed readable instead of garbled.
+ */
+export const createLineStreamer = (emit: (line: string) => void): ((chunk: string) => void) => {
+  let buf = ""
+  return (chunk: string) => {
+    buf += chunk
+    let nl = buf.indexOf("\n")
+    while (nl !== -1) {
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      if (line.trim() !== "") emit(line)
+      nl = buf.indexOf("\n")
+    }
+  }
 }
 
 export const createFullRemoteBackend = (
@@ -243,6 +317,8 @@ export const createFullRemoteBackend = (
   const ttl = cfg.ttlMinutes ?? D.ttlMinutes
   const preset = cfg.preset ?? D.preset
   const model = cfg.model ?? D.model
+  const onDemand = cfg.onDemand ?? false
+  const marketLabel = onDemand ? "on-demand" : "spot"
   // Patch-gen concurrency on the remote box (c7i.8xlarge = 32 vCPU). Default 6 —
   // the binding limit is the shared gpt-5.4 login rate, not box CPU. Serial
   // (the prior implicit default) ran ~10 min/instance and risked the TTL on a
@@ -269,7 +345,12 @@ export const createFullRemoteBackend = (
    *  empty run.log) on 2/2 grading calls. The long grading session must tolerate
    *  a busy-but-alive box, so we do NOT set an aggressive keepalive here; the rare
    *  truly-dead-box hang is bounded by the OUTER `timeout` the caller wraps. */
-  const sshTo = (host: string, remoteCmd: string, input?: string) =>
+  const sshTo = (
+    host: string,
+    remoteCmd: string,
+    input?: string,
+    onData?: (chunk: string) => void,
+  ) =>
     spawn(
       "ssh",
       [
@@ -282,8 +363,21 @@ export const createFullRemoteBackend = (
         host,
         remoteCmd,
       ],
-      ...(input !== undefined ? [{ input }] : []),
+      ...(input !== undefined || onData !== undefined
+        ? [
+            {
+              ...(input !== undefined ? { input } : {}),
+              ...(onData !== undefined ? { onData } : {}),
+            },
+          ]
+        : []),
     )
+
+  // Surface the box's streamed stdout LIVE, each COMPLETE line via `log()` with a
+  // `[box]` prefix — turns the otherwise-silent multi-minute remote `bench run`
+  // into a live feed (instance starts, grading, verdicts).
+  const makeLineStreamer = (): ((chunk: string) => void) =>
+    createLineStreamer((line) => log(`[box] ${line}`))
 
   /** Find-or-create the SG + open :22. Without an attached SG the box lands in
    *  the default SG (no inbound :22) ⇒ ssh times out.
@@ -359,7 +453,7 @@ export const createFullRemoteBackend = (
   }
 
   const plan = (): readonly string[] => [
-    `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} spot (IMDSv2 hop-1, shutdown -h +${ttl})`,
+    `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} ${marketLabel} (IMDSv2 hop-1, shutdown -h +${ttl})`,
     `[dry-run] would rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
     "[dry-run] would ship STRIPPED token over ssh stdin (access_token only; refresh/id dropped)",
     `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset}, patch-gen concurrency=${concurrency}, grade concurrency=${concurrency} [x86 native pipelined])`,
@@ -391,8 +485,10 @@ export const createFullRemoteBackend = (
       ...(cfg.subnetId !== undefined ? ["--subnet-id", cfg.subnetId] : []),
       "--security-group-ids",
       sgId,
-      "--instance-market-options",
-      '{"MarketType":"spot"}',
+      // Spot (default) ⇒ ~3× cheaper but reclaimable. On-demand ⇒ no market
+      // option (AWS default) ⇒ no reclaim, for capacity crunches where spot dies
+      // in minutes.
+      ...(onDemand ? [] : ["--instance-market-options", '{"MarketType":"spot"}']),
       "--metadata-options",
       "HttpTokens=required,HttpPutResponseHopLimit=1",
       "--instance-initiated-shutdown-behavior",
@@ -412,7 +508,7 @@ export const createFullRemoteBackend = (
     let iid = ""
     let lastErr = ""
     for (const it of typeCandidates) {
-      log(`[full-remote] launching hardened spot box (${it}, IMDSv2 hop-1, TTL)…`)
+      log(`[full-remote] launching hardened ${marketLabel} box (${it}, IMDSv2 hop-1, TTL)…`)
       const launch = await aws(launchArgs(it))
       const got = oneLine(launch.stdout)
       if (launch.code === 0 && got !== "" && got !== "None") {
@@ -684,6 +780,10 @@ export const createFullRemoteBackend = (
           // nothing to read — the remote run produces no measurement.
           `--observe-dir ~/observe ` +
           `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
+        // No stdin; stream the box's stdout LIVE so the multi-minute run is not a
+        // silent black box (instance starts, grading, verdicts surface as `[box]`).
+        undefined,
+        makeLineStreamer(),
       )
 
       log(`[full-remote] run finished (exit ${remoteRun.code}); fetching report…`)

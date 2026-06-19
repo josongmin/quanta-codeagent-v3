@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { KNOB_PRESETS } from "@/runner/knobs"
-import { errMessage, logger, setTerminalIo } from "@/shared"
+import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
@@ -58,6 +58,30 @@ const KNOWN_SUBCOMMANDS = new Set([
   "--help",
   "-h",
 ])
+
+/** Every `instance_id` in a SWE-bench dataset jsonl — the expected set that
+ *  instance-aware relaunch reconciles against to detect partial box loss.
+ *  Best-effort: unparseable/blank lines are skipped, a missing file ⇒ []. */
+const readDatasetInstanceIds = (path: string): string[] => {
+  let raw: string
+  try {
+    raw = readFileSync(path, "utf8")
+  } catch {
+    return []
+  }
+  const ids: string[] = []
+  for (const line of raw.split("\n")) {
+    const t = line.trim()
+    if (t === "") continue
+    try {
+      const id = (JSON.parse(t) as { instance_id?: unknown }).instance_id
+      if (typeof id === "string" && id !== "") ids.push(id)
+    } catch {
+      /* skip malformed line */
+    }
+  }
+  return ids
+}
 
 /** Read a value flag in BOTH `--flag value` and `--flag=value` forms. The
  *  `=`-form previously fell through `indexOf` and was silently ignored. */
@@ -145,6 +169,8 @@ const buildBaseBackend = (spec: string, modelName: string | undefined): GradeBac
     return createEc2Backend({
       ...common,
       keep: hasFlag("--keep"),
+      // Same escape hatch as full-remote: on-demand when spot is being reclaimed.
+      onDemand: gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND"),
       ...(region !== undefined ? { region } : {}),
     })
   }
@@ -167,75 +193,113 @@ const buildBackend = (spec: string, modelName: string | undefined): GradeBackend
   return buildBaseBackend(spec, modelName)
 }
 
-const cmdGrade = async (): Promise<void> => {
-  // ADR-0536 §6 — full-remote mode (remote patch-gen + grading) runs the AGENT
-  // on a credential-bearing box (agent executes model-generated code). Opt-in
-  // AND gated behind --allow-remote-secrets. The executor (createFullRemoteBackend)
-  // ships ONLY the stripped short-lived access_token over ssh STDIN (refresh/id
-  // dropped), enforces IMDSv2 hop-1 + TTL, and always terminates. NOTE: actually
-  // launching ships a credential across a trust boundary — the harness may block
-  // that at runtime (by design); --dry-run plans it safely. `grade-only` default
-  // is unaffected.
-  const mode = argValue("--mode") ?? "grade-only"
-  if (mode === "full") {
-    if (!hasFlag("--allow-remote-secrets")) {
-      logger.info(
-        "refused: --mode full runs patch-gen on the remote box and needs an LLM credential there. " +
-          "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6). " +
-          "Tip: --dry-run shows the plan without launching or shipping anything.",
-      )
-      process.exit(2)
-    }
-    const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
-    if (dataset === undefined) {
-      logger.info(
-        "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run]",
-      )
-      process.exit(2)
-    }
-    const dry = hasFlag("--dry-run")
-    // Only read the on-disk credential when actually launching (dry-run never
-    // touches it). Stripped to access_token only inside the executor.
-    const authPath = `${process.env.HOME}/.quanta/auth/chatgpt.json`
-    const authJson = dry ? "{}" : readFileSync(authPath, "utf8")
-    const instance = argValue("--instance")
-    const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset")
-    const fullModel = argValue("--model")
-    // A spot reclaim or ssh-255 keepalive drop loses the WHOLE run (empty result
-    // before report.json exists). Relaunch a fresh box on an empty result —
-    // `QUANTA_BENCH_FULL_REMOTE_RELAUNCH` extra attempts (default 1). `--keep`
-    // boxes are NOT auto-relaunched-over since the prior box survives for
-    // inspection (relaunch would still mint a new box, so it stays correct).
-    const relaunchRaw = process.env.QUANTA_BENCH_FULL_REMOTE_RELAUNCH
-    const maxRelaunch =
-      relaunchRaw !== undefined && /^\d+$/.test(relaunchRaw.trim())
-        ? Number.parseInt(relaunchRaw.trim(), 10)
-        : 1
-    const makeBackend = () =>
-      createFullRemoteBackend({
-        repoDir: process.cwd(),
-        authJson,
-        datasetPath: dataset,
-        ...(instance !== undefined ? { instanceIds: instance.split(",") } : {}),
-        ...(preset !== undefined ? { preset } : {}),
-        ...(fullModel !== undefined ? { model: fullModel } : {}),
-        dryRun: dry,
-        keep: hasFlag("--keep"),
-        onLog: (m) => logger.info(m),
-      })
-    const res = dry
-      ? await makeBackend().run()
-      : await runWithRelaunch(makeBackend, { maxRelaunch, onLog: (m) => logger.info(m) })
-    if (res.dryRun) {
-      printBlock(["=== full-remote plan (dry-run) ===", ...(res.plan ?? [])].join("\n"))
-    } else {
-      logger.info(
-        `full-remote done — resolved ${res.resolved?.length ?? 0} | unresolved ${res.unresolved?.length ?? 0}`,
-      )
-      for (const id of res.resolved ?? []) logger.info(`  ✅ ${id}`)
-    }
+/** Log the merged outcome of an instance-aware full-remote run — resolved count,
+ *  any box-loss (`missing`, surfaced NOT silently dropped), and attempt count. */
+const logFullRemoteOutcome = (out: {
+  resolved: string[]
+  unresolved: string[]
+  missing: string[]
+  attempts: number
+}): void => {
+  const lostNote = out.missing.length > 0 ? ` | ⚠️ LOST ${out.missing.length} (box-loss)` : ""
+  const attemptNote = out.attempts > 1 ? ` [${out.attempts} attempts]` : ""
+  logger.info(
+    `full-remote done — resolved ${out.resolved.length} | unresolved ${out.unresolved.length}${lostNote}${attemptNote}`,
+  )
+  for (const id of out.resolved) logger.info(`  ✅ ${id}`)
+  for (const id of out.missing)
+    logger.info(`  ❓ LOST (never graded across ${out.attempts} attempts): ${id}`)
+}
+
+/** ADR-0536 §6 — full-remote mode (remote patch-gen + grading). Runs the AGENT
+ *  on a credential-bearing box; gated behind --allow-remote-secrets. The executor
+ *  ships ONLY the stripped short-lived access_token over ssh STDIN (refresh/id
+ *  dropped), enforces IMDSv2 hop-1 + TTL, and always terminates. --dry-run plans
+ *  it safely without launching. Instance-aware relaunch recovers box loss. */
+const cmdGradeFullRemote = async (): Promise<void> => {
+  if (!hasFlag("--allow-remote-secrets")) {
+    logger.info(
+      "refused: --mode full runs patch-gen on the remote box and needs an LLM credential there. " +
+        "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6). " +
+        "Tip: --dry-run shows the plan without launching or shipping anything.",
+    )
+    process.exit(2)
+  }
+  const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
+  if (dataset === undefined) {
+    logger.info(
+      "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run]",
+    )
+    process.exit(2)
+  }
+  const dry = hasFlag("--dry-run")
+  // Only read the on-disk credential when actually launching (dry-run never
+  // touches it). Stripped to access_token only inside the executor.
+  const authJson = dry
+    ? "{}"
+    : readFileSync(`${process.env.HOME}/.quanta/auth/chatgpt.json`, "utf8")
+  const instance = argValue("--instance")
+  const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset")
+  const fullModel = argValue("--model")
+  // The expected instance set instance-aware relaunch reconciles against to detect
+  // partial loss. `--instance` wins; else every instance_id in the dataset jsonl.
+  const expected =
+    instance !== undefined
+      ? instance
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s !== "")
+      : readDatasetInstanceIds(dataset)
+  // HARD GUARD: `--keep` forces 0 relaunches — a kept box is NOT auto-terminated
+  // on loss, so relaunching would orphan it (runaway spot billing). Also 0 when
+  // the expected set is unknown (can't reconcile what's missing).
+  const maxRelaunch =
+    hasFlag("--keep") || expected.length === 0 ? 0 : runtimeConfig().fullRemoteRelaunch
+  // ON-DEMAND escape hatch for spot capacity crunches (QUANTA_FULL_REMOTE_ONDEMAND
+  // =1). Spot is ~3× cheaper but AWS reclaims it under pressure — observed
+  // reclaiming c7i boxes in 4–17 min, faster than relaunch can recover. Same
+  // process.env-read pattern as QUANTA_FULL_REMOTE_CONCURRENCY.
+  const onDemand = gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND")
+  const makeBackend = (ids: readonly string[]) =>
+    createFullRemoteBackend({
+      repoDir: process.cwd(),
+      authJson,
+      datasetPath: dataset,
+      ...(ids.length > 0 ? { instanceIds: [...ids] } : {}),
+      ...(preset !== undefined ? { preset } : {}),
+      ...(fullModel !== undefined ? { model: fullModel } : {}),
+      dryRun: dry,
+      keep: hasFlag("--keep"),
+      onDemand,
+      onLog: (m) => logger.info(m),
+    })
+  if (dry) {
+    const res = await makeBackend(expected).run()
+    printBlock(["=== full-remote plan (dry-run) ===", ...(res.plan ?? [])].join("\n"))
     return
   }
+  if (expected.length === 0) {
+    // Unknown expected set ⇒ no instance-aware reconcile possible; run once.
+    logger.info("[full-remote] could not determine instance set — relaunch retry disabled")
+    const res = await makeBackend([]).run()
+    logFullRemoteOutcome({
+      resolved: [...(res.resolved ?? [])],
+      unresolved: [...(res.unresolved ?? [])],
+      missing: [],
+      attempts: 1,
+    })
+    return
+  }
+  const out = await runWithRelaunch(makeBackend, {
+    expected,
+    maxRelaunch,
+    onLog: (m) => logger.info(m),
+  })
+  logFullRemoteOutcome(out)
+}
+
+const cmdGrade = async (): Promise<void> => {
+  if ((argValue("--mode") ?? "grade-only") === "full") return cmdGradeFullRemote()
 
   const predictions = argValue("--predictions")
   const backendSpec = argValue("--backend")

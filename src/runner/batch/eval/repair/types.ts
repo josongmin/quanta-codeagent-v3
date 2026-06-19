@@ -128,6 +128,13 @@ export interface BuildRepairContextArgs {
   predicateSummary?: string
   /** 1-based round number we are about to start (for prose only). */
   round: number
+  /** WS2 widen behavior: co-change sibling owner files (blind — from the LSP/grep
+   *  `ownerResolved`, NEVER hidden test fields). When non-empty, the seed tells
+   *  the agent these files override the SAME method and likely need the same fix
+   *  — turning the gate's `sibling_coverage_missing` record into actual model
+   *  pressure. buildContext is only called AFTER a red round, so this fires
+   *  exactly when the single-site attempt proved insufficient. */
+  siblingOwners?: readonly string[]
   /** Optional cap on total message bytes (default ~12k); the diff/tail are
    *  truncated first to fit. */
   maxBytes?: number

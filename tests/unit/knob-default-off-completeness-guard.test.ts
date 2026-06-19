@@ -296,6 +296,22 @@ const NON_FALSY_DEFAULT_ALLOWLIST: Readonly<Record<string, AllowlistEntry>> = {
     reason:
       "enum mode-selector (deny|opaque-tunnel); default 'deny' is the fail-closed safe value (the OFF posture), not false. Only read when TLS-MITM is authorized.",
   },
+  // Numeric tuning COUNTS, not feature gates — both bench-only and inert off the
+  // full-remote path. grade-concurrency 1 = serial grading (the historical
+  // global mutex, arm64-safe, byte-identical). full-remote-relaunch 1 = the
+  // safe-resilience baseline (one transient spot/ssh box loss self-heals).
+  QUANTA_SWEBENCH_GRADE_CONCURRENCY: {
+    field: "swebenchGradeConcurrency",
+    expectedDefault: 1,
+    reason:
+      "grade parallelism COUNT; default 1 = serial grading (the pre-existing global-mutex behavior, arm64-safe). >1 only on x86 native. Not a feature gate.",
+  },
+  QUANTA_BENCH_FULL_REMOTE_RELAUNCH: {
+    field: "fullRemoteRelaunch",
+    expectedDefault: 1,
+    reason:
+      "full-remote box relaunch COUNT on empty result; default 1 = the resilience baseline (one transient spot/ssh loss self-heals). Bench-only, inert off the full-remote path. Not a feature gate.",
+  },
 }
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,9 @@ export interface Ec2BackendConfig {
   readonly ttlMinutes?: number
   /** Keep the box alive after grading (debug). Default false ⇒ terminate. */
   readonly keep?: boolean
+  /** Launch ON-DEMAND instead of spot (no reclaim) — for capacity crunches where
+   *  spot is reclaimed mid-grade. ~3× cost. Default false (spot). */
+  readonly onDemand?: boolean
   readonly maxWorkers?: number
   /** model_name_or_path baked into the predictions rows (report filename
    *  `<model>.<runId>.json`). Forwarded to the internal ssh backend; default
@@ -106,6 +109,7 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   const subnetId = cfg.subnetId ?? DEFAULTS.subnetId
   const vpcId = cfg.vpcId ?? DEFAULTS.vpcId
   const sgName = cfg.sgName ?? DEFAULTS.sgName
+  const onDemand = cfg.onDemand ?? false
   const diskGb = cfg.diskGb ?? DEFAULTS.diskGb
   const ttlMinutes = cfg.ttlMinutes ?? DEFAULTS.ttlMinutes
   const keep = cfg.keep ?? false
@@ -210,8 +214,9 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
       ...(cfg.subnetId !== undefined ? ["--subnet-id", subnetId] : []),
       "--security-group-ids",
       sgId,
-      "--instance-market-options",
-      '{"MarketType":"spot"}',
+      // Spot (default, ~3× cheaper) ⇒ reclaimable; on-demand ⇒ no market option
+      // (AWS default) ⇒ no reclaim, for capacity crunches.
+      ...(onDemand ? [] : ["--instance-market-options", '{"MarketType":"spot"}']),
       "--metadata-options",
       "HttpTokens=required,HttpPutResponseHopLimit=1",
       "--instance-initiated-shutdown-behavior",

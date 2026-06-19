@@ -1005,6 +1005,11 @@ export interface RuntimeConfig {
   /** Max turns per instance for the bench runner (`QUANTA_MAX_TURNS`).
    *  Absent ⇒ batch mode default from BUDGET_PRESETS.batch. */
   readonly maxTurnsBatch: number | undefined
+  /** Extra full-remote box relaunches on an empty result
+   *  (`QUANTA_BENCH_FULL_REMOTE_RELAUNCH`). A spot reclaim / ssh-255 drop loses
+   *  the whole run; default 1 ⇒ up to 2 attempts. `--keep` forces 0 (a kept box
+   *  isn't auto-terminated, so relaunching would orphan it). */
+  readonly fullRemoteRelaunch: number
   /** Force `--prepare-images` to attempt the local build even on arm64
    *  (`QUANTA_SWEBENCH_PREPARE_FORCE`). Default false — arm64 skips prepare
    *  (conda crashes under x86 emulation; the eval path pulls prebuilt). */
@@ -1715,6 +1720,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),
     benchTimeoutMs: parsePositiveInt(env["QUANTA_BENCH_TIMEOUT_MS"], "QUANTA_BENCH_TIMEOUT_MS"),
     maxTurnsBatch: parsePositiveInt(env["QUANTA_MAX_TURNS"], "QUANTA_MAX_TURNS"),
+    fullRemoteRelaunch:
+      parsePositiveInt(
+        env["QUANTA_BENCH_FULL_REMOTE_RELAUNCH"],
+        "QUANTA_BENCH_FULL_REMOTE_RELAUNCH",
+      ) ?? 1,
     swebenchPrepareForce: parseBool(env["QUANTA_SWEBENCH_PREPARE_FORCE"]),
     runId: stringOrUndef(env["QUANTA_RUN_ID"]),
     prefsHome: stringOrUndef(env["QUANTA_PREFS_HOME"]),
