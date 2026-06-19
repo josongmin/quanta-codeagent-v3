@@ -39,6 +39,9 @@ evidence:
       - tests/unit/bench-full-remote-relaunch-hellgate.test.ts
       - tests/unit/bench-full-remote-stream-hellgate.test.ts
       - tests/unit/full-remote-bench-env-forward.test.ts
+      - tests/unit/bench-remote-backend.test.ts
+      - tests/unit/bench-concurrency-hellgate.test.ts
+      - tests/unit/bench-local-env-and-gold-sanity.test.ts
     integration: []
     contract: []
 knobs: []

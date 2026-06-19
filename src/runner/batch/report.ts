@@ -24,7 +24,12 @@ import {
   type FailureClassification,
 } from "./corpus/failure-classifier"
 import { resolvedTotals } from "./observe"
-import type { BenchInstanceBudget, BenchReproTestTelemetry, InstanceResult } from "./types"
+import type {
+  BenchInstanceBudget,
+  BenchReproTestTelemetry,
+  GradeBreakdown,
+  InstanceResult,
+} from "./types"
 
 export interface BenchReportMeta {
   model: string
@@ -62,6 +67,10 @@ export interface PerInstanceReport {
   budget?: BenchInstanceBudget
   /** Repro-test generation/install telemetry. Omitted when the knob was off. */
   reproTest?: BenchReproTestTelemetry
+  /** jun-19 — official-grade regression-vs-didn't-fix breakdown (swebench only).
+   *  Lets a run self-measure PASS_TO_PASS-break rate (regression-gate
+   *  justification). Omitted for non-swebench / ungraded ⇒ byte-identical. */
+  gradeBreakdown?: GradeBreakdown
 }
 
 export interface BenchReport {
@@ -128,6 +137,7 @@ export const buildReport = (
         ...(c.termination !== "passed" ? { failure: c } : {}),
         ...(r.budget !== undefined ? { budget: r.budget } : {}),
         ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
+        ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
       }
     }),
     knobs,

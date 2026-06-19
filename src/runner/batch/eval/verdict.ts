@@ -7,12 +7,14 @@
  * `error`. Returns rich evidence so the caller can emit a `verify` trajectory
  * event; pass/fail semantics are unchanged.
  */
-import type { Instance } from "../types"
+import type { GradeBreakdown, Instance } from "../types"
 import { exec } from "./exec"
 
 export interface PythonSwebenchResult {
   resolved: boolean
   gradingCompleted: boolean
+  /** Regression-vs-didn't-fix breakdown from the harness (eval-only diagnostic). */
+  breakdown?: GradeBreakdown
   log: string
 }
 
@@ -32,6 +34,8 @@ export interface VerifyOutcome {
   failedTests: string[]
   logTail: string
   reportPath: string
+  /** Official-grade regression-vs-didn't-fix breakdown (swebench path only). */
+  breakdown?: GradeBreakdown
 }
 
 export interface VerifyDeps {
@@ -107,6 +111,7 @@ export const verify = async (
         failedTests: [],
         logTail: r.log.slice(-2000),
         reportPath: "",
+        ...(r.breakdown !== undefined ? { breakdown: r.breakdown } : {}),
       }
     }
   }

@@ -41,6 +41,8 @@ evidence:
       - tests/unit/repair-context.test.ts
       - tests/unit/repair-validator-observe-only.test.ts
       - tests/unit/repair-primary-rail-hellgate.test.ts
+      - tests/unit/rematerialize.test.ts
+      - tests/unit/runner/retry-policy.test.ts
     integration:
       - tests/integration/bench-closure-repair-gate.test.ts
     contract: []

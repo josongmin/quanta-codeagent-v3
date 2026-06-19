@@ -37,6 +37,7 @@ import { join } from "node:path"
 import { abortableSleep, abortReasonOf, errMessage, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
+import type { GradeBreakdown } from "@/runner/batch/types"
 import type { Instance } from "./types"
 
 export interface SpawnResult {
@@ -119,6 +120,11 @@ export interface PySwebenchResult {
    *  crashes silently; this field reaches the caller for downstream
    *  classification (verdict.ts uses it to avoid the `harness_error` misname). */
   gradingCompleted: boolean
+  /** Per-instance regression-vs-didn't-fix breakdown from the harness output
+   *  (see {@link GradeBreakdown}). Absent when grading did not produce a
+   *  per-instance report (infra fail / empty patch) — the failure-mode signal
+   *  is simply unavailable, never invented. EVAL-ONLY diagnostic. */
+  breakdown?: GradeBreakdown
   /** Human-readable trace: probe/argv/exit + report excerpt or failure cause.
    *  Always populated, even on failure (never throws to the caller). */
   log: string
@@ -207,6 +213,70 @@ const collectResolvedIds = async (dir: string): Promise<string[]> => {
     }
   }
   return ids
+}
+
+/** `{success:[…], failure:[…]}` → counts. Tolerant of missing/!array members. */
+const statusCounts = (node: unknown): { failed: number; total: number } => {
+  if (typeof node !== "object" || node === null) return { failed: 0, total: 0 }
+  const rec = node as Record<string, unknown>
+  const s = Array.isArray(rec.success) ? rec.success.length : 0
+  const f = Array.isArray(rec.failure) ? rec.failure.length : 0
+  return { failed: f, total: s + f }
+}
+
+/**
+ * Pull per-instance {@link GradeBreakdown}s out of a parsed harness PER-INSTANCE
+ * report object: `{ "<instance_id>": { resolved, tests_status: { FAIL_TO_PASS:
+ * {success,failure}, PASS_TO_PASS:{success,failure} } } }`. Entries without a
+ * `tests_status` (e.g. the run-summary report, which only has `resolved_ids`)
+ * yield nothing — so feeding either report shape here is safe.
+ */
+export const extractGradeBreakdowns = (report: unknown): Map<string, GradeBreakdown> => {
+  const out = new Map<string, GradeBreakdown>()
+  if (typeof report !== "object" || report === null) return out
+  for (const [iid, val] of Object.entries(report as Record<string, unknown>)) {
+    if (typeof val !== "object" || val === null) continue
+    const rec = val as Record<string, unknown>
+    const ts = rec.tests_status
+    if (typeof ts !== "object" || ts === null) continue // not a per-instance report
+    const tsr = ts as Record<string, unknown>
+    const f2p = statusCounts(tsr.FAIL_TO_PASS)
+    const p2p = statusCounts(tsr.PASS_TO_PASS)
+    out.set(iid, {
+      resolved: rec.resolved === true,
+      failToPassFailed: f2p.failed,
+      passToPassFailed: p2p.failed,
+      passToPassTotal: p2p.total,
+    })
+  }
+  return out
+}
+
+/**
+ * Recursively scan `dir` for harness per-instance `report.json`s (nested under
+ * `logs/run_evaluation/<run>/<model>/<instance>/report.json`) and merge their
+ * breakdowns. Tolerant: unreadable / non-report JSON is skipped. EVAL-ONLY.
+ */
+export const collectGradeBreakdowns = async (
+  dir: string,
+): Promise<Map<string, GradeBreakdown>> => {
+  const merged = new Map<string, GradeBreakdown>()
+  let entries: string[]
+  try {
+    entries = (await readdir(dir, { recursive: true })) as unknown as string[]
+  } catch {
+    return merged
+  }
+  for (const rel of entries) {
+    if (!rel.endsWith("report.json")) continue
+    try {
+      const parsed = JSON.parse(await readFile(join(dir, rel), "utf8")) as unknown
+      for (const [iid, b] of extractGradeBreakdowns(parsed)) merged.set(iid, b)
+    } catch {
+      // not a per-instance report / unreadable — skip
+    }
+  }
+  return merged
 }
 
 /**
@@ -374,6 +444,9 @@ export const evaluateWithPythonSwebench = async (
     const { run, resolvedIds, retried } = await gradeWithRetry(spawn, argv, work, opts)
     const resolved = resolvedIds.includes(meta.instanceId)
     const gradingCompleted = harnessReachedSummary(run.stdout)
+    // Capture the regression-vs-didn't-fix breakdown from the harness per-instance
+    // report BEFORE the `finally` removes `work`. Best-effort: absent ⇒ omitted.
+    const breakdown = (await collectGradeBreakdowns(work)).get(meta.instanceId)
     const tail = (s: string): string => s.slice(-1500)
     const log = [
       `cmd: ${argv.join(" ")}`,
@@ -384,7 +457,7 @@ export const evaluateWithPythonSwebench = async (
       `stdout(tail): ${tail(run.stdout)}`,
       `stderr(tail): ${tail(run.stderr)}`,
     ].join("\n")
-    return { resolved, gradingCompleted, log }
+    return { resolved, gradingCompleted, log, ...(breakdown !== undefined ? { breakdown } : {}) }
   } catch (e) {
     return {
       resolved: false,

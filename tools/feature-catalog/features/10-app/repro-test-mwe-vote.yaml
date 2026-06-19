@@ -36,6 +36,11 @@ evidence:
       - tests/unit/extract-issue-repro.test.ts
       - tests/unit/repro-test/execute.test.ts
       - tests/unit/repro-test/generate.test.ts
+      - tests/unit/repro-test/adversarial-repro.test.ts
+      - tests/unit/repro-vote.test.ts
+      - tests/unit/repro-vote-validate.test.ts
+      - tests/unit/repro-vote-wiring-hellgate.test.ts
+      - tests/unit/repro-consensus-selection-port.test.ts
       - tests/unit/repair-validator-observe-only.test.ts
       - tests/unit/repair-primary-rail-hellgate.test.ts
     integration: []

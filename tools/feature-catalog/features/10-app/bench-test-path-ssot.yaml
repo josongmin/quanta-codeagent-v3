@@ -27,10 +27,11 @@ purpose: |
 evidence:
   code:
     - src/shared/test-path.ts
+    - src/agent/dispatch.ts
   adrs: []
   tests:
     unit:
-      - tests/unit/no-raw-nul-bytes-hellgate.test.ts
+      - tests/unit/dispatch-test-scope-guard-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

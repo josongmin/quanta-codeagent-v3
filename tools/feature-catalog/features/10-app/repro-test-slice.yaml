@@ -57,8 +57,10 @@ evidence:
       - tests/unit/repro-test/execute.test.ts
       - tests/unit/repro-test/select.test.ts
       - tests/unit/repro-test/integration.test.ts
+      - tests/unit/repro-test/adversarial-repro.test.ts
       - tests/unit/repro-test-hellgate.test.ts
       - tests/unit/bench-repro-test-wiring.test.ts
+      - tests/unit/repro-run-argv.test.ts
     integration: []
     contract: []
 knobs:

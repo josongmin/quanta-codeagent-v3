@@ -92,6 +92,22 @@ export type BenchReproTestTelemetry =
       sampleStderrTail?: string
     }
 
+/**
+ * Per-instance grading breakdown — the "WHY did it fail" diagnostic the summary
+ * `resolved` boolean discards. EVAL-ONLY (from the official harness output).
+ * Separates the two failure modes a single `resolved:false` conflates:
+ *   - `passToPassFailed > 0` ⇒ the patch BROKE an existing test (a REGRESSION) —
+ *     the failure a regression gate / verify-and-select can address.
+ *   - `passToPassFailed === 0 ∧ failToPassFailed > 0` ⇒ the patch did NOT fix the
+ *     target (no regression) — only better localization/generation can help.
+ */
+export interface GradeBreakdown {
+  resolved: boolean
+  failToPassFailed: number
+  passToPassFailed: number
+  passToPassTotal: number
+}
+
 /** Outcome of running one instance once. */
 export interface InstanceResult {
   id: string
@@ -221,6 +237,12 @@ export interface InstanceResult {
    * here — the late-critic routing is a later measure-first step.
    */
   patchBudget?: import("@/agent/patch-budget").PatchBudgetVerdict
+  /** jun-19 — official-grade regression-vs-didn't-fix breakdown (eval-only).
+   *  Present only for swebench instances graded by the Python harness; absent
+   *  ⇒ byte-identical report. Lets a campaign run self-measure how often our
+   *  patches break PASS_TO_PASS (the regression-gate justification) with NO
+   *  extra runs — see {@link GradeBreakdown}. */
+  gradeBreakdown?: GradeBreakdown
   /**
    * T-301 — the typed VerificationPlan computed for this run (primaryRail +
    * required/optional steps + per-step successPredicate). Emitted only when the

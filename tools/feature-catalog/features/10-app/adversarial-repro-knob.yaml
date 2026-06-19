@@ -30,6 +30,7 @@ evidence:
   tests:
     unit:
       - tests/unit/bench-repro-test-wiring.test.ts
+      - tests/unit/repro-test/adversarial-repro.test.ts
     integration: []
     contract: []
 knobs: ["adversarial-repro"]

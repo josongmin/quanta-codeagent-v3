@@ -989,6 +989,11 @@ const runInstanceOnce = async (
         })
       }
     }
+    // jun-19 — surface the official-grade regression-vs-didn't-fix breakdown so a
+    // campaign run self-measures how often our patches break PASS_TO_PASS (the
+    // regression-gate justification) with NO extra runs. Present for swebench
+    // grades only; absent ⇒ byte-identical report.
+    if (v.breakdown !== undefined) extra.gradeBreakdown = v.breakdown
     return okResult(instance, phase, v, extra)
   } catch (error) {
     if (error instanceof ObservationError) {

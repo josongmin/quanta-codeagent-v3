@@ -52,6 +52,7 @@ evidence:
     - src/runner/batch/eval/closure-diagnostics.ts
     - src/runner/batch/eval/closure-diagnostics-io.ts
     - src/runner/batch/eval/closure-session.ts
+    - src/runner/batch/eval/fault-evidence.ts
     - src/runner/batch/eval/knobs-bench.ts
     - src/runner/batch/eval/patch-hygiene.ts
   adrs: []
@@ -83,5 +84,7 @@ evidence:
     integration:
       - tests/integration/bench-closure-repair-gate.test.ts
     contract: []
+config_refs:
+  env: [QUANTA_BENCH_CLOSURE_DIAG]
 knobs: []
 deliberate_hold: null

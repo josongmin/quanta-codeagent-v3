@@ -11,7 +11,7 @@ modes: [batch]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:bench"]
-depends_on: [bench-eval-driver]
+depends_on: [bench-eval-driver, bench-knob-presets-registry]
 surface_integration:
   cli: missing
   web: na

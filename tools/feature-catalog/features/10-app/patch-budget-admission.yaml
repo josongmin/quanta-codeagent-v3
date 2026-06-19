@@ -31,10 +31,12 @@ evidence:
   code:
     - src/agent/patch-budget/index.ts
     - src/runner/knobs/knobs/patch-budget.ts
+    - src/runner/knobs/presets.ts
   adrs: []
   tests:
     unit:
       - tests/unit/patch-budget.test.ts
+      - tests/unit/bench-preset-drives-config-hellgate.test.ts
     integration: []
     contract: []
 knobs: ["patch-budget"]

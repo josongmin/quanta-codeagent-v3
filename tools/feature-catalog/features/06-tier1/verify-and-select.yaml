@@ -11,7 +11,15 @@ modes: [headless]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:trae"]
-depends_on: [speculative-branch-search, branch-search-pure-scorer]
+depends_on: [speculative-branch-search, branch-search-pure-scorer, proof-driven-bench-closure]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench verify-select path only; not interactive CLI"
+    web: "outer control plane; no browser affordance"
 purpose: |
   The OUTER control plane for SWE-bench: the corrected north-star is "no single
   noisy oracle holds global verdict authority". The bench generates N candidate
@@ -44,6 +52,8 @@ evidence:
       - tests/unit/regression-oracle.test.ts
       - tests/unit/selection-executor.test.ts
       - tests/unit/resolved-consensus.test.ts
+      - tests/unit/pass-to-pass-threading.test.ts
+      - tests/unit/repro-consensus-selection-port.test.ts
     integration: []
     contract: []
 knobs:
