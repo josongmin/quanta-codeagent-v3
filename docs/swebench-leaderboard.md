@@ -11,7 +11,8 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 - **batch4 11/13 + batch5 9/13 + batch7 9/13 = 29** — django E-class 계속. run_id `eclass-untried-sweep-b457-2026-06-19`.
 - **batch3-slice 12/14 + batch6 9/13 = 21** — run_id `eclass-untried-sweep-b36-2026-06-19`. (batch3는 박스 하나가 16145서 hang했으나 같은 슬라이스 중복 박스가 12/14로 완주 → 거기서 수확.)
 - **batch9 9/13** (local capture, batch3-slice와 2 net-new) + **사이드카 recovery 4** (non-django: pytest-5787, sympy-12096/17630/23262 — 전부 clean preset, oracle-hint 無). run_id `eclass-untried-sweep-b9` / `sidecar-harvest-nondjango`.
-- 누적 유니크 resolved = **191 / 500**. 타게팅 원칙: **E-class untried(cnt≥14) 우선, CEILING(cnt=0) skip(0 ROI), 길고 어려운 M/H는 보류.**
+- **non-django E-class 확장 +41** (sklearn 19, sphinx 8, xarray 5, matplotlib 4, sympy 3, astropy 1, django 1) — 전부 clean agentless-v2. run_id `nondjango-eclass-harvest-2026-06-20`. django 졸업 후 다repo로 확장하니 대량 회수.
+- 누적 유니크 resolved = **235 / 500**. 타게팅 원칙: **E-class untried(cnt≥14) 우선, CEILING(cnt=0) skip(0 ROI), 길고 어려운 M/H는 보류.**
 - 인프라: 박스 종료 후 결과 회수는 durable 사이드카 `~/Library/quanta-codeagent-v3/bench/full-remote/report-i-*.json`(perInstance[].passed/turns)가 정본 — box ssh보다 신뢰성 높음(박스 죽어도 남음).
 - 놀던 박스 4개(완료/hung) 종료해 비용 정리.
 - ⚠️ 인프라 교훈: **박스 run.log = 결과 정본**(box→local 스트리밍 자주 끊겨 로컬 sweep 로그가 patch-gen에서 멈춤=거짓). 회수는 박스 ssh로. 또 per-instance patch-gen 타임아웃 없어 1개 hang이 배치 grading 배리어를 막음(16145) → 중복 박스가 구제.

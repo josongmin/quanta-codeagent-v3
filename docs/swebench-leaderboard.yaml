@@ -1002,3 +1002,218 @@ runs:
     turns: 119
     preset: agentless-v2
     model: gpt-5.4
+
+- run_id: nondjango-eclass-harvest-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (durable sidecar)
+  scope: 'COVERAGE EXPANSION — non-django E-class sweep harvest. 41 clean agentless-v2 passes across 7 repos: {'sklearn': 19, 'xarray': 5, 'sympy': 3, 'matplotlib': 4, 'sphinx': 8, 'astropy': 1, 'django': 1}. issue-hint=problem statement (legit), no gold/localize oracle.'
+  resolved_count: 41
+  resolved:
+  - instance_id: astropy__astropy-13579
+    repo: astropy
+    turns: 56
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-16139
+    repo: django
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: matplotlib__matplotlib-22719
+    repo: matplotlib
+    turns: 34
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: matplotlib__matplotlib-25122
+    repo: matplotlib
+    turns: 21
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: matplotlib__matplotlib-25287
+    repo: matplotlib
+    turns: 42
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: matplotlib__matplotlib-26113
+    repo: matplotlib
+    turns: 28
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-3677
+    repo: xarray
+    turns: 28
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-4075
+    repo: xarray
+    turns: 25
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-4629
+    repo: xarray
+    turns: 55
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-4966
+    repo: xarray
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-7233
+    repo: xarray
+    turns: 47
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-10908
+    repo: sklearn
+    turns: 28
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-11310
+    repo: sklearn
+    turns: 44
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-11578
+    repo: sklearn
+    turns: 24
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-12585
+    repo: sklearn
+    turns: 20
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-12682
+    repo: sklearn
+    turns: 44
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-13135
+    repo: sklearn
+    turns: 17
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-13142
+    repo: sklearn
+    turns: 21
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-13328
+    repo: sklearn
+    turns: 38
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-13439
+    repo: sklearn
+    turns: 25
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-13496
+    repo: sklearn
+    turns: 40
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-13779
+    repo: sklearn
+    turns: 17
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-14141
+    repo: sklearn
+    turns: 30
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-14496
+    repo: sklearn
+    turns: 27
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-14710
+    repo: sklearn
+    turns: 32
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-14894
+    repo: sklearn
+    turns: 36
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-15100
+    repo: sklearn
+    turns: 19
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-25232
+    repo: sklearn
+    turns: 51
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-25973
+    repo: sklearn
+    turns: 39
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-9288
+    repo: sklearn
+    turns: 24
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-7757
+    repo: sphinx
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-7889
+    repo: sphinx
+    turns: 30
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-7910
+    repo: sphinx
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-8120
+    repo: sphinx
+    turns: 51
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-8269
+    repo: sphinx
+    turns: 30
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-8721
+    repo: sphinx
+    turns: 34
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-9320
+    repo: sphinx
+    turns: 24
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-9367
+    repo: sphinx
+    turns: 29
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sympy__sympy-24066
+    repo: sympy
+    turns: 29
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sympy__sympy-24213
+    repo: sympy
+    turns: 36
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sympy__sympy-24443
+    repo: sympy
+    turns: 25
+    preset: agentless-v2
+    model: gpt-5.4
