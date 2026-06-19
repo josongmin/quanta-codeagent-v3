@@ -483,10 +483,21 @@ const runDatasetMode = async (
     results,
     { provider: meta.provider, model: meta.model, n: cfg.n },
   )
-  // T-101 closure diagnostics — OFFLINE sibling artifact, default-OFF so the
-  // no-knob path is byte-identical. EVAL-ONLY: the oracle (dataset gold/F2P) is
-  // read here post-run, never threaded into the agent loop. Best-effort.
-  if (gateOn(process.env, "QUANTA_BENCH_CLOSURE_DIAG")) {
+  // T-101 closure diagnostics — OFFLINE sibling artifact. EVAL-ONLY: the oracle
+  // (dataset gold/F2P) is read here post-run, never threaded into the agent loop.
+  // AUTO-ENABLED whenever the run actually produced closure telemetry (a closure
+  // posture was active — primary-rail / verification-plan), so a `--preset
+  // agentless-v2` run captures its OWN measurement (false_red / gate_enter /
+  // verify_rounds) without the operator having to remember a separate
+  // QUANTA_BENCH_CLOSURE_DIAG flag. The flag still force-enables; a non-closure run
+  // produces no closure fields ⇒ no sidecar ⇒ byte-identical. Best-effort.
+  const closureTelemetryPresent = results.some(
+    (r) =>
+      r.primaryRailPresent !== undefined ||
+      r.verificationPlan !== undefined ||
+      r.gateEntered !== undefined,
+  )
+  if (gateOn(process.env, "QUANTA_BENCH_CLOSURE_DIAG") || closureTelemetryPresent) {
     try {
       const dataset = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET
       const sc = writeClosureSidecar(reportPath, results, dataset)
