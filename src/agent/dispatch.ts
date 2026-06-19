@@ -41,6 +41,7 @@ import {
 import { buildRepairReactor, commandRepairCheck, lintRepairCheck } from "./edit-repair-wire"
 import { LocalEffectChannel } from "./effect-channel"
 import { decideLocalizePhase, MUTATING_TOOL_NAMES } from "./localize-phase-guard"
+import { reproDoubtStep } from "./repro-doubt-guard"
 import { resolveCollaborationMode } from "./mode"
 import { checkWriteEffects } from "./ownership-policy"
 import { planStoreToMutator } from "./plan/mutator-adapter"
@@ -698,6 +699,28 @@ const observeEffortClassifierToolFailure = (
   classifier.onToolFailure(toolName)
 }
 
+/** repro-doubt guard (jun-20) — advance the per-run stuck counter on every tool
+ *  dispatch and, when the agent has re-run the test `stuckRuns` times since its
+ *  last edit, prepend the one-shot {@link REPRO_DOUBT_STEER} as a system-reminder.
+ *  DEFAULT-OFF byte-identical: absent `reproDoubt`/`reproDoubtState` ⇒ early return
+ *  with no allocation. State is advanced by reassigning `config.reproDoubtState`
+ *  (the config object persists across the run — same channel as `attachReproDoubt`),
+ *  mirroring how `localizePhaseState` is carried. The steer reuses
+ *  {@link prependCapReminder}'s system-reminder framing so the model reads it
+ *  alongside the test output it just produced. */
+const applyReproDoubtSteer = (
+  out: DispatchResult,
+  config: AgentConfig,
+  toolName: string,
+): DispatchResult => {
+  const cfg = config.reproDoubt
+  const state = config.reproDoubtState
+  if (cfg === undefined || state === undefined) return out
+  const r = reproDoubtStep(state, toolName, cfg)
+  config.reproDoubtState = r.state
+  return r.steer === undefined ? out : prependCapReminder(out, r.steer)
+}
+
 /** ADR-0223 wrap: `execute(...)` bracketed by stuck-detector ticks so the
  *  auto-background slice can poll "is this tool past the 2s threshold?" without
  *  any per-call timer. Extracted to keep `dispatchToolInner` under biome's
@@ -1126,7 +1149,10 @@ const dispatchToolInner = async (
   // When a reminder was generated, prepend it as a `<system-reminder>` block
   // in the tool result output so the model reads the enforcement hint alongside
   // the tool output. `prependCapReminder` is extracted to keep complexity low.
-  const finalOut = capReminder !== undefined ? prependCapReminder(out, capReminder) : out
+  const cappedOut = capReminder !== undefined ? prependCapReminder(out, capReminder) : out
+  // repro-doubt: advance the stuck counter + (once per streak) prepend the
+  // doubt steer. Default-OFF byte-identical when the knob is unset.
+  const finalOut = applyReproDoubtSteer(cappedOut, config, effectiveCall.name)
   if (config.hooks) {
     await emitPostToolUseHooks(config, effectiveCall, finalOut)
   }

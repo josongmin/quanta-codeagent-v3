@@ -16,8 +16,9 @@ import { DedupGate } from "./dispatch-dedup"
 import { type TurnDiffSession, wireGitObservability } from "./git-observability"
 import type { HookBus, HookPromptInject } from "./hooks"
 import type { LocalizePhaseState } from "./localize-phase-guard"
+import type { ReproDoubtState } from "./repro-doubt-guard"
 import type { AgentMode } from "./prompt"
-import { buildLocalizePhase } from "./session-resources"
+import { buildLocalizePhase, buildReproDoubt } from "./session-resources"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import type { AgentConfig } from "./types"
 
@@ -227,6 +228,22 @@ export const attachLocalizePhase = (cfg: AgentConfig): LocalizePhaseState | unde
   const state = buildLocalizePhase(cfg)
   if (state !== undefined && cfg.localizePhaseState === undefined) {
     cfg.localizePhaseState = state
+  }
+  return state
+}
+
+/**
+ * repro-doubt absorption (jun-20) — build the guard state when
+ * `cfg.reproDoubt.stuckRuns` is active and attach it to `cfg.reproDoubtState` so
+ * the sibling dispatch module advances it per tool call (via the AgentConfig
+ * channel, exactly like `attachLocalizePhase`). Unlike localize-phase the loop
+ * does NOT bump this state — dispatch advances it on each tool dispatch — so the
+ * return value is informational only. Default-OFF: `undefined` when inactive.
+ */
+export const attachReproDoubt = (cfg: AgentConfig): ReproDoubtState | undefined => {
+  const state = buildReproDoubt(cfg)
+  if (state !== undefined && cfg.reproDoubtState === undefined) {
+    cfg.reproDoubtState = state
   }
   return state
 }

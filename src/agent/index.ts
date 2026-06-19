@@ -429,6 +429,7 @@ export {
 } from "./verify-guard"
 export {
   isTestLikeCommand,
+  isVerifyOutputFailing,
   matchVerifyCommand,
   TEST_LIKE_RE,
   VERIFY_MATCHERS,

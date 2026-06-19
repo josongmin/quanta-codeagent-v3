@@ -17,6 +17,7 @@ import {
   attachCapEnforcer,
   attachDedupGate,
   attachLocalizePhase,
+  attachReproDoubt,
   buildGitDirectiveEmit,
   buildSeedMessages,
   buildTurnDiffSession,
@@ -142,6 +143,7 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   const closeoutGuardState = buildCloseoutGuard(cfg)
   attachCapEnforcer(cfg)
   const localizePhaseState = attachLocalizePhase(cfg)
+  attachReproDoubt(cfg)
   const guardChain = buildGuardChain({
     config: cfg,
     verifyGuardState,

@@ -29,6 +29,7 @@ import type {
   BenchReproTestTelemetry,
   GradeBreakdown,
   InstanceResult,
+  ReproOracleCalibration,
 } from "./types"
 
 export interface BenchReportMeta {
@@ -71,6 +72,10 @@ export interface PerInstanceReport {
    *  Lets a run self-measure PASS_TO_PASS-break rate (regression-gate
    *  justification). Omitted for non-swebench / ungraded ⇒ byte-identical. */
   gradeBreakdown?: GradeBreakdown
+  /** jun-20 — repro-oracle gold calibration (verify-select runs only). Lets a
+   *  campaign self-measure the resolved-oracle false-negative rate (the
+   *  verify-and-select bottleneck). Omitted otherwise ⇒ byte-identical. */
+  reproOracleCalibration?: ReproOracleCalibration
 }
 
 export interface BenchReport {

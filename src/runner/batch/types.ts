@@ -108,6 +108,22 @@ export interface GradeBreakdown {
   passToPassTotal: number
 }
 
+/**
+ * Repro-oracle gold calibration (EVAL-ONLY). Did the patched-resolved oracle
+ * recognize the GOLD reference fix as resolved? A `falseNegative` oracle says
+ * "not resolved" on a known-correct fix — so it would reject correct candidates,
+ * and a resolved gate built on it must FAIL-OPEN. `falseNegative` rate is the
+ * direct readout of the oracle's correctness (the verify-and-select bottleneck).
+ * See `repro-oracle-calibration.ts`.
+ */
+export interface ReproOracleCalibration {
+  goldCalibrated: boolean
+  falseNegative: boolean
+  available: boolean
+  goldVotes: number | null
+  goldK: number | null
+}
+
 /** Outcome of running one instance once. */
 export interface InstanceResult {
   id: string
@@ -243,6 +259,12 @@ export interface InstanceResult {
    *  patches break PASS_TO_PASS (the regression-gate justification) with NO
    *  extra runs — see {@link GradeBreakdown}. */
   gradeBreakdown?: GradeBreakdown
+  /** jun-20 — repro-oracle gold calibration (eval-only). Present only on a
+   *  verify-select run with a gold patch; absent ⇒ byte-identical. Lets a
+   *  campaign self-measure the resolved-oracle false-negative rate (the
+   *  verify-and-select bottleneck) with NO extra runs — see {@link
+   *  ReproOracleCalibration}. */
+  reproOracleCalibration?: ReproOracleCalibration
   /**
    * T-301 — the typed VerificationPlan computed for this run (primaryRail +
    * required/optional steps + per-step successPredicate). Emitted only when the

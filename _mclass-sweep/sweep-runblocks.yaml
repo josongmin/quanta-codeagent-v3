@@ -1,0 +1,66 @@
+- run_id: sweep-w3-s0-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2, prebaked AMI
+  scope: 'STRUCTURAL SWEEP wave3 slice0 — non-CEILING untried, cnt-desc.'
+  resolved_count: 6
+  resolved:
+  - instance_id: django__django-16527
+    repo: django
+    turns: 18
+  - instance_id: django__django-16801
+    repo: django
+    turns: 34
+  - instance_id: django__django-16595
+    repo: django
+    turns: 42
+  - instance_id: django__django-7530
+    repo: django
+    turns: 60
+  - instance_id: matplotlib__matplotlib-20859
+    repo: matplotlib
+    turns: 41
+  - instance_id: django__django-14500
+    repo: django
+    turns: 28
+- run_id: sweep-w4-s0-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2, prebaked AMI
+  scope: 'STRUCTURAL SWEEP wave4 slice0 — non-CEILING untried, cnt-desc.'
+  resolved_count: 4
+  resolved:
+  - instance_id: astropy__astropy-14096
+    repo: astropy
+    turns: 55
+  - instance_id: sympy__sympy-12481
+    repo: sympy
+    turns: 41
+  - instance_id: django__django-17087
+    repo: django
+    turns: 57
+  - instance_id: django__django-13401
+    repo: django
+    turns: 60
+- run_id: sweep-w5-s0-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2, prebaked AMI
+  scope: 'STRUCTURAL SWEEP wave5 slice0 — non-CEILING untried, cnt-desc.'
+  resolved_count: 3
+  resolved:
+  - instance_id: astropy__astropy-12907
+    repo: astropy
+    turns: 25
+  - instance_id: pytest-dev__pytest-7521
+    repo: pytest
+    turns: 32
+  - instance_id: django__django-14999
+    repo: django
+    turns: 60

@@ -1216,6 +1216,195 @@ const BENCH: readonly KnobInventoryEntry[] = [
       "Bench (gap-B): spec-fidelity steer — when the issue declares a concrete expected output (extractIssueDeclaredExpected), append a minimal-literal-fix steer; fail-closed (no spec ⇒ no steer, so co-change cases are not nudged). Default-OFF ⇒ byte-identical.",
     readSite: "runner/knobs/knobs/spec-fidelity-steer.ts",
   },
+  {
+    envKey: "QUANTA_BENCH_CLOSURE_REPAIR",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: closure-driven repair budget (max repair rounds N in [1,10]). Preset-level executor for the closure bundle verify gate. Default-OFF ⇒ byte-identical single-pass.",
+    readSite: "runner/knobs/knobs/closure-repair.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_ROUND0_MINIMAL",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (WS1): thin round-0 prompt — suppress bulky repro directive prose at round 0; re-attach on repair rounds ≥1. Default-OFF ⇒ byte-identical.",
+    readSite: "runner/knobs/knobs/round0-minimal.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_LSP_STEER",
+    kind: "bool",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: append LSP-nav grounding steer to localize-phase block. DEFAULT-ON when nav is on; explicit 0/off/false suppresses (A/B cold arm). Pointless without QUANTA_BENCH_LSP.",
+    readSite: "runner/knobs/knobs/lsp-steer.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_PATCH_BUDGET",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: minimal-edit PatchBudget telemetry over the final diff (#13417 over-engineer class). Default-OFF ⇒ byte-identical; observe-first.",
+    readSite: "runner/knobs/knobs/patch-budget.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_REPRO_VOTE",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: K-of-N resolved gate — re-run reproducing repro set on patched tree and majority-vote 'Issue resolved'. Requires repro-test. Default-OFF ⇒ byte-identical.",
+    readSite: "runner/knobs/knobs/repro-vote.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_ADVERSARIAL_REPRO",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: adversarial repro coverage block in repro generation (boundary/must-reject/no-copy-suggested-fix). Default-OFF ⇒ byte-identical repro prompt.",
+    readSite: "runner/knobs/knobs/adversarial-repro.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_REPRO_DOUBT",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: after N consecutive test re-runs with no edit, steer agent to doubt its repro test (break verify_loop_stuck). Domain N in [2,12]. Default-OFF.",
+    readSite: "runner/knobs/knobs/repro-doubt.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: verify-and-select outer plane — generate N candidate patches, score via VerificationBundle, submit best. Domain N in [1,8]. Default-OFF ⇒ single-pass.",
+    readSite: "runner/knobs/knobs/verify-select.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: max verify-and-select candidates generated concurrently (requires isolated sandboxes). Domain [1,8]. Unset ⇒ sequential (byte-identical).",
+    readSite: "runner/knobs/knobs/verify-select-concurrency.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_FIND_REFS",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: enable find_references tool + steer (timeout-immune ripgrep replacement for lsp_references on large repos). Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/driver.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_SIMPLICITY",
+    kind: "bool",
+    default: true,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: minimal-mechanism simplicity steer in SWE-bench prompt (OpenHands/Linus philosophy). DEFAULT-ON; explicit 0 disables (A/B baseline arm).",
+    readSite: "runner/batch/eval/driver.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_SIBLING",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: sibling-completion / co-change steer (ceiling multi-file class). Default-OFF ⇒ byte-identical prompt.",
+    readSite: "runner/batch/eval/driver.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_PROTECT_TESTS",
+    kind: "bool",
+    default: true,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: dispatch test-scope guard — deny mutating tools on test paths during in-loop swebench runs. DEFAULT-ON; explicit 0 disables (advisory-only baseline).",
+    readSite: "runner/batch/eval/driver.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_HOOKS",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runner-knobs",
+    describe:
+      "Pre/post tool-use HookBus wiring (cli + agent-batch surfaces only; bench measurement stays byte-identical). Strict 1/on gate.",
+    readSite: "runner/knobs/knobs/hooks.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_WORKING_STATE",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runner-knobs",
+    describe: "L3 working-state scratchpad (Codex absorption). CLI/agent surfaces only; excludes bench measurement.",
+    readSite: "runner/knobs/knobs/working-state.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_CLOSEOUT",
+    kind: "enum",
+    default: undefined,
+    group: "bench",
+    home: "runner-knobs",
+    describe:
+      "Closeout reminder at finish (ADR-0017). 1/on/true ⇒ enable; 4rule ⇒ Codex defended-claim scaffold. CLI/agent surfaces.",
+    readSite: "runner/knobs/knobs/closeout-guard.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_MUST_PASS",
+    kind: "enum",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: verify-guard outcome gate override (off / 1|on|strict / 2 / 3 maxTrips). Unset ⇒ driver swebench auto-on posture stands.",
+    readSite: "runner/knobs/knobs/must-pass.ts",
+  },
+  {
+    envKey: "QUANTA_FULL_REMOTE_AMI",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Full-remote: EC2 AMI override (--ami or env). Prebaked image with docker+uv+django; unset ⇒ stock/default AMI selection.",
+    readSite: "apps/bench/cli.ts",
+  },
+  {
+    envKey: "QUANTA_FULL_REMOTE_ONDEMAND",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Full-remote: on-demand (non-spot) EC2 escape hatch for capacity crunches. Default-OFF.",
+    readSite: "apps/bench/cli.ts",
+  },
 ]
 
 /** P1 cluster — memory pipeline (memory-factory.ts), @-mention resolver caps

@@ -104,3 +104,78 @@ describe("BenchStreamTap", () => {
     expect(tap.lastErrorMessage).toBe("boom")
   })
 })
+
+// P0 — verify-pass detection (tentative-patch retention). The tap fires
+// `onVerifyPass` exactly when a VERIFY tool_result comes back passing, so the
+// driver can snapshot a verified-green candidate. Teeth: pass fires, fail/
+// failing-output/non-verify do NOT, and absent callback is byte-identical.
+const toolResult = (name: string, ok: boolean, preview = ""): AgentEvent => ({
+  type: "tool_result",
+  id: `c-${name}`,
+  name,
+  ok,
+  preview,
+})
+
+describe("BenchStreamTap verify-pass (P0)", () => {
+  const run = (events: AgentEvent[]): { fired: number; forwarded: number } => {
+    const cap = new Capture()
+    let fired = 0
+    const tap = new BenchStreamTap(cap, () => {
+      fired += 1
+    })
+    for (const e of events) tap.emit(e)
+    return { fired, forwarded: cap.events.length }
+  }
+
+  test("test_runner PASS → fires once", () => {
+    expect(run([toolCall("test_runner", {}), toolResult("test_runner", true)]).fired).toBe(1)
+  })
+
+  test("test_runner FAIL (ok:false) → does NOT fire", () => {
+    expect(run([toolCall("test_runner", {}), toolResult("test_runner", false)]).fired).toBe(0)
+  })
+
+  test("test_runner ok:true but FAILING OUTPUT → does NOT fire", () => {
+    expect(
+      run([toolCall("test_runner", {}), toolResult("test_runner", true, "1 failed, 3 passed")])
+        .fired,
+    ).toBe(0)
+  })
+
+  test("bash test-like command (pytest) PASS → fires", () => {
+    expect(
+      run([toolCall("bash", { command: "python -m pytest tests/x.py" }), toolResult("bash", true)])
+        .fired,
+    ).toBe(1)
+  })
+
+  test("bash NON-test command PASS → does NOT fire", () => {
+    expect(run([toolCall("bash", { command: "ls -la" }), toolResult("bash", true)]).fired).toBe(0)
+  })
+
+  test("an edit tool result → does NOT fire (only verifies count)", () => {
+    expect(run([toolCall("edit", { file_path: "/s/a.py" }), toolResult("edit", true)]).fired).toBe(
+      0,
+    )
+  })
+
+  test("multiple verifies → fires once each (seq advances)", () => {
+    expect(
+      run([
+        toolCall("test_runner", {}),
+        toolResult("test_runner", true),
+        toolCall("test_runner", {}),
+        toolResult("test_runner", true),
+      ]).fired,
+    ).toBe(2)
+  })
+
+  test("RED-on-injection: NO callback → never fires, forwards EVERY event unchanged (byte-identical)", () => {
+    const cap = new Capture()
+    const tap = new BenchStreamTap(cap) // no onVerifyPass
+    const events = [toolCall("test_runner", {}), toolResult("test_runner", true)]
+    for (const e of events) tap.emit(e)
+    expect(cap.events).toEqual(events) // pure pass-through, no crash
+  })
+})

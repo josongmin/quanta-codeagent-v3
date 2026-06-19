@@ -60,6 +60,7 @@ import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { IdeContextProvider } from "./ide-context"
 import type { LocalizePhaseConfig, LocalizePhaseState } from "./localize-phase-guard"
+import type { ReproDoubtConfig, ReproDoubtState } from "./repro-doubt-guard"
 import type { NamedAgentResolver } from "./named-agent-registry"
 import type { ObjectivePort } from "./objective"
 import type { PlanStore } from "./plan/state"
@@ -475,6 +476,14 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  PUBLIC because the dispatch seam is in a sibling module — there is no
    *  module-private channel between `loop.ts` and `dispatch.ts`. */
   localizePhaseState?: LocalizePhaseState
+  /** repro-doubt guard config (jun-20). `{stuckRuns:N}` ⇒ after N test re-runs
+   *  with no edit, dispatch appends the one-shot doubt steer. Absent ⇒ OFF
+   *  (byte-identical). Set by the `repro-doubt` knob (QUANTA_BENCH_REPRO_DOUBT). */
+  reproDoubt?: ReproDoubtConfig
+  /** repro-doubt mutable state slot — built by `buildReproDoubt` ONLY when
+   *  `reproDoubt.stuckRuns` is active. Dispatch advances it per tool call and
+   *  appends {@link REPRO_DOUBT_STEER} once per stuck streak. Absent ⇒ never fires. */
+  reproDoubtState?: ReproDoubtState
   /** Bench test-scope guard (RCA 2026-06-19, django-13417). When `true`, the
    *  dispatch pre-flight `consultTestScope` DENIES any mutating tool
    *  (edit/write/scripted_replace/apply_patch[_structured]) whose target is a
@@ -2385,6 +2394,9 @@ export interface SafetyConfig {
   verifyGuard?: { maxTrips?: number; mustPass?: boolean }
   localizePhase?: LocalizePhaseConfig
   localizePhaseState?: LocalizePhaseState
+  /** repro-doubt guard — see AgentConfig.reproDoubt / reproDoubtState. */
+  reproDoubt?: ReproDoubtConfig
+  reproDoubtState?: ReproDoubtState
   /** Bench test-scope guard — see AgentConfig.protectTestPaths. */
   protectTestPaths?: boolean
   closeoutGuard?: { enabled?: boolean; fourRule?: boolean }

@@ -4,6 +4,7 @@ import type { RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
 import { type CloseoutGuardState, createCloseoutGuardState } from "./closeout-guard"
 import { createLocalizePhaseState, type LocalizePhaseState } from "./localize-phase-guard"
+import { createReproDoubtState, type ReproDoubtState } from "./repro-doubt-guard"
 import type { PersistDeps } from "./memory"
 import type { AgentRecorder } from "./metrics"
 import type { AgentConfig, RedactionRollup } from "./types"
@@ -120,6 +121,18 @@ export const buildLocalizePhase = (config: AgentConfig): LocalizePhaseState | un
   if (!Number.isInteger(n)) return undefined
   if (n < 1) return undefined
   return createLocalizePhaseState()
+}
+
+/** repro-doubt per-run state (jun-20). Built ONLY when `config.reproDoubt.stuckRuns`
+ *  is an integer ≥ 2 (the active domain — see `repro-doubt.ts` knob parser). Absent
+ *  ⇒ `undefined` (dispatch advance/inject is a single property check + early return →
+ *  byte-identical loop). Mirrors `buildLocalizePhase`. */
+export const buildReproDoubt = (config: AgentConfig): ReproDoubtState | undefined => {
+  const n = config.reproDoubt?.stuckRuns
+  if (typeof n !== "number") return undefined
+  if (!Number.isInteger(n)) return undefined
+  if (n < 2) return undefined
+  return createReproDoubtState()
 }
 
 /** Closeout reminder per-run resource. Built ONLY when

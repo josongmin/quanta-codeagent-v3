@@ -40,7 +40,11 @@ import {
   wireOptionalAgentPorts,
 } from "@/agent"
 import type { PrimaryRailStep } from "@/agent/closure"
-import { FIND_REFS_STEER, LSP_GROUNDING_STEER, SPEC_FIDELITY_STEER } from "@/agent/localize-phase-guard"
+import {
+  FIND_REFS_STEER,
+  LSP_GROUNDING_STEER,
+  SPEC_FIDELITY_STEER,
+} from "@/agent/localize-phase-guard"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
@@ -57,6 +61,7 @@ import type {
   BenchReproTestTelemetry,
   Instance,
   InstanceResult,
+  ReproOracleCalibration,
 } from "../types"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { buildClosureSession, buildPhasePatchHygiene } from "./closure-session"
@@ -71,12 +76,11 @@ import {
   resolveBenchKnobs,
 } from "./knobs-bench"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
+import { withCandidatePatch } from "./rematerialize"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import { makeReproVoteValidate } from "./repair/repro-vote"
 import { makePatchedResolvedConsensus } from "./repair/resolved-consensus"
-import { withCandidatePatch } from "./rematerialize"
-import type { Candidate } from "./selection-executor"
 import type {
   BuildRepairContextArgs,
   RunOnceResult,
@@ -99,6 +103,7 @@ import {
   ObservationError,
   type Wiring,
 } from "./report"
+import { calibrateReproOracle } from "./repro-oracle-calibration"
 import {
   type AttemptOutcome,
   classifyOutcome,
@@ -108,6 +113,7 @@ import {
   runRetryLoop,
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
+import type { Candidate } from "./selection-executor"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -1221,7 +1227,9 @@ export const buildConfig = (
       // `inLoopExec` like verifyGuard: the mini-swe posture (OFF) edits-and-
       // submits with test edits already stripped at diff time, so the guard is
       // moot there.
-      ...(instance.swebench && opt.inLoopExec && !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
+      ...(instance.swebench &&
+      opt.inLoopExec &&
+      !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
         ? { protectTestPaths: true }
         : {}),
       // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
@@ -1449,7 +1457,11 @@ const runAgentPhase = async (
  *  they can never drift in how a candidate's repro set is executed). */
 const reproExecBundle = (
   instance: Instance,
-): { exec: ReproExecPort; writeFile: ReproWriteFilePort; buildArgv?: (s: string) => readonly string[] } => {
+): {
+  exec: ReproExecPort
+  writeFile: ReproWriteFilePort
+  buildArgv?: (s: string) => readonly string[]
+} => {
   const repo = instance.swebench?.repo
   return {
     exec: (argv, cwd, timeoutMs) =>
@@ -1459,7 +1471,9 @@ const reproExecBundle = (
     writeFile: async (p: string, c: string): Promise<void> => {
       await Bun.write(p, c)
     },
-    ...(repo !== undefined ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, scriptPath) } : {}),
+    ...(repo !== undefined
+      ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, scriptPath) }
+      : {}),
   }
 }
 
@@ -1496,7 +1510,10 @@ export const makeReproConsensusSelectionPort = (
   timeoutMs: number,
 ): ((c: Candidate) => Promise<{ votes: number; k: number } | null>) => {
   if (reproSources.length === 0) return () => Promise.resolve(null)
-  const probe = makePatchedResolvedConsensus({ sources: reproSources, ...reproExecBundle(instance) })
+  const probe = makePatchedResolvedConsensus({
+    sources: reproSources,
+    ...reproExecBundle(instance),
+  })
   return (c) =>
     withCandidatePatch<{ votes: number; k: number } | null>({
       sandbox,
@@ -1505,6 +1522,57 @@ export const makeReproConsensusSelectionPort = (
       timeoutMs,
       probe: (sb) => probe(sb),
     })
+}
+
+const CALIBRATION_UNAVAILABLE: ReproOracleCalibration = {
+  goldCalibrated: false,
+  falseNegative: false,
+  available: false,
+  goldVotes: null,
+  goldK: null,
+}
+
+/**
+ * SOTA++ — the GOLD-CALIBRATED repro-consensus selection port. Same selection
+ * signal as {@link makeReproConsensusSelectionPort}, but FIRST calibrates the
+ * consensus oracle against the gold patch ({@link calibrateReproOracle}): if the
+ * oracle is a CONFIRMED false negative (says "not resolved" on the known-correct
+ * gold fix), the returned port FAILS OPEN (always `null`) so a proven-unreliable
+ * oracle can never REJECT a correct candidate — the convergent root-cause
+ * (jun-20: ~75–79% of misses are "right place, fix unrecognized by the oracle").
+ * Returns the calibration alongside for eval-only telemetry so a campaign
+ * self-measures the false-negative rate with no extra runs.
+ *
+ * EVAL-ONLY: the gold patch is the dataset reference, the same boundary the
+ * closure oracle's gold files use — never handed to the agent loop. The
+ * calibration mutates the sandbox (reset → gold → reset, via withCandidatePatch)
+ * but leaves it at base, so it MUST run before the candidate-generation loop.
+ */
+export const makeCalibratedReproConsensusPort = async (
+  instance: Instance,
+  reproSources: readonly string[],
+  sandbox: string,
+  timeoutMs: number,
+): Promise<{
+  port: (c: Candidate) => Promise<{ votes: number; k: number } | null>
+  calibration: ReproOracleCalibration
+}> => {
+  const base = makeReproConsensusSelectionPort(instance, reproSources, sandbox, timeoutMs)
+  if (reproSources.length === 0) return { port: base, calibration: CALIBRATION_UNAVAILABLE }
+  const probe = makePatchedResolvedConsensus({
+    sources: reproSources,
+    ...reproExecBundle(instance),
+  })
+  const calibration = await calibrateReproOracle({
+    resolvedProbe: probe,
+    goldPatch: instance.goldPatch,
+    sandbox,
+    baseCommit: instance.swebench?.baseCommit,
+    timeoutMs,
+  })
+  // A confirmed-false-negative oracle must NEVER reject a candidate ⇒ fail-open.
+  const port = calibration.falseNegative ? () => Promise.resolve(null) : base
+  return { port, calibration }
 }
 
 /**
@@ -1537,7 +1605,11 @@ const runRepairPhase = async (
   // patched tree); it falls back to the legacy gate on an empty set / fail /
   // tie. Default-OFF or no repro ⇒ `baseValidate` ⇒ byte-identical. The exec
   // wiring lives in the SHARED `buildReproVoteValidate` so both drivers agree.
-  const validate = buildReproVoteValidate(instance, reproSources, repair.validate ?? defaultValidate)
+  const validate = buildReproVoteValidate(
+    instance,
+    reproSources,
+    repair.validate ?? defaultValidate,
+  )
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,

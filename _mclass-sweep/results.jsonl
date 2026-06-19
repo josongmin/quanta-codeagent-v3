@@ -1,0 +1,31 @@
+{"id": "django__django-16569", "outcome": "pass", "turns": 21}
+{"id": "django__django-17029", "outcome": "pass", "turns": 23}
+{"id": "pydata__xarray-4356", "outcome": "pass", "turns": 24}
+{"id": "django__django-16662", "outcome": "pass", "turns": 60}
+{"id": "matplotlib__matplotlib-24970", "outcome": "pass", "turns": 28}
+{"id": "sympy__sympy-22714", "outcome": "pass", "turns": 42}
+{"id": "django__django-16100", "outcome": "pass", "turns": 30}
+{"id": "pytest-dev__pytest-10081", "outcome": "pass", "turns": 35}
+{"id": "pytest-dev__pytest-7432", "outcome": "pass", "turns": 34}
+{"id": "django__django-14539", "outcome": "pass", "turns": 60}
+{"id": "pytest-dev__pytest-5631", "outcome": "pass", "turns": 41}
+{"id": "astropy__astropy-14539", "outcome": "miss", "reason": "completed_unresolved"}
+{"id": "django__django-16612", "outcome": "miss", "turns": 29, "wave": 2, "slice": 0}
+{"id": "django__django-16527", "outcome": "pass", "turns": 18, "wave": 3, "slice": 0}
+{"id": "django__django-16801", "outcome": "pass", "turns": 34, "wave": 3, "slice": 0}
+{"id": "django__django-16595", "outcome": "pass", "turns": 42, "wave": 3, "slice": 0}
+{"id": "django__django-7530", "outcome": "pass", "turns": 60, "wave": 3, "slice": 0}
+{"id": "matplotlib__matplotlib-20859", "outcome": "pass", "turns": 41, "wave": 3, "slice": 0}
+{"id": "django__django-14500", "outcome": "pass", "turns": 28, "wave": 3, "slice": 0}
+{"id": "astropy__astropy-14096", "outcome": "pass", "turns": 55, "wave": 4, "slice": 0}
+{"id": "django__django-11211", "outcome": "miss", "turns": 44, "wave": 4, "slice": 0}
+{"id": "matplotlib__matplotlib-24570", "outcome": "miss", "turns": 27, "wave": 4, "slice": 0}
+{"id": "sympy__sympy-12481", "outcome": "pass", "turns": 41, "wave": 4, "slice": 0}
+{"id": "django__django-17087", "outcome": "pass", "turns": 57, "wave": 4, "slice": 0}
+{"id": "django__django-13401", "outcome": "pass", "turns": 60, "wave": 4, "slice": 0}
+{"id": "astropy__astropy-12907", "outcome": "pass", "turns": 25, "wave": 5, "slice": 0}
+{"id": "django__django-11815", "outcome": "miss", "turns": 60, "wave": 5, "slice": 0}
+{"id": "pytest-dev__pytest-7521", "outcome": "pass", "turns": 32, "wave": 5, "slice": 0}
+{"id": "sympy__sympy-23950", "outcome": "miss", "turns": 43, "wave": 5, "slice": 0}
+{"id": "django__django-14999", "outcome": "pass", "turns": 60, "wave": 5, "slice": 0}
+{"id": "django__django-15382", "outcome": "miss", "turns": 28, "wave": 5, "slice": 0}

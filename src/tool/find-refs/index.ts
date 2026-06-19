@@ -95,7 +95,18 @@ export const isDefinitionLine = (content: string, symbol: string): boolean => {
   return m.decl.test(content) || m.assign.test(content)
 }
 
-/** Render rg `path:line:content` rows into a grouped, def-first, capped report. */
+const FILE_CAP = 25
+
+/**
+ * Render rg `path:line:content` rows into a CO-CHANGE-oriented report:
+ *   1. header — total refs / file count / def count
+ *   2. **Files (co-change candidates)** — per-file ref counts, sorted by
+ *      (has-definition, ref-count). This is the actionable signal for a
+ *      multi-file fix: it tells the model WHICH files use the symbol and so may
+ *      have to change together (the exact gap `lsp_references` was meant to fill
+ *      before it started timing out). Capped at 25 files.
+ *   3. Matches — the raw `path:line:content` rows, definition-like first, cap 200.
+ */
 export const formatFindRefs = (stdout: string, symbol: string): string => {
   const rows = stdout
     .trimEnd()
@@ -104,19 +115,38 @@ export const formatFindRefs = (stdout: string, symbol: string): string => {
   const { decl, assign } = buildDefMatchers(symbol) // compile ONCE, reuse per row
   const defs: string[] = []
   const uses: string[] = []
+  const perFile = new Map<string, { count: number; hasDef: boolean }>()
   for (const row of rows) {
     // rg row = `path:line:content` (content may itself contain colons).
     const m = row.match(/^(.*?):(\d+):(.*)$/)
+    const file = m ? (m[1] as string) : (row.split(":", 1)[0] as string)
     const content = m ? (m[3] as string) : row
-    if (m && (decl.test(content) || assign.test(content))) defs.push(`[def] ${row}`)
+    const isDef = m !== null && (decl.test(content) || assign.test(content))
+    if (isDef) defs.push(`[def] ${row}`)
     else uses.push(row)
+    const f = perFile.get(file) ?? { count: 0, hasDef: false }
+    f.count += 1
+    f.hasDef = f.hasDef || isDef
+    perFile.set(file, f)
   }
+  const header = `${symbol} — ${rows.length} reference(s) in ${perFile.size} file(s)${defs.length ? ` (${defs.length} definition-like)` : ""}`
+  // Co-change candidate map: files with a definition first, then by ref count.
+  const files = [...perFile.entries()].sort(
+    (a, b) => Number(b[1].hasDef) - Number(a[1].hasDef) || b[1].count - a[1].count,
+  )
+  const fileLines = files
+    .slice(0, FILE_CAP)
+    .map(([f, s]) => `  ${f} — ${s.count} ref${s.count === 1 ? "" : "s"}${s.hasDef ? " (def here)" : ""}`)
+    .join("\n")
+  const fileMore = files.length > FILE_CAP ? `\n  … (${files.length - FILE_CAP} more files)` : ""
+  const fileBlock = `Files (co-change candidates — verify each that should change together):\n${fileLines}${fileMore}`
   const ordered = [...defs, ...uses]
-  const fileCount = new Set(rows.map((r) => r.split(":", 1)[0])).size
-  const header = `${symbol} — ${rows.length} reference(s) in ${fileCount} file(s)${defs.length ? ` (${defs.length} definition-like)` : ""}`
   const shown = ordered.slice(0, MAX_ROWS).join("\n")
-  const more = ordered.length > MAX_ROWS ? `\n… (${ordered.length - MAX_ROWS} more; NARROW with \`path\` or \`type\`)` : ""
-  return `${header}\n${shown}${more}`
+  const more =
+    ordered.length > MAX_ROWS
+      ? `\n… (${ordered.length - MAX_ROWS} more rows; NARROW with \`path\`/\`type\`)`
+      : ""
+  return `${header}\n\n${fileBlock}\n\nMatches:\n${shown}${more}`
 }
 
 export const findReferencesTool = defineTool<Input>({

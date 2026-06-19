@@ -16,13 +16,13 @@ import {
   BenchObserver,
   benchOptIns,
   buildReproVoteValidate,
-  makeReproConsensusSelectionPort,
   buildConfig as buildRunnerConfig,
   composeWithReproHint,
   DEFAULT_POLICY,
   enumerateRepoSources,
   type IssueHintMode,
   knobsForReport,
+  makeCalibratedReproConsensusPort,
   type PrepareIssueHintDeps,
   type PrepareReproTestDeps,
   parseBenchBranchSearchK,
@@ -51,9 +51,15 @@ import {
 } from "@/runner/batch/eval/repair-phase-policy"
 import { type Candidate, runSelection } from "@/runner/batch/eval/selection-executor"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
+import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
-import { errMessage } from "@/shared"
-import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
+import { errMessage, gateOn } from "@/shared"
+import type {
+  BenchReproTestTelemetry,
+  Instance,
+  InstanceResult,
+  ReproOracleCalibration,
+} from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
@@ -301,6 +307,9 @@ interface Phase {
    *  the repro sentinel reports resolved (false-RED ⇒ wasteful churn). Repair only. */
   primaryFalseRed?: boolean
   verifyRounds?: number
+  /** jun-20 — repro-oracle gold calibration for this verify-select run (eval-only
+   *  telemetry). Set by the selection phase; undefined on single-pass/repair. */
+  reproOracleCalibration?: ReproOracleCalibration
 }
 
 // Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
@@ -358,13 +367,34 @@ const runAgentPhase = async (
   let firstEditFile: string | undefined
   let editCount: number | undefined
   let turnsToFirstEdit: number | undefined
-  const patch = await withGitSnapshot(
+  // P0 — tentative-patch retention (Sonar absorption). When ON, snapshot the
+  // sandbox diff each time the agent's OWN verification passes; on a bad ending
+  // (max_turns / aborted — `stopReason !== "completed"`) emit the last
+  // verified-green snapshot instead of the empty/regressed final tree. Snapshots
+  // run on a serialized best-effort chain (never throw past the run). OFF (or
+  // non-swebench) ⇒ no `onVerifyPass` wired ⇒ tap + patch byte-identical.
+  const tentativeOn =
+    instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_TENTATIVE")
+  const recorder = createTentativeRecorder()
+  let snapChain: Promise<void> = Promise.resolve()
+  const onVerifyPass = tentativeOn
+    ? (seq: number): void => {
+        snapChain = snapChain.then(async () => {
+          try {
+            recorder.record(await gitStageAndDiffCached(sandbox, deps.timeoutMs), true, seq)
+          } catch {
+            /* best-effort: a failed mid-run snapshot must never break the run */
+          }
+        })
+      }
+    : undefined
+  const rawPatch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const tap = new BenchStreamTap(w.stream)
+      const tap = new BenchStreamTap(w.stream, onVerifyPass)
       const outcome = await runAgentViaSdk(
         buildRunnerConfig(
           instance,
@@ -387,6 +417,13 @@ const runAgentPhase = async (
       turnsToFirstEdit = tap.turnsToFirstEdit
     },
   )
+  // Drain any in-flight snapshots, then select what to emit. `finalOk` = the
+  // agent declared done cleanly; any other reason is the "ran out mid-validate"
+  // case the retention targets.
+  await snapChain
+  const patch = tentativeOn
+    ? recorder.selectEmitted(rawPatch, stopReason === "completed")
+    : rawPatch
   return {
     patch,
     turns,
@@ -528,6 +565,17 @@ const runSelectionPhase = async (
         : `${closureHint}\n\n${seed}`
 
   let totalTurns = 0
+  // jun-20 — GOLD-CALIBRATE the resolved-consensus oracle BEFORE generation (it
+  // resets the sandbox to base). A confirmed false-negative oracle ⇒ the
+  // resolvedKofN port fails open (never rejects a candidate); the calibration is
+  // surfaced as eval-only telemetry so the campaign self-measures the oracle's
+  // false-negative rate (the verify-and-select bottleneck).
+  const { port: resolvedKofNPort, calibration } = await makeCalibratedReproConsensusPort(
+    instance,
+    reproSources,
+    sandbox,
+    deps.timeoutMs,
+  )
   const result = await runSelection({
     n,
     owners,
@@ -580,11 +628,16 @@ const runSelectionPhase = async (
       // and re-run the reproducing repro set there → the VerificationBundle's
       // `patchedResolvedKofN` HARD signal (votes<k ⇒ reject). So selection picks
       // the candidate the repro set reports RESOLVED. Empty reproducing set ⇒ a
-      // port that yields null (no objection). See `makeReproConsensusSelectionPort`.
-      resolvedKofN: makeReproConsensusSelectionPort(instance, reproSources, sandbox, deps.timeoutMs),
+      // port that yields null (no objection). Gold-calibrated above — a confirmed
+      // false-negative oracle is failed open so it never rejects a correct fix.
+      resolvedKofN: resolvedKofNPort,
     },
   })
-  return { patch: result.winner?.patch ?? "", turns: totalTurns }
+  return {
+    patch: result.winner?.patch ?? "",
+    turns: totalTurns,
+    reproOracleCalibration: calibration,
+  }
 }
 
 const okResult = (
@@ -940,6 +993,12 @@ const runInstanceOnce = async (
         extra.gateEntered = gateDecisionVerify
         extra.gateBypassed = !gateDecisionVerify
         if (phase.verifyRounds !== undefined) extra.verifyRounds = phase.verifyRounds
+      }
+      // jun-20 — repro-oracle gold calibration (verify-select path; eval-only).
+      // Surfaces the resolved-oracle false-negative signal into report.json so a
+      // campaign self-measures the bottleneck rate with no extra runs.
+      if (phase.reproOracleCalibration !== undefined) {
+        extra.reproOracleCalibration = phase.reproOracleCalibration
       }
       // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
       // byte-identical report.json when OFF). Telemetry-first: emit, don't deny.

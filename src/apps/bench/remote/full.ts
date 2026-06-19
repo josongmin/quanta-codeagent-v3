@@ -191,7 +191,12 @@ const userData = (ttl: number): string =>
     "#!/bin/bash",
     "set -eux",
     `shutdown -h +${ttl}`,
-    "apt-get update -y && apt-get install -y docker.io git curl unzip",
+    // ripgrep (jun-19): the `grep` tool AND the new `find_references` tool both
+    // shell out to `rg`. It was MISSING from every bench box → both returned
+    // "rg: command not found" and the agent silently fell back to bash grep
+    // (measured on django-11400: 5/5 grep-tool calls + find_references all failed).
+    // Installing it un-breaks the grep tool too, not just find_references.
+    "apt-get update -y && apt-get install -y docker.io git curl unzip ripgrep",
     "systemctl enable --now docker",
     "usermod -aG docker ubuntu",
     "su - ubuntu -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'",

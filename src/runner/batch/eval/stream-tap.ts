@@ -16,7 +16,7 @@
  * bytes, so the default-OFF posture stays byte-identical.
  */
 import { relative, sep } from "node:path"
-import { mutatingToolKind } from "@/agent"
+import { isTestLikeCommand, isVerifyOutputFailing, mutatingToolKind } from "@/agent"
 import type { AgentEvent, StreamPort } from "@/stream"
 
 /**
@@ -71,7 +71,33 @@ export class BenchStreamTap implements StreamPort {
   /** Count of file-mutating tool_calls across the run (churn). */
   editCount = 0
   private currentTurn = 0
-  constructor(private readonly downstream: StreamPort) {}
+  /** tool_call ids whose invocation was a VERIFY (test_runner / test-like bash),
+   *  awaiting their `tool_result` to decide pass/fail. Only populated when
+   *  `onVerifyPass` is wired (P0 tentative-patch retention) — absent ⇒ empty ⇒
+   *  byte-identical to the pre-feature tap. */
+  private readonly pendingVerify = new Set<string>()
+  private verifySeq = 0
+  /**
+   * @param downstream  pass-through sink (NullStream for non-observed runs).
+   * @param onVerifyPass  P0 hook — called once each time a VERIFY tool_result
+   *   comes back passing (`ok` AND no failure marker in its output). The driver
+   *   wires this to snapshot the sandbox diff as a verified-green tentative
+   *   candidate. Absent ⇒ no verify-pass tracking ⇒ byte-identical.
+   */
+  constructor(
+    private readonly downstream: StreamPort,
+    private readonly onVerifyPass?: (seq: number) => void,
+  ) {}
+  /** A verify tool_call — `test_runner`, or a `bash` whose command is test-like
+   *  (`isTestLikeCommand`, the SSOT verify-signal matcher the validator uses). */
+  private isVerifyCall(name: string, input: unknown): boolean {
+    if (name === "test_runner") return true
+    if (name === "bash" && typeof input === "object" && input !== null && "command" in input) {
+      const cmd = (input as { command: unknown }).command
+      return typeof cmd === "string" && isTestLikeCommand(cmd)
+    }
+    return false
+  }
   emit(event: AgentEvent): void {
     if (event.type === "turn_start") {
       this.currentTurn = event.turn
@@ -88,12 +114,24 @@ export class BenchStreamTap implements StreamPort {
         // validator falls back to reproPath / degenerate when cmd is unset).
         this.lastVerifyCmd = "test_runner"
       }
+      if (this.onVerifyPass !== undefined && this.isVerifyCall(event.name, event.input)) {
+        this.pendingVerify.add(event.id)
+      }
       const editPath = editTargetOf(event.name, event.input)
       if (editPath !== undefined) {
         this.editCount += 1
         if (this.firstEditFile === undefined) {
           this.firstEditFile = editPath
           this.turnsToFirstEdit = this.currentTurn
+        }
+      }
+    } else if (event.type === "tool_result") {
+      // P0 — a VERIFY that came back passing marks the CURRENT tree as a
+      // verified-green candidate. `ok` = the runner executed; the output check
+      // catches "exited 0 but tests failed" (same SSOT the verify-guard uses).
+      if (this.onVerifyPass !== undefined && this.pendingVerify.delete(event.id)) {
+        if (event.ok && !isVerifyOutputFailing(event.name, undefined, event.preview)) {
+          this.onVerifyPass(this.verifySeq++)
         }
       }
     } else if (event.type === "error") {

@@ -12,6 +12,28 @@ verdict: real reusable methodology, not PR). Three techniques hit our exact gaps
 ---
 
 ## Methodology discipline (LEARNED this session — binds ALL phases)
+0. **A knob is NEVER a destination.** default-OFF is measurement scaffolding ONLY.
+   After the A/B, EVERY knob resolves to exactly one of: **default-ON** (it won) or
+   **DELETED** (it didn't). No permanent-OFF limbo — an OFF-forever knob is dead
+   code. SIMPLICITY already completed the cycle (OFF → validated → default-ON).
+   EXCEPTION: a pure SAFETY net (can only help or be neutral, never worse — e.g.
+   P0 tentative-retention: emitting best-of instead of a regressed/empty patch on
+   exhaustion) ships **default-ON the moment regression==0 is confirmed**; its A/B
+   only measures HOW MUCH it recovers, not whether to keep it.
+0b. **TYPE-MATCHED comparison — the ONLY valid A/B.** Do NOT A/B on random
+    instances. For each lever, build the comparison set from instances that
+    (a) currently FAIL, AND (b) are the SPECIFIC TYPE the lever targets — using
+    the GOLD ORACLE to (i) classify the failure type (is the fail actually this
+    type?) and (ii) verify the lever's output is the RIGHT fix, not just a pass.
+    Then ON-vs-OFF on that set; adopt the winner. A lever that helps its own
+    target type but is neutral elsewhere still WINS (so the set must be the type,
+    not the full benchmark). Per-lever target sets:
+      - P0 tentative: instances that hit `max_turns_exhausted` where the gold
+        oracle shows a correct patch WAS reachable mid-run (it regressed/emptied).
+      - P1 AST: instances where localization failed under pyright warm-up
+        exhaustion / cross-file (matplotlib-25479, multi-file ceiling).
+      - P2 lean: instances where the verbose prompt drove over-exploration /
+        over-engineering / max_turns (gold shows a small fix the agent overshot).
 1. **Every lever is knob-gated, default-OFF, A/B'd vs baseline.** No exceptions.
 2. **Attribution requires ABLATION.** "Ran it ON and it passed" ≠ "it helped"
    (the "10 green from one steer" overclaim → ablation showed only 2 causal).

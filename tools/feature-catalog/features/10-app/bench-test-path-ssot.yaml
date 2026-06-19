@@ -8,10 +8,12 @@ status: new
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [batch, interactive]
-configurable: n-a
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [bench-eval-driver]
+config_refs:
+  env: [QUANTA_BENCH_PROTECT_TESTS]
 surface_integration:
   cli: partial
   web: na
@@ -28,6 +30,7 @@ evidence:
   code:
     - src/shared/test-path.ts
     - src/agent/dispatch.ts
+    - src/config/knob-inventory.ts
   adrs: []
   tests:
     unit:
