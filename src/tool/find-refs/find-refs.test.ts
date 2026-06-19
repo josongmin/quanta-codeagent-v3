@@ -123,6 +123,23 @@ describe("find_references execute — REAL ripgrep, whole-word boundary (integra
     expect(r.output).not.toContain("address = 1")
   })
 
+  it("treats a dunder/metachar symbol as a LITERAL whole word (-F -w): matches __add__ as a word, not inside my__add__var", async () => {
+    mkdirSync(join(root, "meta"), { recursive: true })
+    writeFileSync(
+      join(root, "meta", "m.py"),
+      [
+        "def __add__(self): pass", // dunder DEFINITION → must match + classify [def]
+        "x = a.__add__(b)", // dunder use (.__add__( → word-bounded) → match
+        "y = my__add__var", // SUBSTRING inside a longer identifier → must NOT match under -w
+      ].join("\n"),
+    )
+    const r = await run({ symbol: "__add__" }, root)
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("meta/m.py")
+    expect(r.output).toContain("[def]") // the `def __add__` line classified
+    expect(r.output).not.toContain("my__add__var") // substring occurrence excluded by -w
+  })
+
   it("returns ok with a clear 0-references message (not an error) when the symbol is absent", async () => {
     const r = await run({ symbol: "ThisSymbolDoesNotExistAnywhere" }, root)
     expect(r.ok).toBe(true)

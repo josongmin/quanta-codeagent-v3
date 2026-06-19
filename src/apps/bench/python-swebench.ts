@@ -34,10 +34,10 @@
  */
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import type { GradeBreakdown } from "@/runner/batch/types"
 import { abortableSleep, abortReasonOf, errMessage, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
-import type { GradeBreakdown } from "@/runner/batch/types"
 import type { Instance } from "./types"
 
 export interface SpawnResult {
@@ -257,9 +257,7 @@ export const extractGradeBreakdowns = (report: unknown): Map<string, GradeBreakd
  * `logs/run_evaluation/<run>/<model>/<instance>/report.json`) and merge their
  * breakdowns. Tolerant: unreadable / non-report JSON is skipped. EVAL-ONLY.
  */
-export const collectGradeBreakdowns = async (
-  dir: string,
-): Promise<Map<string, GradeBreakdown>> => {
+export const collectGradeBreakdowns = async (dir: string): Promise<Map<string, GradeBreakdown>> => {
   const merged = new Map<string, GradeBreakdown>()
   let entries: string[]
   try {

@@ -66,23 +66,33 @@ export const buildFindRefsArgv = (input: Input, jailedPath?: string): string[] =
 }
 
 /**
+ * Compile the two definition-matching regexes for `symbol` ONCE (they are
+ * symbol-specific so cannot be module-level). `formatFindRefs` builds these a
+ * single time and reuses them across every row — avoiding the per-row `new
+ * RegExp` compile that the adversarial perf audit flagged on pathological input
+ * (a 1-char symbol on a huge repo). The symbol is escaped for RegExp safety even
+ * though it is a literal identifier.
+ *   - `decl`:   `def|class|function|fn|func|interface|type|struct|trait|enum  foo`
+ *   - `assign`: leading-ws `foo =` / `foo:` / `foo: T =` at a statement position.
+ *     Excludes comparisons (`==`/`!=`/`<=`/`>=`); walrus `foo := x` is classified
+ *     as a USE (the `:=` matches neither branch) — cosmetic only, never drops rows.
+ */
+const buildDefMatchers = (symbol: string): { decl: RegExp; assign: RegExp } => {
+  const s = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return {
+    decl: new RegExp(`\\b(?:def|class|function|fn|func|interface|type|struct|trait|enum)\\s+${s}\\b`),
+    assign: new RegExp(`^\\s*${s}\\s*(?::[^=]|=(?![=]))`),
+  }
+}
+
+/**
  * Heuristic: does this matched line DECLARE `symbol` (vs merely use it)?
  * Pure + language-spread (py/js/ts/rust/go/java/cpp). Conservative — a false
- * "use" only costs ordering, never correctness. The line is the raw match
- * content (after `path:line:`), `symbol` the searched identifier.
+ * "use" only costs ordering, never correctness (every row is still reported).
  */
 export const isDefinitionLine = (content: string, symbol: string): boolean => {
-  // Escape the symbol for use inside a RegExp (it's a literal identifier, but be safe).
-  const s = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  // `def foo` / `class foo` / `function foo` / `fn foo` / `func foo` / `interface foo` / `type foo` / `struct foo` / `trait foo` / `enum foo`
-  const declKeyword = new RegExp(
-    `\\b(?:def|class|function|fn|func|interface|type|struct|trait|enum)\\s+${s}\\b`,
-  )
-  if (declKeyword.test(content)) return true
-  // Assignment / annotation at a statement-ish position: leading ws then `foo =` / `foo:` / `foo: T =`.
-  // Excludes `==`/`!=`/`<=`/`>=` (comparisons) and `:=` walrus is still a bind so allowed.
-  const assign = new RegExp(`^\\s*${s}\\s*(?::[^=]|=(?![=]))`)
-  return assign.test(content)
+  const m = buildDefMatchers(symbol)
+  return m.decl.test(content) || m.assign.test(content)
 }
 
 /** Render rg `path:line:content` rows into a grouped, def-first, capped report. */
@@ -91,13 +101,14 @@ export const formatFindRefs = (stdout: string, symbol: string): string => {
     .trimEnd()
     .split("\n")
     .filter((l) => l.length > 0)
+  const { decl, assign } = buildDefMatchers(symbol) // compile ONCE, reuse per row
   const defs: string[] = []
   const uses: string[] = []
   for (const row of rows) {
     // rg row = `path:line:content` (content may itself contain colons).
     const m = row.match(/^(.*?):(\d+):(.*)$/)
     const content = m ? (m[3] as string) : row
-    if (m && isDefinitionLine(content, symbol)) defs.push(`[def] ${row}`)
+    if (m && (decl.test(content) || assign.test(content))) defs.push(`[def] ${row}`)
     else uses.push(row)
   }
   const ordered = [...defs, ...uses]

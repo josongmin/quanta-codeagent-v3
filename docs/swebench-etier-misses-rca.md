@@ -94,6 +94,36 @@ reprovote = `agentless-v2` + `closure-repair:3` + `repro-vote:1`. 이게 false-n
 - n=12 = diagnostic A/B지 leaderboard 주장 아님. 500 일반화 금지. "improved" 주장 전 적대 어딧 ≥3.
 - v1/v2/reprovote in-place 금지 — 신규 동작은 전부 신규 preset.
 
+## M0 결과 — reprovote 12-case 재런 (2026-06-20, `closure-i-09d2d976ae56b6f9f`)
+
+`--preset agentless-v2-reprovote` + trajectory, 12-case. **이전 agentless-v2에서 0/12 → reprovote 5/11 resolved**(sphinx-9711 grader_invalid 제외). engage 결정적.
+
+### reprovote는 engage한다 (theater/churn 아님)
+- `gate_enter_rate=1.0`·`gate_bypass_rate=0` (지난 run 전부 null이던 게 채워짐 = 게이트 100% 발화)
+- `verify_rounds_per_run=2.875` (max churn 아님), `primary_false_green=0`·`primary_false_red=0` (oracle 오플래그 0)
+- **flip 5건**: 11951(else None→고침)·12039(sibling)·12754(60t thrash였음)·13964(empty였음)·14311(.name 회귀). repair-loop+vote가 실제로 정답 attempt를 선택.
+- ⟹ doc 기존 가정("reprovote는 false-neg 한 겹만 벗김")은 **틀림**: false_red=0 = 벗길 false-neg 자체가 없었고, 승리는 repair 시도수↑ + vote 선택.
+
+### 🔴 신규 버그 — `__repro_*.py` leak (= `multi_file_drift`의 정체)
+repair/verify loop가 디스크에 쓴 재현 스크립트가 **model_patch에 새 파일로 샌다**(patch-hygiene:1 ON인데 strip 안 함). 실측:
+- 12039 PASS = 18파일 중 **16개 `__repro_*.py`** + gold(ddl_references.py)✅ + indexes.py stray. 13128=20 repro leak, 12965=16, 14017=12.
+- ⟹ `owner_recall@1` 0.92→**0.27 폭락은 artifact**: repro 파일이 file 목록 오염 → first-edit=repro파일 → ownerHit=False (resolved인데도). 실제 gold-file hit는 graded 전부 ✅(14351 제외).
+- ⟹ `multi_file_drift=5`도 대부분 이 leak + 소수 real stray(deprecation.py/indexes.py/expressions.py).
+- **이건 leaderboard 제출 hygiene로도 치명**(스크래치 16파일 동봉). **#1 우선 픽스**.
+
+### 잔여 타겟 (hygiene 픽스 후 재채점 전제)
+- **14351** — 유일 잔여 wrong-FILE (related_lookups.py vs gold lookups.py) → owner-symbol/exec-trace localize.
+- **12965** — reprovote가 **right-file(compiler.py)로 이동**시켰으나 wrong-fix + deprecation.py drift → fix-synthesis.
+- **13128·14017·sympy-24066** — right-file, wrong-fix (hard synthesis; 13128 F2P=7·1-4h).
+- **13121** — wrong-patch→**EMPTY 퇴행**(reprovote가 4-file 멀티사이트서 churn하다 빈손) → M5 empty-floor가 정조준(reprovote-유발 회귀).
+- **sphinx-9711** — grader_invalid, denominator 제외(doc 기존 플래그 확인됨).
+
+### 우선순위 재정렬 (M0 기준)
+1. **patch-hygiene repro-strip** (cheap·high-ROI: 패치정화 + multi_file_drift 오분류 제거 + owner metric 복원 + 제출 hygiene). → **재채점**으로 clean verdict/metric 확보.
+2. **M5 empty-floor** — 13121 reprovote-유발 회귀 salvage.
+3. **M3 owner-symbol** — 14351 + 메트릭 신뢰성(파일단위는 repair drift로 깨짐 확정).
+4. **M2/M4(evidence/paired) 강등** — reprovote vote가 "done前 verify" 역할 이미 수행(easy/medium flip). 잔여는 happy-path-overfit 아니라 hard-synthesis+localize 1건 → 기대수율 낮음. hygiene+재채점 후 재평가.
+
 ---
 
 ## django__django-11951  (RIGHT-FILE-WRONG-FIX)

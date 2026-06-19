@@ -112,6 +112,19 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 export const LSP_GROUNDING_STEER =
   " Before editing a symbol you found by text search, confirm its TRUE owner with `lsp_definition` (go-to-definition — a text match often points to the wrong class or an override, not the method that actually runs) and use `lsp_references` (find-references) to surface every call site that may have to change together for a multi-file fix."
 
+/**
+ * Co-change steer ADDENDUM, appended ONLY when the `find_references` tool is wired
+ * (bench: `QUANTA_BENCH_FIND_REFS`). jun-19 MEASURED: pyright `lsp_references` is
+ * INTRACTABLE on large repos — it timed out on sympy at BOTH 15s and 60s, so the
+ * model issues one references call, eats the timeout, and falls back to ad-hoc grep
+ * (→ mislocates to the symptom site). `find_references` is the timeout-immune
+ * ripgrep replacement; this redirects the co-change map to it. Kept SEPARATE from
+ * {@link LSP_GROUNDING_STEER} so the steer never names a tool that isn't present
+ * (no "unknown tool" in baseline runs where the gate is off).
+ */
+export const FIND_REFS_STEER =
+  " For the multi-file co-change map, PREFER `find_references` (fast whole-word ripgrep search — instant, never times out) over `lsp_references` (which type-analyzes the whole project and TIMES OUT on large repos like sympy/django). Use `find_references <symbol>` to list every call site, then confirm the true owner of the one you edit with `lsp_definition`."
+
 /** gap-B spec-fidelity steer. Appended to the bench prompt ONLY when the
  *  `spec-fidelity-steer` knob is on AND the issue declares a concrete expected
  *  output (`extractIssueDeclaredExpected` ≠ undefined). Two sentences, no

@@ -201,6 +201,11 @@ export {
 // AND ast-grep is present on PATH (the tool self-probes and returns an install
 // hint if the binary is missing). Read-only + concurrency-safe.
 export { astGrepTool } from "./ast-grep"
+// Caller-wired: registered by the bench driver when the localize grounding steer
+// is on (find_references is the timeout-immune ripgrep replacement for the
+// steer's lsp_references recommendation — pyright references is intractable on
+// large repos, measured jun-19). Read-only + concurrency-safe.
+export { findReferencesTool } from "./find-refs"
 export {
   aggregate as aggregateFileTree,
   fileTreeSummaryTool,

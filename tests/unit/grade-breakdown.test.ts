@@ -5,14 +5,12 @@
  * regression gate / verify-and-select can only address the former, so the
  * distinction is what justifies (or kills) the gate.
  */
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import {
-  collectGradeBreakdowns,
-  extractGradeBreakdowns,
-} from "@/apps/bench/python-swebench"
+import { collectGradeBreakdowns, extractGradeBreakdowns } from "@/apps/bench/python-swebench"
 
 /** Build a harness PER-INSTANCE report object for one instance. */
 const perInstanceReport = (
@@ -40,7 +38,12 @@ const perInstanceReport = (
 describe("extractGradeBreakdowns — the regression-vs-didn't-fix signal", () => {
   test("RESOLVED: F2P all pass ∧ P2P all pass", () => {
     const m = extractGradeBreakdowns(
-      perInstanceReport("sympy__sympy-1", { success: 1, failure: 0 }, { success: 40, failure: 0 }, true),
+      perInstanceReport(
+        "sympy__sympy-1",
+        { success: 1, failure: 0 },
+        { success: 40, failure: 0 },
+        true,
+      ),
     )
     expect(m.get("sympy__sympy-1")).toEqual({
       resolved: true,
@@ -52,7 +55,12 @@ describe("extractGradeBreakdowns — the regression-vs-didn't-fix signal", () =>
 
   test("REGRESSION: P2P has failures (gate-ADDRESSABLE) — the key tooth", () => {
     const m = extractGradeBreakdowns(
-      perInstanceReport("sympy__sympy-2", { success: 1, failure: 0 }, { success: 38, failure: 2 }, false),
+      perInstanceReport(
+        "sympy__sympy-2",
+        { success: 1, failure: 0 },
+        { success: 38, failure: 2 },
+        false,
+      ),
     )
     const b = m.get("sympy__sympy-2")
     expect(b?.resolved).toBe(false)
@@ -63,7 +71,12 @@ describe("extractGradeBreakdowns — the regression-vs-didn't-fix signal", () =>
 
   test("DIDN'T-FIX: F2P fails, P2P green (gate-IRRELEVANT)", () => {
     const m = extractGradeBreakdowns(
-      perInstanceReport("sympy__sympy-3", { success: 0, failure: 1 }, { success: 40, failure: 0 }, false),
+      perInstanceReport(
+        "sympy__sympy-3",
+        { success: 0, failure: 1 },
+        { success: 40, failure: 0 },
+        false,
+      ),
     )
     const b = m.get("sympy__sympy-3")
     expect(b?.resolved).toBe(false)
@@ -103,7 +116,12 @@ describe("collectGradeBreakdowns — recursive scan of the harness work dir", ()
     writeFileSync(
       join(nested, "report.json"),
       JSON.stringify(
-        perInstanceReport("sympy__sympy-9", { success: 1, failure: 0 }, { success: 10, failure: 3 }, false),
+        perInstanceReport(
+          "sympy__sympy-9",
+          { success: 1, failure: 0 },
+          { success: 10, failure: 3 },
+          false,
+        ),
       ),
     )
     // also drop a summary report at the root — must be tolerated, contributes nothing

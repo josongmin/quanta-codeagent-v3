@@ -163,6 +163,7 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // Read-only built-ins
   read: null,
   grep: null,
+  find_references: null, // ripgrep whole-word ref search — read-only, like grep
   glob: null,
   localize: null,
   diagnostics: null,
@@ -591,6 +592,9 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   // Web search + workspace retrieval — provider/pipeline ports.
   "web_search",
   "search_codebase",
+  // find_references (jun-19) — bench-driver-wired ripgrep ref search (read-only),
+  // gated QUANTA_BENCH_FIND_REFS; not in static defaultTools, so pinned here.
+  "find_references",
   // NOTE: `read_image_url` is intentionally NOT here — it ships in the static
   // `defaultTools` array (enumerable by both drift detectors), so listing it
   // would be a redundant, drift-prone duplicate. Its MUTATING_TOOL_TABLE entry

@@ -40,7 +40,7 @@ import {
   wireOptionalAgentPorts,
 } from "@/agent"
 import type { PrimaryRailStep } from "@/agent/closure"
-import { LSP_GROUNDING_STEER, SPEC_FIDELITY_STEER } from "@/agent/localize-phase-guard"
+import { FIND_REFS_STEER, LSP_GROUNDING_STEER, SPEC_FIDELITY_STEER } from "@/agent/localize-phase-guard"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
@@ -49,7 +49,7 @@ import { errMessage, gateDisabled, gateOn } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Tool } from "@/tool"
-import { astGrepTool, buildDefaultTools, ToolRegistry } from "@/tool"
+import { astGrepTool, buildDefaultTools, findReferencesTool, ToolRegistry } from "@/tool"
 import { reproRunArgv } from "../corpus/dataset"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type {
@@ -1048,9 +1048,21 @@ export const buildConfig = (
   }
   const lspNavTools = opt.lspNav ? lspNavToolList() : []
   const astGrepToolList = gateOn(process.env, "QUANTA_AST_GREP") ? [astGrepTool as Tool] : []
+  // find_references (jun-19): timeout-immune ripgrep replacement for the steer's
+  // lsp_references recommendation (pyright references is intractable on large
+  // repos — measured 15s AND 60s timeouts on sympy). Gated QUANTA_BENCH_FIND_REFS
+  // (forwarded to the full-remote box; default-OFF ⇒ byte-identical).
+  const findRefsToolList = gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
+    ? [findReferencesTool as Tool]
+    : []
   // DIP factory: bench driver runs against the default port surface; the
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
-  const registry = new ToolRegistry([...buildDefaultTools(), ...lspNavTools, ...astGrepToolList])
+  const registry = new ToolRegistry([
+    ...buildDefaultTools(),
+    ...lspNavTools,
+    ...astGrepToolList,
+    ...findRefsToolList,
+  ])
   const permission: PermissionContext = { mode: "acceptEdits" }
   const base = `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
@@ -1069,6 +1081,13 @@ export const buildConfig = (
   const lspSteerLine =
     instance.swebench && opt.localizePhase?.lspGroundingSteer === true
       ? `\n-${LSP_GROUNDING_STEER}`
+      : ""
+  // find_references co-change steer: fires ONLY when the tool is wired
+  // (QUANTA_BENCH_FIND_REFS) so the directive never names an absent tool. Redirects
+  // the multi-file co-change map from the timing-out lsp_references to find_references.
+  const findRefsSteerLine =
+    instance.swebench && gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
+      ? `\n-${FIND_REFS_STEER}`
       : ""
   // gap-B spec-fidelity steer: fires ONLY when the knob is on AND the issue
   // declares a concrete expected output (fail-closed — co-change cases without a
@@ -1104,7 +1123,7 @@ export const buildConfig = (
       ? `\n-${SIBLING_COMPLETION_STEER}`
       : ""
   const baseText = instance.swebench
-    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${specSteerLine}${simplicitySteerLine}${siblingSteerLine}`
+    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${findRefsSteerLine}${specSteerLine}${simplicitySteerLine}${siblingSteerLine}`
     : base
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here

@@ -189,3 +189,15 @@ SWE-bench Verified의 **천장(ceiling)** = 공개 프론티어 스캐폴드 17�
 3. patch-budget: v3-thin이 sympy-12096 풀었으나 **in-budget(patch-budget 안 fired)** → 공로는 steer/모델, patch-budget **unproven**. v2 baseline은 /tmp reap으로 미완.
 
 **메타 교훈(이 세션 반복)**: trajectory raw 메시지 카운트 금지 — 48레코드가 대화이력 반복포함 → "73 LSP" "156 edit" 둘 다 inflated. **반드시 tool_use_id로 dedup.** + wired≠engages≠returns(launch-proof로 engages 확인, but references는 returns 안 함).
+
+---
+
+## ✅ 세션2 빌드 — `find_references` 도구 (SOTA++, LANDED)
+
+위 측정 결론("pyright references intractable → precomputed ref가 fix")의 **구현**.
+
+- **무엇**: `src/tool/find-refs/index.ts` — ripgrep `-F -w`(fixed-string whole-word) 기반 즉시-반환 reference 검색. def-looking 라인 `[def]` 분류+우선, file:line 그룹, 200 cap, jail(resolveJailed), no-throw. pyright `lsp_references`(15s/60s 타임아웃)의 timeout-immune 대체.
+- **배선**: barrel export(`@/tool`) + bench driver registry(`findRefsToolList`, gate `QUANTA_BENCH_FIND_REFS`) + `FIND_REFS_STEER`(localize-phase-guard, co-change를 find_references로 redirect) + driver prompt 합성(`findRefsSteerLine`, swebench∧gate) + manifest GATED 엔트리. **default-OFF byte-identical**; `QUANTA_BENCH_FIND_REFS=1`로 켜짐(`buildForwardedBenchEnv`가 QUANTA_BENCH_* forward → EC2 박스 도달 확인).
+- **품질**: 적대 어딧 3R — 보안/correctness 0 HIGH(injection·jail·word-boundary·no-throw 전부 SAFE, 라이브 rg로 검증), 배선/byte-identity 0 HIGH(forward·byte-identical·steer⊆tool·siblingSteerLine 무손상), dunder/metachar 엣지. LOW perf 1건(row마다 regex 컴파일) **fix**(1회 컴파일). 12/12 test green, tsc 내파일 0, drift가드 green.
+- **측정 중**(bp98f16e2): django-11400(3파일 co-change: fields/reverse_related/admin.filters) @ agentless-v2 + QUANTA_BENCH_FIND_REFS=1. 가설: find_references+steer가 multi-site co-change를 잡아 resolved/owner_recall 개선. ⚠️ n=1 — 효과 주장은 측정 결과 + 셋 단위 확인 후.
+- **남은 것**: (1) 측정으로 효과 확인되면 agentless-v2(or 신규 arm)에 QUANTA_BENCH_FIND_REFS 묶기. (2) `isDefinitionLine` 분류는 cosmetic(ordering)만 — 정밀화는 tree-sitter 분류로 후속. (3) verify-select capture/seeding 버그(병렬에이전트) + patch-budget(unproven) 별개.

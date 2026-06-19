@@ -888,6 +888,14 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     risk: "read-only",
     note: "Structural code search via ast-grep — finds code by AST shape (pattern + metavariables), not text, so there are no false positives from comments/strings. Opt-in EVERYWHERE (QUANTA_AST_GREP): requires the ast-grep binary on PATH (brew install ast-grep / cargo install ast-grep); absent binary ⇒ tool returns an install hint. Read-only + concurrency-safe (pure subprocess search, no FS writes). Capped at 50 matches per call.",
   },
+  {
+    name: "find_references",
+    origin: "@/tool/find-refs (findReferencesTool)",
+    gate: { kind: "env-flag", env: "QUANTA_BENCH_FIND_REFS" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    note: "Fast whole-word reference search (ripgrep -F -w). The timeout-immune replacement for the localize grounding steer's lsp_references recommendation — jun-19 MEASURED: pyright textDocument/references is INTRACTABLE on large repos (timed out on sympy at BOTH 15s and 60s, because it type-analyzes every possibly-referencing file). This returns every file:line where the symbol appears as a word in milliseconds (repo-size-independent), definition-like lines marked [def] first. Opt-in via QUANTA_BENCH_FIND_REFS (forwarded to the full-remote box); when on, the driver also appends a co-change steer redirecting the model from lsp_references to this tool. Read-only + concurrency-safe. Lexical/approximate (same-named symbol in another scope also matches) — confirm the owner with lsp_definition. Capped at 200 rows.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state

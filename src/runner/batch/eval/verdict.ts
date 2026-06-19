@@ -72,8 +72,7 @@ export const verify = async (
       // falling through there would fake-pass every instance. An empty patch with a
       // real testCmd would also produce misleading results (swebench F2P tests can
       // pass on base). Both cases must refuse loudly.
-      const isNoopTestCmd =
-        instance.testCmd.trim() === "true" || instance.testCmd.trim() === ""
+      const isNoopTestCmd = instance.testCmd.trim() === "true" || instance.testCmd.trim() === ""
       if (isNoopTestCmd || patch.trim() === "") {
         return {
           passed: false,
