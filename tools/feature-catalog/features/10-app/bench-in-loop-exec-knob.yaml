@@ -1,0 +1,36 @@
+id: bench-in-loop-exec-knob
+title: bench-in-loop-exec — agent runs tests in-loop vs submit-only posture
+section: 10
+subsystem: 벤치 — in-loop test execution toggle
+order: 2418
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-on]
+depends_on: [bench-eval-driver]
+config_refs:
+  env: [QUANTA_BENCH_IN_LOOP_EXEC]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench posture default-ON; explicit off swaps to mini-swe submit posture"
+    web: "no browser affordance"
+purpose: 'Default-ON (inverted bench knob): unset preserves today SWEBENCH_DIRECTIVE + verifyGuard. Explicit off ⇒ submit-only mini-swe posture.'
+evidence:
+  code:
+    - src/runner/knobs/knobs/bench-in-loop-exec.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/bench-in-loop-exec-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["bench-in-loop-exec"]
+deliberate_hold: null

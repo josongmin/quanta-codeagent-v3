@@ -1,0 +1,44 @@
+id: repro-test-mwe-vote
+title: Repro MWE extraction + K-of-N resolved vote gate
+section: 10
+subsystem: 벤치 — repro oracle hardening
+order: 2402
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:bench", "default-off"]
+depends_on: [repro-test-slice, proof-driven-bench-closure, bench-repair-context-builder]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench repair validation path only"
+    web: "no browser affordance"
+purpose: |
+  Issue MWE → repro extractor seeds repro-test generation; repro validator gates
+  on stdout sentinel (not exit code). `repro-vote` knob re-runs the reproducing
+  set on the patched tree and majority-votes resolved to kill brittle false-negatives.
+evidence:
+  code:
+    - src/agent/repro-test/vote.ts
+    - src/agent/verification-plan/extract-issue-repro.ts
+    - src/runner/batch/eval/repair/repro-vote.ts
+    - src/runner/knobs/knobs/repro-vote.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/extract-issue-repro.test.ts
+      - tests/unit/repro-test/execute.test.ts
+      - tests/unit/repro-test/generate.test.ts
+      - tests/unit/repair-validator-observe-only.test.ts
+      - tests/unit/repair-primary-rail-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["repro-vote"]
+deliberate_hold: null

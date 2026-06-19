@@ -44,6 +44,46 @@ def files_from_patch(patch: str) -> set:
     # drop /dev/null (pure deletes) and test files are kept (gold sometimes edits tests)
     return {f for f in files if f and f != "dev/null"}
 
+HUNK_RE = re.compile(r'^@@ -(\d+)(?:,(\d+))?')          # old-side range header
+
+def hunks_from_patch(patch: str) -> dict:
+    """file -> [(old_start, old_end)] from each @@ -a,b @@ header (base-side lines)."""
+    out: dict = {}
+    cur = None
+    for line in (patch or "").splitlines():
+        m = FILE_RE.match(line)
+        if m:
+            cur = m.group(1).strip()
+            out.setdefault(cur, [])
+            continue
+        h = HUNK_RE.match(line)
+        if h and cur is not None:
+            start = int(h.group(1))
+            count = int(h.group(2)) if h.group(2) is not None else 1
+            end = start + max(count, 1) - 1
+            out[cur].append((start, end))
+    return {f: r for f, r in out.items() if r}
+
+def _overlap(a, b, pad: int) -> bool:
+    return a[0] - pad <= b[1] and b[0] - pad <= a[1]
+
+def verdict_line(our_patch: str, gold_patch: str, pad: int = 10) -> str:
+    """EMPTY / MISS (wrong file) / MISS_INTRA (right file, disjoint lines) / HIT_LINE."""
+    of = files_from_patch(our_patch)
+    if not of:
+        return "EMPTY"
+    gh = hunks_from_patch(gold_patch)
+    oh = hunks_from_patch(our_patch)
+    shared = [f for f in gh if f in of]
+    if not shared:
+        return "MISS"
+    for f in shared:
+        for gr in gh[f]:
+            for orr in oh.get(f, []):
+                if _overlap(gr, orr, pad):
+                    return "HIT_LINE"
+    return "MISS_INTRA"
+
 def load_gold(dataset_path: str) -> dict:
     gold = {}
     for line in open(dataset_path):
@@ -108,42 +148,59 @@ def main():
     ap.add_argument("--json", default=None)
     a = ap.parse_args()
 
-    gold = load_gold(a.dataset)
+    gold = load_gold(a.dataset)                  # iid -> file set
+    gold_patch = {d["instance_id"]: d["patch"]   # iid -> raw gold patch (for line-level)
+                  for d in (json.loads(l) for l in open(a.dataset) if l.strip())}
     labels = a.label + [f"arm{i}" for i in range(len(a.preds) - len(a.label))]
     read = read_files_from_trajectory(a.trajectory) if a.trajectory else set()
 
     arms = {}
     for preds_path, label in zip(a.preds, labels):
-        preds = load_preds(preds_path)
+        preds = load_preds(preds_path)                       # iid -> file set
+        preds_patch = {}                                     # iid -> raw our patch
+        for l in open(preds_path):
+            if not l.strip():
+                continue
+            d = json.loads(l)
+            if d.get("instance_id"):
+                preds_patch[d["instance_id"]] = d.get("model_patch") or d.get("prediction") or d.get("patch") or ""
         rows = []
         for iid, edited in preds.items():
             g = gold.get(iid, set())
             v = verdict(edited, g)
+            vl = verdict_line(preds_patch.get(iid, ""), gold_patch.get(iid, ""))  # line-level
             missing = sorted(g - edited)       # gold files the agent never touched
             note = ""
             if read and missing:
                 never_read = [f for f in missing if f not in read]
                 note = ("never-read:" + ",".join(never_read)) if never_read else "read-but-not-edited"
-            rows.append({"id": iid, "verdict": v, "edited": sorted(edited),
+            rows.append({"id": iid, "verdict": v, "verdict_line": vl, "edited": sorted(edited),
                          "gold": sorted(g), "missing": missing, "note": note})
         arms[label] = rows
 
     out = {"arms": {}}
     for label, rows in arms.items():
         c = Counter(r["verdict"] for r in rows)
+        cl = Counter(r["verdict_line"] for r in rows)
         n = len(rows)
         wrong_surface = (c["MISS"] + c["EMPTY"]) / n if n else 0.0
         localized_ok = (c["EXACT"] + c["HIT_ALL"] + c["PARTIAL"]) / n if n else 0.0
-        out["arms"][label] = {"n": n, "counts": dict(c),
+        # of patches that hit the right FILE, how many missed the right LINES (intra-file)?
+        file_ok = cl["HIT_LINE"] + cl["MISS_INTRA"]
+        intra_miss_rate = cl["MISS_INTRA"] / file_ok if file_ok else 0.0
+        out["arms"][label] = {"n": n, "counts": dict(c), "counts_line": dict(cl),
                               "wrong_surface_rate": round(wrong_surface, 3),
                               "touched_a_gold_file_rate": round(localized_ok, 3),
+                              "intra_file_miss_rate": round(intra_miss_rate, 3),
                               "rows": rows}
         print(f"\n===== {label}  (n={n}) =====")
         print(f"  wrong-surface (MISS+EMPTY): {wrong_surface:.0%}   touched-a-gold-file: {localized_ok:.0%}")
-        print(f"  verdicts: {dict(c)}")
-        for r in sorted(rows, key=lambda x: x["verdict"]):
-            line = f"  [{r['verdict']:7}] {r['id']}"
-            if r["verdict"] not in ("EXACT", "HIT_ALL"):
+        print(f"  FILE verdicts: {dict(c)}")
+        print(f"  LINE verdicts: {dict(cl)}   intra-file-miss (right file, wrong lines): {intra_miss_rate:.0%} of file-hits")
+        print(f"  → of file-hits: HIT_LINE={cl['HIT_LINE']} = pure-synthesis-fail-or-pass | MISS_INTRA={cl['MISS_INTRA']} = intra-file localize miss")
+        for r in sorted(rows, key=lambda x: (x["verdict_line"], x["verdict"])):
+            line = f"  [{r['verdict']:7}/{r['verdict_line']:10}] {r['id']}"
+            if r["verdict"] not in ("EXACT", "HIT_ALL") or r["verdict_line"] in ("MISS_INTRA",):
                 line += f"  edited={r['edited']} gold={r['gold']}"
                 if r["note"]:
                     line += f"  ({r['note']})"

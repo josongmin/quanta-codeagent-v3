@@ -142,6 +142,45 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-1") // real beats empty even when both inadmissible
   })
 
+  it("DEFECT2: same content edit on DIFFERENT files is NOT deduped (cross-file collision)", async () => {
+    const { gen } = genFrom([
+      cand({
+        id: "cand-0",
+        patch: "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-x=1\n+x=2",
+        files: ["foo.py"],
+      }),
+      cand({
+        id: "cand-1",
+        patch: "--- a/bar.py\n+++ b/bar.py\n@@ -1 +1 @@\n-x=1\n+x=2",
+        files: ["bar.py"],
+      }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: { generate: gen },
+    })
+    expect(r.generated).toBe(2) // different fix SITES must survive dedup
+  })
+
+  it("empty patch with (stray) owner files still scores no ownerCoverage", async () => {
+    // defense-in-depth: an empty no-patch must never gain owner-coverage credit.
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "", files: ["owner.py"] }), // inconsistent but hardened
+      cand({ id: "cand-1", patch: "+++ b/other.py\n+real", files: ["other.py"] }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["owner.py"]),
+      // both inadmissible (real regresses; empty applyClean=false) ⇒ best-effort,
+      // where the empty's bogus ownerCoverage would win if not hardened.
+      ports: { generate: gen, regression: async (c) => (c.id === "cand-1" ? false : null) },
+    })
+    expect(r.winner?.id).toBe("cand-1") // real beats empty even though empty "touches" the owner
+  })
+
   it("empty (no-patch) candidate is inadmissible (applyClean=false)", async () => {
     const { gen } = genFrom([cand({ id: "cand-0", patch: "", files: [] })])
     const r = await runSelection({

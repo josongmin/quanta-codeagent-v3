@@ -74,6 +74,9 @@ import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import { makeReproVoteValidate } from "./repair/repro-vote"
+import { makePatchedResolvedConsensus } from "./repair/resolved-consensus"
+import { withCandidatePatch } from "./rematerialize"
+import type { Candidate } from "./selection-executor"
 import type {
   BuildRepairContextArgs,
   RunOnceResult,
@@ -1421,15 +1424,15 @@ const runAgentPhase = async (
  * fail-open path. The exec port mirrors the base-red run (uvx project-env argv
  * for SWE-bench, the instance's `localEnv`) so imports resolve identically.
  */
-export const buildReproVoteValidate = (
+/** Shared repro exec wiring — uvx project-env argv (SWE-bench) + the instance's
+ *  localEnv, mirroring the base-red run so imports resolve identically. Used by
+ *  BOTH the repro-vote validator and the consensus selection scorer (one SSOT so
+ *  they can never drift in how a candidate's repro set is executed). */
+const reproExecBundle = (
   instance: Instance,
-  reproSources: readonly string[],
-  fallback: (args: ValidateArgs) => Promise<ValidatorResult>,
-): ((args: ValidateArgs) => Promise<ValidatorResult>) => {
-  if (benchOptIns().reproVote !== true || reproSources.length === 0) return fallback
-  const repoForRepro = instance.swebench?.repo
-  return makeReproVoteValidate({
-    sources: reproSources,
+): { exec: ReproExecPort; writeFile: ReproWriteFilePort; buildArgv?: (s: string) => readonly string[] } => {
+  const repo = instance.swebench?.repo
+  return {
     exec: (argv, cwd, timeoutMs) =>
       execArgv(argv, cwd, timeoutMs, {
         ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
@@ -1437,11 +1440,52 @@ export const buildReproVoteValidate = (
     writeFile: async (p: string, c: string): Promise<void> => {
       await Bun.write(p, c)
     },
-    ...(repoForRepro !== undefined
-      ? { buildArgv: (scriptPath: string) => reproRunArgv(repoForRepro, scriptPath) }
-      : {}),
-    fallback,
-  })
+    ...(repo !== undefined ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, scriptPath) } : {}),
+  }
+}
+
+export const buildReproVoteValidate = (
+  instance: Instance,
+  reproSources: readonly string[],
+  fallback: (args: ValidateArgs) => Promise<ValidatorResult>,
+): ((args: ValidateArgs) => Promise<ValidatorResult>) => {
+  if (benchOptIns().reproVote !== true || reproSources.length === 0) return fallback
+  return makeReproVoteValidate({ sources: reproSources, ...reproExecBundle(instance), fallback })
+}
+
+/**
+ * SOTA++ verify-and-select — repro-vote as the candidate SELECTION scorer.
+ *
+ * Builds the selection executor's `resolvedKofN` port: for each candidate patch,
+ * RE-MATERIALIZE its tree (reset → `git apply` → probe → reset, via
+ * {@link withCandidatePatch} — the anti-theater seam so the consensus measures
+ * THIS candidate, not the shared/base tree) and re-run the REPRODUCING repro set
+ * there, projecting the resolved-majority into the VerificationBundle's
+ * `patchedResolvedKofN` HARD signal. So the OUTER selection picks the candidate
+ * the repro set actually reports as RESOLVED: the inner repro-vote becomes the
+ * outer selection's verification signal (generate N → verify each by the vote →
+ * select the consensus-resolved winner).
+ *
+ * FAIL-OPEN: an empty reproducing set ⇒ a port that always yields `null` (no
+ * consensus objection, the bundle never rejects on a missing signal); a
+ * non-applying candidate patch ⇒ `withCandidatePatch` returns `null`.
+ */
+export const makeReproConsensusSelectionPort = (
+  instance: Instance,
+  reproSources: readonly string[],
+  sandbox: string,
+  timeoutMs: number,
+): ((c: Candidate) => Promise<{ votes: number; k: number } | null>) => {
+  if (reproSources.length === 0) return () => Promise.resolve(null)
+  const probe = makePatchedResolvedConsensus({ sources: reproSources, ...reproExecBundle(instance) })
+  return (c) =>
+    withCandidatePatch<{ votes: number; k: number } | null>({
+      sandbox,
+      patch: c.patch,
+      baseCommit: instance.swebench?.baseCommit,
+      timeoutMs,
+      probe: (sb) => probe(sb),
+    })
 }
 
 /**

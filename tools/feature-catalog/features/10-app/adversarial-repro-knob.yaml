@@ -1,0 +1,36 @@
+id: adversarial-repro-knob
+title: adversarial-repro — repro-quality adversarial coverage block
+section: 10
+subsystem: 벤치 — repro false-green guard
+order: 2419
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-off]
+depends_on: [repro-test-slice]
+config_refs:
+  env: [QUANTA_BENCH_ADVERSARIAL_REPRO]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench repro generation prompt augment"
+    web: "no browser affordance"
+purpose: 'Default-OFF: append adversarial-coverage block to repro generation so shallow fixes stay RED (#10999 under-fix class).'
+evidence:
+  code:
+    - src/runner/knobs/knobs/adversarial-repro.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/bench-repro-test-wiring.test.ts
+    integration: []
+    contract: []
+knobs: ["adversarial-repro"]
+deliberate_hold: null

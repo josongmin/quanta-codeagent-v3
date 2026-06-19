@@ -109,6 +109,25 @@ describe("makePatchedResolvedConsensus (port)", () => {
     expect(r).toBeNull()
   })
 
+  it("DEFECT1: crashed (inconclusive) samples must NOT inflate the quorum (decisive-only default k)", async () => {
+    // 2 "resolved" + 3 post-fix crashes ("Other issues" ⇒ inconclusive). voteResolved
+    // says FIXED (decisive 2-0). The default k must be a majority of DECISIVE votes
+    // (=2), NOT of all 5 samples (=3) — else a correct patch is rejected (false-NEG).
+    const { exec, writeFile } = makeExec([
+      "Issue resolved",
+      "Issue resolved",
+      "Other issues",
+      "Other issues",
+      "Other issues",
+    ])
+    const r = await makePatchedResolvedConsensus({
+      sources: ["a", "b", "c", "d", "e"],
+      exec,
+      writeFile,
+    })("/p")
+    expect(r).toEqual({ votes: 2, k: 2 }) // admits; NOT { votes:2, k:3 }
+  })
+
   it("explicit k overrides the majority default", async () => {
     const { exec, writeFile } = makeExec(["Issue resolved", "Issue resolved"])
     const r = await makePatchedResolvedConsensus({ sources: ["a", "b"], exec, writeFile, k: 1 })(

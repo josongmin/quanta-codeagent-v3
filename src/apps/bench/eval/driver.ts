@@ -2,9 +2,8 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
-import { analyzePatchBudget } from "@/agent/patch-budget"
-import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
+import { analyzePatchBudget } from "@/agent/patch-budget"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
@@ -16,8 +15,9 @@ import {
   type BenchKnobState,
   BenchObserver,
   benchOptIns,
-  buildConfig as buildRunnerConfig,
   buildReproVoteValidate,
+  makeReproConsensusSelectionPort,
+  buildConfig as buildRunnerConfig,
   composeWithReproHint,
   DEFAULT_POLICY,
   enumerateRepoSources,
@@ -41,12 +41,15 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
+import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
+import { withCandidatePatch } from "@/runner/batch/eval/rematerialize"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
   benchShouldRunRepairPhase,
   primaryRailRedAfterRepair,
 } from "@/runner/batch/eval/repair-phase-policy"
+import { type Candidate, runSelection } from "@/runner/batch/eval/selection-executor"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
@@ -54,10 +57,8 @@ import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
-import { withCandidatePatch } from "./rematerialize"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
-import { type Candidate, runSelection } from "@/runner/batch/eval/selection-executor"
 import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
 import {
@@ -77,8 +78,8 @@ export type { BenchKnobState, IssueHintMode, PrepareIssueHintDeps, PrepareReproT
 export {
   applyBenchKnobs,
   BenchObserver,
-  benchOptIns,
   benchInstallsReproHint,
+  benchOptIns,
   benchRunsRepairPhase,
   buildRunnerConfig as buildConfig,
   composeWithReproHint,
@@ -419,7 +420,11 @@ const runRepairPhase = async (
   let repairRounds = 0
   // #2 repro-vote: K-of-N RESOLVED majority gate when the knob is on AND a
   // reproducing set exists; else byte-identical `repair.validate ?? defaultValidate`.
-  const validate = buildReproVoteValidate(instance, reproSources, repair.validate ?? defaultValidate)
+  const validate = buildReproVoteValidate(
+    instance,
+    reproSources,
+    repair.validate ?? defaultValidate,
+  )
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -505,6 +510,7 @@ const runSelectionPhase = async (
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
+  reproSources: readonly string[],
 ): Promise<Phase> => {
   const owners = new Set(localizeCandidates)
   const seedFor = (i: number): string | undefined => {
@@ -515,7 +521,11 @@ const runSelectionPhase = async (
       : `Focus your investigation on \`${file}\`. Confirm the ROOT CAUSE lives there (not merely where the symptom surfaces) before editing.`
   }
   const mergeHint = (seed: string | undefined): string | undefined =>
-    seed === undefined ? closureHint : closureHint === undefined ? seed : `${closureHint}\n\n${seed}`
+    seed === undefined
+      ? closureHint
+      : closureHint === undefined
+        ? seed
+        : `${closureHint}\n\n${seed}`
 
   let totalTurns = 0
   const result = await runSelection({
@@ -566,6 +576,12 @@ const runSelectionPhase = async (
           },
         })
       },
+      // SOTA++ repro-vote as the SELECTION scorer: re-materialize each candidate
+      // and re-run the reproducing repro set there → the VerificationBundle's
+      // `patchedResolvedKofN` HARD signal (votes<k ⇒ reject). So selection picks
+      // the candidate the repro set reports RESOLVED. Empty reproducing set ⇒ a
+      // port that yields null (no objection). See `makeReproConsensusSelectionPort`.
+      resolvedKofN: makeReproConsensusSelectionPort(instance, reproSources, sandbox, deps.timeoutMs),
     },
   })
   return { patch: result.winner?.patch ?? "", turns: totalTurns }
@@ -840,6 +856,7 @@ const runInstanceOnce = async (
             precomputedHint,
             reproHint,
             closureHint,
+            reproSources,
           )
         : runRepair && repair !== undefined
           ? await runRepairPhase(

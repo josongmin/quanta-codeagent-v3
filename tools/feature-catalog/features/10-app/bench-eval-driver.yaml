@@ -45,7 +45,16 @@ evidence:
     - src/apps/bench/eval/snapshot.ts
     - src/apps/bench/eval/verdict.ts
     - src/apps/bench/eval/exec.ts
+    - src/runner/batch/eval/driver.ts
+    - src/runner/batch/eval/retry-policy.ts
+    - src/runner/batch/eval/sandbox.ts
+    - src/runner/batch/eval/snapshot.ts
+    - src/runner/batch/report.ts
+    - src/runner/batch/types.ts
+    - src/runner/batch/corpus/dataset.ts
+    - src/runner/knobs/presets.ts
     - src/shared/runtime-config.ts
+    - src/shared/runtime-config-knobs.ts
   adrs: []
   tests:
     unit:

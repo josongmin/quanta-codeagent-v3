@@ -73,12 +73,15 @@ export interface SelectionResult {
   generated: number
 }
 
-/** Normalize a diff to its +/- CONTENT lines (drop hunk headers / context /
- *  line-number noise) so two patches that differ only cosmetically dedup. */
+/** Normalize a diff to its `+++ b/` / `--- a/` FILE headers plus `+/-` CONTENT
+ *  lines (dropping `@@` hunk-offset noise + context) so two patches dedup only
+ *  when they make the SAME edit to the SAME file(s). Keeping the file headers is
+ *  deliberate: the SAME content edit on DIFFERENT files is a DIFFERENT fix site
+ *  (the diversity the executor exists to span) and must NOT collide. */
 const normalizePatch = (patch: string): string =>
   patch
     .split("\n")
-    .filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l))
+    .filter((l) => /^[+-]/.test(l))
     .map((l) => l.trimEnd())
     .join("\n")
 
@@ -148,7 +151,9 @@ export const runSelection = async (args: {
       voterQuorum: null,
       // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
       minimality: isEmpty ? null : maxB === minB ? 1 : 1 - (size - minB) / (maxB - minB),
-      ownerCoverage: ownerCoverageOf(c.files, args.owners),
+      // an empty no-patch earns NO owner-coverage credit (even if a caller hands
+      // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
+      ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
     }
     scored.push({ candidate: c, verdict: scoreCandidate(hard, soft) })
   }

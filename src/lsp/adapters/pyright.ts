@@ -5,7 +5,12 @@ import { LspClient, type LspClientOptions } from "./base"
 export type PyrightAdapterOptions = LspClientOptions
 
 const DEFAULT_COMMAND = ["pyright-langserver", "--stdio"]
-const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
+// jun-19 MEASUREMENT: raised 15s→60s to learn whether `textDocument/references`
+// EVER returns on a large repo (sympy) or is intractable. If it returns within
+// 60s → band-aid viable (and measure if grounding then recovers localization);
+// if it still times out → references is intractable, needs a precomputed
+// (tree-sitter/ripgrep) ref index, not pyright. REVERT to 15_000 after the probe.
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
 
 /** Resolve the Python interpreter pyright should use for `workspaceFolders`
  *  mode. WITHOUT a `pythonPath`, pyright cannot set up the workspace's import
@@ -38,13 +43,15 @@ const buildWorkspaceConfiguration = (cwd: string): Record<string, unknown> => {
       defaultInterpreterPath: pythonPath,
       analysis: {
         diagnosticMode: "openFilesOnly",
-        // jun-19: indexing ON so the EXISTING prewarm (which warms the server via
-        // a `definition` readiness probe) ALSO builds pyright's project-wide
-        // symbol index — `textDocument/references` / workspaceSymbol need that
-        // index, and with it OFF they fell back to an on-demand whole-project
-        // scan that TIMED OUT (15s) on large repos (sympy: measured ref timeout
-        // on sympy-17630). The index build is background + amortized into prewarm.
-        indexing: true,
+        // jun-19 MEASURED: `indexing:true` does NOT fix the `textDocument/references`
+        // 15s timeout on large repos (sympy-17630 still timed out with it ON).
+        // `python.analysis.indexing` covers workspace-symbol / auto-import / installed
+        // packages — NOT find-references, which must type-analyze every possibly-
+        // referencing file on-demand (fundamentally slow on sympy under openFilesOnly).
+        // → references-timeout fix is NOT a pyright config knob; it needs a precomputed
+        //   AST/lexical ref index (tree-sitter/ripgrep) or a raised timeout. Kept OFF
+        //   (indexing has a prewarm cost with zero references benefit).
+        indexing: false,
         autoImportCompletions: false,
         autoSearchPaths: true,
         useLibraryCodeForTypes: true,

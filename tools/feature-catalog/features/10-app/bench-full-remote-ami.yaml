@@ -1,0 +1,45 @@
+id: bench-full-remote-ami
+title: Full-remote bench — prebaked AMI + artifact persist under benchHome
+section: 10
+subsystem: 벤치 — EC2 full-remote eval
+order: 2406
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_FULL_REMOTE_AMI]
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [bench-eval-driver, bench-python-swebench]
+surface_integration:
+  cli: partial
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench full-remote subcommand; AMI override via --ami / env"
+    web: "no browser affordance"
+purpose: |
+  Full-remote SWE-bench runs on EC2 with prebaked AMI (docker+uv+django images),
+  closure diagnostics sidecar fetch, serial grading, QUANTA_BENCH_* env forward,
+  and durable artifacts under benchHome() (not /tmp).
+evidence:
+  code:
+    - src/apps/bench/remote/backend.ts
+    - src/apps/bench/remote/ec2.ts
+    - src/apps/bench/remote/full.ts
+    - src/apps/bench/cli.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/bench-full-remote-hellgate.test.ts
+      - tests/unit/bench-full-remote-relaunch-hellgate.test.ts
+      - tests/unit/bench-full-remote-stream-hellgate.test.ts
+      - tests/unit/full-remote-bench-env-forward.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

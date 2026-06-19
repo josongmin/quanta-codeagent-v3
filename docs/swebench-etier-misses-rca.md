@@ -1,12 +1,98 @@
 # SWE-bench E-tier 미스 RCA (gpt-5.4, agentless-v2, full-remote)
 
-풀 = easy-untried E-tier(#≥14 프론티어 해결, 우리만 실패 후보). graded & **unresolved 12건**.
+풀 = easy-untried E-tier(#≥14 프론티어 해결 = **천장 아님·회복가능**). graded & **unresolved 12건**.
+(스캐폴드 매트릭스 134 전수에 이 12개 미포함 = ceiling-32도 아니고 표시 17-arm 컬럼에도 없는 "보통" 인스턴스 → 회복가능 확정.)
 
-분류 요약: RIGHT-FILE-WRONG-FIX 9 · WRONG-FILE 2 · EMPTY 1 → **병목=fix 정확성(localize 아님)**.
+## 정정된 헤드라인 (closure-diagnostics 실측 기준)
 
-> ⚠️ trajectory(턴별 풀이로그)는 mining wave에서 미기록(QUANTA_BENCH_RECORD_TRAJECTORY off가 default).
-> 풀이 추적엔 해당 wave의 스트림 로그(sweep-eclassN.log)서 인스턴스ID grep + 아래 인라인 패치 대조 사용.
-> 턴별 전체 트레이스 필요시 `QUANTA_BENCH_RECORD_TRAJECTORY=1`로 재런.
+**기존 "RIGHT-FILE-WRONG-FIX 9 · WRONG-FILE 2 · EMPTY 1 → 병목=fix 정확성(localize 아님)"은 근거가 diff-추측이라 약했고 부분적으로만 맞다.** closure-diagnostics(`bench/full-remote/closure-i-{0caa…,0cd6…,030515…}.json`)로 확정:
+
+- **owner localize는 이미 ~92% 해결** — `owner_recall@1` 0.85~1.0, `first_edit_owner_match` 0.92~1.0, `stray_file_rate` 0 (3 wave). → 이 set엔 localize 추가투자 헤드룸 거의 없음. STRATEGY.md의 P0/P1(빈도 기준 최우선)은 이 회복가능 set에선 적용 안 됨(헤드룸은 P2/P3).
+- **지배 실패 = `model_miss`** = 올바른 파일·owner 찍고 repro RED까지 띄운 뒤 **패치가 틀림**. `repro_red_but_unresolved_rate` = 0.18~0.33 (= closure-repair가 net-negative였던 원인인 repro-oracle false-negative 시그니처).
+- 정확한 3분류: **file-level localize 성공 후 owner/fix 실패 9 + owner/file localize 실패 3(wrong-file 2 + empty 1) + grader-validity 별도 1(sphinx-9711)**.
+
+### closure 실측 (per-instance)
+
+| inst | term | turns | class | ownerHit | gold f/h | F2P/P2P | family |
+|---|---|--:|---|:--:|---|---|---|
+| 11951 | completed_unresolved | 24 | model_miss | ✅ | 1/1 | 1/21 | wrong-generalization (`else None`; issue가 정답식 줌) |
+| 12039 | completed_unresolved | 25 | model_miss | ✅ | 1/2 | 1/11 | sibling-coverage (IndexColumns만, base Columns 누락) |
+| 14311 | completed_unresolved | 27 | model_miss | ✅ | 1/1 | 1/59 | paired-regression (`.name` → package `__main__` 회귀) |
+| 13121 | completed_unresolved | 39 | model_miss | ✅ | **4/9** | 1/168 | multi-site design-delete를 expressions.py 1조건으로 축소 |
+| 12754 | max_turns | 60 | model_miss | ✅ | 1/1 | 1/112 | owner/lifecycle within-file |
+| 13128 | max_turns | 60 | model_miss | ✅ | 1/3 | **7**/134 | wrong-condition, hard(1-4h) |
+| 14017 | max_turns | 60 | model_miss | ✅ | 1/1 | 2/147 | wrong-structure (Q-wrap vs allow-through) |
+| 14351 | max_turns | 60 | model_miss | ❌ | 1/1 | 1/58 | **wrong-file** (related_lookups.py vs gold lookups.py) |
+| 12965 | max_turns | 60 | model_miss | ❌ | 1/1 | 1/52 | **wrong-file** (mysql/features.py vs gold sql/compiler.py) |
+| 13964 | max_turns | 60 | empty_patch_other | ⬜ | 1/1 | 1/36 | **empty** (edit 후 빈손 복귀; no-patch breaker가 salvage 못 함; gold=L0 1줄 base.py) |
+| sympy-24066 | (earlier) | — | — | ✅file | 1/1 | 1/30 | semantic-normalization wrong-fix |
+| sphinx-9711 | (earlier) | — | — | ✅file | 1/2 | 1/0 | wrong-fix(InvalidVersion fallback 누락) — **단 grader-validity 오염** |
+
+> ⚠️ trajectory(턴별 풀이로그)는 mining wave에서 미기록(`QUANTA_BENCH_RECORD_TRAJECTORY` off default). 풀이 추적엔 wave 스트림 로그(`sweep-eclassN.log`)서 인스턴스ID grep + 아래 인라인 패치 대조. wired vs **engaged** 분리는 M0 재런으로.
+> ⚠️ sphinx-9711: 현 report상 gold patch가 selected verifier에서 미해결 → **clean grading proof 아님**. resolved-rate denominator에서 분리, grader-validity부터 재검.
+
+## 구조 원인 (코드)
+
+- **FaultEvidencePacket가 path/score/symbol name만** 담음 ([types.ts:6](src/agent/fault-evidence/types.ts#L6) "never raw source bodies", [build.ts:43](src/agent/fault-evidence/build.ts#L43) = stage1/issue-file/owner-resolve 점수 merge만). → sibling method·donor pattern·caller/ref·adjacent negative case가 prompt/gate authority로 못 올라옴.
+- **agentless-v2는 closure knob은 켜도 closure-repair executor는 의도적 제외** ([presets.ts:108](src/runner/knobs/presets.ts#L108)). plan/rail telemetry ≠ 실제 finish blocking. driver도 split 명시 ([driver.ts:798](src/apps/bench/eval/driver.ts#L798)). closure-repair는 측정상 net-negative(9→7)였고 원인 = **repro oracle false-negative**(맞는 fix를 reproduced로 읽어 repair churn) → reprovote의 K-of-N resolved vote가 이걸 겨냥.
+- repair loop의 typed predicate mismatch는 아직 observe/advisory ([repair/index.ts:79](src/runner/batch/eval/repair/index.ts#L79)) → 짧은 wrong-fix를 막는 "done 전 paired-control proof"로 부족.
+
+## 조질 계획 (reprovote=SOTA floor 위에 적층)
+
+reprovote = `agentless-v2` + `closure-repair:3` + `repro-vote:1`. 이게 false-neg oracle 한 겹만 벗김 → 이 set의 잔여(wrong-generalization·coverage·structure)는 **evidence v2 + paired-control**이 정조준.
+
+### arm 매트릭스 (각 arm = 독립 preset; boolean env로 preset-ON knob OFF 불가 → 별도 preset 필수)
+
+| arm | preset | reprovote 대비 추가 | 단일변수 |
+|---|---|---|---|
+| A0 | `agentless-v2-reprovote` | — (frozen floor) | control |
+| A1 | `…-reprovote-evidence` | `fault-evidence:2` (bounded 본문) | 증거본문 효과 |
+| A2 | `…-reprovote-paired` | `paired-control:1` (신규) | done-blocking proof 효과 |
+| A3 | `…-reprovote-evidence-paired` | 둘 다 | v3 후보 |
+| A4 | `…-reprovote-rescue` | `no-patch-rescue` (신규) | empty 구제 |
+
+신규 knob:
+- `fault-evidence:2` — v1 path/score/symbol → **bounded** ownerSnippet·siblingPatterns·callerRefs·donorPatterns·adjacentControls. raw-blob 금지·line-window cap(deterministic).
+- `paired-control:1` — done 전 case-class별 **public issue/repo 유래** paired test 생성, **base-red 증명(vacuous-green 가드)** 후 required. self-critique 불가, hidden F2P/P2P label authority 금지.
+- `no-patch-rescue` — high-confidence owner인데 empty면 제출 금지 → bounded rescue, 실패 시 `no_patch_exhausted` verdict 분리(resolved 오염 금지).
+
+### case → arm 라우팅 (기대 flip)
+
+- owner맞음·fix틀림 (A1/A2 정조준): **11951**(A2 max-cap 보존 / A1 issue 정답식), **12039**(A1 donor `Columns.col_str` / A2 DESC+opclass empty-suffix), **14311**(A2 module `foo.bar.baz`+package `foo.bar.__main__`), **14017**(A2 Exists&Q↔Q&Exists), **sympy-24066**(A1 donor / A2 dimensionless control).
+- right-file thrash (A0 reprovote 단독이 false-neg 해소로 푸는지 = M0 핵심 관찰): **12754, 13128, 14017**. 13128은 F2P=7·1-4h라 기대 낮춤.
+- **이 arm으로 안 잡힘 → 별도 트랙 (denominator 분리)**: **12965, 14351** wrong-file(exec-trace/call-graph SCG localize; owner-symbol admission 없으면 false-green), **13964** empty(A4), **sphinx-9711** grader-validity 재검.
+
+### 측정 / 통과 게이트 (이미 도는 closure rail)
+
+북극성 = **resolved**(공식 x86 harness, `report.json`+patch artifact 필수 — "full-remote done"·empty fail list는 증거 아님) + `repro_red_but_unresolved_rate ↓`.
+
+| 게이트 | 기준 |
+|---|---|
+| resolved (12 set) | A1/A2/A3 > A0 |
+| repro_red_but_unresolved | ↓ |
+| 비용 | `verify_rounds_per_run`·repair rounds 폭증 금지(closure-repair churn 재발 방지) |
+| empty | no empty patch, `no_patch_exhausted` 분리 |
+| owner-symbol (신규 M3) | `owner_symbol_match`·`first_edit_owner_symbol_match`·`line_window@50` — 없으면 wrong-file false-green |
+| grader | sphinx-9711 gold 재채점 clean 전까지 제외 |
+
+⚠️ `primary_false_red_rate`는 vote arm 간 **비교 금지**(vote가 observed 안 냄 = 구조적 0).
+
+### 시퀀스
+
+- **M0 (먼저, engage-proof / 유저 트리거)**: 12개만 `QUANTA_BENCH_RECORD_TRAJECTORY=1` + `--preset agentless-v2-reprovote` 재런. 확인: LSP/tool 실호출·first-edit owner·final verify·primary rail present·**gate entered**(지난 run 전부 null = wired≠engages 의심)·empty-patch path. reprovote가 churn하면 **oracle부터** 고치고 A1/A2 보류.
+- **M1**: 이 doc 정정 (← 완료).
+- **M2**: `fault-evidence:2` (bounded typed evidence) — 12039·11951·14311·sympy-24066·sphinx 정조준.
+- **M3**: owner-symbol admission + metric — 12965·14351·12754·13128 false-green 차단.
+- **M4**: paired-control verification(done-blocking, public-derived only).
+- **M5**: empty-patch fail-safe(13964; L0 1-line empty를 resolved에 안 섞음).
+- **M6**: repair executor default-on 금지 — A0/A1/A2/A3/A4 12-case A/B로만. 통과 = resolved↑·repair rounds↓·no empty·grader clean.
+
+### 적대 가드
+
+- closure-repair net-positive 조건 = oracle이 reproduced→resolved를 신뢰성 있게 flip. reprovote가 그 주장인데 **미측정** → M0가 선증명. 안 되면 oracle 수리 선행.
+- paired-control = public 유래 only(hidden label authority = STRATEGY heuristic-boundary 위반). base-red 후 required(vacuous-green 차단).
+- n=12 = diagnostic A/B지 leaderboard 주장 아님. 500 일반화 금지. "improved" 주장 전 적대 어딧 ≥3.
+- v1/v2/reprovote in-place 금지 — 신규 동작은 전부 신규 preset.
 
 ---
 

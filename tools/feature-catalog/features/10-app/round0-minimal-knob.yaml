@@ -1,0 +1,36 @@
+id: round0-minimal-knob
+title: round0-minimal — WS1 mini-parity thin round-0 prompt knob
+section: 10
+subsystem: 벤치 — round-0 prompt thinning
+order: 2417
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-off]
+depends_on: [proof-driven-bench-closure, repro-test-slice]
+config_refs:
+  env: [QUANTA_BENCH_ROUND0_MINIMAL]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench buildConfig round-0 reproHint suppression"
+    web: "no browser affordance"
+purpose: 'Default-OFF: suppress bulky repro directive prose at round 0; re-attach on repair rounds ≥1. Keeps one-line closureHint.'
+evidence:
+  code:
+    - src/runner/knobs/knobs/round0-minimal.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/bench-closure-prompt-wiring.test.ts
+    integration: []
+    contract: []
+knobs: ["round0-minimal"]
+deliberate_hold: null

@@ -19,8 +19,13 @@
  *   - executeReproTests throws   ⇒ null (a broken exec is not a "still buggy"
  *                                  verdict — never a false-RED rejection).
  *
- * Quorum `k` defaults to a STRICT MAJORITY of the reproducing-set size — the
- * same majority semantics the base-side vote uses, not a tuned threshold.
+ * Quorum `k` defaults to a STRICT MAJORITY of the DECISIVE votes
+ * (resolved + reproduced) — NOT of the raw sample count. Post-fix crashes
+ * (inconclusive: `other`/`exec_failed`/`unknown`) are "no evidence either way"
+ * and must NOT inflate the bar, else a correct patch whose brittle scripts crash
+ * after the fix would be rejected (the exact false-NEGATIVE this line removes).
+ * This makes the default agree with {@link voteResolved}'s decisive-majority
+ * verdict. An explicit `k` is honored verbatim.
  */
 
 import {
@@ -29,7 +34,7 @@ import {
   type ReproWriteFilePort,
 } from "@/agent/repro-test/execute"
 import type { ReproTestConfig } from "@/agent/repro-test/types"
-import { resolvedConsensus } from "@/agent/repro-test/vote"
+import { resolvedConsensus, voteResolved } from "@/agent/repro-test/vote"
 
 export interface PatchedResolvedConsensusDeps {
   /** Reproducing scripts (outcome === "reproduced" on the un-patched tree). */
@@ -58,7 +63,6 @@ export const makePatchedResolvedConsensus =
   (deps: PatchedResolvedConsensusDeps) =>
   async (sandbox: string): Promise<{ votes: number; k: number } | null> => {
     if (deps.sources.length === 0) return null
-    const k = deps.k ?? majorityQuorum(deps.sources.length)
     try {
       const samples = await executeReproTests({
         tests: deps.sources,
@@ -69,6 +73,10 @@ export const makePatchedResolvedConsensus =
         ...(deps.buildArgv !== undefined ? { buildArgv: deps.buildArgv } : {}),
         ...(deps.pythonBin !== undefined ? { pythonBin: deps.pythonBin } : {}),
       })
+      // Default quorum = majority of DECISIVE votes (resolved+reproduced), so
+      // post-fix crashes don't inflate the bar. Explicit `k` is honored as-is.
+      const v = voteResolved(samples)
+      const k = deps.k ?? majorityQuorum(v.resolved + v.reproduced)
       return resolvedConsensus(samples, k)
     } catch {
       // A broken exec must never be a false-RED rejection — fail-open to null.

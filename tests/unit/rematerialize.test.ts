@@ -4,12 +4,22 @@
  * way to prove the probe observes `base + patch` (and that "theater" — probing
  * the wrong tree — cannot survive) is to read the actual worktree.
  */
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { applyCandidatePatch, resetToBase, withCandidatePatch } from "@/runner/batch/eval/rematerialize"
+import {
+  makeRegressionOracle,
+  type RegressionExecPort,
+  toRegressionGreen,
+} from "@/runner/batch/eval/regression-oracle"
+import {
+  applyCandidatePatch,
+  resetToBase,
+  withCandidatePatch,
+} from "@/runner/batch/eval/rematerialize"
 
 let repo: string
 const git = (...args: string[]): string =>
@@ -38,23 +48,35 @@ const diffFor = (edit: () => void): string => {
   return patch
 }
 
+/** STAGED diff (`git add -A && git diff --cached`) — the EXACT shape the bench
+ *  captures via `gitStageAndDiffCached`, so new-file (`--- /dev/null`) and
+ *  delete-file sections appear. Reverts the edit + unstages afterward. */
+const stagedDiffFor = (edit: () => void): string => {
+  edit()
+  git("add", "-A")
+  const patch = execFileSync("git", ["diff", "--cached"], { cwd: repo, encoding: "utf8" })
+  git("reset", "-q", "--hard", "HEAD")
+  git("clean", "-qfdx")
+  return patch
+}
+
 describe("withCandidatePatch — materializes base + patch for the probe", () => {
   test("probe OBSERVES the patched tree (the anti-theater invariant)", async () => {
     const patch = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\npatched\n"))
-    let observed: string | null = null
+    const obs: { v: string } = { v: "" }
     const ret = await withCandidatePatch({
       sandbox: repo,
       patch,
       baseCommit: baseCommit(),
       timeoutMs: 30_000,
       probe: async (sb) => {
-        observed = readFileSync(join(sb, "foo.txt"), "utf8")
+        obs.v = readFileSync(join(sb, "foo.txt"), "utf8")
         return "probed"
       },
     })
     expect(ret).toBe("probed")
     // RED-ON-INJECTION: if the seam probed the wrong tree, this would be "base\n".
-    expect(observed).toBe("base\npatched\n")
+    expect(obs.v).toBe("base\npatched\n")
   })
 
   test("restores the sandbox to base AFTER the probe (fresh-readback)", async () => {
@@ -92,19 +114,95 @@ describe("withCandidatePatch — materializes base + patch for the probe", () =>
     })
     // restore the dirty state the executor would actually leave
     writeFileSync(join(repo, "foo.txt"), "STALE PRIOR CANDIDATE\n")
-    let observed: string | null = null
+    const obs: { v: string } = { v: "" }
     await withCandidatePatch({
       sandbox: repo,
       patch,
       baseCommit: baseCommit(),
       timeoutMs: 30_000,
       probe: async (sb) => {
-        observed = readFileSync(join(sb, "foo.txt"), "utf8")
+        obs.v = readFileSync(join(sb, "foo.txt"), "utf8")
         return null
       },
     })
     // The leading reset wiped the stale tree → probe sees base+patch, not stacked.
-    expect(observed).toBe("base\nfresh\n")
+    expect(obs.v).toBe("base\nfresh\n")
+  })
+})
+
+describe("withCandidatePatch — git apply covers all diff shapes", () => {
+  test("NEW-FILE patch (--- /dev/null) materializes the added file", async () => {
+    const patch = stagedDiffFor(() => writeFileSync(join(repo, "added.py"), "x = 1\n"))
+    const obs: { v: boolean } = { v: false }
+    await withCandidatePatch({
+      sandbox: repo,
+      patch,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      probe: async (sb) => {
+        obs.v = existsSync(join(sb, "added.py"))
+        return null
+      },
+    })
+    expect(obs.v).toBe(true) // file was created by the patch
+    expect(existsSync(join(repo, "added.py"))).toBe(false) // reset removed it
+  })
+
+  test("DELETE-FILE patch removes the file, reset restores it", async () => {
+    const patch = stagedDiffFor(() => rmSync(join(repo, "keep.txt")))
+    const obs: { v: boolean } = { v: true }
+    await withCandidatePatch({
+      sandbox: repo,
+      patch,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      probe: async (sb) => {
+        obs.v = existsSync(join(sb, "keep.txt"))
+        return null
+      },
+    })
+    expect(obs.v).toBe(false) // patch deleted it
+    expect(existsSync(join(repo, "keep.txt"))).toBe(true) // reset restored it
+    expect(readFileSync(join(repo, "keep.txt"), "utf8")).toBe("keep\n")
+  })
+
+  test("MULTI-FILE patch applies every section atomically", async () => {
+    const patch = stagedDiffFor(() => {
+      writeFileSync(join(repo, "foo.txt"), "base\nA\n")
+      writeFileSync(join(repo, "keep.txt"), "keep\nB\n")
+    })
+    const obs: { foo: string; keep: string } = { foo: "", keep: "" }
+    await withCandidatePatch({
+      sandbox: repo,
+      patch,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      probe: async (sb) => {
+        obs.foo = readFileSync(join(sb, "foo.txt"), "utf8")
+        obs.keep = readFileSync(join(sb, "keep.txt"), "utf8")
+        return null
+      },
+    })
+    expect(obs.foo).toBe("base\nA\n")
+    expect(obs.keep).toBe("keep\nB\n")
+  })
+
+  test("the temp patch file is NOT visible to the probe", async () => {
+    const patch = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nz\n"))
+    const obs: { v: boolean } = { v: true }
+    await withCandidatePatch({
+      sandbox: repo,
+      patch,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      probe: async (sb) => {
+        // the patch is applied via a temp file that MUST be removed before the
+        // probe runs — else a pytest collection would pick up stray repo state.
+        obs.v = existsSync(join(sb, ".quanta-cand.patch"))
+        return null
+      },
+    })
+    expect(obs.v).toBe(false)
   })
 })
 
@@ -177,6 +275,48 @@ describe("withCandidatePatch — FAIL-OPEN (null, never a false verdict)", () =>
   })
 })
 
+describe("composition — re-materialize + regression oracle → regressionGreen (the driver port's exact chain)", () => {
+  const oracle = makeRegressionOracle()
+  // Fake exec that READS the materialized tree: a candidate whose foo.txt
+  // contains "GOOD" passes (exit 0), else the impacted test "fails" (exit 1).
+  // Base foo.txt is "base\n" (NO "GOOD") — so a GREEN result is ONLY possible if
+  // the oracle ran against base+candidate.patch. If it probed base/last (theater),
+  // the green case would read "base\n", fail, and this test would go RED.
+  const fakeExec: RegressionExecPort = async (_argv, cwd, _t) => {
+    const content = readFileSync(join(cwd, "foo.txt"), "utf8")
+    return content.includes("GOOD")
+      ? { code: 0, stdout: "1 passed", stderr: "" }
+      : { code: 1, stdout: "FAILED foo.py::test_x", stderr: "" }
+  }
+  const runPort = (patch: string): Promise<boolean | null> =>
+    withCandidatePatch({
+      sandbox: repo,
+      patch,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      probe: async (sb) => {
+        const r = await oracle.run({
+          tests: ["foo.py::test_x"],
+          sandbox: sb,
+          exec: fakeExec,
+          timeoutMs: 30_000,
+          buildArgv: (t) => ["pytest", ...t],
+        })
+        return toRegressionGreen(["foo.py::test_x"], r)
+      },
+    })
+
+  test("candidate that keeps tests GREEN ⇒ regressionGreen=true", async () => {
+    const patch = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nGOOD\n"))
+    expect(await runPort(patch)).toBe(true)
+  })
+
+  test("candidate that BREAKS a test ⇒ regressionGreen=false (the gate ENGAGES)", async () => {
+    const patch = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nBROKEN\n"))
+    expect(await runPort(patch)).toBe(false)
+  })
+})
+
 describe("primitives", () => {
   test("resetToBase wipes worktree edits + untracked files", async () => {
     writeFileSync(join(repo, "foo.txt"), "dirty\n")
@@ -188,7 +328,8 @@ describe("primitives", () => {
   })
 
   test("applyCandidatePatch returns false for a non-applying diff", async () => {
-    const bad = "diff --git a/foo.txt b/foo.txt\n--- a/foo.txt\n+++ b/foo.txt\n@@ -9,1 +9,1 @@\n-x\n+y\n"
+    const bad =
+      "diff --git a/foo.txt b/foo.txt\n--- a/foo.txt\n+++ b/foo.txt\n@@ -9,1 +9,1 @@\n-x\n+y\n"
     expect(await applyCandidatePatch(repo, bad, 30_000)).toBe(false)
   })
 })

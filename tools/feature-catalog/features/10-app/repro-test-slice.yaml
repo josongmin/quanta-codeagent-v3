@@ -46,6 +46,7 @@ evidence:
     - src/agent/repro-test/generate.ts
     - src/agent/repro-test/execute.ts
     - src/agent/repro-test/select.ts
+    - src/agent/repro-test/vote.ts
     - src/agent/repro-test/types.ts
     - src/apps/bench/eval/driver.ts
     - src/runner/knobs/knobs/repro-test.ts

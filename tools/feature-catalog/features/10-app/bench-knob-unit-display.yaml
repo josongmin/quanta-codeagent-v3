@@ -1,0 +1,38 @@
+id: bench-knob-unit-display
+title: Knob self-describing values — unit suffix in reports/presets
+section: 10
+subsystem: 벤치 — knob report readability
+order: 2404
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [bench-eval-driver]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench report formatting only"
+    web: "no browser affordance"
+purpose: |
+  `Knob.unit` + `formatKnobValue` so preset tables and bench reports never show
+  bare counts ("5 rounds" not "5"). Object-wrapped knob shapes (localize-phase,
+  repro-test) pull the numeric field before formatting.
+evidence:
+  code:
+    - src/runner/knobs/types.ts
+    - src/runner/batch/eval/knobs-bench.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/knob-unit-display.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

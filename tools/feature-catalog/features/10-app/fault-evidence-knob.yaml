@@ -1,0 +1,37 @@
+id: fault-evidence-knob
+title: fault-evidence — T-201 typed FaultEvidencePacket knob
+section: 10
+subsystem: 벤치 — closure fault-evidence lever
+order: 2410
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-off]
+depends_on: [proof-driven-bench-closure]
+config_refs:
+  env: [QUANTA_BENCH_FAULT_EVIDENCE]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench posture projection only"
+    web: "no browser affordance"
+purpose: 'Default-OFF NOOP-apply registry knob: emit bounded typed FaultEvidencePacket (paths/symbols only) via benchPostureFromState. Strict truthy gate: "1"/"on"/"true".'
+evidence:
+  code:
+    - src/runner/knobs/knobs/fault-evidence.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/proof-closure-knobs-wiring.test.ts
+      - tests/unit/bench-fault-evidence-wiring.test.ts
+    integration: []
+    contract: []
+knobs: ["fault-evidence"]
+deliberate_hold: null
