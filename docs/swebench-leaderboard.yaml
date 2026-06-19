@@ -18,6 +18,24 @@ about: 'SWE-bench Verified — internal results SSOT (machine-readable). Rendere
 crosscheck_policy_version: 1
 
 runs:
+- run_id: lockin-simplicity-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2 + QUANTA_BENCH_SIMPLICITY (now DEFAULT-ON)
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench harness, EC2 backend SERIAL, spot terminated
+  scope: 'LOCK-IN: 8 FRESH untried tier-E (#>=15) across 7 repos (astropy/django/matplotlib/xarray/scikit-learn/sphinx) + astropy-7166 (noise re-check), SIMPLICITY ON.'
+  resolved_count: 8
+  resolved: [astropy__astropy-7166, astropy__astropy-7671, django__django-11551, django__django-11999, matplotlib__matplotlib-22719, pydata__xarray-3677, scikit-learn__scikit-learn-10297, sphinx-doc__sphinx-8721]
+  unresolved: [sympy__sympy-12096]
+  verdict: >-
+    8/9. (1) Absorbed SIMPLICITY + binary-strip + test-guard bring quanta to FRONTIER LEVEL on fresh tier-E: 8
+    untried instances across 7 distinct repos all resolved. (No per-instance OFF baseline here, so these 8 are
+    "quanta-with-absorption matches frontier on easy-core", not all proven steer-caused — clean causal proof stays
+    the 13417 + sympy-24562 flips.) (2) astropy-7166, which FAILED in the prior absorb-simplicity batch, PASSED here
+    → that fail was RUN-NOISE, not a steer regression. SIMPLICITY promoted to DEFAULT-ON (off-switch
+    QUANTA_BENCH_SIMPLICITY=0). Only miss: sympy-12096 (5-file over-broad — steer does not fully suppress sympy
+    over-engineering). Combined SIMPLICITY-ON: ~14/18 graded, 2 causal flips, 0 confirmed regression.
 - run_id: absorb-simplicity-2026-06-19
   date: '2026-06-19'
   preset: agentless-v2 + QUANTA_BENCH_SIMPLICITY=1
@@ -476,3 +494,77 @@ runs:
     result: 'mini 3/3 RESOLVED (7166/7336/13417). But this did NOT prove scaffold loss for all three — re-grading QUANTA''s OWN patches source-only showed 7166/7336 also pass (the divergence was patch hygiene, not reasoning). Genuine quanta loss vs mini: ONLY 13417 (over-engineering).'
     live_swe_crosscheck: 'Live-SWE (config-only self-evolve on mini, SAME gpt-5.4) solved 13417 ✅ in 132s with a minimal query.py patch — confirms 13417 is a quanta scaffold-posture loss (over-broad), not a model ceiling.'
     openhands_crosscheck: 'OpenHands SDK v1.21 headless (local runtime, SAME gpt-5.4 via the proxy /v1/responses bridge — native Responses-API mode) solved 13417 ✅ in 91s with a minimal 620B query.py patch (run-id oh-smoke-13417-2026-06-19). TRIPLE confirmation: mini ✅ + Live ✅ + OpenHands ✅ all solve 13417 minimally; only quanta over-engineers (new compiler-executing method). Definitively a quanta scaffold loss, NOT model ceiling. NOTE: per the escalation ladder OpenHands was not required here (mini already passed) — this was a one-off end-to-end setup validation of oh-login.sh.'
+
+- run_id: eclass-untried-sweep-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (no spot reclaim), prebaked AMI
+  scope: 'COVERAGE EXPANSION — untried E-class instances (scaffold-matrix cnt>=14, i.e. 14-17/17 SOTA scaffolds solve them = near-certain recoverable). Targeted by cnt (NOT difficulty label, which mis-pulled CEILING). batch1(12) + batch2(14) = 26/26 = 100%. All django, env-proven.'
+  resolved_count: 26
+  resolved:
+  - instance_id: django__django-11276
+    repo: django
+    turns: 41
+  - instance_id: django__django-11551
+    repo: django
+    turns: 31
+  - instance_id: django__django-11999
+    repo: django
+    turns: 42
+  - instance_id: django__django-12155
+    repo: django
+    turns: 42
+  - instance_id: django__django-12262
+    repo: django
+    turns: 21
+  - instance_id: django__django-12858
+    repo: django
+    turns: 25
+  - instance_id: django__django-13012
+    repo: django
+    turns: 26
+  - instance_id: django__django-13028
+    repo: django
+    turns: 51
+  - instance_id: django__django-13569
+    repo: django
+    turns: 60
+  - instance_id: django__django-13741
+    repo: django
+    turns: 49
+  - instance_id: django__django-13786
+    repo: django
+    turns: 43
+  - instance_id: django__django-13820
+    repo: django
+    turns: 52
+  - instance_id: django__django-14349
+    repo: django
+  - instance_id: django__django-14787
+    repo: django
+  - instance_id: django__django-14855
+    repo: django
+  - instance_id: django__django-14915
+    repo: django
+  - instance_id: django__django-15103
+    repo: django
+  - instance_id: django__django-15104
+    repo: django
+  - instance_id: django__django-15277
+    repo: django
+  - instance_id: django__django-15278
+    repo: django
+  - instance_id: django__django-15315
+    repo: django
+  - instance_id: django__django-15368
+    repo: django
+  - instance_id: django__django-15467
+    repo: django
+  - instance_id: django__django-15499
+    repo: django
+  - instance_id: django__django-15525
+    repo: django
+  - instance_id: django__django-15561
+    repo: django

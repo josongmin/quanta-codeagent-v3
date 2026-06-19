@@ -5,6 +5,12 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 
 > **머신리더블 SSOT = [`swebench-leaderboard.yaml`](swebench-leaderboard.yaml)** (run 블록별 resolved 리스트). 이 md는 사람이 보는 큐레이션 뷰 — 전체 resolved 인스턴스는 yaml 참조.
 
+## 🚀 커버리지 확장 — untried E-class 스윕 (2026-06-19) · **26/26 = 100%**
+`scaffold-solving-summary.md`(500×17 SOTA 스캐폴드 매트릭스)로 **cnt(몇 개 스캐폴드가 푸나)**를 가성비 신호로 사용 — 난이도 라벨(`<15min`)은 CEILING(아무도 못 품)을 섞어 부적합했음. **cnt≥14 (E-class, 14~17/17 스캐폴드가 푸는 = 거의 확실히 회복가능)** untried를 cnt 높은 순으로 타게팅:
+- **batch1 12/12 + batch2 14/14 = 26/26 (100%)** — 전부 cnt=17 django, agentless-v2, on-demand(spot reclaim 회피)+prebaked AMI.
+- 타게팅 원칙: **E-class untried 171개(django+sympy 114) 우선, CEILING 55개는 skip(0 ROI).** run_id `eclass-untried-sweep-2026-06-19`.
+- 진행 중: batch3+ 로 나머지 E-class untried 쭉 스윕.
+
 ## 🥇 easy django T1+T2 — **82/84 resolved (97.6%)** · closure-bundle 회복 (2026-06-18)
 
 위 78/84(baseline preset)에서 미해결이던 6개를 **agentless-v2**(closure 6-knob 전부 ON + LSP-steer, **코드변경 0**)로 EC2 full-remote 재solve → **4/6 회복**. run_id `easy-unresolved-recover-2026-06-18`.
