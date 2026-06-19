@@ -158,7 +158,11 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     }
 
     // Authorize :22 from the current public IP only. ifconfig.me ⇒ public IP.
-    const ipRes = await spawn("curl", ["-s", "ifconfig.me"])
+    // Force IPv4 (`-4`): on dual-stack/IPv6-preferred connections curl returns an
+    // IPv6 address, which fails the IPv4 validation below and aborts grading (the
+    // `--cidr` SG rule is IPv4-only). The EC2 SG :22 rule must match the IPv4 the
+    // ssh control connection actually egresses from.
+    const ipRes = await spawn("curl", ["-4", "-s", "ifconfig.me"])
     const myIp = oneLine(ipRes.stdout)
     // Validate it's actually an IPv4 — a failed/proxied curl can return an HTML
     // error page whose first token is non-empty but not an IP, which would build
