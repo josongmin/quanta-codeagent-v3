@@ -221,12 +221,16 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 
-  // PRESET-9: the repair EXECUTOR is NOT in any preset — measured net-negative
-  // (jun-19: resolution 9→7, repro is a false-NEGATIVE oracle so repair just
-  // churns). The closure GROUNDING knobs stay (they win: 82/84 django). The
-  // executor remains an opt-in CLI/env knob for when the repro oracle is fixed.
-  // red-on-injection: re-add "closure-repair" to agentless-v2 and this fails.
-  test("PRESET-9: no preset enables the repair executor (net-negative, opt-in only)", () => {
+  // PRESET-9: the repair EXECUTOR is NOT in the DEFAULT/v1/v2 presets — measured
+  // net-negative (jun-19: resolution 9→7, repro is a false-NEGATIVE oracle so
+  // repair just churns). The closure GROUNDING knobs stay (they win: 82/84
+  // django). The executor is opt-in: the jun-19 repair-arms `agentless-v2-repair`
+  // (legacy gate) and `agentless-v2-reprovote` (K-of-N vote gate) DO enable
+  // `closure-repair:3` — exactly the "for when the repro oracle is fixed" arms
+  // this comment foresaw (the vote IS that fix). This test pins that v1/v2
+  // themselves stay executor-free. red-on-injection: add "closure-repair" to
+  // agentless-v2 and this fails.
+  test("PRESET-9: v1/v2 presets stay executor-free (repair is explicit opt-in via the repair-arms)", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v2"
     expect(benchOptIns().repairRounds).toBeUndefined()
     expect(KNOB_PRESETS["agentless-v2"]?.["closure-repair"]).toBeUndefined()

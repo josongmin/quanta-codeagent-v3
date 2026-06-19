@@ -215,6 +215,31 @@ const SIMPLICITY_STEER =
   "writing new code. Remove any reproduction script or downloaded file you " +
   "created so only the real source fix remains."
 
+/** Lever A — SIBLING-COMPLETION / co-change consequence check (2026-06-19,
+ *  ceiling RCA). Measured failure mode on the multi-file ceiling subset: quanta
+ *  localizes the OWNER file correctly (often gold-identical) but STOPS there and
+ *  misses the COUPLED sibling file the fix also requires (matplotlib cm.py edit
+ *  needs colors.py `__eq__`; django related.py needs forms/models.py). The
+ *  adversarial audit showed the sibling usually IS reachable by symbol (cm.py
+ *  uses colors.LinearSegmentedColormap; related.py references forms.Model-
+ *  ChoiceField) — the agent simply never follows the link or asks "what does my
+ *  change break elsewhere". This steer forces the LSP traversal + ripple check.
+ *  Complements the WS2 grep feeder (tool-found siblings) with model-driven LSP
+ *  discovery. Knob-gated `QUANTA_BENCH_SIBLING` (default-OFF for clean A/B). */
+const SIBLING_COMPLETION_STEER =
+  "Many fixes span MORE THAN ONE file. KEEP your primary fix exactly where it is " +
+  "— never move it to another file. Then, ADDITIVELY, run a co-change check: for " +
+  "every symbol your edit touches or whose behavior it changes (a renamed/added " +
+  "attribute, a changed return or raise, an altered comparison, a new kwarg you " +
+  "pass), grep the symbol name (and/or use lsp_references) to find every OTHER " +
+  "file that DEFINES or CONSUMES it. For each, ask: does my change break or " +
+  "contradict what it assumes — its equality/hash, how it renders or consumes the " +
+  "value, or its parallel layer (a form field paired with a model field, a " +
+  "registry paired with the object it stores)? If yes, ADD an edit to that file " +
+  "TOO — on top of, not instead of, your primary edit. Your FINAL diff must " +
+  "contain BOTH the primary file AND every coupled file; dropping either one " +
+  "fails the hidden tests. Verify both before you stop."
+
 const SWEBENCH_DIRECTIVE = [
   "",
   "",
@@ -1068,8 +1093,15 @@ export const buildConfig = (
     instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY")
       ? `\n-${SIMPLICITY_STEER}`
       : ""
+  // Lever A — sibling-completion / co-change check (ceiling multi-file class).
+  // Knob-gated `QUANTA_BENCH_SIBLING`, DEFAULT-OFF for a clean A/B against the
+  // 0/6 ceiling baseline; OFF ⇒ "" ⇒ byte-identical prompt.
+  const siblingSteerLine =
+    instance.swebench && gateOn(process.env, "QUANTA_BENCH_SIBLING")
+      ? `\n-${SIBLING_COMPLETION_STEER}`
+      : ""
   const baseText = instance.swebench
-    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${specSteerLine}${simplicitySteerLine}`
+    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${specSteerLine}${simplicitySteerLine}${siblingSteerLine}`
     : base
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here

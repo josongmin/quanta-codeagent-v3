@@ -64,6 +64,7 @@ import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { taskBudgetKnob } from "@/runner/knobs/knobs/task-budget"
 import { testRunnerKnob } from "@/runner/knobs/knobs/test-runner"
 import { verificationPlanKnob } from "@/runner/knobs/knobs/verification-plan"
+import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
@@ -108,6 +109,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(taskBudgetKnob),
   asAnyKnob(testRunnerKnob),
   asAnyKnob(verificationPlanKnob),
+  asAnyKnob(verifySelectKnob),
   asAnyKnob(workingStateKnob),
 ]
 

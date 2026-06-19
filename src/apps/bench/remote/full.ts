@@ -207,7 +207,16 @@ const userData = (ttl: number): string =>
     // is best-effort — a pyright install hiccup must never abort the bootstrap
     // (`set -eux`) and kill the whole bench run. When absent the agent simply
     // degrades to no nav tools (the pre-jun-19 behaviour).
-    "su - ubuntu -c '~/.local/bin/uv tool install pyright >/dev/null 2>&1 && ~/.local/bin/pyright --version >/dev/null 2>&1 || true'",
+    // jun-19 hardening: the prior line warmed `pyright` (CLI) but the LSP
+    // adapter spawns `pyright-langserver`; if uv only linked `pyright` the nav
+    // session still failed "not found". Now we (1) install, (2) warm the node
+    // download via `pyright --version`, (3) GUARANTEE a `pyright-langserver` on
+    // PATH by symlinking it from the uv tool venv when uv didn't expose it, and
+    // (4) warm the langserver binary itself. All fail-OPEN (`|| true`).
+    "su - ubuntu -c '~/.local/bin/uv tool install pyright >/dev/null 2>&1 || true'",
+    "su - ubuntu -c '~/.local/bin/pyright --version >/dev/null 2>&1 || true'",
+    "su - ubuntu -c 'test -x ~/.local/bin/pyright-langserver || ln -sf \"$(find ~/.local/share/uv/tools/pyright -name pyright-langserver -type f 2>/dev/null | head -1)\" ~/.local/bin/pyright-langserver 2>/dev/null || true'",
+    "su - ubuntu -c '~/.local/bin/pyright-langserver --version >/dev/null 2>&1 || true'",
   ].join("\n")
 
 export interface FullRemoteResult {

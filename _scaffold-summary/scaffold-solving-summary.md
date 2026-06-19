@@ -47,7 +47,7 @@
 | Atlassian (`rovo`) | ?internal | 384 | 76.8 | 🔒closed |  |
 | ACoder (`acoder`) | ? | 382 | 76.4 | 🔒closed | gh:ACoder-AI/ACoder |
 | Warp (`warp`) | ? | 378 | 75.6 | 🔒closed |  |
-| Prometheus (`prom-gpt5`) | GPT-5 | 372 | 74.4 | ? |  |
+| Prometheus (`prom-gpt5`) | GPT-5 | 372 | 74.4 | 🟢OSS(GPLv3⚠️copyleft) | gh:EuniAI/Prometheus (KG-driven multi-agent) |
 | Refact (`refact`) | Son-4 | 372 | 74.4 | 🟢OSS |  |
 | SF-SAGE (`sage`) | ? | 369 | 73.8 | 🔒closed |  |
 | tools (`opus-t`) | Opus-4 | 366 | 73.2 | 🔒closed |  |

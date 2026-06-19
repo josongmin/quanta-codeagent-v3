@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
 import { analyzePatchBudget } from "@/agent/patch-budget"
+import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
@@ -53,7 +54,9 @@ import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
 import { buildRepairContext } from "./repair/context"
+import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { runRepairRounds } from "./repair/index"
+import { type Candidate, runSelection } from "@/runner/batch/eval/selection-executor"
 import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
 import {
@@ -467,6 +470,83 @@ const runRepairPhase = async (
   }
 }
 
+/** Repo-relative files a unified diff touches (its `+++ b/<f>` headers, plus
+ *  `--- a/<f>` for pure deletions). Used for owner-coverage scoring. */
+const filesFromPatch = (patch: string): string[] => {
+  const files = new Set<string>()
+  for (const line of patch.split("\n")) {
+    const m = /^(?:\+\+\+ b\/|--- a\/)(.+)$/.exec(line)
+    if (m !== null) {
+      const f = (m[1] as string).trim()
+      if (f !== "" && f !== "/dev/null") files.add(f)
+    }
+  }
+  return [...files]
+}
+
+/**
+ * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
+ * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
+ * the set spans different FIX SITES) and submits the {@link runSelection} pick.
+ * Each candidate is a full agent run on a fresh snapshot (`withGitSnapshot`
+ * resets the tree between them). Reached ONLY when the `verify-select` knob set
+ * `verifySelectN`; otherwise the single-pass path runs (byte-identical).
+ */
+const runSelectionPhase = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+  sandbox: string,
+  signal: AbortSignal,
+  w: Wiring,
+  n: number,
+  localizeCandidates: readonly string[],
+  baseValidatedRed: boolean,
+  precomputedHint: string | undefined,
+  reproHint: string | undefined,
+  closureHint: string | undefined,
+): Promise<Phase> => {
+  const owners = new Set(localizeCandidates)
+  const seedFor = (i: number): string | undefined => {
+    if (i === 0) return undefined
+    const file = localizeCandidates[i - 1]
+    return file === undefined
+      ? undefined
+      : `Focus your investigation on \`${file}\`. Confirm the ROOT CAUSE lives there (not merely where the symptom surfaces) before editing.`
+  }
+  const mergeHint = (seed: string | undefined): string | undefined =>
+    seed === undefined ? closureHint : closureHint === undefined ? seed : `${closureHint}\n\n${seed}`
+
+  let totalTurns = 0
+  const result = await runSelection({
+    n,
+    owners,
+    seeds: Array.from({ length: n }, (_, i) => seedFor(i)),
+    ports: {
+      generate: async (i, seed): Promise<Candidate> => {
+        const phase = await runAgentPhase(
+          instance,
+          deps,
+          sandbox,
+          signal,
+          w,
+          precomputedHint,
+          reproHint,
+          mergeHint(seed),
+        )
+        totalTurns += phase.turns
+        return {
+          id: `cand-${i}`,
+          patch: phase.patch,
+          turns: phase.turns,
+          files: filesFromPatch(phase.patch),
+          baseValidatedRed,
+        }
+      },
+    },
+  })
+  return { patch: result.winner?.patch ?? "", turns: totalTurns }
+}
+
 const okResult = (
   instance: Instance,
   phase: Phase,
@@ -720,33 +800,50 @@ const runInstanceOnce = async (
     // `&& repair !== undefined` is implied by `runRepair` (the predicate's first
     // term) — kept only so TS narrows `repair` to NonNullable for the call.
     phase =
-      runRepair && repair !== undefined
-        ? await runRepairPhase(
+      // TD verify-and-select (knob `verify-select`): N closure-diversity-seeded
+      // candidates → VerificationBundle pick. SWE-bench only; unset ⇒ skip ⇒
+      // byte-identical single-pass below.
+      posture.verifySelectN !== undefined && instance.swebench !== undefined
+        ? await runSelectionPhase(
             instance,
             deps,
             sandbox,
             abort.signal,
             w,
-            repair,
-            precomputedHint,
-            reproHint,
-            closureHint,
-            primaryRailStep,
-            // WS2 widen: the blind LSP/grep sibling owners (empty when feeder off
-            // or no sibling) — co-change pressure injected into repair seeds.
-            ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
-            reproSources,
-          )
-        : await runAgentPhase(
-            instance,
-            deps,
-            sandbox,
-            abort.signal,
-            w,
+            posture.verifySelectN,
+            localizeCandidates,
+            verificationPlan?.baseValidatedRed ?? false,
             precomputedHint,
             reproHint,
             closureHint,
           )
+        : runRepair && repair !== undefined
+          ? await runRepairPhase(
+              instance,
+              deps,
+              sandbox,
+              abort.signal,
+              w,
+              repair,
+              precomputedHint,
+              reproHint,
+              closureHint,
+              primaryRailStep,
+              // WS2 widen: the blind LSP/grep sibling owners (empty when feeder
+              // off or no sibling) — co-change pressure injected into repair seeds.
+              ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
+              reproSources,
+            )
+          : await runAgentPhase(
+              instance,
+              deps,
+              sandbox,
+              abort.signal,
+              w,
+              precomputedHint,
+              reproHint,
+              closureHint,
+            )
 
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
     if (terminal !== undefined) {

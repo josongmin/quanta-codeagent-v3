@@ -1,5 +1,16 @@
 # 천장 72개 — "왜 아무도 못 풀었나" 적대적 리뷰
 
+> ## ⚠️ 정정 (2026-06-19, 134-전수 census 반영 — 아래 본문보다 우선)
+> 이 문서의 "72 천장"은 **9개 부분집합 과대계수**였다. 공개 134개 전수 union으로 재계산한 **진짜 천장 = 32개**(`scaffold-solving-summary.md` §4). 9-subset 72 중 ~40개는 다른 제출(Sonar/Trae/Prometheus 등)이 실제로 푼다.
+> - **천장 32 = 134개 전부 실패**(Trae·Sonar 포함). 단 "풀 수 없다"의 증명 아님 — 우리 Opus-4.8은 census에 없음, 더 센 모델이면 깸.
+> - **EDGE-YES 태깅은 오라클 오염으로 무효**(적대감사 C5 → census로 확정). 증거: 내가 EDGE-YES로 골라 실측한 3개 중 **2개(`sphinx-7462`,`django-16667`)가 하필 #=0 진짜 천장**(아무도 못 푸는 걸 "회복 가능"이라 태깅). `sympy-17630`은 천장 아님(#=2: Sonar/opus4.5 + Prometheus/gpt5가 풂, **단 Sonar는 🔒closed라 흡수 불가**; Trae는 실패).
+> - **edge3 실측 0/3**: localize_score 분해 = django-16667 EXACT(합성 미스, localize 무관) / sphinx-7462 PARTIAL(multi-site) / sympy-17630 MISS(loc). 게다가 pyright+repro 둘 다 죽어 confounded(`jun-19-ceiling-bench-pyright-ami-gap`).
+> - **실제 회복 타겟 = 천장 32가 아니라 "#높은데 우리만 놓치는" 것**(예: `django-13417` #109). 천장은 우선순위↓.
+> - 결론: "병목=localization"은 **미확정**. n=3에서 loc-miss/multi-site/합성 1:1:1. ~36셋 wrong-surface rate 측정 전엔 단정 금지.
+
+---
+*(이하 원본 — 9-subset 72 기준, 위 정정으로 superseded)*
+
 입력: 9개 대표 스캐폴드(opus-tools/sonnet-tools/OH-c4/OH-4x/moatless/Refact/epam/sweagent/aless-lite) 전부 실패한 72 instance.
 방법: repo별 8 에이전트 병렬, 각자 우리 oracle-grounded 리뷰(`docs/analysis/swe-bench-verified-analysis/<repo>/<id>.md`) + `verified-full.jsonl`(gold patch/test_patch/F2P/P2P) 근거. TAXONOMY.md 축 사용.
 원칙: 난이도는 solve-rate가 아니라 구조적 피처로 본다 → "easy인데 0/9"가 핵심 신호.

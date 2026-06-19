@@ -209,6 +209,13 @@ export interface BenchPosture {
    */
   readonly repairRounds: number | undefined
   /**
+   * Verify-and-select candidate count (N). PRESENT ⇒ runInstance generates N
+   * closure-diversity-seeded candidates and submits the VerificationBundle's
+   * pick instead of a single pass. From the `verify-select` knob. Unset ⇒
+   * undefined ⇒ byte-identical single-pass.
+   */
+  readonly verifySelectN: number | undefined
+  /**
    * In-loop test execution (default TRUE = today's byte-identical behavior).
    * TRUE ⇒ the agent is told to run the repo's tests inside its own solve loop
    * (SWEBENCH_DIRECTIVE + verifyGuard + repair phase + repro hint). FALSE ⇒
@@ -304,6 +311,7 @@ export const benchPostureFromState = (
   const repro = readKnobValue(state, "repro-test", isReproValue)
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
+  const verifySelectN = readKnobValue(state, "verify-select", isNumber)
   // Default-TRUE fence: only an explicit `false` from the knob flips it OFF.
   // Unset / any non-false value ⇒ undefined ⇒ inLoopExec stays true (today's
   // exact behavior).
@@ -340,6 +348,7 @@ export const benchPostureFromState = (
     adversarialRepro,
     retryTransient,
     repairRounds,
+    verifySelectN,
     inLoopExec,
     liveOverrides,
     preset: state.preset,

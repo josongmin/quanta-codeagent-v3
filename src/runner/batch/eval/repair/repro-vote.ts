@@ -23,6 +23,20 @@
  *   - vote `resolved`          ⇒ `{ ok: true }`.
  *   - vote `reproduced`        ⇒ `{ ok: false, failTail }` (still buggy — seed
  *                                 the next round with a reproducing tail).
+ *
+ * ⚠️ MEASUREMENT NOTE (A/B comparability — read before interpreting telemetry).
+ * When the VOTE decides a round, this validator returns a BARE result — it does
+ * NOT set `observed` / `predicate`. The orchestrator's `isFalseRed` /
+ * `isFalseGreen` instruments (repair/index.ts) read those fields, so for
+ * vote-decided rounds `primary_false_red_rate` / `primary_false_green_rate` are
+ * STRUCTURALLY ~0 — by construction, not because the vote empirically removed
+ * false-reds. This is intentional: those instruments measure the EXIT-CODE-vs-
+ * marker disagreement of the LEGACY gate, and the vote REPLACES that mechanism
+ * (it gates on the marker majority, so the disagreement cannot arise). Therefore
+ * do NOT compare `primary_false_red_rate` between `agentless-v2-repair` (legacy
+ * gate, real signal) and `agentless-v2-reprovote` (vote, suppressed signal) — it
+ * is apples-to-oranges. Compare RESOLUTION (the grader verdict) and repair-round
+ * count instead; those are the metrics the vote is meant to move.
  */
 
 import {

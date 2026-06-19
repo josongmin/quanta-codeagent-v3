@@ -20,6 +20,13 @@ export interface SwebenchMeta {
   baseCommit: string
   /** Commit whose env defines the test toolchain (optional upstream). */
   environmentSetupCommit?: string
+  /** EVAL-ONLY — the official PASS_TO_PASS regression set (tests that already
+   *  pass on the buggy tree and must keep passing). Threaded for the
+   *  verify-and-select regression oracle (TB): the bench adapter supplies these
+   *  ids to {@link makeBenchRegressionOracle} so a candidate that breaks one is
+   *  inadmissible. NEVER handed to the agent loop — same eval-only boundary as
+   *  the closure oracle's gold files. Absent ⇒ regression signal FAIL-OPEN. */
+  passToPass?: readonly string[]
 }
 
 /** A single SWE-bench-style task. `repoPath` is treated as read-only: the

@@ -568,3 +568,69 @@ runs:
     repo: django
   - instance_id: django__django-15561
     repo: django
+- run_id: mclass-untried-b1-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (no spot reclaim), prebaked AMI
+  scope: 'COVERAGE EXPANSION — untried M-class (scaffold-matrix tier M, ranked by # of 134 SOTA submissions solving = 가성비). Top-6 by cnt (#104-106), cross-repo. Serial grading within box. 5/6=83%; cross-repo M-class proven solvable on django-tuned AMI. Miss: django-10973 (completed_unresolved, 43 turns).'
+  resolved_count: 5
+  resolved:
+  - instance_id: sympy__sympy-11618
+    repo: sympy
+    turns: 53
+  - instance_id: sphinx-doc__sphinx-9698
+    repo: sphinx
+    turns: 21
+  - instance_id: pytest-dev__pytest-7571
+    repo: pytest
+    turns: 60
+  - instance_id: django__django-11292
+    repo: django
+    turns: 60
+  - instance_id: matplotlib__matplotlib-23412
+    repo: matplotlib
+    turns: 26
+- run_id: mclass-untried-b2-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (no spot reclaim), prebaked AMI
+  scope: 'COVERAGE EXPANSION — untried M-class (tier M, ranked by # of 134 SOTA submissions = 가성비). Next-6 by cnt (#102-104), cross-repo. Serial grading within box. 6/6=100%.'
+  resolved_count: 6
+  resolved:
+  - instance_id: django__django-16116
+    repo: django
+    turns: 35
+  - instance_id: django__django-15863
+    repo: django
+    turns: 26
+  - instance_id: pylint-dev__pylint-7277
+    repo: pylint
+    turns: 26
+  - instance_id: matplotlib__matplotlib-26342
+    repo: matplotlib
+    turns: 60
+  - instance_id: django__django-16819
+    repo: django
+    turns: 59
+  - instance_id: pydata__xarray-3151
+    repo: xarray
+    turns: 21
+- run_id: mclass-untried-b3-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (no spot reclaim), prebaked AMI
+  scope: 'COVERAGE EXPANSION — untried M-class (tier M, ranked by #). #100 band, cross-repo. 2/5 genuine = 40% (가성비 dropoff begins below #102). sphinx-9711 EXCLUDED: grader_invalid (gold patch did not resolve under verifier = env/harness false-negative, not agent fault). Genuine misses: xarray-6461, django-14053, django-13837 (completed_unresolved).'
+  resolved_count: 2
+  resolved:
+  - instance_id: sympy__sympy-24661
+    repo: sympy
+    turns: 50
+  - instance_id: sphinx-doc__sphinx-10466
+    repo: sphinx
+    turns: 37

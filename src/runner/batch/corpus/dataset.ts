@@ -274,8 +274,30 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   return `uvx --quiet --python ${py} --with pytest --with-editable . pytest -x --no-header ${parts.join(" ")}`
 }
 
+/** Parse a SWE-bench test-name array field (`PASS_TO_PASS` / `FAIL_TO_PASS`) —
+ *  a JSON-encoded string array of pytest node-ids / bare names. Returns the
+ *  non-empty string entries, or `undefined` when the field is absent, malformed,
+ *  or empty (so callers omit it rather than threading `[]`). EVAL-ONLY use. */
+export const parseTestNameList = (
+  raw: Record<string, unknown>,
+  key: string,
+): readonly string[] | undefined => {
+  const v = raw[key]
+  if (typeof v !== "string") return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(v)
+  } catch {
+    return undefined
+  }
+  if (!Array.isArray(parsed)) return undefined
+  const names = parsed.filter((t): t is string => typeof t === "string" && t.length > 0)
+  return names.length > 0 ? names : undefined
+}
+
 export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
   const goldPatch = str(task.raw.patch)
+  const passToPass = parseTestNameList(task.raw, "PASS_TO_PASS")
   return {
     id: task.instanceId,
     repoPath,
@@ -289,6 +311,7 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
       ...(task.environmentSetupCommit !== undefined
         ? { environmentSetupCommit: task.environmentSetupCommit }
         : {}),
+      ...(passToPass !== undefined ? { passToPass } : {}),
     },
   }
 }
