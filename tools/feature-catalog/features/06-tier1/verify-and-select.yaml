@@ -1,0 +1,59 @@
+id: verify-and-select
+title: Verify-and-select executor — N-candidate diversity-gen + VerificationBundle pick (TD)
+section: 6
+subsystem: verify-and-select outer control plane (jun-19) — absorbs Trae Selector
+order: 91
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:trae"]
+depends_on: [speculative-branch-search, branch-search-pure-scorer]
+purpose: |
+  The OUTER control plane for SWE-bench: the corrected north-star is "no single
+  noisy oracle holds global verdict authority". The bench generates N candidate
+  patches (closure-localization-seeded for DIVERSITY — candidate i is nudged
+  toward the i-th ranked owner so the set spans different FIX SITES, attacking
+  the measured cause-vs-symptom failure where a run fixates on the symptom),
+  scores each through the VerificationBundle (HARD gates AND'd, null=FAIL-OPEN;
+  SOFT weighted rank), and submits selectBest (else selectBestEffort — the gates
+  inform but never submit nothing). Bounded repair is demoted to an INNER
+  candidate-gen tactic. Pieces: VerificationBundle contract+scorer (T0/TA), the
+  regression oracle engine port + bench adapter (TB, plug-ready hard signal,
+  no-leak fenced), the pure selection-executor orchestrator (TD), and the
+  `verify-select` knob (8-step plumbing). Default-OFF / byte-identical when
+  unset; NOT in any preset until the on-demand A/B measures it.
+evidence:
+  code:
+    - src/agent/verification-bundle/types.ts
+    - src/agent/verification-bundle/score.ts
+    - src/agent/verification-bundle/index.ts
+    - src/runner/batch/eval/regression-oracle.ts
+    - src/apps/bench/eval/regression-oracle-adapter.ts
+    - src/runner/batch/eval/selection-executor.ts
+    - src/runner/knobs/knobs/verify-select.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/verification-bundle-score.test.ts
+      - tests/unit/regression-oracle.test.ts
+      - tests/unit/selection-executor.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: verify-select
+    where: QUANTA_BENCH_VERIFY_SELECT
+    purpose: "N candidate count; unset ⇒ single-pass (byte-identical). Cost ≈ ×N."
+deliberate_hold: null
+notes: |
+  FAIL-OPEN is the encoding of the north-star: every nullable signal
+  (regressionGreen / patchedResolvedKofN) NEVER rejects a candidate; only an
+  explicit false / insufficient hard signal makes one inadmissible. Soft signals
+  wired today: minimality (relative, parameter-free) + ownerCoverage (candidate
+  files ∩ closure-ranked owners — this is what lets a root-cause sibling beat a
+  symptom fixation). regression (TB, +3.42 lever in Trae's ablation) is wired as
+  a plug-ready port (PASS_TO_PASS threading is the eval-only follow-up). L3, not
+  L4: wired + hellgate-tested but default-OFF and not yet A/B-measured.

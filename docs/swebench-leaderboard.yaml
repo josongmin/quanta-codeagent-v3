@@ -634,3 +634,51 @@ runs:
   - instance_id: sphinx-doc__sphinx-10466
     repo: sphinx
     turns: 37
+- run_id: mclass-untried-b4-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (no spot reclaim), prebaked AMI
+  scope: 'COVERAGE EXPANSION — untried M-class (tier M, ranked by #). #97-99 band, cross-repo. 4/5 genuine = 80%. sphinx-8595 EXCLUDED: grader_invalid (gold patch did not resolve under verifier; 2nd sphinx grader_invalid after 9711 = sphinx env/harness false-negative pattern). Genuine miss: sympy-24066 (verify_loop_stuck).'
+  resolved_count: 4
+  resolved:
+  - instance_id: django__django-15380
+    repo: django
+    turns: 19
+  - instance_id: pydata__xarray-3305
+    repo: xarray
+    turns: 51
+  - instance_id: matplotlib__matplotlib-23314
+    repo: matplotlib
+    turns: 31
+  - instance_id: django__django-13810
+    repo: django
+    turns: 37
+- run_id: mclass-untried-b5-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (no spot reclaim), prebaked AMI
+  scope: 'COVERAGE EXPANSION — untried M-class (tier M, ranked by #). #96 band, cross-repo. 6/6=100% (sphinx-8475 clean pass this time, no grader_invalid).'
+  resolved_count: 6
+  resolved:
+  - instance_id: sympy__sympy-22456
+    repo: sympy
+    turns: 37
+  - instance_id: sympy__sympy-15349
+    repo: sympy
+    turns: 18
+  - instance_id: sphinx-doc__sphinx-8475
+    repo: sphinx
+    turns: 33
+  - instance_id: django__django-16901
+    repo: django
+    turns: 35
+  - instance_id: django__django-16136
+    repo: django
+    turns: 32
+  - instance_id: django__django-15814
+    repo: django
+    turns: 46

@@ -126,15 +126,17 @@ SWE-bench Verified의 **천장(ceiling)** = 공개 프론티어 스캐폴드 17�
 
 ## 할 것 (목적 + 근거 + ROI)
 
-### S2-P0 — ①b trajectory 판독 (진행 중, bg `bek8e6w86`)
-- **기능**: 완료 후 `trajectory-sympy__sympy-17630.jsonl`서 lsp_* 호출수 + 검색어 + blockmatrix 결정지점 grep.
-- **왜**: (a)도구 쓰고도 실패 vs (b)도구 무시 를 가름 = CKG(도구개선) vs steer강화/ensemble(사용강제) 우선순위 분기점.
-- **ROI**: 높음. 없으면 "모델 등신"도 "도구 부족"도 단정 불가.
+### S2-P0 — ①b trajectory 판독 ✅ DONE (결정적)
+- **결과**: gpt-5.5가 LSP를 **73회 호출**(`lsp_definition` 36 + `lsp_references` 35, +read 338/bash 261/grep 104/edit 45)했는데도 **blockmatrix.py 고착, owner_recall@1=0**(matexpr 못 감). pyright launch-proof READY=grounding LIVE 확인.
+- **판정**: (b)도구 무시 아님 — **(a) 도구 73회 쓰고도 틀린 동네 확신.** find-refs/def를 *자기 가설(BlockMatrix 곱셈 버그) 확증*에 씀 → root-cause(matexpr postprocessor)로 안 튐.
+- **함의**: **CKG/Sourcegraph(더 좋은 정적엔진) 레버를 이 클래스에서 죽임** — 이미 semantic LSP 73회 쓰고도 mislocate. 더 좋은 심볼룩업은 "틀린 가설 확증"을 못 고침. → ensemble을 가리킴.
 
-### S2-P1 — verify-and-select (ensemble) ★ 최대 레버 (세션1 verify-select.ts 작업과 합류)
-- **기능**: N후보 생성 → regression/repro-annotate → selector(테스트 실행) 선택 → majority-vote. Trae 구조 흡수.
-- **왜**: 우리는 **single-shot**(agentless-v2엔 sampling/select 없음; retry-transient는 크래시재시도뿐). sympy-17630은 한 방이 blockmatrix로 새면 끝 — N개 중 matexpr 맞춘 거 건지면 회복. oracle-localize가 "모델은 풀 능력 있음" 증명. SWE-bench 최대 레버 중 하나 + Trae 394 검증.
-- **ROI**: **최상.** 병렬 에이전트가 `verify-select.ts`/`repro-vote.ts`/`regression-oracle.ts` 작업 중 → 합류.
+### S2-P1 — verify-and-select (ensemble) ★ 개념상 최대 레버 — 단 **구현버그로 측정 BLOCKED** 🔴
+- **이미 빌드됨**: `src/runner/batch/eval/selection-executor.ts`(N후보+diversity-seed+VerificationBundle 스코어+selectBest) + `verify-select` knob(`QUANTA_BENCH_VERIFY_SELECT`, default-OFF) + prod driver 배선(`apps/bench/eval/driver.ts:804 runSelectionPhase`). **CKG처럼 "만들 것" 아님 — 이미 있음, 미측정.**
+- **🔴 측정 시도 결과 (sympy-17630 @ v2 + verify-select=6 @ gpt-5.5, full-remote)**: **empty_patch, 66턴, resolved 0/1.** report.knobs에 `verify-select=6 (source:env)` = **활성 확인**(env-forward 정상, executor engage함). trajectory: 6후보가 **edit 156회 + apply_patch 30 + lsp 71**로 진짜 일 다 했는데 **최종 제출 0 bytes.** → **executor가 후보들의 패치를 잃어버림 = capture/selection 버그.**
+- **원인 강한 의심**: `runSelectionPhase`(driver.ts:524)가 6후보를 **동일 `sandbox`에 reset 없이 순차 실행** → 후보간 diff 캡처 꼬임 → `result.winner?.patch ?? ""`가 빈 채로 떨어짐. **fix = 후보별 sandbox 격리/reset + winner.patch 캡처 검증.**
+- **왜 중요**: ①가 "single-shot은 73회 도구쓰고도 mislocate" 증명 + oracle-localize가 "위치 주면 gpt-5.5가 gold급 fix" 증명 → diversity-seed 앙상블이 정확한 회복기전. **개념은 맞고 구현만 깨짐.**
+- **ROI**: **최상 (단 fix 선행).** selection-executor 소유 = 병렬 에이전트. **이 버그 fix 전엔 EC2 더 태우지 말 것**(empty 반복). fix 후 sympy-17630 재측정 = 앙상블 효과 첫 클린 측정.
 
 ### S2-P2 — patch-budget kill/keep (② 진행 예정)
 - **기능**: sympy-12096(5-file over-broad, SIMPLICITY-resistant) @ v2 vs v3-thin + trajectory.

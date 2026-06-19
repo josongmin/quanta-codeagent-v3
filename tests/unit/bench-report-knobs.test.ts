@@ -108,7 +108,9 @@ describe("buildReport — knobs section", () => {
 
   test("explicit meta.knobs ⇒ embedded verbatim into report.knobs", () => {
     const knobs: BenchReportKnobs = {
-      resolved: { "issue-hint": { value: "agentless", source: "env" } },
+      resolved: {
+        "issue-hint": { value: "agentless", unit: undefined, display: "on", source: "env" },
+      },
       preset: "agentless-full",
       inactive: ["subagent"],
     }
@@ -119,6 +121,8 @@ describe("buildReport — knobs section", () => {
     expect(report.knobs.preset).toBe("agentless-full")
     expect(report.knobs.resolved["issue-hint"]).toEqual({
       value: "agentless",
+      unit: undefined,
+      display: "on",
       source: "env",
     })
   })
@@ -126,8 +130,8 @@ describe("buildReport — knobs section", () => {
   test("knobs section round-trips through JSON.stringify ⇒ JSON.parse", () => {
     const knobs: BenchReportKnobs = {
       resolved: {
-        "branch-search": { value: 3, source: "env" },
-        "repro-test": { value: { samples: 5 }, source: "preset" },
+        "branch-search": { value: 3, unit: "candidates", display: "3 candidates", source: "env" },
+        "repro-test": { value: { samples: 5 }, unit: "samples", display: "5 samples", source: "preset" },
       },
       preset: "agentless-full",
       inactive: ["subagent", "skills"],
@@ -221,7 +225,7 @@ describe("writeArtifacts — report file embeds knobs section", () => {
       const reportFile = join(dir, "report.json")
       const predFile = join(dir, "preds.jsonl")
       const knobs: BenchReportKnobs = {
-        resolved: { foo: { value: 42, source: "cli" } },
+        resolved: { foo: { value: 42, unit: undefined, display: "on", source: "cli" } },
         preset: "experimental",
         inactive: ["bar"],
       }

@@ -138,7 +138,7 @@ describe("hellgate — buildReport knobs section shape", () => {
       arr: ["a", "b", "c"],
     }
     const knobs: BenchReportKnobs = {
-      resolved: { complex: { value: deep, source: "preset" } },
+      resolved: { complex: { value: deep, unit: undefined, display: "on", source: "preset" } },
       inactive: [],
     }
     const r = buildReport({ model: "m", provider: "p", n: 0, timestamp: "t", knobs }, [])
@@ -150,7 +150,7 @@ describe("hellgate — buildReport knobs section shape", () => {
     const circ: Record<string, unknown> = { name: "outer" }
     circ.self = circ
     const knobs: BenchReportKnobs = {
-      resolved: { circ: { value: circ, source: "env" } },
+      resolved: { circ: { value: circ, unit: undefined, display: "on", source: "env" } },
       inactive: [],
     }
     const r = buildReport({ model: "m", provider: "p", n: 0, timestamp: "t", knobs }, [])
@@ -295,7 +295,7 @@ describe("hellgate — writeArtifacts file IO edges", () => {
 
     // Supply explicit knobs telemetry that DOES NOT match the env state.
     const explicit: BenchReportKnobs = {
-      resolved: { foo: { value: "bar", source: "cli" } },
+      resolved: { foo: { value: "bar", unit: undefined, display: "on", source: "cli" } },
       preset: "explicit-preset",
       inactive: ["zoz"],
     }
@@ -322,7 +322,7 @@ describe("hellgate — writeArtifacts file IO edges", () => {
     try {
       const reportFile = join(dir, "report.json")
       const knobs: BenchReportKnobs = {
-        resolved: { f: { value: 1, source: "cli" } },
+        resolved: { f: { value: 1, unit: undefined, display: "on", source: "cli" } },
         inactive: [],
       }
       const meta = { model: "m", provider: "p", n: 1, knobs }

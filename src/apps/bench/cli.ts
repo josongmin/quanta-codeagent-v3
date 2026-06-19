@@ -404,16 +404,22 @@ const cmdLeaderboard = (): void => {
     )
     process.exit(2)
   }
-  const preset = argValue("--preset") ?? "agentless-v1"
+  // Profile is AUTO-DETECTED per report from `report.knobs.preset` (each run
+  // records the preset it ran under), so combining reports from different
+  // profiles labels each instance with the preset it was ACTUALLY resolved
+  // under — never a single blanket label. `--preset` is an explicit override.
+  const presetOverride = argValue("--preset")
   const rows = reports.flatMap((p) => {
     const v = loadVerdictsFromFile(p)
-    const model = (() => {
+    const meta = (() => {
       try {
-        return (JSON.parse(readFileSync(p, "utf8")) as { model?: string }).model ?? "unknown"
+        return JSON.parse(readFileSync(p, "utf8")) as { model?: string; knobs?: { preset?: string } }
       } catch {
-        return "unknown"
+        return {} as { model?: string; knobs?: { preset?: string } }
       }
     })()
+    const model = meta.model ?? "unknown"
+    const preset = presetOverride ?? meta.knobs?.preset ?? "unknown"
     return rowsFromRun(v, { preset, model })
   })
   printBlock(renderLeaderboardMarkdown(rows, argValue("--title") ?? "SWE-bench leaderboard"))
