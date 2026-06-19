@@ -9,8 +9,10 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 `scaffold-solving-summary.md`(500×17 SOTA 스캐폴드 매트릭스)로 **cnt(몇 개 스캐폴드가 푸나)**를 가성비 신호로 사용 — 난이도 라벨(`<15min`)은 CEILING(아무도 못 품)을 섞어 부적합했음. **cnt≥14 (E-class, 14~17/17 스캐폴드가 푸는 = 거의 확실히 회복가능)** untried를 cnt 높은 순으로 타게팅:
 - **batch1 12/12 + batch2 14/14 = 26/26 (100%)** — 전부 cnt=17 django, agentless-v2, on-demand(spot reclaim 회피)+prebaked AMI. run_id `eclass-untried-sweep-2026-06-19`.
 - **batch4 11/13 + batch5 9/13 + batch7 9/13 = 29** — django E-class 계속. run_id `eclass-untried-sweep-b457-2026-06-19`.
-- 누적 유니크 resolved = **170 / 500**. 타게팅 원칙: **E-class untried(cnt≥14) 우선, CEILING(cnt=0) skip(0 ROI), 길고 어려운 M/H는 보류.**
-- 진행 중: batch3(박스 hung→재런 예정)/batch6/batch8 patch-gen. 박스 여러 개 병렬(각자 grading serial).
+- **batch3-slice 12/14 + batch6 9/13 = 21** — run_id `eclass-untried-sweep-b36-2026-06-19`. (batch3는 박스 하나가 16145서 hang했으나 같은 슬라이스 중복 박스가 12/14로 완주 → 거기서 수확.)
+- 누적 유니크 resolved = **181 / 500**. 타게팅 원칙: **E-class untried(cnt≥14) 우선, CEILING(cnt=0) skip(0 ROI), 길고 어려운 M/H는 보류.**
+- 진행 중: 박스 3개(15.164.228.253, 13.209.72.221, 54.180.95.91) grading중 — 끝나면 수확.
+- ⚠️ 인프라 교훈: **박스 run.log = 결과 정본**(box→local 스트리밍 자주 끊겨 로컬 sweep 로그가 patch-gen에서 멈춤=거짓). 회수는 박스 ssh로. 또 per-instance patch-gen 타임아웃 없어 1개 hang이 배치 grading 배리어를 막음(16145) → 중복 박스가 구제.
 
 ## 🥇 easy django T1+T2 — **82/84 resolved (97.6%)** · closure-bundle 회복 (2026-06-18)
 
