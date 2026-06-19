@@ -87,6 +87,13 @@ export interface ClosurePerInstance {
   /** null when no oracle / no patch to judge. */
   ownerHit: boolean | null
   firstEditOwnerMatch: boolean | null
+  /** jun-19 — resolution + budget facts per instance so the over-budget ∩
+   *  unresolved correlation (the escalation-justification) is readable directly
+   *  from the sidecar (no separate report.json join). null ⇒ unavailable. */
+  resolved: boolean | null
+  overBudget: boolean | null
+  newDef: boolean | null
+  crossFile: boolean | null
 }
 
 export interface ClosureDiagnostics {
@@ -128,7 +135,16 @@ export const computeClosureDiagnostics = (
     const gold = goldSetOf(f.instanceId)
     const ownerHit = gold && f.patchFiles.length > 0 ? gold.has(f.patchFiles[0] as string) : null
     const firstEditOwnerMatch = gold && f.firstEditFile != null ? gold.has(f.firstEditFile) : null
-    return { instanceId: f.instanceId, class: classify(f), ownerHit, firstEditOwnerMatch }
+    return {
+      instanceId: f.instanceId,
+      class: classify(f),
+      ownerHit,
+      firstEditOwnerMatch,
+      resolved: f.resolved,
+      overBudget: f.overBudget ?? null,
+      newDef: f.newDef ?? null,
+      crossFile: f.crossFile ?? null,
+    }
   })
 
   // Owner recall over patch-bearing instances that have an oracle.
