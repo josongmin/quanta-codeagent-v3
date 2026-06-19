@@ -7,7 +7,7 @@
  * via `getCachePathspecs`).
  */
 
-import type { SandboxData } from "@/shared"
+import { type SandboxData, isTestFilePath } from "@/shared"
 import { getCachePathspecs } from "../corpus/cache-pathspecs"
 import { type ExecResult, exec, execArgv, trimOut } from "./exec"
 
@@ -32,22 +32,47 @@ export const GIT_ARGV: readonly string[] = [
  *  discarded and at worst conflicts with / skews grading (observed: agents
  *  editing `tests/` produced large diffs that failed PASS_TO_PASS). Drop the
  *  per-file sections of a unified `git diff` whose path is a test file/dir.
- *  Pure, order-preserving; non-test (source) hunks pass through verbatim. */
-const TEST_PATH_RE = /(^|\/)tests?\//i
-const TEST_FILE_RE = /(^|\/)(test_[^/]+|[^/]+_test|conftest)\.(py|js|ts|tsx)$/i
+ *
+ *  ALSO drops binary-file sections. An agent that downloads an archive into the
+ *  worktree (observed 2026-06-19: `setuptools-33.1.1.zip` fetched mid-run) has
+ *  it swept by `git add -A` and emitted as a `GIT binary patch` / `Binary files
+ *  … differ` blob. That blob is never part of a source fix AND the official
+ *  harness's `git apply` REJECTS the ENTIRE prediction ("cannot apply binary
+ *  patch … without full index line"), silently turning a correct source edit
+ *  into an `unresolved` (masquerades as a model miss — RCA of astropy-7166/7336).
+ *  A binary marker anywhere in a file section condemns that whole section.
+ *
+ *  Pure, order-preserving; non-test, non-binary (source) hunks pass through
+ *  verbatim — byte-identical to the prior test-only filter for those inputs. */
+/** Structural git-diff binary markers. Anchored at column 0 so they match the
+ *  diff's own framing lines, never `+`/`-`/` `-prefixed hunk *content* that
+ *  merely mentions the phrase (an added `+GIT binary patch` source line stays). */
+const BINARY_MARKER_RE = /^(GIT binary patch|Binary files )/m
+const HEADER_RE = /^diff --git a\/\S+ b\/(\S+)/
 export const sourceOnlyDiff = (diff: string): string => {
   if (diff.trim() === "") return diff
-  const out: string[] = []
-  let skip = false
-  for (const line of diff.split("\n")) {
-    const m = line.match(/^diff --git a\/\S+ b\/(\S+)/)
+  // Split into per-file SECTIONS on the `diff --git` header WITHOUT consuming it
+  // (lookahead), so each section retains its exact bytes — including the trailing
+  // newline that terminates its final hunk line. A naive line-split + join("\n")
+  // would strip that terminator from a kept section whenever the following
+  // section is dropped, yielding a "corrupt patch" the grader's `git apply`
+  // rejects. Any text before the first header (rare preamble) is its own leading
+  // section and is always kept. Concatenation of all sections is byte-identical
+  // to the input when nothing is dropped.
+  const sections = diff.split(/(?=^diff --git )/m)
+  const kept = sections.filter((sec) => {
+    const m = sec.match(HEADER_RE)
     if (m) {
       const p = m[1] ?? ""
-      skip = TEST_PATH_RE.test(p) || TEST_FILE_RE.test(p)
+      // SSOT: same test-path classifier the dispatch test-scope guard uses.
+      if (isTestFilePath(p)) return false
     }
-    if (!skip) out.push(line)
-  }
-  return out.join("\n")
+    // A structural binary marker anywhere in the section condemns the whole
+    // section (header + index + blob) — see the doc comment above for why.
+    if (BINARY_MARKER_RE.test(sec)) return false
+    return true
+  })
+  return kept.join("")
 }
 
 /**

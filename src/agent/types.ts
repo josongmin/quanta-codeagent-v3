@@ -475,6 +475,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  PUBLIC because the dispatch seam is in a sibling module — there is no
    *  module-private channel between `loop.ts` and `dispatch.ts`. */
   localizePhaseState?: LocalizePhaseState
+  /** Bench test-scope guard (RCA 2026-06-19, django-13417). When `true`, the
+   *  dispatch pre-flight `consultTestScope` DENIES any mutating tool
+   *  (edit/write/scripted_replace/apply_patch[_structured]) whose target is a
+   *  test path (`@/shared#isTestFilePath` — same SSOT the bench patch sanitizer
+   *  uses) and steers the model back to source-only edits. Removes the observed
+   *  regression where the model wrote the correct minimal fix, then edited tests
+   *  and chased them into a wrong over-built fix. Absent/false ⇒ guard OFF and
+   *  dispatch is byte-identical. Bench-only (driver opts in for swebench
+   *  in-loop runs); the grader supplies its own tests, so a denied test edit
+   *  loses nothing. */
+  protectTestPaths?: boolean
   /** Closeout guard (Codex CloseoutLens §4 mirror). Optional, absent ⇒ guard
    *  fully OFF and the loop is byte-identical. When `enabled` true, a single
    *  pre-finish nudge injects the closeout reminder (keep only defended claims,
@@ -2374,6 +2385,8 @@ export interface SafetyConfig {
   verifyGuard?: { maxTrips?: number; mustPass?: boolean }
   localizePhase?: LocalizePhaseConfig
   localizePhaseState?: LocalizePhaseState
+  /** Bench test-scope guard — see AgentConfig.protectTestPaths. */
+  protectTestPaths?: boolean
   closeoutGuard?: { enabled?: boolean; fourRule?: boolean }
   /** P12 — closeout critic gate (mirrors `closeoutGuard` placement on both
    *  AgentConfig and SafetyConfig). See AgentConfig.closeoutCritic. */

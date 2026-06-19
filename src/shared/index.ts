@@ -85,6 +85,7 @@ export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-thr
 export { omitUndef } from "./optional"
 export { quantaHomeDir, quantaHomeDirFrom, quantaHomePath } from "./quanta-home"
 export { RECONCILE_PLACEHOLDER_TEXT, reconcileToolPairing } from "./reconcile-tool-pairing"
+export { isTestFilePath } from "./test-path"
 export type { RunContext } from "./run-context"
 export type { PtyBackend, RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
 export {

@@ -97,6 +97,77 @@ describe("eval/ sub-slice decompose — module surface", () => {
     expect(out).toContain("src/foo.py")
     expect(out).not.toContain("tests/test_x.py")
   })
+
+  // RCA 2026-06-19 (astropy-7166/7336): agent downloaded setuptools-33.1.1.zip;
+  // `git add -A` swept it into the prediction as a GIT-binary-patch blob, which
+  // makes the grader's `git apply` reject the WHOLE patch → silent unresolved.
+  test("sourceOnlyDiff drops a GIT binary patch section (header+index+blob) but keeps source", () => {
+    const diff = [
+      "diff --git a/src/foo.py b/src/foo.py",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "diff --git a/setuptools-33.1.1.zip b/setuptools-33.1.1.zip",
+      "new file mode 100644",
+      "index 0000000..1111111",
+      "GIT binary patch",
+      "literal 512",
+      "zcmZ?wbhEHbRAj/ueyA<Tg)b",
+      "",
+      "literal 0",
+      "HcmV?d00001",
+    ].join("\n")
+    const out = sourceOnlyDiff(diff)
+    expect(out).toContain("src/foo.py")
+    expect(out).toContain("+new")
+    // the ENTIRE binary section is gone — not just the blob, the header too
+    expect(out).not.toContain("setuptools-33.1.1.zip")
+    expect(out).not.toContain("GIT binary patch")
+    expect(out).not.toContain("zcmZ?wbhEHbRAj")
+  })
+
+  test("sourceOnlyDiff drops a 'Binary files … differ' section", () => {
+    const diff = [
+      "diff --git a/src/keep.py b/src/keep.py",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      "diff --git a/data/blob.bin b/data/blob.bin",
+      "index 0000000..2222222 100644",
+      "Binary files a/data/blob.bin and b/data/blob.bin differ",
+    ].join("\n")
+    const out = sourceOnlyDiff(diff)
+    expect(out).toContain("src/keep.py")
+    expect(out).not.toContain("blob.bin")
+    expect(out).not.toContain("Binary files")
+  })
+
+  // teeth: a source line whose CONTENT mentions the marker (prefixed +/-) must
+  // survive — only column-0 structural markers condemn a section.
+  test("sourceOnlyDiff keeps a source hunk that merely adds the text 'GIT binary patch'", () => {
+    const diff = [
+      "diff --git a/src/doc.py b/src/doc.py",
+      "@@ -1 +1,2 @@",
+      " header",
+      '+COMMENT = "GIT binary patch"',
+    ].join("\n")
+    const out = sourceOnlyDiff(diff)
+    expect(out).toBe(diff) // byte-identical: no structural binary marker present
+  })
+
+  test("sourceOnlyDiff is byte-identical for a pure-source diff (no test, no binary)", () => {
+    const diff = [
+      "diff --git a/src/a.py b/src/a.py",
+      "@@ -1 +1 @@",
+      "-x",
+      "+y",
+      "diff --git a/src/b.py b/src/b.py",
+      "@@ -1 +1 @@",
+      "-p",
+      "+q",
+    ].join("\n")
+    expect(sourceOnlyDiff(diff)).toBe(diff)
+  })
 })
 
 /** Minimal LLM that yields zero turns — patches nothing, exits the loop. */

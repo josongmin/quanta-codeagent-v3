@@ -1,5 +1,22 @@
 about: 'SWE-bench Verified — internal results SSOT (machine-readable). Rendered/curated view: swebench-leaderboard.md. Append
   one run block per bench run.'
+
+# Cross-check ESCALATION LADDER (when quanta leaves an instance unresolved).
+# All scaffolds run the SAME model (gpt-5.4) via the oauth proxy on a
+# base_commit worktree, source-only patch, graded by the official EC2 harness —
+# so a pass/fail delta isolates SCAFFOLD, not model. Escalate only on failure;
+# do NOT spend a heavier scaffold when a lighter one already proves the ceiling.
+#   Tier 0  quanta (primary, agentless-v2)
+#   Tier 1  mini-swe-agent      — run ONLY if quanta failed   (~/swe-bench-tools/mini-login.sh)
+#   Tier 2  OpenHands           — run ONLY if quanta AND mini both failed (~/swe-bench-tools/oh-login.sh)
+# Interpretation:
+#   quanta ✓                      → no cross-check needed
+#   quanta ✗ / mini ✓             → quanta SCAFFOLD LOSS (lighter scaffold solves it) — investigate quanta
+#   quanta ✗ / mini ✗ / OH ✓      → quanta+mini scaffold loss; OpenHands (full agent) ceiling reachable
+#   quanta ✗ / mini ✗ / OH ✗      → MODEL CEILING (no scaffold at this model solves it) — stop, not a scaffold bug
+# Live-SWE-agent (~/swe-bench-tools/live-login.sh) = optional self-evolve probe, not part of the gating ladder.
+crosscheck_policy_version: 1
+
 runs:
 - run_id: easy-django-t1t2-2026-06-16
   date: '2026-06-16'
@@ -382,3 +399,37 @@ runs:
   - instance_id: sympy__sympy-20916
     repo: sympy
     reason: completed_unresolved (40 turns)
+- run_id: easy-more-b6-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, EC2 backend grade-only, spot terminated (cost-capped)
+  scope: 'untried easy (<15min) 6-batch (astropy 4 + django 2). FIRST batch after the two infra fixes (sandbox isolation + graceful outcome) — 6/6 patch-bearing, ZERO turns-0 loss (vs 8/15 empty in django15). 3 resolved. astropy-7166/7336 carried a setuptools.zip the agent downloaded (graded fine; source-only model miss).'
+  resolved_count: 3
+  resolved:
+  - instance_id: astropy__astropy-14309
+    repo: astropy
+    turns: 29
+  - instance_id: astropy__astropy-14995
+    repo: astropy
+    turns: 35
+  - instance_id: django__django-13406
+    repo: django
+  unresolved:
+  - instance_id: astropy__astropy-7166
+    repo: astropy
+    reason: 'FALSE unresolved — patch-hygiene bug, NOT a model miss. Agent downloaded setuptools-33.1.1.zip; git add -A swept it into the prediction as a GIT-binary-patch blob; the grader git apply REJECTED THE WHOLE PATCH ("cannot apply binary patch without full index line"). Re-graded truly source-only (binary stripped) → RESOLVED ✅. FIXED by sourceOnlyDiff binary-strip (snapshot.ts).'
+  - instance_id: astropy__astropy-7336
+    repo: astropy
+    reason: 'FALSE unresolved — same binary-blob contamination as 7166. Re-graded source-only → RESOLVED ✅. FIXED.'
+  - instance_id: django__django-13417
+    repo: django
+    reason: 'GENUINE divergence (no binary contamination). quanta over-engineered: invented a new has_results_ordering() method in sql/query.py that EXECUTES the compiler (pre_sql_setup) vs gold''s 3-line `not self.query.group_by` guard in query.py. Real scaffold/reasoning loss — mini & Live-SWE both solved it minimally.'
+  rca_note: 'Initial "3/3 scaffold loss" reading was WRONG. RCA (2026-06-19): 2 of 3 (7166, 7336) were a PATCH-HYGIENE bug (binary blob breaks grader git apply → silent unresolved masquerading as model miss), recovered by the sourceOnlyDiff binary-strip fix + re-grade. Only 1 of 3 (13417) is a genuine over-engineering divergence. Net: easy-more-b6 true score is 5/6 after the fix (14309, 14995, 13406, 7166, 7336), not 3/6.'
+  mini_swe_crosscheck:
+    run_id: b6-mini-crosscheck-2026-06-19
+    scaffold: mini-swe-agent (standalone, SAME gpt-5.4 via oauth proxy), base_commit worktree, source-only patches graded EC2 official harness
+    result: 'mini 3/3 RESOLVED (7166/7336/13417). But this did NOT prove scaffold loss for all three — re-grading QUANTA''s OWN patches source-only showed 7166/7336 also pass (the divergence was patch hygiene, not reasoning). Genuine quanta loss vs mini: ONLY 13417 (over-engineering).'
+    live_swe_crosscheck: 'Live-SWE (config-only self-evolve on mini, SAME gpt-5.4) solved 13417 ✅ in 132s with a minimal query.py patch — confirms 13417 is a quanta scaffold-posture loss (over-broad), not a model ceiling.'
+    openhands_crosscheck: 'OpenHands SDK v1.21 headless (local runtime, SAME gpt-5.4 via the proxy /v1/responses bridge — native Responses-API mode) solved 13417 ✅ in 91s with a minimal 620B query.py patch (run-id oh-smoke-13417-2026-06-19). TRIPLE confirmation: mini ✅ + Live ✅ + OpenHands ✅ all solve 13417 minimally; only quanta over-engineers (new compiler-executing method). Definitively a quanta scaffold loss, NOT model ceiling. NOTE: per the escalation ladder OpenHands was not required here (mini already passed) — this was a one-off end-to-end setup validation of oh-login.sh.'

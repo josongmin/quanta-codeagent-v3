@@ -1102,6 +1102,18 @@ export const buildConfig = (
       ...(instance.swebench && opt.inLoopExec
         ? { verifyGuard: { mustPass: true, maxTrips: 2 } }
         : {}),
+      // Test-scope guard (RCA 2026-06-19, django-13417). DEFAULT-ON for real
+      // swebench in-loop runs (the no-test-edit rule is already DECLARED in the
+      // bench system prompt — this ENFORCES it at the dispatch layer so the
+      // model can't edit tests, chase its own modified tests, and regress a
+      // correct minimal fix). Off-switch `QUANTA_BENCH_PROTECT_TESTS=0` yields
+      // the A/B baseline arm (advisory-only, the pre-fix behavior). Gated on
+      // `inLoopExec` like verifyGuard: the mini-swe posture (OFF) edits-and-
+      // submits with test edits already stripped at diff time, so the guard is
+      // moot there.
+      ...(instance.swebench && opt.inLoopExec && !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
+        ? { protectTestPaths: true }
+        : {}),
       // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
       // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
       ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),

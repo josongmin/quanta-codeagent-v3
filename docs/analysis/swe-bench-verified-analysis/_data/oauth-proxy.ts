@@ -89,6 +89,125 @@ async function handleChat(body: any) {
   }
 }
 
+/**
+ * OpenAI **Responses API** (`/v1/responses`) bridge. Newer agent SDKs
+ * (OpenHands SDK v1.x) detect gpt-5* as Responses-capable and call this path
+ * instead of chat/completions. litellm sends `{instructions, input[], tools[]}`
+ * and parses our reply into a `ResponsesAPIResponse` (it reads `.output[]`:
+ * `message` items with `output_text` parts + `function_call` items). We map
+ * that shape to/from the same quanta `createLLM("chatgpt-oauth")` stream, so
+ * OpenHands runs in its NATIVE Responses mode (faithful to how it scores on the
+ * leaderboard) — not a degraded chat-completions fallback.
+ */
+function mapResponsesInput(body: any): { system: string; messages: Message[] } {
+  const sys: string[] = []
+  if (typeof body.instructions === "string" && body.instructions) sys.push(body.instructions)
+  const messages: Message[] = []
+  const flatten = (c: any): string =>
+    typeof c === "string"
+      ? c
+      : Array.isArray(c)
+        ? c.map((p) => (typeof p === "string" ? p : (p?.text ?? ""))).join("")
+        : ""
+  const input = body.input
+  if (typeof input === "string") {
+    messages.push({ role: "user", content: [{ type: "text", text: input }] })
+    return { system: sys.join("\n\n"), messages }
+  }
+  for (const item of Array.isArray(input) ? input : []) {
+    const t = item?.type
+    if (t === "function_call_output") {
+      const block: ToolResultBlock = {
+        type: "tool_result",
+        tool_use_id: item.call_id,
+        content: flatten(item.output),
+      }
+      const last = messages[messages.length - 1]
+      if (last && last.role === "user") last.content.push(block)
+      else messages.push({ role: "user", content: [block] })
+      continue
+    }
+    if (t === "function_call") {
+      let input2: unknown = {}
+      try { input2 = JSON.parse(item.arguments || "{}") } catch { input2 = {} }
+      messages.push({
+        role: "assistant",
+        content: [{ type: "tool_use", id: item.call_id, name: item.name, input: input2 }],
+      })
+      continue
+    }
+    // message-shaped item with a role
+    const role = item?.role
+    if (role === "system" || role === "developer") { sys.push(flatten(item.content)); continue }
+    if (role === "assistant") {
+      messages.push({ role: "assistant", content: [{ type: "text", text: flatten(item.content) }] })
+      continue
+    }
+    messages.push({ role: "user", content: [{ type: "text", text: flatten(item?.content) }] })
+  }
+  return { system: sys.join("\n\n"), messages }
+}
+
+function mapResponsesTools(oai: any[] | undefined): ToolSchema[] {
+  if (!oai) return []
+  // Responses tools are flat: {type:"function", name, description, parameters}
+  return oai.map((t) => ({
+    name: t.name ?? t.function?.name,
+    description: t.description ?? t.function?.description ?? "",
+    input_schema: t.parameters ?? t.function?.parameters ?? { type: "object", properties: {} },
+  }))
+}
+
+async function handleResponses(body: any) {
+  const model = String(body.model || "gpt-5.4").replace(/^openai\//, "")
+  const { system, messages } = mapResponsesInput(body)
+  const tools = mapResponsesTools(body.tools)
+  const llm = createLLM("chatgpt-oauth", { model }, process.env)
+  const streamInput: StreamInput = { system, messages, tools }
+
+  let text = ""
+  const toolCalls: { id: string; name: string; args: string }[] = []
+  const partial = new Map<string, { name: string; input: unknown }>()
+  for await (const ev of llm.stream(streamInput)) {
+    if (ev.type === "text_delta") text += ev.delta
+    else if (ev.type === "tool_use_start") partial.set(ev.id, { name: ev.name, input: {} })
+    else if (ev.type === "tool_use_end") {
+      const p = partial.get(ev.id) ?? { name: "bash", input: {} }
+      toolCalls.push({ id: ev.id, name: p.name, args: JSON.stringify(ev.input ?? {}) })
+    }
+  }
+
+  const output: any[] = []
+  if (text) {
+    output.push({
+      type: "message",
+      id: `msg_${messages.length}`,
+      status: "completed",
+      role: "assistant",
+      content: [{ type: "output_text", text, annotations: [] }],
+    })
+  }
+  for (const tc of toolCalls) {
+    output.push({
+      type: "function_call",
+      id: `fc_${tc.id}`,
+      call_id: tc.id,
+      name: tc.name,
+      arguments: tc.args,
+      status: "completed",
+    })
+  }
+  return {
+    id: `resp-proxy-${messages.length}`,
+    object: "response",
+    created_at: 0,
+    status: "completed",
+    model: `openai/${model}`,
+    output,
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  }
+}
+
 Bun.serve({
   port: PORT,
   idleTimeout: 240,
@@ -101,6 +220,16 @@ Bun.serve({
         return Response.json(res)
       } catch (e: any) {
         console.error("proxy error:", String(e).slice(0, 300))
+        return Response.json({ error: { message: String(e).slice(0, 300), type: "proxy_error" } }, { status: 500 })
+      }
+    }
+    if (url.pathname.endsWith("/responses") && req.method === "POST") {
+      try {
+        const body = await req.json()
+        const res = await handleResponses(body)
+        return Response.json(res)
+      } catch (e: any) {
+        console.error("proxy /responses error:", String(e).slice(0, 300))
         return Response.json({ error: { message: String(e).slice(0, 300), type: "proxy_error" } }, { status: 500 })
       }
     }

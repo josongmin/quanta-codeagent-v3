@@ -11,7 +11,7 @@ import {
 } from "@/permission"
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { compositePiiScanner } from "@/security/pii-redaction"
-import { err, errMessage, ok, QuantaError, runtimeConfig, toError } from "@/shared"
+import { err, errMessage, ok, QuantaError, runtimeConfig, toError, isTestFilePath } from "@/shared"
 import { writeFile } from "@/storage"
 import {
   type DiagnosticItem,
@@ -40,7 +40,7 @@ import {
 } from "./edit-repair-loop"
 import { buildRepairReactor, commandRepairCheck, lintRepairCheck } from "./edit-repair-wire"
 import { LocalEffectChannel } from "./effect-channel"
-import { decideLocalizePhase } from "./localize-phase-guard"
+import { decideLocalizePhase, MUTATING_TOOL_NAMES } from "./localize-phase-guard"
 import { resolveCollaborationMode } from "./mode"
 import { checkWriteEffects } from "./ownership-policy"
 import { planStoreToMutator } from "./plan/mutator-adapter"
@@ -172,6 +172,60 @@ const consultLocalizePhase = (call: ToolUseBlock, config: AgentConfig): Dispatch
   // tool_result.
   const reason = decision.text ?? "Localize-phase: edit blocked during Phase 1."
   return deny(call.id, reason, "localize-phase-blocked")
+}
+
+/** V4A file-marker scan — collect every path an `apply_patch` / `apply_patch_
+ *  structured` patch text touches (`*** Add|Update|Delete File:`, `*** Move
+ *  to:`). Pure string scan; tolerant of malformed input (returns what it finds). */
+const v4aTargetPaths = (patch: string): string[] => {
+  const out: string[] = []
+  const re = /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm
+  for (const m of patch.matchAll(re)) {
+    const p = (m[1] ?? m[2] ?? "").trim()
+    if (p) out.push(p)
+  }
+  return out
+}
+
+/** Target file path(s) a mutating tool call would write, by tool shape:
+ *  `edit`/`write` → `input.path`; `scripted_replace` → `input.file`;
+ *  `apply_patch`(_structured) → every file marker in `input.patch`. Defensive
+ *  against `input:unknown`: a non-matching shape yields `[]` (no false block). */
+const mutatingTargetPaths = (name: string, input: unknown): string[] => {
+  if (typeof input !== "object" || input === null) return []
+  const o = input as Record<string, unknown>
+  if (name === "edit" || name === "write") return typeof o.path === "string" ? [o.path] : []
+  if (name === "scripted_replace") return typeof o.file === "string" ? [o.file] : []
+  if (name === "apply_patch" || name === "apply_patch_structured") {
+    return typeof o.patch === "string" ? v4aTargetPaths(o.patch) : []
+  }
+  return []
+}
+
+/** The steer surfaced when a bench run tries to mutate a TEST file. Frames the
+ *  SOTA discipline: the grader supplies hidden tests, so a model test edit is
+ *  discarded AND (observed django-13417) lures the model into chasing its own
+ *  modified tests, regressing an already-correct minimal fix. */
+const TEST_SCOPE_STEER =
+  "Blocked: this is a test file and test files are OFF-LIMITS in this task. " +
+  "The grader supplies its own hidden tests — any edit you make to a test/ file " +
+  "or test_*/conftest file is discarded and only risks steering you to a wrong, " +
+  "over-built fix. Verify by RUNNING the existing tests (do not modify them) and " +
+  "your own reproduction script. Edit library/source files ONLY."
+
+/** Bench test-scope pre-flight (RCA 2026-06-19, django-13417). When
+ *  `config.protectTestPaths` is set, a mutating tool whose target is a test
+ *  path is denied with {@link TEST_SCOPE_STEER} BEFORE it executes — the agent
+ *  physically cannot edit tests, so it cannot chase its own modified tests and
+ *  regress a correct fix (the failure mini/Live/OpenHands avoid by forbidding
+ *  test edits). Default-OFF: absent flag ⇒ single `!` check + early return →
+ *  byte-identical dispatch. Sibling to `consultLocalizePhase`. */
+const consultTestScope = (call: ToolUseBlock, config: AgentConfig): DispatchResult | null => {
+  if (!config.protectTestPaths) return null
+  if (!MUTATING_TOOL_NAMES.has(call.name)) return null
+  const targets = mutatingTargetPaths(call.name, call.input)
+  if (!targets.some(isTestFilePath)) return null
+  return deny(call.id, TEST_SCOPE_STEER, "test-scope-blocked")
 }
 
 /** ADR-0229 — dispatch-guard pre-flight consult. Returns a deny-style
@@ -957,6 +1011,13 @@ const dispatchToolInner = async (
   // check + early return → byte-identical dispatch).
   const localizeShort = consultLocalizePhase(call, config)
   if (localizeShort) return localizeShort
+
+  // Bench test-scope pre-flight (RCA django-13417): deny a mutating tool that
+  // targets a test path so the model cannot edit tests, chase its own modified
+  // tests, and regress an already-correct minimal fix. Default-OFF
+  // (`config.protectTestPaths` absent ⇒ early-return null → byte-identical).
+  const testScopeShort = consultTestScope(call, config)
+  if (testScopeShort) return testScopeShort
 
   // ADR-0229 — pre-flight dispatch guard. Composes git-write-protect /
   // branch-only / host-allowlist detectors behind one closed port. Default-OFF
