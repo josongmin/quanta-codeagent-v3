@@ -987,3 +987,18 @@ runs:
     turns: 60
     preset: agentless-v2
     model: gpt-5.4
+
+- run_id: sidecar-harvest-2026-06-20b
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (durable sidecar)
+  scope: 'Sidecar incremental harvest. Clean agentless-v2.'
+  resolved_count: 1
+  resolved:
+  - instance_id: django__django-14053
+    repo: django
+    turns: 119
+    preset: agentless-v2
+    model: gpt-5.4
