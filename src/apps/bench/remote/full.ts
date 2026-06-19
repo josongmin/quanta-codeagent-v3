@@ -17,10 +17,23 @@
  * may be blocked by the harness; that's by design. The executor + its security
  * invariants are fully unit-tested offline via an injected {@link SpawnFn}.
  */
-import { writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { errMessage } from "@/shared"
 import { loadVerdicts } from "../analyze/verdicts"
+import { benchHome } from "../corpus"
 import { defaultSpawn, type SpawnFn } from "./backend"
+
+/** Durable dir for fetched full-remote artifacts (predictions / report / closure
+ *  sidecar / trajectory). NEVER /tmp — the OS reaps it on the next session and
+ *  silently destroys the only post-mortem signal (2026-06-19: lost the patches
+ *  needed to RCA a grading false-negative). Lives under benchHome() like the
+ *  rest of bench's persistent output. */
+const fullRemoteArtifactDir = (): string => {
+  const dir = join(benchHome(), "full-remote")
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
 
 export interface FullRemoteConfig {
   /** Local quanta repo to rsync to the box (excludes node_modules/.git). */
@@ -801,7 +814,7 @@ export const createFullRemoteBackend = (
       try {
         const preds = await sshTo(host, "cat ~/preds.jsonl 2>/dev/null")
         if (preds.code === 0 && preds.stdout.trim() !== "") {
-          const localPreds = `/tmp/full-remote-preds-${iid}.jsonl`
+          const localPreds = join(fullRemoteArtifactDir(), `preds-${iid}.jsonl`)
           writeFileSync(localPreds, preds.stdout)
           log(`[full-remote] predictions saved: ${localPreds}`)
         }
@@ -816,7 +829,7 @@ export const createFullRemoteBackend = (
       try {
         const sidecar = await sshTo(host, "cat ~/report.closure-diagnostics.json 2>/dev/null")
         if (sidecar.code === 0 && sidecar.stdout.trim() !== "") {
-          const localSidecar = `/tmp/full-remote-closure-${iid}.json`
+          const localSidecar = join(fullRemoteArtifactDir(), `closure-${iid}.json`)
           writeFileSync(localSidecar, sidecar.stdout)
           log(`[full-remote] closure diagnostics saved: ${localSidecar}`)
         }
@@ -829,7 +842,7 @@ export const createFullRemoteBackend = (
         try {
           const cassette = await sshTo(host, "cat ~/quanta/bench-trajectory.jsonl 2>/dev/null")
           if (cassette.code === 0 && cassette.stdout.trim() !== "") {
-            const localCassette = `/tmp/full-remote-trajectory-${iid}.jsonl`
+            const localCassette = join(fullRemoteArtifactDir(), `trajectory-${iid}.jsonl`)
             writeFileSync(localCassette, cassette.stdout)
             log(`[full-remote] trajectory cassette saved: ${localCassette}`)
           }
@@ -864,7 +877,7 @@ export const createFullRemoteBackend = (
       // reportPath would be a dangling ENOENT for the caller.
       let savedReport: string | undefined
       if (fetched.stdout.trim() !== "") {
-        const localReport = `/tmp/full-remote-report-${iid}.json`
+        const localReport = join(fullRemoteArtifactDir(), `report-${iid}.json`)
         try {
           writeFileSync(localReport, fetched.stdout)
           savedReport = localReport
