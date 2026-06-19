@@ -129,21 +129,31 @@ quanta(agentless-v1)와 **별개 스캐폴드**인 mini-swe-agent v2를 같은 g
   - 로그인 경로: mini(litellm) → `_data/oauth-proxy.ts`(:8765) → quanta `createLLM("chatgpt-oauth")` → gpt-5.4 (raw key 불요)
 - 채점: mini 패치 → `mini-predictions.jsonl` → **공식 swebench harness**(`run_evaluation`, arm64 에뮬, max_workers=1, namespace=swebench) — quanta 칼럼과 **동일 grader**라 apples-to-apples. 산출물: `docs/analysis/swe-bench-verified-analysis/_data/mini-picks10-{predictions.jsonl,report.json}`.
 
-### untried-sympy-6 — mini 2/6 vs quanta(agentless-v2) 3/6 → **상호보완 + quanta 과구현 자폭 1건** (2026-06-18)
+### 🔴 GRADING BUG (2026-06-19) — 동시 채점이 정답 패치를 false-negative → 여러 결론 철회
 
-fresh untried easy(<15min) sympy 6개를 quanta agentless-v2(on-demand EC2)와 mini-swe(같은 gpt-5.4 oauth, **동일 on-demand EC2-native grader**)로 교차채점. picks-10의 "1:1 동일"과 달리 **갈림**:
+**self-inflicted 버그**: full-remote 온박스 채점에 `QUANTA_SWEBENCH_GRADE_CONCURRENCY=6`(내가 추가)을 주면 인스턴스별 `run_evaluation` Docker 채점이 **동시에** 돌며 공유 run_id 이미지캐시/cleanup을 race → **정답 패치를 unresolved로 오판.**
 
-| instance | quanta v2 | mini | 해석 |
+**증명 (same patches, two graders)**: v2-safe 5패치 → 동시채점 **0/5** vs 안전 grade-only **4/5**. 그중 3개(21847·10914·9296)는 **gold와 byte-identical + `git apply --check` clean**인데도 동시채점선 fail. → **fix: full.ts 채점 SERIAL로**(patch-gen 동시는 유지) + 재발방지 헬게이트 + knob UNSAFE 표기.
+
+**이 버그로 오염돼 철회된 결론들:**
+- ❌ ~~"v2-safe 0/5 = restraint 더 나쁨"~~ → 진짜 **4/5**. restraint 안 나쁨.
+- ❌ ~~"21847 = quanta 과구현 자폭, mini만 풂"~~ → serial 재채점선 **v2·v2-safe·mini 셋 다 21847 ✅.** "자폭"은 채점버그 신기루.
+
+### untried-sympy-6 — mini 2/6 vs quanta(agentless-v2) 3/6 (clean, serial 채점)
+
+위 버그 수정 후 serial 재채점한 진짜 숫자 (yaml `easy-untried-sympy-serial-2026-06-19` + `v2safe-regrade-2026-06-19`):
+
+| instance | quanta v2 (serial) | mini (safe) | 해석 |
 |---|---|---|---|
 | 19954 | ✅ | ✅ | both-pass |
-| 18763 | ✅ | ❌ | quanta 우위 (exec-feedback) |
-| 19495 | ✅ (142턴) | ❌ | quanta 우위 (느리지만 적중) |
-| **21847** | **❌** (112턴/2092B) | **✅** | **🔴 quanta 스캐폴드 손실 — 과구현이 자폭, mini edit-and-submit이 적중** |
-| 24562 | ❌ | ❌ | **모델 천장** (gpt-5.4 both-fail) |
-| 20916 | ❌ | ❌ | **모델 천장** |
+| 21847 | ✅ (117t) | ✅ | both-pass (← 버그땐 둘 다 "fail"로 오판됐던 것) |
+| 19495 | ✅ (131t) | ❌ | quanta 우위 |
+| 18763 | ❌ | ❌ | both-fail (단 버그런 patch-gen서는 quanta ✅ → **LLM variance**, 천장 아님) |
+| 24562 | ❌ | ❌ | both-fail |
+| 20916 | ❌ | ❌ | both-fail |
 
-- **both-fail 2개 = 모델 천장** (스캐폴드 무죄). **21847 = quanta 과구현 病** — django-10914/15987과 같은 클래스(trivial을 거대패치로 과해석). v2의 turn-explosion/repair-escalation이 오히려 자폭. 
-- **레버: quanta는 절제(over-engineering 억제)가 필요.** v2가 mini보다 +1(exec-feedback 효과)이지만 과구현으로 -1. **v2-safe(in-loop exec off, edit-and-submit posture)가 21847류를 살릴 후보.** 산출물: yaml run `easy-untried-sympy-ondemand-2026-06-18`.
+- **quanta 3/6, mini 2/6** — quanta가 19495 하나 더(exec-feedback). 21847은 양쪽 다 풂.
+- **메타 교훈**: 측정 인프라(채점) 버그가 며칠치 결론을 오염시킴. "0/5 restraint 더 나쁨"·"과구현 자폭" 둘 다 가짜였고, **gold-identical + apply-check로 패치를 직접 검증**해서야 들통남. 단일 verdict 숫자 믿지 말고 패치를 까봐야 함.
 
 ### picks-10 — mini 5/10 vs quanta(agentless-v1) 5/10 → **인스턴스 단위 1:1 동일**
 

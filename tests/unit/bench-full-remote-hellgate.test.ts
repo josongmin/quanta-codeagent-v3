@@ -146,6 +146,26 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(onDemandArgs).toContain("HttpTokens=required")
   })
 
+  test("grading STAYS SERIAL: remote bench-run sets NO QUANTA_SWEBENCH_GRADE_CONCURRENCY", async () => {
+    // RCA 2026-06-19: concurrent on-box grading (GRADE_CONCURRENCY=6) FALSE-
+    // NEGATIVED correct patches — a box scored 0/5 while the SAME predictions
+    // re-graded serially scored 4/5 (gold-identical, git-apply-clean patches
+    // wrongly marked unresolved; concurrent run_evaluation races the shared
+    // run_id image cache/cleanup). Grading must stay serial; patch-gen stays
+    // concurrent. Red-on-injection: re-add the env and this fails.
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const benchRun = calls.find(
+      (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench")),
+    )
+    expect(benchRun).toBeDefined()
+    const cmd = benchRun?.args.join(" ") ?? ""
+    expect(cmd).not.toContain("QUANTA_SWEBENCH_GRADE_CONCURRENCY") // serial grading
+    expect(cmd).toContain("QUANTA_BENCH_CONCURRENCY=") // ...but patch-gen stays parallel
+  })
+
   test("ALWAYS terminates the box — even when the remote run throws", async () => {
     const calls: Array<{ cmd: string; args: string[] }> = []
     const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {

@@ -456,7 +456,7 @@ export const createFullRemoteBackend = (
     `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} ${marketLabel} (IMDSv2 hop-1, shutdown -h +${ttl})`,
     `[dry-run] would rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
     "[dry-run] would ship STRIPPED token over ssh stdin (access_token only; refresh/id dropped)",
-    `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset}, patch-gen concurrency=${concurrency}, grade concurrency=${concurrency} [x86 native pipelined])`,
+    `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset}, patch-gen concurrency=${concurrency}, grading SERIAL [concurrent grading false-negatives — see full.ts])`,
     "[dry-run] would scp report+observe back, then terminate the box",
   ]
 
@@ -757,13 +757,17 @@ export const createFullRemoteBackend = (
           `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
           // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
           // arch-aware default is "none" (slow local conda build).
-          // The box is x86 NATIVE (no arm64 emulation wedge), so grade
-          // concurrently: each task grades its distinct instance the moment its
-          // patch lands, up to `concurrency` Docker grades at once — kills the
-          // end-of-run serial grading tail. MAX_WORKERS stays 4 for the per-grade
-          // (single-instance) harness fan-out; GRADE_CONCURRENCY is the cross-task
-          // bound (default 1 = serial off-box / arm64).
-          `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_SWEBENCH_GRADE_CONCURRENCY=${concurrency} QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
+          //
+          // ⚠️ GRADING STAYS SERIAL (no QUANTA_SWEBENCH_GRADE_CONCURRENCY). Running
+          // multiple per-instance `run_evaluation` Docker grades concurrently was
+          // MEASURED to FALSE-NEGATIVE correct patches en masse (2026-06-19: a
+          // GRADE_CONCURRENCY=6 box scored 0/5; the SAME 5 predictions re-graded
+          // serially via the grade-only path scored 4/5 — 4 gold-identical,
+          // git-apply-clean patches wrongly marked unresolved). The concurrent
+          // grades race on the shared run_id image cache / cleanup ("Removed N
+          // images") and yank each other's containers. patch-gen stays concurrent
+          // (QUANTA_BENCH_CONCURRENCY) — that's the real time saver and is safe.
+          `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
           // Forwarded operator bench knobs (QUANTA_BENCH_*) — makes remote arms
           // exercise the same posture as local; without it env-only knobs are inert.
           forwardedBenchEnv +

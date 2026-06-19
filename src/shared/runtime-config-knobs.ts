@@ -1116,7 +1116,7 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     default: 1,
     group: "bench",
     describe:
-      "How many run_evaluation Docker grades run at once across overlapping bench tasks (default 1 = serial, arm64-safe; set >1 on x86 native to pipeline grading).",
+      "DO NOT SET >1 — UNSAFE. Concurrent per-instance run_evaluation grades FALSE-NEGATIVE correct patches (measured 2026-06-19: GRADE_CONCURRENCY=6 scored 0/5 vs 4/5 serial; concurrent grades race the shared run_id image cache/cleanup). Default 1 = serial = the only correct value. Kept for the bounded-semaphore mechanism only.",
   },
   {
     envKey: "QUANTA_BENCH_FULL_REMOTE_RELAUNCH",

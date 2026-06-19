@@ -262,30 +262,11 @@ runs:
   preset: agentless-v2
   model: gpt-5.4
   auth: chatgpt-oauth
-  grading: official swebench python harness, full-remote (remote/full.ts, EC2 c7i.8xlarge x86 native ON-DEMAND, on-box local grade)
-  scope: fresh untried easy (<15min) sympy, 6 instances. ON-DEMAND (spot reclaimed both prior boxes in 4-17min — ap-northeast-2 capacity crunch). Validated live-streaming + grade-concurrency=6 + relaunch (no relaunch needed: on-demand did not reclaim).
-  mini_swe_crosscheck: 'mini-swe-agent (same gpt-5.4 oauth, SAME on-demand EC2-native grader) = 2/6 resolved (19954, 21847). vs quanta 3/6 (18763, 19954, 19495). both-pass: 19954. quanta-only: 18763, 19495 (exec-feedback win). mini-only: 21847 (quanta over-engineered 112turns/2092B wrong patch; mini edit-and-submit got it — SCAFFOLD loss, same over-engineer病 as django-10914/15987). both-fail: 24562, 20916 (gpt-5.4 model ceiling). Lever: quanta needs RESTRAINT (v2 turn-explosion/over-engineer self-sabotages); v2-safe candidate for 21847.'
-  resolved_count: 3
-  resolved:
-  - instance_id: sympy__sympy-18763
-    repo: sympy
-    turns: 113
-  - instance_id: sympy__sympy-19954
-    repo: sympy
-    turns: 63
-  - instance_id: sympy__sympy-19495
-    repo: sympy
-    turns: 142
-  unresolved:
-  - instance_id: sympy__sympy-21847
-    repo: sympy
-    reason: completed_unresolved (112 turns, 2092B patch — wrong fix)
-  - instance_id: sympy__sympy-24562
-    repo: sympy
-    reason: completed_unresolved (125 turns)
-  - instance_id: sympy__sympy-20916
-    repo: sympy
-    reason: verify_loop_stuck (38 turns)
+  grading: '⚠️ INVALID GRADING — concurrent on-box grading (QUANTA_SWEBENCH_GRADE_CONCURRENCY=6) FALSE-NEGATIVED correct patches. SUPERSEDED by easy-untried-sympy-serial-2026-06-19 (serial re-run) + v2safe-regrade-2026-06-19. Do NOT cite this run.'
+  scope: 'fresh untried easy (<15min) sympy, 6 instances, ON-DEMAND. This run exposed a self-inflicted grading bug: GRADE_CONCURRENCY=6 ran multiple run_evaluation Docker grades at once → they raced the shared run_id image cache/cleanup and marked correct patches unresolved. Fixed in full.ts (grading now SERIAL).'
+  mini_swe_crosscheck: 'RETRACTED. The "21847 over-engineer self-sabotage / quanta needs restraint" reading was an ARTIFACT of the grading bug. Proof: the SAME 5-patch v2-safe set scored 0/5 under concurrent grading but 4/5 (incl 21847) re-graded serially; 3 of those patches were git-apply-clean AND byte-identical to gold. 21847 is solved by v2, v2-safe, AND mini — not a scaffold loss. Clean numbers: see easy-untried-sympy-serial-2026-06-19.'
+  resolved_count: 0
+  resolved_note: 'verdicts void (grading bug) — see serial re-run for real verdicts'
 - run_id: easy-untried-django15-2026-06-19
   date: '2026-06-19'
   preset: agentless-v2
@@ -323,3 +304,81 @@ runs:
   - instance_id: django__django-10999
     repo: django
     reason: completed_unresolved (recovered at concurrency-3, model miss)
+- run_id: easy-untried-django-iso3-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, EC2 backend grade-only, spot terminated (cost-capped)
+  scope: 'SANDBOX-ISOLATION FIX recovery. The django15 batch lost 8 instances to turns-0 (harness_error "SDK session completed without an outcome"). RCA via observe log: createSandbox placed ALL concurrent sandboxes as SIBLINGS under benchWorkRoot(); an agent ''find ..'' wandered into a peer''s mid-cleanup sandbox (bench-<other>-XXXX) → 322s hang → SIGTERM(143) → aborted session → no outcome. FIX (src/runner/batch/eval/sandbox.ts): isolate each sandbox under its OWN private parent (bench-<id>-XXXX/repo-YYYY) so ''find ..'' sees only its own repo. Re-ran the 6 turns-0 at concurrency-3 → 3 recovered non-empty patches → ALL 3 RESOLVED (proving find-hang was the entire loss). Remaining 3 (10097/11433/13297) = deadline abort mid-LLM-continuation (separate bug; graceful-outcome TODO).'
+  resolved_count: 3
+  resolved:
+  - instance_id: django__django-11555
+    repo: django
+    turns: 17
+  - instance_id: django__django-11964
+    repo: django
+    turns: 60
+  - instance_id: django__django-13109
+    repo: django
+    turns: 89
+  unresolved:
+  - instance_id: django__django-10097
+    repo: django
+    reason: 'GRACEFUL-OUTCOME FIXED (was harness_error turns-0): partial patch captured, completed_unresolved (turns 109, model miss)'
+  - instance_id: django__django-11433
+    repo: django
+    reason: 'graceful-outcome fixed: partial patch captured, completed_unresolved (turns 92, model miss)'
+  - instance_id: django__django-13297
+    repo: django
+    reason: 'graceful-outcome fixed: partial patch captured, verify_loop_stuck (turns 109, model miss)'
+- run_id: v2safe-regrade-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2-safe
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, grade-only EC2 on-demand (swebench-native max_workers — SAFE, not the buggy concurrent path)
+  scope: 'RE-GRADE of the 5 v2-safe patches that the concurrent-grading run scored 0/5. Isolates the grading bug (same patches, two graders). Result 4/5 — PROVES concurrent grading false-negatived 4 correct patches (3 were byte-identical to gold + git-apply-clean).'
+  resolved_count: 4
+  resolved:
+  - instance_id: sympy__sympy-21847
+    repo: sympy
+  - instance_id: django__django-10914
+    repo: django
+  - instance_id: django__django-15987
+    repo: django
+  - instance_id: django__django-9296
+    repo: django
+  unresolved:
+  - instance_id: django__django-16642
+    repo: django
+    reason: real over-engineer miss (added bzip2/gzip/xz beyond gold's br/compress)
+- run_id: easy-untried-sympy-serial-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, full-remote on-demand, grading SERIAL (post grading-bug fix)
+  scope: 'CLEAN re-run of the 6 untried sympy (supersedes easy-untried-sympy-ondemand-2026-06-18, whose grading was bugged). agentless-v2, serial grading.'
+  note: 'quanta-v2 3/6 vs mini-swe 2/6 (mini graded via safe grade-only path). quanta-only win: 19495. both-pass: 19954, 21847. both-fail: 18763/24562/20916 (note: 18763 passed in the bugged patch-gen run but failed here = patch-gen LLM variance, NOT grading). 21847 solved by v2 AND v2-safe AND mini — the earlier "over-engineer self-sabotage" was a grading-bug artifact, now RETRACTED.'
+  resolved_count: 3
+  resolved:
+  - instance_id: sympy__sympy-19954
+    repo: sympy
+    turns: 104
+  - instance_id: sympy__sympy-19495
+    repo: sympy
+    turns: 131
+  - instance_id: sympy__sympy-21847
+    repo: sympy
+    turns: 117
+  unresolved:
+  - instance_id: sympy__sympy-18763
+    repo: sympy
+    reason: completed_unresolved (131 turns; passed under a different patch-gen run = variance)
+  - instance_id: sympy__sympy-24562
+    repo: sympy
+    reason: completed_unresolved (109 turns)
+  - instance_id: sympy__sympy-20916
+    repo: sympy
+    reason: completed_unresolved (40 turns)
