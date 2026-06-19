@@ -16,6 +16,7 @@ import {
   BenchObserver,
   benchOptIns,
   buildConfig as buildRunnerConfig,
+  buildReproVoteValidate,
   composeWithReproHint,
   DEFAULT_POLICY,
   enumerateRepoSources,
@@ -229,6 +230,9 @@ const runAgentViaSdk = async (
 interface InstallReproTestResult {
   readonly hint: string | undefined
   readonly telemetry: BenchReproTestTelemetry | undefined
+  /** #2 repro-vote: scripts that REPRODUCED on the un-patched tree — re-run +
+   *  majority-voted by the K-of-N RESOLVED gate when `repro-vote` is on. */
+  readonly reproSources?: readonly string[]
 }
 
 const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTelemetry => ({
@@ -250,11 +254,16 @@ const installReproTestHint = async (
   const preparation = await prepareReproTestDetailed(instance, sandbox, reproK, { llm })
   const { selection, telemetry } = preparation
   if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
+  // #2 repro-vote: keep EVERY reproducing script for the validation-time vote.
+  const reproSources = selection.samples
+    .filter((s) => s.outcome === "reproduced")
+    .map((s) => s.source)
   const path = `${sandbox}/${REPRO_FILE_NAME}`
   try {
     await Bun.write(path, selection.selected)
     return {
       hint: REPRO_HINT_MESSAGE,
+      reproSources,
       telemetry: {
         installed: true,
         path,
@@ -263,7 +272,7 @@ const installReproTestHint = async (
       },
     }
   } catch (_writeErr) {
-    return { hint: undefined, telemetry: writeFailedTelemetry(telemetry) }
+    return { hint: undefined, reproSources, telemetry: writeFailedTelemetry(telemetry) }
   }
 }
 
@@ -396,6 +405,7 @@ const runRepairPhase = async (
   closureHint: string | undefined,
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
+  reproSources: readonly string[],
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -403,6 +413,9 @@ const runRepairPhase = async (
   let repairFalseGreen = false
   let repairFalseRed = false
   let repairRounds = 0
+  // #2 repro-vote: K-of-N RESOLVED majority gate when the knob is on AND a
+  // reproducing set exists; else byte-identical `repair.validate ?? defaultValidate`.
+  const validate = buildReproVoteValidate(instance, reproSources, repair.validate ?? defaultValidate)
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -425,7 +438,7 @@ const runRepairPhase = async (
             reproHint,
             closureHint,
           ),
-        validate: repair.validate ?? defaultValidate,
+        validate,
         // WS2 widen: bind sibling co-change owners into every repair seed (the
         // gate's `sibling_coverage_missing` record made actionable for the
         // model). Empty list ⇒ byte-identical to the base builder.
@@ -615,6 +628,8 @@ const runInstanceOnce = async (
       : { hint: undefined, telemetry: undefined }
     const reproHint = reproInstall.hint
     reproTest = reproInstall.telemetry
+    // #2 repro-vote: reproducing set for the validation-time K-of-N RESOLVED gate.
+    const reproSources = reproInstall.reproSources ?? []
 
     // T-302 primary-rail SELECTION (default-OFF, knob `primary-rail`). A repro that
     // reproduced the bug on the unpatched base (`reproducedCount > 0` ⇒ red-on-
@@ -720,6 +735,7 @@ const runInstanceOnce = async (
             // WS2 widen: the blind LSP/grep sibling owners (empty when feeder off
             // or no sibling) — co-change pressure injected into repair seeds.
             ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
+            reproSources,
           )
         : await runAgentPhase(
             instance,

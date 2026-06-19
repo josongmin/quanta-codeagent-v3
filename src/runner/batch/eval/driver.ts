@@ -73,6 +73,7 @@ import {
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
+import { makeReproVoteValidate } from "./repair/repro-vote"
 import type {
   BuildRepairContextArgs,
   RunOnceResult,
@@ -872,6 +873,11 @@ export const prepareReproTest = async (
 interface InstallReproTestResult {
   readonly hint: string | undefined
   readonly telemetry: BenchReproTestTelemetry | undefined
+  /** #2 repro-vote: the scripts that REPRODUCED the bug on the un-patched tree
+   *  (outcome === "reproduced"). Re-run on the patched tree + majority-voted by
+   *  the K-of-N RESOLVED gate when the `repro-vote` knob is on. Empty/absent ⇒
+   *  no vote (byte-identical legacy gate). */
+  readonly reproSources?: readonly string[]
 }
 
 const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTelemetry => ({
@@ -897,11 +903,17 @@ const installReproTestHint = async (
   })
   const { selection, telemetry } = preparation
   if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
+  // #2 repro-vote: keep EVERY reproducing script (not just the selected winner)
+  // so the validation-time K-of-N RESOLVED vote can re-run the whole set.
+  const reproSources = selection.samples
+    .filter((s) => s.outcome === "reproduced")
+    .map((s) => s.source)
   const path = `${sandbox}/${REPRO_FILE_NAME}`
   try {
     await Bun.write(path, selection.selected)
     return {
       hint: REPRO_HINT_MESSAGE,
+      reproSources,
       telemetry: {
         installed: true,
         path,
@@ -910,7 +922,7 @@ const installReproTestHint = async (
       },
     }
   } catch {
-    return { hint: undefined, telemetry: writeFailedTelemetry(telemetry) }
+    return { hint: undefined, reproSources, telemetry: writeFailedTelemetry(telemetry) }
   }
 }
 
@@ -1047,10 +1059,13 @@ export const buildConfig = (
   // mini/OpenHands solve it minimally because their system prompt carries an
   // explicit "seek the simplest mechanism / reject over-engineering" philosophy
   // (OpenHands `system_prompt_tech_philosophy.j2`, Linus mode). This line ports
-  // that philosophy verbatim-in-spirit. Knob-gated (`QUANTA_BENCH_SIMPLICITY`,
-  // default-OFF) for a clean A/B; OFF ⇒ "" ⇒ byte-identical prompt.
+  // that philosophy verbatim-in-spirit. DEFAULT-ON (validated 2026-06-19):
+  // 2 proven causal flips (django-13417, sympy-24562: ❌→✅ with the steer), a
+  // fresh untried tier-E batch 8/9 across 7 repos, 7166's earlier fail confirmed
+  // RUN-NOISE (passed on re-run), 0 clear regression across ~18 graded. Off-
+  // switch `QUANTA_BENCH_SIMPLICITY=0` restores the pre-absorption baseline.
   const simplicitySteerLine =
-    instance.swebench && gateOn(process.env, "QUANTA_BENCH_SIMPLICITY")
+    instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY")
       ? `\n-${SIMPLICITY_STEER}`
       : ""
   const baseText = instance.swebench
@@ -1364,6 +1379,40 @@ const runAgentPhase = async (
 }
 
 /**
+ * #2 repro-vote — compose the repair validator. SHARED by both bench drivers
+ * (runner core + apps prod wrapper) so the production exec wiring is identical.
+ *
+ * Default-OFF byte-identical: returns `fallback` UNCHANGED unless the
+ * `repro-vote` knob is on AND a reproducing set exists. ON ⇒ wraps the
+ * K-of-N RESOLVED majority vote that re-runs the reproducing set on the patched
+ * sandbox (`makeReproVoteValidate`), with `fallback` as the inconclusive/empty/
+ * fail-open path. The exec port mirrors the base-red run (uvx project-env argv
+ * for SWE-bench, the instance's `localEnv`) so imports resolve identically.
+ */
+export const buildReproVoteValidate = (
+  instance: Instance,
+  reproSources: readonly string[],
+  fallback: (args: ValidateArgs) => Promise<ValidatorResult>,
+): ((args: ValidateArgs) => Promise<ValidatorResult>) => {
+  if (benchOptIns().reproVote !== true || reproSources.length === 0) return fallback
+  const repoForRepro = instance.swebench?.repo
+  return makeReproVoteValidate({
+    sources: reproSources,
+    exec: (argv, cwd, timeoutMs) =>
+      execArgv(argv, cwd, timeoutMs, {
+        ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+      }),
+    writeFile: async (p: string, c: string): Promise<void> => {
+      await Bun.write(p, c)
+    },
+    ...(repoForRepro !== undefined
+      ? { buildArgv: (scriptPath: string) => reproRunArgv(repoForRepro, scriptPath) }
+      : {}),
+    fallback,
+  })
+}
+
+/**
  * Repair-path phase: ONE `withGitSnapshot` wraps ALL rounds (so the prior
  * round's edits persist into round N+1 — no `git reset/clean` between rounds).
  * The official `verify()` is NEVER invoked here — it runs ONCE outside, on the
@@ -1381,12 +1430,19 @@ const runRepairPhase = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
   primaryRailStep: PrimaryRailStep | undefined,
+  reproSources: readonly string[],
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
   let repairValidated = false
   let repairFalseGreen = false
   let repairRounds = 0
+  // #2 repro-vote: when the knob is on AND we have a reproducing set, the
+  // validator becomes the K-of-N RESOLVED majority vote (re-run the set on the
+  // patched tree); it falls back to the legacy gate on an empty set / fail /
+  // tie. Default-OFF or no repro ⇒ `baseValidate` ⇒ byte-identical. The exec
+  // wiring lives in the SHARED `buildReproVoteValidate` so both drivers agree.
+  const validate = buildReproVoteValidate(instance, reproSources, repair.validate ?? defaultValidate)
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -1409,7 +1465,7 @@ const runRepairPhase = async (
             reproHint,
             closureHint,
           ),
-        validate: repair.validate ?? defaultValidate,
+        validate,
         buildContext: repair.buildContext ?? buildRepairContext,
         sandbox,
         exec,
@@ -1620,6 +1676,9 @@ export const runInstanceOnce = async (
       : { hint: undefined, telemetry: undefined }
     const reproHint = reproInstall.hint
     reproTest = reproInstall.telemetry
+    // #2 repro-vote: the reproducing set (empty unless repro reproduced), passed
+    // to the repair phase so the K-of-N RESOLVED gate can re-run it on the patch.
+    const reproSources = reproInstall.reproSources ?? []
 
     // T-302 primary-rail SELECTION (default-OFF, knob `primary-rail`). When a repro
     // was installed AND it reproduced the bug on the unpatched base
@@ -1713,6 +1772,7 @@ export const runInstanceOnce = async (
             reproHint,
             closureHint,
             primaryRailStep,
+            reproSources,
           )
         : await runAgentPhase(
             instance,

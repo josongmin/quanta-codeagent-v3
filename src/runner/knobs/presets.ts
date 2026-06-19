@@ -113,6 +113,65 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     // where mini failed). Re-add `"closure-repair": "3"` only after the repro
     // oracle reliably flips reproduced→resolved on a correct patch.
   },
+  // jun-19 BASELINE ARM for the repro-vote A/B — agentless-v2 + the repair loop
+  // gated by the LEGACY single-sentinel validator (`closure-repair:3`, NO vote).
+  // This is the apples-to-apples control: it re-introduces the same closure-repair
+  // executor that was measured net-negative, so `agentless-v2-repair` vs
+  // `agentless-v2-reprovote` isolates EXACTLY the vote gate (single variable:
+  // `repro-vote`). A boolean knob's env value cannot turn a preset-ON knob OFF
+  // (parse yields true|undefined, never explicit-false), so the baseline MUST be
+  // its own preset — env `QUANTA_BENCH_REPRO_VOTE=off` would NOT suppress it.
+  "agentless-v2-repair": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "3",
+  },
+  // jun-19 repro-oracle-quality ARM — repair gated by the K-of-N RESOLVED vote.
+  //
+  // The HYPOTHESIS: closure-repair was measured net-negative (resolution 9→7)
+  // ONLY because the repro oracle is a false-NEGATIVE — it reads a CORRECT fix as
+  // "reproduced", so the single-script gate rejects it and repair churns. The
+  // `repro-vote` knob re-runs the WHOLE reproducing set on the patched tree and
+  // majority-votes "Issue resolved", removing exactly that false-NEGATIVE. So
+  // this arm bundles BOTH: `closure-repair:3` (the repair loop) + `repro-vote:1`
+  // (its vote gate). Without closure-repair the repair phase never runs and the
+  // vote would be INERT (the gate lives inside the loop) — they MUST ship together.
+  //
+  // Measurement: vs plain `agentless-v2` (no repair) = repair+vote net effect; vs
+  // `agentless-v2-repair` (repair + legacy single-sentinel gate) = the vote's
+  // ISOLATED effect (single variable `repro-vote`). v1/v2 untouched (frozen).
+  "agentless-v2-reprovote": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "3",
+    "repro-vote": "1",
+  },
   // WS1 mini-parity (jun-18) — agentless-v2 with the round-0 prompt THINNED.
   // Single-variable delta vs agentless-v2: `round0-minimal:1`. Everything else is
   // byte-identical to v2, so a `--preset agentless-mini-parity` vs `agentless-v2`

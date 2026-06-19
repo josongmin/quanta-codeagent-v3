@@ -1,0 +1,57 @@
+{
+  "arms": {
+    "edge3-lsp-dead": {
+      "n": 3,
+      "counts": {
+        "EXACT": 1,
+        "PARTIAL": 1,
+        "MISS": 1
+      },
+      "wrong_surface_rate": 0.333,
+      "touched_a_gold_file_rate": 0.667,
+      "rows": [
+        {
+          "id": "django__django-16667",
+          "verdict": "EXACT",
+          "edited": [
+            "django/forms/widgets.py"
+          ],
+          "gold": [
+            "django/forms/widgets.py"
+          ],
+          "missing": [],
+          "note": ""
+        },
+        {
+          "id": "sphinx-doc__sphinx-7462",
+          "verdict": "PARTIAL",
+          "edited": [
+            "sphinx/domains/python.py"
+          ],
+          "gold": [
+            "sphinx/domains/python.py",
+            "sphinx/pycode/ast.py"
+          ],
+          "missing": [
+            "sphinx/pycode/ast.py"
+          ],
+          "note": ""
+        },
+        {
+          "id": "sympy__sympy-17630",
+          "verdict": "MISS",
+          "edited": [
+            "sympy/matrices/expressions/blockmatrix.py"
+          ],
+          "gold": [
+            "sympy/matrices/expressions/matexpr.py"
+          ],
+          "missing": [
+            "sympy/matrices/expressions/matexpr.py"
+          ],
+          "note": ""
+        }
+      ]
+    }
+  }
+}

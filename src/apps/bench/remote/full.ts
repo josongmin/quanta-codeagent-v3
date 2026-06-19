@@ -44,7 +44,7 @@ export interface FullRemoteConfig {
   readonly datasetPath: string
   /** Subset to run (default: all rows in the dataset). */
   readonly instanceIds?: readonly string[]
-  /** Bench preset. Default `agentless-v1`. */
+  /** Bench preset. Default `agentless-v2-safe`. */
   readonly preset?: string
   /** Model id (predictions/report naming). Default `gpt-5.4`. */
   readonly model?: string
@@ -90,7 +90,7 @@ const D = {
   sgName: "quanta-bench-sg",
   diskGb: 600,
   ttlMinutes: 180,
-  preset: "agentless-v1",
+  preset: "agentless-v2-safe",
   model: "gpt-5.4",
 } as const
 
@@ -338,6 +338,30 @@ export const createLineStreamer = (emit: (line: string) => void): ((chunk: strin
   }
 }
 
+/**
+ * #1-P0 (jun-19 audit) — LSP-grounding launch-proof verdict (PURE, testable).
+ *
+ * Given the box-side pyright probe result, decide whether LSP grounding is LIVE
+ * or INERT for this run. The localize-phase steer (DEFAULT-ON under
+ * agentless-v1/v2) tells the model to call lsp_definition/lsp_references, but
+ * EVERY nav call silently returns "unavailable" if pyright-langserver is not
+ * launchable on the box — grounding becomes THEATER and the report cannot
+ * distinguish "model ignored the steer" from "pyright was never there" (the
+ * jun-16/19 inert bug class). userData installs pyright fail-open (`|| true`),
+ * so this verdict drives a LOUD non-fatal WARNING when it did not land — making
+ * an inert-grounding run OBSERVABLE instead of silent. INERT ⇒ ready:false.
+ */
+export const pyrightLaunchProofVerdict = (probe: {
+  code: number
+  stdout: string
+}): { ready: boolean; detail: string } => {
+  const out = (typeof probe.stdout === "string" ? probe.stdout : "").trim()
+  if (probe.code !== 0 || out === "" || /PYRIGHT_MISSING/.test(out)) {
+    return { ready: false, detail: out.slice(-200) }
+  }
+  return { ready: true, detail: out }
+}
+
 export const createFullRemoteBackend = (
   cfg: FullRemoteConfig,
 ): { run: () => Promise<FullRemoteResult> } => {
@@ -484,7 +508,7 @@ export const createFullRemoteBackend = (
 
   const plan = (): readonly string[] => [
     `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} ${marketLabel} (IMDSv2 hop-1, shutdown -h +${ttl})`,
-    `[dry-run] would rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
+    `[dry-run] would bootstrap bun+uv+pyright langserver, then rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
     "[dry-run] would ship STRIPPED token over ssh stdin (access_token only; refresh/id dropped)",
     `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset}, patch-gen concurrency=${concurrency}, grading SERIAL [concurrent grading false-negatives — see full.ts])`,
     "[dry-run] would scp report+observe back, then terminate the box",
@@ -704,6 +728,27 @@ export const createFullRemoteBackend = (
         throw new Error(
           `[full-remote] swebench toolchain warm failed (code ${warm.code}):\n${warm.stdout}${warm.stderr}`,
         )
+      }
+
+      // #1-P0 (jun-19 audit): LSP-grounding launch-proof. Probe pyright the way
+      // the bench's `bun run` will see it (PATH=~/.local/bin) and emit a LOUD
+      // non-fatal WARNING if it is not launchable — so an INERT-grounding run is
+      // observable, never silent theater. Non-fatal: nav is an enhancement; the
+      // grade still runs (degraded to no-nav). See {@link pyrightLaunchProofVerdict}.
+      const pyrightProbe = await sshTo(
+        host,
+        'export PATH="$HOME/.local/bin:$PATH"; if command -v pyright-langserver >/dev/null 2>&1; then pyright --version 2>&1 | tail -1; else echo PYRIGHT_MISSING; exit 7; fi',
+      )
+      const groundingVerdict = pyrightLaunchProofVerdict(pyrightProbe)
+      if (!groundingVerdict.ready) {
+        log(
+          "[full-remote] ⚠️  WARNING: pyright-langserver is NOT launchable on the box — LSP grounding " +
+            "(lsp_definition / lsp_references) is INERT this run: the localize steer fires but every nav call " +
+            'returns "unavailable" (silent no-nav degrade). The userData pyright install likely failed. ' +
+            `probe: ${groundingVerdict.detail}`,
+        )
+      } else {
+        log(`[full-remote] LSP grounding ready — ${groundingVerdict.detail}`)
       }
 
       const scpDs = await spawn("scp", [

@@ -166,6 +166,28 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(cmd).toContain("QUANTA_BENCH_CONCURRENCY=") // ...but patch-gen stays parallel
   })
 
+  test("default full-remote posture is agentless-v2-safe (bench-in-loop exec OFF)", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const benchRun = calls.find(
+      (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench")),
+    )
+    expect(benchRun).toBeDefined()
+    expect(benchRun?.args.join(" ") ?? "").toContain("QUANTA_BENCH_PRESET='agentless-v2-safe'")
+  })
+
+  test("box bootstrap installs pyright so LSP nav-grounding is not inert by missing binary", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const shipped = everyShippedString(calls)
+    expect(shipped).toContain("uv tool install pyright")
+    expect(shipped).toContain("pyright --version")
+  })
+
   test("ALWAYS terminates the box — even when the remote run throws", async () => {
     const calls: Array<{ cmd: string; args: string[] }> = []
     const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {

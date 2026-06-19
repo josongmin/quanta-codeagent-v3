@@ -55,6 +55,7 @@ import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
 import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
+import { reproVoteKnob } from "@/runner/knobs/knobs/repro-vote"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
 import { round0MinimalKnob } from "@/runner/knobs/knobs/round0-minimal"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
@@ -98,6 +99,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(repairEscalationKnob),
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproTestKnob),
+  asAnyKnob(reproVoteKnob),
   asAnyKnob(retryTransientKnob),
   asAnyKnob(round0MinimalKnob),
   asAnyKnob(skillsKnob),

@@ -235,6 +235,11 @@ export interface BenchPosture {
   readonly patchHygiene: boolean
   /** jun-19: minimal-edit admission — emit PatchBudget over the diff (#13417). */
   readonly patchBudget: boolean
+  /** jun-19: K-of-N RESOLVED gate — re-run the reproducing repro set on the
+   *  patched tree and majority-vote "Issue resolved" (removes the false-NEGATIVE
+   *  single-script oracle). Armed by the driver only when repro-test produced a
+   *  reproducing set; empty set ⇒ byte-identical legacy gate. */
+  readonly reproVote: boolean
   /** T-501: post-localization commit rail + no-patch exhausted verdict. */
   readonly noPatchBreaker: boolean
   /** T-601: multi-owner escalation decision (closed reason taxonomy). */
@@ -316,6 +321,7 @@ export const benchPostureFromState = (
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
   const patchHygiene = readKnobValue(state, "patch-hygiene", isTrue) === true
   const patchBudget = readKnobValue(state, "patch-budget", isTrue) === true
+  const reproVote = readKnobValue(state, "repro-vote", isTrue) === true
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
@@ -343,6 +349,7 @@ export const benchPostureFromState = (
     primaryRail,
     patchHygiene,
     patchBudget,
+    reproVote,
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,

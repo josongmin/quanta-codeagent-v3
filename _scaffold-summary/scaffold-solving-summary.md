@@ -1,40 +1,114 @@
-# SWE-bench Verified — 프론티어 해결 매트릭스 (500 × 표시 17 / 통계 전수 134)
+# SWE-bench Verified — 프론티어 해결 매트릭스 & 분석 (최종본)
 
-> 출처 = `swe-bench/experiments` `evaluation/verified/<run>/results/results.json` 의 `resolved[]`. **공개 제출 134개 전수**.
-> `#`/천장/union/tier 통계는 **134개 전수 기준**. 표의 컬럼은 가독성 위해 최강+모델다양 17개만 표시(나머지 117개도 `#` 카운트엔 포함).
-> ⚠️ 이전 버전은 17개 부분집합으로 천장을 계산해 **23개를 거짓 천장으로 뻥튀기**했음(예: sympy-17630은 17개엔 없지만 Prometheus-gpt5·sonar-opus4.5가 풂). 이 버전은 전수라 그 오류 없음.
+> 출처 `swe-bench/experiments` `evaluation/verified/<run>/{results/results.json, metadata.yaml}` — **공개 제출 134개 전수**. 생성일 2026-06-19.
+> 통계(`#`/천장/union/tier/OSS)는 **134개 전수 기준**. 매트릭스 컬럼은 가독성 위해 최강+다양 17개만 표시(나머지 117개도 `#`엔 포함).
 
-## 요약 (전수 134)
+## 1. 핵심 결론
 
-- **UNION (≥1개 제출이 해결):** 468/500 = *확실히* 풀 수 있는 하한
-- **CEILING (전 134개 0해결):** 32/500 — 공개 제출 누구도 아직 못 푼 것. "풀 수 없다"의 증명은 **아님**(더 센 모델/스캐폴드면 일부 깸)
-- **EASY-CORE (≥90% 제출이 해결):** 59/500 = 거의 모두 푸는 쉬운 코어 (전부=0은 약한 RAG 제출 탓이라 무의미해 ≥90%로 봄)
+- **천장(CEILING) = 32/500** — 공개 134개 *전부* 못 푼 것. "풀 수 없다"의 증명이 **아님**(더 센 모델/스캐폴드면 일부 깸). 우리 모델 Opus-4.8은 이 전수에 없으므로 실제 얼마 푸는지는 돌려야 앎.
+- **UNION = 468/500** = 최소 한 제출이 실제로 푼 것 = *확실히* 풀 수 있는 하한.
+- **EASY-CORE(≥90% 제출 해결) = 59/500** = 거의 모두 푸는 쉬운 코어.
+- **OSS 스캐폴드 = 64개 / closed 64개** (메타 기준). 흡수(코드 학습)는 OSS만 가능 — §3.
 
-### 표시 17개 스캐폴드 (134 리더보드 상위/다양)
+### 우리(quanta) 회복가능 타겟
 
-| 스캐폴드 | 모델 | resolved/500 | % |
-|---|---|---:|---:|
-| Sonar (`sonar-o45`) | Opus-4.5 | 396 | 79.2 |
-| Trae (`trae-dbo`) | Doubao-Seed | 394 | 78.8 |
-| OpenHands (`OH-o45`) | Opus-4.5 | 388 | 77.6 |
-| Live-SWE (`live-gem3`) | Gemini-3pro | 387 | 77.4 |
-| EPAM (`epam`) | Son-4 | 384 | 76.8 |
-| Atlassian (`rovo`) | ?internal | 384 | 76.8 |
-| ACoder (`acoder`) | ? | 382 | 76.4 |
-| Warp (`warp`) | ? | 378 | 75.6 |
-| Prometheus (`prom-gpt5`) | GPT-5 | 372 | 74.4 |
-| Refact (`refact`) | Son-4 | 372 | 74.4 |
-| SF-SAGE (`sage`) | ? | 369 | 73.8 |
-| tools (`opus-t`) | Opus-4 | 366 | 73.2 |
-| OpenHands (`OH-gpt5`) | GPT-5 | 359 | 71.8 |
-| Lingxi (`lingxi-k2`) | Kimi-K2 | 356 | 71.2 |
-| OpenHands (`qwen480`) | Qwen3-480 | 348 | 69.6 |
-| Cortexa (`cortexa`) | o3 | 341 | 68.2 |
-| SWE-Exp (`deepseek`) | DeepSeek-V3 | 210 | 42.0 |
+> ★ = 우리가 식별/측정한 회복가능 인스턴스. `134중 해결수`가 높을수록 "남들은 푸는데 우리만 놓침" = 우선순위 ↑.
 
-## 천장 — 공개 134개 전부 실패 (32개)
+| instance | 134중 해결 | 비고 |
+|---|--:|---|
+| `django__django-13417` | 109 | over-engineer(불필요 helper); gold=4줄 group_by guard |
+| `sympy__sympy-24562` | 56 | - |
+| `sympy__sympy-18763` | 54 | Claude계열 다 놓침; DeepSeek류가 풂 |
+| `pytest-dev__pytest-5787` | 34 | - |
+| `sympy__sympy-17630` | 2 | gpt-5.5런: _blockmul 오localize; gold=_postprocessor MatAdd 2줄. Prometheus(gpt5)는 풂 |
 
-> 회복 불가/ROI0 목록 **아님**. 여러 독립 시스템이 동시 실패 = 평균적으로 더 어렵다는 신호일 뿐(우선순위 ↓용, 배제용 아님). 우리 모델(Opus-4.8)은 이 전수에 없으니 얼마 푸는지는 돌려야 앎.
+### gpt-5.5 천장-probe 실험 기록 (2026-06-19)
+
+- **셋업**: agentless-v1(frozen SOTA preset) + gpt-5.5, full-remote(on-demand c7i.8xlarge, grading SERIAL), 단일 `sympy__sympy-17630`.
+- **결과**: resolved **0/1** (completed_unresolved, 31턴, 패치생성됨). 인프라 클린.
+- **진단(현상=팩트)**: gpt-5.5는 `blockmatrix.py::_blockmul`(곱셈 증상지점)을 고침. gold는 `matexpr.py::_postprocessor`의 MatAdd 분기 2줄. FAIL_TO_PASS의 `test_zero_matrix_add`(덧셈 경로)를 못 통과 → 실패모드는 **localize 미스(증상≠근본)**. (모델이 못 푸는 게 아님은 아래 교차검증)
+- **교차검증**: 같은 인스턴스를 Prometheus(gpt5)·Sonar(opus4.5)가 **실제로 풂**(2/134) → gpt5급으로 풀리는 문제, reasoning 천장 아님.
+- **⚠️ confound(과주장 금지)**: 이 런은 **closure/LSP telemetry 미캡처** + full.ts의 pyright 설치가 **best-effort(`|| true`)**라, agentless-v1의 LSP-steer가 실제 active였는지 **미확인**. 따라서 "localize 미스"가 *grounding 부재* 때문인지 *grounding 있어도 못 짚음* 때문인지 이 1런으론 단정 불가 → **이 런을 P0 LSP-grounding 정당화 근거로 쓰지 않는다**. 분리하려면 oracle-localize(파일 지정) 재런 또는 LSP telemetry 캡처 재런 필요. (직전 ceiling-bench 런도 AMI pyright 갭으로 LSP-steer inert였던 전례 있음 — 같은 confound 클래스.)
+
+### 방법론 교훈
+
+- **부분집합 천장 ≠ 진짜 천장.** 초기 17개 부분집합으로 천장을 재서 72→이후 55로 봤으나, 전수 134로 재계산하니 **32개**. 17엔 없지만 다른 제출이 푼 게 23개(예: sympy-17630). 천장 주장은 **반드시 전수 union**으로.
+- **EASY-CORE는 전부=0이 아니라 ≥90%로** 본다(약한 RAG 제출이 끼면 전부-교집합은 무의미).
+
+## 2. 표시 17개 스캐폴드 (134 리더보드 상위/다양)
+
+| 스캐폴드 | 모델 | resolved/500 | % | OSS | repo |
+|---|---|--:|--:|:--:|---|
+| Sonar (`sonar-o45`) | Opus-4.5 | 396 | 79.2 | 🔒closed | gh:AutoCodeRoverSG/sonar-foundation-agent |
+| Trae (`trae-dbo`) | Doubao-Seed | 394 | 78.8 | 🟢OSS | gh:bytedance/trae-agent |
+| OpenHands (`OH-o45`) | Opus-4.5 | 388 | 77.6 | 🟢OSS |  |
+| Live-SWE (`live-gem3`) | Gemini-3pro | 387 | 77.4 | 🟢OSS | gh:OpenAutoCoder/live-swe-agent |
+| EPAM (`epam`) | Son-4 | 384 | 76.8 | 🔒closed |  |
+| Atlassian (`rovo`) | ?internal | 384 | 76.8 | 🔒closed |  |
+| ACoder (`acoder`) | ? | 382 | 76.4 | 🔒closed | gh:ACoder-AI/ACoder |
+| Warp (`warp`) | ? | 378 | 75.6 | 🔒closed |  |
+| Prometheus (`prom-gpt5`) | GPT-5 | 372 | 74.4 | ? |  |
+| Refact (`refact`) | Son-4 | 372 | 74.4 | 🟢OSS |  |
+| SF-SAGE (`sage`) | ? | 369 | 73.8 | 🔒closed |  |
+| tools (`opus-t`) | Opus-4 | 366 | 73.2 | 🔒closed |  |
+| OpenHands (`OH-gpt5`) | GPT-5 | 359 | 71.8 | 🟢OSS |  |
+| Lingxi (`lingxi-k2`) | Kimi-K2 | 356 | 71.2 | 🟢OSS | gh:lingxi-agent/Lingxi |
+| OpenHands (`qwen480`) | Qwen3-480 | 348 | 69.6 | 🟢OSS |  |
+| Cortexa (`cortexa`) | o3 | 341 | 68.2 | 🟢OSS |  |
+| SWE-Exp (`deepseek`) | DeepSeek-V3 | 210 | 42.0 | ? |  |
+
+## 3. OSS 흡수 후보 (강+공개) vs 코드 못보는 강자(closed)
+
+> os_system=true(스캐폴드 공개)이고 resolved≥300인 시스템 = 코드 까서 학습 가능. closed는 패치/트래젝토리만 봄.
+
+### 🟢 강+OSS (흡수 가능, resolved≥300)
+
+| resolved | 시스템 | org | repo |
+|--:|---|---|---|
+| 396 | live-SWE-agent + Claude 4.5 Opus mediu | - UIUC | gh:OpenAutoCoder/live-swe-agent |
+| 394 | TRAE + Doubao-Seed-Code | ByteDance | gh:bytedance/trae-agent |
+| 388 | OpenHands + Claude Opus 4.5 |  |  |
+| 387 | live-SWE-agent + Gemini 3 Pro Preview  | - UIUC | gh:OpenAutoCoder/live-swe-agent |
+| 376 | TRAE + Claude Sonnet 4 + Opus 4 + Sonn | TRAE | gh:bytedance/trae-agent |
+| 373 | JoyCode + Claude 4 Sonnet + GPT-4.1 | JoyCode | gh:jd-opensource/joycode-agent |
+| 373 | Lingxi-v1.5_claude-4-sonnet-20250514 | Lingxi | gh:nimasteryang/Lingxi |
+| 372 | Refact.ai Agent + Claude 4 Sonnet + o4 | - Refact.ai |  |
+| 359 | OpenHands + GPT-5 | OpenHands |  |
+| 356 | Lingxi v1.5 x Kimi K2 | - Huawei | gh:lingxi-agent/Lingxi |
+| 354 | Moatless Tools + Claude 4 Sonnet | Moatless AI | gh:aorwall/moatless-tools |
+| 352 | Augment Agent v1 | '' | gh:augmentcode/augment-swebench-agent |
+| 352 | OpenHands + Claude 4 Sonnet | OpenHands |  |
+| 352 | Refact.ai Agent | - Refact.ai |  |
+| 348 | 20250805_openhands-Qwen3-Coder-480B-A3 |  |  |
+| 341 | Nemotron-CORTEXA | NVIDIA |  |
+| 333 | SWE-agent + Claude 4 Sonnet | SWE-agent | gh:SWE-agent/SWE-agent |
+| 329 | OpenHands | OpenHands |  |
+| 327 | OpenHands + Kimi K2 | OpenHands |  |
+| 327 | Augment Agent v0 | '' | gh:augmentcode/augment-swebench-agent |
+| 323 | PatchPilot-v1.1 |  |  |
+| 312 | SWE-agent + Claude 3.7 Sonnet w/ Revie | SWE-agent | gh:SWE-agent/SWE-agent |
+| 304 | OpenHands + 4x Scaled (2024-02-03) | OpenHands |  |
+| 302 | EntroPO + R2E + Qwen3-Coder-30B-A3B-In | - 42-b3yond-6ug | gh:sherdencooper/R2E-Gym |
+
+### 🔒 강+closed (코드 비공개, resolved≥360)
+
+| resolved | 시스템 | org |
+|--:|---|---|
+| 396 | Sonar Foundation Agent + Claude 4.5 Opus | - Sonar |
+| 384 | Atlassian Rovo Dev (2025-09-02) | Atlassian |
+| 384 | EPAM AI/Run Developer Agent v20250719 +  | EPAM Systems, Inc. |
+| 382 | ACoder | ACoder |
+| 378 | Warp | Warp |
+| 374 | Sonar Foundation Agent + Claude 4.5 Sonn | - Sonar |
+| 374 | Harness AI | Harness |
+| 369 | Salesforce AI Research SAGE (OpenHands) | Salesforce AI Resear |
+| 366 | Tools + Claude 4 Opus (2025-05-22) |  |
+| 365 | Salesforce AI Research SAGE (bash-only) | Salesforce AI Resear |
+| 362 | Tools + Claude 4 Sonnet (2025-05-22) |  |
+
+## 4. 천장 — 공개 134개 전부 실패 (32개)
+
+> 회복불가/ROI0 목록 **아님**. 여러 독립 시스템 동시실패 = 평균적으로 더 어렵다는 신호(우선순위↓용, 배제용 아님).
 
 - `astropy__astropy-13398` · `astropy__astropy-13977` · `django__django-10554` · `django__django-10999`
 - `django__django-11087` · `django__django-11400` · `django__django-12406` · `django__django-13212`
@@ -45,9 +119,9 @@
 - `sphinx-doc__sphinx-11510` · `sphinx-doc__sphinx-7462` · `sphinx-doc__sphinx-7748` · `sympy__sympy-13852`
 - `sympy__sympy-16597` · `sympy__sympy-20428` · `sympy__sympy-20438` · `sympy__sympy-21930`
 
-## 전체 매트릭스
+## 5. 전체 매트릭스
 
-범례: `✅`해결 `·`실패 · `#`=134중 해결수 · `★`우리 회복가능타겟 · tier(전수%): `E`쉬움(≥80%) `M`중간 `H`어려움(≤5%) `×`천장(0)
+범례: `✅`해결 `·`실패 · `#`=134중 해결수 · `★`우리 회복가능타겟 · tier(전수%): `E`≥80% `M`중간 `H`≤5% `×`천장(0)
 
 ### astropy (22)
 

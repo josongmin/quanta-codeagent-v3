@@ -155,6 +155,8 @@ describe("quanta-bench CLI e2e", () => {
     // executor wired: prints the plan, and the plan documents the access-token-only posture
     expect(out.toLowerCase()).toContain("dry-run")
     expect(out.toLowerCase()).toMatch(/access_token only|refresh.*dropped/)
+    expect(out).toContain("preset=agentless-v2-safe")
+    expect(out.toLowerCase()).toContain("pyright")
   })
 
   test("grade with unknown backend errors out (non-zero)", async () => {
