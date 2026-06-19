@@ -38,7 +38,7 @@ export interface BenchReportKnobs {
    *  self-describing ("5 turns", "on") so a bare "5" never appears. Only knobs
    *  whose layered resolution produced a non-undefined value appear here. */
   readonly resolved: Readonly<
-    Record<string, { value: unknown; unit?: string; display?: string; source: string }>
+    Record<string, { value: unknown; unit: string | undefined; display: string; source: string }>
   >
   /** Resolved `--knobs-preset` name (or `QUANTA_KNOBS_PRESET`). Absent when
    *  no preset was selected. */
