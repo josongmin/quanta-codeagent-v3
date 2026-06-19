@@ -70,6 +70,7 @@ export const branchSearchKnob: Knob<BranchSearchValue> = {
   parse: parseBranchSearch,
   apply: applyBranchSearch,
   describe: "Agentless N-best speculative branch search (K candidates, ~K× cost)",
+  unit: "candidates",
   conflicts: ["localize-phase"],
   // The cost multiplier scales with K — the registry uses the value from
   // `parse` so this static value documents the worst case (max K=8).

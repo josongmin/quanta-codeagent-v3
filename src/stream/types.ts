@@ -462,7 +462,9 @@ export type AgentEvent =
   | {
       type: "knobs_applied"
       surface: SurfaceMirror
-      knobs: Readonly<Record<string, { value: unknown; source: string }>>
+      knobs: Readonly<
+        Record<string, { value: unknown; unit?: string; display?: string; source: string }>
+      >
       preset: string | null
       costMultiplier: number
     }

@@ -64,6 +64,7 @@ export const localizePhaseKnob: Knob<LocalizePhaseValue> = {
   parse: parseLocalizePhase,
   apply: applyLocalizePhase,
   describe: "Block mutating tools during first N turns; force localize-first (Agentless §3.1)",
+  unit: "turns",
   conflicts: ["branch-search"],
   source: "Agentless absorption",
 }

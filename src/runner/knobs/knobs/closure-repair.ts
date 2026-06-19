@@ -51,6 +51,7 @@ export const closureRepairKnob: Knob<number> = {
   parse: parseClosureRepair,
   apply: applyClosureRepair,
   describe: "Repair-round budget for the closure gate's verify-first path (max N rounds)",
+  unit: "rounds",
   // Per-round LLM re-seed cost; static worst case at the cap.
   costMultiplier: 10,
   source: "closure-driven runner (jun-18) — the execution half of T-302",

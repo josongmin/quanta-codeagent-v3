@@ -63,6 +63,7 @@ export const reproTestKnob: Knob<ReproTestValue> = {
   parse: parseReproTest,
   apply: applyReproTest,
   describe: "Agentless §3.3.1 reproduction-test K-sample generation",
+  unit: "samples",
   // Static worst case (max K=40). The registry uses the per-instance parsed
   // value when scheduling matrix budget.
   costMultiplier: 40,

@@ -54,6 +54,11 @@ export interface Knob<T = unknown> {
   readonly apply: (cfg: AgentConfig, value: T, ctx: ApplyContext) => AgentConfig
   readonly describe: string // one-line summary for `--help`
   readonly help?: string // multi-line long help
+  /** Human UNIT of the parsed value, so "5" is never bare. e.g. "turns" /
+   *  "samples" / "candidates" / "rounds" / "retries" / "mode". OMITTED ⇒ the
+   *  value is a boolean ON/OFF flag (rendered "on"). Surfaced in knobsForReport
+   *  (`display`) and the preset tables so the number always carries its unit. */
+  readonly unit?: string
   readonly source?: string // ADR / paper reference
   readonly conflicts?: readonly string[] // ids that MUST NOT co-activate
   readonly requires?: readonly string[] // ids that MUST also be active

@@ -38,6 +38,7 @@ export const retryTransientKnob: Knob<number> = {
   parse: parseRetryTransient,
   apply: applyRetryTransient,
   describe: "Retry cap for transient failures (empty-patch / infra-fail; real-fail never retried)",
+  unit: "retries",
   source: "measurement-stability wrapper",
 }
 

@@ -125,14 +125,36 @@ export const readKnobValue = <T>(
   return guard(kv.value) ? kv.value : undefined
 }
 
-/** Telemetry projection: id → { value, source } for the report. Plain object
- *  (not Map) so it serialises cleanly through `JSON.stringify`. */
+/** Render a knob value with its UNIT so a bare "5" never appears. Number + unit
+ *  ⇒ "5 turns"; a knob with no unit is a boolean flag ⇒ "on"; a non-number value
+ *  (e.g. issue-hint mode) ⇒ "agentless (mode)" when unit is "mode", else the
+ *  raw value. Pure — exported so the report AND any preset table share one SSOT. */
+export const formatKnobValue = (value: unknown, unit: string | undefined): string => {
+  if (unit === undefined) return "on" // unit-less ⇒ boolean ON/OFF flag
+  if (typeof value === "number") return `${value} ${unit}`
+  // Some knobs parse to a wrapper object whose meaningful quantity is a single
+  // numeric field (localize-phase ⇒ {phase1Turns:5}, repro-test ⇒ {samples:5}).
+  // Pull the first numeric field so the display is "5 turns", not "[object…]".
+  if (value !== null && typeof value === "object") {
+    const num = Object.values(value as Record<string, unknown>).find((v) => typeof v === "number")
+    if (typeof num === "number") return `${num} ${unit}`
+  }
+  return `${String(value)} (${unit})` // string-valued (e.g. issue-hint mode)
+}
+
+/** Telemetry projection: id → { value, unit, display, source } for the report.
+ *  `unit` + `display` make every number self-describing (no bare "5"). Plain
+ *  object (not Map) so it serialises cleanly through `JSON.stringify`. */
 export const knobsForReport = (
   state: BenchKnobState,
-): Record<string, { value: unknown; source: string }> => {
-  const out: Record<string, { value: unknown; source: string }> = {}
+): Record<string, { value: unknown; unit: string | undefined; display: string; source: string }> => {
+  const out: Record<
+    string,
+    { value: unknown; unit: string | undefined; display: string; source: string }
+  > = {}
   for (const [id, kv] of state.values) {
-    out[id] = { value: kv.value, source: kv.source }
+    const unit = state.knobs.get(id)?.unit
+    out[id] = { value: kv.value, unit, display: formatKnobValue(kv.value, unit), source: kv.source }
   }
   return out
 }

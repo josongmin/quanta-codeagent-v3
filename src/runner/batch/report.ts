@@ -34,10 +34,12 @@ export interface BenchReportMeta {
 /** Knob telemetry — exact registry state for the run. Cheaply serialisable
  *  (plain JSON-friendly shapes, no Maps / classes). */
 export interface BenchReportKnobs {
-  /** id → { value, source }. Only knobs whose layered resolution produced a
-   *  non-undefined value appear here. Empty object when the registry is
-   *  empty OR no knob's env value matched. */
-  readonly resolved: Readonly<Record<string, { value: unknown; source: string }>>
+  /** id → { value, unit, display, source }. `unit`/`display` make the number
+   *  self-describing ("5 turns", "on") so a bare "5" never appears. Only knobs
+   *  whose layered resolution produced a non-undefined value appear here. */
+  readonly resolved: Readonly<
+    Record<string, { value: unknown; unit?: string; display?: string; source: string }>
+  >
   /** Resolved `--knobs-preset` name (or `QUANTA_KNOBS_PRESET`). Absent when
    *  no preset was selected. */
   readonly preset?: string

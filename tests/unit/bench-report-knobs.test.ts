@@ -172,7 +172,9 @@ describe("collectBenchKnobsTelemetry — env adapter", () => {
     registerKnob(mkBoolKnob("test-one", "QUANTA_BENCH_TEST_ONE"))
     process.env.QUANTA_BENCH_TEST_ONE = "1"
     const k = collectBenchKnobsTelemetry()
-    expect(k.resolved).toEqual({ "test-one": { value: true, source: "env" } })
+    expect(k.resolved).toEqual({
+      "test-one": { value: true, unit: undefined, display: "on", source: "env" },
+    })
     expect(k.inactive).toEqual([])
   })
 
@@ -259,7 +261,7 @@ describe("writeArtifacts — report file embeds knobs section", () => {
         knobs: BenchReportKnobs
       }
       expect(parsed.knobs.resolved).toEqual({
-        "test-one": { value: true, source: "env" },
+        "test-one": { value: true, unit: undefined, display: "on", source: "env" },
       })
       expect(parsed.knobs.preset).toBe("baseline")
       expect(parsed.knobs.inactive).toEqual(["test-two"])

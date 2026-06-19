@@ -51,6 +51,7 @@ export const issueHintKnob: Knob<IssueHintMode> = {
   parse: parseIssueHint,
   apply: applyIssueHint,
   describe: "Issue verbatim/agentless localization hint",
+  unit: "mode",
   source: "Agentless paper §3.1",
 }
 
