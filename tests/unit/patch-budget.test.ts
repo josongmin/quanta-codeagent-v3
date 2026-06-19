@@ -127,6 +127,38 @@ diff --git a/a/y.py b/a/y.py
     expect(v.withinBudget).toBe(true)
   })
 
+  // ADVERSARIAL (jun-19 self-audit): a MODIFIED def signature (-def foo / +def foo)
+  // must NOT count as a new def — it's an in-place edit, not a new helper. Else
+  // every signature change inflates over_budget_rate and corrupts the A/B.
+  test("🔴 modifying a def signature is NOT a new def (in-place edit)", () => {
+    const sigChange = `diff --git a/pkg/mod.py b/pkg/mod.py
+--- a/pkg/mod.py
++++ b/pkg/mod.py
+@@ -10,3 +10,3 @@ class C:
+-    def compute(self, a):
++    def compute(self, a, b=None):
+         return a
+`
+    const v = analyzePatchBudget(sigChange, { ownerFiles: ["pkg/mod.py"] })
+    expect(v.budget.newDefs).toBe(0) // modified, not new
+    expect(v.withinBudget).toBe(true)
+  })
+
+  test("a genuinely NEW def (name only in added) still counts", () => {
+    const newDef = `diff --git a/pkg/mod.py b/pkg/mod.py
+--- a/pkg/mod.py
++++ b/pkg/mod.py
+@@ -10,2 +10,5 @@ class C:
+     def compute(self, a):
+         return a
++    def helper(self):
++        return 2
+`
+    const v = analyzePatchBudget(newDef, { ownerFiles: ["pkg/mod.py"] })
+    expect(v.budget.newDefs).toBe(1)
+    expect(v.withinBudget).toBe(false)
+  })
+
   test("runtime-expanding calls are OBSERVE-ONLY (counted, NOT gated)", () => {
     const dbCall = `diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
 --- a/django/db/models/sql/query.py

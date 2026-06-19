@@ -69,6 +69,7 @@ interface Block {
   file: string
   added: boolean
   addedLines: string[]
+  removedLines: string[]
 }
 
 const parseDiff = (diff: string): Block[] => {
@@ -78,22 +79,35 @@ const parseDiff = (diff: string): Block[] => {
     if (!m) continue
     const file = m[1] as string
     const added = /^new file mode /m.test(part)
-    // hunk body: lines starting with "+" but not the "+++ " file header.
-    const addedLines = part
-      .split(/\r?\n/)
-      .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
-      .map((l) => l.slice(1))
-    blocks.push({ file, added, addedLines })
+    const lines = part.split(/\r?\n/)
+    // hunk body: "+"/"-" lines, excluding the "+++ "/"--- " file headers.
+    const addedLines = lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1))
+    const removedLines = lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).map((l) => l.slice(1))
+    blocks.push({ file, added, addedLines, removedLines })
   }
   return blocks
 }
 
-/** Count added `def`/`class` declarations across the source-file hunks. */
+const DEF_RE = /^\s*(?:async\s+def|def|class)\s+(\w+)/
+const defNames = (lines: readonly string[]): string[] => {
+  const out: string[] = []
+  for (const l of lines) {
+    const m = l.match(DEF_RE)
+    if (m) out.push(m[1] as string)
+  }
+  return out
+}
+
+/** Count GENUINELY-NEW `def`/`class` declarations: a def name that appears in
+ *  ADDED lines but NOT in REMOVED lines. A modified signature (-def foo / +def
+ *  foo) has the name on both sides ⇒ in-place edit, NOT a new helper (else every
+ *  signature change spuriously over-budgets and corrupts the A/B). */
 const countNewDefs = (sourceBlocks: readonly Block[]): number => {
   let n = 0
   for (const b of sourceBlocks) {
-    for (const line of b.addedLines) {
-      if (/^\s*(async\s+def|def|class)\s+\w/.test(line)) n += 1
+    const removed = new Set(defNames(b.removedLines))
+    for (const name of defNames(b.addedLines)) {
+      if (!removed.has(name)) n += 1
     }
   }
   return n
