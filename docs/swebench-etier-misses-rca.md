@@ -109,7 +109,8 @@ repair/verify loop가 디스크에 쓴 재현 스크립트가 **model_patch에 �
 - 12039 PASS = 18파일 중 **16개 `__repro_*.py`** + gold(ddl_references.py)✅ + indexes.py stray. 13128=20 repro leak, 12965=16, 14017=12.
 - ⟹ `owner_recall@1` 0.92→**0.27 폭락은 artifact**: repro 파일이 file 목록 오염 → first-edit=repro파일 → ownerHit=False (resolved인데도). 실제 gold-file hit는 graded 전부 ✅(14351 제외).
 - ⟹ `multi_file_drift=5`도 대부분 이 leak + 소수 real stray(deprecation.py/indexes.py/expressions.py).
-- **이건 leaderboard 제출 hygiene로도 치명**(스크래치 16파일 동봉). **#1 우선 픽스**.
+- **이건 leaderboard 제출 hygiene로도 치명**(스크래치 16파일 동봉).
+- ✅ **이미 픽스됨** — `83663bc6`(2026-06-20 03:24, `REPRO_SCAFFOLD_RE` in snapshot.ts `sourceOnlyDiff`, `reproduce_issue.py`+`__repro_*`까지 strip). M0(02:21)는 이 픽스 **이전** stale main이라 leak이 보인 것. 03:24 이후 모든 wave는 clean. (재채점 시 leak-mislabel 사라짐 예상 — 미검증, sweep 결과가 그 검증.)
 
 ### 잔여 타겟 (hygiene 픽스 후 재채점 전제)
 - **14351** — 유일 잔여 wrong-FILE (related_lookups.py vs gold lookups.py) → owner-symbol/exec-trace localize.
