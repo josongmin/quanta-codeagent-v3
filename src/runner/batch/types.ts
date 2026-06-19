@@ -207,6 +207,14 @@ export interface InstanceResult {
    */
   patchHygiene?: import("./eval/patch-hygiene").PatchHygieneReport
   /**
+   * jun-19 — typed PatchBudget over the final diff (source/new-file/new-def/
+   * cross-file vs owner). Emitted when the `patch-budget` knob is on AND observing;
+   * ABSENT ⇒ byte-identical. Drives over_budget_rate / new_def_rate / cross_file_rate
+   * (the #13417 over-engineer A/B). `withinBudget:false ⇒ escalate` is observe-only
+   * here — the late-critic routing is a later measure-first step.
+   */
+  patchBudget?: import("@/agent/patch-budget").PatchBudgetVerdict
+  /**
    * T-301 — the typed VerificationPlan computed for this run (primaryRail +
    * required/optional steps + per-step successPredicate). Emitted only when the
    * `verification-plan` knob is on AND observing; ABSENT ⇒ byte-identical report.

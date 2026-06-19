@@ -60,6 +60,9 @@ export interface ClosureRunFact {
   primaryFalseRed?: boolean | null
   requiredVerificationCovered?: boolean | null
   outOfScopeFiles?: boolean | null
+  overBudget?: boolean | null
+  newDef?: boolean | null
+  crossFile?: boolean | null
 }
 
 export type InstanceClass =
@@ -164,6 +167,9 @@ export const computeClosureDiagnostics = (
     primary_rail_present_rate: metricOf(facts.map((f) => f.primaryRailPresent)),
     primary_false_green_rate: metricOf(facts.map((f) => f.primaryFalseGreen)),
     primary_false_red_rate: metricOf(facts.map((f) => f.primaryFalseRed)),
+    over_budget_rate: metricOf(facts.map((f) => f.overBudget)),
+    new_def_rate: metricOf(facts.map((f) => f.newDef)),
+    cross_file_rate: metricOf(facts.map((f) => f.crossFile)),
     required_verification_coverage: metricOf(facts.map((f) => f.requiredVerificationCovered)),
     gate_enter_rate: metricOf(facts.map((f) => f.gateEntered)),
     gate_bypass_rate: metricOf(facts.map((f) => f.gateBypassed)),

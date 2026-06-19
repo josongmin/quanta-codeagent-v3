@@ -77,6 +77,10 @@ export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFa
       verifyRounds: r.verifyRounds ?? null,
       synthReproBaseRed: r.synthReproBaseRed ?? null,
       outOfScopeFiles: r.outOfScopeFiles ?? null,
+      // jun-19 patch-budget A/B signals (#13417 over-engineer class).
+      overBudget: r.patchBudget !== undefined ? !r.patchBudget.withinBudget : null,
+      newDef: r.patchBudget !== undefined ? r.patchBudget.budget.newDefs > 0 : null,
+      crossFile: r.patchBudget !== undefined ? r.patchBudget.budget.crossFile : null,
     }
   })
 

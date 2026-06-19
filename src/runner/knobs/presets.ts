@@ -141,6 +141,33 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     // as agentless-v2 — keeps mini-parity = agentless-v2 + round0-minimal (single var).
     "round0-minimal": "1",
   },
+  // jun-19 EXPERIMENTAL ARM — mini-first + patch-budgeted + source-only + critic-late.
+  // Measured insight: #13417's cause is missing minimal-patch ADMISSION, not missing
+  // verification. v3-thin keeps v2's localization+grounding but (1) thins round-0
+  // (round0-minimal + spec-fidelity-steer; heavy verification prose deferred), and
+  // (2) adds the patch-budget admission (over-engineer escalates to the late critic).
+  // closure-repair stays OFF. NOT default; A/B arm vs agentless-v2 / mini-parity.
+  // External alignment: Agentless 3-phase + mini-SWE thin scaffold + OpenHands late-critic.
+  "agentless-v3-thin": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+  },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.
   "everything-v1": {

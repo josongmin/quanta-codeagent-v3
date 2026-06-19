@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
+import { analyzePatchBudget } from "@/agent/patch-budget"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
@@ -197,7 +198,19 @@ const runAgentViaSdk = async (
     })
     const turn = await session.turn.run(undefined, { signal: config.signal })
     const outcome = turn.turn?.outcome
-    if (outcome === undefined) throw new Error("bench SDK session completed without an outcome")
+    if (outcome === undefined) {
+      // The session ended without a turn outcome — almost always a deadline/cancel
+      // abort MID-turn (e.g. #10097: SIGTERM during an LLM continuation at turn 50).
+      // The agent has usually already edited the sandbox, so throwing here would
+      // discard a real partial patch and surface as `harness_error:empty_patch`.
+      // Instead synthesize a minimal `aborted` outcome: the caller's
+      // `withGitSnapshot` still captures the sandbox diff as the candidate patch,
+      // and the result is an honest `aborted` (not a misleading hard error).
+      const turns = eventCapture.events.filter(
+        (e) => e.type === "turn.completed" || e.type === "turn.failed",
+      ).length
+      return { reason: "aborted", turns, messages: [] }
+    }
     const terminalEvent = lastTerminalTurnEventOf(eventCapture.events)
     if (terminalEvent === undefined) {
       throw new Error("bench SDK session completed without a terminal session event")
@@ -782,6 +795,17 @@ const runInstanceOnce = async (
       if (posture.patchHygiene && hygiene !== undefined) {
         extra.patchHygiene = hygiene
         extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
+      }
+      // jun-19 patch-budget (minimal-edit admission, #13417). Observe-only: emit
+      // the typed budget over the diff so over_budget/new_def/cross_file rates feed
+      // the A/B. Owner evidence = the closure localization candidates (justifies
+      // cross-file). The SOFT-WITH-ESCALATION admission is a later measure-first step.
+      if (posture.patchBudget && instance.swebench !== undefined) {
+        const ownerFiles = closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? []
+        extra.patchBudget = analyzePatchBudget(phase.patch, {
+          ownerFiles,
+          repo: instance.swebench.repo,
+        })
       }
       // T-301 verification-plan telemetry (knob-gated, observe-only).
       if (posture.verificationPlan && verificationPlan !== undefined) {

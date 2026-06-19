@@ -230,6 +230,8 @@ export interface BenchPosture {
   readonly primaryRail: boolean
   /** T-401: patch hygiene gate (stray-file deny, owner-outside telemetry). */
   readonly patchHygiene: boolean
+  /** jun-19: minimal-edit admission — emit PatchBudget over the diff (#13417). */
+  readonly patchBudget: boolean
   /** T-501: post-localization commit rail + no-patch exhausted verdict. */
   readonly noPatchBreaker: boolean
   /** T-601: multi-owner escalation decision (closed reason taxonomy). */
@@ -310,6 +312,7 @@ export const benchPostureFromState = (
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
   const patchHygiene = readKnobValue(state, "patch-hygiene", isTrue) === true
+  const patchBudget = readKnobValue(state, "patch-budget", isTrue) === true
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
@@ -334,6 +337,7 @@ export const benchPostureFromState = (
     verificationPlan,
     primaryRail,
     patchHygiene,
+    patchBudget,
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,
