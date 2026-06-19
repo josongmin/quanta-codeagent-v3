@@ -1316,3 +1316,138 @@ runs:
   - instance_id: django__django-14999
     repo: django
     turns: 60
+
+- run_id: eclass-sidecar-harvest-2026-06-20c
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (durable sidecar)
+  scope: 'E-class sweep sidecar harvest, 25 clean agentless-v2 across 7 repos: {'sphinx-doc': 4, 'matplotlib': 2, 'django': 8, 'pydata': 3, 'scikit-learn': 3, 'astropy': 3, 'sympy': 2}. NOTE: 5 (django 10973/13128/14017/15382/15930) were earlier-attempt fails now resolved on re-run with more turns (turn-limited flakiness, not contamination — RCA correction 2026-06-20).'
+  resolved_count: 25
+  resolved:
+  - instance_id: astropy__astropy-14508
+    repo: astropy
+    turns: 37
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: astropy__astropy-14539
+    repo: astropy
+    turns: 50
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: astropy__astropy-7671
+    repo: astropy
+    turns: 35
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-10973
+    repo: django
+    turns: 141
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-13128
+    repo: django
+    turns: 137
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-14017
+    repo: django
+    turns: 125
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-14631
+    repo: django
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-15037
+    repo: django
+    turns: 55
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-15382
+    repo: django
+    turns: 136
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-15930
+    repo: django
+    turns: 151
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: django__django-16612
+    repo: django
+    turns: 29
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: matplotlib__matplotlib-24627
+    repo: matplotlib
+    turns: 50
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: matplotlib__matplotlib-24637
+    repo: matplotlib
+    turns: 57
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-4695
+    repo: pydata
+    turns: 51
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-6461
+    repo: pydata
+    turns: 28
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pydata__xarray-7393
+    repo: pydata
+    turns: 38
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-12973
+    repo: scikit-learn
+    turns: 70
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-25931
+    repo: scikit-learn
+    turns: 58
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: scikit-learn__scikit-learn-26323
+    repo: scikit-learn
+    turns: 118
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-8459
+    repo: sphinx-doc
+    turns: 136
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-8593
+    repo: sphinx-doc
+    turns: 31
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-9281
+    repo: sphinx-doc
+    turns: 151
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sphinx-doc__sphinx-9673
+    repo: sphinx-doc
+    turns: 121
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sympy__sympy-12419
+    repo: sympy
+    turns: 29
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sympy__sympy-14531
+    repo: sympy
+    turns: 46
+    preset: agentless-v2
+    model: gpt-5.4

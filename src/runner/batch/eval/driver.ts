@@ -281,6 +281,35 @@ const SWEBENCH_DIRECTIVE = [
 ].join("\n")
 
 /**
+ * LEAN, low-prescription variant of {@link SWEBENCH_DIRECTIVE} — selected by the
+ * `QUANTA_BENCH_LEAN_PROMPT` knob (Sonar absorption, P2, default-OFF).
+ *
+ * WHY: Sonar measured that LESS-prescriptive prompts score HIGHER for capable
+ * models (two-stage 58% → free-workflow 70% → less-prescriptive + extended
+ * thinking 75%). Our verbose directive plus the lspSteer / specSteer /
+ * simplicitySteer / siblingSteer bolt-ons micromanage the workflow and may CAP
+ * gpt-5.4. This arm encodes Sonar's 3 principles ONLY, high-level, and FOLDS the
+ * bolt-on steers' intent in (smallest-change / in-place edit / source-only), so
+ * when the knob is ON those steers are omitted — see `composeBaseText`. It is a
+ * PARALLEL alternative; the verbose path is untouched and OFF is byte-identical.
+ */
+const SWEBENCH_DIRECTIVE_LEAN = [
+  "",
+  "",
+  "You are fixing a real defect in this repository. An automated grader runs",
+  "hidden tests against ONLY your source changes.",
+  "- Test-driven: reproduce the issue with a small script, fix it, then verify",
+  "  with your reproducer AND by finding and running the repository's own",
+  "  relevant regression tests. Never modify, add, or delete any test file.",
+  "- Solve it the way the problem warrants — reproduction, code inspection, or",
+  "  test analysis — and make the SMALLEST change that fixes the root cause. Edit",
+  "  the existing code in place; do not add helper methods or reach for runtime",
+  "  APIs when an in-place edit works.",
+  "- Change source code ONLY; never rewrite or reformat whole files. Your final",
+  "  unified diff is the submission.",
+].join("\n")
+
+/**
  * Edit-and-submit variant of {@link SWEBENCH_DIRECTIVE} — used when the
  * `bench-in-loop-exec` knob is OFF (`opt.inLoopExec === false`, mini-swe posture).
  *
@@ -319,6 +348,46 @@ const SWEBENCH_DIRECTIVE_NOEXEC = [
   "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
   "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
 ].join("\n")
+
+/** Pre-composed steer lines (already include their leading `\n-` separator, or
+ *  are `""` when their gate is off). Factored into a record so {@link composeBaseText}
+ *  can append them verbatim in the OFF path and drop them all in the LEAN path. */
+interface SteerLines {
+  readonly lsp: string
+  readonly findRefs: string
+  readonly spec: string
+  readonly simplicity: string
+  readonly sibling: string
+}
+
+/**
+ * Compose the bench user-message base text. Pure (no env reads) so it is
+ * unit-testable directly. Two parallel arms, selected by `leanPrompt`:
+ *
+ *  - OFF (default, byte-identical to the pre-knob composition): the in-loop /
+ *    no-exec verbose directive followed by every gated steer line.
+ *  - LEAN ON (`QUANTA_BENCH_LEAN_PROMPT`): the SHORT {@link SWEBENCH_DIRECTIVE_LEAN}
+ *    INSTEAD of the verbose directive, and the bolt-on steers (lsp / spec /
+ *    simplicity / sibling) OMITTED — LEAN folds their intent in. The
+ *    tool-availability `findRefs` steer is retained (it only names an actually-
+ *    wired tool and is default-OFF itself).
+ *
+ * Non-swebench instances always return `base` unchanged on both arms.
+ */
+const composeBaseText = (
+  base: string,
+  isSwebench: boolean,
+  inLoopExec: boolean,
+  steers: SteerLines,
+  leanPrompt: boolean,
+): string => {
+  if (!isSwebench) return base
+  if (leanPrompt) {
+    return `${base}${SWEBENCH_DIRECTIVE_LEAN}${steers.findRefs}`
+  }
+  const directive = inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC
+  return `${base}${directive}${steers.lsp}${steers.findRefs}${steers.spec}${steers.simplicity}${steers.sibling}`
+}
 
 /**
  * BENCH-INTENTIONAL OPT-OUTS (Codex absorption Phases 0-8 + Round 3):
@@ -1128,9 +1197,24 @@ export const buildConfig = (
     instance.swebench && gateOn(process.env, "QUANTA_BENCH_SIBLING")
       ? `\n-${SIBLING_COMPLETION_STEER}`
       : ""
-  const baseText = instance.swebench
-    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${findRefsSteerLine}${specSteerLine}${simplicitySteerLine}${siblingSteerLine}`
-    : base
+  // P2 Sonar absorption — `QUANTA_BENCH_LEAN_PROMPT` (default-OFF, gateOn): ON
+  // swaps the verbose directive for SWEBENCH_DIRECTIVE_LEAN and OMITS the bolt-on
+  // steers (lsp/spec/simplicity/sibling) whose intent LEAN folds in. OFF ⇒ the
+  // exact pre-knob composition (byte-identical), all steers included.
+  const leanPrompt = gateOn(process.env, "QUANTA_BENCH_LEAN_PROMPT")
+  const baseText = composeBaseText(
+    base,
+    Boolean(instance.swebench),
+    opt.inLoopExec,
+    {
+      lsp: lspSteerLine,
+      findRefs: findRefsSteerLine,
+      spec: specSteerLine,
+      simplicity: simplicitySteerLine,
+      sibling: siblingSteerLine,
+    },
+    leanPrompt,
+  )
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
   //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
