@@ -260,6 +260,10 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   // reclaiming c7i boxes in 4–17 min, faster than relaunch can recover. Same
   // process.env-read pattern as QUANTA_FULL_REMOTE_CONCURRENCY.
   const onDemand = gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND")
+  // AMI override (`--ami <id>` or QUANTA_FULL_REMOTE_AMI). Without this the prebaked
+  // AMI could not be selected from the CLI — it was baked but unreachable, so every
+  // run fell back to the hardcoded default. Now selectable per-run.
+  const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
   const makeBackend = (ids: readonly string[]) =>
     createFullRemoteBackend({
       repoDir: process.cwd(),
@@ -268,6 +272,7 @@ const cmdGradeFullRemote = async (): Promise<void> => {
       ...(ids.length > 0 ? { instanceIds: [...ids] } : {}),
       ...(preset !== undefined ? { preset } : {}),
       ...(fullModel !== undefined ? { model: fullModel } : {}),
+      ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
       dryRun: dry,
       keep: hasFlag("--keep"),
       onDemand,
