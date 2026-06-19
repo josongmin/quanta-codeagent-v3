@@ -967,3 +967,23 @@ runs:
     turns: 49
     preset: agentless-v3-thin
     model: gpt-5.4
+
+- run_id: sidecar-harvest-sympy-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (durable sidecar)
+  scope: 'Sidecar new sympy passes. CLEAN agentless-v2 (issue-hint=problem statement only, NO gold/localize oracle).'
+  resolved_count: 2
+  resolved:
+  - instance_id: sympy__sympy-16792
+    repo: sympy
+    turns: 53
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: sympy__sympy-20801
+    repo: sympy
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
