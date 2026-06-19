@@ -18,6 +18,30 @@ about: 'SWE-bench Verified — internal results SSOT (machine-readable). Rendere
 crosscheck_policy_version: 1
 
 runs:
+- run_id: ceiling-leverA-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2 + QUANTA_BENCH_SIBLING (Lever A, knob default-OFF)
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench harness, EC2 backend SERIAL, spot terminated
+  scope: 'Differentiation probe at the 32-instance TRUE ceiling (all 134 public submissions fail). 6 MULTI-file ceiling instances (django-12406/13212, matplotlib-25479, xarray-6992, pylint-4604, sympy-16597).'
+  resolved_count: 0
+  result: 'NEGATIVE (0/6 baseline, 0/6 Lever A v1, 0/6 Lever A v2). Prompt-steering does NOT crack the multi-file co-change ceiling.'
+  rca: >-
+    DIAGNOSIS (held under adversarial audit): 6/6 fail by SIBLING-MISS — quanta localizes the OWNER file correctly
+    (django-13212 owner edit gold-IDENTICAL) but misses the COUPLED sibling the fix also needs (related.py↔forms/
+    models.py; cm.py↔colors.py; validators.py↔forms/fields.py). pyright/LSP was ACTIVE and resolving (4/4 instances
+    lsp ok=true) — NOT the inert-pyright confound. ADVERSARIAL AUDIT corrected two over-claims: (a) only 53% (17/32)
+    of the true ceiling is multi-file — the other 15 are single-file reasoning-hard (different lever); (b) the missed
+    siblings usually ARE symbol-reachable (cm.py uses colors.LinearSegmentedColormap; related.py references
+    forms.ModelChoiceField) — the agent UNDER-USES LSP, it is not LSP-incapable. LEVER A (sibling-completion steer):
+    v1 surfaced siblings inconsistently (sympy 1/6→3/6, found django forms/* and matplotlib colors.py) but SWAPPED
+    (dropped the owner to chase the sibling) → 0/6. v2 (keep-both/additive/never-swap) still never hit BOTH gold
+    files on any instance (always 1/2) → 0/6. CONCLUSION: a prompt steer makes the model find siblings sometimes
+    but NOT reliably commit the complete N-file edit. The ceiling needs a STRONGER mechanism (the WS2 grep feeder
+    injecting siblings as mandatory edit targets, or execution-trace co-change) — or it is a real limit of this
+    scaffold+model. Stopped at v2 (no rabbit-holing). pyright warm-up budget also exhausts on big repos (matplotlib
+    pyplot.py, 90s) — a separate infra blocker for LSP-based sibling discovery.
 - run_id: lockin-simplicity-2026-06-19
   date: '2026-06-19'
   preset: agentless-v2 + QUANTA_BENCH_SIMPLICITY (now DEFAULT-ON)
@@ -32,10 +56,13 @@ runs:
     8/9. (1) Absorbed SIMPLICITY + binary-strip + test-guard bring quanta to FRONTIER LEVEL on fresh tier-E: 8
     untried instances across 7 distinct repos all resolved. (No per-instance OFF baseline here, so these 8 are
     "quanta-with-absorption matches frontier on easy-core", not all proven steer-caused — clean causal proof stays
-    the 13417 + sympy-24562 flips.) (2) astropy-7166, which FAILED in the prior absorb-simplicity batch, PASSED here
+    the 13417 + sympy-24562 flips.) ABLATION (simplicity-off-ablation-2026-06-19): 4 of these 8 re-run with
+    QUANTA_BENCH_SIMPLICITY=0 → 4/4 STILL PASS. So the 8 are NOT steer-caused — quanta solves these tier-E with or
+    without the steer; they were simply untried. HONEST ATTRIBUTION: SIMPLICITY's proven causal benefit = 2 instances
+    (13417, 24562, the over-engineering class), NOT 10. The other 8 are real board green but pre-existing capability.
+    (2) astropy-7166, which FAILED in the prior absorb-simplicity batch, PASSED here
     → that fail was RUN-NOISE, not a steer regression. SIMPLICITY promoted to DEFAULT-ON (off-switch
-    QUANTA_BENCH_SIMPLICITY=0). Only miss: sympy-12096 (5-file over-broad — steer does not fully suppress sympy
-    over-engineering). Combined SIMPLICITY-ON: ~14/18 graded, 2 causal flips, 0 confirmed regression.
+    QUANTA_BENCH_SIMPLICITY=0; harmless since OFF==ON on tier-E). Only miss: sympy-12096 (5-file over-broad).
 - run_id: absorb-simplicity-2026-06-19
   date: '2026-06-19'
   preset: agentless-v2 + QUANTA_BENCH_SIMPLICITY=1
@@ -682,3 +709,100 @@ runs:
   - instance_id: django__django-15814
     repo: django
     turns: 46
+
+- run_id: eclass-untried-sweep-b457-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (parallel boxes, grading serial per-box)
+  scope: 'COVERAGE EXPANSION cont. — untried E-class (scaffold cnt>=14). batch4 11/13 + batch5 9/13 + batch7 9/13 = 29 resolved. All django. batch3/6/8 still patch-gen (batch3 box hung, to relaunch).'
+  resolved_count: 29
+  resolved:
+  - instance_id: django__django-11451
+    repo: django
+    turns: 25
+  - instance_id: django__django-11603
+    repo: django
+    turns: 44
+  - instance_id: django__django-11740
+    repo: django
+    turns: 41
+  - instance_id: django__django-11749
+    repo: django
+    turns: 49
+  - instance_id: django__django-11880
+    repo: django
+    turns: 35
+  - instance_id: django__django-12050
+    repo: django
+    turns: 32
+  - instance_id: django__django-12143
+    repo: django
+    turns: 29
+  - instance_id: django__django-12209
+    repo: django
+    turns: 36
+  - instance_id: django__django-12276
+    repo: django
+    turns: 39
+  - instance_id: django__django-12304
+    repo: django
+    turns: 56
+  - instance_id: django__django-12419
+    repo: django
+    turns: 29
+  - instance_id: django__django-12708
+    repo: django
+    turns: 55
+  - instance_id: django__django-12713
+    repo: django
+    turns: 36
+  - instance_id: django__django-12741
+    repo: django
+    turns: 56
+  - instance_id: django__django-12774
+    repo: django
+    turns: 60
+  - instance_id: django__django-13033
+    repo: django
+    turns: 36
+  - instance_id: django__django-13089
+    repo: django
+    turns: 43
+  - instance_id: django__django-13158
+    repo: django
+    turns: 59
+  - instance_id: django__django-13279
+    repo: django
+    turns: 36
+  - instance_id: django__django-13315
+    repo: django
+    turns: 35
+  - instance_id: django__django-13821
+    repo: django
+    turns: 39
+  - instance_id: django__django-13837
+    repo: django
+    turns: 60
+  - instance_id: django__django-13933
+    repo: django
+    turns: 34
+  - instance_id: django__django-14007
+    repo: django
+    turns: 57
+  - instance_id: django__django-14089
+    repo: django
+    turns: 35
+  - instance_id: django__django-14122
+    repo: django
+    turns: 51
+  - instance_id: django__django-14238
+    repo: django
+    turns: 50
+  - instance_id: django__django-14373
+    repo: django
+    turns: 28
+  - instance_id: django__django-14434
+    repo: django
+    turns: 36

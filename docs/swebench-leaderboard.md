@@ -7,9 +7,10 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 
 ## 🚀 커버리지 확장 — untried E-class 스윕 (2026-06-19) · **26/26 = 100%**
 `scaffold-solving-summary.md`(500×17 SOTA 스캐폴드 매트릭스)로 **cnt(몇 개 스캐폴드가 푸나)**를 가성비 신호로 사용 — 난이도 라벨(`<15min`)은 CEILING(아무도 못 품)을 섞어 부적합했음. **cnt≥14 (E-class, 14~17/17 스캐폴드가 푸는 = 거의 확실히 회복가능)** untried를 cnt 높은 순으로 타게팅:
-- **batch1 12/12 + batch2 14/14 = 26/26 (100%)** — 전부 cnt=17 django, agentless-v2, on-demand(spot reclaim 회피)+prebaked AMI.
-- 타게팅 원칙: **E-class untried 171개(django+sympy 114) 우선, CEILING 55개는 skip(0 ROI).** run_id `eclass-untried-sweep-2026-06-19`.
-- 진행 중: batch3+ 로 나머지 E-class untried 쭉 스윕.
+- **batch1 12/12 + batch2 14/14 = 26/26 (100%)** — 전부 cnt=17 django, agentless-v2, on-demand(spot reclaim 회피)+prebaked AMI. run_id `eclass-untried-sweep-2026-06-19`.
+- **batch4 11/13 + batch5 9/13 + batch7 9/13 = 29** — django E-class 계속. run_id `eclass-untried-sweep-b457-2026-06-19`.
+- 누적 유니크 resolved = **170 / 500**. 타게팅 원칙: **E-class untried(cnt≥14) 우선, CEILING(cnt=0) skip(0 ROI), 길고 어려운 M/H는 보류.**
+- 진행 중: batch3(박스 hung→재런 예정)/batch6/batch8 patch-gen. 박스 여러 개 병렬(각자 grading serial).
 
 ## 🥇 easy django T1+T2 — **82/84 resolved (97.6%)** · closure-bundle 회복 (2026-06-18)
 
