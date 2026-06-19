@@ -76,7 +76,12 @@ export interface FullRemoteConfig {
 
 const D = {
   region: "ap-northeast-2",
-  ami: "ami-0afe1fd15675c3f15",
+  // PREBAKED AMI (quanta-bench-easydjango, 2026-06-17): docker + uv + the swebench
+  // easy-django eval images already pulled. Skips the cold cloud-init image-pull
+  // that dominated bootstrap (the stock ubuntu-22.04 ami-0afe1fd15675c3f15 re-pulled
+  // GB of swebench images every launch). userData stays idempotent (re-running
+  // present installs is fast; bun is still installed there). Override via cfg.ami.
+  ami: "ami-04c2cdd2e17b15779",
   instanceType: "c7i.8xlarge",
   keyName: "pickinstead_korea.pem",
   keyPath: "~/Downloads/pickinstead_korea.pem",
