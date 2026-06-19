@@ -105,10 +105,13 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    // EXECUTION half: the gate's verify-first path runs up to 3 repair rounds
-    // (re-run the primary rail, re-seed the agent). Without this the selected
-    // rail never gates (gate_enter_rate = n=0). CLI `--repair-rounds` overrides.
-    "closure-repair": "3",
+    // NOTE: `closure-repair` (the verify-first repair EXECUTOR) is deliberately
+    // NOT here. Measured net-negative (jun-19 on-demand wide-12: resolution 9→7,
+    // verify_rounds always max, false_red=0 ⇒ the repro oracle is a false-NEGATIVE
+    // — it doesn't recognize a correct fix, so repair just churns). The closure
+    // GROUNDING knobs above are the winners (82/84 django, recovered 10914 / 19495
+    // where mini failed). Re-add `"closure-repair": "3"` only after the repro
+    // oracle reliably flips reproduced→resolved on a correct patch.
   },
   // WS1 mini-parity (jun-18) — agentless-v2 with the round-0 prompt THINNED.
   // Single-variable delta vs agentless-v2: `round0-minimal:1`. Everything else is
@@ -134,28 +137,9 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "closure-repair": "3",
+    // closure-repair (executor) removed for the same measured net-negative reason
+    // as agentless-v2 — keeps mini-parity = agentless-v2 + round0-minimal (single var).
     "round0-minimal": "1",
-  },
-  // TEMP A/B arm (jun-18, local, NOT committed): agentless-v2 minus closure-repair
-  // — isolates the executor's effect on resolution (repair ON vs OFF, all else equal).
-  "agentless-v2-norepair": {
-    lsp: "1",
-    "localize-phase": "5",
-    "issue-hint": "agentless",
-    "issue-hint-expected-actual": "1",
-    "repro-test": "5",
-    "repo-map": "1",
-    "read-outline": "1",
-    "test-runner": "1",
-    "retry-transient": "3",
-    "fault-evidence": "1",
-    "verification-plan": "1",
-    "primary-rail": "1",
-    "patch-hygiene": "1",
-    "no-patch-breaker": "1",
-    "repair-escalation": "1",
-    // NO closure-repair ⇒ rail selected but gate cannot enter verify-first ⇒ single-pass.
   },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.

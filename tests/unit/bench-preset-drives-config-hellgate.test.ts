@@ -221,32 +221,31 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 
-  // PRESET-9: agentless-v2 declares the EXECUTION half — the `closure-repair`
-  // knob projects to `repairRounds`, which is what lets the driver enter the
-  // verify-first repair phase off the selected rail. Before this, the rail was
-  // selected (primary_rail_present_rate ≈ 0.82) but NEVER gated
-  // (gate_enter_rate = n=0) because repair was disconnected from the preset.
-  // red-on-injection: drop "closure-repair" from the preset and this fails.
-  test("PRESET-9: agentless-v2 ⇒ repairRounds=3 (closure executor on); v1 stays off", () => {
+  // PRESET-9: the repair EXECUTOR is NOT in any preset — measured net-negative
+  // (jun-19: resolution 9→7, repro is a false-NEGATIVE oracle so repair just
+  // churns). The closure GROUNDING knobs stay (they win: 82/84 django). The
+  // executor remains an opt-in CLI/env knob for when the repro oracle is fixed.
+  // red-on-injection: re-add "closure-repair" to agentless-v2 and this fails.
+  test("PRESET-9: no preset enables the repair executor (net-negative, opt-in only)", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v2"
-    expect(benchOptIns().repairRounds).toBe(3)
-    // The preset literal actually carries it (anti report-lie: declared == applied).
-    expect(KNOB_PRESETS["agentless-v2"]?.["closure-repair"]).toBe("3")
-    // agentless-v1 does NOT enable the executor (it predates the closure engine).
+    expect(benchOptIns().repairRounds).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v2"]?.["closure-repair"]).toBeUndefined()
+    // But the closure GROUNDING knobs ARE on (the winning config).
+    expect(KNOB_PRESETS["agentless-v2"]?.["primary-rail"]).toBe("1")
     process.env.QUANTA_BENCH_PRESET = "agentless-v1"
     expect(benchOptIns().repairRounds).toBeUndefined()
   })
 
-  // PRESET-10: explicit env OVERRIDES the preset's closure-repair (operator
-  // can dial the repair budget without forking the preset).
-  test("PRESET-10: QUANTA_BENCH_CLOSURE_REPAIR overrides the preset value", () => {
+  // PRESET-10: the executor is still reachable as an explicit opt-in (env/CLI),
+  // so a future A/B can re-enable it on top of agentless-v2 without forking.
+  test("PRESET-10: QUANTA_BENCH_CLOSURE_REPAIR opts the executor back in over a preset", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v2"
+    expect(benchOptIns().repairRounds).toBeUndefined() // off by preset
     process.env.QUANTA_BENCH_CLOSURE_REPAIR = "5"
-    expect(benchOptIns().repairRounds).toBe(5)
-    // A garbage override is rejected by the strict parse and the resolver falls
-    // back to the preset value — a malformed env never silently DISABLES the
-    // closure executor (fail-safe: 3, not undefined).
+    expect(benchOptIns().repairRounds).toBe(5) // explicit opt-in wins
+    // Garbage is rejected by the strict parse; with no preset value to fall back
+    // to, the executor stays OFF (undefined) — fail-safe given it's net-negative.
     process.env.QUANTA_BENCH_CLOSURE_REPAIR = "abc"
-    expect(benchOptIns().repairRounds).toBe(3)
+    expect(benchOptIns().repairRounds).toBeUndefined()
   })
 })
