@@ -830,3 +830,28 @@ reprovote = `agentless-v2` + `closure-repair:3` + `repro-vote:1`. 이게 false-n
                return S.One, expr
            else:
   ```
+
+---
+
+## 부록 — M2~M5 build map (draft; 구현 시점 사이트 재확인 필수)
+
+> Explore 스코핑 결과. line number/shape엔 추정 포함 → 편집 직전 grep로 확정(narrow-symbol false-gap 방지). 4건 모두 기존 SSOT 접합점에 꽂힘, 새 병렬경로 없음.
+
+**M2 `fault-evidence:2` (bounded evidence)**
+- type: `src/agent/fault-evidence/types.ts` `FaultEvidencePacket` — 현 candidates(path/score/sources/symbols)+issueSymbols+truncated/partial. 추가: ownerSnippet(line-window cap)·siblingPatterns·callerRefs·donorPatterns·adjacentControls (raw-blob 금지).
+- builder: `src/agent/fault-evidence/build.ts` `buildFaultEvidencePacket` (score merge 직후 bounded 필드 attach).
+- knob read: `knobs-bench.ts`(`benchPostureFromState`) — 현 binary gate → value parse("1" vs "2"). posture가 driver→closure-session으로 thread.
+- renderer: `src/runner/batch/eval/fault-evidence.ts` `renderFaultEvidenceHint` (level=2 조건 렌더). ⚠️SSOT: apps/bench 재export 경유 — 한 곳서 parse 후 양 driver 동일 thread.
+
+**M3 owner-SYMBOL metric (observe-only)**
+- `src/runner/batch/eval/closure-diagnostics.ts` `computeClosureDiagnostics` — 현 owner_recall@1/first_edit_owner_match = FILE 단위. 추가: owner_symbol_match·first_edit_owner_symbol_match·line_window@50.
+- `ClosureRunFact`에 firstEditSymbol/firstEditLineNum/symbolOwnerGoldFiles(optional) 추가. stream-tap 기록부(driver.ts ~1895)서 stamp.
+- LSP 없으면 graceful `available:false`(knob 커플링 없음).
+
+**M4 paired-control verification (done-blocking, public-derived only)**
+- 기존 finish-blocking chokepoint 재사용(새 경로 X): primary-rail 경로(`closure/types.ts PrimaryRailStep`, `repair/index.ts` validator ~79 = 현 observe-only), driver verify 결정부(~1876).
+- closure-session 플랜 빌더서 paired-control 생성(issue/repo 텍스트 only, base-red 증명 후 required), validator서 primary 통과해도 paired 실패면 round fail. gate 순서 = primary-rail → paired-control → finish. 신규 knob 필요.
+
+**M5 no-patch-rescue**
+- `src/agent/no-patch-breaker.ts` `decideNoPatch`(pure, 무변경). empty-patch 검출부(driver.ts ~1677 즉시 return) 사이에 bounded rescue 삽입: high-conf owner(closure bundle owner.admit) 있으면 owner 기반 minimal edit 1회 verify, 성공시 patch 채택·실패시 `no_patch_exhausted` verdict 분리.
+- 신규 knob `no-patch-rescue` + posture. ⚠️knob OFF시 report shape byte-identical 유지(신규 verdict 타입 금지).

@@ -162,3 +162,30 @@ SWE-bench Verified의 **천장(ceiling)** = 공개 프론티어 스캐폴드 17�
 ## 미커밋 / in-flight (주의)
 - bg run `bek8e6w86`(sympy-17630 v2+trajectory) 완료 대기 → trajectory 판독이 다음 액션.
 - 세션1 `full.ts` pyright fix(미커밋) 보존. 병렬 에이전트 `driver.ts`/`verify-select.ts`/`repro-vote.ts`/`regression-oracle.ts` **건드리지 말 것**([[never-blind-git-stash-pop]] [[sweep-and-macos-sed]]).
+- **세션2 내 미커밋 = `src/lsp/adapters/pyright.ts` 주석만** (indexing/timeout 둘 다 측정 후 원복: `indexing:false`, `15_000` — 값 변경 0, dead-end 문서화 주석만 추가).
+
+---
+
+## 🔴 세션2 측정 결론 — references-grounding 스레드 (DEFINITIVE, 소거법)
+
+**질문**: sympy-17630 단일샷이 mislocate(blockmatrix, gold=matexpr)하는 진짜 원인 = 도구냐 모델이냐?
+
+**측정 (전부 full-remote gpt-5.5, agentless-v2, pyright launch-proof READY):**
+| 시도 | 결과 | 의미 |
+|---|---|---|
+| 단일샷 trajectory dedup | LSP 실호출 **2건**(73 아님—파싱오류), `lsp_references` **15s 타임아웃** | 모델 LSP 거의 안 씀 + 핵심 refs 죽음 |
+| `indexing:true` (config fix) | references **여전히 타임아웃**, 0/1 | indexing은 refs 경로 안 건드림 — config로 못 고침 |
+| references 타임아웃 **60s** 상향 | **여전히 60s 타임아웃**, 0/1 | references는 느린 게 아니라 sympy서 **intractable** |
+
+**확정**: pyright `textDocument/references`는 거대 repo서 **근본적으로 못 씀**(config-no + 60s-no, 둘 다 측정). cross-ref/co-change grounding은 pyright로 불가 → **precomputed 비-semantic 인덱스(tree-sitter/ripgrep, repo크기 무관 즉시반환)가 유일 경로.** = 세션1 P1(co-change) + S2-P3(CKG)의 **측정된 정당화**. `definition`(point-query)은 빠르고 멀쩡 — 죽는 건 references/workspace-symbol(전역 스캔)뿐.
+
+**부수**: `ast_grep` 도구 존재(structural search)하나 agentless-v2서 **OFF**(`QUANTA_AST_GREP` 미설정) + pattern-based(symbol-refs 아님). ripgrep-기반 `find_references` 폴백 or tree-sitter ref 인덱스가 본命.
+
+**단 — 모델이 refs를 1번 부르고 타임아웃→포기**(retry/대체 안 함). 빠른 ref 인덱스를 줘도 **모델이 쓰게 steer** 필요(jun-17 nav 0% 결합). 즉 fix = (1) 안 죽는 ref 도구 + (2) 그걸 쓰게 하는 steer/ensemble.
+
+**우선순위 (측정 후 확정):**
+1. **ripgrep/tree-sitter `find_references` 도구** (pyright refs 대체, 안 죽음) + localize-phase steer. ← references-grounding의 진짜 fix. ast_grep 이미 있으니 거기서 출발 가능.
+2. **verify-select capture+seeding 버그 fix** (병렬에이전트). 정정: 측정 trajectory dedup상 edit **11회**(156 아님—파싱오류) + **diversity seed 0건 fired**(localizeCandidates 빈 듯) + empty 제출 = 버그 2개(seeding 안 함 + capture 잃음).
+3. patch-budget: v3-thin이 sympy-12096 풀었으나 **in-budget(patch-budget 안 fired)** → 공로는 steer/모델, patch-budget **unproven**. v2 baseline은 /tmp reap으로 미완.
+
+**메타 교훈(이 세션 반복)**: trajectory raw 메시지 카운트 금지 — 48레코드가 대화이력 반복포함 → "73 LSP" "156 edit" 둘 다 inflated. **반드시 tool_use_id로 dedup.** + wired≠engages≠returns(launch-proof로 engages 확인, but references는 returns 안 함).

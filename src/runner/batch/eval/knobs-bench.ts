@@ -216,6 +216,12 @@ export interface BenchPosture {
    */
   readonly verifySelectN: number | undefined
   /**
+   * Verify-and-select candidate-generation concurrency (max in-flight). From
+   * the `verify-select-concurrency` knob. Unset ⇒ undefined ⇒ runSelection runs
+   * candidates SEQUENTIALLY (byte-identical). >1 requires isolated generate.
+   */
+  readonly verifySelectConcurrency: number | undefined
+  /**
    * In-loop test execution (default TRUE = today's byte-identical behavior).
    * TRUE ⇒ the agent is told to run the repo's tests inside its own solve loop
    * (SWEBENCH_DIRECTIVE + verifyGuard + repair phase + repro hint). FALSE ⇒
@@ -312,6 +318,7 @@ export const benchPostureFromState = (
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
   const verifySelectN = readKnobValue(state, "verify-select", isNumber)
+  const verifySelectConcurrency = readKnobValue(state, "verify-select-concurrency", isNumber)
   // Default-TRUE fence: only an explicit `false` from the knob flips it OFF.
   // Unset / any non-false value ⇒ undefined ⇒ inLoopExec stays true (today's
   // exact behavior).
@@ -349,6 +356,7 @@ export const benchPostureFromState = (
     retryTransient,
     repairRounds,
     verifySelectN,
+    verifySelectConcurrency,
     inLoopExec,
     liveOverrides,
     preset: state.preset,

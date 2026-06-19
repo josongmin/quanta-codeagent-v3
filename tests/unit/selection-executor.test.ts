@@ -181,6 +181,70 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-1") // real beats empty even though empty "touches" the owner
   })
 
+  it("concurrency caps in-flight generate() calls (never exceeds the limit)", async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+    const gen: SelectionPorts["generate"] = async (i) => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((r) => setTimeout(r, 8)) // force overlap
+      inFlight -= 1
+      return cand({ id: `cand-${i}`, patch: `+++ b/f${i}.py\n+x${i}`, files: [`f${i}.py`] })
+    }
+    const r = await runSelection({
+      n: 6,
+      seeds: Array(6).fill(undefined),
+      owners: new Set(),
+      ports: { generate: gen },
+      concurrency: 2,
+    })
+    expect(maxInFlight).toBe(2) // bounded by the cap
+    expect(r.generated).toBe(6) // all candidates still produced
+  })
+
+  it("concurrency default (1) ⇒ strictly sequential (max in-flight 1)", async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+    const gen: SelectionPorts["generate"] = async (i) => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((r) => setTimeout(r, 4))
+      inFlight -= 1
+      return cand({ id: `cand-${i}`, patch: `+++ b/f${i}.py\n+x${i}`, files: [`f${i}.py`] })
+    }
+    await runSelection({
+      n: 4,
+      seeds: Array(4).fill(undefined),
+      owners: new Set(),
+      ports: { generate: gen }, // no concurrency ⇒ default 1
+    })
+    expect(maxInFlight).toBe(1)
+  })
+
+  it("concurrency preserves INDEX order for dedup determinism (first-by-index wins)", async () => {
+    // cand-0 and cand-2 share content; with index-ordered collection, cand-0
+    // (lower index) is kept regardless of which finishes first.
+    const gen: SelectionPorts["generate"] = async (i) => {
+      // make the LATER index finish FIRST to prove order is by index, not timing
+      await new Promise((r) => setTimeout(r, i === 0 ? 12 : 1))
+      const dup = i === 0 || i === 2
+      return cand({
+        id: `cand-${i}`,
+        patch: dup ? "+++ b/same.py\n+dup" : `+++ b/f${i}.py\n+x${i}`,
+        files: dup ? ["same.py"] : [`f${i}.py`],
+      })
+    }
+    const r = await runSelection({
+      n: 3,
+      seeds: Array(3).fill(undefined),
+      owners: new Set(),
+      ports: { generate: gen },
+      concurrency: 3,
+    })
+    expect(r.generated).toBe(2) // cand-0/cand-2 dedup to one
+    expect(r.scored.map((s) => s.candidate.id)).toEqual(["cand-0", "cand-1"]) // cand-0 kept, index order
+  })
+
   it("empty (no-patch) candidate is inadmissible (applyClean=false)", async () => {
     const { gen } = genFrom([cand({ id: "cand-0", patch: "", files: [] })])
     const r = await runSelection({

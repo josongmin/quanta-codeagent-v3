@@ -5,12 +5,14 @@ import { LspClient, type LspClientOptions } from "./base"
 export type PyrightAdapterOptions = LspClientOptions
 
 const DEFAULT_COMMAND = ["pyright-langserver", "--stdio"]
-// jun-19 MEASUREMENT: raised 15s→60s to learn whether `textDocument/references`
-// EVER returns on a large repo (sympy) or is intractable. If it returns within
-// 60s → band-aid viable (and measure if grounding then recovers localization);
-// if it still times out → references is intractable, needs a precomputed
-// (tree-sitter/ripgrep) ref index, not pyright. REVERT to 15_000 after the probe.
-const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+// jun-19 MEASURED: `textDocument/references` is INTRACTABLE on large repos — it
+// timed out on sympy-17630 at BOTH 15s AND 60s (full-remote, gpt-5.5). So the
+// references-grounding gap is NOT fixable by a higher timeout (band-aid) NOR by
+// pyright config (`indexing:true` also measured-no). Cross-ref grounding needs a
+// PRECOMPUTED non-semantic index (tree-sitter/ripgrep, repo-size-independent),
+// not pyright. Timeout kept at 15s (60s only stalls the agent before the same
+// timeout). `definition` (point-query) is fine — it returns fast and is unaffected.
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
 
 /** Resolve the Python interpreter pyright should use for `workspaceFolders`
  *  mode. WITHOUT a `pythonPath`, pyright cannot set up the workspace's import

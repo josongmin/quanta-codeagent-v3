@@ -26,6 +26,7 @@ import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
+import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-concurrency"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 /** Set of adversarial raw strings every parser should reject. */
@@ -74,6 +75,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["closeout-guard", closeoutGuardKnob],
     ["hooks", hooksKnob],
     ["verify-select", verifySelectKnob],
+    ["verify-select-concurrency", verifySelectConcurrencyKnob],
   ] as const
 
   for (const [id, knob] of knobs) {

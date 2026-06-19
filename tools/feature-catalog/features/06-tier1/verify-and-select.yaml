@@ -36,6 +36,7 @@ evidence:
     - src/runner/batch/eval/selection-executor.ts
     - src/runner/batch/eval/repair/resolved-consensus.ts
     - src/runner/knobs/knobs/verify-select.ts
+    - src/runner/knobs/knobs/verify-select-concurrency.ts
   adrs: []
   tests:
     unit:
@@ -49,6 +50,9 @@ knobs:
   - name: verify-select
     where: QUANTA_BENCH_VERIFY_SELECT
     purpose: "N candidate count; unset ⇒ single-pass (byte-identical). Cost ≈ ×N."
+  - name: verify-select-concurrency
+    where: QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY
+    purpose: "Max candidates generated concurrently; unset ⇒ sequential. >1 needs isolated generate. Throttle: instance-conc × this."
 deliberate_hold: null
 notes: |
   FAIL-OPEN is the encoding of the north-star: every nullable signal

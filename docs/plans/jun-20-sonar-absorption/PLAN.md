@@ -1,0 +1,155 @@
+# Sonar Absorption + Quanta Hardening — SOTA Plan (2026-06-20)
+
+## North star
+Close the **measured** frontier gap on SWE-bench Verified by fixing the failure
+modes we OBSERVED this session — not by prompt-hacking the ceiling. Four levers,
+each grounded in a measured gap + an external SOTA datapoint (Sonar Foundation
+Agent technical report, #1 at 79.2% Verified w/ Opus-4.5).
+
+Source of truth for "what frontier does": Sonar tech report (audited 2026-06-20 —
+verdict: real reusable methodology, not PR). Three techniques hit our exact gaps.
+
+---
+
+## Methodology discipline (LEARNED this session — binds ALL phases)
+1. **Every lever is knob-gated, default-OFF, A/B'd vs baseline.** No exceptions.
+2. **Attribution requires ABLATION.** "Ran it ON and it passed" ≠ "it helped"
+   (the "10 green from one steer" overclaim → ablation showed only 2 causal).
+   Toggle OFF, re-grade the SAME instances.
+3. **Grade on EC2 only** (local has no docker → unreliable; local 0/9 was EC2 8/9).
+   Terminate the spot box after EVERY grade; verify "today boxes up: 0".
+4. **Adversarial audit before any "solved" claim** (3-round audit caught 2 of my
+   over-claims: "all ceiling is multi-file" → only 53%; "LSP can't bridge" →
+   siblings often symbol-reachable, agent just under-uses LSP).
+5. **Stop a lever after 2 negative rounds.** Lever A (sibling steer) v1+v2 both
+   0/6 → stopped. No rabbit-holing (the 13417 micro-opt trap).
+6. **Patch hygiene**: source-only, strip binary + test + agent-created repro junk
+   before grading (binary-strip already landed; junk-.py strip still open — P0.5).
+
+---
+
+## Phase 0 — Stop the bleeding: tentative-patch retention  〔Sonar #1, highest ROI〕
+**Measured gap**: agent finds the correct fix, then burns the rest of its turns
+trying to verify it locally (no test env) → `max_turns_exhausted` with whatever
+is in the tree (often regressed/empty). Seen on 13417, matplotlib-22719, and
+across both ceiling runs.
+
+**Sonar (verbatim)**: *"the agent is encouraged to save tentative patches…
+Otherwise, the agent would often run out of reasoning steps while trying to
+validate a tentative patch, thus forced to terminate without giving an answer."*
+
+**Design**: harness-level best-candidate retention (NOT a prompt).
+- Snapshot the source diff (`sourceOnlyDiff(gitStageAndDiffCached())`) at each
+  *verification-pass* event (verifyGuard already detects pass) AND at each
+  successful edit as a fallback.
+- Keep a ranked best: prefer (verified-green, smallest non-empty diff).
+- On `max_turns_exhausted` / abort, EMIT the best tentative instead of the final
+  tree. Clean runs (agent finishes normally) → final == best → byte-identical.
+- Hook: [driver.ts](../../../src/runner/batch/eval/driver.ts) around
+  `withGitSnapshot` (L1373/L1522) + the agent loop; tie snapshot to the
+  verifyGuard pass signal (session-resources verifyGuardState).
+- Knob: `QUANTA_BENCH_TENTATIVE` (default-OFF for A/B).
+
+**Risk**: low — additive; only changes the emitted patch on exhaustion.
+**Success**: re-run the instances that hit max_turns; tentative ≥ final on EC2,
+0 regression on clean finishers. Ablation: OFF re-grade same set.
+
+### Phase 0.5 — junk-.py hygiene (cheap, rides along)
+pylint-4604 left `reproduce_issue.py`, `tmp_repro_*.py` in the patch. Extend the
+patch sanitizer to drop agent-created top-level non-package `.py` files (repro
+scripts) — but NEVER drop a path that's inside a package dir (gold can add new
+source). SSOT next to `isTestFilePath` / binary-strip.
+
+---
+
+## Phase 1 — Localization: AST symbol index  〔Sonar #2〕
+**Measured gap**: pyright LSP warm-up EXHAUSTS on big repos (matplotlib pyplot.py,
+90s budget blown) → the steer-requested LSP traversal fails; agent under-uses LSP
+(1-2 calls). Localization to the OWNER is good, but cross-file/symbol discovery is
+throttled by pyright cost.
+
+**Sonar (verbatim)**: *"An index of the classes and functions is built at the
+beginning by parsing the whole codebase with treesitter… AST Search is often more
+efficient than grep, saving reasoning steps."* — no LSP, no warm-up, built once.
+
+**Design**:
+- We ALREADY have `astGrepTool` (gate `QUANTA_AST_GREP`, default-OFF). Step 1:
+  turn it ON for bench + measure.
+- Step 2 (if needed): build a tree-sitter class/function index at sandbox setup;
+  expose a `symbol_search(name)` tool that returns definition sites across the
+  whole repo in one call (no per-file pyright warm-up).
+- This REPLACES the role pyright nav was meant to play for symbol lookup; keep
+  pyright only where it adds (diagnostics), or drop it for bench if AST wins.
+- Knob: `QUANTA_BENCH_AST_INDEX` (A/B vs pyright-nav).
+
+**Risk**: medium — competes with the LSP investment; must measure head-to-head.
+**Success**: on the pyright-exhaustion instances (matplotlib etc.), AST-index arm
+matches OWNER localization with 0 warm-up stalls AND surfaces cross-file siblings
+more often than the LSP arm. Ablation vs current.
+
+---
+
+## Phase 2 — Autonomy calibration: lean-prompt A/B  〔Sonar #4, contrarian〕
+**Sonar measured**: two-stage 58% → free-workflow 70% → **less-prescriptive +
+extended-thinking 75%**. *"the prompt was so detailed that … the agent would
+largely do the same things"* — detailed prompts CAP thinking models (Claude's own
+prompting guide).
+
+**Tension with us**: our prompt is verbose — `SWEBENCH_DIRECTIVE` + `lsp-steer` +
+`spec-steer` + `SIMPLICITY` + repro prose. This may cap gpt-5.4.
+
+**Design**: a `lean` directive arm = Sonar's 3 principles only:
+  1. test-driven (reproduce → fix → verify w/ reproducer + autonomously-discovered
+     regression tests; NO PASS_TO_PASS/FAIL_TO_PASS metadata),
+  2. high-level (adapt to task complexity; reproduction / code-inspection / test-
+     analysis as the agent sees fit),
+  3. no SWE-bench overfit.
+A/B `lean` vs current `verbose` on a stratified sample. Keep SIMPLICITY's
+*content* (small-patch bias — Sonar's patch-size data CONFIRMS it) but fold it
+into the lean principles rather than as a bolt-on steer.
+
+**Risk**: low (prompt); result genuinely uncertain (gpt-5.4 may want MORE
+structure than Opus-4.5 — that's exactly why we measure).
+**Success**: clear A/B winner on the stratified sample; adopt the winner.
+
+---
+
+## Phase 3 — Capability measurement: stratified sample  〔answers "where do we stand"〕
+We have NO honest full-500 number. Build one:
+- Stratified random ~40 instances across difficulty tiers (E/M/H + a few ceiling),
+  drawn from the real `swe-bench/experiments` resolved-rate distribution.
+- Run quanta (best config from P0-P2) + grade on EC2 → a CI'd capability estimate.
+- Cross-check the fails with the ladder (mini → OpenHands) to classify
+  scaffold-loss vs model-ceiling.
+- Output: "quanta ≈ X% (±CI) on Verified, vs OpenHands-claude4 ~70%; model gap vs
+  Opus-4.5 explicit." Honest, defensible, finally a real number.
+
+---
+
+## Phase 4 — Consolidate
+- Promote the A/B-winning levers to default-ON (with off-switch), like SIMPLICITY.
+- Update `docs/swebench-leaderboard.yaml` with honest attribution per lever.
+- Commit (user-gated): the session's landed changes + Sonar-absorbed levers.
+
+---
+
+## Explicitly DROPPED (negative results — do not revive without new evidence)
+- **Lever A sibling-steer (prompt)**: v1+v2 both 0/6. Sonar has NO special
+  cross-file mechanism — the ceiling is AST-search + autonomy + a strong model,
+  not a sibling prompt. Localization improvement = Phase 1 (AST), not a steer.
+- **Prompt-only ceiling cracking**: insufficient (measured). The 32 true-ceiling
+  is partly model (Sonar GPT-5 70.8% vs Opus-4.5 79.2%) — not closeable by
+  scaffold alone at gpt-5.4.
+
+## Already LANDED this session (keep; do not redo)
+- **binary-strip** patch sanitizer (recovered 7166/7336 — real bug).
+- **SIMPLICITY** steer → DEFAULT-ON (2 causal flips 13417/24562; Sonar small-patch
+  data independently confirms the direction).
+- **test-scope guard** (enforces no-test-edit; 6 hellgate + 70 regression green).
+- **OpenHands/mini/Live** local ceiling scaffolds (oh-login/mini-login/live-login)
+  + the `/v1/responses` proxy bridge.
+
+## Sequencing
+P0 (tentative) → P0.5 (junk hygiene) → P1 + P2 in parallel A/B → P3 (capability) →
+P4 (consolidate). P0 first: cheapest, fixes the most-observed loss, Sonar flags it
+as "without this the agent gives no answer."

@@ -34,6 +34,7 @@ import {
   selectBest,
   selectBestEffort,
 } from "@/agent/verification-bundle"
+import { Semaphore } from "@/workflow/semaphore"
 
 export interface Candidate {
   /** Stable id (e.g. `cand-0`). */
@@ -109,11 +110,37 @@ export const runSelection = async (args: {
   seeds: readonly (string | undefined)[]
   owners: ReadonlySet<string>
   ports: SelectionPorts
+  /** Max candidates generated CONCURRENTLY. Default 1 = sequential (the shared-
+   *  sandbox path — byte-identical to the pre-concurrency loop). >1 requires the
+   *  `generate` port to ISOLATE each candidate (its own sandbox + deadline), or
+   *  concurrent agent runs corrupt one shared git tree. Bounded by a Semaphore
+   *  so total in-flight never exceeds this (the LLM-throttle ceiling guard). */
+  concurrency?: number
 }): Promise<SelectionResult> => {
-  // ── generate (sequential — each candidate is a full agent run sharing the
-  //    sandbox; the driver resets the tree between them) ────────────────────
-  const raw: Candidate[] = []
-  for (let i = 0; i < args.n; i++) raw.push(await args.ports.generate(i, args.seeds[i]))
+  // ── generate ──────────────────────────────────────────────────────────────
+  // Results are collected in INDEX order regardless of completion timing, so
+  // dedup ("first wins") and scoring stay deterministic.
+  const limit = Math.max(1, Math.floor(args.concurrency ?? 1))
+  let raw: Candidate[]
+  if (limit <= 1) {
+    // Sequential: each candidate is a full agent run sharing the sandbox; the
+    // driver resets the tree between them. BYTE-IDENTICAL to the original loop.
+    raw = []
+    for (let i = 0; i < args.n; i++) raw.push(await args.ports.generate(i, args.seeds[i]))
+  } else {
+    // Bounded-parallel: at most `limit` generate() calls in flight at once.
+    const sem = new Semaphore(limit)
+    raw = await Promise.all(
+      Array.from({ length: args.n }, async (_, i) => {
+        const release = await sem.acquire()
+        try {
+          return await args.ports.generate(i, args.seeds[i])
+        } finally {
+          release()
+        }
+      }),
+    )
+  }
 
   // ── dedup by normalized diff (Trae's pruning lever) ──────────────────────
   const seen = new Set<string>()
