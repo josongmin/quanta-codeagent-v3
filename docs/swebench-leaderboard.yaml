@@ -1466,3 +1466,23 @@ runs:
     turns: 34
     preset: agentless-v2
     model: gpt-5.4
+
+- run_id: idle-box-harvest-2026-06-20e
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2
+  scope: 'Idle-box harvest pre-termination.'
+  resolved_count: 2
+  resolved:
+  - instance_id: psf__requests-1724
+    repo: psf
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
+  - instance_id: pytest-dev__pytest-7236
+    repo: pytest-dev
+    turns: 60
+    preset: agentless-v2
+    model: gpt-5.4
