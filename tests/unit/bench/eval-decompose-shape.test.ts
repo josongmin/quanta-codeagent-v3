@@ -155,6 +155,60 @@ describe("eval/ sub-slice decompose — module surface", () => {
     expect(out).toBe(diff) // byte-identical: no structural binary marker present
   })
 
+  // RCA 2026-06-20 (django gap-fails 11820/12308/12965/13128/14017/14351): the
+  // repro-test pipeline writes `__repro_<n>_<uuid>.py` scaffolds into the worktree;
+  // `git add -A` swept them into the prediction (4-21 stray files), pytest collected
+  // them → PASS_TO_PASS broke → a CORRECT one-file source fix graded `unresolved`.
+  test("sourceOnlyDiff drops agent repro scaffolding (__repro_N_uuid.py) but keeps the real fix", () => {
+    const diff = [
+      "diff --git a/django/db/models/fields/related_lookups.py b/django/db/models/fields/related_lookups.py",
+      "@@ -1 +1 @@",
+      "-buggy",
+      "+fixed",
+      "diff --git a/__repro_0_12fc3620-8ad1-4f8f-90f0-2413027f18f8.py b/__repro_0_12fc3620-8ad1-4f8f-90f0-2413027f18f8.py",
+      "new file mode 100644",
+      "index 0000000..3333333",
+      "@@ -0,0 +1 @@",
+      "+print('Issue reproduced')",
+      "diff --git a/__repro_3_e7b8ab35-11fa-4ec3-960c-398f27f88592.py b/__repro_3_e7b8ab35-11fa-4ec3-960c-398f27f88592.py",
+      "new file mode 100644",
+      "index 0000000..4444444",
+      "@@ -0,0 +1 @@",
+      "+print('Issue resolved')",
+      "diff --git a/reproduce_issue.py b/reproduce_issue.py",
+      "new file mode 100644",
+      "index 0000000..5555555",
+      "@@ -0,0 +1 @@",
+      "+assert True",
+    ].join("\n")
+    const out = sourceOnlyDiff(diff)
+    expect(out).toContain("related_lookups.py")
+    expect(out).toContain("+fixed")
+    // every repro scaffold section is gone — header and body
+    expect(out).not.toContain("__repro_0_12fc3620")
+    expect(out).not.toContain("__repro_3_e7b8ab35")
+    expect(out).not.toContain("reproduce_issue.py")
+    expect(out).not.toContain("Issue reproduced")
+  })
+
+  // teeth: a legitimate source file whose name merely CONTAINS "repro" (e.g. a
+  // real module `reproducibility.py`) must NOT be dropped — only the exact
+  // `__repro_N_uuid.py` / `reproduce_issue.py` scaffold names are scaffolding.
+  test("sourceOnlyDiff keeps a real source file whose name contains 'repro'", () => {
+    const diff = [
+      "diff --git a/src/reproducibility.py b/src/reproducibility.py",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "diff --git a/django/repro_helpers.py b/django/repro_helpers.py",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+    ].join("\n")
+    const out = sourceOnlyDiff(diff)
+    expect(out).toBe(diff) // byte-identical: neither matches the scaffold regex
+  })
+
   test("sourceOnlyDiff is byte-identical for a pure-source diff (no test, no binary)", () => {
     const diff = [
       "diff --git a/src/a.py b/src/a.py",
