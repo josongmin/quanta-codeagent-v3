@@ -255,7 +255,9 @@ describe("knobsForReport — JSON-serialisable projection", () => {
     process.env.QUANTA_BENCH_TEST_ONE = "1"
     const state = resolveBenchKnobs({ envVars: process.env })
     const r = knobsForReport(state)
-    expect(r).toEqual({ "test-one": { value: true, unit: undefined, display: "on", source: "env" } })
+    expect(r).toEqual({
+      "test-one": { value: true, unit: undefined, display: "on", source: "env" },
+    })
     // Pure JSON-friendly — round-trip must succeed.
     const roundTrip = JSON.parse(JSON.stringify(r)) as typeof r
     expect(roundTrip).toEqual(r)

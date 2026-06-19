@@ -34,6 +34,7 @@ evidence:
     - src/runner/batch/eval/regression-oracle.ts
     - src/apps/bench/eval/regression-oracle-adapter.ts
     - src/runner/batch/eval/selection-executor.ts
+    - src/runner/batch/eval/repair/resolved-consensus.ts
     - src/runner/knobs/knobs/verify-select.ts
   adrs: []
   tests:
@@ -41,6 +42,7 @@ evidence:
       - tests/unit/verification-bundle-score.test.ts
       - tests/unit/regression-oracle.test.ts
       - tests/unit/selection-executor.test.ts
+      - tests/unit/resolved-consensus.test.ts
     integration: []
     contract: []
 knobs:
@@ -54,6 +56,9 @@ notes: |
   explicit false / insufficient hard signal makes one inadmissible. Soft signals
   wired today: minimality (relative, parameter-free) + ownerCoverage (candidate
   files ∩ closure-ranked owners — this is what lets a root-cause sibling beat a
-  symptom fixation). regression (TB, +3.42 lever in Trae's ablation) is wired as
-  a plug-ready port (PASS_TO_PASS threading is the eval-only follow-up). L3, not
-  L4: wired + hellgate-tested but default-OFF and not yet A/B-measured.
+  symptom fixation). Both hard-gate signal ports are driver-ready: regression
+  (TB, +3.42 lever in Trae's ablation; PASS_TO_PASS threading is the eval-only
+  follow-up) and patchedResolvedKofN (TC, makePatchedResolvedConsensus re-runs
+  the reproducing set on the patched tree — the strongest "actually fixed it"
+  signal, with all-crashed ⇒ null fail-open). L3, not L4: wired + hellgate-tested
+  but default-OFF and not yet A/B-measured.

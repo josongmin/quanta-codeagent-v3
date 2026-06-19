@@ -126,10 +126,11 @@ SWE-bench Verified의 **천장(ceiling)** = 공개 프론티어 스캐폴드 17�
 
 ## 할 것 (목적 + 근거 + ROI)
 
-### S2-P0 — ①b trajectory 판독 ✅ DONE (결정적)
-- **결과**: gpt-5.5가 LSP를 **73회 호출**(`lsp_definition` 36 + `lsp_references` 35, +read 338/bash 261/grep 104/edit 45)했는데도 **blockmatrix.py 고착, owner_recall@1=0**(matexpr 못 감). pyright launch-proof READY=grounding LIVE 확인.
-- **판정**: (b)도구 무시 아님 — **(a) 도구 73회 쓰고도 틀린 동네 확신.** find-refs/def를 *자기 가설(BlockMatrix 곱셈 버그) 확증*에 씀 → root-cause(matexpr postprocessor)로 안 튐.
-- **함의**: **CKG/Sourcegraph(더 좋은 정적엔진) 레버를 이 클래스에서 죽임** — 이미 semantic LSP 73회 쓰고도 mislocate. 더 좋은 심볼룩업은 "틀린 가설 확증"을 못 고침. → ensemble을 가리킴.
+### S2-P0 — ①b trajectory 판독 ✅ DONE (⚠️ "73회"는 파싱오류였음 — 정정)
+- **TRUE 결과 (dedup by tool_use_id)**: gpt-5.5의 UNIQUE LSP 호출 = **2건뿐** (lsp_definition 1 → blockmatrix 결과 / **lsp_references 1 → "timed out after 15000ms" 타임아웃**). 주력 도구 = bash 16 / read 14 / grep 3 / edit 2. ⚠️ 이전 "73회(def36+ref35)"는 trajectory 48레코드가 **대화이력을 반복포함** → 중복카운트 아티팩트. (raw 메시지 카운트 금지, 반드시 tool_use_id로 dedup.)
+- **mislocation은 real** (closure 사이드카: owner_recall@1=0, blockmatrix.py — 사이드카는 신뢰).
+- **판정 (정정)**: "(a) 도구 많이 쓰고도 틀림" ❌. 실제 = **LSP 거의 안 씀(2회) + 핵심 find-references가 15s 타임아웃 → grep/read 폴백 → mislocate.** sympy(동적 dispatch 많음)서 pyright references 타임아웃 = grounding malfunction([[jun-16-lsp-grounding-django-dead-end]] hang과 동류).
+- **함의 (역전)**: **CKG/faster-refs 정적엔진 레버 부활** (S2-P3). 우리 LSP는 semantic이나 sympy서 *필요한 순간 타임아웃*으로 무용 → tree-sitter CKG(precomputed SQLite, 타임아웃 無)가 *속도 축*에선 우위. 세션1 co-change(find-refs)도 refs가 타임아웃하면 불가 → **빠른 refs 엔진이 진짜 갭일 수 있음.** (단 n=1 타임아웃 — 체계성 확인 필요.)
 
 ### S2-P1 — verify-and-select (ensemble) ★ 개념상 최대 레버 — 단 **구현버그로 측정 BLOCKED** 🔴
 - **이미 빌드됨**: `src/runner/batch/eval/selection-executor.ts`(N후보+diversity-seed+VerificationBundle 스코어+selectBest) + `verify-select` knob(`QUANTA_BENCH_VERIFY_SELECT`, default-OFF) + prod driver 배선(`apps/bench/eval/driver.ts:804 runSelectionPhase`). **CKG처럼 "만들 것" 아님 — 이미 있음, 미측정.**
@@ -143,10 +144,11 @@ SWE-bench Verified의 **천장(ceiling)** = 공개 프론티어 스캐폴드 17�
 - **왜**: patch-budget가 SIMPLICITY 놓친 over-broad를 잡으면 keep, 못 잡으면 v3-thin 드롭. (13417은 SIMPLICITY가 이미 풀어 무의미 → 타겟을 sympy-12096으로 정정.)
 - **ROI**: 중. 이 세션에 만든 미검증 코드 keep/drop 결정.
 
-### S2-P3 — CKG/Sourcegraph 정적엔진 = **조건부 DEFER**
-- **기능**: tree-sitter 심볼인덱스(우리 `src/retrieval/code-parser` 위) 또는 Sourcegraph를 `SymbolIndexPort` 뒤에.
-- **왜**: ① 측정상 grounding LIVE인데도 mislocate → **도구 개선이 이 클래스 안 고침.** 모델이 안 쓰거나((b)) 추론이 틀림((a)) → 둘 다 ensemble을 가리킴. **CKG는 ①b가 "(b)도구 무시 + 도구 신뢰성이 진짜 갭"을 보일 때만 정당.**
-- **ROI**: 현재 낮음(①가 반증). Sourcegraph A/B는 ensemble 이후.
+### S2-P3 — CKG/faster-refs 정적엔진 = **RESURRECTED (DEFER 철회)** 🔼
+- **왜 (정정)**: ①이 실제로 보인 건 "grounding 쓰고도 틀림"이 아니라 **find-references가 sympy서 15s 타임아웃** = grounding이 *필요할 때 작동 안 함*. precomputed tree-sitter refs/심볼 인덱스는 타임아웃 없이 즉시 반환 → 모델이 못 받던 co-change grounding 제공. 우리 "우월한" pyright가 정작 타임아웃으로 무용 → Trae의 "열등한" CKG가 *속도 축*에선 우위.
+- **기능**: `src/retrieval/code-parser`(이미 tree-sitter 보유) 위에 refs/심볼 인덱스 or Sourcegraph를 `SymbolIndexPort` 뒤에 (pyright는 semantic fallback).
+- **🔴 선결 측정**: find-refs 타임아웃이 sympy/django서 **체계적인지** 먼저 확인(여러 인스턴스 lsp_references latency/타임아웃율). n=1이라 단정 금지. 체계적이면 ROI 높음.
+- **결합 이슈**: 모델이 refs 1회 호출 후 타임아웃→포기 → 타임아웃 고쳐도 refs를 더 쓰게 steer 필요(jun-17 nav 0% 문제와 결합). + ensemble(verify-select)과 병행.
 
 ### S2-P4 — preset sprawl 정리 (위생)
 - **기능**: `agentless-v2-safe`→`noexec` 리네임, 측정끝난 arm `_archive` 섹션, winner 마킹.

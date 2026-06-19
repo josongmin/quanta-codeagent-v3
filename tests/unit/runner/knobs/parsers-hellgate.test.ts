@@ -25,6 +25,7 @@ import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
+import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 /** Set of adversarial raw strings every parser should reject. */
@@ -72,6 +73,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["working-state", workingStateKnob],
     ["closeout-guard", closeoutGuardKnob],
     ["hooks", hooksKnob],
+    ["verify-select", verifySelectKnob],
   ] as const
 
   for (const [id, knob] of knobs) {
@@ -95,6 +97,21 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
       }
     })
   }
+})
+
+describe("verify-select — domain bounds [1,8] integer", () => {
+  test("in-range integers parse to the number", () => {
+    expect(verifySelectKnob.parse("1")).toBe(1)
+    expect(verifySelectKnob.parse("5")).toBe(5)
+    expect(verifySelectKnob.parse("8")).toBe(8)
+  })
+  test("out-of-range / non-integer / non-numeric ⇒ undefined", () => {
+    expect(verifySelectKnob.parse("0")).toBeUndefined() // below min
+    expect(verifySelectKnob.parse("9")).toBeUndefined() // above max
+    expect(verifySelectKnob.parse("-1")).toBeUndefined()
+    expect(verifySelectKnob.parse("2.5")).toBeUndefined() // non-integer
+    expect(verifySelectKnob.parse("abc")).toBeUndefined()
+  })
 })
 
 describe("hellgate / parsers — strict truthy knobs (lsp/subagent/skills/working-state)", () => {

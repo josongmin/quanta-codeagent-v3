@@ -29,8 +29,8 @@
 import {
   type CandidateVerdict,
   type HardGateSignals,
-  scoreCandidate,
   type SoftScoreSignals,
+  scoreCandidate,
   selectBest,
   selectBestEffort,
 } from "@/agent/verification-bundle"
@@ -122,16 +122,23 @@ export const runSelection = async (args: {
   })
 
   // ── relative minimality across the deduped set (parameter-free) ──────────
-  const sizes = cands.map((c) => Buffer.byteLength(c.patch, "utf8"))
-  const minB = sizes.length > 0 ? Math.min(...sizes) : 0
-  const maxB = sizes.length > 0 ? Math.max(...sizes) : 0
+  // Computed over NON-EMPTY patches only: an empty diff is a non-fix, not a
+  // "minimal" fix, so it gets NO minimality signal (null) — otherwise size 0
+  // would score 1 and an empty no-patch could win best-effort over a real one.
+  const realSizes = cands
+    .filter((c) => c.patch.trim() !== "")
+    .map((c) => Buffer.byteLength(c.patch, "utf8"))
+  const minB = realSizes.length > 0 ? Math.min(...realSizes) : 0
+  const maxB = realSizes.length > 0 ? Math.max(...realSizes) : 0
 
   const scored: ScoredEntry[] = []
   for (let i = 0; i < cands.length; i++) {
     const c = cands[i] as Candidate
+    const isEmpty = c.patch.trim() === ""
+    const size = Buffer.byteLength(c.patch, "utf8")
     const hard: HardGateSignals = {
       baseValidatedRed: c.baseValidatedRed,
-      applyClean: c.patch.trim() !== "",
+      applyClean: !isEmpty,
       regressionGreen: (await args.ports.regression?.(c)) ?? null,
       patchedResolvedKofN: (await args.ports.resolvedKofN?.(c)) ?? null,
     }
@@ -139,8 +146,8 @@ export const runSelection = async (args: {
       declaredExpectedMatch: null,
       rubricScore: null,
       voterQuorum: null,
-      // smallest diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower.
-      minimality: maxB === minB ? 1 : 1 - ((sizes[i] as number) - minB) / (maxB - minB),
+      // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
+      minimality: isEmpty ? null : maxB === minB ? 1 : 1 - (size - minB) / (maxB - minB),
       ownerCoverage: ownerCoverageOf(c.files, args.owners),
     }
     scored.push({ candidate: c, verdict: scoreCandidate(hard, soft) })

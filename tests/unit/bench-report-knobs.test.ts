@@ -131,7 +131,12 @@ describe("buildReport — knobs section", () => {
     const knobs: BenchReportKnobs = {
       resolved: {
         "branch-search": { value: 3, unit: "candidates", display: "3 candidates", source: "env" },
-        "repro-test": { value: { samples: 5 }, unit: "samples", display: "5 samples", source: "preset" },
+        "repro-test": {
+          value: { samples: 5 },
+          unit: "samples",
+          display: "5 samples",
+          source: "preset",
+        },
       },
       preset: "agentless-full",
       inactive: ["subagent", "skills"],

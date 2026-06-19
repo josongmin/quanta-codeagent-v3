@@ -60,3 +60,33 @@ export const voteResolved = (samples: readonly ReproTestSample[]): ReproVote => 
     resolved > reproduced ? "resolved" : reproduced > resolved ? "reproduced" : "inconclusive"
   return { verdict, resolved, reproduced, inconclusive }
 }
+
+/**
+ * TC — map a re-executed reproducing set to the VerificationBundle's
+ * `patchedResolvedKofN` HARD signal: `votes` = how many scripts flipped to
+ * "Issue resolved" on the PATCHED tree, against a caller-chosen quorum `k`.
+ *
+ * This is the strongest "the patch actually fixed it" signal — symmetric to the
+ * base-side reproduced vote ({@link voteResolved} counts the same outcomes; this
+ * just projects the resolved count into the bundle's {votes,k} shape). The
+ * bundle admits iff `votes >= k`.
+ *
+ * FAIL-OPEN: `null` (no consensus signal ⇒ the bundle treats it as no objection)
+ * when the reproducing set is empty, the quorum is non-positive, OR there is NO
+ * DECISIVE evidence at all (every script crashed `other`/`exec_failed`/`unknown`
+ * — 0 resolved AND 0 reproduced). Crucially, all-crashed must NOT collapse to
+ * `votes:0` (which would REJECT the candidate on a broken script — a false-RED).
+ * A vote IS emitted when at least one script is decisive: only
+ * `outcome === "resolved"` counts toward `votes`, so a still-`reproduced` set
+ * legitimately yields `votes:0` (bug not fixed = reject).
+ */
+export const resolvedConsensus = (
+  samples: readonly ReproTestSample[],
+  k: number,
+): { votes: number; k: number } | null => {
+  if (samples.length === 0 || k < 1) return null
+  const vote = voteResolved(samples)
+  // No decisive evidence either way ⇒ no signal (fail-open), NOT a 0-vote reject.
+  if (vote.resolved === 0 && vote.reproduced === 0) return null
+  return { votes: vote.resolved, k }
+}

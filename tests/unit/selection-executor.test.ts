@@ -37,7 +37,11 @@ describe("ownerCoverageOf", () => {
 describe("runSelection", () => {
   it("CAUSE-vs-SYMPTOM: the candidate touching the closure owner file wins", async () => {
     // cand-0 fixates on the symptom file; cand-1 (owner-seeded) hits the root.
-    const symptom = cand({ id: "cand-0", files: ["blockmatrix.py"], patch: "+++ b/blockmatrix.py\n+x" })
+    const symptom = cand({
+      id: "cand-0",
+      files: ["blockmatrix.py"],
+      patch: "+++ b/blockmatrix.py\n+x",
+    })
     const root = cand({ id: "cand-1", files: ["matexpr.py"], patch: "+++ b/matexpr.py\n+y" })
     const { gen } = genFrom([symptom, root])
     const r = await runSelection({
@@ -50,7 +54,10 @@ describe("runSelection", () => {
   })
 
   it("wiring-proof: each candidate is generated with its diversity seed", async () => {
-    const { gen, seeds } = genFrom([cand({ id: "cand-0" }), cand({ id: "cand-1", files: ["y.py"] })])
+    const { gen, seeds } = genFrom([
+      cand({ id: "cand-0" }),
+      cand({ id: "cand-1", files: ["y.py"] }),
+    ])
     await runSelection({
       n: 2,
       seeds: [undefined, "Focus on y.py"],
@@ -116,6 +123,23 @@ describe("runSelection", () => {
     })
     expect(r.generated).toBe(1)
     expect(r.scored).toHaveLength(1)
+  })
+
+  it("empty no-patch NEVER beats a real patch in best-effort (minimality must not reward size 0)", async () => {
+    // both inadmissible (real regresses; empty has applyClean=false). The winner
+    // must be the REAL candidate — an empty diff is a non-fix, not a "minimal" fix.
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "", files: [] }), // empty no-patch
+      cand({ id: "cand-1", patch: "+++ b/x.py\n+real fix", files: ["x.py"] }), // real, but regresses
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: { generate: gen, regression: async (c) => (c.id === "cand-1" ? false : null) },
+    })
+    expect(r.admissibleCount).toBe(0)
+    expect(r.winner?.id).toBe("cand-1") // real beats empty even when both inadmissible
   })
 
   it("empty (no-patch) candidate is inadmissible (applyClean=false)", async () => {
