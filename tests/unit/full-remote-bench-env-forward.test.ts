@@ -7,10 +7,16 @@ import { buildForwardedBenchEnv } from "@/apps/bench/remote/full"
  * verification-plan — NOT bundled in any preset) are SILENTLY INERT on the box
  * and a remote A/B reads as a null effect (jun-16 env-forwarding bug class).
  *
+ * Scope is `QUANTA_BENCH_*` PLUS a small explicit `FORWARD_EXTRA_ENV` allowlist
+ * of non-prefixed runtime-config dials the bench runner reads directly
+ * (`QUANTA_MAX_TURNS` → `maxTurnsBatch`; jun-20).
+ *
  * Red-on-injection:
  *  - drop the forward ⇒ FWD-1/FWD-2 RED.
  *  - forward the explicitly-handled keys too ⇒ FWD-3 RED (double-assignment).
- *  - widen scope beyond QUANTA_BENCH_* ⇒ FWD-4 RED (secret leak).
+ *  - widen scope to arbitrary non-allowlisted vars ⇒ FWD-4 RED (secret leak).
+ *  - drop QUANTA_MAX_TURNS from the allowlist ⇒ FWD-7 RED (turn budget stuck at
+ *    the box default 60 → complex instances max_turns_exhausted).
  */
 describe("buildForwardedBenchEnv", () => {
   test("FWD-1: experiment knobs (spec-fidelity, verification-plan) are forwarded", () => {
@@ -62,5 +68,14 @@ describe("buildForwardedBenchEnv", () => {
 
   test("FWD-6: no bench knobs ⇒ empty string (byte-identical box command)", () => {
     expect(buildForwardedBenchEnv({ HOME: "/x", QUANTA_PROVIDER: "chatgpt-oauth" })).toBe("")
+  })
+
+  test("FWD-7: QUANTA_MAX_TURNS (non-BENCH allowlist) reaches the box", () => {
+    // Without forwarding, the box falls back to the preset default (60) and
+    // complex instances exhaust turns even when the operator raised the budget.
+    const out = buildForwardedBenchEnv({ QUANTA_MAX_TURNS: "120", QUANTA_BENCH_A: "1" })
+    expect(out).toContain("QUANTA_MAX_TURNS='120' ")
+    // still NOT a blanket widening — a sibling non-allowlisted var stays home.
+    expect(buildForwardedBenchEnv({ QUANTA_RUN_ID: "run-x" })).toBe("")
   })
 })

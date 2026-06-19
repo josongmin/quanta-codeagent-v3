@@ -173,11 +173,20 @@ const EXPLICIT_BOX_ENV: ReadonlySet<string> = new Set([
  * arm is SILENTLY INERT and the whole A/B reads as a null effect (jun-16
  * env-forwarding bug class). The test pins that the experiment knobs survive.
  */
+/** Non-`QUANTA_BENCH_`-prefixed env knobs that ALSO must reach the box. These
+ *  are runtime-config dials read by the bench runner itself (not preset-bundled,
+ *  not BENCH-prefixed) — without forwarding they silently fall back to the box
+ *  default. jun-20: `QUANTA_MAX_TURNS` (→ `maxTurnsBatch`) was stuck at the
+ *  preset 60 on the box, so complex instances `max_turns_exhausted` even when a
+ *  higher local budget was set. Same env-forwarding bug class the BENCH filter
+ *  guards against. */
+const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set(["QUANTA_MAX_TURNS"])
+
 export const buildForwardedBenchEnv = (env: NodeJS.ProcessEnv): string =>
   Object.keys(env)
     .filter(
       (k) =>
-        k.startsWith("QUANTA_BENCH_") &&
+        (k.startsWith("QUANTA_BENCH_") || FORWARD_EXTRA_ENV.has(k)) &&
         !EXPLICIT_BOX_ENV.has(k) &&
         env[k] !== undefined &&
         env[k] !== "",

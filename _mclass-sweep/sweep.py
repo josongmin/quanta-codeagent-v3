@@ -34,7 +34,8 @@ PARALLEL = 1        # ONE box at a time — shared chatgpt-oauth account is rate
                     # agent. Gentle is correct; throughput is secondary to not
                     # poisoning the OAuth quota and producing false-negatives.
 SLICE = 6           # instances per box
-TIMEOUT = 3600      # 1h per box; hang -> killed, box self-terminates via TTL
+TIMEOUT = 2400      # 40min/box; normal waves finish <25min, so this catches a
+                    # poison-slice hang ~20min faster (wave6/7 each wasted ~60min)
 MAX_ATTEMPTS = 2    # an instance that never returns a verdict twice -> give up
 MAX_TRANSIENT = 5   # 429/generation_error retries before deferring (NOT a miss)
 WAVE_BACKOFF = 90   # seconds between waves to let the OAuth rate limit recover

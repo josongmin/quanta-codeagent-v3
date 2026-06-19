@@ -424,6 +424,16 @@ const runAgentPhase = async (
   const patch = tentativeOn
     ? recorder.selectEmitted(rawPatch, stopReason === "completed")
     : rawPatch
+  if (tentativeOn && patch !== rawPatch) {
+    // P0 telemetry — log ONLY when retention actually substitutes (the rare,
+    // interesting case): the run ended badly and we recovered a verified-green
+    // intermediate over the empty/regressed final tree.
+    console.error(
+      `[tentative] ${instance.id}: ENGAGED — emitted verified candidate ` +
+        `(${recorder.count} recorded, stopReason=${stopReason}) ` +
+        `${patch.length}B over ${rawPatch.length}B final`,
+    )
+  }
   return {
     patch,
     turns,
