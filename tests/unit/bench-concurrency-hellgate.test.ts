@@ -118,18 +118,15 @@ describe("grading semaphore — run_evaluation spawns bounded by GRADE_CONCURREN
     expect(peak).toBe(1) // ...but never two at once (default serial)
   })
 
-  test("GRADE_CONCURRENCY=3 ⇒ overlaps up to 3, NEVER more", async () => {
+  test("FOOTGUN CLOSED: a stray GRADE_CONCURRENCY=3 is IGNORED — grading stays serial", async () => {
+    // Concurrent on-box grading false-negatives correct patches (2026-06-19:
+    // GRADE_CONCURRENCY=6 scored 0/5 vs 4/5 serial, 3 gold-identical). gradeLimit
+    // is HARD-CLAMPED to 1, so even setting the knob can't re-enable it — a
+    // warning comment isn't a guard, the code must refuse. Red-on-injection:
+    // un-clamp gradeLimit (read the knob) and peak jumps to 3, re-arming the bug.
     setKnobOverride("QUANTA_SWEBENCH_GRADE_CONCURRENCY", "3")
-    const { peak, spawns } = await peakConcurrentGrades([
-      "a__1",
-      "b__2",
-      "c__3",
-      "d__4",
-      "e__5",
-      "f__6",
-    ])
-    expect(spawns).toBe(6) // all six graded
-    expect(peak).toBeGreaterThan(1) // actually pipelined (not accidentally serial)
-    expect(peak).toBeLessThanOrEqual(3) // ...but bounded by the configured limit
+    const { peak, spawns } = await peakConcurrentGrades(["a__1", "b__2", "c__3", "d__4"])
+    expect(spawns).toBe(4) // all graded
+    expect(peak).toBe(1) // ...but STILL serial despite the knob (footgun hard-disabled)
   })
 })

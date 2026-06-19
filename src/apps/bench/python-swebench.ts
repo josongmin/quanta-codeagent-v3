@@ -252,28 +252,27 @@ export const buildArgv = (
  * fall back to its local testCmd path.
  */
 /**
- * Process-global grading semaphore. When `runBatch` overlaps patch-gen across
- * instances (`QUANTA_BENCH_CONCURRENCY>1`), this bounds how many `run_evaluation`
- * Docker grades run AT ONCE to `swebenchGradeConcurrency` (env
- * `QUANTA_SWEBENCH_GRADE_CONCURRENCY`, default 1).
+ * Process-global grading semaphore — ALWAYS SERIAL (limit hard-pinned to 1).
  *
- *   - Default 1 ⇒ strictly serial, byte-identical to the historical mutex —
- *     arm64 Docker's daemon wedges when several large eval images pull
- *     concurrently under emulation (observed: max_workers=4 wedged it).
- *   - N>1 (x86 NATIVE full-remote EC2) ⇒ each task grades its DISTINCT instance
- *     the moment its patch is ready, up to N concurrent grades, overlapping both
- *     patch-gen and other grades. Distinct instances ⇒ distinct container names
- *     ⇒ no collision. This removes the end-of-run serial grading tail.
+ * ⚠️ Concurrent on-box grading was PROVEN to FALSE-NEGATIVE correct patches
+ * (2026-06-19: GRADE_CONCURRENCY=6 scored 0/5; the SAME 5 patches re-graded
+ * serially scored 4/5, with 3 byte-identical to gold + git-apply-clean).
+ * Separate `run_evaluation` processes race the shared run_id image cache/cleanup
+ * ("Removed N images") and yank each other's containers — the assumption that
+ * "distinct instances ⇒ distinct containers ⇒ safe" was WRONG.
  *
- * Live-counter design (no memoised limit): `gradeLimit()` is read on each
- * acquire so a knob override / env set after import is honoured, and `release`
- * wakes ALL parked waiters which re-check the bound and re-queue if still over —
- * correct (never stalls) without a wake-race window. patch-gen is NOT under this
- * lock; only the Docker grade section is bounded.
+ * So `gradeLimit()` is HARD-CLAMPED to 1: a stray `QUANTA_SWEBENCH_GRADE_CONCURRENCY>1`
+ * is IGNORED (a warning comment isn't a guard — the code must refuse it). The
+ * knob/field are retained only so the value is recorded; they no longer change
+ * behavior. For PARALLEL grading use the grade-only path's swebench-native
+ * `--max_workers` (harness-internal, concurrency-safe), NOT this per-process lock.
+ * patch-gen still overlaps freely (QUANTA_BENCH_CONCURRENCY) — that's safe.
  */
 let gradeInFlight = 0
 const gradeWaiters: Array<() => void> = []
-const gradeLimit = (): number => Math.max(1, runtimeConfig().swebenchGradeConcurrency)
+// HARD-CLAMPED to 1 — see above. Do NOT read the knob here; concurrent grading
+// false-negatives. (Knob still parsed into runtimeConfig for telemetry only.)
+const gradeLimit = (): number => 1
 const withGradingLock = async <T>(fn: () => Promise<T>): Promise<T> => {
   while (gradeInFlight >= gradeLimit()) {
     await new Promise<void>((resolve) => gradeWaiters.push(resolve))
