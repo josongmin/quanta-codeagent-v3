@@ -197,6 +197,23 @@ export interface RunInstanceDeps {
  *  editing tests/ (discarded by the source-only grader); plausible-but-wrong
  *  fixes with no verification loop. Appended to the task message only when
  *  `instance.swebench` is set (custom-corpus runs unaffected). */
+/** Anti-semantic-over-engineering steer absorbed from OpenHands'
+ *  `system_prompt_tech_philosophy.j2` (Linus "good taste" mode) + mini-swe's
+ *  minimal posture — the methodology delta that lets those scaffolds solve the
+ *  #13417 class on the SAME model where quanta over-engineers. Targets SEMANTIC
+ *  over-engineering (a small diff that still reaches for runtime/compiler APIs
+ *  or invents a helper), which the existing diff-SIZE rules do not catch. */
+const SIMPLICITY_STEER =
+  "Prefer the SIMPLEST mechanism that already exists. If a plain attribute or " +
+  "field on the object answers the question (e.g. `self.query.group_by`), read " +
+  "it DIRECTLY — do NOT build or call a runtime/execution/compiler object " +
+  "(e.g. get_compiler(), pre_sql_setup(), running the query) and do NOT add a " +
+  "new helper method, function, or class when editing the existing expression " +
+  "in place would do. Eliminating a special case beats adding a branch or a new " +
+  "abstraction; ask 'is there a one-line change to the existing code?' before " +
+  "writing new code. Remove any reproduction script or downloaded file you " +
+  "created so only the real source fix remains."
+
 const SWEBENCH_DIRECTIVE = [
   "",
   "",
@@ -669,6 +686,11 @@ export interface PrepareReproTestDeps {
   readonly writeFile?: ReproWriteFilePort
   /** Injected exec port. Production: `execArgv` from `./exec.ts`. */
   readonly exec?: ReproExecPort
+  /** jun-19 #10999 under-fix lever: when `true`, the repro prompt gets the
+   *  ADVERSARIAL-coverage block (boundary / must-reject / don't-copy-suggested-
+   *  fix), so a shallow happy-path patch keeps the repro RED. Default-OFF ⇒
+   *  byte-identical prompt. Sourced from `benchOptIns().adversarialRepro`. */
+  readonly adversarial?: boolean
 }
 
 /** Per-instance reproduction-script filename written into the sandbox. The
@@ -754,6 +776,7 @@ export const prepareReproTestDetailed = async (
       llm: deps.llm,
       config,
       ...(mwe !== undefined ? { mwe } : {}),
+      ...(deps.adversarial === true ? { adversarial: true } : {}),
     })
   } catch {
     return {
@@ -865,9 +888,13 @@ const installReproTestHint = async (
 ): Promise<InstallReproTestResult> => {
   // Unified posture: K resolves from the preset/env via the knob framework
   // (preset `agentless-v1` ⇒ K=5; explicit QUANTA_BENCH_REPRO_TEST overrides).
-  const reproK = benchOptIns().reproTestK
+  const posture = benchOptIns()
+  const reproK = posture.reproTestK
   if (reproK === undefined) return { hint: undefined, telemetry: undefined }
-  const preparation = await prepareReproTestDetailed(instance, sandbox, reproK, { llm })
+  const preparation = await prepareReproTestDetailed(instance, sandbox, reproK, {
+    llm,
+    ...(posture.adversarialRepro === true ? { adversarial: true } : {}),
+  })
   const { selection, telemetry } = preparation
   if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
   const path = `${sandbox}/${REPRO_FILE_NAME}`
@@ -1012,8 +1039,22 @@ export const buildConfig = (
     extractIssueDeclaredExpected(instance.problemStatement) !== undefined
       ? `\n-${SPEC_FIDELITY_STEER}`
       : ""
+  // ABSORBED METHODOLOGY (jun-19, #13417 class) — anti-SEMANTIC-over-engineering.
+  // quanta's directive already enforces DIFF-SIZE minimality ("smallest change",
+  // "no whole-file rewrite"), but the 13417 failure is SEMANTIC: a 1-2 line diff
+  // that reaches for a runtime/compiler API (`get_compiler()`) or invents a
+  // helper method (`has_results_ordering()`) — both pass the diff-size rule.
+  // mini/OpenHands solve it minimally because their system prompt carries an
+  // explicit "seek the simplest mechanism / reject over-engineering" philosophy
+  // (OpenHands `system_prompt_tech_philosophy.j2`, Linus mode). This line ports
+  // that philosophy verbatim-in-spirit. Knob-gated (`QUANTA_BENCH_SIMPLICITY`,
+  // default-OFF) for a clean A/B; OFF ⇒ "" ⇒ byte-identical prompt.
+  const simplicitySteerLine =
+    instance.swebench && gateOn(process.env, "QUANTA_BENCH_SIMPLICITY")
+      ? `\n-${SIMPLICITY_STEER}`
+      : ""
   const baseText = instance.swebench
-    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${specSteerLine}`
+    ? `${base}${opt.inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC}${lspSteerLine}${specSteerLine}${simplicitySteerLine}`
     : base
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here

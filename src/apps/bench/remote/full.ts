@@ -196,6 +196,18 @@ const userData = (ttl: number): string =>
     "usermod -aG docker ubuntu",
     "su - ubuntu -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'",
     "su - ubuntu -c 'curl -fsSL https://bun.sh/install | bash'",
+    // jun-19: the LSP nav-grounding lever (DEFAULT-ON since jun-17) was 100%
+    // INERT on every bench box — `pyright-langserver` is not installed, so the
+    // shared nav session failed to ready on every instance ("Executable not
+    // found in $PATH"). The box has neither node nor pyright. `uv tool install
+    // pyright` lands the PyPI wrapper (which self-manages a pinned node) at
+    // ~/.local/bin/pyright-langserver, which remoteRun already puts on PATH.
+    // The trailing `pyright --version` warms the one-time node download so the
+    // first instance doesn't eat that latency. Fail-OPEN (`|| true`): grounding
+    // is best-effort — a pyright install hiccup must never abort the bootstrap
+    // (`set -eux`) and kill the whole bench run. When absent the agent simply
+    // degrades to no nav tools (the pre-jun-19 behaviour).
+    "su - ubuntu -c '~/.local/bin/uv tool install pyright >/dev/null 2>&1 && ~/.local/bin/pyright --version >/dev/null 2>&1 || true'",
   ].join("\n")
 
 export interface FullRemoteResult {

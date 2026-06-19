@@ -13,6 +13,7 @@
  * production import path goes through this barrel.
  */
 
+import "./adversarial-repro"
 import "./advisor"
 import "./bench-in-loop-exec"
 import "./branch-search"

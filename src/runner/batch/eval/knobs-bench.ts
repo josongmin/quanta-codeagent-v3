@@ -194,6 +194,9 @@ export interface BenchPosture {
   readonly issueHintExpectedActual: boolean
   /** Agentless §3.3.1 reproduction-test K (undefined ⇒ no repro pre-compute). */
   readonly reproTestK: number | undefined
+  /** jun-19 #10999 under-fix lever: ON ⇒ the repro prompt gets the
+   *  ADVERSARIAL-coverage block so a shallow happy-path fix stays RED. */
+  readonly adversarialRepro: boolean
   /** Transient-failure retry cap (undefined ⇒ single attempt). */
   readonly retryTransient: number | undefined
   /**
@@ -317,6 +320,7 @@ export const benchPostureFromState = (
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
+  const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
   return {
     lspNav,
     subagent,
@@ -327,6 +331,7 @@ export const benchPostureFromState = (
     issueHintMode,
     issueHintExpectedActual,
     reproTestK: repro !== undefined ? repro.samples : undefined,
+    adversarialRepro,
     retryTransient,
     repairRounds,
     inLoopExec,

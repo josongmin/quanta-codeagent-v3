@@ -81,6 +81,35 @@ const groundingBlock = (mwe: string | undefined): readonly string[] => {
   ]
 }
 
+/** Optional ADVERSARIAL-coverage block (jun-19, #10999 under-fix class). The
+ *  default repro tests the issue's OWN happy-path example, so a *shallow* fix
+ *  that only handles that one example prints "Issue resolved" and the agent
+ *  stops — a false-GREEN self-check (measured: 10999 ownerHit+repro-base-RED yet
+ *  unresolved, because the agent copied the issue's incomplete suggested regex
+ *  and the weak repro passed it). This block forces the script to ALSO exercise
+ *  boundary / must-reject / consistency cases derived by REASONING about a
+ *  correct fix — and to NOT copy any fix the issue itself proposes — so a
+ *  superficial patch stays RED and the agent keeps fixing. `adversarial !== true`
+ *  ⇒ empty (byte-identical to the pre-feature prompt). Pure. */
+const adversarialBlock = (adversarial: boolean | undefined): readonly string[] => {
+  if (adversarial !== true) return []
+  return [
+    "",
+    "Make the reproduction ADVERSARIAL. A shallow fix that only handles the single",
+    'example in the issue must STILL print "Issue reproduced". Beyond that literal',
+    "example, exercise the cases below that apply to THIS bug:",
+    "  - boundary / edge values (empty, zero, negative, very large, range limits);",
+    "  - inputs that SHOULD be rejected or raise (malformed, out-of-domain): assert",
+    "    they are rejected / None / error, NOT silently accepted;",
+    "  - consistency a correct fix must preserve (a sign or transform applied",
+    "    uniformly, round-trip or symmetry equality).",
+    "Derive the EXPECTED behavior by reasoning about what a CORRECT fix must do. Do",
+    "NOT copy any fix, regex, or patch the issue itself proposes — issue-suggested",
+    "fixes are frequently incomplete. Use several concrete cases and print",
+    '"Issue resolved" ONLY if EVERY case behaves correctly.',
+  ]
+}
+
 /** Build the user message. Paper format: issue text + explicit print-contract
  *  + a tiny example so the LLM emits the exact sentinel strings (not
  *  paraphrases like `"the issue was reproduced"`).
@@ -89,8 +118,16 @@ const groundingBlock = (mwe: string | undefined): readonly string[] => {
  *  block is spliced in (see {@link groundingBlock}) so the model wraps the
  *  KNOWN-reproducing code in the sentinel scaffold rather than guessing. When
  *  `mwe` is undefined/empty the output is byte-identical to the pre-feature
- *  prompt. */
-export const buildReproTestPrompt = (issue: string, mwe?: string): string =>
+ *  prompt.
+ *
+ *  When `adversarial` is `true`, an {@link adversarialBlock} is spliced in so a
+ *  shallow happy-path fix fails the script (#10999 under-fix class). Falsy ⇒
+ *  byte-identical to the pre-adversarial prompt. */
+export const buildReproTestPrompt = (
+  issue: string,
+  mwe?: string,
+  adversarial?: boolean,
+): string =>
   [
     "Write a Python script that reproduces the bug described in the issue below.",
     "",
@@ -110,6 +147,7 @@ export const buildReproTestPrompt = (issue: string, mwe?: string): string =>
     "    prints \"Issue resolved\" but then crashes would be misread as still-broken.",
     "  - Wrap the bug-exercising code in try/except so an unexpected error prints",
     '    "Other issues" instead of aborting before any marker.',
+    ...adversarialBlock(adversarial),
     "",
     "Output only the Python source code. No explanation. No markdown fences.",
     "",
@@ -241,11 +279,14 @@ export const generateReproTests = async (args: {
    *  known-reproducing code in the sentinel scaffold instead of guessing.
    *  Undefined/empty ⇒ byte-identical to the un-grounded prompt. */
   mwe?: string
+  /** When `true`, splice the ADVERSARIAL-coverage block so a shallow happy-path
+   *  fix fails the repro (#10999 under-fix class). Falsy ⇒ byte-identical. */
+  adversarial?: boolean
 }): Promise<readonly string[]> => {
-  const { issue, llm, signal, mwe } = args
+  const { issue, llm, signal, mwe, adversarial } = args
   if (typeof issue !== "string" || issue.length === 0) return []
   const samples = resolveSamples(args.config?.samples)
-  const userText = buildReproTestPrompt(issue, mwe)
+  const userText = buildReproTestPrompt(issue, mwe, adversarial)
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: userText }] }]
   const out: string[] = []
   for (let i = 0; i < samples; i++) {

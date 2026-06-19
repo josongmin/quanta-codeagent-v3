@@ -18,6 +18,49 @@ about: 'SWE-bench Verified — internal results SSOT (machine-readable). Rendere
 crosscheck_policy_version: 1
 
 runs:
+- run_id: absorb-simplicity-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2 + QUANTA_BENCH_SIMPLICITY=1
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench harness, EC2 backend SERIAL (max-workers 1), spot terminated
+  scope: 'BREADTH A/B for the absorbed SIMPLICITY steer (OpenHands Linus minimal-edit philosophy). 9 instances = 3 recoverable (quanta previously ❌: sympy-24562 tierE / pytest-5787 tierM / sympy-18763 tierH) + 6 b6 (regression guard).'
+  resolved_count: 6
+  resolved: [astropy__astropy-14309, astropy__astropy-14995, astropy__astropy-7336, django__django-13406, django__django-13417, sympy__sympy-24562]
+  unresolved: [astropy__astropy-7166, pytest-dev__pytest-5787, sympy__sympy-18763]
+  verdict: >-
+    ABSORPTION GENERALIZES. Two DISTINCT over-engineering instances flipped ❌→✅ with the steer:
+    django-13417 (django, group_by guard) AND sympy-24562 (sympy core/numbers.py — different repo/domain),
+    both via a SMALL in-place fix. So the minimal-edit philosophy is not 13417-specific. No regression on the
+    4 clean b6 passers (14309/14995/13406/7336). ONE concern: astropy-7166 was ✅ under the binary-strip recheck
+    but ❌ here — it took a different (subtly wrong) property-docstring approach (`val.fget` unwrap → sets fget.__doc__,
+    which doesn't propagate to property.__doc__). Likely RUN-NOISE (7166 is approach-noisy across runs), NOT clearly
+    steer-caused; needs a 2-3x re-run with steer on/off to disambiguate before defaulting the knob ON. Harder tiers
+    (pytest-5787 M, sympy-18763 H) not recovered by the steer alone. Net 5/9→6/9 (+2 genuine flips, −1 noise).
+    Separate open issue: even when the patch is gold, the agent often max_turns_exhausts (finds the fix, then can't
+    verify locally and over-runs) — a CONVERGENCE/lock-in lever distinct from over-engineering.
+- run_id: q13417-simplicity-2026-06-19
+  date: '2026-06-19'
+  preset: agentless-v2 + QUANTA_BENCH_SIMPLICITY=1
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench harness, EC2 backend, spot terminated
+  scope: 'FIRST quanta solve of django-13417 (the over-engineering ceiling case). ABSORBED METHODOLOGY win, not a micro-fix.'
+  resolved_count: 1
+  resolved:
+  - instance_id: django__django-13417
+    repo: django
+  note: >-
+    RCA showed quanta over-engineers 13417 on the SAME gpt-5.4 where mini/Live/OpenHands solve it minimally:
+    quanta reaches for get_compiler()/pre_sql_setup() or invents a has_results_ordering() helper (all SMALL diffs,
+    so the existing diff-size minimality rule misses them — the failure is SEMANTIC over-engineering). Read OpenHands'
+    system_prompt_tech_philosophy.j2 (Linus "good taste": reject over-engineering, seek the simplest existing
+    mechanism, eliminate special cases over adding branches/helpers) and ported it verbatim-in-spirit as
+    SIMPLICITY_STEER (driver.ts, knob QUANTA_BENCH_SIMPLICITY, default-OFF for clean A/B). WITH the steer, quanta
+    produced the gold-IDENTICAL `not self.query.group_by` in-place guard → RESOLVED ✅. WITHOUT it (2 prior runs):
+    get_compiler / has_results_ordering → FAIL. Same model + scaffold; only delta = the absorbed directive.
+    CAVEAT n=1 (13417 is path-noisy + still max_turns_exhausted — the patch is gold but the agent over-runs verify;
+    convergence is a separate issue). Breadth A/B (recoverable set 24562/5787/18763 + b6 regression) in flight.
 - run_id: easy-django-t1t2-2026-06-16
   date: '2026-06-16'
   preset: agentless-v1

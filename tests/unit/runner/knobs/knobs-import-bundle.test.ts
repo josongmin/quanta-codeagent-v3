@@ -23,6 +23,7 @@ import { beforeAll, describe, expect, test } from "bun:test"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { type AnyKnob, allKnobs, asAnyKnob, registerKnob } from "@/runner/knobs"
+import { adversarialReproKnob } from "@/runner/knobs/knobs/adversarial-repro"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
@@ -65,6 +66,7 @@ import { verificationPlanKnob } from "@/runner/knobs/knobs/verification-plan"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
+  asAnyKnob(adversarialReproKnob),
   asAnyKnob(advisorKnob),
   asAnyKnob(benchInLoopExecKnob),
   asAnyKnob(branchSearchKnob),
