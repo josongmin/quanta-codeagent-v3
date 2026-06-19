@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
 import { analyzePatchBudget } from "@/agent/patch-budget"
+import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
@@ -52,6 +53,8 @@ import { errMessage } from "@/shared"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
+import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
+import { withCandidatePatch } from "./rematerialize"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import { type Candidate, runSelection } from "@/runner/batch/eval/selection-executor"
@@ -539,6 +542,29 @@ const runSelectionPhase = async (
           files: filesFromPatch(phase.patch),
           baseValidatedRed,
         }
+      },
+      // TB regression HARD gate. The scoring loop runs AFTER every candidate is
+      // generated, so the shared sandbox no longer holds this candidate's patch
+      // (withGitSnapshot reset it). `withCandidatePatch` re-materializes the
+      // candidate's tree (reset → git apply → probe → reset) so the impacted
+      // PASS_TO_PASS run measures THIS candidate, not the last/base tree — the
+      // anti-theater seam. No-leak: PASS_TO_PASS is eval-only swebench meta,
+      // handed only to the oracle. Fail-open: empty set / non-applying ⇒ null.
+      regression: (c) => {
+        const tests = instance.swebench?.passToPass ?? []
+        if (tests.length === 0) return Promise.resolve(null)
+        return withCandidatePatch({
+          sandbox,
+          patch: c.patch,
+          baseCommit: instance.swebench?.baseCommit,
+          timeoutMs: deps.timeoutMs,
+          probe: async (sb) => {
+            const r = await makeBenchRegressionOracle()
+              .run({ tests, sandbox: sb })
+              .catch(() => null)
+            return toRegressionGreen(tests, r)
+          },
+        })
       },
     },
   })

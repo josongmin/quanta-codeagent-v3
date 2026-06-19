@@ -38,7 +38,13 @@ const buildWorkspaceConfiguration = (cwd: string): Record<string, unknown> => {
       defaultInterpreterPath: pythonPath,
       analysis: {
         diagnosticMode: "openFilesOnly",
-        indexing: false,
+        // jun-19: indexing ON so the EXISTING prewarm (which warms the server via
+        // a `definition` readiness probe) ALSO builds pyright's project-wide
+        // symbol index — `textDocument/references` / workspaceSymbol need that
+        // index, and with it OFF they fell back to an on-demand whole-project
+        // scan that TIMED OUT (15s) on large repos (sympy: measured ref timeout
+        // on sympy-17630). The index build is background + amortized into prewarm.
+        indexing: true,
         autoImportCompletions: false,
         autoSearchPaths: true,
         useLibraryCodeForTypes: true,
