@@ -1307,6 +1307,26 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/verify-select-concurrency.ts",
   },
   {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
+    kind: "enum",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: verify-select regression hard-signal source. Modes: discovered=no-oracle native repo tests, gold=eval-only PASS_TO_PASS, off=ablation. Unset preserves legacy behavior.",
+    readSite: "runner/knobs/knobs/verify-select-regression.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_REPRO",
+    kind: "enum",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: verify-select generated repro-consensus mode. Modes: hard=legacy gate, positive=soft-only ranking, off=remove signal. Unset preserves legacy behavior.",
+    readSite: "runner/knobs/knobs/verify-select-repro.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_FIND_REFS",
     kind: "bool",
     default: false,

@@ -16,6 +16,13 @@ knowledge: K-Domain
 flags: [regression-trap, has-repro]
 ---
 
+## 로컬 quanta receipt (2026-06-20)
+
+- **PASS receipt**: durable sidecar `/Users/songmin/Library/quanta-codeagent-v3/bench/full-remote/report-i-0015118a58d76af3e.json`.
+- **run**: `agentless-v1`, `gpt-5.5`, official swebench harness, 59 turns, 7755B patch.
+- **patch**: `src/_pytest/reports.py` 단일 파일, `ExceptionChainRepr` import 및 chain serialization/deserialization 구현. Gold 9824B보다 작지만 official grader PASS.
+- **해석**: 기존 gpt-5.4 miss는 multi-surface feature-generation 실패모드로 남긴다. 현재 상태는 active unresolved/model ceiling이 아니라 **capability/variance가 있는 complex-generation case**다.
+
 ## 문제 요약
 
 `xdist`(`-n auto`) 환경에서 테스트가 chained exception(`raise ... from ...` 또는 암묵적 context chaining)으로 실패하면, 워커가 마스터로 직렬화해 보낸 리포트가 마지막 예외 하나만 표시한다. xdist 없이 직접 실행하면 "The above exception was the direct cause..." / "During handling..." 체인이 온전히 출력되는데 직렬화 경로에서 체인이 유실되는 것. 근본 원인은 pytest의 리포트 longrepr 직렬화기(`TestReport._to_json` / `_from_json`)가 단일 `ReprExceptionInfo`(reprtraceback+reprcrash)만 다루고 `ExceptionChainRepr.chain`을 통째로 누락하기 때문이다.

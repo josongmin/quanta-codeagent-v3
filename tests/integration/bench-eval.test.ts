@@ -12,7 +12,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadCorpus, writeSyntheticRealCorpus } from "../../src/apps/bench/corpus/loader"
-import { buildDryRunPlan, formatDryRunPlan } from "../../src/apps/bench/dry-run"
+import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "../../src/apps/bench/dry-run"
 import {
   evaluateWithPythonSwebench,
   isPythonSwebenchAvailable,
@@ -20,6 +20,7 @@ import {
   SWEBENCH_VERIFIED_DATASET,
 } from "../../src/apps/bench/python-swebench"
 import type { Instance } from "../../src/apps/bench/types"
+import type { SwebenchTask } from "../../src/runner/batch/corpus"
 
 const mkInstance = (
   over: Partial<Instance> = {},
@@ -244,11 +245,28 @@ describe("bench-eval: --dry-run plan", () => {
     mkInstance({ id: "b" }),
     mkInstance({ id: "c" }),
   ]
+  const tasks: SwebenchTask[] = [
+    {
+      instanceId: "demo__a",
+      repo: "demo/a",
+      baseCommit: "0".repeat(40),
+      problemStatement: "fix a",
+      raw: {},
+    },
+    {
+      instanceId: "demo__b",
+      repo: "demo/b",
+      baseCommit: "1".repeat(40),
+      problemStatement: "fix b",
+      raw: {},
+    },
+  ]
 
   test("(d) buildDryRunPlan shape with a limit", () => {
     const plan = buildDryRunPlan("/corpus", insts, { n: 5, limit: 2, pythonHarness: true })
     expect(plan).toEqual({
-      corpusRoot: "/corpus",
+      sourceLabel: "corpus",
+      sourcePath: "/corpus",
       total: 3,
       selected: 2,
       n: 5,
@@ -260,12 +278,29 @@ describe("bench-eval: --dry-run plan", () => {
 
   test("(d') no limit selects all; unset root labelled; lines render", () => {
     const plan = buildDryRunPlan("", insts, { n: 1, limit: null, pythonHarness: false })
-    expect(plan.corpusRoot).toBe("(unset)")
+    expect(plan.sourcePath).toBe("(unset)")
     expect(plan.selected).toBe(3)
     const lines = formatDryRunPlan(plan)
     expect(lines[0]).toContain("NO LLM will be called")
+    expect(lines.join("\n")).toContain("corpus: (unset)")
     expect(lines.join("\n")).toContain("verifier: local testCmd")
     expect(lines.join("\n")).toContain("sample ids: a, b, c")
+  })
+
+  test("(d'') dataset plan renders dataset path + instance ids", () => {
+    const plan = buildDatasetDryRunPlan("/dataset.jsonl", tasks, {
+      n: 2,
+      limit: 1,
+      pythonHarness: true,
+    })
+    expect(plan.sourceLabel).toBe("dataset")
+    expect(plan.sourcePath).toBe("/dataset.jsonl")
+    expect(plan.total).toBe(2)
+    expect(plan.selected).toBe(1)
+    expect(plan.sample).toEqual(["demo__a"])
+    const lines = formatDryRunPlan(plan)
+    expect(lines.join("\n")).toContain("dataset: /dataset.jsonl")
+    expect(lines.join("\n")).toContain("sample ids: demo__a")
   })
 
   test("empty corpus → selected 0, sample (none)", () => {

@@ -130,6 +130,8 @@ export interface ReproOracleCalibration {
   goldK: number | null
 }
 
+export type SelectionTelemetry = import("./eval/selection-executor").SelectionTelemetry
+
 /** Outcome of running one instance once. */
 export interface InstanceResult {
   id: string
@@ -271,6 +273,11 @@ export interface InstanceResult {
    *  verify-and-select bottleneck) with NO extra runs — see {@link
    *  ReproOracleCalibration}. */
   reproOracleCalibration?: ReproOracleCalibration
+  /** jun-20 — compact verify-select telemetry (eval-only). Present only on a
+   *  verify-select run; absent ⇒ byte-identical. Captures which candidate fix
+   *  sites were generated, which were admissible, and why the winner won, so a
+   *  campaign can diagnose selection without re-reading the trajectory. */
+  selectionTelemetry?: SelectionTelemetry
   /**
    * T-301 — the typed VerificationPlan computed for this run (primaryRail +
    * required/optional steps + per-step successPredicate). Emitted only when the

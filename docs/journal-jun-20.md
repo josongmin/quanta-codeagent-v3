@@ -431,3 +431,92 @@ Coverage 136→305 with a clean measurement bar (official remote grading, oracle
 excluded, issue-hint=problem-statement allowed). Two would-be wins killed by measurement (repro-
 contamination recovery; reprovote superiority) — the durable output is the verified resolves + two infra
 fixes + a fourth converging "fix-generation quality is the ceiling, small-n is noise" data point.
+
+---
+
+## SPRINT (afternoon, working-tree) — box-pool amortization + no-oracle verify-select substrate
+
+Two parallel audits (journal vs working-tree) surfaced that the day's biggest code landing was **never
+journaled** — five complete, wired, tested clusters sat uncommitted. Recording them here so the next
+session has the full config and the open measurements.
+
+### Cluster 1 — Full-remote box POOL (`box-session.ts` + `pool.ts`, both NEW)
+The per-wave EC2 tax (boot → cloud-init → rsync → bun install → phantom deps → swebench warm → pyright)
+was being paid *every wave*. Extracted the lifecycle so a box is **provisioned ONCE and fed a queue of
+chunks**:
+- `box-session.ts`: `provisionBox` (launch+bootstrap, terminates on any bootstrap failure) +
+  `gradeChunkOnBox` (one patch-gen+grade chunk, no lifecycle) — byte-faithful to the old inline path,
+  pure helpers (`buildForwardedBenchEnv`, `stripToAccessToken`, `pyrightLaunchProofVerdict`, …) each
+  individually testable.
+- `pool.ts`: `runPool` — worker queue, bounded **requeue on box death**, proactive **wall-time rotation**
+  before EC2 TTL, fresh token per chunk, runId-scoped box paths.
+
+Wired: `pool` command in `cli.ts` (registered :53, dispatched :734) with `--dry-run/--workers/--datasets
+/--keep/--max-box-wall-min`. Tests: `bench-pool-hellgate.test.ts` (6, amortized-bootstrap/requeue/
+lost-after-retries/rotation) green. See `[[jun-20-box-lifecycle-pool]]`.
+
+🔴 **Still OFFLINE-only — no live EC2 end-to-end run.** The 76 offline tests don't exercise the AWS/ssh
+path, which historically hides infra bugs (jun-16 10-bug chain). **One live `quanta-bench pool
+--allow-remote-secrets` run is a mandatory pre-trust step.**
+
+### Cluster 2+3 — No-oracle verify-select: regression gate + two knobs
+The convergent #1 lever from all four threads — *candidate selection gated on the executable regression
+suite, not the noisy repro oracle* — now has its substrate:
+- `impacted-test-discovery.ts` (NEW): pure, provenance-agnostic scorer — finds **existing repo tests**
+  that mirror/import a candidate's changed files (mirror-name +50, import-ref +30, package +5). **No
+  SWE-bench hidden PASS_TO_PASS fields** — works at inference time.
+- `repo-regression-discovery-adapter.ts` (NEW): `makeDiscoveredRepoRegressionPort` — base-preflight
+  (must be green on base) → require base+patch stays green. **Fail-open everywhere** (missing / collect-
+  error / base-red ⇒ null), discovery + base-green caches.
+- Two knobs (both fully wired: index.ts:60-61 → knob-inventory.ts:1310,1320 → knobs-bench parser →
+  driver.ts consumer; APPLY is intentional NOOP = out-of-band posture):
+  - `verify-select-regression`: `discovered | gold | off`
+  - `verify-select-repro`: `hard | positive | off`
+
+Two new presets carry it:
+- **`agentless-v3-select-regression`** = agentless-v3-thin + `verify-select=5` + `verify-select-regression=
+  discovered` + `verify-select-repro=positive`.
+- **`agentless-v3-select-regression-doubt`** = same + `repro-doubt=5` (one-shot verify_loop_stuck stall-
+  breaker, isolated as its own preset so the effect stays attributable).
+
+Tests: `impacted-test-discovery.test.ts` (6), `repo-regression-discovery-adapter.test.ts` (3),
+`verify-select-regression-knob.test.ts` (8) green.
+
+### Cluster 4 — SelectionTelemetry report sidecar
+`summarizeSelection`/`SelectionTelemetry` (selection-executor.ts) threaded through types.ts → report.ts →
+driver.ts — compact candidates/admissibility/winner readout on the report, **no full patches or
+trajectory replay** (additive, byte-identical when absent). Lets verify-select A/Bs be read off
+report.json directly. Covered by updated `report-telemetry-wiring.test.ts` + `selection-executor.test.ts`.
+
+### Cluster 5 — Bench dataset dry-run
+`buildDatasetDryRunPlan` (dry-run.ts) for official-dataset mode + a `limitArg: string`→`limit: number|null`
+type tightening. Test: `bench-index-dataset-dry-run.test.ts` (2) green.
+
+### State of this sprint
+COMPLETE + WIRED, no orphans / unregistered knobs / dead exports. New 6 source files typecheck-clean
+(the only `tsc` errors in tree are pre-existing `tools/lspsolve.ts`, unrelated). 25 new + 257 modified-
+suite tests green. **Code-level loose end:** the `PHANTOM_DEPS` FIXME (`box-session.ts:141` — turndown /
+@secretlint / write-file-atomic / csv-parse should live in package.json; fresh clones silently rely on
+`bun add`).
+
+---
+
+## OPEN / HANDOFF — measurements left "verify next run"
+
+Carrying these forward explicitly so they don't get dropped the way jun-19's find_references + verify-
+select-capture continuity did:
+
+- **box-pool live EC2 run** (Cluster 1) — mandatory before trusting pool throughput numbers.
+- **verify-select-regression=`discovered` A/B** — the convergent #1 lever now has substrate. Needs a
+  COMPLETE single-pass control + n≥50 on a MEDIUM slice (small-n = noise, per four converging threads).
+  Readout: SelectionTelemetry sidecar (Cluster 4).
+- **RCA #1 (python-version fix)** — `reproTest` success 54%→? unmeasured (LLM-free, next run).
+- **RCA #2 (`no_reproduced_candidate`, 78 instances)** — OPEN; lever = adversarial-repro / better repro
+  prompt, not yet built. See `[[jun-20-repro-gen-python-version-rca]]`.
+- **M0b regrade** — killed by sweep contention; non-critical but incomplete.
+- **coverage sweep** — ~149 of 431 non-CEILING universe remaining; 6 hung instances parked for slice=1
+  isolated retry.
+
+**Convergent #1 for next session:** ceiling = fix-generation quality; the **resolved oracle (not the
+gate) is the bottleneck** → top lever = executable-regression-suite-gated candidate selection +
+multi-site completeness check. The afternoon sprint built the substrate; the live A/B is the next move.

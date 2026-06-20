@@ -50,6 +50,26 @@ verdict: real reusable methodology, not PR). Three techniques hit our exact gaps
 
 ---
 
+## Current bench profiles (live code, 2026-06-20)
+- `agentless-v3-thin` = CURRENT base profile. Mini-first + patch-budgeted +
+  source-focused generation. This is the default measurement base for SOTA++
+  work because it isolates the minimality thesis without adding selection or
+  repair churn.
+- `agentless-v3-select-regression` = CURRENT no-oracle selection arm. Starts
+  from `v3-thin`, adds `verify-select:5`, discovered native repo-test regression
+  gating, and `verify-select-repro=positive` (generated repro becomes soft-only,
+  never a hard reject).
+- `agentless-v3-select-regression-doubt` = TARGETED `verify_loop_stuck` arm.
+  Same as `select-regression`, plus `repro-doubt:5` to break post-edit test
+  rerun churn when the repro oracle is likely false-negative.
+- `QUANTA_BENCH_TENTATIVE` is NOT a profile: it is a safety-net gate in the
+  driver, and is now default-ON once regression==0 was confirmed.
+- `QUANTA_BENCH_LEAN_PROMPT` stays an A/B gate, NOT a profile. First measured
+  result was neutral on the 5-case max-turns set, so do not fold it into the
+  base profile.
+
+---
+
 ## Phase 0 — Stop the bleeding: tentative-patch retention  〔Sonar #1, highest ROI〕
 **Measured gap**: agent finds the correct fix, then burns the rest of its turns
 trying to verify it locally (no test env) → `max_turns_exhausted` with whatever
@@ -175,3 +195,16 @@ We have NO honest full-500 number. Build one:
 P0 (tentative) → P0.5 (junk hygiene) → P1 + P2 in parallel A/B → P3 (capability) →
 P4 (consolidate). P0 first: cheapest, fixes the most-observed loss, Sonar flags it
 as "without this the agent gives no answer."
+
+---
+## P2 lean — first measurement (2026-06-20, by the measurement track)
+P2 (lean-prompt) was BUILT by the parallel code track (`QUANTA_BENCH_LEAN_PROMPT`,
+`SWEBENCH_DIRECTIVE_LEAN`). Measured it (non-colliding: their code, my grade) on
+the 5 max_turns-prone set, EC2:
+- LEAN: 2/5 (13417, matplotlib-22719) — IDENTICAL to the verbose baseline 2/5.
+VERDICT: NEUTRAL — no regression (the audit's "gpt-5.4 wants more structure → lean
+hurts" worry did NOT materialize), but no gain either: this set does not
+DISCRIMINATE lean (the 2 passes pass under both; the 3 fails are 32-ceiling,
+fail under both). Sonar's +17% not reproduced HERE. Proper P2 A/B needs a
+type-matched OVER-PROMPTING set (gold = small fix; verbose drove over-
+exploration/max_turns; lean lets the model converge). Follow-up.

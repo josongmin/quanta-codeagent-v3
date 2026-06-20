@@ -14,7 +14,8 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 - **non-django E-class 확장 +41** (sklearn 19, sphinx 8, xarray 5, matplotlib 4, sympy 3, astropy 1, django 1) — 전부 clean agentless-v2. run_id `nondjango-eclass-harvest-2026-06-20`. django 졸업 후 다repo로 확장하니 대량 회수.
 - **E-class 사이드카 계속 +49** (sklearn/sphinx/xarray/matplotlib/astropy/sympy/django) — django 졸업분 + 다repo 확장.
 - **RCA 정정(2026-06-20)**: "gap fail"이라 본 django 10973/13128/14017/15382/15930는 contamination도 영구실패도 아닌 **turn-limited 플레이키**였고 재런(125~151턴)으로 PASS. repro-script patch 오염은 실재하나 django는 자체 test runner라 무해 → strip이 회복 0(paired-control 0/6=0/6으로 확인); fix는 source-only 위생/pytest-repo 방어로만 유지.
-- 누적 유니크 resolved = **284 / 500**. 타게팅 원칙: **E-class untried(cnt≥14) 우선, CEILING(cnt=0) skip(0 ROI), 길고 어려운 M/H는 보류.**
+- **Hardset RCA 정정(2026-06-20)**: `pytest-dev__pytest-5787`(gpt-5.5, 59t, 7755B), `sympy__sympy-17630`(gpt-5.5, 26t, 616B), `sympy__sympy-18763`(gpt-5.4, 115t, 528B) 모두 official PASS receipt 확인. 이전 실패 RCA는 "실패모드" 기록으로만 유효하고 active unresolved/model ceiling 아님.
+- 누적 유니크 resolved = **293 / 500**. 타게팅 원칙: **E-class untried(cnt≥14) 우선, CEILING(cnt=0) skip(0 ROI), 길고 어려운 M/H는 보류.**
 - 인프라: 박스 종료 후 결과 회수는 durable 사이드카 `~/Library/quanta-codeagent-v3/bench/full-remote/report-i-*.json`(perInstance[].passed/turns)가 정본 — box ssh보다 신뢰성 높음(박스 죽어도 남음).
 - 놀던 박스 4개(완료/hung) 종료해 비용 정리.
 - ⚠️ 인프라 교훈: **박스 run.log = 결과 정본**(box→local 스트리밍 자주 끊겨 로컬 sweep 로그가 patch-gen에서 멈춤=거짓). 회수는 박스 ssh로. 또 per-instance patch-gen 타임아웃 없어 1개 hang이 배치 grading 배리어를 막음(16145) → 중복 박스가 구제.
@@ -93,8 +94,8 @@ confirmed **resolved 39 django** (remaining 런 진행 중, 전체 목록은 yam
 
 **EC2 교차검증 (2026-06-15, c7i.8xlarge spot, native, run_id=quanta-ec2-r2)**: 동일 패치를
 x86 네이티브로 재채점 → **resolved 5/10, error 0, 56초**(arm64 에뮬레이션 몇시간 대비). 로컬
-5 resolved와 정확히 일치. 로컬의 "infra fail 2개" 정체 해소: pytest-5787은 진짜 unresolved
-(model miss, 로컬 harness_error는 경합 노이즈), sympy-12489는 빈 패치(patch-gen 실패).
+5 resolved와 정확히 일치. 로컬의 "infra fail 2개" 정체 해소: 당시 gpt-5.4 `pytest-5787`은 진짜 unresolved
+(로컬 harness_error는 경합 노이즈), sympy-12489는 빈 패치(patch-gen 실패). 단 `pytest-5787`은 이후 gpt-5.5 sidecar에서 official PASS로 superseded.
 
 **로컬 병렬 재검증 (2026-06-15, concurrency=4, probe-fix + fake-fallback 제거 후)**: 로컬 arm64에서
 patch-gen 4-way 병렬 + grading mutex 직렬로 재실행 → **resolved 5/10, harness_error 0**(이전
@@ -124,14 +125,14 @@ import이 idle 9~13s라 부하 시 초과해 fake로 폴백하던 버그) + sweb
 |---|---|---|---|---|---|
 | pylint-dev__pylint-8898 | pylint | agentless-v1 | gpt-5.4 | quantifier `{1,}` 콤마 split을 shlex로 잘못 처리(brace-aware 파서 필요); 1파일로 풀리는 문제, 모델 추론 미스 | 2026-06-15 |
 | pylint-dev__pylint-4970 | pylint | agentless-v1 | gpt-5.4 | 가드를 `_compute_sims()`에 넣음(gold는 `run()`에 early-return); 위치/의미 미묘하게 빗나간 near-miss | 2026-06-15 |
-| pytest-dev__pytest-5787 | pytest | agentless-v1 | gpt-5.4 | 미완성 — chained exception 직렬화를 절반만(4369자 vs gold 9824자) | 2026-06-15 |
+| pytest-dev__pytest-5787 | pytest | agentless-v1 | gpt-5.4 | historical miss — chained exception 직렬화 미완성(4369자 vs gold 9824자). **Superseded**: gpt-5.5 sidecar PASS 59t/7755B(2026-06-19). | 2026-06-15 |
 | sympy__sympy-12489 | sympy | agentless-v1 | gpt-5.4 | 대폭 미달 — Permutation 서브클래싱 광범위 수정 필요한데 1109자만(gold 9648자) | 2026-06-15 |
 
 ## ⚠️ 로컬 infra fail → EC2 재채점으로 해소 (2026-06-15)
 
 | instance | repo | 로컬 | EC2 네이티브 재채점 결과 |
 |---|---|---|---|
-| pytest-dev__pytest-5787 | pytest | harness_error(경합) | **unresolved (진짜 model miss)** — 인프라 아님 |
+| pytest-dev__pytest-5787 | pytest | harness_error(경합) | **historical gpt-5.4 unresolved** — 인프라 아님. 이후 gpt-5.5 sidecar PASS로 active miss 해소 |
 | sympy-dev__sympy-12489 | sympy | code 143 SIGTERM(경합) | **empty patch** — patch-gen 실패(채점 무관, 재생성 필요) |
 
 ## 🤖 mini-swe-agent baseline (표준 스캐폴드, gpt-5.4 via 로그인)
@@ -182,7 +183,7 @@ mini가 10개 전부 골드 파일 적중(picks=light 티어). resolved/unresolv
 | pytest-dev__pytest-7982 | pytest | ✅ | ✅ | both resolved |
 | pylint-dev__pylint-4970 | pylint | ❌ | ❌ | both miss — 가드 위치 near-miss(gold=`run()` early-return) |
 | pylint-dev__pylint-8898 | pylint | ❌ | ❌ | both miss — brace-aware 파서 필요, 1파일만 수정(gold 3파일) |
-| pytest-dev__pytest-5787 | pytest | ❌ | ❌ | both miss — chained-exception 직렬화 미완성 |
+| pytest-dev__pytest-5787 | pytest | ❌ | ❌ | historical gpt-5.4 both-miss — 이후 quanta gpt-5.5 sidecar PASS |
 | sympy__sympy-12489 | sympy | ❌ | ❌ | both miss — Permutation 서브클래싱 대폭 미달 |
 | sphinx-doc__sphinx-8595 | sphinx | ⛔ | ⛔ | **grading false-neg**: 골드 패치도 이 harness서 fail(env 불일치). 양쪽 모델 무죄, 점수서 제외 |
 

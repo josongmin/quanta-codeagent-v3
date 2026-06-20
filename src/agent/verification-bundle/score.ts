@@ -5,7 +5,7 @@
  *
  * HARD GATE (admissibility) = AND of the four hard signals, each REJECTING
  * only on explicit negative evidence; every nullable signal is FAIL-OPEN:
- *   - `baseValidatedRed === false`                    → reject
+ *   - `baseValidatedRed === false`                    → reject (`null` ⇒ pass)
  *   - `applyClean === false`                          → reject
  *   - `patchedResolvedKofN` present && `votes < k`    → reject (null ⇒ pass)
  *   - `regressionGreen === false`                     → reject (null ⇒ pass)

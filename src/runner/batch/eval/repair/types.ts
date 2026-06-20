@@ -114,6 +114,8 @@ export interface ValidateArgs {
   successPredicate?: SuccessPredicate
 }
 
+export type RepairValidationSource = "primary_rail" | "verify_cmd" | "repro" | "none"
+
 /** Pure-function context builder: given the running diff + the latest
  *  validator failure, produce the seed user message for the next round.
  *  No instance/dataset reads — same no-leak structural guarantee. */
@@ -124,6 +126,14 @@ export interface BuildRepairContextArgs {
   cumulativeDiff: string
   /** Bounded tail from the validator's failure (≤ ~2000 chars). */
   failTail: string
+  /** The exact gate the validator used for the previous round. Exposes WHY the
+   *  loop stayed red: primary rail, agent verify cmd, repro script, or no
+   *  runnable signal at all. */
+  validationSource?: RepairValidationSource
+  /** Exact command the validator ran for the previous round (when any). */
+  validationCmd?: string
+  /** Exit code observed from the validation gate (when a command actually ran). */
+  validationExitCode?: number
   /** Advisory typed-rail mismatch summary for the next round's seed. */
   predicateSummary?: string
   /** 1-based round number we are about to start (for prose only). */

@@ -35,6 +35,8 @@ import {
   knobsForSurface,
   resolveKnobs,
 } from "@/runner/knobs"
+import type { VerifySelectRegressionMode } from "@/runner/knobs/knobs/verify-select-regression"
+import type { VerifySelectReproMode } from "@/runner/knobs/knobs/verify-select-repro"
 // Side-effect: registers all bench/agent knobs so knobsForSurface("bench")
 // returns a populated map. Safe to import multiple times (module cached once).
 import "@/runner/knobs/knobs"
@@ -147,7 +149,10 @@ export const formatKnobValue = (value: unknown, unit: string | undefined): strin
  *  object (not Map) so it serialises cleanly through `JSON.stringify`. */
 export const knobsForReport = (
   state: BenchKnobState,
-): Record<string, { value: unknown; unit: string | undefined; display: string; source: string }> => {
+): Record<
+  string,
+  { value: unknown; unit: string | undefined; display: string; source: string }
+> => {
   const out: Record<
     string,
     { value: unknown; unit: string | undefined; display: string; source: string }
@@ -222,6 +227,18 @@ export interface BenchPosture {
    */
   readonly verifySelectConcurrency: number | undefined
   /**
+   * Verify-and-select regression hard-signal source. undefined preserves the
+   * existing eval-only PASS_TO_PASS behavior when available; explicit `discovered`
+   * is the no-oracle live-problem path; `off` is the ablation.
+   */
+  readonly verifySelectRegression: VerifySelectRegressionMode | undefined
+  /**
+   * Verify-and-select generated repro-consensus mode. undefined preserves legacy
+   * hard-gate behavior; `positive` makes self-generated repros soft-only; `off`
+   * removes the signal.
+   */
+  readonly verifySelectRepro: VerifySelectReproMode | undefined
+  /**
    * In-loop test execution (default TRUE = today's byte-identical behavior).
    * TRUE ⇒ the agent is told to run the repo's tests inside its own solve loop
    * (SWEBENCH_DIRECTIVE + verifyGuard + repair phase + repro hint). FALSE ⇒
@@ -284,6 +301,10 @@ const isReproValue = (v: unknown): v is { samples: number } =>
   typeof (v as { samples: unknown }).samples === "number"
 const isRepoMapValue = (v: unknown): v is { enabled: true } =>
   typeof v === "object" && v !== null && (v as { enabled?: unknown }).enabled === true
+const isVerifySelectRegressionMode = (v: unknown): v is VerifySelectRegressionMode =>
+  v === "discovered" || v === "gold" || v === "off"
+const isVerifySelectReproMode = (v: unknown): v is VerifySelectReproMode =>
+  v === "hard" || v === "positive" || v === "off"
 
 /**
  * Project a resolved {@link BenchKnobState} into the {@link BenchPosture}.
@@ -319,6 +340,12 @@ export const benchPostureFromState = (
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
   const verifySelectN = readKnobValue(state, "verify-select", isNumber)
   const verifySelectConcurrency = readKnobValue(state, "verify-select-concurrency", isNumber)
+  const verifySelectRegression = readKnobValue(
+    state,
+    "verify-select-regression",
+    isVerifySelectRegressionMode,
+  )
+  const verifySelectRepro = readKnobValue(state, "verify-select-repro", isVerifySelectReproMode)
   // Default-TRUE fence: only an explicit `false` from the knob flips it OFF.
   // Unset / any non-false value ⇒ undefined ⇒ inLoopExec stays true (today's
   // exact behavior).
@@ -357,6 +384,8 @@ export const benchPostureFromState = (
     repairRounds,
     verifySelectN,
     verifySelectConcurrency,
+    verifySelectRegression,
+    verifySelectRepro,
     inLoopExec,
     liveOverrides,
     preset: state.preset,
@@ -373,5 +402,3 @@ export const benchPostureFromState = (
     round0Minimal,
   }
 }
-
-

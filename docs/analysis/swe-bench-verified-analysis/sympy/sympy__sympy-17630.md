@@ -16,6 +16,13 @@ knowledge: K-Domain
 flags: [regression-trap, has-repro, cross-file-dep]
 ---
 
+## 로컬 quanta receipt (2026-06-20)
+
+- **PASS receipt**: durable sidecar `/Users/songmin/Library/quanta-codeagent-v3/bench/full-remote/report-i-007cd5902aad2e32c.json`.
+- **run**: `agentless-v1`, `gpt-5.5`, official swebench harness, 26 turns, 616B patch.
+- **patch**: `sympy/matrices/expressions/matexpr.py`에서 `if cls == Add: return mat_class(*matrices).doit(deep=False)` 추가. Gold의 `if mat_class == MatAdd:`와 syntactic form은 다르지만 official grader PASS.
+- **해석**: 이전 `_blockmul` 패치는 실패모드 RCA로 유지한다. 현재 상태는 active unresolved/model ceiling이 아니라 **single-shot localization variance + symptom-root split** 케이스다.
+
 ## 문제 요약
 `ZeroMatrix` 블록을 포함한 `BlockMatrix`를 한 번 블록곱하면 멀쩡하지만, 두 번 곱하면 `AttributeError: 'Zero' object has no attribute 'cols'`가 터진다. 이슈 제출자가 직접 진단한 근본 원인은 `b._blockmul(b)` 결과의 영(zero) 블록이 행렬 `ZeroMatrix`가 아니라 **스칼라 `sympy.core.numbers.Zero`** 로 바뀌어 들어간다는 점이다. 즉 행렬 덧셈 과정에서 `ZeroMatrix + ZeroMatrix`가 행렬형을 잃고 스칼라 `Zero`로 붕괴해, 다음 라운드의 `colblocksizes`가 `.cols`를 찾지 못한다.
 

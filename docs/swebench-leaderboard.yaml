@@ -18,6 +18,40 @@ about: 'SWE-bench Verified — internal results SSOT (machine-readable). Rendere
 crosscheck_policy_version: 1
 
 runs:
+# ── jun-20 lever measurements (knob state recorded for reproducibility) ──
+# NOTE on knob capture: report.json `knobs.resolved` records every REGISTERED,
+# preset-driven knob (source p=preset / e=env). GAP: `SIMPLICITY` + `TENTATIVE`
+# are wired as DIRECT gateOn/gateDisabled env reads in driver.ts, NOT registered
+# knobs, so they do NOT appear in `knobs.resolved` — they are recorded EXPLICITLY
+# below. FOLLOW-UP: register them as knobs so they auto-capture into report.json.
+- run_id: p0-tentative-ab-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench harness, EC2 backend SERIAL, spot terminated
+  knobs_resolved: 'fault-evidence=on(p), issue-hint=agentless(p), issue-hint-expected-actual=on(p), localize-phase=5turns(p), lsp=on(e), no-patch-breaker=on(p), patch-hygiene=on(p), primary-rail=on(p), read-outline=on(e), repair-escalation=on(p), repo-map=on(e), repro-test=5(p), retry-transient=3(p), test-runner=on(p), verification-plan=on(p)'
+  knobs_unregistered: 'SIMPLICITY=ON (default, env gate), TENTATIVE=ON-arm/OFF-arm (the A/B var)'
+  resolved_count: 2
+  scope: 'P0 tentative-patch retention A/B on 5 max_turns-prone (13417/22719/13212/25479/pylint-4604). ON 2/5 == OFF 2/5 (13417,22719) → regression==0. P0 ENGAGED on pylint-4604 (recovered verified 444B over 640B max_turns final) but it is 32-ceiling → no flip. Pure safety-net → promoted default-ON.'
+- run_id: p2-lean-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2 + QUANTA_BENCH_LEAN_PROMPT=1
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench harness, EC2 backend SERIAL, spot terminated
+  knobs_unregistered: 'SIMPLICITY=ON(default), TENTATIVE=ON(default), LEAN_PROMPT=ON (the A/B var)'
+  resolved_count: 2
+  scope: 'P2 lean-prompt (parallel-built SWEBENCH_DIRECTIVE_LEAN) A/B on the same 5-set. LEAN 2/5 == verbose 2/5 (13417,22719). NEUTRAL — no regression (the audit worry "gpt-5.4 wants structure → lean hurts" did NOT materialize); gain not shown (set does not discriminate over-prompting). Needs a type-matched over-prompting set.'
+- run_id: v3-select-regression-discrim-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v3-select-regression
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: LOCAL-only (EC2 deferred — parallel sweep contention); selectionTelemetry analysis is EC2-independent
+  knobs_resolved: 'verify-select=5(p), verify-select-regression=discovered(p), verify-select-repro=positive(p), patch-budget=on(p), round0-minimal=on(p), spec-fidelity-steer=on(p), fault-evidence=on(p), issue-hint=agentless(p), localize-phase=5turns(p), lsp=on(e), no-patch-breaker=on(p), patch-hygiene=on(p), primary-rail=on(p), repair-escalation=on(p), repro-test=5(p), retry-transient=3(p), verification-plan=on(p)'
+  resolved_count_local: 1
+  scope: '6 discriminating set (recoverable-missed + over-eng + ceiling). selectionTelemetry finding: verify-select REGRESSION ORACLE fails on django/pytest (baseValidatedRed=false → no validated repro authority → admissibleCount=0 → degrades to default candidate). Works on sympy (voterQuorum admits 3) — sympy-18763 [PASS local], a recoverable-H (2/17 frontier). sympy-12096 selection picked minimal single-file over 3-file over-broad. NEXT TARGET: make baseValidatedRed (discovered repo regression test, RED baseline) fire on django/pytest.'
 - run_id: ceiling-leverA-2026-06-19
   date: '2026-06-19'
   preset: agentless-v2 + QUANTA_BENCH_SIBLING (Lever A, knob default-OFF)
@@ -81,7 +115,9 @@ runs:
     but ❌ here — it took a different (subtly wrong) property-docstring approach (`val.fget` unwrap → sets fget.__doc__,
     which doesn't propagate to property.__doc__). Likely RUN-NOISE (7166 is approach-noisy across runs), NOT clearly
     steer-caused; needs a 2-3x re-run with steer on/off to disambiguate before defaulting the knob ON. Harder tiers
-    (pytest-5787 M, sympy-18763 H) not recovered by the steer alone. Net 5/9→6/9 (+2 genuine flips, −1 noise).
+    (pytest-5787 M, sympy-18763 H) not recovered by the steer alone. Later sidecar receipts resolved both
+    pytest-5787 (gpt-5.5) and sympy-18763 (gpt-5.4), so this unresolved list is historical for the
+    simplicity-steer A/B, not active board status. Net 5/9→6/9 (+2 genuine flips, −1 noise).
     Separate open issue: even when the patch is gold, the agent often max_turns_exhausts (finds the fix, then can't
     verify locally and over-runs) — a CONVERGENCE/lock-in lever distinct from over-engineering.
 - run_id: q13417-simplicity-2026-06-19
@@ -1009,7 +1045,7 @@ runs:
   model: gpt-5.4
   auth: chatgpt-oauth
   grading: official swebench python harness, on-demand EC2 (durable sidecar)
-  scope: 'COVERAGE EXPANSION — non-django E-class sweep harvest. 41 clean agentless-v2 passes across 7 repos: {'sklearn': 19, 'xarray': 5, 'sympy': 3, 'matplotlib': 4, 'sphinx': 8, 'astropy': 1, 'django': 1}. issue-hint=problem statement (legit), no gold/localize oracle.'
+  scope: "COVERAGE EXPANSION — non-django E-class sweep harvest. 41 clean agentless-v2 passes across 7 repos: {'sklearn': 19, 'xarray': 5, 'sympy': 3, 'matplotlib': 4, 'sphinx': 8, 'astropy': 1, 'django': 1}. issue-hint=problem statement (legit), no gold/localize oracle."
   resolved_count: 41
   resolved:
   - instance_id: astropy__astropy-13579
@@ -1323,7 +1359,7 @@ runs:
   model: gpt-5.4
   auth: chatgpt-oauth
   grading: official swebench python harness, on-demand EC2 (durable sidecar)
-  scope: 'E-class sweep sidecar harvest, 25 clean agentless-v2 across 7 repos: {'sphinx-doc': 4, 'matplotlib': 2, 'django': 8, 'pydata': 3, 'scikit-learn': 3, 'astropy': 3, 'sympy': 2}. NOTE: 5 (django 10973/13128/14017/15382/15930) were earlier-attempt fails now resolved on re-run with more turns (turn-limited flakiness, not contamination — RCA correction 2026-06-20).'
+  scope: "E-class sweep sidecar harvest, 25 clean agentless-v2 across 7 repos: {'sphinx-doc': 4, 'matplotlib': 2, 'django': 8, 'pydata': 3, 'scikit-learn': 3, 'astropy': 3, 'sympy': 2}. NOTE: 5 (django 10973/13128/14017/15382/15930) were earlier-attempt fails now resolved on re-run with more turns (turn-limited flakiness, not contamination — RCA correction 2026-06-20)."
   resolved_count: 25
   resolved:
   - instance_id: astropy__astropy-14508
@@ -1555,7 +1591,7 @@ runs:
   model: gpt-5.4
   auth: chatgpt-oauth
   grading: official swebench python harness, on-demand EC2
-  scope: 'Coverage sidecar harvest 9 ({'matplotlib': 3, 'django': 4, 'scikit-learn': 2}). incl django-13121 (earlier gap-fail, now PASS on v2 re-run).'
+  scope: "Coverage sidecar harvest 9 ({'matplotlib': 3, 'django': 4, 'scikit-learn': 2}). incl django-13121 (earlier gap-fail, now PASS on v2 re-run)."
   resolved_count: 9
   resolved:
   - instance_id: django__django-12754
@@ -1603,3 +1639,21 @@ runs:
     turns: 16
     preset: agentless-v2
     model: gpt-5.4
+
+- run_id: hardset-sidecar-correction-18763-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2 (durable sidecar report-i-0c5da49c3a3267012.json)
+  scope: 'Hardset RCA correction: sympy-18763 has an official PASS receipt. Earlier unresolved rows remain valid as historical failed attempts / patch-gen variance, not active model ceiling.'
+  resolved_count: 1
+  resolved:
+  - instance_id: sympy__sympy-18763
+    repo: sympy
+    turns: 115
+    preset: agentless-v2
+    model: gpt-5.4
+    patch_bytes: 528
+    repro_samples: 5
+    pass_to_pass_total: 141

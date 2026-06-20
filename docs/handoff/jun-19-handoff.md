@@ -122,6 +122,7 @@ SWE-bench Verified의 **천장(ceiling)** = 공개 프론티어 스캐폴드 17�
 - v1런: 0/1, `blockmatrix.py` 오localize(gold=`matexpr.py::_postprocessor` MatAdd 2줄).
 - **v2런 (pyright launch-proof READY = grounding LIVE)**: **또 0/1, owner_recall@1=0, 또 blockmatrix.py.** closure 사이드카 확정(first_edit_owner_match=0, synth_repro_base_red=0).
 - **oracle-localize A/B**(세션 중): 위치(matexpr.py)만 주면 **gpt-5.5가 gold급 fix → PASS.** ⇒ **localization이 병목, reasoning 천장 아님.**
+- **정정(2026-06-20)**: durable sidecar `report-i-007cd5902aad2e32c.json`에서 gpt-5.5/agentless-v1이 `matexpr.py` 패치로 official PASS(26t, 616B). 위 두 실패는 active ceiling이 아니라 **single-shot localization variance / symptom-root split 실패모드**로 보존.
 - **미해결**: trajectory 안 켜서 모델이 lsp_*를 *호출*했는지 미확인 → **①b 재런 trajectory ON 진행 중**(bg `bek8e6w86`).
 
 ## 할 것 (목적 + 근거 + ROI)

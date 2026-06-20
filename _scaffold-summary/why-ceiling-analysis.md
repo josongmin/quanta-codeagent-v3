@@ -3,8 +3,8 @@
 > ## ⚠️ 정정 (2026-06-19, 134-전수 census 반영 — 아래 본문보다 우선)
 > 이 문서의 "72 천장"은 **9개 부분집합 과대계수**였다. 공개 134개 전수 union으로 재계산한 **진짜 천장 = 32개**(`scaffold-solving-summary.md` §4). 9-subset 72 중 ~40개는 다른 제출(Sonar/Trae/Prometheus 등)이 실제로 푼다.
 > - **천장 32 = 134개 전부 실패**(Trae·Sonar 포함). 단 "풀 수 없다"의 증명 아님 — 우리 Opus-4.8은 census에 없음, 더 센 모델이면 깸.
-> - **EDGE-YES 태깅은 오라클 오염으로 무효**(적대감사 C5 → census로 확정). 증거: 내가 EDGE-YES로 골라 실측한 3개 중 **2개(`sphinx-7462`,`django-16667`)가 하필 #=0 진짜 천장**(아무도 못 푸는 걸 "회복 가능"이라 태깅). `sympy-17630`은 천장 아님(#=2: Sonar/opus4.5 + Prometheus/gpt5가 풂, **단 Sonar는 🔒closed라 흡수 불가**; Trae는 실패).
-> - **edge3 실측 0/3**: localize_score 분해 = django-16667 EXACT(합성 미스, localize 무관) / sphinx-7462 PARTIAL(multi-site) / sympy-17630 MISS(loc). 게다가 pyright+repro 둘 다 죽어 confounded(`jun-19-ceiling-bench-pyright-ami-gap`).
+> - **EDGE-YES 태깅은 오라클 오염으로 무효**(적대감사 C5 → census로 확정). 증거: 내가 EDGE-YES로 골라 실측한 3개 중 **2개(`sphinx-7462`,`django-16667`)가 하필 #=0 진짜 천장**(아무도 못 푸는 걸 "회복 가능"이라 태깅). `sympy-17630`은 천장 아님(#=2: Sonar/opus4.5 + Prometheus/gpt5가 풂, **단 Sonar는 🔒closed라 흡수 불가**; Trae는 실패)이고, 이후 quanta gpt-5.5도 clean sidecar PASS.
+> - **edge3 실측 0/3은 stale**: 당시 localize_score 분해 = django-16667 EXACT(합성 미스, localize 무관) / sphinx-7462 PARTIAL(multi-site) / sympy-17630 MISS(loc), pyright+repro confounded(`jun-19-ceiling-bench-pyright-ami-gap`). 이후 `sympy-17630`은 quanta gpt-5.5 PASS로 회복.
 > - **실제 회복 타겟 = 천장 32가 아니라 "#높은데 우리만 놓치는" 것**(예: `django-13417` #109). 천장은 우선순위↓.
 > - 결론: "병목=localization"은 **미확정**. n=3에서 loc-miss/multi-site/합성 1:1:1. ~36셋 wrong-surface rate 측정 전엔 단정 금지.
 
@@ -58,7 +58,7 @@ EDGE-YES ~14 (우리 차별기로 플립 plausible) / EDGE-MAYBE ~43 / EDGE-NO ~
 
 | 우리가 만든 것 | 공격하는 천장 클래스 | 회복 후보 |
 |---|---|---|
-| execution-trace localization (jun-17, sympy-23262 교훈) | symptom/cause split #2 | matplotlib-23299/23476/25479, sympy-17630/20428, sphinx-9229, django-11477/15973 |
+| execution-trace localization (jun-17, sympy-23262 교훈) | symptom/cause split #2 | matplotlib-23299/23476/25479, sympy-20428, sphinx-9229, django-11477/15973 (`sympy-17630`은 이후 quanta gpt-5.5 PASS receipt 확보) |
 | warm-LSP cross-file grounding + steer DEFAULT-ON (jun-17) | 멀티사이트 #3, cross-file dep | django-11400/13195/13212/16256, astropy-8707, sphinx-7462 |
 | agentless closure + test-feedback (jun-17 execfeedback) | overfit #1·#4, model-trust trap | sympy-20916/21930, astropy-7606/14182, django-16667/14315, sklearn류 |
 | regression-safety gating (patch-slice/staleness) | REGRESSION-TRAP (전 instance secondary) | pytest-10356, django P2P-heavy 다수 |

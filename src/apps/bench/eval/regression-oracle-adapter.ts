@@ -13,6 +13,7 @@
  * be supplied without touching the engine port.
  */
 
+import { pythonForRepoVersion } from "@/runner/batch/corpus/repo-version-python"
 import { execArgv } from "@/runner/batch/eval/exec"
 import {
   makeRegressionOracle,
@@ -20,6 +21,7 @@ import {
   type RegressionResult,
   type RunImpactedTestsPort,
 } from "@/runner/batch/eval/regression-oracle"
+import type { LocalEnvSelection } from "@/runtime"
 
 /** Default project-env pytest command over explicit node-ids. The patched
  *  repo is already installed by env-prep, so `python -m pytest <ids>` resolves
@@ -35,9 +37,36 @@ export const buildPytestArgv = (tests: readonly string[]): readonly string[] => 
   ...tests,
 ]
 
+/** Project-env pytest command over explicit file/node ids. This is the no-oracle
+ *  live-problem path: install the sandbox repo editable under the same per-repo
+ *  Python selection used by SWE-bench fallback tests, then run its native pytest
+ *  files. */
+export const buildProjectPytestArgv =
+  (repo: string | undefined, version: string | undefined) =>
+  (tests: readonly string[]): readonly string[] => [
+    "uvx",
+    "--quiet",
+    "--python",
+    pythonForRepoVersion(repo ?? "", version),
+    "--with",
+    "pytest",
+    "--with-editable",
+    ".",
+    "pytest",
+    "-x",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "--no-header",
+    ...tests,
+  ]
+
 /** The bench exec port is `execArgv` — argv form (no shell word-splitting of
  *  test ids) with the scrubbed env (no token inheritance). */
-const benchExec: RegressionExecPort = (argv, cwd, timeoutMs) => execArgv(argv, cwd, timeoutMs)
+const benchExec =
+  (localEnv: LocalEnvSelection | undefined): RegressionExecPort =>
+  (argv, cwd, timeoutMs) =>
+    execArgv(argv, cwd, timeoutMs, localEnv !== undefined ? { localEnv } : undefined)
 
 /** Regression check wall-clock cap (PASS_TO_PASS suites can be large). */
 const DEFAULT_TIMEOUT_MS = 300_000
@@ -54,6 +83,7 @@ export interface BenchRegressionOracle {
 /** Build the bench-wired oracle. `buildArgv` overridable for per-repo runners. */
 export const makeBenchRegressionOracle = (
   buildArgv: (tests: readonly string[]) => readonly string[] = buildPytestArgv,
+  options: { readonly localEnv?: LocalEnvSelection } = {},
 ): BenchRegressionOracle => {
   const port: RunImpactedTestsPort = makeRegressionOracle()
   return {
@@ -61,7 +91,7 @@ export const makeBenchRegressionOracle = (
       port.run({
         tests,
         sandbox,
-        exec: benchExec,
+        exec: benchExec(options.localEnv),
         timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS,
         buildArgv,
       }),

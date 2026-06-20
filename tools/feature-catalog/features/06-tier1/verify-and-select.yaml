@@ -39,21 +39,29 @@ evidence:
     - src/agent/verification-bundle/types.ts
     - src/agent/verification-bundle/score.ts
     - src/agent/verification-bundle/index.ts
+    - src/runner/batch/eval/impacted-test-discovery.ts
     - src/runner/batch/eval/regression-oracle.ts
     - src/apps/bench/eval/regression-oracle-adapter.ts
+    - src/apps/bench/eval/repo-regression-discovery-adapter.ts
     - src/runner/batch/eval/selection-executor.ts
     - src/runner/batch/eval/repair/resolved-consensus.ts
     - src/runner/knobs/knobs/verify-select.ts
     - src/runner/knobs/knobs/verify-select-concurrency.ts
+    - src/runner/knobs/knobs/verify-select-regression.ts
+    - src/runner/knobs/knobs/verify-select-repro.ts
+    - src/runner/knobs/presets.ts
   adrs: []
   tests:
     unit:
       - tests/unit/verification-bundle-score.test.ts
       - tests/unit/regression-oracle.test.ts
+      - tests/unit/impacted-test-discovery.test.ts
+      - tests/unit/repo-regression-discovery-adapter.test.ts
       - tests/unit/selection-executor.test.ts
       - tests/unit/resolved-consensus.test.ts
       - tests/unit/pass-to-pass-threading.test.ts
       - tests/unit/repro-consensus-selection-port.test.ts
+      - tests/unit/verify-select-regression-knob.test.ts
     integration: []
     contract: []
 knobs:
@@ -63,6 +71,12 @@ knobs:
   - name: verify-select-concurrency
     where: QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY
     purpose: "Max candidates generated concurrently; unset ⇒ sequential. >1 needs isolated generate. Throttle: instance-conc × this."
+  - name: verify-select-regression
+    where: QUANTA_BENCH_VERIFY_SELECT_REGRESSION
+    purpose: "Regression source for verify-select: unset/gold keeps eval-only PASS_TO_PASS; discovered runs no-oracle impacted native repo tests; off ablates."
+  - name: verify-select-repro
+    where: QUANTA_BENCH_VERIFY_SELECT_REPRO
+    purpose: "Generated repro consensus mode for verify-select: unset/hard preserves legacy reject; positive uses votes/k as soft-only; off ablates."
 deliberate_hold: null
 notes: |
   FAIL-OPEN is the encoding of the north-star: every nullable signal
@@ -72,7 +86,10 @@ notes: |
   files ∩ closure-ranked owners — this is what lets a root-cause sibling beat a
   symptom fixation). Both hard-gate signal ports are driver-ready: regression
   (TB, +3.42 lever in Trae's ablation; PASS_TO_PASS threading is the eval-only
-  follow-up) and patchedResolvedKofN (TC, makePatchedResolvedConsensus re-runs
-  the reproducing set on the patched tree — the strongest "actually fixed it"
-  signal, with all-crashed ⇒ null fail-open). L3, not L4: wired + hellgate-tested
-  but default-OFF and not yet A/B-measured.
+  follow-up; no-oracle `discovered` mode finds impacted native repo tests from
+  candidate source files, base-preflights them, and only rejects on candidate
+  regressions) and patchedResolvedKofN (TC, makePatchedResolvedConsensus re-runs
+  the reproducing set on the patched tree; `verify-select-repro=positive` demotes
+  that self-generated signal to soft-only AND skips eval-only gold calibration,
+  while unset preserves the legacy gold-calibrated hard gate). L3, not L4:
+  wired + hellgate-tested but default-OFF and not yet A/B-measured.

@@ -14,7 +14,7 @@
  * owner-coverage selection lets a sibling that touches the root-cause file win).
  *
  * Scoring signals assembled here:
- *   HARD  — baseValidatedRed (closure), applyClean (non-empty diff),
+ *   HARD  — baseValidatedRed (closure; `null` in no-oracle modes), applyClean (non-empty diff),
  *           regressionGreen (port, null=fail-open), patchedResolvedKofN (port,
  *           null=fail-open).
  *   SOFT  — minimality (RELATIVE across the candidate set: smallest diff = 1,
@@ -45,8 +45,9 @@ export interface Candidate {
   turns: number
   /** Repo-relative files the diff touches (for owner-coverage). */
   files: readonly string[]
-  /** The instance's baseValidatedRed (same for every candidate). */
-  baseValidatedRed: boolean
+  /** The instance's repro-authority gate state (same for every candidate).
+   *  `null` = selection mode does not require repro authority. */
+  baseValidatedRed: boolean | null
 }
 
 export interface SelectionPorts {
@@ -64,6 +65,12 @@ export interface ScoredEntry {
 }
 
 export interface SelectionResult {
+  /** Requested candidate count (`args.n`). */
+  attempted: number
+  /** Successful generate() calls BEFORE dedup. */
+  successfulGenerations: number
+  /** generate() calls that failed/aborted and were skipped. */
+  generationFailures: number
   /** Winning candidate (admissible best, else best-effort). null iff 0 generated. */
   winner: Candidate | null
   /** Per-candidate scoring (post-dedup), generation order. */
@@ -73,6 +80,8 @@ export interface SelectionResult {
   /** Distinct (deduped) candidate count. */
   generated: number
 }
+
+export type ResolvedKofNMode = "hard" | "soft"
 
 /** Compact, JSON-friendly per-candidate view (NO full patch — too big for the
  *  sidecar). The `reasons` carry the hard-gate rejections + soft signals from
@@ -91,6 +100,9 @@ export interface CandidateTelemetry {
  *  verify-select campaign self-diagnoses (which fix SITES the N candidates
  *  spanned, which were admissible, which won). NEVER fed to the agent loop. */
 export interface SelectionTelemetry {
+  attempted: number
+  successfulGenerations: number
+  generationFailures: number
   generated: number
   admissibleCount: number
   winnerId: string | null
@@ -100,6 +112,9 @@ export interface SelectionTelemetry {
 /** Project a {@link SelectionResult} into compact eval-only telemetry (drops the
  *  full candidate patches; keeps files + verdict). Pure. */
 export const summarizeSelection = (result: SelectionResult): SelectionTelemetry => ({
+  attempted: result.attempted,
+  successfulGenerations: result.successfulGenerations,
+  generationFailures: result.generationFailures,
   generated: result.generated,
   admissibleCount: result.admissibleCount,
   winnerId: result.winner?.id ?? null,
@@ -148,6 +163,9 @@ export const runSelection = async (args: {
   seeds: readonly (string | undefined)[]
   owners: ReadonlySet<string>
   ports: SelectionPorts
+  /** How to consume resolvedKofN. Default `hard` preserves legacy behavior.
+   *  `soft` turns votes/k into positive ranking credit and never hard-rejects. */
+  resolvedKofNMode?: ResolvedKofNMode
   /** Max candidates generated CONCURRENTLY. Default 1 = sequential (the shared-
    *  sandbox path — byte-identical to the pre-concurrency loop). >1 requires the
    *  `generate` port to ISOLATE each candidate (its own sandbox + deadline), or
@@ -159,25 +177,38 @@ export const runSelection = async (args: {
   // Results are collected in INDEX order regardless of completion timing, so
   // dedup ("first wins") and scoring stay deterministic.
   const limit = Math.max(1, Math.floor(args.concurrency ?? 1))
+  let generationFailures = 0
+  const tryGenerate = async (i: number): Promise<Candidate | null> => {
+    try {
+      return await args.ports.generate(i, args.seeds[i])
+    } catch {
+      generationFailures += 1
+      return null
+    }
+  }
   let raw: Candidate[]
   if (limit <= 1) {
     // Sequential: each candidate is a full agent run sharing the sandbox; the
     // driver resets the tree between them. BYTE-IDENTICAL to the original loop.
     raw = []
-    for (let i = 0; i < args.n; i++) raw.push(await args.ports.generate(i, args.seeds[i]))
+    for (let i = 0; i < args.n; i++) {
+      const candidate = await tryGenerate(i)
+      if (candidate !== null) raw.push(candidate)
+    }
   } else {
     // Bounded-parallel: at most `limit` generate() calls in flight at once.
     const sem = new Semaphore(limit)
-    raw = await Promise.all(
+    const maybeRaw = await Promise.all(
       Array.from({ length: args.n }, async (_, i) => {
         const release = await sem.acquire()
         try {
-          return await args.ports.generate(i, args.seeds[i])
+          return await tryGenerate(i)
         } finally {
           release()
         }
       }),
     )
+    raw = maybeRaw.filter((candidate): candidate is Candidate => candidate !== null)
   }
 
   // ── dedup by normalized diff (Trae's pruning lever) ──────────────────────
@@ -204,16 +235,21 @@ export const runSelection = async (args: {
     const c = cands[i] as Candidate
     const isEmpty = c.patch.trim() === ""
     const size = Buffer.byteLength(c.patch, "utf8")
+    const resolvedKofN = (await args.ports.resolvedKofN?.(c)) ?? null
+    const resolvedMode = args.resolvedKofNMode ?? "hard"
     const hard: HardGateSignals = {
       baseValidatedRed: c.baseValidatedRed,
       applyClean: !isEmpty,
       regressionGreen: (await args.ports.regression?.(c)) ?? null,
-      patchedResolvedKofN: (await args.ports.resolvedKofN?.(c)) ?? null,
+      patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
     }
     const soft: SoftScoreSignals = {
       declaredExpectedMatch: null,
       rubricScore: null,
-      voterQuorum: null,
+      voterQuorum:
+        resolvedMode === "soft" && resolvedKofN !== null && resolvedKofN.k > 0
+          ? resolvedKofN.votes / resolvedKofN.k
+          : null,
       // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
       minimality: isEmpty ? null : maxB === minB ? 1 : 1 - (size - minB) / (maxB - minB),
       // an empty no-patch earns NO owner-coverage credit (even if a caller hands
@@ -227,6 +263,9 @@ export const runSelection = async (args: {
   const winnerId = selectBest(ranked) ?? selectBestEffort(ranked)
   const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
   return {
+    attempted: args.n,
+    successfulGenerations: raw.length,
+    generationFailures,
     winner,
     scored,
     admissibleCount: scored.filter((s) => s.verdict.admissible).length,

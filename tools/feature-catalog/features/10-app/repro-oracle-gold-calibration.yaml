@@ -22,21 +22,29 @@ surface_integration:
   evidence:
     cli: "makeCalibratedReproConsensusPort wraps the resolvedKofN selection port"
     web: "no browser affordance"
-purpose: >-
-  ⚠️ EVAL-ONLY DIAGNOSTIC, NOT a production solving capability (needs the dataset
-  GOLD patch as ground truth; live tasks have no gold ⇒ UNAVAILABLE/inert off-bench).
-  Calibrates the noisy patched-resolved oracle by running the SAME probe on the
-  gold-patched tree: if the probe says "not resolved" on the known-correct fix, the
-  oracle is a CONFIRMED false-negative for that instance and the resolved gate FAILS
-  OPEN (never rejects a candidate on it). Two jobs: (1) MEASURE the oracle's
-  per-instance false-negative rate (the jun-20 root-cause readout — 75–79% of misses
-  are "right place, fix unrecognized by oracle"); (2) de-noise the bench score so a
-  broken oracle can't discard a correct candidate before official grading.
-  ⚠️ ASYMMETRIC LIMITATION: fail-open removes a false-RED, it does NOT add a
-  true-GREEN — selection then degrades to weak minimality+ownerCoverage, so the
-  correct candidate may still lose to a wrong sibling. Does NOT cheat grading: the
-  final verdict is the independent official harness; fail-open only changes WHICH
-  candidate is submitted, never makes a wrong patch pass.
+purpose: |
+  EVAL-ONLY DIAGNOSTIC, NOT a production solving capability. It needs the
+  dataset gold patch as ground truth, so live tasks have no gold and this is
+  unavailable off-bench.
+
+  It calibrates the noisy patched-resolved oracle by running the same probe on
+  the gold-patched tree. If the probe says "not resolved" on the known-correct
+  fix, the oracle is a confirmed false-negative for that instance and the
+  resolved gate fails open, meaning it never rejects a candidate on that
+  signal.
+
+  Two jobs:
+  1. Measure the oracle's per-instance false-negative rate, which is the jun-20
+     root-cause readout for the "right place, fix unrecognized by oracle" miss
+     family.
+  2. De-noise bench candidate selection so a broken oracle cannot discard a
+     correct candidate before official grading.
+
+  Asymmetric limitation: fail-open removes a false-red, but it does not add a
+  true-green. Selection then degrades to weak minimality plus ownerCoverage, so
+  the correct candidate may still lose to a wrong sibling. It does not cheat
+  grading: the final verdict is still the independent official harness; fail-open
+  only changes which candidate is submitted.
 evidence:
   code:
     - src/runner/batch/eval/repro-oracle-calibration.ts
@@ -51,3 +59,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
+notes: ""

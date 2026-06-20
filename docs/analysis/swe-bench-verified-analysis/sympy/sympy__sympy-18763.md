@@ -16,6 +16,13 @@ knowledge: K-Domain
 flags: [has-repro, regression-trap]
 ---
 
+## 로컬 quanta receipt (2026-06-20)
+
+- **PASS receipt**: durable sidecar `/Users/songmin/Library/quanta-codeagent-v3/bench/full-remote/report-i-0c5da49c3a3267012.json`.
+- **run**: `agentless-v2`, `gpt-5.4`, official swebench harness, 115 turns, 528B patch, repro 5/5 reproduced, P2P 141/141 clean.
+- **patch**: `latex_expr = self.parenthesize(expr, PRECEDENCE['Mul'])` in `LatexPrinter._print_Subs`. Gold의 unconditional `\left(...\right)` 문자열 래핑과는 다르지만 official grader PASS.
+- **해석**: 이전 conditional/over-engineering 실패 RCA는 failure-mode calibration으로 유효하다. 현재 상태는 active model ceiling이 아니라 **patch-gen variance / anchoring-risk** 케이스다.
+
 ## 문제 요약
 `Subs` 객체의 LaTeX 출력이 치환 대상 식(expression)을 괄호로 감싸지 않아, 곱(Mul) 등 더 큰 식 안에 들어갈 때 우선순위가 깨진다. 예: `3*Subs(-x+y, (x,), (1,))`가 `3 \left. - x + y \right|_{...}`로 출력되어 마치 `3`이 `-x`에만 곱해지는 것처럼 모호하게 보인다. 이슈는 원하는 정답(`3 \left. \left(- x + y\right) \right|_{...}`)까지 명시적으로 제시한다.
 

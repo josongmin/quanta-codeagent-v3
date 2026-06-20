@@ -22,6 +22,8 @@
  */
 import { classifyStdout } from "@/agent/repro-test/execute"
 import type {
+  BuildRepairContextArgs,
+  RepairValidationSource,
   RoundResult,
   RunOnceResult,
   RunRepairRoundsArgs,
@@ -53,10 +55,12 @@ export const runRepairRounds = async (
   let falseRed = isFalseRed(v0)
   for (let i = 1; i <= maxRounds; i++) {
     const predicateSummary = predicateSummaryOf(prevValidator)
+    const validationGate = validationGateContextOf(args, prevRun, prevValidator)
     const seed = args.buildContext({
       problem: args.problem,
       cumulativeDiff: prevRun.patch,
       failTail: prevValidator.failTail ?? "",
+      ...validationGate,
       ...(predicateSummary !== undefined ? { predicateSummary } : {}),
       round: i,
     })
@@ -101,6 +105,43 @@ const predicateSummaryOf = (v: ValidatorResult): string | undefined => {
   return predicate.mismatchReason !== undefined
     ? `Typed rail mismatch: ${predicate.mismatchReason}. Advisory only in v1; keep iterating until the same rail passes.`
     : "Typed rail mismatch: the typed rail contract did not match. Advisory only in v1; keep iterating until the same rail passes."
+}
+
+const validationGateContextOf = (
+  args: RunRepairRoundsArgs,
+  run: RunOnceResult,
+  validator: ValidatorResult,
+): Pick<
+  BuildRepairContextArgs,
+  "validationSource" | "validationCmd" | "validationExitCode"
+> => {
+  const exitCode = validator.observed?.exitCode
+  const withExit = <T extends { validationSource: RepairValidationSource; validationCmd?: string }>(
+    base: T,
+  ): T & { validationExitCode?: number } =>
+    exitCode !== undefined ? { ...base, validationExitCode: exitCode } : base
+
+  if (args.primaryRailStep !== undefined) {
+    return withExit({
+      validationSource: "primary_rail",
+      validationCmd: args.primaryRailStep.cmd,
+    })
+  }
+  const lastVerifyCmd = run.lastVerifyCmd
+  if ((lastVerifyCmd ?? "") !== "") {
+    return withExit({
+      validationSource: "verify_cmd",
+      validationCmd: lastVerifyCmd,
+    })
+  }
+  const reproPath = run.reproPath
+  if ((reproPath ?? "") !== "") {
+    return withExit({
+      validationSource: "repro",
+      validationCmd: `python "${reproPath}"`,
+    })
+  }
+  return { validationSource: "none" }
 }
 
 const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<ValidatorResult> => {

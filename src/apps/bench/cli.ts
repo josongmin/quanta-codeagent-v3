@@ -29,9 +29,11 @@ import { explainFailure } from "./analyze/explain"
 import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
 import { loadVerdictsFromFile } from "./analyze/verdicts"
 import type { GradeBackend } from "./remote/backend"
+import { D, provisionBox } from "./remote/box-session"
 import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
-import { createFullRemoteBackend, runWithRelaunch } from "./remote/full"
+import { buildForwardedBenchEnv, createFullRemoteBackend, runWithRelaunch } from "./remote/full"
+import { type PoolChunk, runPool } from "./remote/pool"
 import { createSshBackend } from "./remote/ssh"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
@@ -48,6 +50,8 @@ setTerminalIo({
 const KNOWN_SUBCOMMANDS = new Set([
   "run",
   "grade",
+  "pool",
+  "box",
   "remote",
   "diff",
   "explain",
@@ -310,6 +314,236 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   logFullRemoteOutcome(out)
 }
 
+/** Patch-gen concurrency on the box, clamped [1,16]. Mirrors full.ts. The shared
+ *  OAuth login rate (× box count) is the binding limit, not box CPU. */
+const resolvePoolConcurrency = (): number =>
+  Math.max(
+    1,
+    Math.min(
+      16,
+      Math.trunc(
+        Number(process.env.QUANTA_FULL_REMOTE_CONCURRENCY ?? process.env.QUANTA_BENCH_CONCURRENCY),
+      ) || 6,
+    ),
+  )
+
+/** Filesystem-safe runId from a chunk dataset path basename. `wave3-s0.jsonl` →
+ *  `wave3-s0`. Non-`[A-Za-z0-9_-]` collapse to `_` so the box-side `~/runs/<id>`
+ *  dir is always a single safe segment. */
+const runIdFromDataset = (path: string): string => {
+  const base = (path.split("/").pop() ?? path).replace(/\.jsonl?$/i, "")
+  return base.replace(/[^A-Za-z0-9_-]+/g, "_") || "chunk"
+}
+
+/**
+ * jun-20 box-lifecycle Phase 2/3 — persistent-pool full-remote. Bootstraps ONE
+ * box (or `--workers N`) ONCE and feeds it a QUEUE of dataset chunks, instead of
+ * re-paying the boot+rsync+install+warm tax per wave. Each chunk re-ships a FRESH
+ * token and writes to a runId-scoped box dir; a chunk whose box died is requeued.
+ *
+ *   quanta-bench pool --allow-remote-secrets --datasets c1.jsonl,c2.jsonl[,…] [--workers 1]
+ */
+const cmdPool = async (): Promise<void> => {
+  if (!hasFlag("--allow-remote-secrets")) {
+    logger.info(
+      "refused: pool runs patch-gen on remote boxes and needs an LLM credential there. " +
+        "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6).",
+    )
+    process.exit(2)
+  }
+  const datasetsArg = argValue("--datasets")
+  if (datasetsArg === undefined || datasetsArg.trim() === "") {
+    logger.info(
+      "usage: quanta-bench pool --allow-remote-secrets --datasets <c1.jsonl,c2.jsonl,…> [--workers 1] [--model m] [--ami id]",
+    )
+    process.exit(2)
+  }
+  const datasets = datasetsArg
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "")
+  const chunks: PoolChunk[] = datasets.map((datasetPath) => ({
+    runId: runIdFromDataset(datasetPath),
+    datasetPath,
+  }))
+  const workers = Math.max(1, Math.trunc(Number(argValue("--workers")) || 1))
+  const authFile =
+    process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`
+  const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset") ?? "agentless-v2-safe"
+  const model = argValue("--model") ?? "gpt-5.4"
+  const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
+  const onDemand = gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND")
+  const concurrency = resolvePoolConcurrency()
+  const recordTrajectory =
+    process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
+    process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
+    process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "0"
+  logger.info(
+    `[pool] ${chunks.length} chunk(s) across ${workers} box(es); per-box patch-gen concurrency=${concurrency} (× ${workers} hits the shared OAuth rate)`,
+  )
+  if (hasFlag("--dry-run")) {
+    printBlock(
+      [
+        "=== pool plan (dry-run) ===",
+        `workers=${workers}  preset=${preset}  model=${model}  concurrency=${concurrency}  onDemand=${onDemand}`,
+        ...chunks.map((c) => `chunk ${c.runId} ← ${c.datasetPath}  (box dir ~/runs/${c.runId}/)`),
+        "would reuse a warm idle box or provision one, grade each chunk SERIALLY, fetch reports, leave warm.",
+      ].join("\n"),
+    )
+    return
+  }
+  const wallMin = argValue("--max-box-wall-min")
+  const out = await runPool(chunks, {
+    provision: {
+      repoDir: process.cwd(),
+      authJson: "{}", // unused for provisioning; the per-chunk provider ships the real token
+      datasetPath: datasets[0] ?? "",
+      ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
+      onDemand,
+      keep: hasFlag("--keep"),
+      onLog: (m) => logger.info(m),
+    },
+    workers,
+    preset,
+    model,
+    concurrency,
+    ...(wallMin !== undefined ? { maxBoxWallMs: Math.max(0, Number(wallMin) || 0) * 60_000 } : {}),
+    // FRESH token per chunk — a long pool run never grades on a stale access_token.
+    authJsonProvider: () => readFileSync(authFile, "utf8"),
+    forwardedBenchEnv: buildForwardedBenchEnv(process.env),
+    recordTrajectory,
+    onLog: (m) => logger.info(m),
+  })
+  summarizePoolRun(out, chunks.length)
+}
+
+/** Print the per-chunk + total outcome of a pool run. */
+const summarizePoolRun = (out: Awaited<ReturnType<typeof runPool>>, chunkCount: number): void => {
+  let resolved = 0
+  let lost = 0
+  for (const r of out) {
+    resolved += r.result.resolved?.length ?? 0
+    if (r.lost) lost += 1
+    const tag = r.lost ? "❓ LOST" : "ok"
+    logger.info(
+      `[pool] chunk ${r.chunk.runId}: ${tag} — resolved ${r.result.resolved?.length ?? 0} | unresolved ${r.result.unresolved?.length ?? 0} | attempts ${r.attempts}`,
+    )
+  }
+  logger.info(`[pool] DONE — total resolved ${resolved} across ${chunkCount} chunks; ${lost} lost`)
+}
+
+/**
+ * jun-20 box-lifecycle — `bench box` manages the WARM box pool that `pool` now
+ * leaves alive for reuse. Boxes are SPOT (reclaimable) + TTL-self-terminating, so
+ * this is for visibility + manual cleanup of lingerers, plus pre-warming.
+ *
+ *   quanta-bench box ls                  # list running quanta-bench boxes (id/age/ip)
+ *   quanta-bench box rm <iid|all>        # terminate a box (or all of them)
+ *   quanta-bench box up                  # provision + bootstrap ONE warm box, leave it alive
+ */
+const BOX_TAG_FILTERS = [
+  "--filters",
+  "Name=tag:Name,Values=quanta-bench-full",
+  "Name=instance-state-name,Values=running,pending",
+]
+
+const awsText = async (
+  region: string,
+  args: string[],
+): Promise<{ code: number; out: string; err: string }> => {
+  const p = Bun.spawn(["aws", "--region", region, ...args], { stdout: "pipe", stderr: "pipe" })
+  const [out, err] = await Promise.all([
+    new Response(p.stdout).text(),
+    new Response(p.stderr).text(),
+  ])
+  return { code: await p.exited, out, err }
+}
+
+const cmdBoxLs = async (region: string): Promise<void> => {
+  const r = await awsText(region, [
+    "ec2",
+    "describe-instances",
+    ...BOX_TAG_FILTERS,
+    "--query",
+    "Reservations[].Instances[].[InstanceId,State.Name,LaunchTime,PublicIpAddress,InstanceType]",
+    "--output",
+    "text",
+  ])
+  if (r.code !== 0) {
+    logger.info(`[box] describe failed: ${r.err.trim()}`)
+    process.exit(1)
+  }
+  const lines = r.out.trim()
+  // printBlock (raw stdout) — logger.info mangles embedded \n to `?`.
+  printBlock(
+    lines === "" ? "[box] no running quanta-bench boxes" : `[box] running boxes:\n${lines}`,
+  )
+}
+
+const cmdBoxRm = async (region: string): Promise<void> => {
+  const target = positionals()[1]
+  if (target === undefined) {
+    logger.info("usage: quanta-bench box rm <instance-id|all>")
+    process.exit(2)
+  }
+  let ids: string[]
+  if (target === "all") {
+    const r = await awsText(region, [
+      "ec2",
+      "describe-instances",
+      ...BOX_TAG_FILTERS,
+      "--query",
+      "Reservations[].Instances[].InstanceId",
+      "--output",
+      "text",
+    ])
+    ids = r.out
+      .trim()
+      .split(/\s+/)
+      .filter((s) => s.startsWith("i-"))
+  } else {
+    ids = [target]
+  }
+  if (ids.length === 0) {
+    logger.info("[box] nothing to terminate")
+    return
+  }
+  const r = await awsText(region, ["ec2", "terminate-instances", "--instance-ids", ...ids])
+  logger.info(
+    r.code === 0
+      ? `[box] terminating: ${ids.join(", ")}`
+      : `[box] terminate failed: ${r.err.trim()}`,
+  )
+  if (r.code !== 0) process.exit(1)
+}
+
+const cmdBoxUp = async (): Promise<void> => {
+  const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
+  logger.info("[box] provisioning + bootstrapping ONE warm box (left alive for reuse)…")
+  const session = await provisionBox({
+    repoDir: process.cwd(),
+    authJson: "{}", // no patch-gen here; pool ships the real token per chunk
+    datasetPath: "",
+    ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
+    onDemand: gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND"),
+    keep: true, // leave it alive — that is the whole point of `box up`
+    onLog: (m) => logger.info(m),
+  })
+  logger.info(
+    `[box] WARM box ready: ${session.iid} (${session.ip}) — pool will reuse it. TTL self-terminates.`,
+  )
+}
+
+const cmdBox = async (): Promise<void> => {
+  const region = process.env.QUANTA_FULL_REMOTE_REGION ?? D.region
+  const action = positionals()[0] ?? "ls"
+  if (action === "ls") return cmdBoxLs(region)
+  if (action === "rm") return cmdBoxRm(region)
+  if (action === "up") return cmdBoxUp()
+  logger.info("usage: quanta-bench box <ls|rm <iid|all>|up>")
+  process.exit(2)
+}
+
 const cmdGrade = async (): Promise<void> => {
   if ((argValue("--mode") ?? "grade-only") === "full") return cmdGradeFullRemote()
 
@@ -420,7 +654,10 @@ const cmdLeaderboard = (): void => {
     const v = loadVerdictsFromFile(p)
     const meta = (() => {
       try {
-        return JSON.parse(readFileSync(p, "utf8")) as { model?: string; knobs?: { preset?: string } }
+        return JSON.parse(readFileSync(p, "utf8")) as {
+          model?: string
+          knobs?: { preset?: string }
+        }
       } catch {
         return {} as { model?: string; knobs?: { preset?: string } }
       }
@@ -493,6 +730,12 @@ const main = async (): Promise<void> => {
     case "grade":
     case "remote":
       await cmdGrade()
+      return
+    case "pool":
+      await cmdPool()
+      return
+    case "box":
+      await cmdBox()
       return
     case "diff":
       cmdDiff()

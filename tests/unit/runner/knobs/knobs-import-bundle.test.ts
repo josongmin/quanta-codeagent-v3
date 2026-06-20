@@ -54,6 +54,7 @@ import { ratelimitNoticeKnob } from "@/runner/knobs/knobs/ratelimit-notice"
 import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
 import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
+import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { reproVoteKnob } from "@/runner/knobs/knobs/repro-vote"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
@@ -66,6 +67,8 @@ import { testRunnerKnob } from "@/runner/knobs/knobs/test-runner"
 import { verificationPlanKnob } from "@/runner/knobs/knobs/verification-plan"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-concurrency"
+import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
+import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
@@ -100,6 +103,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(readOutlineKnob),
   asAnyKnob(repairEscalationKnob),
   asAnyKnob(repoMapKnob),
+  asAnyKnob(reproDoubtKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(reproVoteKnob),
   asAnyKnob(retryTransientKnob),
@@ -112,6 +116,8 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(verificationPlanKnob),
   asAnyKnob(verifySelectKnob),
   asAnyKnob(verifySelectConcurrencyKnob),
+  asAnyKnob(verifySelectRegressionKnob),
+  asAnyKnob(verifySelectReproKnob),
   asAnyKnob(workingStateKnob),
 ]
 

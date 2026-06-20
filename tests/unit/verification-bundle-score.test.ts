@@ -37,6 +37,10 @@ describe("scoreCandidate — hard gate (red-on-injection, each gate)", () => {
     expect(scoreCandidate({ ...HARD_OK, regressionGreen: null }, SOFT_NONE).admissible).toBe(true)
   })
 
+  it("baseValidatedRed=null (no-oracle mode) ⇒ admissible", () => {
+    expect(scoreCandidate({ ...HARD_OK, baseValidatedRed: null }, SOFT_NONE).admissible).toBe(true)
+  })
+
   it("baseValidatedRed=false ⇒ inadmissible", () => {
     expect(scoreCandidate({ ...HARD_OK, baseValidatedRed: false }, SOFT_NONE).admissible).toBe(
       false,

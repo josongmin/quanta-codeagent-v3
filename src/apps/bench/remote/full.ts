@@ -2,260 +2,45 @@
  * Full-remote executor (ADR-0536 §6 / P3) — runs BOTH patch-gen and grading on
  * a fresh EC2 box, for fully-detached long runs.
  *
- * ⚠️ SECURITY: full-remote needs an LLM credential ON the box (it runs the
- * agent, which executes model-generated code). The hardening here is mandatory:
- *   - only the SHORT-LIVED `access_token` is shipped — `refresh_token`/`id_token`
- *     are STRIPPED ({@link stripToAccessToken}); a leaked access_token expires
- *     and cannot mint new ones;
- *   - the token is piped over `ssh` STDIN (never a CLI arg / `ps` / local temp
- *     file / rsync artifact);
- *   - the box enforces IMDSv2 hop-1 (no metadata-credential pivot) + a
- *     `shutdown -h +<ttl>` self-terminate backstop, and is ALWAYS terminated
- *     (even on failure).
+ * jun-20 box-lifecycle refactor: the EXPENSIVE bootstrap surface (launch +
+ * cloud-init + rsync + bun install + phantom deps + swebench/uvx warm + pyright)
+ * and the per-chunk grade execution now live in {@link ./box-session} so a
+ * persistent pool ({@link ./pool}) can amortise ONE box over many chunks. This
+ * file is the THIN single-run wrapper: provision a box, grade once, terminate —
+ * plus the caller-level instance-aware relaunch ({@link runWithRelaunch}).
  *
- * NOTE: actually invoking `run()` ships a credential across a trust boundary and
- * may be blocked by the harness; that's by design. The executor + its security
- * invariants are fully unit-tested offline via an injected {@link SpawnFn}.
+ * ⚠️ SECURITY: full-remote needs an LLM credential ON the box (it runs the agent,
+ * which executes model-generated code). The hardening lives in box-session.ts and
+ * is unchanged: only the SHORT-LIVED access_token is shipped (refresh/id stripped),
+ * over ssh STDIN, with IMDSv2 hop-1 + TTL self-terminate + ALWAYS-terminate. The
+ * whole flow is unit-tested offline via an injected SpawnFn.
  */
-import { mkdirSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
 import { errMessage } from "@/shared"
-import { loadVerdicts } from "../analyze/verdicts"
-import { benchHome } from "../corpus"
-import { defaultSpawn, type SpawnFn } from "./backend"
+import {
+  buildForwardedBenchEnv,
+  coveredInstances,
+  D,
+  type FullRemoteConfig,
+  type FullRemoteResult,
+  gradeChunkOnBox,
+  provisionBox,
+} from "./box-session"
 
-/** Durable dir for fetched full-remote artifacts (predictions / report / closure
- *  sidecar / trajectory). NEVER /tmp — the OS reaps it on the next session and
- *  silently destroys the only post-mortem signal (2026-06-19: lost the patches
- *  needed to RCA a grading false-negative). Lives under benchHome() like the
- *  rest of bench's persistent output. */
-const fullRemoteArtifactDir = (): string => {
-  const dir = join(benchHome(), "full-remote")
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
-
-export interface FullRemoteConfig {
-  /** Local quanta repo to rsync to the box (excludes node_modules/.git). */
-  readonly repoDir: string
-  /** RAW chatgpt.json content (the caller reads it; we strip it here). */
-  readonly authJson: string
-  /** Local swebench instances.jsonl. */
-  readonly datasetPath: string
-  /** Subset to run (default: all rows in the dataset). */
-  readonly instanceIds?: readonly string[]
-  /** Bench preset. Default `agentless-v2-safe`. */
-  readonly preset?: string
-  /** Model id (predictions/report naming). Default `gpt-5.4`. */
-  readonly model?: string
-  readonly dryRun?: boolean
-  readonly spawn?: SpawnFn
-  /** Progress sink — called at each stage so a long run isn't a silent black box. */
-  readonly onLog?: (msg: string) => void
-  /** Injectable sleep (test seam — default real setTimeout). */
-  readonly sleep?: (ms: number) => Promise<void>
-  /** Max cloud-init readiness polls (test seam — default 30 × 10s ≈ 5min). */
-  readonly maxReadyPolls?: number
-  readonly region?: string
-  readonly ami?: string
-  readonly instanceType?: string
-  readonly keyName?: string
-  readonly keyPath?: string
-  readonly subnetId?: string
-  readonly vpcId?: string
-  readonly sgName?: string
-  readonly diskGb?: number
-  readonly ttlMinutes?: number
-  readonly keep?: boolean
-  /** Launch ON-DEMAND instead of spot. Spot is ~3× cheaper but AWS reclaims it
-   *  on capacity pressure — observed in ap-northeast-2 reclaiming c7i boxes in
-   *  4–17 min, killing runs faster than relaunch can recover. On-demand has no
-   *  reclaim. Default false (spot). */
-  readonly onDemand?: boolean
-}
-
-const D = {
-  region: "ap-northeast-2",
-  // PREBAKED AMI (quanta-bench-easydjango, 2026-06-17): docker + uv + the swebench
-  // easy-django eval images already pulled. Skips the cold cloud-init image-pull
-  // that dominated bootstrap (the stock ubuntu-22.04 ami-0afe1fd15675c3f15 re-pulled
-  // GB of swebench images every launch). userData stays idempotent (re-running
-  // present installs is fast; bun is still installed there). Override via cfg.ami.
-  ami: "ami-04c2cdd2e17b15779",
-  instanceType: "c7i.8xlarge",
-  keyName: "pickinstead_korea.pem",
-  keyPath: "~/Downloads/pickinstead_korea.pem",
-  subnetId: "subnet-9c13f1e7",
-  vpcId: "vpc-4340a92a",
-  sgName: "quanta-bench-sg",
-  diskGb: 600,
-  ttlMinutes: 180,
-  preset: "agentless-v2-safe",
-  model: "gpt-5.4",
-} as const
-
-/**
- * Reduce a chatgpt.json to the MINIMUM the box needs: the short-lived
- * `access_token` + non-secret account fields. The long-lived `refresh_token`
- * and `id_token` are dropped so a box compromise can't mint fresh credentials.
- */
-/** Placeholder for the long-lived secrets we refuse to ship. The token-store
- *  loader only requires `refresh_token`/`id_token` to be NON-EMPTY strings — it
- *  never uses them for a short run (access_token is valid + never refreshed). */
-const REDACTED = "REDACTED-not-shipped-to-remote"
-
-export const stripToAccessToken = (authJson: string): string => {
-  const parsed = JSON.parse(authJson) as Record<string, unknown>
-  // Fail fast: a token file with no usable access_token would still ship (with
-  // REDACTED placeholders) and the box would run 0 turns / empty patch after a
-  // full provision cycle — an expensive silent waste. Catch it before launch.
-  if (typeof parsed.access_token !== "string" || parsed.access_token === "") {
-    throw new Error(
-      "[full-remote] auth json has no usable access_token — cannot run patch-gen on the box " +
-        "(re-login locally: `quanta /login`).",
-    )
-  }
-  const safe: Record<string, unknown> = {}
-  for (const k of ["access_token", "account_id", "expires_at", "last_refresh", "plan_type"]) {
-    if (parsed[k] !== undefined) safe[k] = parsed[k]
-  }
-  // The loader hard-requires non-empty refresh_token + id_token fields. Satisfy
-  // the shape with REDACTED placeholders so the REAL long-lived secrets stay
-  // home — for a short run the access_token never expires, so refresh (which
-  // would need the real value) is never invoked.
-  safe.refresh_token = REDACTED
-  safe.id_token = REDACTED
-  return JSON.stringify(safe)
-}
-
-/**
- * Packages `src/` imports that are NOT declared in package.json/bun.lock (they
- * survive locally only because they sit in a dev's node_modules). A clean
- * `bun install` on a fresh box misses them, so full-remote `bun add`s them.
- * All pure-JS (no native ABI) so they install cleanly on the linux box.
- * FIXME: these belong in the repo's package.json — a fresh clone breaks without
- * them. (Discovered 2026-06-16 via the full-remote clean-box run.)
- */
-export const PHANTOM_DEPS = [
-  "turndown",
-  "@secretlint/core",
-  "@secretlint/secretlint-rule-preset-recommend",
-  "@secretlint/types",
-  "write-file-atomic",
-  "csv-parse",
-] as const
-
-const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
-
-/** Single-quote a value for safe interpolation into a remote bash command
- *  string. Without this, a preset/model/instance-id containing a space, `;`,
- *  `$(...)`, backtick, or `|` would break out of the intended command (the
- *  token is piped over STDIN and is safe, but these env/flag values are not). */
-const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
-
-/** Keys set EXPLICITLY in the remote command — excluded from the generic forward
- *  to avoid double-assignment. */
-const EXPLICIT_BOX_ENV: ReadonlySet<string> = new Set([
-  "QUANTA_BENCH_PRESET",
-  "QUANTA_BENCH_CONCURRENCY",
-  "QUANTA_BENCH_RECORD_TRAJECTORY",
-])
-
-/**
- * Build the `KEY=val ` prefix that forwards the operator's local bench knobs
- * (every set, non-empty `QUANTA_BENCH_*` except the explicitly-handled ones) into
- * the remote box command. PURE — deterministic over the given env. Sorted for a
- * stable command string. Each value is shell-quoted.
- *
- * WHY this exists as a tested seam: without forwarding, env-only knobs that are
- * NOT bundled in any preset (QUANTA_BENCH_SPEC_FIDELITY_STEER /
- * QUANTA_BENCH_VERIFICATION_PLAN / …) never reach the box, so a remote experiment
- * arm is SILENTLY INERT and the whole A/B reads as a null effect (jun-16
- * env-forwarding bug class). The test pins that the experiment knobs survive.
- */
-/** Non-`QUANTA_BENCH_`-prefixed env knobs that ALSO must reach the box. These
- *  are runtime-config dials read by the bench runner itself (not preset-bundled,
- *  not BENCH-prefixed) — without forwarding they silently fall back to the box
- *  default. jun-20: `QUANTA_MAX_TURNS` (→ `maxTurnsBatch`) was stuck at the
- *  preset 60 on the box, so complex instances `max_turns_exhausted` even when a
- *  higher local budget was set. Same env-forwarding bug class the BENCH filter
- *  guards against. */
-const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set(["QUANTA_MAX_TURNS"])
-
-export const buildForwardedBenchEnv = (env: NodeJS.ProcessEnv): string =>
-  Object.keys(env)
-    .filter(
-      (k) =>
-        (k.startsWith("QUANTA_BENCH_") || FORWARD_EXTRA_ENV.has(k)) &&
-        !EXPLICIT_BOX_ENV.has(k) &&
-        env[k] !== undefined &&
-        env[k] !== "",
-    )
-    .sort()
-    .map((k) => `${k}=${shq(env[k] as string)} `)
-    .join("")
-
-const userData = (ttl: number): string =>
-  [
-    "#!/bin/bash",
-    "set -eux",
-    `shutdown -h +${ttl}`,
-    // ripgrep (jun-19): the `grep` tool AND the new `find_references` tool both
-    // shell out to `rg`. It was MISSING from every bench box → both returned
-    // "rg: command not found" and the agent silently fell back to bash grep
-    // (measured on django-11400: 5/5 grep-tool calls + find_references all failed).
-    // Installing it un-breaks the grep tool too, not just find_references.
-    "apt-get update -y && apt-get install -y docker.io git curl unzip ripgrep",
-    "systemctl enable --now docker",
-    "usermod -aG docker ubuntu",
-    "su - ubuntu -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'",
-    "su - ubuntu -c 'curl -fsSL https://bun.sh/install | bash'",
-    // jun-19: the LSP nav-grounding lever (DEFAULT-ON since jun-17) was 100%
-    // INERT on every bench box — `pyright-langserver` is not installed, so the
-    // shared nav session failed to ready on every instance ("Executable not
-    // found in $PATH"). The box has neither node nor pyright. `uv tool install
-    // pyright` lands the PyPI wrapper (which self-manages a pinned node) at
-    // ~/.local/bin/pyright-langserver, which remoteRun already puts on PATH.
-    // The trailing `pyright --version` warms the one-time node download so the
-    // first instance doesn't eat that latency. Fail-OPEN (`|| true`): grounding
-    // is best-effort — a pyright install hiccup must never abort the bootstrap
-    // (`set -eux`) and kill the whole bench run. When absent the agent simply
-    // degrades to no nav tools (the pre-jun-19 behaviour).
-    // jun-19 hardening: the prior line warmed `pyright` (CLI) but the LSP
-    // adapter spawns `pyright-langserver`; if uv only linked `pyright` the nav
-    // session still failed "not found". Now we (1) install, (2) warm the node
-    // download via `pyright --version`, (3) GUARANTEE a `pyright-langserver` on
-    // PATH by symlinking it from the uv tool venv when uv didn't expose it, and
-    // (4) warm the langserver binary itself. All fail-OPEN (`|| true`).
-    "su - ubuntu -c '~/.local/bin/uv tool install pyright >/dev/null 2>&1 || true'",
-    "su - ubuntu -c '~/.local/bin/pyright --version >/dev/null 2>&1 || true'",
-    "su - ubuntu -c 'test -x ~/.local/bin/pyright-langserver || ln -sf \"$(find ~/.local/share/uv/tools/pyright -name pyright-langserver -type f 2>/dev/null | head -1)\" ~/.local/bin/pyright-langserver 2>/dev/null || true'",
-    "su - ubuntu -c '~/.local/bin/pyright-langserver --version >/dev/null 2>&1 || true'",
-  ].join("\n")
-
-export interface FullRemoteResult {
-  readonly reportPath?: string
-  readonly resolved?: readonly string[]
-  readonly unresolved?: readonly string[]
-  readonly errored?: readonly string[]
-  readonly emptyPatch?: readonly string[]
-  readonly dryRun?: boolean
-  readonly plan?: readonly string[]
-}
-
-/** Every instance that earned ANY verdict in `r` — resolved / unresolved /
- *  errored / emptyPatch. The COMPLEMENT (an expected instance absent from all
- *  four) is a box-loss: spot reclaim or ssh-255 killed the box before that
- *  instance's verdict was written. A grade-concurrency pipeline spreads grading
- *  across the run, so a mid-run death leaves a PARTIAL report — exactly the case
- *  the old all-or-nothing empty-check missed (silent under-count). */
-export const coveredInstances = (r: FullRemoteResult): Set<string> =>
-  new Set<string>([
-    ...(r.resolved ?? []),
-    ...(r.unresolved ?? []),
-    ...(r.errored ?? []),
-    ...(r.emptyPatch ?? []),
-  ])
+// Re-export the public surface so existing importers (tests + callers) keep
+// resolving these from "./full" after the box-session.ts extraction.
+export {
+  buildForwardedBenchEnv,
+  coveredInstances,
+  createLineStreamer,
+  type FullRemoteConfig,
+  type FullRemoteResult,
+  fullRemoteArtifactDir,
+  gradeChunkOnBox,
+  PHANTOM_DEPS,
+  provisionBox,
+  pyrightLaunchProofVerdict,
+  stripToAccessToken,
+} from "./box-session"
 
 export interface RelaunchOutcome {
   readonly resolved: string[]
@@ -340,72 +125,32 @@ export const runWithRelaunch = async (
   }
 }
 
-/**
- * Reassemble a byte/chunk stream into COMPLETE lines and `emit` each one (blank
- * lines dropped). A trailing partial line (no newline yet) is held in the buffer
- * until its newline arrives — so a line split across two stdout chunks
- * ("Instances comp" + "leted: 1\n") is emitted ONCE, intact, not as fragments.
- * This is what makes the streamed remote-run feed readable instead of garbled.
- */
-export const createLineStreamer = (emit: (line: string) => void): ((chunk: string) => void) => {
-  let buf = ""
-  return (chunk: string) => {
-    buf += chunk
-    let nl = buf.indexOf("\n")
-    while (nl !== -1) {
-      const line = buf.slice(0, nl)
-      buf = buf.slice(nl + 1)
-      if (line.trim() !== "") emit(line)
-      nl = buf.indexOf("\n")
-    }
-  }
-}
-
-/**
- * #1-P0 (jun-19 audit) — LSP-grounding launch-proof verdict (PURE, testable).
- *
- * Given the box-side pyright probe result, decide whether LSP grounding is LIVE
- * or INERT for this run. The localize-phase steer (DEFAULT-ON under
- * agentless-v1/v2) tells the model to call lsp_definition/lsp_references, but
- * EVERY nav call silently returns "unavailable" if pyright-langserver is not
- * launchable on the box — grounding becomes THEATER and the report cannot
- * distinguish "model ignored the steer" from "pyright was never there" (the
- * jun-16/19 inert bug class). userData installs pyright fail-open (`|| true`),
- * so this verdict drives a LOUD non-fatal WARNING when it did not land — making
- * an inert-grounding run OBSERVABLE instead of silent. INERT ⇒ ready:false.
- */
-export const pyrightLaunchProofVerdict = (probe: {
-  code: number
-  stdout: string
-}): { ready: boolean; detail: string } => {
-  const out = (typeof probe.stdout === "string" ? probe.stdout : "").trim()
-  if (probe.code !== 0 || out === "" || /PYRIGHT_MISSING/.test(out)) {
-    return { ready: false, detail: out.slice(-200) }
-  }
-  return { ready: true, detail: out }
-}
-
-export const createFullRemoteBackend = (
-  cfg: FullRemoteConfig,
-): { run: () => Promise<FullRemoteResult> } => {
-  const spawn = cfg.spawn ?? defaultSpawn
-  const region = cfg.region ?? D.region
-  const keyPath = cfg.keyPath ?? D.keyPath
-  const ttl = cfg.ttlMinutes ?? D.ttlMinutes
-  const preset = cfg.preset ?? D.preset
-  const model = cfg.model ?? D.model
+/** Dry-run plan lines — printed instead of provisioning anything. */
+const dryRunPlan = (cfg: FullRemoteConfig): readonly string[] => {
   const onDemand = cfg.onDemand ?? false
   const marketLabel = onDemand ? "on-demand" : "spot"
-  // Patch-gen concurrency on the remote box (c7i.8xlarge = 32 vCPU). Default 6 —
-  // the binding limit is the shared gpt-5.4 login rate, not box CPU. Serial
-  // (the prior implicit default) ran ~10 min/instance and risked the TTL on a
-  // 12+ instance run. Override via QUANTA_FULL_REMOTE_CONCURRENCY OR the alias
-  // QUANTA_BENCH_CONCURRENCY (the natural name — jun-20: setting only the latter
-  // silently ran conc=6 because full.ts CLOBBERS it on the box, causing a 6-box
-  // ×6 = 36-loop OAuth throttle burst that confounded a whole overnight run). The
-  // box concurrency × box count is what hits the shared token, so honor either
-  // name. Clamped [1,16]. Forwarded to the box `bench run` via QUANTA_BENCH_CONCURRENCY.
-  const concurrency = Math.max(
+  const ttl = cfg.ttlMinutes ?? D.ttlMinutes
+  const preset = cfg.preset ?? D.preset
+  const concurrency = resolveConcurrency()
+  return [
+    `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} ${marketLabel} (IMDSv2 hop-1, shutdown -h +${ttl})`,
+    `[dry-run] would bootstrap bun+uv+pyright langserver, then rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
+    "[dry-run] would ship STRIPPED token over ssh stdin (access_token only; refresh/id dropped)",
+    `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset}, patch-gen concurrency=${concurrency}, grading SERIAL [concurrent grading false-negatives — see box-session.ts])`,
+    "[dry-run] would scp report+observe back, then terminate the box",
+  ]
+}
+
+/**
+ * Patch-gen concurrency on the remote box (c7i.8xlarge = 32 vCPU). Default 6 —
+ * the binding limit is the shared gpt-5.4 login rate, not box CPU. Override via
+ * QUANTA_FULL_REMOTE_CONCURRENCY OR the alias QUANTA_BENCH_CONCURRENCY (jun-20:
+ * setting only the latter silently ran conc=6 because full.ts CLOBBERS it on the
+ * box). The box concurrency × box count is what hits the shared token, so honor
+ * either name. Clamped [1,16].
+ */
+const resolveConcurrency = (): number =>
+  Math.max(
     1,
     Math.min(
       16,
@@ -414,596 +159,51 @@ export const createFullRemoteBackend = (
       ) || 6,
     ),
   )
-  const keep = cfg.keep ?? false
+
+/**
+ * Single-run full-remote backend: provision a fresh box, run ONE patch-gen +
+ * grading chunk, terminate. The bootstrap + grade execution are owned by
+ * {@link ./box-session}; this wrapper just wires the lifecycle (and the dry-run
+ * plan). For multi-chunk amortisation use {@link ./pool}.
+ */
+export const createFullRemoteBackend = (
+  cfg: FullRemoteConfig,
+): { run: () => Promise<FullRemoteResult> } => {
+  const preset = cfg.preset ?? D.preset
+  const model = cfg.model ?? D.model
   const log = cfg.onLog ?? (() => {})
+  const concurrency = resolveConcurrency()
   // Make the EFFECTIVE box concurrency observable up-front (the jun-20 confound
   // was invisible because only the box-side echoed it). With N boxes this is the
   // per-box loop count whose product hits the shared login rate.
-  log(`[full-remote] patch-gen concurrency=${concurrency} per box (override: QUANTA_FULL_REMOTE_CONCURRENCY | QUANTA_BENCH_CONCURRENCY)`)
-
-  const sgName = cfg.sgName ?? D.sgName
-  const vpcId = cfg.vpcId ?? D.vpcId
-  const aws = (args: readonly string[]) => spawn("aws", ["--region", region, ...args])
-  /** ssh helper bound to the resolved host (`ubuntu@<ip>`). Token, when given,
-   *  goes over STDIN — never an argv. Short connect-timeout so a closed :22
-   *  fails fast instead of the default ~2min hang.
-   *
-   *  NOTE on keepalive: a tight `ServerAliveInterval=15 / CountMax=4` (60s grace)
-   *  was tried to reap a one-off 65-min dead-box hang, but it KILLED healthy long
-   *  runs — during docker grading the box is CPU-saturated and sshd cannot answer
-   *  keepalive probes within 60s, so ssh tore down healthy sessions (`exit 255`,
-   *  empty run.log) on 2/2 grading calls. The long grading session must tolerate
-   *  a busy-but-alive box, so we do NOT set an aggressive keepalive here; the rare
-   *  truly-dead-box hang is bounded by the OUTER `timeout` the caller wraps. */
-  const sshTo = (
-    host: string,
-    remoteCmd: string,
-    input?: string,
-    onData?: (chunk: string) => void,
-  ) =>
-    spawn(
-      "ssh",
-      [
-        "-i",
-        keyPath,
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-o",
-        "ConnectTimeout=15",
-        host,
-        remoteCmd,
-      ],
-      ...(input !== undefined || onData !== undefined
-        ? [
-            {
-              ...(input !== undefined ? { input } : {}),
-              ...(onData !== undefined ? { onData } : {}),
-            },
-          ]
-        : []),
-    )
-
-  // Surface the box's streamed stdout LIVE, each COMPLETE line via `log()` with a
-  // `[box]` prefix — turns the otherwise-silent multi-minute remote `bench run`
-  // into a live feed (instance starts, grading, verdicts).
-  const makeLineStreamer = (): ((chunk: string) => void) =>
-    createLineStreamer((line) => log(`[box] ${line}`))
-
-  /** Find-or-create the SG + open :22. Without an attached SG the box lands in
-   *  the default SG (no inbound :22) ⇒ ssh times out.
-   *
-   *  Ingress is `0.0.0.0/0` (public) — the operator opted into it; SSH is
-   *  key-only (no password auth on the Ubuntu AMI) and the box is throwaway +
-   *  TTL-terminated, so public :22 is acceptable and avoids a brittle public-IP
-   *  lookup. Tighten via a tagged SG if you need IP-restricted. */
-  const ensureSecurityGroup = async (): Promise<string> => {
-    const found = await aws([
-      "ec2",
-      "describe-security-groups",
-      "--filters",
-      `Name=group-name,Values=${sgName}`,
-      "--query",
-      "SecurityGroups[0].GroupId",
-      "--output",
-      "text",
-    ])
-    // A FAILED describe is a connectivity/credentials problem — do NOT mask it by
-    // blindly creating (the SG likely already exists). Surface it; a re-run when
-    // the network recovers will find the existing SG.
-    if (found.code !== 0) {
-      throw new Error(
-        `[full-remote] could not reach EC2 (${region}) — network/credentials? : ${found.stderr.trim()}`,
-      )
-    }
-    let sgId = oneLine(found.stdout)
-    if (sgId === "" || sgId === "None") {
-      const created = await aws([
-        "ec2",
-        "create-security-group",
-        "--group-name",
-        sgName,
-        "--description",
-        "quanta bench box",
-        "--vpc-id",
-        vpcId,
-        "--query",
-        "GroupId",
-        "--output",
-        "text",
-      ])
-      if (created.code !== 0) {
-        throw new Error(
-          `[full-remote] create-security-group failed (code ${created.code}): ${created.stderr}`,
-        )
-      }
-      sgId = oneLine(created.stdout)
-    }
-    // Open :22 publicly. A DUPLICATE rule returns non-zero (tolerated — already
-    // open). A REAL failure (wrong VPC / perms) fails fast: otherwise the box
-    // launches into an SG with no :22 and the only symptom is a misleading
-    // ssh/cloud-init timeout minutes later.
-    const auth = await aws([
-      "ec2",
-      "authorize-security-group-ingress",
-      "--group-id",
-      sgId,
-      "--protocol",
-      "tcp",
-      "--port",
-      "22",
-      "--cidr",
-      "0.0.0.0/0",
-    ])
-    if (auth.code !== 0 && !/Duplicate/i.test(auth.stderr)) {
-      throw new Error(
-        `[full-remote] authorize :22 ingress failed (code ${auth.code}): ${auth.stderr}`,
-      )
-    }
-    return sgId
-  }
-
-  const plan = (): readonly string[] => [
-    `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} ${marketLabel} (IMDSv2 hop-1, shutdown -h +${ttl})`,
-    `[dry-run] would bootstrap bun+uv+pyright langserver, then rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
-    "[dry-run] would ship STRIPPED token over ssh stdin (access_token only; refresh/id dropped)",
-    `[dry-run] would run: bun run bench run --swebench <dataset> --grade-backend local (preset=${preset}, patch-gen concurrency=${concurrency}, grading SERIAL [concurrent grading false-negatives — see full.ts])`,
-    "[dry-run] would scp report+observe back, then terminate the box",
-  ]
+  log(
+    `[full-remote] patch-gen concurrency=${concurrency} per box (override: QUANTA_FULL_REMOTE_CONCURRENCY | QUANTA_BENCH_CONCURRENCY)`,
+  )
 
   const run = async (): Promise<FullRemoteResult> => {
-    if (cfg.dryRun) return { dryRun: true, plan: plan() }
+    if (cfg.dryRun) return { dryRun: true, plan: dryRunPlan(cfg) }
 
-    log("[full-remote] ensuring security group (:22 from your IP)…")
-    const sgId = await ensureSecurityGroup()
-
-    // Instance-type fallbacks on capacity errors. The subnet/AZ is DELIBERATELY
-    // NOT pinned unless the caller sets `subnetId` — pinning an AZ is the #1
-    // cause of `InsufficientInstanceCapacity`; letting AWS choose the AZ + a few
-    // type fallbacks makes the launch resilient.
-    const typeCandidates = [
-      ...new Set([cfg.instanceType ?? D.instanceType, "c7i.4xlarge", "c6i.8xlarge", "m6i.8xlarge"]),
-    ]
-    const launchArgs = (instanceType: string): string[] => [
-      "ec2",
-      "run-instances",
-      "--image-id",
-      cfg.ami ?? D.ami,
-      "--instance-type",
-      instanceType,
-      "--key-name",
-      cfg.keyName ?? D.keyName,
-      ...(cfg.subnetId !== undefined ? ["--subnet-id", cfg.subnetId] : []),
-      "--security-group-ids",
-      sgId,
-      // Spot (default) ⇒ ~3× cheaper but reclaimable. On-demand ⇒ no market
-      // option (AWS default) ⇒ no reclaim, for capacity crunches where spot dies
-      // in minutes.
-      ...(onDemand ? [] : ["--instance-market-options", '{"MarketType":"spot"}']),
-      "--metadata-options",
-      "HttpTokens=required,HttpPutResponseHopLimit=1",
-      "--instance-initiated-shutdown-behavior",
-      "terminate",
-      "--block-device-mappings",
-      `[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":${cfg.diskGb ?? D.diskGb},"VolumeType":"gp3","DeleteOnTermination":true}}]`,
-      "--user-data",
-      userData(ttl),
-      "--tag-specifications",
-      "ResourceType=instance,Tags=[{Key=Name,Value=quanta-bench-full}]",
-      "--query",
-      "Instances[0].InstanceId",
-      "--output",
-      "text",
-    ]
-
-    let iid = ""
-    let lastErr = ""
-    for (const it of typeCandidates) {
-      log(`[full-remote] launching hardened ${marketLabel} box (${it}, IMDSv2 hop-1, TTL)…`)
-      const launch = await aws(launchArgs(it))
-      const got = oneLine(launch.stdout)
-      if (launch.code === 0 && got !== "" && got !== "None") {
-        iid = got
-        break
-      }
-      lastErr = launch.stderr
-      if (/InsufficientInstanceCapacity|capacity/i.test(launch.stderr)) {
-        log(`[full-remote] no ${it} capacity — trying next type…`)
-        continue
-      }
-      // A non-capacity error won't be fixed by a different type ⇒ fail fast.
-      throw new Error(`[full-remote] run-instances failed (code ${launch.code}): ${launch.stderr}`)
-    }
-    if (iid === "") {
-      throw new Error(
-        `[full-remote] no spot capacity across ${typeCandidates.join(", ")}: ${lastErr}`,
-      )
-    }
-
-    const terminate = async (): Promise<void> => {
-      if (!keep) await aws(["ec2", "terminate-instances", "--instance-ids", iid])
-    }
-
-    log(`[full-remote] instance ${iid} — waiting for running…`)
+    const session = await provisionBox(cfg)
     try {
-      await aws(["ec2", "wait", "instance-running", "--instance-ids", iid])
-      const desc = await aws([
-        "ec2",
-        "describe-instances",
-        "--instance-ids",
-        iid,
-        "--query",
-        "Reservations[0].Instances[0].PublicIpAddress",
-        "--output",
-        "text",
-      ])
-      const ip = oneLine(desc.stdout)
-      if (ip === "" || ip === "None") {
-        throw new Error(`[full-remote] no public IP for ${iid}: ${desc.stdout}`)
-      }
-      const host = `ubuntu@${ip}`
-      log(`[full-remote] box up at ${ip}. Waiting for cloud-init (docker+bun+uv ~2-3min)…`)
-
-      // Wait until SSH is reachable AND cloud-init finished installing bun —
-      // instance-running ≠ bootstrap-done. Poll up to ~5min.
-      const sleep = cfg.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
-      const maxReadyPolls = cfg.maxReadyPolls ?? 30
-      let ready = false
-      for (let i = 0; i < maxReadyPolls; i++) {
-        const probe = await sshTo(
-          host,
-          "sudo cloud-init status --wait >/dev/null 2>&1; test -x ~/.bun/bin/bun && echo READY",
-        )
-        if (probe.code === 0 && probe.stdout.includes("READY")) {
-          ready = true
-          break
-        }
-        await sleep(10_000)
-      }
-      if (!ready)
-        throw new Error(
-          "[full-remote] box never became ssh-reachable + bun-ready (check SG :22 / cloud-init)",
-        )
-
-      log(
-        "[full-remote] bootstrapped. Syncing src/ + config (SURGICAL — the monorepo's apps/crates/native are GBs and the bench needs only src)…",
-      )
-      // The repo is a monorepo (top-level apps/ alone is ~4GB). The bench agent
-      // imports ONLY `src/` (via `@/*` aliases). Ship src/ minus stale `*.js`
-      // build artifacts, plus the root config files, then `bun install`. Whole-
-      // repo rsync overran the ssh connection ("Connection reset by peer").
-      const sshOpts = `ssh -i ${keyPath} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15`
-      await sshTo(host, "mkdir -p ~/quanta")
-      const rsynced = await spawn("rsync", [
-        "-az",
-        "--partial",
-        "--exclude",
-        "node_modules",
-        "--exclude",
-        "*.js", // stale compiled mirrors — bun runs the .ts directly
-        "--exclude",
-        "*.test.ts", // tests not needed to RUN the agent
-        "--exclude",
-        ".quanta",
-        "-e",
-        sshOpts,
-        `${cfg.repoDir}/src/`,
-        `${host}:~/quanta/src/`,
-      ])
-      if (rsynced.code !== 0) {
-        throw new Error(`[full-remote] rsync src failed (code ${rsynced.code}): ${rsynced.stderr}`)
-      }
-      // Root config files needed for `bun install` + `@/*` path aliases.
-      const scpCfg = await spawn("scp", [
-        "-i",
-        keyPath,
-        "-o",
-        "ConnectTimeout=15",
-        `${cfg.repoDir}/package.json`,
-        `${cfg.repoDir}/bun.lock`,
-        `${cfg.repoDir}/tsconfig.json`,
-        `${cfg.repoDir}/tsconfig.base.json`,
-        `${cfg.repoDir}/bunfig.toml`,
-        `${host}:~/quanta/`,
-      ])
-      if (scpCfg.code !== 0) {
-        throw new Error(`[full-remote] scp config failed (code ${scpCfg.code}): ${scpCfg.stderr}`)
-      }
-      log("[full-remote] synced src + config; running bun install on box (full deps, ~1-2min)…")
-      // `set -o pipefail` so a FAILED install propagates through the `tail`
-      // (without it the pipeline exit is tail's 0 — masking a partial install).
-      const installed = await sshTo(
-        host,
-        "set -o pipefail; cd ~/quanta && ~/.bun/bin/bun install 2>&1 | tail -25",
-      )
-      if (installed.code !== 0) {
-        throw new Error(
-          `[full-remote] bun install failed (code ${installed.code}):\n${installed.stdout}${installed.stderr}`,
-        )
-      }
-      // PHANTOM DEPS: the repo imports several packages that are NOT declared in
-      // package.json/bun.lock (they only exist in a dev's local node_modules), so
-      // a clean install misses them and the bench dies with "Cannot find package".
-      // We can't ship the macOS node_modules (native ABI ≠ linux), so install the
-      // known phantoms on the box (all pure-JS). FIXME: declare these in the repo's
-      // package.json — a fresh `bun install` breaks without them.
-      const phantoms = PHANTOM_DEPS.join(" ")
-      log(`[full-remote] installing phantom deps (undeclared in package.json): ${phantoms}…`)
-      const added = await sshTo(
-        host,
-        `set -o pipefail; cd ~/quanta && ~/.bun/bin/bun add ${phantoms} 2>&1 | tail -15`,
-      )
-      if (added.code !== 0) {
-        throw new Error(
-          `[full-remote] bun add (phantom deps) failed (code ${added.code}):\n${added.stdout}${added.stderr}`,
-        )
-      }
-
-      // Grading toolchain: the bench grades via QUANTA_SWEBENCH_PYTHON_BIN, which
-      // must be the `swebench-python` SHIM (uvx --from swebench python "$@"), NOT
-      // raw uvx (uvx can't take `-c "import swebench"`). The shim lives in tools/
-      // locally (not shipped), so create it on the box + WARM the uvx cache so the
-      // 60s import-probe doesn't time out on swebench's first (multi-second) pull.
-      log(
-        "[full-remote] creating swebench-python shim + warming uvx swebench cache (first pull ~30-60s)…",
-      )
-      // Write the shim via ssh STDIN (verbatim — no printf/escaping hell). `$HOME`
-      // and `$@` stay literal in the file; bash expands them at shim RUN time.
-      const shim =
-        '#!/usr/bin/env bash\nexec "$HOME/.local/bin/uvx" --from swebench --python 3.11 --quiet python "$@"\n'
-      const wrote = await sshTo(host, "cat > ~/swebench-python && chmod +x ~/swebench-python", shim)
-      if (wrote.code !== 0) {
-        throw new Error(
-          `[full-remote] writing swebench-python shim failed (code ${wrote.code}): ${wrote.stderr}`,
-        )
-      }
-      const warm = await sshTo(
-        host,
-        'set -o pipefail; ~/swebench-python -c "import swebench; print(swebench.__version__)" 2>&1 | tail -3',
-      )
-      if (warm.code !== 0) {
-        throw new Error(
-          `[full-remote] swebench toolchain warm failed (code ${warm.code}):\n${warm.stdout}${warm.stderr}`,
-        )
-      }
-
-      // #1-P0 (jun-19 audit): LSP-grounding launch-proof. Probe pyright the way
-      // the bench's `bun run` will see it (PATH=~/.local/bin) and emit a LOUD
-      // non-fatal WARNING if it is not launchable — so an INERT-grounding run is
-      // observable, never silent theater. Non-fatal: nav is an enhancement; the
-      // grade still runs (degraded to no-nav). See {@link pyrightLaunchProofVerdict}.
-      const pyrightProbe = await sshTo(
-        host,
-        'export PATH="$HOME/.local/bin:$PATH"; if command -v pyright-langserver >/dev/null 2>&1; then pyright --version 2>&1 | tail -1; else echo PYRIGHT_MISSING; exit 7; fi',
-      )
-      const groundingVerdict = pyrightLaunchProofVerdict(pyrightProbe)
-      if (!groundingVerdict.ready) {
-        log(
-          "[full-remote] ⚠️  WARNING: pyright-langserver is NOT launchable on the box — LSP grounding " +
-            "(lsp_definition / lsp_references) is INERT this run: the localize steer fires but every nav call " +
-            'returns "unavailable" (silent no-nav degrade). The userData pyright install likely failed. ' +
-            `probe: ${groundingVerdict.detail}`,
-        )
-      } else {
-        log(`[full-remote] LSP grounding ready — ${groundingVerdict.detail}`)
-      }
-
-      const scpDs = await spawn("scp", [
-        "-i",
-        keyPath,
-        "-o",
-        "ConnectTimeout=15",
-        cfg.datasetPath,
-        `${host}:~/instances.jsonl`,
-      ])
-      if (scpDs.code !== 0) {
-        throw new Error(`[full-remote] scp dataset failed (code ${scpDs.code}): ${scpDs.stderr}`)
-      }
-
-      // Ship the STRIPPED token over ssh STDIN (never an arg / temp file).
-      log("[full-remote] shipping stripped token (access_token only) over ssh stdin…")
-      const shipped = await sshTo(
-        host,
-        // chmod 600: quanta's auth loader REFUSES a token file with loose perms
-        // (umask makes `cat >` create it 0664) — without this the agent aborts
-        // with 0 turns / empty patch ("token file has loose permissions").
-        "mkdir -p ~/.quanta/auth && cat > ~/.quanta/auth/chatgpt.json && chmod 600 ~/.quanta/auth/chatgpt.json",
-        stripToAccessToken(cfg.authJson),
-      )
-      if (shipped.code !== 0) {
-        throw new Error(`[full-remote] token ship failed (code ${shipped.code}): ${shipped.stderr}`)
-      }
-
-      // Run patch-gen + grading ON the box (full remote). Tee to ~/run.log so the
-      // operator can watch live from another terminal.
-      // `--instance` is a comma-OR filter on the box (see matchesInstanceFilter):
-      // ALL ids go through, shell-quoted as one arg.
-      const idsFlag =
-        cfg.instanceIds && cfg.instanceIds.length > 0
-          ? ` --instance ${shq(cfg.instanceIds.join(","))}`
-          : ""
-      log(
-        `[full-remote] running patch-gen + grading on box (minutes). Watch live:\n` +
-          `    ssh -i ${keyPath} ${host} 'tail -f ~/run.log'`,
-      )
-      // Propagate trajectory recording to the box when the operator opted in
-      // locally. Force a FIXED box-side path so the cassette can be fetched back
-      // deterministically (see below). Absent ⇒ empty ⇒ box run unchanged.
-      const recordTrajectory =
-        process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
-        process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
-        process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "0"
-      const trajectoryRecordEnv = recordTrajectory
-        ? `QUANTA_BENCH_RECORD_TRAJECTORY="$HOME/quanta/bench-trajectory.jsonl" `
-        : ""
-      // Forward the operator's local bench knobs (every `QUANTA_BENCH_*`) to the
-      // box so a REMOTE arm exercises the SAME posture as a local one. Without
-      // this, knobs set only via env — e.g. QUANTA_BENCH_SPEC_FIDELITY_STEER /
-      // QUANTA_BENCH_VERIFICATION_PLAN (NOT bundled in any preset) — never reach
-      // the box, so the remote experiment arm is SILENTLY INERT (jun-16
-      // env-forwarding bug class; an entire A/B campaign can read as null effect).
-      // The explicitly-set keys below are excluded to avoid double-assignment.
-      // Scope = `QUANTA_BENCH_*` only: bench feature flags, never secrets.
-      const forwardedBenchEnv = buildForwardedBenchEnv(process.env)
-      // `set -o pipefail` so a failed bench run propagates through the `tee`
-      // (otherwise the pipeline's exit code is tee's, always 0 — masking failures).
-      //
-      // NOTE (2026-06-17): a detached `setsid`+sentinel-poll variant was tried to
-      // survive local network blips during the multi-minute run, but it REGRESSED
-      // (the poll repeatedly saw the box unreachable and gave up with an empty
-      // run.log on 2/2 boxes, while the proven blocking form succeeded on ~6 prior
-      // waves the same day). Reverted to the single blocking ssh. Flaky/blip box
-      // loss is handled by CALLER-LEVEL retry (relaunch a fresh box), not by
-      // holding/ polling one box. A correct detached variant needs offline testing,
-      // not live trial-and-error.
-      const remoteRun = await sshTo(
-        host,
-        // Prepend uv's install dir to PATH so the in-process repro executor can
-        // find `uvx` (the Agentless repro runs under `uvx --with-editable .` to
-        // import the project). uv installs to ~/.local/bin; a non-interactive ssh
-        // `bun run` does NOT source ~/.profile, so without this `Bun.spawn(["uvx"])`
-        // throws "Executable not found in $PATH" and every repro is exec_failed.
-        // scrubEnv() allowlists the PATH key, so this value propagates to the
-        // repro exec's spawned env. (Same reason bun is invoked by absolute path.)
-        `set -o pipefail; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; QUANTA_BENCH_PRESET=${shq(preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
-          `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
-          // Force prebuilt-image pull (the proven fast path) — on x64 the bench's
-          // arch-aware default is "none" (slow local conda build).
-          //
-          // ⚠️ GRADING STAYS SERIAL (no QUANTA_SWEBENCH_GRADE_CONCURRENCY). Running
-          // multiple per-instance `run_evaluation` Docker grades concurrently was
-          // MEASURED to FALSE-NEGATIVE correct patches en masse (2026-06-19: a
-          // GRADE_CONCURRENCY=6 box scored 0/5; the SAME 5 predictions re-graded
-          // serially via the grade-only path scored 4/5 — 4 gold-identical,
-          // git-apply-clean patches wrongly marked unresolved). The concurrent
-          // grades race on the shared run_id image cache / cleanup ("Removed N
-          // images") and yank each other's containers. patch-gen stays concurrent
-          // (QUANTA_BENCH_CONCURRENCY) — that's the real time saver and is safe.
-          `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
-          // Forwarded operator bench knobs (QUANTA_BENCH_*) — makes remote arms
-          // exercise the same posture as local; without it env-only knobs are inert.
-          forwardedBenchEnv +
-          // Optional LLM-trajectory recording (default-OFF). When the operator
-          // sets QUANTA_BENCH_RECORD_TRAJECTORY locally, propagate it to the box
-          // so the run records a replayable cassette (fetched back below) — makes
-          // a FAILED remote run replayable/forkable from any turn after the fact.
-          trajectoryRecordEnv +
-          `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ~/instances.jsonl${idsFlag} ` +
-          // `--observe-dir` ENABLES observe mode on the box so the per-instance
-          // report carries the observe-only telemetry (firstEditFile, verificationPlan,
-          // faultEvidence, and the T-3/T-4 closure measurement signals). Without it
-          // the report has only the base verdict fields and closure-diagnostics has
-          // nothing to read — the remote run produces no measurement.
-          `--observe-dir ~/observe ` +
-          `--model ${shq(model)} --predictions ~/preds.jsonl --report ~/report.json 2>&1 | tee ~/run.log`,
-        // No stdin; stream the box's stdout LIVE so the multi-minute run is not a
-        // silent black box (instance starts, grading, verdicts surface as `[box]`).
-        undefined,
-        makeLineStreamer(),
-      )
-
-      log(`[full-remote] run finished (exit ${remoteRun.code}); fetching report…`)
-      const fetched = await sshTo(host, "cat ~/report.json 2>/dev/null")
-
-      // Also fetch the raw predictions (our generated patches) BEFORE the box is
-      // terminated — the report only carries `patchBytes` (size), so without this
-      // the actual patch text is lost forever once the box dies, making any later
-      // oracle (gold-patch) diff / failure-mode classification impossible. Saved
-      // to a local sidecar; best-effort (never fatal to the run result).
-      try {
-        const preds = await sshTo(host, "cat ~/preds.jsonl 2>/dev/null")
-        if (preds.code === 0 && preds.stdout.trim() !== "") {
-          const localPreds = join(fullRemoteArtifactDir(), `preds-${iid}.jsonl`)
-          writeFileSync(localPreds, preds.stdout)
-          log(`[full-remote] predictions saved: ${localPreds}`)
-        }
-      } catch (_ignore) {
-        /* best-effort — patch text is a diagnostic nicety, not the run result */
-      }
-      // Fetch the closure-diagnostics SIDECAR (the closure measurement metrics —
-      // primary_false_green_rate / primary_rail_present_rate / gate_enter_rate /
-      // required_verification_coverage). The box writes it next to report.json when
-      // QUANTA_BENCH_CLOSURE_DIAG is on; report.json itself does NOT carry the
-      // metrics, so without this fetch the remote run produces no measurement.
-      try {
-        const sidecar = await sshTo(host, "cat ~/report.closure-diagnostics.json 2>/dev/null")
-        if (sidecar.code === 0 && sidecar.stdout.trim() !== "") {
-          const localSidecar = join(fullRemoteArtifactDir(), `closure-${iid}.json`)
-          writeFileSync(localSidecar, sidecar.stdout)
-          log(`[full-remote] closure diagnostics saved: ${localSidecar}`)
-        }
-      } catch (_ignore) {
-        /* best-effort — the measurement sidecar is a diagnostic, not the verdict */
-      }
-      // Fetch the LLM-trajectory cassette when recording was requested — makes a
-      // FAILED remote run replayable/forkable from any turn after the box dies.
-      if (recordTrajectory) {
-        try {
-          const cassette = await sshTo(host, "cat ~/quanta/bench-trajectory.jsonl 2>/dev/null")
-          if (cassette.code === 0 && cassette.stdout.trim() !== "") {
-            const localCassette = join(fullRemoteArtifactDir(), `trajectory-${iid}.jsonl`)
-            writeFileSync(localCassette, cassette.stdout)
-            log(`[full-remote] trajectory cassette saved: ${localCassette}`)
-          }
-        } catch (_ignore) {
-          /* best-effort — replay cassette is a diagnostic, not the run result */
-        }
-      }
-      // The on-box `bench run` writes OUR report shape (perInstance[].passed) —
-      // loadVerdicts handles BOTH that and the swebench-harness shape.
-      let parsed = {
-        resolved: [] as string[],
-        unresolved: [] as string[],
-        errored: [] as string[],
-        emptyPatch: [] as string[],
-      }
-      let reportJson: unknown
-      try {
-        reportJson = JSON.parse(fetched.stdout)
-        const v = loadVerdicts(reportJson)
-        parsed = {
-          resolved: [...v.resolved],
-          unresolved: [...v.unresolved],
-          errored: [...v.errored],
-          emptyPatch: [...v.emptyPatch],
-        }
-      } catch {
-        // unparseable / missing report — diagnose below
-      }
-
-      // Save the report locally so it survives box termination. Only set
-      // `savedReport` when a file was actually written — otherwise the result's
-      // reportPath would be a dangling ENOENT for the caller.
-      let savedReport: string | undefined
-      if (fetched.stdout.trim() !== "") {
-        const localReport = join(fullRemoteArtifactDir(), `report-${iid}.json`)
-        try {
-          writeFileSync(localReport, fetched.stdout)
-          savedReport = localReport
-          log(`[full-remote] report saved: ${localReport}`)
-        } catch (_ignore) {
-          /* best-effort local save */
-        }
-      }
-
-      const empty =
-        parsed.resolved.length +
-          parsed.unresolved.length +
-          parsed.errored.length +
-          parsed.emptyPatch.length ===
-        0
-      if (empty) {
-        // No verdicts — pull the tail of the on-box run log so the failure is
-        // visible BEFORE we terminate the box.
-        const tail = await sshTo(host, "tail -40 ~/run.log 2>/dev/null")
-        log(`[full-remote] ⚠️ no verdicts in report (run exit ${remoteRun.code}). Box run.log tail:`)
-        log(tail.stdout || "(run.log empty)")
-      }
-
+      const result = await gradeChunkOnBox(session, {
+        datasetPath: cfg.datasetPath,
+        authJson: cfg.authJson,
+        ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
+        preset,
+        model,
+        concurrency,
+        artifactSuffix: session.iid,
+        recordTrajectory:
+          process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
+          process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
+          process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "0",
+        forwardedBenchEnv: buildForwardedBenchEnv(process.env),
+      })
       log("[full-remote] terminating box…")
-      await terminate()
-      return { ...(savedReport !== undefined ? { reportPath: savedReport } : {}), ...parsed }
+      await session.terminate()
+      return result
     } catch (err) {
-      await terminate().catch(() => undefined)
+      await session.terminate()
       throw err
     }
   }

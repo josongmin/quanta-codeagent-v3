@@ -252,4 +252,46 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     process.env.QUANTA_BENCH_CLOSURE_REPAIR = "abc"
     expect(benchOptIns().repairRounds).toBeUndefined()
   })
+
+  test("PRESET-11: agentless-v3-select-regression wires no-oracle select posture", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression"
+    const opt = benchOptIns()
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    expect(KNOB_PRESETS["agentless-v3-select-regression"]).toMatchObject({
+      "verify-select": "5",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "positive",
+    })
+  })
+
+  test("PRESET-12: agentless-v3-thin stays mini-first without verify-select enabled", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin"
+    const opt = benchOptIns()
+    expect(opt.verifySelectN).toBeUndefined()
+    expect(opt.verifySelectRegression).toBeUndefined()
+    expect(opt.verifySelectRepro).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v3-thin"]).toMatchObject({
+      "round0-minimal": "1",
+      "spec-fidelity-steer": "1",
+      "patch-budget": "1",
+    })
+  })
+
+  test("PRESET-13: agentless-v3-select-regression-doubt adds the targeted stall-breaker", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression-doubt"
+    const opt = benchOptIns()
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    const cfg = buildOnce()
+    expect(cfg.reproDoubt).toEqual({ stuckRuns: 5 })
+    expect(KNOB_PRESETS["agentless-v3-select-regression-doubt"]).toMatchObject({
+      "verify-select": "5",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "positive",
+      "repro-doubt": "5",
+    })
+  })
 })

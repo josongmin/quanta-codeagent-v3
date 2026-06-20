@@ -14,6 +14,7 @@ import {
   applyBenchKnobs,
   type BenchKnobState,
   BenchObserver,
+  type BenchPosture,
   benchOptIns,
   buildReproVoteValidate,
   buildConfig as buildRunnerConfig,
@@ -23,6 +24,7 @@ import {
   type IssueHintMode,
   knobsForReport,
   makeCalibratedReproConsensusPort,
+  makeReproConsensusSelectionPort,
   type PrepareIssueHintDeps,
   type PrepareReproTestDeps,
   parseBenchBranchSearchK,
@@ -49,11 +51,16 @@ import {
   benchShouldRunRepairPhase,
   primaryRailRedAfterRepair,
 } from "@/runner/batch/eval/repair-phase-policy"
-import { type Candidate, runSelection } from "@/runner/batch/eval/selection-executor"
+import {
+  type Candidate,
+  runSelection,
+  type SelectionTelemetry,
+  summarizeSelection,
+} from "@/runner/batch/eval/selection-executor"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
-import { errMessage, gateDisabled, gateOn } from "@/shared"
+import { errMessage, gateDisabled } from "@/shared"
 import type {
   BenchReproTestTelemetry,
   Instance,
@@ -67,6 +74,7 @@ import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
+import { makeDiscoveredRepoRegressionPort } from "./repo-regression-discovery-adapter"
 import {
   buildWiring,
   emitPatch,
@@ -76,7 +84,7 @@ import {
   ObservationError,
   type Wiring,
 } from "./report"
-import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
+import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { verify } from "./verdict"
 
@@ -310,6 +318,10 @@ interface Phase {
   /** jun-20 — repro-oracle gold calibration for this verify-select run (eval-only
    *  telemetry). Set by the selection phase; undefined on single-pass/repair. */
   reproOracleCalibration?: ReproOracleCalibration
+  /** jun-20 — verify-select winner/candidate telemetry (eval-only). Lets a run
+   *  self-diagnose which fix sites were spanned, which candidates were
+   *  admissible, and why the winner won without re-parsing trajectories. */
+  selectionTelemetry?: SelectionTelemetry
 }
 
 // Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
@@ -543,6 +555,29 @@ const filesFromPatch = (patch: string): string[] => {
   return [...files]
 }
 
+export interface SelectionReproPolicy {
+  readonly enabled: boolean
+  readonly goldCalibrate: boolean
+  readonly resolvedKofNMode: "hard" | "soft"
+}
+
+/** Live-like no-oracle rule for verify-select repro use:
+ *  - `positive` keeps the generated repro signal as SOFT-ONLY and MUST NOT peek
+ *    at gold calibration.
+ *  - unset / `hard` preserves the legacy eval-only gold-calibrated hard gate.
+ *  - `off` removes the selection signal entirely. */
+export const selectionReproPolicy = (
+  mode: BenchPosture["verifySelectRepro"],
+): SelectionReproPolicy => {
+  if (mode === "off") {
+    return { enabled: false, goldCalibrate: false, resolvedKofNMode: "hard" }
+  }
+  if (mode === "positive") {
+    return { enabled: true, goldCalibrate: false, resolvedKofNMode: "soft" }
+  }
+  return { enabled: true, goldCalibrate: true, resolvedKofNMode: "hard" }
+}
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -558,6 +593,9 @@ const runSelectionPhase = async (
   signal: AbortSignal,
   w: Wiring,
   n: number,
+  concurrency: number | undefined,
+  verifySelectRegression: BenchPosture["verifySelectRegression"],
+  verifySelectRepro: BenchPosture["verifySelectRepro"],
   localizeCandidates: readonly string[],
   baseValidatedRed: boolean,
   precomputedHint: string | undefined,
@@ -566,6 +604,8 @@ const runSelectionPhase = async (
   reproSources: readonly string[],
 ): Promise<Phase> => {
   const owners = new Set(localizeCandidates)
+  const reproPolicy = selectionReproPolicy(verifySelectRepro)
+  const generationErrors = new Map<number, string>()
   const seedFor = (i: number): string | undefined => {
     if (i === 0) return undefined
     const file = localizeCandidates[i - 1]
@@ -586,45 +626,81 @@ const runSelectionPhase = async (
   // resolvedKofN port fails open (never rejects a candidate); the calibration is
   // surfaced as eval-only telemetry so the campaign self-measures the oracle's
   // false-negative rate (the verify-and-select bottleneck).
-  const { port: resolvedKofNPort, calibration } = await makeCalibratedReproConsensusPort(
-    instance,
-    reproSources,
-    sandbox,
-    deps.timeoutMs,
-  )
+  const calibrationUnavailable: ReproOracleCalibration = {
+    goldCalibrated: false,
+    falseNegative: false,
+    available: false,
+    goldVotes: null,
+    goldK: null,
+  }
+  const { port: resolvedKofNPort, calibration } =
+    reproPolicy.enabled === false
+      ? { port: () => Promise.resolve(null), calibration: calibrationUnavailable }
+      : reproPolicy.goldCalibrate
+        ? await makeCalibratedReproConsensusPort(instance, reproSources, sandbox, deps.timeoutMs)
+        : {
+            port: makeReproConsensusSelectionPort(instance, reproSources, sandbox, deps.timeoutMs),
+            calibration: calibrationUnavailable,
+          }
+  const discoveredRegressionPort =
+    verifySelectRegression === "discovered"
+      ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
+      : undefined
+  const resolvedKofNSelectionPort = reproPolicy.enabled ? resolvedKofNPort : undefined
+  // No-oracle verify-select (`discovered`) must not let synthesized repro
+  // authority veto admissibility. In that mode, impacted repo tests are the hard
+  // regression signal and repro consensus is already downgraded to positive-only
+  // soft credit / fail-open; keep repro-authority absent as `null`, not `false`.
+  const selectionBaseValidatedRed =
+    verifySelectRegression === "discovered" ? null : baseValidatedRed
   const result = await runSelection({
     n,
     owners,
     seeds: Array.from({ length: n }, (_, i) => seedFor(i)),
+    resolvedKofNMode: reproPolicy.resolvedKofNMode,
+    ...(concurrency !== undefined ? { concurrency } : {}),
     ports: {
       generate: async (i, seed): Promise<Candidate> => {
-        const phase = await runAgentPhase(
-          instance,
-          deps,
-          sandbox,
-          signal,
-          w,
-          precomputedHint,
-          reproHint,
-          mergeHint(seed),
-        )
-        totalTurns += phase.turns
-        return {
-          id: `cand-${i}`,
-          patch: phase.patch,
-          turns: phase.turns,
-          files: filesFromPatch(phase.patch),
-          baseValidatedRed,
+        const isolated = concurrency !== undefined && concurrency > 1
+        const candidateSandbox = isolated ? await forkSandbox(instance.id, sandbox) : sandbox
+        try {
+          const phase = await runAgentPhase(
+            instance,
+            deps,
+            candidateSandbox,
+            signal,
+            w,
+            precomputedHint,
+            reproHint,
+            mergeHint(seed),
+          )
+          totalTurns += phase.turns
+          const generationError = agentPhaseError(phase)
+          if (generationError !== undefined) {
+            generationErrors.set(i, generationError)
+            throw new Error(generationError)
+          }
+          return {
+            id: `cand-${i}`,
+            patch: phase.patch,
+            turns: phase.turns,
+            files: filesFromPatch(phase.patch),
+            baseValidatedRed: selectionBaseValidatedRed,
+          }
+        } finally {
+          if (isolated) await cleanupSandbox(candidateSandbox)
         }
       },
-      // TB regression HARD gate. The scoring loop runs AFTER every candidate is
-      // generated, so the shared sandbox no longer holds this candidate's patch
-      // (withGitSnapshot reset it). `withCandidatePatch` re-materializes the
-      // candidate's tree (reset → git apply → probe → reset) so the impacted
-      // PASS_TO_PASS run measures THIS candidate, not the last/base tree — the
-      // anti-theater seam. No-leak: PASS_TO_PASS is eval-only swebench meta,
-      // handed only to the oracle. Fail-open: empty set / non-applying ⇒ null.
+      // TB regression HARD gate. Source is knob-selected:
+      //   unset/gold => legacy eval-only PASS_TO_PASS set,
+      //   discovered => no-oracle impacted repo-test discovery,
+      //   off => ablation.
+      // Every path fails open on missing/non-running tests.
       regression: (c) => {
+        if (verifySelectRegression === "off") return Promise.resolve(null)
+        if (verifySelectRegression === "discovered") {
+          return discoveredRegressionPort?.(c) ?? Promise.resolve(null)
+        }
         const tests = instance.swebench?.passToPass ?? []
         if (tests.length === 0) return Promise.resolve(null)
         return withCandidatePatch({
@@ -646,13 +722,33 @@ const runSelectionPhase = async (
       // the candidate the repro set reports RESOLVED. Empty reproducing set ⇒ a
       // port that yields null (no objection). Gold-calibrated above — a confirmed
       // false-negative oracle is failed open so it never rejects a correct fix.
-      resolvedKofN: resolvedKofNPort,
+      ...(resolvedKofNSelectionPort !== undefined
+        ? { resolvedKofN: resolvedKofNSelectionPort }
+        : {}),
     },
   })
+  if (result.successfulGenerations === 0 && result.generationFailures > 0) {
+    const orderedErrors = [...generationErrors.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, error]) => error)
+    const sample = orderedErrors.slice(0, 2).join("; ")
+    return {
+      patch: "",
+      turns: totalTurns,
+      stopReason: "error",
+      agentError:
+        "agent stopped with error before verification: " +
+        `verify-select candidate generation failed for all ${n} candidates` +
+        (sample === "" ? "" : ` (${sample})`),
+      reproOracleCalibration: calibration,
+      selectionTelemetry: summarizeSelection(result),
+    }
+  }
   return {
     patch: result.winner?.patch ?? "",
     turns: totalTurns,
     reproOracleCalibration: calibration,
+    selectionTelemetry: summarizeSelection(result),
   }
 }
 
@@ -709,6 +805,12 @@ const generationFailureResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
+    if (args.phase.reproOracleCalibration !== undefined) {
+      extra.reproOracleCalibration = args.phase.reproOracleCalibration
+    }
+    if (args.phase.selectionTelemetry !== undefined) {
+      extra.selectionTelemetry = args.phase.selectionTelemetry
+    }
   }
   return {
     id: args.instance.id,
@@ -740,6 +842,12 @@ const noPatchResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
+    if (args.phase.reproOracleCalibration !== undefined) {
+      extra.reproOracleCalibration = args.phase.reproOracleCalibration
+    }
+    if (args.phase.selectionTelemetry !== undefined) {
+      extra.selectionTelemetry = args.phase.selectionTelemetry
+    }
   }
   return {
     id: args.instance.id,
@@ -920,6 +1028,9 @@ const runInstanceOnce = async (
             abort.signal,
             w,
             posture.verifySelectN,
+            posture.verifySelectConcurrency,
+            posture.verifySelectRegression,
+            posture.verifySelectRepro,
             localizeCandidates,
             verificationPlan?.baseValidatedRed ?? false,
             precomputedHint,
@@ -1015,6 +1126,9 @@ const runInstanceOnce = async (
       // campaign self-measures the bottleneck rate with no extra runs.
       if (phase.reproOracleCalibration !== undefined) {
         extra.reproOracleCalibration = phase.reproOracleCalibration
+      }
+      if (phase.selectionTelemetry !== undefined) {
+        extra.selectionTelemetry = phase.selectionTelemetry
       }
       // T-401 patch-hygiene report (knob-gated + swebench-only + observe-only ⇒
       // byte-identical report.json when OFF). Telemetry-first: emit, don't deny.

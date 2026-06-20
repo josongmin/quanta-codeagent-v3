@@ -22,11 +22,14 @@ import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
+import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-concurrency"
+import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
+import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 /** Set of adversarial raw strings every parser should reject. */
@@ -68,6 +71,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["localize-phase", localizePhaseKnob],
     ["branch-search", branchSearchKnob],
     ["issue-hint", issueHintKnob],
+    ["repro-doubt", reproDoubtKnob],
     ["repro-test", reproTestKnob],
     ["must-pass", mustPassKnob],
     ["persona", personaKnob],
@@ -76,6 +80,8 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["hooks", hooksKnob],
     ["verify-select", verifySelectKnob],
     ["verify-select-concurrency", verifySelectConcurrencyKnob],
+    ["verify-select-regression", verifySelectRegressionKnob],
+    ["verify-select-repro", verifySelectReproKnob],
   ] as const
 
   for (const [id, knob] of knobs) {
@@ -113,6 +119,43 @@ describe("verify-select — domain bounds [1,8] integer", () => {
     expect(verifySelectKnob.parse("-1")).toBeUndefined()
     expect(verifySelectKnob.parse("2.5")).toBeUndefined() // non-integer
     expect(verifySelectKnob.parse("abc")).toBeUndefined()
+  })
+})
+
+describe("verify-select-regression — closed mode enum", () => {
+  test("accepted modes normalize to canonical values", () => {
+    expect(verifySelectRegressionKnob.parse("discovered")).toBe("discovered")
+    expect(verifySelectRegressionKnob.parse("repo")).toBe("discovered")
+    expect(verifySelectRegressionKnob.parse("native")).toBe("discovered")
+    expect(verifySelectRegressionKnob.parse("gold")).toBe("gold")
+    expect(verifySelectRegressionKnob.parse("pass-to-pass")).toBe("gold")
+    expect(verifySelectRegressionKnob.parse("off")).toBe("off")
+    expect(verifySelectRegressionKnob.parse("0")).toBe("off")
+    expect(verifySelectRegressionKnob.parse("false")).toBe("off")
+  })
+
+  test("unknown modes reject", () => {
+    expect(verifySelectRegressionKnob.parse("oracle")).toBeUndefined()
+    expect(verifySelectRegressionKnob.parse("generated")).toBeUndefined()
+    expect(verifySelectRegressionKnob.parse("hidden")).toBeUndefined()
+  })
+})
+
+describe("verify-select-repro — closed mode enum", () => {
+  test("accepted modes normalize to canonical values", () => {
+    expect(verifySelectReproKnob.parse("hard")).toBe("hard")
+    expect(verifySelectReproKnob.parse("gate")).toBe("hard")
+    expect(verifySelectReproKnob.parse("positive")).toBe("positive")
+    expect(verifySelectReproKnob.parse("soft")).toBe("positive")
+    expect(verifySelectReproKnob.parse("off")).toBe("off")
+    expect(verifySelectReproKnob.parse("0")).toBe("off")
+    expect(verifySelectReproKnob.parse("false")).toBe("off")
+  })
+
+  test("unknown modes reject", () => {
+    expect(verifySelectReproKnob.parse("oracle")).toBeUndefined()
+    expect(verifySelectReproKnob.parse("generated")).toBeUndefined()
+    expect(verifySelectReproKnob.parse("vote")).toBeUndefined()
   })
 })
 

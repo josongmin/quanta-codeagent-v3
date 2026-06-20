@@ -2,8 +2,9 @@
 """Structural SWE-bench coverage sweep.
 
 Pushes every non-CEILING untried instance (E/M/H tier, ranked cnt-desc, sphinx
-deprioritised) through full-remote grading, 3 boxes in parallel, until the
-universe is exhausted.
+deprioritised) through full-remote grading. P0 (jun-20 box-lifecycle plan): ONE
+box per wave with a fat slice + high per-box patch-gen concurrency, amortising the
+bootstrap tax instead of multiplying boxes (which only multiplies the 429 burst).
 
 Race-safety: this script is the SOLE writer of files under _mclass-sweep/.
 It only READS the shared leaderboard (to dedup against whatever the parallel
@@ -29,17 +30,34 @@ RUNBLOCKS = f"{SWEEP}/sweep-runblocks.yaml"
 LOGDIR = f"{SWEEP}/logs"
 DATE = "2026-06-20"
 
-PARALLEL = 2        # 2 boxes (=12 instances/wave). Bumped from 1 once the parallel
-                    # agent wound down (EC2 4-7) freeing OAuth headroom. Still
-                    # 429-aware: if 429s spike, exponential backoff absorbs it and
-                    # the next cycle can drop back to 1. Grading is serial PER BOX
-                    # (separate docker), so 2 boxes is grading-safe.
-SLICE = 6           # instances per box
-TIMEOUT = 2400      # 40min/box; normal waves finish <25min, so this catches a
-                    # poison-slice hang ~20min faster (wave6/7 each wasted ~60min)
+PARALLEL = 1        # P0 (jun-20 box-lifecycle plan): collapse to 1 box. The binding
+                    # limit is the shared gpt-5.4 OAuth rate, not box count — so we
+                    # buy throughput by raising PER-BOX patch-gen concurrency (see
+                    # run_box) and amortising one box over a FAT slice, not by adding
+                    # boxes (which multiplies the bootstrap tax + the 429 burst).
+SLICE = 16          # instances per box. Bumped 6->16 so one box bootstrap (boot+rsync+
+                    # install+warm ~4min) amortises over 16 grades instead of 6.
+TIMEOUT = 5400      # 90min/box. A 16-instance slice grades SERIALLY (process-global
+                    # docker mutex), so the per-box wall is gen + ~16*grade — far past
+                    # the old 40min. 90min stays well under the 180min box TTL while
+                    # still catching a genuine poison-slice hang.
 MAX_ATTEMPTS = 2    # an instance that never returns a verdict twice -> give up
 MAX_TRANSIENT = 5   # 429/generation_error retries before deferring (NOT a miss)
 WAVE_BACKOFF = 90   # seconds between waves to let the OAuth rate limit recover
+
+# --- jun-20 box-lifecycle pool (Phase 3b) ----------------------------------
+# Default ON: a super-wave submits POOL_CHUNKS slices to ONE persistent box via
+# `quanta-bench pool`, so the box bootstrap (boot+rsync+install+warm ~4min) is
+# paid ONCE per super-wave instead of once per slice. The box-side grade is still
+# SERIAL per chunk; the win is amortised bootstrap + a long-lived box across
+# slices. Set SWEEP_USE_POOL=0 to fall back to the proven per-slice path.
+# NOTE: each chunk grades ~SLICE instances SERIALLY, so POOL_CHUNKS*SLICE*~grade
+# must fit under the box TTL (180min) — keep the product modest (default 2*16=32,
+# ~64min grade + gen, well under TTL; the pool also rotates the box at 150min).
+USE_POOL = os.environ.get("SWEEP_USE_POOL", "1") != "0"
+POOL_CHUNKS = int(os.environ.get("SWEEP_POOL_CHUNKS", "2"))  # slices per super-wave (one box)
+POOL_WORKERS = int(os.environ.get("SWEEP_POOL_WORKERS", "1"))  # boxes (>1 multiplies the 429 burst)
+POOL_TIMEOUT = int(os.environ.get("SWEEP_POOL_TIMEOUT", "9000"))  # 150min — multi-chunk box-life wall
 
 os.makedirs(LOGDIR, exist_ok=True)
 os.makedirs(SLICEDIR, exist_ok=True)
@@ -133,10 +151,16 @@ def parse_log(path):
 
 def run_box(slice_path, log_path):
     env = dict(os.environ)
-    env["QUANTA_FULL_REMOTE_ONDEMAND"] = "1"
+    # P0: drop ONDEMAND -> spot. With PARALLEL=1 a spot reclaim loses at most one
+    # wave, and the harvest below already undoes attempts for no-verdict instances
+    # so the slice re-queues next wave. Spot is the cheaper default for the longer
+    # fat-slice waves; the box-death requeue hardening is Phase 4.
     env["QUANTA_BENCH_PRESET"] = "agentless-v2"
-    # Per-box patch-gen concurrency: low to stay under the shared OAuth 429 ceiling
-    env["QUANTA_FULL_REMOTE_CONCURRENCY"] = "3"
+    # Per-box patch-gen concurrency. conc=8 (was 3): a concurrent measurement run
+    # shares this OAuth login, so the SUMMED burst is what matters — 1 box * 8 here
+    # leaves headroom under the 429 ceiling alongside that run. Bump toward 12 only
+    # once this sweep is the sole token consumer.
+    env["QUANTA_FULL_REMOTE_CONCURRENCY"] = "8"
     cmd = ["bun", "run", "src/apps/bench/cli.ts", "grade", "--mode", "full",
            "--allow-remote-secrets", "--dataset", slice_path]
     with open(log_path, "w") as lf:
@@ -145,6 +169,25 @@ def run_box(slice_path, log_path):
                            stdout=lf, stderr=subprocess.STDOUT, timeout=TIMEOUT + 120)
         except subprocess.TimeoutExpired:
             lf.write("\n[sweep] box wall-timeout\n")
+
+def run_pool(slice_paths, log_path):
+    """Grade many slices on ONE persistent box via the pool CLI. All chunk output
+    streams to a single combined log (workers=1 ⇒ sequential), which parse_log
+    reads per-slice (it keys by instance id, so a shared log is fine)."""
+    env = dict(os.environ)
+    env["QUANTA_BENCH_PRESET"] = "agentless-v2"
+    env["QUANTA_FULL_REMOTE_CONCURRENCY"] = "8"
+    cmd = ["bun", "run", "src/apps/bench/cli.ts", "pool",
+           "--allow-remote-secrets",
+           "--datasets", ",".join(slice_paths),
+           "--workers", str(POOL_WORKERS),
+           "--preset", "agentless-v2", "--model", "gpt-5.4"]
+    with open(log_path, "w") as lf:
+        try:
+            subprocess.run(["timeout", str(POOL_TIMEOUT)] + cmd, cwd=ROOT, env=env,
+                           stdout=lf, stderr=subprocess.STDOUT, timeout=POOL_TIMEOUT + 120)
+        except subprocess.TimeoutExpired:
+            lf.write("\n[sweep] pool wall-timeout\n")
 
 def repo_of(fid):
     return fid.split("__")[0].replace("-dev", "").replace("-doc", "").replace("pydata", "xarray")
@@ -158,7 +201,7 @@ def append_runblock(wave, idx, passed):
         "  preset: agentless-v2",
         "  model: gpt-5.4",
         "  auth: chatgpt-oauth",
-        "  grading: official swebench python harness, on-demand EC2, prebaked AMI",
+        "  grading: official swebench python harness, spot EC2, prebaked AMI",
         f"  scope: 'STRUCTURAL SWEEP wave{wave} slice{idx} — non-CEILING untried, cnt-desc.'",
         f"  resolved_count: {len(passed)}",
         "  resolved:",
@@ -194,9 +237,10 @@ def main():
         if not remaining:
             log("SWEEP COMPLETE — no remaining non-CEILING untried instances")
             break
-        batch = remaining[: PARALLEL * SLICE]
-        log(f"wave {wave}: {len(remaining)} remaining; launching {len(batch)} "
-            f"across {min(PARALLEL, (len(batch)+SLICE-1)//SLICE)} boxes")
+        n_chunks = POOL_CHUNKS if USE_POOL else PARALLEL
+        batch = remaining[: n_chunks * SLICE]
+        mode = f"pool({POOL_WORKERS}box×{POOL_CHUNKS}chunk)" if USE_POOL else f"{PARALLEL}box"
+        log(f"wave {wave}: {len(remaining)} remaining; launching {len(batch)} via {mode}")
         slices = [batch[i:i + SLICE] for i in range(0, len(batch), SLICE)]
         # build slice files
         jobs = []
@@ -212,16 +256,24 @@ def main():
             for fid in sl:
                 attempts[fid] = attempts.get(fid, 0) + 1
         save_attempts(attempts)
-        # launch in parallel
-        with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
-            futs = [ex.submit(run_box, sp, lp) for (_, _, sp, lp) in jobs]
-            for fu in futs:
-                fu.result()
+        # launch
+        if USE_POOL:
+            # ONE persistent box grades all slices; combined log shared by every
+            # slice (parse_log keys by instance id, so a shared log is correct).
+            pool_log = f"{LOGDIR}/sweep-w{wave}-pool.log"
+            run_pool([sp for (_, _, sp, _) in jobs], pool_log)
+            log_for = {i: pool_log for (i, _, _, _) in jobs}
+        else:
+            with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
+                futs = [ex.submit(run_box, sp, lp) for (_, _, sp, lp) in jobs]
+                for fu in futs:
+                    fu.result()
+            log_for = {i: lp for (i, _, _, lp) in jobs}
         # harvest
         tcnt = load_transient()
         wave_pass = wave_miss = wave_ginv = wave_trans = 0
         for (i, sl, sp, lp) in jobs:
-            res = parse_log(lp)
+            res = parse_log(log_for[i])
             passed = []
             for fid in sl:
                 outcome = res.get(fid)

@@ -37,6 +37,17 @@ export const copyRepo = async (instance: Instance, sandbox: string): Promise<voi
   await cp(instance.repoPath, sandbox, { recursive: true })
 }
 
+/** Fork a PREPARED sandbox into a fresh isolated sibling sandbox. Used by
+ *  verify-select candidate generation when concurrency > 1: every candidate
+ *  must run on its OWN tree, otherwise concurrent agents race on one git
+ *  worktree and corrupt patch capture. */
+export const forkSandbox = async (instanceId: string, sourceSandbox: string): Promise<string> => {
+  const parent = await mkdtemp(join(benchWorkRoot(), `bench-${instanceId}-fork-`))
+  const sandbox = await mkdtemp(join(parent, "repo-"))
+  await cp(sourceSandbox, sandbox, { recursive: true })
+  return sandbox
+}
+
 /** Best-effort cleanup — never throws (the run is already done). Removes the
  *  PRIVATE PARENT (one level up from the repo dir), so both the repo and its
  *  isolation wrapper are gone. */

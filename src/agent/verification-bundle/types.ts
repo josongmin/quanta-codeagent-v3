@@ -34,8 +34,10 @@
 export interface HardGateSignals {
   /** The reproduction reproduced RED on the un-patched tree (a valid failing
    *  baseline exists). `false` ⇒ no validated repro authority for this
-   *  instance ⇒ candidate not in the provable tier (falls to best-effort). */
-  baseValidatedRed: boolean
+   *  instance ⇒ candidate not in the provable tier (falls to best-effort).
+   *  `null` ⇒ this selection mode does not require repro authority
+   *  (FAIL-OPEN), e.g. no-oracle discovered-regression gating. */
+  baseValidatedRed: boolean | null
   /** Patched-side resolved K-of-N consensus (TC): `votes` scripts of the
    *  reproducing set now print "Issue resolved", quorum `k`. `null` ⇒ no
    *  consensus run (FAIL-OPEN). Admissible iff `votes >= k`. */

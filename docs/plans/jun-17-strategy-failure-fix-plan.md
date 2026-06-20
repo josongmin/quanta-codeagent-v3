@@ -8,6 +8,7 @@
 
 > 근거: light 티어 7개 실패 인스턴스의 오라클(골드패치) 대조 분석 + 4-앵글 설계
 > (제안 → 적대어딧 → 객관어딧 → 합성, 13-에이전트 워크플로우). 모든 코드 seam 실파일 검증됨.
+> 2026-06-20 정정: `sympy-18763`은 이후 quanta gpt-5.4 sidecar에서 official PASS(115t, 528B). 이 문서의 `sympy-18763` 언급은 active unresolved가 아니라 historical failure-mode/spec-fidelity calibration 사례로만 해석한다.
 
 ---
 

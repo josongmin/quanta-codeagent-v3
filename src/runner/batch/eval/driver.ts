@@ -69,6 +69,7 @@ import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { validateGoldPatch } from "./gold-sanity"
 import {
+  applyBenchKnobs,
   type BenchIssueHintMode,
   type BenchPosture,
   benchPostureFromState,
@@ -1110,7 +1111,8 @@ export const buildConfig = (
   // per-call probe in `lsp-bridge` makes the tools emit a clean `ok:false` —
   // registration is harmless without a server. Default-OFF preserves
   // byte-identical bench behavior.
-  const opt = benchOptIns()
+  const state = resolveBenchKnobs({ envVars: process.env })
+  const opt = benchPostureFromState(state, process.env)
   // Runtime-config-bridged knobs (read-outline / test-runner / repo-map): these
   // are NOT AgentConfig fields — they are read at wire time via `runtimeConfig()`
   // inside `wireOptionalAgentPorts`. The unified posture resolves them from the
@@ -1256,8 +1258,7 @@ export const buildConfig = (
       content: [{ type: "text", text }],
     },
   ]
-  return wireOptionalAgentPorts(
-    {
+  const baseConfig = {
       llm: deps.llm,
       registry,
       stream,
@@ -1319,6 +1320,11 @@ export const buildConfig = (
         : {}),
       // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
       // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
+    }
+  const knobApplied = applyBenchKnobs(baseConfig, state, { instance, sandbox })
+  return wireOptionalAgentPorts(
+    {
+      ...knobApplied,
       ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
       ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
       ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),

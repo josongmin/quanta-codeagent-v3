@@ -96,7 +96,7 @@ import {
   type SwebenchTask,
   toInstance,
 } from "./corpus"
-import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { finalizeRun, runInstance } from "./eval"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
@@ -589,7 +589,7 @@ export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
 const maybeRunDatasetMode = async (
   cfg: {
     n: number
-    limitArg?: string
+    limit: number | null
     maxTurns: number
     timeoutMs: number
   },
@@ -604,6 +604,22 @@ const maybeRunDatasetMode = async (
     exitFn(0)
     return true
   }
+  const parsed: SwebenchTask[] = parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
+  const instanceFilter = argValue("--instance")
+  const tasks =
+    instanceFilter !== undefined && instanceFilter !== ""
+      ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
+      : parsed
+  if (argFlag("--dry-run")) {
+    const plan = buildDatasetDryRunPlan(datasetFile, tasks, {
+      n: cfg.n,
+      limit: cfg.limit,
+      pythonHarness: gateOn(process.env, "QUANTA_SWEBENCH_PYTHON"),
+    })
+    for (const line of formatDryRunPlan(plan)) logger.info(line)
+    exitFn(0)
+    return true
+  }
   const resolved = resolveLLM("a dataset")
   if (resolved === null) return true
   const { provider, model, llm } = resolved
@@ -613,7 +629,7 @@ const maybeRunDatasetMode = async (
     { provider, model },
     {
       n: cfg.n,
-      ...(cfg.limitArg ? { limit: Number(cfg.limitArg) } : {}),
+      ...(cfg.limit !== null ? { limit: cfg.limit } : {}),
       maxTurns: cfg.maxTurns,
       timeoutMs: cfg.timeoutMs,
     },
@@ -824,9 +840,7 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 
   // Official-dataset mode takes precedence; when its flag/env is unset the
   // custom-corpus path is byte-for-byte unchanged.
-  if (
-    await maybeRunDatasetMode({ n, ...(limitArg ? { limitArg } : {}), maxTurns, timeoutMs }, obs)
-  ) {
+  if (await maybeRunDatasetMode({ n, limit, maxTurns, timeoutMs }, obs)) {
     return
   }
   await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs }, obs)

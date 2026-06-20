@@ -75,12 +75,45 @@ describe("runSelection", () => {
     // cand-0 regresses a test, cand-1 is clean → cand-1 must win even if equal otherwise.
     const ports: SelectionPorts = {
       generate: gen,
-      regression: async (c) => (c.id === "cand-0" ? false : true),
+      regression: async (c) => c.id !== "cand-0",
     }
     const r = await runSelection({ n: 2, seeds: [undefined, undefined], owners: new Set(), ports })
     expect(r.winner?.id).toBe("cand-1")
     expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(false)
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.admissible).toBe(true)
+  })
+
+  it("resolvedKofN default mode is hard: insufficient resolved votes reject", async () => {
+    const { gen } = genFrom([cand({ id: "cand-0" })])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(),
+      ports: { generate: gen, resolvedKofN: async () => ({ votes: 0, k: 1 }) },
+    })
+    expect(r.scored[0]?.verdict.admissible).toBe(false)
+  })
+
+  it("resolvedKofN soft mode gives positive credit without hard-rejecting false negatives", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] }),
+      cand({ id: "cand-1", patch: "+++ b/b.py\n+x", files: ["b.py"] }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      resolvedKofNMode: "soft",
+      ports: {
+        generate: gen,
+        resolvedKofN: async (c) => (c.id === "cand-0" ? { votes: 0, k: 1 } : { votes: 1, k: 1 }),
+      },
+    })
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(true)
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
+      "soft:voterQuorum=1",
+    )
   })
 
   it("PAIRED control: regression port ABSENT ⇒ fail-open, candidates stay admissible", async () => {
@@ -90,6 +123,17 @@ describe("runSelection", () => {
       seeds: [undefined],
       owners: new Set(),
       ports: { generate: gen }, // no regression port
+    })
+    expect(r.scored[0]?.verdict.admissible).toBe(true)
+  })
+
+  it("no-oracle mode: repro authority absent does not reject when other gates are green", async () => {
+    const { gen } = genFrom([cand({ id: "cand-0", baseValidatedRed: null })])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(),
+      ports: { generate: gen, regression: async () => true },
     })
     expect(r.scored[0]?.verdict.admissible).toBe(true)
   })
@@ -246,6 +290,44 @@ describe("runSelection", () => {
     expect(r.scored.map((s) => s.candidate.id)).toEqual(["cand-0", "cand-1"]) // cand-0 kept, index order
   })
 
+  it("candidate generation failure does not abort selection when another candidate succeeds", async () => {
+    const gen: SelectionPorts["generate"] = async (i) => {
+      if (i === 0) throw new Error("candidate 0 failed")
+      return cand({ id: "cand-1", patch: "+++ b/ok.py\n+fix", files: ["ok.py"] })
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: { generate: gen },
+    })
+    expect(r.attempted).toBe(2)
+    expect(r.successfulGenerations).toBe(1)
+    expect(r.generationFailures).toBe(1)
+    expect(r.generated).toBe(1)
+    expect(r.scored).toHaveLength(1)
+    expect(r.winner?.id).toBe("cand-1")
+  })
+
+  it("all candidate generation failures degrade to empty selection instead of throwing", async () => {
+    const gen: SelectionPorts["generate"] = async () => {
+      throw new Error("all failed")
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: { generate: gen },
+      concurrency: 2,
+    })
+    expect(r.attempted).toBe(2)
+    expect(r.successfulGenerations).toBe(0)
+    expect(r.generationFailures).toBe(2)
+    expect(r.generated).toBe(0)
+    expect(r.scored).toHaveLength(0)
+    expect(r.winner).toBeNull()
+  })
+
   it("summarizeSelection: compact eval-only telemetry (files + verdict, NO patch) for diagnosis", async () => {
     // the cause-vs-symptom diagnostic: which sites the candidates spanned + who won.
     const { gen } = genFrom([
@@ -259,6 +341,9 @@ describe("runSelection", () => {
       ports: { generate: gen },
     })
     const t = summarizeSelection(r)
+    expect(t.attempted).toBe(2)
+    expect(t.successfulGenerations).toBe(2)
+    expect(t.generationFailures).toBe(0)
     expect(t.generated).toBe(2)
     expect(t.winnerId).toBe("cand-1") // owner-coverage winner
     expect(t.candidates.map((c) => c.id)).toEqual(["cand-0", "cand-1"])

@@ -10,13 +10,17 @@
  *   1. `Repair round <round>.`
  *   2. Original problem statement (verbatim, possibly trimmed if hugely over budget).
  *   3. `Your patch so far (cumulative):` + truncated cumulative diff.
- *   4. `Validation failed. Tail of failing output:` + tail-truncated failTail.
- *   5. Forceful next-step instruction (do NOT revert; fix source; re-verify).
+ *   4. `Validation gate:` + the exact command/source that kept the loop red.
+ *   5. `Typed rail note:` when a typed predicate mismatched (advisory in v1).
+ *   6. `Validation failed. Tail of failing output:` + tail-truncated failTail.
+ *   7. Forceful next-step instruction (do NOT revert; fix source; re-verify).
  *
  * Truncation order to fit `maxBytes` (default 12000):
  *   failTail first (keep TAIL), then cumulativeDiff (drop middle hunks, keep
  *   `diff --git` headers + first+last hunks), then trim the problem if still
- *   over budget. Each truncation leaves a marker `… <N bytes truncated>`.
+ *   over budget. The validation-gate section is structurally bounded (command
+ *   string head-kept) so the builder still respects the overall cap. Each
+ *   truncation leaves a marker `… <N bytes truncated>`.
  */
 import type { BuildRepairContextArgs } from "./types"
 
@@ -24,6 +28,7 @@ const DEFAULT_MAX = 12000
 
 const HEADER_PROBLEM = "Original problem (verbatim):"
 const HEADER_DIFF = "Your patch so far (cumulative):"
+const HEADER_VALIDATION = "Validation gate:"
 const HEADER_PREDICATE = "Typed rail note:"
 const HEADER_SIBLINGS =
   "Co-change sites — these files override the SAME method and very likely need the same fix. A single-site edit is INCOMPLETE; apply the change to each:"
@@ -52,12 +57,54 @@ const trimHead = (s: string, target: number): string => {
   return `${s.slice(0, room)}\n… <${dropped} bytes truncated>`
 }
 
+const renderValidationGate = (args: {
+  source: BuildRepairContextArgs["validationSource"]
+  cmd: string | undefined
+  exitCode: number | undefined
+  maxCmdBytes: number
+}): string[] => {
+  const cmd = args.cmd === undefined || args.cmd === "" ? "(missing command)" : trimHead(args.cmd, args.maxCmdBytes)
+  switch (args.source) {
+    case "primary_rail":
+      return [
+        "The loop clears only on the PRIMARY RAIL command below; a different green command does not count.",
+        `Command: ${cmd}`,
+        ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
+      ]
+    case "verify_cmd":
+      return [
+        "The loop is gating on your last verification command from the previous round.",
+        `Command: ${cmd}`,
+        ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
+      ]
+    case "repro":
+      return [
+        "The loop is gating on your reproduction script from the previous round.",
+        `Command: ${cmd}`,
+        ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
+      ]
+    case "none":
+      return [
+        "No verification command or reproduction script was captured from the previous round, so the validator had no runnable check.",
+        "Before you stop next round, run a concrete verification command and leave it in the transcript.",
+      ]
+    default:
+      return []
+  }
+}
+
 export const buildRepairContext = (args: BuildRepairContextArgs): string => {
   const maxBytes = args.maxBytes ?? DEFAULT_MAX
   const header = `Repair round ${args.round}.`
   let problem = args.problem
   let diff = args.cumulativeDiff
   let failTail = args.failTail
+  const validationGate = renderValidationGate({
+    source: args.validationSource,
+    cmd: args.validationCmd,
+    exitCode: args.validationExitCode,
+    maxCmdBytes: Math.max(96, Math.floor(maxBytes / 5)),
+  })
   const predicateSummary = args.predicateSummary
   // Bounded, deduped sibling list (a handful of file paths — never truncated).
   const siblingOwners = [...new Set(args.siblingOwners ?? [])]
@@ -75,6 +122,7 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
       "",
       HEADER_DIFF,
       d === "" ? "(no diff produced yet)" : d,
+      ...(validationGate.length > 0 ? ["", HEADER_VALIDATION, validationGate.join("\n")] : []),
       ...(predicateSummary !== undefined && predicateSummary !== ""
         ? ["", HEADER_PREDICATE, predicateSummary]
         : []),

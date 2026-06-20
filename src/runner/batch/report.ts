@@ -30,6 +30,7 @@ import type {
   GradeBreakdown,
   InstanceResult,
   ReproOracleCalibration,
+  SelectionTelemetry,
 } from "./types"
 
 export interface BenchReportMeta {
@@ -76,6 +77,10 @@ export interface PerInstanceReport {
    *  campaign self-measure the resolved-oracle false-negative rate (the
    *  verify-and-select bottleneck). Omitted otherwise ⇒ byte-identical. */
   reproOracleCalibration?: ReproOracleCalibration
+  /** jun-20 — compact verify-select telemetry (verify-select runs only). Lets a
+   *  report preserve candidate/admissibility/winner diagnosis without carrying
+   *  the full patches or requiring trajectory replay. */
+  selectionTelemetry?: SelectionTelemetry
 }
 
 export interface BenchReport {
@@ -146,6 +151,7 @@ export const buildReport = (
         ...(r.reproOracleCalibration !== undefined
           ? { reproOracleCalibration: r.reproOracleCalibration }
           : {}),
+        ...(r.selectionTelemetry !== undefined ? { selectionTelemetry: r.selectionTelemetry } : {}),
       }
     }),
     knobs,

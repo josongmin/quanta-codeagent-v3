@@ -1,0 +1,345 @@
+/**
+ * RED-first HELLGATE for the persistent full-remote box pool (jun-20 Phase 2).
+ *
+ * The pool's whole reason to exist is amortising the EXPENSIVE bootstrap over
+ * many chunks instead of re-paying it per wave. So the centerpiece teeth are:
+ *   - ONE box bootstrap (run-instances) across N chunks — NOT one per chunk
+ *     (red-on-injection: if a worker re-provisions per chunk, the count blows up);
+ *   - each chunk re-ships a FRESH token AND writes to a runId-SCOPED box dir
+ *     (so two chunks never collide on the shared ~/report.json);
+ *   - a chunk whose box produced NO verdict (spot reclaim) is RE-QUEUED on a
+ *     fresh box, never silently lost;
+ *   - the box is ALWAYS terminated when the worker drains.
+ *
+ * Everything routes through an injected SpawnFn ⇒ no real box / token / network.
+ */
+import { describe, expect, test } from "bun:test"
+import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
+import { detectRateLimit } from "../../src/apps/bench/remote/box-session"
+import { chunkBoxPaths, type PoolChunk, runPool } from "../../src/apps/bench/remote/pool"
+
+const FULL_AUTH = JSON.stringify({
+  access_token: "ACCESS-xyz",
+  refresh_token: "REFRESH-super-secret",
+  id_token: "IDTOK-secret",
+  account_id: "acct-1",
+})
+
+interface Recorder {
+  fn: SpawnFn
+  calls: Array<{ cmd: string; args: string[]; input?: string }>
+}
+
+/** Mock spawn. `reportFor(runId, launchIdx)` decides the report-fetch payload for
+ *  a given chunk runId on a given box (launch index, 0-based) — return "" to
+ *  simulate a dead box (no report). Default: always a 1-resolved report. */
+const mockSpawn = (opts: {
+  reportFor?: (runId: string, launchIdx: number) => string
+  /** runIds whose run.log tail should carry a generation_error (429 signal). */
+  rateLimited?: Set<string>
+}): Recorder => {
+  const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+  const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+  let launchIdx = -1
+  const reportFor = opts.reportFor ?? (() => JSON.stringify({ resolved_ids: ["x__y-1"] }))
+
+  const routeSsh = (args: string[]): SpawnResult => {
+    const cmd = args[args.length - 1] ?? ""
+    if (cmd.includes("READY")) return ok("READY")
+    // atomic grade lock: a fresh box acquires it (mkdir succeeds ⇒ LOCKED). Match
+    // mkdir/rmdir SPECIFICALLY so the idle probe's `test -d …lock` falls through.
+    if (cmd.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+    if (cmd.includes("rmdir ~/.pool-grade.lock")) return ok("")
+    // report fetch: `cat ~/runs/<runId>/report.json 2>/dev/null`
+    const m = cmd.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+    if (m) return ok(reportFor(m[1] ?? "", Math.max(0, launchIdx)))
+    // run.log tail: inject a 429 marker for rate-limited runIds.
+    const t = cmd.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
+    if (t && opts.rateLimited?.has(t[1] ?? ""))
+      return ok("[FAIL][generation_error] z__z-1 (turns=2)")
+    // preds / closure / trajectory / mkdir / token ship / bench run
+    return ok("")
+  }
+  const route = (cmd: string, args: string[]): SpawnResult => {
+    if (args.includes("describe-security-groups")) return ok("sg-abc")
+    if (args.includes("run-instances")) {
+      launchIdx += 1
+      return ok(`i-box${launchIdx}`)
+    }
+    if (args.includes("describe-instances")) return ok("1.2.3.4")
+    if (args.includes("wait")) return ok("")
+    if (args.includes("terminate-instances")) return ok("")
+    if (cmd === "ssh") return routeSsh(args)
+    return ok("") // scp / rsync / other aws
+  }
+  const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
+    calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+    return route(cmd, [...args])
+  }
+  return { fn, calls }
+}
+
+const baseProvision = (spawn: SpawnFn) => ({
+  repoDir: "/tmp/repo",
+  authJson: FULL_AUTH,
+  datasetPath: "/tmp/unused.jsonl", // pool uses per-chunk datasets
+  spawn,
+  sleep: async () => {},
+  maxReadyPolls: 2,
+})
+
+const poolCfg = (spawn: SpawnFn, over: Record<string, unknown> = {}) => ({
+  provision: baseProvision(spawn),
+  workers: 1,
+  preset: "agentless-v2",
+  model: "gpt-5.4",
+  concurrency: 8,
+  authJsonProvider: () => FULL_AUTH,
+  ...over,
+})
+
+const CHUNKS: PoolChunk[] = [
+  { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+  { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+  { runId: "c3", datasetPath: "/tmp/c3.jsonl" },
+]
+
+const count = (calls: Recorder["calls"], pred: (c: Recorder["calls"][number]) => boolean): number =>
+  calls.filter(pred).length
+
+describe("runPool — persistent box, amortised bootstrap", () => {
+  test("bootstraps ONE box across N chunks (not one per chunk)", async () => {
+    const { fn, calls } = mockSpawn({})
+    const out = await runPool(CHUNKS, poolCfg(fn))
+    // TEETH: 3 chunks, 1 worker, all boxes healthy ⇒ EXACTLY ONE run-instances.
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
+    // Warm default: a healthy box is LEFT ALIVE at clean drain (reused next run /
+    // reaped by TTL), so NO terminate.
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
+    expect(out.every((r) => !r.lost)).toBe(true)
+    expect(out.map((r) => r.chunk.runId)).toEqual(["c1", "c2", "c3"]) // input order preserved
+  })
+
+  test("each chunk re-ships a token AND writes to a runId-scoped box dir", async () => {
+    const { fn, calls } = mockSpawn({})
+    await runPool(CHUNKS, poolCfg(fn))
+    // Token shipped once PER CHUNK (fresh access_token each time), never the
+    // long-lived secret.
+    const tokenShips = calls.filter(
+      (c) => c.cmd === "ssh" && c.input !== undefined && c.input.includes("ACCESS-xyz"),
+    )
+    expect(tokenShips.length).toBe(3) // one per chunk
+    const shippedBlob = calls.map((c) => c.input ?? "").join("\n")
+    expect(shippedBlob).not.toContain("REFRESH-super-secret")
+    expect(shippedBlob).not.toContain("IDTOK-secret")
+    // runId-scoped report paths: each chunk's bench-run targets its OWN dir.
+    const benchRuns = calls.filter(
+      (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run")),
+    )
+    expect(benchRuns.length).toBe(3)
+    expect(benchRuns.some((c) => c.args.join(" ").includes("~/runs/c1/report.json"))).toBe(true)
+    expect(benchRuns.some((c) => c.args.join(" ").includes("~/runs/c2/report.json"))).toBe(true)
+    expect(benchRuns.some((c) => c.args.join(" ").includes("~/runs/c3/report.json"))).toBe(true)
+  })
+
+  test("RCA jun-20: the long bench-run ssh carries keepalive (no-keepalive HANG regression)", async () => {
+    const { fn, calls } = mockSpawn({})
+    await runPool(CHUNKS, poolCfg(fn))
+    // The long foreground `ssh '… cli.ts run … | tee run.log'` MUST keep the idle
+    // TCP alive through patch-gen silence — with NO probes ssh hangs on a NAT-
+    // dropped socket forever and the box is orphaned (observed on 2/2 long runs).
+    // Probes every 30s + 600s grace (30×20) tolerate a busy-but-alive box.
+    const benchRuns = calls.filter(
+      (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run")),
+    )
+    expect(benchRuns.length).toBeGreaterThan(0)
+    for (const c of benchRuns) {
+      expect(c.args).toContain("ServerAliveInterval=30")
+      expect(c.args).toContain("ServerAliveCountMax=20")
+    }
+  })
+
+  test("a dead box (no verdict) RE-QUEUES the chunk on a FRESH box", async () => {
+    // c2 produces NO report on the FIRST box (launchIdx 0) → dead box. The pool
+    // must terminate that box, provision a fresh one, and retry c2 (where it
+    // succeeds). Net: 2 boxes, and c2 not lost.
+    let c2Seen = 0
+    const { fn, calls } = mockSpawn({
+      reportFor: (runId) => {
+        if (runId === "c2") {
+          c2Seen += 1
+          return c2Seen === 1 ? "" : JSON.stringify({ resolved_ids: ["x__y-2"] })
+        }
+        return JSON.stringify({ resolved_ids: [`x__y-${runId}`] })
+      },
+    })
+    const out = await runPool(CHUNKS, poolCfg(fn, { maxChunkRetries: 2 }))
+    // TEETH: the requeue forced a SECOND box (bootstrap re-paid only for the loss).
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(2)
+    const c2 = out.find((r) => r.chunk.runId === "c2")
+    expect(c2?.lost).toBe(false)
+    expect(c2?.attempts).toBe(2) // first box died, second succeeded
+    expect(c2?.result.resolved).toContain("x__y-2")
+    // The DEAD box was terminated (1); the survivor is left WARM at drain.
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(1)
+  })
+
+  test("a chunk that never produces a verdict is surfaced as lost, not silently 0", async () => {
+    const { fn } = mockSpawn({
+      reportFor: (runId) => (runId === "c2" ? "" : JSON.stringify({ resolved_ids: ["ok"] })),
+    })
+    const out = await runPool(CHUNKS, poolCfg(fn, { maxChunkRetries: 1 }))
+    const c2 = out.find((r) => r.chunk.runId === "c2")
+    expect(c2?.lost).toBe(true)
+    expect(c2?.attempts).toBe(2) // initial + 1 retry, both empty
+    // the OTHER chunks still resolved.
+    expect(out.filter((r) => r.lost).length).toBe(1)
+  })
+
+  test("PROACTIVE rotation retires a TTL-aged box WITHOUT counting a chunk failure", async () => {
+    const { fn, calls } = mockSpawn({})
+    // Clock advances hugely on each read ⇒ every rotation check sees the box as
+    // past its wall budget ⇒ the worker rotates before chunks 2 and 3.
+    let t = 0
+    const out = await runPool(
+      CHUNKS,
+      poolCfg(fn, { maxBoxWallMs: 1, now: () => (t += 1_000_000_000) }),
+    )
+    // TEETH: rotation provisioned EXTRA boxes (more than the single happy-path box)…
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBeGreaterThan(1)
+    // …but every chunk still graded, and rotation is NOT a retry (attempts stay 1).
+    expect(out.every((r) => !r.lost)).toBe(true)
+    expect(out.every((r) => r.attempts === 1)).toBe(true)
+  })
+
+  test("REUSES a warm idle box (no launch) instead of provisioning", async () => {
+    // findIdleBox's tag-filtered describe returns a running box; its bootstrap
+    // probe says OK and its idle probe says IDLE ⇒ the pool ATTACHES, never
+    // launching. attachBox's --instance-ids describe resolves the ip.
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string) => ({ code: 0, stdout: s, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances")) {
+        // findIdleBox (tag filter) ⇒ id+ip row; attachBox (--instance-ids) ⇒ ip.
+        return a.includes("--filters") ? ok("i-warmbox\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("echo OK")) return ok("OK") // bootstrap probe
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (c.includes("IDLE")) return ok("IDLE") // idle probe
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn))
+    // TEETH: a warm box was reused ⇒ ZERO launches.
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    // ...the chunk still graded on the attached box.
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.result.resolved).toContain("w__w-1")
+    // ...and a reused box is NEVER terminated (left warm).
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
+  })
+
+  test("keepWarm:false terminates the box on clean drain", async () => {
+    const { fn, calls } = mockSpawn({})
+    await runPool(CHUNKS, poolCfg(fn, { keepWarm: false, reuseWarm: false }))
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(1)
+  })
+
+  test("429 BACKOFF: a rate-limited chunk pauses before the next, exponentially; clean resets", async () => {
+    // c1 + c2 rate-limited (consecutive ⇒ base, then 2×base); c3 clean.
+    const { fn } = mockSpawn({ rateLimited: new Set(["c1", "c2"]) })
+    const slept: number[] = []
+    await runPool(
+      CHUNKS,
+      poolCfg(fn, { backoffBaseMs: 1000, sleep: async (ms: number) => void slept.push(ms) }),
+    )
+    // TEETH: two backoffs (after c1, after c2), exponential; none after the clean c3.
+    expect(slept).toEqual([1000, 2000])
+  })
+
+  test("429 BACKOFF: no rate-limit ⇒ never sleeps; backoffBaseMs=0 disables", async () => {
+    const noLimit = mockSpawn({})
+    const sleptA: number[] = []
+    await runPool(
+      CHUNKS,
+      poolCfg(noLimit.fn, {
+        backoffBaseMs: 1000,
+        sleep: async (ms: number) => void sleptA.push(ms),
+      }),
+    )
+    expect(sleptA).toEqual([]) // clean run never backs off
+
+    const limited = mockSpawn({ rateLimited: new Set(["c1", "c2", "c3"]) })
+    const sleptB: number[] = []
+    await runPool(
+      CHUNKS,
+      poolCfg(limited.fn, { backoffBaseMs: 0, sleep: async (ms: number) => void sleptB.push(ms) }),
+    )
+    expect(sleptB).toEqual([]) // disabled
+  })
+
+  test("detectRateLimit fires on the canonical markers, NOT on a bare 429 in an id/turns", () => {
+    expect(detectRateLimit("[FAIL][generation_error] x (turns=2)")).toBe(true)
+    expect(detectRateLimit("hit too many requests")).toBe(true)
+    expect(detectRateLimit("HTTP 429 throttled")).toBe(true)
+    expect(detectRateLimit("[PASS] x (turns=5)\nInstances completed: 1")).toBe(false)
+    expect(detectRateLimit("")).toBe(false)
+    // RED-on-injection: a bare 429 in an instance id / turn count must NOT trip a
+    // backoff (the false-positive the loose `\b429\b` caused).
+    expect(detectRateLimit("[PASS] psf__requests-429 (turns=429)")).toBe(false)
+  })
+
+  test("a BUSY reused box is dropped WITHOUT terminating it (never kills another run's box)", async () => {
+    // findIdleBox keeps returning a warm box, but its grade lock is ALWAYS held
+    // (another run owns it). The pool must DROP it WITHOUT terminating — killing it
+    // would murder the other run's grade — and surface the chunk as lost.
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string) => ({ code: 0, stdout: s, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances"))
+        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      if (a.includes("run-instances")) return ok("i-fresh")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY") // always busy (another run)
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (c.includes("IDLE")) return ok("IDLE")
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool(
+      [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+      poolCfg(fn, { maxChunkRetries: 1 }),
+    )
+    // CRITICAL TEETH: a box we don't own is NEVER terminated.
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
+    // ...and the chunk is surfaced as lost (could not acquire a box), not silent 0.
+    expect(out[0]?.lost).toBe(true)
+  })
+
+  test("chunkBoxPaths isolates every chunk + trajectory uses $HOME (double-quote safe)", () => {
+    const p = chunkBoxPaths("abc")
+    expect(p.report).toBe("~/runs/abc/report.json")
+    expect(p.dataset).toBe("~/runs/abc/instances.jsonl")
+    expect(p.observeDir).toBe("~/runs/abc/observe")
+    // trajectory is placed inside double quotes in the record env → MUST be $HOME
+    // (bash does not expand ~ inside double quotes).
+    expect(p.trajectory.startsWith("$HOME/")).toBe(true)
+    expect(p.trajectory).not.toContain("~")
+  })
+})

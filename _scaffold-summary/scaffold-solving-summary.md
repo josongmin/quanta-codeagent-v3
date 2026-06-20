@@ -10,7 +10,7 @@
 - **EASY-CORE(≥90% 제출 해결) = 59/500** = 거의 모두 푸는 쉬운 코어.
 - **OSS 스캐폴드 = 64개 / closed 64개** (메타 기준). 흡수(코드 학습)는 OSS만 가능 — §3.
 
-### 우리(quanta) 회복가능 타겟
+### 우리(quanta) 회복가능/회복된 타겟
 
 > ★ = 우리가 식별/측정한 회복가능 인스턴스. `134중 해결수`가 높을수록 "남들은 푸는데 우리만 놓침" = 우선순위 ↑.
 
@@ -18,16 +18,17 @@
 |---|--:|---|
 | `django__django-13417` | 109 | over-engineer(불필요 helper); gold=4줄 group_by guard |
 | `sympy__sympy-24562` | 56 | - |
-| `sympy__sympy-18763` | 54 | Claude계열 다 놓침; DeepSeek류가 풂 |
-| `pytest-dev__pytest-5787` | 34 | - |
-| `sympy__sympy-17630` | 2 | gpt-5.5런: _blockmul 오localize; gold=_postprocessor MatAdd 2줄. Prometheus(gpt5)는 풂 |
+| `sympy__sympy-18763` | 54 | quanta gpt-5.4 sidecar PASS(115t, 528B). 이전 clean serial fail은 patch-gen variance/anchoring 실패모드로만 해석 |
+| `pytest-dev__pytest-5787` | 34 | quanta gpt-5.5 sidecar PASS(59t, 7755B). 이전 gpt-5.4 miss는 historical |
+| `sympy__sympy-17630` | 2 | quanta gpt-5.5 sidecar PASS(26t, 616B, `matexpr.py`). 이전 `_blockmul` 오localize는 실패모드 기록 |
 
-### gpt-5.5 천장-probe 실험 기록 (2026-06-19)
+### gpt-5.5 천장-probe 실험 기록 + 정정 (2026-06-19/20)
 
 - **셋업**: agentless-v1(frozen SOTA preset) + gpt-5.5, full-remote(on-demand c7i.8xlarge, grading SERIAL), 단일 `sympy__sympy-17630`.
-- **결과**: resolved **0/1** (completed_unresolved, 31턴, 패치생성됨). 인프라 클린.
-- **진단(현상=팩트)**: gpt-5.5는 `blockmatrix.py::_blockmul`(곱셈 증상지점)을 고침. gold는 `matexpr.py::_postprocessor`의 MatAdd 분기 2줄. FAIL_TO_PASS의 `test_zero_matrix_add`(덧셈 경로)를 못 통과 → 실패모드는 **localize 미스(증상≠근본)**. (모델이 못 푸는 게 아님은 아래 교차검증)
-- **교차검증**: 같은 인스턴스를 Prometheus(gpt5)·Sonar(opus4.5)가 **실제로 풂**(2/134) → gpt5급으로 풀리는 문제, reasoning 천장 아님.
+- **첫 결과**: resolved **0/1** (completed_unresolved, 31턴, 패치생성됨). 인프라 클린.
+- **첫 실패 진단(현상=팩트)**: gpt-5.5는 `blockmatrix.py::_blockmul`(곱셈 증상지점)을 고침. gold는 `matexpr.py::_postprocessor`의 MatAdd 분기 2줄. FAIL_TO_PASS의 `test_zero_matrix_add`(덧셈 경로)를 못 통과 → 실패모드는 **localize 미스(증상≠근본)**.
+- **정정(2026-06-20)**: durable sidecar `report-i-007cd5902aad2e32c.json`에서 같은 quanta/gpt-5.5 stack이 `matexpr.py` 패치로 **PASS**(26턴, 616B). 따라서 `17630`은 active model ceiling이 아니라 **single-shot localization variance / symptom-root split** 케이스다.
+- **교차검증**: 같은 인스턴스를 Prometheus(gpt5)·Sonar(opus4.5)가 **실제로 풂**(2/134) + quanta gpt-5.5도 1회 풂 → gpt5급으로 풀리는 문제, reasoning 천장 아님.
 - **⚠️ confound(과주장 금지)**: 이 런은 **closure/LSP telemetry 미캡처** + full.ts의 pyright 설치가 **best-effort(`|| true`)**라, agentless-v1의 LSP-steer가 실제 active였는지 **미확인**. 따라서 "localize 미스"가 *grounding 부재* 때문인지 *grounding 있어도 못 짚음* 때문인지 이 1런으론 단정 불가 → **이 런을 P0 LSP-grounding 정당화 근거로 쓰지 않는다**. 분리하려면 oracle-localize(파일 지정) 재런 또는 LSP telemetry 캡처 재런 필요. (직전 ceiling-bench 런도 AMI pyright 갭으로 LSP-steer inert였던 전례 있음 — 같은 confound 클래스.)
 
 ### 방법론 교훈

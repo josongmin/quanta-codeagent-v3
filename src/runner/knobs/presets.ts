@@ -227,6 +227,61 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
   },
+  // jun-20 no-oracle verify-select arm. Starts from v3-thin, adds N-best
+  // selection, uses discovered native repo tests as the hard regression signal,
+  // and demotes self-generated repro consensus to positive-only soft ranking so
+  // a noisy repro false-negative cannot reject the right candidate.
+  "agentless-v3-select-regression": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "verify-select": "5",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+  },
+  // jun-20 targeted verify_loop_stuck arm. Keeps the no-oracle verify-select
+  // posture, but adds the one-shot repro-doubt guard after 5 consecutive
+  // post-edit test reruns. Separate preset so the stall-breaker effect stays
+  // attributable instead of silently changing the base select-regression arm.
+  "agentless-v3-select-regression-doubt": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "verify-select": "5",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+    "repro-doubt": "5",
+  },
   // agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen
   // sink for "use everything" runs; NOT measurement-clean vs agentless-v1.
   "everything-v1": {

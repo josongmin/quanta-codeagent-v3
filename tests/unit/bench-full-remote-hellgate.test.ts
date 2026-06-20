@@ -62,6 +62,8 @@ const mockSpawn = (
   // Split ssh routing into a sub-helper so cognitive complexity stays flat.
   const routeSsh = (args: string[]): SpawnResult => {
     if (args.some((a) => a.includes("bun") && a.includes("READY"))) return ok("READY") // readiness
+    // atomic grade lock (a fresh box acquires it cleanly ⇒ LOCKED).
+    if (args.some((a) => a.includes("mkdir ~/.pool-grade.lock"))) return ok("LOCKED")
     if (args.some((a) => a.includes("cat ") || a.includes(".json")))
       return ok(o.emptyReport ? "" : JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
     return ok("")

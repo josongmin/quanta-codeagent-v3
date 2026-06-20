@@ -164,6 +164,34 @@ describe("buildRepairContext (pure repair seed builder)", () => {
     expect(out).toContain("stdout missing substring")
   })
 
+  test("validation gate section names the primary rail command and exit code", () => {
+    const out = buildRepairContext({
+      problem: SMALL_PROBLEM,
+      cumulativeDiff: "DIFF_TEXT",
+      failTail: "FAIL_TEXT",
+      validationSource: "primary_rail",
+      validationCmd: 'python "reproduce_issue.py"',
+      validationExitCode: 1,
+      round: 1,
+    })
+    expect(out).toContain("Validation gate:")
+    expect(out).toContain("PRIMARY RAIL")
+    expect(out).toContain('Command: python "reproduce_issue.py"')
+    expect(out).toContain("Exit code: 1")
+  })
+
+  test("missing validation signal is surfaced explicitly instead of a blank gate", () => {
+    const out = buildRepairContext({
+      problem: SMALL_PROBLEM,
+      cumulativeDiff: "",
+      failTail: "",
+      validationSource: "none",
+      round: 1,
+    })
+    expect(out).toContain("No verification command or reproduction script was captured")
+    expect(out).toContain("run a concrete verification command")
+  })
+
   test("empty diff and empty failTail yield a sensible placeholder, not a blank section", () => {
     const out = buildRepairContext({
       problem: SMALL_PROBLEM,
