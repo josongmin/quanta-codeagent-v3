@@ -96,7 +96,12 @@ describe("stripToAccessToken (security crux)", () => {
  *  `{ emptyReport: true }` the report-fetch (and any `.json` ssh) returns empty
  *  stdout — the "box produced no report" scenario. */
 const mockSpawn = (
-  o: { emptyReport?: boolean; reportBody?: string; beforeReportFetch?: () => void } = {},
+  o: {
+    emptyReport?: boolean
+    reportBody?: string
+    beforeReportFetch?: () => void
+    snapshotWriteResult?: SpawnResult
+  } = {},
 ): { fn: SpawnFn; calls: Array<{ cmd: string; args: string[]; input?: string }> } => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
   const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
@@ -109,6 +114,13 @@ const mockSpawn = (
     if (args.some((a) => a.includes("bun") && a.includes("READY"))) return ok("READY") // readiness
     if (args.some((a) => a.includes("command -v pyright-langserver"))) {
       return ok("pyright 1.1.350\n")
+    }
+    if (
+      args.some((a) => a.includes("bench-box-status.json")) &&
+      args.some((a) => a.includes("cat > ~/.quanta/bench-box-status.json.tmp")) &&
+      args.some((a) => a.includes("mv ~/.quanta/bench-box-status.json.tmp ~/.quanta/bench-box-status.json"))
+    ) {
+      return o.snapshotWriteResult ?? ok("")
     }
     // atomic grade lock (a fresh box acquires it cleanly ⇒ LOCKED).
     if (args.some((a) => a.includes("mkdir ~/.pool-grade.lock"))) return ok("LOCKED")
@@ -230,6 +242,22 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(argstr).toContain("Key=QuantaModel,Value=gpt-5.4")
     expect(argstr).toContain("Key=QuantaDataset,Value=ds.jsonl")
     expect(argstr).toContain("Key=QuantaSelection,Value=psf__requests-5414")
+  })
+
+  test("ALWAYS fetches the box run.log back before terminating (failure forensics)", async () => {
+    // The box is destroyed at end-of-run, so its run.log — the ONLY on-box record
+    // of LSP server-exit WARNs (crash/OOM), throttle/429, warm-up exhaustion — is
+    // gone unless pulled here. Before the fix it was never fetched: every death
+    // had to be chased by live ssh-babysitting against a box racing termination.
+    // Red-on-injection: drop the runLog fetchOptionalArtifact and this fails.
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const fetchedRunLog = calls.some(
+      (c) => c.cmd === "ssh" && c.args.some((a) => /cat ~\/(?:runs\/[^/]+\/)?run\.log\b/.test(a)),
+    )
+    expect(fetchedRunLog).toBe(true)
   })
 
   test("market: default is SPOT; onDemand:true drops the spot market option", async () => {
@@ -526,6 +554,9 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     await createFullRemoteBackend({ ...baseCfg, spawn: fn })
       .run()
       .catch(() => undefined)
+    const statusWriteCmds = calls
+      .filter((c) => c.cmd === "ssh" && c.args.join(" ").includes("bench-box-status.json"))
+      .map((c) => c.args.join(" "))
     const statusWrites = calls
       .filter(
         (c) =>
@@ -554,6 +585,29 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
           s.includes('"resolvedCount":1'),
       ),
     ).toBe(true)
+    expect(
+      statusWriteCmds.every(
+        (cmd) =>
+          cmd.includes("cat > ~/.quanta/bench-box-status.json.tmp") &&
+          cmd.includes("mv ~/.quanta/bench-box-status.json.tmp ~/.quanta/bench-box-status.json"),
+      ),
+    ).toBe(true)
+  })
+
+  test("snapshot publish failures are logged explicitly instead of being swallowed silently", async () => {
+    const logs: string[] = []
+    const { fn } = mockSpawn({
+      snapshotWriteResult: { code: 255, stdout: "", stderr: "ssh write failed" },
+    })
+    await createFullRemoteBackend({
+      ...baseCfg,
+      spawn: fn,
+      onLog: (line) => logs.push(line),
+    })
+      .run()
+      .catch(() => undefined)
+    expect(logs.some((line) => line.includes("snapshot publish failed"))).toBe(true)
+    expect(logs.some((line) => line.includes("snapshot=write-failed"))).toBe(true)
   })
 
   test("generation_error report rows count as errored in the idle box snapshot, not empty", async () => {
@@ -619,14 +673,16 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const calls: Array<{ cmd: string; args: string[] }> = []
     const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
       calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-security-groups")) return { code: 0, stdout: "sg-abc", stderr: "" }
+      if (args.includes("describe-security-groups"))
+        return { code: 0, stdout: "sg-abc", stderr: "" }
       if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
       if (args.includes("run-instances")) return { code: 0, stdout: "i-strict", stderr: "" }
       if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
       if (args.includes("terminate-instances")) return { code: 0, stdout: "", stderr: "" }
       if (cmd === "ssh") {
         const remote = args[args.length - 1] ?? ""
-        if (remote.includes("bun") && remote.includes("READY")) return { code: 0, stdout: "READY", stderr: "" }
+        if (remote.includes("bun") && remote.includes("READY"))
+          return { code: 0, stdout: "READY", stderr: "" }
         if (remote.includes("command -v pyright-langserver")) {
           return { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
         }
@@ -657,15 +713,18 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
       if (cmd === "ssh") {
         const remote = args[args.length - 1] ?? ""
-        if (remote.includes("test -x ~/.bun/bin/bun")) return { code: 0, stdout: "OK\n", stderr: "" }
+        if (remote.includes("test -x ~/.bun/bin/bun"))
+          return { code: 0, stdout: "OK\n", stderr: "" }
         if (remote.includes("command -v pyright-langserver")) {
           pyrightProbeCount += 1
           return pyrightProbeCount === 1
             ? { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
             : { code: 0, stdout: "pyright 1.1.350\n", stderr: "" }
         }
-        if (remote.includes("bun") && remote.includes("READY")) return { code: 0, stdout: "READY", stderr: "" }
-        if (remote.includes("~/swebench-python -c")) return { code: 0, stdout: "2.0.0\n", stderr: "" }
+        if (remote.includes("bun") && remote.includes("READY"))
+          return { code: 0, stdout: "READY", stderr: "" }
+        if (remote.includes("~/swebench-python -c"))
+          return { code: 0, stdout: "2.0.0\n", stderr: "" }
         return { code: 0, stdout: "", stderr: "" }
       }
       return { code: 0, stdout: "", stderr: "" }

@@ -222,7 +222,7 @@ describe("bench box ls status view", () => {
     expect(out).toContain("source=snapshot  mode=full-remote  workload=django__django-11179")
     expect(out).toContain("i-probe  running  c7i.8xlarge  1.2.3.6  status=busy")
     expect(out).toContain(
-      "source=probe  snapshot=missing  active=yes  report=no  runExit=no  preds=84",
+      "source=probe  snapshot=write-failed  active=yes  report=no  runExit=no  preds=84",
     )
     expect(out).toContain("i-pending  pending  c7i.8xlarge  None  status=bootstrapping")
     expect(out).toContain(
@@ -314,7 +314,7 @@ describe("bench box ls status view", () => {
     expect(code).toBe(0)
     expect(out).toContain("[box] summary:")
     expect(out).toContain(
-      "total=4  busy=2  idle=1  bootstrapping=1  unreachable=0  stale=0  snapshotIssues=2",
+      "total=4  busy=2  idle=1  bootstrapping=1  unreachable=0  stale=0  snapshotIssues=2  snapshotStates=write-failed:1,not-ready:1",
     )
     expect(out).toContain("patchGenBudget=12/16  available=4  holders=1  leases=pool:wave7:12")
     expect(out).toContain("target=i-busy  status=busy/running  source=snapshot")
@@ -332,6 +332,7 @@ describe("bench box ls status view", () => {
         bootstrapping: number
         stale: number
         snapshotIssues?: number
+        snapshotStateCounts?: Record<string, number>
         target?: string
       }
       budget?: {
@@ -350,6 +351,7 @@ describe("bench box ls status view", () => {
         bootstrapping: 1,
         stale: 0,
         snapshotIssues: 2,
+        snapshotStateCounts: { "write-failed": 1, "not-ready": 1 },
         target: "i-busy",
       }),
     )
@@ -364,7 +366,7 @@ describe("bench box ls status view", () => {
     expect(parsed.boxes.map((row) => row.iid)).toEqual(["i-pending", "i-idle", "i-busy", "i-probe"])
   })
 
-  test("box status --json exposes snapshot health for probe-fallback rows", async () => {
+  test("box status --json surfaces write-failed snapshots when runtime probe proves the run is active", async () => {
     const { code, out } = await runCli(["box", "status", "--json"])
     expect(code).toBe(0)
     const parsed = JSON.parse(out) as {
@@ -379,7 +381,7 @@ describe("bench box ls status view", () => {
       expect.objectContaining({
         statusSource: "probe",
         snapshotHealthy: false,
-        snapshotState: "missing",
+        snapshotState: "write-failed",
       }),
     )
     expect(parsed.boxes.find((row) => row.iid === "i-pending")).toEqual(
@@ -448,6 +450,7 @@ describe("bench box ls status view", () => {
         bootstrapping: number
         stale: number
         snapshotIssues?: number
+        snapshotStateCounts?: Record<string, number>
       }
       budget?: { inUse: number; limit: number; available: number }
       boxes: Array<unknown>
@@ -460,6 +463,7 @@ describe("bench box ls status view", () => {
         bootstrapping: 0,
         stale: 0,
         snapshotIssues: 0,
+        snapshotStateCounts: {},
       }),
     )
     expect(parsed.budget).toEqual(
@@ -525,11 +529,11 @@ describe("bench box ls status view", () => {
     expect(parsed.tail).toContain("[PASS] demo__inst-1 (turns=2)")
   })
 
-  test("box logs falls back to probe metadata when snapshot is missing", async () => {
+  test("box logs falls back to probe metadata when the runtime-visible snapshot write failed", async () => {
     const { code, out } = await runCli(["box", "logs", "i-probe"])
     expect(code).toBe(0)
     expect(out).toContain("[box] i-probe  ubuntu@1.2.3.6")
-    expect(out).toContain("source=probe  snapshot=missing")
+    expect(out).toContain("source=probe  snapshot=write-failed")
     expect(out).toContain("logPath=~/run.log")
     expect(out).toContain("[warn] pyright warm-up budget exhausted")
   })

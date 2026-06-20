@@ -158,7 +158,32 @@ export const buildReport = (
   }
 }
 
-/** Write the report as pretty JSON (trailing newline). */
+/** Canonical SSOT sink for ALL bench reports — regardless of the caller-chosen
+ *  `--report` path. Override with `QUANTA_BENCH_RESULTS_DIR`; disable the mirror
+ *  with `QUANTA_BENCH_RESULTS_DIR=off`. Default `~/.quanta/bench/results`. */
+const benchResultsDir = (): string | null => {
+  const override = process.env.QUANTA_BENCH_RESULTS_DIR
+  if (override === "off" || override === "0") return null
+  if (override && override.length > 0) return override
+  const home = process.env.HOME ?? process.env.USERPROFILE
+  return home ? `${home}/.quanta/bench/results` : null
+}
+
+/** Write the report as pretty JSON (trailing newline). Additionally mirrors the
+ *  report into the canonical SSOT dir so results never scatter again — the
+ *  mirror name is the sanitised source path, so re-runs to the same `--report`
+ *  overwrite their own mirror (idempotent, no accumulation). Best-effort: a
+ *  mirror failure never fails the run (the primary write already succeeded). */
 export const writeReport = async (file: string, report: BenchReport): Promise<void> => {
-  await Bun.write(file, `${JSON.stringify(report, null, 2)}\n`)
+  const json = `${JSON.stringify(report, null, 2)}\n`
+  await Bun.write(file, json)
+  const dir = benchResultsDir()
+  if (!dir) return
+  try {
+    const { resolve } = await import("node:path")
+    const mirrorName = resolve(file).replace(/^[/\\]+/, "").replace(/[^a-zA-Z0-9._-]/g, "__")
+    await Bun.write(`${dir}/${mirrorName}`, json)
+  } catch {
+    // canonical mirror is best-effort — the caller's report.json already landed
+  }
 }

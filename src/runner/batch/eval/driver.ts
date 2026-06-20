@@ -699,9 +699,12 @@ interface BenchLspProbeTarget {
   readonly count: number
 }
 
-const dominantLspProbeTarget = (repoRoot: string): BenchLspProbeTarget | undefined => {
+/** Dominant LSP-mapped language across `rels` (highest mapped-file count; ties
+ *  broken by bin name so the pick is deterministic). Shared by the whole-repo
+ *  probe and the task-relevant (gold-patch) probe. */
+const dominantBinOf = (rels: Iterable<string>): BenchLspProbeTarget | undefined => {
   const bins = new Map<string, { rel: string; count: number }>()
-  for (const rel of enumerateRepoSources(repoRoot)) {
+  for (const rel of rels) {
     const bin = LSP_EXTENSION_TO_LANGUAGE.get(extname(rel).toLowerCase())
     if (bin === undefined) continue
     const seen = bins.get(bin)
@@ -721,6 +724,9 @@ const dominantLspProbeTarget = (repoRoot: string): BenchLspProbeTarget | undefin
   return best
 }
 
+const dominantLspProbeTarget = (repoRoot: string): BenchLspProbeTarget | undefined =>
+  dominantBinOf(enumerateRepoSources(repoRoot))
+
 export class StrictLspGroundingDegradedError extends Error {
   constructor(message: string) {
     super(message)
@@ -731,6 +737,7 @@ export class StrictLspGroundingDegradedError extends Error {
 const verifyStrictPresetLspGrounding = async (
   posture: BenchPosture,
   sandbox: string,
+  taskFiles?: readonly string[],
 ): Promise<void> => {
   const preset = posture.preset
   if (preset === undefined || !presetRequiresLiveLspGrounding(preset)) return
@@ -739,7 +746,17 @@ const verifyStrictPresetLspGrounding = async (
       `[bench] preset ${preset} requires live LSP grounding, but LSP nav is disabled in the resolved posture.`,
     )
   }
-  const probe = dominantLspProbeTarget(sandbox)
+  // Gate on the TASK-RELEVANT language first: the LSP server for the files THIS
+  // instance actually edits (its gold-patch targets). A repo's incidental
+  // C-extension subdir (astropy/utils/src/*.c) must NOT require clangd for a
+  // Python task. The whole-repo fallback probe is a CAPPED (MAX_WALK_FILES),
+  // filesystem-order-dependent walk whose "dominant" language flips between
+  // identical runs (measured jun-21: astropy-7166 hard-failed turns=0 demanding
+  // clangd on 1 of 3 identical runs). The gold-patch file list is small + stable,
+  // so it identifies the worked-on language deterministically.
+  const probe =
+    (taskFiles !== undefined && taskFiles.length > 0 ? dominantBinOf(taskFiles) : undefined) ??
+    dominantLspProbeTarget(sandbox)
   if (probe === undefined) {
     throw new StrictLspGroundingDegradedError(
       `[bench] preset ${preset} requires live LSP grounding, but this repo has no source file mapped to a configured language server.`,
@@ -2614,7 +2631,11 @@ export const prepareAttemptContext = async (
   signal: AbortSignal,
 ): Promise<PreparedAttemptContext> => {
   const posture = benchOptIns()
-  await verifyStrictPresetLspGrounding(posture, sandbox)
+  // The gold patch's targets are the files the task actually concerns ⇒ the
+  // language to require grounding for. Absent (non-swebench) ⇒ undefined, and the
+  // gate falls back to the whole-repo probe (historical behavior).
+  const taskFiles = instance.goldPatch ? filesFromPatch(instance.goldPatch) : undefined
+  await verifyStrictPresetLspGrounding(posture, sandbox, taskFiles)
   const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm, posture)
   const stage1Files = stage1FilesOf(hintRepro.localizeCandidates)
   const ownerResolved = await resolveOwnerResolved({

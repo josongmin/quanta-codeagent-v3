@@ -20,7 +20,6 @@
  * for observability/golden tests. Throws only if `runOnce` itself throws —
  * validator failures are normal and never throw.
  */
-import { decidePrimaryRailFinishGate } from "@/agent/primary-rail"
 import type {
   BuildRepairContextArgs,
   RepairReproOutcome,
@@ -109,18 +108,14 @@ const isFalseGreen = (v: ValidatorResult): boolean =>
 const clearedAsValidated = (args: RunRepairRoundsArgs, v: ValidatorResult): boolean => {
   if (!v.ok) return false
   if (args.primaryRailStep === undefined) return true
-  const railState: "green" | "red" = isFalseGreen(v) ? "red" : "green"
-  const decision = decidePrimaryRailFinishGate({
-    cfg: { enabled: true },
-    result: {
-      primaryRailPresent: true,
-      primaryRailState: railState,
-      // The exit-code green that did not match the typed rail predicate is the
-      // single non-primary green that the gate must refuse to honor.
-      nonPrimaryGreens: railState === "red" ? 1 : 0,
-    },
-  })
-  return !decision.block
+  // A false-green round (rail predicate evaluable AND matched===false) leaves the
+  // typed rail unproven, so the lone exit-code green must NOT substitute for the
+  // rail's own proof and the round does not clear. This is exactly
+  // `decidePrimaryRailFinishGate`'s decision (block ⇔ rail present AND state !==
+  // "green") specialised to this site; it is INLINED rather than imported from
+  // `@/agent/primary-rail` so the repair slice keeps its structural no-leak fence
+  // (imports only `./types`). Keep in sync with the keystone decider.
+  return !isFalseGreen(v)
 }
 
 const MARKER_REPRODUCED = "Issue reproduced"

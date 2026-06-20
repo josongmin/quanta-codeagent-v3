@@ -132,4 +132,48 @@ describe("bench strict LSP grounding fail-closed", () => {
     }),
     60_000,
   )
+
+  test.serial(
+    "task-relevant gating: a Python task (gold patch in .py) is NOT blocked by an incidental C-dominant repo when clangd is missing",
+    env.run(async () => {
+      // The astropy-7166 shape (measured jun-21): a Python instance whose repo
+      // carries a C-extension subdir. pyright is up, clangd is not. The OLD
+      // whole-repo probe picked the dominant language by raw file count — C here —
+      // and hard-failed the Python task turns=0 demanding clangd. Task-relevant
+      // gating keys off the gold-patch language (.py ⇒ pyright) and lets it run.
+      env.set({ QUANTA_BENCH_PRESET: "agentless-v3-thin-strict" })
+      __resetLspAvailabilityCacheForTest()
+      __setLspAvailabilityOverrideForTest((bin) => bin !== "clangd")
+      const dir = mkdtempSync(join(tmpdir(), "bench-strict-lsp-taskrel-"))
+      try {
+        // Make C the whole-repo dominant language (5 .c > 1 .py) so the old probe
+        // would demand clangd; the fix must ignore it in favor of the gold language.
+        mkdirSync(join(dir, "utils", "src"), { recursive: true })
+        for (let i = 0; i < 5; i++) {
+          writeFileSync(join(dir, "utils", "src", `compiler${i}.c`), "int main(){return 0;}\n")
+        }
+        writeFileSync(join(dir, "core.py"), "def add(a, b):\n    return a - b\n")
+        const instance: Instance = {
+          id: "strict-lsp-taskrel",
+          repoPath: dir,
+          problemStatement: "Fix add().",
+          testCmd: "true",
+          goldPatch:
+            "--- a/core.py\n+++ b/core.py\n@@ -1,2 +1,2 @@\n-    return a - b\n+    return a + b\n",
+        }
+        const llm = new SpyLLM()
+        const result = await runInstance(instance, { llm, maxTurns: 3, timeoutMs: 20_000 })
+        // Red-on-injection: drop the task-relevant probe and the C-dominant repo
+        // demands the missing clangd ⇒ degraded turns=0 ⇒ llm.invoked === false.
+        expect(llm.invoked).toBe(true)
+        expect(result.verdict).not.toBe("degraded")
+        expect(result.error ?? "").not.toContain("clangd")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+        __setLspAvailabilityOverrideForTest(null)
+        __resetLspAvailabilityCacheForTest()
+      }
+    }),
+    60_000,
+  )
 })

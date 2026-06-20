@@ -232,6 +232,9 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   test("writes box-status snapshots so operators can see the current chunk + phase", async () => {
     const { fn, calls } = mockSpawn({})
     await runPool(CHUNKS, poolCfg(fn))
+    const statusWriteCmds = calls
+      .filter((c) => c.cmd === "ssh" && c.args.join(" ").includes("bench-box-status.json"))
+      .map((c) => c.args.join(" "))
     const statusWrites = calls
       .filter(
         (c) =>
@@ -264,6 +267,13 @@ describe("runPool — persistent box, amortised bootstrap", () => {
           s.includes('"runId":"c3"') &&
           s.includes('"reportPath":"~/runs/c3/report.json"') &&
           s.includes('"resolvedCount":1'),
+      ),
+    ).toBe(true)
+    expect(
+      statusWriteCmds.every(
+        (cmd) =>
+          cmd.includes("cat > ~/.quanta/bench-box-status.json.tmp") &&
+          cmd.includes("mv ~/.quanta/bench-box-status.json.tmp ~/.quanta/bench-box-status.json"),
       ),
     ).toBe(true)
   })

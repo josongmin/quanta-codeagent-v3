@@ -43,6 +43,11 @@ const DATASET_JSONL =
   argOf("--dataset") ??
   join(REPO, "docs", "analysis", "swe-bench-verified-analysis", "_data", "verified-full.jsonl")
 const LIVE_ROOTS = [...argsOf("--live"), join(HOME, "easy-more")]
+// Competitor (frontier-winning) full trajectories — the only ones still on
+// disk. The broad per-submission turn data lived in a swe-bench/experiments
+// clone that's gone; only the parsed ✅/· matrix md survived.
+const FRONTIER_TRAJ_DIR =
+  argOf("--frontier-trajs") ?? join(HOME, "Library", "quanta-codeagent-v3", "frontier-winning", "trajs")
 
 function argOf(flag: string): string | undefined {
   const i = process.argv.indexOf(flag)
@@ -130,7 +135,40 @@ interface Run {
   mtime: number
   resolved: number
   total: number
-  perInstance: { id: string; passed: boolean; turns: number }[]
+  perInstance: { id: string; passed: boolean; turns: number; fail: FailInfo | null }[]
+}
+
+interface FailInfo {
+  termination: string // completed_unresolved / error / timeout / …
+  klass: string // 못고침 / regression(기존깨짐) / timeout / error / 미해결
+  repro: string // reproTest.reason (no_reproduced_candidate / execution_failed / …)
+  f2p: number // FAIL_TO_PASS still failing
+  p2p: number // PASS_TO_PASS broken (regression signal)
+}
+
+// Turn the raw grade/termination signals into a one-line failure reason.
+function classifyFail(pi: any): FailInfo | null {
+  if (pi.passed) return null
+  const gb = pi.gradeBreakdown ?? {}
+  const term = pi.failure?.termination ?? pi.budget?.attemptOutcomes?.slice(-1)?.[0]?.subkind ?? "unknown"
+  const f2p = Number(gb.failToPassFailed) || 0
+  const p2p = Number(gb.passToPassFailed) || 0
+  let klass: string
+  if (p2p > 0)
+    klass = "기존테스트깸" // patch broke PASS_TO_PASS (regression)
+  else if (f2p > 0)
+    klass = "패치햇는데틀림" // patch graded but FAIL_TO_PASS still red — wrong fix
+  else if (/timeout/i.test(term))
+    klass = "타임아웃"
+  else if (/admission|blocked|gate/i.test(term))
+    klass = "게이트차단" // admission gate blocked the patch before grading
+  else if (/error|harness|exec/i.test(term))
+    klass = "채점/실행에러" // infra error, not a model miss
+  else if (/no_patch|empty|no_repro|no_diff/i.test(term))
+    klass = "패치생성실패" // model produced no usable patch
+  else
+    klass = "미제출(불명)" // completed without a graded patch, no clear signal
+  return { termination: term, klass, repro: pi.reproTest?.reason ?? "", f2p, p2p }
 }
 
 // Dirs that are source checkouts / caches — never hold our reports but contain
@@ -162,17 +200,34 @@ function walkReports(root: string, acc: string[], depth = 0) {
   }
 }
 
-function presetFromKnobs(knobs: any): string {
-  // The frozen preset name isn't a single field; surface the issue-hint mode
-  // plus a couple of telltale knobs so arms are distinguishable.
+// The versioned preset (agentless-v2, v3-thin-strict, …) is a `--preset` CLI
+// arg that is NOT persisted in report.json. We recover it from the file path
+// (the ground truth of how the campaign was launched). A trailing `*` marks a
+// label inferred from path/knobs rather than read from the data.
+function presetLabel(file: string, knobs: any): string {
+  const name = basename(file).toLowerCase()
+  const dir = basename(file.replace(/\/[^/]+$/, "")).toLowerCase()
+  // 1) the FILENAME literally encodes the arm. Match name only — the parent
+  //    dir (e.g. `reprovote-ab`) would otherwise poison every file under it.
+  if (/v3.?thin.*strict|strict/.test(name)) return "agentless-v3-thin-strict*"
+  if (/v3.?thin|v3thin/.test(name)) return "agentless-v3-thin*"
+  if (/norepair/.test(name)) return "agentless-v2 · norepair*"
+  if (/reprovote/.test(name)) return "agentless-v2 · reprovote*"
+  if (/v2.?repair|[-_]repair/.test(name)) return "agentless-v2 · repair*"
+  if (/v2/.test(name)) return "agentless-v2*"
+  if (/v1/.test(name)) return "agentless-v1*"
+  // 2) SOTA shard campaign (reprovote-ab/sota) = the agentless-v2 baseline
+  if (dir === "sota" || /shard/.test(name)) return "agentless-v2 (SOTA)*"
+  // 3) full-remote per-instance sidecars carry no preset in the data
+  if (/^report-i-/.test(name)) return "full-remote · preset 미기록"
+  if (/^local-/.test(name)) return "local"
+  // 4) last resort: knob fingerprint
   try {
     const r = knobs?.resolved ?? {}
-    const hint = r["issue-hint"]?.value
-    const reprovote = r["repro-vote"]?.display ?? r["repro-vote"]?.value
-    const bits = [hint, reprovote].filter(Boolean)
-    return bits.join("/") || "—"
+    const bits = [r["issue-hint"]?.value, r["repro-vote"]?.display ?? r["repro-vote"]?.value].filter(Boolean)
+    return bits.length ? bits.join("/") + "*" : "preset 미기록"
   } catch {
-    return "—"
+    return "preset 미기록"
   }
 }
 
@@ -195,6 +250,7 @@ function parseRuns(): Run[] {
       id: pi.id,
       passed: !!pi.passed,
       turns: Number(pi.turns) || 0,
+      fail: classifyFail(pi),
     }))
     const resolved = perInstance.filter((p) => p.passed).length
     let mtime = 0
@@ -205,7 +261,7 @@ function parseRuns(): Run[] {
       label: basename(f).replace(/\.report\.json$/, ""),
       file: f,
       model: r.model ?? "?",
-      preset: presetFromKnobs(r.knobs),
+      preset: presetLabel(f, r.knobs),
       mtime,
       resolved,
       total: perInstance.length,
@@ -307,6 +363,28 @@ function loadDataset(): Record<string, DatasetRow> {
   return map
 }
 
+// Competitor frontier trajectories → short-id → turn count (tool-call rounds,
+// counted from `<function_results>` blocks) + path. Only the 4 recovered
+// targets exist on disk.
+let FRONTIER_CACHE: Record<string, { turns: number; file: string }> | null = null
+function loadFrontierTrajs() {
+  if (FRONTIER_CACHE) return FRONTIER_CACHE
+  const map: Record<string, { turns: number; file: string }> = {}
+  if (existsSync(FRONTIER_TRAJ_DIR)) {
+    for (const f of readdirSync(FRONTIER_TRAJ_DIR)) {
+      if (!f.endsWith(".txt")) continue
+      const p = join(FRONTIER_TRAJ_DIR, f)
+      try {
+        const txt = readFileSync(p, "utf8")
+        const turns = (txt.match(/<function_results>/g) || []).length
+        map[shortId(f.replace(/\.txt$/, ""))] = { turns, file: p }
+      } catch {}
+    }
+  }
+  FRONTIER_CACHE = map
+  return map
+}
+
 interface Campaign {
   key: string
   members: string[] // file labels that rolled up into this campaign
@@ -378,6 +456,8 @@ function buildData() {
       passPreset: string | null
       passModel: string | null
       passedBy: string[]
+      fail: FailInfo | null
+      failMtime: number
     }
   > = {}
   for (const run of runs) {
@@ -397,6 +477,8 @@ function buildData() {
         passPreset: null,
         passModel: null,
         passedBy: [],
+        fail: null,
+        failMtime: 0,
       })
       q.attempts++
       if (!q.models.includes(run.model)) q.models.push(run.model)
@@ -415,9 +497,16 @@ function buildData() {
           q.passPreset = run.preset
           q.passModel = run.model
         }
-      } else if (pi.turns > 0 && (q.failTurns === null || pi.turns > q.failTurns)) {
-        // Most turns burned on a failing attempt — shows effort before giving up.
-        q.failTurns = pi.turns
+      } else {
+        if (pi.turns > 0 && (q.failTurns === null || pi.turns > q.failTurns)) {
+          // Most turns burned on a failing attempt — effort before giving up.
+          q.failTurns = pi.turns
+        }
+        // Keep the failure reason from the most recent failing attempt.
+        if (pi.fail && run.mtime >= q.failMtime) {
+          q.fail = pi.fail
+          q.failMtime = run.mtime
+        }
       }
     }
   }
@@ -430,6 +519,9 @@ function buildData() {
     quantaSolved: Object.values(quanta).filter((q) => q.passed).length,
     reportFiles: runs.length,
   }
+  const frontier = loadFrontierTrajs()
+  const frontierTurns: Record<string, number> = {}
+  for (const [id, t] of Object.entries(frontier)) frontierTurns[id] = t.turns
   return {
     generatedAt: new Date().toISOString(),
     matrixSource: matrix.source,
@@ -437,6 +529,7 @@ function buildData() {
     topScaffolds: matrix.topScaffolds,
     rows: matrix.rows,
     dataset,
+    frontierTurns,
     runs,
     campaigns,
     quanta,
@@ -459,6 +552,15 @@ const server = Bun.serve({
       const d = loadDataset()[id]
       if (!d) return new Response(JSON.stringify({ error: "no dataset row for " + id }), { status: 404, headers: { "content-type": "application/json" } })
       const github = d.repo && d.baseCommit ? `https://github.com/${d.repo}/commit/${d.baseCommit}` : ""
+      const ft = loadFrontierTrajs()[id]
+      let frontierTraj: { turns: number; text: string } | null = null
+      if (ft) {
+        let text = ""
+        try {
+          text = readFileSync(ft.file, "utf8").slice(0, 20000)
+        } catch {}
+        frontierTraj = { turns: ft.turns, text }
+      }
       return new Response(
         JSON.stringify({
           id,
@@ -469,6 +571,7 @@ const server = Bun.serve({
           patch: d.patch, // the GOLD/oracle patch
           testPatch: d.testPatch,
           github,
+          frontierTraj, // competitor winning trajectory (only 4 on disk)
         }),
         { headers: { "content-type": "application/json", "cache-control": "no-store" } },
       )
@@ -524,6 +627,7 @@ const HTML = /* html */ `<!doctype html>
   td.inst { text-align: left; color: #adbac7; }
   td.q-yes { color: #3fb950; font-weight: 700; }
   td.q-no { color: #f85149; font-weight: 700; }
+  td.profile { white-space: normal; max-width: 180px; text-align: left; font-size: 11px; line-height: 1.5; }
   .yes { color: #2ea043; }
   .no { color: #30363d; }
   tr:hover td { background: #11161d; }
@@ -542,6 +646,17 @@ const HTML = /* html */ `<!doctype html>
   details summary { cursor: pointer; padding: 3px 0; }
   tr.mrow { cursor: pointer; }
   a { color: #2f81f7; text-decoration: none; }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(1,4,9,.7);
+                   z-index: 50; align-items: flex-start; justify-content: center; padding: 40px 16px; }
+  .modal-box { background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+               width: min(960px, 100%); max-height: 86vh; overflow: auto; padding: 16px 20px;
+               box-shadow: 0 12px 48px rgba(0,0,0,.5); }
+  .modal-head { display: flex; align-items: center; justify-content: space-between;
+                margin-bottom: 10px; position: sticky; top: -16px; background: #161b22; padding: 4px 0; }
+  .modal-head h3 { margin: 0; font-size: 14px; }
+  .modal-close { background: #21262d; color: #adbac7; border: 1px solid #30363d; border-radius: 6px;
+                 cursor: pointer; font-size: 14px; line-height: 1; padding: 4px 9px; }
+  .modal-close:hover { background: #30363d; color: #e6edf3; }
 </style>
 </head>
 <body>
@@ -552,17 +667,24 @@ const HTML = /* html */ `<!doctype html>
 </header>
 <div class="cards" id="cards"></div>
 <nav>
-  <button data-tab="runs" class="active">우리 런</button>
-  <button data-tab="matrix">전체 문제 매트릭스</button>
+  <button data-tab="matrix" class="active">전체 문제 매트릭스</button>
+  <button data-tab="runs">우리 런</button>
   <button data-tab="scaffolds">경쟁 스캐폴드</button>
   <button data-tab="live">라이브</button>
 </nav>
 <div class="wrap" id="view"></div>
+<div class="modal-overlay" id="modal">
+  <div class="modal-box" id="modal-box">
+    <div class="modal-head"><h3 id="modal-title"></h3><button class="modal-close" id="modal-close">✕ 닫기</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
 
 <script>
-let DATA = null, TAB = "runs", SORT = { key: "hash", dir: -1 };
+let DATA = null, TAB = "matrix", SORT = { key: "hash", dir: -1 };
 const SCAF_SHOW = ["sonar-o45","trae-dbo","OH-o45","live-gem3","prom-gpt5"];
 const SCAF_LABEL = { "sonar-o45":"Sonar", "trae-dbo":"Trae", "OH-o45":"OpenHands", "live-gem3":"Live-SWE", "prom-gpt5":"Prometheus" };
+function esc(s){ return (s||"").replace(/</g,"&lt;").replace(/"/g,"&quot;"); }
 
 async function poll() {
   try {
@@ -648,6 +770,16 @@ function renderMatrix(v) {
       <select id="repo"><option value="">모든 repo</option></select>
       <span class="muted" id="mcount"></span>
     </div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px;line-height:1.7">
+      ❌ 실패분류 —
+      <b>패치햇는데틀림</b>: 패치 채점됐으나 타겟테스트(FAIL_TO_PASS) 여전히 실패 ·
+      <b>기존테스트깸</b>: 패치가 PASS_TO_PASS 깨뜨림(regression) ·
+      <b>게이트차단</b>: admission 게이트가 패치 막음(채점 못감) ·
+      <b>패치생성실패</b>: 모델이 쓸 패치 못만듦 ·
+      <b>채점/실행에러</b>: 인프라 에러(모델탓 아님) ·
+      <b>타임아웃</b> · <b>미제출(불명)</b>
+      &nbsp;|&nbsp; preset <b>*</b> = 파일경로서 추정(리포트에 미기록) · 🏆 = 경쟁사 풀이 트랜스크립트 보유(4개뿐)
+    </div>
     <div id="mtable"></div>\`;
   const sel = v.querySelector("#filter"); sel.value = MATRIX_FILTER.kind;
   const repoSel = v.querySelector("#repo");
@@ -661,27 +793,55 @@ function renderMatrix(v) {
 }
 
 const MATRIX_FILTER = { q: "", kind: "all", repo: "" };
-const EXPANDED = new Set();
 const ORACLE_CACHE = {};
 
-async function loadOracle(id) {
-  const box = document.getElementById("oracle-" + id);
-  if (!box) return;
-  let o = ORACLE_CACHE[id];
-  if (!o) {
-    box.innerHTML = '<span class="muted">오라클 불러오는 중…</span>';
-    try { o = await (await fetch("/api/oracle?id=" + encodeURIComponent(id))).json(); ORACLE_CACHE[id] = o; }
-    catch (e) { box.innerHTML = '<span class="q-no">오라클 로드 실패</span>'; return; }
+function oracleHtml(o) {
+  if (o.error) return '<span class="muted">' + o.error + '</span>';
+  // Our verdict + failure reason (from the merged run records).
+  const me = (DATA.quanta||{})[o.id];
+  let verdict = '';
+  if (me && me.passed) {
+    verdict = '<div style="margin-bottom:6px;color:#3fb950">✅ 우리 해결 — '+me.passes+'/'+me.attempts+'회'+
+      (me.bestTurns?', 최소 '+me.bestTurns+'턴':'')+(me.passPreset?' · '+esc(me.passPreset):'')+(me.passModel?' · '+esc(me.passModel):'')+'</div>';
+  } else if (me) {
+    const f = me.fail;
+    verdict = '<div style="margin-bottom:6px;color:#f85149">❌ 우리 미해결 — 시도 '+me.attempts+'회'+(me.failTurns?', 최대 '+me.failTurns+'턴':'')+'</div>'+
+      (f ? '<div style="margin-bottom:6px;font-size:11px" class="muted">실패원인: <b style="color:#e6edf3">'+esc(f.klass)+'</b>'+
+        ' · 종료='+esc(f.termination)+' · FAIL_TO_PASS 실패='+f.f2p+' / PASS_TO_PASS 깨짐='+f.p2p+
+        (f.repro?' · 재현테스트='+esc(f.repro):'')+'</div>' : '');
   }
-  if (o.error) { box.innerHTML = '<span class="muted">' + o.error + '</span>'; return; }
-  const esc = s => (s||"").replace(/</g,"&lt;");
-  box.innerHTML =
-    '<div style="margin-bottom:6px">' +
+  return verdict + '<div style="margin-bottom:6px">' +
       (o.github ? '<a href="'+o.github+'" target="_blank">🔗 GitHub commit ('+o.repo+')</a>  ' : '') +
       '<span class="muted">'+o.instanceId+' · '+o.difficulty+'</span></div>' +
     '<details open><summary class="muted">문제 설명</summary><pre class="ora">'+esc(o.statement)+'</pre></details>' +
     '<details><summary class="muted" style="color:#3fb950">✅ 정답(gold) 패치 — 오라클</summary><pre class="ora">'+esc(o.patch)+'</pre></details>' +
-    '<details><summary class="muted">테스트 패치</summary><pre class="ora">'+esc(o.testPatch)+'</pre></details>';
+    '<details><summary class="muted">테스트 패치</summary><pre class="ora">'+esc(o.testPatch)+'</pre></details>' +
+    (o.frontierTraj
+      ? '<details><summary style="color:#d29922">🏆 프론티어 경쟁사 풀이 트랜스크립트 ('+o.frontierTraj.turns+'턴)</summary><pre class="ora">'+esc(o.frontierTraj.text)+'</pre></details>'
+      : '');
+}
+
+async function openModal(id) {
+  const overlay = document.getElementById("modal");
+  const title = document.getElementById("modal-title");
+  const body = document.getElementById("modal-body");
+  if (!overlay || !body) return;
+  title.textContent = id;
+  body.innerHTML = '<span class="muted">오라클 불러오는 중…</span>';
+  overlay.style.display = "flex";
+  let o = ORACLE_CACHE[id];
+  if (!o) {
+    try { o = await (await fetch("/api/oracle?id=" + encodeURIComponent(id))).json(); ORACLE_CACHE[id] = o; }
+    catch (e) { body.innerHTML = '<span class="q-no">오라클 로드 실패</span>'; return; }
+  }
+  // Guard against a slow fetch resolving after the user opened another row / closed.
+  if (overlay.style.display === "none" || title.textContent !== id) return;
+  body.innerHTML = oracleHtml(o);
+}
+
+function closeModal() {
+  const overlay = document.getElementById("modal");
+  if (overlay) overlay.style.display = "none";
 }
 
 // Unified row set: every instance we have ANY evidence for — competitor
@@ -740,26 +900,36 @@ function drawMatrix() {
     const me = r.me;
     let qcell = '<td class="muted">·</td>';
     if (me && me.passed) qcell = '<td class="q-yes" title="'+me.passedBy.slice(0,8).join(", ")+'">✅<span class="muted" style="font-size:10px"> '+me.passes+'/'+me.attempts+'</span></td>';
-    else if (me) qcell = '<td class="q-no" title="시도 '+me.attempts+'회, 모델 '+me.models.join("/")+'">❌</td>';
+    else if (me) {
+      const fk = me.fail ? me.fail.klass : '';
+      const ftitle = me.fail ? (me.fail.klass+' · '+me.fail.termination+(me.fail.repro?' · repro:'+me.fail.repro:'')+' · F2P'+me.fail.f2p+'/P2P'+me.fail.p2p) : ('시도 '+me.attempts+'회');
+      qcell = '<td class="q-no" title="'+esc(ftitle)+'">❌'+(fk?' <span class="muted" style="font-size:10px">'+esc(fk)+'</span>':'')+'</td>';
+    }
     // Turns: cheapest passing run, else most-effort failing run.
     const turns = me ? (me.passed ? (me.bestTurns || '?') : (me.failTurns || '')) : '';
-    // Profile we ran: the winning profile/model on a pass, else every profile tried.
+    // Profile we ran: the winning profile on a pass, else every profile tried —
+    // one per line so the column stays narrow.
     let presetCell = '<span class="muted">·</span>';
     if (me) {
-      const p = me.passed && me.passPreset ? me.passPreset : (me.presets || []).join(', ');
+      const presetsArr = me.passed && me.passPreset ? [me.passPreset] : (me.presets || []);
       const mdl = me.passed && me.passModel ? me.passModel : (me.models || []).join('/');
-      if (p || mdl) presetCell = '<span title="'+esc((p||'—')+' · '+(mdl||'—'))+'">'+esc(p||'—')+
-        (mdl?' <span class="muted" style="font-size:10px">'+esc(mdl)+'</span>':'')+'</span>';
+      const lines = presetsArr.map(esc);
+      const body = lines.length ? lines.join('<br>') : '—';
+      presetCell = '<span title="'+esc(presetsArr.join(' / ')+' · '+(mdl||'—'))+'">'+body+
+        (mdl ? '<br><span class="muted" style="font-size:10px">'+esc(mdl)+'</span>' : '')+'</span>';
     }
-    const hashCell = r.hash < 0 ? '<span class="muted">—</span>' : r.hash;
+    const hashCell = r.hash < 0
+      ? '<span class="muted">—</span>'
+      : (r.hash === 0
+          ? '<span title="공개 134제출 전부 실패 = 천장(데이터 누락 아님)">0 <span class="pill" style="background:#5a1e1e;color:#f0a0a0">천장</span></span>'
+          : r.hash);
     const tierCell = r.tier === '?' ? '<span class="muted">—</span>' : '<span class="'+tierClass(r.tier)+'">'+r.tier+'</span>';
-    h += '<tr class="mrow" data-id="'+r.id+'"><td class="inst">'+r.id+(r.statement?' <span class="muted">ⓘ</span>':'')+'</td>'+qcell+
-      '<td class="muted">'+turns+'</td><td class="muted" style="font-size:11px">'+presetCell+'</td><td class="muted" style="font-size:11px">'+r.difficulty+'</td>';
+    const ftn = (DATA.frontierTurns||{})[r.id];
+    const ftBadge = ftn ? ' <span class="pill" title="프론티어 경쟁사 풀이 턴">🏆'+ftn+'t</span>' : '';
+    h += '<tr class="mrow" data-id="'+r.id+'"><td class="inst">'+r.id+(r.statement?' <span class="muted">ⓘ</span>':'')+ftBadge+'</td>'+qcell+
+      '<td class="muted">'+turns+'</td><td class="profile muted">'+presetCell+'</td><td class="muted" style="font-size:11px">'+r.difficulty+'</td>';
     for (const s of SCAF_SHOW) h += '<td class="'+(r.cells[s]?'yes':'no')+'">'+(r.cells[s]?'✅':'·')+'</td>';
     h += '<td>'+hashCell+'</td><td>'+tierCell+'</td></tr>';
-    if (EXPANDED.has(r.id)) {
-      h += '<tr><td colspan="'+(5+SCAF_SHOW.length)+'" style="text-align:left;background:#11161d" id="oracle-'+r.id+'"></td></tr>';
-    }
   }
   h += '</tbody></table>';
   document.getElementById("mtable").innerHTML = h;
@@ -768,12 +938,7 @@ function drawMatrix() {
     if (SORT.key === k) SORT.dir *= -1; else { SORT.key = k; SORT.dir = -1; }
     drawMatrix();
   });
-  document.querySelectorAll("#mtable tr.mrow").forEach(tr => tr.onclick = () => {
-    const id = tr.dataset.id;
-    if (EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id);
-    drawMatrix();
-  });
-  EXPANDED.forEach(id => loadOracle(id));
+  document.querySelectorAll("#mtable tr.mrow").forEach(tr => tr.onclick = () => openModal(tr.dataset.id));
 }
 
 function renderScaffolds() {
@@ -797,6 +962,11 @@ function renderLive() {
 }
 
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { TAB = b.dataset.tab; render(); });
+
+// Modal close: ✕ button, click on backdrop (not the box), or Escape.
+document.getElementById("modal-close").onclick = closeModal;
+document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
 let cd = 5;
 setInterval(() => { cd--; if (cd <= 0) { cd = 5; poll(); } document.getElementById("cd").textContent = cd; }, 1000);

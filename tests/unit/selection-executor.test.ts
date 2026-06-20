@@ -182,8 +182,11 @@ describe("runSelection", () => {
     })
     expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(true)
     expect(r.winner?.id).toBe("cand-1")
+    // bugbash #31: voterQuorum is the consensus ratio votes/k squashed by
+    // r/(r+1) so super-quorum stays distinguishable from exact quorum. votes=1,
+    // k=1 ⇒ ratio 1 ⇒ 1/(1+1) = 0.5 (was clamped to 1 before the fix).
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
-      "soft:voterQuorum=1",
+      "soft:voterQuorum=0.5",
     )
   })
 
@@ -249,7 +252,8 @@ describe("runSelection", () => {
     expect(generated).toBe(2)
     expect(r.earlyAccepted).toBe(false)
     expect(r.successfulGenerations).toBe(2)
-    expect(r.scored.every((s) => s.verdict.reasons.includes("soft:voterQuorum=1"))).toBe(true)
+    // bugbash #31: votes=1,k=1 ⇒ ratio 1 ⇒ r/(r+1) = 0.5 (was clamped to 1).
+    expect(r.scored.every((s) => s.verdict.reasons.includes("soft:voterQuorum=0.5"))).toBe(true)
   })
 
   it("ADVERSARIAL: earlyAccept cannot stop without known owner authority", async () => {

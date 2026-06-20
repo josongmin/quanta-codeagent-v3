@@ -855,6 +855,9 @@ interface BoxStatusSummary {
   readonly unreachable: number
   readonly stale: number
   readonly snapshotIssues: number
+  readonly snapshotStateCounts: Partial<
+    Record<Awaited<ReturnType<typeof inspectBox>>["snapshotState"], number>
+  >
   readonly target?: string
   readonly targetFollowHint?: string
 }
@@ -1059,6 +1062,13 @@ const resolveBoxTarget = (
 }
 
 const summarizeBenchBoxes = (rows: readonly BoxRuntimeRow[]): BoxStatusSummary => {
+  const snapshotStateCounts = rows.reduce<
+    Partial<Record<Awaited<ReturnType<typeof inspectBox>>["snapshotState"], number>>
+  >((acc, row) => {
+    if (row.snapshotHealthy) return acc
+    acc[row.snapshotState] = (acc[row.snapshotState] ?? 0) + 1
+    return acc
+  }, {})
   if (rows.length === 0) {
     return {
       total: 0,
@@ -1068,6 +1078,7 @@ const summarizeBenchBoxes = (rows: readonly BoxRuntimeRow[]): BoxStatusSummary =
       unreachable: 0,
       stale: 0,
       snapshotIssues: 0,
+      snapshotStateCounts,
     }
   }
   const target = resolveBoxTarget(rows, "auto")
@@ -1079,6 +1090,7 @@ const summarizeBenchBoxes = (rows: readonly BoxRuntimeRow[]): BoxStatusSummary =
     unreachable: rows.filter((row) => row.lifecycle === "unreachable").length,
     stale: rows.filter((row) => row.freshness === "stale").length,
     snapshotIssues: rows.filter((row) => !row.snapshotHealthy).length,
+    snapshotStateCounts,
     target: target.iid,
     targetFollowHint: target.followHint,
   }
@@ -1176,6 +1188,22 @@ const renderPatchGenBudgetLine = (budget: PatchGenBudgetState): string => {
 const renderPatchGenBudgetErrorLine = (error: string): string =>
   `  patchGenBudget=unavailable  error=${error}`
 
+const SNAPSHOT_STATE_RENDER_ORDER: ReadonlyArray<
+  Awaited<ReturnType<typeof inspectBox>>["snapshotState"]
+> = ["write-failed", "read-failed", "invalid", "missing", "not-ready", "ok"]
+
+const renderSnapshotStateCounts = (
+  counts: Partial<Record<Awaited<ReturnType<typeof inspectBox>>["snapshotState"], number>>,
+): string | undefined => {
+  const rendered = SNAPSHOT_STATE_RENDER_ORDER.map((state) => {
+    const count = counts[state]
+    return count !== undefined && count > 0 ? `${state}:${count}` : undefined
+  })
+    .filter((entry): entry is string => entry !== undefined)
+    .join(",")
+  return rendered === "" ? undefined : rendered
+}
+
 const renderBoxStatus = (
   summary: BoxStatusSummary,
   rows: readonly BoxRuntimeRow[],
@@ -1188,7 +1216,11 @@ const renderBoxStatus = (
     latestLaunchFirst(rows)[0]
   return [
     "[box] summary:",
-    `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}  snapshotIssues=${summary.snapshotIssues}`,
+    `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}  snapshotIssues=${summary.snapshotIssues}${
+      renderSnapshotStateCounts(summary.snapshotStateCounts) !== undefined
+        ? `  snapshotStates=${renderSnapshotStateCounts(summary.snapshotStateCounts)}`
+        : ""
+    }`,
     budget !== undefined ? renderPatchGenBudgetLine(budget) : undefined,
     budget === undefined && budgetError !== undefined
       ? renderPatchGenBudgetErrorLine(budgetError)

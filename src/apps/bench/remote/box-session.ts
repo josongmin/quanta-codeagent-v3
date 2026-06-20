@@ -249,6 +249,7 @@ const launchTagSpecifications = (cfg: FullRemoteConfig): string => {
  *  never run two grades at once. */
 const GRADE_LOCK_DIR = "~/.pool-grade.lock"
 const BOX_STATUS_PATH = "~/.quanta/bench-box-status.json"
+const BOX_STATUS_TMP_PATH = "~/.quanta/bench-box-status.json.tmp"
 
 /** Thrown by {@link gradeChunkOnBox} when the box is already grading (lock held).
  *  The pool drops the box WITHOUT terminating it (it belongs to the other run). */
@@ -612,7 +613,13 @@ export interface BoxRuntimeProbe {
   readonly lastLogLine?: string
 }
 
-export type BoxSnapshotState = "ok" | "missing" | "invalid" | "read-failed" | "not-ready"
+export type BoxSnapshotState =
+  | "ok"
+  | "missing"
+  | "write-failed"
+  | "invalid"
+  | "read-failed"
+  | "not-ready"
 
 export interface BoxInspection {
   readonly lifecycle: "bootstrapping" | "idle" | "busy" | "unreachable"
@@ -626,7 +633,7 @@ export interface BoxInspection {
 
 interface BoxSnapshotRead {
   readonly snapshotHealthy: boolean
-  readonly snapshotState: Exclude<BoxSnapshotState, "not-ready">
+  readonly snapshotState: Exclude<BoxSnapshotState, "not-ready" | "write-failed">
   readonly snapshot?: BoxStatusSnapshot
 }
 
@@ -683,10 +690,22 @@ const selectionMeta = (
 const writeBoxSnapshot = async (
   session: BoxSession,
   snapshot: BoxStatusSnapshot,
-): Promise<void> => {
-  await session
-    .ssh(`mkdir -p ~/.quanta && cat > ${BOX_STATUS_PATH}`, `${JSON.stringify(snapshot)}\n`)
-    .catch(() => undefined)
+): Promise<{ ok: true } | { ok: false; error: string }> => {
+  try {
+    const out = await session.ssh(
+      `mkdir -p ~/.quanta && cat > ${BOX_STATUS_TMP_PATH} && mv ${BOX_STATUS_TMP_PATH} ${BOX_STATUS_PATH}`,
+      `${JSON.stringify(snapshot)}\n`,
+    )
+    if (out.code !== 0) {
+      return {
+        ok: false,
+        error: `exit ${out.code}: ${(out.stderr || out.stdout || "no output").trim()}`,
+      }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: errMessage(err) }
+  }
 }
 
 const asSnapshotPhase = (value: unknown): BoxStatusSnapshot["phase"] | undefined =>
@@ -954,6 +973,41 @@ const readBoxRuntimeProbe = async (
     return normalizeRuntimeProbePayload(JSON.parse(raw.stdout) as Partial<BoxRuntimeProbe>)
   } catch {
     return undefined
+  }
+}
+
+const probeShowsRuntimeEvidence = (probe: BoxRuntimeProbe | undefined): boolean =>
+  probe?.activeRunDetected === true ||
+  probe?.runLogPath !== undefined ||
+  probe?.runLogUpdatedAt !== undefined ||
+  probe?.reportPath !== undefined ||
+  probe?.reportExists !== undefined ||
+  probe?.predictionsPath !== undefined ||
+  probe?.predictionsLines !== undefined ||
+  probe?.observeDir !== undefined ||
+  probe?.runExitPath !== undefined ||
+  probe?.runExitExists !== undefined ||
+  probe?.lastLogLine !== undefined
+
+/**
+ * `gradeChunkOnBox()` publishes the running snapshot BEFORE dataset upload,
+ * token ship, and the detached bench run start. Once the runtime probe can see
+ * an active run or any run artifacts, the snapshot file should already exist.
+ * If it does not, the snapshot publish path regressed and the operator must see
+ * that as stronger than a generic "missing file".
+ */
+const resolveSnapshotInspection = (
+  snapshotRead: BoxSnapshotRead,
+  probe: BoxRuntimeProbe | undefined,
+  busy: boolean,
+): Pick<BoxInspection, "snapshotHealthy" | "snapshotState" | "snapshot"> => {
+  if (snapshotRead.snapshotState === "missing" && (busy || probeShowsRuntimeEvidence(probe))) {
+    return { snapshotHealthy: false, snapshotState: "write-failed" }
+  }
+  return {
+    snapshotHealthy: snapshotRead.snapshotHealthy,
+    snapshotState: snapshotRead.snapshotState,
+    ...(snapshotRead.snapshot !== undefined ? { snapshot: snapshotRead.snapshot } : {}),
   }
 }
 
@@ -1505,13 +1559,12 @@ export const inspectBox = async (
   const busy = busyProbe.stdout.includes("BUSY")
   const snapshotRead = await readBoxSnapshot((cmd) => ssh(cmd))
   const probe = await readBoxRuntimeProbe((cmd) => ssh(cmd))
+  const snapshotInspection = resolveSnapshotInspection(snapshotRead, probe, busy)
   return {
     lifecycle: busy ? "busy" : "idle",
     bootstrapped: true,
     busy,
-    snapshotHealthy: snapshotRead.snapshotHealthy,
-    snapshotState: snapshotRead.snapshotState,
-    ...(snapshotRead.snapshot !== undefined ? { snapshot: snapshotRead.snapshot } : {}),
+    ...snapshotInspection,
     ...(probe !== undefined ? { probe } : {}),
   }
 }
@@ -1747,20 +1800,27 @@ const createSnapshotController = (
   finish: () => Promise<void>
 } => {
   const { log } = session
+  let snapshotWriteFailures = 0
+  let snapshotWriteWarned = false
   const publish = async (
     phase: BoxStatusSnapshot["phase"],
     extras: Partial<BoxStatusSnapshot> = {},
   ): Promise<void> => {
-    state.snapshotWrites = state.snapshotWrites
-      .then(() =>
-        writeBoxSnapshot(session, {
-          ...snapshotBase,
-          phase,
-          updatedAt: new Date().toISOString(),
-          ...extras,
-        }),
-      )
-      .catch(() => undefined)
+    state.snapshotWrites = state.snapshotWrites.then(async () => {
+      const write = await writeBoxSnapshot(session, {
+        ...snapshotBase,
+        phase,
+        updatedAt: new Date().toISOString(),
+        ...extras,
+      })
+      if (!write.ok) {
+        snapshotWriteFailures += 1
+        if (!snapshotWriteWarned) {
+          snapshotWriteWarned = true
+          log(`[box] snapshot publish failed (${phase}): ${write.error}`)
+        }
+      }
+    })
     await state.snapshotWrites
   }
 
@@ -1806,6 +1866,12 @@ const createSnapshotController = (
   const finish = async (): Promise<void> => {
     if (!state.wroteRunningSnapshot) return
     await publish("idle", idleSnapshotExtras(state))
+    if (snapshotWriteFailures > 0) {
+      log(
+        `[box] snapshot publish degraded: ${snapshotWriteFailures} failure(s) total; ` +
+          "later `box status` may report snapshot=write-failed.",
+      )
+    }
   }
 
   return { publish, flush, makeLineStreamer, start, stop, finish }
@@ -1961,6 +2027,19 @@ const fetchChunkArtifacts = async (args: {
     localPath: join(fullRemoteArtifactDir(), `preds-${args.artifactSuffix}.jsonl`),
     log: args.log,
     label: "[full-remote] predictions saved",
+  })
+  // ALWAYS pull the operational run.log back before the box is terminated. It
+  // holds the only on-box diagnostics — LSP server-exit WARNs (crash/OOM),
+  // throttle/429 markers, warm-up exhaustion — and the box is destroyed at
+  // end-of-run, so a death NOT fetched here is a death investigated by live
+  // ssh-babysitting (or lost entirely). Not gated on `recordTrajectory`: this is
+  // the cheap, always-useful failure-forensics artifact, not the heavy cassette.
+  await fetchOptionalArtifact({
+    ssh: args.ssh,
+    remotePath: args.paths.runLog,
+    localPath: join(fullRemoteArtifactDir(), `runlog-${args.artifactSuffix}.log`),
+    log: args.log,
+    label: "[full-remote] run.log saved",
   })
   await fetchOptionalArtifact({
     ssh: args.ssh,

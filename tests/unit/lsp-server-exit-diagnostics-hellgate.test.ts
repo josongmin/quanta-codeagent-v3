@@ -79,13 +79,45 @@ describe("LspClient — server-exit diagnostics (crash/OOM must be logged)", () 
     }
   })
 
+  test("a crash that ALSO triggers a reactive stop() is STILL warned (status, not the stopped flag)", async () => {
+    // The real regression (measured jun-21): when pyright dies, the warm-pool's
+    // fatal-error path calls stop() (sets `stopped=true`) BEFORE the exit handler
+    // logs. Gating the warn on `this.stopped` downgraded the crash to debug and it
+    // vanished. The classification must key off the EXIT STATUS, so an explicit
+    // stop() racing the crash does NOT silence it.
+    const warn = spyOn(logger, "warn").mockImplementation(() => {})
+    try {
+      client = new LspClient(
+        {
+          defaultCommand: ["/bin/sh", "-c", "printf 'OOMish\\n' 1>&2; exit 1"],
+          languageIdFor: lang,
+        },
+        { requestTimeoutMs: 500 },
+      )
+      const started = client.start().catch(() => undefined)
+      // Reactive teardown, exactly like the pool does on a fatal nav error.
+      await client.stop().catch(() => undefined)
+      await started
+      client = null
+      await settleExit()
+
+      const cried = warn.mock.calls.some((c) => String(c[0]).includes("exited UNEXPECTEDLY"))
+      expect(cried).toBe(true) // formerly downgraded to debug by the stopped-flag gate
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   test("paired control: a DELIBERATE stop() is NOT a crash — no UNEXPECTEDLY warn", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {})
     try {
       // `cat` stays alive (stdout open) until WE tear it down. An operator-driven
       // stop must stay quiet (debug), so the warn is specific to real crashes and
       // does not cry wolf on every clean shutdown.
-      client = new LspClient({ defaultCommand: ["cat"], languageIdFor: lang }, { requestTimeoutMs: 300 })
+      client = new LspClient(
+        { defaultCommand: ["cat"], languageIdFor: lang },
+        { requestTimeoutMs: 300 },
+      )
       await client.start().catch(() => undefined) // initialize times out — fine
       await client.stop()
       client = null

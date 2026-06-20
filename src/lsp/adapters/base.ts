@@ -1588,11 +1588,15 @@ export class LspClient implements LspPort {
       // holds the server's LAST words (its crash/OOM reason) instead of racing
       // the exit event and logging an empty tail.
       await this.stderrPump?.catch(() => undefined)
-      // Surface the death cause that was formerly invisible. `signalCode` is the
-      // OOM tell: a SIGKILL the server did not ask for is almost always the
-      // kernel OOM-killer (large repos blow past node's default heap). An exit we
-      // DID initiate (`this.stopped` ⇒ our stop()/shutdown) is expected → debug;
-      // anything else is a crash worth a WARN with the retained stderr tail.
+      // Classify by the EXIT STATUS, never by `this.stopped`: a crash triggers
+      // the pool's reactive teardown (`stopClient → stop()`), which sets
+      // `stopped=true` — so gating on it would DOWNGRADE the very crash we want to
+      // surface (measured jun-21: a pyright OOM logged at debug, invisible). A
+      // clean `exit 0`, or the `SIGTERM` our own stop() sends, is expected →
+      // debug. Anything else — a non-zero exit (crash) or a signal we did NOT
+      // send (SIGKILL ⇒ the kernel OOM-killer; large repos blow past node's
+      // default heap) — is a real death worth a WARN with the stderr tail.
+      const expected = proc.exitCode === 0 || proc.signalCode === "SIGTERM"
       const detail = {
         command: this.command[0],
         cwd: this.cwd,
@@ -1600,7 +1604,7 @@ export class LspClient implements LspPort {
         signal: proc.signalCode,
         stderrTail: this.stderrTail.slice(-2_000),
       }
-      if (this.stopped) logger.debug("lsp: server exited", detail)
+      if (expected) logger.debug("lsp: server exited", detail)
       else logger.warn("lsp: server exited UNEXPECTEDLY", detail)
     }
     void proc.exited.then(onExit).catch(onExit)
