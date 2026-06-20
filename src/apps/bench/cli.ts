@@ -335,6 +335,23 @@ const runIdFromDataset = (path: string): string => {
   return base.replace(/[^A-Za-z0-9_-]+/g, "_") || "chunk"
 }
 
+/** Allocate UNIQUE pool chunk runIds from dataset paths. Basenames may collide
+ *  (`a/same.jsonl`, `b/same.jsonl`) — suffix duplicates deterministically so the
+ *  box-side `~/runs/<runId>/...` dirs and the pool's per-runId result map never
+ *  collide. */
+const buildPoolChunks = (datasetPaths: readonly string[]): PoolChunk[] => {
+  const seen = new Map<string, number>()
+  return datasetPaths.map((datasetPath) => {
+    const base = runIdFromDataset(datasetPath)
+    const nth = (seen.get(base) ?? 0) + 1
+    seen.set(base, nth)
+    return {
+      runId: nth === 1 ? base : `${base}_${nth}`,
+      datasetPath,
+    }
+  })
+}
+
 /**
  * jun-20 box-lifecycle Phase 2/3 — persistent-pool full-remote. Bootstraps ONE
  * box (or `--workers N`) ONCE and feeds it a QUEUE of dataset chunks, instead of
@@ -362,10 +379,7 @@ const cmdPool = async (): Promise<void> => {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s !== "")
-  const chunks: PoolChunk[] = datasets.map((datasetPath) => ({
-    runId: runIdFromDataset(datasetPath),
-    datasetPath,
-  }))
+  const chunks = buildPoolChunks(datasets)
   const workers = Math.max(1, Math.trunc(Number(argValue("--workers")) || 1))
   const authFile =
     process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`

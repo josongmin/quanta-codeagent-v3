@@ -84,6 +84,22 @@ describe("buildRepairContext (pure repair seed builder)", () => {
     expect(out.length).toBeLessThanOrEqual(4096)
   })
 
+  test("tiny maxBytes still hard-caps the full prompt", () => {
+    const huge = "X".repeat(50_000)
+    const out = buildRepairContext({
+      problem: huge,
+      cumulativeDiff: huge,
+      failTail: huge,
+      validationSource: "primary_rail",
+      validationCmd: `python "${"a".repeat(500)}"`,
+      validationExitCode: 1,
+      round: 2,
+      maxBytes: 256,
+    })
+    expect(out.length).toBeLessThanOrEqual(256)
+    expect(/<\d+ bytes truncated>/.test(out)).toBe(true)
+  })
+
   test("failTail kept as TAIL when truncated, with truncation marker", () => {
     const failTail = `${"H".repeat(8000)}${"T".repeat(1000)}`
     const out = buildRepairContext({

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
-import { type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
+import { evaluateSuccessPredicate, type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { analyzePatchBudget } from "@/agent/patch-budget"
 import { decideEscalation } from "@/agent/repair-escalation"
@@ -521,6 +521,7 @@ const runRepairPhase = async (
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
+        evaluatePredicate: evaluateSuccessPredicate,
         ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
       })
       turns = out.turns

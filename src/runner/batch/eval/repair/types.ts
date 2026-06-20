@@ -48,6 +48,9 @@ export interface ValidatorResult {
    *  ⇒ fail-open: the predicate is advisory and never overrides `ok`. */
   observed?: ExecObservation
   predicate?: PredicateResult
+  /** Repro-marker outcome recorded from stdout classification. Diagnostic only:
+   *  used by observe-only repair instruments such as false-RED measurement. */
+  reproOutcome?: RepairReproOutcome
 }
 
 /** One repair round's bookkeeping (observability/golden, not the score). */
@@ -112,7 +115,13 @@ export interface ValidateArgs {
    *  the exit-code decision stands). Pure-core evaluation; the predicate type is
    *  the closure engine's. */
   successPredicate?: SuccessPredicate
+  /** Injected typed-predicate evaluator. The repair slice stays structurally
+   *  isolated from the closure engine by receiving this pure evaluator from the
+   *  owning driver rather than importing it directly. */
+  evaluatePredicate?: (observed: ExecObservation, predicate: SuccessPredicate) => PredicateResult
 }
+
+export type RepairReproOutcome = "reproduced" | "resolved" | "other" | "exec_failed" | "unknown"
 
 export type RepairValidationSource = "primary_rail" | "verify_cmd" | "repro" | "none"
 
@@ -179,6 +188,9 @@ export interface RunRepairRoundsArgs {
    *  ABSENT ⇒ byte-identical (agent-command gate). The rail is selected from
    *  PUBLIC evidence only (repro/owner-test/smoke) upstream (no-leak preserved). */
   primaryRailStep?: PrimaryRailStep
+  /** Injected typed-predicate evaluator passed through to the validator when a
+   *  typed success predicate is present. */
+  evaluatePredicate?: ValidateArgs["evaluatePredicate"]
 }
 
 /** Orchestrator result. The cumulative `patch` is what the bench runner then

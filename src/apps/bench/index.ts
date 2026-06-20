@@ -144,7 +144,10 @@ const loadEnv = (files: string[]): void => {
 
 const argValue = (flag: string): string | undefined => {
   const i = process.argv.indexOf(flag)
-  return i >= 0 ? process.argv[i + 1] : undefined
+  if (i >= 0) return process.argv[i + 1]
+  const pref = `${flag}=`
+  const eq = process.argv.find((a) => a.startsWith(pref))
+  return eq !== undefined ? eq.slice(pref.length) : undefined
 }
 
 const argFlag = (flag: string): boolean => process.argv.includes(flag)

@@ -20,7 +20,6 @@
  * for observability/golden tests. Throws only if `runOnce` itself throws —
  * validator failures are normal and never throw.
  */
-import { classifyStdout } from "@/agent/repro-test/execute"
 import type {
   BuildRepairContextArgs,
   RepairValidationSource,
@@ -97,7 +96,7 @@ const isFalseGreen = (v: ValidatorResult): boolean =>
  *  incidental exit code. Records, never flips `ok` — the fix is the next step,
  *  gated on THIS measurement (no blind loop change). */
 const isFalseRed = (v: ValidatorResult): boolean =>
-  !v.ok && v.observed !== undefined && classifyStdout(v.observed.stdout, v.observed.exitCode) === "resolved"
+  !v.ok && v.reproOutcome === "resolved"
 
 const predicateSummaryOf = (v: ValidatorResult): string | undefined => {
   const predicate = v.predicate
@@ -128,14 +127,14 @@ const validationGateContextOf = (
     })
   }
   const lastVerifyCmd = run.lastVerifyCmd
-  if ((lastVerifyCmd ?? "") !== "") {
+  if (typeof lastVerifyCmd === "string" && lastVerifyCmd !== "") {
     return withExit({
       validationSource: "verify_cmd",
       validationCmd: lastVerifyCmd,
     })
   }
   const reproPath = run.reproPath
-  if ((reproPath ?? "") !== "") {
+  if (typeof reproPath === "string" && reproPath !== "") {
     return withExit({
       validationSource: "repro",
       validationCmd: `python "${reproPath}"`,
@@ -161,6 +160,7 @@ const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<Valid
           // T-1 wired: evaluate the rail's typed predicate over the observed
           // output (observe-only in v1 — validator records, does NOT flip ok).
           successPredicate: args.primaryRailStep.successPredicate,
+          ...(args.evaluatePredicate !== undefined ? { evaluatePredicate: args.evaluatePredicate } : {}),
         }
       : {
           sandbox: args.sandbox,
@@ -168,6 +168,7 @@ const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<Valid
           timeoutMs: args.timeoutMs,
           ...(r.lastVerifyCmd !== undefined ? { cmd: r.lastVerifyCmd } : {}),
           ...(r.reproPath !== undefined ? { reproPath: r.reproPath } : {}),
+          ...(args.evaluatePredicate !== undefined ? { evaluatePredicate: args.evaluatePredicate } : {}),
         }
   return args.validate(validateArgs)
 }

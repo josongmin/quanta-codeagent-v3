@@ -918,6 +918,11 @@ export const gradeChunkOnBox = async (
   // cleanly; a busy box throws POOL_BUSY_ERROR (the pool drops it WITHOUT
   // terminating — it belongs to the other run). Released in the `finally`.
   const lock = await ssh(`mkdir ${GRADE_LOCK_DIR} 2>/dev/null && echo LOCKED || echo BUSY`)
+  if (lock.code !== 0) {
+    throw new Error(
+      `[full-remote] grade lock probe failed (code ${lock.code}): ${lock.stderr || lock.stdout}`,
+    )
+  }
   if (!lock.stdout.includes("LOCKED")) {
     throw new Error(
       `${POOL_BUSY_ERROR}: box ${session.iid} is grading another run (lock held) — not reusing`,

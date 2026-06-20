@@ -16,8 +16,12 @@ for(const [name,sym,file] of targets){
   const lines=(await Bun.file(F).text()).split("\n")
   // usage: sym( 또는 sym, 가 본문에 (import 라인 제외) 나오는 곳
   let ln=-1,col=-1
-  for(let i=0;i<lines.length;i++){ if(/^\s*(from|import)\s/.test(lines[i]))continue
-    const c=lines[i].search(new RegExp(`\\b${sym}\\b`)); if(c>=0){ln=i;col=c;break} }
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i]
+    if(line===undefined) continue
+    if(/^\s*(from|import)\s/.test(line))continue
+    const c=line.search(new RegExp(`\\b${sym}\\b`)); if(c>=0){ln=i;col=c;break}
+  }
   if(ln<0){console.log(`${name}: usage 못찾음`);await sess.stop();continue}
   let res="null"
   for(let i=0;i<5;i++){ const d=await sess.definition(F,{line:ln,character:col},ac.signal).catch(()=>null)

@@ -19,8 +19,10 @@
  *   failTail first (keep TAIL), then cumulativeDiff (drop middle hunks, keep
  *   `diff --git` headers + first+last hunks), then trim the problem if still
  *   over budget. The validation-gate section is structurally bounded (command
- *   string head-kept) so the builder still respects the overall cap. Each
- *   truncation leaves a marker `… <N bytes truncated>`.
+ *   string head-kept). If the fixed prose still leaves the composed prompt over
+ *   budget, a final whole-message squeeze enforces the hard cap while keeping
+ *   both the opening context and the tail instructions. Each truncation leaves
+ *   a marker `… <N bytes truncated>`.
  */
 import type { BuildRepairContextArgs } from "./types"
 
@@ -167,7 +169,8 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
     const room = Math.max(floors.problem, maxBytes - overhead)
     problem = trimHead(problem, room)
   }
-  return compose(problem, diff, failTail)
+  out = compose(problem, diff, failTail)
+  return out.length <= maxBytes ? out : headTailSqueeze(out, maxBytes)
 }
 
 /**
@@ -227,9 +230,12 @@ const rebuildDiff = (files: readonly DiffFile[]): string => {
 }
 
 const headTailSqueeze = (s: string, target: number): string => {
-  const half = Math.max(128, Math.floor(target / 2) - 32)
-  const head = s.slice(0, half)
-  const tail = s.slice(-half)
+  if (s.length <= target) return s
+  const room = Math.max(0, target - MARKER_OVERHEAD)
+  const headSize = Math.floor(room / 2)
+  const tailSize = room - headSize
+  const head = s.slice(0, headSize)
+  const tail = s.slice(-tailSize)
   const dropped = s.length - head.length - tail.length
   return `${head}\n… <${dropped} bytes truncated>\n${tail}`
 }

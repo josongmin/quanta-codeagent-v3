@@ -108,6 +108,20 @@ export interface PoolChunkResult {
   readonly lost: boolean
 }
 
+const assertUniqueChunkRunIds = (chunks: readonly PoolChunk[]): void => {
+  const seen = new Set<string>()
+  const dup = new Set<string>()
+  for (const chunk of chunks) {
+    if (seen.has(chunk.runId)) dup.add(chunk.runId)
+    seen.add(chunk.runId)
+  }
+  if (dup.size > 0) {
+    throw new Error(
+      `[pool] duplicate chunk runId(s): ${[...dup].sort().join(", ")} — every chunk must have a unique runId`,
+    )
+  }
+}
+
 /** runId-scoped box paths so concurrent/sequential chunks on one box never
  *  collide on the shared fixed paths. `trajectory` uses `$HOME` (not `~`) because
  *  it is interpolated inside double quotes in the record env (see box-session.ts). */
@@ -315,6 +329,7 @@ export const runPool = async (
   chunks: readonly PoolChunk[],
   cfg: PoolConfig,
 ): Promise<PoolChunkResult[]> => {
+  assertUniqueChunkRunIds(chunks)
   const workers = Math.max(1, Math.trunc(cfg.workers) || 1)
   const queue = new ChunkQueue(chunks)
   const attemptsByRun = new Map<string, number>()

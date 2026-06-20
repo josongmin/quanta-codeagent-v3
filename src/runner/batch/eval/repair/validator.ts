@@ -20,12 +20,24 @@
  * Bun and Node `string.slice`. The tail is taken from the END (the failure
  * tends to be at the tail of test runner output).
  */
-import { evaluateSuccessPredicate } from "@/agent/closure"
-import type { ExecObservation } from "@/agent/closure"
-import { classifyStdout } from "@/agent/repro-test/execute"
-import type { ValidateArgs, ValidatorResult } from "./types"
+import type { RepairReproOutcome, ValidateArgs, ValidatorResult } from "./types"
 
 const DEFAULT_TAIL = 2000
+const MARKER_REPRODUCED = "Issue reproduced"
+const MARKER_RESOLVED = "Issue resolved"
+const MARKER_OTHER = "Other issues"
+
+const classifyReproOutcome = (stdout: string, code: number): RepairReproOutcome => {
+  const s = typeof stdout === "string" ? stdout : ""
+  const iReproduced = s.lastIndexOf(MARKER_REPRODUCED)
+  const iResolved = s.lastIndexOf(MARKER_RESOLVED)
+  const iOther = s.lastIndexOf(MARKER_OTHER)
+  const max = Math.max(iReproduced, iResolved, iOther)
+  if (max < 0) return code !== 0 ? "exec_failed" : "unknown"
+  if (max === iResolved) return "resolved"
+  if (max === iReproduced) return "reproduced"
+  return "other"
+}
 
 export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => {
   const tailBound = args.tailBytes ?? DEFAULT_TAIL
@@ -42,18 +54,19 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
   // (below) when present, else the legacy exit code. The predicate is fail-open by
   // construction (evaluator returns evaluable:false for anything it can't
   // confidently judge). Recorded for diagnostics / repair seed pressure.
-  const observed: ExecObservation = { exitCode: r.code, stdout: r.stdout, stderr: r.stderr }
+  const observed = { exitCode: r.code, stdout: r.stdout, stderr: r.stderr }
   const predicate =
-    args.successPredicate !== undefined
-      ? evaluateSuccessPredicate(observed, args.successPredicate)
+    args.successPredicate !== undefined && args.evaluatePredicate !== undefined
+      ? args.evaluatePredicate(observed, args.successPredicate)
       : undefined
 
   const combined = `${r.stdout}\n${r.stderr}`
   const failTail = combined.length > tailBound ? combined.slice(-tailBound) : combined
+  const reproOutcome = classifyReproOutcome(r.stdout, r.code)
   const ok = (result: boolean): ValidatorResult =>
     result
-      ? { ok: true, observed, ...(predicate !== undefined ? { predicate } : {}) }
-      : { ok: false, failTail, observed, ...(predicate !== undefined ? { predicate } : {}) }
+      ? { ok: true, observed, reproOutcome, ...(predicate !== undefined ? { predicate } : {}) }
+      : { ok: false, failTail, observed, reproOutcome, ...(predicate !== undefined ? { predicate } : {}) }
 
   // jun-18 RCA fix — REPRO-SENTINEL gating. A repro is an Agentless script whose
   // CONTRACT is the stdout marker ("Issue resolved"/"reproduced"/"Other issues"),
@@ -65,9 +78,8 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
   // patch). When a marker is present the marker decides; a non-repro verify cmd
   // (pytest, …) carries no marker ⇒ classifyStdout is unknown/exec_failed ⇒ the
   // legacy exit-code decision below is byte-identical.
-  const outcome = classifyStdout(r.stdout, r.code)
-  if (outcome === "resolved") return ok(true)
-  if (outcome === "reproduced" || outcome === "other") return ok(false)
+  if (reproOutcome === "resolved") return ok(true)
+  if (reproOutcome === "reproduced" || reproOutcome === "other") return ok(false)
 
   // No repro sentinel — legacy exit-code decision (byte-identical to pre-fix).
   return ok(r.code === 0)

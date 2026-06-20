@@ -39,7 +39,7 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
-import type { PrimaryRailStep } from "@/agent/closure"
+import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
 import {
   FIND_REFS_STEER,
   LSP_GROUNDING_STEER,
@@ -1736,6 +1736,7 @@ const runRepairPhase = async (
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
+        evaluatePredicate: evaluateSuccessPredicate,
         ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
       })
       turns = out.turns

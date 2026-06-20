@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { evaluateSuccessPredicate } from "@/agent/closure"
 import { validate } from "@/runner/batch/eval/repair/validator"
 import type { ExecFn, ValidateArgs } from "@/runner/batch/eval/repair/types"
 
@@ -20,6 +21,7 @@ const base = (over: Partial<ValidateArgs>): ValidateArgs => ({
   cmd: "pytest -q",
   exec: fakeExec(0),
   timeoutMs: 1000,
+  evaluatePredicate: evaluateSuccessPredicate,
   ...over,
 })
 

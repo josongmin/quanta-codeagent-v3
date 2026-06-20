@@ -332,6 +332,49 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(out[0]?.lost).toBe(true)
   })
 
+  test("a lock-probe ssh failure on an OWNED box is a hard failure, not BUSY (terminate it)", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances")) return ok("i-owned")
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("wait")) return ok("")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("mkdir ~/.pool-grade.lock"))
+          return { code: 255, stdout: "", stderr: "ssh: connect timeout" }
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool(
+      [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+      poolCfg(fn, { maxChunkRetries: 0, reuseWarm: false }),
+    )
+    // TEETH: a lock-probe transport failure means the OWNED box is bad and MUST
+    // be terminated; classifying it as BUSY would leak the box here.
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(1)
+    expect(out[0]?.lost).toBe(true)
+  })
+
+  test("duplicate chunk runIds are rejected (never silently merge results)", async () => {
+    const { fn } = mockSpawn({})
+    await expect(
+      runPool(
+        [
+          { runId: "dup", datasetPath: "/tmp/a.jsonl" },
+          { runId: "dup", datasetPath: "/tmp/b.jsonl" },
+        ],
+        poolCfg(fn),
+      ),
+    ).rejects.toThrow(/duplicate chunk runId/i)
+  })
+
   test("chunkBoxPaths isolates every chunk + trajectory uses $HOME (double-quote safe)", () => {
     const p = chunkBoxPaths("abc")
     expect(p.report).toBe("~/runs/abc/report.json")

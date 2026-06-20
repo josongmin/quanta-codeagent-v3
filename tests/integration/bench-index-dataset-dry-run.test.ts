@@ -63,6 +63,15 @@ describe("bench index dataset dry-run", () => {
     expect(out.toLowerCase()).not.toContain("no api key")
   })
 
+  test("--flag=value forms route to dataset dry-run instead of silently falling back to corpus", async () => {
+    const { code, out } = await runBench(`--swebench=${datasetFile}`, "--dry-run", "--limit=1")
+    expect(code).toBe(0)
+    expect(out).toContain("dry-run plan")
+    expect(out).toContain(`dataset: ${datasetFile}`)
+    expect(out).toContain("2 loaded, 1 selected (--limit 1)")
+    expect(out).toContain("sample ids: demo__inst-1")
+  })
+
   test("invalid --limit in dataset mode falls back to no cap instead of selecting zero", async () => {
     const { code, out } = await runBench("--swebench", datasetFile, "--dry-run", "--limit", "bogus")
     expect(code).toBe(0)
