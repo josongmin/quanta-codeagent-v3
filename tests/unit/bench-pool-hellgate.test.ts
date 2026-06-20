@@ -184,6 +184,16 @@ const waitForCondition = async (
 }
 
 describe("runPool — persistent box, amortised bootstrap", () => {
+  test("an empty chunk set returns immediately without spawn, guards, or worker opt-in", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      throw new Error("empty pool must not touch remote control plane")
+    }
+    await expect(runPool([], poolCfg(fn, { workers: 2 }))).resolves.toEqual([])
+    expect(calls).toEqual([])
+  })
+
   test("bootstraps ONE box across N chunks (not one per chunk)", async () => {
     const { fn, calls } = mockSpawn({})
     const out = await runPool(CHUNKS, poolCfg(fn))
@@ -1179,6 +1189,155 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       runPool(CHUNKS, poolCfg(fn, { workers: 2, allowExtraWorkers: true })),
     ).rejects.toThrow(/allowExtraBoxes|extra-box opt-in/i)
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
+  test("with explicit multi-worker opt-in, the pool waits for sibling workers to settle before surfacing the first failure", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let authReads = 0
+    let releaseSecondRun: (() => void) | undefined
+    const secondRunGate = new Promise<void>((resolve) => {
+      releaseSecondRun = resolve
+    })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances"))
+        return ok(`i-${calls.filter((c) => c.args.includes("run-instances")).length}`)
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("wait")) return ok("")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("setsid bash -c")) return ok("LAUNCHED")
+        if (c.includes("run.exit") || c.includes("XQ-RUN-EXIT-XQ")) {
+          if (c.includes("~/runs/c2/")) await secondRunGate
+          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        }
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        const report = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+        if (report) return ok(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    const runPromise = runPool(
+      [
+        { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+        { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+      ],
+      poolCfg(fn, {
+        workers: 2,
+        allowExtraWorkers: true,
+        allowExtraBoxes: true,
+        keepWarm: false,
+        reuseWarm: false,
+        authJsonProvider: () => {
+          authReads += 1
+          if (authReads === 1) throw new Error("auth boom")
+          return FULL_AUTH
+        },
+      }),
+    )
+    const early = await Promise.race([
+      runPromise.then(
+        () => "resolved",
+        () => "rejected",
+      ),
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve("pending"), 100)
+      }),
+    ])
+    expect(early).toBe("pending")
+    releaseSecondRun?.()
+    await expect(runPromise).rejects.toThrow(/auth boom/i)
+  })
+
+  test("after a fatal worker abort, sibling workers do NOT start fresh chunks from the shared queue", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let authReads = 0
+    let releaseC2Run: (() => void) | undefined
+    const c2RunGate = new Promise<void>((resolve) => {
+      releaseC2Run = resolve
+    })
+    let releaseC3Run: (() => void) | undefined
+    const c3RunGate = new Promise<void>((resolve) => {
+      releaseC3Run = resolve
+    })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances"))
+        return ok(`i-${calls.filter((c) => c.args.includes("run-instances")).length}`)
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("wait")) return ok("")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("setsid bash -c")) return ok("LAUNCHED")
+        if (c.includes("run.exit") || c.includes("XQ-RUN-EXIT-XQ")) {
+          if (c.includes("~/runs/c2/")) await c2RunGate
+          if (c.includes("~/runs/c3/")) await c3RunGate
+          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        }
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        const report = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+        if (report) return ok(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    const runPromise = runPool(
+      [
+        { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+        { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+        { runId: "c3", datasetPath: "/tmp/c3.jsonl" },
+      ],
+      poolCfg(fn, {
+        workers: 2,
+        allowExtraWorkers: true,
+        allowExtraBoxes: true,
+        keepWarm: false,
+        reuseWarm: false,
+        authJsonProvider: () => {
+          authReads += 1
+          if (authReads === 1) throw new Error("auth boom")
+          return FULL_AUTH
+        },
+      }),
+    )
+    try {
+      releaseC2Run?.()
+      const afterC2 = await Promise.race([
+        runPromise.then(
+          () => "resolved",
+          () => "rejected",
+        ),
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve("pending"), 100)
+        }),
+      ])
+      expect(afterC2).toBe("rejected")
+      expect(
+        calls.some(
+          (c) =>
+            c.cmd === "ssh" &&
+            c.args.some((arg) => arg.includes("cli.ts run")) &&
+            c.args.join(" ").includes("~/runs/c3/instances.jsonl"),
+        ),
+      ).toBe(false)
+      await expect(runPromise).rejects.toThrow(/auth boom/i)
+    } finally {
+      releaseC2Run?.()
+      releaseC3Run?.()
+    }
   })
 
   test("a running BUSY box blocks auto-launch of another box unless explicitly opted in", async () => {

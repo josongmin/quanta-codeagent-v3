@@ -1,7 +1,16 @@
 import { mkdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { asPositiveInt, atomicWriteJson, parseIsoMs, processAlive, readJson, sleepReal } from "./lease-fs"
+import {
+  asPositiveInt,
+  atomicWriteJson,
+  createHeartbeatLoop,
+  errorCodeOf,
+  parseIsoMs,
+  processAlive,
+  readJson,
+  sleepReal,
+} from "./lease-fs"
 
 export interface SingleBoxGuard {
   readonly dir: string
@@ -28,6 +37,28 @@ interface SingleBoxOwnerRecord {
   readonly acquiredAt: string
   readonly heartbeatAt: string
 }
+
+interface ResolvedAcquireSingleBoxGuardOptions {
+  readonly label: string
+  readonly dir: string
+  readonly wait: boolean
+  readonly waitMs: number
+  readonly pollMs: number
+  readonly heartbeatMs: number
+  readonly staleHeartbeatMs: number
+  readonly now: () => number
+  readonly sleep: (ms: number) => Promise<void>
+  readonly log: (msg: string) => void
+  readonly deadline: number | undefined
+}
+
+type SingleBoxAcquireAttempt =
+  | { readonly kind: "acquired"; readonly guard: SingleBoxGuard }
+  | {
+      readonly kind: "waiting"
+      readonly owner: SingleBoxOwnerRecord | undefined
+      readonly timedOut: boolean
+    }
 
 const DEFAULT_WAIT_MS = 45 * 60 * 1000
 const DEFAULT_POLL_MS = 15_000
@@ -97,88 +128,135 @@ const buildGuardError = (
       `${dir} (${formatOwner(owner)}) — refusing to attach or launch another box without explicit extra-box opt-in`,
   )
 
+const resolveAcquireSingleBoxGuardOptions = (
+  opts: AcquireSingleBoxGuardOptions,
+): ResolvedAcquireSingleBoxGuardOptions => {
+  const wait = opts.wait === true
+  const waitMs = asPositiveInt(opts.waitMs ?? DEFAULT_WAIT_MS, DEFAULT_WAIT_MS)
+  const now = opts.now ?? (() => Date.now())
+  return {
+    label: opts.label,
+    dir: opts.dir ?? resolveSingleBoxGuardDir(),
+    wait,
+    waitMs,
+    pollMs: asPositiveInt(opts.pollMs ?? DEFAULT_POLL_MS, DEFAULT_POLL_MS),
+    heartbeatMs: asPositiveInt(opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
+    staleHeartbeatMs: asPositiveInt(
+      opts.staleHeartbeatMs ?? DEFAULT_STALE_HEARTBEAT_MS,
+      DEFAULT_STALE_HEARTBEAT_MS,
+    ),
+    now,
+    sleep: opts.sleep ?? sleepReal,
+    log: opts.onLog ?? (() => {}),
+    deadline: !wait
+      ? now()
+      : opts.waitMs !== undefined && opts.waitMs <= 0
+        ? undefined
+        : now() + waitMs,
+  }
+}
+
+const writeSingleBoxOwnerRecord = async (
+  opts: ResolvedAcquireSingleBoxGuardOptions,
+  acquiredAt: string,
+): Promise<void> => {
+  await atomicWriteJson(ownerMetaPath(opts.dir), {
+    label: opts.label,
+    pid: process.pid,
+    acquiredAt,
+    heartbeatAt: new Date(opts.now()).toISOString(),
+  })
+}
+
+const createSingleBoxGuardHandle = (
+  opts: ResolvedAcquireSingleBoxGuardOptions,
+  acquiredAt: string,
+): SingleBoxGuard => {
+  const heartbeat = createHeartbeatLoop(opts.heartbeatMs, () =>
+    writeSingleBoxOwnerRecord(opts, acquiredAt),
+  )
+  let released = false
+  let releaseInFlight: Promise<void> | undefined
+
+  const runRelease = async (): Promise<void> => {
+    heartbeat.pause()
+    try {
+      await rm(opts.dir, { recursive: true, force: true })
+      heartbeat.stop()
+      released = true
+    } catch (err) {
+      heartbeat.resume()
+      throw err
+    }
+  }
+
+  return {
+    dir: opts.dir,
+    label: opts.label,
+    release: async (): Promise<void> => {
+      if (released) return
+      if (releaseInFlight !== undefined) return releaseInFlight
+      releaseInFlight = runRelease()
+      try {
+        await releaseInFlight
+      } finally {
+        releaseInFlight = undefined
+      }
+    },
+  }
+}
+
+const tryAcquireSingleBoxGuard = async (
+  opts: ResolvedAcquireSingleBoxGuardOptions,
+): Promise<SingleBoxAcquireAttempt> => {
+  const acquiredAt = new Date(opts.now()).toISOString()
+  try {
+    await mkdir(opts.dir)
+    try {
+      await writeSingleBoxOwnerRecord(opts, acquiredAt)
+    } catch (err) {
+      await rm(opts.dir, { recursive: true, force: true }).catch(() => undefined)
+      throw err
+    }
+    return {
+      kind: "acquired",
+      guard: createSingleBoxGuardHandle(opts, acquiredAt),
+    }
+  } catch (err) {
+    if (errorCodeOf(err) !== "EEXIST") throw err
+    const nowMs = opts.now()
+    if (await lockLooksStale(opts.dir, nowMs, opts.staleHeartbeatMs)) {
+      await rm(opts.dir, { recursive: true, force: true }).catch(() => undefined)
+      return tryAcquireSingleBoxGuard(opts)
+    }
+    return {
+      kind: "waiting",
+      owner: await readOwnerRecord(opts.dir),
+      timedOut: opts.deadline !== undefined && nowMs >= opts.deadline,
+    }
+  }
+}
+
 export const acquireSingleBoxGuard = async (
   opts: AcquireSingleBoxGuardOptions,
 ): Promise<SingleBoxGuard> => {
-  const dir = opts.dir ?? resolveSingleBoxGuardDir()
-  const wait = opts.wait === true
-  const waitMs = asPositiveInt(opts.waitMs ?? DEFAULT_WAIT_MS, DEFAULT_WAIT_MS)
-  const pollMs = asPositiveInt(opts.pollMs ?? DEFAULT_POLL_MS, DEFAULT_POLL_MS)
-  const heartbeatMs = asPositiveInt(opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS)
-  const staleHeartbeatMs = asPositiveInt(
-    opts.staleHeartbeatMs ?? DEFAULT_STALE_HEARTBEAT_MS,
-    DEFAULT_STALE_HEARTBEAT_MS,
-  )
-  const now = opts.now ?? (() => Date.now())
-  const sleep = opts.sleep ?? sleepReal
-  const log = opts.onLog ?? (() => {})
-  const deadline = wait
-    ? opts.waitMs !== undefined && opts.waitMs <= 0
-      ? undefined
-      : now() + waitMs
-    : now()
+  const resolved = resolveAcquireSingleBoxGuardOptions(opts)
   let announcedWait = false
 
-  await mkdir(dirname(dir), { recursive: true })
+  await mkdir(dirname(resolved.dir), { recursive: true })
 
   for (;;) {
-    const acquiredAt = new Date(now()).toISOString()
-    try {
-      await mkdir(dir)
-      const writeOwner = async (): Promise<void> =>
-        atomicWriteJson(ownerMetaPath(dir), {
-          label: opts.label,
-          pid: process.pid,
-          acquiredAt,
-          heartbeatAt: new Date(now()).toISOString(),
-        })
-      try {
-        await writeOwner()
-      } catch (err) {
-        await rm(dir, { recursive: true, force: true }).catch(() => undefined)
-        throw err
-      }
-      let released = false
-      let heartbeatStopped = false
-      const heartbeat = setInterval(() => {
-        void writeOwner().catch(() => undefined)
-      }, heartbeatMs)
-      return {
-        dir,
-        label: opts.label,
-        release: async (): Promise<void> => {
-          if (released) return
-          if (!heartbeatStopped) {
-            clearInterval(heartbeat)
-            heartbeatStopped = true
-          }
-          await rm(dir, { recursive: true, force: true })
-          released = true
-        },
-      }
-    } catch (err) {
-      const code =
-        err !== null && typeof err === "object" && "code" in err
-          ? (err as { code?: unknown }).code
-          : undefined
-      if (code !== "EEXIST") throw err
-      const nowMs = now()
-      if (await lockLooksStale(dir, nowMs, staleHeartbeatMs)) {
-        await rm(dir, { recursive: true, force: true }).catch(() => undefined)
-        continue
-      }
-      const owner = await readOwnerRecord(dir)
-      if (deadline !== undefined && nowMs >= deadline) {
-        throw buildGuardError(dir, owner, wait)
-      }
-      if (!wait) {
-        throw buildGuardError(dir, owner, false)
-      }
-      if (!announcedWait) {
-        log(`[single-box] waiting for local owner guard ${dir} (${formatOwner(owner)})…`)
-        announcedWait = true
-      }
-      await sleep(pollMs)
+    const attempt = await tryAcquireSingleBoxGuard(resolved)
+    if (attempt.kind === "acquired") return attempt.guard
+    if (attempt.timedOut || !resolved.wait) {
+      throw buildGuardError(resolved.dir, attempt.owner, resolved.wait)
     }
+    if (!announcedWait) {
+      resolved.log(
+        `[single-box] waiting for local owner guard ${resolved.dir} (${formatOwner(attempt.owner)})…`,
+      )
+      announcedWait = true
+    }
+    await resolved.sleep(resolved.pollMs)
   }
 }

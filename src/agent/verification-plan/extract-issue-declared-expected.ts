@@ -27,10 +27,6 @@ export interface IssueDeclaredExpected {
   value: string
 }
 
-/** Verbs that, with an explicit modal, mark a declared expected output. */
-const EXPECT_RE =
-  /\b(?:should|must|expected to|ought to)\s+(?:print|output|return|give|produce|render|show|be|display|yield)\b/i
-
 /** "should <verb> `LITERAL`" — the literal must DIRECTLY follow the verb (only
  *  whitespace / `:` / `=` between). This deliberately EXCLUDES preposition-object
  *  literals like "should be returned by `solveset`" (here `solveset` is a
@@ -108,15 +104,17 @@ export const extractIssueDeclaredExpected = (
     return { kind: "stdout-empty", value: "issue declares the correct output is empty" }
   }
 
-  // 2) "should <verb> `LITERAL`" — only when an expect verb is actually present
-  //    (EXPECT_LITERAL_RE already requires it; the EXPECT_RE pre-check keeps the
-  //    intent explicit and the failure mode obvious).
-  if (EXPECT_RE.test(problemStatement)) {
-    const m = EXPECT_LITERAL_RE.exec(problemStatement)
-    if (m?.[1] !== undefined && isMeaningful(m[1])) {
-      const value = m[1].trim()
-      return { kind: classify(value), value }
-    }
+  // 2) "should <verb> `LITERAL`" — EXPECT_LITERAL_RE self-contains the required
+  //    modal + expect-verb + delimited-literal, so it is the sole gate here. (A
+  //    prior narrower EXPECT_RE pre-check was removed: its verb list lacked
+  //    `equals?` and the plural forms `returns?`/`gives?`/… present in
+  //    EXPECT_LITERAL_RE, so it could ONLY subtract valid matches — adding zero
+  //    precision while silently dropping real declared outputs like
+  //    "should equal `(1,)`".)
+  const m = EXPECT_LITERAL_RE.exec(problemStatement)
+  if (m?.[1] !== undefined && isMeaningful(m[1])) {
+    const value = m[1].trim()
+    return { kind: classify(value), value }
   }
 
   // 3) "Expected[ output]: LITERAL" label.

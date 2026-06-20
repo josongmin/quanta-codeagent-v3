@@ -114,7 +114,7 @@ const mockSpawn = (opts: { rateLimited?: Set<string> } = {}) => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
   const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
   const emitBenchRunPass = (
-    args: string[],
+    args: readonly string[],
     onData: ((chunk: string) => void) | undefined,
   ): void => {
     if (!args.some((a) => a.includes("cli.ts run"))) return

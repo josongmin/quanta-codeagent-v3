@@ -442,17 +442,15 @@ const runPrepareImages = async (instanceIds: string[]): Promise<number> => {
 const readSwebenchTasks = (datasetFile: string): SwebenchTask[] =>
   parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
 
-const readFilteredSwebenchTasks = (datasetFile: string): SwebenchTask[] => {
-  const parsed = readSwebenchTasks(datasetFile)
+/** Apply the `--instance <substr>` filter to ALREADY-parsed tasks. Pure — no
+ *  IO — so the dataset file is read + JSON-parsed exactly ONCE per run and the
+ *  parsed corpus is threaded through (filter + empty-check + limit) instead of
+ *  re-reading the same 500-row file three times. */
+const filterSwebenchTasks = (parsed: readonly SwebenchTask[]): SwebenchTask[] => {
   const instanceFilter = argValue("--instance")
   return instanceFilter !== undefined && instanceFilter !== ""
     ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
-    : parsed
-}
-
-const selectSwebenchTasks = (datasetFile: string, limit?: number): SwebenchTask[] => {
-  const tasks = readFilteredSwebenchTasks(datasetFile)
-  return limit ? tasks.slice(0, limit) : tasks
+    : [...parsed]
 }
 
 const runDatasetMode = async (
@@ -460,18 +458,20 @@ const runDatasetMode = async (
   llm: LLMPort,
   meta: { provider: string; model: string },
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
+  // Pre-parsed by the single caller (`maybeRunDatasetMode`) so the dataset file
+  // is read + parsed ONCE per run: `parsed` is the raw corpus (drives the empty
+  // check), `filtered` already has the `--instance` filter applied.
+  tasks: { parsed: readonly SwebenchTask[]; filtered: SwebenchTask[] },
   obs?: ObserveCtx,
 ): Promise<void> => {
-  const parsed = readSwebenchTasks(datasetFile)
-  if (parsed.length === 0) {
+  if (tasks.parsed.length === 0) {
     logger.info(
       `No usable tasks parsed from "${datasetFile}". Expecting official SWE-bench JSONL. Nothing to run.`,
     )
     exitFn(0)
     return
   }
-  const tasks = readFilteredSwebenchTasks(datasetFile)
-  const selected = cfg.limit ? tasks.slice(0, cfg.limit) : tasks
+  const selected = cfg.limit ? tasks.filtered.slice(0, cfg.limit) : tasks.filtered
 
   logger.info(
     `bench(swebench): ${selected.length} task(s), provider=${meta.provider}, model=${meta.model}, n=${cfg.n}`,
@@ -645,9 +645,13 @@ const maybeRunDatasetMode = async (
     exitFn(0)
     return true
   }
-  const tasks = selectSwebenchTasks(datasetFile)
+  // Parse the dataset file ONCE per run; the raw corpus + the `--instance`
+  // filtered view are then threaded through the dry-run plan AND the run path
+  // (no more 3× re-read/re-parse of the same JSONL).
+  const parsed = readSwebenchTasks(datasetFile)
+  const filtered = filterSwebenchTasks(parsed)
   if (argFlag("--dry-run")) {
-    const plan = buildDatasetDryRunPlan(datasetFile, tasks, {
+    const plan = buildDatasetDryRunPlan(datasetFile, filtered, {
       n: cfg.n,
       limit: cfg.limit,
       pythonHarness: gateOn(process.env, "QUANTA_SWEBENCH_PYTHON"),
@@ -670,6 +674,7 @@ const maybeRunDatasetMode = async (
       maxTurns: cfg.maxTurns,
       timeoutMs: cfg.timeoutMs,
     },
+    { parsed, filtered },
     obs,
   )
   return true

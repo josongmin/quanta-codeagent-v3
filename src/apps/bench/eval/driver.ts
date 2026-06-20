@@ -16,6 +16,7 @@ import {
   buildConfig as buildRunnerConfig,
   composeWithReproHint,
   DEFAULT_POLICY,
+  emitKnobsApplied,
   enumerateRepoSources,
   envPrepFailedResult,
   type IssueHintMode,
@@ -286,6 +287,11 @@ const runAgentOnce = async (
   closureHint: string | undefined,
 ): Promise<RunOnceResult> => {
   const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
+  // Knob telemetry: emit ONE `knobs_applied` event per runAgent invocation —
+  // the greppable per-run marker of which knobs/preset actually ran. The runner
+  // driver emits it at both agent entry points; this prod (SDK) wrapper must
+  // match or every real trajectory is silently missing the line (split-brain).
+  emitKnobsApplied(tap, process.env)
   const outcome = await runAgentViaSdk(
     buildRunnerConfig(
       instance,
@@ -362,6 +368,10 @@ const runAgentPhase = async (
         onVerifyPass,
         benchVerifyAuthorityCommandsOf(instance),
       )
+      // Knob telemetry: emit once per phase entry (matches the contract on
+      // `emitKnobsApplied`). The single-pass path bypasses `runAgentOnce`, so
+      // the emit lives here directly — mirrors the runner driver's runAgentPhase.
+      emitKnobsApplied(tap, process.env)
       const outcome = await runAgentViaSdk(
         buildRunnerConfig(
           instance,
@@ -985,6 +995,11 @@ export const runInstance = async (
     ...result,
     budget: {
       baseTimeoutMs: deps.timeoutMs,
+      // `adaptedTimeoutMs === baseTimeoutMs` BY DESIGN here: this prod path
+      // deliberately skips the knob-`costMultiplier` wall-clock scaling the
+      // (dead) runner-driver twin applies (see the runInstance doc above). So
+      // this is the timeout actually used per attempt — truthful, not a no-op
+      // copy. Do NOT "fix" it to compute a scaled value without re-reading why.
       adaptedTimeoutMs: deps.timeoutMs,
       attempts: loop.attempts,
       attemptOutcomes: loop.outcomes.map(projectOutcome),

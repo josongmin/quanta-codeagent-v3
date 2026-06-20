@@ -763,10 +763,18 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
     serialize: (s) => JSON.stringify(s, null, 2),
     parse: parseState,
     stateVersion: STATE_VERSION,
-    mergeWithDisk: ({ onDisk, inMemory }) => {
+    mergeWithDisk: ({ onDisk }) => {
+      // The `inMemory` arg was snapshotted by the engine BEFORE its `await
+      // rereadForMerge()` IO. A synchronous setThread/recordDenial/
+      // recordUserOverride can land on the live `state` DURING that await
+      // window; if we merged from that stale snapshot we would then overwrite
+      // the live `state` (below) and silently drop the interleaved grant/denial
+      // — a security-state loss. Re-snapshot the LIVE state HERE (callback
+      // invocation time, after all the engine's awaits) so any mutation that
+      // raced the reread is part of the merge input and survives.
       const merged = mergePermissionState({
         onDisk,
-        inMemory,
+        inMemory: liveSnapshot(),
         baseline: persistedState,
       })
       // Promote the merged snapshot into live memory during the flush path so

@@ -237,6 +237,13 @@ export interface LspClientSpec {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000
 
+/** Cap on the retained stderr tail (bytes of decoded text). The drain pump must
+ *  still consume the whole stream to keep the OS pipe empty (deadlock guard);
+ *  this only bounds how much of the MOST RECENT stderr we keep so an unexpected
+ *  server exit (crash / OOM) can be diagnosed. Flat literal so the magic-number
+ *  scan does not trip. */
+const STDERR_TAIL_MAX = 8_192
+
 /** Raw LSP shapes we read off the wire. Kept minimal: we narrow only the
  *  fields we consume (same pattern as the LLM adapters). */
 interface RawRange {
@@ -650,6 +657,12 @@ export class LspClient implements LspPort {
   private stderrPump: Promise<void> | null = null
   private stopped = false
   private exited = false
+  /** Bounded tail of the server's most recent stderr (decoded). The drain pump
+   *  exists to keep the OS pipe empty (deadlock guard); we ALSO retain the tail
+   *  so an unexpected exit (crash / OOM SIGKILL) logs the reason the server
+   *  printed — formerly every stderr byte was discarded, so a dying pyright left
+   *  no diagnosable trace. Capped at {@link STDERR_TAIL_MAX}. */
+  private stderrTail = ""
   serverInfo: LspServerInfo | null = null
 
   constructor(spec: LspClientSpec, options: LspClientOptions = {}) {
@@ -1436,9 +1449,15 @@ export class LspClient implements LspPort {
   private async drainStderr(): Promise<void> {
     const stderr = this.proc?.stderr
     if (!stderr || typeof stderr === "number") return
+    const decoder = new TextDecoder()
     try {
-      for await (const _ of stderr) {
-        // discard — purpose is to keep the pipe empty so the server never blocks
+      for await (const chunk of stderr) {
+        // Keep the pipe empty (deadlock guard) AND retain a bounded tail: when the
+        // server dies, the reason it prints here (crash stack / OOM notice) is the
+        // ONLY diagnosable signal — formerly discarded. Cap so a verbose server
+        // (pyright debug output) can't grow it unbounded.
+        const text = decoder.decode(chunk as Uint8Array, { stream: true })
+        if (text.length > 0) this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_MAX)
       }
     } catch (e) {
       logger.debug("lsp: stderr drain ended", { error: errMessage(e) })
@@ -1561,15 +1580,25 @@ export class LspClient implements LspPort {
   private watchExit(): void {
     const proc = this.proc
     if (!proc) return
-    proc.exited
-      .then(() => {
-        this.exited = true
-        this.failAllPending(new Error("LSP server exited"))
-      })
-      .catch(() => {
-        this.exited = true
-        this.failAllPending(new Error("LSP server exited"))
-      })
+    const onExit = () => {
+      this.exited = true
+      // Surface the death cause that was formerly invisible. `signalCode` is the
+      // OOM tell: a SIGKILL the server did not ask for is almost always the
+      // kernel OOM-killer (large repos blow past node's default heap). An exit we
+      // DID initiate (`this.stopped` ⇒ our stop()/shutdown) is expected → debug;
+      // anything else is a crash worth a WARN with the retained stderr tail.
+      const detail = {
+        command: this.command[0],
+        cwd: this.cwd,
+        exitCode: proc.exitCode,
+        signal: proc.signalCode,
+        stderrTail: this.stderrTail.slice(-2_000),
+      }
+      if (this.stopped) logger.debug("lsp: server exited", detail)
+      else logger.warn("lsp: server exited UNEXPECTEDLY", detail)
+      this.failAllPending(new Error("LSP server exited"))
+    }
+    proc.exited.then(onExit).catch(onExit)
   }
 
   private failAllPending(reason: Error): void {

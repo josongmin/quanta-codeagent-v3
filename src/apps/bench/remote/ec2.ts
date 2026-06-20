@@ -133,8 +133,17 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
       "--output",
       "text",
     ])
+    // A describe FAILURE (non-zero exit = network/creds error) must fail fast
+    // with a dedicated cause — folding it into the "not found" branch routes a
+    // transient AWS error into create-security-group, masking the real reason as
+    // a misleading "create-security-group failed". Mirrors box-session.ts.
+    if (found.code !== 0) {
+      throw new Error(
+        `[ec2-backend] could not reach EC2 (${region}) — network/credentials? : ${found.stderr.trim()}`,
+      )
+    }
     let sgId = oneLine(found.stdout)
-    if (found.code !== 0 || sgId === "" || sgId === "None") {
+    if (sgId === "" || sgId === "None") {
       const created = await aws([
         "ec2",
         "create-security-group",

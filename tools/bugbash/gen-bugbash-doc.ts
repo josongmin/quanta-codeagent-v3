@@ -71,10 +71,7 @@ function blobAtPin(commit: string, file: string): string {
 function deriveLine(commit: string, file: string, anchor: string): number {
   const lines = blobAtPin(commit, file).split("\n")
   const hits: number[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (line !== undefined && line.includes(anchor)) hits.push(i + 1)
-  }
+  for (let i = 0; i < lines.length; i++) if (lines[i]?.includes(anchor)) hits.push(i + 1)
   if (hits.length !== 1)
     throw new Error(`anchor "${anchor}" hit ${hits.length} lines in ${file}@${commit.slice(0, 8)}`)
   return hits[0] as number
@@ -100,8 +97,12 @@ W("# Jun-20 Bug Bash — 6/16~6/17 변경 파일 적대 어딧")
 W()
 W("> 9-클러스터 병렬 어딧 워크플로우 결과. 6/16~6/17 커밋 52개 + 미커밋 WIP 대상.")
 W("> 각 finding은 독립 skeptic verifier로 적대 재검증함.")
-W(`> **${c.total_surfaced}건 surfaced = ${c.actionable} actionable + ${c.none_retained} none-retained**`)
-W("> (raw 37 → 적대 검증으로 4건 false-positive 드롭 → 33 surfaced. 그중 2건은 검증이 corrected_severity=none으로 깎은 retained-note라 actionable 아님.)")
+W(
+  `> **${c.total_surfaced}건 surfaced = ${c.actionable} actionable + ${c.none_retained} none-retained**`,
+)
+W(
+  "> (raw 37 → 적대 검증으로 4건 false-positive 드롭 → 33 surfaced. 그중 2건은 검증이 corrected_severity=none으로 깎은 retained-note라 actionable 아님.)",
+)
 W("> 살아남은 HIGH 0개 (검증이 high 4건 중 2건을 med로 강등, 2건을 FP/none으로 기각).")
 W()
 W("## Snapshot (재현 기준)")
@@ -114,8 +115,12 @@ W(`| Worktree at audit | dirty WIP (그 후 위 커밋으로 커밋됨) |`)
 W(`| Worktree now (pin) | clean = \`${!data.worktree_dirty}\` |`)
 W(`| Workflow run | \`${data.workflow_run}\` |`)
 W()
-W(`> 모든 \`file:line\` 인용은 **위 핀 커밋 기준**으로 유도됨 (\`git show ${data.audited_commit_short}:<file>\` 에서 unique anchor 탐색).`)
-W("> 라인은 손으로 적지 않고 SSOT JSON의 anchor에서 파생되며, `tests/unit/bugbash-doc-integrity-hellgate.test.ts` 가 doc↔코드 정합을 강제한다.")
+W(
+  `> 모든 \`file:line\` 인용은 **위 핀 커밋 기준**으로 유도됨 (\`git show ${data.audited_commit_short}:<file>\` 에서 unique anchor 탐색).`,
+)
+W(
+  "> 라인은 손으로 적지 않고 SSOT JSON의 anchor에서 파생되며, `tests/unit/bugbash-doc-integrity-hellgate.test.ts` 가 doc↔코드 정합을 강제한다.",
+)
 W(`> ${data.worktree_note}`)
 W()
 W("## 요약")
@@ -126,7 +131,9 @@ const medN = data.findings.filter((f) => f.severity === "med").length
 const lowN = data.findings.filter((f) => f.severity === "low").length
 W(`| 🟠 MED | ${medN} | actionable |`)
 W(`| 🟡 LOW | ${lowN} | actionable |`)
-W(`| ⚪ NONE | ${c.none_retained} | retained-note (검증이 by-design/consequence-반증으로 기각; 참고용) |`)
+W(
+  `| ⚪ NONE | ${c.none_retained} | retained-note (검증이 by-design/consequence-반증으로 기각; 참고용) |`,
+)
 W(`| **actionable 합** | **${c.actionable}** | |`)
 W()
 
@@ -144,9 +151,15 @@ W()
 
 W("## 재발 패턴 (테마)")
 W()
-W("- **observe-only / built-not-wired**: 게이트·escalation·메트릭이 *기록만* 하고 강제하지 않음 (#1, #9, #14, #28). 메모리의 `wired≠engages theater class`와 직결.")
-W("- **apps-driver vs runner-driver split-brain**: 두 드라이버가 drift (#6, #5, #27). split-brain 막으려 만든 쌍이 정작 split-brain.")
-W("- **transient 실패를 영구 상태로 캐시 / fail-open**: 일시 오류를 영구 'dead'로 (#4 LSP, #5 SG describe).")
+W(
+  "- **observe-only / built-not-wired**: 게이트·escalation·메트릭이 *기록만* 하고 강제하지 않음 (#1, #9, #14, #28). 메모리의 `wired≠engages theater class`와 직결.",
+)
+W(
+  "- **apps-driver vs runner-driver split-brain**: 두 드라이버가 drift (#6, #5, #27). split-brain 막으려 만든 쌍이 정작 split-brain.",
+)
+W(
+  "- **transient 실패를 영구 상태로 캐시 / fail-open**: 일시 오류를 영구 'dead'로 (#4 LSP, #5 SG describe).",
+)
 W("- **brittle 문자열 파싱**: regex 채점·extractor가 edge에서 조용히 오판 (#10, #29, #30).")
 W()
 W("---")
@@ -160,7 +173,9 @@ for (const f of data.findings) {
   W(
     `- **등급**: ${f.severity.toUpperCase()} (어딧 원래값 \`${f.original_severity}\`) · **분류**: \`${f.category}\` · **검증 verdict**: \`${f.verdict}\``,
   )
-  W(`- **위치 (pinned ${data.audited_commit_short})**: \`${cite(f)}\` — anchor: \`${f.anchor.replace(/`/g, "\\`")}\``)
+  W(
+    `- **위치 (pinned ${data.audited_commit_short})**: \`${cite(f)}\` — anchor: \`${f.anchor.replace(/`/g, "\\`")}\``,
+  )
   W(`- **클러스터**: ${CLUSTER_NAME[f.cluster] ?? f.cluster}`)
   W(`- **어딧 당시 인용(참고, drift 있을 수 있음)**: \`${f.file}:${f.line_at_audit}\``)
   W()

@@ -344,14 +344,20 @@ const earnedVerdict = (r: FullRemoteResult): boolean =>
  *  goes back to the FRONT so it retries promptly on the next provisioned box. */
 class ChunkQueue {
   private readonly items: PoolChunk[]
+  private aborted = false
   constructor(chunks: readonly PoolChunk[]) {
     this.items = [...chunks]
   }
   next(): PoolChunk | undefined {
+    if (this.aborted) return undefined
     return this.items.shift()
   }
   requeueFront(chunk: PoolChunk): void {
+    if (this.aborted) return
     this.items.unshift(chunk)
+  }
+  abort(): void {
+    this.aborted = true
   }
   get size(): number {
     return this.items.length
@@ -816,21 +822,24 @@ const processWorkerChunk = async (args: {
     )
     let outcome: ChunkOutcome | undefined
     let primaryErr: unknown
+    let budgetCleanupErr: unknown
     try {
       outcome = await gradeWorkerChunk({ ...args, auth, budgetGrant })
     } catch (err) {
       primaryErr = err
-    } finally {
-      try {
-        await releaseGrantedChunkBudgetLease(args.workerId, args.chunk, args.runtime, budgetGrant)
-      } catch (cleanupErr) {
-        if (primaryErr !== undefined) {
-          throw new Error(
-            `[pool] worker ${args.workerId}: chunk ${args.chunk.runId} budget cleanup failed after primary=${errMessage(primaryErr)}; cleanup=${errMessage(cleanupErr)}`,
-          )
-        }
-        throw cleanupErr
+    }
+    try {
+      await releaseGrantedChunkBudgetLease(args.workerId, args.chunk, args.runtime, budgetGrant)
+    } catch (cleanupErr) {
+      budgetCleanupErr = cleanupErr
+    }
+    if (budgetCleanupErr !== undefined) {
+      if (primaryErr !== undefined) {
+        throw new Error(
+          `[pool] worker ${args.workerId}: chunk ${args.chunk.runId} budget cleanup failed after primary=${errMessage(primaryErr)}; cleanup=${errMessage(budgetCleanupErr)}`,
+        )
       }
+      throw budgetCleanupErr
     }
     if (primaryErr !== undefined) throw primaryErr
     if (!args.multiAuth && outcome !== undefined) {
@@ -871,6 +880,18 @@ const finalizeWorkerRun = async (
     throw cleanupErr
   }
   if (primaryErr !== undefined) throw primaryErr
+}
+
+const mergeWorkerRunErrors = (
+  errors: ReadonlyArray<{ workerId: number; error: unknown }>,
+): unknown => {
+  if (errors.length === 0) return undefined
+  if (errors.length === 1) return errors[0]?.error
+  return new Error(
+    `[pool] multiple workers failed: ${errors
+      .map(({ workerId, error }) => `worker ${workerId}=${errMessage(error)}`)
+      .join("; ")}`,
+  )
 }
 
 /** Outcome of one chunk grade attempt — drives the per-account auth lease
@@ -1055,6 +1076,7 @@ const runWorker = async (
     }
   } catch (err) {
     primaryErr = err
+    queue.abort()
   }
   await finalizeWorkerRun(workerId, runtime, state, primaryErr)
 }
@@ -1069,6 +1091,7 @@ export const runPool = async (
   cfg: PoolConfig,
 ): Promise<PoolChunkResult[]> => {
   assertUniqueChunkRunIds(chunks)
+  if (chunks.length === 0) return []
   const workers = Math.max(1, Math.trunc(cfg.workers) || 1)
   if (workers > 1 && cfg.allowExtraWorkers !== true) {
     throw new Error(
@@ -1089,12 +1112,19 @@ export const runPool = async (
     const queue = new ChunkQueue(chunks)
     const attemptsByRun = new Map<string, number>()
     const out = new Map<string, PoolChunkResult>()
-
-    await Promise.all(
-      Array.from({ length: workers }, (_unused, i) =>
-        runWorker(i + 1, queue, cfg, attemptsByRun, out),
-      ),
+    const workerRuns = Array.from({ length: workers }, (_unused, i) => ({
+      workerId: i + 1,
+      promise: runWorker(i + 1, queue, cfg, attemptsByRun, out),
+    }))
+    const settled = await Promise.allSettled(workerRuns.map((worker) => worker.promise))
+    const workerErrors = settled.flatMap((result, idx) =>
+      result.status === "rejected"
+        ? [{ workerId: workerRuns[idx]?.workerId ?? idx + 1, error: result.reason }]
+        : [],
     )
+    if (workerErrors.length > 0) {
+      throw mergeWorkerRunErrors(workerErrors)
+    }
 
     // Preserve input order; a chunk with no recorded result (should not happen —
     // every path records one) is surfaced as lost rather than dropped.

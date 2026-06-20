@@ -376,7 +376,25 @@ export const runSelection = async (args: {
       return null
     }
   }
-  const scoreOne = async (c: Candidate, minB: number, maxB: number): Promise<ScoredEntry> => {
+  // Per-candidate memo of the EXPENSIVE, candidate-only port probes
+  // (resolvedKofN / applyClean / regression — each a full tree reset + pytest /
+  // repro consensus). These depend ONLY on the candidate, never on the relative
+  // `minB`/`maxB` minimality window, so with `earlyAccept` on we run them ONCE
+  // per candidate (the early-gate probe) and finalize reuses the verdict instead
+  // of re-materializing the tree a second time. Keyed by candidate identity.
+  interface ScoredPorts {
+    isEmpty: boolean
+    size: number
+    resolvedKofN: ResolvedKofNSignal | null
+    resolvedMode: ResolvedKofNMode
+    hard: HardGateSignals
+    voterQuorum: number | null
+    ownerCoverage: number | null
+  }
+  const portsMemo = new Map<Candidate, ScoredPorts>()
+  const probeOne = async (c: Candidate): Promise<ScoredPorts> => {
+    const cached = portsMemo.get(c)
+    if (cached !== undefined) return cached
     const isEmpty = c.patch.trim() === ""
     const size = Buffer.byteLength(c.patch, "utf8")
     const resolvedKofN = (await args.ports.resolvedKofN?.(c)) ?? null
@@ -388,17 +406,33 @@ export const runSelection = async (args: {
       regressionGreen: (await args.ports.regression?.(c)) ?? null,
       patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
     }
-    const soft: SoftScoreSignals = {
-      declaredExpectedMatch: null,
-      rubricScore: null,
+    const probed: ScoredPorts = {
+      isEmpty,
+      size,
+      resolvedKofN,
+      resolvedMode,
+      hard,
       voterQuorum: voterQuorumOf(resolvedMode, resolvedKofN),
-      // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
-      minimality: minimalityOf({ isEmpty, size, minB, maxB }),
       // an empty no-patch earns NO owner-coverage credit (even if a caller hands
       // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
       ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
     }
-    return { candidate: c, hard, verdict: scoreCandidate(hard, soft) }
+    portsMemo.set(c, probed)
+    return probed
+  }
+  const scoreOne = async (c: Candidate, minB: number, maxB: number): Promise<ScoredEntry> => {
+    const probed = await probeOne(c)
+    const soft: SoftScoreSignals = {
+      declaredExpectedMatch: null,
+      rubricScore: null,
+      voterQuorum: probed.voterQuorum,
+      // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
+      // The ONLY signal that varies with the relative minimality window, so it is
+      // recomputed cheaply (pure arithmetic) on each scoring pass.
+      minimality: minimalityOf({ isEmpty: probed.isEmpty, size: probed.size, minB, maxB }),
+      ownerCoverage: probed.ownerCoverage,
+    }
+    return { candidate: c, hard: probed.hard, verdict: scoreCandidate(probed.hard, soft) }
   }
 
   const maybeFinalizeEarlyAccept = async (

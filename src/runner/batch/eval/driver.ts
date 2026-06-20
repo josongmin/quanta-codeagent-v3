@@ -1566,7 +1566,7 @@ interface Phase {
  * bytes (and the existing recorder maps the event onto the `recovery`
  * trajectory family, no new TrajectoryKind required).
  */
-const emitKnobsApplied = (stream: StreamPort, envVars: NodeJS.ProcessEnv): void => {
+export const emitKnobsApplied = (stream: StreamPort, envVars: NodeJS.ProcessEnv): void => {
   try {
     const state = resolveBenchKnobs({ envVars })
     const knobs = knobsForReport(state)

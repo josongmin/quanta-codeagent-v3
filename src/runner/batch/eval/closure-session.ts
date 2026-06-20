@@ -55,6 +55,21 @@ export const buildClosureSession = (args: {
       ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
     },
     gate: {
+      // `stakes` (crossFile / destructive / patchFileCount) are PRE-PATCH
+      // UNKNOWABLE at session assembly: the gate runs BEFORE the agent writes a
+      // single hunk, so the eventual patch's file count, cross-file spread, and
+      // destructiveness do not yet exist. We deliberately do NOT fabricate them
+      // — pinning them neutral keeps highStakes(s) honest (false until a real
+      // post-patch stakes signal is wired) rather than guessing high/low. The
+      // live anti-under-verify axis is `uncertainty`, which assembleClosureBundle
+      // OR-derives from REAL owner-admission evidence (coverageExpectation !==
+      // "single-site" ⇒ uncertain), so the verify-vs-commit gate is NOT reduced
+      // to a repro-availability check — it still routes ambiguous/owner-family
+      // localizations to `verify`. Because both stakes fields here are neutral,
+      // the gate's `structure` LSP source (which needs crossFile||unresolvedSymbols)
+      // is unreachable FROM THIS SITE today; that source stays live for callers
+      // that supply real structural signals — it is intentionally inert here, not
+      // dead in gate-decision.
       stakes: { patchFileCount: 1, crossFile: false, destructive: false },
       uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
       signal: {

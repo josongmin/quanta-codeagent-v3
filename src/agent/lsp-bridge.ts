@@ -1,4 +1,5 @@
 import { extname } from "node:path"
+import { fileURLToPath } from "node:url"
 import type { CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
 import {
   ClangdAdapter,
@@ -114,6 +115,20 @@ const specFor = (filePath: string): ServerSpec | null => {
   return SERVERS.find((entry) => entry.exts.includes(ext))?.spec ?? null
 }
 
+/** Decode a `file://` URI from an LSP response into a filesystem path. Uses the
+ *  same `fileURLToPath` as `@/lsp`'s {@link base.ts} so percent-encoding (a
+ *  `%20` space, non-ASCII chars) is decoded instead of leaking into the path —
+ *  a hand-rolled `replace(/^file:\/\//,"")` would yield the literal `%20`. Non
+ *  `file:` URIs (and any malformed URI `fileURLToPath` rejects) fall back to the
+ *  raw string so this never throws on these best-effort/null-degrade paths. */
+const uriToPath = (uri: string): string => {
+  try {
+    return fileURLToPath(uri)
+  } catch {
+    return uri
+  }
+}
+
 /**
  * ADR-0422 follow-up — lowercase extension → LANGUAGE KEY (the server binary,
  * which is the server identity). Built from the SAME {@link SERVERS} table so
@@ -141,6 +156,17 @@ const LSP_AVAILABILITY_TIMEOUT_MS = 5_000
 // then share ONE `bin --version` subprocess instead of each racing a cache miss
 // and spawning a duplicate. The probe never rejects (errors resolve to `false`),
 // so a cached promise is always a settled, reusable result.
+//
+// Cache ONLY successes (audit #4): a `false` result is evicted once it settles
+// so a single transient failure — the 5s race timeout firing under startup
+// CPU/IO contention — does NOT permanently disable EVERY LSP surface
+// process-wide. Without this, one flaky `bin --version` poisons the cache and
+// every later `open()` short-circuits to null + reports "not installed" even
+// though the binary IS installed (the recurring "LSP inert" footgun). A cached
+// `true` stays permanent (the binary cannot un-install mid-process); concurrent
+// callers still share the in-flight probe (it is evicted only AFTER it resolves
+// false), so the dedup guarantee is preserved. Mirrors a reset-on-failure
+// `once` memoizer.
 const availabilityCache = new Map<string, Promise<boolean>>()
 const probeAvailable = async (bin: string): Promise<boolean> => {
   try {
@@ -166,7 +192,14 @@ const probeAvailable = async (bin: string): Promise<boolean> => {
 const isAvailable = (bin: string): Promise<boolean> => {
   const cached = availabilityCache.get(bin)
   if (cached !== undefined) return cached
-  const probe = probeAvailable(bin)
+  const probe = probeAvailable(bin).then((ok) => {
+    // Evict a settled `false` so a transient miss is re-probed next call; a
+    // `true` is left cached (permanent, the binary stays installed). The
+    // in-flight promise is still shared by concurrent callers above — eviction
+    // only happens after it resolves, so the dedup invariant holds.
+    if (!ok && availabilityCache.get(bin) === probe) availabilityCache.delete(bin)
+    return ok
+  })
   availabilityCache.set(bin, probe)
   return probe
 }
@@ -573,7 +606,7 @@ export const evidenceLspStatic =
       uri: string
       range: { start: { line: number } }
     }): { file: string; line: number } => ({
-      file: l.uri.replace(/^file:\/\//, ""),
+      file: uriToPath(l.uri),
       line: l.range.start.line + 1,
     })
     try {
@@ -739,7 +772,7 @@ const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
       // Pick the first file's spec to open a server for the apply.
       const firstUri = edit.changes[0]?.uri
       if (!firstUri) return
-      const file = firstUri.replace(/^file:\/\//, "")
+      const file = uriToPath(firstUri)
       const spec = specFor(file)
       if (!spec) throw new Error(`lsp_code_action: no server for ${file}`)
       if (!(await isAvailable(spec.bin))) return

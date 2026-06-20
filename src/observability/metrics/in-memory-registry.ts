@@ -53,6 +53,16 @@ export interface InMemoryRegistryOpts {
   /** Exact observation cap per histogram before compacting to a bounded
    *  percentile sketch. Count / sum remain exact after compaction. */
   readonly histogramMaxObservations?: number
+  /** Cardinality guard: max distinct label-series retained PER metric name.
+   *  Contract #5 bounds memory WITHIN a series (histogram compaction) but the
+   *  NUMBER of series is otherwise unbounded — a future emitter that passes a
+   *  high-cardinality label (per-request id, free-form error string) would grow
+   *  `series` for the process lifetime. Once a name hits the cap, new series for
+   *  that name are dropped (existing ones still update) and the drop is counted
+   *  in {@link RegistryDiagnostics.seriesDropped}. The default is generous so
+   *  the wired bounded-label paths (`tool`,`ok`) never trip it — default
+   *  behavior stays byte-identical. */
+  readonly maxSeriesPerName?: number
 }
 
 const DEFAULT_BUCKETS: ReadonlyArray<number> = Object.freeze([1, 10, 100, 1000, 10_000])

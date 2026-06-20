@@ -83,43 +83,48 @@ const deepSumTokens = (v: unknown, acc: { input: number; output: number }): void
   }
 }
 
-/** Backfill tokens + wall-clock for one instance from its observe JSONL (any
- *  `<instanceId>.<attempt>.jsonl` under `observeDir`). Returns zeros if absent. */
+/** Backfill tokens + wall-clock for one instance from its observe JSONL.
+ *  Best-of-N runs emit one file PER attempt (`<instanceId>.0.jsonl`,
+ *  `<instanceId>.1.jsonl`, …); sum tokens across ALL of them and span the
+ *  wall-clock over every attempt, else an n-attempt run reports ~1/n of the
+ *  real cost. Returns zeros if absent. */
 const fromObserve = (
   observeDir: string,
   instanceId: string,
 ): { input: number; output: number; wallClockMs: number } => {
   if (!existsSync(observeDir)) return { input: 0, output: 0, wallClockMs: 0 }
-  let file: string | undefined
+  let files: string[]
   try {
-    file = readdirSync(observeDir).find(
+    {const __f = readdirSync(observeDir).find(
       (f) => f.startsWith(`${instanceId}.`) && f.endsWith(".jsonl"),
-    )
+    ); files = __f === undefined ? [] : [__f]}
   } catch {
     return { input: 0, output: 0, wallClockMs: 0 }
   }
-  if (file === undefined) return { input: 0, output: 0, wallClockMs: 0 }
+  if (files.length === 0) return { input: 0, output: 0, wallClockMs: 0 }
   const acc = { input: 0, output: 0 }
   let minTs = Number.POSITIVE_INFINITY
   let maxTs = Number.NEGATIVE_INFINITY
-  try {
-    for (const line of readFileSync(join(observeDir, file), "utf8").split("\n")) {
-      if (line.trim() === "") continue
-      let ev: unknown
-      try {
-        ev = JSON.parse(line)
-      } catch {
-        continue
+  for (const file of files) {
+    try {
+      for (const line of readFileSync(join(observeDir, file), "utf8").split("\n")) {
+        if (line.trim() === "") continue
+        let ev: unknown
+        try {
+          ev = JSON.parse(line)
+        } catch {
+          continue
+        }
+        deepSumTokens(ev, acc)
+        const ts = num((ev as { ts?: unknown }).ts)
+        if (ts > 0) {
+          minTs = Math.min(minTs, ts)
+          maxTs = Math.max(maxTs, ts)
+        }
       }
-      deepSumTokens(ev, acc)
-      const ts = num((ev as { ts?: unknown }).ts)
-      if (ts > 0) {
-        minTs = Math.min(minTs, ts)
-        maxTs = Math.max(maxTs, ts)
-      }
+    } catch {
+      // skip an unreadable attempt file rather than dropping the whole instance
     }
-  } catch {
-    return { input: 0, output: 0, wallClockMs: 0 }
   }
   const wallClockMs =
     Number.isFinite(minTs) && Number.isFinite(maxTs) ? Math.max(0, maxTs - minTs) : 0

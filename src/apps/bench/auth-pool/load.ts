@@ -6,11 +6,16 @@
  * token file — only a manifest path is read, and only when pool mode is selected.
  */
 import { readFileSync } from "node:fs"
+import { homedir } from "node:os"
 import type { AuthPoolEntry, AuthSource } from "./types"
 
-/** Default credential when no pool and no explicit `QUANTA_BENCH_AUTH_FILE`. */
+/** Default credential when no pool and no explicit `QUANTA_BENCH_AUTH_FILE`.
+ *  An INJECTED `env.HOME` wins (byte-identical to the legacy path) for callers
+ *  that already hold an env bag; with HOME unset we resolve a REAL home via
+ *  `os.homedir()` (passwd-DB fallback) instead of silently building an absolute
+ *  `/.quanta/...` path rooted at the filesystem root. */
 export const defaultAuthFile = (env: NodeJS.ProcessEnv): string =>
-  `${env.HOME ?? ""}/.quanta/auth/chatgpt.json`
+  `${env.HOME !== undefined && env.HOME !== "" ? env.HOME : homedir()}/.quanta/auth/chatgpt.json`
 
 const asRecord = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
@@ -31,20 +36,32 @@ const reqPositiveInt = (rec: Record<string, unknown>, key: string, ctx: string):
   return v
 }
 
-const optPositiveInt = (rec: Record<string, unknown>, key: string, ctx: string): number | undefined => {
+const optPositiveInt = (
+  rec: Record<string, unknown>,
+  key: string,
+  ctx: string,
+): number | undefined => {
   const v = rec[key]
   if (v === undefined) return undefined
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0 || !Number.isInteger(v)) {
-    throw new Error(`auth-pool: ${ctx} optional "${key}" must be a positive integer (got ${String(v)})`)
+    throw new Error(
+      `auth-pool: ${ctx} optional "${key}" must be a positive integer (got ${String(v)})`,
+    )
   }
   return v
 }
 
-const optPositiveNum = (rec: Record<string, unknown>, key: string, ctx: string): number | undefined => {
+const optPositiveNum = (
+  rec: Record<string, unknown>,
+  key: string,
+  ctx: string,
+): number | undefined => {
   const v = rec[key]
   if (v === undefined) return undefined
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
-    throw new Error(`auth-pool: ${ctx} optional "${key}" must be a positive number (got ${String(v)})`)
+    throw new Error(
+      `auth-pool: ${ctx} optional "${key}" must be a positive number (got ${String(v)})`,
+    )
   }
   return v
 }
@@ -63,7 +80,11 @@ const toEntry = (raw: unknown, idx: number): AuthPoolEntry => {
   const ctx = `accounts[${idx}]`
   const label = reqString(rec, "label", ctx)
   const authFile = reqString(rec, "authFile" in rec ? "authFile" : "auth_file", ctx)
-  const maxParallel = reqPositiveInt(rec, "maxParallel" in rec ? "maxParallel" : "max_parallel", ctx)
+  const maxParallel = reqPositiveInt(
+    rec,
+    "maxParallel" in rec ? "maxParallel" : "max_parallel",
+    ctx,
+  )
   const maxBoxes = optPositiveInt(rec, "maxBoxes" in rec ? "maxBoxes" : "max_boxes", ctx)
   const cooldownBaseSec = optPositiveNum(
     rec,
@@ -131,7 +152,7 @@ export interface ResolveAuthOpts {
  */
 export const selectAuthSourceLabel = (src: AuthSource, rawLabel: string): AuthSource => {
   const label = rawLabel.trim()
-  if (label === "") throw new Error('auth-pool: --auth-label requires a non-empty label')
+  if (label === "") throw new Error("auth-pool: --auth-label requires a non-empty label")
   if (src.kind !== "pool") {
     throw new Error(
       `auth-pool: --auth-label=${label} requires auth pool mode (--auth-pool or QUANTA_BENCH_AUTH_POOL)`,

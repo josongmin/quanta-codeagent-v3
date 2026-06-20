@@ -20,7 +20,11 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
-import { createFullRemoteBackend, stripToAccessToken } from "../../src/apps/bench/remote/full"
+import {
+  attachBox,
+  createFullRemoteBackend,
+  stripToAccessToken,
+} from "../../src/apps/bench/remote/full"
 import {
   acquirePatchGenBudgetLease,
   readPatchGenBudgetState,
@@ -103,6 +107,9 @@ const mockSpawn = (
       return ok(`0\n==XQ-RUN-EXIT-XQ==\n`)
     }
     if (args.some((a) => a.includes("bun") && a.includes("READY"))) return ok("READY") // readiness
+    if (args.some((a) => a.includes("command -v pyright-langserver"))) {
+      return ok("pyright 1.1.350\n")
+    }
     // atomic grade lock (a fresh box acquires it cleanly ⇒ LOCKED).
     if (args.some((a) => a.includes("mkdir ~/.pool-grade.lock"))) return ok("LOCKED")
     const reportFetch = args.find((a) => /cat ~\/(?:runs\/[^/]+\/)?report\.json/.test(a))
@@ -412,6 +419,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       if (cmd === "ssh") {
         const remote = a[a.length - 1] ?? ""
         if (remote.includes("READY")) return ok("READY")
+        if (remote.includes("command -v pyright-langserver")) return ok("pyright 1.1.350\n")
         if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
         if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
         if (remote.includes("setsid bash -c") && remote.includes("run --swebench")) {
@@ -594,7 +602,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(benchRun).toBeDefined()
     const cmd = benchRun?.args.join(" ") ?? ""
     expect(cmd).toContain("QUANTA_BENCH_PRESET=")
-    expect(cmd).toContain("agentless-v3-thin")
+    expect(cmd).toContain("agentless-v3-thin-strict")
   })
 
   test("box bootstrap installs pyright so LSP nav-grounding is not inert by missing binary", async () => {
@@ -605,6 +613,80 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const shipped = everyShippedString(calls)
     expect(shipped).toContain("uv tool install pyright")
     expect(shipped).toContain("pyright --version")
+  })
+
+  test("thin-strict family fails closed when pyright grounding is inert on a fresh box", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      calls.push({ cmd, args: [...args] })
+      if (args.includes("describe-security-groups")) return { code: 0, stdout: "sg-abc", stderr: "" }
+      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
+      if (args.includes("run-instances")) return { code: 0, stdout: "i-strict", stderr: "" }
+      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
+      if (args.includes("terminate-instances")) return { code: 0, stdout: "", stderr: "" }
+      if (cmd === "ssh") {
+        const remote = args[args.length - 1] ?? ""
+        if (remote.includes("bun") && remote.includes("READY")) return { code: 0, stdout: "READY", stderr: "" }
+        if (remote.includes("command -v pyright-langserver")) {
+          return { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
+        }
+        return { code: 0, stdout: "", stderr: "" }
+      }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await expect(
+      createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        preset: "agentless-v3-thin-strict",
+      }).run(),
+    ).rejects.toThrow(/requires live LSP grounding/i)
+    expect(
+      calls.some((c) => c.args.includes("terminate-instances") && c.args.includes("i-strict")),
+    ).toBe(true)
+    expect(
+      calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench"))),
+    ).toBe(false)
+  })
+
+  test("warm thin-strict boxes re-prove LSP grounding instead of bypassing on attach", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    let pyrightProbeCount = 0
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      calls.push({ cmd, args: [...args] })
+      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
+      if (cmd === "ssh") {
+        const remote = args[args.length - 1] ?? ""
+        if (remote.includes("test -x ~/.bun/bin/bun")) return { code: 0, stdout: "OK\n", stderr: "" }
+        if (remote.includes("command -v pyright-langserver")) {
+          pyrightProbeCount += 1
+          return pyrightProbeCount === 1
+            ? { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
+            : { code: 0, stdout: "pyright 1.1.350\n", stderr: "" }
+        }
+        if (remote.includes("bun") && remote.includes("READY")) return { code: 0, stdout: "READY", stderr: "" }
+        if (remote.includes("~/swebench-python -c")) return { code: 0, stdout: "2.0.0\n", stderr: "" }
+        return { code: 0, stdout: "", stderr: "" }
+      }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await attachBox(
+      {
+        ...baseCfg,
+        spawn: fn,
+        preset: "agentless-v3-thin-strict",
+      },
+      "i-warm",
+    )
+    expect(pyrightProbeCount).toBe(2)
+    expect(calls.some((c) => c.cmd === "rsync")).toBe(true)
+    expect(
+      calls.some(
+        (c) =>
+          c.cmd === "ssh" &&
+          c.args.some((a) => a.includes("cd ~/quanta && ~/.bun/bin/bun install")),
+      ),
+    ).toBe(true)
   })
 
   test("ALWAYS terminates the box — even when the remote run throws", async () => {
@@ -643,6 +725,9 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       if (cmd === "ssh") {
         const remote = args[args.length - 1] ?? ""
         if (remote.includes("READY")) return { code: 0, stdout: "READY", stderr: "" }
+        if (remote.includes("command -v pyright-langserver")) {
+          return { code: 0, stdout: "pyright 1.1.350\n", stderr: "" }
+        }
         if (remote.includes("mkdir ~/.pool-grade.lock")) {
           return { code: 0, stdout: "LOCKED", stderr: "" }
         }
@@ -772,6 +857,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         const c = args[args.length - 1] ?? ""
         if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
         if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("command -v pyright-langserver")) return ok("pyright 1.1.350\n")
         if (c.includes("IDLE")) return ok("IDLE")
         if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY")
         if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
@@ -802,6 +888,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         const c = args[args.length - 1] ?? ""
         if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
         if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("command -v pyright-langserver")) return ok("pyright 1.1.350\n")
         if (c.includes("IDLE")) return ok("IDLE")
         if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
         if (c.includes("rmdir ~/.pool-grade.lock")) {

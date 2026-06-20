@@ -302,10 +302,10 @@ const userData = (ttl: number): string =>
     // pyright` lands the PyPI wrapper (which self-manages a pinned node) at
     // ~/.local/bin/pyright-langserver, which remoteRun already puts on PATH.
     // The trailing `pyright --version` warms the one-time node download so the
-    // first instance doesn't eat that latency. Fail-OPEN (`|| true`): grounding
-    // is best-effort — a pyright install hiccup must never abort the bootstrap
-    // (`set -eux`) and kill the whole bench run. When absent the agent simply
-    // degrades to no nav tools (the pre-jun-19 behaviour).
+    // first instance doesn't eat that latency. Fail-OPEN (`|| true`) at
+    // cloud-init so the EC2 launch itself stays robust; the post-bootstrap
+    // launch-proof below decides whether an inert pyright install is a loud
+    // warning or a strict fail-closed stop, depending on the selected preset.
     // jun-19 hardening: the prior line warmed `pyright` (CLI) but the LSP
     // adapter spawns `pyright-langserver`; if uv only linked `pyright` the nav
     // session still failed "not found". Now we (1) install, (2) warm the node
@@ -389,8 +389,8 @@ export const createLineStreamer = (emit: (line: string) => void): ((chunk: strin
  * launchable on the box — grounding becomes THEATER and the report cannot
  * distinguish "model ignored the steer" from "pyright was never there" (the
  * jun-16/19 inert bug class). userData installs pyright fail-open (`|| true`),
- * so this verdict drives a LOUD non-fatal WARNING when it did not land — making
- * an inert-grounding run OBSERVABLE instead of silent. INERT ⇒ ready:false.
+ * so this verdict feeds the post-bootstrap posture gate: non-strict presets log
+ * a LOUD warning, while the thin-strict family fails closed. INERT ⇒ ready:false.
  */
 export const pyrightLaunchProofVerdict = (probe: {
   code: number
@@ -401,6 +401,49 @@ export const pyrightLaunchProofVerdict = (probe: {
     return { ready: false, detail: out.slice(-200) }
   }
   return { ready: true, detail: out }
+}
+
+const THIN_STRICT_PRESET_PREFIX = "agentless-v3-thin-strict"
+
+const presetRequiresLiveLspGrounding = (preset: string): boolean =>
+  preset === THIN_STRICT_PRESET_PREFIX || preset.startsWith(`${THIN_STRICT_PRESET_PREFIX}-`)
+
+const pyrightGroundingProbeCommand =
+  'export PATH="$HOME/.local/bin:$PATH"; if command -v pyright-langserver >/dev/null 2>&1; then pyright --version 2>&1 | tail -1; else echo PYRIGHT_MISSING; exit 7; fi'
+
+const probePyrightGrounding = async (
+  ssh: (cmd: string) => Promise<SpawnResult>,
+): Promise<{ ready: boolean; detail: string }> =>
+  pyrightLaunchProofVerdict(await ssh(pyrightGroundingProbeCommand))
+
+const pyrightProbeDetail = (detail: string): string => (detail === "" ? "(no probe output)" : detail)
+
+const inertGroundingWarning = (detail: string): string =>
+  "[full-remote] ⚠️  WARNING: pyright-langserver is NOT launchable on the box — LSP grounding " +
+  "(lsp_definition / lsp_references) is INERT this run: the localize steer fires but every nav call " +
+  'returns "unavailable" (silent no-nav degrade). The userData pyright install likely failed. ' +
+  `probe: ${pyrightProbeDetail(detail)}`
+
+const strictGroundingFailure = (preset: string, detail: string): Error =>
+  new Error(
+    `[full-remote] preset ${preset} requires live LSP grounding, but pyright-langserver is not ` +
+      `launchable on the box. probe: ${pyrightProbeDetail(detail)}`,
+  )
+
+const verifyPyrightGrounding = async (
+  ssh: (cmd: string) => Promise<SpawnResult>,
+  log: (msg: string) => void,
+  preset: string,
+): Promise<void> => {
+  const groundingVerdict = await probePyrightGrounding(ssh)
+  if (!groundingVerdict.ready) {
+    if (presetRequiresLiveLspGrounding(preset)) {
+      throw strictGroundingFailure(preset, groundingVerdict.detail)
+    }
+    log(inertGroundingWarning(groundingVerdict.detail))
+    return
+  }
+  log(`[full-remote] LSP grounding ready — ${groundingVerdict.detail}`)
 }
 
 /**
@@ -1156,23 +1199,10 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
       `[full-remote] swebench toolchain warm failed (code ${warm.code}):\n${warm.stdout}${warm.stderr}`,
     )
   }
-  // #1-P0 (jun-19): LSP-grounding launch-proof. Non-fatal — grounding is an
-  // enhancement; emit a LOUD warning if pyright is not launchable so an inert
-  // run is observable, never silent theater.
-  const pyrightProbe = await ssh(
-    'export PATH="$HOME/.local/bin:$PATH"; if command -v pyright-langserver >/dev/null 2>&1; then pyright --version 2>&1 | tail -1; else echo PYRIGHT_MISSING; exit 7; fi',
-  )
-  const groundingVerdict = pyrightLaunchProofVerdict(pyrightProbe)
-  if (!groundingVerdict.ready) {
-    log(
-      "[full-remote] ⚠️  WARNING: pyright-langserver is NOT launchable on the box — LSP grounding " +
-        "(lsp_definition / lsp_references) is INERT this run: the localize steer fires but every nav call " +
-        'returns "unavailable" (silent no-nav degrade). The userData pyright install likely failed. ' +
-        `probe: ${groundingVerdict.detail}`,
-    )
-  } else {
-    log(`[full-remote] LSP grounding ready — ${groundingVerdict.detail}`)
-  }
+  // #1-P0 (jun-19/20): prove LSP grounding is actually LIVE after bootstrap.
+  // The thin-strict family is fail-closed: proceeding with silent no-nav
+  // degrade would violate the preset's contract.
+  await verifyPyrightGrounding(ssh, log, cfg.preset ?? D.preset)
 }
 
 /**
@@ -1444,9 +1474,20 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
     terminate: async () => {}, // reused box stays WARM (TTL reaps it)
   }
   log(`[pool] reusing warm box ${iid} (${ip})`)
+  const preset = cfg.preset ?? D.preset
   if (!(await isBootstrapped((c) => ssh(c)))) {
     log(`[pool] box ${iid} missing bootstrap (stale) — re-bootstrapping…`)
     await bootstrapBox(session, cfg)
+  } else if (presetRequiresLiveLspGrounding(preset)) {
+    const groundingVerdict = await probePyrightGrounding((c) => ssh(c))
+    if (!groundingVerdict.ready) {
+      log(
+        `[pool] box ${iid} lost live LSP grounding for preset ${preset} — re-bootstrapping…`,
+      )
+      await bootstrapBox(session, cfg)
+    } else {
+      log(`[pool] warm box ${iid} LSP grounding ready — ${groundingVerdict.detail}`)
+    }
   }
   return session
 }

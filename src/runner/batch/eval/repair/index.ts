@@ -20,6 +20,7 @@
  * for observability/golden tests. Throws only if `runOnce` itself throws —
  * validator failures are normal and never throw.
  */
+import { decidePrimaryRailFinishGate } from "@/agent/primary-rail"
 import type {
   BuildRepairContextArgs,
   RepairReproOutcome,
@@ -43,8 +44,14 @@ export const runRepairRounds = async (
   const v0 = await runValidate(args, r0)
   let turnsTotal = r0.turns
   history.push({ round: 0, patch: r0.patch, validated: v0.ok })
-  if (v0.ok || maxRounds <= 0) {
-    return finalize(history, turnsTotal, v0.ok, r0.patch, isFalseGreen(v0), isFalseRed(v0))
+  // T-302 finish gate (default-OFF; armed only when a primary rail is set — the
+  // SAME `primaryRailStep !== undefined` knob that already swaps the validator
+  // gate). When armed, an exit-code-green round whose typed rail predicate did
+  // NOT match (false green) does NOT clear as validated — the rail is not proven.
+  // Knob ABSENT ⇒ `clearedAsValidated` is identically `v.ok` ⇒ byte-identical.
+  const v0Cleared = clearedAsValidated(args, v0)
+  if (v0Cleared || maxRounds <= 0) {
+    return finalize(history, turnsTotal, v0Cleared, r0.patch, isFalseGreen(v0), isFalseRed(v0))
   }
 
   let prevRun: RunOnceResult = r0
@@ -71,9 +78,12 @@ export const runRepairRounds = async (
     prevRun = ri
     prevValidator = vi
     if (isFalseRed(vi)) falseRed = true
-    if (vi.ok) {
+    // Record the (observe-only) false-green signal for EVERY exit-code-green
+    // round, even when the finish gate withholds clearing — the diagnostic must
+    // reflect what happened, not whether the gate let it pass.
+    if (vi.ok) falseGreen = isFalseGreen(vi)
+    if (clearedAsValidated(args, vi)) {
       validated = true
-      falseGreen = isFalseGreen(vi)
       break
     }
   }
@@ -86,6 +96,32 @@ export const runRepairRounds = async (
  *  predicate is NOT a false green (never penalizes). */
 const isFalseGreen = (v: ValidatorResult): boolean =>
   v.ok && v.predicate?.evaluable === true && v.predicate.matched === false
+
+/** T-302 finish-gate ENFORCEMENT (default-OFF). Whether an exit-code-green
+ *  round may be treated as VALIDATED. With no primary rail set the answer is
+ *  identically `v.ok` (byte-identical to the legacy exit-code-only behavior).
+ *  When a primary rail IS set, the typed-rail-aware {@link decidePrimaryRailFinishGate}
+ *  is the authority: a false-green round (rail predicate evaluable AND matched
+ *  ===false) maps to a still-RED rail, so the gate BLOCKS and the round does NOT
+ *  clear — the spurious exit-code green is the lone non-primary green that must
+ *  not substitute for the rail's own proof. Reuses the keystone decider rather
+ *  than re-deriving the policy. */
+const clearedAsValidated = (args: RunRepairRoundsArgs, v: ValidatorResult): boolean => {
+  if (!v.ok) return false
+  if (args.primaryRailStep === undefined) return true
+  const railState: "green" | "red" = isFalseGreen(v) ? "red" : "green"
+  const decision = decidePrimaryRailFinishGate({
+    cfg: { enabled: true },
+    result: {
+      primaryRailPresent: true,
+      primaryRailState: railState,
+      // The exit-code green that did not match the typed rail predicate is the
+      // single non-primary green that the gate must refuse to honor.
+      nonPrimaryGreens: railState === "red" ? 1 : 0,
+    },
+  })
+  return !decision.block
+}
 
 const MARKER_REPRODUCED = "Issue reproduced"
 const MARKER_RESOLVED = "Issue resolved"
