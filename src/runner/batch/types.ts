@@ -6,6 +6,7 @@
  * are local to the app and intentionally minimal.
  */
 
+import type { StopReason } from "@/agent"
 import type { LocalEnvSelection } from "@/runtime"
 
 /** Official SWE-bench instance metadata, present only for instances loaded
@@ -140,6 +141,9 @@ export interface InstanceResult {
   patch: string
   /** Agent turns consumed. */
   turns: number
+  /** Typed terminal agent stop authority when the main loop reached a terminal
+   *  verdict. Omitted for harness/env failures outside the agent loop. */
+  stopReason?: StopReason
   /** Present only on a harness-level failure (setup crash, timeout, etc.). */
   error?: string
   /**

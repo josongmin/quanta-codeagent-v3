@@ -203,8 +203,27 @@ export const OUTCOME_FAILURE_MATCHERS: readonly OutcomeFailureMatcher[] = [
   { id: "go-fail-summary", ecosystem: "go", pattern: /^FAIL\b/m },
   // cargo test: `test result: FAILED. 1 passed; 2 failed; ...`
   { id: "cargo", ecosystem: "rust", pattern: /^test result:\s*FAILED\b/m },
-  // rspec: `Failures:` + final `5 failures` summary
-  { id: "rspec", ecosystem: "ruby", pattern: /^\d+\s+examples?,\s+\d+\s+failures?/m },
+  // Generic non-zero count summaries: `1 passed, 2 errors`, `3 failures`, ...
+  // Zero-count summaries (`0 failed`, `0 errors`) are NOT failure signals.
+  { id: "generic-failed-count", ecosystem: "generic", pattern: /\b(?:[1-9]\d*)\s+failed\b/m },
+  {
+    id: "generic-failure-count",
+    ecosystem: "generic",
+    pattern: /\b(?:[1-9]\d*)\s+failures?\b/m,
+  },
+  {
+    id: "generic-error-count",
+    ecosystem: "generic",
+    pattern: /\b(?:[1-9]\d*)\s+errors?\b/m,
+  },
+  {
+    id: "generic-failure-assignment",
+    ecosystem: "generic",
+    pattern: /\b(?:failures?|errors?)\s*=\s*(?:[1-9]\d*)\b/m,
+  },
+  // rspec: `Failures:` + final `5 failures` summary. `0 failures` is an
+  // explicit PASS summary and must not over-block verdict salvage.
+  { id: "rspec", ecosystem: "ruby", pattern: /^\d+\s+examples?,\s+[1-9]\d*\s+failures?/m },
   // phpunit: `FAILURES! Tests: 5, Assertions: 12, Failures: 3.`
   { id: "phpunit", ecosystem: "php", pattern: /^FAILURES!/m },
   // dotnet test: `Failed!  - Failed:    3, Passed: ...`

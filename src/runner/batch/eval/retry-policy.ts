@@ -192,6 +192,29 @@ const classifyByAdmission = (result: InstanceResult): AttemptOutcome | undefined
   return undefined
 }
 
+const classifyByStopReason = (result: InstanceResult): AttemptOutcome | undefined => {
+  if (result.stopReason === "refusal") {
+    return {
+      kind: "generation-fail",
+      reason: result.error ?? "agent stopped with refusal before verification",
+    }
+  }
+  if (result.stopReason === "error") {
+    return {
+      kind: "generation-fail",
+      reason: result.error ?? "agent stopped with error before verification",
+    }
+  }
+  if (result.stopReason === "aborted") return { kind: "timeout" }
+  if (result.stopReason === "budget_exhausted") {
+    return { kind: "real-fail", subkind: "budget_exhausted" }
+  }
+  if (result.stopReason === "max_turns") {
+    return { kind: "real-fail", subkind: "max_turns_exhausted" }
+  }
+  return undefined
+}
+
 /** Error-string sniffer. Returns `undefined` when no string-pattern matches;
  *  the caller falls through to the patch-state heuristics. Extracted from
  *  `classifyOutcome` to keep complexity under the biome cap. */
@@ -244,6 +267,8 @@ export const classifyOutcome = (result: InstanceResult): AttemptOutcome => {
   if (byVerdict !== undefined) return byVerdict
   const byAdmission = classifyByAdmission(result)
   if (byAdmission !== undefined) return byAdmission
+  const byStopReason = classifyByStopReason(result)
+  if (byStopReason !== undefined) return byStopReason
   const err = typeof result.error === "string" ? result.error : ""
   const patch = typeof result.patch === "string" ? result.patch : ""
   const byErr = classifyByErrorString(err)

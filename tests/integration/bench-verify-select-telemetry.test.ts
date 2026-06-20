@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { BudgetMeter } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { classifyOutcome } from "@/runner/batch/eval/retry-policy"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
@@ -82,6 +83,72 @@ class SequentialEditLLM implements LLMPort {
       return
     }
     yield { type: "text_delta", delta: "done" }
+    yield { type: "message_stop", stop_reason: "end_turn" }
+  }
+}
+
+class EditThenThrowThenNoopLLM implements LLMPort {
+  private calls = 0
+
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    const text = input.messages
+      .flatMap((m) => m.content)
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join(" ")
+    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    if (this.calls === 1) {
+      yield { type: "tool_use_start", id: "edit-1", name: "edit" }
+      yield {
+        type: "tool_use_end",
+        id: "edit-1",
+        input: {
+          path: join(sandbox, "math.js"),
+          old_string: "return a - b",
+          new_string: "return a + b",
+        },
+      }
+      yield { type: "message_stop", stop_reason: "tool_use" }
+      return
+    }
+    if (this.calls === 2) {
+      throw new Error("429 Too Many Requests")
+    }
+    yield { type: "text_delta", delta: "noop" }
+    yield { type: "message_stop", stop_reason: "end_turn" }
+  }
+}
+
+class EditThenRefuseThenNoopLLM implements LLMPort {
+  private calls = 0
+
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    const text = input.messages
+      .flatMap((m) => m.content)
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join(" ")
+    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    if (this.calls === 1) {
+      yield { type: "tool_use_start", id: "edit-1", name: "edit" }
+      yield {
+        type: "tool_use_end",
+        id: "edit-1",
+        input: {
+          path: join(sandbox, "math.js"),
+          old_string: "return a - b",
+          new_string: "return a + b",
+        },
+      }
+      yield { type: "message_stop", stop_reason: "tool_use" }
+      return
+    }
+    if (this.calls === 2) {
+      yield { type: "text_delta", delta: "I refuse to continue." }
+      yield { type: "message_stop", stop_reason: "refusal" }
+      return
+    }
+    yield { type: "text_delta", delta: "noop" }
     yield { type: "message_stop", stop_reason: "end_turn" }
   }
 }
@@ -219,6 +286,66 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
   )
 
   test.serial(
+    "ADVERSARIAL: edited candidate survives post-edit provider error and remains selectable",
+    verifySelectEnv.run(async () => {
+      const corpusRoot = join(dir, "corpus")
+      await writeSyntheticCorpus(corpusRoot)
+      const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+      const swebenchLike: Instance = {
+        ...base,
+        swebench: {
+          instanceId: "demo__bench-error-patch",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
+
+      const result = await runInstance(swebenchLike, {
+        ...DEPS,
+        llm: new EditThenThrowThenNoopLLM(),
+      })
+
+      expect(result.passed).toBe(true)
+      expect(result.stopReason).toBeUndefined()
+      expect(result.patch).toContain("return a + b")
+      expect(result.selectionTelemetry?.attempted).toBe(2)
+      expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
+      expect(result.selectionTelemetry?.generationFailures).toBe(0)
+      expect(result.selectionTelemetry?.winnerId).toBe("cand-0")
+    }),
+  )
+
+  test.serial(
+    "ADVERSARIAL: edited candidate survives post-edit refusal and remains selectable",
+    verifySelectEnv.run(async () => {
+      const corpusRoot = join(dir, "corpus")
+      await writeSyntheticCorpus(corpusRoot)
+      const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+      const swebenchLike: Instance = {
+        ...base,
+        swebench: {
+          instanceId: "demo__bench-refusal-patch",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
+
+      const result = await runInstance(swebenchLike, {
+        ...DEPS,
+        llm: new EditThenRefuseThenNoopLLM(),
+      })
+
+      expect(result.passed).toBe(true)
+      expect(result.stopReason).toBeUndefined()
+      expect(result.patch).toContain("return a + b")
+      expect(result.selectionTelemetry?.attempted).toBe(2)
+      expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
+      expect(result.selectionTelemetry?.generationFailures).toBe(0)
+      expect(result.selectionTelemetry?.winnerId).toBe("cand-0")
+    }),
+  )
+
+  test.serial(
     "verify-select no-winner preserves max_turns authority from the terminal candidate",
     verifySelectEnv.run(async () => {
       const corpusRoot = join(dir, "corpus")
@@ -245,6 +372,39 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
       expect(classifyOutcome(result)).toEqual({
         kind: "real-fail",
         subkind: "max_turns_exhausted",
+      })
+    }),
+  )
+
+  test.serial(
+    "verify-select no-winner preserves budget_exhausted authority from the terminal candidate",
+    verifySelectEnv.run(async () => {
+      const corpusRoot = join(dir, "corpus")
+      await writeSyntheticCorpus(corpusRoot)
+      const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+      const swebenchLike: Instance = {
+        ...base,
+        swebench: {
+          instanceId: "demo__demo-budget",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
+      const deps = {
+        ...DEPS,
+        llm: new NoopEndLLM(),
+        budgetMeterFactory: () => new BudgetMeter({ dials: { maxTurns: 0 } }),
+      }
+
+      const result = await runInstance(swebenchLike, deps)
+
+      expect(result.passed).toBe(false)
+      expect(result.patch).toBe("")
+      expect(result.error).toContain("token budget")
+      expect(result.selectionTelemetry?.winnerId).toBeNull()
+      expect(classifyOutcome(result)).toEqual({
+        kind: "real-fail",
+        subkind: "budget_exhausted",
       })
     }),
   )

@@ -276,3 +276,93 @@ describe("hellgate — VerifyOutcome shape invariants", () => {
     expect(out.failedTests).toEqual([])
   })
 })
+
+// ── E. Summary-salvage fail-closed boundary ───────────────────────────────────
+
+describe("hellgate — local verifier summary salvage", () => {
+  const shellEnv = { vars: {}, pathPrepend: ["/bin", "/usr/bin"] }
+
+  test("non-zero exit + explicit passing summary ⇒ recovered PASS", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '1 passed in 0.01s\\n' >&2; exit 143",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(true)
+    expect(out.exitCode).toBe(143)
+  })
+
+  test("non-zero exit + zero-failure summary ⇒ recovered PASS", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '1 passed, 0 failed, 0 errors in 0.01s\\n' >&2; exit 143",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(true)
+    expect(out.exitCode).toBe(143)
+  })
+
+  test("non-zero exit + passing summary PLUS plural errors ⇒ stays FAIL (no false green)", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '1 passed, 2 errors in 0.01s\\n' >&2; exit 143",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(false)
+    expect(out.exitCode).toBe(143)
+  })
+
+  test("zero exit + explicit failed summary ⇒ stays FAIL (no exit-code fake pass)", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '1 failed, 3 passed in 0.01s\\n' >&2; exit 0",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(false)
+    expect(out.exitCode).toBe(0)
+  })
+
+  test("zero exit + plural error summary ⇒ stays FAIL (no exit-code fake pass)", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '1 passed, 2 errors in 0.01s\\n' >&2; exit 0",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(false)
+    expect(out.exitCode).toBe(0)
+  })
+
+  test("ADVERSARIAL: zero exit + rspec zero-failure summary stays PASS", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '5 examples, 0 failures\\n' >&2; exit 0",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(true)
+    expect(out.exitCode).toBe(0)
+  })
+})

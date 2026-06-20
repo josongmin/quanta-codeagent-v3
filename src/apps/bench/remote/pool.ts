@@ -30,11 +30,13 @@ import {
   type FullRemoteConfig,
   type FullRemoteResult,
   findIdleBox,
+  GRADE_LOCK_RELEASE_ERROR,
   gradeChunkOnBox,
   POOL_BUSY_ERROR,
   provisionBox,
 } from "./box-session"
 import type { PoolAuthLease, PoolAuthProvider } from "./pool-auth"
+import { acquireSingleBoxGuard, type SingleBoxGuard } from "./single-box-guard"
 import { acquirePatchGenBudgetLease, clampPatchGenConcurrency } from "./token-budget"
 
 /** One unit of work for the pool: a runId-tagged dataset slice. */
@@ -118,6 +120,8 @@ export interface PoolConfig {
    *  rotated boxes are still terminated regardless. Set false to terminate on
    *  clean drain. */
   readonly keepWarm?: boolean
+  /** Override the local single-box owner guard dir (test seam). */
+  readonly singleBoxGuardDir?: string
   /** Override the cross-process patch-gen budget lease dir (test seam). */
   readonly tokenBudgetDir?: string
   /** Max wait for the global patch-gen budget lease. */
@@ -137,7 +141,7 @@ export interface PoolChunkResult {
   readonly lost: boolean
 }
 
-const assertUniqueChunkRunIds = (chunks: readonly PoolChunk[]): void => {
+export const assertUniqueChunkRunIds = (chunks: readonly PoolChunk[]): void => {
   const seen = new Set<string>()
   const dup = new Set<string>()
   for (const chunk of chunks) {
@@ -242,6 +246,25 @@ const awaitPoolLaunchWindow = async (cfg: PoolConfig): Promise<void> => {
   }
 }
 
+const acquirePoolSingleBoxGuard = async (
+  chunks: readonly PoolChunk[],
+  cfg: PoolConfig,
+): Promise<SingleBoxGuard | undefined> => {
+  if (cfg.allowExtraBoxes === true) return undefined
+  const first = chunks[0]?.runId ?? "empty"
+  const label = `pool:${first}${chunks.length > 1 ? `+${chunks.length - 1}` : ""}`
+  return acquireSingleBoxGuard({
+    label,
+    ...(cfg.singleBoxGuardDir !== undefined ? { dir: cfg.singleBoxGuardDir } : {}),
+    wait: cfg.waitForIdle === true,
+    ...(cfg.waitForIdle === true ? { waitMs: cfg.waitForIdleTimeoutMs } : {}),
+    ...(cfg.waitForIdlePollMs !== undefined ? { pollMs: cfg.waitForIdlePollMs } : {}),
+    ...(cfg.now !== undefined ? { now: cfg.now } : {}),
+    ...(cfg.sleep !== undefined ? { sleep: cfg.sleep } : {}),
+    ...(cfg.onLog !== undefined ? { onLog: cfg.onLog } : {}),
+  })
+}
+
 /** runId-scoped box paths so concurrent/sequential chunks on one box never
  *  collide on the shared fixed paths. `trajectory` uses `$HOME` (not `~`) because
  *  it is interpolated inside double quotes in the record env (see box-session.ts). */
@@ -305,6 +328,41 @@ const logGrantedChunkBudgetLease = (args: {
 }): void => {
   args.onLog(
     `[pool] worker ${args.workerId}: chunk ${args.chunk.runId} granted ${args.lease.units}/${args.lease.requestedUnits} global patch-gen token(s); box concurrency=${args.effectiveConcurrency} (in-use now <= ${args.lease.limit})`,
+  )
+}
+
+interface GrantedChunkBudgetLease {
+  readonly lease: Awaited<ReturnType<typeof acquirePatchGenBudgetLease>>
+  readonly concurrency: number
+}
+
+const acquireGrantedChunkBudgetLease = async (
+  workerId: number,
+  chunk: PoolChunk,
+  cfg: PoolConfig,
+  onLog: (message: string) => void,
+): Promise<GrantedChunkBudgetLease> => {
+  const lease = await acquireChunkBudgetLease(workerId, chunk, cfg, onLog)
+  const concurrency = clampPatchGenConcurrency(lease.units)
+  logGrantedChunkBudgetLease({
+    workerId,
+    chunk,
+    effectiveConcurrency: concurrency,
+    lease,
+    onLog,
+  })
+  return { lease, concurrency }
+}
+
+const releaseGrantedChunkBudgetLease = async (
+  workerId: number,
+  chunk: PoolChunk,
+  runtime: WorkerRuntime,
+  grant: GrantedChunkBudgetLease,
+): Promise<void> => {
+  await grant.lease.release()
+  runtime.log(
+    `[pool] worker ${workerId}: released patch-gen budget lease for ${chunk.runId} (${grant.lease.units} token(s))`,
   )
 }
 
@@ -382,12 +440,6 @@ const terminateWorkerSession = async (state: WorkerState): Promise<void> => {
   await clearWorkerSession(state)?.terminate()
 }
 
-const terminateWorkerSessionQuietly = async (state: WorkerState): Promise<void> => {
-  await clearWorkerSession(state)
-    ?.terminate()
-    .catch(() => undefined)
-}
-
 const maybeRotateWorkerSession = async (
   workerId: number,
   runtime: WorkerRuntime,
@@ -398,7 +450,7 @@ const maybeRotateWorkerSession = async (
   runtime.log(
     `[pool] worker ${workerId}: box ${state.session.iid} reached wall-time budget (${Math.round(runtime.maxBoxWallMs / 60000)}min) — rotating before TTL kills a chunk…`,
   )
-  await terminateWorkerSessionQuietly(state)
+  await terminateWorkerSession(state)
 }
 
 const provisionWorkerSession = async (
@@ -428,22 +480,24 @@ const provisionWorkerSession = async (
 
 const ensureWorkerSession = async (
   workerId: number,
-  queue: ChunkQueue,
+  _queue: ChunkQueue,
   chunk: PoolChunk,
-  attempt: number,
+  _attempt: number,
   cfg: PoolConfig,
   runtime: WorkerRuntime,
   state: WorkerState,
-  out: Map<string, PoolChunkResult>,
+  _out: Map<string, PoolChunkResult>,
 ): Promise<boolean> => {
   if (state.session !== undefined) return true
   try {
     state.session = await provisionWorkerSession(workerId, cfg, runtime, state)
     return true
   } catch (err) {
-    runtime.log(`[pool] worker ${workerId}: provision failed: ${errMessage(err)}`)
-    requeueOrLoseChunk(queue, out, chunk, attempt, runtime.maxRetries)
-    return false
+    const msg = errMessage(err)
+    runtime.log(`[pool] worker ${workerId}: provision failed: ${msg}`)
+    throw new Error(
+      `[pool] worker ${workerId}: aborting run because box provisioning failed before chunk ${chunk.runId}: ${msg}`,
+    )
   }
 }
 
@@ -504,8 +558,29 @@ const handleDeadBoxChunkError = async (
   err: unknown,
 ): Promise<void> => {
   runtime.log(`[pool] worker ${workerId}: chunk ${chunk.runId} threw: ${errMessage(err)}`)
-  await terminateWorkerSessionQuietly(state)
+  try {
+    await terminateWorkerSession(state)
+  } catch (cleanupErr) {
+    throw new Error(
+      `[pool] worker ${workerId}: failed to terminate box after chunk ${chunk.runId} threw ${errMessage(err)}: ${errMessage(cleanupErr)}`,
+    )
+  }
   requeueOrLoseChunk(queue, out, chunk, attempt, runtime.maxRetries)
+}
+
+const handleChunkBudgetWaitError = (
+  workerId: number,
+  chunk: PoolChunk,
+  runtime: WorkerRuntime,
+  err: unknown,
+): never => {
+  const msg = errMessage(err)
+  runtime.log(
+    `[pool] worker ${workerId}: chunk ${chunk.runId} could not acquire patch-gen budget: ${msg}`,
+  )
+  throw new Error(
+    `[pool] worker ${workerId}: aborting run because chunk ${chunk.runId} could not acquire patch-gen budget: ${msg}`,
+  )
 }
 
 /** Outcome of one chunk grade attempt — drives the per-account auth lease
@@ -528,23 +603,15 @@ const gradeChunkAttempt = async (
   state: WorkerState,
   out: Map<string, PoolChunkResult>,
   authJson: string,
+  chunkConcurrency: number,
+  accountLabel: string | undefined,
 ): Promise<ChunkOutcome> => {
   const session = state.session
   if (session === undefined) {
     throw new Error(`[pool] worker ${workerId}: missing box session before grading ${chunk.runId}`)
   }
   const paths = chunkBoxPaths(chunk.runId)
-  let lease: Awaited<ReturnType<typeof acquirePatchGenBudgetLease>> | undefined
   try {
-    lease = await acquireChunkBudgetLease(workerId, chunk, cfg, runtime.log)
-    const chunkConcurrency = clampPatchGenConcurrency(lease.units)
-    logGrantedChunkBudgetLease({
-      workerId,
-      chunk,
-      effectiveConcurrency: chunkConcurrency,
-      lease,
-      onLog: runtime.log,
-    })
     await session.ssh(`mkdir -p ${paths.observeDir}`)
     const result = await gradeChunkOnBox(session, {
       datasetPath: chunk.datasetPath,
@@ -557,6 +624,8 @@ const gradeChunkAttempt = async (
       artifactSuffix: chunk.runId,
       recordTrajectory: cfg.recordTrajectory ?? false,
       forwardedBenchEnv: cfg.forwardedBenchEnv ?? "",
+      // jun-20 multi-auth (T-6): surface the leased account in the box status snapshot.
+      ...(accountLabel !== undefined ? { accountLabel } : {}),
     })
     if (earnedVerdict(result)) {
       recordSuccessfulChunk(out, chunk, result, attempt)
@@ -567,17 +636,12 @@ const gradeChunkAttempt = async (
   } catch (err) {
     if (errMessage(err).includes(POOL_BUSY_ERROR)) {
       handlePoolBusyChunkError(workerId, queue, chunk, attempt, runtime, state, out)
+    } else if (errMessage(err).includes(GRADE_LOCK_RELEASE_ERROR)) {
+      throw err
     } else {
       await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
     }
     return OUTCOME_LOST
-  } finally {
-    if (lease !== undefined) {
-      await lease.release().catch(() => undefined)
-      runtime.log(
-        `[pool] worker ${workerId}: released patch-gen budget lease for ${chunk.runId} (${lease.units} token(s))`,
-      )
-    }
   }
 }
 
@@ -611,7 +675,7 @@ const finalizeWorkerSession = async (
 ): Promise<void> => {
   if (!runtime.keepWarm) {
     runtime.log(`[pool] worker ${workerId}: terminating box (keepWarm=false)`)
-    await terminateWorkerSessionQuietly(state)
+    await terminateWorkerSession(state)
     return
   }
   if (state.session !== undefined) {
@@ -691,49 +755,83 @@ const runWorker = async (
       // chunk never launches a box it then can't credential. Single-auth mode
       // skips this entirely and ships the legacy provider (byte-identical).
       let authLease: PoolAuthLease | undefined
-      let authJson: string
+      let leasedAccountLabel: string | undefined
+      let authJson: string | undefined
       if (multiAuth) {
         const lease = await acquireAuthLeaseWithWait(workerId, chunk, cfg, runtime, state)
         if (lease === null) {
-          runtime.log(
-            `[pool] worker ${workerId}: no enabled account for chunk ${chunk.runId} — marking lost`,
+          throw new Error(
+            `[pool] worker ${workerId}: aborting run because the auth pool has no enabled account for chunk ${chunk.runId}`,
           )
-          loseChunk(out, chunk, attempt)
-          continue
         }
         authLease = lease
-        state.boxAccountLabel = lease.accountLabel
-        authJson = lease.readAuthJson()
-        runtime.log(`[pool] worker ${workerId}: chunk ${chunk.runId} leased account ${lease.accountLabel}`)
+        leasedAccountLabel = lease.accountLabel
       } else {
         authJson = cfg.authJsonProvider()
       }
 
       try {
-        if (!(await ensureWorkerSession(workerId, queue, chunk, attempt, cfg, runtime, state, out))) {
-          authLease?.release({ rateLimited: false, lostBox: true, completed: false })
+        if (multiAuth) {
+          const lease = authLease
+          if (lease === undefined) {
+            throw new Error(
+              `[pool] worker ${workerId}: missing auth lease before reading credentials for ${chunk.runId}`,
+            )
+          }
+          authJson = lease.readAuthJson()
+          runtime.log(
+            `[pool] worker ${workerId}: chunk ${chunk.runId} leased account ${lease.accountLabel}`,
+          )
+        }
+        let budgetGrant: GrantedChunkBudgetLease
+        let outcome: ChunkOutcome | undefined
+        try {
+          budgetGrant = await acquireGrantedChunkBudgetLease(workerId, chunk, cfg, runtime.log)
+        } catch (err) {
+          handleChunkBudgetWaitError(workerId, chunk, runtime, err)
+          authLease?.release({ rateLimited: false, lostBox: false, completed: false })
           authLease = undefined
           continue
         }
-        const outcome = await gradeChunkAttempt(
-          workerId,
-          queue,
-          chunk,
-          attempt,
-          cfg,
-          runtime,
-          state,
-          out,
-          authJson,
-        )
-        if (multiAuth) {
-          authLease?.release({
-            rateLimited: outcome.rateLimited,
-            lostBox: outcome.lostBox,
-            completed: outcome.completed,
-          })
-          authLease = undefined
-        } else {
+        try {
+          if (
+            !(await ensureWorkerSession(workerId, queue, chunk, attempt, cfg, runtime, state, out))
+          ) {
+            authLease?.release({ rateLimited: false, lostBox: true, completed: false })
+            authLease = undefined
+            continue
+          }
+          if (authJson === undefined) {
+            throw new Error(
+              `[pool] worker ${workerId}: missing auth payload before grading ${chunk.runId}`,
+            )
+          }
+          if (leasedAccountLabel !== undefined) state.boxAccountLabel = leasedAccountLabel
+          outcome = await gradeChunkAttempt(
+            workerId,
+            queue,
+            chunk,
+            attempt,
+            cfg,
+            runtime,
+            state,
+            out,
+            authJson,
+            budgetGrant.concurrency,
+            leasedAccountLabel,
+          )
+          if (multiAuth) {
+            authLease?.release({
+              rateLimited: outcome.rateLimited,
+              lostBox: outcome.lostBox,
+              completed: outcome.completed,
+            })
+            authLease = undefined
+          }
+        } finally {
+          await releaseGrantedChunkBudgetLease(workerId, chunk, runtime, budgetGrant)
+        }
+        if (!multiAuth && outcome !== undefined) {
           await maybeBackoffWorker(workerId, queue, runtime, state, outcome.rateLimited)
         }
       } finally {
@@ -769,24 +867,31 @@ export const runPool = async (
         "(allowExtraBoxes=true): parallel workers can launch parallel boxes",
     )
   }
-  await awaitPoolLaunchWindow(cfg)
-  const queue = new ChunkQueue(chunks)
-  const attemptsByRun = new Map<string, number>()
-  const out = new Map<string, PoolChunkResult>()
+  const guard = await acquirePoolSingleBoxGuard(chunks, cfg)
+  try {
+    await awaitPoolLaunchWindow(cfg)
+    const queue = new ChunkQueue(chunks)
+    const attemptsByRun = new Map<string, number>()
+    const out = new Map<string, PoolChunkResult>()
 
-  await Promise.all(
-    Array.from({ length: workers }, (_unused, i) => runWorker(i + 1, queue, cfg, attemptsByRun, out)),
-  )
+    await Promise.all(
+      Array.from({ length: workers }, (_unused, i) =>
+        runWorker(i + 1, queue, cfg, attemptsByRun, out),
+      ),
+    )
 
-  // Preserve input order; a chunk with no recorded result (should not happen —
-  // every path records one) is surfaced as lost rather than dropped.
-  return chunks.map(
-    (chunk) =>
-      out.get(chunk.runId) ?? {
-        chunk,
-        result: {},
-        attempts: attemptsByRun.get(chunk.runId) ?? 0,
-        lost: true,
-      },
-  )
+    // Preserve input order; a chunk with no recorded result (should not happen —
+    // every path records one) is surfaced as lost rather than dropped.
+    return chunks.map(
+      (chunk) =>
+        out.get(chunk.runId) ?? {
+          chunk,
+          result: {},
+          attempts: attemptsByRun.get(chunk.runId) ?? 0,
+          lost: true,
+        },
+    )
+  } finally {
+    await guard?.release()
+  }
 }

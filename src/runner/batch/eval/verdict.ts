@@ -7,6 +7,7 @@
  * `error`. Returns rich evidence so the caller can emit a `verify` trajectory
  * event; pass/fail semantics are unchanged.
  */
+import { isVerifyOutputFailing } from "@/agent/verify-signal"
 import type { GradeBreakdown, Instance } from "../types"
 import { exec } from "./exec"
 
@@ -50,6 +51,13 @@ export interface VerifyDeps {
     opts?: unknown
   }
 }
+
+const PASS_SUMMARY_RE = /\b\d+\s+passed\b/i
+
+const hasExplicitPassingSummary = (output: string): boolean => PASS_SUMMARY_RE.test(output)
+
+const hasExplicitFailureSummary = (output: string): boolean =>
+  isVerifyOutputFailing("test_runner", undefined, output)
 
 export const verify = async (
   instance: Instance,
@@ -136,15 +144,17 @@ export const verify = async (
   })
   // Pytest summary parsing — exit code alone is unreliable when the shell
   // wrapper got SIGTERM'd (exit 143) AFTER pytest already printed its
-  // summary. Trust the explicit summary line when present:
-  //   "X passed, ..." with no "Y failed" / "Y error" → passed
-  // This recovers real passes that exit-code-only logic would mis-fail.
+  // summary. Trust the explicit pass summary only when there is NO explicit
+  // non-zero failure signal in the same output:
+  //   "X passed, ..." + no "N failed/failures/errors" (N>0) → passed
+  // Any explicit failure signal wins over exit code 0 as well: some runners
+  // can still emit a zero exit while reporting failed/error counts in their
+  // summary, and grading must fail closed there.
   const combined = `${test.stdout}\n${test.stderr}`
+  const explicitFailure = hasExplicitFailureSummary(combined)
   const summaryPass =
-    /\b\d+ passed\b/.test(combined) &&
-    !/\b\d+ failed\b/.test(combined) &&
-    !/\b\d+ error\b/.test(combined)
-  const passed = test.code === 0 || summaryPass
+    hasExplicitPassingSummary(combined) && !explicitFailure
+  const passed = !explicitFailure && (test.code === 0 || summaryPass)
   return {
     passed,
     command: instance.testCmd,

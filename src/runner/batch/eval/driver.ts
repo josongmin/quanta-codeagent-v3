@@ -152,6 +152,15 @@ export interface RunInstanceDeps {
   /** Wall-clock budget (ms) for the whole instance. */
   timeoutMs: number
   /**
+   * Optional hard-budget factory for a single agent invocation. The factory is
+   * called fresh for each solve / repair round / verify-select candidate so
+   * meter state never leaks across independent agent runs.
+   *
+   * Absent (default) ⇒ no budget meter is wired and the loop stays
+   * byte-identical to the pre-budget path.
+   */
+  budgetMeterFactory?: () => AgentConfig["budgetMeter"]
+  /**
    * Official-harness verifier. When present AND the instance carries swebench
    * metadata, the captured patch is graded by the Python harness instead of
    * the local `testCmd`. Absent (default) ⇒ unchanged local testCmd path.
@@ -1425,6 +1434,7 @@ export const buildConfig = (
       content: [{ type: "text", text }],
     },
   ]
+  const budgetMeter = deps.budgetMeterFactory?.()
   const baseConfig = {
     llm: deps.llm,
     registry,
@@ -1444,6 +1454,7 @@ export const buildConfig = (
     ...localEnvSlotOf(instance),
     maxTurns: deps.maxTurns,
     signal,
+    ...(budgetMeter !== undefined ? { budgetMeter } : {}),
     onConfirm: async () => false,
     // Real SWE-bench repos blow the context window over a long trajectory.
     // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
@@ -2037,6 +2048,7 @@ const generateSelectionCandidate = async (args: {
     args.addTurns(phase.turns)
     const generationError = selectionGenerationErrorOf({
       stopReason: phase.stopReason,
+      patch: phase.patch,
       ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
     })
     if (generationError !== undefined) {
@@ -2213,14 +2225,22 @@ const okResult = (
   phase: Phase,
   v: { passed: boolean; error?: string },
   extra: Partial<InstanceResult>,
-): InstanceResult => ({
-  id: instance.id,
-  passed: v.passed,
-  patch: phase.patch,
-  turns: phase.turns,
-  ...(v.error !== undefined ? { error: v.error } : {}),
-  ...extra,
-})
+): InstanceResult => {
+  const keepTerminalAuthority =
+    phase.stopReason !== "error" &&
+    phase.stopReason !== "refusal"
+  return {
+    id: instance.id,
+    passed: v.passed,
+    patch: phase.patch,
+    turns: phase.turns,
+    ...(keepTerminalAuthority && phase.stopReason !== undefined
+      ? { stopReason: phase.stopReason }
+      : {}),
+    ...(v.error !== undefined ? { error: v.error } : {}),
+    ...extra,
+  }
+}
 
 const reproResultExtra = (
   reproTest: BenchReproTestTelemetry | undefined,
@@ -2240,12 +2260,16 @@ const agentPhaseError = (phase: Phase): string | undefined => {
   if (phase.stopReason === "max_turns" && phase.patch.trim() === "") {
     return "agent reached max turns before verification"
   }
-  if (phase.stopReason === "error") {
+  if (phase.stopReason === "error" && phase.patch.trim() === "") {
     return phase.agentError ?? "agent stopped with error before verification"
   }
-  if (phase.stopReason === "refusal") return "agent stopped with refusal before verification"
-  if (phase.stopReason === "aborted") return "agent aborted before verification"
-  if (phase.stopReason === "budget_exhausted") {
+  if (phase.stopReason === "refusal" && phase.patch.trim() === "") {
+    return "agent stopped with refusal before verification"
+  }
+  if (phase.stopReason === "aborted" && phase.patch.trim() === "") {
+    return "agent aborted before verification"
+  }
+  if (phase.stopReason === "budget_exhausted" && phase.patch.trim() === "") {
     return "agent exhausted token budget before verification"
   }
   return undefined
@@ -2286,6 +2310,7 @@ const generationFailureResult = (args: {
     passed: false,
     patch: args.phase.patch,
     turns: args.phase.turns,
+    ...(args.phase.stopReason !== undefined ? { stopReason: args.phase.stopReason } : {}),
     error: args.generationError,
     ...extra,
   }
@@ -2330,6 +2355,7 @@ const noPatchResult = (args: {
     passed: false,
     patch: args.phase.patch,
     turns: args.phase.turns,
+    ...(args.phase.stopReason !== undefined ? { stopReason: args.phase.stopReason } : {}),
     ...(noWinnerError !== undefined ? { error: noWinnerError } : {}),
     ...extra,
   }
@@ -2670,6 +2696,7 @@ export const maybeStrictBudgetBlockedResult = (args: {
       : undefined
   if (strictBudget === undefined || strictBudget.withinBudget) return undefined
   const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  if (args.phase.stopReason !== undefined) extra.stopReason = args.phase.stopReason
   observeStrictBudgetBlock({ ...args, extra, strictBudget })
   return buildStrictPatchBudgetBlockedResult({
     id: args.instance.id,
@@ -2950,6 +2977,7 @@ export const runInstanceOnce = async (
         passed: false,
         patch: phase.patch,
         turns: phase.turns,
+        ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
         verdict: "degraded",
         error: `observation failed (strict): ${e.message}`,
         ...reproResultExtra(reproTest),
@@ -2960,6 +2988,7 @@ export const runInstanceOnce = async (
       passed: false,
       patch: phase.patch,
       turns: phase.turns,
+      ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
       error: errMessage(e),
       ...reproResultExtra(reproTest),
     }
@@ -3053,6 +3082,9 @@ export const runInstance = async (
     llm: deps.llm,
     maxTurns: deps.maxTurns,
     timeoutMs: adaptedTimeoutMs,
+    ...(deps.budgetMeterFactory !== undefined
+      ? { budgetMeterFactory: deps.budgetMeterFactory }
+      : {}),
     ...(deps.pythonSwebench !== undefined ? { pythonSwebench: deps.pythonSwebench } : {}),
     ...(deps.observe !== undefined ? { observe: deps.observe } : {}),
     ...(deps.repair !== undefined ? { repair: deps.repair } : {}),

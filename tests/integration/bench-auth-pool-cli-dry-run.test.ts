@@ -114,6 +114,73 @@ describe("T-1 bench pool dry-run with auth pool", () => {
     expect(code).toBe(0)
     expect(out).toContain("auth: pool of 2")
   })
+
+  test("--auth-label pins the pool dry-run to one account", async () => {
+    const { code, out } = await runCli(
+      {},
+      "pool",
+      "--allow-remote-secrets",
+      "--dry-run",
+      "--auth-pool",
+      manifest,
+      "--auth-label",
+      "acct-b",
+      "--datasets",
+      ds,
+    )
+    expect(code).toBe(0)
+    expect(out).toContain("auth: pool of 1")
+    expect(out).toContain("acct-b")
+    expect(out).not.toContain("acct-a")
+    expect(out).toMatch(/plan chunk .* acct-b/)
+  })
+
+  test("unknown --auth-label fails fast instead of silently using another account", async () => {
+    const { code, out } = await runCli(
+      {},
+      "pool",
+      "--allow-remote-secrets",
+      "--dry-run",
+      "--auth-pool",
+      manifest,
+      "--auth-label",
+      "missing",
+      "--datasets",
+      ds,
+    )
+    expect(code).toBe(1)
+    expect(out).toMatch(/unknown account label "missing"/)
+  })
+
+  test("all-disabled auth pools fail fast instead of silently using a disabled account", async () => {
+    const disabledManifest = join(dir, "auth-pool-disabled.yaml")
+    writeFileSync(
+      disabledManifest,
+      [
+        "accounts:",
+        "  - label: acct-a",
+        `    auth_file: ${join(dir, "nope-a.json")}`,
+        "    max_parallel: 6",
+        "    disabled: true",
+        "  - label: acct-b",
+        `    auth_file: ${join(dir, "nope-b.json")}`,
+        "    max_parallel: 6",
+        "    disabled: true",
+      ].join("\n"),
+    )
+    const { code, out } = await runCli(
+      {},
+      "pool",
+      "--allow-remote-secrets",
+      "--dry-run",
+      "--auth-pool",
+      disabledManifest,
+      "--datasets",
+      ds,
+    )
+    expect(code).toBe(1)
+    expect(out).toMatch(/no enabled accounts available/i)
+  })
 })
 
 describe("T-1 full-remote dry-run shares the auth source", () => {
@@ -131,5 +198,50 @@ describe("T-1 full-remote dry-run shares the auth source", () => {
     expect(code).toBe(0)
     expect(out).toContain("auth: pool of 2")
     expect(out).not.toMatch(/ENOENT|no such file/)
+  })
+
+  test("grade --mode full rejects --auth-label outside pool mode", async () => {
+    const { code, out } = await runCli(
+      { QUANTA_BENCH_AUTH_FILE: NONEXISTENT_AUTH },
+      "grade",
+      "--mode",
+      "full",
+      "--allow-remote-secrets",
+      "--dataset",
+      ds,
+      "--dry-run",
+      "--auth-label",
+      "acct-a",
+    )
+    expect(code).toBe(1)
+    expect(out).toMatch(/requires auth pool mode/i)
+  })
+
+  test("grade --mode full rejects all-disabled auth pools", async () => {
+    const disabledManifest = join(dir, "full-auth-pool-disabled.yaml")
+    writeFileSync(
+      disabledManifest,
+      [
+        "accounts:",
+        "  - label: acct-a",
+        `    auth_file: ${join(dir, "nope-a.json")}`,
+        "    max_parallel: 6",
+        "    disabled: true",
+      ].join("\n"),
+    )
+    const { code, out } = await runCli(
+      {},
+      "grade",
+      "--mode",
+      "full",
+      "--allow-remote-secrets",
+      "--dataset",
+      ds,
+      "--dry-run",
+      "--auth-pool",
+      disabledManifest,
+    )
+    expect(code).toBe(1)
+    expect(out).toMatch(/no enabled accounts available/i)
   })
 })

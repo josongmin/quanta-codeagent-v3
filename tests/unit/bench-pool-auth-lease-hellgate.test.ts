@@ -236,6 +236,115 @@ describe("T-3 pool account-aware scheduler", () => {
     const out = await runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, provider))
     expect(out[0]?.lost).toBe(false)
   })
+
+  test("all-disabled auth pools ABORT the run instead of silently marking chunks lost", async () => {
+    const { fn } = mockSpawn({})
+    const mgr = new AuthLeaseManager(
+      [{ label: "disabled", authFile: "/d.json", maxParallel: 6, disabled: true }],
+      { now: () => 1_000_000 },
+    )
+    const provider = createLeasePoolAuthProvider(mgr, () => authJsonFor("disabled"))
+    await expect(
+      runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, provider)),
+    ).rejects.toThrow(/no enabled account|auth pool/i)
+  })
+
+  test("auth file read failure releases the acquired lease instead of leaking account capacity", async () => {
+    const { fn } = mockSpawn({})
+    const mgr = new AuthLeaseManager([{ label: "solo", authFile: "/missing.json", maxParallel: 6, maxBoxes: 1 }], {
+      now: () => 1_000_000,
+    })
+    const provider = createLeasePoolAuthProvider(mgr, () => {
+      throw new Error("ENOENT: missing auth file")
+    })
+    await expect(
+      runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, provider)),
+    ).rejects.toThrow(/missing auth file/i)
+    expect(mgr.snapshot()[0]?.activeSlots).toBe(0)
+    expect(mgr.snapshot()[0]?.activeBoxes).toBe(0)
+  })
+
+  test("maxBoxes holds until the prior live box terminates; a second launch must not race ahead", async () => {
+    const events: string[] = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let launches = 0
+    let releaseTerminate!: () => void
+    const terminateBlocked = new Promise<void>((resolve) => {
+      releaseTerminate = resolve
+    })
+    let resolveTerminateStarted!: () => void
+    const terminateStarted = new Promise<void>((resolve) => {
+      resolveTerminateStarted = resolve
+    })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
+        const runId =
+          (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
+        o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
+      }
+      if (cmd === "ssh") {
+        const c = args[args.length - 1] ?? ""
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        const r = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+        if (r) return ok(JSON.stringify({ resolved_ids: [`x__${r[1]}-1`] }))
+        return ok("")
+      }
+      if (args.includes("run-instances")) {
+        launches += 1
+        events.push(`launch:${launches}`)
+        return ok(`i-box-${launches}`)
+      }
+      if (args.includes("describe-instances")) return ok("1.2.3.4")
+      if (args.includes("terminate-instances")) {
+        events.push("terminate:start")
+        resolveTerminateStarted()
+        await terminateBlocked
+        events.push("terminate:done")
+        return ok("")
+      }
+      return ok("")
+    }
+    const mgr = new AuthLeaseManager([{ label: "solo", authFile: "/s.json", maxParallel: 6, maxBoxes: 1 }], {
+      now: () => 1_000_000,
+    })
+    const provider = createLeasePoolAuthProvider(mgr, () => authJsonFor("solo"))
+    const runPromise = runPool(
+      [
+        { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+        { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+      ],
+      poolCfg(fn, provider, {
+        workers: 2,
+        allowExtraWorkers: true,
+        allowExtraBoxes: true,
+        keepWarm: false,
+        reuseWarm: false,
+        sleep: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        },
+      }),
+    )
+    await Promise.race([
+      terminateStarted,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`timed out waiting for first terminate: ${events.join(" | ")}`)), 2_000),
+      ),
+    ])
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(events.filter((e) => e.startsWith("launch:"))).toEqual(["launch:1"])
+    releaseTerminate()
+    const out = await Promise.race([
+      runPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`timed out waiting for run completion: ${events.join(" | ")}`)), 2_000),
+      ),
+    ])
+    expect(out.every((r) => !r.lost)).toBe(true)
+  })
 })
 
 // cleanup

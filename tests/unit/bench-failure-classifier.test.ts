@@ -100,6 +100,30 @@ describe("classify — termination axis", () => {
     expect(classify(r).termination).toBe("timeout")
   })
 
+  test("ADVERSARIAL: typed refusal authority outranks exhaustion-like error strings", () => {
+    const r: InstanceResult = {
+      id: "typed-refusal",
+      passed: false,
+      patch: "",
+      turns: 4,
+      stopReason: "refusal",
+      error: "agent exhausted token budget before verification",
+    }
+    expect(classify(r).termination).toBe("generation_error")
+  })
+
+  test("ADVERSARIAL: typed budget stopReason outranks generic harness-looking errors", () => {
+    const r: InstanceResult = {
+      id: "typed-budget",
+      passed: false,
+      patch: "",
+      turns: 7,
+      stopReason: "budget_exhausted",
+      error: "setup failed (code 1): flaky stderr",
+    }
+    expect(classify(r).termination).toBe("budget_exhausted")
+  })
+
   test("typed patch-budget strict block → admission_blocked, not harness_error", () => {
     const r: InstanceResult = {
       id: "x",

@@ -96,7 +96,7 @@ describe("quanta-bench CLI e2e", () => {
   test("presets lists agentless-v1", async () => {
     const { out } = await run("presets")
     expect(out).toContain("agentless-v1")
-    expect(out).toContain("Default live execution preset: agentless-v3-thin")
+    expect(out).toContain("Default live execution preset: agentless-v3-thin-strict")
     expect(out).toContain("Individual QUANTA_BENCH_* env vars override a preset's values.")
     expect(out).toContain("QUANTA_BENCH_SOTA=1")
   })
@@ -140,7 +140,7 @@ describe("quanta-bench CLI e2e", () => {
     const { code, out } = await run("run", "--swebench", join(dir, "instances.jsonl"), "--dry-run")
     expect(code).toBe(0)
     expect(out).toContain("dry-run plan")
-    expect(out).toContain("preset: agentless-v3-thin")
+    expect(out).toContain("preset: agentless-v3-thin-strict")
   })
 
   test("grade --mode full WITHOUT --allow-remote-secrets is refused (secret gate)", async () => {
@@ -174,7 +174,7 @@ describe("quanta-bench CLI e2e", () => {
     // executor wired: prints the plan, and the plan documents the access-token-only posture
     expect(out.toLowerCase()).toContain("dry-run")
     expect(out.toLowerCase()).toMatch(/access_token only|refresh.*dropped/)
-    expect(out).toContain("preset=agentless-v3-thin")
+    expect(out).toContain("preset=agentless-v3-thin-strict")
     expect(out.toLowerCase()).toContain("pyright")
   })
 

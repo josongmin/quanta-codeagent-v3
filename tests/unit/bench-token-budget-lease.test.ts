@@ -64,6 +64,20 @@ describe("patch-gen budget lease", () => {
     expect(state.leases).toEqual([])
   })
 
+  test("lease-file deletion failure ABORTS release instead of silently succeeding", async () => {
+    const lease = await acquirePatchGenBudgetLease({
+      label: "only",
+      requestedUnits: 7,
+      dir: DIR,
+      waitMs: 1_000,
+      pollMs: 10,
+    })
+    const leasePath = join(DIR, `${lease.leaseId}.lease.json`)
+    rmSync(leasePath, { force: true })
+    mkdirSync(leasePath, { recursive: true })
+    await expect(lease.release()).rejects.toThrow()
+  })
+
   test("read state prunes a stale dead lease file", async () => {
     writeFileSync(
       join(DIR, "stale.lease.json"),

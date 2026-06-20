@@ -9,6 +9,7 @@ const REPO = process.cwd()
 let dir = ""
 let fakeBin = ""
 let budgetDir = ""
+let badBudgetPath = ""
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "bench-box-ls-"))
@@ -29,6 +30,7 @@ beforeAll(() => {
   const budgetHeldAt = new Date(now - 30_000).toISOString()
   budgetDir = join(dir, "budget")
   mkdirSync(budgetDir)
+  badBudgetPath = join(dir, "budget-bad-file")
   writeFileSync(
     join(budgetDir, "lease-demo.lease.json"),
     `${JSON.stringify({
@@ -41,6 +43,7 @@ beforeAll(() => {
       heartbeatAt: budgetHeldAt,
     })}\n`,
   )
+  writeFileSync(badBudgetPath, "not-a-directory\n")
   writeFileSync(
     aws,
     `#!/bin/sh
@@ -101,7 +104,7 @@ case "$host::$last" in
     ;;
   ubuntu@1.2.3.4::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"running","mode":"pool","runId":"wave7-s0","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"instancePreview":["demo__inst-1","demo__inst-2","demo__inst-3"],"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"startedAt":"${busyStartedAt}","updatedAt":"${busyUpdatedAt}","runLogPath":"~/runs/wave7-s0/run.log","reportPath":"~/runs/wave7-s0/report.json","predictionsPath":"~/runs/wave7-s0/preds.jsonl","observeDir":"~/runs/wave7-s0/observe","lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
+{"phase":"running","mode":"pool","runId":"wave7-s0","accountLabel":"acct-a","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"instancePreview":["demo__inst-1","demo__inst-2","demo__inst-3"],"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"startedAt":"${busyStartedAt}","updatedAt":"${busyUpdatedAt}","runLogPath":"~/runs/wave7-s0/run.log","reportPath":"~/runs/wave7-s0/report.json","predictionsPath":"~/runs/wave7-s0/preds.jsonl","observeDir":"~/runs/wave7-s0/observe","lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
 EOF
     exit 0
     ;;
@@ -184,7 +187,7 @@ const runCli = async (
       ...process.env,
       ...env,
       PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
-      QUANTA_BENCH_TOKEN_BUDGET_DIR: budgetDir,
+      QUANTA_BENCH_TOKEN_BUDGET_DIR: env.QUANTA_BENCH_TOKEN_BUDGET_DIR ?? budgetDir,
     },
   })
   const out = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`
@@ -197,7 +200,9 @@ describe("bench box ls status view", () => {
     expect(code).toBe(0)
     expect(out).toContain("[box] running boxes:")
     expect(out).toContain("i-busy  running  c7i.8xlarge  1.2.3.4  status=busy/running")
-    expect(out).toContain("source=snapshot  mode=pool  workload=wave7-s0  dataset=wave7-s0.jsonl")
+    expect(out).toContain(
+      "source=snapshot  mode=pool  account=acct-a  workload=wave7-s0  dataset=wave7-s0.jsonl",
+    )
     expect(out).toContain("log=[PASS] demo__inst-1 (turns=2)")
     expect(out).toContain("i-idle  running  c7i.8xlarge  1.2.3.5  status=idle/idle")
     expect(out).toContain("source=snapshot  mode=full-remote  workload=django__django-11179")
@@ -242,6 +247,7 @@ describe("bench box ls status view", () => {
         snapshot: expect.objectContaining({
           mode: "pool",
           runId: "wave7-s0",
+          accountLabel: "acct-a",
           runLogPath: "~/runs/wave7-s0/run.log",
           reportPath: "~/runs/wave7-s0/report.json",
         }),
@@ -365,6 +371,30 @@ describe("bench box ls status view", () => {
       }),
     )
     expect(parsed.boxes).toEqual([])
+  })
+
+  test("box status surfaces token-budget read failures instead of silently hiding them", async () => {
+    const { code, out } = await runCli(["box", "status", "--json"], {
+      QUANTA_BENCH_TOKEN_BUDGET_DIR: badBudgetPath,
+    })
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out) as {
+      summary: { total: number }
+      budget?: unknown
+      budgetError?: string
+    }
+    expect(parsed.summary.total).toBe(4)
+    expect(parsed.budget).toBeUndefined()
+    expect(parsed.budgetError).toMatch(/patch-gen budget/i)
+  })
+
+  test("plain box status prints an explicit budget error line", async () => {
+    const { code, out } = await runCli(["box", "status"], {
+      QUANTA_BENCH_TOKEN_BUDGET_DIR: badBudgetPath,
+    })
+    expect(code).toBe(0)
+    expect(out).toContain("patchGenBudget=unavailable")
+    expect(out).toMatch(/patch-gen budget/i)
   })
 
   test("box logs tails the resolved log path for the selected box", async () => {

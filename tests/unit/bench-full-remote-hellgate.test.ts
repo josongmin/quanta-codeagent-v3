@@ -16,7 +16,7 @@
  */
 import { afterAll, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
@@ -34,11 +34,34 @@ const FULL_AUTH = JSON.stringify({
   expires_at: "2026-06-24T00:00:00Z",
 })
 
-const TOKEN_BUDGET_DIR = mkdtempSync(join(tmpdir(), "bench-full-budget-"))
+const TEMP_DIRS = new Set<string>()
+
+const allocTempDir = (prefix: string): string => {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  TEMP_DIRS.add(dir)
+  return dir
+}
+
+const TOKEN_BUDGET_DIR = allocTempDir("bench-full-budget-")
+const DEFAULT_SINGLE_BOX_GUARD_DIR = join(allocTempDir("bench-full-single-box-root-"), "guard")
 
 afterAll(() => {
-  rmSync(TOKEN_BUDGET_DIR, { recursive: true, force: true })
+  for (const dir of TEMP_DIRS) {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
+
+const holdBudgetMutationLock = (dir: string): (() => void) => {
+  const lockDir = join(dir, ".lock")
+  mkdirSync(lockDir, { recursive: true })
+  writeFileSync(
+    join(lockDir, "owner.json"),
+    `${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`,
+  )
+  return () => {
+    rmSync(lockDir, { recursive: true, force: true })
+  }
+}
 
 describe("stripToAccessToken (security crux)", () => {
   test("keeps real access_token; REAL refresh_token/id_token never shipped (placeholders only)", () => {
@@ -69,7 +92,7 @@ describe("stripToAccessToken (security crux)", () => {
  *  `{ emptyReport: true }` the report-fetch (and any `.json` ssh) returns empty
  *  stdout — the "box produced no report" scenario. */
 const mockSpawn = (
-  o: { emptyReport?: boolean } = {},
+  o: { emptyReport?: boolean; reportBody?: string; beforeReportFetch?: () => void } = {},
 ): { fn: SpawnFn; calls: Array<{ cmd: string; args: string[]; input?: string }> } => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
   const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
@@ -82,8 +105,16 @@ const mockSpawn = (
     if (args.some((a) => a.includes("bun") && a.includes("READY"))) return ok("READY") // readiness
     // atomic grade lock (a fresh box acquires it cleanly ⇒ LOCKED).
     if (args.some((a) => a.includes("mkdir ~/.pool-grade.lock"))) return ok("LOCKED")
-    if (args.some((a) => a.includes("cat ") || a.includes(".json")))
-      return ok(o.emptyReport ? "" : JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
+    const reportFetch = args.find((a) => /cat ~\/(?:runs\/[^/]+\/)?report\.json/.test(a))
+    if (reportFetch !== undefined) {
+      o.beforeReportFetch?.()
+      return ok(
+        o.emptyReport
+          ? ""
+          : (o.reportBody ?? JSON.stringify({ resolved_ids: ["psf__requests-5414"] })),
+      )
+    }
+    if (args.some((a) => a.includes("cat ") || a.includes(".json"))) return ok("")
     return ok("")
   }
   const route = (cmd: string, args: string[]): SpawnResult => {
@@ -138,6 +169,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     authJson: FULL_AUTH,
     datasetPath: "/tmp/ds.jsonl",
     instanceIds: ["psf__requests-5414"],
+    singleBoxGuardDir: DEFAULT_SINGLE_BOX_GUARD_DIR,
     tokenBudgetDir: TOKEN_BUDGET_DIR,
     tokenBudgetWaitMs: 5_000,
     tokenBudgetPollMs: 10,
@@ -258,7 +290,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     }
   })
 
-  test("provisions the box BEFORE waiting on the global patch-gen budget", async () => {
+  test("waits on the global patch-gen budget BEFORE provisioning the box", async () => {
     const held = await acquirePatchGenBudgetLease({
       label: "block-full-budget",
       requestedUnits: 16,
@@ -280,7 +312,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         await waitForCondition(() => calls.some((c) => c.args.includes("run-instances")), {
           timeoutMs: 200,
         }),
-      ).toBe(true)
+      ).toBe(false)
       expect(
         calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench"))),
       ).toBe(false)
@@ -291,9 +323,114 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     }
     await runPromise.catch(() => undefined)
     if (failure !== undefined) throw failure
+    expect(calls.some((c) => c.args.includes("run-instances"))).toBe(true)
     expect(
       calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench"))),
     ).toBe(true)
+  })
+
+  test("a global patch-gen budget release failure ABORTS the run instead of silently succeeding", async () => {
+    const tokenBudgetDir = mkdtempSync(join(tmpdir(), "bench-full-budget-release-"))
+    let releaseLock: (() => void) | undefined
+    try {
+      const { fn } = mockSpawn({
+        beforeReportFetch: () => {
+          releaseLock ??= holdBudgetMutationLock(tokenBudgetDir)
+        },
+      })
+      await expect(
+        createFullRemoteBackend({
+          ...baseCfg,
+          spawn: fn,
+          tokenBudgetDir,
+          tokenBudgetWaitMs: 100,
+          tokenBudgetPollMs: 10,
+        }).run(),
+      ).rejects.toThrow(/global patch-gen budget lock|timed out waiting/i)
+    } finally {
+      releaseLock?.()
+      rmSync(tokenBudgetDir, { recursive: true, force: true })
+    }
+  })
+
+  test("concurrent single-box full-remote runs FAIL-CLOSED instead of launching a second box", async () => {
+    const tokenBudgetDir = allocTempDir("bench-full-concurrent-budget-")
+    const singleBoxGuardDir = join(allocTempDir("bench-full-single-box-root-"), "guard")
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    let launched = 0
+    let releaseFirstRun: (() => void) | undefined
+    const firstRunDone = new Promise<void>((resolve) => {
+      releaseFirstRun = resolve
+    })
+    let firstBenchStarted = false
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      const a = [...args]
+      calls.push({ cmd, args: a })
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances")) {
+        launched += 1
+        return ok(`i-box${launched - 1}`)
+      }
+      if (a.includes("wait")) return ok("")
+      if (a.includes("--filters") && a.includes("Reservations[].Instances[].InstanceId"))
+        return ok("")
+      if (a.includes("--filters") && a.includes("InstanceId,PublicIpAddress")) return ok("")
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const remote = a[a.length - 1] ?? ""
+        if (remote.includes("READY")) return ok("READY")
+        if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (remote.includes("setsid bash -c") && remote.includes("run --swebench")) {
+          firstBenchStarted = true
+          return ok("LAUNCHED")
+        }
+        if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ")) {
+          if (firstBenchStarted && launched === 1) await firstRunDone
+          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        }
+        if (/cat ~\/report\.json/.test(remote))
+          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
+        return ok("")
+      }
+      if (cmd === "curl") return ok("9.9.9.9")
+      return ok("")
+    }
+
+    const prevConcurrency = process.env.QUANTA_FULL_REMOTE_CONCURRENCY
+    process.env.QUANTA_FULL_REMOTE_CONCURRENCY = "8"
+    try {
+      const first = createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        tokenBudgetDir,
+        singleBoxGuardDir,
+      }).run()
+      expect(
+        await waitForCondition(
+          () => firstBenchStarted && calls.some((c) => c.args.includes("run-instances")),
+          { timeoutMs: 250 },
+        ),
+      ).toBe(true)
+
+      await expect(
+        createFullRemoteBackend({
+          ...baseCfg,
+          spawn: fn,
+          tokenBudgetDir,
+          singleBoxGuardDir,
+        }).run(),
+      ).rejects.toThrow(/single-box|owner/i)
+
+      releaseFirstRun?.()
+      await first
+      expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(1)
+    } finally {
+      if (prevConcurrency === undefined) delete process.env.QUANTA_FULL_REMOTE_CONCURRENCY
+      else process.env.QUANTA_FULL_REMOTE_CONCURRENCY = prevConcurrency
+    }
   })
 
   test("owner process stays alive through cloud-init wait; it fails EXPLICITLY instead of exiting cleanly", () => {
@@ -325,6 +462,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
           spawn,
           onDemand: true,
           maxReadyPolls: 1,
+          singleBoxGuardDir: ${JSON.stringify(join(allocTempDir("bench-full-single-box-root-"), "guard"))},
           onLog: () => {},
         }).run()
         console.error("UNEXPECTED_OK")
@@ -379,6 +517,41 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     ).toBe(true)
   })
 
+  test("generation_error report rows count as errored in the idle box snapshot, not empty", async () => {
+    const { fn, calls } = mockSpawn({
+      reportBody: JSON.stringify({
+        perInstance: [
+          {
+            id: "psf__requests-5414",
+            passed: false,
+            turns: 0,
+            patchBytes: 0,
+            failure: { termination: "generation_error", signals: ["empty_patch"] },
+          },
+        ],
+      }),
+    })
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const statusWrites = calls
+      .filter(
+        (c) =>
+          c.cmd === "ssh" &&
+          c.input !== undefined &&
+          c.args.join(" ").includes("bench-box-status.json"),
+      )
+      .map((c) => c.input ?? "")
+    expect(
+      statusWrites.some(
+        (s) =>
+          s.includes('"phase":"idle"') &&
+          s.includes('"erroredCount":1') &&
+          s.includes('"emptyPatchCount":0'),
+      ),
+    ).toBe(true)
+  })
+
   test("default full-remote posture is the current base preset", async () => {
     const { fn, calls } = mockSpawn()
     await createFullRemoteBackend({ ...baseCfg, spawn: fn })
@@ -424,6 +597,62 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       (c) => c.args.includes("terminate-instances") && c.args.includes("i-xyz"),
     )
     expect(terminated).toBe(true)
+  })
+
+  test("a grade-phase termination failure preserves BOTH the primary run error and cleanup error", async () => {
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      if (args.includes("describe-security-groups"))
+        return { code: 0, stdout: "sg-abc", stderr: "" }
+      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
+      if (args.includes("run-instances")) return { code: 0, stdout: "i-xyz", stderr: "" }
+      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
+      if (args.includes("terminate-instances")) {
+        return { code: 254, stdout: "", stderr: "terminate denied" }
+      }
+      if (cmd === "ssh") {
+        const remote = args[args.length - 1] ?? ""
+        if (remote.includes("READY")) return { code: 0, stdout: "READY", stderr: "" }
+        if (remote.includes("mkdir ~/.pool-grade.lock")) {
+          return { code: 0, stdout: "LOCKED", stderr: "" }
+        }
+        if (remote.includes("chmod 600 ~/.quanta/auth/chatgpt.json")) {
+          return { code: 1, stdout: "", stderr: "ship boom" }
+        }
+        if (remote.includes("rmdir ~/.pool-grade.lock")) {
+          return { code: 0, stdout: "", stderr: "" }
+        }
+        return { code: 0, stdout: "", stderr: "" }
+      }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
+      /primary=.*ship boom.*cleanup=.*terminate denied|cleanup=.*terminate denied.*primary=.*ship boom/i,
+    )
+  })
+
+  test("a bootstrap cleanup termination failure surfaces explicitly instead of silently succeeding", async () => {
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      if (args.includes("describe-security-groups"))
+        return { code: 0, stdout: "sg-abc", stderr: "" }
+      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
+      if (args.includes("run-instances")) return { code: 0, stdout: "i-xyz", stderr: "" }
+      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
+      if (args.includes("terminate-instances")) {
+        return { code: 254, stdout: "", stderr: "terminate denied" }
+      }
+      if (cmd === "ssh") return { code: 1, stdout: "", stderr: "boom" }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    try {
+      await createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()
+      throw new Error("UNEXPECTED_OK")
+    } catch (err) {
+      const msg = String(err)
+      expect(msg).toContain("box never became ssh-reachable + bun-ready")
+      expect(msg).toContain("terminate")
+      expect(msg).toContain("terminate denied")
+      expect(msg).not.toContain("UNEXPECTED_OK")
+    }
   })
 
   test("ssh/scp/rsync target the RESOLVED ip, never a placeholder", async () => {
@@ -494,6 +723,39 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     await createFullRemoteBackend({ ...baseCfg, spawn: fn })
       .run()
       .catch(() => undefined)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(countCalls(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
+  })
+
+  test("a warm-box grade-lock release failure ABORTS instead of silently leaving the box busy", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      calls.push({ cmd, args: [...args] })
+      if (args.includes("describe-instances")) {
+        return args.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (args.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = args[args.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("IDLE")) return ok("IDLE")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) {
+          return { code: 1, stdout: "", stderr: "lock release denied" }
+        }
+        if (c.includes("cat ") || c.includes(".json")) {
+          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
+        }
+        return ok("")
+      }
+      return ok("")
+    }
+    await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
+      /GRADE_LOCK_RELEASE_FAILED|lock release denied/i,
+    )
     expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
     expect(countCalls(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
   })

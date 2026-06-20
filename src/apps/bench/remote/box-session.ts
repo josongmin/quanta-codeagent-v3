@@ -23,8 +23,10 @@
  * a `shutdown -h` TTL backstop and is ALWAYS terminated. Everything routes through
  * the injected {@link SpawnFn} so the whole flow is unit-testable offline.
  */
+
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
+import { errMessage } from "@/shared"
 import { loadVerdicts } from "../analyze/verdicts"
 import { benchHome } from "../corpus"
 import { CURRENT_BENCH_BASE_PRESET } from "../preset"
@@ -84,6 +86,8 @@ export interface FullRemoteConfig {
   /** Fail-closed single-box guard: if another quanta-bench box is already
    *  running, callers must opt in before launching a fresh one. */
   readonly allowExtraBoxes?: boolean
+  /** Override the local single-box owner guard dir (test seam). */
+  readonly singleBoxGuardDir?: string
   /** Override the cross-process patch-gen budget lease dir (test seam). */
   readonly tokenBudgetDir?: string
   /** Max wait for the global patch-gen budget lease. */
@@ -226,6 +230,7 @@ const BOX_STATUS_PATH = "~/.quanta/bench-box-status.json"
 /** Thrown by {@link gradeChunkOnBox} when the box is already grading (lock held).
  *  The pool drops the box WITHOUT terminating it (it belongs to the other run). */
 export const POOL_BUSY_ERROR = "POOL_BOX_BUSY"
+export const GRADE_LOCK_RELEASE_ERROR = "GRADE_LOCK_RELEASE_FAILED"
 
 /** Single-quote a value for safe interpolation into a remote bash command
  *  string. Without this, a preset/model/instance-id containing a space, `;`,
@@ -401,8 +406,9 @@ export const pyrightLaunchProofVerdict = (probe: {
 /**
  * A live, bootstrapped EC2 box. The connection primitives (`ssh`, `aws`, raw
  * `spawn`) are bound to the resolved host/region/key so a caller never re-derives
- * them. `terminate` is idempotent-enough (a double terminate just errors on the
- * second AWS call, swallowed by callers). Created ONLY by {@link provisionBox}.
+ * them. `terminate` is a fail-closed cleanup boundary for launched boxes:
+ * callers must see a failed AWS terminate instead of silently assuming the box
+ * was cleaned up. Created ONLY by {@link provisionBox}.
  */
 export interface BoxSession {
   readonly iid: string
@@ -416,7 +422,8 @@ export interface BoxSession {
    *  streams stdout live. */
   ssh(remoteCmd: string, input?: string, onData?: (chunk: string) => void): Promise<SpawnResult>
   aws(args: readonly string[]): Promise<SpawnResult>
-  /** Terminate the box (no-op when `keep`). NEVER throws. */
+  /** Terminate the box (no-op when `keep` or attach). Throws when launched-box
+   *  cleanup fails. */
   terminate(): Promise<void>
 }
 
@@ -469,12 +476,19 @@ export interface GradeChunkParams {
   /** Forwarded `QUANTA_BENCH_*` env prefix (already built via
    *  {@link buildForwardedBenchEnv}). */
   readonly forwardedBenchEnv: string
+  /** jun-20 multi-auth (T-6): auth-pool account that leased this chunk. Surfaced
+   *  in the box status snapshot for operator attribution. Omitted in single-auth. */
+  readonly accountLabel?: string
 }
 
 export interface BoxStatusSnapshot {
   readonly phase: "running" | "fetching" | "idle"
   readonly mode: "pool" | "full-remote"
   readonly runId?: string
+  /** jun-20 multi-auth (T-6): which auth-pool account last owned this chunk, so
+   *  `box ls` / postmortems can attribute a 429 to a specific account. Absent in
+   *  single-auth mode. Never a token — just the operator-facing label. */
+  readonly accountLabel?: string
   readonly workload: string
   readonly dataset: string
   readonly instanceCount: number
@@ -644,6 +658,7 @@ const normalizeSnapshotPayload = (
     phase,
     mode,
     ...optionalSnapshotString("runId", parsed.runId),
+    ...optionalSnapshotString("accountLabel", parsed.accountLabel),
     workload: asNonEmptyString(parsed.workload) ?? "unknown",
     dataset: asNonEmptyString(parsed.dataset) ?? "unknown",
     instanceCount: asFiniteNumber(parsed.instanceCount) ?? 0,
@@ -856,6 +871,17 @@ const aws =
   (spawn: SpawnFn, region: string) =>
   (args: readonly string[]): Promise<SpawnResult> =>
     spawn("aws", ["--region", region, ...args])
+
+const terminateFailure = (iid: string, result: SpawnResult): Error => {
+  const detail =
+    result.stderr.trim() || result.stdout.trim() || `aws terminate-instances exited ${result.code}`
+  return new Error(`[full-remote] terminate-instances failed for ${iid}: ${detail}`)
+}
+
+const cleanupFailure = (phase: string, iid: string, primary: unknown, cleanup: unknown): Error =>
+  new Error(
+    `[full-remote] ${phase} failed and cleanup failed for ${iid}: primary=${errMessage(primary)}; cleanup=${errMessage(cleanup)}`,
+  )
 
 /** ssh helper bound to host+key. Token (when given) goes over STDIN — never an
  *  argv. Short connect-timeout so a closed :22 fails fast.
@@ -1175,8 +1201,9 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
   const iid = await launchInstance(awsFn, cfg, sgId, ttl, marketLabel, log)
 
   const terminate = async (): Promise<void> => {
-    if (!keep)
-      await awsFn(["ec2", "terminate-instances", "--instance-ids", iid]).catch(() => undefined)
+    if (keep) return
+    const terminated = await awsFn(["ec2", "terminate-instances", "--instance-ids", iid])
+    if (terminated.code !== 0) throw terminateFailure(iid, terminated)
   }
 
   try {
@@ -1205,7 +1232,11 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
     await bootstrapBox(session, cfg)
     return session
   } catch (err) {
-    await terminate()
+    try {
+      await terminate()
+    } catch (cleanupErr) {
+      throw cleanupFailure("bootstrap", iid, err, cleanupErr)
+    }
     throw err
   }
 }
@@ -1530,6 +1561,9 @@ const createSnapshotBase = (
   return {
     mode: snapshotMode(params),
     ...(snapshotMode(params) === "pool" ? { runId: artifactSuffix } : {}),
+    ...(params.accountLabel !== undefined && params.accountLabel !== ""
+      ? { accountLabel: params.accountLabel }
+      : {}),
     workload: workloadLabel(params),
     dataset: basename(params.datasetPath),
     instanceCount: selection.instanceCount,
@@ -1656,7 +1690,12 @@ const acquireGradeLock = async (ssh: BoxSession["ssh"], iid: string): Promise<vo
 }
 
 const releaseGradeLock = async (ssh: BoxSession["ssh"]): Promise<void> => {
-  await ssh(`rmdir ${GRADE_LOCK_DIR} 2>/dev/null`).catch(() => undefined)
+  const released = await ssh(`rmdir ${GRADE_LOCK_DIR} 2>/dev/null`)
+  if (released.code !== 0) {
+    throw new Error(
+      `${GRADE_LOCK_RELEASE_ERROR}: ${released.stderr.trim() || released.stdout.trim() || `rmdir exited ${released.code}`}`,
+    )
+  }
 }
 
 const uploadChunkDataset = async (args: {
@@ -1904,6 +1943,8 @@ export const gradeChunkOnBox = async (
     createSnapshotBase(params, paths, artifactSuffix),
     state,
   )
+  let result: FullRemoteResult | undefined
+  let primaryErr: unknown
 
   // ATOMIC busy-lock: `mkdir` fails non-zero if the dir already exists, so two
   // runs can NEVER grade the SAME reused box concurrently — which would race the
@@ -1956,15 +1997,34 @@ export const gradeChunkOnBox = async (
       state.finalLastLogLine = diagnostics.lastLogLine
     }
     state.finalRateLimited = diagnostics.rateLimited
-    return {
+    result = {
       ...(fetched.reportPath !== undefined ? { reportPath: fetched.reportPath } : {}),
       ...parsed,
       ...(diagnostics.rateLimited ? { rateLimited: true } : {}),
     }
+  } catch (err) {
+    primaryErr = err
   } finally {
     snapshots.stop()
+  }
+  let cleanupErr: unknown
+  try {
     // Release the grade lock so the box can be reused for the next chunk/run.
     await releaseGradeLock(ssh)
-    await snapshots.finish()
+  } catch (err) {
+    cleanupErr = err
   }
+  await snapshots.finish()
+  if (cleanupErr !== undefined) {
+    if (primaryErr !== undefined) {
+      throw new Error(
+        `[full-remote] grade lock cleanup failed for ${session.iid}: primary=${errMessage(primaryErr)}; cleanup=${errMessage(cleanupErr)}`,
+      )
+    }
+    throw cleanupErr
+  }
+  if (primaryErr !== undefined) {
+    throw primaryErr
+  }
+  return result ?? {}
 }

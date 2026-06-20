@@ -18,6 +18,8 @@ export {
   describeAuthSource,
   loadAuthPoolFile,
   parseAuthPoolManifest,
+  resolveAuthLaunchFile,
   type ResolveAuthOpts,
   resolveAuthSource,
+  selectAuthSourceLabel,
 } from "./load"

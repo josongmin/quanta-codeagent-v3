@@ -207,6 +207,15 @@ describe("BenchStreamTap verify-pass (P0)", () => {
     ).toBe(0)
   })
 
+  test("test_runner ok:true but plural error summary → does NOT fire", () => {
+    expect(
+      run([
+        toolCall("test_runner", {}),
+        toolResult("test_runner", true, "1 passed, 2 errors", "pytest tests/x.py"),
+      ]).fired,
+    ).toBe(0)
+  })
+
   test("bash test-like command (pytest) PASS → fires", () => {
     expect(
       run([

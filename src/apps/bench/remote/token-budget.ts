@@ -385,7 +385,7 @@ export const acquirePatchGenBudgetLease = async (
               sleep,
             })
             try {
-              await unlink(leasePath(dir, leaseId)).catch(() => undefined)
+              await unlink(leasePath(dir, leaseId))
             } finally {
               await unlock()
             }
@@ -431,12 +431,12 @@ export const readPatchGenBudgetState = async (
     staleLockMs,
     now,
     sleep: sleepReal,
-  }).catch(() => undefined)
+  })
   try {
     await mkdir(dir, { recursive: true })
-    const records = await listLeaseRecords(dir, now(), staleLeaseMs, releaseLock !== undefined)
+    const records = await listLeaseRecords(dir, now(), staleLeaseMs, true)
     return buildState(dir, limit, records, now())
   } finally {
-    await releaseLock?.()
+    await releaseLock()
   }
 }

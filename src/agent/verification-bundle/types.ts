@@ -27,6 +27,11 @@
  * engine only ever sees `regressionGreen: boolean | null`.
  */
 
+export interface ResolvedKofNSignal {
+  votes: number
+  k: number
+}
+
 /**
  * HARD gates — AND-combined, each REJECTS only on explicit negative evidence.
  * Nullable members are FAIL-OPEN (null ⇒ treated as "no objection").
@@ -43,8 +48,10 @@ export interface HardGateSignals {
   patchProduced: boolean
   /** Patched-side resolved K-of-N consensus (TC): `votes` scripts of the
    *  reproducing set now print "Issue resolved", quorum `k`. `null` ⇒ no
-   *  consensus run (FAIL-OPEN). Admissible iff `votes >= k`. */
-  patchedResolvedKofN: { votes: number; k: number } | null
+   *  consensus run (FAIL-OPEN). Present but malformed (`votes < 0`, `k <= 0`,
+   *  non-integer payload) ⇒ FAIL-CLOSED because the hard authority packet is
+   *  corrupted. Admissible iff the payload is valid and `votes >= k`. */
+  patchedResolvedKofN: ResolvedKofNSignal | null
   /** Impacted-test regression result (TB): `true` = the candidate breaks no
    *  existing test, `false` = it regressed at least one. `null` ⇒ no test set
    *  / oracle unavailable (FAIL-OPEN — a missing regression run must never

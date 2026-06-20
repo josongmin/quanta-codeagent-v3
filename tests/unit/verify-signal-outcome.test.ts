@@ -141,17 +141,7 @@ describe("isVerifyOutputFailing — rspec", () => {
   })
 
   test("`5 examples, 0 failures` ⇒ false (no failure tokens)", () => {
-    // Conservative: the pattern requires `\d+ failures?` AFTER the comma.
-    // "0 failures" still matches as it's the runner reporting "0 failed".
-    // We accept this as a known over-block edge case — but it should be
-    // false because the matcher requires at least 1 failure to be useful.
-    // Update: pattern matches `\d+\s+failures?` which includes 0. So this
-    // test documents the over-block: rspec 0-failure summary fires.
-    // For now we ACCEPT this since the practical runner won't emit
-    // "0 failures" alongside an `ok:true` mismatch (the dispatch ok would
-    // be true and the model wouldn't have failed). If observed in the
-    // wild, tighten to `[1-9]\d*\s+failures`.
-    expect(probe("5 examples, 0 failures")).toBe(true)
+    expect(probe("5 examples, 0 failures")).toBe(false)
   })
 })
 

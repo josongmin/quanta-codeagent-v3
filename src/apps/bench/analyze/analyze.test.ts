@@ -39,7 +39,7 @@ describe("loadVerdicts — both report shapes", () => {
         passed: false,
         turns: 0,
         patchBytes: 0,
-        failure: { termination: "generation_error", signals: ["empty_patch"] },
+        failure: { termination: "completed_unresolved", signals: ["empty_patch"] },
       },
       {
         id: "django__django-4",
@@ -132,6 +132,24 @@ describe("loadVerdicts — both report shapes", () => {
     expect(v.errored.has("django__django-grader")).toBe(true)
     expect(v.emptyPatch.has("django__django-grader")).toBe(false)
     expect(v.unresolved.has("django__django-grader")).toBe(false)
+  })
+
+  test("typed generation_error stays errored, not emptyPatch", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      perInstance: [
+        {
+          id: "django__django-generation",
+          passed: false,
+          turns: 0,
+          patchBytes: 0,
+          failure: { termination: "generation_error", signals: ["empty_patch"] },
+        },
+      ],
+    })
+    expect(v.errored.has("django__django-generation")).toBe(true)
+    expect(v.emptyPatch.has("django__django-generation")).toBe(false)
+    expect(v.unresolved.has("django__django-generation")).toBe(false)
   })
 
   test("harness report → correct four buckets", () => {

@@ -34,6 +34,9 @@ import type { StopReason } from "@/agent"
 import {
   type CandidateVerdict,
   type HardGateSignals,
+  type ResolvedKofNSignal,
+  resolvedKofNPositive,
+  resolvedKofNVoterQuorum,
   type SoftScoreSignals,
   scoreCandidate,
   selectBest,
@@ -69,7 +72,7 @@ export interface SelectionPorts {
   /** OPTIONAL regression hard signal; absent ⇒ null (FAIL-OPEN). */
   regression?: (c: Candidate) => Promise<boolean | null>
   /** OPTIONAL patched resolved K-of-N hard signal; absent ⇒ null (FAIL-OPEN). */
-  resolvedKofN?: (c: Candidate) => Promise<{ votes: number; k: number } | null>
+  resolvedKofN?: (c: Candidate) => Promise<ResolvedKofNSignal | null>
 }
 
 export interface ScoredEntry {
@@ -183,7 +186,10 @@ export const normalizeSelectionPath = (raw: string, sandbox: string | undefined)
   const rel = relInsideSandbox(p, sandbox)
   if (rel === null) return null
   p = rel
-  p = p.replace(/^\.\//, "").replace(/^(?:a|b)\//, "")
+  // Generic selection paths are repo-relative authorities, not raw git diff
+  // headers. Stripping a leading `a/` or `b/` here would collapse real paths
+  // like `a/pkg/file.py` onto `pkg/file.py`.
+  p = p.replace(/^\.\//, "")
   return normalizePathParts(p)
 }
 
@@ -267,10 +273,7 @@ export const ownerCoverageOf = (
 }
 
 const fullyInsideOwners = (files: readonly string[], owners: ReadonlySet<string>): boolean =>
-  owners.size === 0 || (files.length > 0 && files.every((f) => owners.has(f)))
-
-const resolvedPositive = (resolved: { votes: number; k: number } | null): boolean =>
-  resolved !== null && resolved.k > 0 && resolved.votes >= resolved.k
+  owners.size > 0 && files.length > 0 && files.every((f) => owners.has(f))
 
 const earlyAcceptable = (
   entry: ScoredEntry,
@@ -282,21 +285,24 @@ const earlyAcceptable = (
   // keep a candidate admissible, but they are not strong enough to stop the
   // loop. The progressive shortcut requires an explicitly clean-applying patch.
   if (!entry.hard.patchProduced || entry.hard.applyClean !== true) return false
+  // No owner authority => no early stop. Without a known closure-owner set the
+  // cost guard would collapse back to "first positive wins", which defeats the
+  // diversity search the selector exists to preserve.
+  if (owners.size === 0) return false
   // Early-accept is a cost shortcut, not a license to bypass the selector's
   // diversity/owner-coverage authority. If closure owners are known, a positive
   // candidate may stop the loop only when every touched file is inside that owner
   // set; broad symptom+stray patches must still face later owner-seeded siblings.
   if (!fullyInsideOwners(entry.candidate.files, owners)) return false
   const resolved = entry.hard.patchedResolvedKofN
-  if (requireHardResolved) return resolvedPositive(resolved)
-  return resolvedPositive(resolved) || entry.hard.regressionGreen === true
+  if (requireHardResolved) return resolvedKofNPositive(resolved)
+  return resolvedKofNPositive(resolved) || entry.hard.regressionGreen === true
 }
 
 const voterQuorumOf = (
   mode: ResolvedKofNMode,
-  resolved: { votes: number; k: number } | null,
-): number | null =>
-  mode === "soft" && resolved !== null && resolved.k > 0 ? resolved.votes / resolved.k : null
+  resolved: ResolvedKofNSignal | null,
+): number | null => (mode === "soft" ? resolvedKofNVoterQuorum(resolved) : null)
 
 const terminalAuthorityRank = (candidate: Candidate): number => {
   if (
@@ -309,6 +315,9 @@ const terminalAuthorityRank = (candidate: Candidate): number => {
   if (candidate.stopReason === "error" || candidate.stopReason === "refusal") return 1
   return 0
 }
+
+const strongerTerminalRepresentative = (current: Candidate, candidate: Candidate): Candidate =>
+  terminalAuthorityRank(candidate) > terminalAuthorityRank(current) ? candidate : current
 
 const minimalityOf = (args: {
   readonly isEmpty: boolean
@@ -414,10 +423,26 @@ export const runSelection = async (args: {
   ): Promise<SelectionResult> => {
     // ── dedup by normalized diff (Trae's pruning lever) ──────────────────────
     const seen = new Set<string>()
+    const firstIdByPatchKey = new Map<string, string>()
+    const terminalRepresentativeByFirstId = new Map<string, Candidate>()
     const cands = rawCandidates.filter((c) => {
       const key = normalizePatch(c.patch)
-      if (seen.has(key)) return false
+      if (seen.has(key)) {
+        const firstId = firstIdByPatchKey.get(key)
+        if (firstId !== undefined) {
+          const representative = terminalRepresentativeByFirstId.get(firstId)
+          if (representative !== undefined) {
+            terminalRepresentativeByFirstId.set(
+              firstId,
+              strongerTerminalRepresentative(representative, c),
+            )
+          }
+        }
+        return false
+      }
       seen.add(key)
+      firstIdByPatchKey.set(key, c.id)
+      terminalRepresentativeByFirstId.set(c.id, c)
       return true
     })
 
@@ -445,14 +470,27 @@ export const runSelection = async (args: {
     let terminalCandidate: Candidate | null = null
     if (winner === null) {
       const bestTerminalRank = scored.reduce(
-        (best, entry) => Math.max(best, terminalAuthorityRank(entry.candidate)),
+        (best, entry) =>
+          Math.max(
+            best,
+            terminalAuthorityRank(
+              terminalRepresentativeByFirstId.get(entry.candidate.id) ?? entry.candidate,
+            ),
+          ),
         0,
       )
       const terminalPool = scored
-        .filter((entry) => terminalAuthorityRank(entry.candidate) === bestTerminalRank)
+        .filter(
+          (entry) =>
+            terminalAuthorityRank(
+              terminalRepresentativeByFirstId.get(entry.candidate.id) ?? entry.candidate,
+            ) === bestTerminalRank,
+        )
         .map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict }))
       const terminalId = selectBestEffort(terminalPool)
-      terminalCandidate = scored.find((s) => s.candidate.id === terminalId)?.candidate ?? null
+      const chosen = scored.find((s) => s.candidate.id === terminalId)?.candidate ?? null
+      terminalCandidate =
+        chosen === null ? null : (terminalRepresentativeByFirstId.get(chosen.id) ?? chosen)
     }
     return {
       attempted: args.n,

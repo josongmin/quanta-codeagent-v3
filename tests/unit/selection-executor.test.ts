@@ -48,11 +48,17 @@ describe("selection input canonicalization", () => {
     expect(normalizeSelectionPath("./sympy/core/function.py", sandbox)).toBe(
       "sympy/core/function.py",
     )
-    expect(normalizeSelectionPath("b/sympy/core/function.py", sandbox)).toBe(
-      "sympy/core/function.py",
-    )
     expect(normalizeSelectionPath("/other/repo/sympy/core/function.py", sandbox)).toBeNull()
     expect(normalizeSelectionPath("../escape.py", sandbox)).toBeNull()
+  })
+
+  it("ADVERSARIAL: real repo paths beginning with a/ or b/ stay distinct owner authority", () => {
+    const sandbox = "/tmp/work/repo"
+    expect(normalizeSelectionPath("a/pkg/file.py", sandbox)).toBe("a/pkg/file.py")
+    expect(normalizeSelectionPath("b/pkg/file.py", sandbox)).toBe("b/pkg/file.py")
+    expect(
+      filesFromPatch("--- a/a/pkg/file.py\n+++ b/a/pkg/file.py\n+changed\n--- a/b/pkg/file.py\n+++ b/b/pkg/file.py\n+changed"),
+    ).toEqual(["a/pkg/file.py", "b/pkg/file.py"])
   })
 
   it("dedupes normalized owner candidates and seeds from canonical file names", () => {
@@ -62,7 +68,7 @@ describe("selection input canonicalization", () => {
       ownerCandidates: [
         "/tmp/work/repo/sympy/core/function.py",
         "./sympy/core/function.py",
-        "b/sympy/core/evalf.py",
+        "./sympy/core/evalf.py",
       ],
     })
     expect(inputs.ownerFiles).toEqual(["sympy/core/function.py", "sympy/core/evalf.py"])
@@ -77,7 +83,7 @@ describe("selection input canonicalization", () => {
     expect(
       filesFromPatch("--- a/./sympy/core/function.py\n+++ b/sympy/core/function.py\n+changed"),
     ).toEqual(["sympy/core/function.py"])
-    expect(normalizeSelectionPaths(["./a.py", "b/a.py", "/dev/null"], undefined)).toEqual(["a.py"])
+    expect(normalizeSelectionPaths(["./a.py", "/dev/null"], undefined)).toEqual(["a.py"])
   })
 })
 
@@ -140,6 +146,25 @@ describe("runSelection", () => {
     expect(r.scored[0]?.verdict.admissible).toBe(false)
   })
 
+  it("ADVERSARIAL: malformed hard resolved payload cannot pass as admissible", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] }),
+      cand({ id: "cand-1", patch: "+++ b/b.py\n+y", files: ["b.py"] }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: {
+        generate: gen,
+        resolvedKofN: async (c) => (c.id === "cand-0" ? { votes: 0, k: 0 } : { votes: 1, k: 1 }),
+      },
+    })
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(false)
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.admissible).toBe(true)
+    expect(r.winner?.id).toBe("cand-1")
+  })
+
   it("resolvedKofN soft mode gives positive credit without hard-rejecting false negatives", async () => {
     const { gen } = genFrom([
       cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] }),
@@ -160,6 +185,23 @@ describe("runSelection", () => {
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
       "soft:voterQuorum=1",
     )
+  })
+
+  it("ADVERSARIAL: malformed soft resolved payload earns no voterQuorum credit", async () => {
+    const { gen } = genFrom([cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] })])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(),
+      resolvedKofNMode: "soft",
+      ports: {
+        generate: gen,
+        resolvedKofN: async () => ({ votes: 0.5, k: 1 }),
+      },
+    })
+    expect(r.scored[0]?.verdict.admissible).toBe(true)
+    expect(r.scored[0]?.verdict.score).toBeCloseTo(0.15)
+    expect(r.scored[0]?.verdict.reasons).not.toContain("soft:voterQuorum=0.5")
   })
 
   it("earlyAccept stops sequential selection after the first owner-scoped hard-positive candidate", async () => {
@@ -208,6 +250,37 @@ describe("runSelection", () => {
     expect(r.earlyAccepted).toBe(false)
     expect(r.successfulGenerations).toBe(2)
     expect(r.scored.every((s) => s.verdict.reasons.includes("soft:voterQuorum=1"))).toBe(true)
+  })
+
+  it("ADVERSARIAL: earlyAccept cannot stop without known owner authority", async () => {
+    let generated = 0
+    const { gen } = genFrom([
+      cand({
+        id: "cand-0",
+        patch: "+++ b/symptom.py\n+first\n+extra churn",
+        files: ["symptom.py"],
+      }),
+      cand({ id: "cand-1", patch: "+++ b/root.py\n+fix", files: ["root.py"] }),
+    ])
+    const countingGen: SelectionPorts["generate"] = async (i, seed) => {
+      generated += 1
+      return await gen(i, seed)
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      earlyAccept: true,
+      ports: {
+        generate: countingGen,
+        applyClean: async () => true,
+        regression: async () => true,
+      },
+    })
+    expect(generated).toBe(2)
+    expect(r.earlyAccepted).toBe(false)
+    expect(r.successfulGenerations).toBe(2)
+    expect(r.winner?.id).toBe("cand-1")
   })
 
   it("ADVERSARIAL: earlyAccept cannot bypass owner diversity with a positive stray-file candidate", async () => {
@@ -531,6 +604,23 @@ describe("runSelection", () => {
     expect(r.winner).toBeNull()
     expect(r.terminalCandidate?.id).toBe("cand-0")
     expect(r.terminalCandidate?.stopReason).toBe("aborted")
+  })
+
+  it("ADVERSARIAL: deduped empty patches preserve stronger later terminal authority", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "", files: [], stopReason: "completed", editCount: 0 }),
+      cand({ id: "cand-1", patch: "", files: [], stopReason: "max_turns", editCount: 1 }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: { generate: gen },
+    })
+    expect(r.generated).toBe(1)
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate?.id).toBe("cand-1")
+    expect(r.terminalCandidate?.stopReason).toBe("max_turns")
   })
 
   it("terminalCandidate preserves first no-winner metadata on score ties", async () => {

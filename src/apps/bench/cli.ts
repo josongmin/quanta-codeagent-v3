@@ -22,7 +22,14 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
-import { AuthLeaseManager, type AuthSource, describeAuthSource, resolveAuthSource } from "./auth-pool"
+import {
+  AuthLeaseManager,
+  type AuthSource,
+  describeAuthSource,
+  resolveAuthLaunchFile,
+  resolveAuthSource,
+  selectAuthSourceLabel,
+} from "./auth-pool"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
@@ -70,6 +77,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "grade",
   "pool",
   "box",
+  "auth",
   "remote",
   "diff",
   "explain",
@@ -123,11 +131,13 @@ const waitForIdleBox = (): boolean =>
 const resolveCliAuthSource = (): AuthSource => {
   const authPoolArg = argValue("--auth-pool")
   const authFileArg = argValue("--auth-file")
-  return resolveAuthSource({
+  const authLabelArg = argValue("--auth-label")
+  const resolved = resolveAuthSource({
     env: process.env,
     ...(authPoolArg !== undefined ? { authPoolArg } : {}),
     ...(authFileArg !== undefined ? { authFileArg } : {}),
   })
+  return authLabelArg !== undefined ? selectAuthSourceLabel(resolved, authLabelArg) : resolved
 }
 
 const positiveMinutesFlagMs = (flag: string): number | undefined => {
@@ -295,11 +305,11 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   // concurrent bench efforts on ONE OAuth token starved each other → sustained
   // 429 surfacing as `generation_error` ("LLM stream failed after retries") on
   // BOTH. Point each fleet at its own account file to decouple the rate limits.
-  // jun-20 multi-auth (T-1): resolve through the SAME source abstraction `pool`
-  // uses, so full-remote can't silently diverge to a different auth truth. T-5
-  // adds `--auth-label` pinning / auto-pick; here single stays byte-identical.
+  // jun-20 multi-auth: resolve through the SAME source abstraction `pool` uses,
+  // so full-remote can't silently diverge to a different auth truth. Single-auth
+  // stays byte-identical; pool mode now also honors fail-fast `--auth-label`.
   const authSource = resolveCliAuthSource()
-  const authFile = poolLaunchAuthFile(authSource)
+  const authFile = resolveAuthLaunchFile(authSource)
   const authJson = dry ? "{}" : readFileSync(authFile, "utf8")
   const instance = argValue("--instance")
   const preset = resolveBenchExecutionPreset({
@@ -424,6 +434,63 @@ const buildPoolChunks = (datasetPaths: readonly string[]): PoolChunk[] => {
   })
 }
 
+/**
+ * jun-20 multi-auth (T-4): the `--chunk-size N` operator escape hatch. When set,
+ * each dataset is split into N-instance microchunks so chunk-level account
+ * routing approximates per-PROBLEM parallelism (chunkSize=1 ⇒ one problem per
+ * chunk) — no per-instance auth surgery inside `bench run`. Returns undefined
+ * when the flag is absent (callers fall back to whole-dataset chunks).
+ */
+const microchunkSizeArg = (): number | undefined => {
+  const raw = argValue("--chunk-size")
+  if (raw === undefined || raw.trim() === "") return undefined
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+    logger.info(`refused: --chunk-size must be a positive integer (got "${raw}")`)
+    process.exit(2)
+  }
+  return n
+}
+
+const microchunkToPoolChunk = (m: Microchunk): PoolChunk => ({
+  runId: m.runId,
+  datasetPath: m.datasetPath,
+  ...(m.instanceIds.length > 0 ? { instanceIds: [...m.instanceIds] } : {}),
+})
+
+/**
+ * Resolve the pool's chunk list: whole-dataset chunks by default, or microchunks
+ * when `--chunk-size` is set. In dry-run, microchunks are PLANNED only (no slice
+ * files written); a real run materializes them on disk.
+ */
+const resolvePoolChunks = (datasets: readonly string[], dryRun: boolean): PoolChunk[] => {
+  const size = microchunkSizeArg()
+  if (size === undefined) return buildPoolChunks(datasets)
+  const outDirOverride = argValue("--microchunk-dir")
+  const chunks: PoolChunk[] = []
+  for (const ds of datasets) {
+    const outDir = outDirOverride ?? defaultMicrochunkDir(ds)
+    if (dryRun) {
+      const base = runIdFromDataset(ds)
+      const planned = planMicrochunks(readFileSync(ds, "utf8"), base, size)
+      for (const p of planned) {
+        chunks.push(
+          microchunkToPoolChunk({
+            runId: p.runId,
+            datasetPath: join(outDir, `${p.runId}.jsonl`),
+            instanceIds: p.instanceIds,
+          }),
+        )
+      }
+    } else {
+      for (const m of writeMicrochunks({ datasetPath: ds, chunkSize: size, outDir })) {
+        chunks.push(microchunkToPoolChunk(m))
+      }
+    }
+  }
+  return chunks
+}
+
 const requirePoolDatasets = (): string[] => {
   const datasetsArg = argValue("--datasets")
   if (datasetsArg === undefined || datasetsArg.trim() === "") {
@@ -457,19 +524,6 @@ const poolConcurrencySource = (override: string | undefined): string =>
  *   quanta-bench pool … --workers 2 --allow-extra-boxes   # explicit multi-box opt-in
  */
 /**
- * jun-20 multi-auth: the single credential a NON-pool launch ships. Single ⇒ the
- * one file. Pool ⇒ first ready account (used only as the `authJsonProvider`
- * fallback; `pool` actually drives per-chunk leasing via `buildPoolAuthProvider`,
- * and full-remote picks one account in T-5).
- */
-const poolLaunchAuthFile = (src: AuthSource): string => {
-  if (src.kind === "single") return src.authFile
-  const ready = src.accounts.find((a) => a.disabled !== true) ?? src.accounts[0]
-  if (ready === undefined) throw new Error("auth-pool: no accounts available")
-  return ready.authFile
-}
-
-/**
  * jun-20 multi-auth (T-3): a per-account lease provider for `pool`, or undefined
  * in single-auth mode (so the legacy `authJsonProvider` path stays unchanged).
  * Each account's token file is read FRESH at ship time (never cached, never the
@@ -493,8 +547,8 @@ const planPoolChunkAccounts = (src: AuthSource, chunks: readonly PoolChunk[]): s
   return chunks.map((c) => {
     const lease = mgr.acquire({ runId: c.runId, requestedSlots: 1 })
     return lease === null
-      ? `  plan ${c.runId} → (all accounts saturated — queued until a slot frees)`
-      : `  plan ${c.runId} → ${lease.accountLabel}`
+      ? `  plan ${c.runId} -> (all accounts saturated — queued until a slot frees)`
+      : `  plan ${c.runId} -> ${lease.accountLabel}`
   })
 }
 
@@ -507,13 +561,13 @@ const cmdPool = async (): Promise<void> => {
     process.exit(2)
   }
   const datasets = requirePoolDatasets()
-  const chunks = buildPoolChunks(datasets)
+  const chunks = resolvePoolChunks(datasets, hasFlag("--dry-run"))
   const workers = resolvePoolWorkers()
   // jun-20 multi-auth (T-1): resolve EITHER the legacy single account or a
   // multi-account pool. T-3 schedules per-chunk leases off this; until then the
   // launch path stays single-account (byte-identical when no pool configured).
   const authSource = resolveCliAuthSource()
-  const authFile = poolLaunchAuthFile(authSource)
+  const authFile = resolveAuthLaunchFile(authSource)
   const preset = resolveBenchExecutionPreset({
     envVars: process.env,
     argvPreset: argValue("--preset"),
@@ -539,6 +593,9 @@ const cmdPool = async (): Promise<void> => {
       [
         "=== pool plan (dry-run) ===",
         describeAuthSource(authSource),
+        ...(microchunkSizeArg() !== undefined
+          ? [`microchunks: ${chunks.length} chunk(s) at chunk-size=${microchunkSizeArg()}`]
+          : []),
         `workers=${workers}  preset=${preset}  model=${model}  concurrency=${concurrency}  onDemand=${onDemand}  waitForIdle=${waitForIdle}`,
         ...chunks.map((c) => `chunk ${c.runId} ← ${c.datasetPath}  (box dir ~/runs/${c.runId}/)`),
         ...planPoolChunkAccounts(authSource, chunks),
@@ -598,6 +655,55 @@ const summarizePoolRun = (out: Awaited<ReturnType<typeof runPool>>, chunkCount: 
     )
   }
   logger.info(`[pool] DONE — total resolved ${resolved} across ${chunkCount} chunks; ${lost} lost`)
+}
+
+/**
+ * jun-20 multi-auth (T-6): `quanta-bench auth status [--auth-pool m] [--json]`.
+ * Shows the operator the resolved auth roster — labels and per-account capacity
+ * (maxParallel / maxBoxes / weight / disabled) — so a multi-account fleet can be
+ * run without guessing which accounts exist or how much each can take. This is
+ * the STATIC allocation view from the manifest; live cooldown/activeSlots surface
+ * through the per-box status snapshots (`box ls`). NEVER prints token material:
+ * the resolver only ever holds file PATHS, never reads a credential.
+ */
+const cmdAuth = (): void => {
+  const action = positionals()[0]
+  if (action !== "status") {
+    logger.info("usage: quanta-bench auth status [--auth-pool <manifest>] [--auth-label <label>] [--json]")
+    process.exit(2)
+  }
+  const src = resolveCliAuthSource()
+  const json = hasFlag("--json")
+  if (src.kind === "single") {
+    printBlock(
+      json
+        ? JSON.stringify({ mode: "single", authFile: src.authFile })
+        : `auth: single account\n  file: ${src.authFile}`,
+    )
+    return
+  }
+  const rows = src.accounts.map((a) => ({
+    label: a.label,
+    maxParallel: a.maxParallel,
+    maxBoxes: a.maxBoxes ?? null,
+    weight: a.weight ?? 1,
+    disabled: a.disabled === true,
+  }))
+  if (json) {
+    printBlock(JSON.stringify({ mode: "pool", accounts: rows }, null, 2))
+    return
+  }
+  printBlock(
+    [
+      `auth: pool of ${rows.length} account(s)`,
+      ...rows.map(
+        (r) =>
+          `  ${r.disabled ? "✕" : "•"} ${r.label}  maxParallel=${r.maxParallel}  maxBoxes=${
+            r.maxBoxes ?? "∞"
+          }  weight=${r.weight}${r.disabled ? "  (disabled)" : ""}`,
+      ),
+    ].join("\n"),
+  )
 }
 
 /**
@@ -886,7 +992,7 @@ const yesNo = (value: boolean | undefined): string =>
 
 const boxDetailLine = (row: BoxRuntimeRow): string | undefined =>
   row.snapshot !== undefined
-    ? `  source=snapshot  mode=${row.snapshot.mode}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+    ? `  source=snapshot  mode=${row.snapshot.mode}${row.snapshot.accountLabel !== undefined ? `  account=${row.snapshot.accountLabel}` : ""}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
     : row.probe !== undefined
       ? `  source=probe  active=${yesNo(row.probe.activeRunDetected)}  report=${yesNo(row.probe.reportExists)}  runExit=${yesNo(row.probe.runExitExists)}${row.probe.predictionsLines !== undefined ? `  preds=${row.probe.predictionsLines}` : ""}`
       : hasLaunchTags(row)
@@ -950,10 +1056,14 @@ const renderPatchGenBudgetLine = (budget: PatchGenBudgetState): string => {
   return `  patchGenBudget=${budget.inUse}/${budget.limit}  available=${budget.available}  holders=${budget.leases.length}  leases=${holders}`
 }
 
+const renderPatchGenBudgetErrorLine = (error: string): string =>
+  `  patchGenBudget=unavailable  error=${error}`
+
 const renderBoxStatus = (
   summary: BoxStatusSummary,
   rows: readonly BoxRuntimeRow[],
   budget: PatchGenBudgetState | undefined,
+  budgetError: string | undefined,
 ): string => {
   const staleRows = latestLaunchFirst(rows.filter((row) => row.freshness === "stale"))
   const focus =
@@ -963,6 +1073,9 @@ const renderBoxStatus = (
     "[box] summary:",
     `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}`,
     budget !== undefined ? renderPatchGenBudgetLine(budget) : undefined,
+    budget === undefined && budgetError !== undefined
+      ? renderPatchGenBudgetErrorLine(budgetError)
+      : undefined,
     focus !== undefined
       ? `  target=${focus.iid}  status=${boxStatusLabel(focus)}  source=${focus.statusSource}${focus.logPath !== undefined ? `  logPath=${focus.logPath}` : ""}${
           focus.logAgeSec !== undefined ? `  logAge=${focus.logAgeSec}s` : ""
@@ -1299,20 +1412,34 @@ const cmdBoxLs = async (region: string): Promise<void> => {
 const cmdBoxStatus = async (region: string): Promise<void> => {
   const keyPath = argValue("--key") ?? D.keyPath
   const rows = await listBenchBoxes(region, keyPath)
-  const budget = await readPatchGenBudgetState().catch(() => undefined)
+  const budgetState = await (async (): Promise<{
+    budget?: PatchGenBudgetState
+    budgetError?: string
+  }> => {
+    try {
+      return { budget: await readPatchGenBudgetState() }
+    } catch (err) {
+      return { budgetError: `patch-gen budget read failed: ${errMessage(err)}` }
+    }
+  })()
   const ordered = latestLaunchFirst(rows)
   const summary = summarizeBenchBoxes(ordered)
   if (hasFlag("--json")) {
     printBlock(
       JSON.stringify(
-        { summary, ...(budget !== undefined ? { budget } : {}), boxes: ordered },
+        {
+          summary,
+          ...(budgetState.budget !== undefined ? { budget: budgetState.budget } : {}),
+          ...(budgetState.budgetError !== undefined ? { budgetError: budgetState.budgetError } : {}),
+          boxes: ordered,
+        },
         null,
         2,
       ),
     )
     return
   }
-  printBlock(renderBoxStatus(summary, ordered, budget))
+  printBlock(renderBoxStatus(summary, ordered, budgetState.budget, budgetState.budgetError))
 }
 
 const cmdBoxLogs = async (region: string): Promise<void> => {
@@ -1614,6 +1741,9 @@ const main = async (): Promise<void> => {
       return
     case "box":
       await cmdBox()
+      return
+    case "auth":
+      cmdAuth()
       return
     case "diff":
       cmdDiff()

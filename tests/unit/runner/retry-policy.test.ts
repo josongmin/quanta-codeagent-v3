@@ -309,6 +309,30 @@ describe("classifyOutcome — infra-fail string patterns", () => {
 })
 
 describe("classifyOutcome — real-fail subkinds", () => {
+  test("ADVERSARIAL: typed refusal authority outranks exhaustion-like error strings", () => {
+    const result = mkResult({
+      stopReason: "refusal",
+      error: "agent exhausted token budget before verification",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "generation-fail",
+      reason: "agent exhausted token budget before verification",
+    })
+  })
+
+  test("ADVERSARIAL: typed budget stopReason outranks generic harness-looking error strings", () => {
+    const result = mkResult({
+      stopReason: "budget_exhausted",
+      patch: "",
+      turns: 9,
+      error: "setup failed (code 1): flaky stderr",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "budget_exhausted",
+    })
+  })
+
   test("error 'verify loop stuck' ⇒ real-fail / verify_loop_stuck", () => {
     const result = mkResult({ patch: "x", error: "verify loop stuck after retries" })
     expect(classifyOutcome(result)).toEqual({

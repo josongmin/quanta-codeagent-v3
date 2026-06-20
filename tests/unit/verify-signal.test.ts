@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+  isVerifyOutputFailing,
   isVerifySignalCommand,
   isTestLikeCommand,
   matchesExactVerifyCommand,
   matchVerifyCommand,
+  OUTCOME_FAILURE_MATCHERS,
   TEST_LIKE_RE,
   VERIFY_MATCHERS,
 } from "@/agent/verify-signal"
@@ -125,5 +127,24 @@ describe("verify-signal module purity", () => {
       .split("\n")
       .filter((l) => /^\s*import\b/.test(l) || /^\s*export\s+.*\bfrom\b/.test(l))
     expect(importLines).toHaveLength(0)
+  })
+})
+
+describe("verify-signal — output failure detection", () => {
+  test("plural non-zero errors are treated as failing output", () => {
+    expect(isVerifyOutputFailing("test_runner", undefined, "1 passed, 2 errors in 0.01s")).toBe(
+      true,
+    )
+  })
+
+  test("zero-count summary is NOT treated as failing output", () => {
+    expect(
+      isVerifyOutputFailing("test_runner", undefined, "1 passed, 0 failed, 0 errors in 0.01s"),
+    ).toBe(false)
+  })
+
+  test("failure matcher ids stay unique", () => {
+    const ids = OUTCOME_FAILURE_MATCHERS.map((m) => m.id)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })

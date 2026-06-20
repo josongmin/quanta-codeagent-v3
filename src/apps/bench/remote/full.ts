@@ -35,6 +35,7 @@ import {
   clampPatchGenConcurrency,
   resolveGlobalPatchGenBudget,
 } from "./token-budget"
+import { acquireSingleBoxGuard, type SingleBoxGuard } from "./single-box-guard"
 
 // Re-export the public surface so existing importers (tests + callers) keep
 // resolving these from "./full" after the box-session.ts extraction.
@@ -266,6 +267,18 @@ const attachOrProvisionFullRemoteBox = async (cfg: FullRemoteConfig): Promise<Bo
   return provisionBox({ ...cfg, launchMode: cfg.launchMode ?? "full-remote" })
 }
 
+const acquireFullRemoteSingleBoxGuard = async (
+  cfg: FullRemoteConfig,
+): Promise<SingleBoxGuard | undefined> => {
+  if (cfg.allowExtraBoxes === true) return undefined
+  return acquireSingleBoxGuard({
+    label: `full:${basename(cfg.datasetPath)}`,
+    ...(cfg.singleBoxGuardDir !== undefined ? { dir: cfg.singleBoxGuardDir } : {}),
+    ...(cfg.sleep !== undefined ? { sleep: cfg.sleep } : {}),
+    ...(cfg.onLog !== undefined ? { onLog: cfg.onLog } : {}),
+  })
+}
+
 const fullRemoteRecordTrajectoryEnabled = (): boolean =>
   process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
   process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
@@ -279,6 +292,19 @@ const runSingleFullRemoteChunk = async (args: {
   readonly concurrency: number
   readonly onLog: (msg: string) => void
 }): Promise<FullRemoteResult> => {
+  const terminateWithContext = async (primaryErr?: unknown): Promise<void> => {
+    try {
+      await args.session.terminate()
+    } catch (cleanupErr) {
+      if (primaryErr !== undefined) {
+        throw new Error(
+          `[full-remote] remote chunk failed and box termination failed for ${args.session.iid}: ` +
+            `primary=${errMessage(primaryErr)}; cleanup=${errMessage(cleanupErr)}`,
+        )
+      }
+      throw cleanupErr
+    }
+  }
   try {
     const result = await gradeChunkOnBox(args.session, {
       datasetPath: args.cfg.datasetPath,
@@ -292,10 +318,10 @@ const runSingleFullRemoteChunk = async (args: {
       forwardedBenchEnv: buildForwardedBenchEnv(process.env),
     })
     args.onLog("[full-remote] terminating box…")
-    await args.session.terminate()
+    await terminateWithContext()
     return result
   } catch (err) {
-    await args.session.terminate()
+    await terminateWithContext(err)
     throw err
   }
 }
@@ -322,12 +348,13 @@ export const createFullRemoteBackend = (
 
   const run = async (): Promise<FullRemoteResult> => {
     if (cfg.dryRun) return { dryRun: true, plan: dryRunPlan(cfg) }
-    const session = await attachOrProvisionFullRemoteBox(cfg)
+    const guard = await acquireFullRemoteSingleBoxGuard(cfg)
     let lease: Awaited<ReturnType<typeof acquirePatchGenBudgetLease>> | undefined
     try {
       lease = await acquireFullRemoteLease(cfg, concurrency, log)
       const effectiveConcurrency = clampPatchGenConcurrency(lease.units)
       logGrantedFullRemoteLease(lease, effectiveConcurrency, log)
+      const session = await attachOrProvisionFullRemoteBox(cfg)
       return await runSingleFullRemoteChunk({
         session,
         cfg,
@@ -336,16 +363,18 @@ export const createFullRemoteBackend = (
         concurrency: effectiveConcurrency,
         onLog: log,
       })
-    } catch (err) {
-      if (lease === undefined) {
-        await session.terminate().catch(() => undefined)
-      }
-      throw err
     } finally {
+      let leaseReleaseErr: unknown
       if (lease !== undefined) {
-        await lease.release().catch(() => undefined)
-        log(`[full-remote] released global patch-gen budget lease (${lease.units} token(s))`)
+        try {
+          await lease.release()
+          log(`[full-remote] released global patch-gen budget lease (${lease.units} token(s))`)
+        } catch (err) {
+          leaseReleaseErr = err
+        }
       }
+      await guard?.release()
+      if (leaseReleaseErr !== undefined) throw leaseReleaseErr
     }
   }
 

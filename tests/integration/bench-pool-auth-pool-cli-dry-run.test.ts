@@ -76,8 +76,8 @@ describe("T-3 pool dry-run shows the per-chunk account plan", () => {
     expect(code).toBe(0)
     expect(out).toContain("auth: pool of 2")
     // least-loaded spread ⇒ first chunk acct-a, second acct-b.
-    expect(out).toMatch(/plan ca → acct-a/)
-    expect(out).toMatch(/plan cb → acct-b/)
+    expect(out).toMatch(/plan ca -> acct-a/)
+    expect(out).toMatch(/plan cb -> acct-b/)
     // dry-run never reads the (missing) token files, never prints token bytes.
     expect(out).not.toMatch(/ENOENT|no such file/)
     expect(out).not.toMatch(/access_token|refresh_token/)
@@ -94,6 +94,11 @@ describe("T-3 pool dry-run shows the per-chunk account plan", () => {
     )
     expect(code).toBe(0)
     expect(out).toContain("auth: single")
-    expect(out).not.toMatch(/plan ca →/)
+    // teeth: assert against the REAL emitted glyph (ASCII `->`), and that NO plan
+    // line of any kind is printed in single-auth mode. The prior `→` (unicode)
+    // assertion was vacuous — the impl never emits that glyph, so it could never
+    // catch a single-auth regression that wrongly printed a plan.
+    expect(out).not.toMatch(/plan ca ->/)
+    expect(out).not.toContain("plan ca")
   })
 })

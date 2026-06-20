@@ -30,7 +30,7 @@ const NO_WINNER_TELEMETRY = {
   candidates: [],
 } as const
 
-const mkTerminal = (phase: Record<string, unknown>): InstanceResult =>
+const mkMaybeTerminal = (phase: Record<string, unknown>): InstanceResult | undefined =>
   terminalAgentResult({
     instance: INSTANCE,
     phase: {
@@ -48,7 +48,10 @@ const mkTerminal = (phase: Record<string, unknown>): InstanceResult =>
     },
     wiring: {} as never,
     startedAt: 0,
-  }) as InstanceResult
+  }) as InstanceResult | undefined
+
+const mkTerminal = (phase: Record<string, unknown>): InstanceResult =>
+  mkMaybeTerminal(phase) as InstanceResult
 
 describe("terminalAgentResult", () => {
   test("verify-select no-winner stays on the no-patch owner path", () => {
@@ -69,6 +72,7 @@ describe("terminalAgentResult", () => {
       agentError: "no patch produced before max turns exhausted (no_patch_exhausted)",
     })
 
+    expect(result.stopReason).toBe("max_turns")
     expect(result.error).toContain("max turns")
     expect(result.selectionTelemetry?.winnerId).toBeNull()
     expect(classifyOutcome(result)).toEqual({
@@ -83,6 +87,7 @@ describe("terminalAgentResult", () => {
       agentError: "no patch produced before token budget exhausted (no_patch_exhausted)",
     })
 
+    expect(result.stopReason).toBe("budget_exhausted")
     expect(result.error).toContain("token budget")
     expect(result.selectionTelemetry?.winnerId).toBeNull()
     expect(result.reproOracleCalibration).toEqual(CALIBRATION)
@@ -97,6 +102,7 @@ describe("terminalAgentResult", () => {
       stopReason: "aborted",
     })
 
+    expect(result.stopReason).toBe("aborted")
     expect(result.error).toContain("aborted")
     expect(result.selectionTelemetry?.winnerId).toBeNull()
     expect(result.reproOracleCalibration).toEqual(CALIBRATION)
@@ -111,11 +117,59 @@ describe("terminalAgentResult", () => {
       agentError: "429 Too Many Requests",
     })
 
+    expect(result.stopReason).toBe("error")
     expect(result.error).toBe("429 Too Many Requests")
     expect(result.selectionTelemetry?.winnerId).toBeNull()
     expect(classifyOutcome(result)).toEqual({
       kind: "generation-fail",
       reason: "429 Too Many Requests",
     })
+  })
+
+  test("ADVERSARIAL: non-empty max_turns patch is preserved for later verification", () => {
+    expect(
+      mkMaybeTerminal({
+        patch: "diff --git a/math.js b/math.js\n--- a/math.js\n+++ b/math.js\n+return a + b\n",
+        stopReason: "max_turns",
+      }),
+    ).toBeUndefined()
+  })
+
+  test("ADVERSARIAL: non-empty budget_exhausted patch is preserved for later verification", () => {
+    expect(
+      mkMaybeTerminal({
+        patch: "diff --git a/math.js b/math.js\n--- a/math.js\n+++ b/math.js\n+return a + b\n",
+        stopReason: "budget_exhausted",
+      }),
+    ).toBeUndefined()
+  })
+
+  test("ADVERSARIAL: non-empty aborted patch is preserved for later verification", () => {
+    expect(
+      mkMaybeTerminal({
+        patch: "diff --git a/math.js b/math.js\n--- a/math.js\n+++ b/math.js\n+return a + b\n",
+        stopReason: "aborted",
+      }),
+    ).toBeUndefined()
+  })
+
+  test("ADVERSARIAL: non-empty error patch is preserved for later verification", () => {
+    expect(
+      mkMaybeTerminal({
+        patch: "diff --git a/math.js b/math.js\n--- a/math.js\n+++ b/math.js\n+return a + b\n",
+        stopReason: "error",
+        agentError: "429 Too Many Requests",
+      }),
+    ).toBeUndefined()
+  })
+
+  test("ADVERSARIAL: non-empty refusal patch is preserved for later verification", () => {
+    expect(
+      mkMaybeTerminal({
+        patch: "diff --git a/math.js b/math.js\n--- a/math.js\n+++ b/math.js\n+return a + b\n",
+        stopReason: "refusal",
+        agentError: "policy refusal after edit",
+      }),
+    ).toBeUndefined()
   })
 })

@@ -92,10 +92,20 @@ const lastSessionEnd = (events: TrajectoryEvent[]): TrajectoryEvent | undefined 
   return undefined
 }
 
+const terminationFromStopReason = (r: InstanceResult): TerminationType | null => {
+  if (r.stopReason === "refusal" || r.stopReason === "error") return "generation_error"
+  if (r.stopReason === "aborted") return r.turns === 0 ? "hung_stream" : "timeout"
+  if (r.stopReason === "budget_exhausted") return "budget_exhausted"
+  if (r.stopReason === "max_turns") return "max_turns_exhausted"
+  return null
+}
+
 const terminationWithoutTrajectory = (r: InstanceResult): TerminationType | null => {
   if (r.passed) return "passed"
   if (isPatchBudgetStrictAdmission(r.admissionBlock)) return "admission_blocked"
   if (r.verdict === "grader_invalid") return "grader_invalid"
+  const stopReasonTermination = terminationFromStopReason(r)
+  if (stopReasonTermination !== null) return stopReasonTermination
   if (isGenerationError(r.error)) return "generation_error"
   if (isTimeoutError(r.error)) return "timeout"
   if (isBudgetExhaustedError(r.error)) return "budget_exhausted"

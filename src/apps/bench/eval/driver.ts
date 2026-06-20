@@ -596,6 +596,7 @@ const generateSelectionCandidate = async (args: {
     args.addTurns(phase.turns)
     const generationError = selectionGenerationErrorOf({
       stopReason: phase.stopReason,
+      patch: phase.patch,
       ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
     })
     if (generationError !== undefined) {

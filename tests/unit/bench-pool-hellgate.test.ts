@@ -14,7 +14,7 @@
  * Everything routes through an injected SpawnFn ⇒ no real box / token / network.
  */
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
@@ -29,19 +29,35 @@ const FULL_AUTH = JSON.stringify({
   account_id: "acct-1",
 })
 
-const TOKEN_BUDGET_DIRS = new Set<string>()
+const TEMP_DIRS = new Set<string>()
 
-const allocTokenBudgetDir = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), "bench-pool-budget-"))
-  TOKEN_BUDGET_DIRS.add(dir)
+const allocTempDir = (prefix: string): string => {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  TEMP_DIRS.add(dir)
   return dir
 }
 
+const DEFAULT_SINGLE_BOX_GUARD_DIR = join(allocTempDir("bench-pool-single-box-root-"), "guard")
+
+const allocTokenBudgetDir = (): string => allocTempDir("bench-pool-budget-")
+
 afterAll(() => {
-  for (const dir of TOKEN_BUDGET_DIRS) {
+  for (const dir of TEMP_DIRS) {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+const holdBudgetMutationLock = (dir: string): (() => void) => {
+  const lockDir = join(dir, ".lock")
+  mkdirSync(lockDir, { recursive: true })
+  writeFileSync(
+    join(lockDir, "owner.json"),
+    `${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`,
+  )
+  return () => {
+    rmSync(lockDir, { recursive: true, force: true })
+  }
+}
 
 interface Recorder {
   fn: SpawnFn
@@ -55,6 +71,10 @@ const mockSpawn = (opts: {
   reportFor?: (runId: string, launchIdx: number) => string
   /** runIds whose run.log tail should carry a generation_error (429 signal). */
   rateLimited?: Set<string>
+  beforeReportFetch?: () => void
+  terminateResult?: SpawnResult
+  tokenShipResult?: SpawnResult
+  gradeLockReleaseResult?: SpawnResult
 }): Recorder => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
   const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
@@ -71,14 +91,18 @@ const mockSpawn = (opts: {
     // atomic grade lock: a fresh box acquires it (mkdir succeeds ⇒ LOCKED). Match
     // mkdir/rmdir SPECIFICALLY so the idle probe's `test -d …lock` falls through.
     if (cmd.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-    if (cmd.includes("rmdir ~/.pool-grade.lock")) return ok("")
+    if (cmd.includes("rmdir ~/.pool-grade.lock")) return opts.gradeLockReleaseResult ?? ok("")
+    if (cmd.includes("cat > ~/.quanta/auth/chatgpt.json")) return opts.tokenShipResult ?? ok("")
     // detached-run launch/poll: the `run.exit` sentinel carries the bench exit
     // code (RCA jun-20 ssh-resilience). Report DONE (exit 0) immediately so the
     // poll loop terminates in one tick; launch ssh ignores the stdout.
     if (cmd.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
     // report fetch: `cat ~/runs/<runId>/report.json 2>/dev/null`
     const m = cmd.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-    if (m) return ok(reportFor(m[1] ?? "", Math.max(0, launchIdx)))
+    if (m) {
+      opts.beforeReportFetch?.()
+      return ok(reportFor(m[1] ?? "", Math.max(0, launchIdx)))
+    }
     // run.log tail: inject a 429 marker for rate-limited runIds.
     const t = cmd.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
     if (t && opts.rateLimited?.has(t[1] ?? ""))
@@ -94,7 +118,7 @@ const mockSpawn = (opts: {
     }
     if (args.includes("describe-instances")) return ok("1.2.3.4")
     if (args.includes("wait")) return ok("")
-    if (args.includes("terminate-instances")) return ok("")
+    if (args.includes("terminate-instances")) return opts.terminateResult ?? ok("")
     if (cmd === "ssh") return routeSsh(args)
     return ok("") // scp / rsync / other aws
   }
@@ -126,6 +150,7 @@ const poolCfg = (spawn: SpawnFn, over: Record<string, unknown> = {}) => ({
   preset: "agentless-v2",
   model: "gpt-5.4",
   concurrency: 8,
+  singleBoxGuardDir: DEFAULT_SINGLE_BOX_GUARD_DIR,
   tokenBudgetDir: allocTokenBudgetDir(),
   tokenBudgetWaitMs: 5_000,
   tokenBudgetPollMs: 10,
@@ -141,6 +166,22 @@ const CHUNKS: PoolChunk[] = [
 
 const count = (calls: Recorder["calls"], pred: (c: Recorder["calls"][number]) => boolean): number =>
   calls.filter(pred).length
+
+const waitForCondition = async (
+  pred: () => boolean,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<boolean> => {
+  const timeoutMs = opts.timeoutMs ?? 250
+  const pollMs = opts.pollMs ?? 5
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (pred()) return true
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, pollMs)
+    })
+  }
+  return pred()
+}
 
 describe("runPool — persistent box, amortised bootstrap", () => {
   test("bootstraps ONE box across N chunks (not one per chunk)", async () => {
@@ -289,6 +330,49 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     }
   })
 
+  test("waits on the chunk patch-gen budget BEFORE provisioning a box", async () => {
+    const tokenBudgetDir = allocTokenBudgetDir()
+    const held = await acquirePatchGenBudgetLease({
+      label: "block-pool-budget",
+      requestedUnits: 16,
+      minUnits: 16,
+      dir: tokenBudgetDir,
+      waitMs: 1_000,
+      pollMs: 10,
+    })
+    const { fn, calls } = mockSpawn({})
+    const runPromise = runPool(
+      [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+      poolCfg(fn, {
+        concurrency: 16,
+        tokenBudgetDir,
+        tokenBudgetWaitMs: 1_000,
+        tokenBudgetPollMs: 10,
+      }),
+    )
+    let failure: unknown
+    try {
+      expect(
+        await waitForCondition(() => calls.some((c) => c.args.includes("run-instances")), {
+          timeoutMs: 200,
+        }),
+      ).toBe(false)
+      expect(
+        calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run"))),
+      ).toBe(false)
+    } catch (err) {
+      failure = err
+    } finally {
+      await held.release()
+    }
+    await runPromise
+    if (failure !== undefined) throw failure
+    expect(calls.some((c) => c.args.includes("run-instances"))).toBe(true)
+    expect(calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run")))).toBe(
+      true,
+    )
+  })
+
   test("releases chunk-scoped budget BEFORE 429 backoff sleep", async () => {
     const tokenBudgetDir = allocTokenBudgetDir()
     const { fn } = mockSpawn({ rateLimited: new Set(["c1"]) })
@@ -317,6 +401,133 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       }),
     )
     expect(probeUnits).toBe(16)
+  })
+
+  test("a chunk patch-gen budget release failure ABORTS the run instead of silently succeeding", async () => {
+    const tokenBudgetDir = allocTokenBudgetDir()
+    let releaseLock: (() => void) | undefined
+    try {
+      const { fn } = mockSpawn({
+        beforeReportFetch: () => {
+          releaseLock ??= holdBudgetMutationLock(tokenBudgetDir)
+        },
+      })
+      await expect(
+        runPool(
+          [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+          poolCfg(fn, {
+            concurrency: 16,
+            tokenBudgetDir,
+            tokenBudgetWaitMs: 100,
+            tokenBudgetPollMs: 10,
+          }),
+        ),
+      ).rejects.toThrow(/global patch-gen budget lock|timed out waiting/i)
+    } finally {
+      releaseLock?.()
+    }
+  })
+
+  test("a patch-gen budget timeout ABORTS the run instead of silently marking the chunk lost", async () => {
+    const tokenBudgetDir = allocTokenBudgetDir()
+    const held = await acquirePatchGenBudgetLease({
+      label: "block-pool-budget",
+      requestedUnits: 16,
+      minUnits: 16,
+      dir: tokenBudgetDir,
+      waitMs: 1_000,
+      pollMs: 10,
+    })
+    try {
+      const { fn } = mockSpawn({})
+      await expect(
+        runPool(
+          [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+          poolCfg(fn, {
+            concurrency: 16,
+            tokenBudgetDir,
+            tokenBudgetWaitMs: 100,
+            tokenBudgetPollMs: 10,
+          }),
+        ),
+      ).rejects.toThrow(/patch-gen budget|timed out waiting/i)
+    } finally {
+      await held.release()
+    }
+  })
+
+  test("concurrent single-box pool runs FAIL-CLOSED instead of launching a second box", async () => {
+    const tokenBudgetDir = allocTokenBudgetDir()
+    const singleBoxGuardDir = join(allocTempDir("bench-pool-single-box-root-"), "guard")
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    let launched = 0
+    let releaseFirstRun: (() => void) | undefined
+    const firstRunDone = new Promise<void>((resolve) => {
+      releaseFirstRun = resolve
+    })
+    let firstBenchStarted = false
+    const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
+      const a = [...args]
+      calls.push({ cmd, args: a, ...(o?.input !== undefined ? { input: o.input } : {}) })
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances")) {
+        launched += 1
+        return ok(`i-box${launched - 1}`)
+      }
+      if (a.includes("wait")) return ok("")
+      if (a.includes("--filters") && a.includes("Reservations[].Instances[].InstanceId"))
+        return ok("")
+      if (a.includes("--filters") && a.includes("InstanceId,PublicIpAddress")) return ok("")
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const remote = a[a.length - 1] ?? ""
+        if (remote.includes("READY")) return ok("READY")
+        if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (remote.includes("setsid bash -c") && remote.includes("cli.ts run")) {
+          firstBenchStarted = true
+          return ok("LAUNCHED")
+        }
+        if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ")) {
+          if (firstBenchStarted && launched === 1) await firstRunDone
+          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        }
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(remote))
+          return ok(JSON.stringify({ resolved_ids: ["x__y-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+
+    const first = runPool(
+      [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+      poolCfg(fn, {
+        tokenBudgetDir,
+        singleBoxGuardDir,
+      }),
+    )
+    expect(
+      await waitForCondition(
+        () => firstBenchStarted && calls.some((c) => c.args.includes("run-instances")),
+        { timeoutMs: 250 },
+      ),
+    ).toBe(true)
+
+    await expect(
+      runPool(
+        [{ runId: "c2", datasetPath: "/tmp/c2.jsonl" }],
+        poolCfg(fn, {
+          tokenBudgetDir,
+          singleBoxGuardDir,
+        }),
+      ),
+    ).rejects.toThrow(/single-box|owner/i)
+
+    releaseFirstRun?.()
+    await first
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
   })
 
   test("RCA jun-20: the long bench-run ssh carries keepalive (no-keepalive HANG regression)", async () => {
@@ -361,6 +572,45 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(1)
   })
 
+  test("a reprovision failure ABORTS the run instead of silently surfacing a lost chunk", async () => {
+    let launches = 0
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances")) {
+        launches += 1
+        return launches === 1
+          ? ok("i-box0")
+          : {
+              code: 254,
+              stdout: "",
+              stderr: "An error occurred (InsufficientInstanceCapacity)",
+            }
+      }
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("wait")) return ok("")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const remote = a[a.length - 1] ?? ""
+        if (remote.includes("READY")) return ok("READY")
+        if (remote.includes("setsid bash -c")) return ok("LAUNCHED")
+        if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"))
+          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(remote)) return ok("")
+        o?.onData?.("[FAIL][generation_error] c1__inst-1 (turns=2)\n")
+        return ok("")
+      }
+      return ok("")
+    }
+
+    await expect(
+      runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, { maxChunkRetries: 1 })),
+    ).rejects.toThrow(/InsufficientInstanceCapacity|provision failed|no spot capacity/i)
+  })
+
   test("a chunk that never produces a verdict is surfaced as lost, not silently 0", async () => {
     const { fn } = mockSpawn({
       reportFor: (runId) => (runId === "c2" ? "" : JSON.stringify({ resolved_ids: ["ok"] })),
@@ -387,6 +637,20 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     // …but every chunk still graded, and rotation is NOT a retry (attempts stay 1).
     expect(out.every((r) => !r.lost)).toBe(true)
     expect(out.every((r) => r.attempts === 1)).toBe(true)
+  })
+
+  test("a rotation termination failure ABORTS before provisioning a replacement box", async () => {
+    const { fn, calls } = mockSpawn({
+      terminateResult: { code: 254, stdout: "", stderr: "terminate denied" },
+    })
+    let t = 0
+    await expect(
+      runPool(
+        CHUNKS,
+        poolCfg(fn, { reuseWarm: false, maxBoxWallMs: 1, now: () => (t += 1_000_000_000) }),
+      ),
+    ).rejects.toThrow(/terminate denied|terminate/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
   })
 
   test("REUSES a warm idle box (no launch) instead of provisioning", async () => {
@@ -433,6 +697,45 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     const { fn, calls } = mockSpawn({})
     await runPool(CHUNKS, poolCfg(fn, { keepWarm: false, reuseWarm: false }))
     expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(1)
+  })
+
+  test("a clean-drain termination failure ABORTS the run instead of silently succeeding", async () => {
+    const { fn } = mockSpawn({
+      terminateResult: { code: 254, stdout: "", stderr: "terminate denied" },
+    })
+    await expect(
+      runPool(
+        [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+        poolCfg(fn, { keepWarm: false, reuseWarm: false }),
+      ),
+    ).rejects.toThrow(/terminate denied|terminate/i)
+  })
+
+  test("a grade-lock release failure ABORTS instead of being retried as a dead box", async () => {
+    const { fn } = mockSpawn({
+      gradeLockReleaseResult: { code: 1, stdout: "", stderr: "lock release denied" },
+    })
+    await expect(
+      runPool(
+        [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+        poolCfg(fn, { maxChunkRetries: 2, reuseWarm: false }),
+      ),
+    ).rejects.toThrow(/GRADE_LOCK_RELEASE_FAILED|lock release denied/i)
+  })
+
+  test("a cleanup termination failure after a chunk throw ABORTS instead of silently resolving lost", async () => {
+    const { fn } = mockSpawn({
+      tokenShipResult: { code: 1, stdout: "", stderr: "ship boom" },
+      terminateResult: { code: 254, stdout: "", stderr: "terminate denied" },
+    })
+    await expect(
+      runPool(
+        [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+        poolCfg(fn, { maxChunkRetries: 1, reuseWarm: false }),
+      ),
+    ).rejects.toThrow(
+      /failed to terminate box after chunk c1 threw .*ship boom.*terminate denied|failed to terminate box after chunk c1 threw .*terminate denied.*ship boom/i,
+    )
   })
 
   test("429 BACKOFF: a rate-limited chunk pauses before the next, exponentially; clean resets", async () => {

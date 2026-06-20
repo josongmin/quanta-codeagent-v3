@@ -1,7 +1,7 @@
 import { gateOn } from "@/shared"
 import { KNOB_PRESETS } from "@/runner/knobs"
 
-export const CURRENT_BENCH_BASE_PRESET = "agentless-v3-thin"
+export const CURRENT_BENCH_BASE_PRESET = "agentless-v3-thin-strict"
 
 const asNonEmpty = (raw: string | undefined): string | undefined => {
   const trimmed = raw?.trim()

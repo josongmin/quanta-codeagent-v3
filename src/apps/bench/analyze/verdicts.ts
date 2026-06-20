@@ -62,7 +62,16 @@ const rowIsEmptyPatch = (row: Record<string, unknown>): boolean => {
   return false
 }
 
-const ERRORED_TERMINATIONS = new Set(["harness_error", "timeout", "hung_stream", "grader_invalid"])
+// Some typed terminal failures still carry patchBytes=0 / empty_patch because
+// no prediction was emitted; error authority must win over the empty-patch
+// convenience bucket or provider/harness failures get flattened away.
+const ERRORED_TERMINATIONS = new Set([
+  "harness_error",
+  "generation_error",
+  "timeout",
+  "hung_stream",
+  "grader_invalid",
+])
 
 const rowIsErrored = (row: Record<string, unknown>): boolean => {
   const failure = row.failure

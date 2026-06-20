@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import {
   type HardGateSignals,
+  resolvedKofNPositive,
+  resolvedKofNVoterQuorum,
   type ScoredCandidate,
   type SoftScoreSignals,
   scoreCandidate,
@@ -63,6 +65,27 @@ describe("scoreCandidate — hard gate (red-on-injection, each gate)", () => {
     expect(
       scoreCandidate({ ...HARD_OK, patchedResolvedKofN: { votes: 2, k: 2 } }, SOFT_NONE).admissible,
     ).toBe(true)
+  })
+
+  it("ADVERSARIAL: malformed patchedResolvedKofN payload fails closed", () => {
+    expect(
+      scoreCandidate({ ...HARD_OK, patchedResolvedKofN: { votes: 0, k: 0 } }, SOFT_NONE).admissible,
+    ).toBe(false)
+    expect(
+      scoreCandidate({ ...HARD_OK, patchedResolvedKofN: { votes: -1, k: 1 } }, SOFT_NONE)
+        .admissible,
+    ).toBe(false)
+    expect(
+      scoreCandidate({ ...HARD_OK, patchedResolvedKofN: { votes: 1, k: -1 } }, SOFT_NONE)
+        .admissible,
+    ).toBe(false)
+  })
+
+  it("ADVERSARIAL: malformed resolved packets never become positive or soft credit", () => {
+    expect(resolvedKofNPositive({ votes: 0, k: 0 })).toBe(false)
+    expect(resolvedKofNPositive({ votes: 1.5, k: 1 })).toBe(false)
+    expect(resolvedKofNVoterQuorum({ votes: 0.5, k: 1 })).toBeNull()
+    expect(resolvedKofNVoterQuorum({ votes: -1, k: 1 })).toBeNull()
   })
 
   it("ALL nullable signals null (base/apply true) ⇒ admissible (fail-open self-harm proof)", () => {

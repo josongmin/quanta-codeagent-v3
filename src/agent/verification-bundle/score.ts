@@ -8,6 +8,7 @@
  *   - `baseValidatedRed === false`                    → reject (`null` ⇒ pass)
  *   - `patchProduced === false`                       → reject
  *   - `applyClean === false`                          → reject (`null` ⇒ pass)
+ *   - `patchedResolvedKofN` present but malformed      → reject (null ⇒ pass)
  *   - `patchedResolvedKofN` present && `votes < k`    → reject (null ⇒ pass)
  *   - `regressionGreen === false`                     → reject (null ⇒ pass)
  *
@@ -23,6 +24,7 @@
  * none is admissible (the caller then submits a best-effort pick by raw score).
  */
 
+import { isValidResolvedKofN } from "./resolved-kofn"
 import type { CandidateVerdict, HardGateSignals, ScoredCandidate, SoftScoreSignals } from "./types"
 
 /** Near-equal conservative soft weights (pre-measurement; tune only after A/B). */
@@ -68,7 +70,10 @@ export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): C
   }
   if (hard.patchedResolvedKofN !== null) {
     const { votes, k } = hard.patchedResolvedKofN
-    if (votes < k) {
+    if (!isValidResolvedKofN(hard.patchedResolvedKofN)) {
+      admissible = false
+      reasons.push(`hard:patchedResolvedKofN invalid payload votes=${votes},k=${k}`)
+    } else if (votes < k) {
       admissible = false
       reasons.push(`hard:patchedResolvedKofN votes=${votes}<k=${k}`)
     }

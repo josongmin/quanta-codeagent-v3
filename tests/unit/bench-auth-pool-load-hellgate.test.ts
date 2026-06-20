@@ -11,7 +11,9 @@ import {
   type AuthSource,
   describeAuthSource,
   parseAuthPoolManifest,
+  resolveAuthLaunchFile,
   resolveAuthSource,
+  selectAuthSourceLabel,
 } from "@/apps/bench/auth-pool"
 
 const GOOD_YAML = `
@@ -135,6 +137,66 @@ describe("T-1 resolveAuthSource", () => {
       env: { QUANTA_BENCH_AUTH_POOL: "", QUANTA_BENCH_AUTH_FILE: "/a.json" },
     })
     expect(src).toEqual({ kind: "single", authFile: "/a.json" })
+  })
+})
+
+describe("T-5 selectAuthSourceLabel", () => {
+  test("pinning a pool source keeps only the named account", () => {
+    const src = parseAuthPoolManifest(GOOD_YAML)
+    const pinned = selectAuthSourceLabel(src, "acct-b")
+    expect(pinned).toEqual({
+      kind: "pool",
+      accounts: [
+        expect.objectContaining({
+          label: "acct-b",
+          authFile: "/home/me/.quanta/auth/chatgpt-b.json",
+        }),
+      ],
+    })
+  })
+
+  test("pinning an unknown label fails fast", () => {
+    const src = parseAuthPoolManifest(GOOD_YAML)
+    expect(() => selectAuthSourceLabel(src, "missing")).toThrow(/unknown account label "missing"/)
+  })
+
+  test("pinning a disabled account fails fast", () => {
+    const src = parseAuthPoolManifest(`
+accounts:
+  - { label: acct-a, auth_file: /a.json, max_parallel: 2 }
+  - { label: acct-b, auth_file: /b.json, max_parallel: 2, disabled: true }
+`)
+    expect(() => selectAuthSourceLabel(src, "acct-b")).toThrow(/account label "acct-b" is disabled/)
+  })
+
+  test("--auth-label is rejected in single-auth mode", () => {
+    expect(() =>
+      selectAuthSourceLabel({ kind: "single", authFile: "/single.json" }, "acct-a"),
+    ).toThrow(/requires auth pool mode/i)
+  })
+})
+
+describe("T-5 resolveAuthLaunchFile", () => {
+  test("single-auth returns the one auth file", () => {
+    expect(resolveAuthLaunchFile({ kind: "single", authFile: "/single.json" })).toBe("/single.json")
+  })
+
+  test("pool auto-pick chooses the first enabled account", () => {
+    const src = parseAuthPoolManifest(`
+accounts:
+  - { label: acct-a, auth_file: /a.json, max_parallel: 2, disabled: true }
+  - { label: acct-b, auth_file: /b.json, max_parallel: 2 }
+`)
+    expect(resolveAuthLaunchFile(src)).toBe("/b.json")
+  })
+
+  test("all-disabled pool fails fast instead of falling back to a disabled account", () => {
+    const src = parseAuthPoolManifest(`
+accounts:
+  - { label: acct-a, auth_file: /a.json, max_parallel: 2, disabled: true }
+  - { label: acct-b, auth_file: /b.json, max_parallel: 2, disabled: true }
+`)
+    expect(() => resolveAuthLaunchFile(src)).toThrow(/no enabled accounts available/i)
   })
 })
 

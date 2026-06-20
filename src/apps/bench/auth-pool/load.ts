@@ -124,6 +124,46 @@ export interface ResolveAuthOpts {
 }
 
 /**
+ * Narrow an auth source to one named account. This is a REAL promotion from the
+ * old ignored flag: the selected label becomes the ONLY schedulable account.
+ * Fail fast on misuse or ambiguity; never silently fall back to some other
+ * account.
+ */
+export const selectAuthSourceLabel = (src: AuthSource, rawLabel: string): AuthSource => {
+  const label = rawLabel.trim()
+  if (label === "") throw new Error('auth-pool: --auth-label requires a non-empty label')
+  if (src.kind !== "pool") {
+    throw new Error(
+      `auth-pool: --auth-label=${label} requires auth pool mode (--auth-pool or QUANTA_BENCH_AUTH_POOL)`,
+    )
+  }
+  const account = src.accounts.find((entry) => entry.label === label)
+  if (account === undefined) {
+    throw new Error(`auth-pool: unknown account label "${label}"`)
+  }
+  if (account.disabled === true) {
+    throw new Error(`auth-pool: account label "${label}" is disabled`)
+  }
+  return { kind: "pool", accounts: [account] }
+}
+
+/**
+ * Resolve the concrete auth file a single launch should ship.
+ *
+ * `single` stays byte-identical. `pool` auto-picks the first enabled account in
+ * stable manifest order. Disabled accounts are a hard kill-switch, not a hint,
+ * so an all-disabled pool fails fast instead of quietly reusing one.
+ */
+export const resolveAuthLaunchFile = (src: AuthSource): string => {
+  if (src.kind === "single") return src.authFile
+  const ready = src.accounts.find((entry) => entry.disabled !== true)
+  if (ready === undefined) {
+    throw new Error("auth-pool: no enabled accounts available for launch")
+  }
+  return ready.authFile
+}
+
+/**
  * The single resolver shared by `pool` and `grade --mode full`.
  *
  * - pool manifest present (flag or `QUANTA_BENCH_AUTH_POOL`) ⇒ `{ kind: "pool" }`
