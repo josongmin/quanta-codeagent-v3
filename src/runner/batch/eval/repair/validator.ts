@@ -41,13 +41,13 @@ const classifyReproOutcome = (stdout: string, code: number): RepairReproOutcome 
 
 export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => {
   const tailBound = args.tailBytes ?? DEFAULT_TAIL
-  const cmd = pickCmd(args)
-  if (cmd === undefined) {
+  const picked = pickCmd(args)
+  if (picked === undefined) {
     // No agent-supplied signal — return a degenerate failure so the outer
     // loop can still iterate or terminate, but never silently "pass".
     return { ok: false, failTail: "" }
   }
-  const r = await args.exec(cmd, args.sandbox, args.timeoutMs)
+  const r = await args.exec(picked.cmd, args.sandbox, args.timeoutMs)
 
   // T-1: record the observation + typed predicate verdict. The PREDICATE stays
   // observe-only (it never decides `ok`); the `ok` decision is the repro SENTINEL
@@ -78,17 +78,21 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
   // patch). When a marker is present the marker decides; a non-repro verify cmd
   // (pytest, …) carries no marker ⇒ classifyStdout is unknown/exec_failed ⇒ the
   // legacy exit-code decision below is byte-identical.
-  if (reproOutcome === "resolved") return ok(true)
-  if (reproOutcome === "reproduced" || reproOutcome === "other") return ok(false)
+  if (picked.reproAuthority) {
+    if (reproOutcome === "resolved") return ok(true)
+    if (reproOutcome === "reproduced" || reproOutcome === "other") return ok(false)
+  }
 
   // No repro sentinel — legacy exit-code decision (byte-identical to pre-fix).
   return ok(r.code === 0)
 }
 
-const pickCmd = (args: ValidateArgs): string | undefined => {
+const pickCmd = (
+  args: ValidateArgs,
+): { readonly cmd: string; readonly reproAuthority: boolean } | undefined => {
   const cmd = args.cmd ?? ""
-  if (cmd !== "") return cmd
+  if (cmd !== "") return { cmd, reproAuthority: args.reproAuthority === true }
   const repro = args.reproPath ?? ""
-  if (repro !== "") return `python "${repro}"`
+  if (repro !== "") return { cmd: `python "${repro}"`, reproAuthority: true }
   return undefined
 }

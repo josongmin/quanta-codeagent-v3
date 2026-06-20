@@ -37,6 +37,7 @@ describe("runRepairRounds — validation gate context", () => {
       exec,
       timeoutMs: 1000,
       primaryRailStep: {
+        kind: "repro",
         cmd: 'python "reproduce_issue.py"',
         authority: "execution",
         successPredicate: { type: "selected_test_passes" },

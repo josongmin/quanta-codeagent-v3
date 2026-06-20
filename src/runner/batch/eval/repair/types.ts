@@ -105,6 +105,11 @@ export interface ValidateArgs {
   /** Or the path to a repro script the agent created (run as
    *  `python <reproPath>`). */
   reproPath?: string
+  /** Explicit authority bit for sentinel-mode repro validation. Use when the
+   *  validator is running a repro THROUGH `cmd` (for example a selected primary
+   *  rail), so stdout markers are authoritative and may override exit code.
+   *  Absent/false ⇒ a plain `cmd` is treated as an ordinary verify command. */
+  reproAuthority?: boolean
   exec: ExecFn
   timeoutMs: number
   /** Bound on captured tail bytes from stdout+stderr (default 2000). */

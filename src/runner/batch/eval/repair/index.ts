@@ -183,6 +183,7 @@ const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<Valid
           exec: args.exec,
           timeoutMs: args.timeoutMs,
           cmd: args.primaryRailStep.cmd,
+          ...(args.primaryRailStep.kind === "repro" ? { reproAuthority: true } : {}),
           // T-1 wired: evaluate the rail's typed predicate over the observed
           // output (observe-only in v1 — validator records, does NOT flip ok).
           successPredicate: args.primaryRailStep.successPredicate,

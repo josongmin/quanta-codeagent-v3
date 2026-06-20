@@ -105,17 +105,35 @@ describe("validator — repro-sentinel gating (RCA fix)", () => {
   })
 
   test("exit 0 BUT stdout 'Issue reproduced' ⇒ ok:false (repro says NOT fixed — false-green caught)", async () => {
-    const r = await validate(base({ exec: fakeExec(0, "Issue reproduced\n") }))
+    const r = await validate({
+      sandbox: "/tmp/x",
+      reproPath: "/tmp/x/reproduce_issue.py",
+      exec: fakeExec(0, "Issue reproduced\n"),
+      timeoutMs: 1000,
+      evaluatePredicate: evaluateSuccessPredicate,
+    })
     expect(r.ok).toBe(false)
   })
 
   test("exit 0 + stdout 'Other issues' ⇒ ok:false (repro blew up, not resolved)", async () => {
-    const r = await validate(base({ exec: fakeExec(0, "Other issues: boom\n") }))
+    const r = await validate({
+      sandbox: "/tmp/x",
+      reproPath: "/tmp/x/reproduce_issue.py",
+      exec: fakeExec(0, "Other issues: boom\n"),
+      timeoutMs: 1000,
+      evaluatePredicate: evaluateSuccessPredicate,
+    })
     expect(r.ok).toBe(false)
   })
 
   test("last-marker-wins: 'reproduced' then 'resolved' ⇒ ok:true", async () => {
-    const r = await validate(base({ exec: fakeExec(1, "Issue reproduced\n...fixed...\nIssue resolved\n") }))
+    const r = await validate({
+      sandbox: "/tmp/x",
+      reproPath: "/tmp/x/reproduce_issue.py",
+      exec: fakeExec(1, "Issue reproduced\n...fixed...\nIssue resolved\n"),
+      timeoutMs: 1000,
+      evaluatePredicate: evaluateSuccessPredicate,
+    })
     expect(r.ok).toBe(true)
   })
 

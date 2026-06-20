@@ -41,6 +41,7 @@ import {
 } from "@/agent"
 import {
   evaluateSuccessPredicate,
+  type OwnerSibling,
   type PrimaryRailStep,
   resolveOwnerSiblings,
 } from "@/agent/closure"
@@ -69,7 +70,11 @@ import type {
   ReproOracleCalibration,
 } from "../types"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
-import { buildClosureSession, buildPhasePatchHygiene } from "./closure-session"
+import {
+  buildClosureSession,
+  buildPhasePatchHygiene,
+  type ClosureSessionState,
+} from "./closure-session"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { validateGoldPatch } from "./gold-sanity"
@@ -135,6 +140,7 @@ import {
   type SelectionTelemetry,
   summarizeSelection,
 } from "./selection-executor"
+import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -1174,6 +1180,128 @@ const benchBoundTestRunner = (instance: Instance): Tool<BenchTestRunnerInput> | 
 const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
   instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}
 
+const applyLiveOverrides = (envKeys: readonly string[]): void => {
+  for (const envKey of envKeys) {
+    setKnobOverride(envKey, "1")
+  }
+}
+
+const buildBenchRegistry = (instance: Instance, opt: BenchPosture): ToolRegistry => {
+  const lspNavTools = opt.lspNav ? lspNavToolList() : []
+  const astGrepTools = gateOn(process.env, "QUANTA_AST_GREP") ? [astGrepTool as Tool] : []
+  const findRefsTools = gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
+    ? [findReferencesTool as Tool]
+    : []
+  const benchVerifierTool = benchBoundTestRunner(instance)
+  return new ToolRegistry([
+    ...buildDefaultTools(),
+    ...lspNavTools,
+    ...astGrepTools,
+    ...findRefsTools,
+    ...(benchVerifierTool !== undefined ? [benchVerifierTool] : []),
+  ])
+}
+
+const buildBaseProblemText = (instance: Instance, sandbox: string): string => {
+  const verifierHint = repoLocalVerifierHint(instance)
+  return verifierHint === ""
+    ? `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
+    : `${instance.problemStatement}\n\nWork inside ${sandbox}.\n${verifierHint}\nWhen done, stop.`
+}
+
+const buildDirectiveSteers = (
+  instance: Instance,
+  opt: BenchPosture,
+): {
+  lsp: string
+  findRefs: string
+  spec: string
+  simplicity: string
+  sibling: string
+} => ({
+  lsp:
+    instance.swebench && opt.localizePhase?.lspGroundingSteer === true
+      ? `\n-${LSP_GROUNDING_STEER}`
+      : "",
+  findRefs:
+    instance.swebench && gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
+      ? `\n-${FIND_REFS_STEER}`
+      : "",
+  spec:
+    instance.swebench &&
+    opt.specFidelitySteer === true &&
+    extractIssueDeclaredExpected(instance.problemStatement) !== undefined
+      ? `\n-${SPEC_FIDELITY_STEER}`
+      : "",
+  simplicity:
+    instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY")
+      ? `\n-${SIMPLICITY_STEER}`
+      : "",
+  sibling:
+    instance.swebench && gateOn(process.env, "QUANTA_BENCH_SIBLING")
+      ? `\n-${SIBLING_COMPLETION_STEER}`
+      : "",
+})
+
+const resolveIssueHintText = (
+  instance: Instance,
+  opt: BenchPosture,
+  precomputedHint: string | undefined,
+): string => {
+  if (precomputedHint !== undefined) return precomputedHint
+  if (opt.issueHintMode !== "regex") return ""
+  return composeIssueHint(
+    extractIssueHint(instance.problemStatement, {
+      withExpectedActual: opt.issueHintExpectedActual,
+    }),
+  )
+}
+
+const buildPromptText = (args: {
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly opt: BenchPosture
+  readonly seedMsg?: string
+  readonly precomputedHint?: string
+  readonly reproHint?: string
+  readonly closureHint?: string
+}): string => {
+  const leanPrompt = gateOn(process.env, "QUANTA_BENCH_LEAN_PROMPT")
+  const baseText = composeBaseText(
+    buildBaseProblemText(args.instance, args.sandbox),
+    Boolean(args.instance.swebench),
+    args.opt.inLoopExec,
+    buildDirectiveSteers(args.instance, args.opt),
+    leanPrompt,
+  )
+  const round0ReproSuppressed = args.opt.round0Minimal === true && args.seedMsg === undefined
+  const effectiveReproHint = round0ReproSuppressed ? undefined : args.reproHint
+  return composePromptText({
+    issueHint: resolveIssueHintText(args.instance, args.opt, args.precomputedHint),
+    baseText,
+    ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+    ...(effectiveReproHint !== undefined ? { reproHint: effectiveReproHint } : {}),
+    ...(args.seedMsg !== undefined ? { seedMsg: args.seedMsg } : {}),
+  })
+}
+
+const buildConfigGuards = (
+  instance: Instance,
+  opt: BenchPosture,
+  signal: AbortSignal,
+): Partial<AgentConfig> => ({
+  ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
+  ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
+    ? { lspPrewarm: { enabled: true, warmSignal: signal } }
+    : {}),
+  ...(instance.swebench && opt.inLoopExec ? { verifyGuard: { mustPass: true, maxTrips: 2 } } : {}),
+  ...(instance.swebench &&
+  opt.inLoopExec &&
+  !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
+    ? { protectTestPaths: true }
+    : {}),
+})
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -1224,34 +1352,11 @@ export const buildConfig = (
   // setKnobOverride invalidates the runtimeConfig cache and is idempotent (set
   // to the same value on every buildConfig call). Empty list ⇒ no-op ⇒
   // byte-identical to the pre-preset path.
-  for (const envKey of opt.liveOverrides) {
-    setKnobOverride(envKey, "1")
-  }
-  const lspNavTools = opt.lspNav ? lspNavToolList() : []
-  const astGrepToolList = gateOn(process.env, "QUANTA_AST_GREP") ? [astGrepTool as Tool] : []
-  // find_references (jun-19): timeout-immune ripgrep replacement for the steer's
-  // lsp_references recommendation (pyright references is intractable on large
-  // repos — measured 15s AND 60s timeouts on sympy). Gated QUANTA_BENCH_FIND_REFS
-  // (forwarded to the full-remote box; default-OFF ⇒ byte-identical).
-  const findRefsToolList = gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
-    ? [findReferencesTool as Tool]
-    : []
-  const benchVerifierTool = benchBoundTestRunner(instance)
+  applyLiveOverrides(opt.liveOverrides)
   // DIP factory: bench driver runs against the default port surface; the
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
-  const registry = new ToolRegistry([
-    ...buildDefaultTools(),
-    ...lspNavTools,
-    ...astGrepToolList,
-    ...findRefsToolList,
-    ...(benchVerifierTool !== undefined ? [benchVerifierTool] : []),
-  ])
+  const registry = buildBenchRegistry(instance, opt)
   const permission: PermissionContext = { mode: "acceptEdits" }
-  const verifierHint = repoLocalVerifierHint(instance)
-  const base =
-    verifierHint === ""
-      ? `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
-      : `${instance.problemStatement}\n\nWork inside ${sandbox}.\n${verifierHint}\nWhen done, stop.`
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
   // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
   // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
@@ -1265,26 +1370,6 @@ export const buildConfig = (
   // calls in a real run). So we surface it as an ALWAYS-PRESENT directive line
   // too, gated on the SAME `lspGroundingSteer` flag (not `lspNav`, so the
   // frozen agentless-v1 prompt stays byte-identical and the v1↔v2 A/B is clean).
-  const lspSteerLine =
-    instance.swebench && opt.localizePhase?.lspGroundingSteer === true
-      ? `\n-${LSP_GROUNDING_STEER}`
-      : ""
-  // find_references co-change steer: fires ONLY when the tool is wired
-  // (QUANTA_BENCH_FIND_REFS) so the directive never names an absent tool. Redirects
-  // the multi-file co-change map from the timing-out lsp_references to find_references.
-  const findRefsSteerLine =
-    instance.swebench && gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
-      ? `\n-${FIND_REFS_STEER}`
-      : ""
-  // gap-B spec-fidelity steer: fires ONLY when the knob is on AND the issue
-  // declares a concrete expected output (fail-closed — co-change cases without a
-  // stated output are NOT nudged toward minimality). Off ⇒ "" ⇒ byte-identical.
-  const specSteerLine =
-    instance.swebench &&
-    opt.specFidelitySteer === true &&
-    extractIssueDeclaredExpected(instance.problemStatement) !== undefined
-      ? `\n-${SPEC_FIDELITY_STEER}`
-      : ""
   // ABSORBED METHODOLOGY (jun-19, #13417 class) — anti-SEMANTIC-over-engineering.
   // quanta's directive already enforces DIFF-SIZE minimality ("smallest change",
   // "no whole-file rewrite"), but the 13417 failure is SEMANTIC: a 1-2 line diff
@@ -1298,35 +1383,9 @@ export const buildConfig = (
   // fresh untried tier-E batch 8/9 across 7 repos, 7166's earlier fail confirmed
   // RUN-NOISE (passed on re-run), 0 clear regression across ~18 graded. Off-
   // switch `QUANTA_BENCH_SIMPLICITY=0` restores the pre-absorption baseline.
-  const simplicitySteerLine =
-    instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY")
-      ? `\n-${SIMPLICITY_STEER}`
-      : ""
   // Lever A — sibling-completion / co-change check (ceiling multi-file class).
   // Knob-gated `QUANTA_BENCH_SIBLING`, DEFAULT-OFF for a clean A/B against the
   // 0/6 ceiling baseline; OFF ⇒ "" ⇒ byte-identical prompt.
-  const siblingSteerLine =
-    instance.swebench && gateOn(process.env, "QUANTA_BENCH_SIBLING")
-      ? `\n-${SIBLING_COMPLETION_STEER}`
-      : ""
-  // P2 Sonar absorption — `QUANTA_BENCH_LEAN_PROMPT` (default-OFF, gateOn): ON
-  // swaps the verbose directive for SWEBENCH_DIRECTIVE_LEAN and OMITS the bolt-on
-  // steers (lsp/spec/simplicity/sibling) whose intent LEAN folds in. OFF ⇒ the
-  // exact pre-knob composition (byte-identical), all steers included.
-  const leanPrompt = gateOn(process.env, "QUANTA_BENCH_LEAN_PROMPT")
-  const baseText = composeBaseText(
-    base,
-    Boolean(instance.swebench),
-    opt.inLoopExec,
-    {
-      lsp: lspSteerLine,
-      findRefs: findRefsSteerLine,
-      spec: specSteerLine,
-      simplicity: simplicitySteerLine,
-      sibling: siblingSteerLine,
-    },
-    leanPrompt,
-  )
   // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
   //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
   //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
@@ -1335,31 +1394,14 @@ export const buildConfig = (
   // When `precomputedHint` is provided (any non-undefined value, including
   // `""`), the Agentless pre-compute already ran; we honor it verbatim and do
   // NOT re-extract. Empty pre-computed hint ⇒ "" ⇒ byte-identical.
-  const hint =
-    precomputedHint !== undefined
-      ? precomputedHint
-      : opt.issueHintMode === "regex"
-        ? composeIssueHint(
-            extractIssueHint(instance.problemStatement, {
-              withExpectedActual: opt.issueHintExpectedActual,
-            }),
-          )
-        : ""
-  // WS1 mini-parity (`round0-minimal`): at round 0 — the agent's FIRST attempt,
-  // identified by `seedMsg === undefined` (single-pass `runAgentPhase` and the
-  // repair loop's round-0 both seed with undefined) — suppress the bulky repro
-  // directive prose so the prompt is `issueHint + closureHint(one line) +
-  // baseText`, matching mini-swe's clean round-0 posture. The prose re-attaches
-  // on repair rounds ≥1 (seedMsg present ⇒ the primary rail already went red).
-  // Knob OFF (default) ⇒ effectiveReproHint === reproHint ⇒ byte-identical.
-  const round0ReproSuppressed = opt.round0Minimal === true && seedMsg === undefined
-  const effectiveReproHint = round0ReproSuppressed ? undefined : reproHint
-  const text = composePromptText({
-    issueHint: hint,
-    baseText,
-    ...(closureHint !== undefined ? { closureHint } : {}),
-    ...(effectiveReproHint !== undefined ? { reproHint: effectiveReproHint } : {}),
+  const text = buildPromptText({
+    instance,
+    sandbox,
+    opt,
     ...(seedMsg !== undefined ? { seedMsg } : {}),
+    ...(precomputedHint !== undefined ? { precomputedHint } : {}),
+    ...(reproHint !== undefined ? { reproHint } : {}),
+    ...(closureHint !== undefined ? { closureHint } : {}),
   })
   const messages: Message[] = [
     {
@@ -1383,10 +1425,6 @@ export const buildConfig = (
     // workspace); the cold arm of the A/B is `QUANTA_LSP_PREWARM=0`
     // (`gateDisabled` off-switch). The run `signal` is the warm abort so
     // session end cancels an in-flight warm instead of riding the budget.
-    ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
-    ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
-      ? { lspPrewarm: { enabled: true, warmSignal: signal } }
-      : {}),
     ...localEnvSlotOf(instance),
     maxTurns: deps.maxTurns,
     signal,
@@ -1410,9 +1448,6 @@ export const buildConfig = (
     // Gated additionally on `opt.inLoopExec`: the mini-swe (OFF) posture
     // edits-and-submits, so a "must verify" guard is moot (and would push the
     // agent at the same unrunnable host test-env). ON ⇒ byte-identical.
-    ...(instance.swebench && opt.inLoopExec
-      ? { verifyGuard: { mustPass: true, maxTrips: 2 } }
-      : {}),
     // Test-scope guard (RCA 2026-06-19, django-13417). DEFAULT-ON for real
     // swebench in-loop runs (the no-test-edit rule is already DECLARED in the
     // bench system prompt — this ENFORCES it at the dispatch layer so the
@@ -1422,11 +1457,7 @@ export const buildConfig = (
     // `inLoopExec` like verifyGuard: the mini-swe posture (OFF) edits-and-
     // submits with test edits already stripped at diff time, so the guard is
     // moot there.
-    ...(instance.swebench &&
-    opt.inLoopExec &&
-    !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
-      ? { protectTestPaths: true }
-      : {}),
+    ...buildConfigGuards(instance, opt, signal),
     // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
     // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
   }
@@ -2033,7 +2064,10 @@ const runSelectionPhase = async (
             mergeHint(seed),
           )
           totalTurns += phase.turns
-          const generationError = agentPhaseError(phase)
+          const generationError = selectionGenerationErrorOf({
+            stopReason: phase.stopReason,
+            ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
+          })
           if (generationError !== undefined) {
             generationErrors.set(i, generationError)
             throw new Error(generationError)
@@ -2172,7 +2206,15 @@ const generationFailureResult = (args: {
   readonly wiring: Wiring
   readonly startedAt: number
 }): InstanceResult => {
-  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  const extra: Partial<InstanceResult> = {
+    ...reproResultExtra(args.reproTest),
+    ...(args.phase.reproOracleCalibration !== undefined
+      ? { reproOracleCalibration: args.phase.reproOracleCalibration }
+      : {}),
+    ...(args.phase.selectionTelemetry !== undefined
+      ? { selectionTelemetry: args.phase.selectionTelemetry }
+      : {}),
+  }
   if (args.deps.observe && args.wiring.observer) {
     extra.verdict = "ok"
     extra.durationMs = Date.now() - args.startedAt
@@ -2184,12 +2226,6 @@ const generationFailureResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
-    if (args.phase.reproOracleCalibration !== undefined) {
-      extra.reproOracleCalibration = args.phase.reproOracleCalibration
-    }
-    if (args.phase.selectionTelemetry !== undefined) {
-      extra.selectionTelemetry = args.phase.selectionTelemetry
-    }
   }
   return {
     id: args.instance.id,
@@ -2209,7 +2245,15 @@ const noPatchResult = (args: {
   readonly wiring: Wiring
   readonly startedAt: number
 }): InstanceResult => {
-  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  const extra: Partial<InstanceResult> = {
+    ...reproResultExtra(args.reproTest),
+    ...(args.phase.reproOracleCalibration !== undefined
+      ? { reproOracleCalibration: args.phase.reproOracleCalibration }
+      : {}),
+    ...(args.phase.selectionTelemetry !== undefined
+      ? { selectionTelemetry: args.phase.selectionTelemetry }
+      : {}),
+  }
   if (args.deps.observe && args.wiring.observer) {
     extra.verdict = "ok"
     extra.durationMs = Date.now() - args.startedAt
@@ -2221,12 +2265,6 @@ const noPatchResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
-    if (args.phase.reproOracleCalibration !== undefined) {
-      extra.reproOracleCalibration = args.phase.reproOracleCalibration
-    }
-    if (args.phase.selectionTelemetry !== undefined) {
-      extra.selectionTelemetry = args.phase.selectionTelemetry
-    }
   }
   return {
     id: args.instance.id,
@@ -2257,6 +2295,498 @@ const terminalAgentResult = (args: {
   }
   if (args.phase.patch.trim() === "") return noPatchResult(args)
   return undefined
+}
+
+type RepairConfig = NonNullable<RunInstanceDeps["repair"]>
+
+interface HintReproContext {
+  readonly posture: BenchPosture
+  readonly precomputedHint: string
+  readonly localizeCandidates: readonly string[]
+  readonly reproHint: string | undefined
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly reproSources: readonly string[]
+}
+
+interface PreparedAttemptContext extends HintReproContext {
+  readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly closureSession: ClosureSessionState | undefined
+  readonly verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined
+  readonly primaryRailStep: PrimaryRailStep | undefined
+  readonly closureHint: string | undefined
+  readonly effectiveRepair: RepairConfig | undefined
+  readonly repairGateEligible: boolean
+  readonly gateDecisionVerify: boolean
+  readonly runRepair: boolean
+}
+
+const envPrepFailedResult = (
+  instance: Instance,
+  prep: { readonly code: number; readonly stderr: string },
+): InstanceResult => ({
+  id: instance.id,
+  passed: false,
+  patch: "",
+  turns: 0,
+  verdict: "env_prep_failed",
+  error: `env prep (setupCmd) failed (code ${prep.code}): ${prep.stderr.slice(0, 500)}`,
+})
+
+const stage1FilesOf = (files: readonly string[]): readonly { file: string; score: number }[] =>
+  files.map((file, i) => ({
+    file,
+    score: files.length - i,
+  }))
+
+const readSandboxSource = (sandbox: string, rel: string): string | null => {
+  try {
+    return readFileSync(join(sandbox, rel), "utf8")
+  } catch {
+    return null
+  }
+}
+
+const prepareHintAndReproContext = async (
+  instance: Instance,
+  sandbox: string,
+  llm: LLMPort,
+): Promise<HintReproContext> => {
+  const posture = benchOptIns()
+  let localizeCandidates: readonly string[] = []
+  const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
+    llm,
+    onCandidates: (files) => {
+      localizeCandidates = files
+    },
+  })
+  const reproInstall = benchInstallsReproHint(posture.inLoopExec)
+    ? await installReproTestHint(instance, sandbox, llm)
+    : { hint: undefined, telemetry: undefined }
+  return {
+    posture,
+    precomputedHint,
+    localizeCandidates,
+    reproHint: reproInstall.hint,
+    reproTest: reproInstall.telemetry,
+    reproSources: reproInstall.reproSources ?? [],
+  }
+}
+
+const resolveOwnerResolved = async (args: {
+  readonly instance: Instance
+  readonly posture: BenchPosture
+  readonly stage1Files: readonly { file: string; score: number }[]
+  readonly sandbox: string
+  readonly signal: AbortSignal
+}): Promise<readonly OwnerSibling[] | undefined> => {
+  if (!(args.instance.swebench !== undefined && args.posture.faultEvidence && args.posture.lspNav)) {
+    return undefined
+  }
+  return resolveOwnerSiblings()({
+    stage1Files: args.stage1Files,
+    issueText: args.instance.problemStatement,
+    cwd: args.sandbox,
+    readSource: (rel) => readSandboxSource(args.sandbox, rel),
+    signal: args.signal,
+  })
+}
+
+const buildClosureAttemptState = (args: {
+  readonly instance: Instance
+  readonly posture: BenchPosture
+  readonly stage1Files: readonly { file: string; score: number }[]
+  readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly reproTest: BenchReproTestTelemetry | undefined
+}): ClosureSessionState | undefined =>
+  args.instance.swebench === undefined
+    ? undefined
+    : buildClosureSession({
+        problemStatement: args.instance.problemStatement,
+        stage1Files: args.stage1Files,
+        ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
+        ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
+          ? { reproScript: { cmd: `python "${args.reproTest.path}"`, baseValidatedRed: true } }
+          : {}),
+        posture: {
+          lspNav: args.posture.lspNav,
+          primaryRail: args.posture.primaryRail,
+          faultEvidence: args.posture.faultEvidence,
+        },
+      })
+
+const resolveRepairState = (args: {
+  readonly deps: RunInstanceDeps
+  readonly instance: Instance
+  readonly posture: BenchPosture
+  readonly closureSession: ClosureSessionState | undefined
+}): Pick<
+  PreparedAttemptContext,
+  "effectiveRepair" | "repairGateEligible" | "gateDecisionVerify" | "runRepair"
+> => {
+  const effectiveRepair =
+    args.deps.repair ??
+    (args.posture.repairRounds !== undefined ? { maxRounds: args.posture.repairRounds } : undefined)
+  const repairGateEligible = benchRunsRepairPhase(
+    effectiveRepair !== undefined,
+    args.instance.swebench !== undefined,
+    args.posture.inLoopExec,
+  )
+  const gateDecisionVerify = repairGateEligible && args.closureSession?.bundle.gate.action === "verify"
+  const runRepair =
+    effectiveRepair !== undefined &&
+    benchShouldRunRepairPhase({
+      eligible: repairGateEligible,
+      primaryRailEnabled: args.posture.primaryRail,
+      gateAction: args.closureSession?.bundle.gate.action,
+      primaryRailStep: args.closureSession?.primaryRailStep,
+      verificationPlan: args.closureSession?.bundle.plan,
+    })
+  return { effectiveRepair, repairGateEligible, gateDecisionVerify, runRepair }
+}
+
+const prepareAttemptContext = async (
+  instance: Instance,
+  sandbox: string,
+  deps: RunInstanceDeps,
+  signal: AbortSignal,
+): Promise<PreparedAttemptContext> => {
+  const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm)
+  const stage1Files = stage1FilesOf(hintRepro.localizeCandidates)
+  const ownerResolved = await resolveOwnerResolved({
+    instance,
+    posture: hintRepro.posture,
+    stage1Files,
+    sandbox,
+    signal,
+  })
+  const closureSession = buildClosureAttemptState({
+    instance,
+    posture: hintRepro.posture,
+    stage1Files,
+    ownerResolved,
+    reproTest: hintRepro.reproTest,
+  })
+  return {
+    ...hintRepro,
+    ownerResolved,
+    closureSession,
+    verificationPlan: closureSession?.bundle.plan,
+    primaryRailStep: closureSession?.primaryRailStep,
+    closureHint: closureSession?.closureHint,
+    ...resolveRepairState({
+      deps,
+      instance,
+      posture: hintRepro.posture,
+      closureSession,
+    }),
+  }
+}
+
+const runMainPhase = async (args: {
+  readonly instance: Instance
+  readonly deps: RunInstanceDeps
+  readonly sandbox: string
+  readonly signal: AbortSignal
+  readonly wiring: Wiring
+  readonly prepared: PreparedAttemptContext
+}): Promise<Phase> => {
+  if (args.prepared.posture.verifySelectN !== undefined && args.instance.swebench !== undefined) {
+    return runSelectionPhase(
+      args.instance,
+      args.deps,
+      args.sandbox,
+      args.signal,
+      args.wiring,
+      args.prepared.posture.verifySelectN,
+      args.prepared.posture.verifySelectConcurrency,
+      args.prepared.posture.verifySelectEarlyAccept,
+      args.prepared.posture.verifySelectRegression,
+      args.prepared.posture.verifySelectRepro,
+      args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??
+        args.prepared.localizeCandidates,
+      args.prepared.verificationPlan?.baseValidatedRed ?? false,
+      args.prepared.precomputedHint,
+      args.prepared.reproHint,
+      args.prepared.closureHint,
+      args.prepared.reproSources,
+    )
+  }
+  if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
+    return runRepairPhase(
+      args.instance,
+      args.deps,
+      args.sandbox,
+      args.signal,
+      args.wiring,
+      args.prepared.effectiveRepair,
+      args.prepared.precomputedHint,
+      args.prepared.reproHint,
+      args.prepared.closureHint,
+      args.prepared.primaryRailStep,
+      args.prepared.ownerResolved?.map((o) => o.file) ?? [],
+      args.prepared.reproSources,
+    )
+  }
+  return runAgentPhase(
+    args.instance,
+    args.deps,
+    args.sandbox,
+    args.signal,
+    args.wiring,
+    args.prepared.precomputedHint,
+    args.prepared.reproHint,
+    args.prepared.closureHint,
+  )
+}
+
+const maybeValidateTerminalResult = async (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly deps: RunInstanceDeps
+  readonly wiring: Wiring
+  readonly startedAt: number
+  readonly signal: AbortSignal
+}): Promise<InstanceResult | undefined> => {
+  const terminal = terminalAgentResult(args)
+  if (terminal === undefined) return undefined
+  if (!shouldValidateGold(args.deps, false)) return terminal
+  const gold = await validateGoldPatch(args.instance, { ...args.deps, signal: args.signal })
+  if (gold.ok) return terminal
+  const { error: _prevError, ...rest } = terminal
+  return { ...rest, passed: false, verdict: "grader_invalid", error: gold.error }
+}
+
+const observeStrictBudgetBlock = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly deps: RunInstanceDeps
+  readonly instance: Instance
+  readonly wiring: Wiring
+  readonly phase: Phase
+  readonly startedAt: number
+  readonly strictBudget: ReturnType<typeof buildPhasePatchBudget>
+}): void => {
+  if (!(args.deps.observe && args.wiring.observer)) return
+  args.extra.verdict = "ok"
+  args.extra.durationMs = Date.now() - args.startedAt
+  args.extra.patchPath = emitPatch(
+    args.deps.observe,
+    args.instance,
+    args.wiring.observer,
+    args.phase.patch,
+  )
+  const usage = args.wiring.usage?.total()
+  if (usage) args.extra.usage = usage
+  if (args.phase.firstEditFile !== undefined) args.extra.firstEditFile = args.phase.firstEditFile
+  if (args.phase.editCount !== undefined) args.extra.editCount = args.phase.editCount
+  if (args.phase.turnsToFirstEdit !== undefined) args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
+  args.extra.patchBudget = args.strictBudget
+}
+
+const maybeStrictBudgetBlockedResult = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly deps: RunInstanceDeps
+  readonly wiring: Wiring
+  readonly startedAt: number
+  readonly posture: BenchPosture
+  readonly closureSession: ClosureSessionState | undefined
+}): InstanceResult | undefined => {
+  const strictBudget =
+    args.posture.patchBudgetStrict && args.instance.swebench !== undefined
+      ? buildPhasePatchBudget({
+          patch: args.phase.patch,
+          repo: args.instance.swebench.repo,
+          closureSession: args.closureSession,
+          strict: true,
+        })
+      : undefined
+  if (strictBudget === undefined || strictBudget.withinBudget) return undefined
+  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  observeStrictBudgetBlock({ ...args, extra, strictBudget })
+  return buildStrictPatchBudgetBlockedResult({
+    id: args.instance.id,
+    turns: args.phase.turns,
+    verdict: strictBudget,
+    extra,
+  })
+}
+
+const validateVerifiedOutcome = async (args: {
+  readonly instance: Instance
+  readonly deps: RunInstanceDeps
+  readonly signal: AbortSignal
+  readonly verified: Awaited<ReturnType<typeof verify>>
+}): Promise<{
+  readonly verified: Awaited<ReturnType<typeof verify>>
+  readonly graderInvalid: boolean
+}> => {
+  if (!shouldValidateGold(args.deps, args.verified.passed)) {
+    return { verified: args.verified, graderInvalid: false }
+  }
+  const gold = await validateGoldPatch(args.instance, { ...args.deps, signal: args.signal })
+  if (gold.ok) return { verified: args.verified, graderInvalid: false }
+  const { error: _prevError, ...rest } = args.verified
+  return {
+    verified: { ...rest, passed: false, error: gold.error },
+    graderInvalid: true,
+  }
+}
+
+const attachObservedSuccessBasics = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly deps: RunInstanceDeps
+  readonly instance: Instance
+  readonly wiring: Wiring
+  readonly phase: Phase
+  readonly verified: Awaited<ReturnType<typeof verify>>
+  readonly startedAt: number
+}): void => {
+  if (!(args.deps.observe && args.wiring.observer)) return
+  args.extra.verdict ??= "ok"
+  args.extra.durationMs = Date.now() - args.startedAt
+  args.extra.patchPath = emitPatch(
+    args.deps.observe,
+    args.instance,
+    args.wiring.observer,
+    args.phase.patch,
+  )
+  emitVerify(args.wiring.observer, args.verified)
+  const usage = args.wiring.usage?.total()
+  if (usage) args.extra.usage = usage
+  if (args.phase.firstEditFile !== undefined) args.extra.firstEditFile = args.phase.firstEditFile
+  if (args.phase.editCount !== undefined) args.extra.editCount = args.phase.editCount
+  if (args.phase.turnsToFirstEdit !== undefined) args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
+}
+
+const attachClosureMetrics = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+}): void => {
+  const { posture, verificationPlan, primaryRailStep, repairGateEligible, gateDecisionVerify } =
+    args.prepared
+  if (posture.verificationPlan || posture.primaryRail) {
+    args.extra.primaryRailPresent = primaryRailStep !== undefined
+    args.extra.requiredVerificationCovered =
+      verificationPlan?.required.some((s) => s.successPredicate !== undefined) ?? false
+    if (verificationPlan !== undefined) args.extra.synthReproBaseRed = verificationPlan.baseValidatedRed
+    if (primaryRailStep !== undefined && args.phase.primaryFalseGreen !== undefined) {
+      args.extra.primaryFalseGreen = args.phase.primaryFalseGreen
+    }
+    if (primaryRailStep !== undefined && args.phase.primaryFalseRed !== undefined) {
+      args.extra.primaryFalseRed = args.phase.primaryFalseRed
+    }
+  }
+  if (repairGateEligible) {
+    args.extra.gateEntered = gateDecisionVerify
+    args.extra.gateBypassed = !gateDecisionVerify
+    if (args.phase.verifyRounds !== undefined) args.extra.verifyRounds = args.phase.verifyRounds
+  }
+}
+
+const attachSelectionAndClosureArtifacts = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+}): void => {
+  const { posture, verificationPlan, closureSession, primaryRailStep, ownerResolved } = args.prepared
+  if (args.phase.reproOracleCalibration !== undefined) {
+    args.extra.reproOracleCalibration = args.phase.reproOracleCalibration
+  }
+  if (args.phase.selectionTelemetry !== undefined) {
+    args.extra.selectionTelemetry = args.phase.selectionTelemetry
+  }
+  const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
+  const hygiene =
+    args.instance.swebench !== undefined ? buildPhasePatchHygiene(args.phase.patch, ownerHint) : undefined
+  if (posture.patchHygiene && hygiene !== undefined) {
+    args.extra.patchHygiene = hygiene
+    args.extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
+  }
+  if ((posture.patchBudget || posture.patchBudgetStrict) && args.instance.swebench !== undefined) {
+    args.extra.patchBudget = buildPhasePatchBudget({
+      patch: args.phase.patch,
+      repo: args.instance.swebench.repo,
+      closureSession,
+      strict: posture.patchBudgetStrict,
+    })
+  }
+  if (posture.verificationPlan && verificationPlan !== undefined) {
+    args.extra.verificationPlan = verificationPlan
+  }
+  if (posture.faultEvidence && closureSession !== undefined) {
+    args.extra.faultEvidence = closureSession.bundle.evidence
+    args.extra.ownerAdmission = closureSession.bundle.owner
+  }
+  if (posture.repairEscalation && closureSession !== undefined) {
+    args.extra.repairEscalation = decideEscalation({
+      candidates: closureSession.bundle.evidence.candidates.map((c) => ({
+        file: c.file,
+        score: c.score,
+        sources: c.sources,
+      })),
+      primaryRailRedAfterRepair: primaryRailRedAfterRepair(
+        primaryRailStep,
+        args.phase.validated,
+        args.phase.primaryFalseGreen,
+      ),
+      siblingFiles: ownerResolved?.map((o) => o.file) ?? [],
+    })
+  }
+}
+
+const buildSuccessfulResultExtra = (args: {
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly phase: Phase
+  readonly verified: Awaited<ReturnType<typeof verify>>
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly deps: RunInstanceDeps
+  readonly wiring: Wiring
+  readonly startedAt: number
+  readonly prepared: PreparedAttemptContext
+  readonly graderInvalid: boolean
+}): Partial<InstanceResult> => {
+  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  if (args.graderInvalid) extra.verdict = "grader_invalid"
+  attachObservedSuccessBasics(args)
+  attachClosureMetrics(args)
+  attachSelectionAndClosureArtifacts(args)
+  if (args.verified.breakdown !== undefined) extra.gradeBreakdown = args.verified.breakdown
+  return extra
+}
+
+const verifyAndFinalizeResult = async (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly deps: RunInstanceDeps
+  readonly sandbox: string
+  readonly signal: AbortSignal
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly wiring: Wiring
+  readonly startedAt: number
+  readonly prepared: PreparedAttemptContext
+}): Promise<InstanceResult> => {
+  const verified = await verify(args.instance, args.phase.patch, args.sandbox, {
+    ...args.deps,
+    signal: args.signal,
+  })
+  const validated = await validateVerifiedOutcome({
+    instance: args.instance,
+    deps: args.deps,
+    signal: args.signal,
+    verified,
+  })
+  const extra = buildSuccessfulResultExtra({
+    ...args,
+    verified: validated.verified,
+    graderInvalid: validated.graderInvalid,
+  })
+  return okResult(args.instance, args.phase, validated.verified, extra)
 }
 
 /**

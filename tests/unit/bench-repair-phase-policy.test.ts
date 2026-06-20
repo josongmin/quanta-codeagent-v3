@@ -7,6 +7,7 @@ import {
 } from "@/runner/batch/eval/repair-phase-policy"
 
 const railStep: PrimaryRailStep = {
+  kind: "owner-test",
   cmd: "python reproduce_issue.py",
   authority: "execution",
   successPredicate: { type: "selected_test_passes" },

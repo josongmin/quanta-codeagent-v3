@@ -69,6 +69,7 @@ import {
   type SelectionTelemetry,
   summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
+import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
@@ -710,7 +711,10 @@ const runSelectionPhase = async (
             mergeHint(seed),
           )
           totalTurns += phase.turns
-          const generationError = agentPhaseError(phase)
+          const generationError = selectionGenerationErrorOf({
+            stopReason: phase.stopReason,
+            ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
+          })
           if (generationError !== undefined) {
             generationErrors.set(i, generationError)
             throw new Error(generationError)
@@ -857,7 +861,15 @@ const generationFailureResult = (args: {
   readonly wiring: Wiring
   readonly startedAt: number
 }): InstanceResult => {
-  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  const extra: Partial<InstanceResult> = {
+    ...reproResultExtra(args.reproTest),
+    ...(args.phase.reproOracleCalibration !== undefined
+      ? { reproOracleCalibration: args.phase.reproOracleCalibration }
+      : {}),
+    ...(args.phase.selectionTelemetry !== undefined
+      ? { selectionTelemetry: args.phase.selectionTelemetry }
+      : {}),
+  }
   if (args.deps.observe && args.wiring.observer) {
     extra.verdict = "ok"
     extra.durationMs = Date.now() - args.startedAt
@@ -869,12 +881,6 @@ const generationFailureResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
-    if (args.phase.reproOracleCalibration !== undefined) {
-      extra.reproOracleCalibration = args.phase.reproOracleCalibration
-    }
-    if (args.phase.selectionTelemetry !== undefined) {
-      extra.selectionTelemetry = args.phase.selectionTelemetry
-    }
   }
   return {
     id: args.instance.id,
@@ -894,7 +900,15 @@ const noPatchResult = (args: {
   readonly wiring: Wiring
   readonly startedAt: number
 }): InstanceResult => {
-  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  const extra: Partial<InstanceResult> = {
+    ...reproResultExtra(args.reproTest),
+    ...(args.phase.reproOracleCalibration !== undefined
+      ? { reproOracleCalibration: args.phase.reproOracleCalibration }
+      : {}),
+    ...(args.phase.selectionTelemetry !== undefined
+      ? { selectionTelemetry: args.phase.selectionTelemetry }
+      : {}),
+  }
   if (args.deps.observe && args.wiring.observer) {
     extra.verdict = "ok"
     extra.durationMs = Date.now() - args.startedAt
@@ -906,12 +920,6 @@ const noPatchResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
-    if (args.phase.reproOracleCalibration !== undefined) {
-      extra.reproOracleCalibration = args.phase.reproOracleCalibration
-    }
-    if (args.phase.selectionTelemetry !== undefined) {
-      extra.selectionTelemetry = args.phase.selectionTelemetry
-    }
   }
   return {
     id: args.instance.id,

@@ -7,7 +7,7 @@
  * core returns verdicts. See docs/plans/jun-17-closure-driven-runner/README.md.
  */
 
-import type { SuccessPredicate } from "@/agent/verification-plan"
+import type { SuccessPredicate, VerificationStepKind } from "@/agent/verification-plan"
 
 export type { SuccessPredicate }
 
@@ -48,6 +48,7 @@ export interface PredicateResult {
  * "<repro>"`) is the adapter's job; the SHAPE is core.
  */
 export interface PrimaryRailStep {
+  readonly kind: VerificationStepKind
   readonly cmd: string
   readonly authority: "execution" | "structure" | "exact-diff"
   readonly successPredicate: SuccessPredicate

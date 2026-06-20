@@ -39,3 +39,7 @@
 [sweep 19:56:31] wave 19 done: pass=0 miss=0 grader_invalid=0 transient429=0
 [sweep 19:58:01] wave 20: 11 remaining; launching 11 via pool(1box×2chunk)
 [sweep 19:58:06] wave 20 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:59:36] wave 21: 11 remaining; launching 11 via pool(1box×2chunk)
+[sweep 19:59:40] wave 21 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 20:01:10] wave 22: 11 remaining; launching 11 via pool(1box×2chunk)
+[sweep 20:01:13] wave 22 done: pass=0 miss=0 grader_invalid=0 transient429=0

@@ -20,6 +20,8 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain("selectionTelemetry: summarizeSelection(result)")
     expect(DRIVER_SRC).toContain("result.terminalCandidate?.stopReason")
     expect(APP_DRIVER_SRC).toContain("result.terminalCandidate?.stopReason")
+    expect(DRIVER_SRC).toContain("selectionGenerationErrorOf({")
+    expect(APP_DRIVER_SRC).toContain("selectionGenerationErrorOf({")
     expect(DRIVER_SRC).toContain("candidatePatchAppliesCleanly")
     expect(DRIVER_SRC).toContain("applyClean: (c) =>")
   })

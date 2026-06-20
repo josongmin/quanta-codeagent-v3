@@ -14,6 +14,18 @@ const writeEnv = (vars: ReadonlyMap<string, string | undefined>): void => {
 const snapshotEnv = (keys: readonly string[]): Map<string, string | undefined> =>
   new Map(keys.map((key) => [key, process.env[key]]))
 
+let envLock: Promise<void> = Promise.resolve()
+
+const acquireEnvLock = async (): Promise<() => void> => {
+  const prior = envLock
+  let release!: () => void
+  envLock = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await prior
+  return release
+}
+
 /** Scoped env helper for tests that drive cached runtime knobs. Every write
  *  re-pins `runtimeConfig()` so later reads cannot observe stale env. */
 export const scopedEnv = (
@@ -23,6 +35,7 @@ export const scopedEnv = (
   readonly beforeEach: () => void
   readonly afterEach: () => void
   readonly set: (vars: Record<string, string | undefined>) => void
+  readonly run: <T>(body: () => Promise<T>) => () => Promise<T>
 } => {
   let saved = new Map<string, string | undefined>()
 
@@ -43,5 +56,18 @@ export const scopedEnv = (
       }
       __resetRuntimeConfig()
     },
+    run:
+      <T>(body: () => Promise<T>) =>
+      async (): Promise<T> => {
+        const release = await acquireEnvLock()
+        saved = snapshotEnv(keys)
+        writeEnv(new Map(keys.map((key) => [key, hasOwn(initial, key) ? initial[key] : undefined])))
+        try {
+          return await body()
+        } finally {
+          writeEnv(saved)
+          release()
+        }
+      },
   }
 }

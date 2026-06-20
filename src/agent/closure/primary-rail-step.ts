@@ -14,6 +14,7 @@ export const buildPrimaryRailStep = (
 ): PrimaryRailStep | undefined => {
   if (step === null || step === undefined || step.cmd === "") return undefined
   return {
+    kind: step.kind,
     cmd: step.cmd,
     authority: step.authority ?? "execution",
     successPredicate: step.successPredicate ?? { type: "test_exit_zero" },

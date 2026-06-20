@@ -304,6 +304,7 @@ describe("CR-2 false-green killed (driver level)", () => {
     const AGENT_CMD = "node -e 'process.exit(0)'" // the agent's own (green) verify
     const RAIL_CMD = `python "/repro.py"` // the typed primary rail
     const rail: PrimaryRailStep = {
+      kind: "owner-test",
       cmd: RAIL_CMD,
       authority: "execution",
       successPredicate: { type: "selected_test_passes" },
@@ -347,6 +348,7 @@ describe("CR-2 false-green killed (driver level)", () => {
   test("(b') CONTROL: rail GREEN ⇒ round clears on the rail (proves (b)'s red is the rail, not a stuck loop)", async () => {
     const RAIL_CMD = `python "/repro.py"`
     const rail: PrimaryRailStep = {
+      kind: "owner-test",
       cmd: RAIL_CMD,
       authority: "execution",
       successPredicate: { type: "selected_test_passes" },

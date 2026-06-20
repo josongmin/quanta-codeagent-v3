@@ -35,7 +35,7 @@ const makeValidate = (passing: ReadonlySet<string>) => {
 }
 
 const railStep = (cmd: string) =>
-  ({ cmd, authority: "execution", successPredicate: { type: "test_exit_zero" } }) as const
+  ({ kind: "owner-test", cmd, authority: "execution", successPredicate: { type: "test_exit_zero" } }) as const
 
 const base = {
   config: { maxRounds: 1 },

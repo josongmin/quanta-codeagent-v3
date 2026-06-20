@@ -6,8 +6,8 @@ import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { runInstance } from "@/runner/batch/eval"
 import { classifyOutcome } from "@/runner/batch/eval/retry-policy"
 import type { Instance } from "@/runner/batch/types"
-import { scopedEnv } from "../_support/scoped-env"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
+import { scopedEnv } from "../_support/scoped-env"
 
 class NoopEndLLM implements LLMPort {
   async *stream(): AsyncIterable<StreamEvent> {
@@ -17,7 +17,7 @@ class NoopEndLLM implements LLMPort {
 }
 
 class ThrowLLM implements LLMPort {
-  async *stream(): AsyncIterable<StreamEvent> {
+  stream(): AsyncIterable<StreamEvent> {
     throw new Error("429 Too Many Requests")
   }
 }
@@ -58,17 +58,15 @@ describe("runner verify-select telemetry survives early terminal no-patch", () =
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "runner-verify-select-telemetry-"))
-    verifySelectEnv.beforeEach()
   })
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
-    verifySelectEnv.afterEach()
   })
 
   test.serial(
     "selectionTelemetry + reproOracleCalibration stay attached when verify-select has no submittable winner",
-    async () => {
+    verifySelectEnv.run(async () => {
       const corpusRoot = join(dir, "corpus")
       const obs = join(dir, "obs")
       await writeSyntheticCorpus(corpusRoot)
@@ -122,53 +120,58 @@ describe("runner verify-select telemetry survives early terminal no-patch", () =
         kind: "real-fail",
         subkind: "completed_unresolved",
       })
-    },
+    }),
   )
 
-  test.serial("all verify-select candidate generation failures stay generation-fail, not empty-patch", async () => {
-    const corpusRoot = join(dir, "corpus")
-    const obs = join(dir, "obs-all-fail")
-    await writeSyntheticCorpus(corpusRoot)
-    const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
-    const swebenchLike: Instance = {
-      ...base,
-      swebench: {
-        instanceId: "demo__runner-2",
-        repo: "demo/demo",
-        baseCommit: "0".repeat(40),
-      },
-    }
+  test.serial(
+    "all verify-select candidate generation failures stay generation-fail, not empty-patch",
+    verifySelectEnv.run(async () => {
+      const corpusRoot = join(dir, "corpus")
+      const obs = join(dir, "obs-all-fail")
+      await writeSyntheticCorpus(corpusRoot)
+      const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+      const swebenchLike: Instance = {
+        ...base,
+        swebench: {
+          instanceId: "demo__runner-2",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
 
-    const result = await runInstance(swebenchLike, {
-      ...DEPS,
-      llm: new ThrowLLM(),
-      observe: {
-        dir: obs,
-        runId: "run-vs-runner-all-fail",
-        now: (() => {
-          let ts = 1
-          return () => ts++
-        })(),
-      },
-    })
+      const result = await runInstance(swebenchLike, {
+        ...DEPS,
+        llm: new ThrowLLM(),
+        observe: {
+          dir: obs,
+          runId: "run-vs-runner-all-fail",
+          now: (() => {
+            let ts = 1
+            return () => ts++
+          })(),
+        },
+      })
 
-    expect(result.passed).toBe(false)
-    expect(result.patch).toBe("")
-    expect(result.error).toContain("verify-select candidate generation failed for all 2 candidates")
-    expect(result.selectionTelemetry?.attempted).toBe(2)
-    expect(result.selectionTelemetry?.successfulGenerations).toBe(0)
-    expect(result.selectionTelemetry?.generationFailures).toBe(2)
-    expect(result.selectionTelemetry?.generated).toBe(0)
-    expect(result.selectionTelemetry?.winnerId).toBeNull()
-    expect(classifyOutcome(result)).toEqual({
-      kind: "generation-fail",
-      reason: result.error as string,
-    })
-  })
+      expect(result.passed).toBe(false)
+      expect(result.patch).toBe("")
+      expect(result.error).toContain(
+        "verify-select candidate generation failed for all 2 candidates",
+      )
+      expect(result.selectionTelemetry?.attempted).toBe(2)
+      expect(result.selectionTelemetry?.successfulGenerations).toBe(0)
+      expect(result.selectionTelemetry?.generationFailures).toBe(2)
+      expect(result.selectionTelemetry?.generated).toBe(0)
+      expect(result.selectionTelemetry?.winnerId).toBeNull()
+      expect(classifyOutcome(result)).toEqual({
+        kind: "generation-fail",
+        reason: result.error as string,
+      })
+    }),
+  )
 
   test.serial(
     "verify-select no-winner preserves max_turns authority from the terminal candidate",
-    async () => {
+    verifySelectEnv.run(async () => {
       const corpusRoot = join(dir, "corpus")
       await writeSyntheticCorpus(corpusRoot)
       const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
@@ -194,6 +197,6 @@ describe("runner verify-select telemetry survives early terminal no-patch", () =
         kind: "real-fail",
         subkind: "max_turns_exhausted",
       })
-    },
+    }),
   )
 })
