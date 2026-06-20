@@ -117,9 +117,7 @@ describe("BenchStreamTap", () => {
         "uvx --python 3.8 --with pytest pytest tests/test_x.py -k repro",
       ),
     )
-    expect(tap.lastVerifyCmd).toBe(
-      "uvx --python 3.8 --with pytest pytest tests/test_x.py -k repro",
-    )
+    expect(tap.lastVerifyCmd).toBe("uvx --python 3.8 --with pytest pytest tests/test_x.py -k repro")
   })
 
   test("verify-shaped bash command comes from tool_result evidence, not tool_call text", () => {
@@ -216,20 +214,33 @@ describe("BenchStreamTap verify-pass (P0)", () => {
     ).toBe(0)
   })
 
+  test("test_runner ok:true but ANSI-colored FAIL output → does NOT fire", () => {
+    expect(
+      run([
+        toolCall("test_runner", {}),
+        toolResult(
+          "test_runner",
+          true,
+          "[31mFAIL[0m  tests/x.test.ts",
+          "vitest run tests/x.test.ts",
+        ),
+      ]).fired,
+    ).toBe(0)
+  })
+
   test("bash test-like command (pytest) PASS → fires", () => {
     expect(
       run([
         toolCall("bash", { command: "python -m pytest tests/x.py" }),
         toolResult("bash", true, "2 passed", "python -m pytest tests/x.py"),
-      ])
-        .fired,
+      ]).fired,
     ).toBe(1)
   })
 
   test("test_runner PASS without executedCommand evidence → does NOT fire", () => {
-    expect(run([toolCall("test_runner", {}), toolResult("test_runner", true, "2 passed")]).fired).toBe(
-      0,
-    )
+    expect(
+      run([toolCall("test_runner", {}), toolResult("test_runner", true, "2 passed")]).fired,
+    ).toBe(0)
   })
 
   test("bash background placeholder (ok:true, still running) → does NOT fire", () => {

@@ -52,7 +52,9 @@ describe("single-box guard hellgate", () => {
     })
     chmodSync(root, 0o555)
     try {
-      await expect(guard.release()).rejects.toThrow(/EACCES|EPERM|permission|operation not permitted/i)
+      await expect(guard.release()).rejects.toThrow(
+        /EACCES|EPERM|permission|operation not permitted/i,
+      )
     } finally {
       chmodSync(root, 0o755)
       await guard.release().catch(() => undefined)
@@ -82,5 +84,35 @@ describe("single-box guard hellgate", () => {
     } finally {
       await first.release().catch(() => undefined)
     }
+  })
+
+  test("a live guard re-creates its owner dir so external deletion cannot open a second launch lane", async () => {
+    const root = allocTempDir("bench-single-box-heartbeat-")
+    const dir = join(root, "guard")
+    const first = await acquireSingleBoxGuard({
+      label: "first",
+      dir,
+      heartbeatMs: 1_000,
+    })
+    let firstReleaseErr: unknown
+    try {
+      rmSync(dir, { recursive: true, force: true })
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 1_100)
+      })
+      await expect(
+        acquireSingleBoxGuard({
+          label: "second",
+          dir,
+        }),
+      ).rejects.toThrow(/single-box|owner/i)
+    } finally {
+      try {
+        await first.release()
+      } catch (err) {
+        firstReleaseErr = err
+      }
+    }
+    expect(firstReleaseErr).toBeUndefined()
   })
 })

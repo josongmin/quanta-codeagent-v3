@@ -188,8 +188,6 @@ describe("HELLGATE — recency semantics", () => {
 // ────────────────────────────────────────────────────────────────────────
 describe("HELLGATE — adversarial inputs", () => {
   test("cfg is an object with __proto__ injecting mustPass ⇒ NOT activated", () => {
-    // Object.create-based prototype injection cannot flip mustPass: we test
-    // for OWN property only via direct `===` comparison.
     const cfg = Object.create({ mustPass: true })
     const state = createVerifyGuardState()
     const v = decideVerifyGuard({
@@ -197,12 +195,35 @@ describe("HELLGATE — adversarial inputs", () => {
       cfg,
       state,
     })
-    // Behavior IS via the prototype because JS property access reads the
-    // chain. This test DOCUMENTS the prototype-read behavior; if security
-    // requires own-only it would need an explicit `Object.hasOwn` call.
-    // For now we ACCEPT prototype reads since the AgentConfig is constructed
-    // by trusted code paths.
-    expect(typeof v.block).toBe("boolean")
+    expect(v.block).toBe(false)
+    expect(state.trips).toBe(0)
+  })
+
+  test("prototype-injected maxTrips cannot zero out the default presence cap", () => {
+    const cfg = Object.create({ maxTrips: 0 })
+    const state = createVerifyGuardState()
+    const v = decideVerifyGuard({
+      history: h({ name: "edit" }),
+      cfg,
+      state,
+    })
+    expect(v.block).toBe(true)
+    expect(v.text).toBe(VERIFY_FORCE_MESSAGE)
+    expect(state.trips).toBe(1)
+  })
+
+  test("prototype-injected exactCommands cannot classify a non-test bash call as verify", () => {
+    const cmd = `node -e "process.exit(1)"`
+    const cfg = Object.create({ exactCommands: [cmd] as readonly string[] })
+    const state = createVerifyGuardState()
+    const v = decideVerifyGuard({
+      history: h({ name: "edit" }, { name: "bash", arg: cmd, ok: false }),
+      cfg,
+      state,
+    })
+    expect(v.block).toBe(true)
+    expect(v.text).toBe(VERIFY_FORCE_MESSAGE)
+    expect(state.trips).toBe(1)
   })
 
   test("mustPass: undefined (vs absent) treated as not-set ⇒ presence-only", () => {
@@ -297,6 +318,14 @@ describe("HELLGATE — ecosystem coverage at the gate", () => {
       expect(v.text).toBe(VERIFY_PASS_FORCE_MESSAGE)
     })
   }
+
+  test("gate blocks with ok:true + ANSI-colored failure output", () => {
+    const ansiFail = "[31mFAIL[0m  tests/foo.test.ts\n  ✕ does the thing"
+    expect(isVerifyOutputFailing("bash", "pytest", ansiFail)).toBe(true)
+    const v = verdictAfter({ name: "edit" }, { name: "test_runner", ok: true, output: ansiFail })
+    expect(v.block).toBe(true)
+    expect(v.text).toBe(VERIFY_PASS_FORCE_MESSAGE)
+  })
 
   const passingOutputs: Array<{ name: string; output: string }> = [
     { name: "pytest", output: "==================== 5 passed in 0.42s ====================" },

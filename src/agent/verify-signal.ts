@@ -170,6 +170,10 @@ export interface OutcomeFailureMatcher {
   readonly pattern: RegExp
 }
 
+const ANSI_CSI_RE = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
+
+const stripAnsiCsi = (output: string): string => output.replace(ANSI_CSI_RE, "")
+
 /**
  * Output-side failure registry. Each pattern targets a specific test-runner's
  * canonical failure summary, NOT a generic "error" keyword (which would over-
@@ -255,8 +259,10 @@ export const isVerifyOutputFailing = (
   output: string,
 ): boolean => {
   if (typeof output !== "string" || output.length === 0) return false
+  const normalized = stripAnsiCsi(output)
+  if (normalized.length === 0) return false
   for (const m of OUTCOME_FAILURE_MATCHERS) {
-    if (m.pattern.test(output)) return true
+    if (m.pattern.test(normalized)) return true
   }
   return false
 }

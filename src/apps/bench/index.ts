@@ -28,7 +28,7 @@
  *                                                  execution surface, live
  *                                                  runs default to the current
  *                                                  base profile
- *                                                  (`agentless-v3-thin`).
+ *                                                  (`agentless-v3-thin-strict`).
  *                                                  Individual QUANTA_BENCH_*
  *                                                  override. QUANTA_BENCH_SOTA=1
  *                                                  = alias for agentless-v1.

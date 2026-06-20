@@ -30,12 +30,12 @@ import {
   gradeChunkOnBox,
   provisionBox,
 } from "./box-session"
+import { acquireSingleBoxGuard, type SingleBoxGuard } from "./single-box-guard"
 import {
   acquirePatchGenBudgetLease,
   clampPatchGenConcurrency,
   resolveGlobalPatchGenBudget,
 } from "./token-budget"
-import { acquireSingleBoxGuard, type SingleBoxGuard } from "./single-box-guard"
 
 // Re-export the public surface so existing importers (tests + callers) keep
 // resolving these from "./full" after the box-session.ts extraction.
@@ -254,6 +254,94 @@ const logGrantedFullRemoteLease = (
   )
 }
 
+type FullRemoteLease = Awaited<ReturnType<typeof acquirePatchGenBudgetLease>>
+
+interface FullRemoteRunAttempt {
+  readonly lease: FullRemoteLease | undefined
+  readonly result: FullRemoteResult | undefined
+  readonly primaryErr: unknown
+}
+
+const runFullRemoteAttempt = async (args: {
+  readonly cfg: FullRemoteConfig
+  readonly preset: string
+  readonly model: string
+  readonly concurrency: number
+  readonly log: (msg: string) => void
+}): Promise<FullRemoteRunAttempt> => {
+  let lease: FullRemoteLease | undefined
+  try {
+    lease = await acquireFullRemoteLease(args.cfg, args.concurrency, args.log)
+    const effectiveConcurrency = clampPatchGenConcurrency(lease.units)
+    logGrantedFullRemoteLease(lease, effectiveConcurrency, args.log)
+    const session = await attachOrProvisionFullRemoteBox(args.cfg)
+    return {
+      lease,
+      result: await runSingleFullRemoteChunk({
+        session,
+        cfg: args.cfg,
+        preset: args.preset,
+        model: args.model,
+        concurrency: effectiveConcurrency,
+        onLog: args.log,
+      }),
+      primaryErr: undefined,
+    }
+  } catch (err) {
+    return { lease, result: undefined, primaryErr: err }
+  }
+}
+
+const mergeFullRemoteCleanupError = (earlier: unknown, later: unknown): Error =>
+  new Error(
+    `[full-remote] cleanup failed in multiple phases: earlier=${errMessage(earlier)}; later=${errMessage(later)}`,
+  )
+
+const releaseFullRemoteResources = async (args: {
+  readonly lease: FullRemoteLease | undefined
+  readonly guard: SingleBoxGuard | undefined
+  readonly log: (msg: string) => void
+}): Promise<unknown> => {
+  let cleanupErr: unknown
+  if (args.lease !== undefined) {
+    try {
+      await args.lease.release()
+      args.log(
+        `[full-remote] released global patch-gen budget lease (${args.lease.units} token(s))`,
+      )
+    } catch (err) {
+      cleanupErr = err
+    }
+  }
+  try {
+    await args.guard?.release()
+  } catch (err) {
+    cleanupErr = cleanupErr === undefined ? err : mergeFullRemoteCleanupError(cleanupErr, err)
+  }
+  return cleanupErr
+}
+
+const finalizeFullRemoteRun = (args: {
+  readonly result: FullRemoteResult | undefined
+  readonly primaryErr: unknown
+  readonly cleanupErr: unknown
+}): FullRemoteResult => {
+  if (args.primaryErr !== undefined) {
+    if (args.cleanupErr !== undefined) {
+      throw new Error(
+        `[full-remote] run failed and cleanup failed: primary=${errMessage(args.primaryErr)}; ` +
+          `cleanup=${errMessage(args.cleanupErr)}`,
+      )
+    }
+    throw args.primaryErr
+  }
+  if (args.cleanupErr !== undefined) throw args.cleanupErr
+  if (args.result === undefined) {
+    throw new Error("[full-remote] internal error: run completed without result or error")
+  }
+  return args.result
+}
+
 const attachOrProvisionFullRemoteBox = async (cfg: FullRemoteConfig): Promise<BoxSession> => {
   const idle = await findIdleBox(cfg).catch(() => undefined)
   if (idle !== undefined) return attachBox(cfg, idle)
@@ -349,33 +437,17 @@ export const createFullRemoteBackend = (
   const run = async (): Promise<FullRemoteResult> => {
     if (cfg.dryRun) return { dryRun: true, plan: dryRunPlan(cfg) }
     const guard = await acquireFullRemoteSingleBoxGuard(cfg)
-    let lease: Awaited<ReturnType<typeof acquirePatchGenBudgetLease>> | undefined
-    try {
-      lease = await acquireFullRemoteLease(cfg, concurrency, log)
-      const effectiveConcurrency = clampPatchGenConcurrency(lease.units)
-      logGrantedFullRemoteLease(lease, effectiveConcurrency, log)
-      const session = await attachOrProvisionFullRemoteBox(cfg)
-      return await runSingleFullRemoteChunk({
-        session,
-        cfg,
-        preset,
-        model,
-        concurrency: effectiveConcurrency,
-        onLog: log,
-      })
-    } finally {
-      let leaseReleaseErr: unknown
-      if (lease !== undefined) {
-        try {
-          await lease.release()
-          log(`[full-remote] released global patch-gen budget lease (${lease.units} token(s))`)
-        } catch (err) {
-          leaseReleaseErr = err
-        }
-      }
-      await guard?.release()
-      if (leaseReleaseErr !== undefined) throw leaseReleaseErr
-    }
+    const attempt = await runFullRemoteAttempt({ cfg, preset, model, concurrency, log })
+    const cleanupErr = await releaseFullRemoteResources({
+      lease: attempt.lease,
+      guard,
+      log,
+    })
+    return finalizeFullRemoteRun({
+      result: attempt.result,
+      primaryErr: attempt.primaryErr,
+      cleanupErr,
+    })
   }
 
   return { run }

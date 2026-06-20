@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+  isTestLikeCommand,
   isVerifyOutputFailing,
   isVerifySignalCommand,
-  isTestLikeCommand,
   matchesExactVerifyCommand,
   matchVerifyCommand,
   OUTCOME_FAILURE_MATCHERS,
@@ -96,7 +96,7 @@ describe("verify-signal — isTestLikeCommand / matchVerifyCommand", () => {
   })
 
   test("exact allowlist normalizes trivial whitespace drift", () => {
-    const authoritative = "node -e \"process.exit(0)\""
+    const authoritative = 'node -e "process.exit(0)"'
     expect(matchesExactVerifyCommand(`  node   -e   "process.exit(0)"  `, [authoritative])).toBe(
       true,
     )

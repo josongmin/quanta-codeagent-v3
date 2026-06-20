@@ -8,7 +8,7 @@
  *  - the pool consumes the produced chunks unchanged.
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assertUniqueChunkRunIds } from "../../src/apps/bench/remote/pool"
@@ -21,7 +21,9 @@ import {
 const row = (id: string): string =>
   JSON.stringify({ instance_id: id, repo: "demo/repo", base_commit: "0".repeat(40) })
 
-const DATASET = [row("django__django-1"), row("sklearn__sklearn-2"), row("sympy__sympy-3")].join("\n")
+const DATASET = [row("django__django-1"), row("sklearn__sklearn-2"), row("sympy__sympy-3")].join(
+  "\n",
+)
 
 describe("T-4 planMicrochunks (pure)", () => {
   test("chunkSize=1 ⇒ one instance per chunk, order preserved", () => {
@@ -46,8 +48,12 @@ describe("T-4 planMicrochunks (pure)", () => {
     expect(ids[8]).toMatch(/^big-09-/)
     expect(ids[9]).toMatch(/^big-10-/)
     // and zero-padding makes lexicographic sort == run order even when SHUFFLED
-    const shuffled = [ids[5], ids[0], ids[11], ids[2]].filter((x): x is string => x !== undefined)
-    expect([...shuffled].sort()).toEqual([ids[0], ids[2], ids[5], ids[11]])
+    const at = (i: number): string => {
+      const v = ids[i]
+      if (v === undefined) throw new Error(`missing id ${i}`)
+      return v
+    }
+    expect([at(5), at(0), at(11), at(2)].sort()).toEqual([at(0), at(2), at(5), at(11)])
     for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]+$/) // no slashes/spaces
   })
 
@@ -94,7 +100,9 @@ describe("T-4 writeMicrochunks (filesystem) ↔ pool", () => {
       expect(chunks.length).toBe(3)
       // the pool's own uniqueness guard accepts them unchanged
       expect(() =>
-        assertUniqueChunkRunIds(chunks.map((c) => ({ runId: c.runId, datasetPath: c.datasetPath }))),
+        assertUniqueChunkRunIds(
+          chunks.map((c) => ({ runId: c.runId, datasetPath: c.datasetPath })),
+        ),
       ).not.toThrow()
       // each slice file holds exactly its instance line(s) — and zero auth bytes
       for (const c of chunks) {

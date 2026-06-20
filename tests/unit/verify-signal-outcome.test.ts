@@ -195,10 +195,7 @@ describe("isVerifyOutputFailing — false-positive guards", () => {
   })
 
   test("ANSI escape codes around `FAILED` still matched ⇒ true", () => {
-    // The matcher is line-anchored on `FAILED\s+\S` — ANSI codes between
-    // FAILED and the path break the anchor. Document the trade-off: we
-    // would rather UNDER-match on ANSI than over-match on prose.
-    expect(probe("[31mFAIL[0m  tests/foo.test.ts")).toBe(false)
+    expect(probe("[31mFAIL[0m  tests/foo.test.ts")).toBe(true)
   })
 })
 

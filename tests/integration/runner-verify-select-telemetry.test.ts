@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BudgetMeter } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { runInstance } from "@/runner/batch/eval"
+import { BenchObserver } from "@/runner/batch/eval/driver"
 import { classifyOutcome } from "@/runner/batch/eval/retry-policy"
 import type { Instance } from "@/runner/batch/types"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
@@ -169,6 +170,25 @@ const verifySelectEnv = scopedEnv(
   },
 )
 
+const verifySelectDiagnosticEnv = scopedEnv(
+  [
+    "QUANTA_BENCH_VERIFY_SELECT",
+    "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
+    "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
+    "QUANTA_BENCH_VERIFY_SELECT_REPRO",
+    "QUANTA_BENCH_PATCH_BUDGET",
+    "QUANTA_BENCH_PATCH_HYGIENE",
+  ],
+  {
+    QUANTA_BENCH_VERIFY_SELECT: "2",
+    QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT: undefined,
+    QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
+    QUANTA_BENCH_VERIFY_SELECT_REPRO: "positive",
+    QUANTA_BENCH_PATCH_BUDGET: "1",
+    QUANTA_BENCH_PATCH_HYGIENE: "1",
+  },
+)
+
 describe("runner verify-select telemetry survives early terminal no-patch", () => {
   let dir: string
 
@@ -236,6 +256,71 @@ describe("runner verify-select telemetry survives early terminal no-patch", () =
         kind: "real-fail",
         subkind: "completed_unresolved",
       })
+    }),
+  )
+
+  test.serial(
+    "ADVERSARIAL: late strict observation degradation preserves verify-select telemetry",
+    verifySelectDiagnosticEnv.run(async () => {
+      const corpusRoot = join(dir, "corpus")
+      const obs = join(dir, "obs-degraded")
+      const patchGeneratedSpy = spyOn(BenchObserver.prototype, "patchGenerated").mockImplementation(
+        () => {
+          throw new Error("patch event sink failed")
+        },
+      )
+      try {
+        await writeSyntheticCorpus(corpusRoot)
+        const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+        const swebenchLike: Instance = {
+          ...base,
+          swebench: {
+            instanceId: "demo__runner-observation-selection",
+            repo: "demo/demo",
+            baseCommit: "0".repeat(40),
+          },
+        }
+
+        const result = await runInstance(swebenchLike, {
+          ...DEPS,
+          llm: new NoopEndLLM(),
+          observe: {
+            dir: obs,
+            runId: "run-vs-runner-degraded",
+            now: (() => {
+              let ts = 1
+              return () => ts++
+            })(),
+          },
+        })
+
+        expect(result.passed).toBe(false)
+        expect(result.verdict).toBe("degraded")
+        expect(result.stopReason).toBe("completed")
+        expect(result.selectionTelemetry?.attempted).toBe(2)
+        expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
+        expect(result.selectionTelemetry?.generationFailures).toBe(0)
+        expect(result.selectionTelemetry?.winnerId).toBeNull()
+        expect(result.patchBudget?.withinBudget).toBe(true)
+        expect(result.patchHygiene).toEqual({
+          patchFileCount: 0,
+          addedFiles: [],
+          filesOutsideOwner: [],
+          strayAddedFiles: [],
+          violation: false,
+        })
+        expect(result.outOfScopeFiles).toBe(false)
+        expect(result.reproOracleCalibration).toEqual({
+          goldCalibrated: false,
+          falseNegative: false,
+          available: false,
+          goldVotes: null,
+          goldK: null,
+        })
+        expect(result.error).toContain("observation failed (strict)")
+      } finally {
+        patchGeneratedSpy.mockRestore()
+      }
     }),
   )
 

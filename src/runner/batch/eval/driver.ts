@@ -2226,9 +2226,7 @@ const okResult = (
   v: { passed: boolean; error?: string },
   extra: Partial<InstanceResult>,
 ): InstanceResult => {
-  const keepTerminalAuthority =
-    phase.stopReason !== "error" &&
-    phase.stopReason !== "refusal"
+  const keepTerminalAuthority = phase.stopReason !== "error" && phase.stopReason !== "refusal"
   return {
     id: instance.id,
     passed: v.passed,
@@ -2837,6 +2835,74 @@ const attachSelectionAndClosureArtifacts = (args: {
   }
 }
 
+const attachLateFailureArtifacts = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+}): void => {
+  attachClosureMetrics({ extra: args.extra, phase: args.phase, prepared: args.prepared })
+  attachSelectionAndClosureArtifacts({
+    extra: args.extra,
+    instance: args.instance,
+    sandbox: args.sandbox,
+    phase: args.phase,
+    prepared: args.prepared,
+  })
+}
+
+export const latePhaseFailureResultOf = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly error: string
+  readonly verdict?: InstanceResult["verdict"]
+  readonly prepared?: PreparedAttemptContext
+  readonly sandbox?: string
+}): InstanceResult => {
+  const extra: Partial<InstanceResult> = {
+    ...reproResultExtra(args.reproTest),
+    ...(args.phase.stopReason !== undefined ? { stopReason: args.phase.stopReason } : {}),
+    ...(args.phase.firstEditFile !== undefined ? { firstEditFile: args.phase.firstEditFile } : {}),
+    ...(args.phase.editCount !== undefined ? { editCount: args.phase.editCount } : {}),
+    ...(args.phase.turnsToFirstEdit !== undefined
+      ? { turnsToFirstEdit: args.phase.turnsToFirstEdit }
+      : {}),
+    ...(args.phase.primaryFalseGreen !== undefined
+      ? { primaryFalseGreen: args.phase.primaryFalseGreen }
+      : {}),
+    ...(args.phase.primaryFalseRed !== undefined
+      ? { primaryFalseRed: args.phase.primaryFalseRed }
+      : {}),
+    ...(args.phase.verifyRounds !== undefined ? { verifyRounds: args.phase.verifyRounds } : {}),
+    ...(args.phase.reproOracleCalibration !== undefined
+      ? { reproOracleCalibration: args.phase.reproOracleCalibration }
+      : {}),
+    ...(args.phase.selectionTelemetry !== undefined
+      ? { selectionTelemetry: args.phase.selectionTelemetry }
+      : {}),
+  }
+  if (args.prepared !== undefined && args.sandbox !== undefined) {
+    attachLateFailureArtifacts({
+      extra,
+      instance: args.instance,
+      sandbox: args.sandbox,
+      phase: args.phase,
+      prepared: args.prepared,
+    })
+  }
+  return {
+    id: args.instance.id,
+    passed: false,
+    patch: args.phase.patch,
+    turns: args.phase.turns,
+    ...extra,
+    ...(args.verdict !== undefined ? { verdict: args.verdict } : {}),
+    error: args.error,
+  }
+}
+
 const buildSuccessfulResultExtra = (args: {
   readonly instance: Instance
   readonly sandbox: string
@@ -2919,13 +2985,15 @@ export const runInstanceOnce = async (
   let phase: Phase = { patch: "", turns: 0 }
   let w: Wiring = { stream: new NullStream() }
   let reproTest: BenchReproTestTelemetry | undefined
+  let prepared: PreparedAttemptContext | undefined
   try {
     w = buildWiring(instance, deps.observe)
     await copyRepo(instance, sandbox)
     const prep = await runEnvPrep(instance, sandbox, deps.timeoutMs)
     if (!prep.ok) return envPrepFailedResult(instance, prep)
-    const prepared = await prepareAttemptContext(instance, sandbox, deps, abort.signal)
-    reproTest = prepared.reproTest
+    prepared = await prepareAttemptContext(instance, sandbox, deps, abort.signal)
+    const preparedContext = prepared
+    reproTest = preparedContext.reproTest
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
     phase = await runMainPhase({
       instance,
@@ -2933,7 +3001,7 @@ export const runInstanceOnce = async (
       sandbox,
       signal: abort.signal,
       wiring: w,
-      prepared,
+      prepared: preparedContext,
     })
     const terminal = await maybeValidateTerminalResult({
       instance,
@@ -2952,8 +3020,8 @@ export const runInstanceOnce = async (
       deps,
       wiring: w,
       startedAt,
-      posture: prepared.posture,
-      closureSession: prepared.closureSession,
+      posture: preparedContext.posture,
+      closureSession: preparedContext.closureSession,
     })
     if (strictBudgetBlocked !== undefined) return strictBudgetBlocked
     // Await inside the try so sandbox cleanup in `finally` cannot race the
@@ -2968,30 +3036,26 @@ export const runInstanceOnce = async (
       reproTest,
       wiring: w,
       startedAt,
-      prepared,
+      prepared: preparedContext,
     })
   } catch (e) {
     if (e instanceof ObservationError) {
-      return {
-        id: instance.id,
-        passed: false,
-        patch: phase.patch,
-        turns: phase.turns,
-        ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
+      return latePhaseFailureResultOf({
+        instance,
+        phase,
+        reproTest,
         verdict: "degraded",
         error: `observation failed (strict): ${e.message}`,
-        ...reproResultExtra(reproTest),
-      }
+        ...(prepared !== undefined ? { prepared, sandbox } : {}),
+      })
     }
-    return {
-      id: instance.id,
-      passed: false,
-      patch: phase.patch,
-      turns: phase.turns,
-      ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
+    return latePhaseFailureResultOf({
+      instance,
+      phase,
+      reproTest,
       error: errMessage(e),
-      ...reproResultExtra(reproTest),
-    }
+      ...(prepared !== undefined ? { prepared, sandbox } : {}),
+    })
   } finally {
     if (deadline !== undefined) clearTimeout(deadline)
     w.observer?.close()

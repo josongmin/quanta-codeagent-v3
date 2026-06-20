@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises"
+import { mkdir, readdir, rm, stat, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
+import { asPositiveInt, atomicWriteJson, parseIsoMs, processAlive, readJson, sleepReal } from "./lease-fs"
 
 export interface PatchGenBudgetLease {
   readonly leaseId: string
@@ -89,16 +91,6 @@ const LOCK_META = "owner.json"
 /** Budget waits are owner liveness, not background telemetry.
  *  `unref()` here let a waiter/lease-holder vanish between polls/heartbeats,
  *  silently dropping the budget record while work was still outstanding. */
-const sleepReal = (ms: number): Promise<void> =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms)
-  })
-
-const asPositiveInt = (raw: number, fallback: number): number => {
-  const n = Math.trunc(raw)
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
 export const clampPatchGenConcurrency = (raw: number): number =>
   Math.max(1, Math.min(16, Math.trunc(raw) || 1))
 
@@ -112,36 +104,10 @@ export const resolvePatchGenBudgetDir = (): string =>
   process.env.QUANTA_BENCH_TOKEN_BUDGET_DIR?.trim() ||
   join(homedir(), ".quanta", "bench-token-budget")
 
-const parseIsoMs = (value: string): number | undefined => {
-  const ms = Date.parse(value)
-  return Number.isFinite(ms) ? ms : undefined
-}
-
-const processAlive = (pid: number): boolean => {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
 const leasePath = (dir: string, leaseId: string): string => join(dir, `${leaseId}${LEASE_SUFFIX}`)
 
-const atomicWriteJson = async (path: string, value: unknown): Promise<void> => {
-  const tmp = `${path}.${randomUUID()}.tmp`
-  await writeFile(tmp, `${JSON.stringify(value)}\n`)
-  await rename(tmp, path)
-}
-
-const readJson = async <T>(path: string): Promise<T | undefined> => {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T
-  } catch {
-    return undefined
-  }
-}
+const invalidLeaseRecordError = (path: string): Error =>
+  new Error(`[budget] invalid lease record at ${path}; refusing to ignore accounting`)
 
 const isLeaseRecord = (value: unknown): value is PatchGenBudgetLeaseRecord => {
   if (value === null || typeof value !== "object") return false
@@ -191,15 +157,17 @@ const listLeaseRecords = async (
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
   const records: PatchGenBudgetLeaseRecord[] = []
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(LEASE_SUFFIX)) continue
+    if (!entry.name.endsWith(LEASE_SUFFIX)) continue
     const path = join(dir, entry.name)
+    if (!entry.isFile()) {
+      throw invalidLeaseRecordError(path)
+    }
     const parsed = await readJson<unknown>(path)
     if (!isLeaseRecord(parsed)) {
-      if (prune) await unlink(path).catch(() => undefined)
-      continue
+      throw invalidLeaseRecordError(path)
     }
     if (leaseIsStale(parsed, nowMs, staleLeaseMs)) {
-      if (prune) await unlink(path).catch(() => undefined)
+      if (prune) await unlink(path)
       continue
     }
     records.push(parsed)
@@ -259,7 +227,8 @@ const lockLooksStale = async (
         ? Math.max(0, nowMs - lockStat.mtimeMs)
         : Number.POSITIVE_INFINITY
   if (ageMs <= staleLockMs) return false
-  return ownerPid === undefined || !processAlive(ownerPid)
+  if (ownerPid === undefined) return false
+  return !processAlive(ownerPid)
 }
 
 const acquireMutationLock = async (opts: MutationLockOptions): Promise<() => Promise<void>> => {
@@ -274,13 +243,13 @@ const acquireMutationLock = async (opts: MutationLockOptions): Promise<() => Pro
         acquiredAt: new Date(opts.now()).toISOString(),
       })
       return async (): Promise<void> => {
-        await rm(lockDir, { recursive: true, force: true }).catch(() => undefined)
+        await rm(lockDir, { recursive: true, force: true })
       }
     } catch (err) {
       const code = (err as { code?: string }).code
       if (code !== "EEXIST") throw err
       if (await lockLooksStale(opts.dir, opts.now(), opts.staleLockMs)) {
-        await rm(lockDirPath(opts.dir), { recursive: true, force: true }).catch(() => undefined)
+        await rm(lockDirPath(opts.dir), { recursive: true, force: true })
         continue
       }
       if (opts.waitMs > 0 && opts.now() - startMs >= opts.waitMs) {
@@ -354,6 +323,9 @@ export const acquirePatchGenBudgetLease = async (
         }
         await atomicWriteJson(leasePath(dir, leaseId), record)
         let released = false
+        let leaseDeleted = false
+        let pendingUnlock: (() => Promise<void>) | undefined
+        let releaseInFlight: Promise<void> | undefined
         const touch = async (): Promise<void> => {
           if (released) return
           await atomicWriteJson(leasePath(dir, leaseId), {
@@ -361,10 +333,17 @@ export const acquirePatchGenBudgetLease = async (
             heartbeatAt: new Date(now()).toISOString(),
           })
         }
-        const heartbeat = setInterval(() => {
+        let heartbeat = setInterval(() => {
           void touch().catch(() => undefined)
         }, heartbeatMs)
-        heartbeat.unref?.()
+        const startHeartbeat = (): void => {
+          heartbeat = setInterval(() => {
+            void touch().catch(() => undefined)
+          }, heartbeatMs)
+        }
+        const stopHeartbeat = (): void => {
+          clearInterval(heartbeat)
+        }
         return {
           leaseId,
           label: opts.label,
@@ -374,20 +353,56 @@ export const acquirePatchGenBudgetLease = async (
           dir,
           release: async (): Promise<void> => {
             if (released) return
-            released = true
-            clearInterval(heartbeat)
-            const unlock = await acquireMutationLock({
-              dir,
-              waitMs,
-              pollMs,
-              staleLockMs,
-              now,
-              sleep,
-            })
+            if (releaseInFlight !== undefined) return releaseInFlight
+            releaseInFlight = (async (): Promise<void> => {
+              if (pendingUnlock === undefined) {
+                pendingUnlock = await acquireMutationLock({
+                  dir,
+                  waitMs,
+                  pollMs,
+                  staleLockMs,
+                  now,
+                  sleep,
+                })
+              }
+              stopHeartbeat()
+              let unlinkErr: unknown
+              if (!leaseDeleted) {
+                try {
+                  await unlink(leasePath(dir, leaseId))
+                  leaseDeleted = true
+                } catch (err) {
+                  unlinkErr = err
+                }
+              }
+              let unlockErr: unknown
+              if (pendingUnlock !== undefined) {
+                try {
+                  await pendingUnlock()
+                  pendingUnlock = undefined
+                } catch (err) {
+                  unlockErr = err
+                }
+              }
+              if (unlockErr !== undefined) {
+                if (!leaseDeleted) startHeartbeat()
+                if (unlinkErr !== undefined) {
+                  throw new Error(
+                    `[budget] release failed for ${leaseId}: primary=${errMessage(unlinkErr)}; cleanup=${errMessage(unlockErr)}`,
+                  )
+                }
+                throw unlockErr
+              }
+              if (unlinkErr !== undefined) {
+                startHeartbeat()
+                throw unlinkErr
+              }
+              released = true
+            })()
             try {
-              await unlink(leasePath(dir, leaseId))
+              await releaseInFlight
             } finally {
-              await unlock()
+              releaseInFlight = undefined
             }
           },
         }

@@ -1,58 +1,71 @@
 # Jun-20 Bug Bash — 6/16~6/17 변경 파일 적대 어딧
 
 > 9-클러스터 병렬 어딧 워크플로우 결과. 6/16~6/17 커밋 52개 + 미커밋 WIP 대상.
-> 각 finding은 독립 skeptic verifier로 적대 재검증함. **37 raw → 4 false-positive 드롭 → 33 confirmed.**
-> 살아남은 HIGH 0개 (검증이 high 4개 중 2개를 med로 강등, 2개를 FP/none으로 기각).
+> 각 finding은 독립 skeptic verifier로 적대 재검증함.
+> **33건 surfaced = 31 actionable + 2 none-retained**
+> (raw 37 → 적대 검증으로 4건 false-positive 드롭 → 33 surfaced. 그중 2건은 검증이 corrected_severity=none으로 깎은 retained-note라 actionable 아님.)
+> 살아남은 HIGH 0개 (검증이 high 4건 중 2건을 med로 강등, 2건을 FP/none으로 기각).
 
-생성: 2026-06-20 · 워크플로우 `jun16-17-adversarial-audit` (run `wf_3382e300-4ae`)
+## Snapshot (재현 기준)
+
+| 항목 | 값 |
+|------|----|
+| Audited commit | `8b3f5371` (`8b3f537139da90e82fb1ca474828c7dd68e685a1`) |
+| Branch | `main` |
+| Worktree at audit | dirty WIP (그 후 위 커밋으로 커밋됨) |
+| Worktree now (pin) | clean = `true` |
+| Workflow run | `wf_3382e300-4ae` |
+
+> 모든 `file:line` 인용은 **위 핀 커밋 기준**으로 유도됨 (`git show 8b3f5371:<file>` 에서 unique anchor 탐색).
+> 라인은 손으로 적지 않고 SSOT JSON의 anchor에서 파생되며, `tests/unit/bugbash-doc-integrity-hellgate.test.ts` 가 doc↔코드 정합을 강제한다.
+> Audit ran against a dirty WIP working tree; those WIP files are now committed into the pinned HEAD. Citations are resolved against this pinned commit, not the live tree.
 
 ## 요약
 
-| 등급 | 개수 |
-|------|------|
-| 🟠 MED | 7 |
-| 🟡 LOW | 24 |
-| ⚪ NONE | 2 |
-
-**무효(none)** = 검증이 corrected_severity=none으로 깎음(by-design 또는 consequence 반증). 참고용으로만 남김.
+| 등급 | 개수 | 의미 |
+|------|------|------|
+| 🟠 MED | 7 | actionable |
+| 🟡 LOW | 24 | actionable |
+| ⚪ NONE | 2 | retained-note (검증이 by-design/consequence-반증으로 기각; 참고용) |
+| **actionable 합** | **31** | |
 
 ## 인덱스
 
-| # | 등급 | 분류 | 파일 | 제목 |
+| # | 등급 | 분류 | 인용 (pinned) | 제목 |
 |---|------|------|------|------|
-| [1](#1) | 🟠 med | dead-code | `agent/primary-rail/index.ts` | decidePrimaryRailFinishGate (the documented false-green killer) has ZERO production callers |
-| [2](#2) | 🟠 med | correctness | `permission/permission-store.ts` | mergeWithDisk callback reassigns live `state` from a pre-await snapshot, dropping mutations that interleave during the flush IO window |
-| [3](#3) | 🟠 med | silent-failure | `apps/bench/analyze/cost.ts` | Cost fallback sums only the FIRST attempt's tokens for Best-of-N runs (undercount) |
-| [4](#4) | 🟠 med | silent-failure | `agent/lsp-bridge.ts` | Availability probe caches a transient failure as a permanent process-wide 'LSP dead' |
-| [5](#5) | 🟠 med | silent-failure | `apps/bench/remote/ec2.ts` | ensureSecurityGroup treats a describe FAILURE (network/creds) as 'SG not found' and tries to create |
-| [6](#6) | 🟠 med | silent-failure | `apps/bench/eval/driver.ts` | Production SDK driver never emits `knobs_applied` telemetry (split-brain with runner driver) |
-| [7](#7) | 🟠 med | efficiency | `runner/batch/eval/selection-executor.ts` | earlyAccept re-runs every hard-gate probe twice per candidate (double pytest/repro materialization) |
-| [8](#8) | 🟡 low | silent-failure | `runner/batch/eval/closure-session.ts` | Gate stakes/uncertainty signals hard-coded to false at the only assembly site, neutering the anti-under-verify arm |
-| [9](#9) | 🟡 low | dead-code | `runner/batch/eval/driver.ts` | decideEscalation result is computed post-repair and only stored as telemetry; never widens the search |
-| [10](#10) | 🟡 low | silent-failure | `agent/verification-plan/extract-issue-declared-expected.ts` | EXPECT_RE pre-gate is strictly narrower than EXPECT_LITERAL_RE, silently dropping valid declared outputs |
-| [11](#11) | 🟡 low | jank | `agent/verification-plan/extract-issue-declared-expected.ts` | Comment claims EXPECT_RE pre-check is a harmless intent-marker, but it actively suppresses matches |
-| [12](#12) | 🟡 low | efficiency | `observability/metrics/in-memory-registry.ts` | snapshot() is O(series) allocation on every call and the `series` Map has no per-metric series cap |
-| [13](#13) | 🟡 low | silent-failure | `observability/metrics/in-memory-registry.ts` | Sink send/flush failures are silently swallowed with no rate-limited error counter |
-| [14](#14) | 🟡 low | dead-code | `runner/batch/eval/knobs-bench.ts` | `sotaOn` posture field is computed but has zero production consumers (dead telemetry field) |
-| [15](#15) | 🟡 low | jank | `T:unit/bench-sota-preset-hellgate.test.ts` | SOTA hellgate test comments describe a `sotaOn ||` / `sotaOn ? :` composition that no longer exists in benchPostureFromState (stale red-on-injection claims, lost teeth) |
-| [16](#16) | 🟡 low | jank | `config/knob-inventory.ts` | readSite for the 8 NOOP-bench closure knobs points at the NOOP knob-declaration file, not the effect site (driver.ts), so /knobs mis-routes an operator debugging 'why is this on' |
-| [17](#17) | 🟡 low | efficiency | `apps/bench/index.ts` | Dataset JSONL parsed 3× per run (and again for dry-run plan) |
-| [18](#18) | 🟡 low | jank | `apps/bench/cli.ts` | --max-workers accepts negative / zero and ships it verbatim to remote --max_workers |
-| [19](#19) | 🟡 low | correctness | `apps/bench/cli.ts` | --skip-resolved casts resolved_ids to string[] without filtering non-strings |
-| [20](#20) | 🟡 low | correctness | `agent/lsp-bridge.ts` | Hand-rolled `uri.replace(/^file:\/\//,"")` mishandles URL-encoded paths instead of using fileURLToPath |
-| [21](#21) | 🟡 low | silent-failure | `agent/lsp-bridge.ts` | Import-probe line cap silently marks a file 'verified-ready' when imports live past line 200 |
-| [22](#22) | 🟡 low | dead-code | `apps/bench/remote/pool.ts` | Unreachable lease-release after handleChunkBudgetWaitError (which is `: never`) |
-| [23](#23) | 🟡 low | correctness | `apps/bench/remote/box-session.ts` | runId flows unquoted into remote ssh commands with no boundary sanitization (shell-injection defense-in-depth gap) |
-| [24](#24) | 🟡 low | correctness | `apps/bench/remote/box-session.ts` | stripToAccessToken silently drops account fields whose absence may make the shipped token unusable, only guarding access_token |
-| [25](#25) | 🟡 low | silent-failure | `apps/bench/auth-pool/load.ts` | defaultAuthFile falls back to filesystem root when HOME is unset |
-| [26](#26) | 🟡 low | god-code | `apps/bench/remote/box-session.ts` | gradeChunkOnBox + box-session.ts is a 600+ line module mixing lifecycle, snapshot telemetry, brittle remote python probe, verdict parsing, and command construction |
-| [27](#27) | 🟡 low | duplication | `apps/bench/eval/driver.ts` | Two drivers diverged: production apps driver has tentative-patch retention the runner driver lacks |
-| [28](#28) | 🟡 low | correctness | `runner/batch/eval/closure-diagnostics-io.ts` | `endReasonOf` ignores `InstanceResult.stopReason`, so `no_patch_exhausted_rate` is ~always 0 for single-attempt runs |
-| [29](#29) | 🟡 low | correctness | `runner/batch/eval/verdict.ts` | "0 passed" summary grades a zero-test / SIGTERM'd run as PASS |
-| [30](#30) | 🟡 low | correctness | `runner/batch/eval/verdict.ts` | generic error/failure-count failure matcher can flip a real PASS to fail-closed on incidental output |
-| [31](#31) | 🟡 low | jank | `agent/verification-bundle/score.ts` | voterQuorum soft signal silently clamps votes/k > 1 to 1, conflating super-quorum with exact quorum |
-| [32](#32) | ⚪ none | dead-code | `runner/batch/eval/repair-phase-policy.ts` | primaryRailState can only be 'red' or 'unrun' at this call site, making decideRepairAdmission's 'already green' guard unreachable here |
-| [33](#33) | ⚪ none | correctness | `apps/bench/eval/driver.ts` | Apps `runInstance` budget telemetry reports adaptedTimeoutMs == base even though it deliberately does not adapt |
+| [1](#1) | 🟠 med | dead-code | `src/agent/primary-rail/index.ts:74` | decidePrimaryRailFinishGate (the documented false-green killer) has ZERO production callers |
+| [2](#2) | 🟠 med | correctness | `src/permission/permission-store.ts:775` | mergeWithDisk callback reassigns live `state` from a pre-await snapshot, dropping mutations that interleave during the flush IO window |
+| [3](#3) | 🟠 med | silent-failure | `src/apps/bench/analyze/cost.ts:96` | Cost fallback sums only the FIRST attempt's tokens for Best-of-N runs (undercount) |
+| [4](#4) | 🟠 med | silent-failure | `src/agent/lsp-bridge.ts:170` | Availability probe caches a transient failure as a permanent process-wide 'LSP dead' |
+| [5](#5) | 🟠 med | silent-failure | `src/apps/bench/remote/ec2.ts:137` | ensureSecurityGroup treats a describe FAILURE (network/creds) as 'SG not found' and tries to create |
+| [6](#6) | 🟠 med | silent-failure | `src/apps/bench/eval/driver.ts:287` | Production SDK driver never emits `knobs_applied` telemetry (split-brain with runner driver) |
+| [7](#7) | 🟠 med | efficiency | `src/runner/batch/eval/selection-executor.ts:404` | earlyAccept re-runs every hard-gate probe twice per candidate (double pytest/repro materialization) |
+| [8](#8) | 🟡 low | silent-failure | `src/runner/batch/eval/closure-session.ts:59` | Gate stakes/uncertainty signals hard-coded to false at the only assembly site, neutering the anti-under-verify arm |
+| [9](#9) | 🟡 low | dead-code | `src/runner/batch/eval/driver.ts:2824` | decideEscalation result is computed post-repair and only stored as telemetry; never widens the search |
+| [10](#10) | 🟡 low | silent-failure | `src/agent/verification-plan/extract-issue-declared-expected.ts:31` | EXPECT_RE pre-gate is strictly narrower than EXPECT_LITERAL_RE, silently dropping valid declared outputs |
+| [11](#11) | 🟡 low | jank | `src/agent/verification-plan/extract-issue-declared-expected.ts:112` | Comment claims EXPECT_RE pre-check is a harmless intent-marker, but it actively suppresses matches |
+| [12](#12) | 🟡 low | efficiency | `src/observability/metrics/in-memory-registry.ts:477` | snapshot() is O(series) allocation on every call and the `series` Map has no per-metric series cap |
+| [13](#13) | 🟡 low | silent-failure | `src/observability/metrics/in-memory-registry.ts:328` | Sink send/flush failures are silently swallowed with no rate-limited error counter |
+| [14](#14) | 🟡 low | dead-code | `src/runner/batch/eval/knobs-bench.ts:403` | `sotaOn` posture field is computed but has zero production consumers (dead telemetry field) |
+| [15](#15) | 🟡 low | jank | `tests/unit/bench-sota-preset-hellgate.test.ts:44` | SOTA hellgate test comments describe a `sotaOn \|\|` / `sotaOn ? :` composition that no longer exists in benchPostureFromState (stale red-on-injection claims, lost teeth) |
+| [16](#16) | 🟡 low | jank | `src/config/knob-inventory.ts:1177` | readSite for the 8 NOOP-bench closure knobs points at the NOOP knob-declaration file, not the effect site (driver.ts), so /knobs mis-routes an operator debugging 'why is this on' |
+| [17](#17) | 🟡 low | efficiency | `src/apps/bench/index.ts:141` | Dataset JSONL parsed 3× per run (and again for dry-run plan) |
+| [18](#18) | 🟡 low | jank | `src/apps/bench/cli.ts:223` | --max-workers accepts negative / zero and ships it verbatim to remote --max_workers |
+| [19](#19) | 🟡 low | correctness | `src/apps/bench/cli.ts:1577` | --skip-resolved casts resolved_ids to string[] without filtering non-strings |
+| [20](#20) | 🟡 low | correctness | `src/agent/lsp-bridge.ts:576` | Hand-rolled `uri.replace(/^file:\/\//,"")` mishandles URL-encoded paths instead of using fileURLToPath |
+| [21](#21) | 🟡 low | silent-failure | `src/agent/lsp-bridge.ts:192` | Import-probe line cap silently marks a file 'verified-ready' when imports live past line 200 |
+| [22](#22) | 🟡 low | dead-code | `src/apps/bench/remote/pool.ts:791` | Unreachable lease-release after handleChunkBudgetWaitError (which is `: never`) |
+| [23](#23) | 🟡 low | correctness | `src/apps/bench/remote/box-session.ts:854` | runId flows unquoted into remote ssh commands with no boundary sanitization (shell-injection defense-in-depth gap) |
+| [24](#24) | 🟡 low | correctness | `src/apps/bench/remote/box-session.ts:141` | stripToAccessToken silently drops account fields whose absence may make the shipped token unusable, only guarding access_token |
+| [25](#25) | 🟡 low | silent-failure | `src/apps/bench/auth-pool/load.ts:13` | defaultAuthFile falls back to filesystem root when HOME is unset |
+| [26](#26) | 🟡 low | god-code | `src/apps/bench/remote/box-session.ts:1932` | gradeChunkOnBox + box-session.ts is a 600+ line module mixing lifecycle, snapshot telemetry, brittle remote python probe, verdict parsing, and command construction |
+| [27](#27) | 🟡 low | duplication | `src/apps/bench/eval/driver.ts:338` | Two drivers diverged: production apps driver has tentative-patch retention the runner driver lacks |
+| [28](#28) | 🟡 low | correctness | `src/runner/batch/eval/closure-diagnostics-io.ts:32` | `endReasonOf` ignores `InstanceResult.stopReason`, so `no_patch_exhausted_rate` is ~always 0 for single-attempt runs |
+| [29](#29) | 🟡 low | correctness | `src/runner/batch/eval/verdict.ts:55` | "0 passed" summary grades a zero-test / SIGTERM'd run as PASS |
+| [30](#30) | 🟡 low | correctness | `src/agent/verify-signal.ts:178` | generic error/failure-count failure matcher can flip a real PASS to fail-closed on incidental output |
+| [31](#31) | 🟡 low | jank | `src/agent/verification-bundle/score.ts:34` | voterQuorum soft signal silently clamps votes/k > 1 to 1, conflating super-quorum with exact quorum |
+| [32](#32) | ⚪ none | dead-code | `src/runner/batch/eval/repair-phase-policy.ts:25` | primaryRailState can only be 'red' or 'unrun' at this call site, making decideRepairAdmission's 'already green' guard unreachable here |
+| [33](#33) | ⚪ none | correctness | `src/apps/bench/eval/driver.ts:987` | Apps `runInstance` budget telemetry reports adaptedTimeoutMs == base even though it deliberately does not adapt |
 
 ## 재발 패턴 (테마)
 
@@ -69,8 +82,9 @@
 ### 1. 🟠 decidePrimaryRailFinishGate (the documented false-green killer) has ZERO production callers
 
 - **등급**: MED (어딧 원래값 `high`) · **분류**: `dead-code` · **검증 verdict**: `real`
-- **위치**: `src/agent/primary-rail/index.ts:74-86`
+- **위치 (pinned 8b3f5371)**: `src/agent/primary-rail/index.ts:74` — anchor: `export const decidePrimaryRailFinishGate`
 - **클러스터**: Closure engine core
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/primary-rail/index.ts:74-86`
 
 **영향 (왜 문제인가)**
 
@@ -98,8 +112,9 @@ Downgraded high→med on impact scope (not correctness, which is confirmed): thi
 ### 2. 🟠 mergeWithDisk callback reassigns live `state` from a pre-await snapshot, dropping mutations that interleave during the flush IO window
 
 - **등급**: MED (어딧 원래값 `med`) · **분류**: `correctness` · **검증 verdict**: `real`
-- **위치**: `src/permission/permission-store.ts:766-777`
+- **위치 (pinned 8b3f5371)**: `src/permission/permission-store.ts:775` — anchor: `cloneAsMutable(merged)`
 - **클러스터**: Observability / permission / sandbox
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/permission/permission-store.ts:766-777`
 
 **영향 (왜 문제인가)**
 
@@ -144,8 +159,9 @@ Severity med (not high): it is a single-process narrow-window race — the inter
 ### 3. 🟠 Cost fallback sums only the FIRST attempt's tokens for Best-of-N runs (undercount)
 
 - **등급**: MED (어딧 원래값 `med`) · **분류**: `silent-failure` · **검증 verdict**: `real`
-- **위치**: `src/apps/bench/analyze/cost.ts:93-101`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/analyze/cost.ts:96` — anchor: `startsWith(\`${instanceId}.\``
 - **클러스터**: Leaderboard / analyze / CLI
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/analyze/cost.ts:93-101`
 
 **영향 (왜 문제인가)**
 
@@ -179,8 +195,9 @@ Severity med (not high): manifests only under the conjunction of n>1 AND report.
 ### 4. 🟠 Availability probe caches a transient failure as a permanent process-wide 'LSP dead'
 
 - **등급**: MED (어딧 원래값 `high`) · **분류**: `silent-failure` · **검증 verdict**: `overstated`
-- **위치**: `src/agent/lsp-bridge.ts:144-172`
+- **위치 (pinned 8b3f5371)**: `src/agent/lsp-bridge.ts:170` — anchor: `availabilityCache.set(bin, probe)`
 - **클러스터**: LSP / pyright / prewarm
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/lsp-bridge.ts:144-172`
 
 **영향 (왜 문제인가)**
 
@@ -210,8 +227,9 @@ WHY OVERSTATED, not full-real at high: (1) The trigger probability is lower than
 ### 5. 🟠 ensureSecurityGroup treats a describe FAILURE (network/creds) as 'SG not found' and tries to create
 
 - **등급**: MED (어딧 원래값 `med`) · **분류**: `silent-failure` · **검증 verdict**: `real`
-- **위치**: `src/apps/bench/remote/ec2.ts:124-158`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/remote/ec2.ts:137` — anchor: `found.code !== 0`
 - **클러스터**: Remote bench / EC2 / pool
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/remote/ec2.ts:124-158`
 
 **영향 (왜 문제인가)**
 
@@ -244,8 +262,9 @@ Severity stays med, not high: a phantom/wrong SG is unlikely because the fixed g
 ### 6. 🟠 Production SDK driver never emits `knobs_applied` telemetry (split-brain with runner driver)
 
 - **등급**: MED (어딧 원래값 `high`) · **분류**: `silent-failure` · **검증 verdict**: `real`
-- **위치**: `src/apps/bench/eval/driver.ts:275-412`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/eval/driver.ts:287` — anchor: `new BenchStreamTap(w.stream`
 - **클러스터**: Repair orchestrator + eval drivers
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/eval/driver.ts:275-412`
 
 **영향 (왜 문제인가)**
 
@@ -274,8 +293,9 @@ Severity corrected high→med: the emitKnobsApplied swallow-comment notes (and M
 ### 7. 🟠 earlyAccept re-runs every hard-gate probe twice per candidate (double pytest/repro materialization)
 
 - **등급**: MED (어딧 원래값 `med`) · **분류**: `efficiency` · **검증 verdict**: `real`
-- **위치**: `src/runner/batch/eval/selection-executor.ts:404-418, 459-462`
+- **위치 (pinned 8b3f5371)**: `src/runner/batch/eval/selection-executor.ts:404` — anchor: `const maybeFinalizeEarlyAccept = async`
 - **클러스터**: Verification-bundle + verify-signal (WIP)
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/runner/batch/eval/selection-executor.ts:404-418, 459-462`
 
 **영향 (왜 문제인가)**
 
@@ -305,8 +325,9 @@ Confirmed real by reading the code and its callers. In the sequential path (sele
 ### 8. 🟡 Gate stakes/uncertainty signals hard-coded to false at the only assembly site, neutering the anti-under-verify arm
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `silent-failure` · **검증 verdict**: `overstated`
-- **위치**: `src/runner/batch/eval/closure-session.ts:57-65`
+- **위치 (pinned 8b3f5371)**: `src/runner/batch/eval/closure-session.ts:59` — anchor: `sampleDisagreement: false`
 - **클러스터**: Closure engine core
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/runner/batch/eval/closure-session.ts:57-65`
 
 **영향 (왜 문제인가)**
 
@@ -330,8 +351,9 @@ Two sub-claims in the evidence ARE accurate but don't carry the consequence: (1)
 ### 9. 🟡 decideEscalation result is computed post-repair and only stored as telemetry; never widens the search
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `dead-code` · **검증 verdict**: `overstated`
-- **위치**: `src/runner/batch/eval/driver.ts:2813-2827`
+- **위치 (pinned 8b3f5371)**: `src/runner/batch/eval/driver.ts:2824` — anchor: `repairEscalation = decideEscalation`
 - **클러스터**: Closure engine core
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/runner/batch/eval/driver.ts:2813-2827`
 
 **영향 (왜 문제인가)**
 
@@ -360,8 +382,9 @@ Corrected severity low (not med, not none): it is a real, accurate observation t
 ### 10. 🟡 EXPECT_RE pre-gate is strictly narrower than EXPECT_LITERAL_RE, silently dropping valid declared outputs
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `silent-failure` · **검증 verdict**: `overstated`
-- **위치**: `src/agent/verification-plan/extract-issue-declared-expected.ts:31-40, 114-120`
+- **위치 (pinned 8b3f5371)**: `src/agent/verification-plan/extract-issue-declared-expected.ts:31` — anchor: `const EXPECT_RE =`
 - **클러스터**: Fault-evidence + verification-plan
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/verification-plan/extract-issue-declared-expected.ts:31-40, 114-120`
 
 **영향 (왜 문제인가)**
 
@@ -388,8 +411,9 @@ However, MED severity is overstated. (1) The PRIMARY consequence — the spec-fi
 ### 11. 🟡 Comment claims EXPECT_RE pre-check is a harmless intent-marker, but it actively suppresses matches
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `jank` · **검증 verdict**: `overstated`
-- **위치**: `src/agent/verification-plan/extract-issue-declared-expected.ts:112-113`
+- **위치 (pinned 8b3f5371)**: `src/agent/verification-plan/extract-issue-declared-expected.ts:112` — anchor: `EXPECT_RE pre-check keeps`
 - **클러스터**: Fault-evidence + verification-plan
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/verification-plan/extract-issue-declared-expected.ts:112-113`
 
 **영향 (왜 문제인가)**
 
@@ -415,8 +439,9 @@ However the finding is OVERSTATED on two counts: (1) The comment does not verbat
 ### 12. 🟡 snapshot() is O(series) allocation on every call and the `series` Map has no per-metric series cap
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `efficiency` · **검증 verdict**: `overstated`
-- **위치**: `src/observability/metrics/in-memory-registry.ts:477-481`
+- **위치 (pinned 8b3f5371)**: `src/observability/metrics/in-memory-registry.ts:477` — anchor: `snapshot() {`
 - **클러스터**: Observability / permission / sandbox
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/observability/metrics/in-memory-registry.ts:477-481`
 
 **영향 (왜 문제인가)**
 
@@ -452,8 +477,9 @@ Net: the observation is real as a design-hardening note (no cardinality guard; d
 ### 13. 🟡 Sink send/flush failures are silently swallowed with no rate-limited error counter
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `silent-failure` · **검증 verdict**: `overstated`
-- **위치**: `src/observability/metrics/in-memory-registry.ts:325-334`
+- **위치 (pinned 8b3f5371)**: `src/observability/metrics/in-memory-registry.ts:328` — anchor: `sink.send(sample)`
 - **클러스터**: Observability / permission / sandbox
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/observability/metrics/in-memory-registry.ts:325-334`
 
 **영향 (왜 문제인가)**
 
@@ -487,8 +513,9 @@ Net: the code observation is accurate but the consequence ("plane goes dark, bro
 ### 14. 🟡 `sotaOn` posture field is computed but has zero production consumers (dead telemetry field)
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `dead-code` · **검증 verdict**: `real`
-- **위치**: `src/runner/batch/eval/knobs-bench.ts:262,403`
+- **위치 (pinned 8b3f5371)**: `src/runner/batch/eval/knobs-bench.ts:403` — anchor: `sotaOn: state.preset`
 - **클러스터**: Knobs + config + presets
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/runner/batch/eval/knobs-bench.ts:262,403`
 
 **영향 (왜 문제인가)**
 
@@ -516,8 +543,9 @@ Severity LOW is correct: a single harmless derived boolean with no production re
 ### 15. 🟡 SOTA hellgate test comments describe a `sotaOn ||` / `sotaOn ? :` composition that no longer exists in benchPostureFromState (stale red-on-injection claims, lost teeth)
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `jank` · **검증 verdict**: `real`
-- **위치**: `tests/unit/bench-sota-preset-hellgate.test.ts:44-45,54-55,68-69,98-100,113`
+- **위치 (pinned 8b3f5371)**: `tests/unit/bench-sota-preset-hellgate.test.ts:44` — anchor: `\`lspNav = sotaOn || ...\``
 - **클러스터**: Knobs + config + presets
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `tests/unit/bench-sota-preset-hellgate.test.ts:44-45,54-55,68-69,98-100,113`
 
 **영향 (왜 문제인가)**
 
@@ -543,8 +571,9 @@ Downgraded from med to low: this is pure comment/red-on-injection drift, not los
 ### 16. 🟡 readSite for the 8 NOOP-bench closure knobs points at the NOOP knob-declaration file, not the effect site (driver.ts), so /knobs mis-routes an operator debugging 'why is this on'
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `jank` · **검증 verdict**: `real`
-- **위치**: `src/config/knob-inventory.ts:1150-1218`
+- **위치 (pinned 8b3f5371)**: `src/config/knob-inventory.ts:1177` — anchor: `readSite: "runner/knobs/knobs/primary-rail.ts"`
 - **클러스터**: Knobs + config + presets
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/config/knob-inventory.ts:1150-1218`
 
 **영향 (왜 문제인가)**
 
@@ -578,8 +607,9 @@ Severity assessment (kept at low, not raised, not dropped to none): The header (
 ### 17. 🟡 Dataset JSONL parsed 3× per run (and again for dry-run plan)
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `efficiency` · **검증 verdict**: `real`
-- **위치**: `src/apps/bench/index.ts:458-474`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/index.ts:141` — anchor: `split("\n")`
 - **클러스터**: Leaderboard / analyze / CLI
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/index.ts:458-474`
 
 **영향 (왜 문제인가)**
 
@@ -612,8 +642,9 @@ Caveats that keep this LOW: (a) the cost is once per process invocation at start
 ### 18. 🟡 --max-workers accepts negative / zero and ships it verbatim to remote --max_workers
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `jank` · **검증 verdict**: `real`
-- **위치**: `src/apps/bench/cli.ts:222-227`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/cli.ts:223` — anchor: `const mwRaw = argValue("--max-workers")`
 - **클러스터**: Leaderboard / analyze / CLI
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/cli.ts:222-227`
 
 **영향 (왜 문제인가)**
 
@@ -641,8 +672,9 @@ Severity stays low/jank (auditor's own rating): it requires an operator CLI typo
 ### 19. 🟡 --skip-resolved casts resolved_ids to string[] without filtering non-strings
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `correctness` · **검증 verdict**: `overstated`
-- **위치**: `src/apps/bench/cli.ts:1526-1527`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/cli.ts:1577` — anchor: `as string[]`
 - **클러스터**: Leaderboard / analyze / CLI
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/cli.ts:1526-1527`
 
 **영향 (왜 문제인가)**
 
@@ -667,8 +699,9 @@ But the claimed consequence is partially overstated. (1) Numeric/null pollutants
 ### 20. 🟡 Hand-rolled `uri.replace(/^file:\/\//,"")` mishandles URL-encoded paths instead of using fileURLToPath
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `correctness` · **검증 verdict**: `overstated`
-- **위치**: `src/agent/lsp-bridge.ts:572-577, 742`
+- **위치 (pinned 8b3f5371)**: `src/agent/lsp-bridge.ts:576` — anchor: `l.uri.replace(/^file:`
 - **클러스터**: LSP / pyright / prewarm
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/lsp-bridge.ts:572-577, 742`
 
 **영향 (왜 문제인가)**
 
@@ -700,8 +733,9 @@ Net: a genuine parity/correctness nit (should use fileURLToPath for consistency 
 ### 21. 🟡 Import-probe line cap silently marks a file 'verified-ready' when imports live past line 200
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `silent-failure` · **검증 verdict**: `overstated`
-- **위치**: `src/agent/lsp-bridge.ts:222-238, 260-272`
+- **위치 (pinned 8b3f5371)**: `src/agent/lsp-bridge.ts:192` — anchor: `PYRIGHT_IMPORT_SCAN_LINE_CAP = 200`
 - **클러스터**: LSP / pyright / prewarm
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/lsp-bridge.ts:222-238, 260-272`
 
 **영향 (왜 문제인가)**
 
@@ -734,8 +768,9 @@ Net: a real but minor latent imperfection (the two cases should be distinguishab
 ### 22. 🟡 Unreachable lease-release after handleChunkBudgetWaitError (which is `: never`)
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `dead-code` · **검증 verdict**: `real`
-- **위치**: `src/apps/bench/remote/pool.ts:785-788`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/remote/pool.ts:791` — anchor: `handleChunkBudgetWaitError(workerId`
 - **클러스터**: Remote bench / EC2 / pool
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/remote/pool.ts:785-788`
 
 **영향 (왜 문제인가)**
 
@@ -764,8 +799,9 @@ Confirmed by the actual code. `handleChunkBudgetWaitError` (pool.ts:571-584) has
 ### 23. 🟡 runId flows unquoted into remote ssh commands with no boundary sanitization (shell-injection defense-in-depth gap)
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `correctness` · **검증 verdict**: `overstated`
-- **위치**: `src/apps/bench/remote/box-session.ts:270-277, 611, 1699-1717, 44 (PoolChunk.runId)`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/remote/box-session.ts:854` — anchor: `\`~/runs/${snapshot.runId}/run.log\``
 - **클러스터**: Remote bench / EC2 / pool
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/remote/box-session.ts:270-277, 611, 1699-1717, 44 (PoolChunk.runId)`
 
 **영향 (왜 문제인가)**
 
@@ -794,8 +830,9 @@ Threat model is also weak: this is a local operator-run benchmarking CLI; runId 
 ### 24. 🟡 stripToAccessToken silently drops account fields whose absence may make the shipped token unusable, only guarding access_token
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `correctness` · **검증 verdict**: `real`
-- **위치**: `src/apps/bench/remote/box-session.ts:127-149`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/remote/box-session.ts:141` — anchor: `"expires_at", "last_refresh"`
 - **클러스터**: Remote bench / EC2 / pool
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/remote/box-session.ts:127-149`
 
 **영향 (왜 문제인가)**
 
@@ -823,8 +860,9 @@ Severity is correctly low, not higher: (1) ChatGPT OAuth access tokens are long-
 ### 25. 🟡 defaultAuthFile falls back to filesystem root when HOME is unset
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `silent-failure` · **검증 verdict**: `overstated`
-- **위치**: `src/apps/bench/auth-pool/load.ts:12-13`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/auth-pool/load.ts:13` — anchor: `env.HOME ?? ""}/.quanta/auth`
 - **클러스터**: Remote bench / EC2 / pool
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/auth-pool/load.ts:12-13`
 
 **영향 (왜 문제인가)**
 
@@ -854,8 +892,9 @@ Net: a real but minor consistency/robustness nit (should use the SSOT / os.homed
 ### 26. 🟡 gradeChunkOnBox + box-session.ts is a 600+ line module mixing lifecycle, snapshot telemetry, brittle remote python probe, verdict parsing, and command construction
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `god-code` · **검증 verdict**: `overstated`
-- **위치**: `src/apps/bench/remote/box-session.ts:1426-1972`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/remote/box-session.ts:1932` — anchor: `export const gradeChunkOnBox = async`
 - **클러스터**: Remote bench / EC2 / pool
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/remote/box-session.ts:1426-1972`
 
 **영향 (왜 문제인가)**
 
@@ -888,8 +927,9 @@ Net: a legitimate maintainability/cohesion note (split probe+snapshot into teste
 ### 27. 🟡 Two drivers diverged: production apps driver has tentative-patch retention the runner driver lacks
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `duplication` · **검증 verdict**: `overstated`
-- **위치**: `src/apps/bench/eval/driver.ts:844-991`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/eval/driver.ts:338` — anchor: `const tentativeOn =`
 - **클러스터**: Repair orchestrator + eval drivers
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/eval/driver.ts:844-991`
 
 **영향 (왜 문제인가)**
 
@@ -920,8 +960,9 @@ Net: a genuine but low-impact duplication/dead-code drift, not a correctness or 
 ### 28. 🟡 `endReasonOf` ignores `InstanceResult.stopReason`, so `no_patch_exhausted_rate` is ~always 0 for single-attempt runs
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `correctness` · **검증 verdict**: `overstated`
-- **위치**: `src/runner/batch/eval/closure-diagnostics-io.ts:32-42`
+- **위치 (pinned 8b3f5371)**: `src/runner/batch/eval/closure-diagnostics-io.ts:32` — anchor: `const endReasonOf = (r: InstanceResult)`
 - **클러스터**: Repair orchestrator + eval drivers
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/runner/batch/eval/closure-diagnostics-io.ts:32-42`
 
 **영향 (왜 문제인가)**
 
@@ -957,8 +998,9 @@ Thus the bug bites ONLY the narrow intersection: explicit QUANTA_BENCH_CLOSURE_D
 ### 29. 🟡 "0 passed" summary grades a zero-test / SIGTERM'd run as PASS
 
 - **등급**: LOW (어딧 원래값 `med`) · **분류**: `correctness` · **검증 verdict**: `overstated`
-- **위치**: `src/runner/batch/eval/verdict.ts:155-157`
+- **위치 (pinned 8b3f5371)**: `src/runner/batch/eval/verdict.ts:55` — anchor: `const PASS_SUMMARY_RE`
 - **클러스터**: Verification-bundle + verify-signal (WIP)
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/runner/batch/eval/verdict.ts:155-157`
 
 **영향 (왜 문제인가)**
 
@@ -985,8 +1027,9 @@ But the finding overstates the triggers and blast radius. I ran real pytest: a b
 ### 30. 🟡 generic error/failure-count failure matcher can flip a real PASS to fail-closed on incidental output
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `correctness` · **검증 verdict**: `real`
-- **위치**: `src/runner/batch/eval/verdict.ts:208,221-223`
+- **위치 (pinned 8b3f5371)**: `src/agent/verify-signal.ts:178` — anchor: `export const OUTCOME_FAILURE_MATCHERS`
 - **클러스터**: Verification-bundle + verify-signal (WIP)
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/verify-signal.ts:208,221-223`
 
 **영향 (왜 문제인가)**
 
@@ -1013,8 +1056,9 @@ Severity stays low, consistent with the finding's own framing, for two reasons t
 ### 31. 🟡 voterQuorum soft signal silently clamps votes/k > 1 to 1, conflating super-quorum with exact quorum
 
 - **등급**: LOW (어딧 원래값 `low`) · **분류**: `jank` · **검증 verdict**: `real`
-- **위치**: `src/agent/verification-bundle/score.ts:43-48,88-94`
+- **위치 (pinned 8b3f5371)**: `src/agent/verification-bundle/score.ts:34` — anchor: `voterQuorum`
 - **클러스터**: Verification-bundle + verify-signal (WIP)
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/agent/verification-bundle/score.ts:43-48,88-94`
 
 **영향 (왜 문제인가)**
 
@@ -1042,8 +1086,9 @@ However, severity is correctly low (jank, not correctness bug), and the conseque
 ### 32. ⚪ primaryRailState can only be 'red' or 'unrun' at this call site, making decideRepairAdmission's 'already green' guard unreachable here
 
 - **등급**: NONE (어딧 원래값 `low`) · **분류**: `dead-code` · **검증 verdict**: `overstated`
-- **위치**: `src/runner/batch/eval/repair-phase-policy.ts:23-30`
+- **위치 (pinned 8b3f5371)**: `src/runner/batch/eval/repair-phase-policy.ts:25` — anchor: `primaryRailState`
 - **클러스터**: Closure engine core
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/runner/batch/eval/repair-phase-policy.ts:23-30`
 
 **영향 (왜 문제인가)**
 
@@ -1073,8 +1118,9 @@ So `decideRepairAdmission` is a general-purpose pure tri-state decider; this cal
 ### 33. ⚪ Apps `runInstance` budget telemetry reports adaptedTimeoutMs == base even though it deliberately does not adapt
 
 - **등급**: NONE (어딧 원래값 `low`) · **분류**: `correctness` · **검증 verdict**: `overstated`
-- **위치**: `src/apps/bench/eval/driver.ts:966-991`
+- **위치 (pinned 8b3f5371)**: `src/apps/bench/eval/driver.ts:987` — anchor: `adaptedTimeoutMs`
 - **클러스터**: Repair orchestrator + eval drivers
+- **어딧 당시 인용(참고, drift 있을 수 있음)**: `src/apps/bench/eval/driver.ts:966-991`
 
 **영향 (왜 문제인가)**
 

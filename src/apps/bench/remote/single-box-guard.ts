@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { asPositiveInt, atomicWriteJson, parseIsoMs, processAlive, readJson, sleepReal } from "./lease-fs"
 
 export interface SingleBoxGuard {
   readonly dir: string
@@ -35,48 +35,9 @@ const DEFAULT_HEARTBEAT_MS = 15_000
 const DEFAULT_STALE_HEARTBEAT_MS = 60_000
 const OWNER_META = "owner.json"
 
-const sleepReal = (ms: number): Promise<void> =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms)
-  })
-
-const asPositiveInt = (raw: number, fallback: number): number => {
-  const n = Math.trunc(raw)
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
 export const resolveSingleBoxGuardDir = (): string =>
   process.env.QUANTA_BENCH_SINGLE_BOX_GUARD_DIR?.trim() ||
   join(homedir(), ".quanta", "bench-single-box")
-
-const parseIsoMs = (value: string): number | undefined => {
-  const ms = Date.parse(value)
-  return Number.isFinite(ms) ? ms : undefined
-}
-
-const processAlive = (pid: number): boolean => {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-const atomicWriteJson = async (path: string, value: unknown): Promise<void> => {
-  const tmp = `${path}.${randomUUID()}.tmp`
-  await writeFile(tmp, `${JSON.stringify(value)}\n`)
-  await rename(tmp, path)
-}
-
-const readJson = async <T>(path: string): Promise<T | undefined> => {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T
-  } catch {
-    return undefined
-  }
-}
 
 const isOwnerRecord = (value: unknown): value is SingleBoxOwnerRecord => {
   if (value === null || typeof value !== "object") return false
@@ -151,7 +112,11 @@ export const acquireSingleBoxGuard = async (
   const now = opts.now ?? (() => Date.now())
   const sleep = opts.sleep ?? sleepReal
   const log = opts.onLog ?? (() => {})
-  const deadline = wait ? (opts.waitMs !== undefined && opts.waitMs <= 0 ? undefined : now() + waitMs) : now()
+  const deadline = wait
+    ? opts.waitMs !== undefined && opts.waitMs <= 0
+      ? undefined
+      : now() + waitMs
+    : now()
   let announcedWait = false
 
   await mkdir(dirname(dir), { recursive: true })
@@ -193,7 +158,9 @@ export const acquireSingleBoxGuard = async (
       }
     } catch (err) {
       const code =
-        err !== null && typeof err === "object" && "code" in err ? (err as { code?: unknown }).code : undefined
+        err !== null && typeof err === "object" && "code" in err
+          ? (err as { code?: unknown }).code
+          : undefined
       if (code !== "EEXIST") throw err
       const nowMs = now()
       if (await lockLooksStale(dir, nowMs, staleHeartbeatMs)) {

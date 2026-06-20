@@ -31,6 +31,25 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("maybeValidateTerminalResult({")
   })
 
+  test("both drivers preserve phase stopReason through late catch paths", () => {
+    expect(DRIVER_SRC).toContain("latePhaseFailureResultOf({")
+    expect(DRIVER_SRC).toContain('verdict: "degraded"')
+    expect(DRIVER_SRC).toContain("...(prepared !== undefined ? { prepared, sandbox } : {})")
+    expect(APP_DRIVER_SRC).toContain("latePhaseFailureResultOf({")
+    expect(APP_DRIVER_SRC).toContain('verdict: "degraded"')
+    expect(APP_DRIVER_SRC).toContain("...(prepared !== undefined ? { prepared, sandbox } : {})")
+  })
+
+  test("shared late-failure helper preserves prepared-derived diagnostics in the owner", () => {
+    expect(DRIVER_SRC).toContain("const attachLateFailureArtifacts =")
+    expect(DRIVER_SRC).toContain(
+      "attachClosureMetrics({ extra: args.extra, phase: args.phase, prepared: args.prepared })",
+    )
+    expect(DRIVER_SRC).toContain("attachSelectionAndClosureArtifacts({")
+    expect(DRIVER_SRC).toContain("selectionTelemetry: args.phase.selectionTelemetry")
+    expect(DRIVER_SRC).toContain("reproOracleCalibration: args.phase.reproOracleCalibration")
+  })
+
   test("verify-select owner seeds come from ClosureBundle evidence in both drivers", () => {
     const expected =
       /(?:args\.prepared\.)?closureSession\?\.bundle\.evidence\.candidates\.map\(\(c\) => c\.file\)\s+\?\?\s+(?:args\.prepared\.)?localizeCandidates/
@@ -52,7 +71,7 @@ describe("runner verify-select and patch-budget driver parity", () => {
       /(?:args\.)?posture\.patchBudgetStrict && (?:args\.)?instance\.swebench !== undefined/,
     )
     expect(DRIVER_SRC).toContain("maybeStrictBudgetBlockedResult({")
-    expect(DRIVER_SRC).toContain("closureSession: prepared.closureSession")
+    expect(DRIVER_SRC).toMatch(/closureSession: prepared(?:Context)?\.closureSession/)
     expect(DRIVER_SRC).toContain(
       "if (strictBudgetBlocked !== undefined) return strictBudgetBlocked",
     )

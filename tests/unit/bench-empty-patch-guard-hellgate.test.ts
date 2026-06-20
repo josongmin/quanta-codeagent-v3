@@ -338,6 +338,20 @@ describe("hellgate — local verifier summary salvage", () => {
     expect(out.exitCode).toBe(0)
   })
 
+  test("ADVERSARIAL: zero exit + ANSI-colored FAIL summary stays FAIL", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '\\033[31mFAIL\\033[0m  tests/foo.test.ts\\n' >&2; exit 0",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(false)
+    expect(out.exitCode).toBe(0)
+  })
+
   test("zero exit + plural error summary ⇒ stays FAIL (no exit-code fake pass)", async () => {
     const out = await verify(
       mkInstance({

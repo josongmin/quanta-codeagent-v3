@@ -20,6 +20,7 @@ import {
   envPrepFailedResult,
   type IssueHintMode,
   knobsForReport,
+  latePhaseFailureResultOf,
   makeCalibratedReproConsensusPort,
   makeReproConsensusSelectionPort,
   maybeStrictBudgetBlockedResult,
@@ -859,6 +860,7 @@ const runInstanceOnce = async (
   let phase: Phase = { patch: "", turns: 0 }
   let w: Wiring = { stream: new NullStream() }
   let reproTest: BenchReproTestTelemetry | undefined
+  let prepared: PreparedAttemptContext | undefined
   try {
     w = buildWiring(instance, deps.observe)
     await copyRepo(instance, sandbox)
@@ -866,8 +868,9 @@ const runInstanceOnce = async (
     const prep = await runEnvPrep(instance, sandbox, deps.timeoutMs)
     if (!prep.ok) return envPrepFailedResult(instance, prep)
 
-    const prepared = await prepareAttemptContext(instance, sandbox, deps, abort.signal)
-    reproTest = prepared.reproTest
+    prepared = await prepareAttemptContext(instance, sandbox, deps, abort.signal)
+    const preparedContext = prepared
+    reproTest = preparedContext.reproTest
 
     // Setup is done — arm the solve deadline now so the agent gets the full
     // `timeoutMs` of think time (see note where `deadline` is declared).
@@ -879,7 +882,7 @@ const runInstanceOnce = async (
       sandbox,
       signal: abort.signal,
       wiring: w,
-      prepared,
+      prepared: preparedContext,
     })
 
     const terminal = await maybeValidateTerminalResult({
@@ -900,8 +903,8 @@ const runInstanceOnce = async (
       deps,
       wiring: w,
       startedAt,
-      posture: prepared.posture,
-      closureSession: prepared.closureSession,
+      posture: preparedContext.posture,
+      closureSession: preparedContext.closureSession,
     })
     if (strictBudgetBlocked !== undefined) return strictBudgetBlocked
 
@@ -917,28 +920,26 @@ const runInstanceOnce = async (
       reproTest,
       wiring: w,
       startedAt,
-      prepared,
+      prepared: preparedContext,
     })
   } catch (error) {
     if (error instanceof ObservationError) {
-      return {
-        id: instance.id,
-        passed: false,
-        patch: phase.patch,
-        turns: phase.turns,
+      return latePhaseFailureResultOf({
+        instance,
+        phase,
+        reproTest,
         verdict: "degraded",
         error: `observation failed (strict): ${error.message}`,
-        ...(reproTest !== undefined ? { reproTest } : {}),
-      }
+        ...(prepared !== undefined ? { prepared, sandbox } : {}),
+      })
     }
-    return {
-      id: instance.id,
-      passed: false,
-      patch: phase.patch,
-      turns: phase.turns,
+    return latePhaseFailureResultOf({
+      instance,
+      phase,
+      reproTest,
       error: errMessage(error),
-      ...(reproTest !== undefined ? { reproTest } : {}),
-    }
+      ...(prepared !== undefined ? { prepared, sandbox } : {}),
+    })
   } finally {
     clearTimeout(deadline)
     w.observer?.close()

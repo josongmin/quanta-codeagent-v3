@@ -13,17 +13,12 @@
  * machine. The signal symbols are re-exported below for back-compat.
  */
 
-import {
-  isTestLikeCommand,
-  isVerifyOutputFailing,
-  isVerifySignalCommand,
-  matchesExactVerifyCommand,
-} from "./verify-signal"
+import { isTestLikeCommand, isVerifyOutputFailing, isVerifySignalCommand } from "./verify-signal"
 
 export {
-  isVerifySignalCommand,
   isTestLikeCommand,
   isVerifyOutputFailing,
+  isVerifySignalCommand,
   matchesExactVerifyCommand,
   matchVerifyCommand,
   OUTCOME_FAILURE_MATCHERS,
@@ -124,6 +119,11 @@ export interface VerifyGuardConfig {
   exactCommands?: readonly string[]
 }
 
+const ownVerifyGuardField = <K extends keyof VerifyGuardConfig>(
+  cfg: VerifyGuardConfig,
+  key: K,
+): VerifyGuardConfig[K] | undefined => (Object.hasOwn(cfg, key) ? cfg[key] : undefined)
+
 /** Index of the LAST mutating tool in history, or `-1` if none. Pure scan. */
 const findLastMutating = (history: readonly GuardHistoryEntry[]): number => {
   for (let i = history.length - 1; i >= 0; i--) {
@@ -194,8 +194,10 @@ export const decideVerifyGuard = (args: {
   const lastMut = findLastMutating(history)
   if (lastMut === -1) return { block: false }
 
-  const lastVerify = findLastVerifyAfter(history, lastMut, cfg.exactCommands)
-  const cap = cfg.maxTrips ?? DEFAULT_MAX_TRIPS
+  const exactCommands = ownVerifyGuardField(cfg, "exactCommands")
+  const lastVerify = findLastVerifyAfter(history, lastMut, exactCommands)
+  const cap = ownVerifyGuardField(cfg, "maxTrips") ?? DEFAULT_MAX_TRIPS
+  const mustPass = ownVerifyGuardField(cfg, "mustPass") === true
 
   // Presence branch: no verify after the latest edit.
   if (lastVerify === undefined) {
@@ -203,7 +205,7 @@ export const decideVerifyGuard = (args: {
   }
   // Must-pass branch: presence satisfied, but the latest verify failed.
   // Conservative: unknown outcome (ok absent + output absent) ⇒ no block.
-  if (cfg.mustPass === true && isVerifyFailing(lastVerify) && spendTrip(state, cap)) {
+  if (mustPass && isVerifyFailing(lastVerify) && spendTrip(state, cap)) {
     return { block: true, text: VERIFY_PASS_FORCE_MESSAGE }
   }
   return { block: false }

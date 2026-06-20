@@ -14,7 +14,7 @@
  * Everything routes through an injected SpawnFn ⇒ no real box / token / network.
  */
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
@@ -428,6 +428,40 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     }
   })
 
+  test("a chunk budget-release failure preserves the earlier primary abort", async () => {
+    const tokenBudgetDir = allocTokenBudgetDir()
+    let releaseLock: (() => void) | undefined
+    const { fn } = mockSpawn({})
+    const authProvider = {
+      acquire: () => ({
+        accountLabel: "acct-a",
+        readAuthJson: () => {
+          releaseLock ??= holdBudgetMutationLock(tokenBudgetDir)
+          throw new Error("auth boom")
+        },
+        release: () => {},
+      }),
+      canEventuallySchedule: () => true,
+      nextReadyAt: () => undefined,
+    }
+    try {
+      await expect(
+        runPool(
+          [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+          poolCfg(fn, {
+            concurrency: 16,
+            tokenBudgetDir,
+            tokenBudgetWaitMs: 100,
+            tokenBudgetPollMs: 10,
+            authProvider,
+          }),
+        ),
+      ).rejects.toThrow(/auth boom.*timed out waiting|timed out waiting.*auth boom/i)
+    } finally {
+      releaseLock?.()
+    }
+  })
+
   test("a patch-gen budget timeout ABORTS the run instead of silently marking the chunk lost", async () => {
     const tokenBudgetDir = allocTokenBudgetDir()
     const held = await acquirePatchGenBudgetLease({
@@ -453,6 +487,54 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       ).rejects.toThrow(/patch-gen budget|timed out waiting/i)
     } finally {
       await held.release()
+    }
+  })
+
+  test("a final cleanup termination failure preserves BOTH the primary abort and cleanup error", async () => {
+    const { fn } = mockSpawn({
+      terminateResult: { code: 254, stdout: "", stderr: "terminate denied" },
+    })
+    let authReads = 0
+    await expect(
+      runPool(
+        [
+          { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+          { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+        ],
+        poolCfg(fn, {
+          keepWarm: false,
+          reuseWarm: false,
+          authJsonProvider: () => {
+            authReads += 1
+            if (authReads === 2) throw new Error("auth boom")
+            return FULL_AUTH
+          },
+        }),
+      ),
+    ).rejects.toThrow(/auth boom.*terminate denied|terminate denied.*auth boom/i)
+  })
+
+  test("a top-level single-box guard release failure preserves the primary abort", async () => {
+    const singleBoxRoot = allocTempDir("bench-pool-guard-release-root-")
+    const singleBoxGuardDir = join(singleBoxRoot, "guard")
+    const { fn } = mockSpawn({})
+    try {
+      await expect(
+        runPool(
+          [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+          poolCfg(fn, {
+            singleBoxGuardDir,
+            authJsonProvider: () => {
+              chmodSync(singleBoxRoot, 0o555)
+              throw new Error("auth boom")
+            },
+          }),
+        ),
+      ).rejects.toThrow(
+        /auth boom.*permission|permission.*auth boom|auth boom.*EACCES|EACCES.*auth boom/i,
+      )
+    } finally {
+      chmodSync(singleBoxRoot, 0o755)
     }
   })
 
@@ -693,6 +775,35 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
   })
 
+  test("an idle live box still blocks a fresh launch when reuseWarm=false unless explicitly opted in", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string) => ({ code: 0, stdout: s, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances")) {
+        return a.includes("--filters") ? ok("i-warmbox\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("pgrep")) return ok("IDLE")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    await expect(
+      runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn, { reuseWarm: false })),
+    ).rejects.toThrow(/refusing to launch a fresh box|refusing to launch another box/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
   test("keepWarm:false terminates the box on clean drain", async () => {
     const { fn, calls } = mockSpawn({})
     await runPool(CHUNKS, poolCfg(fn, { keepWarm: false, reuseWarm: false }))
@@ -849,7 +960,9 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       const a = [...args]
       if (a.includes("describe-security-groups")) return ok("sg-abc")
       if (a.includes("run-instances")) return ok("i-fresh")
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("describe-instances")) {
+        return a.includes("--filters") ? ok("i-busy") : ok("1.2.3.4")
+      }
       if (a.includes("terminate-instances")) return ok("")
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
@@ -866,7 +979,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     }
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
-      poolCfg(fn, { maxChunkRetries: 1, reuseWarm: false }),
+      poolCfg(fn, { maxChunkRetries: 1, reuseWarm: false, allowExtraBoxes: true }),
     )
     // CRITICAL TEETH: a box hitting POOL_BUSY is NEVER terminated (don't kill the
     // other run). If the POOL_BUSY branch wrongly called terminate, this is >0.
@@ -875,6 +988,137 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBeGreaterThan(0)
     // lost:true proves the BUSY path ran — a bypassed lock would RESOLVE (lost:false).
     expect(out[0]?.lost).toBe(true)
+  })
+
+  test("a mid-run POOL_BUSY box FAIL-CLOSED unless explicit extra-box opt-in is set", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let launched = false
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances")) {
+        launched = true
+        return ok("i-fresh")
+      }
+      if (a.includes("describe-instances")) {
+        if (a.includes("--filters")) {
+          return a.some((part) => part.includes("Reservations[].Instances[].InstanceId"))
+            ? ok(launched ? "i-busy" : "")
+            : ok("")
+        }
+        return ok("1.2.3.4")
+      }
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    await expect(
+      runPool(
+        [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+        poolCfg(fn, { maxChunkRetries: 1, reuseWarm: false }),
+      ),
+    ).rejects.toThrow(/refusing to launch a fresh box|refusing to launch another box/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
+  })
+
+  test("a mid-run POOL_BUSY warm-box race ABORTS by default instead of auto-launching another box", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let pgrepCount = 0
+    let lockCount = 0
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances")) {
+        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("pgrep")) {
+          pgrepCount += 1
+          return ok(pgrepCount <= 2 ? "IDLE" : "BUSY")
+        }
+        if (c.includes("mkdir ~/.pool-grade.lock")) {
+          lockCount += 1
+          return ok(lockCount === 1 ? "BUSY" : "LOCKED")
+        }
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    await expect(
+      runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn, { maxChunkRetries: 1 })),
+    ).rejects.toThrow(/refusing to launch another box/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
+  })
+
+  test("a mid-run POOL_BUSY warm-box race waits, then REUSES the box once it goes idle", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const slept: number[] = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let pgrepCount = 0
+    let lockCount = 0
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances")) {
+        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("pgrep")) {
+          pgrepCount += 1
+          if (pgrepCount <= 2) return ok("IDLE")
+          if (pgrepCount <= 4) return ok("BUSY")
+          return ok("IDLE")
+        }
+        if (c.includes("mkdir ~/.pool-grade.lock")) {
+          lockCount += 1
+          return ok(lockCount === 1 ? "BUSY" : "LOCKED")
+        }
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool(
+      [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+      poolCfg(fn, {
+        maxChunkRetries: 1,
+        waitForIdle: true,
+        waitForIdlePollMs: 1234,
+        sleep: async (ms: number) => void slept.push(ms),
+      }),
+    )
+    expect(slept).toEqual([1234])
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.attempts).toBe(2)
+    expect(out[0]?.result.resolved).toContain("w__w-1")
   })
 
   test("a lock-probe ssh failure on an OWNED box is a hard failure, not BUSY (terminate it)", async () => {
