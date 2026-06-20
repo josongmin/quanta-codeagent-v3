@@ -171,7 +171,7 @@ describe("runSelection", () => {
   })
 
   it("empty no-patch NEVER beats a real patch in best-effort (minimality must not reward size 0)", async () => {
-    // both inadmissible (real regresses; empty has applyClean=false). The winner
+    // both inadmissible (real regresses; empty has patchProduced=false). The winner
     // must be the REAL candidate — an empty diff is a non-fix, not a "minimal" fix.
     const { gen } = genFrom([
       cand({ id: "cand-0", patch: "", files: [] }), // empty no-patch
@@ -219,11 +219,50 @@ describe("runSelection", () => {
       n: 2,
       seeds: [undefined, undefined],
       owners: new Set(["owner.py"]),
-      // both inadmissible (real regresses; empty applyClean=false) ⇒ best-effort,
+      // both inadmissible (real regresses; empty patchProduced=false) ⇒ best-effort,
       // where the empty's bogus ownerCoverage would win if not hardened.
       ports: { generate: gen, regression: async (c) => (c.id === "cand-1" ? false : null) },
     })
     expect(r.winner?.id).toBe("cand-1") // real beats empty even though empty "touches" the owner
+  })
+
+  it("best-effort never submits a known non-applying patch", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/owner.py\n+stale", files: ["owner.py"] }),
+      cand({ id: "cand-1", patch: "+++ b/other.py\n+real", files: ["other.py"] }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["owner.py"]),
+      // Both inadmissible: cand-0 is structurally bad (does not apply), cand-1
+      // regresses. Best-effort must prefer the structurally submittable patch.
+      ports: {
+        generate: gen,
+        applyClean: async (c) => c.id !== "cand-0",
+        regression: async (c) => (c.id === "cand-1" ? false : null),
+      },
+    })
+    expect(r.admissibleCount).toBe(0)
+    expect(r.winner?.id).toBe("cand-1")
+  })
+
+  it("winner is null when every candidate is structurally unshippable", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "", files: [] }),
+      cand({ id: "cand-1", patch: "+++ b/bad.py\n+stale", files: ["bad.py"] }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: {
+        generate: gen,
+        applyClean: async (c) => (c.id === "cand-1" ? false : null),
+      },
+    })
+    expect(r.admissibleCount).toBe(0)
+    expect(r.winner).toBeNull()
   })
 
   it("concurrency caps in-flight generate() calls (never exceeds the limit)", async () => {
@@ -355,7 +394,7 @@ describe("runSelection", () => {
     expect(t.candidates[1]?.reasons.some((x) => x.startsWith("soft:ownerCoverage"))).toBe(true)
   })
 
-  it("empty (no-patch) candidate is inadmissible (applyClean=false)", async () => {
+  it("empty (no-patch) candidate is inadmissible (patchProduced=false)", async () => {
     const { gen } = genFrom([cand({ id: "cand-0", patch: "", files: [] })])
     const r = await runSelection({
       n: 1,
@@ -364,5 +403,35 @@ describe("runSelection", () => {
       ports: { generate: gen },
     })
     expect(r.scored[0]?.verdict.admissible).toBe(false)
+  })
+
+  it("non-empty candidate with applyClean=false is inadmissible", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/x.py\n+stale", files: ["x.py"] }),
+      cand({ id: "cand-1", patch: "+++ b/y.py\n+clean", files: ["y.py"] }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: {
+        generate: gen,
+        applyClean: async (c) => c.id !== "cand-0",
+      },
+    })
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(false)
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.admissible).toBe(true)
+    expect(r.winner?.id).toBe("cand-1")
+  })
+
+  it("applyClean=null on a non-empty candidate fails open", async () => {
+    const { gen } = genFrom([cand({ id: "cand-0" })])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(),
+      ports: { generate: gen, applyClean: async () => null },
+    })
+    expect(r.scored[0]?.verdict.admissible).toBe(true)
   })
 })

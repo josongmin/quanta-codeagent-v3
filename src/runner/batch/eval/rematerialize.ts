@@ -121,3 +121,30 @@ export const withCandidatePatch = async <T>(args: {
     await resetToBase(sandbox, baseCommit, timeoutMs)
   }
 }
+
+/**
+ * Probe-free applyability check for a candidate patch.
+ *
+ * Returns:
+ *   - `false` when the candidate is definitely not admissible on applyability
+ *     grounds (empty patch or `git apply` failed against base),
+ *   - `true` when the patch applied cleanly,
+ *   - `null` when the reset/apply seam is unavailable (no base commit / reset
+ *     failure), so callers can FAIL-OPEN rather than fabricate a false red.
+ */
+export const candidatePatchAppliesCleanly = async (args: {
+  sandbox: string
+  patch: string
+  baseCommit: string | undefined
+  timeoutMs: number
+}): Promise<boolean | null> => {
+  const { sandbox, patch, baseCommit, timeoutMs } = args
+  if (patch.trim() === "") return false
+  if (baseCommit === undefined) return null
+  if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return null
+  try {
+    return await applyCandidatePatch(sandbox, patch, timeoutMs)
+  } finally {
+    await resetToBase(sandbox, baseCommit, timeoutMs)
+  }
+}

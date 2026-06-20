@@ -23,7 +23,10 @@ surface_integration:
     cli: "preset selector consumed by bench resolver; inventory for --help"
     web: "no browser affordance"
 purpose: |
-  `KNOB_PRESETS` frozen versioned bundles (agentless-v1/v2/v3-thin, baseline, …)
+  `KNOB_PRESETS` frozen versioned bundles (agentless-v1/v2/v3-thin, baseline,
+  …), including the current explicit v3 experiment arms
+  (`agentless-v3-thin-strict`, `agentless-v3-thin-strict-select`,
+  `agentless-v3-select-regression`, `agentless-v3-select-regression-doubt`),
   plus `knob-inventory.ts` bench declarations for discoverability / completeness
   ratchets. Individual `QUANTA_BENCH_*` env vars override preset values.
 evidence:

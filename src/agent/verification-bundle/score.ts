@@ -3,10 +3,11 @@
  *
  * Pure, deterministic, I/O-free — the verdict authority's decision logic.
  *
- * HARD GATE (admissibility) = AND of the four hard signals, each REJECTING
+ * HARD GATE (admissibility) = AND of the five hard signals, each REJECTING
  * only on explicit negative evidence; every nullable signal is FAIL-OPEN:
  *   - `baseValidatedRed === false`                    → reject (`null` ⇒ pass)
- *   - `applyClean === false`                          → reject
+ *   - `patchProduced === false`                       → reject
+ *   - `applyClean === false`                          → reject (`null` ⇒ pass)
  *   - `patchedResolvedKofN` present && `votes < k`    → reject (null ⇒ pass)
  *   - `regressionGreen === false`                     → reject (null ⇒ pass)
  *
@@ -45,7 +46,7 @@ const softValue = (v: boolean | number | null): number | null => {
 }
 
 /**
- * Score one candidate. Pure. The four hard gates are AND-ed with the fail-open
+ * Score one candidate. Pure. The hard gates are AND-ed with the fail-open
  * rule; the soft score is a weighted sum over present signals.
  */
 export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): CandidateVerdict => {
@@ -56,6 +57,10 @@ export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): C
   if (hard.baseValidatedRed === false) {
     admissible = false
     reasons.push("hard:baseValidatedRed=false (no validated repro authority)")
+  }
+  if (hard.patchProduced === false) {
+    admissible = false
+    reasons.push("hard:patchProduced=false (empty patch)")
   }
   if (hard.applyClean === false) {
     admissible = false

@@ -32,7 +32,9 @@ evidence:
     - src/config/knob-inventory.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/repro-doubt-guard.test.ts
+      - tests/unit/bench-preset-drives-config-hellgate.test.ts
     integration: []
     contract: []
 knobs: ["repro-doubt"]

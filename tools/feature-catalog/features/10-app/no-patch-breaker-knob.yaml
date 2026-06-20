@@ -26,11 +26,13 @@ purpose: 'Default-OFF NOOP-apply registry knob: force best-edit commit when budg
 evidence:
   code:
     - src/runner/knobs/knobs/no-patch-breaker.ts
+    - src/runner/batch/eval/no-patch-breaker-adapter.ts
   adrs: []
   tests:
     unit:
       - tests/unit/proof-closure-knobs-wiring.test.ts
       - tests/unit/no-patch-breaker.test.ts
+      - tests/unit/runner/no-patch-breaker-driver.test.ts
     integration: []
     contract: []
 knobs: ["no-patch-breaker"]

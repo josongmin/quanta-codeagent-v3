@@ -107,6 +107,37 @@ describe("writeArtifacts (D-fix)", () => {
     }
   })
 
+  test("strict admission block is serialized as failure termination, not unknown", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-art-"))
+    try {
+      const predFile = join(dir, "preds.jsonl")
+      const reportFile = join(dir, "report.json")
+      const results: InstanceResult[] = [
+        {
+          id: "strict-block",
+          passed: false,
+          patch: "",
+          turns: 9,
+          error: "patch budget exceeded: new-def budget=0",
+          admissionBlock: { kind: "patch_budget_strict" },
+        },
+      ]
+      await writeArtifacts(predFile, reportFile, results, {
+        provider: "openai",
+        model: "gpt-test",
+        n: 1,
+      })
+      const report = JSON.parse(readFileSync(reportFile, "utf8")) as {
+        failureBreakdown: { byTermination: Record<string, number> }
+        perInstance: { failure?: { termination: string } }[]
+      }
+      expect(report.perInstance[0]?.failure?.termination).toBe("admission_blocked")
+      expect(report.failureBreakdown.byTermination.admission_blocked).toBe(1)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("predictions for a failed run still carry whatever patch was produced (empty allowed)", async () => {
     // The D-fix matters most for FAIL cases — triage needs the patch even
     // (especially) when the run didn't pass. Verify empty patches survive.

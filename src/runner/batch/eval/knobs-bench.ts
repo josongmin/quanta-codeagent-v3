@@ -265,6 +265,8 @@ export interface BenchPosture {
   readonly patchHygiene: boolean
   /** jun-19: minimal-edit admission — emit PatchBudget over the diff (#13417). */
   readonly patchBudget: boolean
+  /** jun-20: hard minimal-edit admission — do not submit over-budget final patches. */
+  readonly patchBudgetStrict: boolean
   /** jun-19: K-of-N RESOLVED gate — re-run the reproducing repro set on the
    *  patched tree and majority-vote "Issue resolved" (removes the false-NEGATIVE
    *  single-script oracle). Armed by the driver only when repro-test produced a
@@ -363,6 +365,7 @@ export const benchPostureFromState = (
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
   const patchHygiene = readKnobValue(state, "patch-hygiene", isTrue) === true
   const patchBudget = readKnobValue(state, "patch-budget", isTrue) === true
+  const patchBudgetStrict = readKnobValue(state, "patch-budget-strict", isTrue) === true
   const reproVote = readKnobValue(state, "repro-vote", isTrue) === true
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
@@ -395,6 +398,7 @@ export const benchPostureFromState = (
     primaryRail,
     patchHygiene,
     patchBudget,
+    patchBudgetStrict,
     reproVote,
     noPatchBreaker,
     repairEscalation,

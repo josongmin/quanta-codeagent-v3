@@ -52,7 +52,7 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
     else process.env.QUANTA_BENCH_VERIFY_SELECT_REPRO = savedVerifySelectRepro
   })
 
-  test("selectionTelemetry + reproOracleCalibration stay attached when verify-select emits an empty winner", async () => {
+  test("selectionTelemetry + reproOracleCalibration stay attached when verify-select has no submittable winner", async () => {
     const corpusRoot = join(dir, "corpus")
     const obs = join(dir, "obs")
     await writeSyntheticCorpus(corpusRoot)
@@ -86,13 +86,13 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
     expect(result.selectionTelemetry?.generationFailures).toBe(0)
     expect(result.selectionTelemetry?.generated).toBe(1)
     expect(result.selectionTelemetry?.admissibleCount).toBe(0)
-    expect(result.selectionTelemetry?.winnerId).toBe("cand-0")
+    expect(result.selectionTelemetry?.winnerId).toBeNull()
     expect(result.selectionTelemetry?.candidates).toHaveLength(1)
     expect(result.selectionTelemetry?.candidates[0]?.id).toBe("cand-0")
     expect(result.selectionTelemetry?.candidates[0]?.admissible).toBe(false)
     expect(result.selectionTelemetry?.candidates[0]?.score).toBe(0)
     expect(result.selectionTelemetry?.candidates[0]?.reasons).toContain(
-      "hard:applyClean=false (patch did not apply)",
+      "hard:patchProduced=false (empty patch)",
     )
     expect(result.reproOracleCalibration).toEqual({
       goldCalibrated: false,

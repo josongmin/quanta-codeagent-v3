@@ -31,6 +31,7 @@ export const strayFilesOf = (diff: string): string[] => buildPatchHygiene(diff).
  *  stream tap threads the real reason in a later wave). */
 const endReasonOf = (r: InstanceResult): string | null => {
   const outs = r.budget?.attemptOutcomes ?? []
+  if (outs.some((o) => o.kind === "admission-blocked")) return "admission_blocked"
   if (outs.some((o) => o.kind === "real-fail" && o.subkind === "max_turns_exhausted"))
     return "max_turns"
   if (outs.some((o) => o.kind === "timeout")) return "timeout"

@@ -279,7 +279,42 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 
-  test("PRESET-13: agentless-v3-select-regression-doubt adds the targeted stall-breaker", () => {
+  test("PRESET-14: agentless-v3-thin-strict is noexec + hard patch-budget, without late selector", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.patchBudget).toBe(true)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v3-thin-strict"]).toMatchObject({
+      "bench-in-loop-exec": "off",
+      "round0-minimal": "1",
+      "spec-fidelity-steer": "1",
+      "patch-budget": "1",
+      "patch-budget-strict": "1",
+    })
+    expect(KNOB_PRESETS["agentless-v3-thin-strict"]?.["test-runner"]).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v3-thin-strict"]?.["repro-test"]).toBeUndefined()
+  })
+
+  test("PRESET-15: agentless-v3-thin-strict-select keeps noexec candidate-gen and adds late selector", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-select"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-select"]).toMatchObject({
+      "bench-in-loop-exec": "off",
+      "patch-budget-strict": "1",
+      "verify-select": "5",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "positive",
+    })
+  })
+
+  test("PRESET-16: agentless-v3-select-regression-doubt adds the targeted stall-breaker", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression-doubt"
     const opt = benchOptIns()
     expect(opt.verifySelectN).toBe(5)

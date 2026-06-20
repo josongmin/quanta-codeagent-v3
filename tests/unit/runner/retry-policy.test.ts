@@ -116,6 +116,15 @@ describe("DEFAULT_POLICY.shouldRetry — terminal kinds (never retry)", () => {
     )
     expect(decision).toBeUndefined()
   })
+
+  test("admission-blocked ⇒ NO retry (bench policy, not transient)", () => {
+    const decision = DEFAULT_POLICY.shouldRetry(
+      { kind: "admission-blocked", source: "patch_budget_strict", reason: "patch budget exceeded" },
+      1,
+      3,
+    )
+    expect(decision).toBeUndefined()
+  })
 })
 
 describe("DEFAULT_POLICY.shouldRetry — timeout (ambiguous, no retry by default)", () => {
@@ -174,6 +183,20 @@ describe("classifyOutcome — verdict-driven terminal and infra classifications"
     const out = classifyOutcome(result)
     expect(out.kind).toBe("infra-fail")
     if (out.kind === "infra-fail") expect(out.reason).toBe("env_prep_failed")
+  })
+
+  test("admissionBlock=patch_budget_strict ⇒ admission-blocked", () => {
+    const result = mkResult({
+      patch: "",
+      turns: 12,
+      error: "patch budget exceeded: new-def budget=0",
+      admissionBlock: { kind: "patch_budget_strict" },
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "admission-blocked",
+      source: "patch_budget_strict",
+      reason: "patch budget exceeded: new-def budget=0",
+    })
   })
 })
 

@@ -21,6 +21,7 @@ import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
+import { patchBudgetStrictKnob } from "@/runner/knobs/knobs/patch-budget-strict"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
@@ -74,6 +75,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["repro-doubt", reproDoubtKnob],
     ["repro-test", reproTestKnob],
     ["must-pass", mustPassKnob],
+    ["patch-budget-strict", patchBudgetStrictKnob],
     ["persona", personaKnob],
     ["working-state", workingStateKnob],
     ["closeout-guard", closeoutGuardKnob],
@@ -105,6 +107,21 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
       }
     })
   }
+})
+
+describe("patch-budget-strict — closed truthy bool", () => {
+  test("accepted truthy forms parse to true", () => {
+    expect(patchBudgetStrictKnob.parse("1")).toBe(true)
+    expect(patchBudgetStrictKnob.parse("on")).toBe(true)
+    expect(patchBudgetStrictKnob.parse("true")).toBe(true)
+  })
+
+  test("false/garbage forms stay undefined", () => {
+    expect(patchBudgetStrictKnob.parse("0")).toBeUndefined()
+    expect(patchBudgetStrictKnob.parse("off")).toBeUndefined()
+    expect(patchBudgetStrictKnob.parse("false")).toBeUndefined()
+    expect(patchBudgetStrictKnob.parse("TRUE")).toBeUndefined()
+  })
 })
 
 describe("verify-select — domain bounds [1,8] integer", () => {

@@ -153,6 +153,13 @@ export interface InstanceResult {
    * behavior).
    */
   verdict?: "ok" | "degraded" | "env_prep_failed" | "grader_invalid"
+  /**
+   * Bench-side admission block (distinct from observation `verdict`). Present
+   * when the runner intentionally refuses to submit a generated patch, e.g.
+   * `patch-budget-strict`. Unlike `verdict`, this still counts as a fair run in
+   * resolved/total; it is a measured policy decision, not an infra exclusion.
+   */
+  admissionBlock?: import("./admission").AdmissionBlock
   /** Absolute path of the captured `.patch` file (only when observing). */
   patchPath?: string
   /** Wall-clock instance duration in ms (only when observing). */
@@ -257,8 +264,9 @@ export interface InstanceResult {
    * jun-19 — typed PatchBudget over the final diff (source/new-file/new-def/
    * cross-file vs owner). Emitted when the `patch-budget` knob is on AND observing;
    * ABSENT ⇒ byte-identical. Drives over_budget_rate / new_def_rate / cross_file_rate
-   * (the #13417 over-engineer A/B). `withinBudget:false ⇒ escalate` is observe-only
-   * here — the late-critic routing is a later measure-first step.
+   * (the #13417 over-engineer A/B). In observe-only mode,
+   * `withinBudget:false ⇒ escalate`; in strict mode the runner also blocks the
+   * over-budget patch from official submission and returns an empty patch.
    */
   patchBudget?: import("@/agent/patch-budget").PatchBudgetVerdict
   /** jun-19 — official-grade regression-vs-didn't-fix breakdown (eval-only).
@@ -317,6 +325,11 @@ export interface InstanceResult {
 export type BenchAttemptOutcome =
   | { kind: "pass" }
   | { kind: "empty-patch"; reason?: string }
+  | {
+      kind: "admission-blocked"
+      source: import("./admission").AdmissionBlock["kind"]
+      reason: string
+    }
   | { kind: "generation-fail"; reason: string }
   | { kind: "grader-invalid"; reason: string }
   | { kind: "timeout" }

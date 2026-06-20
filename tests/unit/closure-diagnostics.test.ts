@@ -136,6 +136,24 @@ describe("computeClosureDiagnostics", () => {
     expect(empty.perInstance).toEqual([])
   })
 
+  test("strict admission block is tracked separately from no_patch/model_miss", () => {
+    const blocked = computeClosureDiagnostics(
+      [
+        fact({
+          instanceId: "strict-block",
+          resolved: false,
+          patchFiles: [],
+          emptyPatch: true,
+          endReason: "admission_blocked",
+        }),
+      ],
+      new Map(),
+    )
+    expect(blocked.perInstance[0]?.class).toBe("admission_blocked")
+    expect(blocked.metrics.admission_blocked_rate.available).toBe(true)
+    expect(blocked.metrics.admission_blocked_rate.value).toBeCloseTo(1)
+  })
+
   test("gate metrics become available once instrumented (forward-compat)", () => {
     const instrumented = computeClosureDiagnostics(
       [

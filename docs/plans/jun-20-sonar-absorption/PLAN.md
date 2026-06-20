@@ -68,6 +68,63 @@ verdict: real reusable methodology, not PR). Three techniques hit our exact gaps
   result was neutral on the 5-case max-turns set, so do not fold it into the
   base profile.
 
+### Immediate measurement protocol (picked, not brainstorming)
+- **Smoke 1 — selection-sensitive recoverable**
+  - instance: `sympy__sympy-12096`
+  - dataset: [select-regression-smoke.sympy-12096.jsonl](/Users/songmin/quanta-codeagent-v3/docs/plans/jun-20-sonar-absorption/slices/select-regression-smoke.sympy-12096.jsonl)
+  - control: `agentless-v3-thin`
+  - treatment: `agentless-v3-select-regression`
+  - why this case: prior telemetry already showed a candidate-selection delta
+    (`minimal single-file` vs `3-file over-broad`), so it is the cleanest first
+    smoke for the outer selection plane rather than the repro-doubt guard.
+  - run ids:
+    - `v3sel-smoke-sympy12096-ctl`
+    - `v3sel-smoke-sympy12096-trt`
+  - commands:
+    ```sh
+    QUANTA_RUN_ID=v3sel-smoke-sympy12096-ctl QUANTA_BENCH_PRESET=agentless-v3-thin \
+      bun run src/apps/bench/cli.ts run \
+      --swebench docs/plans/jun-20-sonar-absorption/slices/select-regression-smoke.sympy-12096.jsonl \
+      --model gpt-5.4
+
+    QUANTA_RUN_ID=v3sel-smoke-sympy12096-trt QUANTA_BENCH_PRESET=agentless-v3-select-regression \
+      bun run src/apps/bench/cli.ts run \
+      --swebench docs/plans/jun-20-sonar-absorption/slices/select-regression-smoke.sympy-12096.jsonl \
+      --model gpt-5.4
+    ```
+  - readout: `resolved`, `turns`, `selectionTelemetry.candidates/admissible/winner`,
+    and whether the chosen patch stays narrow.
+
+- **Smoke 2 — verify_loop_stuck / repro-oracle doubt**
+  - instance: `django__django-10999`
+  - dataset: [select-regression-doubt-smoke.django-10999.jsonl](/Users/songmin/quanta-codeagent-v3/docs/plans/jun-20-sonar-absorption/slices/select-regression-doubt-smoke.django-10999.jsonl)
+  - control: `agentless-v3-select-regression`
+  - treatment: `agentless-v3-select-regression-doubt`
+  - why this case: this is the clean anchoring-trap / `verify_loop_stuck` case.
+    Measuring `repro-doubt` on a non-stuck instance would just add noise.
+  - run ids:
+    - `v3doubt-smoke-dj10999-ctl`
+    - `v3doubt-smoke-dj10999-trt`
+  - commands:
+    ```sh
+    QUANTA_RUN_ID=v3doubt-smoke-dj10999-ctl QUANTA_BENCH_PRESET=agentless-v3-select-regression \
+      bun run src/apps/bench/cli.ts run \
+      --swebench docs/plans/jun-20-sonar-absorption/slices/select-regression-doubt-smoke.django-10999.jsonl \
+      --model gpt-5.4
+
+    QUANTA_RUN_ID=v3doubt-smoke-dj10999-trt QUANTA_BENCH_PRESET=agentless-v3-select-regression-doubt \
+      bun run src/apps/bench/cli.ts run \
+      --swebench docs/plans/jun-20-sonar-absorption/slices/select-regression-doubt-smoke.django-10999.jsonl \
+      --model gpt-5.4
+    ```
+  - readout: `resolved`, `turns`, failure classifier (`verify_loop_stuck` present
+    or absent), and whether the treatment escapes churn without introducing a
+    wrong broad patch.
+
+- **Promotion rule (unchanged)**: these 2 smokes are only substrate checks. Do
+  **NOT** promote either arm from smoke wins alone. Promotion still requires a
+  COMPLETE control and `n>=50` on a MEDIUM slice.
+
 ---
 
 ## Phase 0 — Stop the bleeding: tentative-patch retention  〔Sonar #1, highest ROI〕

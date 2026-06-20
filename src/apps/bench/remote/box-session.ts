@@ -502,83 +502,92 @@ const writeBoxSnapshot = async (
     .catch(() => undefined)
 }
 
+const asSnapshotPhase = (value: unknown): BoxStatusSnapshot["phase"] | undefined =>
+  value === "running" || value === "fetching" || value === "idle" ? value : undefined
+
+const asSnapshotMode = (value: unknown): BoxStatusSnapshot["mode"] | undefined =>
+  value === "pool" || value === "full-remote" ? value : undefined
+
+const asNonEmptyString = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined
+
+const asFiniteNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined
+
+const asInstancePreview = (value: unknown): readonly string[] | undefined =>
+  Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string" && v !== "").slice(0, 3)
+    : undefined
+
+const optionalSnapshotString = <K extends keyof BoxStatusSnapshot>(
+  key: K,
+  value: unknown,
+): Partial<Pick<BoxStatusSnapshot, K>> => {
+  const parsed = asNonEmptyString(value)
+  if (parsed === undefined) return {}
+  return {
+    [key]: key === "lastLogLine" ? normalizeStatusText(parsed) : parsed,
+  } as Partial<Pick<BoxStatusSnapshot, K>>
+}
+
+const optionalSnapshotNumber = <K extends keyof BoxStatusSnapshot>(
+  key: K,
+  value: unknown,
+): Partial<Pick<BoxStatusSnapshot, K>> => {
+  const parsed = asFiniteNumber(value)
+  return parsed === undefined ? {} : ({ [key]: parsed } as Partial<Pick<BoxStatusSnapshot, K>>)
+}
+
+const snapshotPathMeta = (parsed: Partial<BoxStatusSnapshot>): Partial<BoxStatusSnapshot> => ({
+  ...optionalSnapshotString("runLogPath", parsed.runLogPath),
+  ...optionalSnapshotString("reportPath", parsed.reportPath),
+  ...optionalSnapshotString("predictionsPath", parsed.predictionsPath),
+  ...optionalSnapshotString("observeDir", parsed.observeDir),
+  ...optionalSnapshotString("trajectoryPath", parsed.trajectoryPath),
+})
+
+const snapshotVerdictMeta = (parsed: Partial<BoxStatusSnapshot>): Partial<BoxStatusSnapshot> => ({
+  ...optionalSnapshotNumber("resolvedCount", parsed.resolvedCount),
+  ...optionalSnapshotNumber("unresolvedCount", parsed.unresolvedCount),
+  ...optionalSnapshotNumber("erroredCount", parsed.erroredCount),
+  ...optionalSnapshotNumber("emptyPatchCount", parsed.emptyPatchCount),
+  ...(parsed.rateLimited === true ? { rateLimited: true } : {}),
+  ...optionalSnapshotNumber("lastExitCode", parsed.lastExitCode),
+  ...optionalSnapshotString("lastLogLine", parsed.lastLogLine),
+})
+
+const normalizeSnapshotPayload = (
+  parsed: Partial<BoxStatusSnapshot>,
+): BoxStatusSnapshot | undefined => {
+  const phase = asSnapshotPhase(parsed.phase)
+  const mode = asSnapshotMode(parsed.mode)
+  const instancePreview = asInstancePreview(parsed.instancePreview)
+  if (phase === undefined || mode === undefined) return undefined
+  return {
+    phase,
+    mode,
+    ...optionalSnapshotString("runId", parsed.runId),
+    workload: asNonEmptyString(parsed.workload) ?? "unknown",
+    dataset: asNonEmptyString(parsed.dataset) ?? "unknown",
+    instanceCount: asFiniteNumber(parsed.instanceCount) ?? 0,
+    ...(instancePreview !== undefined ? { instancePreview } : {}),
+    preset: asNonEmptyString(parsed.preset) ?? "unknown",
+    model: asNonEmptyString(parsed.model) ?? "unknown",
+    concurrency: asFiniteNumber(parsed.concurrency) ?? 0,
+    ...optionalSnapshotString("startedAt", parsed.startedAt),
+    updatedAt: asNonEmptyString(parsed.updatedAt) ?? "unknown",
+    ...snapshotPathMeta(parsed),
+    ...snapshotVerdictMeta(parsed),
+  }
+}
+
 const readBoxSnapshot = async (
   ssh: (cmd: string) => Promise<SpawnResult>,
 ): Promise<BoxStatusSnapshot | undefined> => {
   const raw = await ssh(`cat ${BOX_STATUS_PATH} 2>/dev/null`).catch(() => undefined)
   if (raw === undefined || raw.code !== 0 || raw.stdout.trim() === "") return undefined
   try {
-    const parsed = JSON.parse(raw.stdout) as Partial<BoxStatusSnapshot>
-    if (
-      parsed.phase !== "running" &&
-      parsed.phase !== "fetching" &&
-      parsed.phase !== "idle"
-    ) {
-      return undefined
-    }
-    if (parsed.mode !== "pool" && parsed.mode !== "full-remote") return undefined
-    return {
-      phase: parsed.phase,
-      mode: parsed.mode,
-      ...(typeof parsed.runId === "string" && parsed.runId !== "" ? { runId: parsed.runId } : {}),
-      workload:
-        typeof parsed.workload === "string" && parsed.workload !== "" ? parsed.workload : "unknown",
-      dataset: typeof parsed.dataset === "string" && parsed.dataset !== "" ? parsed.dataset : "unknown",
-      instanceCount:
-        typeof parsed.instanceCount === "number" && Number.isFinite(parsed.instanceCount)
-          ? parsed.instanceCount
-          : 0,
-      ...(Array.isArray(parsed.instancePreview)
-        ? {
-            instancePreview: parsed.instancePreview
-              .filter((v): v is string => typeof v === "string" && v !== "")
-              .slice(0, 3),
-          }
-        : {}),
-      preset: typeof parsed.preset === "string" && parsed.preset !== "" ? parsed.preset : "unknown",
-      model: typeof parsed.model === "string" && parsed.model !== "" ? parsed.model : "unknown",
-      concurrency:
-        typeof parsed.concurrency === "number" && Number.isFinite(parsed.concurrency)
-          ? parsed.concurrency
-          : 0,
-      ...(typeof parsed.startedAt === "string" && parsed.startedAt !== ""
-        ? { startedAt: parsed.startedAt }
-        : {}),
-      updatedAt:
-        typeof parsed.updatedAt === "string" && parsed.updatedAt !== "" ? parsed.updatedAt : "unknown",
-      ...(typeof parsed.runLogPath === "string" && parsed.runLogPath !== ""
-        ? { runLogPath: parsed.runLogPath }
-        : {}),
-      ...(typeof parsed.reportPath === "string" && parsed.reportPath !== ""
-        ? { reportPath: parsed.reportPath }
-        : {}),
-      ...(typeof parsed.predictionsPath === "string" && parsed.predictionsPath !== ""
-        ? { predictionsPath: parsed.predictionsPath }
-        : {}),
-      ...(typeof parsed.observeDir === "string" && parsed.observeDir !== ""
-        ? { observeDir: parsed.observeDir }
-        : {}),
-      ...(typeof parsed.trajectoryPath === "string" && parsed.trajectoryPath !== ""
-        ? { trajectoryPath: parsed.trajectoryPath }
-        : {}),
-      ...(typeof parsed.resolvedCount === "number" && Number.isFinite(parsed.resolvedCount)
-        ? { resolvedCount: parsed.resolvedCount }
-        : {}),
-      ...(typeof parsed.unresolvedCount === "number" && Number.isFinite(parsed.unresolvedCount)
-        ? { unresolvedCount: parsed.unresolvedCount }
-        : {}),
-      ...(typeof parsed.erroredCount === "number" && Number.isFinite(parsed.erroredCount)
-        ? { erroredCount: parsed.erroredCount }
-        : {}),
-      ...(typeof parsed.emptyPatchCount === "number" && Number.isFinite(parsed.emptyPatchCount)
-        ? { emptyPatchCount: parsed.emptyPatchCount }
-        : {}),
-      ...(parsed.rateLimited === true ? { rateLimited: true } : {}),
-      ...(typeof parsed.lastExitCode === "number" ? { lastExitCode: parsed.lastExitCode } : {}),
-      ...(typeof parsed.lastLogLine === "string" && parsed.lastLogLine !== ""
-        ? { lastLogLine: normalizeStatusText(parsed.lastLogLine) }
-        : {}),
-    }
+    return normalizeSnapshotPayload(JSON.parse(raw.stdout) as Partial<BoxStatusSnapshot>)
   } catch {
     return undefined
   }
@@ -597,6 +606,8 @@ export const boxRunLogPath = (
 
 const SNAPSHOT_HEARTBEAT_MS = 15_000
 const SNAPSHOT_LINE_FLUSH_MS = 2_000
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise<void>((r) => void setTimeout(r, ms).unref?.())
 
 const aws =
   (spawn: SpawnFn, region: string) =>
@@ -928,20 +939,7 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
   try {
     log(`[full-remote] instance ${iid} — waiting for running…`)
     await awsFn(["ec2", "wait", "instance-running", "--instance-ids", iid])
-    const desc = await awsFn([
-      "ec2",
-      "describe-instances",
-      "--instance-ids",
-      iid,
-      "--query",
-      "Reservations[0].Instances[0].PublicIpAddress",
-      "--output",
-      "text",
-    ])
-    const ip = oneLine(desc.stdout)
-    if (ip === "" || ip === "None") {
-      throw new Error(`[full-remote] no public IP for ${iid}: ${desc.stdout}`)
-    }
+    const ip = await describeInstancePublicIp(awsFn, iid)
     const host = `ubuntu@${ip}`
     log(`[full-remote] box up at ${ip}. Waiting for cloud-init (docker+bun+uv ~2-3min)…`)
 
@@ -960,25 +958,7 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
     }
 
     // Wait until SSH is reachable AND cloud-init finished installing bun.
-    const sleep = cfg.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
-    const maxReadyPolls = cfg.maxReadyPolls ?? 30
-    let ready = false
-    for (let i = 0; i < maxReadyPolls; i++) {
-      const probe = await ssh(
-        "sudo cloud-init status --wait >/dev/null 2>&1; test -x ~/.bun/bin/bun && echo READY",
-      )
-      if (probe.code === 0 && probe.stdout.includes("READY")) {
-        ready = true
-        break
-      }
-      await sleep(10_000)
-    }
-    if (!ready) {
-      throw new Error(
-        "[full-remote] box never became ssh-reachable + bun-ready (check SG :22 / cloud-init)",
-      )
-    }
-
+    await waitForBoxReady(ssh, cfg)
     await bootstrapBox(session, cfg)
     return session
   } catch (err) {
@@ -994,6 +974,45 @@ const isBootstrapped = async (ssh: (cmd: string) => Promise<SpawnResult>): Promi
     "test -x ~/.bun/bin/bun && test -x ~/swebench-python && test -d ~/quanta/src && echo OK",
   )
   return probe.code === 0 && probe.stdout.includes("OK")
+}
+
+const describeInstancePublicIp = async (
+  awsFn: (args: readonly string[]) => Promise<SpawnResult>,
+  iid: string,
+): Promise<string> => {
+  const desc = await awsFn([
+    "ec2",
+    "describe-instances",
+    "--instance-ids",
+    iid,
+    "--query",
+    "Reservations[0].Instances[0].PublicIpAddress",
+    "--output",
+    "text",
+  ])
+  const ip = oneLine(desc.stdout)
+  if (ip === "" || ip === "None") {
+    throw new Error(`[full-remote] no public IP for ${iid}: ${desc.stdout}`)
+  }
+  return ip
+}
+
+const waitForBoxReady = async (
+  ssh: (cmd: string) => Promise<SpawnResult>,
+  cfg: FullRemoteConfig,
+): Promise<void> => {
+  const sleep = cfg.sleep ?? defaultSleep
+  const maxReadyPolls = cfg.maxReadyPolls ?? 30
+  for (let i = 0; i < maxReadyPolls; i++) {
+    const probe = await ssh(
+      "sudo cloud-init status --wait >/dev/null 2>&1; test -x ~/.bun/bin/bun && echo READY",
+    )
+    if (probe.code === 0 && probe.stdout.includes("READY")) return
+    await sleep(10_000)
+  }
+  throw new Error(
+    "[full-remote] box never became ssh-reachable + bun-ready (check SG :22 / cloud-init)",
+  )
 }
 
 const listRunningBoxes = async (
@@ -1144,6 +1163,69 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
  * predictions + closure sidecar + (optional) trajectory back to durable local
  * storage. Owns NO box lifecycle — the caller terminates / reuses the box.
  */
+/** Poll cadence for the detached run. The box does the work; we just re-check. */
+const RUN_POLL_INTERVAL_MS = 15_000
+/** Sentinel splitting the exit-code field from the fresh run.log tail in one poll. */
+const RUN_EXIT_MARK = "==XQ-RUN-EXIT-XQ=="
+const detachedLaunchCommand = (benchCmd: string, runLog: string, runExit: string): string =>
+  `rm -f ${runExit}; setsid bash -c ${shq(`${benchCmd} > ${runLog} 2>&1; echo $? > ${runExit}`)} </dev/null >/dev/null 2>&1 & echo LAUNCHED`
+
+const detachedProbeCommand = (runExit: string, runLog: string, seen: number): string =>
+  `cat ${runExit} 2>/dev/null; echo "${RUN_EXIT_MARK}"; tail -n +${seen + 1} ${runLog} 2>/dev/null`
+
+const parseDetachedProbe = (stdout: string): { exitCode?: number; freshLines: string[] } => {
+  const mark = stdout.indexOf(RUN_EXIT_MARK)
+  const exitField = (mark >= 0 ? stdout.slice(0, mark) : "").trim()
+  const fresh = mark >= 0 ? stdout.slice(mark + RUN_EXIT_MARK.length) : ""
+  return {
+    ...(/^\d+$/.test(exitField) ? { exitCode: Number(exitField) } : {}),
+    freshLines: fresh.split("\n").slice(0, -1),
+  }
+}
+
+/**
+ * Detached run + poll — ssh-resilience (RCA jun-20). Launches `benchCmd` under
+ * `setsid` so it is its OWN session leader: an ssh teardown's SIGHUP never
+ * reaches it, and the bench runs to completion regardless of any local-side
+ * disconnect. Output goes to `runLog`, the exit code to a `runExit` sentinel.
+ * Then we POLL with SHORT reconnecting ssh calls — a dropped/255 poll is
+ * NON-FATAL (the next tick reconnects); no single long-lived ssh is ever held,
+ * which is what was orphaning boxes (a 60-90min foreground stream dies on any
+ * idle NAT-drop or active reset). Returns the bench's real exit code.
+ */
+const runBenchDetachedPoll = async (args: {
+  ssh: (cmd: string, input?: string, onData?: (chunk: string) => void) => Promise<SpawnResult>
+  benchCmd: string
+  runLog: string
+  runExit: string
+  onLine: (chunk: string) => void
+  sleep?: (ms: number) => Promise<void>
+  pollIntervalMs?: number
+}): Promise<{ code: number }> => {
+  const sleep = args.sleep ?? defaultSleep
+  const launch = await args.ssh(detachedLaunchCommand(args.benchCmd, args.runLog, args.runExit))
+  if (launch.code !== 0) {
+    throw new Error(
+      `[full-remote] detached bench launch failed (code ${launch.code}): ${launch.stderr}`,
+    )
+  }
+  let seen = 0
+  for (;;) {
+    // ONE short ssh per tick: exit sentinel (empty until done) + NEW run.log lines.
+    const probe = await args.ssh(detachedProbeCommand(args.runExit, args.runLog, seen))
+    // A failed/dropped poll (ssh non-zero) is NON-FATAL — just retry next tick.
+    if (probe.code === 0) {
+      const parsed = parseDetachedProbe(probe.stdout)
+      for (const line of parsed.freshLines) {
+        args.onLine(`${line}\n`)
+        seen += 1
+      }
+      if (parsed.exitCode !== undefined) return { code: parsed.exitCode }
+    }
+    await sleep(args.pollIntervalMs ?? RUN_POLL_INTERVAL_MS)
+  }
+}
+
 export const gradeChunkOnBox = async (
   session: BoxSession,
   params: GradeChunkParams,
@@ -1160,7 +1242,9 @@ export const gradeChunkOnBox = async (
     workload: workloadLabel(params),
     dataset: basename(params.datasetPath),
     instanceCount: selection.instanceCount,
-    ...(selection.instancePreview !== undefined ? { instancePreview: selection.instancePreview } : {}),
+    ...(selection.instancePreview !== undefined
+      ? { instancePreview: selection.instancePreview }
+      : {}),
     preset,
     model,
     concurrency,
@@ -1180,6 +1264,7 @@ export const gradeChunkOnBox = async (
   let finalEmptyPatchCount: number | undefined
   let finalRateLimited = false
   let latestLogLine: string | undefined
+  let sawLiveLogLine = false
   let lastSnapshotFlushAt = 0
   let snapshotWrites = Promise.resolve()
   let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -1217,7 +1302,14 @@ export const gradeChunkOnBox = async (
     createLineStreamer((line) => {
       log(`[box] ${line}`)
       const normalized = normalizeStatusText(line)
-      if (normalized !== "") latestLogLine = normalized
+      if (normalized !== "") {
+        latestLogLine = normalized
+        if (!sawLiveLogLine) {
+          sawLiveLogLine = true
+          flushRunningSnapshot(true)
+          return
+        }
+      }
       flushRunningSnapshot()
     })
 
@@ -1285,20 +1377,32 @@ export const gradeChunkOnBox = async (
     // on-box grading was MEASURED to false-negative correct patches (2026-06-19:
     // GRADE_CONCURRENCY=6 box scored 0/5; same predictions re-graded serially
     // scored 4/5). patch-gen stays concurrent (QUANTA_BENCH_CONCURRENCY).
-    const remoteRun = await ssh(
-      // Prepend uv's install dir to PATH so the in-process repro executor can find
-      // `uvx`; a non-interactive ssh does NOT source ~/.profile.
+    // Prepend uv's install dir to PATH so the in-process repro executor can find
+    // `uvx`; a non-interactive ssh does NOT source ~/.profile.
+    const benchCmd =
       `set -o pipefail; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; QUANTA_BENCH_PRESET=${shq(preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
-        `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
-        `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
-        params.forwardedBenchEnv +
-        trajectoryRecordEnv +
-        `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ${paths.dataset}${idsFlag} ` +
-        `--observe-dir ${paths.observeDir} ` +
-        `--model ${shq(model)} --predictions ${paths.preds} --report ${paths.report} 2>&1 | tee ${paths.runLog}`,
-      undefined,
-      makeLineStreamer(),
-    )
+      `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
+      `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${concurrency} ` +
+      params.forwardedBenchEnv +
+      trajectoryRecordEnv +
+      `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ${paths.dataset}${idsFlag} ` +
+      `--observe-dir ${paths.observeDir} ` +
+      `--model ${shq(model)} --predictions ${paths.preds} --report ${paths.report}`
+    // RESILIENT RUN (RCA jun-20): a single 60-90min FOREGROUND ssh streaming the
+    // run dies on ANY connection blip during patch-gen silence (idle NAT-drop OR
+    // active TCP reset) — keepalive alone is insufficient (it can't survive an
+    // active reset). ssh then HANGS or 255s and the box is ORPHANED (3× this
+    // session). Fix: DETACH the bench under `setsid` (survives ssh death — no
+    // SIGHUP) writing run.log + a `run.exit` sentinel, then POLL with SHORT
+    // reconnecting ssh calls — a dropped poll just retries on the next tick, and
+    // the bench keeps running regardless. The orchestrator can die and re-attach.
+    const remoteRun = await runBenchDetachedPoll({
+      ssh,
+      benchCmd,
+      runLog: paths.runLog,
+      runExit: paths.runLog.replace(/run\.log$/, "run.exit"),
+      onLine: makeLineStreamer(),
+    })
 
     finalExitCode = remoteRun.code
     await publishSnapshot("fetching", {

@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
-import { evaluateSuccessPredicate, type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
+import {
+  evaluateSuccessPredicate,
+  type PrimaryRailStep,
+  resolveOwnerSiblings,
+} from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
-import { analyzePatchBudget } from "@/agent/patch-budget"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
@@ -43,16 +46,21 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
-import { makeBenchRegressionOracle } from "@/runner/batch/eval/regression-oracle-adapter"
+import { noPatchExhaustedErrorOf } from "@/runner/batch/eval/no-patch-breaker-adapter"
+import {
+  buildPhasePatchBudget,
+  buildStrictPatchBudgetBlockedResult,
+} from "@/runner/batch/eval/patch-budget-admission"
 import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
-import { makeDiscoveredRepoRegressionPort } from "@/runner/batch/eval/repo-regression-discovery-adapter"
-import { withCandidatePatch } from "@/runner/batch/eval/rematerialize"
+import { makeBenchRegressionOracle } from "@/runner/batch/eval/regression-oracle-adapter"
+import { candidatePatchAppliesCleanly, withCandidatePatch } from "@/runner/batch/eval/rematerialize"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
   benchShouldRunRepairPhase,
   primaryRailRedAfterRepair,
 } from "@/runner/batch/eval/repair-phase-policy"
+import { makeDiscoveredRepoRegressionPort } from "@/runner/batch/eval/repo-regression-discovery-adapter"
 import {
   type Candidate,
   runSelection,
@@ -692,6 +700,13 @@ const runSelectionPhase = async (
           if (isolated) await cleanupSandbox(candidateSandbox)
         }
       },
+      applyClean: (c) =>
+        candidatePatchAppliesCleanly({
+          sandbox,
+          patch: c.patch,
+          baseCommit: instance.swebench?.baseCommit,
+          timeoutMs: deps.timeoutMs,
+        }),
       // TB regression HARD gate. Source is knob-selected:
       //   unset/gold => legacy eval-only PASS_TO_PASS set,
       //   discovered => no-oracle impacted repo-test discovery,
@@ -775,6 +790,13 @@ const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolea
   deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
 
 const agentPhaseError = (phase: Phase): string | undefined => {
+  const noPatchExhausted = noPatchExhaustedErrorOf({
+    enabled: benchOptIns().noPatchBreaker,
+    stopReason: phase.stopReason,
+    patch: phase.patch,
+    ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
+  })
+  if (noPatchExhausted !== undefined) return noPatchExhausted
   if (phase.stopReason === "error") {
     return phase.agentError ?? "agent stopped with error before verification"
   }
@@ -1079,6 +1101,36 @@ const runInstanceOnce = async (
       return terminal
     }
 
+    const strictBudget =
+      posture.patchBudgetStrict && instance.swebench !== undefined
+        ? buildPhasePatchBudget({
+            patch: phase.patch,
+            repo: instance.swebench.repo,
+            closureSession,
+            strict: true,
+          })
+        : undefined
+    if (strictBudget !== undefined && !strictBudget.withinBudget) {
+      const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
+      if (deps.observe && w.observer) {
+        extra.verdict = "ok"
+        extra.durationMs = Date.now() - startedAt
+        extra.patchPath = emitPatch(deps.observe, instance, w.observer, phase.patch)
+        const usage = w.usage?.total()
+        if (usage) extra.usage = usage
+        if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
+        if (phase.editCount !== undefined) extra.editCount = phase.editCount
+        if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
+        extra.patchBudget = strictBudget
+      }
+      return buildStrictPatchBudgetBlockedResult({
+        id: instance.id,
+        turns: phase.turns,
+        verdict: strictBudget,
+        extra,
+      })
+    }
+
     let v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
     const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
     if (shouldValidateGold(deps, v.passed)) {
@@ -1144,11 +1196,12 @@ const runInstanceOnce = async (
       // the typed budget over the diff so over_budget/new_def/cross_file rates feed
       // the A/B. Owner evidence = the closure localization candidates (justifies
       // cross-file). The SOFT-WITH-ESCALATION admission is a later measure-first step.
-      if (posture.patchBudget && instance.swebench !== undefined) {
-        const ownerFiles = closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? []
-        extra.patchBudget = analyzePatchBudget(phase.patch, {
-          ownerFiles,
+      if ((posture.patchBudget || posture.patchBudgetStrict) && instance.swebench !== undefined) {
+        extra.patchBudget = buildPhasePatchBudget({
+          patch: phase.patch,
           repo: instance.swebench.repo,
+          closureSession,
+          strict: posture.patchBudgetStrict,
         })
       }
       // T-301 verification-plan telemetry (knob-gated, observe-only).

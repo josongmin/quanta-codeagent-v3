@@ -1257,6 +1257,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/patch-budget.ts",
   },
   {
+    envKey: "QUANTA_BENCH_PATCH_BUDGET_STRICT",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: hard minimal-edit admission. Blocks over-budget final patches from official submission; use only in strict SOTA++ arms.",
+    readSite: "runner/knobs/knobs/patch-budget-strict.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_REPRO_VOTE",
     kind: "bool",
     default: false,

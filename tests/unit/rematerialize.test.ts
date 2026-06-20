@@ -17,6 +17,7 @@ import {
 } from "@/runner/batch/eval/regression-oracle"
 import {
   applyCandidatePatch,
+  candidatePatchAppliesCleanly,
   resetToBase,
   withCandidatePatch,
 } from "@/runner/batch/eval/rematerialize"
@@ -349,5 +350,37 @@ describe("primitives", () => {
     }
     expect(threw).toBe(false)
     expect(result).toBe(false)
+  })
+
+  test("candidatePatchAppliesCleanly distinguishes applies / non-applies / unavailable", async () => {
+    const good = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nGOOD\n"))
+    const bad =
+      "diff --git a/foo.txt b/foo.txt\n--- a/foo.txt\n+++ b/foo.txt\n@@ -9,1 +9,1 @@\n-x\n+y\n"
+
+    expect(
+      await candidatePatchAppliesCleanly({
+        sandbox: repo,
+        patch: good,
+        baseCommit: baseCommit(),
+        timeoutMs: 30_000,
+      }),
+    ).toBe(true)
+    expect(readFileSync(join(repo, "foo.txt"), "utf8")).toBe("base\n")
+    expect(
+      await candidatePatchAppliesCleanly({
+        sandbox: repo,
+        patch: bad,
+        baseCommit: baseCommit(),
+        timeoutMs: 30_000,
+      }),
+    ).toBe(false)
+    expect(
+      await candidatePatchAppliesCleanly({
+        sandbox: repo,
+        patch: good,
+        baseCommit: undefined,
+        timeoutMs: 30_000,
+      }),
+    ).toBeNull()
   })
 })

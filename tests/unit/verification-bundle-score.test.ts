@@ -11,6 +11,7 @@ import {
 /** All hard gates SATISFIED (the admissible baseline to inject failures into). */
 const HARD_OK: HardGateSignals = {
   baseValidatedRed: true,
+  patchProduced: true,
   patchedResolvedKofN: { votes: 3, k: 2 },
   regressionGreen: true,
   applyClean: true,
@@ -47,6 +48,10 @@ describe("scoreCandidate — hard gate (red-on-injection, each gate)", () => {
     )
   })
 
+  it("patchProduced=false ⇒ inadmissible", () => {
+    expect(scoreCandidate({ ...HARD_OK, patchProduced: false }, SOFT_NONE).admissible).toBe(false)
+  })
+
   it("applyClean=false ⇒ inadmissible", () => {
     expect(scoreCandidate({ ...HARD_OK, applyClean: false }, SOFT_NONE).admissible).toBe(false)
   })
@@ -63,9 +68,10 @@ describe("scoreCandidate — hard gate (red-on-injection, each gate)", () => {
   it("ALL nullable signals null (base/apply true) ⇒ admissible (fail-open self-harm proof)", () => {
     const hard: HardGateSignals = {
       baseValidatedRed: true,
+      patchProduced: true,
       patchedResolvedKofN: null,
       regressionGreen: null,
-      applyClean: true,
+      applyClean: null,
     }
     expect(scoreCandidate(hard, SOFT_NONE).admissible).toBe(true)
   })

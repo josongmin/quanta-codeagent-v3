@@ -68,6 +68,7 @@ export interface ClosureRunFact {
 export type InstanceClass =
   | "resolved"
   | "model_miss"
+  | "admission_blocked"
   | "no_patch_exhausted"
   | "empty_patch_other"
   | "ungraded"
@@ -111,7 +112,10 @@ const metricOf = (vals: ReadonlyArray<boolean | number | null | undefined>): Clo
 }
 
 const classify = (f: ClosureRunFact): InstanceClass => {
-  if (f.emptyPatch) return f.endReason === "max_turns" ? "no_patch_exhausted" : "empty_patch_other"
+  if (f.emptyPatch) {
+    if (f.endReason === "admission_blocked") return "admission_blocked"
+    return f.endReason === "max_turns" ? "no_patch_exhausted" : "empty_patch_other"
+  }
   if (f.resolved === true) return "resolved"
   if (f.resolved === false) return "model_miss"
   return "ungraded"
@@ -174,6 +178,7 @@ export const computeClosureDiagnostics = (
       ),
     ),
     stray_file_rate: metricOf(patchBearing.map((f) => f.strayFiles.length > 0)),
+    admission_blocked_rate: metricOf(perInstance.map((p) => p.class === "admission_blocked")),
     no_patch_exhausted_rate: metricOf(perInstance.map((p) => p.class === "no_patch_exhausted")),
     // F6 exploration-efficiency (raw means / rate — no arbitrary thresholds):
     edit_count_per_run: metricOf(facts.map((f) => f.editCount)),

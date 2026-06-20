@@ -157,7 +157,12 @@ export const testRunnerTool: Tool<Input> = {
     yield { type: "progress", message: `running: ${resolved}` }
 
     const timeoutMs = Math.min(input.timeout_ms ?? DEFAULT_TIMEOUT, MAX_TIMEOUT)
-    const r = await runShell(resolved, { cwd: ctx.cwd, signal: ctx.signal, timeoutMs })
+    const r = await runShell(resolved, {
+      cwd: ctx.cwd,
+      signal: ctx.signal,
+      timeoutMs,
+      ...(ctx.localEnv !== undefined ? { localEnv: ctx.localEnv } : {}),
+    })
 
     const combined = [r.stdout, r.stderr].filter(Boolean).join("\n").trimEnd()
     const tail =

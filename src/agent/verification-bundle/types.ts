@@ -38,6 +38,9 @@ export interface HardGateSignals {
    *  `null` ⇒ this selection mode does not require repro authority
    *  (FAIL-OPEN), e.g. no-oracle discovered-regression gating. */
   baseValidatedRed: boolean | null
+  /** The candidate generation produced a non-empty diff. `false` ⇒ no fix was
+   *  produced, so the candidate is never admissible. */
+  patchProduced: boolean
   /** Patched-side resolved K-of-N consensus (TC): `votes` scripts of the
    *  reproducing set now print "Issue resolved", quorum `k`. `null` ⇒ no
    *  consensus run (FAIL-OPEN). Admissible iff `votes >= k`. */
@@ -48,8 +51,9 @@ export interface HardGateSignals {
    *  reject a candidate). */
   regressionGreen: boolean | null
   /** The candidate diff applied cleanly to the sandbox. `false` ⇒ a patch that
-   *  does not apply is never admissible. */
-  applyClean: boolean
+   *  does not apply is never admissible. `null` ⇒ applyability was not probed
+   *  / could not be judged (FAIL-OPEN). */
+  applyClean: boolean | null
 }
 
 /**

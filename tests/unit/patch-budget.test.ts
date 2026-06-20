@@ -172,4 +172,22 @@ diff --git a/a/y.py b/a/y.py
     // observe-only: a single owner-file edit with a runtime call is STILL within budget.
     expect(v.withinBudget).toBe(true)
   })
+
+  test("strict mode gates runtime-expanding compiler calls (#13417 helper class)", () => {
+    const dbCall = `diff --git a/django/db/models/query.py b/django/db/models/query.py
+--- a/django/db/models/query.py
++++ b/django/db/models/query.py
+@@ -1225,3 +1225,4 @@ class QuerySet:
+         elif self.query.default_ordering and self.query.get_meta().ordering:
++            compiler = self.query.get_compiler(using='default')
+             return True
+`
+    const v = analyzePatchBudget(dbCall, {
+      ownerFiles: ["django/db/models/query.py"],
+      runtimeExpandingPolicy: "gate",
+    })
+    expect(v.budget.runtimeExpandingCalls).toBeGreaterThanOrEqual(1)
+    expect(v.withinBudget).toBe(false)
+    expect(v.overBudgetReasons.join(" ")).toContain("runtime-expanding budget=0")
+  })
 })

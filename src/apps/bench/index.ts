@@ -197,6 +197,7 @@ export const repairConfigFromArg = (
 
 /** Compact failure tag for the console FAIL line. Returns "" when the
  *  classification is `passed`. Examples:
+ *    `[FAIL][admission_blocked]`
  *    `[FAIL][hung_stream:dirty_cache_leak]`
  *    `[FAIL][completed_unresolved:verify_loop_stuck]`
  *    `[FAIL][max_turns_exhausted]` (no signals) */

@@ -46,6 +46,7 @@ import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
 import { noPatchBreakerKnob } from "@/runner/knobs/knobs/no-patch-breaker"
 import { patchBudgetKnob } from "@/runner/knobs/knobs/patch-budget"
+import { patchBudgetStrictKnob } from "@/runner/knobs/knobs/patch-budget-strict"
 import { patchHygieneKnob } from "@/runner/knobs/knobs/patch-hygiene"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
@@ -95,6 +96,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(networkProxyKnob),
   asAnyKnob(noPatchBreakerKnob),
   asAnyKnob(patchBudgetKnob),
+  asAnyKnob(patchBudgetStrictKnob),
   asAnyKnob(patchHygieneKnob),
   asAnyKnob(personaKnob),
   asAnyKnob(policyMergeKnob),

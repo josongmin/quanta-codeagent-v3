@@ -61,6 +61,10 @@ const mockSpawn = (
   const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
   // Split ssh routing into a sub-helper so cognitive complexity stays flat.
   const routeSsh = (args: string[]): SpawnResult => {
+    if (args.some((a) => a.includes("setsid bash -c"))) return ok("LAUNCHED")
+    if (args.some((a) => a.includes("run.exit") || a.includes("XQ-RUN-EXIT-XQ"))) {
+      return ok(`0\n==XQ-RUN-EXIT-XQ==\n`)
+    }
     if (args.some((a) => a.includes("bun") && a.includes("READY"))) return ok("READY") // readiness
     // atomic grade lock (a fresh box acquires it cleanly ⇒ LOCKED).
     if (args.some((a) => a.includes("mkdir ~/.pool-grade.lock"))) return ok("LOCKED")
@@ -82,6 +86,10 @@ const mockSpawn = (
       args: [...args],
       ...(opts?.input !== undefined ? { input: opts.input } : {}),
     })
+    if (cmd === "ssh" && args.some((a) => a.includes("run --swebench"))) {
+      opts?.onData?.("[info] bench(swebench): 1 task(s)\n")
+      opts?.onData?.("[PASS] psf__requests-5414 (turns=2)\n")
+    }
     return route(cmd, [...args])
   }
   return { fn, calls }
@@ -178,10 +186,33 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       .run()
       .catch(() => undefined)
     const statusWrites = calls
-      .filter((c) => c.cmd === "ssh" && c.input !== undefined && c.args.join(" ").includes("bench-box-status.json"))
+      .filter(
+        (c) =>
+          c.cmd === "ssh" &&
+          c.input !== undefined &&
+          c.args.join(" ").includes("bench-box-status.json"),
+      )
       .map((c) => c.input ?? "")
-    expect(statusWrites.some((s) => s.includes('"phase":"running"') && s.includes('"mode":"full-remote"'))).toBe(true)
-    expect(statusWrites.some((s) => s.includes('"phase":"idle"') && s.includes('"mode":"full-remote"'))).toBe(true)
+    expect(
+      statusWrites.some(
+        (s) =>
+          s.includes('"phase":"running"') &&
+          s.includes('"mode":"full-remote"') &&
+          s.includes('"runLogPath":"~/run.log"') &&
+          s.includes('"observeDir":"~/observe"') &&
+          s.includes('"instancePreview":["psf__requests-5414"]'),
+      ),
+    ).toBe(true)
+    expect(
+      statusWrites.some(
+        (s) =>
+          s.includes('"phase":"idle"') &&
+          s.includes('"mode":"full-remote"') &&
+          s.includes('"reportPath":"~/report.json"') &&
+          s.includes('"predictionsPath":"~/preds.jsonl"') &&
+          s.includes('"resolvedCount":1'),
+      ),
+    ).toBe(true)
   })
 
   test("default full-remote posture is agentless-v2-safe (bench-in-loop exec OFF)", async () => {
@@ -193,7 +224,9 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench")),
     )
     expect(benchRun).toBeDefined()
-    expect(benchRun?.args.join(" ") ?? "").toContain("QUANTA_BENCH_PRESET='agentless-v2-safe'")
+    const cmd = benchRun?.args.join(" ") ?? ""
+    expect(cmd).toContain("QUANTA_BENCH_PRESET=")
+    expect(cmd).toContain("agentless-v2-safe")
   })
 
   test("box bootstrap installs pyright so LSP nav-grounding is not inert by missing binary", async () => {
@@ -283,6 +316,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       if (args.includes("terminate-instances")) return ok("")
       if (cmd === "ssh") {
         const c = args[args.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
         if (c.includes("echo OK")) return ok("OK")
         if (c.includes("IDLE")) return ok("IDLE")
         if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
@@ -334,6 +368,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       if (args.includes("run-instances")) return ok("i-fresh")
       if (cmd === "ssh") {
         const c = args[args.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
         if (c.includes("READY")) return ok("READY")
         if (c.includes("echo OK")) return ok("OK")
         if (c.includes("IDLE")) return ok("BUSY")
@@ -386,6 +421,8 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         return { code: 0, stdout: "i-fallback", stderr: "" }
       }
       if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
+      if (cmd === "ssh" && args.some((a) => a.includes("run.exit")))
+        return { code: 0, stdout: "0\n==XQ-RUN-EXIT-XQ==\n", stderr: "" }
       if (cmd === "ssh" && args.some((a) => a.includes("READY")))
         return { code: 0, stdout: "READY", stderr: "" }
       if (cmd === "ssh" && args.some((a) => a.includes(".json")))
@@ -442,15 +479,15 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // TEETH (shell injection): the metacharacters must be inside single quotes,
     // NOT bare in the command. A bare `=evil; touch` would execute the injection.
     expect(cmd).not.toContain("=evil; touch /pwned") // bare (would execute) — absent
-    expect(cmd).toContain("'evil; touch /pwned'") // single-quoted — inert
+    expect(cmd).toContain("QUANTA_BENCH_PRESET='\\''evil; touch /pwned'\\''")
     expect(cmd).not.toContain("--model m`whoami`") // bare (would execute) — absent
-    expect(cmd).toContain("--model 'm`whoami`'") // single-quoted — inert
+    expect(cmd).toContain("--model '\\''m`whoami`'\\''") // nested shell-quoted — inert
   })
 
   test("authorize-ingress REAL failure fails fast (not a misleading downstream error)", async () => {
     // Self-audit R2: a real authorize failure used to be swallowed → box with no
     // :22 → misleading ssh/cloud-init timeout. Fail fast at the SG stage.
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+    const fn: SpawnFn = async (_cmd, args): Promise<SpawnResult> => {
       if (args.includes("describe-security-groups")) return { code: 0, stdout: "sg", stderr: "" }
       if (args.includes("authorize-security-group-ingress"))
         return { code: 255, stdout: "", stderr: "An error occurred (UnauthorizedOperation)" }

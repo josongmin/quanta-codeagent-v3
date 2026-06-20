@@ -5,7 +5,8 @@
  * {@link VerificationBundle}, and return the winner. Bounded repair (if any)
  * lives INSIDE candidate generation as an inner tactic — it never holds global
  * verdict authority here. This module is a pure orchestrator over INJECTED
- * ports (generate / regression / resolvedKofN): no fs, no exec, no agent — so
+ * ports (generate / applyClean / regression / resolvedKofN): no fs, no exec,
+ * no agent — so
  * it is fully unit-testable with fakes, and the driver supplies the real ports.
  *
  * Diversity, not repetition: `seeds[i]` nudges candidate i toward the i-th
@@ -14,16 +15,18 @@
  * owner-coverage selection lets a sibling that touches the root-cause file win).
  *
  * Scoring signals assembled here:
- *   HARD  — baseValidatedRed (closure; `null` in no-oracle modes), applyClean (non-empty diff),
- *           regressionGreen (port, null=fail-open), patchedResolvedKofN (port,
- *           null=fail-open).
+ *   HARD  — baseValidatedRed (closure; `null` in no-oracle modes),
+ *           patchProduced (empty diff = false), applyClean (non-empty diff can
+ *           be probed via port), regressionGreen (port, null=fail-open),
+ *           patchedResolvedKofN (port, null=fail-open).
  *   SOFT  — minimality (RELATIVE across the candidate set: smallest diff = 1,
  *           parameter-free), ownerCoverage (fraction of the candidate's files
  *           that are closure-ranked owners; null when no owner set).
  *
  * Winner = `selectBest` (highest-scoring admissible) else `selectBestEffort`
- * (highest raw score) — the hard gates inform but never leave us submitting
- * nothing when a candidate exists.
+ * over STRUCTURALLY SUBMITTABLE candidates only (highest raw score among
+ * non-empty, applying patches). We never knowingly submit an empty or
+ * non-applying patch.
  */
 
 import {
@@ -53,6 +56,8 @@ export interface Candidate {
 export interface SelectionPorts {
   /** Generate candidate `index` with optional localization `seed`. */
   generate: (index: number, seed: string | undefined) => Promise<Candidate>
+  /** OPTIONAL applyability hard signal; absent/null ⇒ non-empty patches fail open. */
+  applyClean?: (c: Candidate) => Promise<boolean | null>
   /** OPTIONAL regression hard signal; absent ⇒ null (FAIL-OPEN). */
   regression?: (c: Candidate) => Promise<boolean | null>
   /** OPTIONAL patched resolved K-of-N hard signal; absent ⇒ null (FAIL-OPEN). */
@@ -61,6 +66,7 @@ export interface SelectionPorts {
 
 export interface ScoredEntry {
   candidate: Candidate
+  hard: HardGateSignals
   verdict: CandidateVerdict
 }
 
@@ -71,7 +77,9 @@ export interface SelectionResult {
   successfulGenerations: number
   /** generate() calls that failed/aborted and were skipped. */
   generationFailures: number
-  /** Winning candidate (admissible best, else best-effort). null iff 0 generated. */
+  /** Winning candidate (admissible best, else best-effort among structurally
+   *  submittable candidates). null when 0 generated OR every candidate is
+   *  structurally unshippable (empty / non-applying). */
   winner: Candidate | null
   /** Per-candidate scoring (post-dedup), generation order. */
   scored: ScoredEntry[]
@@ -239,7 +247,8 @@ export const runSelection = async (args: {
     const resolvedMode = args.resolvedKofNMode ?? "hard"
     const hard: HardGateSignals = {
       baseValidatedRed: c.baseValidatedRed,
-      applyClean: !isEmpty,
+      patchProduced: !isEmpty,
+      applyClean: isEmpty ? null : ((await args.ports.applyClean?.(c)) ?? null),
       regressionGreen: (await args.ports.regression?.(c)) ?? null,
       patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
     }
@@ -256,11 +265,14 @@ export const runSelection = async (args: {
       // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
       ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
     }
-    scored.push({ candidate: c, verdict: scoreCandidate(hard, soft) })
+    scored.push({ candidate: c, hard, verdict: scoreCandidate(hard, soft) })
   }
 
   const ranked = scored.map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
-  const winnerId = selectBest(ranked) ?? selectBestEffort(ranked)
+  const fallbackRanked = scored
+    .filter((s) => s.hard.patchProduced && s.hard.applyClean !== false)
+    .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
+  const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
   const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
   return {
     attempted: args.n,

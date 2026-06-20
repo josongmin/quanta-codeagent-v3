@@ -19,7 +19,10 @@
  *
  * APPLY IS A NOOP — consumed out of band by the bench driver's runInstance
  * (`posture.verifySelectN` → runSelectionPhase), not stored on `AgentConfig`.
- * NOT in any preset until the on-demand A/B measures it (no effect claim first).
+ * Explicit experimental presets now include `agentless-v3-thin-strict-select`,
+ * `agentless-v3-select-regression`, and `agentless-v3-select-regression-doubt`,
+ * but verify-select is still NOT in the default base profile and is not yet
+ * promoted as an A/B-proven winner.
  */
 
 import type { AgentConfig } from "@/agent"
@@ -48,7 +51,8 @@ export const verifySelectKnob: Knob<number> = {
   surfaces: SURFACES,
   parse: parseVerifySelect,
   apply: applyVerifySelect,
-  describe: "Verify-and-select: generate N candidates, score via VerificationBundle, submit the best",
+  describe:
+    "Verify-and-select: generate N candidates, score via VerificationBundle, submit the best",
   unit: "candidates",
   // Per-candidate full agent invocation; static worst case at the cap.
   costMultiplier: 8,

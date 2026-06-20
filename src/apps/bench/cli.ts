@@ -29,7 +29,7 @@ import { explainFailure } from "./analyze/explain"
 import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
 import { loadVerdictsFromFile } from "./analyze/verdicts"
 import type { GradeBackend } from "./remote/backend"
-import { D, inspectBox, provisionBox } from "./remote/box-session"
+import { boxRunLogPath, D, inspectBox, provisionBox } from "./remote/box-session"
 import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
 import { buildForwardedBenchEnv, createFullRemoteBackend, runWithRelaunch } from "./remote/full"
@@ -130,6 +130,7 @@ const VALUE_FLAGS = new Set([
   "--observe-dir",
   "--mode",
   "--model",
+  "--lines",
 ])
 
 /** Positional args after the subcommand (argv[2]), skipping flags AND the
@@ -374,6 +375,28 @@ const buildPoolChunks = (datasetPaths: readonly string[]): PoolChunk[] => {
   })
 }
 
+const requirePoolDatasets = (): string[] => {
+  const datasetsArg = argValue("--datasets")
+  if (datasetsArg === undefined || datasetsArg.trim() === "") {
+    logger.info(
+      "usage: quanta-bench pool --allow-remote-secrets --datasets <c1.jsonl,c2.jsonl,…> [--workers 1] [--allow-extra-boxes] [--model m] [--ami id]",
+    )
+    process.exit(2)
+  }
+  return datasetsArg
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "")
+}
+
+const poolConcurrencySource = (override: string | undefined): string =>
+  override !== undefined &&
+  override !== "" &&
+  Number.isFinite(Number(override)) &&
+  Number(override) > 0
+    ? "env override"
+    : `default shared budget=${DEFAULT_POOL_TOKEN_BUDGET}`
+
 /**
  * jun-20 box-lifecycle Phase 2/3 — persistent-pool full-remote. Bootstraps ONE
  * box (or `--workers N`) ONCE and feeds it a QUEUE of dataset chunks, instead of
@@ -391,17 +414,7 @@ const cmdPool = async (): Promise<void> => {
     )
     process.exit(2)
   }
-  const datasetsArg = argValue("--datasets")
-  if (datasetsArg === undefined || datasetsArg.trim() === "") {
-    logger.info(
-      "usage: quanta-bench pool --allow-remote-secrets --datasets <c1.jsonl,c2.jsonl,…> [--workers 1] [--allow-extra-boxes] [--model m] [--ami id]",
-    )
-    process.exit(2)
-  }
-  const datasets = datasetsArg
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s !== "")
+  const datasets = requirePoolDatasets()
   const chunks = buildPoolChunks(datasets)
   const workers = resolvePoolWorkers()
   const authFile =
@@ -413,13 +426,7 @@ const cmdPool = async (): Promise<void> => {
   const concurrency = resolvePoolConcurrency(workers)
   const extraBoxes = allowExtraBoxes()
   const concurrencyOverride = poolConcurrencyOverrideRaw()
-  const concurrencySource =
-    concurrencyOverride !== undefined &&
-    concurrencyOverride !== "" &&
-    Number.isFinite(Number(concurrencyOverride)) &&
-    Number(concurrencyOverride) > 0
-      ? "env override"
-      : `default shared budget=${DEFAULT_POOL_TOKEN_BUDGET}`
+  const concurrencySource = poolConcurrencySource(concurrencyOverride)
   const recordTrajectory =
     process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
     process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
@@ -487,6 +494,7 @@ const summarizePoolRun = (out: Awaited<ReturnType<typeof runPool>>, chunkCount: 
  *
  *   quanta-bench box ls                  # list running quanta-bench boxes + runtime status
  *   quanta-bench box ls --json           # same, machine-readable
+ *   quanta-bench box status              # operator summary + suggested follow target
  *   quanta-bench box rm <iid|all>        # terminate a box (or all of them)
  *   quanta-bench box up                  # provision + bootstrap ONE warm box, leave it alive
  */
@@ -516,6 +524,29 @@ interface BoxLsRow {
   readonly instanceType: string
 }
 
+interface BoxRuntimeRow extends BoxLsRow, Awaited<ReturnType<typeof inspectBox>> {
+  readonly snapshotAgeSec?: number
+  readonly runAgeSec?: number
+  readonly logPath?: string
+  readonly freshness: "fresh" | "stale" | "unknown"
+  readonly followHint: string
+}
+
+interface BoxStatusSummary {
+  readonly total: number
+  readonly busy: number
+  readonly idle: number
+  readonly bootstrapping: number
+  readonly unreachable: number
+  readonly stale: number
+  readonly target?: string
+  readonly targetFollowHint?: string
+}
+
+const DEFAULT_BOX_LOG_PATH = "~/run.log"
+const BUSY_SNAPSHOT_STALE_SEC = 180
+const IDLE_SNAPSHOT_STALE_SEC = 900
+
 const parseBoxLsRows = (out: string): BoxLsRow[] =>
   out
     .trim()
@@ -528,7 +559,28 @@ const parseBoxLsRows = (out: string): BoxLsRow[] =>
     })
     .filter((row) => row.iid.startsWith("i-"))
 
-const cmdBoxLs = async (region: string): Promise<void> => {
+const parseIsoMs = (s: string | undefined): number | undefined => {
+  if (s === undefined || s === "") return undefined
+  const ms = Date.parse(s)
+  return Number.isFinite(ms) ? ms : undefined
+}
+
+const ageSecondsFromIso = (s: string | undefined): number | undefined => {
+  const ms = parseIsoMs(s)
+  if (ms === undefined) return undefined
+  return Math.max(0, Math.round((Date.now() - ms) / 1000))
+}
+
+const boxFreshness = (
+  lifecycle: BoxRuntimeRow["lifecycle"],
+  snapshotAgeSec: number | undefined,
+): BoxRuntimeRow["freshness"] => {
+  if (snapshotAgeSec === undefined) return "unknown"
+  const budgetSec = lifecycle === "busy" ? BUSY_SNAPSHOT_STALE_SEC : IDLE_SNAPSHOT_STALE_SEC
+  return snapshotAgeSec > budgetSec ? "stale" : "fresh"
+}
+
+const listBenchBoxes = async (region: string, keyPath: string): Promise<BoxRuntimeRow[]> => {
   const r = await awsText(region, [
     "ec2",
     "describe-instances",
@@ -543,15 +595,13 @@ const cmdBoxLs = async (region: string): Promise<void> => {
     process.exit(1)
   }
   const rows = parseBoxLsRows(r.out)
-  if (rows.length === 0) {
-    printBlock("[box] no running quanta-bench boxes")
-    return
-  }
+  if (rows.length === 0) return []
   const baseCfg = {
     repoDir: process.cwd(),
     authJson: "{}",
     datasetPath: "",
     region,
+    keyPath,
   }
   const inspections: Awaited<ReturnType<typeof inspectBox>>[] = await Promise.all(
     rows.map(async (row) => {
@@ -565,37 +615,316 @@ const cmdBoxLs = async (region: string): Promise<void> => {
       }))
     }),
   )
-  const enriched: Array<BoxLsRow & Awaited<ReturnType<typeof inspectBox>>> = rows.map((row, i) => {
+  return rows.map((row, i) => {
     const inspection = inspections[i] ?? {
       lifecycle: "unreachable",
       bootstrapped: false,
       busy: false,
     }
-    return { ...row, ...inspection }
+    const snapshot = inspection.snapshot
+    const snapshotAgeSec = ageSecondsFromIso(snapshot?.updatedAt)
+    const runAgeSec = ageSecondsFromIso(snapshot?.startedAt)
+    const logPath = boxRunLogPath(snapshot)
+    return {
+      ...row,
+      ...inspection,
+      ...(snapshotAgeSec !== undefined ? { snapshotAgeSec } : {}),
+      ...(runAgeSec !== undefined ? { runAgeSec } : {}),
+      ...(logPath !== undefined ? { logPath } : {}),
+      freshness: boxFreshness(inspection.lifecycle, snapshotAgeSec),
+      followHint: `bun run src/apps/bench/cli.ts box logs ${row.iid} --follow`,
+    }
   })
+}
+
+const latestLaunchFirst = (rows: readonly BoxRuntimeRow[]): BoxRuntimeRow[] =>
+  [...rows].sort(
+    (a, b) =>
+      (parseIsoMs(b.launchTime) ?? Number.NEGATIVE_INFINITY) -
+      (parseIsoMs(a.launchTime) ?? Number.NEGATIVE_INFINITY),
+  )
+
+const resolveBoxTarget = (
+  rows: readonly BoxRuntimeRow[],
+  raw: string | undefined,
+): BoxRuntimeRow => {
+  if (rows.length === 0) {
+    throw new Error("[box] no running quanta-bench boxes")
+  }
+  const target = raw?.trim()
+  if (target === undefined || target === "" || target === "auto") {
+    const busy = latestLaunchFirst(rows.filter((row) => row.lifecycle === "busy"))
+    if (busy[0] !== undefined) return busy[0]
+    return latestLaunchFirst(rows)[0] as BoxRuntimeRow
+  }
+  if (target === "latest") return latestLaunchFirst(rows)[0] as BoxRuntimeRow
+  if (target === "busy") {
+    const busy = latestLaunchFirst(rows.filter((row) => row.lifecycle === "busy"))
+    if (busy[0] === undefined) throw new Error("[box] no busy box is currently running")
+    return busy[0]
+  }
+  const exact = rows.find((row) => row.iid === target)
+  if (exact !== undefined) return exact
+  const pref = rows.filter((row) => row.iid.startsWith(target))
+  if (pref.length === 1) return pref[0] as BoxRuntimeRow
+  if (pref.length > 1) {
+    throw new Error(
+      `[box] ambiguous box target "${target}" — matches: ${pref.map((row) => row.iid).join(", ")}`,
+    )
+  }
+  throw new Error(`[box] box "${target}" not found`)
+}
+
+const summarizeBenchBoxes = (rows: readonly BoxRuntimeRow[]): BoxStatusSummary => {
+  const target = resolveBoxTarget(rows, "auto")
+  return {
+    total: rows.length,
+    busy: rows.filter((row) => row.lifecycle === "busy").length,
+    idle: rows.filter((row) => row.lifecycle === "idle").length,
+    bootstrapping: rows.filter((row) => row.lifecycle === "bootstrapping").length,
+    unreachable: rows.filter((row) => row.lifecycle === "unreachable").length,
+    stale: rows.filter((row) => row.freshness === "stale").length,
+    target: target.iid,
+    targetFollowHint: target.followHint,
+  }
+}
+
+const boxStatusLabel = (row: BoxRuntimeRow): string =>
+  `${row.lifecycle}${row.snapshot?.phase !== undefined ? `/${row.snapshot.phase}` : ""}${
+    row.freshness === "stale" ? "/stale" : ""
+  }`
+
+const boxDetailLine = (row: BoxRuntimeRow): string | undefined =>
+  row.snapshot === undefined
+    ? undefined
+    : `  mode=${row.snapshot.mode}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+
+const boxRuntimeLine = (row: BoxRuntimeRow): string | undefined =>
+  row.snapshot === undefined
+    ? undefined
+    : `  started=${row.snapshot.startedAt ?? "unknown"}${row.runAgeSec !== undefined ? `  runtime=${row.runAgeSec}s` : ""}${row.logPath !== undefined ? `  logPath=${row.logPath}` : ""}`
+
+const boxOutcomeLine = (row: BoxRuntimeRow): string | undefined =>
+  row.snapshot?.resolvedCount !== undefined ||
+  row.snapshot?.unresolvedCount !== undefined ||
+  row.snapshot?.erroredCount !== undefined ||
+  row.snapshot?.emptyPatchCount !== undefined ||
+  row.snapshot?.rateLimited === true
+    ? `  outcome=resolved:${row.snapshot?.resolvedCount ?? 0} unresolved:${row.snapshot?.unresolvedCount ?? 0} errored:${row.snapshot?.erroredCount ?? 0} empty:${row.snapshot?.emptyPatchCount ?? 0}${row.snapshot?.rateLimited === true ? "  rateLimited=yes" : ""}`
+    : undefined
+
+const renderBoxRow = (row: BoxRuntimeRow): string[] => {
+  const headline = `${row.iid}  ${row.state}  ${row.instanceType}  ${row.ip}  status=${boxStatusLabel(row)}`
+  return [
+    headline,
+    `  launched=${row.launchTime}`,
+    boxDetailLine(row),
+    boxRuntimeLine(row),
+    boxOutcomeLine(row),
+    row.snapshot?.lastLogLine !== undefined ? `  log=${row.snapshot.lastLogLine}` : undefined,
+    row.logPath !== undefined ? `  follow=${row.followHint}` : undefined,
+  ].filter((line): line is string => line !== undefined)
+}
+
+const renderBoxList = (rows: readonly BoxRuntimeRow[]): string =>
+  ["[box] running boxes:", ...latestLaunchFirst(rows).flatMap((row) => renderBoxRow(row))].join(
+    "\n",
+  )
+
+const renderBoxStatus = (summary: BoxStatusSummary, rows: readonly BoxRuntimeRow[]): string => {
+  const staleRows = latestLaunchFirst(rows.filter((row) => row.freshness === "stale"))
+  const focus =
+    latestLaunchFirst(rows.filter((row) => row.lifecycle === "busy"))[0] ??
+    latestLaunchFirst(rows)[0]
+  return [
+    "[box] summary:",
+    `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}`,
+    focus !== undefined
+      ? `  target=${focus.iid}  status=${boxStatusLabel(focus)}${focus.logPath !== undefined ? `  logPath=${focus.logPath}` : ""}`
+      : undefined,
+    summary.targetFollowHint !== undefined ? `  follow=${summary.targetFollowHint}` : undefined,
+    ...staleRows.map(
+      (row) =>
+        `  stale=${row.iid}  status=${boxStatusLabel(row)}  updated=${row.snapshot?.updatedAt ?? "none"}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`,
+    ),
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n")
+}
+
+const boxTailCommand = (logPath: string, lines: number, follow = false): string =>
+  `if test -f ${logPath}; then tail -n ${lines}${follow ? " -f" : ""} ${logPath}; else echo "__QUANTA_LOG_MISSING__ ${logPath}" >&2; exit 2; fi`
+
+const renderBoxLogHeader = (
+  row: BoxRuntimeRow,
+  host: string,
+  logPath: string,
+  follow: boolean,
+): string =>
+  [
+    follow ? `[box] following ${row.iid} (${host})` : `[box] ${row.iid}  ${host}`,
+    `  status=${boxStatusLabel(row)}`,
+    `  logPath=${logPath}`,
+    row.snapshot?.updatedAt !== undefined
+      ? `  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+      : undefined,
+    row.snapshot?.startedAt !== undefined
+      ? `  started=${row.snapshot.startedAt}${row.runAgeSec !== undefined ? `  runtime=${row.runAgeSec}s` : ""}`
+      : undefined,
+    row.snapshot?.lastLogLine !== undefined ? `  last=${row.snapshot.lastLogLine}` : undefined,
+    `  follow=${row.followHint}`,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n")
+
+const renderBoxLogsJson = (
+  row: BoxRuntimeRow,
+  logPath: string,
+  lines: number,
+  tail: { code: number; out: string; err: string },
+): string =>
+  JSON.stringify(
+    {
+      iid: row.iid,
+      ip: row.ip,
+      lifecycle: row.lifecycle,
+      freshness: row.freshness,
+      phase: row.snapshot?.phase,
+      logPath,
+      lines,
+      snapshot: row.snapshot,
+      snapshotAgeSec: row.snapshotAgeSec,
+      runAgeSec: row.runAgeSec,
+      followHint: row.followHint,
+      tail: tail.out,
+      error: tail.err.trim() === "" ? undefined : tail.err.trim(),
+      exitCode: tail.code,
+    },
+    null,
+    2,
+  )
+
+const sshBoxText = async (
+  keyPath: string,
+  host: string,
+  remoteCmd: string,
+): Promise<{ code: number; out: string; err: string }> => {
+  const proc = Bun.spawn(
+    [
+      "ssh",
+      "-i",
+      keyPath,
+      "-o",
+      "StrictHostKeyChecking=accept-new",
+      "-o",
+      "ConnectTimeout=15",
+      "-o",
+      "ServerAliveInterval=30",
+      "-o",
+      "ServerAliveCountMax=20",
+      "-o",
+      "TCPKeepAlive=yes",
+      host,
+      remoteCmd,
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  )
+  const [out, err] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  return { code: await proc.exited, out, err }
+}
+
+const sshBoxFollow = async (keyPath: string, host: string, remoteCmd: string): Promise<number> => {
+  const proc = Bun.spawn(
+    [
+      "ssh",
+      "-i",
+      keyPath,
+      "-o",
+      "StrictHostKeyChecking=accept-new",
+      "-o",
+      "ConnectTimeout=15",
+      "-o",
+      "ServerAliveInterval=30",
+      "-o",
+      "ServerAliveCountMax=20",
+      "-o",
+      "TCPKeepAlive=yes",
+      host,
+      remoteCmd,
+    ],
+    { stdout: "inherit", stderr: "inherit" },
+  )
+  return await proc.exited
+}
+
+const cmdBoxLs = async (region: string): Promise<void> => {
+  const keyPath = argValue("--key") ?? D.keyPath
+  const rows = await listBenchBoxes(region, keyPath)
+  if (rows.length === 0) {
+    printBlock("[box] no running quanta-bench boxes")
+    return
+  }
   if (hasFlag("--json")) {
-    printBlock(JSON.stringify(enriched, null, 2))
+    printBlock(JSON.stringify(rows, null, 2))
+    return
+  }
+  printBlock(renderBoxList(rows))
+}
+
+const cmdBoxStatus = async (region: string): Promise<void> => {
+  const keyPath = argValue("--key") ?? D.keyPath
+  const rows = await listBenchBoxes(region, keyPath)
+  if (rows.length === 0) {
+    printBlock("[box] no running quanta-bench boxes")
+    return
+  }
+  const ordered = latestLaunchFirst(rows)
+  const summary = summarizeBenchBoxes(ordered)
+  if (hasFlag("--json")) {
+    printBlock(JSON.stringify({ summary, boxes: ordered }, null, 2))
+    return
+  }
+  printBlock(renderBoxStatus(summary, ordered))
+}
+
+const cmdBoxLogs = async (region: string): Promise<void> => {
+  if (hasFlag("--json") && hasFlag("--follow")) {
+    logger.info("[box] --json and --follow are mutually exclusive")
+    process.exit(2)
+  }
+  const keyPath = argValue("--key") ?? D.keyPath
+  const rows = await listBenchBoxes(region, keyPath)
+  const row = resolveBoxTarget(rows, positionals()[1])
+  if (row.state !== "running" || row.ip === "" || row.ip === "None") {
+    logger.info(
+      `[box] ${row.iid} is not ssh-ready yet (state=${row.state}, ip=${row.ip || "none"})`,
+    )
+    process.exit(1)
+  }
+  const logPath = row.logPath ?? DEFAULT_BOX_LOG_PATH
+  const host = `ubuntu@${row.ip}`
+  const lines = Math.max(1, Math.trunc(Number(argValue("--lines")) || 80))
+  if (hasFlag("--follow")) {
+    printBlock(renderBoxLogHeader(row, host, logPath, true))
+    const code = await sshBoxFollow(keyPath, host, boxTailCommand(logPath, lines, true))
+    if (code !== 0) process.exit(code)
+    return
+  }
+  const tail = await sshBoxText(keyPath, host, boxTailCommand(logPath, lines))
+  if (hasFlag("--json")) {
+    printBlock(renderBoxLogsJson(row, logPath, lines, tail))
+    if (tail.code !== 0) process.exit(tail.code)
     return
   }
   printBlock(
-    [
-      "[box] running boxes:",
-      ...enriched.flatMap((row) => {
-        const phase = row.snapshot?.phase
-        const headline =
-          `${row.iid}  ${row.state}  ${row.instanceType}  ${row.ip}  ` +
-          `status=${row.lifecycle}${phase !== undefined ? `/${phase}` : ""}`
-        const detail =
-          row.snapshot === undefined
-            ? undefined
-            : `  mode=${row.snapshot.mode}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}`
-        const logLine =
-          row.snapshot?.lastLogLine !== undefined ? `  log=${row.snapshot.lastLogLine}` : undefined
-        const launched = `  launched=${row.launchTime}`
-        return [headline, launched, detail, logLine].filter((line) => line !== undefined)
-      }),
-    ].join("\n"),
+    [renderBoxLogHeader(row, host, logPath, false), `--- tail -n ${lines} ---`, tail.out.trimEnd()]
+      .filter((line) => line !== undefined)
+      .join("\n"),
   )
+  if (tail.code !== 0) process.exit(tail.code)
 }
 
 const cmdBoxRm = async (region: string): Promise<void> => {
@@ -669,12 +998,16 @@ const cmdBoxUp = async (): Promise<void> => {
 }
 
 const cmdBox = async (): Promise<void> => {
-  const region = process.env.QUANTA_FULL_REMOTE_REGION ?? D.region
+  const region = argValue("--region") ?? process.env.QUANTA_FULL_REMOTE_REGION ?? D.region
   const action = positionals()[0] ?? "ls"
   if (action === "ls") return cmdBoxLs(region)
+  if (action === "status") return cmdBoxStatus(region)
+  if (action === "logs") return cmdBoxLogs(region)
   if (action === "rm") return cmdBoxRm(region)
   if (action === "up") return cmdBoxUp()
-  logger.info("usage: quanta-bench box <ls [--json]|rm <iid|all>|up>")
+  logger.info(
+    "usage: quanta-bench box <ls [--json]|status [--json]|logs [iid|busy|latest] [--lines N] [--follow|--json]|rm <iid|all>|up>",
+  )
   process.exit(2)
 }
 

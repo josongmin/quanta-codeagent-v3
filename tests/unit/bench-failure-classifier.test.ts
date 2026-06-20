@@ -78,6 +78,20 @@ describe("classify — termination axis", () => {
     expect(classify(r).termination).toBe("harness_error")
   })
 
+  test("typed patch-budget strict block → admission_blocked, not harness_error", () => {
+    const r: InstanceResult = {
+      id: "x",
+      passed: false,
+      patch: "",
+      turns: 12,
+      error: "patch budget exceeded: runtime-expanding budget=0",
+      admissionBlock: { kind: "patch_budget_strict" },
+    }
+    const c = classify(r)
+    expect(c.termination).toBe("admission_blocked")
+    expect(c.signals).not.toContain("empty_patch")
+  })
+
   test("completed agent with empty patch and no trajectory → completed_unresolved + empty_patch", () => {
     const r: InstanceResult = { id: "x", passed: false, patch: "", turns: 16 }
     const c = classify(r)

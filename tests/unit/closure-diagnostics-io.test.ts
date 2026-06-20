@@ -4,13 +4,13 @@
  * the oracle never being consulted as anything but post-hoc gold.
  */
 import { describe, expect, test } from "bun:test"
-import type { InstanceResult } from "@/runner/batch/types"
 import {
   buildFacts,
   diagnoseRun,
   patchFiles,
   strayFilesOf,
 } from "@/runner/batch/eval/closure-diagnostics-io"
+import type { InstanceResult } from "@/runner/batch/types"
 
 const DIFF = `diff --git a/pkg/a.py b/pkg/a.py
 --- a/pkg/a.py
@@ -33,7 +33,9 @@ describe("closure-diagnostics-io", () => {
       "diff --git a/test.html.Z b/test.html.Z\nnew file mode 100644\n" +
       "diff --git a/django/core/paginator.py b/django/core/paginator.py\n--- a/django/core/paginator.py\n+++ b/django/core/paginator.py\n"
     expect(strayFilesOf(diff)).toEqual(["test.html.Z"])
-    expect(strayFilesOf("diff --git a/django/core/paginator.py b/django/core/paginator.py\n")).toEqual([])
+    expect(
+      strayFilesOf("diff --git a/django/core/paginator.py b/django/core/paginator.py\n"),
+    ).toEqual([])
   })
 
   test("buildFacts maps max_turns empty patch to the #9296 class signal", () => {
@@ -52,6 +54,31 @@ describe("closure-diagnostics-io", () => {
     const [f] = buildFacts([r])
     expect(f.emptyPatch).toBe(true)
     expect(f.endReason).toBe("max_turns")
+  })
+
+  test("buildFacts maps strict admission blocks to admission_blocked endReason", () => {
+    const r: InstanceResult = {
+      id: "strict-block",
+      passed: false,
+      patch: "",
+      turns: 8,
+      admissionBlock: { kind: "patch_budget_strict" },
+      budget: {
+        baseTimeoutMs: 1,
+        adaptedTimeoutMs: 1,
+        attempts: 1,
+        attemptOutcomes: [
+          {
+            kind: "admission-blocked",
+            source: "patch_budget_strict",
+            reason: "patch budget exceeded",
+          },
+        ],
+      },
+    }
+    const [f] = buildFacts([r])
+    expect(f.emptyPatch).toBe(true)
+    expect(f.endReason).toBe("admission_blocked")
   })
 
   test("buildFacts derives over_budget/new_def/cross_file from patchBudget (jun-19)", () => {
@@ -100,7 +127,12 @@ describe("closure-diagnostics-io", () => {
   })
 
   test("diagnoseRun with no dataset → owner metrics unavailable, no crash", () => {
-    const r: InstanceResult = { id: "x", passed: true, patch: "diff --git a/x.py b/x.py\n", turns: 3 }
+    const r: InstanceResult = {
+      id: "x",
+      passed: true,
+      patch: "diff --git a/x.py b/x.py\n",
+      turns: 3,
+    }
     const d = diagnoseRun([r], undefined)
     expect(d.total).toBe(1)
     expect(d.metrics["owner_recall@1"].available).toBe(false)

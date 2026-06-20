@@ -38,6 +38,7 @@
  * closed enum.
  */
 
+import { isPatchBudgetStrictAdmission } from "../admission"
 import type { InstanceResult } from "../types"
 
 /**
@@ -47,6 +48,9 @@ import type { InstanceResult } from "../types"
  *                      error before producing a candidate patch. Stop by
  *                      default; quota/rate-limit errors are not improved by
  *                      immediate bench retries.
+ *   - `admission-blocked` — the runner refused to submit the generated patch
+ *                      (e.g. `patch-budget-strict`). Terminal bench-policy
+ *                      outcome; immediate retries cannot change that answer.
  *   - `empty-patch`  — agent never produced a diff before doing useful work.
  *                      A completed nonzero-turn trajectory with no diff is a
  *                      real model fail, not a transient retry candidate.
@@ -71,6 +75,11 @@ import type { InstanceResult } from "../types"
 export type AttemptOutcome =
   | { readonly kind: "pass" }
   | { readonly kind: "empty-patch"; readonly reason?: string }
+  | {
+      readonly kind: "admission-blocked"
+      readonly source: NonNullable<InstanceResult["admissionBlock"]>["kind"]
+      readonly reason: string
+    }
   | { readonly kind: "generation-fail"; readonly reason: string }
   | { readonly kind: "grader-invalid"; readonly reason: string }
   | { readonly kind: "timeout" }
@@ -94,6 +103,7 @@ export interface RetryPolicy {
  * The bench's frozen default policy:
  *   - empty-patch  ⇒ retry (LLM/API transient)
  *   - generation-fail ⇒ DO NOT retry (provider quota/rate-limit waste guard)
+ *   - admission-blocked ⇒ DO NOT retry (bench admission policy)
  *   - grader-invalid ⇒ DO NOT retry (dataset/verifier authority issue)
  *   - infra-fail   ⇒ retry (harness transient)
  *   - timeout      ⇒ DO NOT retry (ambiguous; budget already exhausted)
@@ -133,16 +143,17 @@ export const DEFAULT_POLICY: RetryPolicy = {
  *   2. `result.verdict === "env_prep_failed"`          ⇒ infra-fail (T4)
  *   3. `result.verdict === "degraded"`                 ⇒ infra-fail (recorder)
  *   4. `result.verdict === "grader_invalid"`           ⇒ grader-invalid
- *   5. `error` matches provider/model generation failure ⇒ generation-fail
- *   6. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
- *   7. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
- *   8. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
- *   9. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
- *  10. `patch === ""` AND turns > 0                    ⇒ real-fail / completed_unresolved
- *  11. `error` contains "empty prediction"             ⇒ empty-patch
- *  12. `error` contains "no patch produced"            ⇒ empty-patch
- *  13. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
- *  14. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
+ *   5. `result.admissionBlock.kind === "patch_budget_strict"` ⇒ admission-blocked
+ *   6. `error` matches provider/model generation failure ⇒ generation-fail
+ *   7. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
+ *   8. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
+ *   9. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
+ *  10. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
+ *  11. `patch === ""` AND turns > 0                    ⇒ real-fail / completed_unresolved
+ *  12. `error` contains "empty prediction"             ⇒ empty-patch
+ *  13. `error` contains "no patch produced"            ⇒ empty-patch
+ *  14. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
+ *  15. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
  *
  * The classifier is pure; the bench driver may call it AFTER `runInstance`
  * to decide whether to loop.
@@ -159,6 +170,17 @@ const classifyByVerdict = (result: InstanceResult): AttemptOutcome | undefined =
   }
   if (result.verdict === "grader_invalid") {
     return { kind: "grader-invalid", reason: result.error ?? "grader_invalid" }
+  }
+  return undefined
+}
+
+const classifyByAdmission = (result: InstanceResult): AttemptOutcome | undefined => {
+  if (isPatchBudgetStrictAdmission(result.admissionBlock)) {
+    return {
+      kind: "admission-blocked",
+      source: result.admissionBlock.kind,
+      reason: result.error ?? "patch budget exceeded",
+    }
   }
   return undefined
 }
@@ -210,6 +232,8 @@ export const classifyOutcome = (result: InstanceResult): AttemptOutcome => {
   if (result.passed === true) return { kind: "pass" }
   const byVerdict = classifyByVerdict(result)
   if (byVerdict !== undefined) return byVerdict
+  const byAdmission = classifyByAdmission(result)
+  if (byAdmission !== undefined) return byAdmission
   const err = typeof result.error === "string" ? result.error : ""
   const patch = typeof result.patch === "string" ? result.patch : ""
   const byErr = classifyByErrorString(err)

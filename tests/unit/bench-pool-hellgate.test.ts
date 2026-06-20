@@ -46,10 +46,18 @@ const mockSpawn = (opts: {
   const routeSsh = (args: string[]): SpawnResult => {
     const cmd = args[args.length - 1] ?? ""
     if (cmd.includes("READY")) return ok("READY")
+    if (cmd.includes("setsid bash -c")) return ok("LAUNCHED")
+    if (cmd.includes("run.exit") || cmd.includes("XQ-RUN-EXIT-XQ")) {
+      return ok(`0\n==XQ-RUN-EXIT-XQ==\n`)
+    }
     // atomic grade lock: a fresh box acquires it (mkdir succeeds ⇒ LOCKED). Match
     // mkdir/rmdir SPECIFICALLY so the idle probe's `test -d …lock` falls through.
     if (cmd.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
     if (cmd.includes("rmdir ~/.pool-grade.lock")) return ok("")
+    // detached-run launch/poll: the `run.exit` sentinel carries the bench exit
+    // code (RCA jun-20 ssh-resilience). Report DONE (exit 0) immediately so the
+    // poll loop terminates in one tick; launch ssh ignores the stdout.
+    if (cmd.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
     // report fetch: `cat ~/runs/<runId>/report.json 2>/dev/null`
     const m = cmd.match(/cat ~\/runs\/([^/]+)\/report\.json/)
     if (m) return ok(reportFor(m[1] ?? "", Math.max(0, launchIdx)))
@@ -74,6 +82,12 @@ const mockSpawn = (opts: {
   }
   const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
     calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+    if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
+      const runId =
+        (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
+      o?.onData?.(`[info] ${runId} started\n`)
+      o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
+    }
     return route(cmd, [...args])
   }
   return { fn, calls }
@@ -146,11 +160,39 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     const { fn, calls } = mockSpawn({})
     await runPool(CHUNKS, poolCfg(fn))
     const statusWrites = calls
-      .filter((c) => c.cmd === "ssh" && c.input !== undefined && c.args.join(" ").includes("bench-box-status.json"))
+      .filter(
+        (c) =>
+          c.cmd === "ssh" &&
+          c.input !== undefined &&
+          c.args.join(" ").includes("bench-box-status.json"),
+      )
       .map((c) => c.input ?? "")
-    expect(statusWrites.some((s) => s.includes('"phase":"running"') && s.includes('"runId":"c1"'))).toBe(true)
-    expect(statusWrites.some((s) => s.includes('"phase":"fetching"') && s.includes('"runId":"c1"'))).toBe(true)
-    expect(statusWrites.some((s) => s.includes('"phase":"idle"') && s.includes('"runId":"c3"'))).toBe(true)
+    expect(
+      statusWrites.some(
+        (s) =>
+          s.includes('"phase":"running"') &&
+          s.includes('"runId":"c1"') &&
+          s.includes('"runLogPath":"~/runs/c1/run.log"') &&
+          s.includes('"observeDir":"~/runs/c1/observe"'),
+      ),
+    ).toBe(true)
+    expect(
+      statusWrites.some(
+        (s) =>
+          s.includes('"phase":"fetching"') &&
+          s.includes('"runId":"c1"') &&
+          s.includes('"predictionsPath":"~/runs/c1/preds.jsonl"'),
+      ),
+    ).toBe(true)
+    expect(
+      statusWrites.some(
+        (s) =>
+          s.includes('"phase":"idle"') &&
+          s.includes('"runId":"c3"') &&
+          s.includes('"reportPath":"~/runs/c3/report.json"') &&
+          s.includes('"resolvedCount":1'),
+      ),
+    ).toBe(true)
   })
 
   test("RCA jun-20: the long bench-run ssh carries keepalive (no-keepalive HANG regression)", async () => {
@@ -240,6 +282,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       if (a.includes("terminate-instances")) return ok("")
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
         if (c.includes("echo OK")) return ok("OK") // bootstrap probe
         // idle probe (uniquely contains `pgrep`) — checked BEFORE the lock matchers
         // because the stale-lock-reclaim probe also contains `rmdir …lock`.
@@ -383,6 +426,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       if (a.includes("terminate-instances")) return ok("")
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
         if (c.includes("READY")) return ok("READY")
         if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY") // lock held by another run
         if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
@@ -419,6 +463,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       if (a.includes("terminate-instances")) return ok("")
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
         if (c.includes("READY")) return ok("READY")
         if (c.includes("mkdir ~/.pool-grade.lock"))
           return { code: 255, stdout: "", stderr: "ssh: connect timeout" }
@@ -467,6 +512,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
         if (c.includes("echo OK")) return ok("OK")
         if (c.includes("IDLE")) return ok("BUSY")
         return ok("")
@@ -494,6 +540,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       if (a.includes("terminate-instances")) return ok("")
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
         if (c.includes("READY")) return ok("READY")
         if (c.includes("echo OK")) return ok("OK")
         if (c.includes("IDLE")) return ok("BUSY")

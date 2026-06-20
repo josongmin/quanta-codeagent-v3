@@ -227,6 +227,46 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
   },
+  // jun-20 strict arm:
+  // mini-first + hard patch-budget admission + source-only sanitizer. It keeps
+  // the localization stack, turns host in-loop execution OFF for round-0 thinness,
+  // and blocks over-budget final patches from submission. Existing v3-thin remains
+  // observe-only because it has already been measured.
+  "agentless-v3-thin-strict": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "patch-hygiene": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+  },
+  // Strict + late critic/select. Candidate generation stays mini-first/noexec;
+  // only the outer selector runs regression checks after candidates exist.
+  "agentless-v3-thin-strict-select": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "patch-hygiene": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "5",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+  },
   // jun-20 no-oracle verify-select arm. Starts from v3-thin, adds N-best
   // selection, uses discovered native repo tests as the hard regression signal,
   // and demotes self-generated repro consensus to positive-only soft ranking so

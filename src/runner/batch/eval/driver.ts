@@ -16,7 +16,7 @@
  * this is a pure structural refactor.
  */
 
-import { type Dirent, readFileSync, readdirSync } from "node:fs"
+import { type Dirent, readdirSync, readFileSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import {
   type AgentConfig,
@@ -39,13 +39,16 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
-import { evaluateSuccessPredicate, type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
+import {
+  evaluateSuccessPredicate,
+  type PrimaryRailStep,
+  resolveOwnerSiblings,
+} from "@/agent/closure"
 import {
   FIND_REFS_STEER,
   LSP_GROUNDING_STEER,
   SPEC_FIDELITY_STEER,
 } from "@/agent/localize-phase-guard"
-import { analyzePatchBudget } from "@/agent/patch-budget"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
@@ -77,9 +80,15 @@ import {
   knobsForReport,
   resolveBenchKnobs,
 } from "./knobs-bench"
+import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
+import {
+  buildPhasePatchBudget,
+  buildStrictPatchBudgetBlockedResult,
+} from "./patch-budget-admission"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
-import { withCandidatePatch } from "./rematerialize"
-import { makeDiscoveredRepoRegressionPort } from "./repo-regression-discovery-adapter"
+import { toRegressionGreen } from "./regression-oracle"
+import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
+import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import { makeReproVoteValidate } from "./repair/repro-vote"
@@ -97,6 +106,7 @@ import {
   benchShouldRunRepairPhase,
   primaryRailRedAfterRepair,
 } from "./repair-phase-policy"
+import { makeDiscoveredRepoRegressionPort } from "./repo-regression-discovery-adapter"
 import {
   buildWiring,
   emitPatch,
@@ -107,8 +117,6 @@ import {
   type Wiring,
 } from "./report"
 import { calibrateReproOracle } from "./repro-oracle-calibration"
-import { toRegressionGreen } from "./regression-oracle"
-import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import {
   type AttemptOutcome,
   classifyOutcome,
@@ -118,7 +126,12 @@ import {
   runRetryLoop,
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
-import { runSelection, type SelectionTelemetry, summarizeSelection, type Candidate } from "./selection-executor"
+import {
+  type Candidate,
+  runSelection,
+  type SelectionTelemetry,
+  summarizeSelection,
+} from "./selection-executor"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -1072,6 +1085,16 @@ export const composeWithReproHint = (
     ? hintedBase
     : composePromptPrelude({ issueHint: hint, reproHint, baseText })
 
+const repoLocalVerifierHint = (instance: Instance): string => {
+  if (instance.swebench === undefined) return ""
+  const testCmd = instance.testCmd.trim()
+  if (testCmd.length === 0) return ""
+  return [
+    `Repository-local verifier for this task: ${testCmd}`,
+    "When running repo tests, prefer this command (or a narrower variant of it) over bare host-global pytest/python.",
+  ].join("\n")
+}
+
 const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
   instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}
 
@@ -1146,7 +1169,11 @@ export const buildConfig = (
     ...findRefsToolList,
   ])
   const permission: PermissionContext = { mode: "acceptEdits" }
-  const base = `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
+  const verifierHint = repoLocalVerifierHint(instance)
+  const base =
+    verifierHint === ""
+      ? `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
+      : `${instance.problemStatement}\n\nWork inside ${sandbox}.\n${verifierHint}\nWhen done, stop.`
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
   // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
   // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
@@ -1263,72 +1290,73 @@ export const buildConfig = (
     },
   ]
   const baseConfig = {
-      llm: deps.llm,
-      registry,
-      stream,
-      permission,
-      messages,
-      system: buildSystemPrompt(sandbox),
-      cwd: sandbox,
-      // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
-      // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not
-      // leak a `pyright-langserver` child for the 30-min idle-TTL window (the
-      // idle-TTL is an interactive-reuse affordance, useless to a one-shot
-      // bench instance). Prewarm is DEFAULT-ON with nav (warm the localize-phase
-      // workspace); the cold arm of the A/B is `QUANTA_LSP_PREWARM=0`
-      // (`gateDisabled` off-switch). The run `signal` is the warm abort so
-      // session end cancels an in-flight warm instead of riding the budget.
-      ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
-      ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
-        ? { lspPrewarm: { enabled: true, warmSignal: signal } }
-        : {}),
-      ...localEnvSlotOf(instance),
-      maxTurns: deps.maxTurns,
-      signal,
-      onConfirm: async () => false,
-      // Real SWE-bench repos blow the context window over a long trajectory.
-      // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
-      // without this, large-repo instances PTL-die instead of compacting.
-      compaction: {},
-      // Verify-guard (ADR-0013): observed bench failure — agent edits a
-      // source file then declares "done" with 0 verification → wrong fix ships.
-      // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
-      // byte-identical). Absent ⇒ guard OFF, loop unchanged.
-      //
-      // mustPass (outcome-gate) extension — sanity runs with skills/subagent ON
-      // showed the model can call `test_runner`, receive `ok:false`, and STILL
-      // declare "done"; the presence-only guard accepts the call as "verified"
-      // because it ran. mustPass = ALSO require the verify to PASS. maxTrips=2
-      // gives one budget slot per branch (presence + must-pass) so a single run
-      // can hit both before the cap; SWE-bench prioritizes measurement integrity
-      // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
-      // Gated additionally on `opt.inLoopExec`: the mini-swe (OFF) posture
-      // edits-and-submits, so a "must verify" guard is moot (and would push the
-      // agent at the same unrunnable host test-env). ON ⇒ byte-identical.
-      ...(instance.swebench && opt.inLoopExec
-        ? { verifyGuard: { mustPass: true, maxTrips: 2 } }
-        : {}),
-      // Test-scope guard (RCA 2026-06-19, django-13417). DEFAULT-ON for real
-      // swebench in-loop runs (the no-test-edit rule is already DECLARED in the
-      // bench system prompt — this ENFORCES it at the dispatch layer so the
-      // model can't edit tests, chase its own modified tests, and regress a
-      // correct minimal fix). Off-switch `QUANTA_BENCH_PROTECT_TESTS=0` yields
-      // the A/B baseline arm (advisory-only, the pre-fix behavior). Gated on
-      // `inLoopExec` like verifyGuard: the mini-swe posture (OFF) edits-and-
-      // submits with test edits already stripped at diff time, so the guard is
-      // moot there.
-      ...(instance.swebench &&
-      opt.inLoopExec &&
-      !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
-        ? { protectTestPaths: true }
-        : {}),
-      // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
-      // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
-    }
+    llm: deps.llm,
+    registry,
+    stream,
+    permission,
+    messages,
+    system: buildSystemPrompt(sandbox),
+    cwd: sandbox,
+    // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
+    // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not
+    // leak a `pyright-langserver` child for the 30-min idle-TTL window (the
+    // idle-TTL is an interactive-reuse affordance, useless to a one-shot
+    // bench instance). Prewarm is DEFAULT-ON with nav (warm the localize-phase
+    // workspace); the cold arm of the A/B is `QUANTA_LSP_PREWARM=0`
+    // (`gateDisabled` off-switch). The run `signal` is the warm abort so
+    // session end cancels an in-flight warm instead of riding the budget.
+    ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
+    ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
+      ? { lspPrewarm: { enabled: true, warmSignal: signal } }
+      : {}),
+    ...localEnvSlotOf(instance),
+    maxTurns: deps.maxTurns,
+    signal,
+    onConfirm: async () => false,
+    // Real SWE-bench repos blow the context window over a long trajectory.
+    // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
+    // without this, large-repo instances PTL-die instead of compacting.
+    compaction: {},
+    // Verify-guard (ADR-0013): observed bench failure — agent edits a
+    // source file then declares "done" with 0 verification → wrong fix ships.
+    // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
+    // byte-identical). Absent ⇒ guard OFF, loop unchanged.
+    //
+    // mustPass (outcome-gate) extension — sanity runs with skills/subagent ON
+    // showed the model can call `test_runner`, receive `ok:false`, and STILL
+    // declare "done"; the presence-only guard accepts the call as "verified"
+    // because it ran. mustPass = ALSO require the verify to PASS. maxTrips=2
+    // gives one budget slot per branch (presence + must-pass) so a single run
+    // can hit both before the cap; SWE-bench prioritizes measurement integrity
+    // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
+    // Gated additionally on `opt.inLoopExec`: the mini-swe (OFF) posture
+    // edits-and-submits, so a "must verify" guard is moot (and would push the
+    // agent at the same unrunnable host test-env). ON ⇒ byte-identical.
+    ...(instance.swebench && opt.inLoopExec
+      ? { verifyGuard: { mustPass: true, maxTrips: 2 } }
+      : {}),
+    // Test-scope guard (RCA 2026-06-19, django-13417). DEFAULT-ON for real
+    // swebench in-loop runs (the no-test-edit rule is already DECLARED in the
+    // bench system prompt — this ENFORCES it at the dispatch layer so the
+    // model can't edit tests, chase its own modified tests, and regress a
+    // correct minimal fix). Off-switch `QUANTA_BENCH_PROTECT_TESTS=0` yields
+    // the A/B baseline arm (advisory-only, the pre-fix behavior). Gated on
+    // `inLoopExec` like verifyGuard: the mini-swe posture (OFF) edits-and-
+    // submits with test edits already stripped at diff time, so the guard is
+    // moot there.
+    ...(instance.swebench &&
+    opt.inLoopExec &&
+    !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
+      ? { protectTestPaths: true }
+      : {}),
+    // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
+    // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
+  }
   const knobApplied = applyBenchKnobs(baseConfig, state, { instance, sandbox })
+  const noPatchApplied = opt.noPatchBreaker ? wireNoPatchBreaker(knobApplied) : knobApplied
   return wireOptionalAgentPorts(
     {
-      ...knobApplied,
+      ...noPatchApplied,
       ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
       ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
       ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
@@ -1920,6 +1948,13 @@ const runSelectionPhase = async (
           if (isolated) await cleanupSandbox(candidateSandbox)
         }
       },
+      applyClean: (c) =>
+        candidatePatchAppliesCleanly({
+          sandbox,
+          patch: c.patch,
+          baseCommit: instance.swebench?.baseCommit,
+          timeoutMs: deps.timeoutMs,
+        }),
       regression: (c) => {
         if (verifySelectRegression === "off") return Promise.resolve(null)
         if (verifySelectRegression === "discovered") {
@@ -1995,6 +2030,13 @@ const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolea
   deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
 
 const agentPhaseError = (phase: Phase): string | undefined => {
+  const noPatchExhausted = noPatchExhaustedErrorOf({
+    enabled: benchOptIns().noPatchBreaker,
+    stopReason: phase.stopReason,
+    patch: phase.patch,
+    ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
+  })
+  if (noPatchExhausted !== undefined) return noPatchExhausted
   if (phase.stopReason === "error") {
     return phase.agentError ?? "agent stopped with error before verification"
   }
@@ -2323,6 +2365,36 @@ export const runInstanceOnce = async (
       return terminal
     }
 
+    const strictBudget =
+      posture.patchBudgetStrict && instance.swebench !== undefined
+        ? buildPhasePatchBudget({
+            patch: phase.patch,
+            repo: instance.swebench.repo,
+            closureSession,
+            strict: true,
+          })
+        : undefined
+    if (strictBudget !== undefined && !strictBudget.withinBudget) {
+      const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
+      if (deps.observe && w.observer) {
+        extra.verdict = "ok"
+        extra.durationMs = Date.now() - startedAt
+        extra.patchPath = emitPatch(deps.observe, instance, w.observer, phase.patch)
+        const usage = w.usage?.total()
+        if (usage) extra.usage = usage
+        if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
+        if (phase.editCount !== undefined) extra.editCount = phase.editCount
+        if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
+        extra.patchBudget = strictBudget
+      }
+      return buildStrictPatchBudgetBlockedResult({
+        id: instance.id,
+        turns: phase.turns,
+        verdict: strictBudget,
+        extra,
+      })
+    }
+
     // T01 (audit L5 H-5): thread the per-instance deadline signal into verify so
     // the official harness grading + its transient-crash retry sleep stop when
     // the instance deadline fires instead of cascading into the next instance.
@@ -2389,11 +2461,12 @@ export const runInstanceOnce = async (
         extra.patchHygiene = hygiene
         extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
       }
-      if (posture.patchBudget && instance.swebench !== undefined) {
-        const ownerFiles = closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? []
-        extra.patchBudget = analyzePatchBudget(phase.patch, {
-          ownerFiles,
+      if ((posture.patchBudget || posture.patchBudgetStrict) && instance.swebench !== undefined) {
+        extra.patchBudget = buildPhasePatchBudget({
+          patch: phase.patch,
           repo: instance.swebench.repo,
+          closureSession,
+          strict: posture.patchBudgetStrict,
         })
       }
       // T-301 verification-plan telemetry (knob-gated, observe-only).
@@ -2462,6 +2535,9 @@ export const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
     return o.reason !== undefined
       ? { kind: "empty-patch", reason: o.reason }
       : { kind: "empty-patch" }
+  }
+  if (o.kind === "admission-blocked") {
+    return { kind: "admission-blocked", source: o.source, reason: o.reason }
   }
   if (o.kind === "generation-fail") return { kind: "generation-fail", reason: o.reason }
   if (o.kind === "grader-invalid") return { kind: "grader-invalid", reason: o.reason }

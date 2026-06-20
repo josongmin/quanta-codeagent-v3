@@ -17,6 +17,7 @@
  * fixtures so a future detector cannot silently drift.
  */
 import { existsSync, readFileSync } from "node:fs"
+import { isPatchBudgetStrictAdmission } from "@/runner/batch/admission"
 import type { InstanceResult } from "../types"
 import { getCachePathRe } from "./cache-pathspecs"
 
@@ -24,6 +25,7 @@ import { getCachePathRe } from "./cache-pathspecs"
  *  exactly one bucket. */
 export type TerminationType =
   | "passed"
+  | "admission_blocked"
   | "generation_error"
   | "grader_invalid"
   | "harness_error"
@@ -93,6 +95,7 @@ const computeTermination = (
   events: TrajectoryEvent[] | null,
 ): TerminationType => {
   if (r.passed) return "passed"
+  if (isPatchBudgetStrictAdmission(r.admissionBlock)) return "admission_blocked"
   if (r.verdict === "grader_invalid") return "grader_invalid"
   if (isGenerationError(r.error)) return "generation_error"
   if (isAgentNoPatch(r)) return "completed_unresolved"
@@ -219,8 +222,15 @@ export const classify = (r: InstanceResult): FailureClassification => {
   const events = readTrajectory(r.patchPath)
   const termination = computeTermination(r, events)
   const signals: FailureSignal[] = []
-  if (r.patch.trim() === "" && termination !== "generation_error") signals.push("empty_patch")
-  else if (isDirtyCacheLeak(r.patch)) signals.push("dirty_cache_leak")
+  if (
+    r.patch.trim() === "" &&
+    termination !== "generation_error" &&
+    termination !== "admission_blocked"
+  ) {
+    signals.push("empty_patch")
+  } else if (isDirtyCacheLeak(r.patch)) {
+    signals.push("dirty_cache_leak")
+  }
   if (distinctEditedFiles(r.patch) >= DRIFT_THRESHOLD) signals.push("multi_file_drift")
   if (events !== null) {
     if (hasVerifyLoopStuck(events)) signals.push("verify_loop_stuck")

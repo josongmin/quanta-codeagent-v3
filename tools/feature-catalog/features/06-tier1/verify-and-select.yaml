@@ -33,9 +33,10 @@ purpose: |
   regression oracle engine port + bench adapter (TB, plug-ready hard signal,
   no-leak fenced), the pure selection-executor orchestrator (TD), and the
   `verify-select` knob (8-step plumbing). Default-OFF / byte-identical when
-  unset. Explicit experimental presets now exist (`agentless-v3-select-regression`
-  and `agentless-v3-select-regression-doubt`), but the feature is still NOT in
-  the default base profile and is not yet promoted as an A/B-proven winner.
+  unset. Explicit experimental presets now exist (`agentless-v3-thin-strict-select`,
+  `agentless-v3-select-regression`, and `agentless-v3-select-regression-doubt`),
+  but the feature is still NOT in the default base profile and is not yet
+  promoted as an A/B-proven winner.
 evidence:
   code:
     - src/agent/verification-bundle/types.ts
@@ -45,6 +46,8 @@ evidence:
     - src/runner/batch/eval/regression-oracle.ts
     - src/apps/bench/eval/regression-oracle-adapter.ts
     - src/apps/bench/eval/repo-regression-discovery-adapter.ts
+    - src/runner/batch/eval/regression-oracle-adapter.ts
+    - src/runner/batch/eval/repo-regression-discovery-adapter.ts
     - src/runner/batch/eval/selection-executor.ts
     - src/runner/batch/eval/repair/resolved-consensus.ts
     - src/runner/knobs/knobs/verify-select.ts
@@ -64,7 +67,11 @@ evidence:
       - tests/unit/pass-to-pass-threading.test.ts
       - tests/unit/repro-consensus-selection-port.test.ts
       - tests/unit/verify-select-regression-knob.test.ts
-    integration: []
+      - tests/unit/runner/verify-select-driver-parity.test.ts
+      - tests/unit/bench-preset-drives-config-hellgate.test.ts
+    integration:
+      - tests/integration/bench-verify-select-concurrency.test.ts
+      - tests/integration/runner-verify-select-telemetry.test.ts
     contract: []
 knobs:
   - name: verify-select

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -63,13 +63,26 @@ case "$host::$last" in
     ;;
   ubuntu@1.2.3.4::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"running","mode":"pool","runId":"wave7-s0","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"updatedAt":"2026-06-20T09:00:00.000Z","lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
+{"phase":"running","mode":"pool","runId":"wave7-s0","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"instancePreview":["demo__inst-1","demo__inst-2","demo__inst-3"],"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"startedAt":"2026-06-20T08:55:00.000Z","updatedAt":"2026-06-20T09:00:00.000Z","runLogPath":"~/runs/wave7-s0/run.log","reportPath":"~/runs/wave7-s0/report.json","predictionsPath":"~/runs/wave7-s0/preds.jsonl","observeDir":"~/runs/wave7-s0/observe","lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
 EOF
     exit 0
     ;;
   ubuntu@1.2.3.5::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"preset":"agentless-v2-safe","model":"gpt-5.4","concurrency":16,"updatedAt":"2026-06-20T09:05:00.000Z","lastExitCode":0,"lastLogLine":"resolved 1 | unresolved 0"}
+{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"instancePreview":["django__django-11179"],"preset":"agentless-v2-safe","model":"gpt-5.4","concurrency":16,"startedAt":"2026-06-20T09:01:00.000Z","updatedAt":"2026-06-20T09:05:00.000Z","runLogPath":"~/run.log","reportPath":"~/report.json","predictionsPath":"~/preds.jsonl","observeDir":"~/observe","resolvedCount":1,"unresolvedCount":0,"erroredCount":0,"emptyPatchCount":0,"lastExitCode":0,"lastLogLine":"resolved 1 | unresolved 0"}
+EOF
+    exit 0
+    ;;
+  ubuntu@1.2.3.4::*"tail -n 80 ~/runs/wave7-s0/run.log"*)
+    cat <<'EOF'
+[info] bench(swebench): 16 task(s), provider=chatgpt-oauth
+[PASS] demo__inst-1 (turns=2)
+EOF
+    exit 0
+    ;;
+  ubuntu@1.2.3.4::*"tail -n 5 ~/runs/wave7-s0/run.log"*)
+    cat <<'EOF'
+[PASS] demo__inst-1 (turns=2)
 EOF
     exit 0
     ;;
@@ -120,22 +133,110 @@ describe("bench box ls status view", () => {
     const rows = JSON.parse(out) as Array<{
       iid: string
       lifecycle: string
-      snapshot?: { mode?: string; runId?: string; workload?: string }
+      freshness?: string
+      logPath?: string
+      followHint?: string
+      snapshot?: {
+        mode?: string
+        runId?: string
+        workload?: string
+        runLogPath?: string
+        reportPath?: string
+      }
     }>
     expect(rows.find((r) => r.iid === "i-busy")).toEqual(
       expect.objectContaining({
         lifecycle: "busy",
-        snapshot: expect.objectContaining({ mode: "pool", runId: "wave7-s0" }),
+        freshness: "fresh",
+        logPath: "~/runs/wave7-s0/run.log",
+        followHint: expect.stringContaining("box logs i-busy --follow"),
+        snapshot: expect.objectContaining({
+          mode: "pool",
+          runId: "wave7-s0",
+          runLogPath: "~/runs/wave7-s0/run.log",
+          reportPath: "~/runs/wave7-s0/report.json",
+        }),
       }),
     )
     expect(rows.find((r) => r.iid === "i-idle")).toEqual(
       expect.objectContaining({
         lifecycle: "idle",
-        snapshot: expect.objectContaining({ mode: "full-remote", workload: "django__django-11179" }),
+        freshness: "fresh",
+        logPath: "~/run.log",
+        snapshot: expect.objectContaining({
+          mode: "full-remote",
+          workload: "django__django-11179",
+          runLogPath: "~/run.log",
+        }),
       }),
     )
     expect(rows.find((r) => r.iid === "i-pending")).toEqual(
-      expect.objectContaining({ lifecycle: "bootstrapping" }),
+      expect.objectContaining({ lifecycle: "bootstrapping", freshness: "unknown" }),
     )
+  })
+
+  test("box status prints operator summary with a recommended target", async () => {
+    const { code, out } = await runCli("box", "status")
+    expect(code).toBe(0)
+    expect(out).toContain("[box] summary:")
+    expect(out).toContain("total=3  busy=1  idle=1  bootstrapping=1  unreachable=0  stale=0")
+    expect(out).toContain("target=i-busy  status=busy/running")
+    expect(out).toContain("follow=bun run src/apps/bench/cli.ts box logs i-busy --follow")
+  })
+
+  test("box status --json exposes summary plus full rows", async () => {
+    const { code, out } = await runCli("box", "status", "--json")
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out) as {
+      summary: {
+        total: number
+        busy: number
+        idle: number
+        bootstrapping: number
+        stale: number
+        target?: string
+      }
+      boxes: Array<{ iid: string }>
+    }
+    expect(parsed.summary).toEqual(
+      expect.objectContaining({
+        total: 3,
+        busy: 1,
+        idle: 1,
+        bootstrapping: 1,
+        stale: 0,
+        target: "i-busy",
+      }),
+    )
+    expect(parsed.boxes.map((row) => row.iid)).toEqual(["i-pending", "i-idle", "i-busy"])
+  })
+
+  test("box logs tails the resolved log path for the selected box", async () => {
+    const { code, out } = await runCli("box", "logs", "busy")
+    expect(code).toBe(0)
+    expect(out).toContain("[box] i-busy  ubuntu@1.2.3.4")
+    expect(out).toContain("logPath=~/runs/wave7-s0/run.log")
+    expect(out).toContain("--- tail -n 80 ---")
+    expect(out).toContain("[info] bench(swebench): 16 task(s), provider=chatgpt-oauth")
+    expect(out).toContain("[PASS] demo__inst-1 (turns=2)")
+  })
+
+  test("box logs --json exposes machine-readable tail metadata", async () => {
+    const { code, out } = await runCli("box", "logs", "busy", "--json", "--lines", "5")
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out) as {
+      iid: string
+      logPath: string
+      followHint: string
+      lines: number
+      snapshot?: { runId?: string }
+      tail: string
+    }
+    expect(parsed.iid).toBe("i-busy")
+    expect(parsed.logPath).toBe("~/runs/wave7-s0/run.log")
+    expect(parsed.lines).toBe(5)
+    expect(parsed.followHint).toContain("box logs i-busy --follow")
+    expect(parsed.snapshot?.runId).toBe("wave7-s0")
+    expect(parsed.tail).toContain("[PASS] demo__inst-1 (turns=2)")
   })
 })

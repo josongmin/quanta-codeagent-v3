@@ -24,17 +24,22 @@ surface_integration:
     web: "no browser affordance"
 purpose: |
   Full-remote SWE-bench runs on EC2 with prebaked AMI (docker+uv+django images),
-  closure diagnostics sidecar fetch, serial grading, QUANTA_BENCH_* env forward,
-  and durable artifacts under benchHome() (not /tmp).
+  closure diagnostics sidecar fetch, QUANTA_BENCH_* env forward, durable
+  artifacts under benchHome() (not /tmp), and reusable box-session/pool wiring
+  so repeated chunks amortize the bootstrap tax instead of re-provisioning every
+  wave.
 evidence:
   code:
     - src/apps/bench/remote/backend.ts
+    - src/apps/bench/remote/box-session.ts
     - src/apps/bench/remote/ec2.ts
     - src/apps/bench/remote/full.ts
+    - src/apps/bench/remote/pool.ts
     - src/apps/bench/cli.ts
   adrs: []
   tests:
     unit:
+      - tests/unit/bench-pool-hellgate.test.ts
       - tests/unit/bench-full-remote-hellgate.test.ts
       - tests/unit/bench-full-remote-relaunch-hellgate.test.ts
       - tests/unit/bench-full-remote-stream-hellgate.test.ts
@@ -42,7 +47,8 @@ evidence:
       - tests/unit/bench-remote-backend.test.ts
       - tests/unit/bench-concurrency-hellgate.test.ts
       - tests/unit/bench-local-env-and-gold-sanity.test.ts
-    integration: []
+    integration:
+      - tests/integration/bench-box-ls-status.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
