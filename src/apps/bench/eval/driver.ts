@@ -43,7 +43,9 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { validateGoldPatch } from "@/runner/batch/eval/gold-sanity"
+import { makeBenchRegressionOracle } from "@/runner/batch/eval/regression-oracle-adapter"
 import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
+import { makeDiscoveredRepoRegressionPort } from "@/runner/batch/eval/repo-regression-discovery-adapter"
 import { withCandidatePatch } from "@/runner/batch/eval/rematerialize"
 import {
   benchInstallsReproHint,
@@ -69,12 +71,10 @@ import type {
 } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
-import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
-import { makeDiscoveredRepoRegressionPort } from "./repo-regression-discovery-adapter"
 import {
   buildWiring,
   emitPatch,

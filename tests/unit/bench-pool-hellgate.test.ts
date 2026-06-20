@@ -142,6 +142,17 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(benchRuns.some((c) => c.args.join(" ").includes("~/runs/c3/report.json"))).toBe(true)
   })
 
+  test("writes box-status snapshots so operators can see the current chunk + phase", async () => {
+    const { fn, calls } = mockSpawn({})
+    await runPool(CHUNKS, poolCfg(fn))
+    const statusWrites = calls
+      .filter((c) => c.cmd === "ssh" && c.input !== undefined && c.args.join(" ").includes("bench-box-status.json"))
+      .map((c) => c.input ?? "")
+    expect(statusWrites.some((s) => s.includes('"phase":"running"') && s.includes('"runId":"c1"'))).toBe(true)
+    expect(statusWrites.some((s) => s.includes('"phase":"fetching"') && s.includes('"runId":"c1"'))).toBe(true)
+    expect(statusWrites.some((s) => s.includes('"phase":"idle"') && s.includes('"runId":"c3"'))).toBe(true)
+  })
+
   test("RCA jun-20: the long bench-run ssh carries keepalive (no-keepalive HANG regression)", async () => {
     const { fn, calls } = mockSpawn({})
     await runPool(CHUNKS, poolCfg(fn))
@@ -230,9 +241,11 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
         if (c.includes("echo OK")) return ok("OK") // bootstrap probe
+        // idle probe (uniquely contains `pgrep`) — checked BEFORE the lock matchers
+        // because the stale-lock-reclaim probe also contains `rmdir …lock`.
+        if (c.includes("pgrep")) return ok("IDLE") // warm box is idle
         if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
         if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (c.includes("IDLE")) return ok("IDLE") // idle probe
         if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
           return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
         return ok("")
@@ -288,6 +301,56 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(sleptB).toEqual([]) // disabled
   })
 
+  test("429 BACKOFF: a CLEAN chunk resets the exponential ladder (d1 rl / d2 clean / d3 rl)", async () => {
+    // Pattern proves the RESET specifically: d1 rate-limited ⇒ base; d2 clean ⇒
+    // ladder resets; d3 rate-limited ⇒ base AGAIN (not 2×base); d4 present so d3's
+    // backoff fires (queue not empty). Without the reset, d3 would back off 2×base.
+    const four = [
+      { runId: "d1", datasetPath: "/tmp/d1.jsonl" },
+      { runId: "d2", datasetPath: "/tmp/d2.jsonl" },
+      { runId: "d3", datasetPath: "/tmp/d3.jsonl" },
+      { runId: "d4", datasetPath: "/tmp/d4.jsonl" },
+    ]
+    const { fn } = mockSpawn({ rateLimited: new Set(["d1", "d3"]) })
+    const slept: number[] = []
+    await runPool(
+      four,
+      poolCfg(fn, { backoffBaseMs: 1000, sleep: async (ms: number) => void slept.push(ms) }),
+    )
+    // d1→base, (d2 clean: no sleep + reset), d3→base again (RESET teeth), d4 clean.
+    expect(slept).toEqual([1000, 1000])
+  })
+
+  test("429 BACKOFF: a throttled-but-NO-VERDICT chunk backs off on the REQUEUE attempt too", async () => {
+    // THE bug H3 guards. Throttling yields an empty report ⇒ the chunk is REQUEUED,
+    // and the requeue branch writes NOTHING to `out`. Reading the backoff signal
+    // from `out.get(runId)` (the OLD code) therefore SKIPS the backoff on the
+    // requeue attempt and keeps hammering the throttled login. Reading it from THIS
+    // attempt's result (the fix) backs off every throttled attempt.
+    //   c1: rate-limited + NO verdict (requeues once, then lost); c2: clean+valid.
+    //   maxChunkRetries:1 ⇒ c1 gets TWO attempts, BOTH throttled.
+    // FIX  ⇒ backs off after BOTH c1 attempts ⇒ slept == [base, 2×base].
+    // OLD  ⇒ requeue attempt records no `out` ⇒ no backoff ⇒ slept == [base] (RED).
+    const { fn } = mockSpawn({
+      reportFor: (runId) => (runId === "c1" ? "" : JSON.stringify({ resolved_ids: ["ok"] })),
+      rateLimited: new Set(["c1"]),
+    })
+    const slept: number[] = []
+    await runPool(
+      [
+        { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+        { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+      ],
+      poolCfg(fn, {
+        backoffBaseMs: 1000,
+        maxChunkRetries: 1,
+        reuseWarm: false, // dead-box requeue launches fresh; keep it deterministic
+        sleep: async (ms: number) => void slept.push(ms),
+      }),
+    )
+    expect(slept).toEqual([1000, 2000]) // both throttled c1 attempts backed off
+  })
+
   test("detectRateLimit fires on the canonical markers, NOT on a bare 429 in an id/turns", () => {
     expect(detectRateLimit("[FAIL][generation_error] x (turns=2)")).toBe(true)
     expect(detectRateLimit("hit too many requests")).toBe(true)
@@ -299,36 +362,47 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(detectRateLimit("[PASS] psf__requests-429 (turns=429)")).toBe(false)
   })
 
-  test("a BUSY reused box is dropped WITHOUT terminating it (never kills another run's box)", async () => {
-    // findIdleBox keeps returning a warm box, but its grade lock is ALWAYS held
-    // (another run owns it). The pool must DROP it WITHOUT terminating — killing it
-    // would murder the other run's grade — and surface the chunk as lost.
+  test("a BUSY box (lock held) is dropped WITHOUT terminating it (POOL_BUSY ≠ dead box)", async () => {
+    // The lock mkdir always returns BUSY ⇒ gradeChunkOnBox throws POOL_BUSY. The
+    // pool must DROP the box WITHOUT terminating (it could be another run's box).
+    // TEETH design:
+    //   - reuseWarm:false forces a real LAUNCH, so the box's terminate is a REAL
+    //     aws `terminate-instances` (an ATTACHED box's terminate is a no-op, which
+    //     would make the "not terminated" assertion vacuous — the prior bug).
+    //   - the report fetch returns a VALID resolved report, so if the lock check
+    //     were bypassed the chunk would RESOLVE (lost:false) — `lost===true` then
+    //     proves the POOL_BUSY path was actually taken, not a no-verdict masquerade.
     const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string) => ({ code: 0, stdout: s, stderr: "" })
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     const fn: SpawnFn = async (cmd, args, o) => {
       calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
       const a = [...args]
-      if (a.includes("describe-instances"))
-        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
       if (a.includes("run-instances")) return ok("i-fresh")
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
       if (a.includes("terminate-instances")) return ok("")
       if (cmd === "ssh") {
         const c = a[a.length - 1] ?? ""
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY") // always busy (another run)
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY") // lock held by another run
         if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (c.includes("IDLE")) return ok("IDLE")
+        // a VALID report — only reachable if the lock check is (wrongly) bypassed.
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
         return ok("")
       }
       return ok("")
     }
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
-      poolCfg(fn, { maxChunkRetries: 1 }),
+      poolCfg(fn, { maxChunkRetries: 1, reuseWarm: false }),
     )
-    // CRITICAL TEETH: a box we don't own is NEVER terminated.
+    // CRITICAL TEETH: a box hitting POOL_BUSY is NEVER terminated (don't kill the
+    // other run). If the POOL_BUSY branch wrongly called terminate, this is >0.
     expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
-    // ...and the chunk is surfaced as lost (could not acquire a box), not silent 0.
+    // It DID launch (and re-launch on requeue) — proving the box was dropped+replaced.
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBeGreaterThan(0)
+    // lost:true proves the BUSY path ran — a bypassed lock would RESOLVE (lost:false).
     expect(out[0]?.lost).toBe(true)
   })
 
@@ -373,6 +447,70 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         poolCfg(fn),
       ),
     ).rejects.toThrow(/duplicate chunk runId/i)
+  })
+
+  test("workers > 1 is fail-closed unless the caller opts in explicitly", async () => {
+    const { fn, calls } = mockSpawn({})
+    await expect(runPool(CHUNKS, poolCfg(fn, { workers: 2 }))).rejects.toThrow(
+      /explicit opt-in|allowExtraWorkers/i,
+    )
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
+  test("a running BUSY box blocks auto-launch of another box unless explicitly opted in", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances") && a.includes("--filters")) return ok("i-busy\t9.9.9.9")
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("IDLE")) return ok("BUSY")
+        return ok("")
+      }
+      return ok("")
+    }
+    await expect(
+      runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn)),
+    ).rejects.toThrow(/refusing to launch another box/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
+  test("explicit extra-box opt-in can launch past a running BUSY box", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("describe-instances")) {
+        return a.includes("--filters") ? ok("i-busy\t9.9.9.9") : ok("1.2.3.4")
+      }
+      if (a.includes("run-instances")) return ok("i-fresh")
+      if (a.includes("wait")) return ok("")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("IDLE")) return ok("BUSY")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool(
+      [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+      poolCfg(fn, { allowExtraBoxes: true, reuseWarm: false }),
+    )
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
+    expect(out[0]?.lost).toBe(false)
   })
 
   test("chunkBoxPaths isolates every chunk + trajectory uses $HOME (double-quote safe)", () => {

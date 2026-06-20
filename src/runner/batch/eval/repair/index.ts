@@ -22,6 +22,7 @@
  */
 import type {
   BuildRepairContextArgs,
+  RepairReproOutcome,
   RepairValidationSource,
   RoundResult,
   RunOnceResult,
@@ -86,6 +87,29 @@ export const runRepairRounds = async (
 const isFalseGreen = (v: ValidatorResult): boolean =>
   v.ok && v.predicate?.evaluable === true && v.predicate.matched === false
 
+const MARKER_REPRODUCED = "Issue reproduced"
+const MARKER_RESOLVED = "Issue resolved"
+const MARKER_OTHER = "Other issues"
+
+const classifyReproOutcome = (stdout: string, code: number): RepairReproOutcome => {
+  const s = typeof stdout === "string" ? stdout : ""
+  const iReproduced = s.lastIndexOf(MARKER_REPRODUCED)
+  const iResolved = s.lastIndexOf(MARKER_RESOLVED)
+  const iOther = s.lastIndexOf(MARKER_OTHER)
+  const max = Math.max(iReproduced, iResolved, iOther)
+  if (max < 0) return code !== 0 ? "exec_failed" : "unknown"
+  if (max === iResolved) return "resolved"
+  if (max === iReproduced) return "reproduced"
+  return "other"
+}
+
+const reproOutcomeOf = (v: ValidatorResult): RepairReproOutcome | undefined => {
+  if (v.reproOutcome !== undefined) return v.reproOutcome
+  return v.observed !== undefined
+    ? classifyReproOutcome(v.observed.stdout, v.observed.exitCode)
+    : undefined
+}
+
 /** OBSERVE-ONLY measurement (jun-18 RCA instrument): the round did NOT clear
  *  (`ok:false`, exit-code ≠ 0 on the rail) YET the repro's OWN sentinel says the
  *  bug is fixed (`classifyStdout(stdout) === "resolved"`). This is a false-RED:
@@ -94,9 +118,11 @@ const isFalseGreen = (v: ValidatorResult): boolean =>
  *  re-deriving the SAME correct patch). If this rate is high, the validator must
  *  gate on the repro's sentinel (its actual Agentless contract) rather than the
  *  incidental exit code. Records, never flips `ok` — the fix is the next step,
- *  gated on THIS measurement (no blind loop change). */
+ *  gated on THIS measurement (no blind loop change). Prefer the validator's
+ *  recorded `reproOutcome`; custom / test validators that omit it still
+ *  participate via `observed.stdout` fallback. */
 const isFalseRed = (v: ValidatorResult): boolean =>
-  !v.ok && v.reproOutcome === "resolved"
+  !v.ok && reproOutcomeOf(v) === "resolved"
 
 const predicateSummaryOf = (v: ValidatorResult): string | undefined => {
   const predicate = v.predicate

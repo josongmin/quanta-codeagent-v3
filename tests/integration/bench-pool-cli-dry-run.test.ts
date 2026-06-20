@@ -47,6 +47,49 @@ const runCli = async (...args: string[]): Promise<{ code: number; out: string }>
 }
 
 describe("bench pool cli dry-run", () => {
+  test("single-box default spends the full shared token budget on one box", async () => {
+    const { code, out } = await runCli(
+      "pool",
+      "--allow-remote-secrets",
+      "--dry-run",
+      "--datasets",
+      dsA,
+    )
+    expect(code).toBe(0)
+    expect(out).toContain("workers=1")
+    expect(out).toContain("concurrency=16")
+  })
+
+  test("workers > 1 is refused without explicit extra-box opt-in", async () => {
+    const { code, out } = await runCli(
+      "pool",
+      "--allow-remote-secrets",
+      "--dry-run",
+      "--datasets",
+      `${dsA},${dsB}`,
+      "--workers",
+      "2",
+    )
+    expect(code).not.toBe(0)
+    expect(out).toContain("--allow-extra-boxes")
+  })
+
+  test("explicit multi-box opt-in is allowed and splits the default token budget", async () => {
+    const { code, out } = await runCli(
+      "pool",
+      "--allow-remote-secrets",
+      "--dry-run",
+      "--allow-extra-boxes",
+      "--datasets",
+      `${dsA},${dsB}`,
+      "--workers",
+      "2",
+    )
+    expect(code).toBe(0)
+    expect(out).toContain("workers=2")
+    expect(out).toContain("concurrency=8")
+  })
+
   test("duplicate dataset basenames get unique runIds (no silent chunk collision)", async () => {
     const { code, out } = await runCli(
       "pool",

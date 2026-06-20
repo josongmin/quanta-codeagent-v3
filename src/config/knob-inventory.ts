@@ -1396,6 +1396,26 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/closeout-guard.ts",
   },
   {
+    envKey: "QUANTA_REPO_MAP",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runner-knobs",
+    describe:
+      "Bounded repo-map turn-0 injection (cli/agent/bench runner knob). Default-OFF; set ⇒ config.repoMap turns on with fixed caps.",
+    readSite: "runner/knobs/knobs/repo-map.ts",
+  },
+  {
+    envKey: "QUANTA_MULTI_VOTER",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "runner-knobs",
+    describe:
+      "Adversarial multi-voter verification quorum. Format <voters> or <voters>:<quorum>; requires branch-search. Default-OFF.",
+    readSite: "runner/knobs/knobs/multi-voter.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_MUST_PASS",
     kind: "enum",
     default: undefined,

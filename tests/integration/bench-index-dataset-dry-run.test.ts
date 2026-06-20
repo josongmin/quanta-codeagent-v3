@@ -53,6 +53,15 @@ const runBench = async (...args: string[]): Promise<{ code: number; out: string 
 }
 
 describe("bench index dataset dry-run", () => {
+  test("--help exits with usage instead of starting a run", async () => {
+    const { code, out } = await runBench("--help")
+    expect(code).toBe(0)
+    expect(out).toContain("quanta bench")
+    expect(out).toContain("--swebench <dataset.jsonl>")
+    expect(out).toContain("--repair-rounds <N>")
+    expect(out).not.toContain("instance(s), provider=")
+  })
+
   test("--swebench --dry-run prints the plan and never asks for API keys", async () => {
     const { code, out } = await runBench("--swebench", datasetFile, "--dry-run", "--limit", "1")
     expect(code).toBe(0)

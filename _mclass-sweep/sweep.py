@@ -25,6 +25,7 @@ MISS = f"{SWEEP}/misses.txt"
 GINVALID = f"{SWEEP}/grader-invalid.txt"
 ATTEMPTS = f"{SWEEP}/attempts.json"
 TRANSIENT_CNT = f"{SWEEP}/transient.json"   # id -> 429 retry count
+INFRA_CNT = f"{SWEEP}/infra-rollback.json"  # id -> batch-death attempt rollbacks (BOUNDED)
 DEFERRED = f"{SWEEP}/deferred.txt"          # gave up after MAX_TRANSIENT 429s
 RUNBLOCKS = f"{SWEEP}/sweep-runblocks.yaml"
 LOGDIR = f"{SWEEP}/logs"
@@ -43,6 +44,10 @@ TIMEOUT = 5400      # 90min/box. A 16-instance slice grades SERIALLY (process-gl
                     # still catching a genuine poison-slice hang.
 MAX_ATTEMPTS = 2    # an instance that never returns a verdict twice -> give up
 MAX_TRANSIENT = 5   # 429/generation_error retries before deferring (NOT a miss)
+MAX_INFRA_ROLLBACK = 3  # cap batch-death attempt rollbacks per instance, so a poison
+                        # instance that HANGS the serial box (whole batch → 0 verdicts)
+                        # can't be rolled back forever — after this it burns attempts
+                        # normally and MAX_ATTEMPTS caps it. Guarantees termination.
 WAVE_BACKOFF = 90   # seconds between waves to let the OAuth rate limit recover
 
 # --- jun-20 box-lifecycle pool (Phase 3b) ----------------------------------
@@ -56,8 +61,19 @@ WAVE_BACKOFF = 90   # seconds between waves to let the OAuth rate limit recover
 # ~64min grade + gen, well under TTL; the pool also rotates the box at 150min).
 USE_POOL = os.environ.get("SWEEP_USE_POOL", "1") != "0"
 POOL_CHUNKS = int(os.environ.get("SWEEP_POOL_CHUNKS", "2"))  # slices per super-wave (one box)
-POOL_WORKERS = int(os.environ.get("SWEEP_POOL_WORKERS", "1"))  # boxes (>1 multiplies the 429 burst)
+POOL_WORKERS = int(os.environ.get("SWEEP_POOL_WORKERS", "1"))  # boxes (>1 requires explicit opt-in)
 POOL_TIMEOUT = int(os.environ.get("SWEEP_POOL_TIMEOUT", "9000"))  # 150min — multi-chunk box-life wall
+ALLOW_MULTI_BOX = os.environ.get("SWEEP_ALLOW_MULTI_BOX", "0") == "1"
+PATCH_GEN_BUDGET = int(os.environ.get("SWEEP_PATCH_GEN_BUDGET", "16"))
+
+if (PARALLEL > 1 or POOL_WORKERS > 1) and not ALLOW_MULTI_BOX:
+    raise SystemExit(
+        "refused: multi-box sweep is disabled by default. Re-run with "
+        "SWEEP_ALLOW_MULTI_BOX=1 to launch more than one box."
+    )
+
+def per_box_patch_gen_concurrency(boxes):
+    return max(1, min(16, PATCH_GEN_BUDGET // max(1, boxes)))
 
 os.makedirs(LOGDIR, exist_ok=True)
 os.makedirs(SLICEDIR, exist_ok=True)
@@ -156,11 +172,10 @@ def run_box(slice_path, log_path):
     # so the slice re-queues next wave. Spot is the cheaper default for the longer
     # fat-slice waves; the box-death requeue hardening is Phase 4.
     env["QUANTA_BENCH_PRESET"] = "agentless-v2"
-    # Per-box patch-gen concurrency. conc=8 (was 3): a concurrent measurement run
-    # shares this OAuth login, so the SUMMED burst is what matters — 1 box * 8 here
-    # leaves headroom under the 429 ceiling alongside that run. Bump toward 12 only
-    # once this sweep is the sole token consumer.
-    env["QUANTA_FULL_REMOTE_CONCURRENCY"] = "8"
+    # Default single-box posture: spend the WHOLE shared OAuth budget on that one
+    # box. If the operator EXPLICITLY opts into more boxes, split the same default
+    # budget across them instead of multiplying the burst.
+    env["QUANTA_FULL_REMOTE_CONCURRENCY"] = str(per_box_patch_gen_concurrency(PARALLEL))
     cmd = ["bun", "run", "src/apps/bench/cli.ts", "grade", "--mode", "full",
            "--allow-remote-secrets", "--dataset", slice_path]
     with open(log_path, "w") as lf:
@@ -176,12 +191,14 @@ def run_pool(slice_paths, log_path):
     reads per-slice (it keys by instance id, so a shared log is fine)."""
     env = dict(os.environ)
     env["QUANTA_BENCH_PRESET"] = "agentless-v2"
-    env["QUANTA_FULL_REMOTE_CONCURRENCY"] = "8"
+    env["QUANTA_FULL_REMOTE_CONCURRENCY"] = str(per_box_patch_gen_concurrency(POOL_WORKERS))
     cmd = ["bun", "run", "src/apps/bench/cli.ts", "pool",
            "--allow-remote-secrets",
            "--datasets", ",".join(slice_paths),
            "--workers", str(POOL_WORKERS),
            "--preset", "agentless-v2", "--model", "gpt-5.4"]
+    if POOL_WORKERS > 1:
+        cmd.append("--allow-extra-boxes")
     with open(log_path, "w") as lf:
         try:
             subprocess.run(["timeout", str(POOL_TIMEOUT)] + cmd, cwd=ROOT, env=env,
@@ -271,15 +288,39 @@ def main():
             log_for = {i: lp for (i, _, _, lp) in jobs}
         # harvest
         tcnt = load_transient()
+        try:
+            infra = json.load(open(INFRA_CNT))
+        except Exception:
+            infra = {}
         wave_pass = wave_miss = wave_ginv = wave_trans = 0
+        # Parse each slice's log ONCE. A batch (esp. a pool super-wave) that
+        # produced ZERO verdicts across ALL slices = box death / POOL_TIMEOUT —
+        # an INFRA failure, NOT any instance's fault. In that case we roll the
+        # attempt back below so a transient infra hiccup can't burn 16-32 instances
+        # toward MAX_ATTEMPTS and silently drop them. If SOME instances DID get a
+        # verdict, the box worked and a missing one genuinely hung → keep its
+        # attempt (MAX_ATTEMPTS still caps a real per-instance hang).
+        parsed_logs = {i: parse_log(log_for[i]) for (i, _, _, _) in jobs}
+        batch_had_verdicts = any(
+            parsed_logs[i].get(fid) for (i, sl, _, _) in jobs for fid in sl
+        )
         for (i, sl, sp, lp) in jobs:
-            res = parse_log(log_for[i])
+            res = parsed_logs[i]
             passed = []
             for fid in sl:
                 outcome = res.get(fid)
                 if not outcome:
-                    # no verdict (hang/box death) — undo this attempt so it retries
-                    # (MAX_ATTEMPTS still caps a persistently-hanging instance)
+                    # no verdict. If the WHOLE batch died (infra), roll back the
+                    # attempt so this instance isn't penalised for a box death /
+                    # timeout — but only up to MAX_INFRA_ROLLBACK times, so a poison
+                    # instance that HANGS the serial box (and thus zeroes the whole
+                    # batch every wave) can't be rolled back forever. After the cap
+                    # the attempt sticks → MAX_ATTEMPTS eventually marks it dead.
+                    # If the batch otherwise worked, this instance specifically hung
+                    # → keep the attempt immediately (MAX_ATTEMPTS caps it).
+                    if not batch_had_verdicts and infra.get(fid, 0) < MAX_INFRA_ROLLBACK:
+                        attempts[fid] = max(0, attempts.get(fid, 1) - 1)
+                        infra[fid] = infra.get(fid, 0) + 1
                     continue
                 kind, turns = outcome
                 if kind == "transient":
@@ -310,6 +351,7 @@ def main():
             append_runblock(wave, i, passed)
         save_attempts(attempts)
         save_transient(tcnt)
+        json.dump(infra, open(INFRA_CNT, "w"))
         log(f"wave {wave} done: pass={wave_pass} miss={wave_miss} "
             f"grader_invalid={wave_ginv} transient429={wave_trans}")
         if wave_trans and not wave_pass:

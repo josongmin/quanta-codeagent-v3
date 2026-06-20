@@ -23,8 +23,8 @@
  * a `shutdown -h` TTL backstop and is ALWAYS terminated. Everything routes through
  * the injected {@link SpawnFn} so the whole flow is unit-testable offline.
  */
-import { mkdirSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { basename, join } from "node:path"
 import { loadVerdicts } from "../analyze/verdicts"
 import { benchHome } from "../corpus"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "./backend"
@@ -77,6 +77,9 @@ export interface FullRemoteConfig {
    *  4–17 min, killing runs faster than relaunch can recover. On-demand has no
    *  reclaim. Default false (spot). */
   readonly onDemand?: boolean
+  /** Fail-closed single-box guard: if another quanta-bench box is already
+   *  running, callers must opt in before launching a fresh one. */
+  readonly allowExtraBoxes?: boolean
 }
 
 export const D = {
@@ -156,6 +159,7 @@ const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
  *  it exists). Held for the duration of one chunk's grade so a reused box can
  *  never run two grades at once. */
 const GRADE_LOCK_DIR = "~/.pool-grade.lock"
+const BOX_STATUS_PATH = "~/.quanta/bench-box-status.json"
 
 /** Thrown by {@link gradeChunkOnBox} when the box is already grading (lock held).
  *  The pool drops the box WITHOUT terminating it (it belongs to the other run). */
@@ -404,6 +408,195 @@ export interface GradeChunkParams {
    *  {@link buildForwardedBenchEnv}). */
   readonly forwardedBenchEnv: string
 }
+
+export interface BoxStatusSnapshot {
+  readonly phase: "running" | "fetching" | "idle"
+  readonly mode: "pool" | "full-remote"
+  readonly runId?: string
+  readonly workload: string
+  readonly dataset: string
+  readonly instanceCount: number
+  readonly instancePreview?: readonly string[]
+  readonly preset: string
+  readonly model: string
+  readonly concurrency: number
+  readonly startedAt?: string
+  readonly updatedAt: string
+  readonly runLogPath?: string
+  readonly reportPath?: string
+  readonly predictionsPath?: string
+  readonly observeDir?: string
+  readonly trajectoryPath?: string
+  readonly resolvedCount?: number
+  readonly unresolvedCount?: number
+  readonly erroredCount?: number
+  readonly emptyPatchCount?: number
+  readonly rateLimited?: boolean
+  readonly lastExitCode?: number
+  readonly lastLogLine?: string
+}
+
+export interface BoxInspection {
+  readonly lifecycle: "bootstrapping" | "idle" | "busy" | "unreachable"
+  readonly bootstrapped: boolean
+  readonly busy: boolean
+  readonly snapshot?: BoxStatusSnapshot
+}
+
+const normalizeStatusText = (s: string): string =>
+  s
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E]/g, " ")
+    .trim()
+    .slice(0, 200)
+
+const workloadLabel = (params: GradeChunkParams): string => {
+  if (params.instanceIds !== undefined && params.instanceIds.length === 1)
+    return params.instanceIds[0] ?? "1 instance"
+  if (params.instanceIds !== undefined && params.instanceIds.length > 1)
+    return `${params.instanceIds.length} instances`
+  return basename(params.datasetPath)
+}
+
+const snapshotMode = (params: GradeChunkParams): "pool" | "full-remote" =>
+  params.paths === undefined ? "full-remote" : "pool"
+
+const readDatasetInstanceIds = (path: string): string[] => {
+  try {
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .flatMap((line) => {
+        try {
+          const id = (JSON.parse(line) as { instance_id?: unknown }).instance_id
+          return typeof id === "string" && id !== "" ? [id] : []
+        } catch {
+          return []
+        }
+      })
+  } catch {
+    return []
+  }
+}
+
+const selectionMeta = (
+  params: GradeChunkParams,
+): { instanceCount: number; instancePreview?: readonly string[] } => {
+  const ids =
+    params.instanceIds !== undefined && params.instanceIds.length > 0
+      ? [...params.instanceIds]
+      : readDatasetInstanceIds(params.datasetPath)
+  return {
+    instanceCount: ids.length,
+    ...(ids.length > 0 ? { instancePreview: ids.slice(0, 3) } : {}),
+  }
+}
+
+const writeBoxSnapshot = async (
+  session: BoxSession,
+  snapshot: BoxStatusSnapshot,
+): Promise<void> => {
+  await session
+    .ssh(`mkdir -p ~/.quanta && cat > ${BOX_STATUS_PATH}`, `${JSON.stringify(snapshot)}\n`)
+    .catch(() => undefined)
+}
+
+const readBoxSnapshot = async (
+  ssh: (cmd: string) => Promise<SpawnResult>,
+): Promise<BoxStatusSnapshot | undefined> => {
+  const raw = await ssh(`cat ${BOX_STATUS_PATH} 2>/dev/null`).catch(() => undefined)
+  if (raw === undefined || raw.code !== 0 || raw.stdout.trim() === "") return undefined
+  try {
+    const parsed = JSON.parse(raw.stdout) as Partial<BoxStatusSnapshot>
+    if (
+      parsed.phase !== "running" &&
+      parsed.phase !== "fetching" &&
+      parsed.phase !== "idle"
+    ) {
+      return undefined
+    }
+    if (parsed.mode !== "pool" && parsed.mode !== "full-remote") return undefined
+    return {
+      phase: parsed.phase,
+      mode: parsed.mode,
+      ...(typeof parsed.runId === "string" && parsed.runId !== "" ? { runId: parsed.runId } : {}),
+      workload:
+        typeof parsed.workload === "string" && parsed.workload !== "" ? parsed.workload : "unknown",
+      dataset: typeof parsed.dataset === "string" && parsed.dataset !== "" ? parsed.dataset : "unknown",
+      instanceCount:
+        typeof parsed.instanceCount === "number" && Number.isFinite(parsed.instanceCount)
+          ? parsed.instanceCount
+          : 0,
+      ...(Array.isArray(parsed.instancePreview)
+        ? {
+            instancePreview: parsed.instancePreview
+              .filter((v): v is string => typeof v === "string" && v !== "")
+              .slice(0, 3),
+          }
+        : {}),
+      preset: typeof parsed.preset === "string" && parsed.preset !== "" ? parsed.preset : "unknown",
+      model: typeof parsed.model === "string" && parsed.model !== "" ? parsed.model : "unknown",
+      concurrency:
+        typeof parsed.concurrency === "number" && Number.isFinite(parsed.concurrency)
+          ? parsed.concurrency
+          : 0,
+      ...(typeof parsed.startedAt === "string" && parsed.startedAt !== ""
+        ? { startedAt: parsed.startedAt }
+        : {}),
+      updatedAt:
+        typeof parsed.updatedAt === "string" && parsed.updatedAt !== "" ? parsed.updatedAt : "unknown",
+      ...(typeof parsed.runLogPath === "string" && parsed.runLogPath !== ""
+        ? { runLogPath: parsed.runLogPath }
+        : {}),
+      ...(typeof parsed.reportPath === "string" && parsed.reportPath !== ""
+        ? { reportPath: parsed.reportPath }
+        : {}),
+      ...(typeof parsed.predictionsPath === "string" && parsed.predictionsPath !== ""
+        ? { predictionsPath: parsed.predictionsPath }
+        : {}),
+      ...(typeof parsed.observeDir === "string" && parsed.observeDir !== ""
+        ? { observeDir: parsed.observeDir }
+        : {}),
+      ...(typeof parsed.trajectoryPath === "string" && parsed.trajectoryPath !== ""
+        ? { trajectoryPath: parsed.trajectoryPath }
+        : {}),
+      ...(typeof parsed.resolvedCount === "number" && Number.isFinite(parsed.resolvedCount)
+        ? { resolvedCount: parsed.resolvedCount }
+        : {}),
+      ...(typeof parsed.unresolvedCount === "number" && Number.isFinite(parsed.unresolvedCount)
+        ? { unresolvedCount: parsed.unresolvedCount }
+        : {}),
+      ...(typeof parsed.erroredCount === "number" && Number.isFinite(parsed.erroredCount)
+        ? { erroredCount: parsed.erroredCount }
+        : {}),
+      ...(typeof parsed.emptyPatchCount === "number" && Number.isFinite(parsed.emptyPatchCount)
+        ? { emptyPatchCount: parsed.emptyPatchCount }
+        : {}),
+      ...(parsed.rateLimited === true ? { rateLimited: true } : {}),
+      ...(typeof parsed.lastExitCode === "number" ? { lastExitCode: parsed.lastExitCode } : {}),
+      ...(typeof parsed.lastLogLine === "string" && parsed.lastLogLine !== ""
+        ? { lastLogLine: normalizeStatusText(parsed.lastLogLine) }
+        : {}),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+export const boxRunLogPath = (
+  snapshot?: Pick<BoxStatusSnapshot, "mode" | "runId" | "runLogPath">,
+): string | undefined => {
+  if (snapshot?.runLogPath !== undefined && snapshot.runLogPath !== "") return snapshot.runLogPath
+  if (snapshot?.mode === "pool" && snapshot.runId !== undefined && snapshot.runId !== "") {
+    return `~/runs/${snapshot.runId}/run.log`
+  }
+  if (snapshot?.mode === "full-remote") return DEFAULT_CHUNK_PATHS.runLog
+  return undefined
+}
+
+const SNAPSHOT_HEARTBEAT_MS = 15_000
+const SNAPSHOT_LINE_FLUSH_MS = 2_000
 
 const aws =
   (spawn: SpawnFn, region: string) =>
@@ -803,18 +996,11 @@ const isBootstrapped = async (ssh: (cmd: string) => Promise<SpawnResult>): Promi
   return probe.code === 0 && probe.stdout.includes("OK")
 }
 
-/**
- * Find a RUNNING, bootstrapped, IDLE quanta-bench box to REUSE — so a back-to-back
- * run skips the whole bootstrap. "Idle" = no `bench run` (patch-gen) and no
- * `run_evaluation` (docker grade) process is live on the box; attaching to a BUSY
- * box would race its grade and false-negative correct patches (the concurrent-
- * grade hazard). Returns the instance id of the first reusable box, or undefined
- * (⇒ the caller launches a fresh one). Best-effort: any AWS/ssh error ⇒ undefined.
- */
-export const findIdleBox = async (cfg: FullRemoteConfig): Promise<string | undefined> => {
+const listRunningBoxes = async (
+  cfg: FullRemoteConfig,
+): Promise<Array<{ iid: string; ip: string }>> => {
   const spawn = cfg.spawn ?? defaultSpawn
   const region = cfg.region ?? D.region
-  const keyPath = cfg.keyPath ?? D.keyPath
   const awsFn = aws(spawn, region)
   const desc = await awsFn([
     "ec2",
@@ -826,22 +1012,80 @@ export const findIdleBox = async (cfg: FullRemoteConfig): Promise<string | undef
     "Reservations[].Instances[].[InstanceId,PublicIpAddress]",
     "--output",
     "text",
-  ]).catch(() => undefined)
-  if (desc === undefined || desc.code !== 0) return undefined
-  const rows = desc.stdout
+  ])
+  if (desc.code !== 0) {
+    throw new Error(`[full-remote] describe running boxes failed: ${desc.stderr || desc.stdout}`)
+  }
+  return desc.stdout
     .trim()
     .split("\n")
     .map((l) => l.trim().split(/\s+/))
     .filter((p) => p.length >= 2 && (p[0] ?? "").startsWith("i-") && p[1] !== "None" && p[1] !== "")
-  for (const [iid, ip] of rows) {
+    .map(([iid, ip]) => ({ iid: iid as string, ip: ip as string }))
+}
+
+/** Running quanta-bench box count, regardless of idle/busy. Used by the single-
+ *  box fail-closed guard: if ANY tagged box is already alive, callers must opt in
+ *  before launching another one. */
+export const countRunningBoxes = async (cfg: FullRemoteConfig): Promise<number> =>
+  (await listRunningBoxes(cfg)).length
+
+const busyProbeCommand =
+  "if pgrep -f 'cli.ts run' >/dev/null 2>&1 || pgrep -f run_evaluation >/dev/null 2>&1; then echo BUSY; " +
+  "elif test -d ~/.pool-grade.lock; then " +
+  'if find ~/.pool-grade.lock -maxdepth 0 -mmin +10 >/dev/null 2>&1 && [ -n "$(find ~/.pool-grade.lock -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir ~/.pool-grade.lock 2>/dev/null; echo IDLE; else echo BUSY; fi; ' +
+  "else echo IDLE; fi"
+
+/**
+ * Find a RUNNING, bootstrapped, IDLE quanta-bench box to REUSE — so a back-to-back
+ * run skips the whole bootstrap. "Idle" = no `bench run` (patch-gen) and no
+ * `run_evaluation` (docker grade) process is live on the box; attaching to a BUSY
+ * box would race its grade and false-negative correct patches (the concurrent-
+ * grade hazard). Returns the instance id of the first reusable box, or undefined
+ * (⇒ the caller launches a fresh one). Best-effort: any AWS/ssh error ⇒ undefined.
+ */
+export const findIdleBox = async (cfg: FullRemoteConfig): Promise<string | undefined> => {
+  const keyPath = cfg.keyPath ?? D.keyPath
+  const spawn = cfg.spawn ?? defaultSpawn
+  const rows = await listRunningBoxes(cfg).catch(() => undefined)
+  if (rows === undefined) return undefined
+  for (const { iid, ip } of rows) {
     const ssh = makeSsh(spawn, keyPath, `ubuntu@${ip}`)
     if (!(await isBootstrapped((c) => ssh(c)).catch(() => false))) continue
-    const idle = await ssh(
-      "if pgrep -f 'cli.ts run' >/dev/null 2>&1 || pgrep -f run_evaluation >/dev/null 2>&1 || test -d ~/.pool-grade.lock; then echo BUSY; else echo IDLE; fi",
-    ).catch(() => undefined)
+    // BUSY iff a grade process is live OR a FRESH grade lock is held. A lock with
+    // NO live grade process AND older than 10min is a STALE leak — the orchestrator
+    // was killed mid-grade so the box-side `finally rmdir` never ran (a real grade
+    // starts its process within seconds, so a 10min-old lock with no process can
+    // only be a crash leak). Reclaim it (rmdir) so the box isn't wasted to its TTL.
+    const idle = await ssh(busyProbeCommand).catch(() => undefined)
     if (idle !== undefined && idle.code === 0 && idle.stdout.includes("IDLE")) return iid
   }
   return undefined
+}
+
+/** Probe one running box for operator-visible runtime state (bootstrapping vs
+ *  idle/busy, plus the current or last workload snapshot when available). */
+export const inspectBox = async (
+  cfg: FullRemoteConfig,
+  box: { iid: string; ip: string },
+): Promise<BoxInspection> => {
+  const keyPath = cfg.keyPath ?? D.keyPath
+  const spawn = cfg.spawn ?? defaultSpawn
+  const ssh = makeSsh(spawn, keyPath, `ubuntu@${box.ip}`)
+  const bootstrapped = await isBootstrapped((c) => ssh(c)).catch(() => false)
+  if (!bootstrapped) return { lifecycle: "bootstrapping", bootstrapped: false, busy: false }
+  const busyProbe = await ssh(busyProbeCommand).catch(() => undefined)
+  if (busyProbe === undefined || busyProbe.code !== 0) {
+    return { lifecycle: "unreachable", bootstrapped: true, busy: false }
+  }
+  const busy = busyProbe.stdout.includes("BUSY")
+  const snapshot = await readBoxSnapshot((cmd) => ssh(cmd))
+  return {
+    lifecycle: busy ? "busy" : "idle",
+    bootstrapped: true,
+    busy,
+    ...(snapshot !== undefined ? { snapshot } : {}),
+  }
 }
 
 /**
@@ -908,8 +1152,74 @@ export const gradeChunkOnBox = async (
   const ssh = session.ssh.bind(session)
   const paths = params.paths ?? DEFAULT_CHUNK_PATHS
   const { preset, model, concurrency, artifactSuffix } = params
+  const selection = selectionMeta(params)
+  const startedAt = new Date().toISOString()
+  const snapshotBase = {
+    mode: snapshotMode(params),
+    ...(snapshotMode(params) === "pool" ? { runId: artifactSuffix } : {}),
+    workload: workloadLabel(params),
+    dataset: basename(params.datasetPath),
+    instanceCount: selection.instanceCount,
+    ...(selection.instancePreview !== undefined ? { instancePreview: selection.instancePreview } : {}),
+    preset,
+    model,
+    concurrency,
+    startedAt,
+    runLogPath: paths.runLog,
+    reportPath: paths.report,
+    predictionsPath: paths.preds,
+    observeDir: paths.observeDir,
+    ...(params.recordTrajectory ? { trajectoryPath: paths.trajectory } : {}),
+  }
+  let wroteRunningSnapshot = false
+  let finalExitCode: number | undefined
+  let finalLastLogLine: string | undefined
+  let finalResolvedCount: number | undefined
+  let finalUnresolvedCount: number | undefined
+  let finalErroredCount: number | undefined
+  let finalEmptyPatchCount: number | undefined
+  let finalRateLimited = false
+  let latestLogLine: string | undefined
+  let lastSnapshotFlushAt = 0
+  let snapshotWrites = Promise.resolve()
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+
+  const publishSnapshot = async (
+    phase: BoxStatusSnapshot["phase"],
+    extras: Partial<BoxStatusSnapshot> = {},
+  ): Promise<void> => {
+    snapshotWrites = snapshotWrites
+      .then(() =>
+        writeBoxSnapshot(session, {
+          ...snapshotBase,
+          phase,
+          updatedAt: new Date().toISOString(),
+          ...extras,
+        }),
+      )
+      .catch(() => undefined)
+    await snapshotWrites
+  }
+
+  const flushRunningSnapshot = (force = false): void => {
+    if (!wroteRunningSnapshot) return
+    const now = Date.now()
+    if (!force && now - lastSnapshotFlushAt < SNAPSHOT_LINE_FLUSH_MS) return
+    lastSnapshotFlushAt = now
+    void publishSnapshot("running", {
+      ...(latestLogLine !== undefined && latestLogLine !== ""
+        ? { lastLogLine: latestLogLine }
+        : {}),
+    })
+  }
+
   const makeLineStreamer = (): ((chunk: string) => void) =>
-    createLineStreamer((line) => log(`[box] ${line}`))
+    createLineStreamer((line) => {
+      log(`[box] ${line}`)
+      const normalized = normalizeStatusText(line)
+      if (normalized !== "") latestLogLine = normalized
+      flushRunningSnapshot()
+    })
 
   // ATOMIC busy-lock: `mkdir` fails non-zero if the dir already exists, so two
   // runs can NEVER grade the SAME reused box concurrently — which would race the
@@ -929,6 +1239,12 @@ export const gradeChunkOnBox = async (
     )
   }
   try {
+    await publishSnapshot("running")
+    wroteRunningSnapshot = true
+    lastSnapshotFlushAt = Date.now()
+    heartbeat = setInterval(() => flushRunningSnapshot(true), SNAPSHOT_HEARTBEAT_MS)
+    heartbeat.unref?.()
+
     // scp the dataset for THIS chunk.
     const scpDs = await spawn("scp", [
       "-i",
@@ -984,6 +1300,10 @@ export const gradeChunkOnBox = async (
       makeLineStreamer(),
     )
 
+    finalExitCode = remoteRun.code
+    await publishSnapshot("fetching", {
+      ...(finalExitCode !== undefined ? { lastExitCode: finalExitCode } : {}),
+    })
     log(`[full-remote] run finished (exit ${remoteRun.code}); fetching report…`)
     const fetched = await ssh(`cat ${paths.report} 2>/dev/null`)
 
@@ -1043,6 +1363,10 @@ export const gradeChunkOnBox = async (
         errored: [...v.errored],
         emptyPatch: [...v.emptyPatch],
       }
+      finalResolvedCount = parsed.resolved.length
+      finalUnresolvedCount = parsed.unresolved.length
+      finalErroredCount = parsed.errored.length
+      finalEmptyPatchCount = parsed.emptyPatch.length
     } catch {
       // unparseable / missing report — diagnose below
     }
@@ -1071,7 +1395,17 @@ export const gradeChunkOnBox = async (
     // detect a shared-OAuth rate limit (generation_error / 429) so the caller can
     // back off instead of hammering the throttled login.
     const tail = await ssh(`tail -60 ${paths.runLog} 2>/dev/null`)
+    finalLastLogLine = normalizeStatusText(
+      tail.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "")
+        .at(-1) ??
+        latestLogLine ??
+        "",
+    )
     const rateLimited = detectRateLimit(tail.stdout)
+    finalRateLimited = rateLimited
     if (empty) {
       log(`[full-remote] ⚠️ no verdicts in report (run exit ${remoteRun.code}). Box run.log tail:`)
       log(tail.stdout || "(run.log empty)")
@@ -1088,7 +1422,21 @@ export const gradeChunkOnBox = async (
       ...(rateLimited ? { rateLimited: true } : {}),
     }
   } finally {
+    if (heartbeat !== undefined) clearInterval(heartbeat)
     // Release the grade lock so the box can be reused for the next chunk/run.
     await ssh(`rmdir ${GRADE_LOCK_DIR} 2>/dev/null`).catch(() => undefined)
+    if (wroteRunningSnapshot) {
+      await publishSnapshot("idle", {
+        ...(finalExitCode !== undefined ? { lastExitCode: finalExitCode } : {}),
+        ...(finalResolvedCount !== undefined ? { resolvedCount: finalResolvedCount } : {}),
+        ...(finalUnresolvedCount !== undefined ? { unresolvedCount: finalUnresolvedCount } : {}),
+        ...(finalErroredCount !== undefined ? { erroredCount: finalErroredCount } : {}),
+        ...(finalEmptyPatchCount !== undefined ? { emptyPatchCount: finalEmptyPatchCount } : {}),
+        ...(finalRateLimited ? { rateLimited: true } : {}),
+        ...(finalLastLogLine !== undefined && finalLastLogLine !== ""
+          ? { lastLogLine: finalLastLogLine }
+          : {}),
+      })
+    }
   }
 }

@@ -10,7 +10,7 @@ monitoring: integrated
 modes: [interactive, headless, daemon]
 configurable: static
 owners: ["@songmin"]
-labels: ["surface:core", "observability-primitive", "surface:cli"]
+labels: ["surface:core", "observability-primitive"]
 depends_on: [agents-fleet-panel, run-workflow, side-agent-process]
 surface_integration:
   cli: full

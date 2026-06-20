@@ -89,6 +89,10 @@ const mockSpawn = (
 
 const everyShippedString = (calls: Array<{ args: string[]; input?: string }>): string =>
   calls.map((c) => `${c.args.join(" ")} ${c.input ?? ""}`).join("\n")
+const countCalls = (
+  calls: Array<{ cmd: string; args: string[] }>,
+  pred: (c: { cmd: string; args: string[] }) => boolean,
+): number => calls.filter(pred).length
 
 describe("full-remote executor (injected spawn — no real box/token)", () => {
   const baseCfg = {
@@ -166,6 +170,18 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const cmd = benchRun?.args.join(" ") ?? ""
     expect(cmd).not.toContain("QUANTA_SWEBENCH_GRADE_CONCURRENCY") // serial grading
     expect(cmd).toContain("QUANTA_BENCH_CONCURRENCY=") // ...but patch-gen stays parallel
+  })
+
+  test("writes a box-status snapshot so `box ls` can show the current phase", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const statusWrites = calls
+      .filter((c) => c.cmd === "ssh" && c.input !== undefined && c.args.join(" ").includes("bench-box-status.json"))
+      .map((c) => c.input ?? "")
+    expect(statusWrites.some((s) => s.includes('"phase":"running"') && s.includes('"mode":"full-remote"'))).toBe(true)
+    expect(statusWrites.some((s) => s.includes('"phase":"idle"') && s.includes('"mode":"full-remote"'))).toBe(true)
   })
 
   test("default full-remote posture is agentless-v2-safe (bench-in-loop exec OFF)", async () => {
@@ -253,6 +269,102 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       .catch(() => undefined)
     const launch = calls.find((c) => c.args.includes("run-instances"))
     expect(launch?.args.includes("--subnet-id")).toBe(false)
+  })
+
+  test("reuses a warm idle box instead of auto-launching a fresh one", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      calls.push({ cmd, args: [...args] })
+      if (args.includes("describe-instances")) {
+        return args.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (args.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = args[args.length - 1] ?? ""
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("IDLE")) return ok("IDLE")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (c.includes("cat ") || c.includes(".json"))
+          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(countCalls(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
+  })
+
+  test("refuses to auto-launch a second box while another quanta-bench box is already running", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      calls.push({ cmd, args: [...args] })
+      if (args.includes("describe-instances") && args.includes("--filters"))
+        return ok("i-busy\t9.9.9.9")
+      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = args[args.length - 1] ?? ""
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("IDLE")) return ok("BUSY")
+        return ok("")
+      }
+      return ok("")
+    }
+    await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
+      /refusing to launch another box/i,
+    )
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
+  test("explicit extra-box opt-in can launch past the single-box guard", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      calls.push({ cmd, args: [...args] })
+      if (args.includes("describe-security-groups")) return ok("sg-abc")
+      if (args.includes("describe-instances")) {
+        return args.includes("--filters") ? ok("i-busy\t9.9.9.9") : ok("1.2.3.4")
+      }
+      if (args.includes("run-instances")) return ok("i-fresh")
+      if (cmd === "ssh") {
+        const c = args[args.length - 1] ?? ""
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("IDLE")) return ok("BUSY")
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (c.includes("cat ") || c.includes(".json"))
+          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn, allowExtraBoxes: true })
+      .run()
+      .catch(() => undefined)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(1)
+  })
+
+  test("dry-run exposes the single-box default patch-gen concurrency 16", async () => {
+    const prevFull = process.env.QUANTA_FULL_REMOTE_CONCURRENCY
+    const prevBench = process.env.QUANTA_BENCH_CONCURRENCY
+    delete process.env.QUANTA_FULL_REMOTE_CONCURRENCY
+    delete process.env.QUANTA_BENCH_CONCURRENCY
+    try {
+      const plan = await createFullRemoteBackend({ ...baseCfg, dryRun: true }).run()
+      expect((plan.plan ?? []).join("\n")).toContain("patch-gen concurrency=16")
+    } finally {
+      if (prevFull === undefined) delete process.env.QUANTA_FULL_REMOTE_CONCURRENCY
+      else process.env.QUANTA_FULL_REMOTE_CONCURRENCY = prevFull
+      if (prevBench === undefined) delete process.env.QUANTA_BENCH_CONCURRENCY
+      else process.env.QUANTA_BENCH_CONCURRENCY = prevBench
+    }
   })
 
   test("falls back to the next instance type on InsufficientInstanceCapacity", async () => {

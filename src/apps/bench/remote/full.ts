@@ -17,9 +17,12 @@
  */
 import { errMessage } from "@/shared"
 import {
+  attachBox,
   buildForwardedBenchEnv,
+  countRunningBoxes,
   coveredInstances,
   D,
+  findIdleBox,
   type FullRemoteConfig,
   type FullRemoteResult,
   gradeChunkOnBox,
@@ -29,9 +32,12 @@ import {
 // Re-export the public surface so existing importers (tests + callers) keep
 // resolving these from "./full" after the box-session.ts extraction.
 export {
+  attachBox,
   buildForwardedBenchEnv,
+  countRunningBoxes,
   coveredInstances,
   createLineStreamer,
+  findIdleBox,
   type FullRemoteConfig,
   type FullRemoteResult,
   fullRemoteArtifactDir,
@@ -142,12 +148,11 @@ const dryRunPlan = (cfg: FullRemoteConfig): readonly string[] => {
 }
 
 /**
- * Patch-gen concurrency on the remote box (c7i.8xlarge = 32 vCPU). Default 6 —
- * the binding limit is the shared gpt-5.4 login rate, not box CPU. Override via
- * QUANTA_FULL_REMOTE_CONCURRENCY OR the alias QUANTA_BENCH_CONCURRENCY (jun-20:
- * setting only the latter silently ran conc=6 because full.ts CLOBBERS it on the
- * box). The box concurrency × box count is what hits the shared token, so honor
- * either name. Clamped [1,16].
+ * Patch-gen concurrency on the remote box (c7i.8xlarge = 32 vCPU). Default 16 —
+ * the binding limit is the shared gpt-5.4 login rate, not box CPU, and the
+ * default operational posture is ONE box unless the caller EXPLICITLY opts into
+ * more. Override via QUANTA_FULL_REMOTE_CONCURRENCY OR the alias
+ * QUANTA_BENCH_CONCURRENCY. Clamped [1,16].
  */
 const resolveConcurrency = (): number =>
   Math.max(
@@ -156,7 +161,7 @@ const resolveConcurrency = (): number =>
       16,
       Math.trunc(
         Number(process.env.QUANTA_FULL_REMOTE_CONCURRENCY ?? process.env.QUANTA_BENCH_CONCURRENCY),
-      ) || 6,
+      ) || 16,
     ),
   )
 
@@ -183,7 +188,20 @@ export const createFullRemoteBackend = (
   const run = async (): Promise<FullRemoteResult> => {
     if (cfg.dryRun) return { dryRun: true, plan: dryRunPlan(cfg) }
 
-    const session = await provisionBox(cfg)
+    const idle = await findIdleBox(cfg).catch(() => undefined)
+    const session =
+      idle !== undefined
+        ? await attachBox(cfg, idle)
+        : await (async () => {
+            const running = await countRunningBoxes(cfg)
+            if (running > 0 && cfg.allowExtraBoxes !== true) {
+              throw new Error(
+                `[full-remote] refusing to launch another box while ${running} quanta-bench box(es) are already running. ` +
+                  "Wait for the existing box to go idle, or re-run with explicit extra-box opt-in.",
+              )
+            }
+            return provisionBox(cfg)
+          })()
     try {
       const result = await gradeChunkOnBox(session, {
         datasetPath: cfg.datasetPath,

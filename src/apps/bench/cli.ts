@@ -29,7 +29,7 @@ import { explainFailure } from "./analyze/explain"
 import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
 import { loadVerdictsFromFile } from "./analyze/verdicts"
 import type { GradeBackend } from "./remote/backend"
-import { D, provisionBox } from "./remote/box-session"
+import { D, inspectBox, provisionBox } from "./remote/box-session"
 import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
 import { buildForwardedBenchEnv, createFullRemoteBackend, runWithRelaunch } from "./remote/full"
@@ -97,6 +97,8 @@ const argValue = (flag: string): string | undefined => {
   return eq !== undefined ? eq.slice(pref.length) : undefined
 }
 const hasFlag = (flag: string): boolean => process.argv.includes(flag)
+const allowExtraBoxes = (): boolean =>
+  hasFlag("--allow-extra-boxes") || gateOn(process.env, "QUANTA_ALLOW_EXTRA_BOXES")
 
 /** Print a render* block (diff / explain / leaderboard markdown) to raw stdout
  *  — NOT via `logger.info`, which prefixes `[info]`, mangles embedded `\n` to
@@ -120,6 +122,10 @@ const VALUE_FLAGS = new Set([
   "--title",
   "--patch",
   "--instance",
+  "--datasets",
+  "--workers",
+  "--ami",
+  "--max-box-wall-min",
   "--shards",
   "--observe-dir",
   "--mode",
@@ -232,7 +238,7 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
   if (dataset === undefined) {
     logger.info(
-      "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run]",
+      "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run] [--allow-extra-boxes]",
     )
     process.exit(2)
   }
@@ -286,6 +292,7 @@ const cmdGradeFullRemote = async (): Promise<void> => {
       ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
       dryRun: dry,
       keep: hasFlag("--keep"),
+      allowExtraBoxes: allowExtraBoxes(),
       onDemand,
       onLog: (m) => logger.info(m),
     })
@@ -314,18 +321,33 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   logFullRemoteOutcome(out)
 }
 
-/** Patch-gen concurrency on the box, clamped [1,16]. Mirrors full.ts. The shared
- *  OAuth login rate (× box count) is the binding limit, not box CPU. */
-const resolvePoolConcurrency = (): number =>
-  Math.max(
-    1,
-    Math.min(
-      16,
-      Math.trunc(
-        Number(process.env.QUANTA_FULL_REMOTE_CONCURRENCY ?? process.env.QUANTA_BENCH_CONCURRENCY),
-      ) || 6,
-    ),
-  )
+const DEFAULT_POOL_TOKEN_BUDGET = 16
+const clampPoolConcurrency = (n: number): number => Math.max(1, Math.min(16, Math.trunc(n) || 1))
+
+/** Patch-gen concurrency on the box, clamped [1,16]. The binding limit is the
+ *  SHARED OAuth rate, not box CPU, so the DEFAULT is a GLOBAL budget of 16
+ *  spread across all boxes in this pool. An explicit env override still wins. */
+const poolConcurrencyOverrideRaw = (): string | undefined =>
+  process.env.QUANTA_FULL_REMOTE_CONCURRENCY ?? process.env.QUANTA_BENCH_CONCURRENCY
+
+const resolvePoolConcurrency = (workers: number): number => {
+  const raw = poolConcurrencyOverrideRaw()
+  const override = raw !== undefined && raw !== "" ? Number(raw) : Number.NaN
+  if (Number.isFinite(override) && override > 0) return clampPoolConcurrency(override)
+  return clampPoolConcurrency(DEFAULT_POOL_TOKEN_BUDGET / Math.max(1, workers))
+}
+
+const resolvePoolWorkers = (): number => {
+  const workers = Math.max(1, Math.trunc(Number(argValue("--workers")) || 1))
+  if (workers > 1 && !allowExtraBoxes()) {
+    logger.info(
+      `[pool] refusing workers=${workers}: extra boxes are disabled by default. ` +
+        "Re-run with --allow-extra-boxes or QUANTA_ALLOW_EXTRA_BOXES=1.",
+    )
+    process.exit(2)
+  }
+  return workers
+}
 
 /** Filesystem-safe runId from a chunk dataset path basename. `wave3-s0.jsonl` →
  *  `wave3-s0`. Non-`[A-Za-z0-9_-]` collapse to `_` so the box-side `~/runs/<id>`
@@ -359,6 +381,7 @@ const buildPoolChunks = (datasetPaths: readonly string[]): PoolChunk[] => {
  * token and writes to a runId-scoped box dir; a chunk whose box died is requeued.
  *
  *   quanta-bench pool --allow-remote-secrets --datasets c1.jsonl,c2.jsonl[,…] [--workers 1]
+ *   quanta-bench pool … --workers 2 --allow-extra-boxes   # explicit multi-box opt-in
  */
 const cmdPool = async (): Promise<void> => {
   if (!hasFlag("--allow-remote-secrets")) {
@@ -371,7 +394,7 @@ const cmdPool = async (): Promise<void> => {
   const datasetsArg = argValue("--datasets")
   if (datasetsArg === undefined || datasetsArg.trim() === "") {
     logger.info(
-      "usage: quanta-bench pool --allow-remote-secrets --datasets <c1.jsonl,c2.jsonl,…> [--workers 1] [--model m] [--ami id]",
+      "usage: quanta-bench pool --allow-remote-secrets --datasets <c1.jsonl,c2.jsonl,…> [--workers 1] [--allow-extra-boxes] [--model m] [--ami id]",
     )
     process.exit(2)
   }
@@ -380,20 +403,29 @@ const cmdPool = async (): Promise<void> => {
     .map((s) => s.trim())
     .filter((s) => s !== "")
   const chunks = buildPoolChunks(datasets)
-  const workers = Math.max(1, Math.trunc(Number(argValue("--workers")) || 1))
+  const workers = resolvePoolWorkers()
   const authFile =
     process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`
   const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset") ?? "agentless-v2-safe"
   const model = argValue("--model") ?? "gpt-5.4"
   const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
   const onDemand = gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND")
-  const concurrency = resolvePoolConcurrency()
+  const concurrency = resolvePoolConcurrency(workers)
+  const extraBoxes = allowExtraBoxes()
+  const concurrencyOverride = poolConcurrencyOverrideRaw()
+  const concurrencySource =
+    concurrencyOverride !== undefined &&
+    concurrencyOverride !== "" &&
+    Number.isFinite(Number(concurrencyOverride)) &&
+    Number(concurrencyOverride) > 0
+      ? "env override"
+      : `default shared budget=${DEFAULT_POOL_TOKEN_BUDGET}`
   const recordTrajectory =
     process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
     process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
     process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "0"
   logger.info(
-    `[pool] ${chunks.length} chunk(s) across ${workers} box(es); per-box patch-gen concurrency=${concurrency} (× ${workers} hits the shared OAuth rate)`,
+    `[pool] ${chunks.length} chunk(s) across ${workers} box(es); per-box patch-gen concurrency=${concurrency} (${concurrencySource})`,
   )
   if (hasFlag("--dry-run")) {
     printBlock(
@@ -418,6 +450,8 @@ const cmdPool = async (): Promise<void> => {
       onLog: (m) => logger.info(m),
     },
     workers,
+    allowExtraWorkers: workers > 1,
+    allowExtraBoxes: extraBoxes,
     preset,
     model,
     concurrency,
@@ -451,7 +485,8 @@ const summarizePoolRun = (out: Awaited<ReturnType<typeof runPool>>, chunkCount: 
  * leaves alive for reuse. Boxes are SPOT (reclaimable) + TTL-self-terminating, so
  * this is for visibility + manual cleanup of lingerers, plus pre-warming.
  *
- *   quanta-bench box ls                  # list running quanta-bench boxes (id/age/ip)
+ *   quanta-bench box ls                  # list running quanta-bench boxes + runtime status
+ *   quanta-bench box ls --json           # same, machine-readable
  *   quanta-bench box rm <iid|all>        # terminate a box (or all of them)
  *   quanta-bench box up                  # provision + bootstrap ONE warm box, leave it alive
  */
@@ -473,6 +508,26 @@ const awsText = async (
   return { code: await p.exited, out, err }
 }
 
+interface BoxLsRow {
+  readonly iid: string
+  readonly state: string
+  readonly launchTime: string
+  readonly ip: string
+  readonly instanceType: string
+}
+
+const parseBoxLsRows = (out: string): BoxLsRow[] =>
+  out
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [iid = "", state = "", launchTime = "", ip = "", instanceType = ""] = line.split(/\s+/)
+      return { iid, state, launchTime, ip, instanceType }
+    })
+    .filter((row) => row.iid.startsWith("i-"))
+
 const cmdBoxLs = async (region: string): Promise<void> => {
   const r = await awsText(region, [
     "ec2",
@@ -487,10 +542,59 @@ const cmdBoxLs = async (region: string): Promise<void> => {
     logger.info(`[box] describe failed: ${r.err.trim()}`)
     process.exit(1)
   }
-  const lines = r.out.trim()
-  // printBlock (raw stdout) — logger.info mangles embedded \n to `?`.
+  const rows = parseBoxLsRows(r.out)
+  if (rows.length === 0) {
+    printBlock("[box] no running quanta-bench boxes")
+    return
+  }
+  const baseCfg = {
+    repoDir: process.cwd(),
+    authJson: "{}",
+    datasetPath: "",
+    region,
+  }
+  const inspections: Awaited<ReturnType<typeof inspectBox>>[] = await Promise.all(
+    rows.map(async (row) => {
+      if (row.state !== "running" || row.ip === "" || row.ip === "None") {
+        return { lifecycle: "bootstrapping", bootstrapped: false, busy: false }
+      }
+      return inspectBox(baseCfg, { iid: row.iid, ip: row.ip }).catch(() => ({
+        lifecycle: "unreachable",
+        bootstrapped: false,
+        busy: false,
+      }))
+    }),
+  )
+  const enriched: Array<BoxLsRow & Awaited<ReturnType<typeof inspectBox>>> = rows.map((row, i) => {
+    const inspection = inspections[i] ?? {
+      lifecycle: "unreachable",
+      bootstrapped: false,
+      busy: false,
+    }
+    return { ...row, ...inspection }
+  })
+  if (hasFlag("--json")) {
+    printBlock(JSON.stringify(enriched, null, 2))
+    return
+  }
   printBlock(
-    lines === "" ? "[box] no running quanta-bench boxes" : `[box] running boxes:\n${lines}`,
+    [
+      "[box] running boxes:",
+      ...enriched.flatMap((row) => {
+        const phase = row.snapshot?.phase
+        const headline =
+          `${row.iid}  ${row.state}  ${row.instanceType}  ${row.ip}  ` +
+          `status=${row.lifecycle}${phase !== undefined ? `/${phase}` : ""}`
+        const detail =
+          row.snapshot === undefined
+            ? undefined
+            : `  mode=${row.snapshot.mode}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}`
+        const logLine =
+          row.snapshot?.lastLogLine !== undefined ? `  log=${row.snapshot.lastLogLine}` : undefined
+        const launched = `  launched=${row.launchTime}`
+        return [headline, launched, detail, logLine].filter((line) => line !== undefined)
+      }),
+    ].join("\n"),
   )
 }
 
@@ -515,6 +619,22 @@ const cmdBoxRm = async (region: string): Promise<void> => {
       .trim()
       .split(/\s+/)
       .filter((s) => s.startsWith("i-"))
+    // BLAST-RADIUS GUARD: EVERY bench box (pool, `grade --mode full`, `box up`)
+    // carries the SAME `quanta-bench-full` tag — there is no per-run owner tag —
+    // so `rm all` terminates boxes a CONCURRENT run/sweep may be actively grading
+    // on (the EC2 form of the "광역 pkill kills the user's bench" hazard). Require
+    // an explicit `--yes` and show exactly what will die first.
+    if (!hasFlag("--yes")) {
+      printBlock(
+        [
+          `[box] rm all would terminate ${ids.length} box(es) — region-wide, ALL quanta-bench boxes:`,
+          ...ids.map((id) => `  ${id}`),
+          "⚠️  this kills ANY concurrent run/sweep grading on these boxes. Re-run with --yes to confirm,",
+          "    or terminate specific ids: `box rm <i-...>`. Check `box ls` first.",
+        ].join("\n"),
+      )
+      process.exit(2)
+    }
   } else {
     ids = [target]
   }
@@ -554,7 +674,7 @@ const cmdBox = async (): Promise<void> => {
   if (action === "ls") return cmdBoxLs(region)
   if (action === "rm") return cmdBoxRm(region)
   if (action === "up") return cmdBoxUp()
-  logger.info("usage: quanta-bench box <ls|rm <iid|all>|up>")
+  logger.info("usage: quanta-bench box <ls [--json]|rm <iid|all>|up>")
   process.exit(2)
 }
 

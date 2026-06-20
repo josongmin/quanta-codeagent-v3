@@ -7,11 +7,11 @@
  * PREFER the smallest possible change; gratuitous expansion (new file, new
  * helper/class/method, unjustified cross-file) is over-budget.
  *
- * 🔴 SOFT-WITH-ESCALATION, never a hard reject. over-budget ⇒ `escalate:true`
- * (route to the late critic / verification path), so a legitimately-large fix
- * (e.g. #14315's base + postgresql cross-file) survives by PROVING itself — it is
- * never silently killed. This is the [[no-heuristics]]-safe shape: round0 prefers
- * minimal, over-budget DEMANDS proof.
+ * Default mode is SOFT-WITH-ESCALATION, never a hard reject. over-budget ⇒
+ * `escalate:true` (route to the late critic / verification path), so a
+ * legitimately-large fix (e.g. #14315's base + postgresql cross-file) survives
+ * by PROVING itself. Strict callers may additionally gate runtime-expanding
+ * calls; the default telemetry path stays observe-only.
  *
  * PURE + deterministic over the diff (+ owner evidence for the cross-file escape).
  * EXACT structural facts only — no semantic "vibe". Separate admission layer; NOT
@@ -51,6 +51,10 @@ export interface PatchBudgetInput {
   readonly ownerFiles?: readonly string[]
   /** repo slug (e.g. "django/django") — reserved for repo-gated observe signals. */
   readonly repo?: string
+  /** Default "observe": runtime-expanding calls are counted but not gated. "gate"
+   *  is the strict SOTA++ admission arm: compiler/IO/runtime calls over-budget
+   *  when the edit could have stayed in-place. */
+  readonly runtimeExpandingPolicy?: "observe" | "gate"
 }
 
 const TEST_PATH = /(^|\/)(tests?|testing)\//i
@@ -157,6 +161,10 @@ export const analyzePatchBudget = (
   // no owner evidence at all + >1 source file ⇒ over (single owner is the budget).
   if (budget.sourceFiles > 1 && owner.size === 0)
     reasons.push(`source-file budget=1 (no owner evidence to justify ${budget.sourceFiles})`)
+  if (input.runtimeExpandingPolicy === "gate" && budget.runtimeExpandingCalls > 0)
+    reasons.push(
+      `runtime-expanding budget=0 (added ${budget.runtimeExpandingCalls} compiler/IO/runtime call(s))`,
+    )
 
   const withinBudget = reasons.length === 0
   return { budget, withinBudget, overBudgetReasons: reasons, escalate: !withinBudget }

@@ -43,6 +43,29 @@ describe("impacted repo-test discovery", () => {
     expect(tests).toEqual(["tests/test_cli.py"])
   })
 
+  test("tests.py under a matching feature directory is discovered without imports", () => {
+    const tests = discoverImpactedTests({
+      changedFiles: ["django/core/validators.py"],
+      repoFiles: [
+        { path: "tests/validators/tests.py", text: "" },
+        { path: "tests/forms/tests.py", text: "" },
+      ],
+    })
+    expect(tests).toEqual(["tests/validators/tests.py"])
+  })
+
+  test("path-token affinity discovers nested feature tests even when the basename is generic", () => {
+    const candidates = discoverImpactedTestCandidates({
+      changedFiles: ["django/template/context.py"],
+      repoFiles: [
+        { path: "tests/template_tests/test_misc.py", text: "" },
+        { path: "tests/forms_tests/test_misc.py", text: "" },
+      ],
+    })
+    expect(candidates.map((c) => c.path)).toEqual(["tests/template_tests/test_misc.py"])
+    expect(candidates[0]?.reasons).toContain("context-token:template")
+  })
+
   test("ignores changed tests and non-python files", () => {
     const tests = discoverImpactedTests({
       changedFiles: ["tests/test_app.py", "docs/usage.md"],

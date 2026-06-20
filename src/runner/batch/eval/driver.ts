@@ -16,7 +16,7 @@
  * this is a pure structural refactor.
  */
 
-import { type Dirent, readdirSync } from "node:fs"
+import { type Dirent, readFileSync, readdirSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import {
   type AgentConfig,
@@ -39,12 +39,13 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
-import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
+import { evaluateSuccessPredicate, type PrimaryRailStep, resolveOwnerSiblings } from "@/agent/closure"
 import {
   FIND_REFS_STEER,
   LSP_GROUNDING_STEER,
   SPEC_FIDELITY_STEER,
 } from "@/agent/localize-phase-guard"
+import { analyzePatchBudget } from "@/agent/patch-budget"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
@@ -78,6 +79,7 @@ import {
 } from "./knobs-bench"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import { withCandidatePatch } from "./rematerialize"
+import { makeDiscoveredRepoRegressionPort } from "./repo-regression-discovery-adapter"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import { makeReproVoteValidate } from "./repair/repro-vote"
@@ -105,6 +107,8 @@ import {
   type Wiring,
 } from "./report"
 import { calibrateReproOracle } from "./repro-oracle-calibration"
+import { toRegressionGreen } from "./regression-oracle"
+import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import {
   type AttemptOutcome,
   classifyOutcome,
@@ -113,8 +117,8 @@ import {
   type RetryPolicy,
   runRetryLoop,
 } from "./retry-policy"
-import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
-import type { Candidate } from "./selection-executor"
+import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
+import { runSelection, type SelectionTelemetry, summarizeSelection, type Candidate } from "./selection-executor"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -1352,8 +1356,19 @@ interface Phase {
    *  gate would catch). Repair path only; undefined on single-pass ⇒ measurement
    *  null (no rail ⇒ no false-green signal). */
   primaryFalseGreen?: boolean
+  /** jun-18 RCA OBSERVE-ONLY — the primary rail still rejected a patch whose repro
+   *  stdout classified RESOLVED (false RED). Repair path only; undefined on single-
+   *  pass ⇒ measurement null. */
+  primaryFalseRed?: boolean
   /** Number of repair/verify rounds consumed when verify-first ran. */
   verifyRounds?: number
+  /** jun-20 — repro-oracle gold calibration for this verify-select run (eval-only
+   *  telemetry). Set by the selection phase; undefined on single-pass/repair. */
+  reproOracleCalibration?: ReproOracleCalibration
+  /** jun-20 — verify-select winner/candidate telemetry (eval-only). Lets a run
+   *  self-diagnose which fix sites were spanned, which candidates were
+   *  admissible, and why the winner won without re-parsing trajectories. */
+  selectionTelemetry?: SelectionTelemetry
 }
 
 /**
@@ -1692,12 +1707,14 @@ const runRepairPhase = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
   primaryRailStep: PrimaryRailStep | undefined,
+  siblingOwners: readonly string[],
   reproSources: readonly string[],
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
   let repairValidated = false
   let repairFalseGreen = false
+  let repairFalseRed = false
   let repairRounds = 0
   // #2 repro-vote: when the knob is on AND we have a reproducing set, the
   // validator becomes the K-of-N RESOLVED majority vote (re-run the set on the
@@ -1732,7 +1749,8 @@ const runRepairPhase = async (
             closureHint,
           ),
         validate,
-        buildContext: repair.buildContext ?? buildRepairContext,
+        buildContext: (ctxArgs) =>
+          (repair.buildContext ?? buildRepairContext)({ ...ctxArgs, siblingOwners }),
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
@@ -1743,6 +1761,7 @@ const runRepairPhase = async (
       finalPatch = out.patch
       repairValidated = out.validated
       repairFalseGreen = out.primaryFalseGreen
+      repairFalseRed = out.primaryFalseRed
       repairRounds = out.rounds
     },
   )
@@ -1755,7 +1774,202 @@ const runRepairPhase = async (
     turns,
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
+    primaryFalseRed: repairFalseRed,
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
+  }
+}
+
+/** Repo-relative files a unified diff touches (its `+++ b/<f>` headers, plus
+ *  `--- a/<f>` for pure deletions). Used for owner-coverage scoring. */
+const filesFromPatch = (patch: string): string[] => {
+  const files = new Set<string>()
+  for (const line of patch.split("\n")) {
+    const m = /^(?:\+\+\+ b\/|--- a\/)(.+)$/.exec(line)
+    if (m !== null) {
+      const f = (m[1] as string).trim()
+      if (f !== "" && f !== "/dev/null") files.add(f)
+    }
+  }
+  return [...files]
+}
+
+export interface SelectionReproPolicy {
+  readonly enabled: boolean
+  readonly goldCalibrate: boolean
+  readonly resolvedKofNMode: "hard" | "soft"
+}
+
+/** Live-like no-oracle rule for verify-select repro use:
+ *  - `positive` keeps the generated repro signal as SOFT-ONLY and MUST NOT peek
+ *    at gold calibration.
+ *  - unset / `hard` preserves the legacy eval-only gold-calibrated hard gate.
+ *  - `off` removes the selection signal entirely. */
+export const selectionReproPolicy = (
+  mode: BenchPosture["verifySelectRepro"],
+): SelectionReproPolicy => {
+  if (mode === "off") {
+    return { enabled: false, goldCalibrate: false, resolvedKofNMode: "hard" }
+  }
+  if (mode === "positive") {
+    return { enabled: true, goldCalibrate: false, resolvedKofNMode: "soft" }
+  }
+  return { enabled: true, goldCalibrate: true, resolvedKofNMode: "hard" }
+}
+
+/**
+ * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
+ * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
+ * the set spans different FIX SITES) and submits the {@link runSelection} pick.
+ * Each candidate is a full agent run on a fresh snapshot (`withGitSnapshot`
+ * resets the tree between them). Reached ONLY when the `verify-select` knob set
+ * `verifySelectN`; otherwise the single-pass path runs (byte-identical).
+ */
+const runSelectionPhase = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+  sandbox: string,
+  signal: AbortSignal,
+  w: Wiring,
+  n: number,
+  concurrency: number | undefined,
+  verifySelectRegression: BenchPosture["verifySelectRegression"],
+  verifySelectRepro: BenchPosture["verifySelectRepro"],
+  localizeCandidates: readonly string[],
+  baseValidatedRed: boolean,
+  precomputedHint: string | undefined,
+  reproHint: string | undefined,
+  closureHint: string | undefined,
+  reproSources: readonly string[],
+): Promise<Phase> => {
+  const owners = new Set(localizeCandidates)
+  const reproPolicy = selectionReproPolicy(verifySelectRepro)
+  const generationErrors = new Map<number, string>()
+  const seedFor = (i: number): string | undefined => {
+    if (i === 0) return undefined
+    const file = localizeCandidates[i - 1]
+    return file === undefined
+      ? undefined
+      : `Focus your investigation on \`${file}\`. Confirm the ROOT CAUSE lives there (not merely where the symptom surfaces) before editing.`
+  }
+  const mergeHint = (seed: string | undefined): string | undefined =>
+    seed === undefined
+      ? closureHint
+      : closureHint === undefined
+        ? seed
+        : `${closureHint}\n\n${seed}`
+
+  let totalTurns = 0
+  const calibrationUnavailable: ReproOracleCalibration = {
+    goldCalibrated: false,
+    falseNegative: false,
+    available: false,
+    goldVotes: null,
+    goldK: null,
+  }
+  const { port: resolvedKofNPort, calibration } =
+    reproPolicy.enabled === false
+      ? { port: () => Promise.resolve(null), calibration: calibrationUnavailable }
+      : reproPolicy.goldCalibrate
+        ? await makeCalibratedReproConsensusPort(instance, reproSources, sandbox, deps.timeoutMs)
+        : {
+            port: makeReproConsensusSelectionPort(instance, reproSources, sandbox, deps.timeoutMs),
+            calibration: calibrationUnavailable,
+          }
+  const discoveredRegressionPort =
+    verifySelectRegression === "discovered"
+      ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
+      : undefined
+  const resolvedKofNSelectionPort = reproPolicy.enabled ? resolvedKofNPort : undefined
+  const selectionBaseValidatedRed =
+    verifySelectRegression === "discovered" ? null : baseValidatedRed
+  const result = await runSelection({
+    n,
+    owners,
+    seeds: Array.from({ length: n }, (_, i) => seedFor(i)),
+    resolvedKofNMode: reproPolicy.resolvedKofNMode,
+    ...(concurrency !== undefined ? { concurrency } : {}),
+    ports: {
+      generate: async (i, seed): Promise<Candidate> => {
+        const isolated = concurrency !== undefined && concurrency > 1
+        const candidateSandbox = isolated ? await forkSandbox(instance.id, sandbox) : sandbox
+        try {
+          const phase = await runAgentPhase(
+            instance,
+            deps,
+            candidateSandbox,
+            signal,
+            w,
+            precomputedHint,
+            reproHint,
+            mergeHint(seed),
+          )
+          totalTurns += phase.turns
+          const generationError = agentPhaseError(phase)
+          if (generationError !== undefined) {
+            generationErrors.set(i, generationError)
+            throw new Error(generationError)
+          }
+          return {
+            id: `cand-${i}`,
+            patch: phase.patch,
+            turns: phase.turns,
+            files: filesFromPatch(phase.patch),
+            baseValidatedRed: selectionBaseValidatedRed,
+          }
+        } finally {
+          if (isolated) await cleanupSandbox(candidateSandbox)
+        }
+      },
+      regression: (c) => {
+        if (verifySelectRegression === "off") return Promise.resolve(null)
+        if (verifySelectRegression === "discovered") {
+          return discoveredRegressionPort?.(c) ?? Promise.resolve(null)
+        }
+        const tests = instance.swebench?.passToPass ?? []
+        if (tests.length === 0) return Promise.resolve(null)
+        return withCandidatePatch({
+          sandbox,
+          patch: c.patch,
+          baseCommit: instance.swebench?.baseCommit,
+          timeoutMs: deps.timeoutMs,
+          probe: async (sb) => {
+            const r = await makeBenchRegressionOracle(
+              undefined,
+              instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {},
+            )
+              .run({ tests, sandbox: sb })
+              .catch(() => null)
+            return toRegressionGreen(tests, r)
+          },
+        })
+      },
+      ...(resolvedKofNSelectionPort !== undefined
+        ? { resolvedKofN: resolvedKofNSelectionPort }
+        : {}),
+    },
+  })
+  if (result.successfulGenerations === 0 && result.generationFailures > 0) {
+    const orderedErrors = [...generationErrors.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, error]) => error)
+    const sample = orderedErrors.slice(0, 2).join("; ")
+    return {
+      patch: "",
+      turns: totalTurns,
+      stopReason: "error",
+      agentError:
+        "agent stopped with error before verification: " +
+        `verify-select candidate generation failed for all ${n} candidates` +
+        (sample === "" ? "" : ` (${sample})`),
+      reproOracleCalibration: calibration,
+      selectionTelemetry: summarizeSelection(result),
+    }
+  }
+  return {
+    patch: result.winner?.patch ?? "",
+    turns: totalTurns,
+    reproOracleCalibration: calibration,
+    selectionTelemetry: summarizeSelection(result),
   }
 }
 
@@ -1812,6 +2026,12 @@ const generationFailureResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
+    if (args.phase.reproOracleCalibration !== undefined) {
+      extra.reproOracleCalibration = args.phase.reproOracleCalibration
+    }
+    if (args.phase.selectionTelemetry !== undefined) {
+      extra.selectionTelemetry = args.phase.selectionTelemetry
+    }
   }
   return {
     id: args.instance.id,
@@ -1843,6 +2063,12 @@ const noPatchResult = (args: {
     )
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
+    if (args.phase.reproOracleCalibration !== undefined) {
+      extra.reproOracleCalibration = args.phase.reproOracleCalibration
+    }
+    if (args.phase.selectionTelemetry !== undefined) {
+      extra.selectionTelemetry = args.phase.selectionTelemetry
+    }
   }
   return {
     id: args.instance.id,
@@ -1962,11 +2188,28 @@ export const runInstanceOnce = async (
       file,
       score: localizeCandidates.length - i,
     }))
+    const ownerResolved =
+      instance.swebench !== undefined && posture.faultEvidence && posture.lspNav
+        ? await resolveOwnerSiblings()({
+            stage1Files,
+            issueText: instance.problemStatement,
+            cwd: sandbox,
+            readSource: (rel) => {
+              try {
+                return readFileSync(join(sandbox, rel), "utf8")
+              } catch {
+                return null
+              }
+            },
+            signal: abort.signal,
+          })
+        : undefined
     const closureSession =
       instance.swebench !== undefined
         ? buildClosureSession({
             problemStatement: instance.problemStatement,
             stage1Files,
+            ...(ownerResolved !== undefined ? { ownerResolved } : {}),
             ...(reproTest?.installed === true && reproTest.reproducedCount > 0
               ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
               : {}),
@@ -2027,30 +2270,49 @@ export const runInstanceOnce = async (
         verificationPlan,
       })
     phase =
-      runRepair && effectiveRepair !== undefined
-        ? await runRepairPhase(
+      posture.verifySelectN !== undefined && instance.swebench !== undefined
+        ? await runSelectionPhase(
             instance,
             deps,
             sandbox,
             abort.signal,
             w,
-            effectiveRepair,
+            posture.verifySelectN,
+            posture.verifySelectConcurrency,
+            posture.verifySelectRegression,
+            posture.verifySelectRepro,
+            localizeCandidates,
+            verificationPlan?.baseValidatedRed ?? false,
             precomputedHint,
             reproHint,
             closureHint,
-            primaryRailStep,
             reproSources,
           )
-        : await runAgentPhase(
-            instance,
-            deps,
-            sandbox,
-            abort.signal,
-            w,
-            precomputedHint,
-            reproHint,
-            closureHint,
-          )
+        : runRepair && effectiveRepair !== undefined
+          ? await runRepairPhase(
+              instance,
+              deps,
+              sandbox,
+              abort.signal,
+              w,
+              effectiveRepair,
+              precomputedHint,
+              reproHint,
+              closureHint,
+              primaryRailStep,
+              ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
+              reproSources,
+            )
+          : await runAgentPhase(
+              instance,
+              deps,
+              sandbox,
+              abort.signal,
+              w,
+              precomputedHint,
+              reproHint,
+              closureHint,
+            )
     const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
     if (terminal !== undefined) {
       if (shouldValidateGold(deps, false)) {
@@ -2101,11 +2363,19 @@ export const runInstanceOnce = async (
         // (NOT false — emitting false would spuriously enlarge the rate denominator).
         if (primaryRailStep !== undefined && phase.primaryFalseGreen !== undefined)
           extra.primaryFalseGreen = phase.primaryFalseGreen
+        if (primaryRailStep !== undefined && phase.primaryFalseRed !== undefined)
+          extra.primaryFalseRed = phase.primaryFalseRed
       }
       if (repairGateEligible) {
         extra.gateEntered = gateDecisionVerify
         extra.gateBypassed = !gateDecisionVerify
         if (phase.verifyRounds !== undefined) extra.verifyRounds = phase.verifyRounds
+      }
+      if (phase.reproOracleCalibration !== undefined) {
+        extra.reproOracleCalibration = phase.reproOracleCalibration
+      }
+      if (phase.selectionTelemetry !== undefined) {
+        extra.selectionTelemetry = phase.selectionTelemetry
       }
       // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
       // + observe-only ⇒ byte-identical report.json when the knob is OFF. The first
@@ -2118,6 +2388,13 @@ export const runInstanceOnce = async (
       if (posture.patchHygiene && hygiene !== undefined) {
         extra.patchHygiene = hygiene
         extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
+      }
+      if (posture.patchBudget && instance.swebench !== undefined) {
+        const ownerFiles = closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? []
+        extra.patchBudget = analyzePatchBudget(phase.patch, {
+          ownerFiles,
+          repo: instance.swebench.repo,
+        })
       }
       // T-301 verification-plan telemetry (knob-gated, observe-only).
       if (posture.verificationPlan && verificationPlan !== undefined) {
@@ -2143,6 +2420,7 @@ export const runInstanceOnce = async (
             phase.validated,
             phase.primaryFalseGreen,
           ),
+          siblingFiles: ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
         })
       }
     }

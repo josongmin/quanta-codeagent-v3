@@ -182,6 +182,19 @@ const resolveConcurrency = (): number => {
   return 1
 }
 
+/** b2 repair CLI/env override parser. Absent / empty / invalid / 0 ⇒ OFF
+ *  (undefined). Positive integer N ⇒ `{ maxRounds: N }`. Keeps the top-level
+ *  bench contract honest: `--repair-rounds 0` means "no repair", not "enter
+ *  the repair path and still run round-0 validation once". */
+export const repairConfigFromArg = (
+  repairArg: string | undefined,
+): { maxRounds: number } | undefined => {
+  if (repairArg === undefined || repairArg.trim() === "") return undefined
+  if (!/^\d+$/.test(repairArg.trim())) return undefined
+  const rounds = Number.parseInt(repairArg.trim(), 10)
+  return Number.isSafeInteger(rounds) && rounds > 0 ? { maxRounds: rounds } : undefined
+}
+
 /** Compact failure tag for the console FAIL line. Returns "" when the
  *  classification is `passed`. Examples:
  *    `[FAIL][hung_stream:dirty_cache_leak]`
@@ -209,6 +222,22 @@ const logInstanceSummary = (result: InstanceResult): void => {
   const tag = failureTag(result)
   const extra = result.error ? ` (${result.error})` : ""
   logger.info(`  [${mark}${verdict}]${tag} ${result.id} (turns=${result.turns})${extra}`)
+}
+
+const printHelp = (): void => {
+  logger.info("quanta bench (legacy direct entrypoint)")
+  logger.info("usage:")
+  logger.info("  bun run src/apps/bench/cli.ts run [flags]")
+  logger.info("  bun run src/apps/bench/index.ts [flags]")
+  logger.info("")
+  logger.info("common flags:")
+  logger.info("  --swebench <dataset.jsonl>     official SWE-bench dataset mode")
+  logger.info("  --corpus <dir>                 local corpus mode")
+  logger.info("  --dry-run                      print the plan, do not build an LLM")
+  logger.info("  --limit <N>                    cap selected instances")
+  logger.info("  --n <N>                        best-of-N attempts")
+  logger.info("  --repair-rounds <N>            explicit repair-loop override")
+  logger.info("  --list-presets                 print bench presets")
 }
 
 const printSummary = (summary: BenchSummary): void => {
@@ -453,12 +482,7 @@ const runDatasetMode = async (
   // Strict non-negative-int parse: a garbage value (NaN) previously flowed into
   // `Math.max(0, NaN)` === NaN and reached `maxRounds`, silently breaking the
   // repair-round comparison. NaN/negative ⇒ 0 (no repair).
-  const repairRounds =
-    repairArg !== undefined && /^\d+$/.test(repairArg.trim())
-      ? Number.parseInt(repairArg.trim(), 10)
-      : 0
-  const repair =
-    repairArg !== undefined && repairArg !== "" ? { maxRounds: repairRounds } : undefined
+  const repair = repairConfigFromArg(repairArg)
   if (repair !== undefined) {
     logger.info(`bench: repair rounds enabled (maxRounds=${repair.maxRounds})`)
   }
@@ -807,6 +831,12 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
   applyBenchEnvDefaults(process.env)
+
+  if (argFlag("--help") || argFlag("-h")) {
+    printHelp()
+    exitFn(0)
+    return
+  }
 
   if (argFlag("--list-presets")) {
     printPresetList()

@@ -45,6 +45,22 @@ const stemOf = (path: string): string => {
 
 const stripTestAffixes = (stem: string): string => stem.replace(/^test_/, "").replace(/_test$/, "")
 
+const GENERIC_DISCOVERY_TOKENS = new Set([
+  "app",
+  "apps",
+  "base",
+  "common",
+  "core",
+  "helper",
+  "helpers",
+  "integration",
+  "test",
+  "tests",
+  "unit",
+  "util",
+  "utils",
+])
+
 export const isPythonTestFile = (path: string): boolean => {
   const p = normalizeRepoPath(path)
   if (!p.endsWith(".py")) return false
@@ -71,6 +87,16 @@ const moduleParts = (path: string): string[] =>
   dropSourceRoots(normalizeRepoPath(path).replace(/\.py$/, "").split("/").filter(Boolean))
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const tokenizePath = (path: string): string[] =>
+  normalizeRepoPath(path)
+    .replace(/\.py$/, "")
+    .split(/[\/_.-]+/)
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean)
+
+const isMeaningfulDiscoveryToken = (token: string): boolean =>
+  token.length >= 4 && !GENERIC_DISCOVERY_TOKENS.has(token)
 
 const importRegexesForSource = (source: string): RegExp[] => {
   const parts = moduleParts(source)
@@ -115,6 +141,32 @@ const scoreTestForSource = (
   if (sourcePkg !== undefined && normalizeRepoPath(testPath).split("/").includes(sourcePkg)) {
     score += 5
     reasons.push(`package:${sourcePkg}`)
+  }
+
+  const sourceToken = sourceStem.toLowerCase()
+  const testTokens = new Set(tokenizePath(testPath))
+  if (isMeaningfulDiscoveryToken(sourceToken) && testTokens.has(sourceToken)) {
+    score += 18
+    reasons.push(`path-token:${sourceToken}`)
+  }
+
+  const contextTokens = [...new Set(sourceParts.slice(0, -1).flatMap((part) => tokenizePath(part)))]
+  for (const token of contextTokens) {
+    if (!isMeaningfulDiscoveryToken(token) || token === sourceToken || !testTokens.has(token)) continue
+    score += 8
+    reasons.push(`context-token:${token}`)
+  }
+
+  const testParts = normalizeRepoPath(testPath).replace(/\.py$/, "").split("/").filter(Boolean)
+  const testParent = testParts.at(-2)?.toLowerCase()
+  if (
+    basename(testPath) === "tests.py" &&
+    testParent !== undefined &&
+    testParent === sourceToken &&
+    isMeaningfulDiscoveryToken(sourceToken)
+  ) {
+    score += 32
+    reasons.push(`parent-mirror:${sourceToken}`)
   }
 
   for (const re of importRegexesForSource(sourcePath)) {

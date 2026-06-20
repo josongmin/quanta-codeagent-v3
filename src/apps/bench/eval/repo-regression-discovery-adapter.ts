@@ -100,16 +100,26 @@ export const makeDiscoveredRepoRegressionPort = (
 
   const discoveryCache = new Map<string, Promise<readonly string[]>>()
   const baseGreenCache = new Map<string, Promise<readonly string[] | null>>()
+  let repoTestSnapshot: Promise<readonly RepoTextFile[] | null> | undefined
+
+  const repoTestsOnBase = (): Promise<readonly RepoTextFile[] | null> => {
+    if (repoTestSnapshot !== undefined) return repoTestSnapshot
+    repoTestSnapshot = (async () => {
+      if (baseCommit === undefined) return null
+      if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return null
+      const paths = await listTrackedPythonFiles(sandbox, timeoutMs)
+      return readRepoTestFiles(sandbox, paths)
+    })()
+    return repoTestSnapshot
+  }
 
   const discoverFor = (candidate: Candidate): Promise<readonly string[]> => {
     const key = keyOf(candidate.files)
     const cached = discoveryCache.get(key)
     if (cached !== undefined) return cached
     const p = (async (): Promise<readonly string[]> => {
-      if (baseCommit === undefined) return []
-      if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return []
-      const paths = await listTrackedPythonFiles(sandbox, timeoutMs)
-      const repoFiles = await readRepoTestFiles(sandbox, paths)
+      const repoFiles = await repoTestsOnBase()
+      if (repoFiles === null) return []
       return discoverImpactedTests({
         changedFiles: candidate.files,
         repoFiles,

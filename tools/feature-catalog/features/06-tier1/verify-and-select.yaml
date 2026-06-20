@@ -33,7 +33,9 @@ purpose: |
   regression oracle engine port + bench adapter (TB, plug-ready hard signal,
   no-leak fenced), the pure selection-executor orchestrator (TD), and the
   `verify-select` knob (8-step plumbing). Default-OFF / byte-identical when
-  unset; NOT in any preset until the on-demand A/B measures it.
+  unset. Explicit experimental presets now exist (`agentless-v3-select-regression`
+  and `agentless-v3-select-regression-doubt`), but the feature is still NOT in
+  the default base profile and is not yet promoted as an A/B-proven winner.
 evidence:
   code:
     - src/agent/verification-bundle/types.ts
@@ -91,5 +93,8 @@ notes: |
   regressions) and patchedResolvedKofN (TC, makePatchedResolvedConsensus re-runs
   the reproducing set on the patched tree; `verify-select-repro=positive` demotes
   that self-generated signal to soft-only AND skips eval-only gold calibration,
-  while unset preserves the legacy gold-calibrated hard gate). L3, not L4:
-  wired + hellgate-tested but default-OFF and not yet A/B-measured.
+  while unset preserves the legacy gold-calibrated hard gate). Current measured
+  presets: `agentless-v3-select-regression` (no-oracle selection arm) and
+  `agentless-v3-select-regression-doubt` (same arm plus `repro-doubt:5` for
+  verify-loop stalls). L3, not L4: wired + hellgate-tested, present in explicit
+  experimental presets, but still not promoted as a base-profile winner.

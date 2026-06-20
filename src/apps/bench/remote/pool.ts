@@ -26,6 +26,7 @@ import {
   attachBox,
   type BoxSession,
   type ChunkPaths,
+  countRunningBoxes,
   type FullRemoteConfig,
   type FullRemoteResult,
   findIdleBox,
@@ -52,6 +53,11 @@ export interface PoolConfig {
   /** Number of worker boxes. 1–2 by default — more boxes just multiply the 429
    *  burst (shared OAuth) and the bootstrap tax. Clamped to ≥1. */
   readonly workers: number
+  /** Fail-closed guard: `workers > 1` must be an EXPLICIT caller opt-in. */
+  readonly allowExtraWorkers?: boolean
+  /** Fail-closed guard across PROCESSES too: if another quanta-bench box is
+   *  already running, callers must opt in before launching a fresh one. */
+  readonly allowExtraBoxes?: boolean
   readonly preset: string
   readonly model: string
   /** Per-box patch-gen concurrency forwarded to `bench run`. */
@@ -241,6 +247,12 @@ const runWorker = async (
       }
 
       const paths = chunkBoxPaths(chunk.runId)
+      // Capture the rate-limit signal from THIS attempt's result directly — NOT
+      // from the shared `out` map (which a requeued/no-verdict chunk never writes,
+      // and which a same-runId collision could read stale). A throttled run very
+      // often yields a no-verdict report yet sets rateLimited:true, so this is the
+      // case the backoff most needs to see.
+      let chunkRateLimited = false
       try {
         // The dataset scp target dir must exist (scp won't mkdir). observeDir too.
         await session.ssh(`mkdir -p ${paths.observeDir}`)
@@ -256,6 +268,7 @@ const runWorker = async (
           recordTrajectory: cfg.recordTrajectory ?? false,
           forwardedBenchEnv: cfg.forwardedBenchEnv ?? "",
         })
+        chunkRateLimited = result.rateLimited === true
         if (earnedVerdict(result)) {
           out.set(chunk.runId, { chunk, result, attempts: attempt, lost: false })
         } else if (attempt <= maxRetries) {
@@ -293,17 +306,17 @@ const runWorker = async (
 
       // 429 BACKOFF: a chunk that hit the shared-OAuth rate limit means the token
       // is throttled — pausing before the next chunk lets it recover instead of
-      // burning more 429s (the contention that confounds a multi-run fleet). The
-      // signal lives on the RECORDED result (a thrown chunk records none ⇒ skip).
-      const recorded = out.get(chunk.runId)
-      if (backoffBaseMs > 0 && recorded?.result.rateLimited === true && queue.size > 0) {
+      // burning more 429s (the contention that confounds a multi-run fleet). Read
+      // the signal from THIS attempt (`chunkRateLimited`), so a throttled-but-no-
+      // verdict chunk that got requeued still triggers the backoff.
+      if (chunkRateLimited && backoffBaseMs > 0 && queue.size > 0) {
         consecRateLimited += 1
         const backoff = Math.min(backoffMaxMs, backoffBaseMs * 2 ** (consecRateLimited - 1))
         log(
           `[pool] worker ${workerId}: rate-limited (#${consecRateLimited} consecutive) — backing off ${Math.round(backoff / 1000)}s before next chunk`,
         )
         await sleep(backoff)
-      } else if (recorded?.result.rateLimited !== true) {
+      } else if (!chunkRateLimited) {
         consecRateLimited = 0 // clean chunk resets the backoff ladder
       }
     }
@@ -331,6 +344,23 @@ export const runPool = async (
 ): Promise<PoolChunkResult[]> => {
   assertUniqueChunkRunIds(chunks)
   const workers = Math.max(1, Math.trunc(cfg.workers) || 1)
+  if (workers > 1 && cfg.allowExtraWorkers !== true) {
+    throw new Error(
+      `[pool] refusing workers=${workers} without explicit opt-in (allowExtraWorkers=true)`,
+    )
+  }
+  if (cfg.allowExtraBoxes !== true) {
+    const idle = await findIdleBox(cfg.provision).catch(() => undefined)
+    if (idle === undefined) {
+      const running = await countRunningBoxes(cfg.provision)
+      if (running > 0) {
+        throw new Error(
+          `[pool] refusing to launch another box while ${running} quanta-bench box(es) are already running. ` +
+            "Wait for the existing box to go idle, or opt in explicitly.",
+        )
+      }
+    }
+  }
   const queue = new ChunkQueue(chunks)
   const attemptsByRun = new Map<string, number>()
   const out = new Map<string, PoolChunkResult>()
