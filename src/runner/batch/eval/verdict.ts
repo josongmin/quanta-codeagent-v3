@@ -7,7 +7,7 @@
  * `error`. Returns rich evidence so the caller can emit a `verify` trajectory
  * event; pass/fail semantics are unchanged.
  */
-import { isVerifyOutputFailing } from "@/agent/verify-signal"
+import { isVerifyOutputFailing, isVerifyOutputPassing } from "@/agent/verify-signal"
 import type { GradeBreakdown, Instance } from "../types"
 import { exec } from "./exec"
 
@@ -52,9 +52,8 @@ export interface VerifyDeps {
   }
 }
 
-const PASS_SUMMARY_RE = /\b\d+\s+passed\b/i
-
-const hasExplicitPassingSummary = (output: string): boolean => PASS_SUMMARY_RE.test(output)
+const hasExplicitPassingSummary = (output: string): boolean =>
+  isVerifyOutputPassing("test_runner", undefined, output)
 
 const hasExplicitFailureSummary = (output: string): boolean =>
   isVerifyOutputFailing("test_runner", undefined, output)
@@ -152,8 +151,7 @@ export const verify = async (
   // summary, and grading must fail closed there.
   const combined = `${test.stdout}\n${test.stderr}`
   const explicitFailure = hasExplicitFailureSummary(combined)
-  const summaryPass =
-    hasExplicitPassingSummary(combined) && !explicitFailure
+  const summaryPass = hasExplicitPassingSummary(combined) && !explicitFailure
   const passed = !explicitFailure && (test.code === 0 || summaryPass)
   return {
     passed,

@@ -225,14 +225,14 @@ const handlePoolLaunchRunningBoxes = async (
   return false
 }
 
-const awaitPoolLaunchWindow = async (cfg: PoolConfig): Promise<void> => {
-  if (cfg.allowExtraBoxes === true) return
+const awaitPoolLaunchWindow = async (cfg: PoolConfig): Promise<string | undefined> => {
+  if (cfg.allowExtraBoxes === true) return undefined
   const runtime = createPoolLaunchWindowRuntime(cfg)
   const announcedWait = { value: false }
 
   for (;;) {
     const idle = await findIdleBox(cfg.provision).catch(() => undefined)
-    if (idle !== undefined) return
+    if (idle !== undefined) return idle
 
     let running: number
     try {
@@ -242,7 +242,7 @@ const awaitPoolLaunchWindow = async (cfg: PoolConfig): Promise<void> => {
       continue
     }
 
-    if (await handlePoolLaunchRunningBoxes(running, runtime, announcedWait)) return
+    if (await handlePoolLaunchRunningBoxes(running, runtime, announcedWait)) return undefined
   }
 }
 
@@ -603,18 +603,22 @@ const provisionWorkerSession = async (
   runtime: WorkerRuntime,
   state: WorkerState,
 ): Promise<BoxSession> => {
+  const workerProvision = {
+    ...cfg.provision,
+    preset: cfg.preset,
+    model: cfg.model,
+  }
   if (runtime.reuseWarm) {
-    const idle = await findIdleBox(cfg.provision).catch(() => undefined)
+    const idle = await findIdleBox(workerProvision).catch(() => undefined)
     if (idle !== undefined) {
-      const session = await attachBox(cfg.provision, idle)
+      const session = await attachBox(workerProvision, idle)
       state.boxProvisionedAt = runtime.now()
       runtime.log(`[pool] worker ${workerId}: reusing warm box ${session.iid}`)
       return session
     }
-    await awaitPoolLaunchWindow(cfg)
-    const reusable = await findIdleBox(cfg.provision).catch(() => undefined)
+    const reusable = await awaitPoolLaunchWindow(cfg)
     if (reusable !== undefined) {
-      const session = await attachBox(cfg.provision, reusable)
+      const session = await attachBox(workerProvision, reusable)
       state.boxProvisionedAt = runtime.now()
       runtime.log(`[pool] worker ${workerId}: reusing warm box ${session.iid}`)
       return session
@@ -624,7 +628,7 @@ const provisionWorkerSession = async (
   }
   runtime.log(`[pool] worker ${workerId}: provisioning box…`)
   const session = await provisionBox({
-    ...cfg.provision,
+    ...workerProvision,
     launchMode: cfg.provision.launchMode ?? "pool",
   })
   state.boxProvisionedAt = runtime.now()

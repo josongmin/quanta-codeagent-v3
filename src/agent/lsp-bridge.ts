@@ -168,6 +168,7 @@ const LSP_AVAILABILITY_TIMEOUT_MS = 5_000
 // false), so the dedup guarantee is preserved. Mirrors a reset-on-failure
 // `once` memoizer.
 const availabilityCache = new Map<string, Promise<boolean>>()
+let availabilityOverrideForTest: ((bin: string) => boolean | Promise<boolean>) | null = null
 const probeAvailable = async (bin: string): Promise<boolean> => {
   try {
     const proc = Bun.spawn([bin, "--version"], { stdout: "pipe", stderr: "pipe" })
@@ -190,6 +191,9 @@ const probeAvailable = async (bin: string): Promise<boolean> => {
   }
 }
 const isAvailable = (bin: string): Promise<boolean> => {
+  if (availabilityOverrideForTest !== null) {
+    return Promise.resolve(availabilityOverrideForTest(bin))
+  }
   const cached = availabilityCache.get(bin)
   if (cached !== undefined) return cached
   const probe = probeAvailable(bin).then((ok) => {
@@ -204,6 +208,11 @@ const isAvailable = (bin: string): Promise<boolean> => {
   return probe
 }
 
+/** Production-safe availability probe for one language-server binary. Shares
+ *  the same per-process cache as the tool surfaces, so a bench preflight and
+ *  the later tool/session open do not double-spawn `--version`. */
+export const lspBinaryAvailable = (bin: string): Promise<boolean> => isAvailable(bin)
+
 /** TEST-ONLY: clear the per-process availability cache. The cache is a module
  *  singleton (one `bin --version` per process by design — see above), so a test
  *  that probes a real binary leaks a cached `true` into a later test that
@@ -213,6 +222,30 @@ const isAvailable = (bin: string): Promise<boolean> => {
 export const __resetLspAvailabilityCacheForTest = (): void => {
   availabilityCache.clear()
 }
+
+/** TEST-ONLY: override binary-availability answers so higher-level callers can
+ *  drive strict fail-closed rails without depending on the host's installed
+ *  language servers. null restores the real cached probe. */
+export const __setLspAvailabilityOverrideForTest = (
+  override: ((bin: string) => boolean | Promise<boolean>) | null,
+): void => {
+  availabilityOverrideForTest = override
+  availabilityCache.clear()
+}
+
+/** TEST-ONLY: drive the cached availability probe for one binary so a unit test
+ *  can prove the "cache only successes" contract (audit #4) — a first probe that
+ *  resolves `false` (binary off `PATH`) must NOT poison a later probe once the
+ *  binary is reachable. Mirrors the other `__*ForTest` seams; NEVER called in
+ *  production. */
+export const __isLspAvailableForTest = (bin: string): Promise<boolean> => lspBinaryAvailable(bin)
+
+/** TEST-ONLY: report whether a binary currently has a cached availability entry.
+ *  Lets a unit test prove that a settled `false` is EVICTED (cache miss) while a
+ *  `true` is RETAINED (cache hit) — the core of the "cache only successes"
+ *  contract (audit #4). NEVER called in production. */
+export const __hasCachedLspAvailabilityForTest = (bin: string): boolean =>
+  availabilityCache.has(bin)
 
 /** Idle-TTL (30 minutes) before an unreferenced pyright workspace is reaped
  *  (interactive cross-turn reuse window). Bench overrides lifetime via the
@@ -252,9 +285,30 @@ const normalizeImportSymbol = (raw: string): string | null => {
   return base.length > 0 ? base : null
 }
 
-const findPyrightImportProbe = (source: string): { line: number; character: number } | null => {
+/** Result of the import scan. `pos` = a probe position to poll `definition` on;
+ *  `pos: null, truncated: false` = genuinely no import in the whole file (safe
+ *  to treat as verified-ready, nothing to confirm); `pos: null, truncated:
+ *  true` = the {@link PYRIGHT_IMPORT_SCAN_LINE_CAP} window was exhausted with
+ *  more lines remaining and no probe found, so an import MAY live past the cap.
+ *  Audit #21: the caller must NOT conflate the truncated case with the genuinely
+ *  import-less case — a file whose imports sit past the cap (long license/
+ *  docstring header) would otherwise be falsely marked warm-verified. */
+interface ImportProbeScan {
+  pos: { line: number; character: number } | null
+  truncated: boolean
+}
+
+/** TEST-ONLY: expose the pure import-scan so a unit test can prove the cap
+ *  conflation fix (audit #21) directly — `truncated` distinguishes a genuinely
+ *  import-less file from one whose imports sit past the line cap, without a live
+ *  pyright. NEVER called in production. */
+export const __findPyrightImportProbeForTest = (source: string): ImportProbeScan =>
+  findPyrightImportProbe(source)
+
+const findPyrightImportProbe = (source: string): ImportProbeScan => {
   const lines = source.split(/\r?\n/)
-  for (let i = 0; i < lines.length && i < PYRIGHT_IMPORT_SCAN_LINE_CAP; i++) {
+  const scanned = Math.min(lines.length, PYRIGHT_IMPORT_SCAN_LINE_CAP)
+  for (let i = 0; i < scanned; i++) {
     const line = lines[i] ?? ""
     const fromMatch = line.match(/^\s*from\s+[\w.]+\s+import\s+(.+)$/)
     const importMatch = line.match(/^\s*import\s+(.+)$/)
@@ -264,19 +318,20 @@ const findPyrightImportProbe = (source: string): { line: number; character: numb
       const symbol = normalizeImportSymbol(piece)
       if (!symbol) continue
       const character = line.indexOf(symbol)
-      if (character >= 0) return { line: i, character }
+      if (character >= 0) return { pos: { line: i, character }, truncated: false }
     }
   }
-  return null
+  // No probe in the window. `truncated` distinguishes "scanned the whole file"
+  // (genuinely import-less) from "hit the cap with lines left" (import may be
+  // beyond it) so the readiness caller can refuse a false verified-ready.
+  return { pos: null, truncated: lines.length > PYRIGHT_IMPORT_SCAN_LINE_CAP }
 }
 
-const readPyrightImportProbe = async (
-  filePath: string,
-): Promise<{ line: number; character: number } | null> => {
+const readPyrightImportProbe = async (filePath: string): Promise<ImportProbeScan> => {
   try {
     return findPyrightImportProbe(await Bun.file(filePath).text())
   } catch {
-    return null
+    return { pos: null, truncated: false }
   }
 }
 
@@ -284,9 +339,11 @@ const readPyrightImportProbe = async (
  * Pyright readiness probe — the ONE engine-specific bit of the warm path.
  * Primes the document, then (if the file has an import we can probe) polls
  * `definition` on that import symbol until pyright resolves it (server warm) or
- * the budget is exhausted. Returns true = verified-ready (or no probe); false =
- * exhausted without a resolve (the pool must NOT mark the file prepared, so the
- * next call re-attempts instead of querying a never-indexed file forever).
+ * the budget is exhausted. Returns true = verified-ready (no import to confirm,
+ * or one resolved); false = exhausted without a resolve, OR the import scan was
+ * truncated by the line cap with imports possibly beyond it (audit #21) — in
+ * both `false` cases the pool must NOT mark the file prepared, so the next call
+ * re-attempts instead of claiming warm-verified status on a maybe-cold server.
  * Re-throws FATAL transport errors so the pool aborts the warm; transient
  * "still indexing" failures are swallowed (keep polling).
  */
@@ -297,13 +354,18 @@ const ensurePyrightFileReady = async (
 ): Promise<boolean> => {
   // Honor an already-aborted signal BEFORE priming a doc — a background prewarm
   // whose session ended must not boot/prime a server just to bail in the poll
-  // loop below. The no-import fast-path (`probe === null`) returns before that
-  // loop, so without this check an aborted prewarm of an import-less anchor
+  // loop below. The no-import fast-path (`scan.pos === null`) returns before
+  // that loop, so without this check an aborted prewarm of an import-less anchor
   // would still fully prime a started server.
   if (signal?.aborted) throw new Error(`pyright warm-up aborted for ${filePath}`)
   await client.prime(filePath, signal)
-  const probe = await readPyrightImportProbe(filePath)
-  if (probe === null) return true
+  const scan = await readPyrightImportProbe(filePath)
+  const probe = scan.pos
+  // Genuinely import-less file ⇒ nothing to verify, verified-ready. But a scan
+  // TRUNCATED by the line cap with no probe found (imports may live past it)
+  // must NOT be marked verified-ready (audit #21) — return false so the pool
+  // re-attempts instead of falsely claiming a warm-verified, maybe-cold server.
+  if (probe === null) return !scan.truncated
   const budgetMs = pyrightWarmupTimingForTest?.budgetMs ?? PYRIGHT_READY_TIMEOUT_MS
   const retryMs = pyrightWarmupTimingForTest?.retryMs ?? PYRIGHT_READY_RETRY_MS
   const deadline = Date.now() + budgetMs

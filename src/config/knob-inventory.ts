@@ -1154,7 +1154,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T-201): emit a typed FaultEvidencePacket (bounded owner-context: paths/symbols only, no raw source) instead of raw-source hint blobs. Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/fault-evidence.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_VERIFICATION_PLAN",
@@ -1164,7 +1164,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T-301): build a typed VerificationPlan (primary rail + required/optional steps with typed successPredicates) instead of relying on the agent's ad-hoc verify command. Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/verification-plan.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_PRIMARY_RAIL",
@@ -1174,7 +1174,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T-302): enforce the planner-selected primary rail as the done-gate (non-primary green never clears; repair iterates while primary RED; categorical commit-vs-verify gate). Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/primary-rail.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_PATCH_HYGIENE",
@@ -1184,7 +1184,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T-401): run a typed PatchHygieneReport over the candidate diff (stray added files deny, owner-outside telemetry-only). Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/patch-hygiene.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_NO_PATCH_BREAKER",
@@ -1194,7 +1194,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T-501): post-localization commit rail (force a best-edit commit when budget is mostly spent with no edit) + explicit no-patch `exhausted` verdict at budget end. Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/no-patch-breaker.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_REPAIR_ESCALATION",
@@ -1204,7 +1204,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T-601): explicit RepairEscalationDecision (continue-single-owner / collect-more-evidence / branch-search / multi-owner-plan) from typed artifacts, with a closed reason taxonomy; widen to multi-site only on explicit cross-owner evidence. Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/repair-escalation.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_SPEC_FIDELITY_STEER",
@@ -1214,7 +1214,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (gap-B): spec-fidelity steer — when the issue declares a concrete expected output (extractIssueDeclaredExpected), append a minimal-literal-fix steer; fail-closed (no spec ⇒ no steer, so co-change cases are not nudged). Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/spec-fidelity-steer.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_CLOSURE_REPAIR",

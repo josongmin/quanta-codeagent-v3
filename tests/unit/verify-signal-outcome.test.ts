@@ -21,7 +21,12 @@
  * tied to specific, recognizable runner summary lines.
  */
 import { describe, expect, test } from "bun:test"
-import { isVerifyOutputFailing, OUTCOME_FAILURE_MATCHERS } from "@/agent/verify-signal"
+import {
+  isVerifyOutputFailing,
+  isVerifyOutputPassing,
+  OUTCOME_FAILURE_MATCHERS,
+  OUTCOME_SUCCESS_MATCHERS,
+} from "@/agent/verify-signal"
 
 const probe = (output: string): boolean => isVerifyOutputFailing("test_runner", undefined, output)
 
@@ -197,6 +202,14 @@ describe("isVerifyOutputFailing — false-positive guards", () => {
   test("ANSI escape codes around `FAILED` still matched ⇒ true", () => {
     expect(probe("[31mFAIL[0m  tests/foo.test.ts")).toBe(true)
   })
+
+  test("incidental prose `fixes 3 failures` ⇒ false", () => {
+    expect(probe("this patch fixes 3 failures in the old implementation")).toBe(false)
+  })
+
+  test("incidental prose `will raise 2 errors` ⇒ false", () => {
+    expect(probe("the old path will raise 2 errors before cleanup")).toBe(false)
+  })
 })
 
 describe("OUTCOME_FAILURE_MATCHERS shape", () => {
@@ -219,5 +232,46 @@ describe("OUTCOME_FAILURE_MATCHERS shape", () => {
     for (const required of ["python", "js", "go", "rust"]) {
       expect(ecosystems.has(required)).toBe(true)
     }
+  })
+})
+
+const passProbe = (output: string): boolean =>
+  isVerifyOutputPassing("test_runner", undefined, output)
+
+describe("isVerifyOutputPassing — explicit success summaries", () => {
+  test("pytest short summary `3 passed in 0.42s` ⇒ true", () => {
+    expect(passProbe("3 passed in 0.42s")).toBe(true)
+  })
+
+  test("unittest `OK` summary ⇒ true", () => {
+    expect(passProbe("Ran 5 tests in 0.01s\n\nOK")).toBe(true)
+  })
+
+  test("rspec `5 examples, 0 failures` ⇒ true", () => {
+    expect(passProbe("5 examples, 0 failures")).toBe(true)
+  })
+
+  test("zero-test `0 passed, 0 failed, 0 errors` ⇒ false", () => {
+    expect(passProbe("0 passed, 0 failed, 0 errors in 0.01s")).toBe(false)
+  })
+
+  test("failing summary is NOT a success summary", () => {
+    expect(passProbe("1 passed, 2 errors in 0.01s")).toBe(false)
+  })
+})
+
+describe("OUTCOME_SUCCESS_MATCHERS shape", () => {
+  test("every matcher has a stable id + ecosystem + RegExp", () => {
+    for (const m of OUTCOME_SUCCESS_MATCHERS) {
+      expect(typeof m.id).toBe("string")
+      expect(m.id.length).toBeGreaterThan(0)
+      expect(typeof m.ecosystem).toBe("string")
+      expect(m.pattern).toBeInstanceOf(RegExp)
+    }
+  })
+
+  test("matcher ids are unique", () => {
+    const ids = OUTCOME_SUCCESS_MATCHERS.map((m) => m.id)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })

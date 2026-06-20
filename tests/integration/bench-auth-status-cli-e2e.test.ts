@@ -110,6 +110,26 @@ describe("T-6 auth status", () => {
   test("unknown subaction prints usage and exits non-zero", async () => {
     const { code, out } = await runCli({}, "auth", "bogus")
     expect(code).not.toBe(0)
-    expect(out).toMatch(/usage: quanta-bench auth status/)
+    expect(out).toMatch(/usage: quanta-bench auth \(status\|login\)/)
+  })
+
+  test("auth login without --auth-label prints login usage and exits non-zero", async () => {
+    const { code, out } = await runCli({}, "auth", "login")
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/usage: quanta-bench auth login --auth-label/)
+  })
+
+  test("auth login reaches the core and fails fast when client_id is cleared (no browser)", async () => {
+    // Proves dispatch → cmdAuthLogin → runBenchLogin is wired: with the client_id
+    // explicitly cleared, the flow refuses BEFORE opening any browser/issuer.
+    const { code, out } = await runCli(
+      { QUANTA_OAUTH_CLIENT_ID: "" },
+      "auth",
+      "login",
+      "--auth-label",
+      "acct-x",
+    )
+    expect(code).toBe(1)
+    expect(out).toMatch(/client_id/)
   })
 })

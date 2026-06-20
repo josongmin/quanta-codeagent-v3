@@ -22,19 +22,20 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { costSummaryFromReport, renderCost } from "./analyze/cost"
+import { diffRuns, renderDiff } from "./analyze/diff"
+import { explainFailure } from "./analyze/explain"
+import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
+import { loadVerdictsFromFile } from "./analyze/verdicts"
 import {
   AuthLeaseManager,
   type AuthSource,
   describeAuthSource,
   resolveAuthLaunchFile,
   resolveAuthSource,
+  runBenchLogin,
   selectAuthSourceLabel,
 } from "./auth-pool"
-import { costSummaryFromReport, renderCost } from "./analyze/cost"
-import { diffRuns, renderDiff } from "./analyze/diff"
-import { explainFailure } from "./analyze/explain"
-import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
-import { loadVerdictsFromFile } from "./analyze/verdicts"
 import {
   CURRENT_BENCH_BASE_PRESET,
   renderBenchPresetListLines,
@@ -49,17 +50,17 @@ import { type PoolChunk, runPool } from "./remote/pool"
 import { createLeasePoolAuthProvider, type PoolAuthProvider } from "./remote/pool-auth"
 import { createSshBackend } from "./remote/ssh"
 import {
-  defaultMicrochunkDir,
-  type Microchunk,
-  planMicrochunks,
-  writeMicrochunks,
-} from "./slicing/microchunk"
-import {
   clampPatchGenConcurrency,
   type PatchGenBudgetState,
   readPatchGenBudgetState,
   resolveGlobalPatchGenBudget,
 } from "./remote/token-budget"
+import {
+  defaultMicrochunkDir,
+  type Microchunk,
+  planMicrochunks,
+  writeMicrochunks,
+} from "./slicing/microchunk"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
 // logger.info writes nowhere).
@@ -183,6 +184,7 @@ const VALUE_FLAGS = new Set([
   "--auth-label",
   "--chunk-size",
   "--microchunk-dir",
+  "--max-parallel",
 ])
 
 /** Positional args after the subcommand (argv[2]), skipping flags AND the
@@ -217,12 +219,54 @@ const modelNameFromPredictions = (path: string): string | undefined => {
   }
 }
 
+/** Coerce a prior report's `resolved_ids` to a clean `string[]` for `--skip-resolved`.
+ *  Accepts a real string array OR a JSON-encoded string array (some swebench exports
+ *  double-encode the id arrays); filters out non-strings / empties. Mirrors
+ *  analyze/verdicts.ts strArray so a malformed report can't pollute the merged
+ *  resolved tally or seed the skip set with non-string junk. */
+export const resolvedIdsFromReport = (v: unknown): string[] => {
+  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string" && x.length > 0)
+  if (typeof v === "string") {
+    try {
+      const parsed: unknown = JSON.parse(v)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((x): x is string => typeof x === "string" && x.length > 0)
+      }
+    } catch {
+      // not JSON — fall through
+    }
+  }
+  return []
+}
+
+/** Parse `--max-workers` for the remote swebench grade harness. ABSENT ⇒ ok with
+ *  no value (backend default applies). A POSITIVE integer ⇒ ok with that value.
+ *  Zero / negative / non-integer garbage ⇒ `invalid` — `Number.isInteger(Number("0"))`
+ *  and `Number.isInteger(Number("-5"))` are both true, so the prior inline parser
+ *  shipped `--max_workers 0` / `-5` verbatim into the remote harness command
+ *  (a broken grade run). Mirrors the strict `argPositiveInt` guard index.ts uses
+ *  for this same class. Pure (string in) so it is unit-testable without argv. */
+export const parseMaxWorkers = (
+  raw: string | undefined,
+): { ok: true; value?: number } | { ok: false; raw: string } => {
+  if (raw === undefined || raw.trim() === "") return { ok: true }
+  const n = Number(raw)
+  if (Number.isInteger(n) && n >= 1) return { ok: true, value: n }
+  return { ok: false, raw }
+}
+
 /** Build ONE backend instance for `spec` (ec2 | ssh:host). A fresh call mints a
  *  fresh box (fanout uses this per shard). */
 const buildBaseBackend = (spec: string, modelName: string | undefined): GradeBackend => {
-  const mwRaw = argValue("--max-workers")
-  const maxWorkers =
-    mwRaw !== undefined && Number.isInteger(Number(mwRaw)) ? Number(mwRaw) : undefined
+  const mw = parseMaxWorkers(argValue("--max-workers"))
+  if (!mw.ok) {
+    logger.info(
+      `refused: --max-workers must be a positive integer (got "${mw.raw}") — ` +
+        "it is passed verbatim to the remote swebench grade harness.",
+    )
+    process.exit(2)
+  }
+  const maxWorkers = mw.value
   const common = {
     ...(modelName !== undefined ? { modelName } : {}),
     ...(maxWorkers !== undefined ? { maxWorkers } : {}),
@@ -358,9 +402,11 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   if (dry) {
     const res = await makeBackend(expected).run()
     printBlock(
-      ["=== full-remote plan (dry-run) ===", describeAuthSource(authSource), ...(res.plan ?? [])].join(
-        "\n",
-      ),
+      [
+        "=== full-remote plan (dry-run) ===",
+        describeAuthSource(authSource),
+        ...(res.plan ?? []),
+      ].join("\n"),
     )
     return
   }
@@ -666,10 +712,53 @@ const summarizePoolRun = (out: Awaited<ReturnType<typeof runPool>>, chunkCount: 
  * through the per-box status snapshots (`box ls`). NEVER prints token material:
  * the resolver only ever holds file PATHS, never reads a credential.
  */
-const cmdAuth = (): void => {
+/**
+ * jun-20 multi-auth (T-7): `quanta-bench auth login --auth-label <label>`. Runs
+ * the SAME ChatGPT OAuth flow as the main CLI's `/login`, writes the token to a
+ * per-label file, and auto-registers the account in the pool manifest — closing
+ * the loop the fleet previously lacked (it could consume per-account files but
+ * nothing produced the extra ones). OAuth errors propagate to `main().catch` (exit 1).
+ */
+const cmdAuthLogin = async (): Promise<void> => {
+  const label = argValue("--auth-label")
+  if (label === undefined || label.trim() === "") {
+    logger.info(
+      "usage: quanta-bench auth login --auth-label <label> [--auth-file <path>] [--auth-pool <manifest>] [--max-parallel N]",
+    )
+    process.exit(2)
+  }
+  const authFile = argValue("--auth-file")
+  const manifestPath = argValue("--auth-pool") ?? process.env.QUANTA_BENCH_AUTH_POOL
+  const maxParallelRaw = argValue("--max-parallel")
+  const res = await runBenchLogin(
+    {
+      label,
+      ...(authFile !== undefined ? { authFile } : {}),
+      ...(manifestPath !== undefined && manifestPath.trim() !== "" ? { manifestPath } : {}),
+      ...(maxParallelRaw !== undefined ? { maxParallel: Number(maxParallelRaw) } : {}),
+    },
+    { env: process.env, onLog: (m) => logger.info(m) },
+  )
+  printBlock(
+    [
+      `✓ signed in account "${res.label}" (plan: ${res.plan})`,
+      `  token:    ${res.authFile}`,
+      `  manifest: ${res.manifestPath} (${res.manifestAdded ? "added" : "already present"}; ${res.accountCount} account(s))`,
+      `  run with: QUANTA_BENCH_AUTH_POOL=${res.manifestPath} quanta-bench pool --allow-remote-secrets …`,
+    ].join("\n"),
+  )
+}
+
+const cmdAuth = async (): Promise<void> => {
   const action = positionals()[0]
+  if (action === "login") {
+    await cmdAuthLogin()
+    return
+  }
   if (action !== "status") {
-    logger.info("usage: quanta-bench auth status [--auth-pool <manifest>] [--auth-label <label>] [--json]")
+    logger.info(
+      "usage: quanta-bench auth (status|login) [--auth-pool <manifest>] [--auth-label <label>] [--json]",
+    )
     process.exit(2)
   }
   const src = resolveCliAuthSource()
@@ -765,6 +854,7 @@ interface BoxStatusSummary {
   readonly bootstrapping: number
   readonly unreachable: number
   readonly stale: number
+  readonly snapshotIssues: number
   readonly target?: string
   readonly targetFollowHint?: string
 }
@@ -885,12 +975,20 @@ const listBenchBoxes = async (region: string, keyPath: string): Promise<BoxRunti
   const inspections: Awaited<ReturnType<typeof inspectBox>>[] = await Promise.all(
     rows.map(async (row) => {
       if (row.state !== "running" || row.ip === "" || row.ip === "None") {
-        return { lifecycle: "bootstrapping", bootstrapped: false, busy: false }
+        return {
+          lifecycle: "bootstrapping",
+          bootstrapped: false,
+          busy: false,
+          snapshotHealthy: false,
+          snapshotState: "not-ready",
+        }
       }
       return inspectBox(baseCfg, { iid: row.iid, ip: row.ip }).catch(() => ({
         lifecycle: "unreachable",
         bootstrapped: false,
         busy: false,
+        snapshotHealthy: false,
+        snapshotState: "read-failed",
       }))
     }),
   )
@@ -899,6 +997,8 @@ const listBenchBoxes = async (region: string, keyPath: string): Promise<BoxRunti
       lifecycle: "unreachable",
       bootstrapped: false,
       busy: false,
+      snapshotHealthy: false,
+      snapshotState: "read-failed",
     }
     const snapshot = inspection.snapshot
     const probe = inspection.probe
@@ -967,6 +1067,7 @@ const summarizeBenchBoxes = (rows: readonly BoxRuntimeRow[]): BoxStatusSummary =
       bootstrapping: 0,
       unreachable: 0,
       stale: 0,
+      snapshotIssues: 0,
     }
   }
   const target = resolveBoxTarget(rows, "auto")
@@ -977,6 +1078,7 @@ const summarizeBenchBoxes = (rows: readonly BoxRuntimeRow[]): BoxStatusSummary =
     bootstrapping: rows.filter((row) => row.lifecycle === "bootstrapping").length,
     unreachable: rows.filter((row) => row.lifecycle === "unreachable").length,
     stale: rows.filter((row) => row.freshness === "stale").length,
+    snapshotIssues: rows.filter((row) => !row.snapshotHealthy).length,
     target: target.iid,
     targetFollowHint: target.followHint,
   }
@@ -987,20 +1089,35 @@ const boxStatusLabel = (row: BoxRuntimeRow): string =>
     row.freshness === "stale" ? "/stale" : ""
   }`
 
+const snapshotHealthDetail = (
+  row: Pick<BoxRuntimeRow, "snapshotHealthy" | "snapshotState">,
+): string => (row.snapshotHealthy ? "  snapshot=ok" : `  snapshot=${row.snapshotState}`)
+
 const yesNo = (value: boolean | undefined): string =>
   value === true ? "yes" : value === false ? "no" : "unknown"
 
+const boxSnapshotDetailLine = (row: BoxRuntimeRow): string | undefined => {
+  if (row.snapshot === undefined) return undefined
+  return `  source=snapshot  mode=${row.snapshot.mode}${row.snapshot.accountLabel !== undefined ? `  account=${row.snapshot.accountLabel}` : ""}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+}
+
+const boxProbeDetailLine = (row: BoxRuntimeRow): string | undefined => {
+  if (row.probe === undefined) return undefined
+  return `  source=probe${snapshotHealthDetail(row)}  active=${yesNo(row.probe.activeRunDetected)}  report=${yesNo(row.probe.reportExists)}  runExit=${yesNo(row.probe.runExitExists)}${row.probe.predictionsLines !== undefined ? `  preds=${row.probe.predictionsLines}` : ""}`
+}
+
+const boxLaunchTagDetailLine = (row: BoxRuntimeRow): string | undefined => {
+  if (!hasLaunchTags(row)) return undefined
+  return `  source=launch-tags${snapshotHealthDetail(row)}${row.launchMode !== undefined ? `  mode=${row.launchMode}` : ""}${row.launchPreset !== undefined ? `  preset=${row.launchPreset}` : ""}${row.launchModel !== undefined ? `  model=${row.launchModel}` : ""}${row.launchDataset !== undefined ? `  dataset=${row.launchDataset}` : ""}${row.launchSelection !== undefined ? `  selection=${row.launchSelection}` : ""}`
+}
+
 const boxDetailLine = (row: BoxRuntimeRow): string | undefined =>
-  row.snapshot !== undefined
-    ? `  source=snapshot  mode=${row.snapshot.mode}${row.snapshot.accountLabel !== undefined ? `  account=${row.snapshot.accountLabel}` : ""}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
-    : row.probe !== undefined
-      ? `  source=probe  active=${yesNo(row.probe.activeRunDetected)}  report=${yesNo(row.probe.reportExists)}  runExit=${yesNo(row.probe.runExitExists)}${row.probe.predictionsLines !== undefined ? `  preds=${row.probe.predictionsLines}` : ""}`
-      : hasLaunchTags(row)
-        ? `  source=launch-tags${row.launchMode !== undefined ? `  mode=${row.launchMode}` : ""}${row.launchPreset !== undefined ? `  preset=${row.launchPreset}` : ""}${row.launchModel !== undefined ? `  model=${row.launchModel}` : ""}${row.launchDataset !== undefined ? `  dataset=${row.launchDataset}` : ""}${row.launchSelection !== undefined ? `  selection=${row.launchSelection}` : ""}`
-      : undefined
+  boxSnapshotDetailLine(row) ?? boxProbeDetailLine(row) ?? boxLaunchTagDetailLine(row)
 
 const boxLaunchHeaderLine = (row: BoxRuntimeRow): string | undefined =>
-  row.snapshot === undefined && row.probe === undefined && hasLaunchTags(row) ? boxDetailLine(row) : undefined
+  row.snapshot === undefined && row.probe === undefined && hasLaunchTags(row)
+    ? boxDetailLine(row)
+    : undefined
 
 const boxRuntimeLine = (row: BoxRuntimeRow): string | undefined => {
   if (row.snapshot !== undefined) {
@@ -1071,20 +1188,20 @@ const renderBoxStatus = (
     latestLaunchFirst(rows)[0]
   return [
     "[box] summary:",
-    `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}`,
+    `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}  snapshotIssues=${summary.snapshotIssues}`,
     budget !== undefined ? renderPatchGenBudgetLine(budget) : undefined,
     budget === undefined && budgetError !== undefined
       ? renderPatchGenBudgetErrorLine(budgetError)
       : undefined,
     focus !== undefined
-      ? `  target=${focus.iid}  status=${boxStatusLabel(focus)}  source=${focus.statusSource}${focus.logPath !== undefined ? `  logPath=${focus.logPath}` : ""}${
+      ? `  target=${focus.iid}  status=${boxStatusLabel(focus)}  source=${focus.statusSource}${snapshotHealthDetail(focus)}${focus.logPath !== undefined ? `  logPath=${focus.logPath}` : ""}${
           focus.logAgeSec !== undefined ? `  logAge=${focus.logAgeSec}s` : ""
         }`
       : undefined,
     summary.targetFollowHint !== undefined ? `  follow=${summary.targetFollowHint}` : undefined,
     ...staleRows.map(
       (row) =>
-        `  stale=${row.iid}  status=${boxStatusLabel(row)}  source=${row.statusSource}  updated=${row.snapshot?.updatedAt ?? row.probe?.runLogUpdatedAt ?? "none"}${
+        `  stale=${row.iid}  status=${boxStatusLabel(row)}  source=${row.statusSource}${snapshotHealthDetail(row)}  updated=${row.snapshot?.updatedAt ?? row.probe?.runLogUpdatedAt ?? "none"}${
           row.snapshotAgeSec !== undefined
             ? ` (${row.snapshotAgeSec}s ago)`
             : row.logAgeSec !== undefined
@@ -1149,7 +1266,7 @@ const renderBoxLogHeader = (
   return [
     follow ? `[box] following ${row.iid} (${host})` : `[box] ${row.iid}  ${host}`,
     `  status=${boxStatusLabel(row)}`,
-    `  source=${row.statusSource}`,
+    `  source=${row.statusSource}${snapshotHealthDetail(row)}`,
     `  logPath=${logPath}`,
     boxHeaderUpdatedLine(row),
     boxHeaderActiveLine(row),
@@ -1189,6 +1306,8 @@ const renderPendingLogJson = (
       lifecycle: row.lifecycle,
       freshness: row.freshness,
       statusSource: row.statusSource,
+      snapshotHealthy: row.snapshotHealthy,
+      snapshotState: row.snapshotState,
       logPath,
       lines,
       snapshot: row.snapshot,
@@ -1311,6 +1430,8 @@ const renderBoxLogsJson = (
       lifecycle: row.lifecycle,
       freshness: row.freshness,
       statusSource: row.statusSource,
+      snapshotHealthy: row.snapshotHealthy,
+      snapshotState: row.snapshotState,
       phase: row.snapshot?.phase,
       logPath,
       lines,
@@ -1430,7 +1551,9 @@ const cmdBoxStatus = async (region: string): Promise<void> => {
         {
           summary,
           ...(budgetState.budget !== undefined ? { budget: budgetState.budget } : {}),
-          ...(budgetState.budgetError !== undefined ? { budgetError: budgetState.budgetError } : {}),
+          ...(budgetState.budgetError !== undefined
+            ? { budgetError: budgetState.budgetError }
+            : {}),
           boxes: ordered,
         },
         null,
@@ -1574,7 +1697,11 @@ const cmdGrade = async (): Promise<void> => {
   const skipReport = argValue("--skip-resolved")
   if (skipReport !== undefined) {
     const rep = JSON.parse(readFileSync(skipReport, "utf8")) as { resolved_ids?: unknown }
-    priorResolved = Array.isArray(rep.resolved_ids) ? (rep.resolved_ids as string[]) : []
+    // FILTER to non-empty strings (and accept the double-encoded-JSON-string form
+    // some swebench exports emit) — same robustness as analyze/verdicts.ts strArray.
+    // The prior `as string[]` cast shipped numbers/nulls straight into `done` and
+    // into the merged tally, polluting the resolved count when fed a malformed report.
+    priorResolved = resolvedIdsFromReport(rep.resolved_ids)
     const done = new Set(priorResolved)
     const rows = readFileSync(predictions, "utf8")
       .split("\n")
@@ -1743,7 +1870,7 @@ const main = async (): Promise<void> => {
       await cmdBox()
       return
     case "auth":
-      cmdAuth()
+      await cmdAuth()
       return
     case "diff":
       cmdDiff()
@@ -1776,3 +1903,5 @@ if (import.meta.main) {
 
 // Exported for unit tests (pure CLI-arg helpers — the routing-bug surface).
 export { argValue, buildBackend, modelNameFromPredictions, positionals }
+// Note: `parseMaxWorkers` and `resolvedIdsFromReport` are exported at their
+// definitions above (pure validators/coercers — unit-tested directly).

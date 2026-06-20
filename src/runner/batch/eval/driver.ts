@@ -17,7 +17,7 @@
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs"
-import { join, relative, sep } from "node:path"
+import { extname, join, relative, sep } from "node:path"
 import {
   type AgentConfig,
   type AgentlessLocalizeDeps,
@@ -29,6 +29,8 @@ import {
   executeReproTests,
   extractIssueHint,
   generateReproTests,
+  lspBinaryAvailable,
+  lspExtensionToLanguage,
   lspNavToolList,
   type ReproExecPort,
   type ReproTestConfig,
@@ -54,6 +56,7 @@ import { decideEscalation } from "@/agent/repair-escalation"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import { errMessage, gateDisabled, gateOn } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -686,6 +689,67 @@ export const enumerateRepoSources = (repoRoot: string): string[] => {
     }
   }
   return out
+}
+
+const LSP_EXTENSION_TO_LANGUAGE = lspExtensionToLanguage()
+
+interface BenchLspProbeTarget {
+  readonly bin: string
+  readonly rel: string
+  readonly count: number
+}
+
+const dominantLspProbeTarget = (repoRoot: string): BenchLspProbeTarget | undefined => {
+  const bins = new Map<string, { rel: string; count: number }>()
+  for (const rel of enumerateRepoSources(repoRoot)) {
+    const bin = LSP_EXTENSION_TO_LANGUAGE.get(extname(rel).toLowerCase())
+    if (bin === undefined) continue
+    const seen = bins.get(bin)
+    if (seen === undefined) bins.set(bin, { rel, count: 1 })
+    else seen.count += 1
+  }
+  let best: BenchLspProbeTarget | undefined
+  for (const [bin, info] of bins) {
+    if (
+      best === undefined ||
+      info.count > best.count ||
+      (info.count === best.count && bin.localeCompare(best.bin) < 0)
+    ) {
+      best = { bin, rel: info.rel, count: info.count }
+    }
+  }
+  return best
+}
+
+export class StrictLspGroundingDegradedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "StrictLspGroundingDegradedError"
+  }
+}
+
+const verifyStrictPresetLspGrounding = async (
+  posture: BenchPosture,
+  sandbox: string,
+): Promise<void> => {
+  const preset = posture.preset
+  if (preset === undefined || !presetRequiresLiveLspGrounding(preset)) return
+  if (!posture.lspNav) {
+    throw new StrictLspGroundingDegradedError(
+      `[bench] preset ${preset} requires live LSP grounding, but LSP nav is disabled in the resolved posture.`,
+    )
+  }
+  const probe = dominantLspProbeTarget(sandbox)
+  if (probe === undefined) {
+    throw new StrictLspGroundingDegradedError(
+      `[bench] preset ${preset} requires live LSP grounding, but this repo has no source file mapped to a configured language server.`,
+    )
+  }
+  if (await lspBinaryAvailable(probe.bin)) return
+  throw new StrictLspGroundingDegradedError(
+    `[bench] preset ${preset} requires live LSP grounding, but ${probe.bin} is not launchable on PATH ` +
+      `(dominant repo-language probe: ${probe.rel}, ${probe.count} file(s)).`,
+  )
 }
 
 export interface PrepareIssueHintDeps {
@@ -1672,6 +1736,16 @@ const runAgentPhase = async (
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
+      // INTENTIONAL DIVERGENCE from the prod apps-driver runAgentPhase: this
+      // runner-core twin passes `undefined` for `onVerifyPass` (no tentative-
+      // patch retention). That P0 safety-net lives ONLY in the apps driver
+      // (src/apps/bench/eval/driver.ts) because this runner `runInstance` shell
+      // has no production caller — apps/bench/eval re-exports runInstance from
+      // the apps driver, and tests pin THIS twin's plain emit. Porting tentative
+      // here would change the test-pinned behavior of a dead path for no prod
+      // gain. The shared phase logic stays in this module; only the orchestration
+      // shell diverges on the tentative axis. Keep in sync if this shell is ever
+      // made live.
       const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
       // Knob telemetry: emit once per phase entry (matches the contract
       // documented on `emitKnobsApplied`). The single-pass path bypasses
@@ -2436,8 +2510,8 @@ const prepareHintAndReproContext = async (
   instance: Instance,
   sandbox: string,
   llm: LLMPort,
+  posture: BenchPosture,
 ): Promise<HintReproContext> => {
-  const posture = benchOptIns()
   let localizeCandidates: readonly string[] = []
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
     llm,
@@ -2539,7 +2613,9 @@ export const prepareAttemptContext = async (
   deps: RunInstanceDeps,
   signal: AbortSignal,
 ): Promise<PreparedAttemptContext> => {
-  const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm)
+  const posture = benchOptIns()
+  await verifyStrictPresetLspGrounding(posture, sandbox)
+  const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm, posture)
   const stage1Files = stage1FilesOf(hintRepro.localizeCandidates)
   const ownerResolved = await resolveOwnerResolved({
     instance,
@@ -2819,6 +2895,15 @@ const attachSelectionAndClosureArtifacts = (args: {
     args.extra.ownerAdmission = closureSession.bundle.owner
   }
   if (posture.repairEscalation && closureSession !== undefined) {
+    // OBSERVE-ONLY (measure-first): the EscalationDecision is computed here on
+    // the post-repair SUCCESS path and assigned only to `args.extra` (serialized
+    // to the report — see RunExtra.repairEscalation doc in batch/types.ts). It
+    // does NOT widen the search: `escalate`/`owners` are never fed back into
+    // selection/seed/branch-search/subagent. Wiring it to ACT (the #14315
+    // multi-owner-widen lever) needs design — there is no seam at this site,
+    // because the repair phase has already finished by the time this runs; the
+    // owners would have to re-enter an earlier phase. Left documented-only on
+    // purpose (default-OFF knob ⇒ byte-identical) until that lever is measured.
     args.extra.repairEscalation = decideEscalation({
       candidates: closureSession.bundle.evidence.candidates.map((c) => ({
         file: c.file,
@@ -3046,6 +3131,16 @@ export const runInstanceOnce = async (
         reproTest,
         verdict: "degraded",
         error: `observation failed (strict): ${e.message}`,
+        ...(prepared !== undefined ? { prepared, sandbox } : {}),
+      })
+    }
+    if (e instanceof StrictLspGroundingDegradedError) {
+      return latePhaseFailureResultOf({
+        instance,
+        phase,
+        reproTest,
+        verdict: "degraded",
+        error: e.message,
         ...(prepared !== undefined ? { prepared, sandbox } : {}),
       })
     }

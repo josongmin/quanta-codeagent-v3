@@ -170,9 +170,23 @@ export interface OutcomeFailureMatcher {
   readonly pattern: RegExp
 }
 
+/** One ecosystem's success-line recognizer. Stable `id` for telemetry. */
+export interface OutcomeSuccessMatcher {
+  readonly id: string
+  readonly ecosystem: string
+  /** Anchored regex matching an EXPLICIT success summary or marker. */
+  readonly pattern: RegExp
+}
+
 const ANSI_CSI_RE = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
 const stripAnsiCsi = (output: string): string => output.replace(ANSI_CSI_RE, "")
+
+const normalizeVerifyOutput = (output: string): string | null => {
+  if (typeof output !== "string" || output.length === 0) return null
+  const normalized = stripAnsiCsi(output)
+  return normalized.length === 0 ? null : normalized
+}
 
 /**
  * Output-side failure registry. Each pattern targets a specific test-runner's
@@ -209,16 +223,24 @@ export const OUTCOME_FAILURE_MATCHERS: readonly OutcomeFailureMatcher[] = [
   { id: "cargo", ecosystem: "rust", pattern: /^test result:\s*FAILED\b/m },
   // Generic non-zero count summaries: `1 passed, 2 errors`, `3 failures`, ...
   // Zero-count summaries (`0 failed`, `0 errors`) are NOT failure signals.
+  //
+  // The `failures?`/`errors?` words also appear in incidental NON-summary prose
+  // ("will raise 2 errors", "fixes 3 failures"), where firing would flip a real
+  // PASS to fail-closed. Test-runner summaries always place the count at a
+  // segment boundary — start of a summary line, or after a `, ` separator
+  // (`1 passed, 2 errors in 0.01s`) — so anchor those two ambiguous words to
+  // that boundary. `failed` is left unanchored: the bare verb is summary-only
+  // (no common prose like "raise N failed"), so it keeps its broader reach.
   { id: "generic-failed-count", ecosystem: "generic", pattern: /\b(?:[1-9]\d*)\s+failed\b/m },
   {
     id: "generic-failure-count",
     ecosystem: "generic",
-    pattern: /\b(?:[1-9]\d*)\s+failures?\b/m,
+    pattern: /(?:^|,\s)(?:[1-9]\d*)\s+failures?\b/m,
   },
   {
     id: "generic-error-count",
     ecosystem: "generic",
-    pattern: /\b(?:[1-9]\d*)\s+errors?\b/m,
+    pattern: /(?:^|,\s)(?:[1-9]\d*)\s+errors?\b/m,
   },
   {
     id: "generic-failure-assignment",
@@ -234,6 +256,42 @@ export const OUTCOME_FAILURE_MATCHERS: readonly OutcomeFailureMatcher[] = [
   { id: "dotnet", ecosystem: "dotnet", pattern: /^Failed!\s+-\s+Failed:/m },
   // make / generic: `make: *** [target] Error N`
   { id: "make-error", ecosystem: "generic", pattern: /\bmake(?:\[\d+\])?:\s+\*{3}\s/m },
+]
+
+/**
+ * Output-side success registry. These are explicit "the suite passed" summary
+ * lines that are safe enough to salvage a non-zero wrapper exit once we have
+ * ALSO ruled out any explicit failure marker. This is intentionally narrower
+ * than arbitrary "ok"/"passed" prose: only recognizable test-runner summaries.
+ */
+export const OUTCOME_SUCCESS_MATCHERS: readonly OutcomeSuccessMatcher[] = [
+  // pytest: `===== 5 passed in 0.42s =====` / short `5 passed in 0.42s`
+  {
+    id: "pytest-summary",
+    ecosystem: "python",
+    pattern: /^=+\s+[1-9]\d*\s+passed(?:[, ]|\s+in\s)/m,
+  },
+  { id: "pytest-short", ecosystem: "python", pattern: /^[1-9]\d*\s+passed(?:[, ]|\s+in\s)/m },
+  // unittest: `OK` / `OK (skipped=1)`
+  { id: "unittest", ecosystem: "python", pattern: /^OK\b(?:\s*\(|\s*$)/m },
+  // jest/vitest: `Tests:       5 passed, 5 total`
+  { id: "jest-vitest", ecosystem: "js", pattern: /^Tests:.*\b[1-9]\d*\s+passed\b/m },
+  // mocha: `10 passing`
+  { id: "mocha", ecosystem: "js", pattern: /^\s*[1-9]\d*\s+passing\b/m },
+  // go test: `ok  github.com/foo/bar/pkg 0.012s`
+  { id: "go", ecosystem: "go", pattern: /^ok\s+\S+/m },
+  // cargo test: `test result: ok. 3 passed; 0 failed; ...`
+  { id: "cargo", ecosystem: "rust", pattern: /^test result:\s*ok\.\s+[1-9]\d*\s+passed;/m },
+  // rspec: `5 examples, 0 failures`
+  { id: "rspec", ecosystem: "ruby", pattern: /^[1-9]\d*\s+examples?,\s+0\s+failures?\b/m },
+  // phpunit: `OK (5 tests, 12 assertions)`
+  { id: "phpunit", ecosystem: "php", pattern: /^OK\s+\([1-9]\d*\s+tests?,/m },
+  // dotnet: `Passed!  - Failed:    0, Passed:     5, Skipped:     0`
+  {
+    id: "dotnet",
+    ecosystem: "dotnet",
+    pattern: /^Passed!\s+-\s+Failed:\s+0,\s+Passed:\s+[1-9]\d*/m,
+  },
 ]
 
 /**
@@ -258,10 +316,30 @@ export const isVerifyOutputFailing = (
   _arg: string | undefined,
   output: string,
 ): boolean => {
-  if (typeof output !== "string" || output.length === 0) return false
-  const normalized = stripAnsiCsi(output)
-  if (normalized.length === 0) return false
+  const normalized = normalizeVerifyOutput(output)
+  if (normalized === null) return false
   for (const m of OUTCOME_FAILURE_MATCHERS) {
+    if (m.pattern.test(normalized)) return true
+  }
+  return false
+}
+
+/**
+ * True iff the captured tool output contains an EXPLICIT, ecosystem-specific
+ * success summary AND no explicit failure summary. This is the exact mirror of
+ * {@link isVerifyOutputFailing}: verdict salvage can promote a non-zero wrapper
+ * exit only on clear runner-owned evidence like `OK` or `5 examples, 0
+ * failures`, never on broad prose.
+ */
+export const isVerifyOutputPassing = (
+  name: string,
+  arg: string | undefined,
+  output: string,
+): boolean => {
+  const normalized = normalizeVerifyOutput(output)
+  if (normalized === null) return false
+  if (isVerifyOutputFailing(name, arg, normalized)) return false
+  for (const m of OUTCOME_SUCCESS_MATCHERS) {
     if (m.pattern.test(normalized)) return true
   }
   return false

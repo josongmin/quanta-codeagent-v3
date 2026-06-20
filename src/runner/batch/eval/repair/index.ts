@@ -157,8 +157,7 @@ const reproOutcomeOf = (v: ValidatorResult): RepairReproOutcome | undefined => {
  *  gated on THIS measurement (no blind loop change). Prefer the validator's
  *  recorded `reproOutcome`; custom / test validators that omit it still
  *  participate via `observed.stdout` fallback. */
-const isFalseRed = (v: ValidatorResult): boolean =>
-  !v.ok && reproOutcomeOf(v) === "resolved"
+const isFalseRed = (v: ValidatorResult): boolean => !v.ok && reproOutcomeOf(v) === "resolved"
 
 const predicateSummaryOf = (v: ValidatorResult): string | undefined => {
   const predicate = v.predicate
@@ -172,10 +171,7 @@ const validationGateContextOf = (
   args: RunRepairRoundsArgs,
   run: RunOnceResult,
   validator: ValidatorResult,
-): Pick<
-  BuildRepairContextArgs,
-  "validationSource" | "validationCmd" | "validationExitCode"
-> => {
+): Pick<BuildRepairContextArgs, "validationSource" | "validationCmd" | "validationExitCode"> => {
   const exitCode = validator.observed?.exitCode
   const withExit = <T extends { validationSource: RepairValidationSource; validationCmd?: string }>(
     base: T,
@@ -223,7 +219,9 @@ const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<Valid
           // T-1 wired: evaluate the rail's typed predicate over the observed
           // output (observe-only in v1 — validator records, does NOT flip ok).
           successPredicate: args.primaryRailStep.successPredicate,
-          ...(args.evaluatePredicate !== undefined ? { evaluatePredicate: args.evaluatePredicate } : {}),
+          ...(args.evaluatePredicate !== undefined
+            ? { evaluatePredicate: args.evaluatePredicate }
+            : {}),
         }
       : {
           sandbox: args.sandbox,
@@ -231,7 +229,9 @@ const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<Valid
           timeoutMs: args.timeoutMs,
           ...(r.lastVerifyCmd !== undefined ? { cmd: r.lastVerifyCmd } : {}),
           ...(r.reproPath !== undefined ? { reproPath: r.reproPath } : {}),
-          ...(args.evaluatePredicate !== undefined ? { evaluatePredicate: args.evaluatePredicate } : {}),
+          ...(args.evaluatePredicate !== undefined
+            ? { evaluatePredicate: args.evaluatePredicate }
+            : {}),
         }
   return args.validate(validateArgs)
 }

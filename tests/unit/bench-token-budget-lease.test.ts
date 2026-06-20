@@ -216,6 +216,47 @@ describe("patch-gen budget lease", () => {
     expect(secondReleaseErr).toBeUndefined()
   })
 
+  test("external deletion cannot reopen the full budget BEFORE the next heartbeat lands", async () => {
+    const first = await acquirePatchGenBudgetLease({
+      label: "first",
+      requestedUnits: 12,
+      dir: DIR,
+      waitMs: 1_000,
+      pollMs: 10,
+      heartbeatMs: 60_000,
+    })
+    let second: Awaited<ReturnType<typeof acquirePatchGenBudgetLease>> | undefined
+    let firstReleaseErr: unknown
+    let secondReleaseErr: unknown
+    try {
+      rmSync(DIR, { recursive: true, force: true })
+      second = await acquirePatchGenBudgetLease({
+        label: "second",
+        requestedUnits: 16,
+        dir: DIR,
+        waitMs: 1_000,
+        pollMs: 10,
+      })
+      expect(second.units).toBe(4)
+      const state = await readPatchGenBudgetState({ dir: DIR })
+      expect(state.inUse).toBe(16)
+      expect(state.leases.map((lease) => lease.label)).toEqual(["first", "second"])
+    } finally {
+      try {
+        await second?.release()
+      } catch (err) {
+        secondReleaseErr = err
+      }
+      try {
+        await first.release()
+      } catch (err) {
+        firstReleaseErr = err
+      }
+    }
+    expect(firstReleaseErr).toBeUndefined()
+    expect(secondReleaseErr).toBeUndefined()
+  })
+
   test("a waiting lease contender stays alive until timeout instead of exiting cleanly between polls", async () => {
     const held = await acquirePatchGenBudgetLease({
       label: "holder",

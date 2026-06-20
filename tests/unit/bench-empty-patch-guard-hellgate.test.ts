@@ -379,4 +379,46 @@ describe("hellgate — local verifier summary salvage", () => {
     expect(out.passed).toBe(true)
     expect(out.exitCode).toBe(0)
   })
+
+  test("non-zero exit + unittest OK summary ⇒ recovered PASS", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf 'Ran 5 tests in 0.01s\\n\\nOK\\n' >&2; exit 143",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(true)
+    expect(out.exitCode).toBe(143)
+  })
+
+  test("non-zero exit + rspec zero-failure summary ⇒ recovered PASS", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '5 examples, 0 failures\\n' >&2; exit 143",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(true)
+    expect(out.exitCode).toBe(143)
+  })
+
+  test("non-zero exit + zero-test summary stays FAIL (no 0-passed fake green)", async () => {
+    const out = await verify(
+      mkInstance({
+        testCmd: "printf '0 passed, 0 failed, 0 errors in 0.01s\\n' >&2; exit 143",
+        localEnv: shellEnv,
+      }),
+      "diff --git a/x b/x\n",
+      "/tmp",
+      { timeoutMs: 1000 },
+    )
+    expect(out.passed).toBe(false)
+    expect(out.exitCode).toBe(143)
+  })
 })

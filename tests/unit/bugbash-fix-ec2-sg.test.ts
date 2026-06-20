@@ -11,7 +11,7 @@
  * throw flips it back into a create attempt, turning both assertions red.
  */
 import { describe, expect, test } from "bun:test"
-import { type SpawnFn, type SpawnResult } from "../../src/apps/bench/remote/backend"
+import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
 import { createEc2Backend } from "../../src/apps/bench/remote/ec2"
 
 interface Issued {
@@ -72,7 +72,12 @@ describe("ec2 ensureSecurityGroup: describe FAILURE ≠ SG-not-found", () => {
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
       return ok()
     })
-    const backend = createEc2Backend({ spawn, sleep: async () => {}, maxPolls: 1, pollIntervalMs: 1 })
+    const backend = createEc2Backend({
+      spawn,
+      sleep: async () => {},
+      maxPolls: 1,
+      pollIntervalMs: 1,
+    })
     await backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r" }).catch(() => undefined)
     // CONTROL: a clean describe that reports None is a real "not found" ⇒ create.
     expect(issued.some((i) => i.cmd === "aws" && i.args.includes("create-security-group"))).toBe(

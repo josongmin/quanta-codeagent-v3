@@ -14,7 +14,9 @@ import { extractIssueDeclaredExpected } from "@/agent/verification-plan/extract-
  */
 describe("bugbash #10 — EXPECT_LITERAL_RE verbs missing from the old pre-gate now extract", () => {
   test("'should equal `LITERAL`' ⇒ extracted (no `equal` verb existed in EXPECT_RE)", () => {
-    const r = extractIssueDeclaredExpected("The result should equal `(1,)` but the call returns `(1)`.")
+    const r = extractIssueDeclaredExpected(
+      "The result should equal `(1,)` but the call returns `(1)`.",
+    )
     expect(r).toEqual({ kind: "symbolic", value: "(1,)" })
   })
 
@@ -46,6 +48,8 @@ describe("bugbash #10 — EXPECT_LITERAL_RE verbs missing from the old pre-gate 
   })
 
   test("control: fail-closed — no expect verb + no marker ⇒ undefined", () => {
-    expect(extractIssueDeclaredExpected("The result is `(1,)` somewhere in the trace.")).toBeUndefined()
+    expect(
+      extractIssueDeclaredExpected("The result is `(1,)` somewhere in the trace."),
+    ).toBeUndefined()
   })
 })

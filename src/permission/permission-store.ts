@@ -430,6 +430,15 @@ export interface CreatePermissionStoreOptions {
   debounceMs?: number
   /** Inject a fake clock (test). Defaults to `Date.now`. */
   now?: () => number
+  /** TEST-ONLY merge-boundary seam. Invoked synchronously at the TOP of the
+   *  `mergeWithDisk` callback — i.e. at the exact instant AFTER the persistence
+   *  engine snapshotted `inMemory` (before its reread IO) and BEFORE this store
+   *  reconciles. Tests use it to deterministically reproduce the interleaving
+   *  race (finding #2): a `setThread`/`recordDenial`/`recordUserOverride` run
+   *  here lands on the live `state` in the snapshot→merge window, and the merge
+   *  MUST fold it in (via the live re-snapshot, not the stale engine snapshot)
+   *  so it is not clobbered. `undefined` in production ⇒ byte-identical no-op. */
+  __onMergeBoundaryForTest?: () => void
 }
 
 /* ------------------------------------------------------------------------- *
@@ -764,6 +773,10 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
     parse: parseState,
     stateVersion: STATE_VERSION,
     mergeWithDisk: ({ onDisk }) => {
+      // TEST-ONLY: simulate a mutation that interleaves the engine's reread IO
+      // window (between its pre-await `inMemory` snapshot and this callback).
+      // Production leaves this undefined ⇒ no-op. See `__onMergeBoundaryForTest`.
+      opts.__onMergeBoundaryForTest?.()
       // The `inMemory` arg was snapshotted by the engine BEFORE its `await
       // rereadForMerge()` IO. A synchronous setThread/recordDenial/
       // recordUserOverride can land on the live `state` DURING that await

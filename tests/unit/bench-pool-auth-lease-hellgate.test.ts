@@ -21,6 +21,7 @@ import { createLeasePoolAuthProvider, type PoolAuthProvider } from "../../src/ap
 const authJsonFor = (label: string): string =>
   JSON.stringify({
     access_token: `ACCESS-${label}`,
+    expires_at: "2099-01-01T00:00:00.000Z",
     refresh_token: `REFRESH-${label}-secret`,
     id_token: `IDTOK-${label}-secret`,
     account_id: label,
@@ -91,6 +92,7 @@ const poolCfg = (
   tokenBudgetDir: allocBudgetDir(),
   tokenBudgetWaitMs: 5_000,
   tokenBudgetPollMs: 10,
+  singleBoxGuardDir: join(allocBudgetDir(), "guard"), // isolate the cross-run box guard per test
   // single-auth fallback is present but must NOT be used in pool mode.
   authJsonProvider: () => {
     throw new Error("single authJsonProvider must NOT be called when authProvider is set")

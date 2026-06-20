@@ -28,7 +28,12 @@ export const patchFiles = (diff: string): string[] =>
 export const strayFilesOf = (diff: string): string[] => buildPatchHygiene(diff).strayAddedFiles
 
 /** session_end-style reason inferred from per-attempt outcomes (until the
- *  stream tap threads the real reason in a later wave). */
+ *  stream tap threads the real reason in a later wave). `budget.attemptOutcomes`
+ *  is stamped ONLY on the multi-attempt path; the default single-attempt
+ *  (maxAttempts===1) run carries no budget, so without the `stopReason`
+ *  fallback below a true `max_turns`/`budget_exhausted` empty-patch run is
+ *  misclassified `empty_patch_other` and `no_patch_exhausted_rate` reads a
+ *  systematic 0. `r.stopReason` is populated on every agent-loop run. */
 const endReasonOf = (r: InstanceResult): string | null => {
   const outs = r.budget?.attemptOutcomes ?? []
   if (outs.some((o) => o.kind === "admission-blocked")) return "admission_blocked"
@@ -38,6 +43,12 @@ const endReasonOf = (r: InstanceResult): string | null => {
     return "max_turns"
   if (outs.some((o) => o.kind === "timeout")) return "timeout"
   if (outs.some((o) => o.kind === "infra-fail")) return "infra"
+  // Single-attempt fallback: no attemptOutcomes, so read the result's own
+  // stopReason. Mirrors classifyByStopReason (retry-policy.ts) so both paths
+  // agree: max_turns/budget_exhausted ⇒ no_patch_exhausted, aborted ⇒ timeout.
+  if (r.stopReason === "budget_exhausted") return "budget_exhausted"
+  if (r.stopReason === "max_turns") return "max_turns"
+  if (r.stopReason === "aborted") return "timeout"
   return null
 }
 

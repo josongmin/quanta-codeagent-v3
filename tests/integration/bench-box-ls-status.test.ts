@@ -115,6 +115,20 @@ EOF
     exit 0
     ;;
   ubuntu@1.2.3.6::*"cat ~/.quanta/bench-box-status.json"*)
+    case "\${QUANTA_BOX_TEST_PROBE_SNAPSHOT_STATE:-missing}" in
+      missing)
+        printf '__QUANTA_BOX_SNAPSHOT_MISSING__\n'
+        exit 0
+        ;;
+      invalid)
+        echo '{"phase":"running"'
+        exit 0
+        ;;
+      read-failed)
+        echo "snapshot read failed" >&2
+        exit 255
+        ;;
+    esac
     exit 1
     ;;
   ubuntu@1.2.3.4::*"__QUANTA_BOX_RUNTIME_PROBE__"*)
@@ -207,10 +221,12 @@ describe("bench box ls status view", () => {
     expect(out).toContain("i-idle  running  c7i.8xlarge  1.2.3.5  status=idle/idle")
     expect(out).toContain("source=snapshot  mode=full-remote  workload=django__django-11179")
     expect(out).toContain("i-probe  running  c7i.8xlarge  1.2.3.6  status=busy")
-    expect(out).toContain("source=probe  active=yes  report=no  runExit=no  preds=84")
+    expect(out).toContain(
+      "source=probe  snapshot=missing  active=yes  report=no  runExit=no  preds=84",
+    )
     expect(out).toContain("i-pending  pending  c7i.8xlarge  None  status=bootstrapping")
     expect(out).toContain(
-      "source=launch-tags  mode=full-remote  preset=agentless-v3-thin  model=gpt-5.4  dataset=pending.jsonl  selection=django__django-11179",
+      "source=launch-tags  snapshot=not-ready  mode=full-remote  preset=agentless-v3-thin  model=gpt-5.4  dataset=pending.jsonl  selection=django__django-11179",
     )
   })
 
@@ -297,7 +313,9 @@ describe("bench box ls status view", () => {
     const { code, out } = await runCli(["box", "status"])
     expect(code).toBe(0)
     expect(out).toContain("[box] summary:")
-    expect(out).toContain("total=4  busy=2  idle=1  bootstrapping=1  unreachable=0  stale=0")
+    expect(out).toContain(
+      "total=4  busy=2  idle=1  bootstrapping=1  unreachable=0  stale=0  snapshotIssues=2",
+    )
     expect(out).toContain("patchGenBudget=12/16  available=4  holders=1  leases=pool:wave7:12")
     expect(out).toContain("target=i-busy  status=busy/running  source=snapshot")
     expect(out).toContain("follow=bun run src/apps/bench/cli.ts box logs i-busy --follow")
@@ -313,6 +331,7 @@ describe("bench box ls status view", () => {
         idle: number
         bootstrapping: number
         stale: number
+        snapshotIssues?: number
         target?: string
       }
       budget?: {
@@ -330,6 +349,7 @@ describe("bench box ls status view", () => {
         idle: 1,
         bootstrapping: 1,
         stale: 0,
+        snapshotIssues: 2,
         target: "i-busy",
       }),
     )
@@ -344,13 +364,91 @@ describe("bench box ls status view", () => {
     expect(parsed.boxes.map((row) => row.iid)).toEqual(["i-pending", "i-idle", "i-busy", "i-probe"])
   })
 
+  test("box status --json exposes snapshot health for probe-fallback rows", async () => {
+    const { code, out } = await runCli(["box", "status", "--json"])
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out) as {
+      boxes: Array<{
+        iid: string
+        snapshotHealthy?: boolean
+        snapshotState?: string
+        statusSource?: string
+      }>
+    }
+    expect(parsed.boxes.find((row) => row.iid === "i-probe")).toEqual(
+      expect.objectContaining({
+        statusSource: "probe",
+        snapshotHealthy: false,
+        snapshotState: "missing",
+      }),
+    )
+    expect(parsed.boxes.find((row) => row.iid === "i-pending")).toEqual(
+      expect.objectContaining({
+        statusSource: "launch-tags",
+        snapshotHealthy: false,
+        snapshotState: "not-ready",
+      }),
+    )
+  })
+
+  test("box status --json distinguishes invalid snapshot payloads from missing snapshots", async () => {
+    const { code, out } = await runCli(["box", "status", "--json"], {
+      QUANTA_BOX_TEST_PROBE_SNAPSHOT_STATE: "invalid",
+    })
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out) as {
+      boxes: Array<{
+        iid: string
+        snapshotHealthy?: boolean
+        snapshotState?: string
+        statusSource?: string
+      }>
+    }
+    expect(parsed.boxes.find((row) => row.iid === "i-probe")).toEqual(
+      expect.objectContaining({
+        statusSource: "probe",
+        snapshotHealthy: false,
+        snapshotState: "invalid",
+      }),
+    )
+  })
+
+  test("box status --json distinguishes read-failed snapshots from missing snapshots", async () => {
+    const { code, out } = await runCli(["box", "status", "--json"], {
+      QUANTA_BOX_TEST_PROBE_SNAPSHOT_STATE: "read-failed",
+    })
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out) as {
+      boxes: Array<{
+        iid: string
+        snapshotHealthy?: boolean
+        snapshotState?: string
+        statusSource?: string
+      }>
+    }
+    expect(parsed.boxes.find((row) => row.iid === "i-probe")).toEqual(
+      expect.objectContaining({
+        statusSource: "probe",
+        snapshotHealthy: false,
+        snapshotState: "read-failed",
+      }),
+    )
+  })
+
   test("box status still surfaces budget truth when no boxes are running", async () => {
     const { code, out } = await runCli(["box", "status", "--json"], {
       QUANTA_BOX_TEST_EMPTY: "1",
     })
     expect(code).toBe(0)
     const parsed = JSON.parse(out) as {
-      summary: { total: number; busy: number; idle: number; bootstrapping: number; stale: number }
+      summary: {
+        total: number
+        busy: number
+        idle: number
+        bootstrapping: number
+        stale: number
+        snapshotIssues?: number
+      }
       budget?: { inUse: number; limit: number; available: number }
       boxes: Array<unknown>
     }
@@ -361,6 +459,7 @@ describe("bench box ls status view", () => {
         idle: 0,
         bootstrapping: 0,
         stale: 0,
+        snapshotIssues: 0,
       }),
     )
     expect(parsed.budget).toEqual(
@@ -430,7 +529,7 @@ describe("bench box ls status view", () => {
     const { code, out } = await runCli(["box", "logs", "i-probe"])
     expect(code).toBe(0)
     expect(out).toContain("[box] i-probe  ubuntu@1.2.3.6")
-    expect(out).toContain("source=probe")
+    expect(out).toContain("source=probe  snapshot=missing")
     expect(out).toContain("logPath=~/run.log")
     expect(out).toContain("[warn] pyright warm-up budget exhausted")
   })
@@ -439,7 +538,7 @@ describe("bench box ls status view", () => {
     const { code, out } = await runCli(["box", "logs", "i-pending"])
     expect(code).toBe(0)
     expect(out).toContain("status=bootstrapping")
-    expect(out).toContain("source=launch-tags")
+    expect(out).toContain("source=launch-tags  snapshot=not-ready")
     expect(out).toContain("dataset=pending.jsonl")
     expect(out).toContain("run log not created yet; box is still bootstrapping")
   })

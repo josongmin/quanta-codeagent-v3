@@ -95,9 +95,9 @@ const fromObserve = (
   if (!existsSync(observeDir)) return { input: 0, output: 0, wallClockMs: 0 }
   let files: string[]
   try {
-    {const __f = readdirSync(observeDir).find(
+    files = readdirSync(observeDir).filter(
       (f) => f.startsWith(`${instanceId}.`) && f.endsWith(".jsonl"),
-    ); files = __f === undefined ? [] : [__f]}
+    )
   } catch {
     return { input: 0, output: 0, wallClockMs: 0 }
   }

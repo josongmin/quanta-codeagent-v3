@@ -1,6 +1,6 @@
 import { mkdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import {
   asPositiveInt,
   atomicWriteJson,
@@ -65,6 +65,7 @@ const DEFAULT_POLL_MS = 15_000
 const DEFAULT_HEARTBEAT_MS = 15_000
 const DEFAULT_STALE_HEARTBEAT_MS = 60_000
 const OWNER_META = "owner.json"
+const OWNER_SHADOW_SUFFIX = ".owner-shadow.json"
 
 export const resolveSingleBoxGuardDir = (): string =>
   process.env.QUANTA_BENCH_SINGLE_BOX_GUARD_DIR?.trim() ||
@@ -87,22 +88,40 @@ const isOwnerRecord = (value: unknown): value is SingleBoxOwnerRecord => {
 
 const ownerMetaPath = (dir: string): string => join(dir, OWNER_META)
 
+const ownerShadowMetaPath = (dir: string): string =>
+  join(dirname(dir), `${basename(dir)}${OWNER_SHADOW_SUFFIX}`)
+
 const heartbeatAgeMs = (record: SingleBoxOwnerRecord, nowMs: number): number => {
   const at = parseIsoMs(record.heartbeatAt)
   return at === undefined ? Number.POSITIVE_INFINITY : Math.max(0, nowMs - at)
 }
 
-const readOwnerRecord = async (dir: string): Promise<SingleBoxOwnerRecord | undefined> => {
-  const parsed = await readJson<unknown>(ownerMetaPath(dir))
+const readOwnerRecordAtPath = async (path: string): Promise<SingleBoxOwnerRecord | undefined> => {
+  const parsed = await readJson<unknown>(path)
   return isOwnerRecord(parsed) ? parsed : undefined
 }
+
+const readOwnerRecord = async (dir: string): Promise<SingleBoxOwnerRecord | undefined> =>
+  readOwnerRecordAtPath(ownerMetaPath(dir))
+
+const readShadowOwnerRecord = async (dir: string): Promise<SingleBoxOwnerRecord | undefined> =>
+  readOwnerRecordAtPath(ownerShadowMetaPath(dir))
+
+const ownerRecordIsReclaimable = (
+  owner: SingleBoxOwnerRecord,
+  nowMs: number,
+  staleHeartbeatMs: number,
+): boolean => heartbeatAgeMs(owner, nowMs) > staleHeartbeatMs && !processAlive(owner.pid)
+
+const effectiveOwnerRecord = async (dir: string): Promise<SingleBoxOwnerRecord | undefined> =>
+  (await readOwnerRecord(dir)) ?? (await readShadowOwnerRecord(dir))
 
 const lockLooksStale = async (
   dir: string,
   nowMs: number,
   staleHeartbeatMs: number,
 ): Promise<boolean> => {
-  const owner = await readOwnerRecord(dir)
+  const owner = await effectiveOwnerRecord(dir)
   const lockStat = await stat(dir).catch(() => undefined)
   const ageMs =
     owner !== undefined
@@ -112,7 +131,7 @@ const lockLooksStale = async (
         : Number.POSITIVE_INFINITY
   if (ageMs <= staleHeartbeatMs) return false
   if (owner === undefined) return false
-  return !processAlive(owner.pid)
+  return ownerRecordIsReclaimable(owner, nowMs, staleHeartbeatMs)
 }
 
 const formatOwner = (owner: SingleBoxOwnerRecord | undefined): string =>
@@ -160,12 +179,14 @@ const writeSingleBoxOwnerRecord = async (
   opts: ResolvedAcquireSingleBoxGuardOptions,
   acquiredAt: string,
 ): Promise<void> => {
-  await atomicWriteJson(ownerMetaPath(opts.dir), {
+  const record = {
     label: opts.label,
     pid: process.pid,
     acquiredAt,
     heartbeatAt: new Date(opts.now()).toISOString(),
-  })
+  }
+  await atomicWriteJson(ownerShadowMetaPath(opts.dir), record)
+  await atomicWriteJson(ownerMetaPath(opts.dir), record)
 }
 
 const createSingleBoxGuardHandle = (
@@ -180,14 +201,29 @@ const createSingleBoxGuardHandle = (
 
   const runRelease = async (): Promise<void> => {
     heartbeat.pause()
+    let dirErr: unknown
+    let shadowErr: unknown
     try {
       await rm(opts.dir, { recursive: true, force: true })
-      heartbeat.stop()
-      released = true
     } catch (err) {
-      heartbeat.resume()
-      throw err
+      dirErr = err
     }
+    try {
+      await rm(ownerShadowMetaPath(opts.dir), { force: true })
+    } catch (err) {
+      shadowErr = err
+    }
+    if (dirErr !== undefined || shadowErr !== undefined) {
+      heartbeat.resume()
+      if (dirErr !== undefined && shadowErr !== undefined) {
+        throw new Error(
+          `[single-box] release failed for ${opts.label}: dir=${String(dirErr)}; shadow=${String(shadowErr)}`,
+        )
+      }
+      throw dirErr ?? shadowErr
+    }
+    heartbeat.stop()
+    released = true
   }
 
   return {
@@ -209,6 +245,18 @@ const createSingleBoxGuardHandle = (
 const tryAcquireSingleBoxGuard = async (
   opts: ResolvedAcquireSingleBoxGuardOptions,
 ): Promise<SingleBoxAcquireAttempt> => {
+  const nowMs = opts.now()
+  const shadowOwner = await readShadowOwnerRecord(opts.dir)
+  if (shadowOwner !== undefined) {
+    if (!ownerRecordIsReclaimable(shadowOwner, nowMs, opts.staleHeartbeatMs)) {
+      return {
+        kind: "waiting",
+        owner: shadowOwner,
+        timedOut: opts.deadline !== undefined && nowMs >= opts.deadline,
+      }
+    }
+    await rm(ownerShadowMetaPath(opts.dir), { force: true }).catch(() => undefined)
+  }
   const acquiredAt = new Date(opts.now()).toISOString()
   try {
     await mkdir(opts.dir)
@@ -216,6 +264,7 @@ const tryAcquireSingleBoxGuard = async (
       await writeSingleBoxOwnerRecord(opts, acquiredAt)
     } catch (err) {
       await rm(opts.dir, { recursive: true, force: true }).catch(() => undefined)
+      await rm(ownerShadowMetaPath(opts.dir), { force: true }).catch(() => undefined)
       throw err
     }
     return {
@@ -224,14 +273,14 @@ const tryAcquireSingleBoxGuard = async (
     }
   } catch (err) {
     if (errorCodeOf(err) !== "EEXIST") throw err
-    const nowMs = opts.now()
     if (await lockLooksStale(opts.dir, nowMs, opts.staleHeartbeatMs)) {
       await rm(opts.dir, { recursive: true, force: true }).catch(() => undefined)
+      await rm(ownerShadowMetaPath(opts.dir), { force: true }).catch(() => undefined)
       return tryAcquireSingleBoxGuard(opts)
     }
     return {
       kind: "waiting",
-      owner: await readOwnerRecord(opts.dir),
+      owner: await effectiveOwnerRecord(opts.dir),
       timedOut: opts.deadline !== undefined && nowMs >= opts.deadline,
     }
   }

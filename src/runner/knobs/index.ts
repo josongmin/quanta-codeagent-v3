@@ -18,7 +18,7 @@ export {
   saveKnobConfigMerged,
   writeKnobConfig,
 } from "./persist"
-export { KNOB_PRESETS } from "./presets"
+export { KNOB_PRESETS, presetRequiresLiveLspGrounding } from "./presets"
 export {
   __resetRegistry,
   __restoreRegistry,

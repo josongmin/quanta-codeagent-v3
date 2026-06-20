@@ -181,6 +181,7 @@ const cfg = (fn: SpawnFn, provider: PoolAuthProvider, over: Record<string, unkno
   tokenBudgetDir: allocBudgetDir(),
   tokenBudgetWaitMs: 5_000,
   tokenBudgetPollMs: 10,
+  singleBoxGuardDir: join(allocBudgetDir(), "guard"), // isolate the cross-run box guard per test
   authJsonProvider: () => "{}",
   authProvider: provider,
   ...over,
@@ -190,7 +191,7 @@ describe("audit: worker threads boxAccountLabel as next-chunk affinity (pool.ts 
   test("chunk N+1's acquire is PREFERRED toward chunk N's leased account", async () => {
     const { fn } = mockSpawn()
     const mgr = new AuthLeaseManager(TWO, { now: () => FIXED_NOW })
-    const base = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x" }))
+    const base = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
     const preferredSeen: Array<string | undefined> = []
     const recording: PoolAuthProvider = {
       acquire: (req) => {
@@ -228,7 +229,7 @@ describe("audit: budget-timeout abort still returns the account slot (no auth-le
     try {
       const { fn } = mockSpawn()
       const mgr = new AuthLeaseManager(TWO, { now: () => FIXED_NOW })
-      const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x" }))
+      const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
       await expect(
         runPool(
           [{ runId: "c1", datasetPath: "/c1.jsonl" }],
@@ -256,7 +257,7 @@ describe("audit: multi-auth has NO global worker-level backoff lane (pool.ts ski
   test("a 429 on acct-a cools that account but never triggers a worker-level sleep", async () => {
     const { fn } = mockSpawn({ rateLimited: new Set(["c1"]) })
     const mgr = new AuthLeaseManager(TWO, { now: () => FIXED_NOW })
-    const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x" }))
+    const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
     const slept: number[] = []
     await runPool(
       [
@@ -291,7 +292,7 @@ describe("audit: multi-auth has NO global worker-level backoff lane (pool.ts ski
         now: () => clock,
       },
     )
-    const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x" }))
+    const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
     const { fn } = mockSpawn({ rateLimited: new Set(["c1"]) })
     const out = await runPool(
       [

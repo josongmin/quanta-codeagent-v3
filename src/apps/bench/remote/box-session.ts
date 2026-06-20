@@ -29,7 +29,7 @@ import { basename, join } from "node:path"
 import { errMessage } from "@/shared"
 import { loadVerdicts } from "../analyze/verdicts"
 import { benchHome } from "../corpus"
-import { CURRENT_BENCH_BASE_PRESET } from "../preset"
+import { CURRENT_BENCH_BASE_PRESET, presetRequiresLiveLspGrounding } from "../preset"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "./backend"
 
 /** Durable dir for fetched full-remote artifacts (predictions / report / closure
@@ -137,6 +137,29 @@ export const stripToAccessToken = (authJson: string): string => {
         "(re-login locally: `quanta /login`).",
     )
   }
+  // Same fail-fast for `expires_at`: the box-side token-store loader
+  // (parseTokenRecordObject in token-store.ts) HARD-REQUIRES it as a non-empty
+  // string — we ship REDACTED placeholders for refresh_token/id_token but there
+  // is NO placeholder for expires_at, so a source token missing it would ship,
+  // then throw "missing/invalid field: expires_at" on the box AFTER the full
+  // provision cycle (the same expensive silent waste the access_token guard
+  // above prevents). Catch it locally instead.
+  if (typeof parsed.expires_at !== "string" || parsed.expires_at === "") {
+    throw new Error(
+      "[full-remote] auth json has no usable expires_at — the box token loader requires it " +
+        "(re-login locally: `quanta /login`).",
+    )
+  }
+  // Whitelist of the non-secret fields the box ACTUALLY needs (verified jun-20
+  // against token-store.ts + the chatgpt-oauth adapter):
+  //   - access_token : the bearer the box runs patch-gen with (guarded above);
+  //   - account_id   : sent as the `chatgpt-account-id` request header — without
+  //                    it the box hits the wrong/default account;
+  //   - expires_at   : loader-required (guarded above), drives the pre-refresh
+  //                    skip so a short run never tries to refresh;
+  //   - last_refresh / plan_type : UX/telemetry only, harmless to keep.
+  // refresh_token / id_token are DELIBERATELY excluded (long-lived secrets) and
+  // re-added below as REDACTED placeholders only to satisfy the loader's shape.
   const safe: Record<string, unknown> = {}
   for (const k of ["access_token", "account_id", "expires_at", "last_refresh", "plan_type"]) {
     if (parsed[k] !== undefined) safe[k] = parsed[k]
@@ -237,6 +260,30 @@ export const GRADE_LOCK_RELEASE_ERROR = "GRADE_LOCK_RELEASE_FAILED"
  *  `$(...)`, backtick, or `|` would break out of the intended command (the
  *  token is piped over STDIN and is safe, but these env/flag values are not). */
 const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
+
+/** Charset a runId / artifact suffix is allowed to contain. The suffix is the
+ *  ONLY caller-supplied value that flows UNQUOTED into remote ssh commands —
+ *  the pool derives box paths from it ({@link ChunkPaths}: `~/runs/<runId>/…`)
+ *  and those paths are interpolated raw into `tail`/`cat`/`setsid bash -c …`. A
+ *  suffix with a shell metachar (` `, `;`, `$(…)`, backtick, `|`, `/`, `..`)
+ *  would break out of the intended command. The pool already documents the
+ *  "filesystem-safe (no spaces / slashes)" contract; this is the boundary that
+ *  ENFORCES it (defense-in-depth — a future caller can't smuggle an injection). */
+const SAFE_SUFFIX_RE = /^[A-Za-z0-9._-]+$/
+
+/** Assert a caller-supplied runId / artifact suffix cannot break out of the
+ *  remote command it is interpolated into. Rejects (never escapes) so a bad
+ *  suffix fails LOUDLY at the boundary instead of silently mangling box paths or
+ *  smuggling a command. */
+export const assertSafeArtifactSuffix = (suffix: string): void => {
+  if (!SAFE_SUFFIX_RE.test(suffix)) {
+    throw new Error(
+      `[full-remote] unsafe artifact suffix / runId ${JSON.stringify(suffix)} — must match ` +
+        `${SAFE_SUFFIX_RE} (no spaces, slashes, or shell metacharacters); it is interpolated ` +
+        "into remote ssh box paths.",
+    )
+  }
+}
 
 /** Keys set EXPLICITLY in the remote command — excluded from the generic forward
  *  to avoid double-assignment. */
@@ -403,11 +450,6 @@ export const pyrightLaunchProofVerdict = (probe: {
   return { ready: true, detail: out }
 }
 
-const THIN_STRICT_PRESET_PREFIX = "agentless-v3-thin-strict"
-
-const presetRequiresLiveLspGrounding = (preset: string): boolean =>
-  preset === THIN_STRICT_PRESET_PREFIX || preset.startsWith(`${THIN_STRICT_PRESET_PREFIX}-`)
-
 const pyrightGroundingProbeCommand =
   'export PATH="$HOME/.local/bin:$PATH"; if command -v pyright-langserver >/dev/null 2>&1; then pyright --version 2>&1 | tail -1; else echo PYRIGHT_MISSING; exit 7; fi'
 
@@ -416,7 +458,8 @@ const probePyrightGrounding = async (
 ): Promise<{ ready: boolean; detail: string }> =>
   pyrightLaunchProofVerdict(await ssh(pyrightGroundingProbeCommand))
 
-const pyrightProbeDetail = (detail: string): string => (detail === "" ? "(no probe output)" : detail)
+const pyrightProbeDetail = (detail: string): string =>
+  detail === "" ? "(no probe output)" : detail
 
 const inertGroundingWarning = (detail: string): string =>
   "[full-remote] ⚠️  WARNING: pyright-langserver is NOT launchable on the box — LSP grounding " +
@@ -569,12 +612,22 @@ export interface BoxRuntimeProbe {
   readonly lastLogLine?: string
 }
 
+export type BoxSnapshotState = "ok" | "missing" | "invalid" | "read-failed" | "not-ready"
+
 export interface BoxInspection {
   readonly lifecycle: "bootstrapping" | "idle" | "busy" | "unreachable"
   readonly bootstrapped: boolean
   readonly busy: boolean
+  readonly snapshotHealthy: boolean
+  readonly snapshotState: BoxSnapshotState
   readonly snapshot?: BoxStatusSnapshot
   readonly probe?: BoxRuntimeProbe
+}
+
+interface BoxSnapshotRead {
+  readonly snapshotHealthy: boolean
+  readonly snapshotState: Exclude<BoxSnapshotState, "not-ready">
+  readonly snapshot?: BoxStatusSnapshot
 }
 
 const normalizeStatusText = (s: string): string =>
@@ -716,15 +769,30 @@ const normalizeSnapshotPayload = (
   }
 }
 
+const BOX_SNAPSHOT_MISSING_MARKER = "__QUANTA_BOX_SNAPSHOT_MISSING__"
+
+const boxSnapshotReadCommand = `if test -f ${BOX_STATUS_PATH}; then cat ${BOX_STATUS_PATH}; else printf '%s\\n' '${BOX_SNAPSHOT_MISSING_MARKER}'; fi`
+
 const readBoxSnapshot = async (
   ssh: (cmd: string) => Promise<SpawnResult>,
-): Promise<BoxStatusSnapshot | undefined> => {
-  const raw = await ssh(`cat ${BOX_STATUS_PATH} 2>/dev/null`).catch(() => undefined)
-  if (raw === undefined || raw.code !== 0 || raw.stdout.trim() === "") return undefined
+): Promise<BoxSnapshotRead> => {
+  const raw = await ssh(boxSnapshotReadCommand).catch(() => undefined)
+  if (raw === undefined || raw.code !== 0) {
+    return { snapshotHealthy: false, snapshotState: "read-failed" }
+  }
+  const stdout = raw.stdout.trim()
+  if (stdout === BOX_SNAPSHOT_MISSING_MARKER) {
+    return { snapshotHealthy: false, snapshotState: "missing" }
+  }
+  if (stdout === "") {
+    return { snapshotHealthy: false, snapshotState: "invalid" }
+  }
   try {
-    return normalizeSnapshotPayload(JSON.parse(raw.stdout) as Partial<BoxStatusSnapshot>)
+    const snapshot = normalizeSnapshotPayload(JSON.parse(raw.stdout) as Partial<BoxStatusSnapshot>)
+    if (snapshot === undefined) return { snapshotHealthy: false, snapshotState: "invalid" }
+    return { snapshotHealthy: true, snapshotState: "ok", snapshot }
   } catch {
-    return undefined
+    return { snapshotHealthy: false, snapshotState: "invalid" }
   }
 }
 
@@ -1415,19 +1483,35 @@ export const inspectBox = async (
   const spawn = cfg.spawn ?? defaultSpawn
   const ssh = makeSsh(spawn, keyPath, `ubuntu@${box.ip}`)
   const bootstrapped = await isBootstrapped((c) => ssh(c)).catch(() => false)
-  if (!bootstrapped) return { lifecycle: "bootstrapping", bootstrapped: false, busy: false }
+  if (!bootstrapped) {
+    return {
+      lifecycle: "bootstrapping",
+      bootstrapped: false,
+      busy: false,
+      snapshotHealthy: false,
+      snapshotState: "not-ready",
+    }
+  }
   const busyProbe = await ssh(busyProbeCommand).catch(() => undefined)
   if (busyProbe === undefined || busyProbe.code !== 0) {
-    return { lifecycle: "unreachable", bootstrapped: true, busy: false }
+    return {
+      lifecycle: "unreachable",
+      bootstrapped: true,
+      busy: false,
+      snapshotHealthy: false,
+      snapshotState: "read-failed",
+    }
   }
   const busy = busyProbe.stdout.includes("BUSY")
-  const snapshot = await readBoxSnapshot((cmd) => ssh(cmd))
+  const snapshotRead = await readBoxSnapshot((cmd) => ssh(cmd))
   const probe = await readBoxRuntimeProbe((cmd) => ssh(cmd))
   return {
     lifecycle: busy ? "busy" : "idle",
     bootstrapped: true,
     busy,
-    ...(snapshot !== undefined ? { snapshot } : {}),
+    snapshotHealthy: snapshotRead.snapshotHealthy,
+    snapshotState: snapshotRead.snapshotState,
+    ...(snapshotRead.snapshot !== undefined ? { snapshot: snapshotRead.snapshot } : {}),
     ...(probe !== undefined ? { probe } : {}),
   }
 }
@@ -1481,9 +1565,7 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
   } else if (presetRequiresLiveLspGrounding(preset)) {
     const groundingVerdict = await probePyrightGrounding((c) => ssh(c))
     if (!groundingVerdict.ready) {
-      log(
-        `[pool] box ${iid} lost live LSP grounding for preset ${preset} — re-bootstrapping…`,
-      )
+      log(`[pool] box ${iid} lost live LSP grounding for preset ${preset} — re-bootstrapping…`)
       await bootstrapBox(session, cfg)
     } else {
       log(`[pool] warm box ${iid} LSP grounding ready — ${groundingVerdict.detail}`)
@@ -1562,7 +1644,20 @@ const runBenchDetachedPoll = async (args: {
   }
 }
 
-interface GradeChunkVerdicts {
+/* ── REMOTE VERDICT PARSING (cohesive, PURE seam) ───────────────────────────
+ * The one concern in this otherwise god-shaped file that is fully pure and
+ * self-contained: turn a fetched remote report.json STRING into the four
+ * disjoint verdict id-sets the chunk result + box snapshot are built from. It
+ * touches no ssh / no lifecycle / no IO, so it is exported and unit-tested
+ * directly ({@link ../../../../tests/unit/bugbash-fix-box-session.test.ts})
+ * instead of only through a full provision+grade round-trip.
+ *
+ * SEAM NOTE (jun-20 #26): these four symbols + their callers (assignVerdictCounts,
+ * the verdict-count branch in gradeChunkOnBox) are the natural cut line for a
+ * future `./verdict-parse.ts` sibling module — kept in-file here to stay within
+ * the behavior-preserving boundary (no import churn / no caller rewiring), but
+ * the export-seam already isolates the concern for independent testing. */
+export interface GradeChunkVerdicts {
   readonly resolved: string[]
   readonly unresolved: string[]
   readonly errored: string[]
@@ -1900,14 +1995,17 @@ const fetchChunkArtifacts = async (args: {
   }
 }
 
-const emptyVerdicts = (): GradeChunkVerdicts => ({
+export const emptyVerdicts = (): GradeChunkVerdicts => ({
   resolved: [],
   unresolved: [],
   errored: [],
   emptyPatch: [],
 })
 
-const parseVerdicts = (reportText: string): GradeChunkVerdicts => {
+/** Parse a fetched remote report.json STRING into the four verdict id-sets.
+ *  Tolerant: a missing/empty/invalid-JSON report yields {@link emptyVerdicts}
+ *  (the run is then surfaced as a box-loss / no-verdict, never a crash). */
+export const parseVerdicts = (reportText: string): GradeChunkVerdicts => {
   try {
     const v = loadVerdicts(JSON.parse(reportText))
     return {
@@ -1921,7 +2019,9 @@ const parseVerdicts = (reportText: string): GradeChunkVerdicts => {
   }
 }
 
-const verdictCount = (verdicts: GradeChunkVerdicts): number =>
+/** Total instances that earned ANY verdict — 0 ⇒ the chunk produced nothing
+ *  gradeable (drives the "no verdicts in report" diagnostics + box-loss path). */
+export const verdictCount = (verdicts: GradeChunkVerdicts): number =>
   verdicts.resolved.length +
   verdicts.unresolved.length +
   verdicts.errored.length +
@@ -1978,6 +2078,10 @@ export const gradeChunkOnBox = async (
   const ssh = session.ssh.bind(session)
   const paths = params.paths ?? DEFAULT_CHUNK_PATHS
   const { artifactSuffix } = params
+  // Boundary guard: artifactSuffix is the pool runId — the one caller value that
+  // reaches the box paths UNQUOTED. Reject a shell-metachar suffix before any
+  // remote command is built/run (shell-injection defense-in-depth).
+  assertSafeArtifactSuffix(artifactSuffix)
   const state = createGradeChunkState()
   const snapshots = createSnapshotController(
     session,

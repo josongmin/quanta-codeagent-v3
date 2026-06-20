@@ -27,6 +27,7 @@ const FULL_AUTH = JSON.stringify({
   refresh_token: "REFRESH-super-secret",
   id_token: "IDTOK-secret",
   account_id: "acct-1",
+  expires_at: "2026-06-24T00:00:00Z",
 })
 
 const TEMP_DIRS = new Set<string>()
@@ -1361,6 +1362,89 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn)),
     ).rejects.toThrow(/refusing to launch another box/i)
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
+  test("an idle warm-box hit in the launch window is ATTACHED directly instead of being re-probed into a fresh launch", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let idleProbeCount = 0
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("describe-instances")) {
+        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("pgrep")) {
+          idleProbeCount += 1
+          if (idleProbeCount === 1) return ok("IDLE") // preflight launch-window hit
+          if (idleProbeCount === 2)
+            return { code: 255, stdout: "", stderr: "ssh probe flake before attach" }
+          if (idleProbeCount === 3) return ok("IDLE") // worker launch-window hit
+          if (idleProbeCount === 4)
+            return { code: 255, stdout: "", stderr: "ssh reprobe flake after launch window" }
+          return ok("IDLE")
+        }
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn))
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.result.resolved).toContain("w__w-1")
+  })
+
+  test("the pool's top-level preset authority governs box grounding checks during provision", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-security-groups")) return ok("sg-abc")
+      if (a.includes("run-instances")) return ok("i-box0")
+      if (a.includes("describe-instances")) return ok("1.2.3.4")
+      if (a.includes("wait")) return ok("")
+      if (a.includes("terminate-instances")) return ok("")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("READY")) return ok("READY")
+        if (c.includes("command -v pyright-langserver")) {
+          return { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
+        }
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (c.includes("setsid bash -c")) return ok("LAUNCHED")
+        if (c.includes("run.exit") || c.includes("XQ-RUN-EXIT-XQ")) {
+          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        }
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c)) {
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        }
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool(
+      [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+      poolCfg(fn, {
+        reuseWarm: false,
+        preset: "agentless-v2",
+      }),
+    )
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.result.resolved).toContain("w__w-1")
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
   })
 
   test("waitForIdle parks behind a busy running box, then REUSES it once it goes idle", async () => {

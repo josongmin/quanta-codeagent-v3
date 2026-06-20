@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readdir, rm, stat, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { errMessage } from "@/shared"
 import {
   asPositiveInt,
@@ -92,6 +92,7 @@ interface ResolvedAcquirePatchGenBudgetLeaseOptions {
   readonly requestedUnits: number
   readonly minUnits: number
   readonly dir: string
+  readonly stateDir: string
   readonly limit: number
   readonly waitMs: number
   readonly pollMs: number
@@ -116,6 +117,7 @@ const DEFAULT_STALE_LOCK_MS = 60_000
 const LEASE_SUFFIX = ".lease.json"
 const LOCK_DIR = ".lock"
 const LOCK_META = "owner.json"
+const STATE_DIR_SUFFIX = ".lease-state"
 
 /** Budget waits are owner liveness, not background telemetry.
  *  `unref()` here let a waiter/lease-holder vanish between polls/heartbeats,
@@ -134,6 +136,9 @@ export const resolvePatchGenBudgetDir = (): string =>
   join(homedir(), ".quanta", "bench-token-budget")
 
 const leasePath = (dir: string, leaseId: string): string => join(dir, `${leaseId}${LEASE_SUFFIX}`)
+
+const budgetStateDir = (dir: string): string =>
+  join(dirname(dir), `${basename(dir)}${STATE_DIR_SUFFIX}`)
 
 const invalidLeaseRecordError = (path: string): Error =>
   new Error(`[budget] invalid lease record at ${path}; refusing to ignore accounting`)
@@ -204,6 +209,18 @@ const listLeaseRecords = async (
   return records.sort(
     (a, b) => a.acquiredAt.localeCompare(b.acquiredAt) || a.leaseId.localeCompare(b.leaseId),
   )
+}
+
+const listBudgetLeaseRecords = async (
+  dir: string,
+  stateDir: string,
+  nowMs: number,
+  staleLeaseMs: number,
+  prune: boolean,
+): Promise<PatchGenBudgetLeaseRecord[]> => {
+  const authoritative = await listLeaseRecords(stateDir, nowMs, staleLeaseMs, prune)
+  if (authoritative.length > 0) return authoritative
+  return listLeaseRecords(dir, nowMs, staleLeaseMs, prune)
 }
 
 const buildState = (
@@ -324,6 +341,7 @@ const resolveAcquirePatchGenBudgetLeaseOptions = (
   const requestedUnits = Math.max(1, Math.min(limit, Math.trunc(opts.requestedUnits) || 1))
   const minUnits = Math.max(1, Math.min(requestedUnits, Math.trunc(opts.minUnits ?? 1) || 1))
   const dir = opts.dir ?? resolvePatchGenBudgetDir()
+  const stateDir = budgetStateDir(dir)
   const now = opts.now ?? (() => Date.now())
   const sleep = opts.sleep ?? sleepReal
   const waitMs = resolveBudgetWaitMs(opts.waitMs)
@@ -334,6 +352,7 @@ const resolveAcquirePatchGenBudgetLeaseOptions = (
     requestedUnits,
     minUnits,
     dir,
+    stateDir,
     limit,
     waitMs,
     pollMs,
@@ -347,14 +366,18 @@ const resolveAcquirePatchGenBudgetLeaseOptions = (
 }
 
 const touchBudgetLease = async (
-  path: string,
+  authoritativePath: string,
+  mirrorPath: string,
   record: PatchGenBudgetLeaseRecord,
   now: () => number,
 ): Promise<void> => {
-  await atomicWriteJson(path, {
+  const heartbeatAt = new Date(now()).toISOString()
+  const nextRecord = {
     ...record,
-    heartbeatAt: new Date(now()).toISOString(),
-  })
+    heartbeatAt,
+  }
+  await atomicWriteJson(authoritativePath, nextRecord)
+  await atomicWriteJson(mirrorPath, nextRecord)
 }
 
 const ensureBudgetReleaseLock = async (
@@ -366,6 +389,7 @@ const ensureBudgetReleaseLock = async (
 const unlinkBudgetLeaseFile = async (
   path: string,
   leaseDeleted: boolean,
+  tolerateMissing: boolean,
 ): Promise<{ readonly leaseDeleted: boolean; readonly error: unknown }> => {
   if (leaseDeleted) {
     return {
@@ -380,6 +404,12 @@ const unlinkBudgetLeaseFile = async (
       error: undefined,
     }
   } catch (err) {
+    if (tolerateMissing && errorCodeOf(err) === "ENOENT") {
+      return {
+        leaseDeleted: true,
+        error: undefined,
+      }
+    }
     return {
       leaseDeleted: false,
       error: err,
@@ -408,34 +438,45 @@ const createPatchGenBudgetLeaseHandle = (
   opts: ResolvedAcquirePatchGenBudgetLeaseOptions,
   record: PatchGenBudgetLeaseRecord,
 ): PatchGenBudgetLease => {
-  const path = leasePath(opts.dir, record.leaseId)
+  const authoritativePath = leasePath(opts.stateDir, record.leaseId)
+  const mirrorPath = leasePath(opts.dir, record.leaseId)
   const heartbeat = createHeartbeatLoop(opts.heartbeatMs, () =>
-    touchBudgetLease(path, record, opts.now),
+    touchBudgetLease(authoritativePath, mirrorPath, record, opts.now),
   )
   let released = false
-  let leaseDeleted = false
+  let authoritativeDeleted = false
+  let mirrorDeleted = false
   let pendingUnlock: (() => Promise<void>) | undefined
   let releaseInFlight: Promise<void> | undefined
 
   const runRelease = async (): Promise<void> => {
     pendingUnlock = await ensureBudgetReleaseLock(pendingUnlock, opts)
     heartbeat.pause()
-    const unlinkResult = await unlinkBudgetLeaseFile(path, leaseDeleted)
-    leaseDeleted = unlinkResult.leaseDeleted
+    const authoritativeUnlink = await unlinkBudgetLeaseFile(
+      authoritativePath,
+      authoritativeDeleted,
+      false,
+    )
+    authoritativeDeleted = authoritativeUnlink.leaseDeleted
+    const mirrorUnlink = await unlinkBudgetLeaseFile(mirrorPath, mirrorDeleted, true)
+    mirrorDeleted = mirrorUnlink.leaseDeleted
     const unlockErr = await releaseBudgetMutationLock(pendingUnlock)
     if (unlockErr === undefined) {
       pendingUnlock = undefined
     }
     if (unlockErr !== undefined) {
-      if (!leaseDeleted) heartbeat.resume()
-      if (unlinkResult.error !== undefined) {
-        throw buildBudgetReleaseError(record.leaseId, unlinkResult.error, unlockErr)
+      if (!authoritativeDeleted) heartbeat.resume()
+      if (authoritativeUnlink.error !== undefined) {
+        throw buildBudgetReleaseError(record.leaseId, authoritativeUnlink.error, unlockErr)
       }
       throw unlockErr
     }
-    if (unlinkResult.error !== undefined) {
+    if (authoritativeUnlink.error !== undefined) {
       heartbeat.resume()
-      throw unlinkResult.error
+      throw authoritativeUnlink.error
+    }
+    if (mirrorUnlink.error !== undefined) {
+      throw mirrorUnlink.error
     }
     heartbeat.stop()
     released = true
@@ -467,7 +508,13 @@ const tryAcquirePatchGenBudgetLease = async (
 ): Promise<PatchGenBudgetAcquireAttempt> => {
   const releaseLock = await acquireMutationLock(lockOptsForBudgetLease(opts))
   try {
-    const records = await listLeaseRecords(opts.dir, opts.now(), opts.staleLeaseMs, true)
+    const records = await listBudgetLeaseRecords(
+      opts.dir,
+      opts.stateDir,
+      opts.now(),
+      opts.staleLeaseMs,
+      true,
+    )
     const state = buildState(opts.dir, opts.limit, records, opts.now())
     if (state.available < opts.minUnits) {
       return {
@@ -485,7 +532,15 @@ const tryAcquirePatchGenBudgetLease = async (
       acquiredAt,
       heartbeatAt: acquiredAt,
     }
-    await atomicWriteJson(leasePath(opts.dir, leaseId), record)
+    const authoritativePath = leasePath(opts.stateDir, leaseId)
+    const mirrorPath = leasePath(opts.dir, leaseId)
+    await atomicWriteJson(authoritativePath, record)
+    try {
+      await atomicWriteJson(mirrorPath, record)
+    } catch (err) {
+      await unlink(authoritativePath).catch(() => undefined)
+      throw err
+    }
     return {
       kind: "acquired",
       lease: createPatchGenBudgetLeaseHandle(opts, record),
@@ -533,6 +588,7 @@ export const readPatchGenBudgetState = async (
   opts: ReadPatchGenBudgetStateOptions = {},
 ): Promise<PatchGenBudgetState> => {
   const dir = opts.dir ?? resolvePatchGenBudgetDir()
+  const stateDir = budgetStateDir(dir)
   const limit = asPositiveInt(opts.limit ?? resolveGlobalPatchGenBudget(), DEFAULT_PATCH_GEN_BUDGET)
   const now = opts.now ?? (() => Date.now())
   const staleLeaseMs = Math.max(
@@ -553,7 +609,7 @@ export const readPatchGenBudgetState = async (
   })
   try {
     await mkdir(dir, { recursive: true })
-    const records = await listLeaseRecords(dir, now(), staleLeaseMs, true)
+    const records = await listBudgetLeaseRecords(dir, stateDir, now(), staleLeaseMs, true)
     return buildState(dir, limit, records, now())
   } finally {
     await releaseLock()

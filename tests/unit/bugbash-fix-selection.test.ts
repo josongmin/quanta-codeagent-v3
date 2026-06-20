@@ -124,8 +124,8 @@ describe("bugbash #7: earlyAccept memoizes scoreOne (no double pytest/repro)", (
       ports: mk(),
     })
     expect(memoized.winner?.id).toBe(reference.winner?.id)
-    expect(memoized.scored.map((s) => [s.candidate.id, s.verdict.admissible, s.verdict.score])).toEqual(
-      reference.scored.map((s) => [s.candidate.id, s.verdict.admissible, s.verdict.score]),
-    )
+    expect(
+      memoized.scored.map((s) => [s.candidate.id, s.verdict.admissible, s.verdict.score]),
+    ).toEqual(reference.scored.map((s) => [s.candidate.id, s.verdict.admissible, s.verdict.score]))
   })
 })

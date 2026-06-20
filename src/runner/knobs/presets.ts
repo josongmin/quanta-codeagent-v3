@@ -25,6 +25,11 @@
  * the `/knobs preset` listing; prefer the `-v1` names for new runs.
  */
 
+const THIN_STRICT_PRESET_PREFIX = "agentless-v3-thin-strict"
+
+export const presetRequiresLiveLspGrounding = (preset: string): boolean =>
+  preset === THIN_STRICT_PRESET_PREFIX || preset.startsWith(`${THIN_STRICT_PRESET_PREFIX}-`)
+
 export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   // Explicit no-op. Selecting `baseline` is byte-identical to no preset at all.
   baseline: {},

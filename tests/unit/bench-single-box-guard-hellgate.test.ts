@@ -141,6 +141,33 @@ describe("single-box guard hellgate", () => {
     expect(firstReleaseErr).toBeUndefined()
   })
 
+  test("external deletion cannot open a second launch lane BEFORE the next heartbeat lands", async () => {
+    const root = allocTempDir("bench-single-box-gap-")
+    const dir = join(root, "guard")
+    const first = await acquireSingleBoxGuard({
+      label: "first",
+      dir,
+      heartbeatMs: 60_000,
+    })
+    let firstReleaseErr: unknown
+    try {
+      rmSync(dir, { recursive: true, force: true })
+      await expect(
+        acquireSingleBoxGuard({
+          label: "second",
+          dir,
+        }),
+      ).rejects.toThrow(/single-box|owner/i)
+    } finally {
+      try {
+        await first.release()
+      } catch (err) {
+        firstReleaseErr = err
+      }
+    }
+    expect(firstReleaseErr).toBeUndefined()
+  })
+
   test("a failed release keeps the heartbeat alive so external deletion still cannot open a second launch lane", async () => {
     const root = allocTempDir("bench-single-box-release-heartbeat-")
     const dir = join(root, "guard")

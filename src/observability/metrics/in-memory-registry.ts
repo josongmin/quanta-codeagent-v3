@@ -6,7 +6,10 @@
  * Counters monotonically sum; gauges latest-write-wins; histograms retain
  * exact observations up to a bounded limit, then compact into fixed-size
  * percentile sketches so long-lived processes keep exact counts / sums without
- * unbounded memory growth.
+ * unbounded memory growth WITHIN a series. The NUMBER of series per metric name
+ * is separately bounded by `maxSeriesPerName` (default generous) so a future
+ * high-cardinality label cannot leak the `series` map for the process lifetime
+ * — drops are counted in `diagnostics().seriesDropped`.
  *
  * Contract (6):
  *   1. PURE STORE: in-memory only, 0 I/O. The optional `MetricSink` is the
@@ -18,9 +21,13 @@
  *      name). Labels do NOT affect the kind commitment — `foo{a=1}` and
  *      `foo{a=2}` share the same kind.
  *   3. SINK NO-THROW: `sink.send` is wrapped in try/catch; a throwing sink
- *      logs nothing (the registry is part of the observability plane — a
- *      misbehaving exporter must not crash the agent). The registry itself
- *      still records the sample.
+ *      never crashes the agent (the registry is part of the observability
+ *      plane — a misbehaving exporter must not take down the loop). The
+ *      registry itself still records the sample. The drop is COUNTED in
+ *      `diagnostics().exportDropped` so a broken collector is distinguishable
+ *      from a healthy one (an operator reads the count off the snapshot plane
+ *      without the registry coupling to a logger). `flush` failures mirror this
+ *      via `diagnostics().flushDropped`.
  *   4. NEGATIVE / NON-FINITE INPUT coerces to 0. A poisoned caller value
  *      cannot poison the registry (same posture as `BudgetMeter.tick`).
  *      Counter `increment("x", -5)` is a no-op; histogram observation of
@@ -68,6 +75,11 @@ export interface InMemoryRegistryOpts {
 const DEFAULT_BUCKETS: ReadonlyArray<number> = Object.freeze([1, 10, 100, 1000, 10_000])
 const DEFAULT_HISTOGRAM_MAX_OBSERVATIONS = 256
 const MIN_P2_SEED_SIZE = 5
+/** Default per-metric-name series cap. Generous enough that every wired
+ *  bounded-label emitter (`tool`,`ok`; `scope` breaches) stays well under it,
+ *  so the guard is inert on the default path; it only fires for a future
+ *  unbounded-cardinality label and caps the leak instead of growing forever. */
+const DEFAULT_MAX_SERIES_PER_NAME = 1024
 
 type MarkerTuple = [number, number, number, number, number]
 
@@ -118,6 +130,27 @@ const sanitizeGauge = (v: number): number => (Number.isFinite(v) ? v : 0)
 const sanitizeHistogramMaxObservations = (value: number | undefined): number => {
   if (value === undefined || !Number.isFinite(value)) return DEFAULT_HISTOGRAM_MAX_OBSERVATIONS
   return Math.max(MIN_P2_SEED_SIZE, Math.trunc(value))
+}
+
+const sanitizeMaxSeriesPerName = (value: number | undefined): number => {
+  if (value === undefined || !Number.isFinite(value)) return DEFAULT_MAX_SERIES_PER_NAME
+  return Math.max(1, Math.trunc(value))
+}
+
+/** Per-registry health counters. Export egress and the cardinality guard both
+ *  fail silently per the no-crash / bounded-memory contracts; these counters
+ *  make those otherwise-invisible events observable to an operator without
+ *  changing the snapshot plane. Read via the registry's `diagnostics()`. */
+export interface RegistryDiagnostics {
+  /** `sink.send` threw and the sample was dropped from EXPORT (the in-memory
+   *  accumulator was still updated). One per failed send. */
+  readonly exportDropped: number
+  /** `sink.flush` threw and the drain was dropped. One per failed flush. */
+  readonly flushDropped: number
+  /** A new label-series was rejected because its metric name was already at
+   *  `maxSeriesPerName`. One per rejected series (the existing series for that
+   *  name continue to update normally). */
+  readonly seriesDropped: number
 }
 
 interface CounterAcc {
@@ -331,15 +364,21 @@ const snapshotRow = (acc: SeriesAcc): MetricSnapshot => {
 }
 
 /** No-throw sink dispatch. The registry is part of the observability plane —
- *  a misbehaving exporter must not crash the agent. */
-const safeSend = (sink: MetricSink | undefined, sample: MetricSample): void => {
-  if (sink === undefined) return
+ *  a misbehaving exporter must not crash the agent. Returns `true` when the
+ *  sample was handed to the sink without throwing, `false` when the send was
+ *  swallowed (so the caller can count the drop for {@link RegistryDiagnostics}).
+ *  A no-sink registry returns `true` — there is nothing to fail. */
+const safeSend = (sink: MetricSink | undefined, sample: MetricSample): boolean => {
+  if (sink === undefined) return true
   try {
     sink.send(sample)
+    return true
   } catch {
     // Swallow — contract #3. A future "strict mode" could rethrow here, but
     // today silent swallow matches every other observability surface in the
-    // tree (jsonl recorder, structured logger).
+    // tree (jsonl recorder, structured logger). The drop is still COUNTED so a
+    // broken collector is distinguishable from a healthy one via diagnostics().
+    return false
   }
 }
 
@@ -370,11 +409,14 @@ export const __resetDefaultMetricSink = (): void => {
   processDefaultSink = null
 }
 
-export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): MetricsRegistry => {
+export const defaultMetricsRegistry = (
+  opts: InMemoryRegistryOpts = {},
+): MetricsRegistry & { diagnostics(): RegistryDiagnostics } => {
   // Explicit sink wins; otherwise fall back to the process-default (null ⇒ none).
   const sink = opts.sink ?? processDefaultSink ?? undefined
   const now = opts.now ?? Date.now
   const histogramMaxObservations = sanitizeHistogramMaxObservations(opts.histogramMaxObservations)
+  const maxSeriesPerName = sanitizeMaxSeriesPerName(opts.maxSeriesPerName)
   // Buckets are validated for shape (numeric, ascending recommended) but not
   // applied — see contract #5.
   const buckets = (opts.histogramBuckets ?? DEFAULT_BUCKETS).filter(
@@ -388,6 +430,29 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
   const kindByName = new Map<string, MetricKind>()
   /** seriesKey → accumulator. */
   const series = new Map<string, SeriesAcc>()
+  /** name → distinct-series count, for the per-name cardinality cap. */
+  const seriesCountByName = new Map<string, number>()
+
+  // Health counters — exported, flush, and cardinality drops are all silent by
+  // contract; these make them observable via diagnostics() without touching the
+  // snapshot plane.
+  let exportDropped = 0
+  let flushDropped = 0
+  let seriesDropped = 0
+
+  /** Admit a brand-new series under the per-name cap. Returns `true` when there
+   *  is headroom (caller proceeds to `series.set`), `false` when the name is at
+   *  its cap (caller drops the sample and we count it). Existing series for a
+   *  name always update — the guard only blocks NEW label combinations. */
+  const admitNewSeries = (name: string): boolean => {
+    const count = seriesCountByName.get(name) ?? 0
+    if (count >= maxSeriesPerName) {
+      seriesDropped += 1
+      return false
+    }
+    seriesCountByName.set(name, count + 1)
+    return true
+  }
 
   const commitKind = (name: string, kind: MetricKind): void => {
     const existing = kindByName.get(name)
@@ -403,7 +468,9 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
     }
   }
 
-  const emit = (sample: MetricSample): void => safeSend(sink, sample)
+  const emit = (sample: MetricSample): void => {
+    if (!safeSend(sink, sample)) exportDropped += 1
+  }
 
   return {
     increment(name, delta, labels) {
@@ -413,6 +480,7 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
       const key = seriesKey(name, lbl)
       const existing = series.get(key)
       if (existing === undefined) {
+        if (!admitNewSeries(name)) return
         series.set(key, { kind: "counter", name, labels: lbl, total: d })
       } else if (existing.kind === "counter") {
         existing.total += d
@@ -433,6 +501,7 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
       const key = seriesKey(name, lbl)
       const existing = series.get(key)
       if (existing === undefined) {
+        if (!admitNewSeries(name)) return
         series.set(key, {
           kind: "histogram",
           name,
@@ -471,6 +540,7 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
       const key = seriesKey(name, lbl)
       const existing = series.get(key)
       if (existing === undefined) {
+        if (!admitNewSeries(name)) return
         series.set(key, { kind: "gauge", name, labels: lbl, value: v })
       } else if (existing.kind === "gauge") {
         existing.value = v
@@ -485,6 +555,11 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
     },
 
     snapshot() {
+      // O(series) allocation is irreducible — the public contract returns one
+      // MetricSnapshot row per series, so a fresh array is the cheapest faithful
+      // materialization. `series.size` itself is now bounded by the per-name
+      // cardinality cap (`admitNewSeries`), so this stays bounded even under a
+      // high-cardinality emitter.
       const rows: MetricSnapshot[] = []
       for (const acc of series.values()) rows.push(snapshotRow(acc))
       return rows
@@ -493,6 +568,7 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
     reset() {
       series.clear()
       kindByName.clear()
+      seriesCountByName.clear()
     },
 
     async flush() {
@@ -501,8 +577,16 @@ export const defaultMetricsRegistry = (opts: InMemoryRegistryOpts = {}): Metrics
         await sink.flush()
       } catch {
         // Swallow — same posture as `safeSend`. A strict-mode flag could
-        // rethrow here in the future.
+        // rethrow here in the future. Still counted so a permanently-failing
+        // drain on shutdown is visible via diagnostics().flushDropped.
+        flushDropped += 1
       }
+    },
+
+    /** Snapshot of the silent-failure health counters (export / flush / series
+     *  cardinality drops). Frozen so callers can't mutate registry state. */
+    diagnostics(): RegistryDiagnostics {
+      return Object.freeze({ exportDropped, flushDropped, seriesDropped })
     },
   }
 }

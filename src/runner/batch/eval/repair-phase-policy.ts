@@ -20,6 +20,12 @@ export const benchShouldRunRepairPhase = (args: {
 }): boolean => {
   if (!args.eligible) return false
   if (!args.primaryRailEnabled) return true
+  // This is the ADMISSION gate (runs BEFORE the rail is re-run), so a 'green'
+  // outcome is not observable here — only "have a validated-red repro" (red) vs
+  // "don't" (unrun) are knowable from the static baseValidatedRed fact. The
+  // "rail already green ⇒ no repair" branch of decideRepairAdmission is therefore
+  // unreachable from THIS caller by design; the post-run green case is owned by
+  // decidePrimaryRailFinishGate / primaryRailRedAfterRepair, not here.
   const repairAdmission = decideRepairAdmission({
     primaryRailPresent: args.primaryRailStep !== undefined,
     primaryRailState:
@@ -34,5 +40,4 @@ export const primaryRailRedAfterRepair = (
   primaryRailStep: PrimaryRailStep | undefined,
   validated: boolean | undefined,
   primaryFalseGreen: boolean | undefined,
-): boolean =>
-  primaryRailStep !== undefined && (validated === false || primaryFalseGreen === true)
+): boolean => primaryRailStep !== undefined && (validated === false || primaryFalseGreen === true)

@@ -23,3 +23,12 @@ export {
   resolveAuthSource,
   selectAuthSourceLabel,
 } from "./load"
+export {
+  type BenchLoginDeps,
+  type BenchLoginOpts,
+  type BenchLoginResult,
+  benchAccountAuthFile,
+  DEFAULT_LOGIN_MAX_PARALLEL,
+  defaultBenchManifestPath,
+  runBenchLogin,
+} from "./login"

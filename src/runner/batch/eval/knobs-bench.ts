@@ -258,7 +258,21 @@ export interface BenchPosture {
   /** Resolved preset name (telemetry/debug; undefined when none selected). */
   readonly preset: string | undefined
   /** True when the SOTA super-preset (agentless-v1) is active — via
-   *  QUANTA_BENCH_SOTA=1 alias or QUANTA_BENCH_PRESET=agentless-v1. */
+   *  QUANTA_BENCH_SOTA=1 alias or QUANTA_BENCH_PRESET=agentless-v1.
+   *
+   *  DEAD FIELD (bugbash #14): zero production consumers. The behavioral
+   *  posture fields (lspNav / localizePhase / issueHintMode / …) are each
+   *  derived from their INDIVIDUAL resolved knob value via `readKnobValue`,
+   *  NOT from `sotaOn` — so nothing branches on this flag at runtime
+   *  (`grep -rn sotaOn src` outside this file finds nothing). The only
+   *  readers are the tautological assertions in
+   *  `tests/unit/bench-sota-preset-hellgate.test.ts` (SOTA-4/SOTA-5), which
+   *  is owned by a different bugbash group. Removal is therefore BLOCKED on
+   *  that group dropping those assertions; until then the field is retained
+   *  to keep the cross-group hellgate green (do NOT delete here in isolation).
+   *  NOTE it also mis-reports: agentless-v1 supersets (v1-nosteer / v2 / v3)
+   *  resolve `sotaOn=false` despite carrying the same posture, so any future
+   *  consumer must read the posture fields, not this label. */
   readonly sotaOn: boolean
   /** T-201: typed FaultEvidencePacket (bounded owner-context, no raw source). */
   readonly faultEvidence: boolean
@@ -367,6 +381,16 @@ export const benchPostureFromState = (
     liveOverrides.push("QUANTA_REPO_MAP")
   // Proof-driven bench closure (jun-17) — each true ONLY when its knob resolves
   // `true` (env / preset), else false. Default-OFF ⇒ byte-identical when unset.
+  //
+  // EFFECT SITE for the closure knobs (bugbash #16): the knob declaration files
+  // under `runner/knobs/knobs/<knob>.ts` are NOOP-apply (`(cfg) => cfg`); the
+  // REAL read is right here — `readKnobValue` projects each into a behavioral
+  // posture field that the driver consumes. So `knob-inventory.ts` points these
+  // readSites at this file. Listed verbatim so the readSite-truthfulness ratchet
+  // resolves them: QUANTA_BENCH_FAULT_EVIDENCE, QUANTA_BENCH_VERIFICATION_PLAN,
+  // QUANTA_BENCH_PRIMARY_RAIL, QUANTA_BENCH_PATCH_HYGIENE,
+  // QUANTA_BENCH_NO_PATCH_BREAKER, QUANTA_BENCH_REPAIR_ESCALATION,
+  // QUANTA_BENCH_SPEC_FIDELITY_STEER.
   const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
@@ -400,6 +424,9 @@ export const benchPostureFromState = (
     inLoopExec,
     liveOverrides,
     preset: state.preset,
+    // DEAD telemetry field (bugbash #14) — see the `sotaOn` doc above; no
+    // production consumer reads it. Retained only so the cross-group SOTA
+    // hellgate stays green; safe to delete once that test drops it.
     sotaOn: state.preset === "agentless-v1",
     faultEvidence,
     verificationPlan,

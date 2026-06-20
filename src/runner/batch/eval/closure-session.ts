@@ -2,17 +2,14 @@ import {
   assembleClosureBundle,
   buildPatchHygiene,
   buildPrimaryRailStep,
-  renderClosurePrompt,
   type ClosureBundle,
   type ClosureBundleInput,
   type PatchHygieneReport,
   type PrimaryRailStep,
+  renderClosurePrompt,
 } from "@/agent/closure"
 import { extractIssueHint } from "@/agent/issue-hint"
-import {
-  extractIssueDeclaredExpected,
-  type IssueDeclaredExpected,
-} from "@/agent/verification-plan"
+import { extractIssueDeclaredExpected, type IssueDeclaredExpected } from "@/agent/verification-plan"
 
 export interface ClosureSessionPosture {
   lspNav: boolean
@@ -86,7 +83,10 @@ export const buildClosureSession = (args: {
   // Pass the feeder's resolved sibling files so the round-0 hint can list every
   // co-change site (WS2 widen at round 0 — the round that always runs).
   const closureHint = args.posture.faultEvidence
-    ? renderClosurePrompt(bundle.owner, (args.ownerResolved ?? []).map((o) => o.file))
+    ? renderClosurePrompt(
+        bundle.owner,
+        (args.ownerResolved ?? []).map((o) => o.file),
+      )
     : undefined
   return {
     input,

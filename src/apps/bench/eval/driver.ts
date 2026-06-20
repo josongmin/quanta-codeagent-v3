@@ -43,6 +43,7 @@ import {
   resolveBenchKnobs,
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
+  StrictLspGroundingDegradedError,
   UsageTap,
   verifyAndFinalizeResult,
 } from "@/runner/batch/eval/driver"
@@ -940,6 +941,16 @@ const runInstanceOnce = async (
         reproTest,
         verdict: "degraded",
         error: `observation failed (strict): ${error.message}`,
+        ...(prepared !== undefined ? { prepared, sandbox } : {}),
+      })
+    }
+    if (error instanceof StrictLspGroundingDegradedError) {
+      return latePhaseFailureResultOf({
+        instance,
+        phase,
+        reproTest,
+        verdict: "degraded",
+        error: error.message,
         ...(prepared !== undefined ? { prepared, sandbox } : {}),
       })
     }

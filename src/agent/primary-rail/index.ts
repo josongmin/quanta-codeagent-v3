@@ -45,7 +45,8 @@ export interface RepairAdmissionDecision {
 export const decideRepairAdmission = (i: RepairAdmissionInput): RepairAdmissionDecision => {
   if (!i.primaryRailPresent) return { admit: false, reason: "no admissible primary rail" }
   if (i.primaryRailState === "green") return { admit: false, reason: "primary rail already green" }
-  if (i.primaryRailState === "unrun") return { admit: false, reason: "primary rail not yet proven red" }
+  if (i.primaryRailState === "unrun")
+    return { admit: false, reason: "primary rail not yet proven red" }
   return { admit: true, reason: "primary rail red: repair admissible" }
 }
 

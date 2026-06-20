@@ -1580,8 +1580,14 @@ export class LspClient implements LspPort {
   private watchExit(): void {
     const proc = this.proc
     if (!proc) return
-    const onExit = () => {
+    const onExit = async () => {
       this.exited = true
+      // Reject in-flight requests FIRST so callers never hang on a dead server.
+      this.failAllPending(new Error("LSP server exited"))
+      // Then let the stderr drain finish before logging, so the retained tail
+      // holds the server's LAST words (its crash/OOM reason) instead of racing
+      // the exit event and logging an empty tail.
+      await this.stderrPump?.catch(() => undefined)
       // Surface the death cause that was formerly invisible. `signalCode` is the
       // OOM tell: a SIGKILL the server did not ask for is almost always the
       // kernel OOM-killer (large repos blow past node's default heap). An exit we
@@ -1596,9 +1602,8 @@ export class LspClient implements LspPort {
       }
       if (this.stopped) logger.debug("lsp: server exited", detail)
       else logger.warn("lsp: server exited UNEXPECTEDLY", detail)
-      this.failAllPending(new Error("LSP server exited"))
     }
-    proc.exited.then(onExit).catch(onExit)
+    void proc.exited.then(onExit).catch(onExit)
   }
 
   private failAllPending(reason: Error): void {

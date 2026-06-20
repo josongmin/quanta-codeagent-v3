@@ -48,6 +48,29 @@ const softValue = (v: boolean | number | null): number | null => {
 }
 
 /**
+ * `voterQuorum` arrives as the consensus RATIO `votes / k` (resolved-kofn.ts),
+ * which is ≥ 1 whenever super-quorum (more reproducing voters resolved than the
+ * quorum threshold). The generic `softValue` clamp would saturate every value
+ * ≥ 1 to exactly 1, conflating an exact-quorum candidate (votes=k) with a
+ * super-quorum one (votes=3k) — the soft ranking could then never prefer the
+ * stronger-consensus patch, throwing away the discrimination the signal exists
+ * to provide.
+ *
+ * Instead squash the ratio with the strictly-increasing bounded map
+ * `r ↦ r / (r + 1)` (a parameter-free logistic-family normalizer, no arbitrary
+ * threshold): sub-quorum stays ordered (0.5 ↦ 0.333), exact-quorum is 0.5, and
+ * super-quorum is strictly higher (3 ↦ 0.75, 10 ↦ 0.909) yet always < 1. So
+ * `votes=k` and `votes=3k` produce DISTINCT, correctly-ordered signals.
+ *
+ * `null`/non-finite/negative defer to the generic coercion (drop / clamp to 0).
+ */
+const voterQuorumValue = (v: number | null): number | null => {
+  if (v === null) return null
+  if (!Number.isFinite(v) || v <= 0) return softValue(v)
+  return v / (v + 1)
+}
+
+/**
  * Score one candidate. Pure. The hard gates are AND-ed with the fail-open
  * rule; the soft score is a weighted sum over present signals.
  */
@@ -84,9 +107,13 @@ export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): C
   }
 
   // ── SOFT SCORE (weighted sum over present signals) ───────────────────────
+  // `voterQuorum` is the consensus RATIO (votes/k, super-quorum ⇒ >1) and uses a
+  // dedicated bounded squash so super-quorum stays distinguishable from exact
+  // quorum instead of saturating to 1; every other signal is a plain [0,1] coerce.
   let score = 0
   for (const key of Object.keys(SOFT_WEIGHTS) as (keyof SoftScoreSignals)[]) {
-    const value = softValue(soft[key])
+    const raw = soft[key]
+    const value = key === "voterQuorum" ? voterQuorumValue(raw as number | null) : softValue(raw)
     if (value !== null) {
       score += SOFT_WEIGHTS[key] * value
       reasons.push(`soft:${key}=${value}`)
