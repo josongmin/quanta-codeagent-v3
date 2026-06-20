@@ -73,7 +73,17 @@ export const applyCandidatePatch = async (
   patch: string,
   timeoutMs: number,
 ): Promise<boolean> => {
-  await Bun.write(join(sandbox, CAND_PATCH_FILE), patch)
+  // `Bun.write` can THROW (ENOSPC / read-only / bad path) — that is a
+  // re-materialization failure, NOT a probe failure, so it must surface as
+  // `false` (→ withCandidatePatch returns null, fail-open) rather than
+  // propagating out and crashing the caller (the regression port does not wrap
+  // withCandidatePatch in its own try/catch). The probe's OWN throw still
+  // propagates (intentional, tested contract).
+  try {
+    await Bun.write(join(sandbox, CAND_PATCH_FILE), patch)
+  } catch {
+    return false
+  }
   const r = await exec(`git apply --whitespace=nowarn ${CAND_PATCH_FILE}`, sandbox, timeoutMs)
   // Best-effort unlink; a failure here is harmless (the next reset's `clean -fdx`
   // sweeps the untracked file, and it is never part of a probe's collection).

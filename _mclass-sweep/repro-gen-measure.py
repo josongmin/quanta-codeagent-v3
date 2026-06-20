@@ -33,8 +33,10 @@ def era(mtime: float) -> str:
 
 
 def adv_on(report: dict) -> bool:
+    # The knob entry is {value, unit, display, source}; key the VALUE, not the
+    # dict's truthiness (a present-but-false knob would read True otherwise).
     k = report.get("knobs", {}).get("resolved", {}).get("adversarial-repro")
-    return bool(k)  # present+truthy ⇒ knob active
+    return bool(k.get("value")) if isinstance(k, dict) else bool(k)
 
 
 def main() -> None:

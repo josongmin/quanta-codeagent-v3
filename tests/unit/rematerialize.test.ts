@@ -332,4 +332,22 @@ describe("primitives", () => {
       "diff --git a/foo.txt b/foo.txt\n--- a/foo.txt\n+++ b/foo.txt\n@@ -9,1 +9,1 @@\n-x\n+y\n"
     expect(await applyCandidatePatch(repo, bad, 30_000)).toBe(false)
   })
+
+  // Self-review fix: `Bun.write` THROWS when the patch file cannot be created —
+  // that is a re-materialization failure (must be `false`, never propagate out
+  // and crash the regression port, which does not wrap withCandidatePatch in a
+  // try/catch). Force the throw with a FILE as the sandbox's parent (Bun.write
+  // mkdir-p's a missing dir, but `<file>/.quanta-cand.patch` is ENOTDIR).
+  test("applyCandidatePatch returns false (never throws) when the patch file can't be written", async () => {
+    const fileAsDir = join(repo, "keep.txt") // a real file → child path is ENOTDIR
+    let threw = false
+    let result: boolean | undefined
+    try {
+      result = await applyCandidatePatch(fileAsDir, "diff --git a/x b/x\n", 30_000)
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(false)
+    expect(result).toBe(false)
+  })
 })
