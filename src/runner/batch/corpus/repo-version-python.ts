@@ -375,12 +375,34 @@ const REPO_FALLBACK_PYTHON: Readonly<Record<string, string>> = {
   "sympy/sympy": "3.9",
 }
 
-/** CPython minor for an instance's repro/test env. Exact (repo,version) ground-truth
- *  first; per-repo high fallback; then a conservative 3.11 for an unknown repo. */
+/** Parse "3.11" → [3, 11] for numeric comparison (string compare is wrong:
+ *  "3.9" > "3.11" lexicographically). */
+const minorTuple = (v: string): readonly [number, number] => {
+  const [a, b] = v.split(".")
+  return [Number(a) || 0, Number(b) || 0]
+}
+
+/** The lowest CPython our repro/test runner can actually provide. uv's managed
+ *  interpreters (python-build-standalone) start at 3.8/3.9 — swebench's
+ *  ground-truth 3.5/3.6 for old django/sklearn/matplotlib are UNAVAILABLE
+ *  ("No interpreter found for Python 3.6"), and 3.9 ran those repos fine for a
+ *  year (the old static `PYTHON_FOR_REPO`). So we FLOOR at 3.9: keep swebench's
+ *  value when it is ≥3.9 (the fix — django 5.0 → 3.11), but never go below it.
+ *  RCA jun-20 audit: the un-floored map regressed old django from "3.9 runs" to
+ *  "3.6 no-interpreter". */
+const UV_FLOOR = "3.9"
+
+/** CPython minor for an instance's repro/test env. Exact (repo,version) swebench
+ *  ground-truth → per-repo high fallback → conservative 3.11 for an unknown repo,
+ *  then FLOORED at {@link UV_FLOOR} (uv cannot provide < 3.8, and 3.9 is the
+ *  proven-runnable floor for the old codebases swebench pins to 3.5/3.6). */
 export const pythonForRepoVersion = (repo: string, version: string | undefined): string => {
+  let py = REPO_FALLBACK_PYTHON[repo] ?? "3.11"
   if (version !== undefined) {
     const exact = REPO_VERSION_PYTHON[repo]?.[version]
-    if (exact !== undefined) return exact
+    if (exact !== undefined) py = exact
   }
-  return REPO_FALLBACK_PYTHON[repo] ?? "3.11"
+  const [pa, pb] = minorTuple(py)
+  const [fa, fb] = minorTuple(UV_FLOOR)
+  return pa < fa || (pa === fa && pb < fb) ? UV_FLOOR : py
 }

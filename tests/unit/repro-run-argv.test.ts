@@ -28,11 +28,6 @@ describe("reproRunArgv", () => {
     expect(pyOf(reproRunArgv("django/django", "5.0", "/s/x.py"))).toBe("3.11")
   })
 
-  // The OTHER direction: old scikit-learn needs 3.6 (3.10 fails the numpy build).
-  test("scikit-learn 0.20 ⇒ --python 3.6 (was wrongly 3.10)", () => {
-    expect(pyOf(reproRunArgv("scikit-learn/scikit-learn", "0.20", "/s/x.py"))).toBe("3.6")
-  })
-
   test("unknown version ⇒ per-repo high fallback (django ⇒ 3.11)", () => {
     expect(pyOf(reproRunArgv("django/django", "99.99", "/s/x.py"))).toBe("3.11")
   })
@@ -42,15 +37,24 @@ describe("reproRunArgv", () => {
   })
 })
 
-describe("pythonForRepoVersion — (repo,version) ground truth", () => {
-  test("exact map hits per version (django spans 3.5 → 3.11)", () => {
-    expect(pythonForRepoVersion("django/django", "1.11")).toBe("3.5")
-    expect(pythonForRepoVersion("django/django", "3.0")).toBe("3.6")
-    expect(pythonForRepoVersion("django/django", "4.2")).toBe("3.9")
+describe("pythonForRepoVersion — (repo,version) ground truth, FLOORED at 3.9", () => {
+  // The fix that mattered: high-end bumped to the version's real python.
+  test("django 5.0 ⇒ 3.11 (the bug: was forced to 3.9)", () => {
     expect(pythonForRepoVersion("django/django", "5.0")).toBe("3.11")
+    expect(pythonForRepoVersion("django/django", "4.2")).toBe("3.9")
   })
 
-  test("sympy is uniformly 3.9 (why the old static map masked the bug for it)", () => {
+  // RCA jun-20 AUDIT regression: swebench pins old django/sklearn to 3.5/3.6, but
+  // uv cannot provide < 3.8 ("No interpreter found for Python 3.6"), and 3.9 ran
+  // them fine for a year. The UV_FLOOR clamps the unavailable-low to 3.9.
+  test("old versions FLOOR at 3.9 (swebench 3.5/3.6 → uv can't provide)", () => {
+    expect(pythonForRepoVersion("django/django", "1.11")).toBe("3.9") // swebench 3.5 → floored
+    expect(pythonForRepoVersion("django/django", "3.0")).toBe("3.9") // swebench 3.6 → floored
+    expect(pythonForRepoVersion("django/django", "4.0")).toBe("3.9") // swebench 3.8 → floored
+    expect(pythonForRepoVersion("scikit-learn/scikit-learn", "0.20")).toBe("3.9") // swebench 3.6
+  })
+
+  test("sympy is uniformly 3.9 (already at the floor)", () => {
     expect(pythonForRepoVersion("sympy/sympy", "1.5")).toBe("3.9")
     expect(pythonForRepoVersion("sympy/sympy", "1.13")).toBe("3.9")
   })
