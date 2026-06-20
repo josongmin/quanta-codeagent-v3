@@ -1,0 +1,30 @@
+{
+  "stamp": "2026-06-20T11-29-40-130Z",
+  "dataset": "/Users/songmin/quanta-codeagent-v3/.tmp/ab-presets-v2-sample-20260620.jsonl",
+  "launched": [
+    {
+      "session": "ab-v2",
+      "preset": "agentless-v2",
+      "logPath": "/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v2.log",
+      "command": "set -o pipefail; cd '/Users/songmin/quanta-codeagent-v3'; export QUANTA_FULL_REMOTE_CONCURRENCY=1; export QUANTA_FULL_REMOTE_ONDEMAND=1; bun run src/apps/bench/cli.ts grade --mode full --allow-remote-secrets --allow-extra-boxes --dataset '/Users/songmin/quanta-codeagent-v3/.tmp/ab-presets-v2-sample-20260620.jsonl' --preset 'agentless-v2' --model gpt-5.4 2>&1 | tee '/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v2.log'"
+    },
+    {
+      "session": "ab-v3thin",
+      "preset": "agentless-v3-thin",
+      "logPath": "/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v3thin.log",
+      "command": "set -o pipefail; cd '/Users/songmin/quanta-codeagent-v3'; export QUANTA_FULL_REMOTE_CONCURRENCY=1; export QUANTA_FULL_REMOTE_ONDEMAND=1; bun run src/apps/bench/cli.ts grade --mode full --allow-remote-secrets --allow-extra-boxes --dataset '/Users/songmin/quanta-codeagent-v3/.tmp/ab-presets-v2-sample-20260620.jsonl' --preset 'agentless-v3-thin' --model gpt-5.4 2>&1 | tee '/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v3thin.log'"
+    },
+    {
+      "session": "ab-v3strict",
+      "preset": "agentless-v3-thin-strict",
+      "logPath": "/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v3strict.log",
+      "command": "set -o pipefail; cd '/Users/songmin/quanta-codeagent-v3'; export QUANTA_FULL_REMOTE_CONCURRENCY=1; export QUANTA_FULL_REMOTE_ONDEMAND=1; bun run src/apps/bench/cli.ts grade --mode full --allow-remote-secrets --allow-extra-boxes --dataset '/Users/songmin/quanta-codeagent-v3/.tmp/ab-presets-v2-sample-20260620.jsonl' --preset 'agentless-v3-thin-strict' --model gpt-5.4 2>&1 | tee '/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v3strict.log'"
+    },
+    {
+      "session": "ab-v3select",
+      "preset": "agentless-v3-thin-strict-select",
+      "logPath": "/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v3select.log",
+      "command": "set -o pipefail; cd '/Users/songmin/quanta-codeagent-v3'; export QUANTA_FULL_REMOTE_CONCURRENCY=1; export QUANTA_FULL_REMOTE_ONDEMAND=1; bun run src/apps/bench/cli.ts grade --mode full --allow-remote-secrets --allow-extra-boxes --dataset '/Users/songmin/quanta-codeagent-v3/.tmp/ab-presets-v2-sample-20260620.jsonl' --preset 'agentless-v3-thin-strict-select' --model gpt-5.4 2>&1 | tee '/Users/songmin/quanta-codeagent-v3/.tmp/ab-tmux/2026-06-20T11-29-40-130Z/ab-v3select.log'"
+    }
+  ]
+}

@@ -1039,7 +1039,7 @@ const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTele
   ...(base.reproducedCount !== undefined ? { reproducedCount: base.reproducedCount } : {}),
 })
 
-const installReproTestHint = async (
+export const installReproTestHint = async (
   instance: Instance,
   sandbox: string,
   llm: LLMPort,
@@ -1180,6 +1180,13 @@ const benchBoundTestRunner = (instance: Instance): Tool<BenchTestRunnerInput> | 
 const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
   instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}
 
+export const benchVerifyAuthorityCommandsOf = (
+  instance: Instance,
+): readonly string[] | undefined => {
+  const cmd = instance.testCmd.trim()
+  return cmd === "" ? undefined : [cmd]
+}
+
 const applyLiveOverrides = (envKeys: readonly string[]): void => {
   for (const envKey of envKeys) {
     setKnobOverride(envKey, "1")
@@ -1289,18 +1296,27 @@ const buildConfigGuards = (
   instance: Instance,
   opt: BenchPosture,
   signal: AbortSignal,
-): Partial<AgentConfig> => ({
-  ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
-  ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
-    ? { lspPrewarm: { enabled: true, warmSignal: signal } }
-    : {}),
-  ...(instance.swebench && opt.inLoopExec ? { verifyGuard: { mustPass: true, maxTrips: 2 } } : {}),
-  ...(instance.swebench &&
-  opt.inLoopExec &&
-  !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
-    ? { protectTestPaths: true }
-    : {}),
-})
+): Partial<AgentConfig> => {
+  const exactCommands = benchVerifyAuthorityCommandsOf(instance)
+  const verifyGuard =
+    instance.swebench && opt.inLoopExec
+      ? exactCommands !== undefined
+        ? { mustPass: true, maxTrips: 2, exactCommands }
+        : { mustPass: true, maxTrips: 2 }
+      : undefined
+  return {
+    ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
+    ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
+      ? { lspPrewarm: { enabled: true, warmSignal: signal } }
+      : {}),
+    ...(verifyGuard !== undefined ? { verifyGuard } : {}),
+    ...(instance.swebench &&
+    opt.inLoopExec &&
+    !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
+      ? { protectTestPaths: true }
+      : {}),
+  }
+}
 
 export const buildConfig = (
   instance: Instance,
@@ -1590,7 +1606,7 @@ const runAgentOnce = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
 ): Promise<RunOnceResult> => {
-  const tap = new BenchStreamTap(w.stream)
+  const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
   // Knob telemetry (2026-05-26): emit ONE `knobs_applied` event per
   // runAgent invocation. In the repair orchestrator each round calls this
   // helper, so each round produces its own trajectory line (the env doesn't
@@ -1645,7 +1661,7 @@ const runAgentPhase = async (
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const tap = new BenchStreamTap(w.stream)
+      const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
       // Knob telemetry: emit once per phase entry (matches the contract
       // documented on `emitKnobsApplied`). The single-pass path bypasses
       // `runAgentOnce`, so the emit lives here directly.
@@ -1987,6 +2003,61 @@ const resolveSelectionReproConsensus = async (
   }
 }
 
+const generateSelectionCandidate = async (args: {
+  readonly index: number
+  readonly seed: string | undefined
+  readonly instance: Instance
+  readonly deps: RunInstanceDeps
+  readonly sandbox: string
+  readonly signal: AbortSignal
+  readonly wiring: Wiring
+  readonly precomputedHint: string | undefined
+  readonly reproHint: string | undefined
+  readonly mergeHint: (seed: string | undefined) => string | undefined
+  readonly concurrency: number | undefined
+  readonly baseValidatedRed: boolean | null
+  readonly generationErrors: Map<number, string>
+  readonly addTurns: (turns: number) => void
+}): Promise<Candidate> => {
+  const isolated = args.concurrency !== undefined && args.concurrency > 1
+  const candidateSandbox = isolated
+    ? await forkSandbox(args.instance.id, args.sandbox)
+    : args.sandbox
+  try {
+    const phase = await runAgentPhase(
+      args.instance,
+      args.deps,
+      candidateSandbox,
+      args.signal,
+      args.wiring,
+      args.precomputedHint,
+      args.reproHint,
+      args.mergeHint(args.seed),
+    )
+    args.addTurns(phase.turns)
+    const generationError = selectionGenerationErrorOf({
+      stopReason: phase.stopReason,
+      ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
+    })
+    if (generationError !== undefined) {
+      args.generationErrors.set(args.index, generationError)
+      throw new Error(generationError)
+    }
+    return {
+      id: `cand-${args.index}`,
+      patch: phase.patch,
+      turns: phase.turns,
+      files: filesFromPatch(phase.patch),
+      baseValidatedRed: args.baseValidatedRed,
+      ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
+      ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
+      ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
+    }
+  } finally {
+    if (isolated) await cleanupSandbox(candidateSandbox)
+  }
+}
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -2049,43 +2120,25 @@ const runSelectionPhase = async (
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
     ports: {
-      generate: async (i, seed): Promise<Candidate> => {
-        const isolated = concurrency !== undefined && concurrency > 1
-        const candidateSandbox = isolated ? await forkSandbox(instance.id, sandbox) : sandbox
-        try {
-          const phase = await runAgentPhase(
-            instance,
-            deps,
-            candidateSandbox,
-            signal,
-            w,
-            precomputedHint,
-            reproHint,
-            mergeHint(seed),
-          )
-          totalTurns += phase.turns
-          const generationError = selectionGenerationErrorOf({
-            stopReason: phase.stopReason,
-            ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
-          })
-          if (generationError !== undefined) {
-            generationErrors.set(i, generationError)
-            throw new Error(generationError)
-          }
-          return {
-            id: `cand-${i}`,
-            patch: phase.patch,
-            turns: phase.turns,
-            files: filesFromPatch(phase.patch),
-            baseValidatedRed: selectionBaseValidatedRed,
-            ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
-            ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
-            ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
-          }
-        } finally {
-          if (isolated) await cleanupSandbox(candidateSandbox)
-        }
-      },
+      generate: (i, seed) =>
+        generateSelectionCandidate({
+          index: i,
+          seed,
+          instance,
+          deps,
+          sandbox,
+          signal,
+          wiring: w,
+          precomputedHint,
+          reproHint,
+          mergeHint,
+          concurrency,
+          baseValidatedRed: selectionBaseValidatedRed,
+          generationErrors,
+          addTurns: (turns) => {
+            totalTurns += turns
+          },
+        }),
       applyClean: (c) =>
         candidatePatchAppliesCleanly({
           sandbox,
@@ -2191,6 +2244,7 @@ const agentPhaseError = (phase: Phase): string | undefined => {
     return phase.agentError ?? "agent stopped with error before verification"
   }
   if (phase.stopReason === "refusal") return "agent stopped with refusal before verification"
+  if (phase.stopReason === "aborted") return "agent aborted before verification"
   if (phase.stopReason === "budget_exhausted") {
     return "agent exhausted token budget before verification"
   }
@@ -2266,22 +2320,22 @@ const noPatchResult = (args: {
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
   }
+  const noWinnerError =
+    args.phase.selectionTelemetry?.winnerId === null
+      ? (agentPhaseError(args.phase) ??
+        "verify-select produced no submittable candidate (all candidates were empty or did not apply)")
+      : undefined
   return {
     id: args.instance.id,
     passed: false,
     patch: args.phase.patch,
     turns: args.phase.turns,
-    ...(args.phase.selectionTelemetry?.winnerId === null
-      ? {
-          error:
-            "verify-select produced no submittable candidate (all candidates were empty or did not apply)",
-        }
-      : {}),
+    ...(noWinnerError !== undefined ? { error: noWinnerError } : {}),
     ...extra,
   }
 }
 
-const terminalAgentResult = (args: {
+export const terminalAgentResult = (args: {
   readonly instance: Instance
   readonly phase: Phase
   readonly reproTest: BenchReproTestTelemetry | undefined
@@ -2289,6 +2343,14 @@ const terminalAgentResult = (args: {
   readonly wiring: Wiring
   readonly startedAt: number
 }): InstanceResult | undefined => {
+  if (
+    args.phase.patch.trim() === "" &&
+    args.phase.selectionTelemetry?.winnerId === null &&
+    args.phase.stopReason !== "error" &&
+    args.phase.stopReason !== "refusal"
+  ) {
+    return noPatchResult(args)
+  }
   const generationError = agentPhaseError(args.phase)
   if (generationError !== undefined) {
     return generationFailureResult({ ...args, generationError })
@@ -2308,7 +2370,7 @@ interface HintReproContext {
   readonly reproSources: readonly string[]
 }
 
-interface PreparedAttemptContext extends HintReproContext {
+export interface PreparedAttemptContext extends HintReproContext {
   readonly ownerResolved: readonly OwnerSibling[] | undefined
   readonly closureSession: ClosureSessionState | undefined
   readonly verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined
@@ -2320,7 +2382,7 @@ interface PreparedAttemptContext extends HintReproContext {
   readonly runRepair: boolean
 }
 
-const envPrepFailedResult = (
+export const envPrepFailedResult = (
   instance: Instance,
   prep: { readonly code: number; readonly stderr: string },
 ): InstanceResult => ({
@@ -2379,7 +2441,9 @@ const resolveOwnerResolved = async (args: {
   readonly sandbox: string
   readonly signal: AbortSignal
 }): Promise<readonly OwnerSibling[] | undefined> => {
-  if (!(args.instance.swebench !== undefined && args.posture.faultEvidence && args.posture.lspNav)) {
+  if (
+    !(args.instance.swebench !== undefined && args.posture.faultEvidence && args.posture.lspNav)
+  ) {
     return undefined
   }
   return resolveOwnerSiblings()({
@@ -2431,7 +2495,8 @@ const resolveRepairState = (args: {
     args.instance.swebench !== undefined,
     args.posture.inLoopExec,
   )
-  const gateDecisionVerify = repairGateEligible && args.closureSession?.bundle.gate.action === "verify"
+  const gateDecisionVerify =
+    repairGateEligible && args.closureSession?.bundle.gate.action === "verify"
   const runRepair =
     effectiveRepair !== undefined &&
     benchShouldRunRepairPhase({
@@ -2444,7 +2509,7 @@ const resolveRepairState = (args: {
   return { effectiveRepair, repairGateEligible, gateDecisionVerify, runRepair }
 }
 
-const prepareAttemptContext = async (
+export const prepareAttemptContext = async (
   instance: Instance,
   sandbox: string,
   deps: RunInstanceDeps,
@@ -2539,7 +2604,7 @@ const runMainPhase = async (args: {
   )
 }
 
-const maybeValidateTerminalResult = async (args: {
+export const maybeValidateTerminalResult = async (args: {
   readonly instance: Instance
   readonly phase: Phase
   readonly reproTest: BenchReproTestTelemetry | undefined
@@ -2579,11 +2644,12 @@ const observeStrictBudgetBlock = (args: {
   if (usage) args.extra.usage = usage
   if (args.phase.firstEditFile !== undefined) args.extra.firstEditFile = args.phase.firstEditFile
   if (args.phase.editCount !== undefined) args.extra.editCount = args.phase.editCount
-  if (args.phase.turnsToFirstEdit !== undefined) args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
+  if (args.phase.turnsToFirstEdit !== undefined)
+    args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
   args.extra.patchBudget = args.strictBudget
 }
 
-const maybeStrictBudgetBlockedResult = (args: {
+export const maybeStrictBudgetBlockedResult = (args: {
   readonly instance: Instance
   readonly phase: Phase
   readonly reproTest: BenchReproTestTelemetry | undefined
@@ -2657,7 +2723,8 @@ const attachObservedSuccessBasics = (args: {
   if (usage) args.extra.usage = usage
   if (args.phase.firstEditFile !== undefined) args.extra.firstEditFile = args.phase.firstEditFile
   if (args.phase.editCount !== undefined) args.extra.editCount = args.phase.editCount
-  if (args.phase.turnsToFirstEdit !== undefined) args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
+  if (args.phase.turnsToFirstEdit !== undefined)
+    args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
 }
 
 const attachClosureMetrics = (args: {
@@ -2671,7 +2738,8 @@ const attachClosureMetrics = (args: {
     args.extra.primaryRailPresent = primaryRailStep !== undefined
     args.extra.requiredVerificationCovered =
       verificationPlan?.required.some((s) => s.successPredicate !== undefined) ?? false
-    if (verificationPlan !== undefined) args.extra.synthReproBaseRed = verificationPlan.baseValidatedRed
+    if (verificationPlan !== undefined)
+      args.extra.synthReproBaseRed = verificationPlan.baseValidatedRed
     if (primaryRailStep !== undefined && args.phase.primaryFalseGreen !== undefined) {
       args.extra.primaryFalseGreen = args.phase.primaryFalseGreen
     }
@@ -2693,7 +2761,8 @@ const attachSelectionAndClosureArtifacts = (args: {
   readonly phase: Phase
   readonly prepared: PreparedAttemptContext
 }): void => {
-  const { posture, verificationPlan, closureSession, primaryRailStep, ownerResolved } = args.prepared
+  const { posture, verificationPlan, closureSession, primaryRailStep, ownerResolved } =
+    args.prepared
   if (args.phase.reproOracleCalibration !== undefined) {
     args.extra.reproOracleCalibration = args.phase.reproOracleCalibration
   }
@@ -2702,7 +2771,9 @@ const attachSelectionAndClosureArtifacts = (args: {
   }
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
   const hygiene =
-    args.instance.swebench !== undefined ? buildPhasePatchHygiene(args.phase.patch, ownerHint) : undefined
+    args.instance.swebench !== undefined
+      ? buildPhasePatchHygiene(args.phase.patch, ownerHint)
+      : undefined
   if (posture.patchHygiene && hygiene !== undefined) {
     args.extra.patchHygiene = hygiene
     args.extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
@@ -2753,14 +2824,20 @@ const buildSuccessfulResultExtra = (args: {
 }): Partial<InstanceResult> => {
   const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
   if (args.graderInvalid) extra.verdict = "grader_invalid"
-  attachObservedSuccessBasics(args)
-  attachClosureMetrics(args)
-  attachSelectionAndClosureArtifacts(args)
+  attachObservedSuccessBasics({ ...args, extra })
+  attachClosureMetrics({ extra, phase: args.phase, prepared: args.prepared })
+  attachSelectionAndClosureArtifacts({
+    extra,
+    instance: args.instance,
+    sandbox: args.sandbox,
+    phase: args.phase,
+    prepared: args.prepared,
+  })
   if (args.verified.breakdown !== undefined) extra.gradeBreakdown = args.verified.breakdown
   return extra
 }
 
-const verifyAndFinalizeResult = async (args: {
+export const verifyAndFinalizeResult = async (args: {
   readonly instance: Instance
   readonly phase: Phase
   readonly deps: RunInstanceDeps
@@ -2818,342 +2895,54 @@ export const runInstanceOnce = async (
   try {
     w = buildWiring(instance, deps.observe)
     await copyRepo(instance, sandbox)
-
-    // T4 — per-instance env pre-preparation (fail-fast). When the instance
-    // carries a `setupCmd`, run it in the sandbox copy BEFORE the agent. If
-    // setup exits non-zero we fail-fast with a DISTINCT `env_prep_failed`
-    // verdict and DO NOT run the agent — handing a half-prepared env to the
-    // agent is exactly the failure this prevents.
     const prep = await runEnvPrep(instance, sandbox, deps.timeoutMs)
-    if (!prep.ok) {
-      return {
-        id: instance.id,
-        passed: false,
-        patch: "",
-        turns: 0,
-        verdict: "env_prep_failed",
-        error: `env prep (setupCmd) failed (code ${prep.code}): ${prep.stderr.slice(0, 500)}`,
-      }
-    }
-
-    // Pre-compute the issue-hint text. For mode `"off"` and `"regex"` this is
-    // a cheap synchronous shortcut (regex path computed eagerly so the hint
-    // string is byte-identical to the legacy in-buildConfig path). For mode
-    // `"agentless"` an async LLM localization call runs here exactly ONCE
-    // per instance, before any agent turn — repair rounds reuse the same
-    // hint (the issue text doesn't change across rounds; re-asking the LLM
-    // would just waste budget).
-    const posture = benchOptIns()
-    const hintMode = posture.issueHintMode
-    // T-201: capture the agentless localizer's ranked candidates from the SAME
-    // pass (observer seam — no second LLM call). Empty unless agentless mode runs.
-    let localizeCandidates: readonly string[] = []
-    const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, {
-      llm: deps.llm,
-      onCandidates: (files) => {
-        localizeCandidates = files
-      },
-    })
-
-    // `bench-in-loop-exec` OFF (mini-swe posture): skip the host-python repro-test
-    // hint — the agent isn't told to run tests, so a repro script is dead weight.
-    // ON ⇒ byte-identical to the pre-knob path.
-    const reproInstall = benchInstallsReproHint(posture.inLoopExec)
-      ? await installReproTestHint(instance, sandbox, deps.llm)
-      : { hint: undefined, telemetry: undefined }
-    const reproHint = reproInstall.hint
-    reproTest = reproInstall.telemetry
-    // #2 repro-vote: the reproducing set (empty unless repro reproduced), passed
-    // to the repair phase so the K-of-N RESOLVED gate can re-run it on the patch.
-    const reproSources = reproInstall.reproSources ?? []
-
-    // T-302 primary-rail SELECTION (default-OFF, knob `primary-rail`). When a repro
-    // was installed AND it reproduced the bug on the unpatched base
-    // (`reproducedCount > 0` ⇒ red-on-injection), that repro IS the primary rail:
-    // buildVerificationPlan only promotes it to primaryRail because baseValidatedRed
-    // is true (a non-red repro would be demoted to optional ⇒ null rail ⇒ no
-    // enforcement). The rail's cmd then GATES the repair loop (see runValidate):
-    // the agent's own verify can no longer clear a round — the false-green killer
-    // fires. Knob OFF or no red repro ⇒ undefined ⇒ byte-identical agent gate.
-    // gap-B: extract the issue-declared expected output (public, fail-closed) so
-    // the verification plan can carry a typed exact-output predicate AND the
-    // spec-fidelity steer can fire only when a concrete spec exists.
-    const stage1Files = localizeCandidates.map((file, i) => ({
-      file,
-      score: localizeCandidates.length - i,
-    }))
-    const ownerResolved =
-      instance.swebench !== undefined && posture.faultEvidence && posture.lspNav
-        ? await resolveOwnerSiblings()({
-            stage1Files,
-            issueText: instance.problemStatement,
-            cwd: sandbox,
-            readSource: (rel) => {
-              try {
-                return readFileSync(join(sandbox, rel), "utf8")
-              } catch {
-                return null
-              }
-            },
-            signal: abort.signal,
-          })
-        : undefined
-    const closureSession =
-      instance.swebench !== undefined
-        ? buildClosureSession({
-            problemStatement: instance.problemStatement,
-            stage1Files,
-            ...(ownerResolved !== undefined ? { ownerResolved } : {}),
-            ...(reproTest?.installed === true && reproTest.reproducedCount > 0
-              ? { reproScript: { cmd: `python "${reproTest.path}"`, baseValidatedRed: true } }
-              : {}),
-            posture: {
-              lspNav: posture.lspNav,
-              primaryRail: posture.primaryRail,
-              faultEvidence: posture.faultEvidence,
-            },
-          })
-        : undefined
-    const verificationPlan = closureSession?.bundle.plan
-    const primaryRailStep = closureSession?.primaryRailStep
-    const closureHint = closureSession?.closureHint
-
-    // Setup is done — arm the solve deadline now so the agent gets the full
-    // `timeoutMs` of think time (copy/setup/hint prep are outside the budget).
+    if (!prep.ok) return envPrepFailedResult(instance, prep)
+    const prepared = await prepareAttemptContext(instance, sandbox, deps, abort.signal)
+    reproTest = prepared.reproTest
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
-
-    // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
-    // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
-    // ABSENT ⇒ existing single-pass path verbatim (byte-identical: same calls,
-    // same buildConfig (no seedMsg), same single withGitSnapshot/runAgent,
-    // same single verify()). The official verify() ALWAYS runs exactly once,
-    // OUTSIDE the repair loop — its result is never fed back to the agent
-    // (no-leak invariant; also enforced by code locality).
-    //
-    // When `hintMode === "off"`, `precomputedHint` is `""`; `buildConfig`
-    // treats a defined-but-empty hint identically to undefined: no
-    // injection. So the off-mode path is byte-identical to the pre-feature
-    // pipeline (the legacy regex-on-`=1` path is also byte-identical
-    // because `prepareIssueHint("regex")` returns the same string the
-    // in-buildConfig regex would have produced).
-    // The closure bundle's EXECUTION half. The verify-first repair loop is
-    // enabled either by the operator's `--repair-rounds` CLI override
-    // (`deps.repair`, which can also carry custom validate/buildContext) OR —
-    // when the caller didn't set it — by the PRESET's `closure-repair` knob
-    // (`posture.repairRounds`). The CLI override wins. Both absent ⇒ undefined ⇒
-    // byte-identical single-pass path. This is what makes `agentless-v2`'s
-    // selected rail (primary_rail_present_rate ≈ 0.82) actually GATE instead of
-    // being an inert judgment (gate_enter_rate was n=0 because deps.repair was
-    // disconnected from the preset).
-    const effectiveRepair =
-      deps.repair ??
-      (posture.repairRounds !== undefined ? { maxRounds: posture.repairRounds } : undefined)
-    const repairGateEligible = benchRunsRepairPhase(
-      effectiveRepair !== undefined,
-      instance.swebench !== undefined,
-      posture.inLoopExec,
-    )
-    const gateDecisionVerify = repairGateEligible && closureSession?.bundle.gate.action === "verify"
-    const runRepair =
-      effectiveRepair !== undefined &&
-      benchShouldRunRepairPhase({
-        eligible: repairGateEligible,
-        primaryRailEnabled: posture.primaryRail,
-        gateAction: closureSession?.bundle.gate.action,
-        primaryRailStep,
-        verificationPlan,
-      })
-    phase =
-      posture.verifySelectN !== undefined && instance.swebench !== undefined
-        ? await runSelectionPhase(
-            instance,
-            deps,
-            sandbox,
-            abort.signal,
-            w,
-            posture.verifySelectN,
-            posture.verifySelectConcurrency,
-            posture.verifySelectEarlyAccept,
-            posture.verifySelectRegression,
-            posture.verifySelectRepro,
-            closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? localizeCandidates,
-            verificationPlan?.baseValidatedRed ?? false,
-            precomputedHint,
-            reproHint,
-            closureHint,
-            reproSources,
-          )
-        : runRepair && effectiveRepair !== undefined
-          ? await runRepairPhase(
-              instance,
-              deps,
-              sandbox,
-              abort.signal,
-              w,
-              effectiveRepair,
-              precomputedHint,
-              reproHint,
-              closureHint,
-              primaryRailStep,
-              ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
-              reproSources,
-            )
-          : await runAgentPhase(
-              instance,
-              deps,
-              sandbox,
-              abort.signal,
-              w,
-              precomputedHint,
-              reproHint,
-              closureHint,
-            )
-    const terminal = terminalAgentResult({ instance, phase, reproTest, deps, wiring: w, startedAt })
-    if (terminal !== undefined) {
-      if (shouldValidateGold(deps, false)) {
-        const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
-        if (!gold.ok) {
-          const { error: _prevError, ...rest } = terminal
-          return { ...rest, passed: false, verdict: "grader_invalid", error: gold.error }
-        }
-      }
-      return terminal
-    }
-
-    const strictBudget =
-      posture.patchBudgetStrict && instance.swebench !== undefined
-        ? buildPhasePatchBudget({
-            patch: phase.patch,
-            repo: instance.swebench.repo,
-            closureSession,
-            strict: true,
-          })
-        : undefined
-    if (strictBudget !== undefined && !strictBudget.withinBudget) {
-      const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
-      if (deps.observe && w.observer) {
-        extra.verdict = "ok"
-        extra.durationMs = Date.now() - startedAt
-        extra.patchPath = emitPatch(deps.observe, instance, w.observer, phase.patch)
-        const usage = w.usage?.total()
-        if (usage) extra.usage = usage
-        if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
-        if (phase.editCount !== undefined) extra.editCount = phase.editCount
-        if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
-        extra.patchBudget = strictBudget
-      }
-      return buildStrictPatchBudgetBlockedResult({
-        id: instance.id,
-        turns: phase.turns,
-        verdict: strictBudget,
-        extra,
-      })
-    }
-
-    // T01 (audit L5 H-5): thread the per-instance deadline signal into verify so
-    // the official harness grading + its transient-crash retry sleep stop when
-    // the instance deadline fires instead of cascading into the next instance.
-    let v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
-
-    const extra: Partial<InstanceResult> = reproResultExtra(reproTest)
-    if (shouldValidateGold(deps, v.passed)) {
-      const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
-      if (!gold.ok) {
-        const { error: _prevError, ...rest } = v
-        v = { ...rest, passed: false, error: gold.error }
-        extra.verdict = "grader_invalid"
-      }
-    }
-    if (deps.observe && w.observer) {
-      extra.verdict ??= "ok"
-      extra.durationMs = Date.now() - startedAt
-      extra.patchPath = emitPatch(deps.observe, instance, w.observer, phase.patch)
-      emitVerify(w.observer, v)
-      const usage = w.usage?.total()
-      if (usage) extra.usage = usage
-      // T-202/F6 closure signals — only attached when observing, so non-observe
-      // report.json stays byte-identical. Consumed offline by closure-diagnostics.
-      if (phase.firstEditFile !== undefined) extra.firstEditFile = phase.firstEditFile
-      if (phase.editCount !== undefined) extra.editCount = phase.editCount
-      if (phase.turnsToFirstEdit !== undefined) extra.turnsToFirstEdit = phase.turnsToFirstEdit
-      // T-3 closure measurement signals (observe-only; gated on the same closure
-      // knobs as the plan telemetry ⇒ byte-identical report when off). Drive the
-      // `primary_rail_present_rate` / `required_verification_coverage` metrics.
-      if (posture.verificationPlan || posture.primaryRail) {
-        extra.primaryRailPresent = primaryRailStep !== undefined
-        extra.requiredVerificationCovered =
-          verificationPlan?.required.some((s) => s.successPredicate !== undefined) ?? false
-        if (verificationPlan !== undefined)
-          extra.synthReproBaseRed = verificationPlan.baseValidatedRed
-        // primaryFalseGreen is only meaningful when a primary RAIL was actually
-        // gated (the predicate runs on the rail). Repair-without-rail (e.g.
-        // verification-plan knob on but no rail selected) ⇒ omit ⇒ measurement null
-        // (NOT false — emitting false would spuriously enlarge the rate denominator).
-        if (primaryRailStep !== undefined && phase.primaryFalseGreen !== undefined)
-          extra.primaryFalseGreen = phase.primaryFalseGreen
-        if (primaryRailStep !== undefined && phase.primaryFalseRed !== undefined)
-          extra.primaryFalseRed = phase.primaryFalseRed
-      }
-      if (repairGateEligible) {
-        extra.gateEntered = gateDecisionVerify
-        extra.gateBypassed = !gateDecisionVerify
-        if (phase.verifyRounds !== undefined) extra.verifyRounds = phase.verifyRounds
-      }
-      if (phase.reproOracleCalibration !== undefined) {
-        extra.reproOracleCalibration = phase.reproOracleCalibration
-      }
-      if (phase.selectionTelemetry !== undefined) {
-        extra.selectionTelemetry = phase.selectionTelemetry
-      }
-      // T-401 — patch hygiene report over the final diff. Knob-gated + swebench-only
-      // + observe-only ⇒ byte-identical report.json when the knob is OFF. The first
-      // mutating edit (if any) is the only owner signal we have here, so it seeds
-      // the owner set; absent ⇒ owner-outside telemetry suppressed (empty), never
-      // flagging every file. Telemetry-first: we EMIT the report, we do NOT deny.
-      const ownerHint = relFromSandbox(sandbox, phase.firstEditFile)
-      const hygiene =
-        instance.swebench !== undefined ? buildPhasePatchHygiene(phase.patch, ownerHint) : undefined
-      if (posture.patchHygiene && hygiene !== undefined) {
-        extra.patchHygiene = hygiene
-        extra.outOfScopeFiles = hygiene.filesOutsideOwner.length > 0
-      }
-      if ((posture.patchBudget || posture.patchBudgetStrict) && instance.swebench !== undefined) {
-        extra.patchBudget = buildPhasePatchBudget({
-          patch: phase.patch,
-          repo: instance.swebench.repo,
-          closureSession,
-          strict: posture.patchBudgetStrict,
-        })
-      }
-      // T-301 verification-plan telemetry (knob-gated, observe-only).
-      if (posture.verificationPlan && verificationPlan !== undefined) {
-        extra.verificationPlan = verificationPlan
-      }
-      // T-201/T-202 fault-evidence packet + owner-admission reuse the SAME
-      // ClosureBundle snapshot as the gate/plan. Empty evidence degrades honestly
-      // (`partial` / `admit:false`); no separate ad hoc recomputation.
-      if (posture.faultEvidence && closureSession !== undefined) {
-        extra.faultEvidence = closureSession.bundle.evidence
-        extra.ownerAdmission = closureSession.bundle.owner
-      }
-      // T-601 escalation uses the SAME evidence packet the prompt/gate saw.
-      if (posture.repairEscalation && closureSession !== undefined) {
-        extra.repairEscalation = decideEscalation({
-          candidates: closureSession.bundle.evidence.candidates.map((c) => ({
-            file: c.file,
-            score: c.score,
-            sources: c.sources,
-          })),
-          primaryRailRedAfterRepair: primaryRailRedAfterRepair(
-            primaryRailStep,
-            phase.validated,
-            phase.primaryFalseGreen,
-          ),
-          siblingFiles: ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : [],
-        })
-      }
-    }
-    return okResult(instance, phase, v, extra)
+    phase = await runMainPhase({
+      instance,
+      deps,
+      sandbox,
+      signal: abort.signal,
+      wiring: w,
+      prepared,
+    })
+    const terminal = await maybeValidateTerminalResult({
+      instance,
+      phase,
+      reproTest,
+      deps,
+      wiring: w,
+      startedAt,
+      signal: abort.signal,
+    })
+    if (terminal !== undefined) return terminal
+    const strictBudgetBlocked = maybeStrictBudgetBlockedResult({
+      instance,
+      phase,
+      reproTest,
+      deps,
+      wiring: w,
+      startedAt,
+      posture: prepared.posture,
+      closureSession: prepared.closureSession,
+    })
+    if (strictBudgetBlocked !== undefined) return strictBudgetBlocked
+    // Await inside the try so sandbox cleanup in `finally` cannot race the
+    // final verifier. A bare `return promise` here would run `finally`
+    // immediately and tear down the sandbox while verify is still spawning.
+    return await verifyAndFinalizeResult({
+      instance,
+      phase,
+      deps,
+      sandbox,
+      signal: abort.signal,
+      reproTest,
+      wiring: w,
+      startedAt,
+      prepared,
+    })
   } catch (e) {
     if (e instanceof ObservationError) {
       return {

@@ -8,6 +8,7 @@ const REPO = process.cwd()
 
 let dir = ""
 let fakeBin = ""
+let budgetDir = ""
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "bench-box-ls-"))
@@ -25,16 +26,34 @@ beforeAll(() => {
   const idleStartedAt = new Date(now - 3 * 60_000).toISOString()
   const idleUpdatedAt = new Date(now - 90_000).toISOString()
   const probeUpdatedAt = new Date(now - 75_000).toISOString()
+  const budgetHeldAt = new Date(now - 30_000).toISOString()
+  budgetDir = join(dir, "budget")
+  mkdirSync(budgetDir)
+  writeFileSync(
+    join(budgetDir, "lease-demo.lease.json"),
+    `${JSON.stringify({
+      leaseId: "lease-demo",
+      label: "pool:wave7",
+      requestedUnits: 16,
+      units: 12,
+      pid: process.pid,
+      acquiredAt: budgetHeldAt,
+      heartbeatAt: budgetHeldAt,
+    })}\n`,
+  )
   writeFileSync(
     aws,
     `#!/bin/sh
+if [ "\${QUANTA_BOX_TEST_EMPTY:-0}" = "1" ]; then
+  exit 0
+fi
 case " $* " in
   *" ec2 describe-instances "*)
     cat <<'EOF'
-i-busy running ${busyLaunchAt} 1.2.3.4 c7i.8xlarge
-i-idle running ${idleLaunchAt} 1.2.3.5 c7i.8xlarge
-i-probe running ${probeLaunchAt} 1.2.3.6 c7i.8xlarge
-i-pending pending ${pendingLaunchAt} None c7i.8xlarge
+i-busy running ${busyLaunchAt} 1.2.3.4 c7i.8xlarge pool agentless-v2 gpt-5.4 wave7-s0.jsonl wave7-s0
+i-idle running ${idleLaunchAt} 1.2.3.5 c7i.8xlarge full-remote agentless-v3-thin gpt-5.4 single.jsonl django__django-11179
+i-probe running ${probeLaunchAt} 1.2.3.6 c7i.8xlarge pool agentless-v2 gpt-5.4 wave7-s1.jsonl wave7-s1
+i-pending pending ${pendingLaunchAt} None c7i.8xlarge full-remote agentless-v3-thin gpt-5.4 pending.jsonl django__django-11179
 EOF
     exit 0
     ;;
@@ -153,14 +172,19 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-const runCli = async (...args: string[]): Promise<{ code: number; out: string }> => {
+const runCli = async (
+  args: string[],
+  env: Record<string, string> = {},
+): Promise<{ code: number; out: string }> => {
   const proc = Bun.spawn(["bun", "run", ENTRY, ...args], {
     cwd: REPO,
     stdout: "pipe",
     stderr: "pipe",
     env: {
       ...process.env,
+      ...env,
       PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+      QUANTA_BENCH_TOKEN_BUDGET_DIR: budgetDir,
     },
   })
   const out = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`
@@ -169,7 +193,7 @@ const runCli = async (...args: string[]): Promise<{ code: number; out: string }>
 
 describe("bench box ls status view", () => {
   test("plain output shows lifecycle plus current workload details", async () => {
-    const { code, out } = await runCli("box", "ls")
+    const { code, out } = await runCli(["box", "ls"])
     expect(code).toBe(0)
     expect(out).toContain("[box] running boxes:")
     expect(out).toContain("i-busy  running  c7i.8xlarge  1.2.3.4  status=busy/running")
@@ -180,10 +204,13 @@ describe("bench box ls status view", () => {
     expect(out).toContain("i-probe  running  c7i.8xlarge  1.2.3.6  status=busy")
     expect(out).toContain("source=probe  active=yes  report=no  runExit=no  preds=84")
     expect(out).toContain("i-pending  pending  c7i.8xlarge  None  status=bootstrapping")
+    expect(out).toContain(
+      "source=launch-tags  mode=full-remote  preset=agentless-v3-thin  model=gpt-5.4  dataset=pending.jsonl  selection=django__django-11179",
+    )
   })
 
   test("--json returns machine-readable lifecycle/snapshot state", async () => {
-    const { code, out } = await runCli("box", "ls", "--json")
+    const { code, out } = await runCli(["box", "ls", "--json"])
     expect(code).toBe(0)
     const rows = JSON.parse(out) as Array<{
       iid: string
@@ -250,22 +277,28 @@ describe("bench box ls status view", () => {
       expect.objectContaining({
         lifecycle: "bootstrapping",
         freshness: "unknown",
-        statusSource: "none",
+        statusSource: "launch-tags",
+        launchMode: "full-remote",
+        launchPreset: "agentless-v3-thin",
+        launchModel: "gpt-5.4",
+        launchDataset: "pending.jsonl",
+        launchSelection: "django__django-11179",
       }),
     )
   })
 
   test("box status prints operator summary with a recommended target", async () => {
-    const { code, out } = await runCli("box", "status")
+    const { code, out } = await runCli(["box", "status"])
     expect(code).toBe(0)
     expect(out).toContain("[box] summary:")
     expect(out).toContain("total=4  busy=2  idle=1  bootstrapping=1  unreachable=0  stale=0")
+    expect(out).toContain("patchGenBudget=12/16  available=4  holders=1  leases=pool:wave7:12")
     expect(out).toContain("target=i-busy  status=busy/running  source=snapshot")
     expect(out).toContain("follow=bun run src/apps/bench/cli.ts box logs i-busy --follow")
   })
 
   test("box status --json exposes summary plus full rows", async () => {
-    const { code, out } = await runCli("box", "status", "--json")
+    const { code, out } = await runCli(["box", "status", "--json"])
     expect(code).toBe(0)
     const parsed = JSON.parse(out) as {
       summary: {
@@ -275,6 +308,12 @@ describe("bench box ls status view", () => {
         bootstrapping: number
         stale: number
         target?: string
+      }
+      budget?: {
+        limit: number
+        inUse: number
+        available: number
+        leases: Array<{ label: string; units: number }>
       }
       boxes: Array<{ iid: string }>
     }
@@ -288,11 +327,48 @@ describe("bench box ls status view", () => {
         target: "i-busy",
       }),
     )
+    expect(parsed.budget).toEqual(
+      expect.objectContaining({
+        limit: 16,
+        inUse: 12,
+        available: 4,
+        leases: [expect.objectContaining({ label: "pool:wave7", units: 12 })],
+      }),
+    )
     expect(parsed.boxes.map((row) => row.iid)).toEqual(["i-pending", "i-idle", "i-busy", "i-probe"])
   })
 
+  test("box status still surfaces budget truth when no boxes are running", async () => {
+    const { code, out } = await runCli(["box", "status", "--json"], {
+      QUANTA_BOX_TEST_EMPTY: "1",
+    })
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out) as {
+      summary: { total: number; busy: number; idle: number; bootstrapping: number; stale: number }
+      budget?: { inUse: number; limit: number; available: number }
+      boxes: Array<unknown>
+    }
+    expect(parsed.summary).toEqual(
+      expect.objectContaining({
+        total: 0,
+        busy: 0,
+        idle: 0,
+        bootstrapping: 0,
+        stale: 0,
+      }),
+    )
+    expect(parsed.budget).toEqual(
+      expect.objectContaining({
+        inUse: 12,
+        limit: 16,
+        available: 4,
+      }),
+    )
+    expect(parsed.boxes).toEqual([])
+  })
+
   test("box logs tails the resolved log path for the selected box", async () => {
-    const { code, out } = await runCli("box", "logs", "busy")
+    const { code, out } = await runCli(["box", "logs", "busy"])
     expect(code).toBe(0)
     expect(out).toContain("[box] i-busy  ubuntu@1.2.3.4")
     expect(out).toContain("logPath=~/runs/wave7-s0/run.log")
@@ -302,7 +378,7 @@ describe("bench box ls status view", () => {
   })
 
   test("box logs --json exposes machine-readable tail metadata", async () => {
-    const { code, out } = await runCli("box", "logs", "busy", "--json", "--lines", "5")
+    const { code, out } = await runCli(["box", "logs", "busy", "--json", "--lines", "5"])
     expect(code).toBe(0)
     const parsed = JSON.parse(out) as {
       iid: string
@@ -321,7 +397,7 @@ describe("bench box ls status view", () => {
   })
 
   test("box logs falls back to probe metadata when snapshot is missing", async () => {
-    const { code, out } = await runCli("box", "logs", "i-probe")
+    const { code, out } = await runCli(["box", "logs", "i-probe"])
     expect(code).toBe(0)
     expect(out).toContain("[box] i-probe  ubuntu@1.2.3.6")
     expect(out).toContain("source=probe")
@@ -330,9 +406,11 @@ describe("bench box ls status view", () => {
   })
 
   test("box logs explains when a bootstrapping box has no run log yet", async () => {
-    const { code, out } = await runCli("box", "logs", "i-pending")
+    const { code, out } = await runCli(["box", "logs", "i-pending"])
     expect(code).toBe(0)
     expect(out).toContain("status=bootstrapping")
+    expect(out).toContain("source=launch-tags")
+    expect(out).toContain("dataset=pending.jsonl")
     expect(out).toContain("run log not created yet; box is still bootstrapping")
   })
 })

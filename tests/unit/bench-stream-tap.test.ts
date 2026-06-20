@@ -130,6 +130,14 @@ describe("BenchStreamTap", () => {
     expect(tap.lastVerifyCmd).toBe("python -m pytest tests/x.py")
   })
 
+  test("bench-authoritative verifier command is captured even when it is not regex-test-like", () => {
+    const cmd = `node -e "const {add}=require('./math.js'); if(add(2,3)!==5) process.exit(1)"`
+    const tap = new BenchStreamTap(new Capture(), undefined, [cmd])
+    tap.emit(toolCall("bash", { command: cmd }))
+    tap.emit(toolResult("bash", false, "", cmd))
+    expect(tap.lastVerifyCmd).toBe(cmd)
+  })
+
   test("bash without executedCommand evidence does not become validator cmd", () => {
     const tap = new BenchStreamTap(new Capture())
     tap.emit(toolCall("bash", { command: "python -m pytest tests/x.py" }))

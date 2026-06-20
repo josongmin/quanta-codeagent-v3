@@ -54,6 +54,9 @@ export interface FullRemoteConfig {
   readonly preset?: string
   /** Model id (predictions/report naming). Default `gpt-5.4`. */
   readonly model?: string
+  /** Launch-time metadata tag so operators can distinguish pool/full/warm boxes
+   *  even before the box-side runtime snapshot exists. */
+  readonly launchMode?: "full-remote" | "pool" | "warm-box"
   readonly dryRun?: boolean
   readonly spawn?: SpawnFn
   /** Progress sink — called at each stage so a long run isn't a silent black box. */
@@ -81,6 +84,12 @@ export interface FullRemoteConfig {
   /** Fail-closed single-box guard: if another quanta-bench box is already
    *  running, callers must opt in before launching a fresh one. */
   readonly allowExtraBoxes?: boolean
+  /** Override the cross-process patch-gen budget lease dir (test seam). */
+  readonly tokenBudgetDir?: string
+  /** Max wait for the global patch-gen budget lease. */
+  readonly tokenBudgetWaitMs?: number
+  /** Poll cadence while waiting for the global patch-gen budget lease. */
+  readonly tokenBudgetPollMs?: number
 }
 
 export const D = {
@@ -155,6 +164,58 @@ export const PHANTOM_DEPS = [
 ] as const
 
 const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
+
+const RUNNING_BOX_FILTERS = [
+  "Name=tag:Name,Values=quanta-bench-full",
+  "Name=instance-state-name,Values=running",
+] as const
+
+const LIVE_BOX_FILTERS = [
+  "Name=tag:Name,Values=quanta-bench-full",
+  "Name=instance-state-name,Values=running,pending",
+] as const
+
+const MAX_LAUNCH_TAG_VALUE = 120
+
+const launchTagValue = (raw: string | undefined): string | undefined => {
+  if (raw === undefined) return undefined
+  const sanitized = raw
+    .trim()
+    .replace(/[^A-Za-z0-9._:-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, MAX_LAUNCH_TAG_VALUE)
+  return sanitized === "" ? undefined : sanitized
+}
+
+const launchSelectionTag = (cfg: FullRemoteConfig): string | undefined => {
+  if ((cfg.launchMode ?? "full-remote") === "pool") return undefined
+  if (cfg.instanceIds !== undefined && cfg.instanceIds.length === 1) {
+    return launchTagValue(cfg.instanceIds[0])
+  }
+  if (cfg.instanceIds !== undefined && cfg.instanceIds.length > 1) {
+    return `count-${cfg.instanceIds.length}`
+  }
+  if (cfg.datasetPath === "") return undefined
+  const ids = readDatasetInstanceIds(cfg.datasetPath)
+  if (ids.length === 1) return launchTagValue(ids[0])
+  if (ids.length > 1) return `count-${ids.length}`
+  return undefined
+}
+
+const launchTagSpecifications = (cfg: FullRemoteConfig): string => {
+  const tags: Array<{ key: string; value: string }> = [{ key: "Name", value: "quanta-bench-full" }]
+  const mode = launchTagValue(cfg.launchMode ?? "full-remote")
+  const preset = launchTagValue(cfg.preset)
+  const model = launchTagValue(cfg.model)
+  const dataset = cfg.datasetPath !== "" ? launchTagValue(basename(cfg.datasetPath)) : undefined
+  const selection = launchSelectionTag(cfg)
+  if (mode !== undefined) tags.push({ key: "QuantaMode", value: mode })
+  if (preset !== undefined) tags.push({ key: "QuantaPreset", value: preset })
+  if (model !== undefined) tags.push({ key: "QuantaModel", value: model })
+  if (dataset !== undefined) tags.push({ key: "QuantaDataset", value: dataset })
+  if (selection !== undefined) tags.push({ key: "QuantaSelection", value: selection })
+  return `ResourceType=instance,Tags=[${tags.map((tag) => `{Key=${tag.key},Value=${tag.value}}`).join(",")}]`
+}
 
 /** Box-side directory used as an ATOMIC grade lock (`mkdir` is atomic + fails if
  *  it exists). Held for the duration of one chunk's grade so a reused box can
@@ -783,8 +844,13 @@ export const boxRunLogPath = (
 
 const SNAPSHOT_HEARTBEAT_MS = 15_000
 const SNAPSHOT_LINE_FLUSH_MS = 2_000
+/** Full-remote readiness/retry waits MUST keep the owner process alive.
+ *  `unref()` here let the CLI exit cleanly while still awaiting cloud-init,
+ *  orphaning fresh EC2 boxes before bootstrap finished. */
 const defaultSleep = (ms: number): Promise<void> =>
-  new Promise<void>((r) => void setTimeout(r, ms).unref?.())
+  new Promise<void>((r) => {
+    setTimeout(r, ms)
+  })
 
 const aws =
   (spawn: SpawnFn, region: string) =>
@@ -945,7 +1011,7 @@ const launchInstance = async (
     "--user-data",
     userData(ttl),
     "--tag-specifications",
-    "ResourceType=instance,Tags=[{Key=Name,Value=quanta-bench-full}]",
+    launchTagSpecifications(cfg),
     "--query",
     "Instances[0].InstanceId",
     "--output",
@@ -1202,8 +1268,7 @@ const listRunningBoxes = async (
     "ec2",
     "describe-instances",
     "--filters",
-    "Name=tag:Name,Values=quanta-bench-full",
-    "Name=instance-state-name,Values=running",
+    ...RUNNING_BOX_FILTERS,
     "--query",
     "Reservations[].Instances[].[InstanceId,PublicIpAddress]",
     "--output",
@@ -1221,10 +1286,30 @@ const listRunningBoxes = async (
 }
 
 /** Running quanta-bench box count, regardless of idle/busy. Used by the single-
- *  box fail-closed guard: if ANY tagged box is already alive, callers must opt in
- *  before launching another one. */
-export const countRunningBoxes = async (cfg: FullRemoteConfig): Promise<number> =>
-  (await listRunningBoxes(cfg)).length
+ *  box fail-closed guard: if ANY tagged box is already alive OR launching,
+ *  callers must opt in before launching another one. */
+export const countLiveBoxes = async (cfg: FullRemoteConfig): Promise<number> => {
+  const spawn = cfg.spawn ?? defaultSpawn
+  const region = cfg.region ?? D.region
+  const awsFn = aws(spawn, region)
+  const desc = await awsFn([
+    "ec2",
+    "describe-instances",
+    "--filters",
+    ...LIVE_BOX_FILTERS,
+    "--query",
+    "Reservations[].Instances[].InstanceId",
+    "--output",
+    "text",
+  ])
+  if (desc.code !== 0) {
+    throw new Error(`[full-remote] describe live boxes failed: ${desc.stderr || desc.stdout}`)
+  }
+  return desc.stdout
+    .trim()
+    .split(/\s+/)
+    .filter((iid) => iid.startsWith("i-")).length
+}
 
 const busyProbeCommand =
   "if pgrep -f 'cli.ts run' >/dev/null 2>&1 || pgrep -f run_evaluation >/dev/null 2>&1; then echo BUSY; " +

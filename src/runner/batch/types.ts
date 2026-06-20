@@ -335,7 +335,11 @@ export type BenchAttemptOutcome =
   | { kind: "timeout" }
   | {
       kind: "real-fail"
-      subkind: "completed_unresolved" | "verify_loop_stuck" | "max_turns_exhausted"
+      subkind:
+        | "completed_unresolved"
+        | "verify_loop_stuck"
+        | "max_turns_exhausted"
+        | "budget_exhausted"
     }
   | { kind: "infra-fail"; reason: string }
 

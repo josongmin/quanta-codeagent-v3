@@ -83,7 +83,7 @@ knobs:
     purpose: "Max candidates generated concurrently; unset ⇒ sequential. >1 needs isolated generate. Throttle: instance-conc × this."
   - name: verify-select-early-accept
     where: QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT
-    purpose: "Progressive cost guard: stop after the first owner-scoped candidate with hard positive regression/resolved signal; soft-only repro quorum remains ranking credit."
+    purpose: "Progressive cost guard: stop after the first clean owner-scoped candidate with explicit hard-positive regression/resolved authority; fail-open nulls and soft-only repro quorum remain keep-search signals."
   - name: verify-select-regression
     where: QUANTA_BENCH_VERIFY_SELECT_REGRESSION
     purpose: "Regression source for verify-select: unset/gold keeps eval-only PASS_TO_PASS; discovered runs no-oracle impacted native repo tests; off ablates."

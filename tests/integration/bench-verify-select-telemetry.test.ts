@@ -39,15 +39,64 @@ class ReadLoopLLM implements LLMPort {
   }
 }
 
+class SlowBashLLM implements LLMPort {
+  async *stream(): AsyncIterable<StreamEvent> {
+    yield { type: "tool_use_start", id: "b1", name: "bash" }
+    yield {
+      type: "tool_use_end",
+      id: "b1",
+      input: { command: "sleep 5" },
+    }
+    yield { type: "message_stop", stop_reason: "tool_use" }
+  }
+}
+
+class SequentialEditLLM implements LLMPort {
+  private calls = 0
+  private readonly targets = [
+    { oldString: "return a - b", newString: "return a + b + 0" },
+    { oldString: "return a - b", newString: "return a + b" },
+  ] as const
+
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    const text = input.messages
+      .flatMap((m) => m.content)
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join(" ")
+    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    if (this.calls % 2 === 1) {
+      const target =
+        this.targets[Math.floor((this.calls - 1) / 2)] ?? this.targets[this.targets.length - 1]
+      yield { type: "tool_use_start", id: `edit-${this.calls}`, name: "edit" }
+      yield {
+        type: "tool_use_end",
+        id: `edit-${this.calls}`,
+        input: {
+          path: join(sandbox, "math.js"),
+          old_string: target.oldString,
+          new_string: target.newString,
+        },
+      }
+      yield { type: "message_stop", stop_reason: "tool_use" }
+      return
+    }
+    yield { type: "text_delta", delta: "done" }
+    yield { type: "message_stop", stop_reason: "end_turn" }
+  }
+}
+
 const DEPS = { maxTurns: 2, timeoutMs: 20_000 }
 const verifySelectEnv = scopedEnv(
   [
     "QUANTA_BENCH_VERIFY_SELECT",
+    "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
     "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
     "QUANTA_BENCH_VERIFY_SELECT_REPRO",
   ],
   {
     QUANTA_BENCH_VERIFY_SELECT: "2",
+    QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT: undefined,
     QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
     QUANTA_BENCH_VERIFY_SELECT_REPRO: "positive",
   },
@@ -95,6 +144,7 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
 
       expect(result.passed).toBe(false)
       expect(result.patch).toBe("")
+      expect(result.error).toContain("verify-select produced no submittable candidate")
       expect(result.selectionTelemetry?.attempted).toBe(2)
       expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
       expect(result.selectionTelemetry?.generationFailures).toBe(0)
@@ -196,6 +246,73 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
         kind: "real-fail",
         subkind: "max_turns_exhausted",
       })
+    }),
+  )
+
+  test.serial(
+    "verify-select no-winner preserves aborted authority from the terminal candidate",
+    verifySelectEnv.run(async () => {
+      const corpusRoot = join(dir, "corpus")
+      await writeSyntheticCorpus(corpusRoot)
+      const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+      const swebenchLike: Instance = {
+        ...base,
+        swebench: {
+          instanceId: "demo__demo-4",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
+
+      const result = await runInstance(swebenchLike, {
+        llm: new SlowBashLLM(),
+        maxTurns: 2,
+        timeoutMs: 150,
+      })
+
+      expect(result.passed).toBe(false)
+      expect(result.patch).toBe("")
+      expect(result.error).toContain("aborted")
+      expect(result.selectionTelemetry?.winnerId).toBeNull()
+      expect(classifyOutcome(result)).toEqual({
+        kind: "timeout",
+      })
+    }),
+  )
+
+  test.serial(
+    "early-accept stays off without a hard positive signal, so verify-select still spends the full candidate budget",
+    verifySelectEnv.run(async () => {
+      verifySelectEnv.set({
+        QUANTA_BENCH_VERIFY_SELECT: "2",
+        QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT: "1",
+        QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
+        QUANTA_BENCH_VERIFY_SELECT_REPRO: "off",
+      })
+
+      const corpusRoot = join(dir, "corpus")
+      await writeSyntheticCorpus(corpusRoot)
+      const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+      const swebenchLike: Instance = {
+        ...base,
+        swebench: {
+          instanceId: "demo__demo-4",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
+
+      const result = await runInstance(swebenchLike, {
+        ...DEPS,
+        llm: new SequentialEditLLM(),
+      })
+
+      expect(result.selectionTelemetry?.attempted).toBe(2)
+      expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
+      expect(result.selectionTelemetry?.generationFailures).toBe(0)
+      expect(result.selectionTelemetry?.generated).toBe(2)
+      expect(result.selectionTelemetry?.earlyAccepted).toBe(false)
+      expect(result.selectionTelemetry?.candidates).toHaveLength(2)
     }),
   )
 })

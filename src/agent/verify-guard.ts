@@ -13,11 +13,18 @@
  * machine. The signal symbols are re-exported below for back-compat.
  */
 
-import { isTestLikeCommand, isVerifyOutputFailing } from "./verify-signal"
-
-export {
+import {
   isTestLikeCommand,
   isVerifyOutputFailing,
+  isVerifySignalCommand,
+  matchesExactVerifyCommand,
+} from "./verify-signal"
+
+export {
+  isVerifySignalCommand,
+  isTestLikeCommand,
+  isVerifyOutputFailing,
+  matchesExactVerifyCommand,
   matchVerifyCommand,
   OUTCOME_FAILURE_MATCHERS,
   type OutcomeFailureMatcher,
@@ -68,10 +75,17 @@ type GuardHistoryEntry = {
  * or a `bash` call whose command string looks like an actual test/repro run
  * (see {@link isTestLikeCommand} — the soundness contract lives there).
  */
-const isVerify = (entry: GuardHistoryEntry): boolean => {
+const isVerify = (
+  entry: GuardHistoryEntry,
+  exactCommands: readonly string[] | undefined,
+): boolean => {
   if (entry.name === "test_runner") return true
   if (entry.name === "bash") {
-    return typeof entry.arg === "string" && entry.arg.length > 0 && isTestLikeCommand(entry.arg)
+    return (
+      typeof entry.arg === "string" &&
+      entry.arg.length > 0 &&
+      isVerifySignalCommand(entry.arg, exactCommands)
+    )
   }
   return false
 }
@@ -107,6 +121,7 @@ const DEFAULT_MAX_TRIPS = 1
 export interface VerifyGuardConfig {
   maxTrips?: number
   mustPass?: boolean
+  exactCommands?: readonly string[]
 }
 
 /** Index of the LAST mutating tool in history, or `-1` if none. Pure scan. */
@@ -122,10 +137,11 @@ const findLastMutating = (history: readonly GuardHistoryEntry[]): number => {
 const findLastVerifyAfter = (
   history: readonly GuardHistoryEntry[],
   from: number,
+  exactCommands: readonly string[] | undefined,
 ): GuardHistoryEntry | undefined => {
   for (let j = history.length - 1; j > from; j--) {
     const entry = history[j]
-    if (entry !== undefined && isVerify(entry)) return entry
+    if (entry !== undefined && isVerify(entry, exactCommands)) return entry
   }
   return undefined
 }
@@ -178,7 +194,7 @@ export const decideVerifyGuard = (args: {
   const lastMut = findLastMutating(history)
   if (lastMut === -1) return { block: false }
 
-  const lastVerify = findLastVerifyAfter(history, lastMut)
+  const lastVerify = findLastVerifyAfter(history, lastMut, cfg.exactCommands)
   const cap = cfg.maxTrips ?? DEFAULT_MAX_TRIPS
 
   // Presence branch: no verify after the latest edit.

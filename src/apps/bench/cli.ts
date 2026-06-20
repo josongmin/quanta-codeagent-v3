@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { AuthLeaseManager, type AuthSource, describeAuthSource, resolveAuthSource } from "./auth-pool"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
@@ -38,7 +39,20 @@ import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
 import { buildForwardedBenchEnv, createFullRemoteBackend, runWithRelaunch } from "./remote/full"
 import { type PoolChunk, runPool } from "./remote/pool"
+import { createLeasePoolAuthProvider, type PoolAuthProvider } from "./remote/pool-auth"
 import { createSshBackend } from "./remote/ssh"
+import {
+  defaultMicrochunkDir,
+  type Microchunk,
+  planMicrochunks,
+  writeMicrochunks,
+} from "./slicing/microchunk"
+import {
+  clampPatchGenConcurrency,
+  type PatchGenBudgetState,
+  readPatchGenBudgetState,
+  resolveGlobalPatchGenBudget,
+} from "./remote/token-budget"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
 // logger.info writes nowhere).
@@ -106,6 +120,16 @@ const allowExtraBoxes = (): boolean =>
 const waitForIdleBox = (): boolean =>
   hasFlag("--wait-for-idle") || gateOn(process.env, "QUANTA_BENCH_WAIT_FOR_IDLE")
 
+const resolveCliAuthSource = (): AuthSource => {
+  const authPoolArg = argValue("--auth-pool")
+  const authFileArg = argValue("--auth-file")
+  return resolveAuthSource({
+    env: process.env,
+    ...(authPoolArg !== undefined ? { authPoolArg } : {}),
+    ...(authFileArg !== undefined ? { authFileArg } : {}),
+  })
+}
+
 const positiveMinutesFlagMs = (flag: string): number | undefined => {
   const raw = argValue(flag)
   if (raw === undefined || raw.trim() === "") return undefined
@@ -144,6 +168,11 @@ const VALUE_FLAGS = new Set([
   "--mode",
   "--model",
   "--lines",
+  "--auth-pool",
+  "--auth-file",
+  "--auth-label",
+  "--chunk-size",
+  "--microchunk-dir",
 ])
 
 /** Positional args after the subcommand (argv[2]), skipping flags AND the
@@ -266,8 +295,11 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   // concurrent bench efforts on ONE OAuth token starved each other → sustained
   // 429 surfacing as `generation_error` ("LLM stream failed after retries") on
   // BOTH. Point each fleet at its own account file to decouple the rate limits.
-  const authFile =
-    process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`
+  // jun-20 multi-auth (T-1): resolve through the SAME source abstraction `pool`
+  // uses, so full-remote can't silently diverge to a different auth truth. T-5
+  // adds `--auth-label` pinning / auto-pick; here single stays byte-identical.
+  const authSource = resolveCliAuthSource()
+  const authFile = poolLaunchAuthFile(authSource)
   const authJson = dry ? "{}" : readFileSync(authFile, "utf8")
   const instance = argValue("--instance")
   const preset = resolveBenchExecutionPreset({
@@ -315,7 +347,11 @@ const cmdGradeFullRemote = async (): Promise<void> => {
     })
   if (dry) {
     const res = await makeBackend(expected).run()
-    printBlock(["=== full-remote plan (dry-run) ===", ...(res.plan ?? [])].join("\n"))
+    printBlock(
+      ["=== full-remote plan (dry-run) ===", describeAuthSource(authSource), ...(res.plan ?? [])].join(
+        "\n",
+      ),
+    )
     return
   }
   if (expected.length === 0) {
@@ -338,9 +374,6 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   logFullRemoteOutcome(out)
 }
 
-const DEFAULT_POOL_TOKEN_BUDGET = 16
-const clampPoolConcurrency = (n: number): number => Math.max(1, Math.min(16, Math.trunc(n) || 1))
-
 /** Patch-gen concurrency on the box, clamped [1,16]. The binding limit is the
  *  SHARED OAuth rate, not box CPU, so the DEFAULT is a GLOBAL budget of 16
  *  spread across all boxes in this pool. An explicit env override still wins. */
@@ -350,8 +383,8 @@ const poolConcurrencyOverrideRaw = (): string | undefined =>
 const resolvePoolConcurrency = (workers: number): number => {
   const raw = poolConcurrencyOverrideRaw()
   const override = raw !== undefined && raw !== "" ? Number(raw) : Number.NaN
-  if (Number.isFinite(override) && override > 0) return clampPoolConcurrency(override)
-  return clampPoolConcurrency(DEFAULT_POOL_TOKEN_BUDGET / Math.max(1, workers))
+  if (Number.isFinite(override) && override > 0) return clampPatchGenConcurrency(override)
+  return clampPatchGenConcurrency(resolveGlobalPatchGenBudget() / Math.max(1, workers))
 }
 
 const resolvePoolWorkers = (): number => {
@@ -411,7 +444,7 @@ const poolConcurrencySource = (override: string | undefined): string =>
   Number.isFinite(Number(override)) &&
   Number(override) > 0
     ? "env override"
-    : `default shared budget=${DEFAULT_POOL_TOKEN_BUDGET}`
+    : `default shared budget=${resolveGlobalPatchGenBudget()}`
 
 /**
  * jun-20 box-lifecycle Phase 2/3 — persistent-pool full-remote. Bootstraps ONE
@@ -423,6 +456,48 @@ const poolConcurrencySource = (override: string | undefined): string =>
  *   quanta-bench pool … --wait-for-idle              # park until the warm box goes idle, then reuse/launch
  *   quanta-bench pool … --workers 2 --allow-extra-boxes   # explicit multi-box opt-in
  */
+/**
+ * jun-20 multi-auth: the single credential a NON-pool launch ships. Single ⇒ the
+ * one file. Pool ⇒ first ready account (used only as the `authJsonProvider`
+ * fallback; `pool` actually drives per-chunk leasing via `buildPoolAuthProvider`,
+ * and full-remote picks one account in T-5).
+ */
+const poolLaunchAuthFile = (src: AuthSource): string => {
+  if (src.kind === "single") return src.authFile
+  const ready = src.accounts.find((a) => a.disabled !== true) ?? src.accounts[0]
+  if (ready === undefined) throw new Error("auth-pool: no accounts available")
+  return ready.authFile
+}
+
+/**
+ * jun-20 multi-auth (T-3): a per-account lease provider for `pool`, or undefined
+ * in single-auth mode (so the legacy `authJsonProvider` path stays unchanged).
+ * Each account's token file is read FRESH at ship time (never cached, never the
+ * long-lived secret — `gradeChunkOnBox` strips it to access_token).
+ */
+const buildPoolAuthProvider = (src: AuthSource): PoolAuthProvider | undefined => {
+  if (src.kind === "single") return undefined
+  const manager = new AuthLeaseManager(src.accounts)
+  return createLeasePoolAuthProvider(manager, (path) => readFileSync(path, "utf8"))
+}
+
+/**
+ * jun-20 multi-auth (T-3): a representative per-chunk → account plan for dry-run.
+ * Simulates least-loaded spreading (each chunk takes one slot, none released) so
+ * the operator can see how chunks fan across accounts. Approximate — real routing
+ * also factors warm-box affinity and live cooldowns. Empty in single-auth mode.
+ */
+const planPoolChunkAccounts = (src: AuthSource, chunks: readonly PoolChunk[]): string[] => {
+  if (src.kind === "single") return []
+  const mgr = new AuthLeaseManager(src.accounts)
+  return chunks.map((c) => {
+    const lease = mgr.acquire({ runId: c.runId, requestedSlots: 1 })
+    return lease === null
+      ? `  plan ${c.runId} → (all accounts saturated — queued until a slot frees)`
+      : `  plan ${c.runId} → ${lease.accountLabel}`
+  })
+}
+
 const cmdPool = async (): Promise<void> => {
   if (!hasFlag("--allow-remote-secrets")) {
     logger.info(
@@ -434,8 +509,11 @@ const cmdPool = async (): Promise<void> => {
   const datasets = requirePoolDatasets()
   const chunks = buildPoolChunks(datasets)
   const workers = resolvePoolWorkers()
-  const authFile =
-    process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`
+  // jun-20 multi-auth (T-1): resolve EITHER the legacy single account or a
+  // multi-account pool. T-3 schedules per-chunk leases off this; until then the
+  // launch path stays single-account (byte-identical when no pool configured).
+  const authSource = resolveCliAuthSource()
+  const authFile = poolLaunchAuthFile(authSource)
   const preset = resolveBenchExecutionPreset({
     envVars: process.env,
     argvPreset: argValue("--preset"),
@@ -460,8 +538,10 @@ const cmdPool = async (): Promise<void> => {
     printBlock(
       [
         "=== pool plan (dry-run) ===",
+        describeAuthSource(authSource),
         `workers=${workers}  preset=${preset}  model=${model}  concurrency=${concurrency}  onDemand=${onDemand}  waitForIdle=${waitForIdle}`,
         ...chunks.map((c) => `chunk ${c.runId} ← ${c.datasetPath}  (box dir ~/runs/${c.runId}/)`),
+        ...planPoolChunkAccounts(authSource, chunks),
         "would reuse a warm idle box or provision one, grade each chunk SERIALLY, fetch reports, leave warm.",
       ].join("\n"),
     )
@@ -473,6 +553,9 @@ const cmdPool = async (): Promise<void> => {
       repoDir: process.cwd(),
       authJson: "{}", // unused for provisioning; the per-chunk provider ships the real token
       datasetPath: datasets[0] ?? "",
+      launchMode: "pool",
+      preset,
+      model,
       ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
       onDemand,
       keep: hasFlag("--keep"),
@@ -488,7 +571,13 @@ const cmdPool = async (): Promise<void> => {
     concurrency,
     ...(wallMin !== undefined ? { maxBoxWallMs: Math.max(0, Number(wallMin) || 0) * 60_000 } : {}),
     // FRESH token per chunk — a long pool run never grades on a stale access_token.
+    // Single-auth fallback; in pool mode `authProvider` below drives per-chunk leasing.
     authJsonProvider: () => readFileSync(authFile, "utf8"),
+    // jun-20 multi-auth (T-3): per-account lease scheduler in pool mode (else undefined).
+    ...(() => {
+      const p = buildPoolAuthProvider(authSource)
+      return p !== undefined ? { authProvider: p } : {}
+    })(),
     forwardedBenchEnv: buildForwardedBenchEnv(process.env),
     recordTrajectory,
     onLog: (m) => logger.info(m),
@@ -546,6 +635,11 @@ interface BoxLsRow {
   readonly launchTime: string
   readonly ip: string
   readonly instanceType: string
+  readonly launchMode?: string
+  readonly launchPreset?: string
+  readonly launchModel?: string
+  readonly launchDataset?: string
+  readonly launchSelection?: string
 }
 
 interface BoxRuntimeRow extends BoxLsRow, Awaited<ReturnType<typeof inspectBox>> {
@@ -554,7 +648,7 @@ interface BoxRuntimeRow extends BoxLsRow, Awaited<ReturnType<typeof inspectBox>>
   readonly logPath?: string
   readonly logAgeSec?: number
   readonly freshness: "fresh" | "stale" | "unknown"
-  readonly statusSource: "snapshot" | "probe" | "none"
+  readonly statusSource: "snapshot" | "probe" | "launch-tags" | "none"
   readonly followHint: string
 }
 
@@ -580,10 +674,44 @@ const parseBoxLsRows = (out: string): BoxLsRow[] =>
     .map((line) => line.trim())
     .filter((line) => line !== "")
     .map((line) => {
-      const [iid = "", state = "", launchTime = "", ip = "", instanceType = ""] = line.split(/\s+/)
-      return { iid, state, launchTime, ip, instanceType }
+      const [
+        iid = "",
+        state = "",
+        launchTime = "",
+        ip = "",
+        instanceType = "",
+        launchMode = "",
+        launchPreset = "",
+        launchModel = "",
+        launchDataset = "",
+        launchSelection = "",
+      ] = line.split(/\s+/)
+      return {
+        iid,
+        state,
+        launchTime,
+        ip,
+        instanceType,
+        ...(launchMode !== "" && launchMode !== "None" ? { launchMode } : {}),
+        ...(launchPreset !== "" && launchPreset !== "None" ? { launchPreset } : {}),
+        ...(launchModel !== "" && launchModel !== "None" ? { launchModel } : {}),
+        ...(launchDataset !== "" && launchDataset !== "None" ? { launchDataset } : {}),
+        ...(launchSelection !== "" && launchSelection !== "None" ? { launchSelection } : {}),
+      }
     })
     .filter((row) => row.iid.startsWith("i-"))
+
+const hasLaunchTags = (
+  row: Pick<
+    BoxLsRow,
+    "launchMode" | "launchPreset" | "launchModel" | "launchDataset" | "launchSelection"
+  >,
+): boolean =>
+  row.launchMode !== undefined ||
+  row.launchPreset !== undefined ||
+  row.launchModel !== undefined ||
+  row.launchDataset !== undefined ||
+  row.launchSelection !== undefined
 
 const parseIsoMs = (s: string | undefined): number | undefined => {
   if (s === undefined || s === "") return undefined
@@ -598,9 +726,16 @@ const ageSecondsFromIso = (s: string | undefined): number | undefined => {
 }
 
 const boxStatusSource = (
+  row: BoxLsRow,
   inspection: Pick<Awaited<ReturnType<typeof inspectBox>>, "snapshot" | "probe">,
 ): BoxRuntimeRow["statusSource"] =>
-  inspection.snapshot !== undefined ? "snapshot" : inspection.probe !== undefined ? "probe" : "none"
+  inspection.snapshot !== undefined
+    ? "snapshot"
+    : inspection.probe !== undefined
+      ? "probe"
+      : hasLaunchTags(row)
+        ? "launch-tags"
+        : "none"
 
 const boxFreshness = (
   lifecycle: BoxRuntimeRow["lifecycle"],
@@ -624,7 +759,7 @@ const listBenchBoxes = async (region: string, keyPath: string): Promise<BoxRunti
     "describe-instances",
     ...BOX_TAG_FILTERS,
     "--query",
-    "Reservations[].Instances[].[InstanceId,State.Name,LaunchTime,PublicIpAddress,InstanceType]",
+    "Reservations[].Instances[].[InstanceId,State.Name,LaunchTime,PublicIpAddress,InstanceType,Tags[?Key=='QuantaMode']|[0].Value,Tags[?Key=='QuantaPreset']|[0].Value,Tags[?Key=='QuantaModel']|[0].Value,Tags[?Key=='QuantaDataset']|[0].Value,Tags[?Key=='QuantaSelection']|[0].Value]",
     "--output",
     "text",
   ])
@@ -673,7 +808,7 @@ const listBenchBoxes = async (region: string, keyPath: string): Promise<BoxRunti
       ...(logPath !== undefined ? { logPath } : {}),
       ...(logAgeSec !== undefined ? { logAgeSec } : {}),
       freshness: boxFreshness(inspection.lifecycle, snapshotAgeSec, probe, logAgeSec),
-      statusSource: boxStatusSource(inspection),
+      statusSource: boxStatusSource(row, inspection),
       followHint: `bun run src/apps/bench/cli.ts box logs ${row.iid} --follow`,
     }
   })
@@ -718,6 +853,16 @@ const resolveBoxTarget = (
 }
 
 const summarizeBenchBoxes = (rows: readonly BoxRuntimeRow[]): BoxStatusSummary => {
+  if (rows.length === 0) {
+    return {
+      total: 0,
+      busy: 0,
+      idle: 0,
+      bootstrapping: 0,
+      unreachable: 0,
+      stale: 0,
+    }
+  }
   const target = resolveBoxTarget(rows, "auto")
   return {
     total: rows.length,
@@ -744,7 +889,12 @@ const boxDetailLine = (row: BoxRuntimeRow): string | undefined =>
     ? `  source=snapshot  mode=${row.snapshot.mode}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
     : row.probe !== undefined
       ? `  source=probe  active=${yesNo(row.probe.activeRunDetected)}  report=${yesNo(row.probe.reportExists)}  runExit=${yesNo(row.probe.runExitExists)}${row.probe.predictionsLines !== undefined ? `  preds=${row.probe.predictionsLines}` : ""}`
+      : hasLaunchTags(row)
+        ? `  source=launch-tags${row.launchMode !== undefined ? `  mode=${row.launchMode}` : ""}${row.launchPreset !== undefined ? `  preset=${row.launchPreset}` : ""}${row.launchModel !== undefined ? `  model=${row.launchModel}` : ""}${row.launchDataset !== undefined ? `  dataset=${row.launchDataset}` : ""}${row.launchSelection !== undefined ? `  selection=${row.launchSelection}` : ""}`
       : undefined
+
+const boxLaunchHeaderLine = (row: BoxRuntimeRow): string | undefined =>
+  row.snapshot === undefined && row.probe === undefined && hasLaunchTags(row) ? boxDetailLine(row) : undefined
 
 const boxRuntimeLine = (row: BoxRuntimeRow): string | undefined => {
   if (row.snapshot !== undefined) {
@@ -789,7 +939,22 @@ const renderBoxList = (rows: readonly BoxRuntimeRow[]): string =>
     "\n",
   )
 
-const renderBoxStatus = (summary: BoxStatusSummary, rows: readonly BoxRuntimeRow[]): string => {
+const renderPatchGenBudgetLine = (budget: PatchGenBudgetState): string => {
+  const holders =
+    budget.leases.length === 0
+      ? "none"
+      : budget.leases
+          .slice(0, 3)
+          .map((lease) => `${lease.label}:${lease.units}`)
+          .join(", ") + (budget.leases.length > 3 ? ` +${budget.leases.length - 3} more` : "")
+  return `  patchGenBudget=${budget.inUse}/${budget.limit}  available=${budget.available}  holders=${budget.leases.length}  leases=${holders}`
+}
+
+const renderBoxStatus = (
+  summary: BoxStatusSummary,
+  rows: readonly BoxRuntimeRow[],
+  budget: PatchGenBudgetState | undefined,
+): string => {
   const staleRows = latestLaunchFirst(rows.filter((row) => row.freshness === "stale"))
   const focus =
     latestLaunchFirst(rows.filter((row) => row.lifecycle === "busy"))[0] ??
@@ -797,6 +962,7 @@ const renderBoxStatus = (summary: BoxStatusSummary, rows: readonly BoxRuntimeRow
   return [
     "[box] summary:",
     `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}`,
+    budget !== undefined ? renderPatchGenBudgetLine(budget) : undefined,
     focus !== undefined
       ? `  target=${focus.iid}  status=${boxStatusLabel(focus)}  source=${focus.statusSource}${focus.logPath !== undefined ? `  logPath=${focus.logPath}` : ""}${
           focus.logAgeSec !== undefined ? `  logAge=${focus.logAgeSec}s` : ""
@@ -874,6 +1040,7 @@ const renderBoxLogHeader = (
     `  logPath=${logPath}`,
     boxHeaderUpdatedLine(row),
     boxHeaderActiveLine(row),
+    boxLaunchHeaderLine(row),
     boxDisplayedLastLogLine(row) !== undefined
       ? `  last=${boxDisplayedLastLogLine(row)}`
       : undefined,
@@ -913,6 +1080,17 @@ const renderPendingLogJson = (
       lines,
       snapshot: row.snapshot,
       probe: row.probe,
+      ...(hasLaunchTags(row)
+        ? {
+            launchTags: {
+              ...(row.launchMode !== undefined ? { mode: row.launchMode } : {}),
+              ...(row.launchPreset !== undefined ? { preset: row.launchPreset } : {}),
+              ...(row.launchModel !== undefined ? { model: row.launchModel } : {}),
+              ...(row.launchDataset !== undefined ? { dataset: row.launchDataset } : {}),
+              ...(row.launchSelection !== undefined ? { selection: row.launchSelection } : {}),
+            },
+          }
+        : {}),
       followHint: row.followHint,
       tail: "",
       error,
@@ -1025,6 +1203,17 @@ const renderBoxLogsJson = (
       lines,
       snapshot: row.snapshot,
       probe: row.probe,
+      ...(hasLaunchTags(row)
+        ? {
+            launchTags: {
+              ...(row.launchMode !== undefined ? { mode: row.launchMode } : {}),
+              ...(row.launchPreset !== undefined ? { preset: row.launchPreset } : {}),
+              ...(row.launchModel !== undefined ? { model: row.launchModel } : {}),
+              ...(row.launchDataset !== undefined ? { dataset: row.launchDataset } : {}),
+              ...(row.launchSelection !== undefined ? { selection: row.launchSelection } : {}),
+            },
+          }
+        : {}),
       snapshotAgeSec: row.snapshotAgeSec,
       runAgeSec: row.runAgeSec,
       logAgeSec: row.logAgeSec,
@@ -1110,17 +1299,20 @@ const cmdBoxLs = async (region: string): Promise<void> => {
 const cmdBoxStatus = async (region: string): Promise<void> => {
   const keyPath = argValue("--key") ?? D.keyPath
   const rows = await listBenchBoxes(region, keyPath)
-  if (rows.length === 0) {
-    printBlock("[box] no running quanta-bench boxes")
-    return
-  }
+  const budget = await readPatchGenBudgetState().catch(() => undefined)
   const ordered = latestLaunchFirst(rows)
   const summary = summarizeBenchBoxes(ordered)
   if (hasFlag("--json")) {
-    printBlock(JSON.stringify({ summary, boxes: ordered }, null, 2))
+    printBlock(
+      JSON.stringify(
+        { summary, ...(budget !== undefined ? { budget } : {}), boxes: ordered },
+        null,
+        2,
+      ),
+    )
     return
   }
-  printBlock(renderBoxStatus(summary, ordered))
+  printBlock(renderBoxStatus(summary, ordered, budget))
 }
 
 const cmdBoxLogs = async (region: string): Promise<void> => {
@@ -1208,6 +1400,7 @@ const cmdBoxUp = async (): Promise<void> => {
     repoDir: process.cwd(),
     authJson: "{}", // no patch-gen here; pool ships the real token per chunk
     datasetPath: "",
+    launchMode: "warm-box",
     ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
     onDemand: gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND"),
     keep: true, // leave it alive — that is the whole point of `box up`

@@ -25,7 +25,19 @@ class ReadLoopLLM implements LLMPort {
   }
 }
 
-describe("runner empty-patch max-turns authority", () => {
+class SlowBashLLM implements LLMPort {
+  async *stream(): AsyncIterable<StreamEvent> {
+    yield { type: "tool_use_start", id: "b1", name: "bash" }
+    yield {
+      type: "tool_use_end",
+      id: "b1",
+      input: { command: "sleep 5" },
+    }
+    yield { type: "message_stop", stop_reason: "tool_use" }
+  }
+}
+
+describe("runner empty-patch terminal authority", () => {
   let dir: string
 
   beforeEach(() => {
@@ -53,6 +65,25 @@ describe("runner empty-patch max-turns authority", () => {
     expect(classifyOutcome(result)).toEqual({
       kind: "real-fail",
       subkind: "max_turns_exhausted",
+    })
+  })
+
+  test("slow tool timeout classifies as timeout", async () => {
+    const corpusRoot = join(dir, "corpus")
+    await writeSyntheticCorpus(corpusRoot)
+    const instance = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+
+    const result = await runInstance(instance, {
+      llm: new SlowBashLLM(),
+      maxTurns: 2,
+      timeoutMs: 150,
+    })
+
+    expect(result.passed).toBe(false)
+    expect(result.patch).toBe("")
+    expect(result.error).toContain("aborted")
+    expect(classifyOutcome(result)).toEqual({
+      kind: "timeout",
     })
   })
 })

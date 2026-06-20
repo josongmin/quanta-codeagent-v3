@@ -62,9 +62,17 @@ const rowIsEmptyPatch = (row: Record<string, unknown>): boolean => {
   return false
 }
 
+const ERRORED_TERMINATIONS = new Set(["harness_error", "timeout", "hung_stream", "grader_invalid"])
+
 const rowIsErrored = (row: Record<string, unknown>): boolean => {
   const failure = row.failure
-  if (isRecord(failure) && failure.termination === "harness_error") return true
+  if (
+    isRecord(failure) &&
+    typeof failure.termination === "string" &&
+    ERRORED_TERMINATIONS.has(failure.termination)
+  ) {
+    return true
+  }
   return false
 }
 

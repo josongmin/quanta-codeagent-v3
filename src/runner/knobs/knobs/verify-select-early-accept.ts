@@ -2,11 +2,12 @@
  * Knob: `verify-select-early-accept` — progressive cost guard for verify-select.
  *
  * When enabled, sequential verify-select can stop after the first generated
- * candidate that is admissible, touches only known closure owners when owners
- * exist, and has a hard positive regression/resolved signal. Soft-only repro
- * quorum stays ranking credit and never becomes stop authority. This keeps
- * N-best as a fallback, not a mandatory cost multiplier. Default-OFF so existing
- * verify-select arms remain reproducible unless a preset opts in.
+ * candidate that is admissible, applies cleanly, touches only known closure
+ * owners when owners exist, and has the configured hard positive
+ * regression/resolved signal. Fail-open null gates and soft-only repro quorum
+ * never become stop authority. This keeps N-best as a fallback, not a mandatory
+ * cost multiplier. Default-OFF so existing verify-select arms remain
+ * reproducible unless a preset opts in.
  */
 
 import type { AgentConfig } from "@/agent"
@@ -29,7 +30,8 @@ export const verifySelectEarlyAcceptKnob: Knob<true> = {
   surfaces: SURFACES,
   parse: parseVerifySelectEarlyAccept,
   apply: applyVerifySelectEarlyAccept,
-  describe: "Verify-and-select: stop after first owner-scoped hard-positive candidate",
+  describe:
+    "Verify-and-select: stop after first clean owner-scoped candidate with explicit hard-positive authority",
   unit: "toggle",
   costMultiplier: 1,
   source: "verify-and-select Phase 2 (jun-20) — progressive early accept",

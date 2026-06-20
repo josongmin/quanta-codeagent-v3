@@ -78,6 +78,28 @@ describe("classify — termination axis", () => {
     expect(classify(r).termination).toBe("harness_error")
   })
 
+  test("token-budget error string → budget_exhausted, not harness_error", () => {
+    const r: InstanceResult = {
+      id: "budget",
+      passed: false,
+      patch: "",
+      turns: 7,
+      error: "agent exhausted token budget before verification",
+    }
+    expect(classify(r).termination).toBe("budget_exhausted")
+  })
+
+  test("generic aborted error string → timeout, not harness_error", () => {
+    const r: InstanceResult = {
+      id: "timeout",
+      passed: false,
+      patch: "",
+      turns: 4,
+      error: "agent aborted before verification",
+    }
+    expect(classify(r).termination).toBe("timeout")
+  })
+
   test("typed patch-budget strict block → admission_blocked, not harness_error", () => {
     const r: InstanceResult = {
       id: "x",
@@ -156,6 +178,31 @@ describe("classify — termination axis", () => {
     )
     try {
       expect(classify(result).termination).toBe("completed_unresolved")
+    } finally {
+      cleanup()
+    }
+  })
+
+  test("session_end budget_exhausted → budget_exhausted", () => {
+    const { result, cleanup } = setup(
+      { id: "budget-turn", passed: false, patch: "diff --git a/x b/x\n", turns: 9 },
+      [toolCall("edit"), toolResult("ok"), sessionEnd("budget_exhausted", 9)],
+    )
+    try {
+      expect(classify(result).termination).toBe("budget_exhausted")
+    } finally {
+      cleanup()
+    }
+  })
+
+  test("session_end aborted after turns → timeout", () => {
+    const { result, cleanup } = setup({ id: "timeout-turn", passed: false, patch: "", turns: 6 }, [
+      toolCall("edit"),
+      toolResult("ok"),
+      sessionEnd("aborted", 6),
+    ])
+    try {
+      expect(classify(result).termination).toBe("timeout")
     } finally {
       cleanup()
     }
@@ -364,6 +411,7 @@ describe("aggregate", () => {
       { termination: "hung_stream", signals: ["dirty_cache_leak"] },
       { termination: "completed_unresolved", signals: ["verify_loop_stuck"] },
       { termination: "max_turns_exhausted", signals: ["search_thrashing"] },
+      { termination: "budget_exhausted", signals: [] },
       { termination: "completed_unresolved", signals: ["verify_loop_stuck", "empty_patch"] },
     ]
     const bd = aggregate(classifications)
@@ -371,6 +419,7 @@ describe("aggregate", () => {
       hung_stream: 1,
       completed_unresolved: 2,
       max_turns_exhausted: 1,
+      budget_exhausted: 1,
     })
     expect(bd.bySignal).toEqual({
       dirty_cache_leak: 1,

@@ -52,7 +52,7 @@ describe("bench localEnv + gold sanity", () => {
     expect(await runEnvPrep(instance, dir, 30000)).toEqual({ ok: true })
     const out = await verify(instance, "diff --git a/a b/a\n", dir, { timeoutMs: 30000 })
     expect(out.passed).toBe(true)
-  })
+  }, 20_000) // Real subprocess setup/verify can exceed Bun's 5s default on loaded dev boxes.
 
   test("buildConfig threads Instance.localEnv into AgentConfig", () => {
     const instance: Instance = {

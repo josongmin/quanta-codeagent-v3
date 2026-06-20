@@ -138,6 +138,37 @@ describe("writeArtifacts (D-fix)", () => {
     }
   })
 
+  test("generic aborted terminal error is serialized as timeout, not harness_error", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-art-"))
+    try {
+      const predFile = join(dir, "preds.jsonl")
+      const reportFile = join(dir, "report.json")
+      const results: InstanceResult[] = [
+        {
+          id: "timeout-aborted",
+          passed: false,
+          patch: "",
+          turns: 5,
+          error: "agent aborted before verification",
+        },
+      ]
+      await writeArtifacts(predFile, reportFile, results, {
+        provider: "openai",
+        model: "gpt-test",
+        n: 1,
+      })
+      const report = JSON.parse(readFileSync(reportFile, "utf8")) as {
+        failureBreakdown: { byTermination: Record<string, number> }
+        perInstance: { failure?: { termination: string } }[]
+      }
+      expect(report.perInstance[0]?.failure?.termination).toBe("timeout")
+      expect(report.failureBreakdown.byTermination.timeout).toBe(1)
+      expect(report.failureBreakdown.byTermination.harness_error).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("predictions for a failed run still carry whatever patch was produced (empty allowed)", async () => {
     // The D-fix matters most for FAIL cases — triage needs the patch even
     // (especially) when the run didn't pass. Verify empty patches survive.

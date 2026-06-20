@@ -1323,7 +1323,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe:
-      "Bench: progressive verify-select cost guard. Stop after first owner-scoped candidate with hard positive regression/resolved signal. Default-OFF.",
+      "Bench: progressive verify-select cost guard. Stop after first clean owner-scoped candidate with explicit hard-positive regression/resolved authority; fail-open nulls never stop early. Default-OFF.",
     readSite: "runner/knobs/knobs/verify-select-early-accept.ts",
   },
   {

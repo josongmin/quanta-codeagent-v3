@@ -139,6 +139,18 @@ describe("D5 hellgate — REAL verification commands MUST satisfy the gate (13+ 
     const blocked = REAL.filter(([, cmd]) => gateAfterEditThen(cmd).block === true)
     expect(blocked).toEqual([])
   })
+
+  test("exact allowlisted repo-local verifier satisfies the gate without broadening generic node -e", () => {
+    const cmd = `node -e "const {add}=require('./math.js'); if(add(2,3)!==5) process.exit(1)"`
+    const state = createVerifyGuardState()
+    const r = decideVerifyGuard({
+      history: h("edit", { name: "bash", arg: cmd }),
+      cfg: { exactCommands: [cmd] },
+      state,
+    })
+    expect(r.block).toBe(false)
+    expect(isTestLikeCommand(cmd)).toBe(false)
+  })
 })
 
 describe("D5 hellgate — gate state-machine corners", () => {

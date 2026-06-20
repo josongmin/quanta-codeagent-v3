@@ -98,6 +98,23 @@ describe("computeClosureDiagnostics", () => {
     expect(d.metrics.no_patch_exhausted_rate.value).toBeCloseTo(1 / 5)
   })
 
+  test("budget_exhausted empty patch is also classified as no_patch_exhausted", () => {
+    const exhausted = computeClosureDiagnostics(
+      [
+        fact({
+          instanceId: "budget-nopatch",
+          resolved: false,
+          patchFiles: [],
+          emptyPatch: true,
+          endReason: "budget_exhausted",
+        }),
+      ],
+      new Map(),
+    )
+    expect(exhausted.perInstance[0]?.class).toBe("no_patch_exhausted")
+    expect(exhausted.metrics.no_patch_exhausted_rate.value).toBeCloseTo(1)
+  })
+
   test("owner_recall@1 counts first-edited-file == gold owner (over patch-bearing+oracle)", () => {
     // patch-bearing with oracle: resolved-1(hit), miss-owner(miss), miss-multi(hit base.py), stray-1(hit) = 3/4
     expect(d.metrics["owner_recall@1"].n).toBe(4)

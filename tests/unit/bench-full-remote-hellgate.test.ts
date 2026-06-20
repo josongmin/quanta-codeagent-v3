@@ -14,9 +14,17 @@
  * Red-on-injection: if someone ships the whole auth json (refresh_token
  * included), or drops IMDSv2/TTL/terminate, a test here fails.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
 import { createFullRemoteBackend, stripToAccessToken } from "../../src/apps/bench/remote/full"
+import {
+  acquirePatchGenBudgetLease,
+  readPatchGenBudgetState,
+} from "../../src/apps/bench/remote/token-budget"
 
 const FULL_AUTH = JSON.stringify({
   access_token: "ACCESS-xyz",
@@ -24,6 +32,12 @@ const FULL_AUTH = JSON.stringify({
   id_token: "IDTOK-secret",
   account_id: "acct-123",
   expires_at: "2026-06-24T00:00:00Z",
+})
+
+const TOKEN_BUDGET_DIR = mkdtempSync(join(tmpdir(), "bench-full-budget-"))
+
+afterAll(() => {
+  rmSync(TOKEN_BUDGET_DIR, { recursive: true, force: true })
 })
 
 describe("stripToAccessToken (security crux)", () => {
@@ -102,12 +116,31 @@ const countCalls = (
   pred: (c: { cmd: string; args: string[] }) => boolean,
 ): number => calls.filter(pred).length
 
+const waitForCondition = async (
+  pred: () => boolean,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<boolean> => {
+  const timeoutMs = opts.timeoutMs ?? 250
+  const pollMs = opts.pollMs ?? 5
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (pred()) return true
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, pollMs)
+    })
+  }
+  return pred()
+}
+
 describe("full-remote executor (injected spawn — no real box/token)", () => {
   const baseCfg = {
     repoDir: "/tmp/fake-repo",
     authJson: FULL_AUTH,
     datasetPath: "/tmp/ds.jsonl",
     instanceIds: ["psf__requests-5414"],
+    tokenBudgetDir: TOKEN_BUDGET_DIR,
+    tokenBudgetWaitMs: 5_000,
+    tokenBudgetPollMs: 10,
     sleep: async () => {}, // no real waiting in tests
     maxReadyPolls: 2,
   }
@@ -139,6 +172,25 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // R3 teeth (the SSH-timeout bug): launch MUST attach a security group, else
     // the box lands in the default SG with no inbound :22 ⇒ ssh times out.
     expect(argstr).toContain("--security-group-ids")
+  })
+
+  test("launch tags expose preset/model/dataset/selection before box-side snapshots exist", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({
+      ...baseCfg,
+      spawn: fn,
+      preset: "agentless-v2",
+      model: "gpt-5.4",
+    })
+      .run()
+      .catch(() => undefined)
+    const launch = calls.find((c) => c.args.includes("run-instances"))
+    const argstr = launch?.args.join(" ") ?? ""
+    expect(argstr).toContain("Key=QuantaMode,Value=full-remote")
+    expect(argstr).toContain("Key=QuantaPreset,Value=agentless-v2")
+    expect(argstr).toContain("Key=QuantaModel,Value=gpt-5.4")
+    expect(argstr).toContain("Key=QuantaDataset,Value=ds.jsonl")
+    expect(argstr).toContain("Key=QuantaSelection,Value=psf__requests-5414")
   })
 
   test("market: default is SPOT; onDemand:true drops the spot market option", async () => {
@@ -178,6 +230,118 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const cmd = benchRun?.args.join(" ") ?? ""
     expect(cmd).not.toContain("QUANTA_SWEBENCH_GRADE_CONCURRENCY") // serial grading
     expect(cmd).toContain("QUANTA_BENCH_CONCURRENCY=") // ...but patch-gen stays parallel
+  })
+
+  test("global patch-gen budget DOWN-SCALES full-remote concurrency when another run already holds tokens", async () => {
+    const held = await acquirePatchGenBudgetLease({
+      label: "other-run",
+      requestedUnits: 12,
+      dir: TOKEN_BUDGET_DIR,
+      waitMs: 1_000,
+      pollMs: 10,
+    })
+    try {
+      const { fn, calls } = mockSpawn()
+      await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+        .run()
+        .catch(() => undefined)
+      const benchRun = calls.find(
+        (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench")),
+      )
+      expect(benchRun).toBeDefined()
+      expect(benchRun?.args.join(" ") ?? "").toContain("QUANTA_BENCH_CONCURRENCY=4")
+      const state = await readPatchGenBudgetState({ dir: TOKEN_BUDGET_DIR })
+      expect(state.inUse).toBe(12)
+      expect(state.leases.map((lease) => lease.label)).toEqual(["other-run"])
+    } finally {
+      await held.release()
+    }
+  })
+
+  test("provisions the box BEFORE waiting on the global patch-gen budget", async () => {
+    const held = await acquirePatchGenBudgetLease({
+      label: "block-full-budget",
+      requestedUnits: 16,
+      minUnits: 16,
+      dir: TOKEN_BUDGET_DIR,
+      waitMs: 1_000,
+      pollMs: 10,
+    })
+    const { fn, calls } = mockSpawn()
+    const runPromise = createFullRemoteBackend({
+      ...baseCfg,
+      spawn: fn,
+      tokenBudgetWaitMs: 1_000,
+      tokenBudgetPollMs: 10,
+    }).run()
+    let failure: unknown
+    try {
+      expect(
+        await waitForCondition(() => calls.some((c) => c.args.includes("run-instances")), {
+          timeoutMs: 200,
+        }),
+      ).toBe(true)
+      expect(
+        calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench"))),
+      ).toBe(false)
+    } catch (err) {
+      failure = err
+    } finally {
+      await held.release()
+    }
+    await runPromise.catch(() => undefined)
+    if (failure !== undefined) throw failure
+    expect(
+      calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench"))),
+    ).toBe(true)
+  })
+
+  test("owner process stays alive through cloud-init wait; it fails EXPLICITLY instead of exiting cleanly", () => {
+    const script = `
+      import { pathToFileURL } from "node:url"
+
+      const mod = await import(pathToFileURL(${JSON.stringify(join(process.cwd(), "src/apps/bench/remote/full.ts"))}).href)
+      const { createFullRemoteBackend } = mod
+      const realSetTimeout = globalThis.setTimeout
+      globalThis.setTimeout = ((fn, _ms, ...args) => realSetTimeout(fn, 5, ...args)) as typeof setTimeout
+
+      const spawn = async (cmd, args) => {
+        const ok = (stdout) => ({ code: 0, stdout, stderr: "" })
+        if (args.includes("describe-security-groups")) return ok("sg-abc")
+        if (cmd === "curl") return ok("9.9.9.9")
+        if (args.includes("run-instances")) return ok("i-deadbeef")
+        if (args.includes("wait")) return ok("")
+        if (args.includes("describe-instances")) return ok("1.2.3.4")
+        if (cmd === "ssh") return ok("")
+        return ok("")
+      }
+
+      try {
+        await createFullRemoteBackend({
+          repoDir: "/tmp/fake-repo",
+          authJson: ${JSON.stringify(FULL_AUTH)},
+          datasetPath: "/tmp/ds.jsonl",
+          instanceIds: ["psf__requests-5414"],
+          spawn,
+          onDemand: true,
+          maxReadyPolls: 1,
+          onLog: () => {},
+        }).run()
+        console.error("UNEXPECTED_OK")
+        process.exit(99)
+      } catch (err) {
+        console.error(String(err))
+        process.exit(17)
+      }
+    `
+    const r = spawnSync(process.execPath, ["-e", script], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 5_000,
+    })
+    expect(r.status).toBe(17)
+    expect(r.stderr).toContain("box never became ssh-reachable + bun-ready")
+    expect(r.stderr).not.toContain("UNEXPECTED_OK")
   })
 
   test("writes a box-status snapshot so `box ls` can show the current phase", async () => {
@@ -352,6 +516,26 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     }
     await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
       /refusing to launch another box/i,
+    )
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
+  test("refuses to auto-launch while another quanta-bench box is still pending", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = []
+    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      calls.push({ cmd, args: [...args] })
+      if (args.includes("describe-instances") && args.includes("--filters")) return ok("i-pending")
+      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = args[args.length - 1] ?? ""
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("IDLE")) return ok("BUSY")
+      }
+      return ok("")
+    }
+    await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
+      /already live \(running\/pending\)/i,
     )
     expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
   })

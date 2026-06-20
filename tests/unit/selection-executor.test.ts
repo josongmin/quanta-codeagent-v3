@@ -294,6 +294,62 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-1")
   })
 
+  it("ADVERSARIAL: earlyAccept never stops on fail-open applyability (null)", async () => {
+    let generated = 0
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/x.py\n+first", files: ["x.py"] }),
+      cand({ id: "cand-1", patch: "+++ b/x.py\n+second", files: ["x.py"] }),
+    ])
+    const countingGen: SelectionPorts["generate"] = async (i, seed) => {
+      generated += 1
+      return await gen(i, seed)
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      earlyAccept: true,
+      ports: {
+        generate: countingGen,
+        applyClean: async (c) => (c.id === "cand-0" ? null : true),
+        regression: async () => true,
+      },
+    })
+    expect(generated).toBe(2)
+    expect(r.earlyAccepted).toBe(true)
+    expect(r.successfulGenerations).toBe(2)
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(true)
+  })
+
+  it("ADVERSARIAL: configured hard resolved authority must be explicitly positive before early stop", async () => {
+    let generated = 0
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/x.py\n+first", files: ["x.py"] }),
+      cand({ id: "cand-1", patch: "+++ b/x.py\n+second", files: ["x.py"] }),
+    ])
+    const countingGen: SelectionPorts["generate"] = async (i, seed) => {
+      generated += 1
+      return await gen(i, seed)
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      earlyAccept: true,
+      ports: {
+        generate: countingGen,
+        applyClean: async () => true,
+        regression: async () => true,
+        resolvedKofN: async (c) => (c.id === "cand-0" ? null : { votes: 1, k: 1 }),
+      },
+    })
+    expect(generated).toBe(2)
+    expect(r.earlyAccepted).toBe(true)
+    expect(r.successfulGenerations).toBe(2)
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(true)
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.admissible).toBe(true)
+  })
+
   it("PAIRED control: regression port ABSENT ⇒ fail-open, candidates stay admissible", async () => {
     const { gen } = genFrom([cand({ id: "cand-0" })])
     const r = await runSelection({
@@ -447,9 +503,34 @@ describe("runSelection", () => {
     })
     expect(r.admissibleCount).toBe(0)
     expect(r.winner).toBeNull()
-    expect(r.terminalCandidate?.id).toBe("cand-1")
-    expect(r.terminalCandidate?.stopReason).toBe("completed")
-    expect(r.terminalCandidate?.editCount).toBe(1)
+    expect(r.terminalCandidate?.id).toBe("cand-0")
+    expect(r.terminalCandidate?.stopReason).toBe("max_turns")
+    expect(r.terminalCandidate?.editCount).toBe(0)
+  })
+
+  it("ADVERSARIAL: terminalCandidate preserves aborted authority ahead of a higher-scoring generic miss", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "", files: [], stopReason: "aborted", editCount: 0 }),
+      cand({
+        id: "cand-1",
+        patch: "+++ b/bad.py\n+stale",
+        files: ["bad.py"],
+        stopReason: "completed",
+        editCount: 1,
+      }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: {
+        generate: gen,
+        applyClean: async (c) => (c.id === "cand-1" ? false : null),
+      },
+    })
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate?.id).toBe("cand-0")
+    expect(r.terminalCandidate?.stopReason).toBe("aborted")
   })
 
   it("terminalCandidate preserves first no-winner metadata on score ties", async () => {

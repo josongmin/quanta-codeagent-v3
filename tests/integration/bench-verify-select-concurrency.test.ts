@@ -91,96 +91,100 @@ describe("verify-select concurrency wiring", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bench-verify-select-concurrency-"))
-    verifySelectEnv.beforeEach()
   })
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
-    verifySelectEnv.afterEach()
   })
 
-  test.serial("driver threads verify-select-concurrency into parallel isolated candidate generation", async () => {
-    const repo = makeRepo(dir)
-    const obs = join(dir, "obs")
-    const llm = new ParallelEditLLM()
-    const instance: Instance = {
-      id: "demo__verify-select-concurrency",
-      repoPath: repo,
-      problemStatement: "Change BUG_A and BUG_B markers to fixed values.",
-      testCmd: "true",
-      swebench: {
-        instanceId: "demo__verify-select-concurrency",
-        repo: "demo/demo",
-        baseCommit: "0".repeat(40),
-      },
-    }
+  test.serial(
+    "driver threads verify-select-concurrency into parallel isolated candidate generation",
+    verifySelectEnv.run(async () => {
+      const repo = makeRepo(dir)
+      const obs = join(dir, "obs")
+      const llm = new ParallelEditLLM()
+      const instance: Instance = {
+        id: "demo__verify-select-concurrency",
+        repoPath: repo,
+        problemStatement: "Change BUG_A and BUG_B markers to fixed values.",
+        testCmd: "true",
+        swebench: {
+          instanceId: "demo__verify-select-concurrency",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
 
-    const result = await runInstance(instance, {
-      ...DEPS,
-      llm,
-      observe: {
-        dir: obs,
-        runId: "run-vsc",
-        now: (() => {
-          let ts = 1
-          return () => ts++
-        })(),
-      },
-    })
+      const result = await runInstance(instance, {
+        ...DEPS,
+        llm,
+        observe: {
+          dir: obs,
+          runId: "run-vsc",
+          now: (() => {
+            let ts = 1
+            return () => ts++
+          })(),
+        },
+      })
 
-    expect(result.selectionTelemetry?.generated).toBe(2)
-    expect(result.selectionTelemetry?.attempted).toBe(2)
-    expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
-    expect(result.selectionTelemetry?.generationFailures).toBe(0)
-    expect(result.selectionTelemetry?.candidates).toHaveLength(2)
-    expect(llm.maxInFlight).toBe(2)
-    expect(result.patch === "" || result.patch.includes("FIX_")).toBe(true)
-  })
+      expect(result.selectionTelemetry?.generated).toBe(2)
+      expect(result.selectionTelemetry?.attempted).toBe(2)
+      expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
+      expect(result.selectionTelemetry?.generationFailures).toBe(0)
+      expect(result.selectionTelemetry?.candidates).toHaveLength(2)
+      expect(llm.maxInFlight).toBe(2)
+      expect(result.patch === "" || result.patch.includes("FIX_")).toBe(true)
+    }),
+  )
 
-  test.serial("discovered regression mode does not hard-reject a candidate when repro authority is absent", async () => {
-    verifySelectEnv.set({
-      QUANTA_BENCH_VERIFY_SELECT: "1",
-      QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY: undefined,
-      QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "discovered",
-      QUANTA_BENCH_VERIFY_SELECT_REPRO: "off",
-    })
+  test.serial(
+    "discovered regression mode does not hard-reject a candidate when repro authority is absent",
+    verifySelectEnv.run(async () => {
+      verifySelectEnv.set({
+        QUANTA_BENCH_VERIFY_SELECT: "1",
+        QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY: undefined,
+        QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "discovered",
+        QUANTA_BENCH_VERIFY_SELECT_REPRO: "off",
+      })
 
-    const repo = makeRepo(dir)
-    const obs = join(dir, "obs-discovered")
-    const llm = new ParallelEditLLM()
-    const instance: Instance = {
-      id: "demo__verify-select-discovered",
-      repoPath: repo,
-      problemStatement: "Change BUG_A to FIX_A.",
-      testCmd: "true",
-      swebench: {
-        instanceId: "demo__verify-select-discovered",
-        repo: "demo/demo",
-        baseCommit: "0".repeat(40),
-      },
-    }
+      const repo = makeRepo(dir)
+      const obs = join(dir, "obs-discovered")
+      const llm = new ParallelEditLLM()
+      const instance: Instance = {
+        id: "demo__verify-select-discovered",
+        repoPath: repo,
+        problemStatement: "Change BUG_A to FIX_A.",
+        testCmd: "true",
+        swebench: {
+          instanceId: "demo__verify-select-discovered",
+          repo: "demo/demo",
+          baseCommit: "0".repeat(40),
+        },
+      }
 
-    const result = await runInstance(instance, {
-      ...DEPS,
-      llm,
-      observe: {
-        dir: obs,
-        runId: "run-vsd",
-        now: (() => {
-          let ts = 1
-          return () => ts++
-        })(),
-      },
-    })
+      const result = await runInstance(instance, {
+        ...DEPS,
+        llm,
+        observe: {
+          dir: obs,
+          runId: "run-vsd",
+          now: (() => {
+            let ts = 1
+            return () => ts++
+          })(),
+        },
+      })
 
-    expect(result.selectionTelemetry?.attempted).toBe(1)
-    expect(result.selectionTelemetry?.successfulGenerations).toBe(1)
-    expect(result.selectionTelemetry?.generationFailures).toBe(0)
-    expect(result.selectionTelemetry?.candidates).toHaveLength(1)
-    expect(result.selectionTelemetry?.candidates[0]?.admissible).toBe(true)
-    expect(result.selectionTelemetry?.candidates[0]?.reasons).not.toContain(
-      "hard:baseValidatedRed=false (no validated repro authority)",
-    )
-    expect(result.patch).toContain("FIX_")
-  })
+      expect(result.selectionTelemetry?.attempted).toBe(1)
+      expect(result.selectionTelemetry?.successfulGenerations).toBe(1)
+      expect(result.selectionTelemetry?.generationFailures).toBe(0)
+      expect(result.selectionTelemetry?.candidates).toHaveLength(1)
+      expect(result.selectionTelemetry?.candidates[0]?.admissible).toBe(true)
+      expect(result.selectionTelemetry?.candidates[0]?.reasons).not.toContain(
+        "hard:baseValidatedRed=false (no validated repro authority)",
+      )
+      expect(result.patch).toContain("FIX_")
+    }),
+  )
 })

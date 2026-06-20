@@ -108,6 +108,15 @@ describe("DEFAULT_POLICY.shouldRetry — terminal kinds (never retry)", () => {
     expect(decision).toBeUndefined()
   })
 
+  test("real-fail budget_exhausted ⇒ NO retry", () => {
+    const decision = DEFAULT_POLICY.shouldRetry(
+      { kind: "real-fail", subkind: "budget_exhausted" },
+      1,
+      3,
+    )
+    expect(decision).toBeUndefined()
+  })
+
   test("grader-invalid ⇒ NO retry (dataset authority issue)", () => {
     const decision = DEFAULT_POLICY.shouldRetry(
       { kind: "grader-invalid", reason: "gold sanity failed" },
@@ -274,6 +283,11 @@ describe("classifyOutcome — timeout", () => {
     const result = mkResult({ patch: "x", error: "aborted by signal" })
     expect(classifyOutcome(result)).toEqual({ kind: "timeout" })
   })
+
+  test("error contains generic 'aborted' ⇒ timeout", () => {
+    const result = mkResult({ patch: "", turns: 4, error: "agent aborted before verification" })
+    expect(classifyOutcome(result)).toEqual({ kind: "timeout" })
+  })
 })
 
 describe("classifyOutcome — infra-fail string patterns", () => {
@@ -308,6 +322,54 @@ describe("classifyOutcome — real-fail subkinds", () => {
     expect(classifyOutcome(result)).toEqual({
       kind: "real-fail",
       subkind: "max_turns_exhausted",
+    })
+  })
+
+  test("error 'agent exhausted token budget before verification' ⇒ real-fail / budget_exhausted", () => {
+    const result = mkResult({
+      patch: "x",
+      error: "agent exhausted token budget before verification",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "budget_exhausted",
+    })
+  })
+
+  test("budget no-patch breaker error stays budget_exhausted, not max_turns_exhausted", () => {
+    const result = mkResult({
+      patch: "",
+      turns: 9,
+      error: "no patch produced before token budget exhausted (no_patch_exhausted)",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "budget_exhausted",
+    })
+  })
+
+  test("max-turn no-patch breaker error stays max_turns_exhausted", () => {
+    const result = mkResult({
+      patch: "",
+      turns: 9,
+      error: "no patch produced before max turns exhausted (no_patch_exhausted)",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "max_turns_exhausted",
+    })
+  })
+
+  test("verify-select no-submittable-candidate stays completed_unresolved, not generation-fail", () => {
+    const result = mkResult({
+      patch: "",
+      turns: 9,
+      error:
+        "verify-select produced no submittable candidate (all candidates were empty or did not apply)",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "completed_unresolved",
     })
   })
 

@@ -144,6 +144,33 @@ describe("bench integration", () => {
     expect(result.patch).toContain("return a + b")
   })
 
+  test("runInstance awaits final verify before sandbox cleanup", async () => {
+    const repo = join(dir, "repo-verify-order")
+    mkdirSync(repo, { recursive: true })
+    writeFileSync(join(repo, "math.js"), "function add(a,b){return a-b}\nmodule.exports={add}\n")
+    const delayedVerifyCmd = [
+      "node -e",
+      `"setTimeout(() => {`,
+      " const fs=require('fs');",
+      " if (!fs.existsSync('./math.js')) process.exit(2);",
+      " const {add}=require('./math.js');",
+      " if (add(2,3)!==5) process.exit(1);",
+      " process.exit(0)",
+      ` }, 150)"`,
+    ].join(" ")
+    const instance: Instance = {
+      id: "verify-order",
+      repoPath: repo,
+      problemStatement: "Fix add() in math.js.",
+      testCmd: delayedVerifyCmd,
+    }
+    const llm = new FixingLLM("math.js", "return a-b", "return a+b")
+    const result = await runInstance(instance, { ...DEPS, llm })
+    expect(result.passed).toBe(true)
+    expect(result.error).toBeUndefined()
+    expect(result.patch).toContain("return a+b")
+  })
+
   test("runInstance with a do-nothing FakeLLM → passed:false", async () => {
     await writeSyntheticCorpus(dir)
     const corpus = await loadCorpus(dir)

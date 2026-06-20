@@ -35,6 +35,8 @@ export interface VerifyMatcher {
   readonly pattern: RegExp
 }
 
+const normalizeVerifyCommand = (cmd: string): string => cmd.trim().replace(/\s+/g, " ")
+
 /**
  * Leading command-position boundary: start-of-string, whitespace, or a shell
  * separator (`;`, `&`, `|`). Prevents a runner *name* from matching as a
@@ -109,6 +111,30 @@ export const matchVerifyCommand = (cmd: string): VerifyMatcher | null => {
 
 /** True iff `cmd` looks like a real test or reproduction invocation. */
 export const isTestLikeCommand = (cmd: string): boolean => matchVerifyCommand(cmd) !== null
+
+/** Bench/host-wired exact verifier authority. Unlike the ecosystem registry,
+ *  this is NOT heuristic recognition: the caller already knows the command is
+ *  authoritative (e.g. bench `instance.testCmd`) and wants an exact-string
+ *  allowance without widening generic shell noise into a verify signal. */
+export const matchesExactVerifyCommand = (
+  cmd: string,
+  exactCommands: readonly string[] | undefined,
+): boolean => {
+  if (exactCommands === undefined || exactCommands.length === 0) return false
+  const normalized = normalizeVerifyCommand(cmd)
+  if (normalized === "") return false
+  for (const candidate of exactCommands) {
+    if (normalizeVerifyCommand(candidate) === normalized) return true
+  }
+  return false
+}
+
+/** True iff `cmd` is either a recognized test/repro command OR an exact
+ *  caller-declared verifier authority command. */
+export const isVerifySignalCommand = (
+  cmd: string,
+  exactCommands: readonly string[] | undefined,
+): boolean => isTestLikeCommand(cmd) || matchesExactVerifyCommand(cmd, exactCommands)
 
 /**
  * Back-compat composed regex, DERIVED from {@link VERIFY_MATCHERS} (so the

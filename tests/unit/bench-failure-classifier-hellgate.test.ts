@@ -15,7 +15,7 @@
  *   - empty_patch precedence over dirty_cache_leak (empty wins, not both)
  *   - empty_patch + multi_file_drift cannot co-occur (empty patch has 0 files)
  *   - session_end with REASON not in {aborted,max_turns,completed} ⇒ completed_unresolved
- *   - session_end aborted with turns>0 ⇒ NOT hung_stream (only turns=0 is)
+ *   - session_end aborted with turns>0 ⇒ timeout (only turns=0 is hung_stream)
  *   - multiple session_end events ⇒ classifier picks the LAST one
  *   - patchPath that doesn't end in .patch ⇒ no trajectory read
  *   - aggregate idempotency under permutation of classifications
@@ -150,7 +150,7 @@ describe("hellgate — trajectory read robustness", () => {
 // ── D. session_end edges ───────────────────────────────────────────────────────
 
 describe("hellgate — session_end interpretation edges", () => {
-  test("session_end reason='aborted' + turns>0 ⇒ NOT hung_stream (completed_unresolved)", () => {
+  test("session_end reason='aborted' + turns>0 ⇒ timeout (only turns=0 is hung_stream)", () => {
     const jsonl = JSON.stringify({
       kind: "session_end",
       data: { reason: "aborted", turns: 5 },
@@ -160,7 +160,7 @@ describe("hellgate — session_end interpretation edges", () => {
       jsonl,
     )
     cleanups.push(cleanup)
-    expect(classify(result).termination).toBe("completed_unresolved")
+    expect(classify(result).termination).toBe("timeout")
   })
 
   test("session_end with UNKNOWN reason ⇒ completed_unresolved (covering partition)", () => {

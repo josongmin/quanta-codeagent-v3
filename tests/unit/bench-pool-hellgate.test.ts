@@ -13,16 +13,34 @@
  *
  * Everything routes through an injected SpawnFn ⇒ no real box / token / network.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
 import { detectRateLimit } from "../../src/apps/bench/remote/box-session"
 import { chunkBoxPaths, type PoolChunk, runPool } from "../../src/apps/bench/remote/pool"
+import { acquirePatchGenBudgetLease } from "../../src/apps/bench/remote/token-budget"
 
 const FULL_AUTH = JSON.stringify({
   access_token: "ACCESS-xyz",
   refresh_token: "REFRESH-super-secret",
   id_token: "IDTOK-secret",
   account_id: "acct-1",
+})
+
+const TOKEN_BUDGET_DIRS = new Set<string>()
+
+const allocTokenBudgetDir = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "bench-pool-budget-"))
+  TOKEN_BUDGET_DIRS.add(dir)
+  return dir
+}
+
+afterAll(() => {
+  for (const dir of TOKEN_BUDGET_DIRS) {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 interface Recorder {
@@ -108,6 +126,9 @@ const poolCfg = (spawn: SpawnFn, over: Record<string, unknown> = {}) => ({
   preset: "agentless-v2",
   model: "gpt-5.4",
   concurrency: 8,
+  tokenBudgetDir: allocTokenBudgetDir(),
+  tokenBudgetWaitMs: 5_000,
+  tokenBudgetPollMs: 10,
   authJsonProvider: () => FULL_AUTH,
   ...over,
 })
@@ -193,6 +214,109 @@ describe("runPool — persistent box, amortised bootstrap", () => {
           s.includes('"resolvedCount":1'),
       ),
     ).toBe(true)
+  })
+
+  test("global patch-gen budget caps concurrently active workers against the remaining tokens", async () => {
+    const tokenBudgetDir = allocTokenBudgetDir()
+    const held = await acquirePatchGenBudgetLease({
+      label: "other-run",
+      requestedUnits: 4,
+      dir: tokenBudgetDir,
+      waitMs: 1_000,
+      pollMs: 10,
+    })
+    try {
+      const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+      const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+      let launchIdx = -1
+      let launchedBenchRuns = 0
+      let releaseRunExit: (() => void) | undefined
+      const runExitGate = new Promise<void>((resolve) => {
+        releaseRunExit = resolve
+      })
+      const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
+        calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+        if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
+          launchedBenchRuns += 1
+          if (launchedBenchRuns >= 2) releaseRunExit?.()
+        }
+        const a = [...args]
+        if (a.includes("describe-security-groups")) return ok("sg-abc")
+        if (a.includes("run-instances")) {
+          launchIdx += 1
+          return ok(`i-box${launchIdx}`)
+        }
+        if (a.includes("describe-instances")) return ok("1.2.3.4")
+        if (a.includes("wait")) return ok("")
+        if (a.includes("terminate-instances")) return ok("")
+        if (cmd === "ssh") {
+          const remote = a[a.length - 1] ?? ""
+          if (remote.includes("READY")) return ok("READY")
+          if (remote.includes("setsid bash -c")) return ok("LAUNCHED")
+          if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ")) {
+            if (launchedBenchRuns < 2) await runExitGate
+            return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+          }
+          if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+          if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
+          const report = remote.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+          if (report) return ok(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
+          return ok("")
+        }
+        return ok("")
+      }
+      await runPool(
+        CHUNKS.slice(0, 2),
+        poolCfg(fn, {
+          workers: 2,
+          allowExtraWorkers: true,
+          allowExtraBoxes: true,
+          concurrency: 8,
+          tokenBudgetDir,
+        }),
+      )
+      const launchedConcurrency = calls
+        .filter((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run")))
+        .map((c) => Number(c.args.join(" ").match(/QUANTA_BENCH_CONCURRENCY=(\d+)/)?.[1] ?? "0"))
+        .sort((a, b) => a - b)
+      expect(launchedConcurrency).toEqual([4, 8])
+      const benchRuns = calls.filter(
+        (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run")),
+      )
+      expect(benchRuns.length).toBe(2)
+    } finally {
+      await held.release()
+    }
+  })
+
+  test("releases chunk-scoped budget BEFORE 429 backoff sleep", async () => {
+    const tokenBudgetDir = allocTokenBudgetDir()
+    const { fn } = mockSpawn({ rateLimited: new Set(["c1"]) })
+    let probeUnits = 0
+    await runPool(
+      [
+        { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+        { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+      ],
+      poolCfg(fn, {
+        concurrency: 16,
+        tokenBudgetDir,
+        backoffBaseMs: 50,
+        sleep: async () => {
+          const probe = await acquirePatchGenBudgetLease({
+            label: "sleep-probe",
+            requestedUnits: 16,
+            minUnits: 16,
+            dir: tokenBudgetDir,
+            waitMs: 100,
+            pollMs: 10,
+          })
+          probeUnits = probe.units
+          await probe.release()
+        },
+      }),
+    )
+    expect(probeUnits).toBe(16)
   })
 
   test("RCA jun-20: the long bench-run ssh carries keepalive (no-keepalive HANG regression)", async () => {
@@ -499,6 +623,14 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     await expect(runPool(CHUNKS, poolCfg(fn, { workers: 2 }))).rejects.toThrow(
       /explicit opt-in|allowExtraWorkers/i,
     )
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
+  test("workers > 1 still fail-closes when extra workers are allowed but extra boxes are not", async () => {
+    const { fn, calls } = mockSpawn({})
+    await expect(
+      runPool(CHUNKS, poolCfg(fn, { workers: 2, allowExtraWorkers: true })),
+    ).rejects.toThrow(/allowExtraBoxes|extra-box opt-in/i)
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
   })
 

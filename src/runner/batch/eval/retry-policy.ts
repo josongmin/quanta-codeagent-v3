@@ -6,7 +6,8 @@
  *     — it treats EVERY failure mode the same (LLM fail, infra crash, real
  *     model loss). For measurement integrity we want to:
  *       1. NEVER retry a REAL model failure (`completed_unresolved` /
- *          `verify_loop_stuck` / `max_turns_exhausted`) — that is signal,
+ *          `verify_loop_stuck` / `max_turns_exhausted` / `budget_exhausted`) —
+ *          that is signal,
  *          not noise.
  *       2. RETRY a transient infra signal (`empty-patch`, harness crash)
  *          once or twice to avoid scoring "OAuth blip" as a model fail.
@@ -61,7 +62,8 @@ import type { InstanceResult } from "../types"
  *                      that retries here.
  *   - `real-fail`    — agent produced a patch but the official verifier
  *                      rejected it (`completed_unresolved`), or the loop
- *                      stalled (`verify_loop_stuck`), or turns exhausted.
+ *                      stalled (`verify_loop_stuck`), or turns / token budget
+ *                      exhausted.
  *                      This is the MODEL'S SIGNAL — never retried.
  *   - `grader-invalid` — the selected verifier rejected the reference patch.
  *                      Terminal: the dataset item is not a fair measurement
@@ -85,7 +87,11 @@ export type AttemptOutcome =
   | { readonly kind: "timeout" }
   | {
       readonly kind: "real-fail"
-      readonly subkind: "completed_unresolved" | "verify_loop_stuck" | "max_turns_exhausted"
+      readonly subkind:
+        | "completed_unresolved"
+        | "verify_loop_stuck"
+        | "max_turns_exhausted"
+        | "budget_exhausted"
     }
   | { readonly kind: "infra-fail"; readonly reason: string }
 
@@ -148,12 +154,13 @@ export const DEFAULT_POLICY: RetryPolicy = {
  *   7. `error` matches /operation timed out|SIGTERM|aborted/i ⇒ timeout
  *   8. `error` matches /harness|spawn|EACCES|ENOENT/i  ⇒ infra-fail
  *   9. `error` matches /verify loop stuck|loop_stuck/i ⇒ real-fail / verify_loop_stuck
- *  10. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
- *  11. `patch === ""` AND turns > 0                    ⇒ real-fail / completed_unresolved
- *  12. `error` contains "empty prediction"             ⇒ empty-patch
- *  13. `error` contains "no patch produced"            ⇒ empty-patch
- *  14. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
- *  15. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
+ *  10. `error` matches /token budget exhausted/i       ⇒ real-fail / budget_exhausted
+ *  11. `error` matches /max turns|turns exhausted/i    ⇒ real-fail / max_turns_exhausted
+ *  12. `patch === ""` AND turns > 0                    ⇒ real-fail / completed_unresolved
+ *  13. `error` contains "empty prediction"             ⇒ empty-patch
+ *  14. `error` contains "no patch produced"            ⇒ empty-patch
+ *  15. `patch === ""`  AND  `error` non-empty          ⇒ empty-patch
+ *  16. otherwise (passed=false, has patch)             ⇒ real-fail / completed_unresolved
  *
  * The classifier is pure; the bench driver may call it AFTER `runInstance`
  * to decide whether to loop.
@@ -197,7 +204,7 @@ const classifyByErrorString = (err: string): AttemptOutcome | undefined => {
   ) {
     return { kind: "generation-fail", reason: err }
   }
-  if (/operation timed out|SIGTERM|aborted by signal|abortcontroller|abort signal/i.test(err)) {
+  if (/operation timed out|SIGTERM|\baborted\b|abortcontroller|abort signal/i.test(err)) {
     return { kind: "timeout" }
   }
   if (/\bharness\b|spawn\s+E|EACCES|ENOENT|EPERM|ECONNREFUSED|ENETUNREACH/i.test(err)) {
@@ -205,6 +212,9 @@ const classifyByErrorString = (err: string): AttemptOutcome | undefined => {
   }
   if (/verify[\s_-]loop[\s_-]stuck|loop_stuck/i.test(err)) {
     return { kind: "real-fail", subkind: "verify_loop_stuck" }
+  }
+  if (/token budget exhausted|exhausted token budget/i.test(err)) {
+    return { kind: "real-fail", subkind: "budget_exhausted" }
   }
   if (/max[\s_-]turns|turns[\s_-]exhausted/i.test(err)) {
     return { kind: "real-fail", subkind: "max_turns_exhausted" }

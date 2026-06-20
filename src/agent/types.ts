@@ -450,7 +450,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * outcome-gate of this shape; quanta's bench driver enables it for real
    * SWE-bench instances with `maxTrips:2`.
    */
-  verifyGuard?: { maxTrips?: number; mustPass?: boolean }
+  verifyGuard?: { maxTrips?: number; mustPass?: boolean; exactCommands?: readonly string[] }
   /**
    * Localize-phase guard (Agentless "localize-first" absorption — Tier 0
    * safety hardening). When set with a positive integer `phase1Turns`, the
@@ -2391,7 +2391,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
 /** Safety / guard knobs. Each member is default-OFF when absent. */
 export interface SafetyConfig {
   compactionBreaker?: CompactionBreakerOptions
-  verifyGuard?: { maxTrips?: number; mustPass?: boolean }
+  verifyGuard?: { maxTrips?: number; mustPass?: boolean; exactCommands?: readonly string[] }
   localizePhase?: LocalizePhaseConfig
   localizePhaseState?: LocalizePhaseState
   /** repro-doubt guard — see AgentConfig.reproDoubt / reproDoubtState. */

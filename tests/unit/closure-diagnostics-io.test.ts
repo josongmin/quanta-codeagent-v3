@@ -56,6 +56,24 @@ describe("closure-diagnostics-io", () => {
     expect(f.endReason).toBe("max_turns")
   })
 
+  test("buildFacts maps budget_exhausted empty patch to its own endReason", () => {
+    const r: InstanceResult = {
+      id: "nopatch-budget",
+      passed: false,
+      patch: "",
+      turns: 60,
+      budget: {
+        baseTimeoutMs: 1,
+        adaptedTimeoutMs: 1,
+        attempts: 1,
+        attemptOutcomes: [{ kind: "real-fail", subkind: "budget_exhausted" }],
+      },
+    }
+    const [f] = buildFacts([r])
+    expect(f.emptyPatch).toBe(true)
+    expect(f.endReason).toBe("budget_exhausted")
+  })
+
   test("buildFacts maps strict admission blocks to admission_blocked endReason", () => {
     const r: InstanceResult = {
       id: "strict-block",

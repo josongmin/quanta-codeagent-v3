@@ -54,5 +54,5 @@ export const noPatchExhaustedErrorOf = (args: {
   if ((args.editCount ?? 0) > 0) return undefined
   return args.stopReason === "max_turns"
     ? "no patch produced before max turns exhausted (no_patch_exhausted)"
-    : "no patch produced before turns exhausted (no_patch_exhausted)"
+    : "no patch produced before token budget exhausted (no_patch_exhausted)"
 }

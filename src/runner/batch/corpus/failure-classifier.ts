@@ -26,12 +26,14 @@ import { getCachePathRe } from "./cache-pathspecs"
 export type TerminationType =
   | "passed"
   | "admission_blocked"
+  | "budget_exhausted"
   | "generation_error"
   | "grader_invalid"
   | "harness_error"
   | "hung_stream"
   | "max_turns_exhausted"
   | "completed_unresolved"
+  | "timeout"
   | "unknown"
 
 /** Non-exclusive failure signals. Multiple may co-occur on one result. */
@@ -90,25 +92,42 @@ const lastSessionEnd = (events: TrajectoryEvent[]): TrajectoryEvent | undefined 
   return undefined
 }
 
-const computeTermination = (
-  r: InstanceResult,
-  events: TrajectoryEvent[] | null,
-): TerminationType => {
+const terminationWithoutTrajectory = (r: InstanceResult): TerminationType | null => {
   if (r.passed) return "passed"
   if (isPatchBudgetStrictAdmission(r.admissionBlock)) return "admission_blocked"
   if (r.verdict === "grader_invalid") return "grader_invalid"
   if (isGenerationError(r.error)) return "generation_error"
+  if (isTimeoutError(r.error)) return "timeout"
+  if (isBudgetExhaustedError(r.error)) return "budget_exhausted"
+  if (isMaxTurnsError(r.error)) return "max_turns_exhausted"
   if (isAgentNoPatch(r)) return "completed_unresolved"
   if (r.error !== undefined) return "harness_error"
   if (r.patch.trim() === "" && r.turns > 0) return "completed_unresolved"
-  if (events === null) return "unknown"
-  const end = lastSessionEnd(events)
-  if (!end?.data) return "unknown"
-  const reason = (end.data as { reason?: string }).reason
-  const turns = ((end.data as { turns?: number }).turns ?? r.turns) | 0
+  return null
+}
+
+const terminationFromSessionEnd = (reason: string | undefined, turns: number): TerminationType => {
   if (reason === "aborted" && turns === 0) return "hung_stream"
+  if (reason === "aborted") return "timeout"
+  if (reason === "budget_exhausted") return "budget_exhausted"
   if (reason === "max_turns") return "max_turns_exhausted"
   return "completed_unresolved"
+}
+
+const computeTermination = (
+  r: InstanceResult,
+  events: TrajectoryEvent[] | null,
+): TerminationType => {
+  const direct = terminationWithoutTrajectory(r)
+  if (events === null) return direct ?? "unknown"
+  const end = lastSessionEnd(events)
+  if (!end?.data) return direct ?? "unknown"
+  const reason = (end.data as { reason?: string }).reason
+  const turns = ((end.data as { turns?: number }).turns ?? r.turns) | 0
+  const fromEnd = terminationFromSessionEnd(reason, turns)
+  return direct === "completed_unresolved" && fromEnd !== "completed_unresolved"
+    ? fromEnd
+    : (direct ?? fromEnd)
 }
 
 const isGenerationError = (error: string | undefined): boolean =>
@@ -116,6 +135,16 @@ const isGenerationError = (error: string | undefined): boolean =>
   /agent stopped with (?:error|refusal)|LLM stream failed|usage_limit_reached|usage limit|rate[_ -]?limit|429 Too Many Requests/i.test(
     error,
   )
+
+const isTimeoutError = (error: string | undefined): boolean =>
+  error !== undefined &&
+  /operation timed out|SIGTERM|\baborted\b|abortcontroller|abort signal/i.test(error)
+
+const isBudgetExhaustedError = (error: string | undefined): boolean =>
+  error !== undefined && /token budget exhausted|exhausted token budget/i.test(error)
+
+const isMaxTurnsError = (error: string | undefined): boolean =>
+  error !== undefined && /max[\s_-]turns|turns[\s_-]exhausted/i.test(error)
 
 const isAgentNoPatch = (r: InstanceResult): boolean =>
   r.turns > 0 &&

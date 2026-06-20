@@ -80,6 +80,60 @@ describe("loadVerdicts — both report shapes", () => {
     expect(v.emptyPatch.has("django__django-2")).toBe(false)
   })
 
+  test("typed timeout stays errored, not emptyPatch", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      perInstance: [
+        {
+          id: "django__django-timeout",
+          passed: false,
+          turns: 7,
+          patchBytes: 0,
+          failure: { termination: "timeout", signals: ["empty_patch"] },
+        },
+      ],
+    })
+    expect(v.errored.has("django__django-timeout")).toBe(true)
+    expect(v.emptyPatch.has("django__django-timeout")).toBe(false)
+    expect(v.unresolved.has("django__django-timeout")).toBe(false)
+  })
+
+  test("typed hung_stream stays errored, not emptyPatch", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      perInstance: [
+        {
+          id: "django__django-hung",
+          passed: false,
+          turns: 0,
+          patchBytes: 0,
+          failure: { termination: "hung_stream", signals: ["empty_patch"] },
+        },
+      ],
+    })
+    expect(v.errored.has("django__django-hung")).toBe(true)
+    expect(v.emptyPatch.has("django__django-hung")).toBe(false)
+    expect(v.unresolved.has("django__django-hung")).toBe(false)
+  })
+
+  test("typed grader_invalid stays errored, not unresolved", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      perInstance: [
+        {
+          id: "django__django-grader",
+          passed: false,
+          turns: 0,
+          patchBytes: 12,
+          failure: { termination: "grader_invalid", signals: [] },
+        },
+      ],
+    })
+    expect(v.errored.has("django__django-grader")).toBe(true)
+    expect(v.emptyPatch.has("django__django-grader")).toBe(false)
+    expect(v.unresolved.has("django__django-grader")).toBe(false)
+  })
+
   test("harness report → correct four buckets", () => {
     const v = loadVerdicts(harnessReport)
     expect([...v.resolved]).toEqual(["django__django-1"])

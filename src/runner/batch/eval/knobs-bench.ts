@@ -226,9 +226,10 @@ export interface BenchPosture {
    * candidates SEQUENTIALLY (byte-identical). >1 requires isolated generate.
    */
   readonly verifySelectConcurrency: number | undefined
-  /** Sequential verify-select cost guard: stop after the first owner-scoped
-   *  candidate with a hard positive regression/resolved signal instead of
-   *  always burning all N. */
+  /** Sequential verify-select cost guard: stop after the first clean
+   *  owner-scoped candidate with explicit hard-positive regression/resolved
+   *  authority instead of always burning all N. Fail-open null gates never stop
+   *  early. */
   readonly verifySelectEarlyAccept: boolean
   /**
    * Verify-and-select regression hard-signal source. undefined preserves the

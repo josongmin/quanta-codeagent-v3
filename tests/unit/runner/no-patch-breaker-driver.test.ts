@@ -138,5 +138,13 @@ describe("no-patch breaker driver wiring", () => {
         editCount: 0,
       }),
     ).toBeUndefined()
+    expect(
+      noPatchExhaustedErrorOf({
+        enabled: true,
+        stopReason: "budget_exhausted",
+        patch: "",
+        editCount: 0,
+      }),
+    ).toBe("no patch produced before token budget exhausted (no_patch_exhausted)")
   })
 })

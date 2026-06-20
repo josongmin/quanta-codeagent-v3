@@ -114,7 +114,9 @@ const metricOf = (vals: ReadonlyArray<boolean | number | null | undefined>): Clo
 const classify = (f: ClosureRunFact): InstanceClass => {
   if (f.emptyPatch) {
     if (f.endReason === "admission_blocked") return "admission_blocked"
-    return f.endReason === "max_turns" ? "no_patch_exhausted" : "empty_patch_other"
+    return f.endReason === "max_turns" || f.endReason === "budget_exhausted"
+      ? "no_patch_exhausted"
+      : "empty_patch_other"
   }
   if (f.resolved === true) return "resolved"
   if (f.resolved === false) return "model_miss"

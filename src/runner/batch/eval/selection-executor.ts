@@ -269,17 +269,27 @@ export const ownerCoverageOf = (
 const fullyInsideOwners = (files: readonly string[], owners: ReadonlySet<string>): boolean =>
   owners.size === 0 || (files.length > 0 && files.every((f) => owners.has(f)))
 
-const earlyAcceptable = (entry: ScoredEntry, owners: ReadonlySet<string>): boolean => {
+const resolvedPositive = (resolved: { votes: number; k: number } | null): boolean =>
+  resolved !== null && resolved.k > 0 && resolved.votes >= resolved.k
+
+const earlyAcceptable = (
+  entry: ScoredEntry,
+  owners: ReadonlySet<string>,
+  requireHardResolved: boolean,
+): boolean => {
   if (!entry.verdict.admissible) return false
-  if (!entry.hard.patchProduced || entry.hard.applyClean === false) return false
+  // Early-stop authority is STRICTER than admissibility: fail-open `null` gates
+  // keep a candidate admissible, but they are not strong enough to stop the
+  // loop. The progressive shortcut requires an explicitly clean-applying patch.
+  if (!entry.hard.patchProduced || entry.hard.applyClean !== true) return false
   // Early-accept is a cost shortcut, not a license to bypass the selector's
   // diversity/owner-coverage authority. If closure owners are known, a positive
   // candidate may stop the loop only when every touched file is inside that owner
   // set; broad symptom+stray patches must still face later owner-seeded siblings.
   if (!fullyInsideOwners(entry.candidate.files, owners)) return false
-  if (entry.hard.regressionGreen === true) return true
   const resolved = entry.hard.patchedResolvedKofN
-  return resolved !== null && resolved.k > 0 && resolved.votes >= resolved.k
+  if (requireHardResolved) return resolvedPositive(resolved)
+  return resolvedPositive(resolved) || entry.hard.regressionGreen === true
 }
 
 const voterQuorumOf = (
@@ -287,6 +297,18 @@ const voterQuorumOf = (
   resolved: { votes: number; k: number } | null,
 ): number | null =>
   mode === "soft" && resolved !== null && resolved.k > 0 ? resolved.votes / resolved.k : null
+
+const terminalAuthorityRank = (candidate: Candidate): number => {
+  if (
+    candidate.stopReason === "max_turns" ||
+    candidate.stopReason === "budget_exhausted" ||
+    candidate.stopReason === "aborted"
+  ) {
+    return 2
+  }
+  if (candidate.stopReason === "error" || candidate.stopReason === "refusal") return 1
+  return 0
+}
 
 const minimalityOf = (args: {
   readonly isEmpty: boolean
@@ -297,6 +319,11 @@ const minimalityOf = (args: {
   if (args.isEmpty) return null
   return args.maxB === args.minB ? 1 : 1 - (args.size - args.minB) / (args.maxB - args.minB)
 }
+
+const requireHardResolvedForEarlyAccept = (
+  ports: SelectionPorts,
+  mode: ResolvedKofNMode | undefined,
+): boolean => ports.resolvedKofN !== undefined && (mode ?? "hard") === "hard"
 
 /**
  * Run the verify-and-select executor. Pure over the injected ports.
@@ -320,10 +347,11 @@ export const runSelection = async (args: {
    *  so total in-flight never exceeds this (the LLM-throttle ceiling guard). */
   concurrency?: number
   /** Progressive cost guard. Sequential-only: once a generated candidate is
-   *  admissible and has a hard positive regression/resolved signal, submit it
-   *  instead of burning the remaining candidate budget. Soft-only repro quorum
-   *  remains ranking credit and never becomes global stop authority. Default
-   *  false preserves N-best. */
+   *  admissible, clean-applying, owner-scoped, and has the configured hard
+   *  positive regression/resolved signal, submit it instead of burning the
+   *  remaining candidate budget. Fail-open `null` gates and soft-only repro
+   *  quorum remain ranking credit / keep-search signals, never global stop
+   *  authority. Default false preserves N-best. */
   earlyAccept?: boolean
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
@@ -364,6 +392,22 @@ export const runSelection = async (args: {
     return { candidate: c, hard, verdict: scoreCandidate(hard, soft) }
   }
 
+  const maybeFinalizeEarlyAccept = async (
+    rawCandidates: readonly Candidate[],
+    candidate: Candidate,
+  ): Promise<SelectionResult | null> => {
+    if (args.earlyAccept !== true) return null
+    const size = Buffer.byteLength(candidate.patch, "utf8")
+    const entry = await scoreOne(candidate, size, size)
+    return earlyAcceptable(
+      entry,
+      args.owners,
+      requireHardResolvedForEarlyAccept(args.ports, args.resolvedKofNMode),
+    )
+      ? await finalize(rawCandidates, true)
+      : null
+  }
+
   const finalize = async (
     rawCandidates: readonly Candidate[],
     earlyAccepted: boolean,
@@ -398,10 +442,18 @@ export const runSelection = async (args: {
       .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
     const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
-    const terminalCandidate =
-      winner === null
-        ? (scored.find((s) => s.candidate.id === selectBestEffort(ranked))?.candidate ?? null)
-        : null
+    let terminalCandidate: Candidate | null = null
+    if (winner === null) {
+      const bestTerminalRank = scored.reduce(
+        (best, entry) => Math.max(best, terminalAuthorityRank(entry.candidate)),
+        0,
+      )
+      const terminalPool = scored
+        .filter((entry) => terminalAuthorityRank(entry.candidate) === bestTerminalRank)
+        .map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict }))
+      const terminalId = selectBestEffort(terminalPool)
+      terminalCandidate = scored.find((s) => s.candidate.id === terminalId)?.candidate ?? null
+    }
     return {
       attempted: args.n,
       ownerFiles: [...args.owners],
@@ -425,11 +477,8 @@ export const runSelection = async (args: {
       const candidate = await tryGenerate(i)
       if (candidate === null) continue
       raw.push(candidate)
-      if (args.earlyAccept === true) {
-        const size = Buffer.byteLength(candidate.patch, "utf8")
-        const entry = await scoreOne(candidate, size, size)
-        if (earlyAcceptable(entry, args.owners)) return await finalize(raw, true)
-      }
+      const earlyAccepted = await maybeFinalizeEarlyAccept(raw, candidate)
+      if (earlyAccepted !== null) return earlyAccepted
     }
   } else {
     // Bounded-parallel: at most `limit` generate() calls in flight at once.

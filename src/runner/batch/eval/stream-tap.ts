@@ -16,7 +16,11 @@
  * bytes, so the default-OFF posture stays byte-identical.
  */
 import { relative, sep } from "node:path"
-import { isTestLikeCommand, isVerifyOutputFailing, mutatingToolKind } from "@/agent"
+import {
+  isVerifyOutputFailing,
+  isVerifySignalCommand,
+  mutatingToolKind,
+} from "@/agent"
 import type { AgentEvent, StreamPort } from "@/stream"
 
 /**
@@ -92,14 +96,19 @@ export class BenchStreamTap implements StreamPort {
   constructor(
     private readonly downstream: StreamPort,
     private readonly onVerifyPass?: (seq: number) => void,
+    private readonly verifyAuthorityCommands?: readonly string[],
   ) {}
   /** A verify tool_call — `test_runner`, or a `bash` whose command is test-like
-   *  (`isTestLikeCommand`, the SSOT verify-signal matcher the validator uses). */
+   *  OR exactly matches a caller-declared verifier authority command
+   *  (e.g. bench `instance.testCmd`). */
   private isVerifyCall(name: string, input: unknown): boolean {
     if (name === "test_runner") return true
     if (name === "bash" && typeof input === "object" && input !== null && "command" in input) {
       const cmd = (input as { command: unknown }).command
-      return typeof cmd === "string" && isTestLikeCommand(cmd)
+      return (
+        typeof cmd === "string" &&
+        isVerifySignalCommand(cmd, this.verifyAuthorityCommands)
+      )
     }
     return false
   }

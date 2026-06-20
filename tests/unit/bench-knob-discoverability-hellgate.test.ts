@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/style/noRestrictedImports: cross-registry declaration audit intentionally imports the real CLI registry; source-grep would weaken the SSOT assertion. */
 /**
  * BENCH knob discoverability hellgate.
  *
@@ -21,11 +22,7 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { CLI_KNOBS } from "@/apps/cli/cli-knobs"
 import { KNOB_INVENTORY } from "@/config/knob-inventory"
-import {
-  __restoreRegistry,
-  __snapshotRegistry,
-  allKnobs,
-} from "@/runner/knobs"
+import { __restoreRegistry, __snapshotRegistry, allKnobs } from "@/runner/knobs"
 import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
 import "@/runner/knobs/knobs"
 
@@ -58,6 +55,7 @@ describe("bench knob discoverability registries", () => {
 
     expect(runtimeConfigBacked).toContain("read-outline")
     expect(runtimeConfigBacked).toContain("test-runner")
+    expect(inventoryBacked).toContain("verify-select-early-accept")
     expect(inventoryBacked).toContain("verify-select-regression")
     expect(inventoryBacked).toContain("verify-select-repro")
   })

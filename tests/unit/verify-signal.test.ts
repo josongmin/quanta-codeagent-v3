@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+  isVerifySignalCommand,
   isTestLikeCommand,
+  matchesExactVerifyCommand,
   matchVerifyCommand,
   TEST_LIKE_RE,
   VERIFY_MATCHERS,
@@ -82,6 +84,20 @@ describe("verify-signal — isTestLikeCommand / matchVerifyCommand", () => {
   test("a runner name inside another word does not match (boundary)", () => {
     expect(isTestLikeCommand("ingest data")).toBe(false) // not 'jest'
     expect(isTestLikeCommand("digest the report")).toBe(false)
+  })
+
+  test("exact allowlist admits a repo-local verifier without widening the generic matcher", () => {
+    const cmd = `node -e "const {add}=require('./math.js'); if(add(2,3)!==5) process.exit(1)"`
+    expect(isTestLikeCommand(cmd)).toBe(false)
+    expect(matchesExactVerifyCommand(cmd, [cmd])).toBe(true)
+    expect(isVerifySignalCommand(cmd, [cmd])).toBe(true)
+  })
+
+  test("exact allowlist normalizes trivial whitespace drift", () => {
+    const authoritative = "node -e \"process.exit(0)\""
+    expect(matchesExactVerifyCommand(`  node   -e   "process.exit(0)"  `, [authoritative])).toBe(
+      true,
+    )
   })
 
   test("TEST_LIKE_RE (derived) agrees with isTestLikeCommand on every case", () => {

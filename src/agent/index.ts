@@ -428,8 +428,10 @@ export {
   type VerifyGuardState,
 } from "./verify-guard"
 export {
+  isVerifySignalCommand,
   isTestLikeCommand,
   isVerifyOutputFailing,
+  matchesExactVerifyCommand,
   matchVerifyCommand,
   TEST_LIKE_RE,
   VERIFY_MATCHERS,
