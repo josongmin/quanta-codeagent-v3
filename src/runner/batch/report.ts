@@ -169,21 +169,29 @@ const benchResultsDir = (): string | null => {
   return home ? `${home}/.quanta/bench/results` : null
 }
 
-/** Write the report as pretty JSON (trailing newline). Additionally mirrors the
- *  report into the canonical SSOT dir so results never scatter again — the
- *  mirror name is the sanitised source path, so re-runs to the same `--report`
- *  overwrite their own mirror (idempotent, no accumulation). Best-effort: a
- *  mirror failure never fails the run (the primary write already succeeded). */
-export const writeReport = async (file: string, report: BenchReport): Promise<void> => {
-  const json = `${JSON.stringify(report, null, 2)}\n`
-  await Bun.write(file, json)
+/** Mirror an already-written report's CONTENT into the canonical SSOT dir so
+ *  results never scatter again — independent of the caller-chosen `--report`
+ *  path. The mirror name is the sanitised source path, so re-runs to the same
+ *  destination overwrite their own mirror (idempotent, no accumulation).
+ *  Best-effort: a mirror failure never throws (the primary write already
+ *  succeeded). Shared by `writeReport` (local batch) and the full-remote
+ *  sidecar saver, so EVERY report path is covered by one canonical sink. */
+export const mirrorReportToSsot = async (sourceFile: string, content: string): Promise<void> => {
   const dir = benchResultsDir()
   if (!dir) return
   try {
     const { resolve } = await import("node:path")
-    const mirrorName = resolve(file).replace(/^[/\\]+/, "").replace(/[^a-zA-Z0-9._-]/g, "__")
-    await Bun.write(`${dir}/${mirrorName}`, json)
+    const mirrorName = resolve(sourceFile).replace(/^[/\\]+/, "").replace(/[^a-zA-Z0-9._-]/g, "__")
+    await Bun.write(`${dir}/${mirrorName}`, content)
   } catch {
-    // canonical mirror is best-effort — the caller's report.json already landed
+    // canonical mirror is best-effort — the source report already landed
   }
+}
+
+/** Write the report as pretty JSON (trailing newline) and mirror it to the
+ *  canonical SSOT dir (see {@link mirrorReportToSsot}). */
+export const writeReport = async (file: string, report: BenchReport): Promise<void> => {
+  const json = `${JSON.stringify(report, null, 2)}\n`
+  await Bun.write(file, json)
+  await mirrorReportToSsot(file, json)
 }

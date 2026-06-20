@@ -26,6 +26,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
+import { mirrorReportToSsot } from "@/runner/batch/report"
 import { errMessage } from "@/shared"
 import { loadVerdicts } from "../analyze/verdicts"
 import { benchHome } from "../corpus"
@@ -2064,6 +2065,9 @@ const fetchChunkArtifacts = async (args: {
     "[full-remote] report saved",
   )
   if (reportPath !== undefined) {
+    // Canonical SSOT mirror — same sink as the local batch's writeReport, so
+    // full-remote per-box reports also collect in one fixed place.
+    await mirrorReportToSsot(reportPath, fetchedReport.stdout)
     return {
       reportText: fetchedReport.stdout,
       reportPath,
