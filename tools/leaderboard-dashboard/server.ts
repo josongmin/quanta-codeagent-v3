@@ -29,6 +29,12 @@ const PORT = Number(argOf("--port") ?? 7878)
 // Extra roots can be added on the CLI: `--reports /some/dir --reports /other`.
 const REPORT_ROOTS = [
   ...argsOf("--reports"),
+  // Canonical SSOT sink — every bench report (local batch + full-remote per-box
+  // sidecars) mirrors here via mirrorReportToSsot, so a graded instance shows up
+  // live the moment its box fetches the report. Keep first so it always wins.
+  process.env.QUANTA_BENCH_RESULTS_DIR && process.env.QUANTA_BENCH_RESULTS_DIR !== "off"
+    ? process.env.QUANTA_BENCH_RESULTS_DIR
+    : join(HOME, ".quanta", "bench", "results"),
   join(HOME, "reprovote-ab"),
   join(HOME, "easy-more"),
   // The big trove: full-remote per-instance sidecars + work/runs reports.
