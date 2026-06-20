@@ -1486,3 +1486,39 @@ runs:
     turns: 60
     preset: agentless-v2
     model: gpt-5.4
+- run_id: sweep-fold-0911-2026-06-20
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2, prebaked AMI
+  scope: 'STRUCTURAL SWEEP fold — non-CEILING untried, cnt-desc, 1-box throttled.'
+  resolved_count: 4
+  resolved:
+  - instance_id: pydata__xarray-2905
+    repo: xarray
+    turns: 45
+  - instance_id: django__django-15022
+    repo: django
+    turns: 60
+  - instance_id: pydata__xarray-3095
+    repo: xarray
+    turns: 34
+  - instance_id: django__django-13964
+    repo: django
+    turns: 42
+
+- run_id: cov-harvest-2026-06-20g
+  date: '2026-06-20'
+  preset: agentless-v2
+  model: gpt-5.4
+  auth: chatgpt-oauth
+  grading: official swebench python harness, on-demand EC2
+  scope: 'Coverage sidecar harvest.'
+  resolved_count: 1
+  resolved:
+  - instance_id: scikit-learn__scikit-learn-14053
+    repo: scikit-learn
+    turns: 33
+    preset: agentless-v2
+    model: gpt-5.4
