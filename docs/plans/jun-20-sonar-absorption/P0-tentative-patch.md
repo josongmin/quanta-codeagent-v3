@@ -130,3 +130,27 @@ NOT yet done:
    path) — only the single-pass `runAgentPhase` is wired. Single-pass is the
    dominant path for the observed max_turns cases; repair-path is a follow-up
    (avoided more driver.ts edits during the parallel session).
+
+---
+
+## FINAL (2026-06-20) — COMPLETE, PROMOTED default-ON
+A/B on the 5 max_turns-prone set (`p0-maxturns-set.jsonl`), EC2 graded:
+- ON  (TENTATIVE=1): **2/5** ✅ django-13417, matplotlib-22719
+- OFF (TENTATIVE=0): **2/5** ✅ django-13417, matplotlib-22719  (IDENTICAL)
+→ **regression == 0** (ON==OFF, same instances).
+
+ENGAGEMENT (telemetry, real run): P0 fired on **pylint-4604** — recovered a
+verified-green 444B candidate over the 640B max_turns final. It still graded ❌
+because pylint-4604 is a 32-true-ceiling instance (sibling-miss, multi-file) —
+the recovered patch was itself incomplete. P0 did NOT hurt it (fails both ways);
+the set simply had no SOLVABLE max_turns-patch-loss case this run.
+
+VERDICT: pure safety-net, mechanism PROVEN to fire correctly, regression==0 →
+**promoted to default-ON** (driver.ts `!gateDisabled`, off-switch
+`QUANTA_BENCH_TENTATIVE=0`). It is insurance against the most-observed loss class
+(agent finds the fix, over-runs validation, max_turns with an empty/regressed
+final). Value will show on a SOLVABLE instance that loses its verified patch to
+exhaustion — not yet captured in a graded flip, but the lever cannot regress.
+
+Follow-ups (unchanged): repair-path wiring (`runRepairPhase`), then the
+reprovote-baseline A/B (P0 on top of `agentless-v2-reprovote`).

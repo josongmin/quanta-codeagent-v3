@@ -74,6 +74,44 @@ export interface SelectionResult {
   generated: number
 }
 
+/** Compact, JSON-friendly per-candidate view (NO full patch — too big for the
+ *  sidecar). The `reasons` carry the hard-gate rejections + soft signals from
+ *  {@link scoreCandidate}, so the cause-vs-symptom story is readable directly:
+ *  e.g. `{files:[blockmatrix.py], admissible:false, reasons:[hard:regressionGreen=false]}`
+ *  next to `{files:[matexpr.py], admissible:true, reasons:[soft:ownerCoverage=1]}`. */
+export interface CandidateTelemetry {
+  id: string
+  files: readonly string[]
+  admissible: boolean
+  score: number
+  reasons: readonly string[]
+}
+
+/** Eval-only selection telemetry — what the executor decided and WHY, so a
+ *  verify-select campaign self-diagnoses (which fix SITES the N candidates
+ *  spanned, which were admissible, which won). NEVER fed to the agent loop. */
+export interface SelectionTelemetry {
+  generated: number
+  admissibleCount: number
+  winnerId: string | null
+  candidates: readonly CandidateTelemetry[]
+}
+
+/** Project a {@link SelectionResult} into compact eval-only telemetry (drops the
+ *  full candidate patches; keeps files + verdict). Pure. */
+export const summarizeSelection = (result: SelectionResult): SelectionTelemetry => ({
+  generated: result.generated,
+  admissibleCount: result.admissibleCount,
+  winnerId: result.winner?.id ?? null,
+  candidates: result.scored.map((s) => ({
+    id: s.candidate.id,
+    files: s.candidate.files,
+    admissible: s.verdict.admissible,
+    score: s.verdict.score,
+    reasons: s.verdict.reasons,
+  })),
+})
+
 /** Normalize a diff to its `+++ b/` / `--- a/` FILE headers plus `+/-` CONTENT
  *  lines (dropping `@@` hunk-offset noise + context) so two patches dedup only
  *  when they make the SAME edit to the SAME file(s). Keeping the file headers is

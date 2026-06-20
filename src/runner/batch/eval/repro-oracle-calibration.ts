@@ -1,6 +1,14 @@
 /**
  * Repro-oracle gold calibration (verify-and-select — the false-NEGATIVE guard).
  *
+ * ⚠️ CLASSIFICATION — EVAL-ONLY DIAGNOSTIC, *not* a production solving capability.
+ * It needs the dataset GOLD patch as ground truth; live tasks have no gold, so this
+ * gate is inert outside the bench (returns `UNAVAILABLE`). Its job is to (a) MEASURE
+ * the repro oracle's per-instance false-negative rate and (b) stop a proven-broken
+ * oracle from DISCARDING a correct candidate on the leaderboard. It does NOT make
+ * quanta solve more real issues — it de-noises the bench score + tells you whether
+ * the production lever is "fix the oracle" vs "improve the agent".
+ *
  * ── The problem this measures + mitigates ────────────────────────────────────
  * The patched-resolved oracle (re-run the reproducing repro set on a candidate's
  * tree, majority-vote "Issue resolved") is the signal that decides "did this
@@ -21,6 +29,13 @@
  * resolved gate built on a `falseNegative` oracle MUST fail-open (never reject a
  * candidate on that oracle), and the per-instance `falseNegative` rate is the
  * direct readout of the oracle's correctness — the thing to drive down.
+ *
+ * ⚠️ ASYMMETRIC LIMITATION: failing open only stops the oracle from DISCARDING a
+ * correct candidate — it gives NO positive selection signal. With `resolvedKofN`
+ * nulled, selection degrades to the weak `minimality`+`ownerCoverage` soft scores,
+ * so the right candidate can still lose to a wrong sibling. "Don't discard the
+ * correct fix" ≠ "pick the correct fix". This guard removes a false-RED; it does
+ * NOT add a true-GREEN.
  *
  * ── Composition (zero coupling) ──────────────────────────────────────────────
  * The resolved-probe is INJECTED (`(sandbox) => {votes,k}|null`) — exactly the
@@ -63,22 +78,37 @@ export const calibrateReproOracle = async (args: {
   if (args.goldPatch === undefined || args.goldPatch.trim() === "") return UNAVAILABLE
   // Wrap the probe so a `null` verdict (no decisive repro outcome) is
   // distinguishable from "gold did not apply" (withCandidatePatch → null).
-  const wrapped = await withCandidatePatch({
-    sandbox: args.sandbox,
-    patch: args.goldPatch,
-    baseCommit: args.baseCommit,
-    timeoutMs: args.timeoutMs,
-    probe: async (sb) => {
-      try {
-        return { verdict: await args.resolvedProbe(sb) }
-      } catch {
-        return { verdict: null } // a thrown probe vouches for nothing on gold
-      }
-    },
-  })
+  // "Never throws" contract (adversarial audit jun-20): the probe's own try/catch
+  // only covers `resolvedProbe`. `withCandidatePatch` ITSELF can throw OUTSIDE it —
+  // `Bun.write` (ENOSPC / read-only sandbox on a giant goldPatch), the bash
+  // `Bun.spawn` (missing `bash`), or the `finally` resetToBase. Catch the whole
+  // materialize+probe so a thrown calibration degrades to UNAVAILABLE (no claim)
+  // instead of killing the instance with a harness-level error.
+  let wrapped: { verdict: { votes: number; k: number } | null } | null
+  try {
+    wrapped = await withCandidatePatch({
+      sandbox: args.sandbox,
+      patch: args.goldPatch,
+      baseCommit: args.baseCommit,
+      timeoutMs: args.timeoutMs,
+      probe: async (sb) => {
+        try {
+          return { verdict: await args.resolvedProbe(sb) }
+        } catch {
+          return { verdict: null } // a thrown probe vouches for nothing on gold
+        }
+      },
+    })
+  } catch {
+    return UNAVAILABLE // materialize/reset threw ⇒ no calibration claim
+  }
   if (wrapped === null) return UNAVAILABLE // gold did not materialize → no claim
   const verdict = wrapped.verdict
-  const goldCalibrated = verdict !== null && verdict.votes >= verdict.k
+  // `k >= 1` guard: a degenerate `{votes:0, k:0}` verdict must NOT read as
+  // calibrated (`0 >= 0`). The production probe guarantees `k >= 1` (vote.ts), but
+  // the injected-probe contract is type-only — defend it here so a `{0,0}` verdict
+  // can't false-positive into goldCalibrated.
+  const goldCalibrated = verdict !== null && verdict.k >= 1 && verdict.votes >= verdict.k
   return {
     goldCalibrated,
     // Gold applied but the oracle did not confirm resolution on a known-correct

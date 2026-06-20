@@ -1,0 +1,53 @@
+id: repro-oracle-gold-calibration
+title: repro-oracle gold calibration — EVAL-ONLY false-negative diagnostic
+section: 10
+subsystem: 벤치 — verify-and-select repro 오라클 보정 (측정도구)
+order: 2422
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, eval-only, diagnostic, not-production-capability]
+depends_on: [repro-test-slice, verify-select]
+config_refs:
+  env: [QUANTA_BENCH_VERIFY_SELECT]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-20"
+  evidence:
+    cli: "makeCalibratedReproConsensusPort wraps the resolvedKofN selection port"
+    web: "no browser affordance"
+purpose: >-
+  ⚠️ EVAL-ONLY DIAGNOSTIC, NOT a production solving capability (needs the dataset
+  GOLD patch as ground truth; live tasks have no gold ⇒ UNAVAILABLE/inert off-bench).
+  Calibrates the noisy patched-resolved oracle by running the SAME probe on the
+  gold-patched tree: if the probe says "not resolved" on the known-correct fix, the
+  oracle is a CONFIRMED false-negative for that instance and the resolved gate FAILS
+  OPEN (never rejects a candidate on it). Two jobs: (1) MEASURE the oracle's
+  per-instance false-negative rate (the jun-20 root-cause readout — 75–79% of misses
+  are "right place, fix unrecognized by oracle"); (2) de-noise the bench score so a
+  broken oracle can't discard a correct candidate before official grading.
+  ⚠️ ASYMMETRIC LIMITATION: fail-open removes a false-RED, it does NOT add a
+  true-GREEN — selection then degrades to weak minimality+ownerCoverage, so the
+  correct candidate may still lose to a wrong sibling. Does NOT cheat grading: the
+  final verdict is the independent official harness; fail-open only changes WHICH
+  candidate is submitted, never makes a wrong patch pass.
+evidence:
+  code:
+    - src/runner/batch/eval/repro-oracle-calibration.ts
+    - src/runner/batch/eval/driver.ts
+    - src/runner/batch/eval/rematerialize.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/repro-oracle-calibration.test.ts
+    integration:
+      - tests/unit/calibrated-repro-consensus-port.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null

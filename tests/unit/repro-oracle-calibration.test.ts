@@ -125,6 +125,52 @@ describe("calibrateReproOracle", () => {
     expect(c.falseNegative).toBe(true)
   })
 
+  // jun-20 audit MISSING-TEST: partial vote (0 < votes < k) — gold did apply +
+  // probe was decisive, but quorum NOT reached ⇒ confirmed false negative.
+  test("PARTIAL vote (votes=1, k=2) on gold ⇒ falseNegative", async () => {
+    const c = await calibrateReproOracle({
+      resolvedProbe: async () => ({ votes: 1, k: 2 }),
+      goldPatch: goldPatchAddingMarker(),
+      sandbox: repo,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+    })
+    expect(c.available).toBe(true)
+    expect(c.goldCalibrated).toBe(false)
+    expect(c.falseNegative).toBe(true)
+    expect(c.goldVotes).toBe(1)
+    expect(c.goldK).toBe(2)
+  })
+
+  // jun-20 audit SUSPECT→GUARD: a degenerate `{votes:0,k:0}` verdict must NOT read
+  // as calibrated via `0 >= 0`. The `k >= 1` guard forces falseNegative.
+  test("degenerate {votes:0,k:0} on gold ⇒ falseNegative (k>=1 guard, not 0>=0)", async () => {
+    const c = await calibrateReproOracle({
+      resolvedProbe: async () => ({ votes: 0, k: 0 }),
+      goldPatch: goldPatchAddingMarker(),
+      sandbox: repo,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+    })
+    expect(c.goldCalibrated).toBe(false) // 0>=0 must NOT calibrate
+    expect(c.falseNegative).toBe(true)
+  })
+
+  // jun-20 audit REAL-BUG fix: `withCandidatePatch` can throw OUTSIDE the probe's
+  // try/catch. A bogus (non-git, non-existent) sandbox exercises that path; the
+  // "Never throws" contract must hold ⇒ resolve to UNAVAILABLE, not reject.
+  test("non-git/absent sandbox ⇒ UNAVAILABLE, never throws", async () => {
+    const c = await calibrateReproOracle({
+      resolvedProbe: treeReadingProbe,
+      goldPatch: goldPatchAddingMarker(),
+      sandbox: join(tmpdir(), "calib-does-not-exist-xyz"),
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+    })
+    expect(c.available).toBe(false) // no claim
+    expect(c.falseNegative).toBe(false) // a materialize failure is NOT an oracle fault
+  })
+
   describe("UNAVAILABLE (no claim — never a false verdict)", () => {
     test("absent gold patch ⇒ available:false, no claim", async () => {
       const c = await calibrateReproOracle({

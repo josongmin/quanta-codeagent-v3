@@ -901,9 +901,10 @@ export const prepareReproTestDetailed = async (
   // instances, build a `uvx --with-editable . python <script>` argv keyed on the
   // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
   const reproRepo = instance.swebench?.repo
+  const reproVersion = instance.swebench?.version
   const buildArgv =
     reproRepo !== undefined
-      ? (scriptPath: string) => reproRunArgv(reproRepo, scriptPath)
+      ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
       : undefined
   let samples: Awaited<ReturnType<typeof executeReproTests>>
   try {
@@ -1547,6 +1548,7 @@ const reproExecBundle = (
   buildArgv?: (s: string) => readonly string[]
 } => {
   const repo = instance.swebench?.repo
+  const version = instance.swebench?.version
   return {
     exec: (argv, cwd, timeoutMs) =>
       execArgv(argv, cwd, timeoutMs, {
@@ -1556,7 +1558,7 @@ const reproExecBundle = (
       await Bun.write(p, c)
     },
     ...(repo !== undefined
-      ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, scriptPath) }
+      ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, version, scriptPath) }
       : {}),
   }
 }
@@ -1617,20 +1619,27 @@ const CALIBRATION_UNAVAILABLE: ReproOracleCalibration = {
 }
 
 /**
- * SOTA++ — the GOLD-CALIBRATED repro-consensus selection port. Same selection
- * signal as {@link makeReproConsensusSelectionPort}, but FIRST calibrates the
- * consensus oracle against the gold patch ({@link calibrateReproOracle}): if the
- * oracle is a CONFIRMED false negative (says "not resolved" on the known-correct
- * gold fix), the returned port FAILS OPEN (always `null`) so a proven-unreliable
- * oracle can never REJECT a correct candidate — the convergent root-cause
- * (jun-20: ~75–79% of misses are "right place, fix unrecognized by the oracle").
- * Returns the calibration alongside for eval-only telemetry so a campaign
+ * EVAL-ONLY DIAGNOSTIC — the GOLD-CALIBRATED repro-consensus selection port (NOT a
+ * production solving capability; gold is absent on live tasks ⇒ inert off-bench).
+ * Same selection signal as {@link makeReproConsensusSelectionPort}, but FIRST
+ * calibrates the consensus oracle against the gold patch ({@link calibrateReproOracle}):
+ * if the oracle is a CONFIRMED false negative (says "not resolved" on the
+ * known-correct gold fix), the returned port FAILS OPEN (always `null`) so a
+ * proven-unreliable oracle can never REJECT a correct candidate — the convergent
+ * root-cause (jun-20: ~75–79% of misses are "right place, fix unrecognized by the
+ * oracle"). Returns the calibration alongside for eval-only telemetry so a campaign
  * self-measures the false-negative rate with no extra runs.
  *
- * EVAL-ONLY: the gold patch is the dataset reference, the same boundary the
- * closure oracle's gold files use — never handed to the agent loop. The
- * calibration mutates the sandbox (reset → gold → reset, via withCandidatePatch)
- * but leaves it at base, so it MUST run before the candidate-generation loop.
+ * ⚠️ ASYMMETRIC: fail-open removes a false-RED, it does NOT add a true-GREEN — with
+ * `resolvedKofN` nulled, selection degrades to the weak minimality+ownerCoverage
+ * signals, so the correct candidate may still lose to a wrong sibling. This guard
+ * stops the oracle DISCARDING a correct fix; it does not PICK one.
+ *
+ * EVAL-ONLY boundary: the gold patch is the dataset reference, the same boundary the
+ * closure oracle's gold files use — never handed to the agent loop (audit-verified:
+ * no `goldPatch` reaches `src/agent`). The calibration mutates the sandbox
+ * (reset → gold → reset, via withCandidatePatch) but leaves it at base, so it MUST
+ * run before the candidate-generation loop.
  */
 export const makeCalibratedReproConsensusPort = async (
   instance: Instance,

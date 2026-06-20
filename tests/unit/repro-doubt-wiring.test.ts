@@ -11,8 +11,10 @@ import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import { createReproDoubtState, REPRO_DOUBT_STEER } from "@/agent/repro-doubt-guard"
-import type { PermissionContext, Tool, ToolEvent, ToolUseBlock } from "@/tool"
+import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
+import type { PermissionContext } from "@/permission"
+import type { ToolUseBlock } from "@/llm"
 import { z } from "zod"
 
 const tool = (name: string, readOnly: boolean): Tool => ({
@@ -54,11 +56,12 @@ describe("repro-doubt wiring (dispatchTool chokepoint)", () => {
   test("ENGAGES: steer injected on the 3rd test re-run after an edit (stuckRuns=3)", async () => {
     const cfg = mkConfig({ reproDoubt: { stuckRuns: 3 }, reproDoubtState: createReproDoubtState() })
     const p = await previews(cfg, ["edit", "bash", "bash", "bash"])
-    expect(p[0].includes(REPRO_DOUBT_STEER)).toBe(false) // edit
-    expect(p[1].includes(REPRO_DOUBT_STEER)).toBe(false) // run 1
-    expect(p[2].includes(REPRO_DOUBT_STEER)).toBe(false) // run 2
-    expect(p[3].includes(REPRO_DOUBT_STEER)).toBe(true) // run 3 → trips
-    expect(p[3].includes("bash ran")).toBe(true) // and the real tool output survives
+    const has = (i: number): boolean => (p[i] ?? "").includes(REPRO_DOUBT_STEER)
+    expect(has(0)).toBe(false) // edit
+    expect(has(1)).toBe(false) // run 1
+    expect(has(2)).toBe(false) // run 2
+    expect(has(3)).toBe(true) // run 3 → trips
+    expect((p[3] ?? "").includes("bash ran")).toBe(true) // and the real tool output survives
   })
 
   test("DEFAULT-OFF byte-identical: no steer when reproDoubt unset", async () => {

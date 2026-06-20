@@ -553,8 +553,19 @@ export async function* streamResponsesSurface(
       ...(config.input.onChunk !== undefined ? { onChunk: config.input.onChunk } : {}),
     })
 
+    // jun-20 throttle-swallow fix — track whether ANY content event was yielded
+    // (a `for await` instead of `yield*` so we observe the stream, not just relay
+    // it). The prepare/continuation event was already yielded above (line ~447);
+    // this counts CONTENT (text/tool/reasoning/completion) events only.
+    let sawContentEvent = false
+    // jun-20 audit fix — capture the TERMINAL stop_reason. A swallowed-throttle
+    // empty stream terminates via the normal end (`stop_reason:"end_turn"`,
+    // openai-responses-wire.ts:750); an INTENTIONAL early terminator
+    // (`response.incomplete` → content_filter / max_tokens / error) carries a
+    // DIFFERENT stop_reason and must NOT be reclassified as a retryable throttle.
+    let terminalStopReason: string | undefined
     try {
-      yield* parseResponsesEvents(guardedFrames, {
+      for await (const ev of parseResponsesEvents(guardedFrames, {
         provider: config.provider,
         fallbackModel: config.model,
         // H15 — pass the capture gate THROUGH to the wire. Default-OFF ⇒ omitted
@@ -588,12 +599,49 @@ export async function* streamResponsesSurface(
         onReasoning: () => {
           resumable = false
         },
-      })
+      })) {
+        // `message_stop` is the synthetic stream-terminator the parser emits even
+        // for a 0-content stream — it is NOT content. Only a real content event
+        // (text / tool_call / thinking / …) marks the turn as non-empty, so the
+        // empty/truncated-throttle guard below fires on a prepare+stop-only stream.
+        // We also remember its stop_reason so an intentional non-end_turn terminator
+        // (content_filter / max_tokens) is excluded from the throttle reclassification.
+        if (ev.type === "message_stop") terminalStopReason = ev.stop_reason
+        else sawContentEvent = true
+        yield ev
+      }
     } catch (error) {
       if (config.continuationStore !== undefined && prepared.routeKey !== undefined) {
         config.continuationStore.clear(prepared.routeKey)
       }
       throw error
+    }
+
+    // jun-20 (overnight RCA) — STRUCTURAL throttle-swallow fix. A 200 response
+    // that streams ZERO content events and never sends `response.completed` is
+    // NOT a valid empty turn: under OAuth load the endpoint accepts the request
+    // then closes the stream in ~220ms with nothing (a silently-swallowed
+    // throttle). Pre-fix this returned normally → the agent loop saw a completed-
+    // empty turn and immediately fired the NEXT request into the same throttle
+    // window (measured 2026-06-20: ~12 prepare-only calls in 10s, NO backoff →
+    // burned turns → empty patch on ~8 instances). Reclassify as a RETRYABLE
+    // `rate_limit` so the loop's exponential-jitter backoff (src/agent/retry.ts,
+    // RETRYABLE_KINDS) actually spaces the retries out. Guarded on
+    // `!sawContentEvent` so a PARTIAL stream (content then drop) is untouched —
+    // only the truly-empty prepare-only case throws. Aborts already threw above.
+    if (
+      !sawContentEvent &&
+      (completed as ResponsesCompletionMeta | null) === null &&
+      (terminalStopReason === "end_turn" || terminalStopReason === undefined)
+    ) {
+      if (config.continuationStore !== undefined && prepared.routeKey !== undefined) {
+        config.continuationStore.clear(prepared.routeKey)
+      }
+      throw new LLMError(
+        `${config.provider} responses stream produced no content and no completion event ` +
+          `(empty/truncated stream — likely transport throttle); retrying with backoff`,
+        { kind: "rate_limit", provider: config.provider },
+      )
     }
 
     // H15 — persist this turn's captured reasoning for the NEXT turn's re-emit.

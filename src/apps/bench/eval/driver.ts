@@ -53,7 +53,7 @@ import { type Candidate, runSelection } from "@/runner/batch/eval/selection-exec
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
-import { errMessage, gateOn } from "@/shared"
+import { errMessage, gateDisabled, gateOn } from "@/shared"
 import type {
   BenchReproTestTelemetry,
   Instance,
@@ -373,8 +373,14 @@ const runAgentPhase = async (
   // verified-green snapshot instead of the empty/regressed final tree. Snapshots
   // run on a serialized best-effort chain (never throw past the run). OFF (or
   // non-swebench) ⇒ no `onVerifyPass` wired ⇒ tap + patch byte-identical.
+  // DEFAULT-ON (2026-06-20): pure safety-net — A/B on the 5 max_turns-prone set
+  // showed ON==OFF (2/5 each, identical instances) ⇒ regression==0, and the
+  // mechanism is proven to fire correctly in a real run (pylint-4604 recovered a
+  // verified 444B candidate over a 640B max_turns final). Per the safety-net
+  // rule it ships ON the moment regression==0 is confirmed. Off-switch
+  // `QUANTA_BENCH_TENTATIVE=0`. Single-pass path only (repair-path is a follow-up).
   const tentativeOn =
-    instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_TENTATIVE")
+    instance.swebench !== undefined && !gateDisabled(process.env, "QUANTA_BENCH_TENTATIVE")
   const recorder = createTentativeRecorder()
   let snapChain: Promise<void> = Promise.resolve()
   const onVerifyPass = tentativeOn

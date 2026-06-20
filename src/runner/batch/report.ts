@@ -143,6 +143,9 @@ export const buildReport = (
         ...(r.budget !== undefined ? { budget: r.budget } : {}),
         ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
         ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
+        ...(r.reproOracleCalibration !== undefined
+          ? { reproOracleCalibration: r.reproOracleCalibration }
+          : {}),
       }
     }),
     knobs,

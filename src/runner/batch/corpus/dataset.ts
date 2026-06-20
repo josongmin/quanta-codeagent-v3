@@ -17,6 +17,7 @@
  * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
  */
 import type { Instance } from "../types"
+import { pythonForRepoVersion } from "./repo-version-python"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
 export interface SwebenchTask {
@@ -202,19 +203,6 @@ export const prepareTaskRepo = async (
  * tests in the sandbox; ImportError/test failure surfaces correctly.
  */
 /** Python version per repo for the SWE-bench Verified light-tier set we
- *  measure against. SWE-bench Verified instances on these repos all run cleanly
- *  on Python 3.9 (older codebases rely on `collections.Mapping` etc. removed
- *  in 3.10+). Unknown repos fall back to 3.10 (safer for modern code). */
-const PYTHON_FOR_REPO: Readonly<Record<string, string>> = {
-  "psf/requests": "3.9",
-  "pallets/flask": "3.9",
-  "pylint-dev/pylint": "3.9",
-  "pytest-dev/pytest": "3.9",
-  "sympy/sympy": "3.9",
-  "sphinx-doc/sphinx": "3.9",
-  "django/django": "3.9",
-}
-
 /**
  * Build the argv to run a repro script under the SAME project env the synthesized
  * `testCmd` uses. A bare `python3 <script>` on the box host cannot `import` the
@@ -225,9 +213,17 @@ const PYTHON_FOR_REPO: Readonly<Record<string, string>> = {
  * (from the sandbox cwd's setup.py/pyproject) + resolves transitive deps; the
  * first sample pays the build, the rest hit uv's cache. `repo === ""` (non-
  * SWE-bench fixtures) ⇒ caller should NOT use this (bare python3 is correct).
+ *
+ * `version` selects the CPython minor via {@link pythonForRepoVersion} (RCA
+ * jun-20: a static per-repo python forced django 5.0 onto 3.9 → `No solution
+ * found`, and old scikit-learn onto 3.10 → numpy build fail; ~13% of repros).
  */
-export const reproRunArgv = (repo: string, scriptPath: string): readonly string[] => {
-  const py = PYTHON_FOR_REPO[repo] ?? "3.10"
+export const reproRunArgv = (
+  repo: string,
+  version: string | undefined,
+  scriptPath: string,
+): readonly string[] => {
+  const py = pythonForRepoVersion(repo, version)
   return ["uvx", "--quiet", "--python", py, "--with-editable", ".", "python", scriptPath]
 }
 
@@ -270,7 +266,8 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   // First call per (python ver, repo, base commit) pays the build cost;
   // subsequent calls hit uv's cache (~ms).
   const repo = typeof raw.repo === "string" ? raw.repo : ""
-  const py = PYTHON_FOR_REPO[repo] ?? "3.10"
+  const version = typeof raw.version === "string" ? raw.version : undefined
+  const py = pythonForRepoVersion(repo, version)
   return `uvx --quiet --python ${py} --with pytest --with-editable . pytest -x --no-header ${parts.join(" ")}`
 }
 
@@ -298,6 +295,7 @@ export const parseTestNameList = (
 export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
   const goldPatch = str(task.raw.patch)
   const passToPass = parseTestNameList(task.raw, "PASS_TO_PASS")
+  const version = typeof task.raw.version === "string" ? task.raw.version : undefined
   return {
     id: task.instanceId,
     repoPath,
@@ -308,6 +306,7 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
       instanceId: task.instanceId,
       repo: task.repo,
       baseCommit: task.baseCommit,
+      ...(version !== undefined ? { version } : {}),
       ...(task.environmentSetupCommit !== undefined
         ? { environmentSetupCommit: task.environmentSetupCommit }
         : {}),

@@ -11,3 +11,15 @@ matplotlib__matplotlib-24570
 django__django-11815
 sympy__sympy-23950
 django__django-15382
+django__django-13449
+django__django-12039
+matplotlib__matplotlib-26291
+astropy__astropy-13453
+pydata__xarray-6744
+django__django-15128
+pytest-dev__pytest-7490
+django__django-16661
+django__django-15161
+sympy__sympy-13878
+sympy__sympy-15875
+django__django-11333

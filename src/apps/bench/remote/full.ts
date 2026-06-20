@@ -399,14 +399,27 @@ export const createFullRemoteBackend = (
   // Patch-gen concurrency on the remote box (c7i.8xlarge = 32 vCPU). Default 6 —
   // the binding limit is the shared gpt-5.4 login rate, not box CPU. Serial
   // (the prior implicit default) ran ~10 min/instance and risked the TTL on a
-  // 12+ instance run. Overridable via QUANTA_FULL_REMOTE_CONCURRENCY; clamped to
-  // [1, 16]. Forwarded to the remote `bench run` via QUANTA_BENCH_CONCURRENCY.
+  // 12+ instance run. Override via QUANTA_FULL_REMOTE_CONCURRENCY OR the alias
+  // QUANTA_BENCH_CONCURRENCY (the natural name — jun-20: setting only the latter
+  // silently ran conc=6 because full.ts CLOBBERS it on the box, causing a 6-box
+  // ×6 = 36-loop OAuth throttle burst that confounded a whole overnight run). The
+  // box concurrency × box count is what hits the shared token, so honor either
+  // name. Clamped [1,16]. Forwarded to the box `bench run` via QUANTA_BENCH_CONCURRENCY.
   const concurrency = Math.max(
     1,
-    Math.min(16, Math.trunc(Number(process.env.QUANTA_FULL_REMOTE_CONCURRENCY)) || 6),
+    Math.min(
+      16,
+      Math.trunc(
+        Number(process.env.QUANTA_FULL_REMOTE_CONCURRENCY ?? process.env.QUANTA_BENCH_CONCURRENCY),
+      ) || 6,
+    ),
   )
   const keep = cfg.keep ?? false
   const log = cfg.onLog ?? (() => {})
+  // Make the EFFECTIVE box concurrency observable up-front (the jun-20 confound
+  // was invisible because only the box-side echoed it). With N boxes this is the
+  // per-box loop count whose product hits the shared login rate.
+  log(`[full-remote] patch-gen concurrency=${concurrency} per box (override: QUANTA_FULL_REMOTE_CONCURRENCY | QUANTA_BENCH_CONCURRENCY)`)
 
   const sgName = cfg.sgName ?? D.sgName
   const vpcId = cfg.vpcId ?? D.vpcId

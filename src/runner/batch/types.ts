@@ -20,6 +20,12 @@ export interface SwebenchMeta {
   baseCommit: string
   /** Commit whose env defines the test toolchain (optional upstream). */
   environmentSetupCommit?: string
+  /** SWE-bench `version` (e.g. django "5.0", scikit-learn "0.20"). Selects the
+   *  CPython minor for the per-instance repro/test env via
+   *  {@link pythonForRepoVersion} — a single static per-repo python is WRONG
+   *  because one repo spans versions needing different pythons (RCA jun-20).
+   *  Absent ⇒ the per-repo high fallback is used. */
+  version?: string
   /** EVAL-ONLY — the official PASS_TO_PASS regression set (tests that already
    *  pass on the buggy tree and must keep passing). Threaded for the
    *  verify-and-select regression oracle (TB): the bench adapter supplies these

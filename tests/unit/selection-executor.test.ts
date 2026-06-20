@@ -4,6 +4,7 @@ import {
   ownerCoverageOf,
   runSelection,
   type SelectionPorts,
+  summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
 
 const cand = (over: Partial<Candidate> & { id: string }): Candidate => ({
@@ -243,6 +244,30 @@ describe("runSelection", () => {
     })
     expect(r.generated).toBe(2) // cand-0/cand-2 dedup to one
     expect(r.scored.map((s) => s.candidate.id)).toEqual(["cand-0", "cand-1"]) // cand-0 kept, index order
+  })
+
+  it("summarizeSelection: compact eval-only telemetry (files + verdict, NO patch) for diagnosis", async () => {
+    // the cause-vs-symptom diagnostic: which sites the candidates spanned + who won.
+    const { gen } = genFrom([
+      cand({ id: "cand-0", files: ["blockmatrix.py"], patch: "+++ b/blockmatrix.py\n+sym" }),
+      cand({ id: "cand-1", files: ["matexpr.py"], patch: "+++ b/matexpr.py\n+root" }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, "Focus on matexpr.py"],
+      owners: new Set(["matexpr.py"]),
+      ports: { generate: gen },
+    })
+    const t = summarizeSelection(r)
+    expect(t.generated).toBe(2)
+    expect(t.winnerId).toBe("cand-1") // owner-coverage winner
+    expect(t.candidates.map((c) => c.id)).toEqual(["cand-0", "cand-1"])
+    expect(t.candidates[0]?.files).toEqual(["blockmatrix.py"])
+    expect(t.candidates[1]?.files).toEqual(["matexpr.py"])
+    // no full patch leaked into telemetry
+    expect(JSON.stringify(t)).not.toContain("+++")
+    // reasons carry the WHY (soft signals fired for the admissible winner)
+    expect(t.candidates[1]?.reasons.some((x) => x.startsWith("soft:ownerCoverage"))).toBe(true)
   })
 
   it("empty (no-patch) candidate is inadmissible (applyClean=false)", async () => {

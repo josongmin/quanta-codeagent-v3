@@ -7,8 +7,8 @@
 
 **기존 "RIGHT-FILE-WRONG-FIX 9 · WRONG-FILE 2 · EMPTY 1 → 병목=fix 정확성(localize 아님)"은 근거가 diff-추측이라 약했고 부분적으로만 맞다.** closure-diagnostics(`bench/full-remote/closure-i-{0caa…,0cd6…,030515…}.json`)로 확정:
 
-- **owner localize는 이미 ~92% 해결** — `owner_recall@1` 0.85~1.0, `first_edit_owner_match` 0.92~1.0, `stray_file_rate` 0 (3 wave). → 이 set엔 localize 추가투자 헤드룸 거의 없음. STRATEGY.md의 P0/P1(빈도 기준 최우선)은 이 회복가능 set에선 적용 안 됨(헤드룸은 P2/P3).
-- **지배 실패 = `model_miss`** = 올바른 파일·owner 찍고 repro RED까지 띄운 뒤 **패치가 틀림**. `repro_red_but_unresolved_rate` = 0.18~0.33 (= closure-repair가 net-negative였던 원인인 repro-oracle false-negative 시그니처).
+- **owner localize는 이미 ~92% 해결** — `owner_recall@1` 0.85~1.0, `first_edit_owner_match` 0.92~1.0, `stray_file_rate` 0 (3 wave, agentless-v2). 이 수치는 **신뢰가능** — v2는 repro-leak 0/13이라 patchFiles[0]=진짜 gold파일(M0-reprovote의 0.27 폭락은 leak artifact, §M0 참조). → 이 set엔 localize 추가투자 헤드룸 거의 없음. STRATEGY.md의 P0/P1(빈도 기준 최우선)은 이 회복가능 set에선 적용 안 됨(헤드룸은 P2/P3).
+- **지배 실패 = `model_miss`** = 올바른 파일·owner 찍고 repro RED까지 띄운 뒤 **패치가 틀림**. `repro_red_but_unresolved_rate` = 0.18~0.33 = 재현 RED인데 미해결 = **순수 fix-synthesis 실패** (agentless-v2엔 closure-repair 게이트 OFF라 oracle false-neg를 낼 주체 자체가 없음 — "oracle false-neg 시그니처"로 읽으면 오독). gold-hit 교차검증이 localize 맞음을 받쳐줌(§잔여타겟 근거).
 - 정확한 3분류: **file-level localize 성공 후 owner/fix 실패 9 + owner/file localize 실패 3(wrong-file 2 + empty 1) + grader-validity 별도 1(sphinx-9711)**.
 
 ### closure 실측 (per-instance)
@@ -96,7 +96,8 @@ reprovote = `agentless-v2` + `closure-repair:3` + `repro-vote:1`. 이게 false-n
 
 ## M0 결과 — reprovote 12-case 재런 (2026-06-20, `closure-i-09d2d976ae56b6f9f`)
 
-`--preset agentless-v2-reprovote` + trajectory, 12-case. **이전 agentless-v2에서 0/12 → reprovote 5/11 resolved**(sphinx-9711 grader_invalid 제외). engage 결정적.
+`--preset agentless-v2-reprovote` + trajectory, 12-case. **이전 agentless-v2 0/11 → reprovote 5/11 resolved** (sphinx-9711은 양쪽 다 grader_invalid라 분모서 제외 — apples-to-apples). engage 결정적.
+> PASS 5건 신뢰성: 동시채점 false-neg는 pass→fail 방향만 만들지 fail→pass는 못 만듦 + 5건 모두 gold-file 편집 확인 → 진짜 해결. (그래서 starve된 M0b 재채점은 verdict 신뢰엔 불필요; leak-strip 후 metric 복원 확인용으로만 가치.)
 
 ### reprovote는 engage한다 (theater/churn 아님)
 - `gate_enter_rate=1.0`·`gate_bypass_rate=0` (지난 run 전부 null이던 게 채워짐 = 게이트 100% 발화)
@@ -107,23 +108,26 @@ reprovote = `agentless-v2` + `closure-repair:3` + `repro-vote:1`. 이게 false-n
 ### 🔴 신규 버그 — `__repro_*.py` leak (= `multi_file_drift`의 정체)
 repair/verify loop가 디스크에 쓴 재현 스크립트가 **model_patch에 새 파일로 샌다**(patch-hygiene:1 ON인데 strip 안 함). 실측:
 - 12039 PASS = 18파일 중 **16개 `__repro_*.py`** + gold(ddl_references.py)✅ + indexes.py stray. 13128=20 repro leak, 12965=16, 14017=12.
-- ⟹ `owner_recall@1` 0.92→**0.27 폭락은 artifact**: repro 파일이 file 목록 오염 → first-edit=repro파일 → ownerHit=False (resolved인데도). 실제 gold-file hit는 graded 전부 ✅(14351 제외).
+- ⟹ `owner_recall@1` 0.92→**0.27 폭락은 artifact** (코드검증 [closure-diagnostics.ts:136,156](src/runner/batch/eval/closure-diagnostics.ts#L136): `ownerHit = gold.has(patchFiles[0])`, recall@1도 첫 patch파일 — `__repro_*`가 diff 알파벳순 `django/`보다 앞(`_`=0x5F<`d`)이라 patchFiles[0]=repro→False). resolved인데 ownerHit=False. 실제 gold-file 편집은 graded 11중 **9개 ✅**(14351=wrong-file, 13121=empty 제외).
+- ⚠️ **별개 메트릭 주의**: `first_edit_owner_match`는 patch 아닌 **stream-tap(첫 edit)** 기반([:137](src/runner/batch/eval/closure-diagnostics.ts#L137))이라 leak 무관 → M0서 1.0 (n=3, denom 작음). owner를 "패치 첫 파일"과 "첫 edit" 두 갈래로 봐야 함.
+- ⟹ **leak은 reprovote-유발 버그** (검증: agentless-v2 preds **0/13 leak·max 0** vs reprovote **8/12·max 20**). repair loop(`closure-repair:3`)가 라운드마다 `__repro_N` 써서 누적 — v2엔 없던 게 SOTA에서 터짐. 그래서 owner_recall이 reprovote에서만 무너짐.
 - ⟹ `multi_file_drift=5`도 대부분 이 leak + 소수 real stray(deprecation.py/indexes.py/expressions.py).
 - **이건 leaderboard 제출 hygiene로도 치명**(스크래치 16파일 동봉).
 - ✅ **이미 픽스됨** — `83663bc6`(2026-06-20 03:24, `REPRO_SCAFFOLD_RE` in snapshot.ts `sourceOnlyDiff`, `reproduce_issue.py`+`__repro_*`까지 strip). M0(02:21)는 이 픽스 **이전** stale main이라 leak이 보인 것. 03:24 이후 모든 wave는 clean. (재채점 시 leak-mislabel 사라짐 예상 — 미검증, sweep 결과가 그 검증.)
 
 ### 잔여 타겟 (hygiene 픽스 후 재채점 전제)
+> 분류 근거 = **gold-file hit 교차검증**(preds 패치의 real 파일이 gold 파일을 편집하는가). 이게 받쳐주므로 잔여는 "localize 실패"가 아니라 "fix-synthesis 실패"로 읽는다. ⚠️ 단 closure 코드 주석([:162](src/runner/batch/eval/closure-diagnostics.ts#L162))은 `repro_red_but_unresolved`를 일반적으로 **localize 병목** 신호로 해석함 — 상반되나, 이 set은 gold-hit 증거로 localize가 맞음을 확인했기에 fix-synthesis 해석이 우선. (일반화 아님, 이 12개 한정.)
 - **14351** — 유일 잔여 wrong-FILE (related_lookups.py vs gold lookups.py) → owner-symbol/exec-trace localize.
-- **12965** — reprovote가 **right-file(compiler.py)로 이동**시켰으나 wrong-fix + deprecation.py drift → fix-synthesis.
-- **13128·14017·sympy-24066** — right-file, wrong-fix (hard synthesis; 13128 F2P=7·1-4h).
-- **13121** — wrong-patch→**EMPTY 퇴행**(reprovote가 4-file 멀티사이트서 churn하다 빈손) → M5 empty-floor가 정조준(reprovote-유발 회귀).
+- **12965** — reprovote가 **right-file(compiler.py) 편집으로 이동**(원본 v2선 mysql/features.py 오파일)했으나 wrong-fix + deprecation.py drift. ownerHit=False는 leak-artifact, 실제 gold 편집함.
+- **13128·14017·sympy-24066** — right-file(gold-hit ✅), wrong-fix (hard synthesis; 13128 F2P=7·1-4h).
+- **13121** — M0서 EMPTY (원본 eclass5선 wrong-patch 있었음). ⚠️ **n=1 vs n=1이라 reprovote-인과 미확정** (gpt-5.4 stochastic 변동 배제 못 함; trajectory 미확인). M5 empty-floor 후보지만 회귀 패턴 여부는 재런으로 확인 필요.
 - **sphinx-9711** — grader_invalid, denominator 제외(doc 기존 플래그 확인됨).
 
 ### 우선순위 재정렬 (M0 기준)
-1. **patch-hygiene repro-strip** (cheap·high-ROI: 패치정화 + multi_file_drift 오분류 제거 + owner metric 복원 + 제출 hygiene). → **재채점**으로 clean verdict/metric 확보.
-2. **M5 empty-floor** — 13121 reprovote-유발 회귀 salvage.
-3. **M3 owner-symbol** — 14351 + 메트릭 신뢰성(파일단위는 repair drift로 깨짐 확정).
-4. **M2/M4(evidence/paired) 강등** — reprovote vote가 "done前 verify" 역할 이미 수행(easy/medium flip). 잔여는 happy-path-overfit 아니라 hard-synthesis+localize 1건 → 기대수율 낮음. hygiene+재채점 후 재평가.
+1. ✅ **patch-hygiene repro-strip — 완료** (`83663bc6`, 03:24). reprovote-유발 leak 제거. owner_recall@1은 patchFiles[0] 기반이라 leak strip 후 자동 복원(real 파일이 alphabetically 첫 자리로 복귀). → clean 재채점은 sweep이 생성 중.
+2. **M5 empty-floor** — 13121 후보. 단 reprovote-인과 미확정(n=1)이라 **재런으로 회귀 패턴 확인 후** 착수(`no-heuristics`).
+3. **M3 owner-symbol** — 주로 14351(wrong-file). 메트릭 신뢰성은 **부차적 refinement**: patch-기반 owner_recall은 leak-strip으로 대부분 복구되므로 "파일단위 영구 깨짐"은 아님. symbol/line 단위는 hard-localize 정밀화용.
+4. **M2/M4(evidence/paired) 강등** — reprovote vote가 "done前 verify" 역할 이미 수행(easy/medium flip). 잔여는 happy-path-overfit 아니라 hard-synthesis+localize 1건 → 기대수율 낮음. 재채점 후 재평가. ⚠️ "vote가 flip 원인"은 미isolation(repair-loop 시도수↑ vs vote 선택 둘 다 켜짐; v2-repair arm 필요).
 
 ---
 

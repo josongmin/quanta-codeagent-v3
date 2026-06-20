@@ -15,3 +15,13 @@
 [sweep 07:49:42] wave 7: 187 remaining; launching 6 across 1 boxes
 [sweep 08:49:44] wave 7 done: pass=0 miss=0 grader_invalid=0 transient429=0
 [sweep 08:51:14] wave 8: 168 remaining; launching 6 across 1 boxes
+[sweep 09:09:56] wave 8 done: pass=4 miss=2 grader_invalid=0 transient429=0
+[sweep 09:11:16] universe=431 non-CEILING instances
+[sweep 09:11:16] wave 1: 162 remaining; launching 6 across 1 boxes
+[sweep 09:33:26] wave 1 done: pass=0 miss=2 grader_invalid=0 transient429=4
+[sweep 09:33:26] wave 1 fully rate-limited (#1 in a row); backing off 180s
+[sweep 09:36:26] wave 2: 160 remaining; launching 6 across 1 boxes
+[sweep 09:56:50] wave 2 done: pass=2 miss=3 grader_invalid=0 transient429=1
+[sweep 09:58:20] wave 3: 155 remaining; launching 6 across 1 boxes
+[sweep 10:16:47] wave 3 done: pass=1 miss=5 grader_invalid=0 transient429=0
+[sweep 10:18:17] wave 4: 149 remaining; launching 6 across 1 boxes

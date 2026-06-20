@@ -29,10 +29,11 @@ RUNBLOCKS = f"{SWEEP}/sweep-runblocks.yaml"
 LOGDIR = f"{SWEEP}/logs"
 DATE = "2026-06-20"
 
-PARALLEL = 1        # ONE box at a time — shared chatgpt-oauth account is rate-limited
-                    # (429s) when too many boxes run concurrently with the parallel
-                    # agent. Gentle is correct; throughput is secondary to not
-                    # poisoning the OAuth quota and producing false-negatives.
+PARALLEL = 2        # 2 boxes (=12 instances/wave). Bumped from 1 once the parallel
+                    # agent wound down (EC2 4-7) freeing OAuth headroom. Still
+                    # 429-aware: if 429s spike, exponential backoff absorbs it and
+                    # the next cycle can drop back to 1. Grading is serial PER BOX
+                    # (separate docker), so 2 boxes is grading-safe.
 SLICE = 6           # instances per box
 TIMEOUT = 2400      # 40min/box; normal waves finish <25min, so this catches a
                     # poison-slice hang ~20min faster (wave6/7 each wasted ~60min)

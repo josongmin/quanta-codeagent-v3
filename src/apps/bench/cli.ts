@@ -235,9 +235,16 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   const dry = hasFlag("--dry-run")
   // Only read the on-disk credential when actually launching (dry-run never
   // touches it). Stripped to access_token only inside the executor.
-  const authJson = dry
-    ? "{}"
-    : readFileSync(`${process.env.HOME}/.quanta/auth/chatgpt.json`, "utf8")
+  //
+  // jun-20: the credential path is overridable via `QUANTA_BENCH_AUTH_FILE` so a
+  // SECOND ChatGPT account can drive a parallel full-remote fleet without sharing
+  // the default account's rate-limit budget. Symptom that forced this: two
+  // concurrent bench efforts on ONE OAuth token starved each other → sustained
+  // 429 surfacing as `generation_error` ("LLM stream failed after retries") on
+  // BOTH. Point each fleet at its own account file to decouple the rate limits.
+  const authFile =
+    process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`
+  const authJson = dry ? "{}" : readFileSync(authFile, "utf8")
   const instance = argValue("--instance")
   const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset")
   const fullModel = argValue("--model")
