@@ -57,6 +57,8 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
       attempted: 2,
       successfulGenerations: 2,
       generationFailures: 0,
+      ownerFiles: ["root.py"],
+      earlyAccepted: false,
       generated: 2,
       admissibleCount: 1,
       winnerId: "cand-1",

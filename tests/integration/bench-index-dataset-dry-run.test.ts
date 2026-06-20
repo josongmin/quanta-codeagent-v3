@@ -45,6 +45,9 @@ const runBench = async (...args: string[]): Promise<{ code: number; out: string 
       OPENAI_API_KEY: "",
       ANTHROPIC_API_KEY: "",
       QUANTA_PROVIDER: "openai",
+      QUANTA_BENCH_PRESET: "",
+      QUANTA_BENCH_SOTA: "",
+      QUANTA_KNOBS_PRESET: "",
     },
   })
   const out = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`
@@ -53,6 +56,15 @@ const runBench = async (...args: string[]): Promise<{ code: number; out: string 
 }
 
 describe("bench index dataset dry-run", () => {
+  test("--list-presets uses the shared preset renderer and exits", async () => {
+    const { code, out } = await runBench("--list-presets")
+    expect(code).toBe(0)
+    expect(out).toContain("agentless-v1")
+    expect(out).toContain("Default live execution preset: agentless-v3-thin.")
+    expect(out).toContain("Individual QUANTA_BENCH_* env vars override a preset's values.")
+    expect(out).toContain("QUANTA_BENCH_SOTA=1")
+  })
+
   test("--help exits with usage instead of starting a run", async () => {
     const { code, out } = await runBench("--help")
     expect(code).toBe(0)
@@ -68,6 +80,7 @@ describe("bench index dataset dry-run", () => {
     expect(out).toContain("dry-run plan")
     expect(out).toContain(`dataset: ${datasetFile}`)
     expect(out).toContain("2 loaded, 1 selected (--limit 1)")
+    expect(out).toContain("preset: agentless-v3-thin")
     expect(out).toContain("sample ids: demo__inst-1")
     expect(out.toLowerCase()).not.toContain("no api key")
   })
@@ -78,6 +91,7 @@ describe("bench index dataset dry-run", () => {
     expect(out).toContain("dry-run plan")
     expect(out).toContain(`dataset: ${datasetFile}`)
     expect(out).toContain("2 loaded, 1 selected (--limit 1)")
+    expect(out).toContain("preset: agentless-v3-thin")
     expect(out).toContain("sample ids: demo__inst-1")
   })
 

@@ -6,10 +6,11 @@
  * outcome) and includes a red-on-injection partner where the prompt asks for
  * it, so a vacuous/over-permissive implementation fails here.
  */
+
+import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { diffRuns, renderDiff } from "./diff"
 import { explainFailure, filesInDiff } from "./explain"
 import { type LeaderRow, renderLeaderboardMarkdown, rowsFromRun } from "./leaderboard"
@@ -26,7 +27,13 @@ describe("loadVerdicts — both report shapes", () => {
     totals: { total: 4, resolved: 1, resolvedPct: 25 },
     perInstance: [
       { id: "django__django-1", passed: true, turns: 3, patchBytes: 120 },
-      { id: "django__django-2", passed: false, turns: 5, patchBytes: 40 }, // unresolved
+      {
+        id: "django__django-2",
+        passed: false,
+        turns: 5,
+        patchBytes: 40,
+        failure: { termination: "admission_blocked", signals: [] },
+      }, // unresolved in our report shape too
       {
         id: "django__django-3",
         passed: false,
@@ -64,6 +71,13 @@ describe("loadVerdicts — both report shapes", () => {
     expect([...v.unresolved]).toEqual(["django__django-2"])
     expect([...v.emptyPatch]).toEqual(["django__django-3"])
     expect([...v.errored]).toEqual(["django__django-4"])
+  })
+
+  test("typed admission_blocked stays unresolved, not errored", () => {
+    const v = loadVerdicts(ourReport)
+    expect(v.unresolved.has("django__django-2")).toBe(true)
+    expect(v.errored.has("django__django-2")).toBe(false)
+    expect(v.emptyPatch.has("django__django-2")).toBe(false)
   })
 
   test("harness report → correct four buckets", () => {
@@ -206,7 +220,8 @@ describe("explainFailure", () => {
 
   test("agent touched only 1 of 2 gold files → sameFiles=false, FAIL_TO_PASS surfaced", () => {
     const { datasetPath } = writeDataset()
-    const agentPatch = "diff --git a/pylint/checkers/format.py b/pylint/checkers/format.py\n+agent change"
+    const agentPatch =
+      "diff --git a/pylint/checkers/format.py b/pylint/checkers/format.py\n+agent change"
     const e = explainFailure({
       datasetPath,
       instanceId: "pylint-dev__pylint-8898",

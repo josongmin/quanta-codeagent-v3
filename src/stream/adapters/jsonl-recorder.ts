@@ -423,6 +423,7 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
         ...(e.durationMs !== undefined ? { durationMs: e.durationMs } : {}),
         ...(e.stderrTail !== undefined ? { stderrTail: e.stderrTail } : {}),
         ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}),
+        ...(e.executedCommand !== undefined ? { executedCommand: e.executedCommand } : {}),
         ...(e.fullLogPath !== undefined ? { fullLogPath: e.fullLogPath } : {}),
       }
     case "recovery":

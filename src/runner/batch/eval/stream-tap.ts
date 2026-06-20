@@ -76,6 +76,11 @@ export class BenchStreamTap implements StreamPort {
    *  `onVerifyPass` is wired (P0 tentative-patch retention) — absent ⇒ empty ⇒
    *  byte-identical to the pre-feature tap. */
   private readonly pendingVerify = new Set<string>()
+  /** VERIFY routing is two-phase: the tool_call tells us this invocation is a
+   *  verifier candidate, but ONLY the later `tool_result.executedCommand` is
+   *  authoritative for what actually ran. This prevents denied or non-verify
+   *  bash calls from poisoning the validator re-exec target. */
+  private readonly pendingVerifyCmd = new Set<string>()
   private verifySeq = 0
   /**
    * @param downstream  pass-through sink (NullStream for non-observed runs).
@@ -102,17 +107,8 @@ export class BenchStreamTap implements StreamPort {
     if (event.type === "turn_start") {
       this.currentTurn = event.turn
     } else if (event.type === "tool_call") {
-      if (event.name === "bash") {
-        const input = event.input
-        if (typeof input === "object" && input !== null && "command" in input) {
-          const cmd = (input as { command: unknown }).command
-          if (typeof cmd === "string" && cmd !== "") this.lastVerifyCmd = cmd
-        }
-      } else if (event.name === "test_runner") {
-        // test_runner has no shell-equivalent string; treat the tool-call name
-        // as a sentinel so the orchestrator knows the agent DID verify (the
-        // validator falls back to reproPath / degenerate when cmd is unset).
-        this.lastVerifyCmd = "test_runner"
+      if (this.isVerifyCall(event.name, event.input)) {
+        this.pendingVerifyCmd.add(event.id)
       }
       if (this.onVerifyPass !== undefined && this.isVerifyCall(event.name, event.input)) {
         this.pendingVerify.add(event.id)
@@ -129,8 +125,20 @@ export class BenchStreamTap implements StreamPort {
       // P0 — a VERIFY that came back passing marks the CURRENT tree as a
       // verified-green candidate. `ok` = the runner executed; the output check
       // catches "exited 0 but tests failed" (same SSOT the verify-guard uses).
+      const hasVerifyCmdCall = this.pendingVerifyCmd.delete(event.id)
+      const hasAuthoritativeVerifyCmd =
+        hasVerifyCmdCall &&
+        typeof event.executedCommand === "string" &&
+        event.executedCommand !== ""
+      if (hasAuthoritativeVerifyCmd) {
+        this.lastVerifyCmd = event.executedCommand
+      }
       if (this.onVerifyPass !== undefined && this.pendingVerify.delete(event.id)) {
-        if (event.ok && !isVerifyOutputFailing(event.name, undefined, event.preview)) {
+        if (
+          hasAuthoritativeVerifyCmd &&
+          event.ok &&
+          !isVerifyOutputFailing(event.name, undefined, event.preview)
+        ) {
           this.onVerifyPass(this.verifySeq++)
         }
       }

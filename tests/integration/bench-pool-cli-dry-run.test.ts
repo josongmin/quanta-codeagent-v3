@@ -104,4 +104,17 @@ describe("bench pool cli dry-run", () => {
     expect(out).toContain("box dir ~/runs/same/")
     expect(out).toContain("box dir ~/runs/same_2/")
   })
+
+  test("--wait-for-idle is accepted and surfaced in the dry-run plan", async () => {
+    const { code, out } = await runCli(
+      "pool",
+      "--allow-remote-secrets",
+      "--dry-run",
+      "--wait-for-idle",
+      "--datasets",
+      dsA,
+    )
+    expect(code).toBe(0)
+    expect(out).toContain("waitForIdle=true")
+  })
 })

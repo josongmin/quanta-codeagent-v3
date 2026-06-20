@@ -178,6 +178,7 @@ export const testRunnerTool: Tool<Input> = {
     const evidence: ToolResultEvidence = {
       ...(r.stderr ? { stderr: r.stderr.slice(-STDERR_EVIDENCE_CAP) } : {}),
       exitCode: r.exitCode,
+      executedCommand: resolved,
     }
 
     yield {

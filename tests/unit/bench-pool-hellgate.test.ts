@@ -525,6 +525,84 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
   })
 
+  test("waitForIdle parks behind a busy running box, then REUSES it once it goes idle", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const slept: number[] = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let idleProbeCount = 0
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances")) {
+        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
+      }
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("pgrep")) {
+          idleProbeCount += 1
+          return ok(idleProbeCount >= 2 ? "IDLE" : "BUSY")
+        }
+        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
+        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
+          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
+        return ok("")
+      }
+      return ok("")
+    }
+    const out = await runPool(
+      [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+      poolCfg(fn, {
+        waitForIdle: true,
+        waitForIdlePollMs: 1234,
+        sleep: async (ms: number) => void slept.push(ms),
+      }),
+    )
+    expect(slept).toEqual([1234])
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.result.resolved).toContain("w__w-1")
+  })
+
+  test("waitForIdle times out instead of launching past a forever-busy box", async () => {
+    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
+    const slept: number[] = []
+    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
+    let nowMs = 0
+    const fn: SpawnFn = async (cmd, args, o) => {
+      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      const a = [...args]
+      if (a.includes("describe-instances") && a.includes("--filters")) return ok("i-busy\t9.9.9.9")
+      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
+      if (cmd === "ssh") {
+        const c = a[a.length - 1] ?? ""
+        if (c.includes("echo OK")) return ok("OK")
+        if (c.includes("pgrep")) return ok("BUSY")
+      }
+      return ok("")
+    }
+    await expect(
+      runPool(
+        [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
+        poolCfg(fn, {
+          waitForIdle: true,
+          waitForIdlePollMs: 1000,
+          waitForIdleTimeoutMs: 2500,
+          now: () => nowMs,
+          sleep: async (ms: number) => {
+            slept.push(ms)
+            nowMs += ms
+          },
+        }),
+      ),
+    ).rejects.toThrow(/timed out waiting/i)
+    expect(slept).toEqual([1000, 1000, 1000])
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+  })
+
   test("explicit extra-box opt-in can launch past a running BUSY box", async () => {
     const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
     const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })

@@ -26,9 +26,10 @@ purpose: |
   `KNOB_PRESETS` frozen versioned bundles (agentless-v1/v2/v3-thin, baseline,
   …), including the current explicit v3 experiment arms
   (`agentless-v3-thin-strict`, `agentless-v3-thin-strict-select`,
-  `agentless-v3-select-regression`, `agentless-v3-select-regression-doubt`),
-  plus `knob-inventory.ts` bench declarations for discoverability / completeness
-  ratchets. Individual `QUANTA_BENCH_*` env vars override preset values.
+  `agentless-v3-thin-strict-closure-select`, `agentless-v3-select-regression`,
+  `agentless-v3-select-regression-doubt`), plus `knob-inventory.ts` bench
+  declarations for discoverability / completeness ratchets. Individual
+  `QUANTA_BENCH_*` env vars override preset values.
 evidence:
   code:
     - src/runner/knobs/presets.ts

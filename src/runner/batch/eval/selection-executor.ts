@@ -29,6 +29,8 @@
  * non-applying patch.
  */
 
+import { isAbsolute, relative, sep } from "node:path"
+import type { StopReason } from "@/agent"
 import {
   type CandidateVerdict,
   type HardGateSignals,
@@ -51,6 +53,12 @@ export interface Candidate {
   /** The instance's repro-authority gate state (same for every candidate).
    *  `null` = selection mode does not require repro authority. */
   baseValidatedRed: boolean | null
+  /** Terminal metadata preserved so upper drivers can classify no-winner
+   *  outcomes from the best terminal candidate instead of flattening them to
+   *  a generic empty-patch miss. */
+  stopReason?: StopReason
+  agentError?: string
+  editCount?: number
 }
 
 export interface SelectionPorts {
@@ -73,6 +81,10 @@ export interface ScoredEntry {
 export interface SelectionResult {
   /** Requested candidate count (`args.n`). */
   attempted: number
+  /** Canonical owner files used for seed generation and owner-coverage scoring. */
+  ownerFiles: readonly string[]
+  /** True when an explicit progressive mode stopped before generating all N. */
+  earlyAccepted: boolean
   /** Successful generate() calls BEFORE dedup. */
   successfulGenerations: number
   /** generate() calls that failed/aborted and were skipped. */
@@ -81,6 +93,9 @@ export interface SelectionResult {
    *  submittable candidates). null when 0 generated OR every candidate is
    *  structurally unshippable (empty / non-applying). */
   winner: Candidate | null
+  /** Highest-scoring terminal candidate when nothing was submittable. Lets the
+   *  caller preserve stop-reason/error/edit metadata even when `winner=null`. */
+  terminalCandidate: Candidate | null
   /** Per-candidate scoring (post-dedup), generation order. */
   scored: ScoredEntry[]
   /** How many candidates were admissible. */
@@ -109,6 +124,9 @@ export interface CandidateTelemetry {
  *  spanned, which were admissible, which won). NEVER fed to the agent loop. */
 export interface SelectionTelemetry {
   attempted: number
+  /** Canonical owner files used by this selection pass. */
+  ownerFiles: readonly string[]
+  earlyAccepted: boolean
   successfulGenerations: number
   generationFailures: number
   generated: number
@@ -121,6 +139,8 @@ export interface SelectionTelemetry {
  *  full candidate patches; keeps files + verdict). Pure. */
 export const summarizeSelection = (result: SelectionResult): SelectionTelemetry => ({
   attempted: result.attempted,
+  ownerFiles: result.ownerFiles,
+  earlyAccepted: result.earlyAccepted,
   successfulGenerations: result.successfulGenerations,
   generationFailures: result.generationFailures,
   generated: result.generated,
@@ -134,6 +154,93 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
     reasons: s.verdict.reasons,
   })),
 })
+
+const fwd = (s: string): string => s.split(sep).join("/").replace(/\\/g, "/")
+
+const relInsideSandbox = (path: string, sandbox: string | undefined): string | null => {
+  if (!isAbsolute(path)) return path
+  if (sandbox === undefined) return null
+  const rel = relative(sandbox, path)
+  return rel === "" || rel.startsWith("..") ? null : fwd(rel)
+}
+
+const normalizePathParts = (path: string): string | null => {
+  const parts: string[] = []
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue
+    if (part === "..") return null
+    parts.push(part)
+  }
+  const out = parts.join("/")
+  return out === "" || out === "dev/null" ? null : out
+}
+
+/** Canonical repo-relative path used by selection owners and candidate patches.
+ *  Absolute paths are accepted only when they are inside the active sandbox. */
+export const normalizeSelectionPath = (raw: string, sandbox: string | undefined): string | null => {
+  let p = fwd(raw.trim().replace(/^["'`]+|["'`]+$/g, ""))
+  if (p === "" || p === "/dev/null") return null
+  const rel = relInsideSandbox(p, sandbox)
+  if (rel === null) return null
+  p = rel
+  p = p.replace(/^\.\//, "").replace(/^(?:a|b)\//, "")
+  return normalizePathParts(p)
+}
+
+export const normalizeSelectionPaths = (
+  paths: readonly string[],
+  sandbox: string | undefined,
+): string[] => {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of paths) {
+    const p = normalizeSelectionPath(raw, sandbox)
+    if (p === null || seen.has(p)) continue
+    seen.add(p)
+    out.push(p)
+  }
+  return out
+}
+
+/** Repo-relative files a unified diff touches (its `+++ b/<f>` headers, plus
+ *  `--- a/<f>` for pure deletions). Used for owner-coverage scoring. */
+export const filesFromPatch = (patch: string): string[] => {
+  const files = new Set<string>()
+  for (const line of patch.split("\n")) {
+    const m = /^(?:\+\+\+ b\/|--- a\/)(.+)$/.exec(line)
+    if (m !== null) {
+      const f = normalizeSelectionPath(m[1] as string, undefined)
+      if (f !== null) files.add(f)
+    }
+  }
+  return [...files]
+}
+
+export interface SelectionInputs {
+  readonly ownerFiles: readonly string[]
+  readonly owners: ReadonlySet<string>
+  readonly seeds: readonly (string | undefined)[]
+}
+
+export const buildSelectionInputs = (args: {
+  readonly n: number
+  readonly ownerCandidates: readonly string[]
+  readonly sandbox?: string
+}): SelectionInputs => {
+  const ownerFiles = normalizeSelectionPaths(args.ownerCandidates, args.sandbox)
+  const seedFor = (i: number): string | undefined => {
+    if (i === 0) return undefined
+    const file = ownerFiles[i - 1]
+    return file === undefined
+      ? undefined
+      : `Focus your investigation on \`${file}\`. Confirm the ROOT CAUSE lives there (not merely where the symptom surfaces) before editing.`
+  }
+  return {
+    ownerFiles,
+    owners: new Set(ownerFiles),
+    seeds: Array.from({ length: args.n }, (_, i) => seedFor(i)),
+  }
+}
 
 /** Normalize a diff to its `+++ b/` / `--- a/` FILE headers plus `+/-` CONTENT
  *  lines (dropping `@@` hunk-offset noise + context) so two patches dedup only
@@ -159,6 +266,38 @@ export const ownerCoverageOf = (
   return hit / files.length
 }
 
+const fullyInsideOwners = (files: readonly string[], owners: ReadonlySet<string>): boolean =>
+  owners.size === 0 || (files.length > 0 && files.every((f) => owners.has(f)))
+
+const earlyAcceptable = (entry: ScoredEntry, owners: ReadonlySet<string>): boolean => {
+  if (!entry.verdict.admissible) return false
+  if (!entry.hard.patchProduced || entry.hard.applyClean === false) return false
+  // Early-accept is a cost shortcut, not a license to bypass the selector's
+  // diversity/owner-coverage authority. If closure owners are known, a positive
+  // candidate may stop the loop only when every touched file is inside that owner
+  // set; broad symptom+stray patches must still face later owner-seeded siblings.
+  if (!fullyInsideOwners(entry.candidate.files, owners)) return false
+  if (entry.hard.regressionGreen === true) return true
+  const resolved = entry.hard.patchedResolvedKofN
+  return resolved !== null && resolved.k > 0 && resolved.votes >= resolved.k
+}
+
+const voterQuorumOf = (
+  mode: ResolvedKofNMode,
+  resolved: { votes: number; k: number } | null,
+): number | null =>
+  mode === "soft" && resolved !== null && resolved.k > 0 ? resolved.votes / resolved.k : null
+
+const minimalityOf = (args: {
+  readonly isEmpty: boolean
+  readonly size: number
+  readonly minB: number
+  readonly maxB: number
+}): number | null => {
+  if (args.isEmpty) return null
+  return args.maxB === args.minB ? 1 : 1 - (args.size - args.minB) / (args.maxB - args.minB)
+}
+
 /**
  * Run the verify-and-select executor. Pure over the injected ports.
  *
@@ -180,6 +319,12 @@ export const runSelection = async (args: {
    *  concurrent agent runs corrupt one shared git tree. Bounded by a Semaphore
    *  so total in-flight never exceeds this (the LLM-throttle ceiling guard). */
   concurrency?: number
+  /** Progressive cost guard. Sequential-only: once a generated candidate is
+   *  admissible and has a hard positive regression/resolved signal, submit it
+   *  instead of burning the remaining candidate budget. Soft-only repro quorum
+   *  remains ranking credit and never becomes global stop authority. Default
+   *  false preserves N-best. */
+  earlyAccept?: boolean
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
@@ -194,6 +339,83 @@ export const runSelection = async (args: {
       return null
     }
   }
+  const scoreOne = async (c: Candidate, minB: number, maxB: number): Promise<ScoredEntry> => {
+    const isEmpty = c.patch.trim() === ""
+    const size = Buffer.byteLength(c.patch, "utf8")
+    const resolvedKofN = (await args.ports.resolvedKofN?.(c)) ?? null
+    const resolvedMode = args.resolvedKofNMode ?? "hard"
+    const hard: HardGateSignals = {
+      baseValidatedRed: c.baseValidatedRed,
+      patchProduced: !isEmpty,
+      applyClean: isEmpty ? null : ((await args.ports.applyClean?.(c)) ?? null),
+      regressionGreen: (await args.ports.regression?.(c)) ?? null,
+      patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
+    }
+    const soft: SoftScoreSignals = {
+      declaredExpectedMatch: null,
+      rubricScore: null,
+      voterQuorum: voterQuorumOf(resolvedMode, resolvedKofN),
+      // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
+      minimality: minimalityOf({ isEmpty, size, minB, maxB }),
+      // an empty no-patch earns NO owner-coverage credit (even if a caller hands
+      // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
+      ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
+    }
+    return { candidate: c, hard, verdict: scoreCandidate(hard, soft) }
+  }
+
+  const finalize = async (
+    rawCandidates: readonly Candidate[],
+    earlyAccepted: boolean,
+  ): Promise<SelectionResult> => {
+    // ── dedup by normalized diff (Trae's pruning lever) ──────────────────────
+    const seen = new Set<string>()
+    const cands = rawCandidates.filter((c) => {
+      const key = normalizePatch(c.patch)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+    // ── relative minimality across the deduped set (parameter-free) ──────────
+    // Computed over NON-EMPTY patches only: an empty diff is a non-fix, not a
+    // "minimal" fix, so it gets NO minimality signal (null) — otherwise size 0
+    // would score 1 and an empty no-patch could win best-effort over a real one.
+    const realSizes = cands
+      .filter((c) => c.patch.trim() !== "")
+      .map((c) => Buffer.byteLength(c.patch, "utf8"))
+    const minB = realSizes.length > 0 ? Math.min(...realSizes) : 0
+    const maxB = realSizes.length > 0 ? Math.max(...realSizes) : 0
+
+    const scored: ScoredEntry[] = []
+    for (let i = 0; i < cands.length; i++) {
+      scored.push(await scoreOne(cands[i] as Candidate, minB, maxB))
+    }
+
+    const ranked = scored.map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
+    const fallbackRanked = scored
+      .filter((s) => s.hard.patchProduced && s.hard.applyClean !== false)
+      .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
+    const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
+    const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
+    const terminalCandidate =
+      winner === null
+        ? (scored.find((s) => s.candidate.id === selectBestEffort(ranked))?.candidate ?? null)
+        : null
+    return {
+      attempted: args.n,
+      ownerFiles: [...args.owners],
+      earlyAccepted,
+      successfulGenerations: rawCandidates.length,
+      generationFailures,
+      winner,
+      terminalCandidate,
+      scored,
+      admissibleCount: scored.filter((s) => s.verdict.admissible).length,
+      generated: cands.length,
+    }
+  }
+
   let raw: Candidate[]
   if (limit <= 1) {
     // Sequential: each candidate is a full agent run sharing the sandbox; the
@@ -201,7 +423,13 @@ export const runSelection = async (args: {
     raw = []
     for (let i = 0; i < args.n; i++) {
       const candidate = await tryGenerate(i)
-      if (candidate !== null) raw.push(candidate)
+      if (candidate === null) continue
+      raw.push(candidate)
+      if (args.earlyAccept === true) {
+        const size = Buffer.byteLength(candidate.patch, "utf8")
+        const entry = await scoreOne(candidate, size, size)
+        if (earlyAcceptable(entry, args.owners)) return await finalize(raw, true)
+      }
     }
   } else {
     // Bounded-parallel: at most `limit` generate() calls in flight at once.
@@ -218,69 +446,5 @@ export const runSelection = async (args: {
     )
     raw = maybeRaw.filter((candidate): candidate is Candidate => candidate !== null)
   }
-
-  // ── dedup by normalized diff (Trae's pruning lever) ──────────────────────
-  const seen = new Set<string>()
-  const cands = raw.filter((c) => {
-    const key = normalizePatch(c.patch)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-
-  // ── relative minimality across the deduped set (parameter-free) ──────────
-  // Computed over NON-EMPTY patches only: an empty diff is a non-fix, not a
-  // "minimal" fix, so it gets NO minimality signal (null) — otherwise size 0
-  // would score 1 and an empty no-patch could win best-effort over a real one.
-  const realSizes = cands
-    .filter((c) => c.patch.trim() !== "")
-    .map((c) => Buffer.byteLength(c.patch, "utf8"))
-  const minB = realSizes.length > 0 ? Math.min(...realSizes) : 0
-  const maxB = realSizes.length > 0 ? Math.max(...realSizes) : 0
-
-  const scored: ScoredEntry[] = []
-  for (let i = 0; i < cands.length; i++) {
-    const c = cands[i] as Candidate
-    const isEmpty = c.patch.trim() === ""
-    const size = Buffer.byteLength(c.patch, "utf8")
-    const resolvedKofN = (await args.ports.resolvedKofN?.(c)) ?? null
-    const resolvedMode = args.resolvedKofNMode ?? "hard"
-    const hard: HardGateSignals = {
-      baseValidatedRed: c.baseValidatedRed,
-      patchProduced: !isEmpty,
-      applyClean: isEmpty ? null : ((await args.ports.applyClean?.(c)) ?? null),
-      regressionGreen: (await args.ports.regression?.(c)) ?? null,
-      patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
-    }
-    const soft: SoftScoreSignals = {
-      declaredExpectedMatch: null,
-      rubricScore: null,
-      voterQuorum:
-        resolvedMode === "soft" && resolvedKofN !== null && resolvedKofN.k > 0
-          ? resolvedKofN.votes / resolvedKofN.k
-          : null,
-      // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
-      minimality: isEmpty ? null : maxB === minB ? 1 : 1 - (size - minB) / (maxB - minB),
-      // an empty no-patch earns NO owner-coverage credit (even if a caller hands
-      // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
-      ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
-    }
-    scored.push({ candidate: c, hard, verdict: scoreCandidate(hard, soft) })
-  }
-
-  const ranked = scored.map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
-  const fallbackRanked = scored
-    .filter((s) => s.hard.patchProduced && s.hard.applyClean !== false)
-    .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
-  const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
-  const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
-  return {
-    attempted: args.n,
-    successfulGenerations: raw.length,
-    generationFailures,
-    winner,
-    scored,
-    admissibleCount: scored.filter((s) => s.verdict.admissible).length,
-    generated: cands.length,
-  }
+  return await finalize(raw, false)
 }

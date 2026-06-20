@@ -215,7 +215,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     ).toBe(true)
   })
 
-  test("default full-remote posture is agentless-v2-safe (bench-in-loop exec OFF)", async () => {
+  test("default full-remote posture is the current base preset", async () => {
     const { fn, calls } = mockSpawn()
     await createFullRemoteBackend({ ...baseCfg, spawn: fn })
       .run()
@@ -226,7 +226,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(benchRun).toBeDefined()
     const cmd = benchRun?.args.join(" ") ?? ""
     expect(cmd).toContain("QUANTA_BENCH_PRESET=")
-    expect(cmd).toContain("agentless-v2-safe")
+    expect(cmd).toContain("agentless-v3-thin")
   })
 
   test("box bootstrap installs pyright so LSP nav-grounding is not inert by missing binary", async () => {

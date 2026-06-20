@@ -38,6 +38,7 @@ describe("bashTool", () => {
     const { result, events } = await collect({ command: "echo hello" }, ctx(dir))
     expect(result.ok).toBe(true)
     expect(result.output).toBe("[exit 0]\nhello")
+    expect(result.evidence?.executedCommand).toBe("echo hello")
     expect(events[0]).toEqual({ type: "progress", message: "running: echo hello" })
   })
 

@@ -15,15 +15,26 @@ beforeAll(() => {
   mkdirSync(fakeBin)
   const aws = join(fakeBin, "aws")
   const ssh = join(fakeBin, "ssh")
+  const now = Date.now()
+  const busyLaunchAt = new Date(now - 10 * 60_000).toISOString()
+  const idleLaunchAt = new Date(now - 8 * 60_000).toISOString()
+  const probeLaunchAt = new Date(now - 11 * 60_000).toISOString()
+  const pendingLaunchAt = new Date(now - 6 * 60_000).toISOString()
+  const busyStartedAt = new Date(now - 4 * 60_000).toISOString()
+  const busyUpdatedAt = new Date(now - 60_000).toISOString()
+  const idleStartedAt = new Date(now - 3 * 60_000).toISOString()
+  const idleUpdatedAt = new Date(now - 90_000).toISOString()
+  const probeUpdatedAt = new Date(now - 75_000).toISOString()
   writeFileSync(
     aws,
     `#!/bin/sh
 case " $* " in
   *" ec2 describe-instances "*)
     cat <<'EOF'
-i-busy running 2026-06-20T00:00:00+00:00 1.2.3.4 c7i.8xlarge
-i-idle running 2026-06-20T00:05:00+00:00 1.2.3.5 c7i.8xlarge
-i-pending pending 2026-06-20T00:10:00+00:00 None c7i.8xlarge
+i-busy running ${busyLaunchAt} 1.2.3.4 c7i.8xlarge
+i-idle running ${idleLaunchAt} 1.2.3.5 c7i.8xlarge
+i-probe running ${probeLaunchAt} 1.2.3.6 c7i.8xlarge
+i-pending pending ${pendingLaunchAt} None c7i.8xlarge
 EOF
     exit 0
     ;;
@@ -53,6 +64,10 @@ case "$host::$last" in
     echo OK
     exit 0
     ;;
+  ubuntu@1.2.3.6::*"test -x ~/.bun/bin/bun"*)
+    echo OK
+    exit 0
+    ;;
   ubuntu@1.2.3.4::*"pgrep -f 'cli.ts run'"*)
     echo BUSY
     exit 0
@@ -61,15 +76,40 @@ case "$host::$last" in
     echo IDLE
     exit 0
     ;;
+  ubuntu@1.2.3.6::*"pgrep -f 'cli.ts run'"*)
+    echo BUSY
+    exit 0
+    ;;
   ubuntu@1.2.3.4::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"running","mode":"pool","runId":"wave7-s0","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"instancePreview":["demo__inst-1","demo__inst-2","demo__inst-3"],"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"startedAt":"2026-06-20T08:55:00.000Z","updatedAt":"2026-06-20T09:00:00.000Z","runLogPath":"~/runs/wave7-s0/run.log","reportPath":"~/runs/wave7-s0/report.json","predictionsPath":"~/runs/wave7-s0/preds.jsonl","observeDir":"~/runs/wave7-s0/observe","lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
+{"phase":"running","mode":"pool","runId":"wave7-s0","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"instancePreview":["demo__inst-1","demo__inst-2","demo__inst-3"],"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"startedAt":"${busyStartedAt}","updatedAt":"${busyUpdatedAt}","runLogPath":"~/runs/wave7-s0/run.log","reportPath":"~/runs/wave7-s0/report.json","predictionsPath":"~/runs/wave7-s0/preds.jsonl","observeDir":"~/runs/wave7-s0/observe","lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
 EOF
     exit 0
     ;;
   ubuntu@1.2.3.5::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"instancePreview":["django__django-11179"],"preset":"agentless-v2-safe","model":"gpt-5.4","concurrency":16,"startedAt":"2026-06-20T09:01:00.000Z","updatedAt":"2026-06-20T09:05:00.000Z","runLogPath":"~/run.log","reportPath":"~/report.json","predictionsPath":"~/preds.jsonl","observeDir":"~/observe","resolvedCount":1,"unresolvedCount":0,"erroredCount":0,"emptyPatchCount":0,"lastExitCode":0,"lastLogLine":"resolved 1 | unresolved 0"}
+{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"instancePreview":["django__django-11179"],"preset":"agentless-v3-thin","model":"gpt-5.4","concurrency":16,"startedAt":"${idleStartedAt}","updatedAt":"${idleUpdatedAt}","runLogPath":"~/run.log","reportPath":"~/report.json","predictionsPath":"~/preds.jsonl","observeDir":"~/observe","resolvedCount":1,"unresolvedCount":0,"erroredCount":0,"emptyPatchCount":0,"lastExitCode":0,"lastLogLine":"resolved 1 | unresolved 0"}
+EOF
+    exit 0
+    ;;
+  ubuntu@1.2.3.6::*"cat ~/.quanta/bench-box-status.json"*)
+    exit 1
+    ;;
+  ubuntu@1.2.3.4::*"__QUANTA_BOX_RUNTIME_PROBE__"*)
+    cat <<'EOF'
+{"activeRunDetected":true,"runLogPath":"~/runs/wave7-s0/run.log","runLogUpdatedAt":"${busyUpdatedAt}","reportPath":"~/runs/wave7-s0/report.json","reportExists":false,"predictionsPath":"~/runs/wave7-s0/preds.jsonl","predictionsLines":7,"observeDir":"~/runs/wave7-s0/observe","runExitPath":"~/runs/wave7-s0/run.exit","runExitExists":false,"lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
+EOF
+    exit 0
+    ;;
+  ubuntu@1.2.3.5::*"__QUANTA_BOX_RUNTIME_PROBE__"*)
+    cat <<'EOF'
+{"activeRunDetected":false,"runLogPath":"~/run.log","runLogUpdatedAt":"${idleUpdatedAt}","reportPath":"~/report.json","reportExists":true,"predictionsPath":"~/preds.jsonl","predictionsLines":1,"observeDir":"~/observe","runExitPath":"~/run.exit","runExitExists":true,"lastLogLine":"resolved 1 | unresolved 0"}
+EOF
+    exit 0
+    ;;
+  ubuntu@1.2.3.6::*"__QUANTA_BOX_RUNTIME_PROBE__"*)
+    cat <<'EOF'
+{"activeRunDetected":true,"runLogPath":"~/run.log","runLogUpdatedAt":"${probeUpdatedAt}","reportPath":"~/report.json","reportExists":false,"predictionsPath":"~/preds.jsonl","predictionsLines":84,"observeDir":"~/observe","runExitPath":"~/run.exit","runExitExists":false,"lastLogLine":"[warn] pyright warm-up budget exhausted"}
 EOF
     exit 0
     ;;
@@ -83,6 +123,19 @@ EOF
   ubuntu@1.2.3.4::*"tail -n 5 ~/runs/wave7-s0/run.log"*)
     cat <<'EOF'
 [PASS] demo__inst-1 (turns=2)
+EOF
+    exit 0
+    ;;
+  ubuntu@1.2.3.6::*"tail -n 80 ~/run.log"*)
+    cat <<'EOF'
+[info] bench(swebench): 16 task(s), provider=chatgpt-oauth
+[warn] pyright warm-up budget exhausted
+EOF
+    exit 0
+    ;;
+  ubuntu@1.2.3.6::*"tail -n 5 ~/run.log"*)
+    cat <<'EOF'
+[warn] pyright warm-up budget exhausted
 EOF
     exit 0
     ;;
@@ -120,10 +173,12 @@ describe("bench box ls status view", () => {
     expect(code).toBe(0)
     expect(out).toContain("[box] running boxes:")
     expect(out).toContain("i-busy  running  c7i.8xlarge  1.2.3.4  status=busy/running")
-    expect(out).toContain("mode=pool  workload=wave7-s0  dataset=wave7-s0.jsonl")
+    expect(out).toContain("source=snapshot  mode=pool  workload=wave7-s0  dataset=wave7-s0.jsonl")
     expect(out).toContain("log=[PASS] demo__inst-1 (turns=2)")
     expect(out).toContain("i-idle  running  c7i.8xlarge  1.2.3.5  status=idle/idle")
-    expect(out).toContain("mode=full-remote  workload=django__django-11179")
+    expect(out).toContain("source=snapshot  mode=full-remote  workload=django__django-11179")
+    expect(out).toContain("i-probe  running  c7i.8xlarge  1.2.3.6  status=busy")
+    expect(out).toContain("source=probe  active=yes  report=no  runExit=no  preds=84")
     expect(out).toContain("i-pending  pending  c7i.8xlarge  None  status=bootstrapping")
   })
 
@@ -134,6 +189,7 @@ describe("bench box ls status view", () => {
       iid: string
       lifecycle: string
       freshness?: string
+      statusSource?: string
       logPath?: string
       followHint?: string
       snapshot?: {
@@ -143,11 +199,17 @@ describe("bench box ls status view", () => {
         runLogPath?: string
         reportPath?: string
       }
+      probe?: {
+        activeRunDetected?: boolean
+        predictionsLines?: number
+        runLogPath?: string
+      }
     }>
     expect(rows.find((r) => r.iid === "i-busy")).toEqual(
       expect.objectContaining({
         lifecycle: "busy",
         freshness: "fresh",
+        statusSource: "snapshot",
         logPath: "~/runs/wave7-s0/run.log",
         followHint: expect.stringContaining("box logs i-busy --follow"),
         snapshot: expect.objectContaining({
@@ -162,6 +224,7 @@ describe("bench box ls status view", () => {
       expect.objectContaining({
         lifecycle: "idle",
         freshness: "fresh",
+        statusSource: "snapshot",
         logPath: "~/run.log",
         snapshot: expect.objectContaining({
           mode: "full-remote",
@@ -170,8 +233,25 @@ describe("bench box ls status view", () => {
         }),
       }),
     )
+    expect(rows.find((r) => r.iid === "i-probe")).toEqual(
+      expect.objectContaining({
+        lifecycle: "busy",
+        freshness: "fresh",
+        statusSource: "probe",
+        logPath: "~/run.log",
+        probe: expect.objectContaining({
+          activeRunDetected: true,
+          predictionsLines: 84,
+          runLogPath: "~/run.log",
+        }),
+      }),
+    )
     expect(rows.find((r) => r.iid === "i-pending")).toEqual(
-      expect.objectContaining({ lifecycle: "bootstrapping", freshness: "unknown" }),
+      expect.objectContaining({
+        lifecycle: "bootstrapping",
+        freshness: "unknown",
+        statusSource: "none",
+      }),
     )
   })
 
@@ -179,8 +259,8 @@ describe("bench box ls status view", () => {
     const { code, out } = await runCli("box", "status")
     expect(code).toBe(0)
     expect(out).toContain("[box] summary:")
-    expect(out).toContain("total=3  busy=1  idle=1  bootstrapping=1  unreachable=0  stale=0")
-    expect(out).toContain("target=i-busy  status=busy/running")
+    expect(out).toContain("total=4  busy=2  idle=1  bootstrapping=1  unreachable=0  stale=0")
+    expect(out).toContain("target=i-busy  status=busy/running  source=snapshot")
     expect(out).toContain("follow=bun run src/apps/bench/cli.ts box logs i-busy --follow")
   })
 
@@ -200,15 +280,15 @@ describe("bench box ls status view", () => {
     }
     expect(parsed.summary).toEqual(
       expect.objectContaining({
-        total: 3,
-        busy: 1,
+        total: 4,
+        busy: 2,
         idle: 1,
         bootstrapping: 1,
         stale: 0,
         target: "i-busy",
       }),
     )
-    expect(parsed.boxes.map((row) => row.iid)).toEqual(["i-pending", "i-idle", "i-busy"])
+    expect(parsed.boxes.map((row) => row.iid)).toEqual(["i-pending", "i-idle", "i-busy", "i-probe"])
   })
 
   test("box logs tails the resolved log path for the selected box", async () => {
@@ -238,5 +318,21 @@ describe("bench box ls status view", () => {
     expect(parsed.followHint).toContain("box logs i-busy --follow")
     expect(parsed.snapshot?.runId).toBe("wave7-s0")
     expect(parsed.tail).toContain("[PASS] demo__inst-1 (turns=2)")
+  })
+
+  test("box logs falls back to probe metadata when snapshot is missing", async () => {
+    const { code, out } = await runCli("box", "logs", "i-probe")
+    expect(code).toBe(0)
+    expect(out).toContain("[box] i-probe  ubuntu@1.2.3.6")
+    expect(out).toContain("source=probe")
+    expect(out).toContain("logPath=~/run.log")
+    expect(out).toContain("[warn] pyright warm-up budget exhausted")
+  })
+
+  test("box logs explains when a bootstrapping box has no run log yet", async () => {
+    const { code, out } = await runCli("box", "logs", "i-pending")
+    expect(code).toBe(0)
+    expect(out).toContain("status=bootstrapping")
+    expect(out).toContain("run log not created yet; box is still bootstrapping")
   })
 })

@@ -1224,6 +1224,10 @@ export interface ToolResultEvidence {
   stderr?: string
   /** Process exit code when the tool spawned an external process. */
   exitCode?: number
+  /** Exact shell command the tool resolved and executed. Used when a caller
+   *  needs to re-run the SAME verifier the tool actually ran, not a sentinel
+   *  tool name or a host-side re-derivation. */
+  executedCommand?: string
   /** Absolute path to a full log when output spilled. Caller-resolved
    *  (FS jail still applies to the path). */
   fullLogPath?: string

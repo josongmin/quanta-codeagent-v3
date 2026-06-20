@@ -90,14 +90,18 @@ const STDERR_TAIL_CAP = 4_000
  *  `undefined` value. */
 const evidenceOf = (
   result: ToolResult,
-): Pick<DispatchResult, "stderrTail" | "exitCode" | "fullLogPath"> => {
-  const out: Pick<DispatchResult, "stderrTail" | "exitCode" | "fullLogPath"> = {}
+): Pick<DispatchResult, "stderrTail" | "exitCode" | "executedCommand" | "fullLogPath"> => {
+  const out: Pick<DispatchResult, "stderrTail" | "exitCode" | "executedCommand" | "fullLogPath"> =
+    {}
   const ev = result.evidence
   if (ev === undefined) return out
   if (typeof ev.stderr === "string" && ev.stderr.length > 0) {
     out.stderrTail = ev.stderr.slice(-STDERR_TAIL_CAP)
   }
   if (typeof ev.exitCode === "number") out.exitCode = ev.exitCode
+  if (typeof ev.executedCommand === "string" && ev.executedCommand.length > 0) {
+    out.executedCommand = ev.executedCommand
+  }
   if (typeof ev.fullLogPath === "string" && ev.fullLogPath.length > 0) {
     out.fullLogPath = ev.fullLogPath
   }

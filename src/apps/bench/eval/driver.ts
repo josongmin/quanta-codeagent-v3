@@ -62,7 +62,9 @@ import {
 } from "@/runner/batch/eval/repair-phase-policy"
 import { makeDiscoveredRepoRegressionPort } from "@/runner/batch/eval/repo-regression-discovery-adapter"
 import {
+  buildSelectionInputs,
   type Candidate,
+  filesFromPatch,
   runSelection,
   type SelectionTelemetry,
   summarizeSelection,
@@ -70,7 +72,7 @@ import {
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
-import { errMessage, gateDisabled } from "@/shared"
+import { errMessage, gateDisabled, logger } from "@/shared"
 import type {
   BenchReproTestTelemetry,
   Instance,
@@ -454,7 +456,7 @@ const runAgentPhase = async (
     // P0 telemetry — log ONLY when retention actually substitutes (the rare,
     // interesting case): the run ended badly and we recovered a verified-green
     // intermediate over the empty/regressed final tree.
-    console.error(
+    logger.warn(
       `[tentative] ${instance.id}: ENGAGED — emitted verified candidate ` +
         `(${recorder.count} recorded, stopReason=${stopReason}) ` +
         `${patch.length}B over ${rawPatch.length}B final`,
@@ -550,20 +552,6 @@ const runRepairPhase = async (
   }
 }
 
-/** Repo-relative files a unified diff touches (its `+++ b/<f>` headers, plus
- *  `--- a/<f>` for pure deletions). Used for owner-coverage scoring. */
-const filesFromPatch = (patch: string): string[] => {
-  const files = new Set<string>()
-  for (const line of patch.split("\n")) {
-    const m = /^(?:\+\+\+ b\/|--- a\/)(.+)$/.exec(line)
-    if (m !== null) {
-      const f = (m[1] as string).trim()
-      if (f !== "" && f !== "/dev/null") files.add(f)
-    }
-  }
-  return [...files]
-}
-
 export interface SelectionReproPolicy {
   readonly enabled: boolean
   readonly goldCalibrate: boolean
@@ -587,6 +575,55 @@ export const selectionReproPolicy = (
   return { enabled: true, goldCalibrate: true, resolvedKofNMode: "hard" }
 }
 
+const unavailableReproCalibration = (): ReproOracleCalibration => ({
+  goldCalibrated: false,
+  falseNegative: false,
+  available: false,
+  goldVotes: null,
+  goldK: null,
+})
+
+const resolveSelectionReproConsensus = async (
+  instance: Instance,
+  sandbox: string,
+  timeoutMs: number,
+  reproSources: readonly string[],
+  mode: BenchPosture["verifySelectRepro"],
+) => {
+  const reproPolicy = selectionReproPolicy(mode)
+  const calibrationUnavailable = unavailableReproCalibration()
+  if (!reproPolicy.enabled) {
+    return {
+      reproPolicy,
+      resolvedKofNSelectionPort: undefined,
+      calibration: calibrationUnavailable,
+    }
+  }
+  if (reproPolicy.goldCalibrate) {
+    const { port, calibration } = await makeCalibratedReproConsensusPort(
+      instance,
+      reproSources,
+      sandbox,
+      timeoutMs,
+    )
+    return {
+      reproPolicy,
+      resolvedKofNSelectionPort: port,
+      calibration,
+    }
+  }
+  return {
+    reproPolicy,
+    resolvedKofNSelectionPort: makeReproConsensusSelectionPort(
+      instance,
+      reproSources,
+      sandbox,
+      timeoutMs,
+    ),
+    calibration: calibrationUnavailable,
+  }
+}
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -603,25 +640,22 @@ const runSelectionPhase = async (
   w: Wiring,
   n: number,
   concurrency: number | undefined,
+  earlyAccept: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
-  localizeCandidates: readonly string[],
+  selectionOwnerCandidates: readonly string[],
   baseValidatedRed: boolean,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
-  const owners = new Set(localizeCandidates)
-  const reproPolicy = selectionReproPolicy(verifySelectRepro)
+  const selectionInputs = buildSelectionInputs({
+    n,
+    ownerCandidates: selectionOwnerCandidates,
+    sandbox,
+  })
   const generationErrors = new Map<number, string>()
-  const seedFor = (i: number): string | undefined => {
-    if (i === 0) return undefined
-    const file = localizeCandidates[i - 1]
-    return file === undefined
-      ? undefined
-      : `Focus your investigation on \`${file}\`. Confirm the ROOT CAUSE lives there (not merely where the symptom surfaces) before editing.`
-  }
   const mergeHint = (seed: string | undefined): string | undefined =>
     seed === undefined
       ? closureHint
@@ -635,27 +669,18 @@ const runSelectionPhase = async (
   // resolvedKofN port fails open (never rejects a candidate); the calibration is
   // surfaced as eval-only telemetry so the campaign self-measures the oracle's
   // false-negative rate (the verify-and-select bottleneck).
-  const calibrationUnavailable: ReproOracleCalibration = {
-    goldCalibrated: false,
-    falseNegative: false,
-    available: false,
-    goldVotes: null,
-    goldK: null,
-  }
-  const { port: resolvedKofNPort, calibration } =
-    reproPolicy.enabled === false
-      ? { port: () => Promise.resolve(null), calibration: calibrationUnavailable }
-      : reproPolicy.goldCalibrate
-        ? await makeCalibratedReproConsensusPort(instance, reproSources, sandbox, deps.timeoutMs)
-        : {
-            port: makeReproConsensusSelectionPort(instance, reproSources, sandbox, deps.timeoutMs),
-            calibration: calibrationUnavailable,
-          }
+  const { reproPolicy, resolvedKofNSelectionPort, calibration } =
+    await resolveSelectionReproConsensus(
+      instance,
+      sandbox,
+      deps.timeoutMs,
+      reproSources,
+      verifySelectRepro,
+    )
   const discoveredRegressionPort =
     verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
       : undefined
-  const resolvedKofNSelectionPort = reproPolicy.enabled ? resolvedKofNPort : undefined
   // No-oracle verify-select (`discovered`) must not let synthesized repro
   // authority veto admissibility. In that mode, impacted repo tests are the hard
   // regression signal and repro consensus is already downgraded to positive-only
@@ -664,9 +689,10 @@ const runSelectionPhase = async (
     verifySelectRegression === "discovered" ? null : baseValidatedRed
   const result = await runSelection({
     n,
-    owners,
-    seeds: Array.from({ length: n }, (_, i) => seedFor(i)),
+    owners: selectionInputs.owners,
+    seeds: selectionInputs.seeds,
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
+    earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
     ports: {
       generate: async (i, seed): Promise<Candidate> => {
@@ -695,6 +721,9 @@ const runSelectionPhase = async (
             turns: phase.turns,
             files: filesFromPatch(phase.patch),
             baseValidatedRed: selectionBaseValidatedRed,
+            ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
+            ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
+            ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
           }
         } finally {
           if (isolated) await cleanupSandbox(candidateSandbox)
@@ -763,6 +792,15 @@ const runSelectionPhase = async (
   return {
     patch: result.winner?.patch ?? "",
     turns: totalTurns,
+    ...(result.terminalCandidate?.stopReason !== undefined
+      ? { stopReason: result.terminalCandidate.stopReason }
+      : {}),
+    ...(result.terminalCandidate?.agentError !== undefined
+      ? { agentError: result.terminalCandidate.agentError }
+      : {}),
+    ...(result.terminalCandidate?.editCount !== undefined
+      ? { editCount: result.terminalCandidate.editCount }
+      : {}),
     reproOracleCalibration: calibration,
     selectionTelemetry: summarizeSelection(result),
   }
@@ -797,6 +835,9 @@ const agentPhaseError = (phase: Phase): string | undefined => {
     ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
   })
   if (noPatchExhausted !== undefined) return noPatchExhausted
+  if (phase.stopReason === "max_turns" && phase.patch.trim() === "") {
+    return "agent reached max turns before verification"
+  }
   if (phase.stopReason === "error") {
     return phase.agentError ?? "agent stopped with error before verification"
   }
@@ -877,6 +918,12 @@ const noPatchResult = (args: {
     passed: false,
     patch: args.phase.patch,
     turns: args.phase.turns,
+    ...(args.phase.selectionTelemetry?.winnerId === null
+      ? {
+          error:
+            "verify-select produced no submittable candidate (all candidates were empty or did not apply)",
+        }
+      : {}),
     ...extra,
   }
 }
@@ -1052,9 +1099,10 @@ const runInstanceOnce = async (
             w,
             posture.verifySelectN,
             posture.verifySelectConcurrency,
+            posture.verifySelectEarlyAccept,
             posture.verifySelectRegression,
             posture.verifySelectRepro,
-            localizeCandidates,
+            closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? localizeCandidates,
             verificationPlan?.baseValidatedRed ?? false,
             precomputedHint,
             reproHint,
@@ -1095,8 +1143,10 @@ const runInstanceOnce = async (
       // because the agent always failed — the reference patch is still checkable.
       if (shouldValidateGold(deps, false)) {
         const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
-        if (!gold.ok)
-          return { ...terminal, passed: false, verdict: "grader_invalid", error: gold.error }
+        if (!gold.ok) {
+          const { error: _prevError, ...rest } = terminal
+          return { ...rest, passed: false, verdict: "grader_invalid", error: gold.error }
+        }
       }
       return terminal
     }
@@ -1136,7 +1186,8 @@ const runInstanceOnce = async (
     if (shouldValidateGold(deps, v.passed)) {
       const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
       if (!gold.ok) {
-        v = { ...v, passed: false, error: gold.error }
+        const { error: _prevError, ...rest } = v
+        v = { ...rest, passed: false, error: gold.error }
         extra.verdict = "grader_invalid"
       }
     }

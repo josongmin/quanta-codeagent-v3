@@ -382,6 +382,7 @@ export const createStreamDispatcher = (
         durationMs?: number
         stderrTail?: string
         exitCode?: number
+        executedCommand?: string
         fullLogPath?: string
       }
       config.stream.emit({
@@ -393,6 +394,9 @@ export const createStreamDispatcher = (
         ...(enriched.durationMs !== undefined ? { durationMs: enriched.durationMs } : {}),
         ...(enriched.stderrTail !== undefined ? { stderrTail: enriched.stderrTail } : {}),
         ...(enriched.exitCode !== undefined ? { exitCode: enriched.exitCode } : {}),
+        ...(enriched.executedCommand !== undefined
+          ? { executedCommand: enriched.executedCommand }
+          : {}),
         ...(enriched.fullLogPath !== undefined ? { fullLogPath: enriched.fullLogPath } : {}),
       })
       return out

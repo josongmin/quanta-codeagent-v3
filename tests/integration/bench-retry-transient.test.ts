@@ -126,6 +126,25 @@ describe("bench retry-transient — scenario coverage", () => {
     expect(result.verdict).toBe("grader_invalid")
   })
 
+  test("patch_budget_strict admission block ⇒ terminal, no retry", async () => {
+    let calls = 0
+    const { result, loop } = await runRetryLoop(async () => {
+      calls += 1
+      return mkResult({
+        error: "patch budget exceeded: new-def budget=0",
+        admissionBlock: { kind: "patch_budget_strict" },
+      })
+    }, 3)
+    expect(calls).toBe(1)
+    expect(loop.attempts).toBe(1)
+    expect(loop.outcomes[0]).toEqual({
+      kind: "admission-blocked",
+      source: "patch_budget_strict",
+      reason: "patch budget exceeded: new-def budget=0",
+    })
+    expect(result.admissionBlock).toEqual({ kind: "patch_budget_strict" })
+  })
+
   test("empty → real-fail mid-loop ⇒ stops on real-fail (signal precedence)", async () => {
     const { result, loop } = await runRetryLoop(
       stepper([

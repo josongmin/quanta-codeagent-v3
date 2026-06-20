@@ -34,9 +34,9 @@ purpose: |
   no-leak fenced), the pure selection-executor orchestrator (TD), and the
   `verify-select` knob (8-step plumbing). Default-OFF / byte-identical when
   unset. Explicit experimental presets now exist (`agentless-v3-thin-strict-select`,
-  `agentless-v3-select-regression`, and `agentless-v3-select-regression-doubt`),
-  but the feature is still NOT in the default base profile and is not yet
-  promoted as an A/B-proven winner.
+  `agentless-v3-thin-strict-closure-select`, `agentless-v3-select-regression`,
+  and `agentless-v3-select-regression-doubt`), but the feature is still NOT in
+  the default base profile and is not yet promoted as an A/B-proven winner.
 evidence:
   code:
     - src/agent/verification-bundle/types.ts
@@ -52,6 +52,7 @@ evidence:
     - src/runner/batch/eval/repair/resolved-consensus.ts
     - src/runner/knobs/knobs/verify-select.ts
     - src/runner/knobs/knobs/verify-select-concurrency.ts
+    - src/runner/knobs/knobs/verify-select-early-accept.ts
     - src/runner/knobs/knobs/verify-select-regression.ts
     - src/runner/knobs/knobs/verify-select-repro.ts
     - src/runner/knobs/presets.ts
@@ -80,6 +81,9 @@ knobs:
   - name: verify-select-concurrency
     where: QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY
     purpose: "Max candidates generated concurrently; unset ⇒ sequential. >1 needs isolated generate. Throttle: instance-conc × this."
+  - name: verify-select-early-accept
+    where: QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT
+    purpose: "Progressive cost guard: stop after the first owner-scoped candidate with hard positive regression/resolved signal; soft-only repro quorum remains ranking credit."
   - name: verify-select-regression
     where: QUANTA_BENCH_VERIFY_SELECT_REGRESSION
     purpose: "Regression source for verify-select: unset/gold keeps eval-only PASS_TO_PASS; discovered runs no-oracle impacted native repo tests; off ablates."
@@ -100,8 +104,10 @@ notes: |
   regressions) and patchedResolvedKofN (TC, makePatchedResolvedConsensus re-runs
   the reproducing set on the patched tree; `verify-select-repro=positive` demotes
   that self-generated signal to soft-only AND skips eval-only gold calibration,
-  while unset preserves the legacy gold-calibrated hard gate). Current measured
-  presets: `agentless-v3-select-regression` (no-oracle selection arm) and
-  `agentless-v3-select-regression-doubt` (same arm plus `repro-doubt:5` for
-  verify-loop stalls). L3, not L4: wired + hellgate-tested, present in explicit
-  experimental presets, but still not promoted as a base-profile winner.
+  while unset preserves the legacy gold-calibrated hard gate). Current explicit
+  presets: `agentless-v3-thin-strict-closure-select` (noexec candidate-gen +
+  ClosureBundle owner authority + late selector), `agentless-v3-select-regression`
+  (no-oracle selection arm), and `agentless-v3-select-regression-doubt` (same
+  arm plus `repro-doubt:5` for verify-loop stalls). L3, not L4: wired +
+  hellgate-tested, present in explicit experimental presets, but still not
+  promoted as a base-profile winner.

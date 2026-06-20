@@ -202,7 +202,8 @@ export type AgentEvent =
   | { type: "tool_progress"; id: string; name: string; message: string }
   // RFC-0002 §5.2 `tool_result` data contract: `preview` is the stdout tail;
   // the optional fields carry the rest of the mandated evidence (durationMs,
-  // stderrTail, exitCode, fullLogPath) when the tool produced them.
+  // stderrTail, exitCode, executedCommand, fullLogPath) when the tool
+  // produced them.
   | {
       type: "tool_result"
       id: string
@@ -212,6 +213,7 @@ export type AgentEvent =
       durationMs?: number
       stderrTail?: string
       exitCode?: number
+      executedCommand?: string
       fullLogPath?: string
     }
   // ADR-0512 — a tool call OUTSIDE the active skill's allowlist (skill-scope v2),

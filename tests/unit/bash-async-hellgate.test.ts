@@ -207,6 +207,7 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
     expect(result.ok).toBe(true)
     expect(result.output).toContain("[exit 0]")
     expect(result.output).toContain("done")
+    expect(result.evidence?.executedCommand).toBe("echo done")
   })
 
   // 2. background + slow command + deadline → detach.
@@ -228,6 +229,7 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
     expect(result.output).toContain("status=running")
     expect(result.output).toMatch(/shellId=[0-9a-f-]{36}/)
     expect(result.output).toContain("partial-output")
+    expect(result.evidence?.executedCommand).toBeUndefined()
   })
 
   // 22. handle id is a UUID.

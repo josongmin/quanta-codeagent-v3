@@ -39,6 +39,18 @@ describe("verify-select-repro knob wiring", () => {
   })
 })
 
+describe("verify-select-early-accept knob wiring", () => {
+  test("unset stays off", () => {
+    expect(posture({}).verifySelectEarlyAccept).toBe(false)
+  })
+
+  test("truthy env reaches BenchPosture", () => {
+    expect(posture({ QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT: "1" }).verifySelectEarlyAccept).toBe(
+      true,
+    )
+  })
+})
+
 describe("selectionReproPolicy", () => {
   test("positive mode is soft-only and does not gold-calibrate", () => {
     expect(selectionReproPolicy("positive")).toEqual({

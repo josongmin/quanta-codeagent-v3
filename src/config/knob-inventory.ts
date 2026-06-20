@@ -1317,6 +1317,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/verify-select-concurrency.ts",
   },
   {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
+    kind: "bool",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: progressive verify-select cost guard. Stop after first owner-scoped candidate with hard positive regression/resolved signal. Default-OFF.",
+    readSite: "runner/knobs/knobs/verify-select-early-accept.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
     kind: "enum",
     default: undefined,
@@ -1392,7 +1402,8 @@ const BENCH: readonly KnobInventoryEntry[] = [
     default: false,
     group: "bench",
     home: "runner-knobs",
-    describe: "L3 working-state scratchpad (Codex absorption). CLI/agent surfaces only; excludes bench measurement.",
+    describe:
+      "L3 working-state scratchpad (Codex absorption). CLI/agent surfaces only; excludes bench measurement.",
     readSite: "runner/knobs/knobs/working-state.ts",
   },
   {

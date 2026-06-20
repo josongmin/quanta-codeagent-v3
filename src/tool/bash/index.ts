@@ -403,6 +403,7 @@ const buildBackgroundCompletedResult = (snap: {
   stdout: string
   stderr: string
   exitCode: number | null
+  command: string
 }): ToolEvent => {
   const body = stripModelControlChars(
     [snap.stdout, snap.stderr].filter(Boolean).join("\n"),
@@ -413,6 +414,7 @@ const buildBackgroundCompletedResult = (snap: {
   const evidence: ToolResultEvidence = {
     ...(snap.stderr ? { stderr: snap.stderr.slice(-STDERR_CAP) } : {}),
     exitCode: exit,
+    executedCommand: snap.command,
   }
   return {
     type: "result",
@@ -450,7 +452,7 @@ const buildBackgroundResult = (
     const snap = outcome.snapshot
     yield snap.status === "running"
       ? buildBackgroundPlaceholderResult(snap, timeoutMs)
-      : buildBackgroundCompletedResult(snap)
+      : buildBackgroundCompletedResult({ ...snap, command: cmd })
   }
   return gen()
 }
@@ -724,6 +726,7 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   const evidence: ToolResultEvidence = {
     ...(rr.stderr ? { stderr: rr.stderr.slice(-STDERR_CAP) } : {}),
     exitCode: rr.exitCode,
+    executedCommand: cmd,
   }
 
   // ADR-0295 — when mode="read" and the spawn fails with an EACCES /

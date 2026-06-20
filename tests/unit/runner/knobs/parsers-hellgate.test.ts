@@ -29,6 +29,7 @@ import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-concurrency"
+import { verifySelectEarlyAcceptKnob } from "@/runner/knobs/knobs/verify-select-early-accept"
 import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
 import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
@@ -82,6 +83,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["hooks", hooksKnob],
     ["verify-select", verifySelectKnob],
     ["verify-select-concurrency", verifySelectConcurrencyKnob],
+    ["verify-select-early-accept", verifySelectEarlyAcceptKnob],
     ["verify-select-regression", verifySelectRegressionKnob],
     ["verify-select-repro", verifySelectReproKnob],
   ] as const
@@ -136,6 +138,21 @@ describe("verify-select — domain bounds [1,8] integer", () => {
     expect(verifySelectKnob.parse("-1")).toBeUndefined()
     expect(verifySelectKnob.parse("2.5")).toBeUndefined() // non-integer
     expect(verifySelectKnob.parse("abc")).toBeUndefined()
+  })
+})
+
+describe("verify-select-early-accept — closed truthy bool", () => {
+  test("accepted truthy forms parse to true", () => {
+    expect(verifySelectEarlyAcceptKnob.parse("1")).toBe(true)
+    expect(verifySelectEarlyAcceptKnob.parse("on")).toBe(true)
+    expect(verifySelectEarlyAcceptKnob.parse("true")).toBe(true)
+  })
+
+  test("false/garbage forms stay undefined", () => {
+    expect(verifySelectEarlyAcceptKnob.parse("0")).toBeUndefined()
+    expect(verifySelectEarlyAcceptKnob.parse("off")).toBeUndefined()
+    expect(verifySelectEarlyAcceptKnob.parse("false")).toBeUndefined()
+    expect(verifySelectEarlyAcceptKnob.parse("TRUE")).toBeUndefined()
   })
 })
 

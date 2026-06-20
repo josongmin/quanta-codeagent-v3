@@ -58,6 +58,14 @@ export interface PoolConfig {
   /** Fail-closed guard across PROCESSES too: if another quanta-bench box is
    *  already running, callers must opt in before launching a fresh one. */
   readonly allowExtraBoxes?: boolean
+  /** When extra boxes are DISABLED, wait for an existing running box to become
+   *  idle (or disappear) instead of failing fast. Useful for chaining waves onto
+   *  the warm-box lifecycle without manual retry loops. */
+  readonly waitForIdle?: boolean
+  /** Poll cadence for {@link waitForIdle}. Default 15s. */
+  readonly waitForIdlePollMs?: number
+  /** Max wait before failing the idle wait. Default 45min. 0/negative = no timeout. */
+  readonly waitForIdleTimeoutMs?: number
   readonly preset: string
   readonly model: string
   /** Per-box patch-gen concurrency forwarded to `bench run`. */
@@ -125,6 +133,61 @@ const assertUniqueChunkRunIds = (chunks: readonly PoolChunk[]): void => {
     throw new Error(
       `[pool] duplicate chunk runId(s): ${[...dup].sort().join(", ")} — every chunk must have a unique runId`,
     )
+  }
+}
+
+const sleepReal = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(r, ms))
+
+const awaitPoolLaunchWindow = async (cfg: PoolConfig): Promise<void> => {
+  if (cfg.allowExtraBoxes === true) return
+  const waitForIdle = cfg.waitForIdle === true
+  const log = cfg.onLog ?? (() => {})
+  const now = cfg.now ?? (() => Date.now())
+  const sleep = cfg.sleep ?? sleepReal
+  const pollMs = Math.max(1_000, cfg.waitForIdlePollMs ?? 15_000)
+  const timeoutMs = cfg.waitForIdleTimeoutMs ?? 45 * 60 * 1000
+  const deadline = timeoutMs > 0 ? now() + timeoutMs : Number.POSITIVE_INFINITY
+  let announcedWait = false
+
+  for (;;) {
+    const idle = await findIdleBox(cfg.provision).catch(() => undefined)
+    if (idle !== undefined) return
+
+    let running: number
+    try {
+      running = await countRunningBoxes(cfg.provision)
+    } catch (err) {
+      if (!waitForIdle) throw err
+      if (now() >= deadline) {
+        throw new Error(
+          `[pool] timed out waiting for a reusable box while status probes kept failing: ${errMessage(err)}`,
+        )
+      }
+      log(`[pool] waiting for a reusable box: status probe failed (${errMessage(err)}) — retrying…`)
+      await sleep(pollMs)
+      continue
+    }
+
+    if (running <= 0) return
+    if (!waitForIdle) {
+      throw new Error(
+        `[pool] refusing to launch another box while ${running} quanta-bench box(es) are already running. ` +
+          "Wait for the existing box to go idle, or opt in explicitly.",
+      )
+    }
+    if (now() >= deadline) {
+      throw new Error(
+        `[pool] timed out waiting for ${running} running quanta-bench box(es) to go idle. ` +
+          "Use explicit extra-box opt-in to launch past them.",
+      )
+    }
+    if (!announcedWait) {
+      log(
+        `[pool] waiting for ${running} running quanta-bench box(es) to go idle before launching another box…`,
+      )
+      announcedWait = true
+    }
+    await sleep(pollMs)
   }
 }
 
@@ -349,18 +412,7 @@ export const runPool = async (
       `[pool] refusing workers=${workers} without explicit opt-in (allowExtraWorkers=true)`,
     )
   }
-  if (cfg.allowExtraBoxes !== true) {
-    const idle = await findIdleBox(cfg.provision).catch(() => undefined)
-    if (idle === undefined) {
-      const running = await countRunningBoxes(cfg.provision)
-      if (running > 0) {
-        throw new Error(
-          `[pool] refusing to launch another box while ${running} quanta-bench box(es) are already running. ` +
-            "Wait for the existing box to go idle, or opt in explicitly.",
-        )
-      }
-    }
-  }
+  await awaitPoolLaunchWindow(cfg)
   const queue = new ChunkQueue(chunks)
   const attemptsByRun = new Map<string, number>()
   const out = new Map<string, PoolChunkResult>()

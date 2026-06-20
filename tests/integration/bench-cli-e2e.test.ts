@@ -57,6 +57,9 @@ beforeAll(() => {
     join(dir, "instances.jsonl"),
     `${JSON.stringify({
       instance_id: "demo__inst-1",
+      repo: "demo/repo",
+      base_commit: "0".repeat(40),
+      problem_statement: "fix demo__inst-1",
       patch:
         "diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1 +1 @@\n-x\n+y\n",
       test_patch: "diff --git a/t.py b/t.py\n",
@@ -77,6 +80,12 @@ const run = async (...args: string[]): Promise<{ code: number; out: string }> =>
     cwd: REPO,
     stdout: "pipe",
     stderr: "pipe",
+    env: {
+      ...process.env,
+      QUANTA_BENCH_PRESET: "",
+      QUANTA_BENCH_SOTA: "",
+      QUANTA_KNOBS_PRESET: "",
+    },
   })
   const out = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`
   const code = await proc.exited
@@ -87,6 +96,9 @@ describe("quanta-bench CLI e2e", () => {
   test("presets lists agentless-v1", async () => {
     const { out } = await run("presets")
     expect(out).toContain("agentless-v1")
+    expect(out).toContain("Default live execution preset: agentless-v3-thin")
+    expect(out).toContain("Individual QUANTA_BENCH_* env vars override a preset's values.")
+    expect(out).toContain("QUANTA_BENCH_SOTA=1")
   })
 
   test("diff reports newly-resolved / regressed", async () => {
@@ -124,6 +136,13 @@ describe("quanta-bench CLI e2e", () => {
     expect(out).toContain("1000000") // 1M input tokens surfaced somewhere
   })
 
+  test("run --dry-run surfaces the current base preset instead of implicit baseline", async () => {
+    const { code, out } = await run("run", "--swebench", join(dir, "instances.jsonl"), "--dry-run")
+    expect(code).toBe(0)
+    expect(out).toContain("dry-run plan")
+    expect(out).toContain("preset: agentless-v3-thin")
+  })
+
   test("grade --mode full WITHOUT --allow-remote-secrets is refused (secret gate)", async () => {
     const { code, out } = await run(
       "grade",
@@ -155,7 +174,7 @@ describe("quanta-bench CLI e2e", () => {
     // executor wired: prints the plan, and the plan documents the access-token-only posture
     expect(out.toLowerCase()).toContain("dry-run")
     expect(out.toLowerCase()).toMatch(/access_token only|refresh.*dropped/)
-    expect(out).toContain("preset=agentless-v2-safe")
+    expect(out).toContain("preset=agentless-v3-thin")
     expect(out.toLowerCase()).toContain("pyright")
   })
 

@@ -68,6 +68,7 @@ import { testRunnerKnob } from "@/runner/knobs/knobs/test-runner"
 import { verificationPlanKnob } from "@/runner/knobs/knobs/verification-plan"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-concurrency"
+import { verifySelectEarlyAcceptKnob } from "@/runner/knobs/knobs/verify-select-early-accept"
 import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
 import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
@@ -118,6 +119,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(verificationPlanKnob),
   asAnyKnob(verifySelectKnob),
   asAnyKnob(verifySelectConcurrencyKnob),
+  asAnyKnob(verifySelectEarlyAcceptKnob),
   asAnyKnob(verifySelectRegressionKnob),
   asAnyKnob(verifySelectReproKnob),
   asAnyKnob(workingStateKnob),

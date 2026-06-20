@@ -263,7 +263,12 @@ describe("bench-eval: --dry-run plan", () => {
   ]
 
   test("(d) buildDryRunPlan shape with a limit", () => {
-    const plan = buildDryRunPlan("/corpus", insts, { n: 5, limit: 2, pythonHarness: true })
+    const plan = buildDryRunPlan("/corpus", insts, {
+      n: 5,
+      limit: 2,
+      pythonHarness: true,
+      preset: "agentless-v3-thin",
+    })
     expect(plan).toEqual({
       sourceLabel: "corpus",
       sourcePath: "/corpus",
@@ -272,17 +277,24 @@ describe("bench-eval: --dry-run plan", () => {
       n: 5,
       limit: 2,
       pythonHarness: true,
+      preset: "agentless-v3-thin",
       sample: ["a", "b"],
     })
   })
 
   test("(d') no limit selects all; unset root labelled; lines render", () => {
-    const plan = buildDryRunPlan("", insts, { n: 1, limit: null, pythonHarness: false })
+    const plan = buildDryRunPlan("", insts, {
+      n: 1,
+      limit: null,
+      pythonHarness: false,
+      preset: "agentless-v3-thin",
+    })
     expect(plan.sourcePath).toBe("(unset)")
     expect(plan.selected).toBe(3)
     const lines = formatDryRunPlan(plan)
     expect(lines[0]).toContain("NO LLM will be called")
     expect(lines.join("\n")).toContain("corpus: (unset)")
+    expect(lines.join("\n")).toContain("preset: agentless-v3-thin")
     expect(lines.join("\n")).toContain("verifier: local testCmd")
     expect(lines.join("\n")).toContain("sample ids: a, b, c")
   })
@@ -292,6 +304,7 @@ describe("bench-eval: --dry-run plan", () => {
       n: 2,
       limit: 1,
       pythonHarness: true,
+      preset: "agentless-v3-thin",
     })
     expect(plan.sourceLabel).toBe("dataset")
     expect(plan.sourcePath).toBe("/dataset.jsonl")
@@ -300,12 +313,18 @@ describe("bench-eval: --dry-run plan", () => {
     expect(plan.sample).toEqual(["demo__a"])
     const lines = formatDryRunPlan(plan)
     expect(lines.join("\n")).toContain("dataset: /dataset.jsonl")
+    expect(lines.join("\n")).toContain("preset: agentless-v3-thin")
     expect(lines.join("\n")).toContain("sample ids: demo__a")
   })
 
   test("empty corpus → selected 0, sample (none)", () => {
     const lines = formatDryRunPlan(
-      buildDryRunPlan("/x", [], { n: 1, limit: null, pythonHarness: false }),
+      buildDryRunPlan("/x", [], {
+        n: 1,
+        limit: null,
+        pythonHarness: false,
+        preset: "agentless-v3-thin",
+      }),
     )
     expect(lines.join("\n")).toContain("0 loaded, 0 selected")
     expect(lines.join("\n")).toContain("sample ids: (none)")

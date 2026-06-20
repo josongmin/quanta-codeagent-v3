@@ -20,9 +20,9 @@
  * APPLY IS A NOOP — consumed out of band by the bench driver's runInstance
  * (`posture.verifySelectN` → runSelectionPhase), not stored on `AgentConfig`.
  * Explicit experimental presets now include `agentless-v3-thin-strict-select`,
- * `agentless-v3-select-regression`, and `agentless-v3-select-regression-doubt`,
- * but verify-select is still NOT in the default base profile and is not yet
- * promoted as an A/B-proven winner.
+ * `agentless-v3-thin-strict-closure-select`, `agentless-v3-select-regression`,
+ * and `agentless-v3-select-regression-doubt`, but verify-select is still NOT in
+ * the default base profile and is not yet promoted as an A/B-proven winner.
  */
 
 import type { AgentConfig } from "@/agent"

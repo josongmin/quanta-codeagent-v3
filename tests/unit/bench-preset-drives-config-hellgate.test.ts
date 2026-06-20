@@ -257,10 +257,12 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression"
     const opt = benchOptIns()
     expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectEarlyAccept).toBe(true)
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("positive")
     expect(KNOB_PRESETS["agentless-v3-select-regression"]).toMatchObject({
       "verify-select": "5",
+      "verify-select-early-accept": "1",
       "verify-select-regression": "discovered",
       "verify-select-repro": "positive",
     })
@@ -303,27 +305,68 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.inLoopExec).toBe(false)
     expect(opt.patchBudgetStrict).toBe(true)
     expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectEarlyAccept).toBe(true)
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("positive")
     expect(KNOB_PRESETS["agentless-v3-thin-strict-select"]).toMatchObject({
       "bench-in-loop-exec": "off",
       "patch-budget-strict": "1",
       "verify-select": "5",
+      "verify-select-early-accept": "1",
       "verify-select-regression": "discovered",
       "verify-select-repro": "positive",
     })
+  })
+
+  test("PRESET-15b: agentless-v3-thin-strict-closure-select combines noexec selector with ClosureBundle grounding", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-closure-select"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.faultEvidence).toBe(true)
+    expect(opt.verificationPlan).toBe(true)
+    expect(opt.primaryRail).toBe(true)
+    expect(opt.patchHygiene).toBe(true)
+    expect(opt.noPatchBreaker).toBe(true)
+    expect(opt.repairEscalation).toBe(true)
+    expect(opt.repairRounds).toBeUndefined()
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectEarlyAccept).toBe(true)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]).toMatchObject({
+      "bench-in-loop-exec": "off",
+      "fault-evidence": "1",
+      "verification-plan": "1",
+      "primary-rail": "1",
+      "patch-hygiene": "1",
+      "no-patch-breaker": "1",
+      "repair-escalation": "1",
+      "patch-budget-strict": "1",
+      "verify-select": "5",
+      "verify-select-early-accept": "1",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "positive",
+    })
+    expect(
+      KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["closure-repair"],
+    ).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["test-runner"]).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["repro-test"]).toBeUndefined()
   })
 
   test("PRESET-16: agentless-v3-select-regression-doubt adds the targeted stall-breaker", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression-doubt"
     const opt = benchOptIns()
     expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectEarlyAccept).toBe(true)
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("positive")
     const cfg = buildOnce()
     expect(cfg.reproDoubt).toEqual({ stuckRuns: 5 })
     expect(KNOB_PRESETS["agentless-v3-select-regression-doubt"]).toMatchObject({
       "verify-select": "5",
+      "verify-select-early-accept": "1",
       "verify-select-regression": "discovered",
       "verify-select-repro": "positive",
       "repro-doubt": "5",

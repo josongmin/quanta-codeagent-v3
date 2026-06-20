@@ -21,13 +21,17 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { KNOB_PRESETS } from "@/runner/knobs"
 import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
 import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
 import { loadVerdictsFromFile } from "./analyze/verdicts"
+import {
+  CURRENT_BENCH_BASE_PRESET,
+  renderBenchPresetListLines,
+  resolveBenchExecutionPreset,
+} from "./preset"
 import type { GradeBackend } from "./remote/backend"
 import { boxRunLogPath, D, inspectBox, provisionBox } from "./remote/box-session"
 import { createEc2Backend } from "./remote/ec2"
@@ -99,6 +103,15 @@ const argValue = (flag: string): string | undefined => {
 const hasFlag = (flag: string): boolean => process.argv.includes(flag)
 const allowExtraBoxes = (): boolean =>
   hasFlag("--allow-extra-boxes") || gateOn(process.env, "QUANTA_ALLOW_EXTRA_BOXES")
+const waitForIdleBox = (): boolean =>
+  hasFlag("--wait-for-idle") || gateOn(process.env, "QUANTA_BENCH_WAIT_FOR_IDLE")
+
+const positiveMinutesFlagMs = (flag: string): number | undefined => {
+  const raw = argValue(flag)
+  if (raw === undefined || raw.trim() === "") return undefined
+  const mins = Number(raw)
+  return Number.isFinite(mins) && mins > 0 ? mins * 60_000 : undefined
+}
 
 /** Print a render* block (diff / explain / leaderboard markdown) to raw stdout
  *  — NOT via `logger.info`, which prefixes `[info]`, mangles embedded `\n` to
@@ -257,7 +270,10 @@ const cmdGradeFullRemote = async (): Promise<void> => {
     process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`
   const authJson = dry ? "{}" : readFileSync(authFile, "utf8")
   const instance = argValue("--instance")
-  const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset")
+  const preset = resolveBenchExecutionPreset({
+    envVars: process.env,
+    argvPreset: argValue("--preset"),
+  })
   const fullModel = argValue("--model")
   // The expected instance set instance-aware relaunch reconciles against to detect
   // partial loss. `--instance` wins; else every instance_id in the dataset jsonl.
@@ -288,7 +304,7 @@ const cmdGradeFullRemote = async (): Promise<void> => {
       authJson,
       datasetPath: dataset,
       ...(ids.length > 0 ? { instanceIds: [...ids] } : {}),
-      ...(preset !== undefined ? { preset } : {}),
+      preset,
       ...(fullModel !== undefined ? { model: fullModel } : {}),
       ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
       dryRun: dry,
@@ -379,7 +395,7 @@ const requirePoolDatasets = (): string[] => {
   const datasetsArg = argValue("--datasets")
   if (datasetsArg === undefined || datasetsArg.trim() === "") {
     logger.info(
-      "usage: quanta-bench pool --allow-remote-secrets --datasets <c1.jsonl,c2.jsonl,…> [--workers 1] [--allow-extra-boxes] [--model m] [--ami id]",
+      "usage: quanta-bench pool --allow-remote-secrets --datasets <c1.jsonl,c2.jsonl,…> [--workers 1] [--wait-for-idle] [--wait-timeout-min N] [--allow-extra-boxes] [--model m] [--ami id]",
     )
     process.exit(2)
   }
@@ -404,6 +420,7 @@ const poolConcurrencySource = (override: string | undefined): string =>
  * token and writes to a runId-scoped box dir; a chunk whose box died is requeued.
  *
  *   quanta-bench pool --allow-remote-secrets --datasets c1.jsonl,c2.jsonl[,…] [--workers 1]
+ *   quanta-bench pool … --wait-for-idle              # park until the warm box goes idle, then reuse/launch
  *   quanta-bench pool … --workers 2 --allow-extra-boxes   # explicit multi-box opt-in
  */
 const cmdPool = async (): Promise<void> => {
@@ -419,12 +436,17 @@ const cmdPool = async (): Promise<void> => {
   const workers = resolvePoolWorkers()
   const authFile =
     process.env.QUANTA_BENCH_AUTH_FILE ?? `${process.env.HOME}/.quanta/auth/chatgpt.json`
-  const preset = process.env.QUANTA_BENCH_PRESET ?? argValue("--preset") ?? "agentless-v2-safe"
+  const preset = resolveBenchExecutionPreset({
+    envVars: process.env,
+    argvPreset: argValue("--preset"),
+  })
   const model = argValue("--model") ?? "gpt-5.4"
   const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
   const onDemand = gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND")
   const concurrency = resolvePoolConcurrency(workers)
   const extraBoxes = allowExtraBoxes()
+  const waitForIdle = waitForIdleBox()
+  const waitTimeoutMs = positiveMinutesFlagMs("--wait-timeout-min")
   const concurrencyOverride = poolConcurrencyOverrideRaw()
   const concurrencySource = poolConcurrencySource(concurrencyOverride)
   const recordTrajectory =
@@ -438,7 +460,7 @@ const cmdPool = async (): Promise<void> => {
     printBlock(
       [
         "=== pool plan (dry-run) ===",
-        `workers=${workers}  preset=${preset}  model=${model}  concurrency=${concurrency}  onDemand=${onDemand}`,
+        `workers=${workers}  preset=${preset}  model=${model}  concurrency=${concurrency}  onDemand=${onDemand}  waitForIdle=${waitForIdle}`,
         ...chunks.map((c) => `chunk ${c.runId} ← ${c.datasetPath}  (box dir ~/runs/${c.runId}/)`),
         "would reuse a warm idle box or provision one, grade each chunk SERIALLY, fetch reports, leave warm.",
       ].join("\n"),
@@ -459,6 +481,8 @@ const cmdPool = async (): Promise<void> => {
     workers,
     allowExtraWorkers: workers > 1,
     allowExtraBoxes: extraBoxes,
+    waitForIdle,
+    ...(waitTimeoutMs !== undefined ? { waitForIdleTimeoutMs: waitTimeoutMs } : {}),
     preset,
     model,
     concurrency,
@@ -528,7 +552,9 @@ interface BoxRuntimeRow extends BoxLsRow, Awaited<ReturnType<typeof inspectBox>>
   readonly snapshotAgeSec?: number
   readonly runAgeSec?: number
   readonly logPath?: string
+  readonly logAgeSec?: number
   readonly freshness: "fresh" | "stale" | "unknown"
+  readonly statusSource: "snapshot" | "probe" | "none"
   readonly followHint: string
 }
 
@@ -571,13 +597,25 @@ const ageSecondsFromIso = (s: string | undefined): number | undefined => {
   return Math.max(0, Math.round((Date.now() - ms) / 1000))
 }
 
+const boxStatusSource = (
+  inspection: Pick<Awaited<ReturnType<typeof inspectBox>>, "snapshot" | "probe">,
+): BoxRuntimeRow["statusSource"] =>
+  inspection.snapshot !== undefined ? "snapshot" : inspection.probe !== undefined ? "probe" : "none"
+
 const boxFreshness = (
   lifecycle: BoxRuntimeRow["lifecycle"],
   snapshotAgeSec: number | undefined,
+  probe: Awaited<ReturnType<typeof inspectBox>>["probe"],
+  logAgeSec: number | undefined,
 ): BoxRuntimeRow["freshness"] => {
-  if (snapshotAgeSec === undefined) return "unknown"
+  if (snapshotAgeSec !== undefined) {
+    const budgetSec = lifecycle === "busy" ? BUSY_SNAPSHOT_STALE_SEC : IDLE_SNAPSHOT_STALE_SEC
+    return snapshotAgeSec > budgetSec ? "stale" : "fresh"
+  }
+  if (probe?.activeRunDetected === true) return "fresh"
+  if (logAgeSec === undefined) return "unknown"
   const budgetSec = lifecycle === "busy" ? BUSY_SNAPSHOT_STALE_SEC : IDLE_SNAPSHOT_STALE_SEC
-  return snapshotAgeSec > budgetSec ? "stale" : "fresh"
+  return logAgeSec > budgetSec ? "stale" : "fresh"
 }
 
 const listBenchBoxes = async (region: string, keyPath: string): Promise<BoxRuntimeRow[]> => {
@@ -622,16 +660,20 @@ const listBenchBoxes = async (region: string, keyPath: string): Promise<BoxRunti
       busy: false,
     }
     const snapshot = inspection.snapshot
+    const probe = inspection.probe
     const snapshotAgeSec = ageSecondsFromIso(snapshot?.updatedAt)
     const runAgeSec = ageSecondsFromIso(snapshot?.startedAt)
-    const logPath = boxRunLogPath(snapshot)
+    const logPath = boxRunLogPath(snapshot) ?? probe?.runLogPath
+    const logAgeSec = ageSecondsFromIso(probe?.runLogUpdatedAt)
     return {
       ...row,
       ...inspection,
       ...(snapshotAgeSec !== undefined ? { snapshotAgeSec } : {}),
       ...(runAgeSec !== undefined ? { runAgeSec } : {}),
       ...(logPath !== undefined ? { logPath } : {}),
-      freshness: boxFreshness(inspection.lifecycle, snapshotAgeSec),
+      ...(logAgeSec !== undefined ? { logAgeSec } : {}),
+      freshness: boxFreshness(inspection.lifecycle, snapshotAgeSec, probe, logAgeSec),
+      statusSource: boxStatusSource(inspection),
       followHint: `bun run src/apps/bench/cli.ts box logs ${row.iid} --follow`,
     }
   })
@@ -694,15 +736,27 @@ const boxStatusLabel = (row: BoxRuntimeRow): string =>
     row.freshness === "stale" ? "/stale" : ""
   }`
 
-const boxDetailLine = (row: BoxRuntimeRow): string | undefined =>
-  row.snapshot === undefined
-    ? undefined
-    : `  mode=${row.snapshot.mode}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+const yesNo = (value: boolean | undefined): string =>
+  value === true ? "yes" : value === false ? "no" : "unknown"
 
-const boxRuntimeLine = (row: BoxRuntimeRow): string | undefined =>
-  row.snapshot === undefined
-    ? undefined
-    : `  started=${row.snapshot.startedAt ?? "unknown"}${row.runAgeSec !== undefined ? `  runtime=${row.runAgeSec}s` : ""}${row.logPath !== undefined ? `  logPath=${row.logPath}` : ""}`
+const boxDetailLine = (row: BoxRuntimeRow): string | undefined =>
+  row.snapshot !== undefined
+    ? `  source=snapshot  mode=${row.snapshot.mode}  workload=${row.snapshot.runId ?? row.snapshot.workload}  dataset=${row.snapshot.dataset}  instances=${row.snapshot.instanceCount}  preset=${row.snapshot.preset}  model=${row.snapshot.model}  conc=${row.snapshot.concurrency}  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+    : row.probe !== undefined
+      ? `  source=probe  active=${yesNo(row.probe.activeRunDetected)}  report=${yesNo(row.probe.reportExists)}  runExit=${yesNo(row.probe.runExitExists)}${row.probe.predictionsLines !== undefined ? `  preds=${row.probe.predictionsLines}` : ""}`
+      : undefined
+
+const boxRuntimeLine = (row: BoxRuntimeRow): string | undefined => {
+  if (row.snapshot !== undefined) {
+    return `  started=${row.snapshot.startedAt ?? "unknown"}${row.runAgeSec !== undefined ? `  runtime=${row.runAgeSec}s` : ""}${row.logPath !== undefined ? `  logPath=${row.logPath}` : ""}`
+  }
+  if (row.probe === undefined) return undefined
+  return `${row.logPath !== undefined ? `  logPath=${row.logPath}` : "  logPath=unknown"}${
+    row.probe.runLogUpdatedAt !== undefined
+      ? `  logUpdated=${row.probe.runLogUpdatedAt}${row.logAgeSec !== undefined ? ` (${row.logAgeSec}s ago)` : ""}`
+      : ""
+  }`
+}
 
 const boxOutcomeLine = (row: BoxRuntimeRow): string | undefined =>
   row.snapshot?.resolvedCount !== undefined ||
@@ -721,7 +775,11 @@ const renderBoxRow = (row: BoxRuntimeRow): string[] => {
     boxDetailLine(row),
     boxRuntimeLine(row),
     boxOutcomeLine(row),
-    row.snapshot?.lastLogLine !== undefined ? `  log=${row.snapshot.lastLogLine}` : undefined,
+    row.snapshot?.lastLogLine !== undefined
+      ? `  log=${row.snapshot.lastLogLine}`
+      : row.probe?.lastLogLine !== undefined
+        ? `  log=${row.probe.lastLogLine}`
+        : undefined,
     row.logPath !== undefined ? `  follow=${row.followHint}` : undefined,
   ].filter((line): line is string => line !== undefined)
 }
@@ -740,42 +798,214 @@ const renderBoxStatus = (summary: BoxStatusSummary, rows: readonly BoxRuntimeRow
     "[box] summary:",
     `  total=${summary.total}  busy=${summary.busy}  idle=${summary.idle}  bootstrapping=${summary.bootstrapping}  unreachable=${summary.unreachable}  stale=${summary.stale}`,
     focus !== undefined
-      ? `  target=${focus.iid}  status=${boxStatusLabel(focus)}${focus.logPath !== undefined ? `  logPath=${focus.logPath}` : ""}`
+      ? `  target=${focus.iid}  status=${boxStatusLabel(focus)}  source=${focus.statusSource}${focus.logPath !== undefined ? `  logPath=${focus.logPath}` : ""}${
+          focus.logAgeSec !== undefined ? `  logAge=${focus.logAgeSec}s` : ""
+        }`
       : undefined,
     summary.targetFollowHint !== undefined ? `  follow=${summary.targetFollowHint}` : undefined,
     ...staleRows.map(
       (row) =>
-        `  stale=${row.iid}  status=${boxStatusLabel(row)}  updated=${row.snapshot?.updatedAt ?? "none"}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`,
+        `  stale=${row.iid}  status=${boxStatusLabel(row)}  source=${row.statusSource}  updated=${row.snapshot?.updatedAt ?? row.probe?.runLogUpdatedAt ?? "none"}${
+          row.snapshotAgeSec !== undefined
+            ? ` (${row.snapshotAgeSec}s ago)`
+            : row.logAgeSec !== undefined
+              ? ` (${row.logAgeSec}s ago)`
+              : ""
+        }`,
     ),
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n")
 }
 
+const BOX_LOG_MISSING_MARKER = "__QUANTA_LOG_MISSING__"
+
 const boxTailCommand = (logPath: string, lines: number, follow = false): string =>
-  `if test -f ${logPath}; then tail -n ${lines}${follow ? " -f" : ""} ${logPath}; else echo "__QUANTA_LOG_MISSING__ ${logPath}" >&2; exit 2; fi`
+  `if test -f ${logPath}; then tail -n ${lines}${follow ? " -f" : ""} ${logPath}; else echo "${BOX_LOG_MISSING_MARKER} ${logPath}" >&2; exit 2; fi`
+
+const missingLogPath = (tail: { out: string; err: string }): string | undefined => {
+  const match = `${tail.out}\n${tail.err}`.match(/__QUANTA_LOG_MISSING__\s+(\S+)/)
+  return match?.[1]
+}
+
+const cleanedLogError = (tail: { err: string }): string | undefined => {
+  const cleaned = tail.err
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== "" && !line.includes(BOX_LOG_MISSING_MARKER))
+    .join("\n")
+    .trim()
+  return cleaned === "" ? undefined : cleaned
+}
+
+const boxDisplayedLastLogLine = (row: BoxRuntimeRow): string | undefined =>
+  row.snapshot?.lastLogLine ?? row.probe?.lastLogLine
+
+const boxHeaderUpdatedLine = (row: BoxRuntimeRow): string | undefined => {
+  if (row.snapshot?.updatedAt !== undefined) {
+    return `  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+  }
+  if (row.probe?.runLogUpdatedAt !== undefined) {
+    return `  logUpdated=${row.probe.runLogUpdatedAt}${row.logAgeSec !== undefined ? ` (${row.logAgeSec}s ago)` : ""}`
+  }
+  return undefined
+}
+
+const boxHeaderActiveLine = (row: BoxRuntimeRow): string | undefined => {
+  if (row.snapshot?.startedAt !== undefined) {
+    return `  started=${row.snapshot.startedAt}${row.runAgeSec !== undefined ? `  runtime=${row.runAgeSec}s` : ""}`
+  }
+  if (row.probe?.activeRunDetected === true) {
+    return `  active=yes${row.logAgeSec !== undefined ? `  logAge=${row.logAgeSec}s` : ""}`
+  }
+  return undefined
+}
 
 const renderBoxLogHeader = (
   row: BoxRuntimeRow,
   host: string,
   logPath: string,
   follow: boolean,
-): string =>
-  [
+): string => {
+  return [
     follow ? `[box] following ${row.iid} (${host})` : `[box] ${row.iid}  ${host}`,
     `  status=${boxStatusLabel(row)}`,
+    `  source=${row.statusSource}`,
     `  logPath=${logPath}`,
-    row.snapshot?.updatedAt !== undefined
-      ? `  updated=${row.snapshot.updatedAt}${row.snapshotAgeSec !== undefined ? ` (${row.snapshotAgeSec}s ago)` : ""}`
+    boxHeaderUpdatedLine(row),
+    boxHeaderActiveLine(row),
+    boxDisplayedLastLogLine(row) !== undefined
+      ? `  last=${boxDisplayedLastLogLine(row)}`
       : undefined,
-    row.snapshot?.startedAt !== undefined
-      ? `  started=${row.snapshot.startedAt}${row.runAgeSec !== undefined ? `  runtime=${row.runAgeSec}s` : ""}`
-      : undefined,
-    row.snapshot?.lastLogLine !== undefined ? `  last=${row.snapshot.lastLogLine}` : undefined,
     `  follow=${row.followHint}`,
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n")
+}
+
+const pendingLogExitCode = (row: BoxRuntimeRow): number =>
+  row.lifecycle === "bootstrapping" || row.probe?.activeRunDetected === true ? 0 : 2
+
+const pendingLogMessage = (row: BoxRuntimeRow, logPath: string | undefined): string => {
+  if (row.lifecycle === "bootstrapping")
+    return "run log not created yet; box is still bootstrapping"
+  if (row.probe?.activeRunDetected === true) {
+    return `run log not created yet${logPath !== undefined ? ` at ${logPath}` : ""}`
+  }
+  return `run log not found${logPath !== undefined ? ` at ${logPath}` : ""}`
+}
+
+const renderPendingLogJson = (
+  row: BoxRuntimeRow,
+  logPath: string | undefined,
+  lines: number,
+  message: string,
+  error: string | undefined,
+): string =>
+  JSON.stringify(
+    {
+      iid: row.iid,
+      ip: row.ip,
+      lifecycle: row.lifecycle,
+      freshness: row.freshness,
+      statusSource: row.statusSource,
+      logPath,
+      lines,
+      snapshot: row.snapshot,
+      probe: row.probe,
+      followHint: row.followHint,
+      tail: "",
+      error,
+      pendingLog: true,
+      message,
+      exitCode: pendingLogExitCode(row),
+    },
+    null,
+    2,
+  )
+
+const printPendingLog = (
+  row: BoxRuntimeRow,
+  host: string,
+  logPath: string | undefined,
+  lines: number,
+  message: string,
+): void => {
+  if (hasFlag("--json")) {
+    printBlock(renderPendingLogJson(row, logPath, lines, message, undefined))
+    if (pendingLogExitCode(row) !== 0) process.exit(pendingLogExitCode(row))
+    return
+  }
+  printBlock(
+    [
+      renderBoxLogHeader(row, host, logPath ?? DEFAULT_BOX_LOG_PATH, false),
+      `--- tail -n ${lines} ---`,
+      message,
+    ].join("\n"),
+  )
+  if (pendingLogExitCode(row) !== 0) process.exit(pendingLogExitCode(row))
+}
+
+const pendingBootstrappingLog = (row: BoxRuntimeRow): boolean =>
+  row.lifecycle === "bootstrapping" && row.logPath === undefined
+
+const pendingBootstrappingHost = (row: BoxRuntimeRow): string =>
+  row.ip === "" || row.ip === "None" ? "ssh-pending" : `ubuntu@${row.ip}`
+
+const handleMissingLogTail = (
+  row: BoxRuntimeRow,
+  host: string,
+  logPath: string,
+  lines: number,
+  tail: { out: string; err: string },
+): boolean => {
+  const pendingLogPath = missingLogPath(tail)
+  if (pendingLogPath === undefined) return false
+  const message = pendingLogMessage(row, pendingLogPath)
+  if (hasFlag("--json")) {
+    printBlock(renderPendingLogJson(row, logPath, lines, message, cleanedLogError(tail)))
+    if (pendingLogExitCode(row) !== 0) process.exit(pendingLogExitCode(row))
+    return true
+  }
+  printPendingLog(row, host, logPath, lines, message)
+  return true
+}
+
+const ensureBoxLogArgs = (): void => {
+  if (hasFlag("--json") && hasFlag("--follow")) {
+    logger.info("[box] --json and --follow are mutually exclusive")
+    process.exit(2)
+  }
+}
+
+const ensureSshReadyBox = (row: BoxRuntimeRow): void => {
+  if (row.state !== "running" || row.ip === "" || row.ip === "None") {
+    logger.info(
+      `[box] ${row.iid} is not ssh-ready yet (state=${row.state}, ip=${row.ip || "none"})`,
+    )
+    process.exit(1)
+  }
+}
+
+const printBoxTail = (
+  row: BoxRuntimeRow,
+  host: string,
+  logPath: string,
+  lines: number,
+  tail: { code: number; out: string; err: string },
+): void => {
+  if (hasFlag("--json")) {
+    printBlock(renderBoxLogsJson(row, logPath, lines, tail))
+    if (tail.code !== 0) process.exit(tail.code)
+    return
+  }
+  printBlock(
+    [renderBoxLogHeader(row, host, logPath, false), `--- tail -n ${lines} ---`, tail.out.trimEnd()]
+      .filter((line) => line !== undefined)
+      .join("\n"),
+  )
+  if (tail.code !== 0) process.exit(tail.code)
+}
 
 const renderBoxLogsJson = (
   row: BoxRuntimeRow,
@@ -789,15 +1019,18 @@ const renderBoxLogsJson = (
       ip: row.ip,
       lifecycle: row.lifecycle,
       freshness: row.freshness,
+      statusSource: row.statusSource,
       phase: row.snapshot?.phase,
       logPath,
       lines,
       snapshot: row.snapshot,
+      probe: row.probe,
       snapshotAgeSec: row.snapshotAgeSec,
       runAgeSec: row.runAgeSec,
+      logAgeSec: row.logAgeSec,
       followHint: row.followHint,
       tail: tail.out,
-      error: tail.err.trim() === "" ? undefined : tail.err.trim(),
+      error: cleanedLogError(tail),
       exitCode: tail.code,
     },
     null,
@@ -891,22 +1124,19 @@ const cmdBoxStatus = async (region: string): Promise<void> => {
 }
 
 const cmdBoxLogs = async (region: string): Promise<void> => {
-  if (hasFlag("--json") && hasFlag("--follow")) {
-    logger.info("[box] --json and --follow are mutually exclusive")
-    process.exit(2)
-  }
+  ensureBoxLogArgs()
   const keyPath = argValue("--key") ?? D.keyPath
   const rows = await listBenchBoxes(region, keyPath)
   const row = resolveBoxTarget(rows, positionals()[1])
-  if (row.state !== "running" || row.ip === "" || row.ip === "None") {
-    logger.info(
-      `[box] ${row.iid} is not ssh-ready yet (state=${row.state}, ip=${row.ip || "none"})`,
-    )
-    process.exit(1)
+  const lines = Math.max(1, Math.trunc(Number(argValue("--lines")) || 80))
+  if (pendingBootstrappingLog(row)) {
+    const host = pendingBootstrappingHost(row)
+    printPendingLog(row, host, undefined, lines, pendingLogMessage(row, undefined))
+    return
   }
+  ensureSshReadyBox(row)
   const logPath = row.logPath ?? DEFAULT_BOX_LOG_PATH
   const host = `ubuntu@${row.ip}`
-  const lines = Math.max(1, Math.trunc(Number(argValue("--lines")) || 80))
   if (hasFlag("--follow")) {
     printBlock(renderBoxLogHeader(row, host, logPath, true))
     const code = await sshBoxFollow(keyPath, host, boxTailCommand(logPath, lines, true))
@@ -914,17 +1144,8 @@ const cmdBoxLogs = async (region: string): Promise<void> => {
     return
   }
   const tail = await sshBoxText(keyPath, host, boxTailCommand(logPath, lines))
-  if (hasFlag("--json")) {
-    printBlock(renderBoxLogsJson(row, logPath, lines, tail))
-    if (tail.code !== 0) process.exit(tail.code)
-    return
-  }
-  printBlock(
-    [renderBoxLogHeader(row, host, logPath, false), `--- tail -n ${lines} ---`, tail.out.trimEnd()]
-      .filter((line) => line !== undefined)
-      .join("\n"),
-  )
-  if (tail.code !== 0) process.exit(tail.code)
+  if (handleMissingLogTail(row, host, logPath, lines, tail)) return
+  printBoxTail(row, host, logPath, lines, tail)
 }
 
 const cmdBoxRm = async (region: string): Promise<void> => {
@@ -1154,13 +1375,7 @@ const cmdCost = (): void => {
 }
 
 const cmdPresets = (): void => {
-  logger.info("Bench presets — select with QUANTA_BENCH_PRESET=<name> (value, NOT on/off):")
-  for (const [name, knobs] of Object.entries(KNOB_PRESETS)) {
-    const body = Object.entries(knobs)
-      .map(([id, v]) => `${id}=${v}`)
-      .join(", ")
-    logger.info(`  ${name.padEnd(16)} ${body === "" ? "(no-op baseline)" : body}`)
-  }
+  for (const line of renderBenchPresetListLines()) logger.info(line)
 }
 
 const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
@@ -1172,6 +1387,9 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   leaderboard  render a resolved/unresolved table from run report(s)
   cost         token / $ / wall-clock summary for a run report
   presets      list bench presets
+
+Default live execution preset: ${CURRENT_BENCH_BASE_PRESET}
+Explicit selectors still win: QUANTA_BENCH_PRESET > QUANTA_BENCH_SOTA > QUANTA_KNOBS_PRESET > --preset.
 
 Run a subcommand with no/invalid args to see its usage. No subcommand ⇒ 'run'.`
 

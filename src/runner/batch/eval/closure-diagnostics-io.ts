@@ -48,42 +48,64 @@ const reproReproducedOf = (r: InstanceResult): boolean | null => {
   return (t.reproducedCount ?? 0) > 0
 }
 
+const resolvedOf = (r: InstanceResult): boolean | null =>
+  r.verdict === undefined || r.verdict === "ok" ? r.passed : null
+
+const patchBudgetFieldsOf = (
+  r: InstanceResult,
+): Pick<ClosureRunFact, "overBudget" | "newDef" | "crossFile"> => ({
+  overBudget: r.patchBudget !== undefined ? !r.patchBudget.withinBudget : null,
+  newDef: r.patchBudget !== undefined ? r.patchBudget.budget.newDefs > 0 : null,
+  crossFile: r.patchBudget !== undefined ? r.patchBudget.budget.crossFile : null,
+})
+
+const telemetryFieldsOf = (
+  r: InstanceResult,
+): Omit<
+  ClosureRunFact,
+  | "instanceId"
+  | "resolved"
+  | "patchFiles"
+  | "strayFiles"
+  | "emptyPatch"
+  | "endReason"
+  | "overBudget"
+  | "newDef"
+  | "crossFile"
+> => ({
+  firstEditFile: r.firstEditFile ?? null,
+  editCount: r.editCount ?? null,
+  turnsToFirstEdit: r.turnsToFirstEdit ?? null,
+  reproReproduced: reproReproducedOf(r),
+  primaryRailPresent: r.primaryRailPresent ?? null,
+  requiredVerificationCovered: r.requiredVerificationCovered ?? null,
+  primaryFalseGreen: r.primaryFalseGreen ?? null,
+  primaryFalseRed: r.primaryFalseRed ?? null,
+  gateEntered: r.gateEntered ?? null,
+  gateBypassed: r.gateBypassed ?? null,
+  verifyRounds: r.verifyRounds ?? null,
+  synthReproBaseRed: r.synthReproBaseRed ?? null,
+  outOfScopeFiles: r.outOfScopeFiles ?? null,
+})
+
+const buildFact = (r: InstanceResult): ClosureRunFact => {
+  const patch = r.patch ?? ""
+  return {
+    instanceId: r.id,
+    resolved: resolvedOf(r),
+    patchFiles: patchFiles(patch),
+    strayFiles: strayFilesOf(patch),
+    emptyPatch: patch === "",
+    endReason: endReasonOf(r),
+    ...telemetryFieldsOf(r),
+    ...patchBudgetFieldsOf(r),
+  }
+}
+
 /** InstanceResult[] -> closure facts (no oracle). Verdict-excluded instances
  *  (degraded / env_prep_failed / grader_invalid) are treated as ungraded. */
 export const buildFacts = (results: ReadonlyArray<InstanceResult>): ClosureRunFact[] =>
-  results.map((r) => {
-    const pf = patchFiles(r.patch ?? "")
-    const fair = r.verdict === undefined || r.verdict === "ok"
-    return {
-      instanceId: r.id,
-      resolved: fair ? r.passed : null,
-      patchFiles: pf,
-      strayFiles: strayFilesOf(r.patch ?? ""),
-      emptyPatch: (r.patch ?? "") === "",
-      endReason: endReasonOf(r),
-      // firstEditFile flows from the T-202 stream tap when present on the result;
-      // absent ⇒ null ⇒ first_edit_owner_match stays unavailable (no false signal).
-      firstEditFile: r.firstEditFile ?? null,
-      // F6 exploration-efficiency signals — absent ⇒ null ⇒ metric unavailable.
-      editCount: r.editCount ?? null,
-      turnsToFirstEdit: r.turnsToFirstEdit ?? null,
-      reproReproduced: reproReproducedOf(r),
-      // T-3 closure measurement (absent ⇒ null ⇒ metric unavailable, not "false").
-      primaryRailPresent: r.primaryRailPresent ?? null,
-      requiredVerificationCovered: r.requiredVerificationCovered ?? null,
-      primaryFalseGreen: r.primaryFalseGreen ?? null,
-      primaryFalseRed: r.primaryFalseRed ?? null,
-      gateEntered: r.gateEntered ?? null,
-      gateBypassed: r.gateBypassed ?? null,
-      verifyRounds: r.verifyRounds ?? null,
-      synthReproBaseRed: r.synthReproBaseRed ?? null,
-      outOfScopeFiles: r.outOfScopeFiles ?? null,
-      // jun-19 patch-budget A/B signals (#13417 over-engineer class).
-      overBudget: r.patchBudget !== undefined ? !r.patchBudget.withinBudget : null,
-      newDef: r.patchBudget !== undefined ? r.patchBudget.budget.newDefs > 0 : null,
-      crossFile: r.patchBudget !== undefined ? r.patchBudget.budget.crossFile : null,
-    }
-  })
+  results.map(buildFact)
 
 /** Dataset JSONL (official SWE-bench rows) -> eval oracle. EVAL-ONLY. */
 export const buildOracle = (datasetPath: string): Map<string, ClosureOracle> => {

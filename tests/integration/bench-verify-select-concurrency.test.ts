@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { scopedEnv } from "../_support/scoped-env"
 import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
 
@@ -58,6 +59,24 @@ class ParallelEditLLM implements LLMPort {
 }
 
 const DEPS = { maxTurns: 4, timeoutMs: 20_000 }
+const verifySelectEnv = scopedEnv(
+  [
+    "QUANTA_BENCH_VERIFY_SELECT",
+    "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
+    "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
+    "QUANTA_BENCH_VERIFY_SELECT_REPRO",
+    "QUANTA_BENCH_ISSUE_HINT",
+    "QUANTA_BENCH_REPRO_TEST",
+  ],
+  {
+    QUANTA_BENCH_VERIFY_SELECT: "2",
+    QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY: "2",
+    QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
+    QUANTA_BENCH_VERIFY_SELECT_REPRO: "off",
+    QUANTA_BENCH_ISSUE_HINT: undefined,
+    QUANTA_BENCH_REPRO_TEST: undefined,
+  },
+)
 
 const makeRepo = (root: string): string => {
   const repo = join(root, "repo")
@@ -69,52 +88,18 @@ const makeRepo = (root: string): string => {
 
 describe("verify-select concurrency wiring", () => {
   let dir: string
-  let savedVerifySelect: string | undefined
-  let savedVerifySelectConcurrency: string | undefined
-  let savedVerifySelectRegression: string | undefined
-  let savedVerifySelectRepro: string | undefined
-  let savedIssueHint: string | undefined
-  let savedReproTest: string | undefined
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bench-verify-select-concurrency-"))
-    savedVerifySelect = process.env.QUANTA_BENCH_VERIFY_SELECT
-    savedVerifySelectConcurrency = process.env.QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY
-    savedVerifySelectRegression = process.env.QUANTA_BENCH_VERIFY_SELECT_REGRESSION
-    savedVerifySelectRepro = process.env.QUANTA_BENCH_VERIFY_SELECT_REPRO
-    savedIssueHint = process.env.QUANTA_BENCH_ISSUE_HINT
-    savedReproTest = process.env.QUANTA_BENCH_REPRO_TEST
-    process.env.QUANTA_BENCH_VERIFY_SELECT = "2"
-    process.env.QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY = "2"
-    process.env.QUANTA_BENCH_VERIFY_SELECT_REGRESSION = "off"
-    process.env.QUANTA_BENCH_VERIFY_SELECT_REPRO = "off"
-    delete process.env.QUANTA_BENCH_ISSUE_HINT
-    delete process.env.QUANTA_BENCH_REPRO_TEST
+    verifySelectEnv.beforeEach()
   })
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
-    if (savedVerifySelect === undefined) delete process.env.QUANTA_BENCH_VERIFY_SELECT
-    else process.env.QUANTA_BENCH_VERIFY_SELECT = savedVerifySelect
-    if (savedVerifySelectConcurrency === undefined) {
-      delete process.env.QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY
-    } else {
-      process.env.QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY = savedVerifySelectConcurrency
-    }
-    if (savedVerifySelectRegression === undefined) {
-      delete process.env.QUANTA_BENCH_VERIFY_SELECT_REGRESSION
-    } else {
-      process.env.QUANTA_BENCH_VERIFY_SELECT_REGRESSION = savedVerifySelectRegression
-    }
-    if (savedVerifySelectRepro === undefined) delete process.env.QUANTA_BENCH_VERIFY_SELECT_REPRO
-    else process.env.QUANTA_BENCH_VERIFY_SELECT_REPRO = savedVerifySelectRepro
-    if (savedIssueHint === undefined) delete process.env.QUANTA_BENCH_ISSUE_HINT
-    else process.env.QUANTA_BENCH_ISSUE_HINT = savedIssueHint
-    if (savedReproTest === undefined) delete process.env.QUANTA_BENCH_REPRO_TEST
-    else process.env.QUANTA_BENCH_REPRO_TEST = savedReproTest
+    verifySelectEnv.afterEach()
   })
 
-  test("driver threads verify-select-concurrency into parallel isolated candidate generation", async () => {
+  test.serial("driver threads verify-select-concurrency into parallel isolated candidate generation", async () => {
     const repo = makeRepo(dir)
     const obs = join(dir, "obs")
     const llm = new ParallelEditLLM()
@@ -152,11 +137,13 @@ describe("verify-select concurrency wiring", () => {
     expect(result.patch === "" || result.patch.includes("FIX_")).toBe(true)
   })
 
-  test("discovered regression mode does not hard-reject a candidate when repro authority is absent", async () => {
-    process.env.QUANTA_BENCH_VERIFY_SELECT = "1"
-    delete process.env.QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY
-    process.env.QUANTA_BENCH_VERIFY_SELECT_REGRESSION = "discovered"
-    process.env.QUANTA_BENCH_VERIFY_SELECT_REPRO = "off"
+  test.serial("discovered regression mode does not hard-reject a candidate when repro authority is absent", async () => {
+    verifySelectEnv.set({
+      QUANTA_BENCH_VERIFY_SELECT: "1",
+      QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY: undefined,
+      QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "discovered",
+      QUANTA_BENCH_VERIFY_SELECT_REPRO: "off",
+    })
 
     const repo = makeRepo(dir)
     const obs = join(dir, "obs-discovered")

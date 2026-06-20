@@ -226,6 +226,10 @@ export interface BenchPosture {
    * candidates SEQUENTIALLY (byte-identical). >1 requires isolated generate.
    */
   readonly verifySelectConcurrency: number | undefined
+  /** Sequential verify-select cost guard: stop after the first owner-scoped
+   *  candidate with a hard positive regression/resolved signal instead of
+   *  always burning all N. */
+  readonly verifySelectEarlyAccept: boolean
   /**
    * Verify-and-select regression hard-signal source. undefined preserves the
    * existing eval-only PASS_TO_PASS behavior when available; explicit `discovered`
@@ -342,6 +346,8 @@ export const benchPostureFromState = (
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
   const verifySelectN = readKnobValue(state, "verify-select", isNumber)
   const verifySelectConcurrency = readKnobValue(state, "verify-select-concurrency", isNumber)
+  const verifySelectEarlyAccept =
+    readKnobValue(state, "verify-select-early-accept", isTrue) === true
   const verifySelectRegression = readKnobValue(
     state,
     "verify-select-regression",
@@ -387,6 +393,7 @@ export const benchPostureFromState = (
     repairRounds,
     verifySelectN,
     verifySelectConcurrency,
+    verifySelectEarlyAccept,
     verifySelectRegression,
     verifySelectRepro,
     inLoopExec,

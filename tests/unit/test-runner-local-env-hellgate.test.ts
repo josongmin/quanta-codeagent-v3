@@ -11,8 +11,9 @@ const collect = async (input: unknown, ctx: ToolContext): Promise<ToolEvent[]> =
 describe("test_runner localEnv wiring", () => {
   test("explicit command inherits ctx.localEnv PATH prepend through runShell", async () => {
     const prefix = "/tmp/quanta-test-runner-local-env"
+    const command = 'printf "%s" "$PATH"'
     const events = await collect(
-      { command: 'printf "%s" "$PATH"' },
+      { command },
       {
         cwd: "/tmp",
         signal: new AbortController().signal,
@@ -24,5 +25,6 @@ describe("test_runner localEnv wiring", () => {
     if (result?.type !== "result") throw new Error("expected result event")
     expect(result.result.ok).toBe(true)
     expect(result.result.output).toContain(`${prefix}:`)
+    expect(result.result.evidence?.executedCommand).toBe(command)
   })
 })

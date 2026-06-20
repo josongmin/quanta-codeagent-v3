@@ -27,6 +27,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { loadVerdicts } from "../analyze/verdicts"
 import { benchHome } from "../corpus"
+import { CURRENT_BENCH_BASE_PRESET } from "../preset"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "./backend"
 
 /** Durable dir for fetched full-remote artifacts (predictions / report / closure
@@ -49,7 +50,7 @@ export interface FullRemoteConfig {
   readonly datasetPath: string
   /** Subset to run (default: all rows in the dataset). */
   readonly instanceIds?: readonly string[]
-  /** Bench preset. Default `agentless-v2-safe`. */
+  /** Bench preset. Default current base profile. */
   readonly preset?: string
   /** Model id (predictions/report naming). Default `gpt-5.4`. */
   readonly model?: string
@@ -98,7 +99,7 @@ export const D = {
   sgName: "quanta-bench-sg",
   diskGb: 600,
   ttlMinutes: 180,
-  preset: "agentless-v2-safe",
+  preset: CURRENT_BENCH_BASE_PRESET,
   model: "gpt-5.4",
 } as const
 
@@ -436,11 +437,26 @@ export interface BoxStatusSnapshot {
   readonly lastLogLine?: string
 }
 
+export interface BoxRuntimeProbe {
+  readonly activeRunDetected: boolean
+  readonly runLogPath?: string
+  readonly runLogUpdatedAt?: string
+  readonly reportPath?: string
+  readonly reportExists?: boolean
+  readonly predictionsPath?: string
+  readonly predictionsLines?: number
+  readonly observeDir?: string
+  readonly runExitPath?: string
+  readonly runExitExists?: boolean
+  readonly lastLogLine?: string
+}
+
 export interface BoxInspection {
   readonly lifecycle: "bootstrapping" | "idle" | "busy" | "unreachable"
   readonly bootstrapped: boolean
   readonly busy: boolean
   readonly snapshot?: BoxStatusSnapshot
+  readonly probe?: BoxRuntimeProbe
 }
 
 const normalizeStatusText = (s: string): string =>
@@ -588,6 +604,167 @@ const readBoxSnapshot = async (
   if (raw === undefined || raw.code !== 0 || raw.stdout.trim() === "") return undefined
   try {
     return normalizeSnapshotPayload(JSON.parse(raw.stdout) as Partial<BoxStatusSnapshot>)
+  } catch {
+    return undefined
+  }
+}
+
+const asBoolean = (value: unknown): boolean | undefined =>
+  typeof value === "boolean" ? value : undefined
+
+const normalizeRuntimeProbePayload = (
+  parsed: Partial<BoxRuntimeProbe>,
+): BoxRuntimeProbe | undefined => {
+  const activeRunDetected = asBoolean(parsed.activeRunDetected) ?? false
+  const runLogPath = asNonEmptyString(parsed.runLogPath)
+  const runLogUpdatedAt = asNonEmptyString(parsed.runLogUpdatedAt)
+  const reportPath = asNonEmptyString(parsed.reportPath)
+  const reportExists = asBoolean(parsed.reportExists)
+  const predictionsPath = asNonEmptyString(parsed.predictionsPath)
+  const predictionsLines = asFiniteNumber(parsed.predictionsLines)
+  const observeDir = asNonEmptyString(parsed.observeDir)
+  const runExitPath = asNonEmptyString(parsed.runExitPath)
+  const runExitExists = asBoolean(parsed.runExitExists)
+  const lastLogLine = asNonEmptyString(parsed.lastLogLine)
+  if (
+    !activeRunDetected &&
+    runLogPath === undefined &&
+    runLogUpdatedAt === undefined &&
+    reportPath === undefined &&
+    reportExists === undefined &&
+    predictionsPath === undefined &&
+    predictionsLines === undefined &&
+    observeDir === undefined &&
+    runExitPath === undefined &&
+    runExitExists === undefined &&
+    lastLogLine === undefined
+  ) {
+    return undefined
+  }
+  return {
+    activeRunDetected,
+    ...(runLogPath !== undefined ? { runLogPath } : {}),
+    ...(runLogUpdatedAt !== undefined ? { runLogUpdatedAt } : {}),
+    ...(reportPath !== undefined ? { reportPath } : {}),
+    ...(reportExists !== undefined ? { reportExists } : {}),
+    ...(predictionsPath !== undefined ? { predictionsPath } : {}),
+    ...(predictionsLines !== undefined ? { predictionsLines } : {}),
+    ...(observeDir !== undefined ? { observeDir } : {}),
+    ...(runExitPath !== undefined ? { runExitPath } : {}),
+    ...(runExitExists !== undefined ? { runExitExists } : {}),
+    ...(lastLogLine !== undefined ? { lastLogLine: normalizeStatusText(lastLogLine) } : {}),
+  }
+}
+
+const BOX_RUNTIME_PROBE_MARKER = "__QUANTA_BOX_RUNTIME_PROBE__"
+
+const boxRuntimeProbeCommand = [
+  "python3 - <<'PY'",
+  `# ${BOX_RUNTIME_PROBE_MARKER}`,
+  "import glob, json, os, re, subprocess",
+  "from datetime import datetime, timezone",
+  "",
+  "HOME = os.path.expanduser('~')",
+  "",
+  "def ps_lines():",
+  "    try:",
+  "        out = subprocess.check_output(['ps', '-Ao', 'args='], text=True, stderr=subprocess.DEVNULL)",
+  "        return [line.strip() for line in out.splitlines() if line.strip()]",
+  "    except Exception:",
+  "        return []",
+  "",
+  "def first_group(pattern, lines):",
+  "    regex = re.compile(pattern)",
+  "    for line in lines:",
+  "        match = regex.search(line)",
+  "        if match is None:",
+  "            continue",
+  "        for group in match.groups():",
+  "            if group:",
+  "                return group",
+  "    return None",
+  "",
+  "def latest_log():",
+  "    candidates = [os.path.join(HOME, 'run.log')] + glob.glob(os.path.join(HOME, 'runs', '*', 'run.log'))",
+  "    existing = [path for path in candidates if os.path.exists(path)]",
+  "    if not existing:",
+  "        return None",
+  "    return max(existing, key=os.path.getmtime)",
+  "",
+  "def iso_mtime(path):",
+  "    if not path or not os.path.exists(path):",
+  "        return None",
+  "    try:",
+  "        return datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).isoformat().replace('+00:00', 'Z')",
+  "    except Exception:",
+  "        return None",
+  "",
+  "def count_lines(path):",
+  "    if not path or not os.path.exists(path):",
+  "        return None",
+  "    try:",
+  "        with open(path, 'r', encoding='utf-8', errors='ignore') as handle:",
+  "            return sum(1 for _ in handle)",
+  "    except Exception:",
+  "        return None",
+  "",
+  "def last_line(path):",
+  "    if not path or not os.path.exists(path):",
+  "        return None",
+  "    try:",
+  "        with open(path, 'r', encoding='utf-8', errors='ignore') as handle:",
+  "            lines = [line.strip() for line in handle.readlines() if line.strip()]",
+  "        return lines[-1] if lines else None",
+  "    except Exception:",
+  "        return None",
+  "",
+  "def user_path(path):",
+  "    if not path:",
+  "        return None",
+  "    return path.replace(HOME, '~', 1) if path.startswith(HOME) else path",
+  "",
+  "lines = ps_lines()",
+  "driver_lines = [line for line in lines if 'src/apps/bench/cli.ts run' in line]",
+  "grade_lines = [line for line in lines if 'swebench.harness.run_evaluation' in line]",
+  "",
+  "run_log = first_group(r'(?:>\\s*|tee\\s+)(\\S*run\\.log)\\b', driver_lines)",
+  "report = first_group(r'--report\\s+(\\S+)', driver_lines)",
+  "preds = first_group(r'--predictions\\s+(\\S+)', driver_lines)",
+  "observe = first_group(r'--observe-dir\\s+(\\S+)', driver_lines)",
+  "if run_log is None:",
+  "    run_log = latest_log()",
+  "if report is None and run_log:",
+  "    report = os.path.join(os.path.dirname(run_log), 'report.json')",
+  "if preds is None and run_log:",
+  "    preds = os.path.join(os.path.dirname(run_log), 'preds.jsonl')",
+  "if observe is None and run_log:",
+  "    observe = os.path.join(os.path.dirname(run_log), 'observe')",
+  "run_exit = re.sub(r'run\\.log$', 'run.exit', run_log) if run_log else None",
+  "",
+  "payload = {",
+  "    'activeRunDetected': bool(driver_lines or grade_lines),",
+  "    'runLogPath': user_path(run_log),",
+  "    'runLogUpdatedAt': iso_mtime(run_log),",
+  "    'reportPath': user_path(report),",
+  "    'reportExists': bool(report and os.path.exists(report)),",
+  "    'predictionsPath': user_path(preds),",
+  "    'predictionsLines': count_lines(preds),",
+  "    'observeDir': user_path(observe),",
+  "    'runExitPath': user_path(run_exit),",
+  "    'runExitExists': bool(run_exit and os.path.exists(run_exit)),",
+  "    'lastLogLine': last_line(run_log),",
+  "}",
+  "print(json.dumps(payload))",
+  "PY",
+].join("\n")
+
+const readBoxRuntimeProbe = async (
+  ssh: (cmd: string) => Promise<SpawnResult>,
+): Promise<BoxRuntimeProbe | undefined> => {
+  const raw = await ssh(boxRuntimeProbeCommand).catch(() => undefined)
+  if (raw === undefined || raw.code !== 0 || raw.stdout.trim() === "") return undefined
+  try {
+    return normalizeRuntimeProbePayload(JSON.parse(raw.stdout) as Partial<BoxRuntimeProbe>)
   } catch {
     return undefined
   }
@@ -1099,11 +1276,13 @@ export const inspectBox = async (
   }
   const busy = busyProbe.stdout.includes("BUSY")
   const snapshot = await readBoxSnapshot((cmd) => ssh(cmd))
+  const probe = await readBoxRuntimeProbe((cmd) => ssh(cmd))
   return {
     lifecycle: busy ? "busy" : "idle",
     bootstrapped: true,
     busy,
     ...(snapshot !== undefined ? { snapshot } : {}),
+    ...(probe !== undefined ? { probe } : {}),
   }
 }
 

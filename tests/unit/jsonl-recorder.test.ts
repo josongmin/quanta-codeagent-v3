@@ -332,6 +332,7 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
       durationMs: 37,
       stderrTail: "boom on line 3",
       exitCode: 1,
+      executedCommand: "pytest tests/test_x.py -k repro",
       fullLogPath: "/tmp/run/tu1.log",
     })
     rec.close()
@@ -344,6 +345,7 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
     expect(line?.data.durationMs).toBe(37)
     expect(line?.data.stderrTail).toBe("boom on line 3")
     expect(line?.data.exitCode).toBe(1)
+    expect(line?.data.executedCommand).toBe("pytest tests/test_x.py -k repro")
     expect(line?.data.fullLogPath).toBe("/tmp/run/tu1.log")
   })
 

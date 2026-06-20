@@ -88,6 +88,10 @@ type Scene =
   | { kind: "edit"; file: string; old: string; new: string }
   | { kind: "editAndBash"; file: string; old: string; new: string; bash: string }
   | { kind: "bashOnly"; bash: string }
+  | {
+      kind: "testRunnerOnly"
+      input?: { command?: string; path?: string; timeout_ms?: number }
+    }
 
 class ScriptedLLM implements LLMPort {
   /** Per-scene turn cursor; reset when a fresh runAgent is detected. */
@@ -152,6 +156,16 @@ class ScriptedLLM implements LLMPort {
           type: "tool_use_end",
           id: `b${this.sceneIdx}`,
           input: { command: scene.bash },
+        }
+        yield { type: "message_stop", stop_reason: "tool_use" }
+        return
+      }
+      if (scene.kind === "testRunnerOnly") {
+        yield { type: "tool_use_start", id: `t${this.sceneIdx}`, name: "test_runner" }
+        yield {
+          type: "tool_use_end",
+          id: `t${this.sceneIdx}`,
+          input: scene.input ?? {},
         }
         yield { type: "message_stop", stop_reason: "tool_use" }
         return
@@ -455,6 +469,33 @@ describe("b2 — bench repair rounds integration", () => {
             bash: expectedCmd,
           },
         ])
+        const observed: { cmd?: string }[] = []
+        const fakeValidate = async (args: ValidateArgs): Promise<ValidatorResult> => {
+          observed.push({ ...(args.cmd !== undefined ? { cmd: args.cmd } : {}) })
+          return { ok: true }
+        }
+        await runInstance(inst, {
+          ...DEPS,
+          llm,
+          repair: { maxRounds: 2, validate: fakeValidate },
+        })
+        expect(observed).toHaveLength(1)
+        expect(observed[0]?.cmd).toBe(expectedCmd)
+      })
+    },
+    RUN_INSTANCE_TIMEOUT_MS,
+  )
+
+  test(
+    "6b. no-arg test_runner is bench-bound and reaches the validator as the exact verifier command",
+    async () => {
+      await withTmp(async (dir) => {
+        const expectedCmd = 'printf "bench-bound-verifier"'
+        const inst: Instance = {
+          ...makeSwebenchInstance(dir, "lastverifycmd-test-runner"),
+          testCmd: expectedCmd,
+        }
+        const llm = new ScriptedLLM([{ kind: "testRunnerOnly" }])
         const observed: { cmd?: string }[] = []
         const fakeValidate = async (args: ValidateArgs): Promise<ValidatorResult> => {
           observed.push({ ...(args.cmd !== undefined ? { cmd: args.cmd } : {}) })

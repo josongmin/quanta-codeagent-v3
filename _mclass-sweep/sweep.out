@@ -1,3 +1,41 @@
-[sweep 17:05:37] universe=431 non-CEILING instances
-[sweep 17:05:37] wave 1: 139 remaining; launching 32 via pool(1box×2chunk)
-[sweep 17:05:40] wave 1 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:25:59] universe=431 non-CEILING instances
+[sweep 19:25:59] wave 1: 139 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:26:27] wave 1 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:27:57] wave 2: 139 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:28:02] wave 2 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:29:32] wave 3: 113 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:29:33] wave 3 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:31:03] wave 4: 113 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:31:05] wave 4 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:32:35] wave 5: 107 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:32:40] wave 5 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:34:10] wave 6: 107 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:34:12] wave 6 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:35:42] wave 7: 107 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:36:13] wave 7 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:37:43] wave 8: 81 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:37:47] wave 8 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:39:17] wave 9: 81 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:39:20] wave 9 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:40:50] wave 10: 75 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:40:52] wave 10 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:42:22] wave 11: 75 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:42:25] wave 11 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:43:55] wave 12: 75 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:44:14] wave 12 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:45:44] wave 13: 49 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:45:49] wave 13 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:47:19] wave 14: 49 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:47:25] wave 14 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:48:55] wave 15: 43 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:49:44] wave 15 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:51:14] wave 16: 43 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:51:23] wave 16 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:52:53] wave 17: 43 remaining; launching 32 via pool(1box×2chunk)
+[sweep 19:53:24] wave 17 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:54:54] wave 18: 17 remaining; launching 17 via pool(1box×2chunk)
+[sweep 19:54:57] wave 18 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:56:27] wave 19: 17 remaining; launching 17 via pool(1box×2chunk)
+[sweep 19:56:31] wave 19 done: pass=0 miss=0 grader_invalid=0 transient429=0
+[sweep 19:58:01] wave 20: 11 remaining; launching 11 via pool(1box×2chunk)
+[sweep 19:58:06] wave 20 done: pass=0 miss=0 grader_invalid=0 transient429=0

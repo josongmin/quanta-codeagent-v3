@@ -88,9 +88,20 @@ describe("validator — observe-only predicate", () => {
  * exit-code decision is byte-identical (non-repro verify cmds unaffected).
  */
 describe("validator — repro-sentinel gating (RCA fix)", () => {
-  test("🔴 exit ≠0 BUT stdout 'Issue resolved' ⇒ ok:true (false-RED eliminated)", async () => {
-    const r = await validate(base({ exec: fakeExec(1, "warn...\nIssue resolved\n", "DeprecationWarning") }))
+  test("🔴 repro authority: exit ≠0 BUT stdout 'Issue resolved' ⇒ ok:true (false-RED eliminated)", async () => {
+    const r = await validate({
+      sandbox: "/tmp/x",
+      reproPath: "/tmp/x/reproduce_issue.py",
+      exec: fakeExec(1, "warn...\nIssue resolved\n", "DeprecationWarning"),
+      timeoutMs: 1000,
+      evaluatePredicate: evaluateSuccessPredicate,
+    })
     expect(r.ok).toBe(true)
+  })
+
+  test("non-repro cmd printing 'Issue resolved' does NOT override exit code", async () => {
+    const r = await validate(base({ exec: fakeExec(1, "warn...\nIssue resolved\n", "DeprecationWarning") }))
+    expect(r.ok).toBe(false)
   })
 
   test("exit 0 BUT stdout 'Issue reproduced' ⇒ ok:false (repro says NOT fixed — false-green caught)", async () => {

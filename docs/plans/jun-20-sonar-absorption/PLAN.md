@@ -59,6 +59,11 @@ verdict: real reusable methodology, not PR). Three techniques hit our exact gaps
   from `v3-thin`, adds `verify-select:5`, discovered native repo-test regression
   gating, and `verify-select-repro=positive` (generated repro becomes soft-only,
   never a hard reject).
+- `agentless-v3-thin-strict-closure-select` = STRUCTURAL selection arm. Uses
+  noexec/mini candidate generation, strict patch-budget admission,
+  ClosureBundle owner authority, discovered regression, positive-only repro
+  signal, and early accept. This is the preferred selector substrate before any
+  default-profile promotion.
 - `agentless-v3-select-regression-doubt` = TARGETED `verify_loop_stuck` arm.
   Same as `select-regression`, plus `repro-doubt:5` to break post-edit test
   rerun churn when the repro oracle is likely false-negative.
@@ -73,7 +78,7 @@ verdict: real reusable methodology, not PR). Three techniques hit our exact gaps
   - instance: `sympy__sympy-12096`
   - dataset: [select-regression-smoke.sympy-12096.jsonl](/Users/songmin/quanta-codeagent-v3/docs/plans/jun-20-sonar-absorption/slices/select-regression-smoke.sympy-12096.jsonl)
   - control: `agentless-v3-thin`
-  - treatment: `agentless-v3-select-regression`
+  - treatment: `agentless-v3-thin-strict-closure-select`
   - why this case: prior telemetry already showed a candidate-selection delta
     (`minimal single-file` vs `3-file over-broad`), so it is the cleanest first
     smoke for the outer selection plane rather than the repro-doubt guard.
@@ -87,7 +92,7 @@ verdict: real reusable methodology, not PR). Three techniques hit our exact gaps
       --swebench docs/plans/jun-20-sonar-absorption/slices/select-regression-smoke.sympy-12096.jsonl \
       --model gpt-5.4
 
-    QUANTA_RUN_ID=v3sel-smoke-sympy12096-trt QUANTA_BENCH_PRESET=agentless-v3-select-regression \
+    QUANTA_RUN_ID=v3sel-smoke-sympy12096-trt QUANTA_BENCH_PRESET=agentless-v3-thin-strict-closure-select \
       bun run src/apps/bench/cli.ts run \
       --swebench docs/plans/jun-20-sonar-absorption/slices/select-regression-smoke.sympy-12096.jsonl \
       --model gpt-5.4

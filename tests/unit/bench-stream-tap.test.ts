@@ -75,6 +75,7 @@ describe("BenchStreamTap", () => {
     tap.emit({ type: "turn_start", turn: 3 })
     tap.emit(toolCall("write", { file_path: "/s/second.py" })) // 2nd edit
     tap.emit(toolCall("bash", { command: "pytest" })) // not an edit
+    tap.emit(toolResult("bash", true, "2 passed", "pytest"))
 
     expect(tap.firstEditFile).toBe("/s/first.py") // not overwritten by second.py
     expect(tap.turnsToFirstEdit).toBe(2)
@@ -103,18 +104,63 @@ describe("BenchStreamTap", () => {
     expect(down.events).toEqual(evs)
     expect(tap.lastErrorMessage).toBe("boom")
   })
+
+  test("test_runner command comes from tool_result evidence, not a sentinel tool name", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit(toolCall("test_runner", {}))
+    expect(tap.lastVerifyCmd).toBeUndefined()
+    tap.emit(
+      toolResult(
+        "test_runner",
+        false,
+        "1 failed",
+        "uvx --python 3.8 --with pytest pytest tests/test_x.py -k repro",
+      ),
+    )
+    expect(tap.lastVerifyCmd).toBe(
+      "uvx --python 3.8 --with pytest pytest tests/test_x.py -k repro",
+    )
+  })
+
+  test("verify-shaped bash command comes from tool_result evidence, not tool_call text", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit(toolCall("bash", { command: "python -m pytest tests/x.py" }))
+    expect(tap.lastVerifyCmd).toBeUndefined()
+    tap.emit(toolResult("bash", false, "1 failed", "python -m pytest tests/x.py"))
+    expect(tap.lastVerifyCmd).toBe("python -m pytest tests/x.py")
+  })
+
+  test("bash without executedCommand evidence does not become validator cmd", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit(toolCall("bash", { command: "python -m pytest tests/x.py" }))
+    tap.emit(toolResult("bash", false, "permission denied"))
+    expect(tap.lastVerifyCmd).toBeUndefined()
+  })
+
+  test("non-verify bash never becomes validator cmd even if it executed", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit(toolCall("bash", { command: "ls -la" }))
+    tap.emit(toolResult("bash", true, "ok", "ls -la"))
+    expect(tap.lastVerifyCmd).toBeUndefined()
+  })
 })
 
 // P0 — verify-pass detection (tentative-patch retention). The tap fires
 // `onVerifyPass` exactly when a VERIFY tool_result comes back passing, so the
 // driver can snapshot a verified-green candidate. Teeth: pass fires, fail/
 // failing-output/non-verify do NOT, and absent callback is byte-identical.
-const toolResult = (name: string, ok: boolean, preview = ""): AgentEvent => ({
+const toolResult = (
+  name: string,
+  ok: boolean,
+  preview = "",
+  executedCommand?: string,
+): AgentEvent => ({
   type: "tool_result",
   id: `c-${name}`,
   name,
   ok,
   preview,
+  ...(executedCommand !== undefined ? { executedCommand } : {}),
 })
 
 describe("BenchStreamTap verify-pass (P0)", () => {
@@ -129,7 +175,17 @@ describe("BenchStreamTap verify-pass (P0)", () => {
   }
 
   test("test_runner PASS → fires once", () => {
-    expect(run([toolCall("test_runner", {}), toolResult("test_runner", true)]).fired).toBe(1)
+    expect(
+      run([
+        toolCall("test_runner", {}),
+        toolResult(
+          "test_runner",
+          true,
+          "2 passed",
+          "uvx --python 3.8 --with pytest pytest tests/test_x.py -k repro",
+        ),
+      ]).fired,
+    ).toBe(1)
   })
 
   test("test_runner FAIL (ok:false) → does NOT fire", () => {
@@ -145,9 +201,34 @@ describe("BenchStreamTap verify-pass (P0)", () => {
 
   test("bash test-like command (pytest) PASS → fires", () => {
     expect(
-      run([toolCall("bash", { command: "python -m pytest tests/x.py" }), toolResult("bash", true)])
+      run([
+        toolCall("bash", { command: "python -m pytest tests/x.py" }),
+        toolResult("bash", true, "2 passed", "python -m pytest tests/x.py"),
+      ])
         .fired,
     ).toBe(1)
+  })
+
+  test("test_runner PASS without executedCommand evidence → does NOT fire", () => {
+    expect(run([toolCall("test_runner", {}), toolResult("test_runner", true, "2 passed")]).fired).toBe(
+      0,
+    )
+  })
+
+  test("bash background placeholder (ok:true, still running) → does NOT fire", () => {
+    expect(
+      run([
+        toolCall("bash", {
+          command: "python -m pytest tests/x.py",
+          timeout_behavior: "background",
+        }),
+        toolResult(
+          "bash",
+          true,
+          "[bash background] shellId=sh-1 status=running\n(deadline 100ms elapsed)",
+        ),
+      ]).fired,
+    ).toBe(0)
   })
 
   test("bash NON-test command PASS → does NOT fire", () => {
@@ -164,9 +245,9 @@ describe("BenchStreamTap verify-pass (P0)", () => {
     expect(
       run([
         toolCall("test_runner", {}),
-        toolResult("test_runner", true),
+        toolResult("test_runner", true, "2 passed", "pytest tests/a.py"),
         toolCall("test_runner", {}),
-        toolResult("test_runner", true),
+        toolResult("test_runner", true, "2 passed", "pytest tests/b.py"),
       ]).fired,
     ).toBe(2)
   })

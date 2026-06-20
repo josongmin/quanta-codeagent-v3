@@ -24,8 +24,11 @@
  *   --dry-run                                      load+count+print plan, NO LLM
  *   --list-presets                                 print bench presets + exit
  *   QUANTA_BENCH_PRESET=<name>                     posture preset (value, NOT
- *                                                  on/off): agentless-v1 /
- *                                                  everything-v1 / baseline.
+ *                                                  on/off). When unset at the
+ *                                                  execution surface, live
+ *                                                  runs default to the current
+ *                                                  base profile
+ *                                                  (`agentless-v3-thin`).
  *                                                  Individual QUANTA_BENCH_*
  *                                                  override. QUANTA_BENCH_SOTA=1
  *                                                  = alias for agentless-v1.
@@ -82,7 +85,6 @@ import {
   writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
 import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
-import { KNOB_PRESETS } from "@/runner/knobs"
 import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
   aggregate,
@@ -101,6 +103,7 @@ import { finalizeRun, runInstance } from "./eval"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
+import { renderBenchPresetListLines, seedBenchExecutionPreset } from "./preset"
 import { evaluateWithPythonSwebench } from "./python-swebench"
 import { patchVote, sampleBestOfN } from "./sampler"
 import type { BenchSummary, Instance, InstanceResult } from "./types"
@@ -436,6 +439,22 @@ const runPrepareImages = async (instanceIds: string[]): Promise<number> => {
   return result.ok ? 0 : 1
 }
 
+const readSwebenchTasks = (datasetFile: string): SwebenchTask[] =>
+  parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
+
+const readFilteredSwebenchTasks = (datasetFile: string): SwebenchTask[] => {
+  const parsed = readSwebenchTasks(datasetFile)
+  const instanceFilter = argValue("--instance")
+  return instanceFilter !== undefined && instanceFilter !== ""
+    ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
+    : parsed
+}
+
+const selectSwebenchTasks = (datasetFile: string, limit?: number): SwebenchTask[] => {
+  const tasks = readFilteredSwebenchTasks(datasetFile)
+  return limit ? tasks.slice(0, limit) : tasks
+}
+
 const runDatasetMode = async (
   datasetFile: string,
   llm: LLMPort,
@@ -443,7 +462,7 @@ const runDatasetMode = async (
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
   obs?: ObserveCtx,
 ): Promise<void> => {
-  const parsed: SwebenchTask[] = parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
+  const parsed = readSwebenchTasks(datasetFile)
   if (parsed.length === 0) {
     logger.info(
       `No usable tasks parsed from "${datasetFile}". Expecting official SWE-bench JSONL. Nothing to run.`,
@@ -451,13 +470,7 @@ const runDatasetMode = async (
     exitFn(0)
     return
   }
-  // `--instance <substr[,substr...]>` filters by instance id (comma = OR) before
-  // the limit slice.
-  const instanceFilter = argValue("--instance")
-  const tasks =
-    instanceFilter !== undefined && instanceFilter !== ""
-      ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
-      : parsed
+  const tasks = readFilteredSwebenchTasks(datasetFile)
   const selected = cfg.limit ? tasks.slice(0, cfg.limit) : tasks
 
   logger.info(
@@ -632,17 +645,13 @@ const maybeRunDatasetMode = async (
     exitFn(0)
     return true
   }
-  const parsed: SwebenchTask[] = parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
-  const instanceFilter = argValue("--instance")
-  const tasks =
-    instanceFilter !== undefined && instanceFilter !== ""
-      ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
-      : parsed
+  const tasks = selectSwebenchTasks(datasetFile)
   if (argFlag("--dry-run")) {
     const plan = buildDatasetDryRunPlan(datasetFile, tasks, {
       n: cfg.n,
       limit: cfg.limit,
       pythonHarness: gateOn(process.env, "QUANTA_SWEBENCH_PYTHON"),
+      preset: process.env.QUANTA_BENCH_PRESET ?? "(unset)",
     })
     for (const line of formatDryRunPlan(plan)) logger.info(line)
     exitFn(0)
@@ -738,6 +747,7 @@ const runCustomCorpusMode = async (
       n: cfg.n,
       limit: cfg.limit,
       pythonHarness,
+      preset: process.env.QUANTA_BENCH_PRESET ?? "(unset)",
     })
     for (const line of formatDryRunPlan(plan)) logger.info(line)
     exitFn(0)
@@ -805,16 +815,7 @@ const DEFAULT_BENCH_TIMEOUT_MS = 600_000
  *  (`KNOB_PRESETS`) so the listing can never drift from what actually resolves.
  *  Triggered by `--list-presets`. */
 const printPresetList = (): void => {
-  logger.info("Bench presets — select with QUANTA_BENCH_PRESET=<name> (value, not on/off).")
-  logger.info("Individual QUANTA_BENCH_* env vars override a preset's values.")
-  logger.info("QUANTA_BENCH_SOTA=1 is a back-compat alias for agentless-v1.")
-  logger.info("")
-  for (const [name, knobs] of Object.entries(KNOB_PRESETS)) {
-    const body = Object.entries(knobs)
-      .map(([id, v]) => `${id}=${v}`)
-      .join(", ")
-    logger.info(`  ${name.padEnd(16)} ${body === "" ? "(no-op baseline)" : body}`)
-  }
+  for (const line of renderBenchPresetListLines()) logger.info(line)
 }
 
 /** Bench runs ONE agent in an isolated per-instance sandbox — there is no other
@@ -822,16 +823,22 @@ const printPresetList = (): void => {
  *  only fires spuriously on the agent's OWN sequential edits (observed: ~50
  *  `stale_precondition` rejections wasting turns + blocking corrections). Default
  *  it OFF for bench; an operator who sets `QUANTA_STALE_READ_GUARD` explicitly
- *  (to anything) keeps their choice. Pure + injectable so the contract is
- *  unit-testable without spawning the CLI. */
-export const applyBenchEnvDefaults = (env: Record<string, string | undefined>): void => {
+ *  (to anything) keeps their choice. The same composition root also seeds the
+ *  current base preset for live runs when no explicit preset selector is set.
+ *  Pure + injectable so the contract is unit-testable without spawning the
+ *  CLI. */
+export const applyBenchEnvDefaults = (
+  env: Record<string, string | undefined>,
+  opts: { argvPreset?: string | undefined } = {},
+): void => {
   if (env.QUANTA_STALE_READ_GUARD === undefined) env.QUANTA_STALE_READ_GUARD = "off"
+  seedBenchExecutionPreset(env, opts.argvPreset)
 }
 
 export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
-  applyBenchEnvDefaults(process.env)
+  applyBenchEnvDefaults(process.env, { argvPreset: argValue("--preset") })
 
   if (argFlag("--help") || argFlag("-h")) {
     printHelp()

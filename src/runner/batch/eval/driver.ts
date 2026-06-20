@@ -58,6 +58,7 @@ import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Tool } from "@/tool"
 import { astGrepTool, buildDefaultTools, findReferencesTool, ToolRegistry } from "@/tool"
+import { testRunnerTool } from "@/tool/test-runner"
 import { reproRunArgv } from "../corpus/dataset"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type {
@@ -127,7 +128,9 @@ import {
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
 import {
+  buildSelectionInputs,
   type Candidate,
+  filesFromPatch,
   runSelection,
   type SelectionTelemetry,
   summarizeSelection,
@@ -857,43 +860,37 @@ const selectionTelemetry = (selection: ReproTestSelection): BenchReproTestTeleme
   return { installed: false, reason: "no_reproduced_candidate", samples, reproducedCount, ...diag }
 }
 
-export const prepareReproTestDetailed = async (
+type ReproSamples = Awaited<ReturnType<typeof executeReproTests>>
+
+const disabledReproResult = (
+  reason: "disabled" | "empty_problem",
+): PrepareReproTestDetailedResult => ({
+  selection: null,
+  telemetry: { installed: false, reason },
+})
+
+const failedReproResult = (
+  reason: "generation_failed" | "generation_empty" | "execution_failed",
+): PrepareReproTestDetailedResult => ({
+  selection: null,
+  telemetry: { installed: false, reason, samples: 0, reproducedCount: 0 },
+})
+
+const buildReproExecPort = (instance: Instance, deps: PrepareReproTestDeps) =>
+  deps.exec ??
+  ((argv, cwd, timeoutMs) =>
+    execArgv(argv, cwd, timeoutMs, {
+      ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+    }))
+
+const generateReproCandidateTests = async (
   instance: Instance,
-  sandbox: string,
-  k: number | undefined,
   deps: PrepareReproTestDeps,
-): Promise<PrepareReproTestDetailedResult> => {
-  if (k === undefined || k < 1) {
-    return { selection: null, telemetry: { installed: false, reason: "disabled" } }
-  }
-  if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
-    return { selection: null, telemetry: { installed: false, reason: "empty_problem" } }
-  }
-  const config: ReproTestConfig = { samples: k }
-  const generate = deps.generate ?? generateReproTests
-  const execute = deps.execute ?? executeReproTests
-  const select = deps.select ?? selectReproTest
-  const execPort =
-    deps.exec ??
-    ((argv, cwd, timeoutMs) =>
-      execArgv(argv, cwd, timeoutMs, {
-        ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
-      }))
-  const writeFile =
-    deps.writeFile ??
-    (async (path: string, content: string): Promise<void> => {
-      await Bun.write(path, content)
-    })
-  // jun-18 closure repro-install lever: when the issue body embeds a confidently
-  // EXECUTABLE Minimal Working Example (the author's own reproduction), seed the
-  // generation with it so the model wraps that KNOWN-reproducing code in the
-  // sentinel scaffold instead of guessing a reproduction from prose. Fail-closed:
-  // `extractIssueRepro` returns undefined for anything ambiguous, in which case
-  // `mwe` is omitted and the generate prompt is byte-identical to the prior path.
-  let tests: readonly string[]
+  config: ReproTestConfig,
+): Promise<readonly string[] | null> => {
   try {
     const mwe = extractIssueRepro(instance.problemStatement)?.code
-    tests = await generate({
+    return await (deps.generate ?? generateReproTests)({
       issue: instance.problemStatement,
       llm: deps.llm,
       config,
@@ -901,45 +898,72 @@ export const prepareReproTestDetailed = async (
       ...(deps.adversarial === true ? { adversarial: true } : {}),
     })
   } catch {
-    return {
-      selection: null,
-      telemetry: { installed: false, reason: "generation_failed", samples: 0, reproducedCount: 0 },
-    }
+    return null
   }
-  if (tests.length === 0) {
-    return {
-      selection: null,
-      telemetry: { installed: false, reason: "generation_empty", samples: 0, reproducedCount: 0 },
-    }
-  }
-  // Run each repro under the SAME project env the testCmd uses. A bare
-  // `python3 <script>` on the box host cannot import the target project (it is
-  // not pip-installed there), so without this every Agentless repro hit
-  // ModuleNotFoundError and the primary rail never fired. For SWE-bench
-  // instances, build a `uvx --with-editable . python <script>` argv keyed on the
-  // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
+}
+
+const executeReproCandidateTests = async (
+  tests: readonly string[],
+  instance: Instance,
+  sandbox: string,
+  deps: PrepareReproTestDeps,
+  config: ReproTestConfig,
+): Promise<ReproSamples | null> => {
   const reproRepo = instance.swebench?.repo
   const reproVersion = instance.swebench?.version
   const buildArgv =
     reproRepo !== undefined
       ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
       : undefined
-  let samples: Awaited<ReturnType<typeof executeReproTests>>
   try {
-    samples = await execute({
+    return await (deps.execute ?? executeReproTests)({
       tests,
       repoRoot: sandbox,
-      exec: execPort,
-      writeFile,
+      exec: buildReproExecPort(instance, deps),
+      writeFile:
+        deps.writeFile ??
+        (async (path: string, content: string): Promise<void> => {
+          await Bun.write(path, content)
+        }),
       config,
       ...(buildArgv !== undefined ? { buildArgv } : {}),
     })
   } catch {
-    return {
-      selection: null,
-      telemetry: { installed: false, reason: "execution_failed", samples: 0, reproducedCount: 0 },
-    }
+    return null
   }
+}
+
+export const prepareReproTestDetailed = async (
+  instance: Instance,
+  sandbox: string,
+  k: number | undefined,
+  deps: PrepareReproTestDeps,
+): Promise<PrepareReproTestDetailedResult> => {
+  if (k === undefined || k < 1) {
+    return disabledReproResult("disabled")
+  }
+  if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
+    return disabledReproResult("empty_problem")
+  }
+  const config: ReproTestConfig = { samples: k }
+  const select = deps.select ?? selectReproTest
+  // jun-18 closure repro-install lever: when the issue body embeds a confidently
+  // EXECUTABLE Minimal Working Example (the author's own reproduction), seed the
+  // generation with it so the model wraps that KNOWN-reproducing code in the
+  // sentinel scaffold instead of guessing a reproduction from prose. Fail-closed:
+  // `extractIssueRepro` returns undefined for anything ambiguous, in which case
+  // `mwe` is omitted and the generate prompt is byte-identical to the prior path.
+  const tests = await generateReproCandidateTests(instance, deps, config)
+  if (tests === null) return failedReproResult("generation_failed")
+  if (tests.length === 0) return failedReproResult("generation_empty")
+  // Run each repro under the SAME project env the testCmd uses. A bare
+  // `python3 <script>` on the box host cannot import the target project (it is
+  // not pip-installed there), so without this every Agentless repro hit
+  // ModuleNotFoundError and the primary rail never fired. For SWE-bench
+  // instances, build a `uvx --with-editable . python <script>` argv keyed on the
+  // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
+  const samples = await executeReproCandidateTests(tests, instance, sandbox, deps, config)
+  if (samples === null) return failedReproResult("execution_failed")
   const selection = select(samples)
   const telemetry: BenchReproTestTelemetry =
     samples.length > 0
@@ -1095,6 +1119,58 @@ const repoLocalVerifierHint = (instance: Instance): string => {
   ].join("\n")
 }
 
+type BenchTestRunnerInput = Parameters<typeof testRunnerTool.execute>[0]
+
+const hasExplicitBenchTestRunnerCommand = (
+  input: BenchTestRunnerInput,
+): input is BenchTestRunnerInput & { command: string } =>
+  typeof input.command === "string" && input.command.trim() !== ""
+
+const hasBenchTestRunnerPath = (input: BenchTestRunnerInput): boolean =>
+  typeof input.path === "string" && input.path.trim() !== ""
+
+/** Bench-authoritative `test_runner`. In bench, the verifier source of truth is
+ *  `instance.testCmd`, not repo-marker autodetect. So a no-arg `test_runner`
+ *  must execute THAT command exactly; otherwise the model can silently drift to
+ *  host-global `pytest`/`python` and the repair validator later replays the
+ *  wrong rail. Bench therefore treats `test_runner` as a SINGLE authoritative
+ *  rail: only `{}` / `{timeout_ms}` are accepted here. Any narrower or ad-hoc
+ *  repo-local verify must go through explicit `bash`, whose exact command is
+ *  already captured separately by the bench stream tap. */
+const benchBoundTestRunner = (instance: Instance): Tool<BenchTestRunnerInput> | undefined => {
+  const authoritative = instance.testCmd.trim()
+  if (authoritative === "") return undefined
+  return {
+    ...testRunnerTool,
+    extractShellCommand: (input: BenchTestRunnerInput): string =>
+      hasExplicitBenchTestRunnerCommand(input)
+        ? input.command
+        : hasBenchTestRunnerPath(input)
+          ? (testRunnerTool.extractShellCommand?.(input) ?? "")
+          : authoritative,
+    async *execute(input: BenchTestRunnerInput, ctx) {
+      if (hasExplicitBenchTestRunnerCommand(input) || hasBenchTestRunnerPath(input)) {
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output:
+              "bench-bound test_runner accepts only `{}` or `{timeout_ms}` and always " +
+              "runs the authoritative bench verifier exactly; for any narrower or " +
+              "custom repo-local verification, use explicit `bash` instead.",
+          },
+        }
+        return
+      }
+      const delegated =
+        input.timeout_ms !== undefined
+          ? { command: authoritative, timeout_ms: input.timeout_ms }
+          : { command: authoritative }
+      for await (const event of testRunnerTool.execute(delegated, ctx)) yield event
+    },
+  }
+}
+
 const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
   instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}
 
@@ -1160,6 +1236,7 @@ export const buildConfig = (
   const findRefsToolList = gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
     ? [findReferencesTool as Tool]
     : []
+  const benchVerifierTool = benchBoundTestRunner(instance)
   // DIP factory: bench driver runs against the default port surface; the
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
   const registry = new ToolRegistry([
@@ -1167,6 +1244,7 @@ export const buildConfig = (
     ...lspNavTools,
     ...astGrepToolList,
     ...findRefsToolList,
+    ...(benchVerifierTool !== undefined ? [benchVerifierTool] : []),
   ])
   const permission: PermissionContext = { mode: "acceptEdits" }
   const verifierHint = repoLocalVerifierHint(instance)
@@ -1400,13 +1478,12 @@ interface Phase {
 }
 
 /**
- * Capture the agent's LAST `bash`/`test_runner` tool call argument by
- * wrapping a downstream `StreamPort` and intercepting `tool_call` events. Pure
- * tap: every event is forwarded unchanged; the bench can read `lastVerifyCmd`
- * after `runAgent` returns. For `bash`, `input.command` carries the shell
- * string; for `test_runner` the tool name itself counts as a verification — we
- * record the tool name (no command string is associated) so the validator can
- * still fall back to the agent's `reproPath` (or return degenerate).
+ * Capture the agent's LAST verification command by wrapping a downstream
+ * `StreamPort` and intercepting verify-shaped events. Pure tap: every event is
+ * forwarded unchanged; the bench can read `lastVerifyCmd` after `runAgent`
+ * returns. `bash` exposes the shell string at `tool_call`; `test_runner`
+ * resolves the command inside the tool and surfaces it later on
+ * `tool_result.executedCommand`.
  */
 // Bench stream tap (`BenchStreamTap` + `editTargetOf` + `relFromSandbox`) is
 // the SSOT in `./stream-tap` — both this runner core and the prod SDK wrapper
@@ -1807,20 +1884,6 @@ const runRepairPhase = async (
   }
 }
 
-/** Repo-relative files a unified diff touches (its `+++ b/<f>` headers, plus
- *  `--- a/<f>` for pure deletions). Used for owner-coverage scoring. */
-const filesFromPatch = (patch: string): string[] => {
-  const files = new Set<string>()
-  for (const line of patch.split("\n")) {
-    const m = /^(?:\+\+\+ b\/|--- a\/)(.+)$/.exec(line)
-    if (m !== null) {
-      const f = (m[1] as string).trim()
-      if (f !== "" && f !== "/dev/null") files.add(f)
-    }
-  }
-  return [...files]
-}
-
 export interface SelectionReproPolicy {
   readonly enabled: boolean
   readonly goldCalibrate: boolean
@@ -1844,6 +1907,55 @@ export const selectionReproPolicy = (
   return { enabled: true, goldCalibrate: true, resolvedKofNMode: "hard" }
 }
 
+const unavailableReproCalibration = (): ReproOracleCalibration => ({
+  goldCalibrated: false,
+  falseNegative: false,
+  available: false,
+  goldVotes: null,
+  goldK: null,
+})
+
+const resolveSelectionReproConsensus = async (
+  instance: Instance,
+  sandbox: string,
+  timeoutMs: number,
+  reproSources: readonly string[],
+  mode: BenchPosture["verifySelectRepro"],
+) => {
+  const reproPolicy = selectionReproPolicy(mode)
+  const calibrationUnavailable = unavailableReproCalibration()
+  if (!reproPolicy.enabled) {
+    return {
+      reproPolicy,
+      resolvedKofNSelectionPort: undefined,
+      calibration: calibrationUnavailable,
+    }
+  }
+  if (reproPolicy.goldCalibrate) {
+    const { port, calibration } = await makeCalibratedReproConsensusPort(
+      instance,
+      reproSources,
+      sandbox,
+      timeoutMs,
+    )
+    return {
+      reproPolicy,
+      resolvedKofNSelectionPort: port,
+      calibration,
+    }
+  }
+  return {
+    reproPolicy,
+    resolvedKofNSelectionPort: makeReproConsensusSelectionPort(
+      instance,
+      reproSources,
+      sandbox,
+      timeoutMs,
+    ),
+    calibration: calibrationUnavailable,
+  }
+}
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -1860,25 +1972,22 @@ const runSelectionPhase = async (
   w: Wiring,
   n: number,
   concurrency: number | undefined,
+  earlyAccept: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
-  localizeCandidates: readonly string[],
+  selectionOwnerCandidates: readonly string[],
   baseValidatedRed: boolean,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
-  const owners = new Set(localizeCandidates)
-  const reproPolicy = selectionReproPolicy(verifySelectRepro)
+  const selectionInputs = buildSelectionInputs({
+    n,
+    ownerCandidates: selectionOwnerCandidates,
+    sandbox,
+  })
   const generationErrors = new Map<number, string>()
-  const seedFor = (i: number): string | undefined => {
-    if (i === 0) return undefined
-    const file = localizeCandidates[i - 1]
-    return file === undefined
-      ? undefined
-      : `Focus your investigation on \`${file}\`. Confirm the ROOT CAUSE lives there (not merely where the symptom surfaces) before editing.`
-  }
   const mergeHint = (seed: string | undefined): string | undefined =>
     seed === undefined
       ? closureHint
@@ -1887,34 +1996,26 @@ const runSelectionPhase = async (
         : `${closureHint}\n\n${seed}`
 
   let totalTurns = 0
-  const calibrationUnavailable: ReproOracleCalibration = {
-    goldCalibrated: false,
-    falseNegative: false,
-    available: false,
-    goldVotes: null,
-    goldK: null,
-  }
-  const { port: resolvedKofNPort, calibration } =
-    reproPolicy.enabled === false
-      ? { port: () => Promise.resolve(null), calibration: calibrationUnavailable }
-      : reproPolicy.goldCalibrate
-        ? await makeCalibratedReproConsensusPort(instance, reproSources, sandbox, deps.timeoutMs)
-        : {
-            port: makeReproConsensusSelectionPort(instance, reproSources, sandbox, deps.timeoutMs),
-            calibration: calibrationUnavailable,
-          }
+  const { reproPolicy, resolvedKofNSelectionPort, calibration } =
+    await resolveSelectionReproConsensus(
+      instance,
+      sandbox,
+      deps.timeoutMs,
+      reproSources,
+      verifySelectRepro,
+    )
   const discoveredRegressionPort =
     verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
       : undefined
-  const resolvedKofNSelectionPort = reproPolicy.enabled ? resolvedKofNPort : undefined
   const selectionBaseValidatedRed =
     verifySelectRegression === "discovered" ? null : baseValidatedRed
   const result = await runSelection({
     n,
-    owners,
-    seeds: Array.from({ length: n }, (_, i) => seedFor(i)),
+    owners: selectionInputs.owners,
+    seeds: selectionInputs.seeds,
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
+    earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
     ports: {
       generate: async (i, seed): Promise<Candidate> => {
@@ -1943,6 +2044,9 @@ const runSelectionPhase = async (
             turns: phase.turns,
             files: filesFromPatch(phase.patch),
             baseValidatedRed: selectionBaseValidatedRed,
+            ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
+            ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
+            ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
           }
         } finally {
           if (isolated) await cleanupSandbox(candidateSandbox)
@@ -2003,6 +2107,15 @@ const runSelectionPhase = async (
   return {
     patch: result.winner?.patch ?? "",
     turns: totalTurns,
+    ...(result.terminalCandidate?.stopReason !== undefined
+      ? { stopReason: result.terminalCandidate.stopReason }
+      : {}),
+    ...(result.terminalCandidate?.agentError !== undefined
+      ? { agentError: result.terminalCandidate.agentError }
+      : {}),
+    ...(result.terminalCandidate?.editCount !== undefined
+      ? { editCount: result.terminalCandidate.editCount }
+      : {}),
     reproOracleCalibration: calibration,
     selectionTelemetry: summarizeSelection(result),
   }
@@ -2037,6 +2150,9 @@ const agentPhaseError = (phase: Phase): string | undefined => {
     ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
   })
   if (noPatchExhausted !== undefined) return noPatchExhausted
+  if (phase.stopReason === "max_turns" && phase.patch.trim() === "") {
+    return "agent reached max turns before verification"
+  }
   if (phase.stopReason === "error") {
     return phase.agentError ?? "agent stopped with error before verification"
   }
@@ -2117,6 +2233,12 @@ const noPatchResult = (args: {
     passed: false,
     patch: args.phase.patch,
     turns: args.phase.turns,
+    ...(args.phase.selectionTelemetry?.winnerId === null
+      ? {
+          error:
+            "verify-select produced no submittable candidate (all candidates were empty or did not apply)",
+        }
+      : {}),
     ...extra,
   }
 }
@@ -2321,9 +2443,10 @@ export const runInstanceOnce = async (
             w,
             posture.verifySelectN,
             posture.verifySelectConcurrency,
+            posture.verifySelectEarlyAccept,
             posture.verifySelectRegression,
             posture.verifySelectRepro,
-            localizeCandidates,
+            closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? localizeCandidates,
             verificationPlan?.baseValidatedRed ?? false,
             precomputedHint,
             reproHint,
@@ -2359,8 +2482,10 @@ export const runInstanceOnce = async (
     if (terminal !== undefined) {
       if (shouldValidateGold(deps, false)) {
         const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
-        if (!gold.ok)
-          return { ...terminal, passed: false, verdict: "grader_invalid", error: gold.error }
+        if (!gold.ok) {
+          const { error: _prevError, ...rest } = terminal
+          return { ...rest, passed: false, verdict: "grader_invalid", error: gold.error }
+        }
       }
       return terminal
     }
@@ -2404,7 +2529,8 @@ export const runInstanceOnce = async (
     if (shouldValidateGold(deps, v.passed)) {
       const gold = await validateGoldPatch(instance, { ...deps, signal: abort.signal })
       if (!gold.ok) {
-        v = { ...v, passed: false, error: gold.error }
+        const { error: _prevError, ...rest } = v
+        v = { ...rest, passed: false, error: gold.error }
         extra.verdict = "grader_invalid"
       }
     }

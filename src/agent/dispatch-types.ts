@@ -26,6 +26,9 @@ export interface DispatchResult {
   stderrTail?: string
   /** Process exit code for shell-class tools, when the ToolResult exposes it. */
   exitCode?: number
+  /** Exact shell command the tool actually executed, when surfaced as typed
+   *  evidence by the tool (e.g. `test_runner` after resolving defaults). */
+  executedCommand?: string
   /** Path to a persisted full log, only when the tool actually wrote one. */
   fullLogPath?: string
   /**
