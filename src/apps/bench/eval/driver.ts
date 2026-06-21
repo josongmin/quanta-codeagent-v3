@@ -66,9 +66,9 @@ import {
   summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
+import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
-import { evaluateStrictPatchRisk } from "@/runner/batch/eval/strict-risk-gate"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage, gateDisabled, logger } from "@/shared"
@@ -654,6 +654,7 @@ const runSelectionPhase = async (
   concurrency: number | undefined,
   earlyAccept: boolean,
   riskGate: boolean,
+  llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"],
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -701,6 +702,15 @@ const runSelectionPhase = async (
   // soft credit / fail-open; keep repro-authority absent as `null`, not `false`.
   const selectionBaseValidatedRed =
     verifySelectRegression === "discovered" ? null : baseValidatedRed
+  const selectionRiskGate = buildSelectionRiskGate({
+    structural: riskGate,
+    llmMode: llmRiskGateMode,
+    llm: deps.llm,
+    problemStatement: instance.problemStatement,
+    ownerFiles: selectionOwnerCandidates,
+    ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
+    signal,
+  })
   const result = await runSelection({
     n,
     owners: selectionInputs.owners,
@@ -708,17 +718,7 @@ const runSelectionPhase = async (
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
-    ...(riskGate
-      ? {
-          riskGate: (c) =>
-            evaluateStrictPatchRisk({
-              patch: c.patch,
-              problemStatement: instance.problemStatement,
-              ownerFiles: selectionOwnerCandidates,
-              ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
-            }),
-        }
-      : {}),
+    ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -837,6 +837,7 @@ const runAppMainPhase = async (args: {
       args.prepared.posture.verifySelectConcurrency,
       args.prepared.posture.verifySelectEarlyAccept,
       args.prepared.posture.verifySelectRiskGate,
+      args.prepared.posture.verifySelectLlmRiskGate,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

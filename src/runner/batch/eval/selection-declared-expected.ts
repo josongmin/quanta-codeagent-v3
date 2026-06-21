@@ -125,7 +125,7 @@ const postgresqlEmptyEnvPatchMatch = (patch: string): boolean => {
   const hasBaseBoundaryNormalization =
     touchesFile(patch, "django/db/backends/base/client.py") &&
     hasBaseEmptyEnvNormalization(addedOrContext)
-  return hasSafePostgresProducer || hasBaseBoundaryNormalization
+  return hasSafePostgresProducer && hasBaseBoundaryNormalization
 }
 
 const hasSqliteFunctionArityExpansion = (added: string): boolean =>
@@ -140,9 +140,13 @@ const hasSqliteSqlArityExpansion = (added: string): boolean =>
   /django_datetime_extract\('%s',\s*%s,\s*%s,\s*%s\)/.test(added) &&
   /django_datetime_trunc\('%s',\s*%s,\s*%s,\s*%s\)/.test(added)
 
+const hasMalformedSqliteTimezonePairFormatter = (added: string): boolean =>
+  /\breturn\s+["']'%s'["']\s*,/.test(added)
+
 const databaseConnectionTimezonePatchMatch = (patch: string): boolean => {
   const added = addedLines(patch)
   if (added.trim() === "") return false
+  if (hasMalformedSqliteTimezonePairFormatter(added)) return false
   const connectionTimezoneMentions =
     added.match(/\bself\.connection\.timezone_name\b/g)?.length ?? 0
   return (

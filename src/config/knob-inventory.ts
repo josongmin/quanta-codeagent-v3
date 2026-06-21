@@ -1327,6 +1327,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/verify-select-early-accept.ts",
   },
   {
+    envKey: "QUANTA_BENCH_RCA_TARGET_GATES",
+    kind: "bool",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: targeted RCA recovery gates for known miss families. Default-OFF; runs with this enabled must not be reported as clean general-profile results.",
+    readSite: "runner/knobs/knobs/rca-target-gates.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
     kind: "bool",
     default: undefined,
@@ -1335,6 +1345,26 @@ const BENCH: readonly KnobInventoryEntry[] = [
     describe:
       "Bench: adaptive verify-select cost guard. Candidate 0 submits immediately when static public-issue/patch risk is low; risky patches expand to the remaining candidate budget. Default-OFF.",
     readSite: "runner/knobs/knobs/verify-select-risk-gate.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE",
+    kind: "enum",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: optional LLM semantic expansion gate layered on top of the structural verify-select gate. Modes: shadow=telemetry only, on=fail-closed expand.",
+    readSite: "runner/knobs/knobs/verify-select-llm-risk-gate.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
+    kind: "bool",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: verify-select counterfactual candidate — cand1 from a counterfactual minimal-alternative seed bound to structural contracts. Off by default.",
+    readSite: "runner/knobs/knobs/verify-select-counterfactual.ts",
   },
   {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",

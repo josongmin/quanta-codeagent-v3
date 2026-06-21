@@ -288,6 +288,11 @@ diff --git a/django/db/backends/sqlite3/operations.py b/django/db/backends/sqlit
 +            lookup_type.lower(), field_name, *self._convert_tznames_to_sql(tzname),
 `
 
+const DATABASE_TIMEZONE_MALFORMED_SQLITE_PAIR_PATCH = DATABASE_TIMEZONE_GOLD_PATCH.replace(
+  `+        return "'%s'" % tzname, "'%s'" % self.connection.timezone_name`,
+  `+        return "'%s'", "'%s'" % (tzname, self.connection.timezone_name)`,
+)
+
 describe("declaredExpectedPatchMatch", () => {
   test("message-prefix issue rejects scalar expected with prefix found only", () => {
     expect(declaredExpectedPatchMatch(TIMESERIES_MESSAGE_ISSUE, FOUND_ONLY_PATCH)).toBe(false)
@@ -331,15 +336,15 @@ describe("declaredExpectedPatchMatch", () => {
     )
   })
 
-  test("postgres env issue accepts producer-only env-or-none return", () => {
+  test("postgres env issue rejects producer-only env-or-none return", () => {
     expect(declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_ONLY_ENV_OR_NONE_PATCH)).toBe(
-      true,
+      false,
     )
   })
 
-  test("postgres env issue accepts base-only execution-boundary normalization", () => {
+  test("postgres env issue rejects base-only execution-boundary normalization", () => {
     expect(declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_BASE_ONLY_BOUNDARY_PATCH)).toBe(
-      true,
+      false,
     )
   })
 
@@ -347,10 +352,10 @@ describe("declaredExpectedPatchMatch", () => {
     expect(declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_GOLD_ENV_PATCH)).toBe(true)
   })
 
-  test("postgres env issue accepts safe nullable producer without base edit", () => {
+  test("postgres env issue rejects safe nullable producer without base edit", () => {
     expect(
       declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_PRODUCER_SAFE_NULLABLE_ONLY_PATCH),
-    ).toBe(true)
+    ).toBe(false)
   })
 
   test("postgres env issue accepts safe nullable producer plus env-is-not-None boundary", () => {
@@ -368,6 +373,15 @@ describe("declaredExpectedPatchMatch", () => {
   test("database timezone issue rejects sqlite SQL-only arity change without UDF registration", () => {
     expect(
       declaredExpectedPatchMatch(DATABASE_TIMEZONE_ISSUE, DATABASE_TIMEZONE_SQLITE_OPS_ONLY_PATCH),
+    ).toBe(false)
+  })
+
+  test("database timezone issue rejects malformed sqlite timezone pair formatter", () => {
+    expect(
+      declaredExpectedPatchMatch(
+        DATABASE_TIMEZONE_ISSUE,
+        DATABASE_TIMEZONE_MALFORMED_SQLITE_PAIR_PATCH,
+      ),
     ).toBe(false)
   })
 

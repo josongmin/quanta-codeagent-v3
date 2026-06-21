@@ -38,6 +38,7 @@
 
 import { isAbsolute, relative, sep } from "node:path"
 import type { StopReason } from "@/agent"
+import { analyzePatchBudget, type PatchBudgetVerdict } from "@/agent/patch-budget"
 import {
   type CandidateVerdict,
   type HardGateSignals,
@@ -52,6 +53,12 @@ import {
 } from "@/agent/verification-bundle"
 import { filesFromUnifiedDiff } from "@/shared"
 import { Semaphore } from "@/workflow/semaphore"
+import {
+  deriveCounterfactualContracts,
+  evaluateCounterfactualContracts,
+} from "./counterfactual-contract"
+import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
+import { buildCounterfactualSeed } from "./counterfactual-seed"
 
 export interface Candidate {
   /** Stable id (e.g. `cand-0`). */
@@ -99,10 +106,26 @@ export interface ScoredEntry {
 export interface SelectionRiskGateDecision {
   readonly expand: boolean
   readonly reasons: readonly string[]
+  readonly shadow?: SelectionRiskGateShadowDecision
+  /** Structural patch-budget verdict for candidate 0 — forwarded (not re-parsed)
+   *  so the counterfactual seed/contract path consumes typed facts. Present only
+   *  on the structural arm. */
+  readonly patchBudget?: PatchBudgetVerdict
+}
+
+export interface SelectionRiskGateShadowDecision {
+  readonly expand: boolean
+  readonly reasons: readonly string[]
 }
 
 export interface SelectionRiskGateTelemetry {
   readonly candidateId: string
+  readonly expanded: boolean
+  readonly reasons: readonly string[]
+  readonly shadow?: SelectionRiskGateShadowTelemetry
+}
+
+export interface SelectionRiskGateShadowTelemetry {
   readonly expanded: boolean
   readonly reasons: readonly string[]
 }
@@ -134,6 +157,23 @@ export interface SelectionResult {
   /** Adaptive strict@1 gate telemetry, present only when the gate was enabled
    *  and candidate 0 was produced. */
   riskGate?: SelectionRiskGateTelemetry
+  /** Counterfactual-select telemetry, present only when the counterfactual arm
+   *  was enabled. `seedGenerated=false` means candidate 0 never expanded. */
+  counterfactual?: CounterfactualTelemetry
+}
+
+export interface CounterfactualTelemetry {
+  /** True when the counterfactual arm was active for this selection pass. */
+  readonly enabled: boolean
+  /** True when a counterfactual seed was generated for candidate 1+. */
+  readonly seedGenerated: boolean
+  /** Structural contracts derived from candidate 0's risk facts. */
+  readonly contracts: readonly string[]
+  /** Candidate ids generated under the counterfactual seed. */
+  readonly candidateIds: readonly string[]
+  /** Counterfactual candidate ids that VIOLATED their contract (excluded from
+   *  winning over candidate 0, kept only as terminal metadata). */
+  readonly violatedCandidateIds: readonly string[]
 }
 
 export type ResolvedKofNMode = "hard" | "soft"
@@ -165,6 +205,7 @@ export interface SelectionTelemetry {
   admissibleCount: number
   winnerId: string | null
   riskGate?: SelectionRiskGateTelemetry
+  counterfactual?: CounterfactualTelemetry
   candidates: readonly CandidateTelemetry[]
 }
 
@@ -180,6 +221,7 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
   admissibleCount: result.admissibleCount,
   winnerId: result.winner?.id ?? null,
   ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
+  ...(result.counterfactual !== undefined ? { counterfactual: result.counterfactual } : {}),
   candidates: result.scored.map((s) => ({
     id: s.candidate.id,
     files: s.candidate.files,
@@ -430,15 +472,45 @@ export const runSelection = async (args: {
   riskGate?: (
     candidate: Candidate,
   ) => SelectionRiskGateDecision | Promise<SelectionRiskGateDecision>
+  /** Counterfactual-select arm. Sequential-only. When candidate 0 expands the
+   *  risk gate, candidate 1+ is seeded with a COUNTERFACTUAL minimal-alternative
+   *  prompt (the inverse of cand0's structural failure) instead of the generic
+   *  owner-focus seed, and any counterfactual candidate that violates its own
+   *  structural contract is barred from winning over candidate 0. When the gate
+   *  does NOT expand, candidate 0 is accepted only after CHEAP validation (real
+   *  applyClean / regression / smoke ports) instead of a blind static accept.
+   *  Default/false preserves the legacy gated behavior byte-identically. */
+  counterfactual?: boolean
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
   // dedup ("first wins") and scoring stay deterministic.
   const limit = Math.max(1, Math.floor(args.concurrency ?? 1))
+  if (args.counterfactual === true && limit > 1) {
+    throw new Error("verify-select-counterfactual requires verify-select-concurrency=1")
+  }
   let generationFailures = 0
+  // ── counterfactual-select state (sequential arm only) ───────────────────────
+  // Set after candidate 0's risk gate expands: cand0's deterministic risk facts,
+  // the counterfactual seed derived from them, and the ids of candidates spawned
+  // under that seed (so the selector can bar a contract-violating counterfactual
+  // from winning WITHOUT touching the global candidate gate).
+  let cand0Facts: CandidateRiskFacts | undefined
+  let counterfactualOwnerFile: string | undefined
+  let counterfactualSeed: string | undefined
+  const counterfactualCandidateIds = new Set<string>()
   const tryGenerate = async (i: number): Promise<Candidate | null> => {
     try {
-      return await args.ports.generate(i, args.seeds[i])
+      // The counterfactual seed replaces ONLY cand1 (the primary minimal
+      // alternative). cand2+ keep their owner-focus seeds so the extra budget
+      // still spans DIFFERENT fix sites — diversity, not N copies of one seed.
+      const useCounterfactual = counterfactualSeed !== undefined && i === 1
+      const candidate = await args.ports.generate(
+        i,
+        useCounterfactual ? counterfactualSeed : args.seeds[i],
+      )
+      if (useCounterfactual) counterfactualCandidateIds.add(candidate.id)
+      return candidate
     } catch {
       generationFailures += 1
       return null
@@ -624,7 +696,33 @@ export const runSelection = async (args: {
       scored.push(await scoreOne(cands[i] as Candidate, minB, maxB))
     }
 
-    const ranked = scored.map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
+    // ── counterfactual contract gate (T-301) ────────────────────────────────
+    // A candidate spawned under the counterfactual seed that VIOLATES its own
+    // derived structural contract is barred from WINNING over candidate 0. This
+    // is a counterfactual-specific negative signal, NOT a global candidate gate:
+    // candidates with no contract (cand0, or any non-counterfactual candidate)
+    // are never excluded here, so a legitimately large patch still survives.
+    const cfContracts = cand0Facts !== undefined ? deriveCounterfactualContracts(cand0Facts) : []
+    const violatedCounterfactual = new Set<string>()
+    if (cfContracts.length > 0) {
+      for (const s of scored) {
+        if (!counterfactualCandidateIds.has(s.candidate.id)) continue
+        const ev = evaluateCounterfactualContracts({
+          contracts: cfContracts,
+          verdict: analyzePatchBudget(s.candidate.patch, {
+            ownerFiles: [...args.owners],
+            runtimeExpandingPolicy: "gate",
+          }),
+          emptyPatch: s.candidate.patch.trim() === "",
+          candidateFiles: s.candidate.files,
+          targetOwnerFile: counterfactualOwnerFile,
+        })
+        if (!ev.satisfied) violatedCounterfactual.add(s.candidate.id)
+      }
+    }
+    const ranked = scored
+      .filter((s) => !violatedCounterfactual.has(s.candidate.id))
+      .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     const fallbackRanked = scored
       .filter(
         (s) =>
@@ -633,10 +731,25 @@ export const runSelection = async (args: {
           s.hard.regressionGreen !== false &&
           s.hard.smokeGreen !== false &&
           !hardResolvedRejected(s.hard.patchedResolvedKofN) &&
-          !declaredExpectedRejected(s.verdict),
+          !declaredExpectedRejected(s.verdict) &&
+          !violatedCounterfactual.has(s.candidate.id),
       )
       .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
+    // Report only counterfactual ids that SURVIVED dedup (are in `scored`): a
+    // cand1 whose patch collapsed onto cand0 is gone from scoring, so listing it
+    // would be a telemetry lie (and it carries no independent contract verdict).
+    const scoredIds = new Set(scored.map((s) => s.candidate.id))
+    const counterfactual: CounterfactualTelemetry | undefined =
+      args.counterfactual === true
+        ? {
+            enabled: true,
+            seedGenerated: counterfactualSeed !== undefined,
+            contracts: cfContracts,
+            candidateIds: [...counterfactualCandidateIds].filter((id) => scoredIds.has(id)),
+            violatedCandidateIds: [...violatedCounterfactual],
+          }
+        : undefined
     const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
     let terminalCandidate: Candidate | null = null
     if (winner === null) {
@@ -675,6 +788,7 @@ export const runSelection = async (args: {
       admissibleCount: scored.filter((s) => s.verdict.admissible).length,
       generated: cands.length,
       ...(riskGate !== undefined ? { riskGate } : {}),
+      ...(counterfactual !== undefined ? { counterfactual } : {}),
     }
   }
 
@@ -695,9 +809,39 @@ export const runSelection = async (args: {
           candidateId: candidate.id,
           expanded: decision.expand,
           reasons: decision.reasons,
+          ...(decision.shadow !== undefined
+            ? {
+                shadow: {
+                  expanded: decision.shadow.expand,
+                  reasons: decision.shadow.reasons,
+                },
+              }
+            : {}),
         }
-        if (!decision.expand) return await staticAccept(raw, candidate, riskGateTelemetry)
+        if (!decision.expand) {
+          // T-101: the counterfactual arm refuses a BLIND static accept — even a
+          // low-risk cand0 must clear cheap validation (real applyClean /
+          // regression / smoke ports via finalize). The legacy arm keeps the
+          // cost-saving static accept (byte-identical).
+          return args.counterfactual === true
+            ? await finalize(raw, false, riskGateTelemetry)
+            : await staticAccept(raw, candidate, riskGateTelemetry)
+        }
         riskGateExpanded = true
+        // T-202: derive cand0's risk facts and the counterfactual seed for cand1+.
+        if (args.counterfactual === true && decision.patchBudget !== undefined) {
+          counterfactualOwnerFile = [...args.owners][0]
+          cand0Facts = extractCandidateRiskFacts({
+            verdict: decision.patchBudget,
+            ownerFiles: [...args.owners],
+            emptyPatch: candidate.patch.trim() === "",
+            ...(decision.shadow !== undefined ? { llmShadowReasons: decision.shadow.reasons } : {}),
+          })
+          counterfactualSeed = buildCounterfactualSeed({
+            facts: cand0Facts,
+            ownerFile: counterfactualOwnerFile,
+          })
+        }
       }
       if (riskGateExpanded) continue
       const earlyAccepted = await maybeFinalizeEarlyAccept(raw, candidate)

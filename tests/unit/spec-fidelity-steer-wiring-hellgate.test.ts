@@ -25,6 +25,7 @@ const ENV_KEYS = [
   "QUANTA_KNOBS_PRESET",
   "QUANTA_BENCH_SPEC_FIDELITY_STEER",
   "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL",
+  "QUANTA_BENCH_RCA_TARGET_GATES",
 ] as const
 
 let saved: Map<string, string | undefined>
@@ -103,10 +104,9 @@ describe("gap-B spec-fidelity steer prompt wiring", () => {
     expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("Fix the existing message construction")
     expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("multi-item lists or prefixes")
     expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("same prefix length")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("not by adding a new branch")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("Do NOT write `expected =")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("self.colnames[:len(required_columns)]")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("unquoted `{}` placeholders")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("not by adding a narrow")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("unquoted placeholders")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).not.toContain("required_columns")
   })
 
   test("SF-5: expected/actual OFF + same exception issue ⇒ message-format steer absent", () => {
@@ -121,6 +121,8 @@ describe("gap-B spec-fidelity steer prompt wiring", () => {
     expect(userText(BACKEND_FAMILY_ISSUE)).toContain("single-backend patch is incomplete")
     expect(userText(BACKEND_FAMILY_ISSUE)).toContain("SQL call arity")
     expect(userText(BACKEND_FAMILY_ISSUE)).toContain("registered Python UDF arity")
+    expect(userText(BACKEND_FAMILY_ISSUE)).not.toContain("never return raw")
+    expect(userText(BACKEND_FAMILY_ISSUE)).not.toContain(`"'%s'" % tzname`)
   })
 
   test("SF-7: expected/actual ON + subprocess env issue ⇒ execution-boundary steer present", () => {
@@ -128,6 +130,18 @@ describe("gap-B spec-fidelity steer prompt wiring", () => {
     expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("trace BOTH the producer")
     expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("drop inherited environment")
     expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("normalize that to None")
+    expect(userText(SUBPROCESS_ENV_ISSUE)).not.toContain("producer-only or base-only patches fail")
+  })
+
+  test("SF-7b: RCA target gates append known-miss specifics only when explicitly enabled", () => {
+    process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
+    process.env.QUANTA_BENCH_RCA_TARGET_GATES = "1"
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("RCA target gate")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("required_columns")
+    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("never return raw")
+    expect(userText(BACKEND_FAMILY_ISSUE)).toContain(`"'%s'" % tzname`)
+    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("single patch must change both")
+    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("producer-only or base-only patches fail")
   })
 
   test("SF-8: targeted issue steers stay absent when expected/actual is OFF", () => {

@@ -142,10 +142,10 @@ import {
   summarizeSelection,
 } from "./selection-executor"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
+import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
-import { evaluateStrictPatchRisk } from "./strict-risk-gate"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
 export interface RunInstanceDeps {
@@ -271,19 +271,22 @@ const MESSAGE_FORMAT_STEER =
   "around '{}'; either change the template or render scalar/list values before " +
   "formatting. " +
   "When an expected prefix/list is compared with an actual prefix/list, render " +
-  "BOTH sides from the same prefix length; do not keep `expected[0]` / " +
-  "`actual[0]` in the failing branch. Preserve scalar display for one item and " +
-  "list display for multiple items by changing the formatter, not by adding a " +
-  "new branch. Do NOT write `expected = required_columns[0] if len(...) == 1 " +
-  "else required_columns` or the analogous `actual = self.colnames[0] ...`; " +
-  "that still feeds raw unquoted strings/lists into the message. Instead build " +
-  "display strings for BOTH expected and found, for example a small local helper " +
-  "that returns `\"'{}'\".format(values[0])` for one item and `str(values)` for " +
-  "many, then pass `required_columns` and `self.colnames[:len(required_columns)]` " +
-  "through that helper. The message template must use unquoted `{}` placeholders " +
-  "for those pre-rendered display strings. " +
+  "BOTH sides from the same prefix length; do not keep scalar-only indexing in " +
+  "the failing branch. Preserve scalar display for one item and list display for " +
+  "multiple items by changing the formatter, not by adding a narrow special-case " +
+  "branch. The message template must use unquoted placeholders for pre-rendered " +
+  "display strings. " +
   "do NOT add a narrow special-case branch that leaves the original misleading " +
   "formatter reachable for the reproduced scenario."
+
+const RCA_MESSAGE_FORMAT_STEER =
+  "RCA target gate: for the Astropy TimeSeries required-columns issue, do NOT " +
+  "write `expected = required_columns[0] if len(...) == 1 else required_columns` " +
+  "or the analogous `actual = self.colnames[0] ...`; instead build display " +
+  "strings for BOTH expected and found, for example a small local helper that " +
+  "returns `\"'{}'\".format(values[0])` for one item and `str(values)` for many, " +
+  "then pass `required_columns` and `self.colnames[:len(required_columns)]` " +
+  "through that helper."
 
 const ADAPTER_FAMILY_STEER =
   "When the issue names multiple backends, adapters, drivers, providers, or " +
@@ -294,6 +297,13 @@ const ADAPTER_FAMILY_STEER =
   "explicitly limits the bug to one backend. For timezone/date extraction " +
   "backend bugs, do not stop at MySQL: update Oracle and SQLite too, and for " +
   "SQLite change BOTH the SQL call arity and the registered Python UDF arity."
+
+const RCA_ADAPTER_FAMILY_STEER =
+  "RCA target gate: for the Django database TIME_ZONE backend issue, SQLite " +
+  "timezone helper tuples must format both returned SQL string entries: " +
+  "`return \"'%s'\" % tzname, \"'%s'\" % self.connection.timezone_name` " +
+  "or return `'NULL', 'NULL'` when timezone conversion is disabled; never " +
+  "return raw `\"'%s'\"` as the first tuple element."
 
 const EXECUTION_ENV_BOUNDARY_STEER =
   "For subprocess, shell, command, or environment-variable bugs, trace BOTH the " +
@@ -306,6 +316,12 @@ const EXECUTION_ENV_BOUNDARY_STEER =
   "construction plus the shared caller when both participate. If a backend " +
   "returns `{}` for no overrides, normalize that to None at the subprocess " +
   "boundary instead of expanding it into a full inherited env."
+
+const RCA_EXECUTION_ENV_BOUNDARY_STEER =
+  "RCA target gate: for the Django PostgreSQL dbshell empty-env issue, a single " +
+  "patch must change both the PostgreSQL producer (`return args, env or None`) " +
+  "and the base subprocess boundary (`env = {**os.environ, **env} if env else " +
+  "None`); producer-only or base-only patches fail the official tests."
 
 /** Lever A — SIBLING-COMPLETION / co-change consequence check (2026-06-19,
  *  ceiling RCA). Measured failure mode on the multi-file ceiling subset: quanta
@@ -1443,18 +1459,25 @@ const buildIssueShapeSteers = (
   isSwebench: boolean,
 ): Pick<SteerLines, "messageFormat" | "adapterFamily" | "executionEnv"> => {
   const enabled = isSwebench && opt.issueHintExpectedActual === true
+  const messageFormatSteer =
+    MESSAGE_FORMAT_STEER + (opt.rcaTargetGates ? ` ${RCA_MESSAGE_FORMAT_STEER}` : "")
+  const adapterFamilySteer =
+    ADAPTER_FAMILY_STEER + (opt.rcaTargetGates ? ` ${RCA_ADAPTER_FAMILY_STEER}` : "")
+  const executionEnvSteer =
+    EXECUTION_ENV_BOUNDARY_STEER +
+    (opt.rcaTargetGates ? ` ${RCA_EXECUTION_ENV_BOUNDARY_STEER}` : "")
   return {
     messageFormat: steerLine(
       enabled && hasExceptionMessageFormatIssue(instance.problemStatement),
-      MESSAGE_FORMAT_STEER,
+      messageFormatSteer,
     ),
     adapterFamily: steerLine(
       enabled && hasAdapterFamilyIssue(instance.problemStatement),
-      ADAPTER_FAMILY_STEER,
+      adapterFamilySteer,
     ),
     executionEnv: steerLine(
       enabled && hasExecutionEnvBoundaryIssue(instance.problemStatement),
-      EXECUTION_ENV_BOUNDARY_STEER,
+      executionEnvSteer,
     ),
   }
 }
@@ -2326,6 +2349,8 @@ const runSelectionPhase = async (
   concurrency: number | undefined,
   earlyAccept: boolean,
   riskGate: boolean,
+  llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"],
+  counterfactual: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -2364,6 +2389,15 @@ const runSelectionPhase = async (
   const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
   const selectionBaseValidatedRed =
     verifySelectRegression === "discovered" ? null : baseValidatedRed
+  const selectionRiskGate = buildSelectionRiskGate({
+    structural: riskGate,
+    llmMode: llmRiskGateMode,
+    llm: deps.llm,
+    problemStatement: instance.problemStatement,
+    ownerFiles: selectionOwnerCandidates,
+    ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
+    signal,
+  })
   const result = await runSelection({
     n,
     owners: selectionInputs.owners,
@@ -2371,17 +2405,8 @@ const runSelectionPhase = async (
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
-    ...(riskGate
-      ? {
-          riskGate: (c) =>
-            evaluateStrictPatchRisk({
-              patch: c.patch,
-              problemStatement: instance.problemStatement,
-              ownerFiles: selectionOwnerCandidates,
-              ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
-            }),
-        }
-      : {}),
+    ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
+    ...(counterfactual ? { counterfactual: true } : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -2856,6 +2881,8 @@ const runMainPhase = async (args: {
       args.prepared.posture.verifySelectConcurrency,
       args.prepared.posture.verifySelectEarlyAccept,
       args.prepared.posture.verifySelectRiskGate,
+      args.prepared.posture.verifySelectLlmRiskGate,
+      args.prepared.posture.verifySelectCounterfactual,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

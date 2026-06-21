@@ -23,13 +23,16 @@ import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { patchBudgetStrictKnob } from "@/runner/knobs/knobs/patch-budget-strict"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
+import { rcaTargetGatesKnob } from "@/runner/knobs/knobs/rca-target-gates"
 import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-concurrency"
+import { verifySelectCounterfactualKnob } from "@/runner/knobs/knobs/verify-select-counterfactual"
 import { verifySelectEarlyAcceptKnob } from "@/runner/knobs/knobs/verify-select-early-accept"
+import { verifySelectLlmRiskGateKnob } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
 import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
 import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { verifySelectRiskGateKnob } from "@/runner/knobs/knobs/verify-select-risk-gate"
@@ -79,12 +82,15 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["must-pass", mustPassKnob],
     ["patch-budget-strict", patchBudgetStrictKnob],
     ["persona", personaKnob],
+    ["rca-target-gates", rcaTargetGatesKnob],
     ["working-state", workingStateKnob],
     ["closeout-guard", closeoutGuardKnob],
     ["hooks", hooksKnob],
     ["verify-select", verifySelectKnob],
     ["verify-select-concurrency", verifySelectConcurrencyKnob],
+    ["verify-select-counterfactual", verifySelectCounterfactualKnob],
     ["verify-select-early-accept", verifySelectEarlyAcceptKnob],
+    ["verify-select-llm-risk-gate", verifySelectLlmRiskGateKnob],
     ["verify-select-regression", verifySelectRegressionKnob],
     ["verify-select-repro", verifySelectReproKnob],
     ["verify-select-risk-gate", verifySelectRiskGateKnob],
@@ -170,6 +176,45 @@ describe("verify-select-risk-gate — closed truthy bool", () => {
     expect(verifySelectRiskGateKnob.parse("off")).toBeUndefined()
     expect(verifySelectRiskGateKnob.parse("false")).toBeUndefined()
     expect(verifySelectRiskGateKnob.parse("TRUE")).toBeUndefined()
+  })
+})
+
+describe("verify-select-counterfactual — closed truthy/falsy bool", () => {
+  test("accepted truthy forms parse to true", () => {
+    expect(verifySelectCounterfactualKnob.parse("1")).toBe(true)
+    expect(verifySelectCounterfactualKnob.parse("on")).toBe(true)
+    expect(verifySelectCounterfactualKnob.parse("true")).toBe(true)
+  })
+
+  test("accepted falsy forms parse to false (explicit, not fall-through)", () => {
+    expect(verifySelectCounterfactualKnob.parse("0")).toBe(false)
+    expect(verifySelectCounterfactualKnob.parse("off")).toBe(false)
+    expect(verifySelectCounterfactualKnob.parse("false")).toBe(false)
+  })
+
+  test("undefined / empty / garbage / case-variants stay undefined", () => {
+    expect(verifySelectCounterfactualKnob.parse(undefined)).toBeUndefined()
+    expect(verifySelectCounterfactualKnob.parse("")).toBeUndefined()
+    expect(verifySelectCounterfactualKnob.parse("TRUE")).toBeUndefined()
+    expect(verifySelectCounterfactualKnob.parse("On")).toBeUndefined()
+    expect(verifySelectCounterfactualKnob.parse("yes")).toBeUndefined()
+    expect(verifySelectCounterfactualKnob.parse("counterfactual")).toBeUndefined()
+  })
+})
+
+describe("verify-select-llm-risk-gate — closed mode enum", () => {
+  test("accepted modes normalize to canonical values", () => {
+    expect(verifySelectLlmRiskGateKnob.parse("shadow")).toBe("shadow")
+    expect(verifySelectLlmRiskGateKnob.parse("on")).toBe("on")
+    expect(verifySelectLlmRiskGateKnob.parse("1")).toBe("on")
+    expect(verifySelectLlmRiskGateKnob.parse("true")).toBe("on")
+  })
+
+  test("false/garbage forms stay undefined", () => {
+    expect(verifySelectLlmRiskGateKnob.parse("0")).toBeUndefined()
+    expect(verifySelectLlmRiskGateKnob.parse("off")).toBeUndefined()
+    expect(verifySelectLlmRiskGateKnob.parse("false")).toBeUndefined()
+    expect(verifySelectLlmRiskGateKnob.parse("critic")).toBeUndefined()
   })
 })
 

@@ -15,7 +15,9 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain("posture.verifySelectConcurrency")
     expect(DRIVER_SRC).toContain("posture.verifySelectEarlyAccept")
     expect(DRIVER_SRC).toContain("posture.verifySelectRegression")
+    expect(DRIVER_SRC).toContain("posture.verifySelectLlmRiskGate")
     expect(DRIVER_SRC).toContain("posture.verifySelectRepro")
+    expect(APP_DRIVER_SRC).toContain("posture.verifySelectLlmRiskGate")
     expect(DRIVER_SRC).toContain("reproOracleCalibration: calibration")
     expect(DRIVER_SRC).toContain("selectionTelemetry: summarizeSelection(result)")
     expect(DRIVER_SRC).toContain("result.terminalCandidate?.stopReason")
@@ -24,6 +26,8 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("selectionGenerationErrorOf({")
     expect(DRIVER_SRC).toContain("candidatePatchAppliesCleanly")
     expect(DRIVER_SRC).toContain("applyClean: (c) =>")
+    expect(DRIVER_SRC).toContain("declaredExpected: makeDeclaredExpectedSelectionPort(instance)")
+    expect(APP_DRIVER_SRC).toContain("declaredExpected: makeDeclaredExpectedSelectionPort(instance)")
   })
 
   test("both drivers preserve empty max-turns authority on the terminal path", () => {

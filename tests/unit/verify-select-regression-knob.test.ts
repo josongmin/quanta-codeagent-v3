@@ -61,6 +61,21 @@ describe("verify-select-risk-gate knob wiring", () => {
   })
 })
 
+describe("verify-select-llm-risk-gate knob wiring", () => {
+  test("unset preserves structural-only behavior", () => {
+    expect(posture({}).verifySelectLlmRiskGate).toBeUndefined()
+  })
+
+  test("shadow and on reach BenchPosture", () => {
+    expect(
+      posture({ QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE: "shadow" }).verifySelectLlmRiskGate,
+    ).toBe("shadow")
+    expect(
+      posture({ QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE: "on" }).verifySelectLlmRiskGate,
+    ).toBe("on")
+  })
+})
+
 describe("selectionReproPolicy", () => {
   test("positive mode is soft-only and does not gold-calibrate", () => {
     expect(selectionReproPolicy("positive")).toEqual({

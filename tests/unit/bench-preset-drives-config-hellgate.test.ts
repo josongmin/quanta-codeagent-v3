@@ -44,6 +44,7 @@ const ENV_KEYS = [
   "QUANTA_BENCH_RETRY_TRANSIENT",
   "QUANTA_BENCH_CLOSURE_REPAIR",
   "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
+  "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
   "QUANTA_READ_OUTLINE",
   "QUANTA_TEST_RUNNER",
   "QUANTA_REPO_MAP",
@@ -327,6 +328,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectN).toBe(2)
     expect(opt.verifySelectConcurrency).toBe(1)
     expect(opt.verifySelectRiskGate).toBe(true)
+    expect(opt.verifySelectLlmRiskGate).toBeUndefined()
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("off")
     expect(KNOB_PRESETS["agentless-v3-thin-strict-gated"]).toMatchObject({
@@ -339,6 +341,100 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
       "verify-select-repro": "off",
     })
     expect(KNOB_PRESETS["agentless-v3-thin-strict-gated"]?.["repro-test"]).toBeUndefined()
+  })
+
+  test("PRESET-14e: agentless-v3-thin-strict-counterfactual enables the counterfactual cand1 seed over the gated baseline", () => {
+    // Default arm (gated, no counterfactual) resolves the new posture field to
+    // FALSE — proves the field is OFF unless the preset opts in (red-on-injection:
+    // if benchPostureFromState defaulted verifySelectCounterfactual to true, or the
+    // gated preset leaked the knob, this would flip).
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated"
+    expect(benchOptIns().verifySelectCounterfactual).toBe(false)
+    expect(
+      KNOB_PRESETS["agentless-v3-thin-strict-gated"]?.["verify-select-counterfactual"],
+    ).toBeUndefined()
+
+    // Counterfactual preset = gated baseline PLUS the counterfactual seed ON.
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-counterfactual"
+    const opt = benchOptIns()
+    expect(opt.verifySelectCounterfactual).toBe(true)
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(2)
+    expect(opt.verifySelectConcurrency).toBe(1)
+    expect(opt.verifySelectRiskGate).toBe(true)
+    expect(opt.verifySelectLlmRiskGate).toBeUndefined()
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("off")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-counterfactual"]).toMatchObject({
+      "bench-in-loop-exec": "off",
+      "patch-budget-strict": "1",
+      "verify-select": "2",
+      "verify-select-concurrency": "1",
+      "verify-select-risk-gate": "1",
+      "verify-select-counterfactual": "on",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "off",
+    })
+  })
+
+  test("PRESET-14f: agentless-v3-thin-strict-counterfactual-shadow combines the counterfactual seed with the shadow semantic gate", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-counterfactual-shadow"
+    const opt = benchOptIns()
+    expect(opt.verifySelectCounterfactual).toBe(true)
+    expect(opt.verifySelectN).toBe(2)
+    expect(opt.verifySelectConcurrency).toBe(1)
+    expect(opt.verifySelectRiskGate).toBe(true)
+    expect(opt.verifySelectLlmRiskGate).toBe("shadow")
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("off")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-counterfactual-shadow"]).toMatchObject({
+      "verify-select": "2",
+      "verify-select-concurrency": "1",
+      "verify-select-risk-gate": "1",
+      "verify-select-counterfactual": "on",
+      "verify-select-llm-risk-gate": "shadow",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "off",
+    })
+  })
+
+  test("PRESET-14c: agentless-v3-thin-strict-gated-llm-shadow records the semantic gate without changing submit authority", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated-llm-shadow"
+    const opt = benchOptIns()
+    expect(opt.verifySelectN).toBe(2)
+    expect(opt.verifySelectConcurrency).toBe(1)
+    expect(opt.verifySelectRiskGate).toBe(true)
+    expect(opt.verifySelectLlmRiskGate).toBe("shadow")
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("off")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated-llm-shadow"]).toMatchObject({
+      "verify-select": "2",
+      "verify-select-concurrency": "1",
+      "verify-select-risk-gate": "1",
+      "verify-select-llm-risk-gate": "shadow",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "off",
+    })
+  })
+
+  test("PRESET-14d: agentless-v3-thin-strict-gated-llm enables fail-closed semantic expansion", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated-llm"
+    const opt = benchOptIns()
+    expect(opt.verifySelectN).toBe(2)
+    expect(opt.verifySelectConcurrency).toBe(1)
+    expect(opt.verifySelectRiskGate).toBe(true)
+    expect(opt.verifySelectLlmRiskGate).toBe("on")
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("off")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated-llm"]).toMatchObject({
+      "verify-select": "2",
+      "verify-select-concurrency": "1",
+      "verify-select-risk-gate": "1",
+      "verify-select-llm-risk-gate": "on",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "off",
+    })
   })
 
   test("PRESET-15b: agentless-v3-thin-strict-closure-select combines noexec selector with ClosureBundle grounding", () => {
@@ -357,6 +453,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectEarlyAccept).toBe(true)
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("positive")
+    expect(opt.rcaTargetGates).toBe(false)
     expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]).toMatchObject({
       "bench-in-loop-exec": "off",
       "fault-evidence": "1",
@@ -372,10 +469,20 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
       "verify-select-repro": "positive",
     })
     expect(
+      KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["rca-target-gates"],
+    ).toBeUndefined()
+    expect(
       KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["closure-repair"],
     ).toBeUndefined()
     expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["test-runner"]).toBeUndefined()
     expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["repro-test"]).toBeUndefined()
+  })
+
+  test("PRESET-15c: no named preset may bake in targeted RCA gates", () => {
+    const contaminated = Object.entries(KNOB_PRESETS).filter(
+      ([, preset]) => preset["rca-target-gates"] !== undefined,
+    )
+    expect(contaminated).toEqual([])
   })
 
   test("PRESET-16: agentless-v3-select-regression-doubt adds the targeted stall-breaker", () => {

@@ -35,6 +35,7 @@ import {
   knobsForSurface,
   resolveKnobs,
 } from "@/runner/knobs"
+import type { VerifySelectLlmRiskGateMode } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
 import type { VerifySelectRegressionMode } from "@/runner/knobs/knobs/verify-select-regression"
 import type { VerifySelectReproMode } from "@/runner/knobs/knobs/verify-select-repro"
 // Side-effect: registers all bench/agent knobs so knobsForSurface("bench")
@@ -236,6 +237,13 @@ export interface BenchPosture {
    *  Risky candidate 0 expands to the remaining verify-select candidates and
    *  lets late selection decide. */
   readonly verifySelectRiskGate: boolean
+  /** Counterfactual candidate seed: when cand0 trips the structural risk gate,
+   *  generate cand1 from a counterfactual minimal-alternative seed bound to the
+   *  structural contracts. Off by default. */
+  readonly verifySelectCounterfactual: boolean
+  /** Optional LLM semantic risk gate layered on top of the structural gate.
+   *  `shadow` records advisory telemetry only; `on` expands fail-closed. */
+  readonly verifySelectLlmRiskGate: VerifySelectLlmRiskGateMode | undefined
   /**
    * Verify-and-select regression hard-signal source. undefined preserves the
    * existing eval-only PASS_TO_PASS behavior when available; explicit `discovered`
@@ -303,6 +311,8 @@ export interface BenchPosture {
   /** gap-B: spec-fidelity steer (minimal-literal-fix; fires only when the issue
    *  declares an exact expected output). */
   readonly specFidelitySteer: boolean
+  /** Explicit targeted-RCA gates. This is not a clean general profile signal. */
+  readonly rcaTargetGates: boolean
   /** WS1 mini-parity: thin the round-0 prompt — suppress the repro directive
    *  prose at round 0 (the agent's first attempt), re-attaching it only on
    *  repair rounds ≥1. The one-line closure (first-edit) hint is kept. */
@@ -331,6 +341,8 @@ const isVerifySelectRegressionMode = (v: unknown): v is VerifySelectRegressionMo
   v === "discovered" || v === "gold" || v === "off"
 const isVerifySelectReproMode = (v: unknown): v is VerifySelectReproMode =>
   v === "hard" || v === "positive" || v === "off"
+const isVerifySelectLlmRiskGateMode = (v: unknown): v is VerifySelectLlmRiskGateMode =>
+  v === "shadow" || v === "on"
 
 /**
  * Project a resolved {@link BenchKnobState} into the {@link BenchPosture}.
@@ -369,6 +381,13 @@ export const benchPostureFromState = (
   const verifySelectEarlyAccept =
     readKnobValue(state, "verify-select-early-accept", isTrue) === true
   const verifySelectRiskGate = readKnobValue(state, "verify-select-risk-gate", isTrue) === true
+  const verifySelectCounterfactual =
+    readKnobValue(state, "verify-select-counterfactual", isTrue) === true
+  const verifySelectLlmRiskGate = readKnobValue(
+    state,
+    "verify-select-llm-risk-gate",
+    isVerifySelectLlmRiskGateMode,
+  )
   const verifySelectRegression = readKnobValue(
     state,
     "verify-select-regression",
@@ -407,6 +426,7 @@ export const benchPostureFromState = (
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
+  const rcaTargetGates = readKnobValue(state, "rca-target-gates", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
   return {
@@ -426,6 +446,8 @@ export const benchPostureFromState = (
     verifySelectConcurrency,
     verifySelectEarlyAccept,
     verifySelectRiskGate,
+    verifySelectCounterfactual,
+    verifySelectLlmRiskGate,
     verifySelectRegression,
     verifySelectRepro,
     inLoopExec,
@@ -445,6 +467,7 @@ export const benchPostureFromState = (
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,
+    rcaTargetGates,
     round0Minimal,
   }
 }

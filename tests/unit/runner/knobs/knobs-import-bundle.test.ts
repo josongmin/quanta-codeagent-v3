@@ -52,6 +52,7 @@ import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
 import { primaryRailKnob } from "@/runner/knobs/knobs/primary-rail"
 import { ratelimitNoticeKnob } from "@/runner/knobs/knobs/ratelimit-notice"
+import { rcaTargetGatesKnob } from "@/runner/knobs/knobs/rca-target-gates"
 import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
 import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
@@ -68,7 +69,9 @@ import { testRunnerKnob } from "@/runner/knobs/knobs/test-runner"
 import { verificationPlanKnob } from "@/runner/knobs/knobs/verification-plan"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
 import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-concurrency"
+import { verifySelectCounterfactualKnob } from "@/runner/knobs/knobs/verify-select-counterfactual"
 import { verifySelectEarlyAcceptKnob } from "@/runner/knobs/knobs/verify-select-early-accept"
+import { verifySelectLlmRiskGateKnob } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
 import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
 import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { verifySelectRiskGateKnob } from "@/runner/knobs/knobs/verify-select-risk-gate"
@@ -104,6 +107,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(policyMergeKnob),
   asAnyKnob(primaryRailKnob),
   asAnyKnob(ratelimitNoticeKnob),
+  asAnyKnob(rcaTargetGatesKnob),
   asAnyKnob(readOutlineKnob),
   asAnyKnob(repairEscalationKnob),
   asAnyKnob(repoMapKnob),
@@ -120,7 +124,9 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(verificationPlanKnob),
   asAnyKnob(verifySelectKnob),
   asAnyKnob(verifySelectConcurrencyKnob),
+  asAnyKnob(verifySelectCounterfactualKnob),
   asAnyKnob(verifySelectEarlyAcceptKnob),
+  asAnyKnob(verifySelectLlmRiskGateKnob),
   asAnyKnob(verifySelectRegressionKnob),
   asAnyKnob(verifySelectReproKnob),
   asAnyKnob(verifySelectRiskGateKnob),

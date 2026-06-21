@@ -420,6 +420,38 @@ describe("runSelection", () => {
     expect(r.earlyAccepted).toBe(true)
   })
 
+  it("riskGate telemetry preserves shadow advisories without changing structural accept", async () => {
+    let generated = 0
+    const gen: SelectionPorts["generate"] = async (i) => {
+      generated += 1
+      return cand({ id: `cand-${i}`, patch: `+++ b/x.py\n+fix${i}`, files: ["x.py"] })
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, "Focus on x.py"],
+      owners: new Set(["x.py"]),
+      riskGate: async () => ({
+        expand: false,
+        reasons: [],
+        shadow: { expand: true, reasons: ["llm:uncertain"] },
+      }),
+      ports: {
+        generate: gen,
+      },
+    })
+    expect(generated).toBe(1)
+    expect(r.riskGate).toEqual({
+      candidateId: "cand-0",
+      expanded: false,
+      reasons: [],
+      shadow: {
+        expanded: true,
+        reasons: ["llm:uncertain"],
+      },
+    })
+    expect(r.winner?.id).toBe("cand-0")
+  })
+
   it("ADVERSARIAL: soft-only repro quorum cannot become early-stop authority", async () => {
     let generated = 0
     const gen: SelectionPorts["generate"] = async (i) => {
