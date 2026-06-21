@@ -71,7 +71,7 @@ import {
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
-import { type MweProofReceipt, mweProofAuthorityRank } from "./mwe-proof"
+import { type MweProofReceipt, type MweProofState, mweProofAuthorityRank } from "./mwe-proof"
 import { contractsSatisfiedCount, requiredContractsSatisfiedCount } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
 
@@ -226,6 +226,11 @@ export interface CandidateTelemetry {
   familyOwnerFiles?: readonly string[]
   requiredContractsSatisfied?: number
   contractsSatisfied?: number
+  /** SCAFF-06 — executable public-MWE proof verdict for this candidate
+   *  (`patched_green` / `candidate_red` / `execution_failed` / …). Present only
+   *  when an MWE receipt was produced, so a resolved/failed case can be ATTRIBUTED
+   *  to the MWE tier (vs contracts/family) when reading the bench report. */
+  mwe?: MweProofState
 }
 
 /** Eval-only selection telemetry — what the executor decided and WHY, so a
@@ -274,6 +279,7 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
       : {}),
     requiredContractsSatisfied: s.requiredContractsSatisfied,
     contractsSatisfied: s.contractsSatisfied,
+    ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
   })),
 })
 
