@@ -2154,6 +2154,7 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
     : ""
   return (
     `set -o pipefail; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; QUANTA_BENCH_PRESET=${shq(params.preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
+    `QUANTA_PREFS_HOME="$HOME/.quanta" ` +
     `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
     `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +
     params.forwardedBenchEnv +

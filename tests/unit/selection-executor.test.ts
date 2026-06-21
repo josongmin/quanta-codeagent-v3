@@ -81,6 +81,68 @@ describe("selection input canonicalization", () => {
     expect(inputs.seeds[3]).toBeUndefined()
   })
 
+  it("family coverage seeds start after cand0 baseline and carry typed provenance", () => {
+    const inputs = buildSelectionInputs({
+      n: 3,
+      sandbox: "/tmp/work/repo",
+      ownerCandidates: ["./pkg/base.py"],
+      candidateFamilies: {
+        families: [
+          {
+            familyId: "symptom-owner",
+            ownerFiles: ["./pkg/symptom.py"],
+            reason: "symptom family",
+            seed: undefined,
+            sourceEvidence: ["static-symbol-witness"],
+          },
+          {
+            familyId: "multi-site",
+            ownerFiles: ["./pkg/base.py", "./pkg/backend.py"],
+            reason: "shared symbol family",
+            seed: "cover shared symbol",
+            sourceEvidence: ["static-symbol-witness"],
+          },
+        ],
+      },
+    })
+
+    expect(inputs.seeds[0]).toBeUndefined()
+    expect(inputs.candidateFamilies[1]?.familyId).toBe("multi-site")
+    expect(inputs.candidateFamilies[2]?.familyId).toBe("symptom-owner")
+    expect(inputs.seeds[1]).toContain("`multi-site`")
+    expect(inputs.seeds[1]).toContain("`pkg/base.py`")
+    expect(inputs.ownerFiles).toEqual(["pkg/base.py", "pkg/backend.py", "pkg/symptom.py"])
+  })
+
+  it("single family seed is emitted once, then legacy owner diversity resumes", () => {
+    const inputs = buildSelectionInputs({
+      n: 4,
+      sandbox: "/tmp/work/repo",
+      ownerCandidates: ["./pkg/root.py", "./pkg/other.py"],
+      candidateFamilies: {
+        families: [
+          {
+            familyId: "multi-site",
+            ownerFiles: ["./pkg/base.py", "./pkg/backend.py"],
+            reason: "shared symbol family",
+            seed: "cover shared symbol",
+            sourceEvidence: ["static-symbol-witness"],
+          },
+        ],
+      },
+    })
+
+    expect(inputs.candidateFamilies.map((family) => family?.familyId ?? null)).toEqual([
+      null,
+      "multi-site",
+      null,
+      null,
+    ])
+    expect(inputs.seeds[1]).toContain("`multi-site`")
+    expect(inputs.seeds[2]).toContain("`pkg/other.py`")
+    expect(inputs.seeds[3]).toContain("`pkg/base.py`")
+  })
+
   it("extracts candidate files from diff headers through the same canonicalizer", () => {
     expect(
       filesFromPatch("--- a/./sympy/core/function.py\n+++ b/sympy/core/function.py\n+changed"),

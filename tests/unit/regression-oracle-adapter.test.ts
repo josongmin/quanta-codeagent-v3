@@ -27,4 +27,12 @@ describe("buildProjectPytestArgv", () => {
   test("non-xarray repos stay free of the xarray-specific numpy guard", () => {
     expect(hasWithDep(buildProjectPytestArgv("sympy/sympy", "1.5")(["t"]), "numpy<2")).toBe(false)
   })
+
+  test("astropy verifier env carries setuptools.dep_util compatibility", () => {
+    const argv = buildProjectPytestArgv("astropy/astropy", "4.3")(["astropy/timeseries/tests"])
+    expect(hasWithDep(argv, "setuptools")).toBe(true)
+    expect(hasWithDep(argv, "setuptools<60")).toBe(true)
+    expect(hasWithDep(argv, "extension_helpers")).toBe(true)
+    expect(argv).toContain("--no-build-isolation")
+  })
 })

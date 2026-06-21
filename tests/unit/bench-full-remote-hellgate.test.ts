@@ -320,6 +320,19 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(cmd).toContain("QUANTA_BENCH_CONCURRENCY=") // ...but patch-gen stays parallel
   })
 
+  test("remote bench-run pins QUANTA_PREFS_HOME to the shipped token root", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const benchRun = calls.find(
+      (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench")),
+    )
+    expect(benchRun).toBeDefined()
+    const cmd = benchRun?.args.join(" ") ?? ""
+    expect(cmd).toContain('QUANTA_PREFS_HOME="$HOME/.quanta"')
+  })
+
   test("global patch-gen budget DOWN-SCALES full-remote concurrency when another run already holds tokens", async () => {
     const held = await acquirePatchGenBudgetLease({
       label: "other-run",

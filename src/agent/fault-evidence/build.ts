@@ -10,7 +10,24 @@ import type {
   FaultCandidateSource,
   FaultEvidenceInput,
   FaultEvidencePacket,
+  OwnerStrength,
 } from "./types"
+
+export type { OwnerStrength } from "./types"
+
+/**
+ * T-OWN-12 — PURE strength classifier (additive; reads only `sources`, never
+ * `score`). A candidate is AUTHORITATIVE iff it carries an authoritative
+ * evidence stream:
+ *   - `issue-file` — named in public issue text, OR
+ *   - a unique-symbol-defining `owner-resolve`.
+ * Uniqueness is not tracked on `FaultCandidate.sources` today, so a bare
+ * `owner-resolve` is treated as ADVISORY here.
+ * TODO(T-OWN-12): when the packet tracks unique-symbol-definer provenance,
+ * promote unique `owner-resolve` candidates to authoritative.
+ */
+export const ownerStrength = (candidate: Pick<FaultCandidate, "sources">): OwnerStrength =>
+  candidate.sources.includes("issue-file") ? "authoritative" : "advisory"
 
 const DEFAULT_MAX_CANDIDATES = 5
 const DEFAULT_MAX_SYMBOLS = 12

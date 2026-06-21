@@ -42,6 +42,7 @@ import {
   wireOptionalAgentPorts,
 } from "@/agent"
 import {
+  defsInSource,
   evaluateSuccessPredicate,
   type OwnerSibling,
   type PrimaryRailStep,
@@ -74,6 +75,10 @@ import type {
 } from "../types"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import {
+  buildCandidateFamilyBundleFromWitness,
+  type CandidateFamilyBundle,
+} from "./candidate-families"
+import {
   buildClosureSession,
   buildPhasePatchHygiene,
   type ClosureSessionState,
@@ -92,7 +97,11 @@ import {
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
-import { buildCleanSelectionPublicContracts } from "./public-contract-bundle"
+import {
+  buildCleanSelectionPublicContracts,
+  buildMultiSiteFamilyContract,
+  mergePublicContractBundles,
+} from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
@@ -140,6 +149,7 @@ import {
   type Candidate,
   filesFromPatch,
   runSelection,
+  type SelectionPorts,
   type SelectionTelemetry,
   summarizeSelection,
 } from "./selection-executor"
@@ -147,6 +157,8 @@ import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { buildAstStaticWitnesses } from "./static-witness-adapter"
+import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
@@ -2359,16 +2371,53 @@ const runSelectionPhase = async (
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
+  ownerResolved: readonly OwnerSibling[] | undefined,
   baseValidatedRed: boolean,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
+  const candidateFamilyBundle = buildSelectionCandidateFamilyBundle({
+    problemStatement: instance.problemStatement,
+    ownerCandidates: selectionOwnerCandidates,
+    ownerResolved,
+    readSource: (rel) => readSandboxSource(sandbox, rel),
+  })
+  const familyPublicContracts = withCandidateFamilyPublicContracts(
+    publicContracts,
+    candidateFamilyBundle,
+  )
+  // SCAFF-05: bridge AST static witnesses (override-family / producer-consumer /
+  // registration-callback / unique-symbol-definer) into REQUIRED public contracts
+  // so a complete co-change candidate beats a single-site one when proof is tied.
+  // Authoritative-only (the adapter/builder enforce it); advisory ⇒ no contract.
+  const staticWitnessContracts = buildStaticWitnessContracts(
+    buildAstStaticWitnesses({
+      problemStatement: instance.problemStatement,
+      ownerCandidates: selectionOwnerCandidates,
+      ...(ownerResolved !== undefined ? { ownerResolved } : {}),
+      readSource: (rel) => readSandboxSource(sandbox, rel),
+    }),
+  )
+  const effectivePublicContracts: PublicContractBundle | undefined =
+    staticWitnessContracts.length === 0
+      ? familyPublicContracts
+      : {
+          contracts: [
+            ...new Map(
+              [...(familyPublicContracts?.contracts ?? []), ...staticWitnessContracts].map((c) => [
+                c.contractId,
+                c,
+              ]),
+            ).values(),
+          ],
+        }
   const selectionInputs = buildSelectionInputs({
     n,
     ownerCandidates: selectionOwnerCandidates,
     sandbox,
+    ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
   const generationErrors = new Map<number, string>()
   const mergeHint = (seed: string | undefined): string | undefined =>
@@ -2391,6 +2440,13 @@ const runSelectionPhase = async (
     verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
       : undefined
+  const regressionSelectionPort = makeSelectionRegressionPort({
+    verifySelectRegression,
+    discoveredRegressionPort,
+    instance,
+    sandbox,
+    timeoutMs: deps.timeoutMs,
+  })
   const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
   const selectionBaseValidatedRed =
     verifySelectRegression === "discovered" ? null : baseValidatedRed
@@ -2407,13 +2463,16 @@ const runSelectionPhase = async (
     n,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
+    candidateFamilies: selectionInputs.candidateFamilies,
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
     ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
-    ...(publicContracts !== undefined ? { publicContracts } : {}),
+    ...(effectivePublicContracts !== undefined
+      ? { publicContracts: effectivePublicContracts }
+      : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -2441,29 +2500,7 @@ const runSelectionPhase = async (
           baseCommit: instance.swebench?.baseCommit,
           timeoutMs: deps.timeoutMs,
         }),
-      regression: (c) => {
-        if (verifySelectRegression === "off") return Promise.resolve(null)
-        if (verifySelectRegression === "discovered") {
-          return discoveredRegressionPort?.(c) ?? Promise.resolve(null)
-        }
-        const tests = instance.swebench?.passToPass ?? []
-        if (tests.length === 0) return Promise.resolve(null)
-        return withCandidatePatch({
-          sandbox,
-          patch: c.patch,
-          baseCommit: instance.swebench?.baseCommit,
-          timeoutMs: deps.timeoutMs,
-          probe: async (sb) => {
-            const r = await makeBenchRegressionOracle(
-              undefined,
-              instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {},
-            )
-              .run({ tests, sandbox: sb })
-              .catch(() => null)
-            return toRegressionGreen(tests, r)
-          },
-        })
-      },
+      regression: regressionSelectionPort,
       ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
       ...(resolvedKofNSelectionPort !== undefined
         ? { resolvedKofN: resolvedKofNSelectionPort }
@@ -2717,6 +2754,76 @@ const readSandboxSource = (sandbox: string, rel: string): string | null => {
   }
 }
 
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const issueMentionsSymbol = (issueText: string, symbol: string): boolean =>
+  new RegExp(`\\b${escapeRegex(symbol)}\\b`).test(issueText)
+
+export const buildSelectionCandidateFamilyBundle = (args: {
+  readonly problemStatement: string
+  readonly ownerCandidates: readonly string[]
+  readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly readSource: (relFile: string) => string | null
+}) => {
+  const symbolOwners = args.ownerCandidates.flatMap((file) => {
+    const source = args.readSource(file)
+    if (source === null) return []
+    const symbols = defsInSource(source).filter((symbol) =>
+      issueMentionsSymbol(args.problemStatement, symbol),
+    )
+    return symbols.length === 0 ? [] : [{ file, symbols }]
+  })
+  return buildCandidateFamilyBundleFromWitness({
+    symbolOwners,
+    ownerResolved: args.ownerResolved ?? [],
+  })
+}
+
+export const withCandidateFamilyPublicContracts = (
+  publicContracts: PublicContractBundle | undefined,
+  candidateFamilyBundle: CandidateFamilyBundle | undefined,
+): PublicContractBundle | undefined => {
+  const familyContracts = candidateFamilyBundle?.families.flatMap((family) =>
+    family.familyId === "multi-site" ? buildMultiSiteFamilyContract(family.ownerFiles) : [],
+  )
+  return mergePublicContractBundles(
+    publicContracts,
+    familyContracts === undefined ? undefined : { contracts: familyContracts },
+  )
+}
+
+export const makeSelectionRegressionPort = (args: {
+  readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
+  readonly discoveredRegressionPort: SelectionPorts["regression"] | undefined
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly timeoutMs: number
+}): NonNullable<SelectionPorts["regression"]> => {
+  return (candidate) => {
+    if (args.verifySelectRegression === "off") return Promise.resolve(null)
+    if (args.verifySelectRegression === "discovered") {
+      return args.discoveredRegressionPort?.(candidate) ?? Promise.resolve(null)
+    }
+    const tests = args.instance.swebench?.passToPass ?? []
+    if (tests.length === 0) return Promise.resolve(null)
+    return withCandidatePatch({
+      sandbox: args.sandbox,
+      patch: candidate.patch,
+      baseCommit: args.instance.swebench?.baseCommit,
+      timeoutMs: args.timeoutMs,
+      probe: async (sb) => {
+        const r = await makeBenchRegressionOracle(
+          undefined,
+          args.instance.localEnv !== undefined ? { localEnv: args.instance.localEnv } : {},
+        )
+          .run({ tests, sandbox: sb })
+          .catch(() => null)
+        return toRegressionGreen(tests, r)
+      },
+    })
+  }
+}
+
 const prepareHintAndReproContext = async (
   instance: Instance,
   sandbox: string,
@@ -2792,6 +2899,11 @@ const buildClosureAttemptState = (args: {
           primaryRail: args.posture.primaryRail,
           faultEvidence: args.posture.faultEvidence,
         },
+        // T-OWN-12 activation: clean presets use rule-based AUTHORITATIVE owner
+        // admission (issue-named owners only), bypassing the additive heuristic
+        // score/lead-gap. Research mode passes false ⇒ legacy admission is
+        // byte-identical (closure-session applies the clean rule only on `true`).
+        ownerClean: args.posture.selectorMode === "clean",
       })
 
 const resolveRepairState = (args: {
@@ -2881,6 +2993,7 @@ const runMainPhase = async (args: {
     const publicContracts = buildCleanSelectionPublicContracts({
       declaredExpected: args.prepared.closureSession?.issueDeclaredExpected,
       candidates: args.prepared.closureSession?.bundle.evidence.candidates,
+      apiSymbols: args.prepared.closureSession?.bundle.evidence.issueSymbols,
     })
     return runSelectionPhase(
       args.instance,
@@ -2901,6 +3014,7 @@ const runMainPhase = async (args: {
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??
         args.prepared.localizeCandidates,
+      args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
       args.prepared.precomputedHint,
       args.prepared.reproHint,

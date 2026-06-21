@@ -12,7 +12,7 @@
  *   2. executedKeepGreen           (DESC) — a clean EXECUTED keep-green suite passed
  *   3. requiredContractsSatisfied  (DESC) — satisfied REQUIRED public contracts
  *   4. contractsSatisfied          (DESC) — satisfied public contracts (any strength)
- *   5. familyRank                  (DESC) — root/api/lifecycle owner > symptom owner
+ *   5. familyRank                  (DESC) — candidate honored its typed family witness
  *   6. sourceFiles                 (ASC)  — minimality: distinct source files touched
  *   7. addedLines                  (ASC)  — minimality: added source lines
  *   8. newDefs                     (ASC)  — minimality: new def/class count
@@ -32,7 +32,7 @@ export interface LexTiers {
   readonly requiredContractsSatisfied: number
   /** count of satisfied public contracts (any strength). higher wins. */
   readonly contractsSatisfied: number
-  /** candidate-family / owner authority class rank (root/api/lifecycle > symptom). higher wins. */
+  /** 1 = candidate honored its typed family witness; 0 = no family witness. higher wins. */
   readonly familyRank: number
   /** distinct source files touched. SMALLER wins. */
   readonly sourceFiles: number

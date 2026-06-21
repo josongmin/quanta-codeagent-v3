@@ -21,6 +21,7 @@ export type CandidateFamilyId =
   | "api-owner"
   | "lifecycle-owner"
   | "test-adjacent-owner"
+  | "multi-site"
 
 /**
  * A single candidate family: a set of owner files reached via the same
@@ -39,6 +40,18 @@ export interface CandidateFamilyBundle {
   readonly families: readonly CandidateFamily[]
 }
 
+export interface SymbolOwnerWitness {
+  readonly file: string
+  readonly symbols: readonly string[]
+}
+
+export interface OwnerResolvedWitness {
+  readonly file: string
+  readonly forSymbol: string
+  /** Optional source owner that led to this resolved co-change site. */
+  readonly fromFile?: string
+}
+
 /**
  * Fixed deterministic precedence for family round-robin.
  *
@@ -51,9 +64,122 @@ const FAMILY_PRECEDENCE: readonly CandidateFamilyId[] = [
   "root-owner",
   "api-owner",
   "lifecycle-owner",
+  "multi-site",
   "symptom-owner",
   "test-adjacent-owner",
 ] as const
+
+const cleanList = (xs: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of xs) {
+    const v = raw.trim()
+    if (v === "" || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+  }
+  return out
+}
+
+const hasAny = (xs: readonly string[], ys: ReadonlySet<string>): boolean =>
+  xs.some((x) => ys.has(x))
+
+const hasAll = (xs: readonly string[], ys: ReadonlySet<string>): boolean =>
+  xs.every((x) => ys.has(x))
+
+export const candidateFamilyRank = (
+  family: Pick<CandidateFamily, "familyId" | "ownerFiles"> | undefined,
+  touchedFiles: readonly string[],
+): number => {
+  if (family === undefined) return 0
+  const ownerFiles = cleanList(family.ownerFiles)
+  if (ownerFiles.length === 0) return 0
+  const touched = new Set(touchedFiles)
+  if (family.familyId === "multi-site" && !hasAll(ownerFiles, touched)) return 0
+  if (family.familyId !== "multi-site" && !hasAny(ownerFiles, touched)) return 0
+  return 1
+}
+
+export const seedForCandidateFamily = (family: CandidateFamily): string => {
+  const files = cleanList(family.ownerFiles)
+  const fileLine =
+    files.length === 0
+      ? ""
+      : ` Candidate family owner files: ${files.map((file) => `\`${file}\``).join(", ")}.`
+  const seedLine =
+    family.seed === undefined || family.seed.trim() === ""
+      ? ""
+      : ` Static seed: ${family.seed.trim()}`
+  return `Explore the \`${family.familyId}\` candidate family.${fileLine}${seedLine} Use this static witness only to choose where to inspect; edit only after confirming the root cause from public source evidence.`
+}
+
+const rootOwnerFamilyOf = (rootOwnerFiles: readonly string[]): CandidateFamily | undefined => {
+  const ownerFiles = cleanList(rootOwnerFiles)
+  if (ownerFiles.length === 0) return undefined
+  return {
+    familyId: "root-owner",
+    ownerFiles,
+    reason: "root owner files from localization evidence",
+    seed: undefined,
+    sourceEvidence: ["localization-owner-files"],
+  }
+}
+
+const addSymbolFile = (bySymbol: Map<string, Set<string>>, symbol: string, file: string): void => {
+  const cleanSymbol = symbol.trim()
+  const cleanFile = file.trim()
+  if (cleanSymbol === "" || cleanFile === "") return
+  const files = bySymbol.get(cleanSymbol) ?? new Set<string>()
+  files.add(cleanFile)
+  bySymbol.set(cleanSymbol, files)
+}
+
+const symbolFileMapOf = (args: {
+  readonly symbolOwners?: readonly SymbolOwnerWitness[]
+  readonly ownerResolved?: readonly OwnerResolvedWitness[]
+}): Map<string, Set<string>> => {
+  const bySymbol = new Map<string, Set<string>>()
+  for (const owner of args.symbolOwners ?? []) {
+    for (const symbol of owner.symbols) addSymbolFile(bySymbol, symbol, owner.file)
+  }
+  for (const resolved of args.ownerResolved ?? []) {
+    addSymbolFile(bySymbol, resolved.forSymbol, resolved.file)
+    if (resolved.fromFile !== undefined)
+      addSymbolFile(bySymbol, resolved.forSymbol, resolved.fromFile)
+  }
+  return bySymbol
+}
+
+const multiSiteFamiliesOf = (bySymbol: ReadonlyMap<string, Set<string>>): CandidateFamily[] =>
+  [...bySymbol.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .flatMap(([symbol, files]) => {
+      const ownerFiles = [...files].sort()
+      if (ownerFiles.length < 2) return []
+      return [
+        {
+          familyId: "multi-site" as const,
+          ownerFiles,
+          reason: `shared public symbol \`${symbol}\` spans multiple owner files`,
+          seed: `Cover every owner file defining \`${symbol}\` if the bug is in that override family.`,
+          sourceEvidence: ["static-symbol-witness"],
+        },
+      ]
+    })
+
+export const buildCandidateFamilyBundleFromWitness = (args: {
+  readonly rootOwnerFiles?: readonly string[]
+  readonly symbolOwners?: readonly SymbolOwnerWitness[]
+  readonly ownerResolved?: readonly OwnerResolvedWitness[]
+}): CandidateFamilyBundle | undefined => {
+  const root = rootOwnerFamilyOf(args.rootOwnerFiles ?? [])
+  const families = [
+    ...(root === undefined ? [] : [root]),
+    ...multiSiteFamiliesOf(symbolFileMapOf(args)),
+  ]
+  if (families.length === 0) return undefined
+  return { families }
+}
 
 /** A family is non-empty iff it actually contributes at least one owner file. */
 const isNonEmptyFamily = (family: CandidateFamily): boolean => family.ownerFiles.length > 0
@@ -65,9 +191,7 @@ const isNonEmptyFamily = (family: CandidateFamily): boolean => family.ownerFiles
  *
  * Stable: families sharing a familyId keep their relative bundle order.
  */
-const orderNonEmptyFamilies = (
-  bundle: CandidateFamilyBundle,
-): readonly CandidateFamily[] => {
+const orderNonEmptyFamilies = (bundle: CandidateFamilyBundle): readonly CandidateFamily[] => {
   const withIndex = bundle.families
     .map((family, index) => ({ family, index }))
     .filter((entry) => isNonEmptyFamily(entry.family))
@@ -137,5 +261,4 @@ export const planFamilyCoverage = (
 export const planFamilyCoverageIds = (
   bundle: CandidateFamilyBundle,
   n: number,
-): readonly CandidateFamilyId[] =>
-  planFamilyCoverage(bundle, n).map((family) => family.familyId)
+): readonly CandidateFamilyId[] => planFamilyCoverage(bundle, n).map((family) => family.familyId)

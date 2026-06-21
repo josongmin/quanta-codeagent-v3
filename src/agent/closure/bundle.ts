@@ -31,8 +31,13 @@ export interface ClosureBundle {
 
 export interface ClosureBundleInput {
   readonly evidence: FaultEvidenceInput
-  /** Owner-admission lead-gap (forwarded to decideOwnerAdmission). */
+  /** Owner-admission lead-gap (forwarded to decideOwnerAdmission). Legacy path
+   *  only; ignored when `ownerClean`. */
   readonly ownerMinLeadGap?: number
+  /** T-OWN-12: when true, owner admission uses the RULE-BASED clean path
+   *  (authoritative/advisory lattice, no additive score). Default false keeps
+   *  research/legacy localization byte-identical. */
+  readonly ownerClean?: boolean
   readonly plan: VerificationPlanInput
   readonly gate: Omit<GateSignals, "commitFast"> & {
     readonly issueProvidesFix: boolean
@@ -44,6 +49,7 @@ export const assembleClosureBundle = (input: ClosureBundleInput): ClosureBundle 
   const owner = decideOwnerAdmission({
     packet: evidence,
     ...(input.ownerMinLeadGap !== undefined ? { minLeadGap: input.ownerMinLeadGap } : {}),
+    ...(input.ownerClean === true ? { clean: true } : {}),
   })
   const plan = buildVerificationPlan(input.plan)
   const gate = decideGate({

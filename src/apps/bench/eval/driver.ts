@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
@@ -14,6 +16,7 @@ import {
   benchVerifyAuthorityCommandsOf,
   buildReproVoteValidate,
   buildConfig as buildRunnerConfig,
+  buildSelectionCandidateFamilyBundle,
   composeWithReproHint,
   DEFAULT_POLICY,
   emitKnobsApplied,
@@ -24,6 +27,7 @@ import {
   latePhaseFailureResultOf,
   makeCalibratedReproConsensusPort,
   makeReproConsensusSelectionPort,
+  makeSelectionRegressionPort,
   maybeValidateTerminalResult,
   type PreparedAttemptContext,
   type PrepareIssueHintDeps,
@@ -47,12 +51,11 @@ import {
   selectionReproPrepK,
   UsageTap,
   verifyAndFinalizeResult,
+  withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
 import { buildCleanSelectionPublicContracts } from "@/runner/batch/eval/public-contract-bundle"
 import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
-import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
-import { makeBenchRegressionOracle } from "@/runner/batch/eval/regression-oracle-adapter"
-import { candidatePatchAppliesCleanly, withCandidatePatch } from "@/runner/batch/eval/rematerialize"
+import { candidatePatchAppliesCleanly } from "@/runner/batch/eval/rematerialize"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
@@ -70,6 +73,8 @@ import {
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
+import { buildAstStaticWitnesses } from "@/runner/batch/eval/static-witness-adapter"
+import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
@@ -638,6 +643,14 @@ const generateSelectionCandidate = async (args: {
   }
 }
 
+const readSandboxSource = (sandbox: string, rel: string): string | null => {
+  try {
+    return readFileSync(join(sandbox, rel), "utf8")
+  } catch {
+    return null
+  }
+}
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -664,16 +677,50 @@ const runSelectionPhase = async (
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
+  ownerResolved: PreparedAttemptContext["ownerResolved"],
   baseValidatedRed: boolean,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
+  const candidateFamilyBundle = buildSelectionCandidateFamilyBundle({
+    problemStatement: instance.problemStatement,
+    ownerCandidates: selectionOwnerCandidates,
+    ownerResolved,
+    readSource: (rel) => readSandboxSource(sandbox, rel),
+  })
+  const familyPublicContracts = withCandidateFamilyPublicContracts(
+    publicContracts,
+    candidateFamilyBundle,
+  )
+  // SCAFF-05 parity (see runner driver): AST static-witness REQUIRED contracts.
+  const staticWitnessContracts = buildStaticWitnessContracts(
+    buildAstStaticWitnesses({
+      problemStatement: instance.problemStatement,
+      ownerCandidates: selectionOwnerCandidates,
+      ...(ownerResolved !== undefined ? { ownerResolved } : {}),
+      readSource: (rel) => readSandboxSource(sandbox, rel),
+    }),
+  )
+  const effectivePublicContracts: PublicContractBundle | undefined =
+    staticWitnessContracts.length === 0
+      ? familyPublicContracts
+      : {
+          contracts: [
+            ...new Map(
+              [...(familyPublicContracts?.contracts ?? []), ...staticWitnessContracts].map((c) => [
+                c.contractId,
+                c,
+              ]),
+            ).values(),
+          ],
+        }
   const selectionInputs = buildSelectionInputs({
     n,
     ownerCandidates: selectionOwnerCandidates,
     sandbox,
+    ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
   const generationErrors = new Map<number, string>()
   const mergeHint = (seed: string | undefined): string | undefined =>
@@ -701,6 +748,13 @@ const runSelectionPhase = async (
     verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
       : undefined
+  const regressionSelectionPort = makeSelectionRegressionPort({
+    verifySelectRegression,
+    discoveredRegressionPort,
+    instance,
+    sandbox,
+    timeoutMs: deps.timeoutMs,
+  })
   const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
   // No-oracle verify-select (`discovered`) must not let synthesized repro
   // authority veto admissibility. In that mode, impacted repo tests are the hard
@@ -721,13 +775,16 @@ const runSelectionPhase = async (
     n,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
+    candidateFamilies: selectionInputs.candidateFamilies,
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
     ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
-    ...(publicContracts !== undefined ? { publicContracts } : {}),
+    ...(effectivePublicContracts !== undefined
+      ? { publicContracts: effectivePublicContracts }
+      : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -755,31 +812,7 @@ const runSelectionPhase = async (
           baseCommit: instance.swebench?.baseCommit,
           timeoutMs: deps.timeoutMs,
         }),
-      // TB regression HARD gate. Source is knob-selected:
-      //   unset/gold => legacy eval-only PASS_TO_PASS set,
-      //   discovered => no-oracle impacted repo-test discovery,
-      //   off => ablation.
-      // Every path fails open on missing/non-running tests.
-      regression: (c) => {
-        if (verifySelectRegression === "off") return Promise.resolve(null)
-        if (verifySelectRegression === "discovered") {
-          return discoveredRegressionPort?.(c) ?? Promise.resolve(null)
-        }
-        const tests = instance.swebench?.passToPass ?? []
-        if (tests.length === 0) return Promise.resolve(null)
-        return withCandidatePatch({
-          sandbox,
-          patch: c.patch,
-          baseCommit: instance.swebench?.baseCommit,
-          timeoutMs: deps.timeoutMs,
-          probe: async (sb) => {
-            const r = await makeBenchRegressionOracle()
-              .run({ tests, sandbox: sb })
-              .catch(() => null)
-            return toRegressionGreen(tests, r)
-          },
-        })
-      },
+      regression: regressionSelectionPort,
       ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
       // SOTA++ repro-vote as the SELECTION scorer: re-materialize each candidate
       // and re-run the reproducing repro set there → the VerificationBundle's
@@ -839,6 +872,7 @@ const runAppMainPhase = async (args: {
     const publicContracts = buildCleanSelectionPublicContracts({
       declaredExpected: args.prepared.closureSession?.issueDeclaredExpected,
       candidates: args.prepared.closureSession?.bundle.evidence.candidates,
+      apiSymbols: args.prepared.closureSession?.bundle.evidence.issueSymbols,
     })
     return runSelectionPhase(
       args.instance,
@@ -859,6 +893,7 @@ const runAppMainPhase = async (args: {
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??
         args.prepared.localizeCandidates,
+      args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
       args.prepared.precomputedHint,
       args.prepared.reproHint,

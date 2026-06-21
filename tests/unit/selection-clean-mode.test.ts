@@ -1,10 +1,27 @@
 import { describe, expect, it } from "bun:test"
-import { buildOwnerMustTouchContracts } from "@/runner/batch/eval/public-contract-bundle"
+import type { CandidateFamily } from "@/runner/batch/eval/candidate-families"
+import {
+  buildApiSurfaceContracts,
+  buildMultiSiteFamilyContract,
+  buildOwnerMustTouchContracts,
+} from "@/runner/batch/eval/public-contract-bundle"
 import {
   type Candidate,
   runSelection,
   type SelectionPorts,
 } from "@/runner/batch/eval/selection-executor"
+
+const fileDiff = (file: string, body = "+    new_guard"): string =>
+  `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1,1 +1,1 @@\n-old\n${body}`
+
+const cand0Of = (over: Partial<Candidate>): Candidate => ({
+  id: "cand-0",
+  patch: fileDiff("pkg/owner.py"),
+  turns: 1,
+  files: ["pkg/owner.py"],
+  baseValidatedRed: true,
+  ...over,
+})
 
 const diff =
   "diff --git a/pkg/owner.py b/pkg/owner.py\n--- a/pkg/owner.py\n+++ b/pkg/owner.py\n@@ -1,1 +1,1 @@\n-old\n+new_guard"
@@ -146,6 +163,146 @@ describe("clean-mode lexicographic selection (T-SEL-06 live wiring)", () => {
       },
     })
     expect(r.winner?.id).toBe("cand-0")
+  })
+})
+
+describe("clean-mode early accept (T-SEL-13 executable-only)", () => {
+  it("CLEAN: a DRIFTING candidate (outside owners) WITH executed proof early-accepts — no owner gating", async () => {
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/owner.py"]),
+      mode: "clean",
+      earlyAccept: true,
+      ports: {
+        generate: async () => cand0Of({ patch: fileDiff("pkg/drift.py"), files: ["pkg/drift.py"] }),
+        applyClean: async () => true,
+        resolvedKofN: async () => ({ votes: 1, k: 1 }),
+      },
+    })
+    expect(r.earlyAccepted).toBe(true)
+  })
+
+  it("CLEAN: a candidate INSIDE owners but WITHOUT executed proof does NOT early-accept (static owner can't stop)", async () => {
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/owner.py"]),
+      mode: "clean",
+      earlyAccept: true,
+      ports: { generate: async () => cand0Of({}), applyClean: async () => true },
+    })
+    expect(r.earlyAccepted).toBe(false)
+  })
+
+  it("RESEARCH: a drifting candidate with proof does NOT early-accept (legacy owner gating intact)", async () => {
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/owner.py"]),
+      earlyAccept: true,
+      ports: {
+        generate: async () => cand0Of({ patch: fileDiff("pkg/drift.py"), files: ["pkg/drift.py"] }),
+        applyClean: async () => true,
+        resolvedKofN: async () => ({ votes: 1, k: 1 }),
+      },
+    })
+    expect(r.earlyAccepted).toBe(false)
+  })
+})
+
+describe("clean-mode api-surface contract (T-CON-10 symbol tier)", () => {
+  it("CLEAN: proof tied — a candidate touching the issue's named symbol beats one that does not", async () => {
+    // cand-0 modifies the BODY of `target_fn` (hunk header names it); cand-1 touches another symbol.
+    const touchesSymbol: Candidate = {
+      id: "cand-0",
+      patch:
+        "diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n@@ -10,3 +10,3 @@ def target_fn(x):\n-    return x\n+    return x + 1",
+      turns: 1,
+      files: ["pkg/a.py"],
+      baseValidatedRed: true,
+    }
+    const wrongSymbol: Candidate = {
+      id: "cand-1",
+      patch:
+        "diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n@@ -40,3 +40,3 @@ def other_fn(y):\n-    return y\n+    return y - 1",
+      turns: 1,
+      files: ["pkg/a.py"],
+      baseValidatedRed: true,
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py"]),
+      mode: "clean",
+      publicContracts: { contracts: buildApiSurfaceContracts(["target_fn"]) },
+      ports: {
+        generate: async (i) => [touchesSymbol, wrongSymbol][i] as Candidate,
+        applyClean: async () => true,
+      },
+    })
+    expect(r.winner?.id).toBe("cand-0")
+  })
+})
+
+describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
+  const smallBaseOnly: Candidate = {
+    id: "cand-0",
+    patch:
+      "diff --git a/pkg/base.py b/pkg/base.py\n--- a/pkg/base.py\n+++ b/pkg/base.py\n@@ -1,1 +1,1 @@\n-old\n+fix_base",
+    turns: 1,
+    files: ["pkg/base.py"],
+    baseValidatedRed: true,
+  }
+  const multiSitePatch: Candidate = {
+    id: "cand-1",
+    patch:
+      "diff --git a/pkg/base.py b/pkg/base.py\n--- a/pkg/base.py\n+++ b/pkg/base.py\n@@ -1,1 +1,1 @@\n-old\n+fix_base\n" +
+      "diff --git a/pkg/backend.py b/pkg/backend.py\n--- a/pkg/backend.py\n+++ b/pkg/backend.py\n@@ -1,1 +1,1 @@\n-old\n+fix_backend",
+    turns: 1,
+    files: ["pkg/base.py", "pkg/backend.py"],
+    baseValidatedRed: true,
+  }
+  const multiSiteFamily: CandidateFamily = {
+    familyId: "multi-site",
+    ownerFiles: ["pkg/base.py", "pkg/backend.py"],
+    reason: "shared public symbol `runshell` spans multiple owner files",
+    seed: "Cover every owner file defining `runshell` if the bug is in that override family.",
+    sourceEvidence: ["static-symbol-witness"],
+  }
+
+  it("CLEAN: required multi-site contract beats smaller single-site patch", async () => {
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      mode: "clean",
+      publicContracts: {
+        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
+      },
+      ports: {
+        generate: async (i) => [smallBaseOnly, multiSitePatch][i] as Candidate,
+        applyClean: async () => true,
+      },
+    })
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.requiredContractsSatisfied).toBe(1)
+  })
+
+  it("CLEAN: multi-site family rank applies only when the candidate touches every family file", async () => {
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      candidateFamilies: [undefined, multiSiteFamily],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      mode: "clean",
+      ports: {
+        generate: async (i) => [smallBaseOnly, multiSitePatch][i] as Candidate,
+        applyClean: async () => true,
+      },
+    })
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.winner?.familyId).toBe("multi-site")
   })
 })
 

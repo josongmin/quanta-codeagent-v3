@@ -12,10 +12,26 @@
 
 export type FaultCandidateSource = "stage1" | "issue-file" | "owner-resolve"
 
+/**
+ * T-OWN-12 — owner-evidence STRENGTH lattice (additive over `sources`).
+ *
+ *  - `authoritative`: at least one evidence stream is itself owner-authority:
+ *      • `issue-file` — the file is NAMED in public issue text (a public,
+ *        non-heuristic owner claim), or
+ *      • a UNIQUE-symbol-defining `owner-resolve` (the file is the sole definer
+ *        of an issue symbol). Uniqueness is not yet tracked on the candidate, so
+ *        `owner-resolve` is treated as ADVISORY for now (see `ownerStrength`).
+ *  - `advisory`: only heuristic/scored streams point at it (`stage1` ranking,
+ *    non-unique `owner-resolve`). Advisory evidence may shape generation /
+ *    family ordering but, in clean mode, can never admit or veto an owner.
+ */
+export type OwnerStrength = "authoritative" | "advisory"
+
 export interface FaultCandidate {
   /** Repo-relative path. */
   file: string
-  /** Deterministic merged rank score (higher = stronger owner signal). */
+  /** Deterministic merged rank score (higher = stronger owner signal).
+   *  Heuristic/advisory only — clean owner admission MUST NOT read this. */
   score: number
   /** Which evidence streams pointed at this file (deduped, stable order). */
   sources: FaultCandidateSource[]

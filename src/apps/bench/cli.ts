@@ -45,6 +45,7 @@ import type { GradeBackend } from "./remote/backend"
 import { boxRunLogPath, D, inspectBox, provisionBox } from "./remote/box-session"
 import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
+import { refreshRemoteAuthJson } from "./remote/fresh-auth"
 import { buildForwardedBenchEnv, createFullRemoteBackend, runWithRelaunch } from "./remote/full"
 import { type PoolChunk, runPool } from "./remote/pool"
 import { createLeasePoolAuthProvider, type PoolAuthProvider } from "./remote/pool-auth"
@@ -354,7 +355,7 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   // stays byte-identical; pool mode now also honors fail-fast `--auth-label`.
   const authSource = resolveCliAuthSource()
   const authFile = resolveAuthLaunchFile(authSource)
-  const authJson = dry ? "{}" : readFileSync(authFile, "utf8")
+  const authJson = dry ? "{}" : await refreshRemoteAuthJson(authFile)
   const instance = argValue("--instance")
   const preset = resolveBenchExecutionPreset({
     envVars: process.env,
@@ -581,6 +582,13 @@ const buildPoolAuthProvider = (src: AuthSource): PoolAuthProvider | undefined =>
   return createLeasePoolAuthProvider(manager, (path) => readFileSync(path, "utf8"))
 }
 
+const refreshPoolAuthSource = async (src: AuthSource): Promise<void> => {
+  const files = src.kind === "single" ? [src.authFile] : src.accounts.map((a) => a.authFile)
+  for (const file of [...new Set(files)]) {
+    await refreshRemoteAuthJson(file)
+  }
+}
+
 /**
  * jun-20 multi-auth (T-3): a representative per-chunk → account plan for dry-run.
  * Simulates least-loaded spreading (each chunk takes one slot, none released) so
@@ -614,6 +622,7 @@ const cmdPool = async (): Promise<void> => {
   // launch path stays single-account (byte-identical when no pool configured).
   const authSource = resolveCliAuthSource()
   const authFile = resolveAuthLaunchFile(authSource)
+  if (!hasFlag("--dry-run")) await refreshPoolAuthSource(authSource)
   const preset = resolveBenchExecutionPreset({
     envVars: process.env,
     argvPreset: argValue("--preset"),

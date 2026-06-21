@@ -44,6 +44,18 @@ describe("reproRunArgv", () => {
     expect(hasWithDep(reproRunArgv("pydata/xarray", "0.12", "/s/x.py"), "numpy<2")).toBe(true)
     expect(hasWithDep(reproRunArgv("sympy/sympy", "1.5", "/s/x.py"), "numpy<2")).toBe(false)
   })
+
+  test("astropy inherits the legacy setuptools.dep_util guard in its repro env", () => {
+    const argv = reproRunArgv("astropy/astropy", "4.3", "/s/x.py")
+    expect(hasWithDep(argv, "setuptools<60")).toBe(true)
+    expect(hasWithDep(argv, "extension_helpers")).toBe(true)
+    expect(argv).toContain("--no-build-isolation")
+    expect(hasWithDep(reproRunArgv("sympy/sympy", "1.5", "/s/x.py"), "setuptools<60")).toBe(false)
+    expect(hasWithDep(reproRunArgv("sympy/sympy", "1.5", "/s/x.py"), "extension_helpers")).toBe(
+      false,
+    )
+    expect(reproRunArgv("sympy/sympy", "1.5", "/s/x.py")).not.toContain("--no-build-isolation")
+  })
 })
 
 describe("pythonForRepoVersion — (repo,version) ground truth, FLOORED at 3.9", () => {

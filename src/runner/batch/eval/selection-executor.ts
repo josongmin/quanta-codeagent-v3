@@ -57,11 +57,20 @@ import {
 import { filesFromUnifiedDiff } from "@/shared"
 import { Semaphore } from "@/workflow/semaphore"
 import {
+  type CandidateFamily,
+  type CandidateFamilyBundle,
+  type CandidateFamilyId,
+  candidateFamilyRank,
+  planFamilyCoverage,
+  seedForCandidateFamily,
+} from "./candidate-families"
+import {
   deriveCounterfactualContracts,
   evaluateCounterfactualContracts,
 } from "./counterfactual-contract"
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
+import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { contractsSatisfiedCount, requiredContractsSatisfiedCount } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
 
@@ -83,6 +92,10 @@ export interface Candidate {
   stopReason?: StopReason
   agentError?: string
   editCount?: number
+  /** Candidate-family provenance supplied by typed static witness generation. */
+  familyId?: CandidateFamilyId
+  familyReason?: string
+  familyOwnerFiles?: readonly string[]
 }
 
 export interface SelectionPorts {
@@ -106,6 +119,8 @@ export interface ScoredEntry {
   candidate: Candidate
   hard: HardGateSignals
   verdict: CandidateVerdict
+  requiredContractsSatisfied: number
+  contractsSatisfied: number
 }
 
 export interface SelectionRiskGateDecision {
@@ -194,6 +209,11 @@ export interface CandidateTelemetry {
   admissible: boolean
   score: number
   reasons: readonly string[]
+  familyId?: CandidateFamilyId
+  familyReason?: string
+  familyOwnerFiles?: readonly string[]
+  requiredContractsSatisfied?: number
+  contractsSatisfied?: number
 }
 
 /** Eval-only selection telemetry — what the executor decided and WHY, so a
@@ -209,6 +229,7 @@ export interface SelectionTelemetry {
   generated: number
   admissibleCount: number
   winnerId: string | null
+  winningFamilyId?: CandidateFamilyId
   riskGate?: SelectionRiskGateTelemetry
   counterfactual?: CounterfactualTelemetry
   candidates: readonly CandidateTelemetry[]
@@ -225,6 +246,7 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
   generated: result.generated,
   admissibleCount: result.admissibleCount,
   winnerId: result.winner?.id ?? null,
+  ...(result.winner?.familyId !== undefined ? { winningFamilyId: result.winner.familyId } : {}),
   ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
   ...(result.counterfactual !== undefined ? { counterfactual: result.counterfactual } : {}),
   candidates: result.scored.map((s) => ({
@@ -233,6 +255,13 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
     admissible: s.verdict.admissible,
     score: s.verdict.score,
     reasons: s.verdict.reasons,
+    ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
+    ...(s.candidate.familyReason !== undefined ? { familyReason: s.candidate.familyReason } : {}),
+    ...(s.candidate.familyOwnerFiles !== undefined
+      ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
+      : {}),
+    requiredContractsSatisfied: s.requiredContractsSatisfied,
+    contractsSatisfied: s.contractsSatisfied,
   })),
 })
 
@@ -301,16 +330,45 @@ export interface SelectionInputs {
   readonly ownerFiles: readonly string[]
   readonly owners: ReadonlySet<string>
   readonly seeds: readonly (string | undefined)[]
+  readonly candidateFamilies: readonly (CandidateFamily | undefined)[]
 }
 
 export const buildSelectionInputs = (args: {
   readonly n: number
   readonly ownerCandidates: readonly string[]
   readonly sandbox?: string
+  readonly candidateFamilies?: CandidateFamilyBundle
 }): SelectionInputs => {
-  const ownerFiles = normalizeSelectionPaths(args.ownerCandidates, args.sandbox)
+  const normalizedFamilyBundle =
+    args.candidateFamilies === undefined
+      ? undefined
+      : {
+          families: args.candidateFamilies.families.map((family) => ({
+            ...family,
+            ownerFiles: normalizeSelectionPaths(family.ownerFiles, args.sandbox),
+          })),
+        }
+  const familySlotCount =
+    normalizedFamilyBundle === undefined
+      ? 0
+      : Math.min(
+          Math.max(0, args.n - 1),
+          normalizedFamilyBundle.families.filter((family) => family.ownerFiles.length > 0).length,
+        )
+  const plannedFamilies = normalizedFamilyBundle
+    ? planFamilyCoverage(normalizedFamilyBundle, familySlotCount)
+    : []
+  const plannedFamilyFor = (i: number): CandidateFamily | undefined =>
+    i === 0 ? undefined : plannedFamilies[i - 1]
+  const familyOwnerFiles = plannedFamilies.flatMap((family) => family.ownerFiles)
+  const ownerFiles = normalizeSelectionPaths(
+    [...args.ownerCandidates, ...familyOwnerFiles],
+    args.sandbox,
+  )
   const seedFor = (i: number): string | undefined => {
     if (i === 0) return undefined
+    const plannedFamily = plannedFamilyFor(i)
+    if (plannedFamily !== undefined) return seedForCandidateFamily(plannedFamily)
     const file = ownerFiles[i - 1]
     return file === undefined
       ? undefined
@@ -320,6 +378,7 @@ export const buildSelectionInputs = (args: {
     ownerFiles,
     owners: new Set(ownerFiles),
     seeds: Array.from({ length: args.n }, (_, i) => seedFor(i)),
+    candidateFamilies: Array.from({ length: args.n }, (_, i) => plannedFamilyFor(i)),
   }
 }
 
@@ -354,24 +413,32 @@ const earlyAcceptable = (
   entry: ScoredEntry,
   owners: ReadonlySet<string>,
   requireHardResolved: boolean,
+  mode: SelectorMode,
 ): boolean => {
   if (!entry.verdict.admissible) return false
   // Early-stop authority is STRICTER than admissibility: fail-open `null` gates
   // keep a candidate admissible, but they are not strong enough to stop the
   // loop. The progressive shortcut requires an explicitly clean-applying patch.
   if (!entry.hard.patchProduced || entry.hard.applyClean !== true) return false
-  // No owner authority => no early stop. Without a known closure-owner set the
-  // cost guard would collapse back to "first positive wins", which defeats the
-  // diversity search the selector exists to preserve.
-  if (owners.size === 0) return false
-  // Early-accept is a cost shortcut, not a license to bypass the selector's
-  // diversity/owner-coverage authority. If closure owners are known, a positive
-  // candidate may stop the loop only when every touched file is inside that owner
-  // set; broad symptom+stray patches must still face later owner-seeded siblings.
-  if (!fullyInsideOwners(entry.candidate.files, owners)) return false
   const resolved = entry.hard.patchedResolvedKofN
+  // Executed proof receipt: a positive validated repro quorum OR an executed
+  // clean keep-green witness result.
+  const executedProof = resolvedKofNPositive(resolved) || entry.hard.regressionGreen === true
+  if (mode === "clean") {
+    // T-SEL-13: clean early-stop requires an EXECUTED proof receipt ONLY. No
+    // static owner/family heuristic may stop the search by itself — a candidate
+    // fully inside the (heuristic) owner set cannot early-accept without proof,
+    // and strong static owner confidence never short-circuits the loop.
+    return executedProof
+  }
+  // research/legacy cost shortcut (byte-identical): owner-coverage gated.
+  // No owner authority => no early stop (collapses to "first positive wins").
+  if (owners.size === 0) return false
+  // A positive candidate may stop the loop only when every touched file is inside
+  // the owner set; broad symptom+stray patches still face later owner siblings.
+  if (!fullyInsideOwners(entry.candidate.files, owners)) return false
   if (requireHardResolved) return resolvedKofNPositive(resolved)
-  return resolvedKofNPositive(resolved) || entry.hard.regressionGreen === true
+  return executedProof
 }
 
 const voterQuorumOf = (
@@ -480,13 +547,24 @@ const buildLexTiers = (
   const proofStrength =
     kofn !== null && isValidResolvedKofN(kofn) && kofn.k > 0 ? kofn.votes / kofn.k : 0
   const budget = analyzePatchBudget(entry.candidate.patch, { ownerFiles: [...owners] }).budget
-  const candidate = { touchedFiles: entry.candidate.files, touchedSymbols: [] as string[] }
+  const candidate = {
+    touchedFiles: entry.candidate.files,
+    touchedSymbols: diffTouchedSymbols(entry.candidate.patch),
+  }
   return {
     proofStrength,
     executedKeepGreen: entry.hard.regressionGreen === true ? 1 : 0,
     requiredContractsSatisfied: requiredContractsSatisfiedCount(contracts, candidate),
     contractsSatisfied: contractsSatisfiedCount(contracts, candidate),
-    familyRank: 0,
+    familyRank: candidateFamilyRank(
+      entry.candidate.familyId === undefined
+        ? undefined
+        : {
+            familyId: entry.candidate.familyId,
+            ownerFiles: entry.candidate.familyOwnerFiles ?? [],
+          },
+      entry.candidate.files,
+    ),
     sourceFiles: budget.sourceFiles,
     addedLines: countAddedSourceLines(entry.candidate.patch),
     newDefs: budget.newDefs,
@@ -549,9 +627,13 @@ export const runSelection = async (args: {
    *  rubric) can neither reject nor rank. */
   mode?: SelectorMode
   /** OPTIONAL public-contract bundle (T-CON-10) for the clean lexicographic
-   *  contract-dominance tier. When omitted, a root-owner-must-touch contract is
-   *  derived from the top owner file. Ignored in research mode. */
+   *  contract-dominance tier. When omitted, the contract tier stays empty.
+   *  Ignored in research mode. */
   publicContracts?: PublicContractBundle
+  /** Optional index-aligned family plan from typed static witness generation.
+   *  Families steer exploration and clean lexicographic family rank only after
+   *  the generated patch actually touches the family files. */
+  candidateFamilies?: readonly (CandidateFamily | undefined)[]
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
@@ -592,6 +674,15 @@ export const runSelection = async (args: {
         useCounterfactual ? counterfactualSeed : args.seeds[i],
       )
       if (useCounterfactual) counterfactualCandidateIds.add(candidate.id)
+      const family = useCounterfactual ? undefined : args.candidateFamilies?.[i]
+      if (family !== undefined) {
+        return {
+          ...candidate,
+          familyId: family.familyId,
+          familyReason: family.reason,
+          familyOwnerFiles: family.ownerFiles,
+        }
+      }
       return candidate
     } catch {
       generationFailures += 1
@@ -658,10 +749,19 @@ export const runSelection = async (args: {
       minimality: minimalityOf({ isEmpty: probed.isEmpty, size: probed.size, minB, maxB }),
       ownerCoverage: probed.ownerCoverage,
     }
+    const contractCandidate = {
+      touchedFiles: c.files,
+      touchedSymbols: diffTouchedSymbols(c.patch),
+    }
     return {
       candidate: c,
       hard: probed.hard,
       verdict: scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode),
+      requiredContractsSatisfied: requiredContractsSatisfiedCount(
+        contractBundle,
+        contractCandidate,
+      ),
+      contractsSatisfied: contractsSatisfiedCount(contractBundle, contractCandidate),
     }
   }
 
@@ -676,6 +776,7 @@ export const runSelection = async (args: {
       entry,
       args.owners,
       requireHardResolvedForEarlyAccept(args.ports, args.resolvedKofNMode),
+      mode,
     )
       ? await finalize(rawCandidates, true)
       : null
@@ -706,6 +807,8 @@ export const runSelection = async (args: {
       candidate,
       hard,
       verdict: scoreWithAuthority(hard, soft, soft.declaredExpectedMatch, mode),
+      requiredContractsSatisfied: 0,
+      contractsSatisfied: 0,
     }
     const ranked = [{ id: candidate.id, verdict: entry.verdict }]
     const fallbackRanked =

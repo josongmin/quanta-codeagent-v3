@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test"
 import {
+  buildCandidateFamilyBundleFromWitness,
   type CandidateFamily,
   type CandidateFamilyBundle,
   type CandidateFamilyId,
+  candidateFamilyRank,
   planFamilyCoverage,
   planFamilyCoverageIds,
 } from "@/runner/batch/eval/candidate-families"
@@ -45,11 +47,7 @@ describe("planFamilyCoverage — coverage guarantee (teeth)", () => {
   })
 
   it("symptom-owner cannot monopolize: with n bigger than family count, every family appears before any repeats", () => {
-    const bundle = bundleOf(
-      family("symptom-owner"),
-      family("root-owner"),
-      family("api-owner"),
-    )
+    const bundle = bundleOf(family("symptom-owner"), family("root-owner"), family("api-owner"))
     const ids = planFamilyCoverageIds(bundle, 5)
     // first 3 slots = one of each (the full non-empty set), only THEN reuse
     const firstPass = ids.slice(0, 3)
@@ -71,19 +69,21 @@ describe("planFamilyCoverage — coverage guarantee (teeth)", () => {
 })
 
 describe("planFamilyCoverage — deterministic ordering (teeth)", () => {
-  it("fixed precedence: root, api, lifecycle, symptom, test-adjacent regardless of bundle order", () => {
+  it("fixed precedence: root, api, lifecycle, multi-site, symptom, test-adjacent regardless of bundle order", () => {
     const bundle = bundleOf(
       family("test-adjacent-owner"),
       family("symptom-owner"),
+      family("multi-site"),
       family("lifecycle-owner"),
       family("api-owner"),
       family("root-owner"),
     )
-    const ids = planFamilyCoverageIds(bundle, 5)
+    const ids = planFamilyCoverageIds(bundle, 6)
     expect(ids).toEqual([
       "root-owner",
       "api-owner",
       "lifecycle-owner",
+      "multi-site",
       "symptom-owner",
       "test-adjacent-owner",
     ])
@@ -109,6 +109,45 @@ describe("planFamilyCoverage — deterministic ordering (teeth)", () => {
     expect(second).toEqual(first)
     // and the id projection is likewise stable
     expect(planFamilyCoverageIds(bundle, 7)).toEqual(planFamilyCoverageIds(bundle, 7))
+  })
+})
+
+describe("candidate family witness builder — static symbol co-change", () => {
+  it("builds a multi-site family from files sharing a public symbol witness", () => {
+    const bundle = buildCandidateFamilyBundleFromWitness({
+      rootOwnerFiles: ["pkg/base.py", "pkg/backend.py"],
+      symbolOwners: [
+        { file: "pkg/base.py", symbols: ["runshell"] },
+        { file: "pkg/backend.py", symbols: ["runshell"] },
+      ],
+    })
+
+    const multi = bundle?.families.find((f) => f.familyId === "multi-site")
+    expect(multi?.ownerFiles).toEqual(["pkg/backend.py", "pkg/base.py"])
+    expect(multi?.sourceEvidence).toEqual(["static-symbol-witness"])
+  })
+
+  it("does not invent a multi-site family from a single owner", () => {
+    const bundle = buildCandidateFamilyBundleFromWitness({
+      symbolOwners: [{ file: "pkg/base.py", symbols: ["runshell"] }],
+    })
+    expect(bundle).toBeUndefined()
+  })
+})
+
+describe("candidateFamilyRank — family label has no authority unless touched", () => {
+  it("multi-site rank requires touching every family file", () => {
+    const multiSiteFamily = family("multi-site", ["pkg/base.py", "pkg/backend.py"])
+    expect(candidateFamilyRank(multiSiteFamily, ["pkg/base.py"])).toBe(0)
+    expect(candidateFamilyRank(multiSiteFamily, ["pkg/base.py", "pkg/backend.py"])).toBeGreaterThan(
+      0,
+    )
+  })
+
+  it("non-multi-site rank requires touching at least one family owner", () => {
+    const rootFamily = family("root-owner", ["pkg/root.py"])
+    expect(candidateFamilyRank(rootFamily, ["pkg/other.py"])).toBe(0)
+    expect(candidateFamilyRank(rootFamily, ["pkg/root.py"])).toBeGreaterThan(0)
   })
 })
 

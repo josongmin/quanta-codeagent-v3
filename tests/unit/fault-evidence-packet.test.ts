@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test"
 import {
   buildFaultEvidencePacket,
   type FaultEvidenceInput,
+  ownerStrength,
 } from "@/agent/fault-evidence/build"
 
 const base: FaultEvidenceInput = {
@@ -89,5 +90,39 @@ describe("buildFaultEvidencePacket", () => {
       ],
     })
     expect(p.candidates.map((c) => c.file)).toEqual(["a.py", "b.py"])
+  })
+})
+
+describe("ownerStrength (T-OWN-12 lattice classifier)", () => {
+  test("issue-file stream ⇒ authoritative (public issue named it)", () => {
+    expect(ownerStrength({ sources: ["issue-file"] })).toBe("authoritative")
+    // red-on-injection: presence of issue-file makes it authoritative even when
+    // mixed with heuristic streams.
+    expect(ownerStrength({ sources: ["stage1", "issue-file", "owner-resolve"] })).toBe(
+      "authoritative",
+    )
+  })
+
+  test("stage1-only ⇒ advisory (heuristic rank is not owner authority)", () => {
+    expect(ownerStrength({ sources: ["stage1"] })).toBe("advisory")
+  })
+
+  test("owner-resolve without unique-definer tracking ⇒ advisory (TODO promotion)", () => {
+    // Uniqueness is not yet tracked on the candidate, so a bare owner-resolve is
+    // ADVISORY for now. A regression that silently promotes it to authoritative
+    // (re-opening scored authority via LSP) goes RED here.
+    expect(ownerStrength({ sources: ["owner-resolve"] })).toBe("advisory")
+    expect(ownerStrength({ sources: ["stage1", "owner-resolve"] })).toBe("advisory")
+  })
+
+  test("empty sources ⇒ advisory (never authoritative by default)", () => {
+    expect(ownerStrength({ sources: [] })).toBe("advisory")
+  })
+
+  test("classification reads ONLY sources, never score", () => {
+    // A huge score with no authoritative stream is still advisory — clean
+    // authority cannot leak through the additive score.
+    expect(ownerStrength({ sources: ["stage1"] })).toBe("advisory")
+    expect(ownerStrength({ sources: ["issue-file"] })).toBe("authoritative")
   })
 })

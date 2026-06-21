@@ -37,6 +37,10 @@ export const buildClosureSession = (args: {
   ownerResolved?: readonly { file: string; forSymbol: string }[]
   reproScript?: { cmd: string; baseValidatedRed: boolean }
   posture: ClosureSessionPosture
+  /** T-OWN-12: opt into rule-based clean owner admission (authoritative/advisory
+   *  lattice, no additive score). Default/omitted ⇒ legacy scored behavior,
+   *  byte-identical to research mode. */
+  ownerClean?: boolean
 }): ClosureSessionState => {
   const issueDeclaredExpected = extractIssueDeclaredExpected(args.problemStatement)
   const issueFiles = args.issueFiles ?? extractIssueHint(args.problemStatement).files
@@ -47,6 +51,7 @@ export const buildClosureSession = (args: {
       ...(issueFiles.length > 0 ? { issueFiles } : {}),
       ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
     },
+    ...(args.ownerClean === true ? { ownerClean: true } : {}),
     plan: {
       ...(args.reproScript !== undefined ? { reproScript: args.reproScript } : {}),
       ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),

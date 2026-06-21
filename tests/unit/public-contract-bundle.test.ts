@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "bun:test"
 import {
   buildApiSurfaceContracts,
   buildCleanSelectionPublicContracts,
@@ -11,10 +11,7 @@ import {
   evaluateContractSatisfaction,
   requiredContractsSatisfiedCount,
 } from "@/runner/batch/eval/public-contract-bundle"
-import type {
-  ContractCandidate,
-  PublicContract,
-} from "@/runner/batch/eval/public-contract-types"
+import type { ContractCandidate, PublicContract } from "@/runner/batch/eval/public-contract-types"
 
 /** A candidate that touches the given files/symbols (generic, no oracle label). */
 const candidate = (
@@ -70,21 +67,21 @@ describe("api-surface teeth", () => {
   if (contract === undefined) throw new Error("expected one api contract")
 
   it("satisfied when candidate touches the subject symbol", () => {
-    expect(
-      evaluateContractSatisfaction(contract, candidate([], ["MyClass.reset"])).satisfied,
-    ).toBe(true)
+    expect(evaluateContractSatisfaction(contract, candidate([], ["MyClass.reset"])).satisfied).toBe(
+      true,
+    )
   })
 
   it("violated when candidate touches a DIFFERENT symbol only", () => {
-    expect(
-      evaluateContractSatisfaction(contract, candidate([], ["MyClass.other"])).satisfied,
-    ).toBe(false)
+    expect(evaluateContractSatisfaction(contract, candidate([], ["MyClass.other"])).satisfied).toBe(
+      false,
+    )
   })
 
   it("touching the right file but NOT the symbol still violates (symbol axis is checked)", () => {
-    expect(
-      evaluateContractSatisfaction(contract, candidate(["MyClass.reset"], [])).satisfied,
-    ).toBe(false)
+    expect(evaluateContractSatisfaction(contract, candidate(["MyClass.reset"], [])).satisfied).toBe(
+      false,
+    )
   })
 })
 
@@ -152,6 +149,15 @@ describe("clean selection public contracts", () => {
     ])
   })
 
+  it("includes an explicit typed multi-site family contract when supplied", () => {
+    const bundle = buildCleanSelectionPublicContracts({
+      multiSiteFamily: ["pkg/base.py", "pkg/backend.py"],
+    })
+    expect(bundle?.contracts).toHaveLength(1)
+    expect(bundle?.contracts[0]?.kind).toBe("multi-site-family")
+    expect(bundle?.contracts[0]?.subjectFiles).toEqual(["pkg/base.py", "pkg/backend.py"])
+  })
+
   it("returns undefined when no clean-authority contracts exist", () => {
     expect(
       buildCleanSelectionPublicContracts({
@@ -181,9 +187,7 @@ describe("provenance is carried through every kind", () => {
     expect(provOf("api-surface")).toEqual(["static-witness"])
     expect(provOf("state-reset-semantics")).toEqual(["validated-repro"])
     // owner-must-touch arises from BOTH the static owner file and the public test.
-    expect(new Set(provOf("owner-must-touch"))).toEqual(
-      new Set(["static-witness", "public-test"]),
-    )
+    expect(new Set(provOf("owner-must-touch"))).toEqual(new Set(["static-witness", "public-test"]))
   })
 
   it("no validated repro ⇒ no state-reset contract (provenance gate is real)", () => {
@@ -220,7 +224,9 @@ describe("exact-output contributes telemetry, never a structural veto", () => {
 // ---------------------------------------------------------------------------
 describe("forbidden-source self-policing (grep the module source)", () => {
   const moduleSrc = readFileSync(
-    fileURLToPath(new URL("../../src/runner/batch/eval/public-contract-bundle.ts", import.meta.url)),
+    fileURLToPath(
+      new URL("../../src/runner/batch/eval/public-contract-bundle.ts", import.meta.url),
+    ),
     "utf8",
   )
   const typesSrc = readFileSync(

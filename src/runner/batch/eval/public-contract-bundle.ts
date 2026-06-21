@@ -65,9 +65,7 @@ const mkContract = (args: {
  * `public-issue-text`). `undefined`/empty declared value ⇒ no contract.
  */
 export const buildExactOutputContract = (
-  declaredExpected:
-    | { readonly kind?: string | undefined; readonly value: string }
-    | undefined,
+  declaredExpected: { readonly kind?: string | undefined; readonly value: string } | undefined,
 ): PublicContract[] => {
   if (declaredExpected === undefined) return []
   if (declaredExpected.value.trim() === "") return []
@@ -135,7 +133,10 @@ export const authoritativeIssueOwnerContracts = (
 /**
  * Clean-selection public contracts assembled from SAFE public inputs only:
  *   - exact-output from issue-declared expected behavior,
- *   - owner-must-touch only for files the issue text explicitly named.
+ *   - owner-must-touch only for files the issue text explicitly named,
+ *   - api-surface from the issue's named symbols (a candidate that touches the
+ *     symbol the issue is about beats one that does not; `supporting` so it ranks
+ *     below the required owner contract).
  *
  * Stage1-only and owner-resolve-only files remain exploration evidence and are
  * deliberately excluded from contract authority. Empty inputs => `undefined`.
@@ -147,10 +148,14 @@ export const buildCleanSelectionPublicContracts = (args: {
   readonly candidates?:
     | readonly { readonly file: string; readonly sources: readonly string[] }[]
     | undefined
+  readonly apiSymbols?: readonly string[] | undefined
+  readonly multiSiteFamily?: readonly string[] | undefined
 }): PublicContractBundle | undefined => {
   const contracts = [
     ...buildExactOutputContract(args.declaredExpected),
     ...authoritativeIssueOwnerContracts(args.candidates ?? []),
+    ...buildApiSurfaceContracts(args.apiSymbols ?? []),
+    ...buildMultiSiteFamilyContract(args.multiSiteFamily ?? []),
   ]
   if (contracts.length === 0) return undefined
   const byId = new Map<string, PublicContract>()
@@ -195,6 +200,20 @@ export const buildMultiSiteFamilyContract = (familyFiles: readonly string[]): Pu
       discriminator: files.join("|"),
     }),
   ]
+}
+
+/** Merge contract bundles, preserving first occurrence of each stable id. */
+export const mergePublicContractBundles = (
+  ...bundles: readonly (PublicContractBundle | undefined)[]
+): PublicContractBundle | undefined => {
+  const byId = new Map<string, PublicContract>()
+  for (const bundle of bundles) {
+    for (const contract of bundle?.contracts ?? []) {
+      if (!byId.has(contract.contractId)) byId.set(contract.contractId, contract)
+    }
+  }
+  if (byId.size === 0) return undefined
+  return { contracts: [...byId.values()] }
 }
 
 /**
