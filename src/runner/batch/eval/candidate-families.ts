@@ -14,6 +14,8 @@
  *   patch contents.
  */
 
+import { canBeCleanAuthority, canBeMultiSiteObligation, type StaticWitness } from "./static-witness"
+
 /** Typed candidate-family identifiers. */
 export type CandidateFamilyId =
   | "root-owner"
@@ -22,6 +24,20 @@ export type CandidateFamilyId =
   | "lifecycle-owner"
   | "test-adjacent-owner"
   | "multi-site"
+  // SCAFF-04 typed structural families from the static-witness adapter:
+  | "override-family"
+  | "producer-consumer"
+  | "registration-callback"
+  | "unique-owner"
+
+/** Co-change families: a candidate must touch EVERY owner file to earn rank
+ *  (an incomplete single-site patch in a co-change family scores 0). */
+const COCHANGE_FAMILY_IDS: ReadonlySet<CandidateFamilyId> = new Set([
+  "multi-site",
+  "override-family",
+  "producer-consumer",
+  "registration-callback",
+])
 
 /**
  * A single candidate family: a set of owner files reached via the same
@@ -61,10 +77,16 @@ export interface OwnerResolvedWitness {
  * final tie-break (see `orderNonEmptyFamilies`).
  */
 const FAMILY_PRECEDENCE: readonly CandidateFamilyId[] = [
+  // authoritative typed structural families first (force co-change coverage)
   "root-owner",
+  "unique-owner",
+  "override-family",
+  "producer-consumer",
+  "registration-callback",
   "api-owner",
   "lifecycle-owner",
   "multi-site",
+  // advisory exploration families last
   "symptom-owner",
   "test-adjacent-owner",
 ] as const
@@ -95,8 +117,9 @@ export const candidateFamilyRank = (
   const ownerFiles = cleanList(family.ownerFiles)
   if (ownerFiles.length === 0) return 0
   const touched = new Set(touchedFiles)
-  if (family.familyId === "multi-site" && !hasAll(ownerFiles, touched)) return 0
-  if (family.familyId !== "multi-site" && !hasAny(ownerFiles, touched)) return 0
+  const isCoChange = COCHANGE_FAMILY_IDS.has(family.familyId)
+  if (isCoChange && !hasAll(ownerFiles, touched)) return 0
+  if (!isCoChange && !hasAny(ownerFiles, touched)) return 0
   return 1
 }
 
@@ -179,6 +202,59 @@ export const buildCandidateFamilyBundleFromWitness = (args: {
   ]
   if (families.length === 0) return undefined
   return { families }
+}
+
+/** Map a static-witness kind to a typed candidate family. */
+const WITNESS_KIND_TO_FAMILY: Readonly<Record<StaticWitness["kind"], CandidateFamilyId>> = {
+  "override-family": "override-family",
+  "producer-consumer": "producer-consumer",
+  "registration-callback": "registration-callback",
+  "unique-symbol-definer": "unique-owner",
+  "lifecycle-owner": "lifecycle-owner",
+}
+
+/**
+ * SCAFF-04: typed structural candidate families from the AST static-witness
+ * adapter. Only AUTHORITATIVE witnesses (genuine relation provenance) become
+ * families; co-change kinds need >=2 files. Advisory / single-file witnesses are
+ * skipped — a family label alone has no authority, and `candidateFamilyRank`
+ * still requires a candidate to touch every co-change file.
+ */
+export const staticWitnessesToFamilies = (
+  witnesses: readonly StaticWitness[],
+): CandidateFamily[] => {
+  const families: CandidateFamily[] = []
+  for (const w of witnesses) {
+    if (!canBeCleanAuthority(w)) continue
+    const familyId = WITNESS_KIND_TO_FAMILY[w.kind]
+    if (COCHANGE_FAMILY_IDS.has(familyId) && !canBeMultiSiteObligation(w)) continue
+    const ownerFiles = cleanList(w.subjectFiles)
+    if (ownerFiles.length === 0) continue
+    families.push({
+      familyId,
+      ownerFiles,
+      reason: w.reason,
+      seed: undefined,
+      sourceEvidence: [`static-witness:${w.provenance}`],
+    })
+  }
+  return families
+}
+
+/** Merge static-witness families into an existing family bundle (dedup by
+ *  familyId+files), so AST structural co-change families also seed generation. */
+export const withStaticWitnessFamilies = (
+  bundle: CandidateFamilyBundle | undefined,
+  witnesses: readonly StaticWitness[],
+): CandidateFamilyBundle | undefined => {
+  const extra = staticWitnessesToFamilies(witnesses)
+  if (extra.length === 0) return bundle
+  const byKey = new Map<string, CandidateFamily>()
+  for (const f of [...(bundle?.families ?? []), ...extra]) {
+    const key = `${f.familyId}:${cleanList(f.ownerFiles).join("|")}`
+    if (!byKey.has(key)) byKey.set(key, f)
+  }
+  return { families: [...byKey.values()] }
 }
 
 /** A family is non-empty iff it actually contributes at least one owner file. */

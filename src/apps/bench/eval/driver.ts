@@ -7,6 +7,7 @@ import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
+import { withStaticWitnessFamilies } from "@/runner/batch/eval/candidate-families"
 import {
   applyBenchKnobs,
   type BenchKnobState,
@@ -684,25 +685,28 @@ const runSelectionPhase = async (
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
-  const candidateFamilyBundle = buildSelectionCandidateFamilyBundle({
+  // SCAFF-04/05 parity (see runner driver): AST witnesses feed BOTH generation
+  // families (complete candidate is generated) and required contracts (it wins).
+  const staticWitnesses = buildAstStaticWitnesses({
     problemStatement: instance.problemStatement,
     ownerCandidates: selectionOwnerCandidates,
-    ownerResolved,
+    ...(ownerResolved !== undefined ? { ownerResolved } : {}),
     readSource: (rel) => readSandboxSource(sandbox, rel),
   })
+  const candidateFamilyBundle = withStaticWitnessFamilies(
+    buildSelectionCandidateFamilyBundle({
+      problemStatement: instance.problemStatement,
+      ownerCandidates: selectionOwnerCandidates,
+      ownerResolved,
+      readSource: (rel) => readSandboxSource(sandbox, rel),
+    }),
+    staticWitnesses,
+  )
   const familyPublicContracts = withCandidateFamilyPublicContracts(
     publicContracts,
     candidateFamilyBundle,
   )
-  // SCAFF-05 parity (see runner driver): AST static-witness REQUIRED contracts.
-  const staticWitnessContracts = buildStaticWitnessContracts(
-    buildAstStaticWitnesses({
-      problemStatement: instance.problemStatement,
-      ownerCandidates: selectionOwnerCandidates,
-      ...(ownerResolved !== undefined ? { ownerResolved } : {}),
-      readSource: (rel) => readSandboxSource(sandbox, rel),
-    }),
-  )
+  const staticWitnessContracts = buildStaticWitnessContracts(staticWitnesses)
   const effectivePublicContracts: PublicContractBundle | undefined =
     staticWitnessContracts.length === 0
       ? familyPublicContracts

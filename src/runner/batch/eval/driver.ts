@@ -77,6 +77,7 @@ import { computeAdaptedTimeout } from "./adaptive-timeout"
 import {
   buildCandidateFamilyBundleFromWitness,
   type CandidateFamilyBundle,
+  withStaticWitnessFamilies,
 } from "./candidate-families"
 import {
   buildClosureSession,
@@ -2378,28 +2379,29 @@ const runSelectionPhase = async (
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
-  const candidateFamilyBundle = buildSelectionCandidateFamilyBundle({
+  // AST static witnesses (built once): feed BOTH generation families (SCAFF-04 —
+  // so a complete co-change candidate is GENERATED) and required contracts
+  // (SCAFF-05 — so it WINS when proof is tied). Authoritative-only; advisory ⇒ none.
+  const staticWitnesses = buildAstStaticWitnesses({
     problemStatement: instance.problemStatement,
     ownerCandidates: selectionOwnerCandidates,
-    ownerResolved,
+    ...(ownerResolved !== undefined ? { ownerResolved } : {}),
     readSource: (rel) => readSandboxSource(sandbox, rel),
   })
+  const candidateFamilyBundle = withStaticWitnessFamilies(
+    buildSelectionCandidateFamilyBundle({
+      problemStatement: instance.problemStatement,
+      ownerCandidates: selectionOwnerCandidates,
+      ownerResolved,
+      readSource: (rel) => readSandboxSource(sandbox, rel),
+    }),
+    staticWitnesses,
+  )
   const familyPublicContracts = withCandidateFamilyPublicContracts(
     publicContracts,
     candidateFamilyBundle,
   )
-  // SCAFF-05: bridge AST static witnesses (override-family / producer-consumer /
-  // registration-callback / unique-symbol-definer) into REQUIRED public contracts
-  // so a complete co-change candidate beats a single-site one when proof is tied.
-  // Authoritative-only (the adapter/builder enforce it); advisory ⇒ no contract.
-  const staticWitnessContracts = buildStaticWitnessContracts(
-    buildAstStaticWitnesses({
-      problemStatement: instance.problemStatement,
-      ownerCandidates: selectionOwnerCandidates,
-      ...(ownerResolved !== undefined ? { ownerResolved } : {}),
-      readSource: (rel) => readSandboxSource(sandbox, rel),
-    }),
-  )
+  const staticWitnessContracts = buildStaticWitnessContracts(staticWitnesses)
   const effectivePublicContracts: PublicContractBundle | undefined =
     staticWitnessContracts.length === 0
       ? familyPublicContracts
