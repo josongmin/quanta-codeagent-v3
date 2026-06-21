@@ -14,7 +14,7 @@ const ISSUE = `Repro:\n\n\`\`\`python\nassert add(1, 2) == 3\n\`\`\`\n`
 const instance = {
   problemStatement: ISSUE,
   swebench: { repo: "acme/widget", version: "1.0", baseCommit: "deadbeef" },
-} as const
+} as unknown as Parameters<typeof prepareMweProofSelectionPort>[0]
 const cand = (id: string): Candidate => ({
   id,
   patch: `diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b`,
