@@ -143,3 +143,23 @@ export const isCleanVetoAuthority = (receipt: MweProofReceipt): boolean =>
  */
 export const isInfraFailure = (receipt: MweProofReceipt): boolean =>
   receipt.state === "execution_failed"
+
+/**
+ * Clean lexicographic AUTHORITY rank of an MWE receipt for the selector's TOP
+ * tier (SCAFF-06). Only the two EXECUTED outcomes of a proven base-red oracle
+ * speak:
+ *   - `patched_green` ⇒ +1 (candidate provably fixes the PUBLIC reported failure
+ *     ⇒ admit / rank above non-proven candidates),
+ *   - `candidate_red`  ⇒ -1 (candidate was executed and provably FAILS the
+ *     base-red public MWE ⇒ veto / rank below neutral),
+ *   - everything else ⇒ 0 (no authority). Crucially `execution_failed` (infra)
+ *     and an ABSENT receipt are BOTH 0 — an infra failure must never veto a
+ *     candidate, and an unpopulated receipt keeps selection byte-identical until
+ *     a real MWE execution feeds receipts.
+ */
+export const mweProofAuthorityRank = (receipt: MweProofReceipt | undefined): -1 | 0 | 1 => {
+  if (receipt === undefined) return 0
+  if (receipt.state === "patched_green") return 1
+  if (receipt.state === "candidate_red") return -1
+  return 0
+}

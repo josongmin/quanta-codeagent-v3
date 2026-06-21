@@ -8,6 +8,11 @@
  * overturn an earlier one.
  *
  * Authority order (highest authority first):
+ *   0. mweProof                    (DESC) — executable PUBLIC-issue MWE verdict
+ *        (+1 patched_green / 0 none|infra / -1 candidate_red). SCAFF-06: a
+ *        candidate that provably passes a base-red public MWE outranks all
+ *        non-proven ones; one that provably FAILS it is vetoed. Absent ⇒ 0, so
+ *        selection is byte-identical until a real MWE execution feeds receipts.
  *   1. proofStrength               (DESC) — validated repro consensus votes/k
  *   2. executedKeepGreen           (DESC) — a clean EXECUTED keep-green suite passed
  *   3. requiredContractsSatisfied  (DESC) — satisfied REQUIRED public contracts
@@ -24,6 +29,11 @@
  */
 
 export interface LexTiers {
+  /** SCAFF-06 executable PUBLIC-issue MWE verdict: +1 candidate provably fixes a
+   *  base-red MWE, -1 it provably fails one, 0 none/infra/absent. higher wins.
+   *  OPTIONAL + treated as 0 when absent ⇒ purely additive top tier (selection
+   *  byte-identical until a real MWE execution populates receipts). */
+  readonly mweProof?: -1 | 0 | 1
   /** validated repro consensus strength votes/k; 0 when no validated repro. higher wins. */
   readonly proofStrength: number
   /** 1 = a clean EXECUTED keep-green witness suite passed; 0 = none executed. higher wins. */
@@ -64,6 +74,13 @@ export interface LexCandidate {
 export const compareLexTiers = (a: LexTiers, b: LexTiers): number => {
   // DESC tiers: the larger value is better, so the better candidate sorts first
   // (negative). We compute (b - a) so a larger `a` yields a negative result.
+
+  // SCAFF-06 top tier — executable public-MWE verdict. Absent ⇒ 0, so a pair of
+  // receipt-less candidates compares EXACTLY as before (the field never flips the
+  // result until a real MWE execution populates it).
+  const mwe = (b.mweProof ?? 0) - (a.mweProof ?? 0)
+  if (mwe !== 0) return mwe
+
   const proof = b.proofStrength - a.proofStrength
   if (proof !== 0) return proof
 

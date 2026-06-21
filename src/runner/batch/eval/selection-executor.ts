@@ -71,6 +71,7 @@ import {
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
+import { type MweProofReceipt, mweProofAuthorityRank } from "./mwe-proof"
 import { contractsSatisfiedCount, requiredContractsSatisfiedCount } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
 
@@ -96,6 +97,11 @@ export interface Candidate {
   familyId?: CandidateFamilyId
   familyReason?: string
   familyOwnerFiles?: readonly string[]
+  /** SCAFF-06 — executable PUBLIC-issue MWE proof receipt for this candidate.
+   *  Drives the selector's top authority tier (`patched_green` admit /
+   *  `candidate_red` veto; infra/absent = no authority). Absent until a real MWE
+   *  execution feeds it ⇒ selection stays byte-identical. */
+  mweReceipt?: MweProofReceipt
 }
 
 export interface SelectionPorts {
@@ -552,6 +558,7 @@ const buildLexTiers = (
     touchedSymbols: diffTouchedSymbols(entry.candidate.patch),
   }
   return {
+    mweProof: mweProofAuthorityRank(entry.candidate.mweReceipt),
     proofStrength,
     executedKeepGreen: entry.hard.regressionGreen === true ? 1 : 0,
     requiredContractsSatisfied: requiredContractsSatisfiedCount(contracts, candidate),
