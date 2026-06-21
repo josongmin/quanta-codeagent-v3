@@ -73,6 +73,7 @@ import {
 } from "@/runner/batch/eval/selection-executor"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
+import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
 import { buildAstStaticWitnesses } from "@/runner/batch/eval/static-witness-adapter"
 import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-contracts"
@@ -760,6 +761,10 @@ const runSelectionPhase = async (
     timeoutMs: deps.timeoutMs,
   })
   const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
+  const mweProofSelectionPort =
+    selectorMode === "clean"
+      ? await prepareMweProofSelectionPort(instance, sandbox, deps.timeoutMs)
+      : undefined
   // No-oracle verify-select (`discovered`) must not let synthesized repro
   // authority veto admissibility. In that mode, impacted repo tests are the hard
   // regression signal and repro consensus is already downgraded to positive-only
@@ -818,6 +823,7 @@ const runSelectionPhase = async (
         }),
       regression: regressionSelectionPort,
       ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
+      ...(mweProofSelectionPort !== undefined ? { mweProof: mweProofSelectionPort } : {}),
       // SOTA++ repro-vote as the SELECTION scorer: re-materialize each candidate
       // and re-run the reproducing repro set there → the VerificationBundle's
       // `patchedResolvedKofN` HARD signal (votes<k ⇒ reject). So selection picks

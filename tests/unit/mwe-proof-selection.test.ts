@@ -101,3 +101,47 @@ describe("SCAFF-06 — receipt flips runSelection end-to-end", () => {
     expect(r.winner?.id).toBe("cand-0")
   })
 })
+
+describe("SCAFF-06 — the mweProof selection PORT populates receipts at selection time", () => {
+  const selectWithPort = (
+    c0: Candidate,
+    c1: Candidate,
+    port: (c: Candidate) => Promise<MweProofReceipt | null>,
+  ) =>
+    runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set([A, B]),
+      mode: "clean",
+      ports: {
+        generate: async (i) => [c0, c1][i] as Candidate,
+        applyClean: async () => true,
+        mweProof: port,
+      },
+    })
+
+  it("the PORT (not generation) drives the top tier: a port patched_green wins over a smaller one", async () => {
+    // Neither candidate carries a receipt from generation; the PORT runs the MWE
+    // at selection time and proves the bigger candidate fixes the public failure.
+    const r = await selectWithPort(cand("cand-0", [A]), cand("cand-1", [A, B]), async (c) =>
+      c.id === "cand-1" ? { state: "patched_green" } : null,
+    )
+    expect(r.winner?.id).toBe("cand-1")
+  })
+
+  it("a port that returns null for all candidates is byte-identical (minimality wins)", async () => {
+    const r = await selectWithPort(cand("cand-0", [A]), cand("cand-1", [A, B]), async () => null)
+    expect(r.winner?.id).toBe("cand-0")
+  })
+
+  it("the PORT result OVERRIDES a generation-set receipt (selection-time exec is authoritative)", async () => {
+    // cand-0 claims patched_green from generation, but the selection-time port
+    // re-runs the MWE and finds it candidate_red ⇒ vetoed; cand-1 wins.
+    const r = await selectWithPort(
+      cand("cand-0", [A], { state: "patched_green" }),
+      cand("cand-1", [A, B]),
+      async (c) => (c.id === "cand-0" ? { state: "candidate_red" } : null),
+    )
+    expect(r.winner?.id).toBe("cand-1")
+  })
+})

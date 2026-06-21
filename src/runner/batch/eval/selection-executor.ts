@@ -119,6 +119,12 @@ export interface SelectionPorts {
    *  `true` is ranking credit. `false` is explicit public issue-shape evidence
    *  that the patch implements the wrong behavior, so the selector rejects it. */
   declaredExpected?: (c: Candidate) => Promise<boolean | null>
+  /** SCAFF-06 — OPTIONAL executable public-MWE probe. Runs the extracted public
+   *  MWE against base + this candidate (same env) and returns the typed proof
+   *  receipt. Absent ⇒ candidates keep any generation-set receipt (or none), so
+   *  selection is byte-identical. When present it OVERRIDES a generation-set
+   *  receipt — selection-time execution is the authority. `null` ⇒ no receipt. */
+  mweProof?: (c: Candidate) => Promise<MweProofReceipt | null>
 }
 
 export interface ScoredEntry {
@@ -712,6 +718,8 @@ export const runSelection = async (args: {
     voterQuorum: number | null
     ownerCoverage: number | null
     declaredExpectedMatch: boolean | null
+    /** SCAFF-06 selection-time MWE receipt (port-derived, else generation-set). */
+    mweReceipt: MweProofReceipt | undefined
   }
   const portsMemo = new Map<Candidate, ScoredPorts>()
   const probeOne = async (c: Candidate): Promise<ScoredPorts> => {
@@ -740,6 +748,9 @@ export const runSelection = async (args: {
       // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
       ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
       declaredExpectedMatch: await declaredExpectedMatchOf(c, isEmpty, args.ports),
+      // SCAFF-06: a selection-time MWE run (port) is authoritative; it overrides a
+      // generation-set receipt. Absent port ⇒ keep the generation-set one (or none).
+      mweReceipt: (await args.ports.mweProof?.(c)) ?? c.mweReceipt,
     }
     portsMemo.set(c, probed)
     return probed
@@ -761,7 +772,10 @@ export const runSelection = async (args: {
       touchedSymbols: diffTouchedSymbols(c.patch),
     }
     return {
-      candidate: c,
+      // SCAFF-06: carry the selection-time MWE receipt on the scored candidate so
+      // the lexicographic top tier (buildLexTiers) sees it. Identity-preserving
+      // when there is no receipt (byte-identical to the pre-SCAFF-06 path).
+      candidate: probed.mweReceipt !== undefined ? { ...c, mweReceipt: probed.mweReceipt } : c,
       hard: probed.hard,
       verdict: scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode),
       requiredContractsSatisfied: requiredContractsSatisfiedCount(

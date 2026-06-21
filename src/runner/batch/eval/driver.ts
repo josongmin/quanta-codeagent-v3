@@ -156,6 +156,7 @@ import {
 } from "./selection-executor"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
+import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { witnessAuthoritativeOwners } from "./static-witness"
@@ -2451,6 +2452,10 @@ const runSelectionPhase = async (
     timeoutMs: deps.timeoutMs,
   })
   const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
+  const mweProofSelectionPort =
+    selectorMode === "clean"
+      ? await prepareMweProofSelectionPort(instance, sandbox, deps.timeoutMs)
+      : undefined
   const selectionBaseValidatedRed =
     verifySelectRegression === "discovered" ? null : baseValidatedRed
   const selectionRiskGate = buildSelectionRiskGate({
@@ -2505,6 +2510,7 @@ const runSelectionPhase = async (
         }),
       regression: regressionSelectionPort,
       ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
+      ...(mweProofSelectionPort !== undefined ? { mweProof: mweProofSelectionPort } : {}),
       ...(resolvedKofNSelectionPort !== undefined
         ? { resolvedKofN: resolvedKofNSelectionPort }
         : {}),

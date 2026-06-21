@@ -29,6 +29,12 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("selectionGenerationErrorOf({")
     expect(DRIVER_SRC).toContain("candidatePatchAppliesCleanly")
     expect(DRIVER_SRC).toContain("applyClean: (c) =>")
+    expect(DRIVER_SRC).toContain("prepareMweProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("prepareMweProofSelectionPort")
+    expect(DRIVER_SRC).toContain('selectorMode === "clean"')
+    expect(APP_DRIVER_SRC).toContain('selectorMode === "clean"')
+    expect(DRIVER_SRC).toContain("mweProof: mweProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("mweProof: mweProofSelectionPort")
     expect(DRIVER_SRC).toContain(
       "rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}",
     )
