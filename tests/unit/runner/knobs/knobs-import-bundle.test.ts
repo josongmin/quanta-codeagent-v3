@@ -61,6 +61,7 @@ import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { reproVoteKnob } from "@/runner/knobs/knobs/repro-vote"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
 import { round0MinimalKnob } from "@/runner/knobs/knobs/round0-minimal"
+import { selectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { specFidelitySteerKnob } from "@/runner/knobs/knobs/spec-fidelity-steer"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
@@ -116,6 +117,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(reproVoteKnob),
   asAnyKnob(retryTransientKnob),
   asAnyKnob(round0MinimalKnob),
+  asAnyKnob(selectorModeKnob),
   asAnyKnob(skillsKnob),
   asAnyKnob(specFidelitySteerKnob),
   asAnyKnob(subagentKnob),

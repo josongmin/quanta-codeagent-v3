@@ -1357,6 +1357,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/verify-select-llm-risk-gate.ts",
   },
   {
+    envKey: "QUANTA_BENCH_SELECTOR_MODE",
+    kind: "enum",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: selector authority mode. clean=only executable/structural hard gates decide selection; research=legacy heuristic gates additionally allowed. Default (unset)=research.",
+    readSite: "runner/knobs/knobs/selector-mode.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
     kind: "bool",
     default: undefined,

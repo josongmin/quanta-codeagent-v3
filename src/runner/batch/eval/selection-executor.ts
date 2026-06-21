@@ -43,13 +43,16 @@ import {
   type CandidateVerdict,
   type HardGateSignals,
   isValidResolvedKofN,
+  type LexTiers,
   type ResolvedKofNSignal,
   resolvedKofNPositive,
   resolvedKofNVoterQuorum,
+  type SelectorMode,
   type SoftScoreSignals,
   scoreCandidate,
   selectBest,
   selectBestEffort,
+  selectLexicographic,
 } from "@/agent/verification-bundle"
 import { filesFromUnifiedDiff } from "@/shared"
 import { Semaphore } from "@/workflow/semaphore"
@@ -59,6 +62,8 @@ import {
 } from "./counterfactual-contract"
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
+import { contractsSatisfiedCount, requiredContractsSatisfiedCount } from "./public-contract-bundle"
+import type { PublicContractBundle } from "./public-contract-types"
 
 export interface Candidate {
   /** Stable id (e.g. `cand-0`). */
@@ -433,6 +438,63 @@ const applyDeclaredExpectedHardGate = (
       }
     : verdict
 
+/**
+ * Score under the active authority mode (T-AUTH-01 / T-SEL-02). `declaredExpected`
+ * is a `researchOnly` signal: it may hard-reject ONLY in `research` mode. In
+ * `clean` mode it never vetoes — the answer-key matcher carries no clean
+ * benchmark authority (it survives only as research telemetry behind rca-gates).
+ */
+const scoreWithAuthority = (
+  hard: HardGateSignals,
+  soft: SoftScoreSignals,
+  declaredExpectedMatch: boolean | null,
+  mode: SelectorMode,
+): CandidateVerdict => {
+  const verdict = scoreCandidate(hard, soft, { mode })
+  return mode === "clean" ? verdict : applyDeclaredExpectedHardGate(verdict, declaredExpectedMatch)
+}
+
+const countAddedSourceLines = (patch: string): number => {
+  let n = 0
+  for (const line of patch.split("\n")) if (line.startsWith("+") && !line.startsWith("+++")) n += 1
+  return n
+}
+
+/**
+ * Project a scored candidate into the clean-selector lexicographic tiers
+ * (T-SEL-06). Executable proof (`votes/k`) + executed keep-green are the top
+ * tiers. The public-contract tier (T-CON-10) is evaluated from `contracts` — but
+ * only GENUINELY-sourced contracts the caller supplies; it is empty by default
+ * (the closure owner ranking is heuristic and must not be promoted into this
+ * tier — see runSelection). The candidate-family tier (T-GEN-09) stays 0 until
+ * authoritative family evidence (T-OWN-12) exists; both slot in ABOVE minimality
+ * WITHOUT disturbing the executable/structural tiers above.
+ */
+const buildLexTiers = (
+  entry: ScoredEntry,
+  order: number,
+  owners: ReadonlySet<string>,
+  contracts: PublicContractBundle,
+): LexTiers => {
+  const kofn = entry.hard.patchedResolvedKofN
+  const proofStrength =
+    kofn !== null && isValidResolvedKofN(kofn) && kofn.k > 0 ? kofn.votes / kofn.k : 0
+  const budget = analyzePatchBudget(entry.candidate.patch, { ownerFiles: [...owners] }).budget
+  const candidate = { touchedFiles: entry.candidate.files, touchedSymbols: [] as string[] }
+  return {
+    proofStrength,
+    executedKeepGreen: entry.hard.regressionGreen === true ? 1 : 0,
+    requiredContractsSatisfied: requiredContractsSatisfiedCount(contracts, candidate),
+    contractsSatisfied: contractsSatisfiedCount(contracts, candidate),
+    familyRank: 0,
+    sourceFiles: budget.sourceFiles,
+    addedLines: countAddedSourceLines(entry.candidate.patch),
+    newDefs: budget.newDefs,
+    newFiles: budget.newFiles,
+    order,
+  }
+}
+
 const declaredExpectedRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(DECLARED_EXPECTED_REJECT_REASON)
 
@@ -481,10 +543,30 @@ export const runSelection = async (args: {
    *  applyClean / regression / smoke ports) instead of a blind static accept.
    *  Default/false preserves the legacy gated behavior byte-identically. */
   counterfactual?: boolean
+  /** Selector authority mode (T-AUTH-01). `research` (default) preserves every
+   *  legacy hard gate byte-identically. `clean` lets only executable/structural
+   *  authority veto — researchOnly signals (issue smoke, declaredExpected,
+   *  rubric) can neither reject nor rank. */
+  mode?: SelectorMode
+  /** OPTIONAL public-contract bundle (T-CON-10) for the clean lexicographic
+   *  contract-dominance tier. When omitted, a root-owner-must-touch contract is
+   *  derived from the top owner file. Ignored in research mode. */
+  publicContracts?: PublicContractBundle
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
   // dedup ("first wins") and scoring stay deterministic.
+  const mode: SelectorMode = args.mode ?? "research"
+  // Clean contract-dominance tier is fed ONLY by genuinely-sourced public
+  // contracts the caller supplies (T-CON-10: public issue text / public tests /
+  // validated repros / AUTHORITATIVE static-witness owners). We intentionally do
+  // NOT auto-derive an owner-must-touch contract from the closure owner list:
+  // those owners come from the additive heuristic score ranking (ISSUE_FILE_BOOST
+  // etc.), so promoting them into a `required` dominance tier would smuggle the
+  // very heuristic authority this clean path removes back in via a mislabeled
+  // contract. Until T-OWN-12 distinguishes authoritative (LSP-definition) owners
+  // from advisory (scored) ones, the tier stays empty unless explicitly fed.
+  const contractBundle: PublicContractBundle = args.publicContracts ?? { contracts: [] }
   const limit = Math.max(1, Math.floor(args.concurrency ?? 1))
   if (args.counterfactual === true && limit > 1) {
     throw new Error("verify-select-counterfactual requires verify-select-concurrency=1")
@@ -579,10 +661,7 @@ export const runSelection = async (args: {
     return {
       candidate: c,
       hard: probed.hard,
-      verdict: applyDeclaredExpectedHardGate(
-        scoreCandidate(probed.hard, soft),
-        probed.declaredExpectedMatch,
-      ),
+      verdict: scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode),
     }
   }
 
@@ -626,10 +705,7 @@ export const runSelection = async (args: {
     const entry = {
       candidate,
       hard,
-      verdict: applyDeclaredExpectedHardGate(
-        scoreCandidate(hard, soft),
-        soft.declaredExpectedMatch,
-      ),
+      verdict: scoreWithAuthority(hard, soft, soft.declaredExpectedMatch, mode),
     }
     const ranked = [{ id: candidate.id, verdict: entry.verdict }]
     const fallbackRanked =
@@ -735,7 +811,37 @@ export const runSelection = async (args: {
           !violatedCounterfactual.has(s.candidate.id),
       )
       .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
-    const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
+    // ── clean: contract-first lexicographic selection (T-SEL-06) ─────────────
+    // Executable proof dominates contracts dominates family dominates minimality;
+    // no weighted sum can let a small symptom patch overturn a stronger-proof
+    // root-cause patch. Research mode keeps the legacy weighted selectBest.
+    const lexCleanWinner = (): string | null => {
+      // `order` (the final lexicographic tie-break) MUST be the STABLE absolute
+      // index in `scored`, not a per-filter index — otherwise the same candidate
+      // would carry a different tie-break in the primary vs the best-effort pass
+      // and the winner could flip non-deterministically when all higher tiers tie.
+      const orderOf = new Map(scored.map((s, i) => [s.candidate.id, i]))
+      const toLex = (s: ScoredEntry, admissible: boolean) => ({
+        id: s.candidate.id,
+        admissible,
+        tiers: buildLexTiers(s, orderOf.get(s.candidate.id) ?? 0, args.owners, contractBundle),
+      })
+      const eligible = scored.filter((s) => !violatedCounterfactual.has(s.candidate.id))
+      const primary = selectLexicographic(eligible.map((s) => toLex(s, s.verdict.admissible)))
+      if (primary !== null) return primary
+      // best-effort: structurally-submittable + executable-clean candidates only
+      // (researchOnly smoke/declaredExpected carry NO clean veto), ranked lex.
+      const effort = eligible.filter(
+        (s) =>
+          s.hard.patchProduced &&
+          s.hard.applyClean !== false &&
+          s.hard.regressionGreen !== false &&
+          !hardResolvedRejected(s.hard.patchedResolvedKofN),
+      )
+      return selectLexicographic(effort.map((s) => toLex(s, true)))
+    }
+    const winnerId =
+      mode === "clean" ? lexCleanWinner() : (selectBest(ranked) ?? selectBestEffort(fallbackRanked))
     // Report only counterfactual ids that SURVIVED dedup (are in `scored`): a
     // cand1 whose patch collapsed onto cand0 is gone from scoring, so listing it
     // would be a telemetry lie (and it carries no independent contract verdict).

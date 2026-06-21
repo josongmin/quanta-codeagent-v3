@@ -22,6 +22,29 @@ export interface IssueRepro {
   readonly code: string
 }
 
+/**
+ * A repro SEED carries the extracted snippet plus an explicit provenance marker.
+ *
+ * T-SMK-04 — issue-smoke demotion. The extracted snippet is precision-first but
+ * still only a HEURISTIC guess at the repro: it is the issue author's claimed
+ * reproduction, NOT a script we have observed go red on the base tree and green
+ * on a fix. So it is exposed as a `"repro-seed"` — auxiliary evidence that may
+ * SEED repro generation/selection — never as validated repro authority. The
+ * provenance tag exists so downstream telemetry can keep "extracted snippet"
+ * distinct from "validated repro" (the latter being the only repro signal that
+ * may decide admissibility, via repro consensus / quorum).
+ */
+export interface IssueReproSeed {
+  /** The extracted python source (verbatim from the fenced block, trimmed). */
+  readonly code: string
+  /**
+   * Provenance: this came from issue-text extraction, NOT from a validated
+   * repro run. Literal-typed so a consumer cannot accidentally treat it as
+   * validated-repro authority.
+   */
+  readonly provenance: "repro-seed"
+}
+
 /** Fenced code blocks: ```lang\n ... ``` (lang optional). CRLF-tolerant. */
 const FENCE_RE = /```([a-zA-Z0-9]*)\r?\n([\s\S]*?)```/g
 
@@ -79,4 +102,23 @@ export const extractIssueRepro = (problemStatement: string | undefined): IssueRe
     }
   }
   return undefined
+}
+
+/**
+ * Extract the issue's reproduction snippet as a repro SEED (T-SMK-04). Identical
+ * precision-first extraction as {@link extractIssueRepro}, but the result is
+ * tagged `provenance: "repro-seed"` so the snippet is consumed as auxiliary
+ * evidence that may seed repro generation/selection — NOT as a standalone gate.
+ *
+ * The seed's only authority is to STEER repro generation toward a known-good
+ * starting script. A false-positive extraction therefore cannot veto a patch:
+ * the snippet only earns admissibility weight once it (or its descendants)
+ * survive a real repro run and enter the validated repro set, where repro
+ * consensus decides.
+ */
+export const extractIssueReproSeed = (
+  problemStatement: string | undefined,
+): IssueReproSeed | undefined => {
+  const repro = extractIssueRepro(problemStatement)
+  return repro === undefined ? undefined : { code: repro.code, provenance: "repro-seed" }
 }

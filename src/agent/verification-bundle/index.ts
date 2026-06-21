@@ -6,11 +6,25 @@
  */
 
 export {
+  isCleanHardVeto,
+  isKnownSignal,
+  type KnownSignal,
+  type SelectorMode,
+  SIGNAL_AUTHORITY,
+  type SignalAuthority,
+} from "./authority"
+export {
   isValidResolvedKofN,
   resolvedKofNPositive,
   resolvedKofNVoterQuorum,
 } from "./resolved-kofn"
 export { scoreCandidate, selectBest, selectBestEffort } from "./score"
+export {
+  compareLexTiers,
+  type LexCandidate,
+  type LexTiers,
+  selectLexicographic,
+} from "./select-lexicographic"
 export type {
   CandidateVerdict,
   HardGateSignals,

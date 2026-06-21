@@ -478,11 +478,68 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["repro-test"]).toBeUndefined()
   })
 
+  test("PRESET-15d: agentless-v3-thin-strict-closure-select-clean preserves closure grounding but switches submit authority to clean", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-closure-select-clean"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.faultEvidence).toBe(true)
+    expect(opt.verificationPlan).toBe(true)
+    expect(opt.primaryRail).toBe(true)
+    expect(opt.patchHygiene).toBe(true)
+    expect(opt.noPatchBreaker).toBe(true)
+    expect(opt.repairEscalation).toBe(true)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectEarlyAccept).toBe(true)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    expect(opt.selectorMode).toBe("clean")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean"]).toMatchObject({
+      "bench-in-loop-exec": "off",
+      "fault-evidence": "1",
+      "verification-plan": "1",
+      "primary-rail": "1",
+      "patch-hygiene": "1",
+      "no-patch-breaker": "1",
+      "repair-escalation": "1",
+      "patch-budget-strict": "1",
+      "verify-select": "5",
+      "verify-select-early-accept": "1",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "positive",
+      "selector-mode": "clean",
+    })
+  })
+
   test("PRESET-15c: no named preset may bake in targeted RCA gates", () => {
     const contaminated = Object.entries(KNOB_PRESETS).filter(
       ([, preset]) => preset["rca-target-gates"] !== undefined,
     )
     expect(contaminated).toEqual([])
+  })
+
+  // PRESET-SM: the three clean-authority presets resolve selectorMode="clean";
+  // a research/select preset (no selector-mode key) projects the default
+  // "research". red-on-injection: if benchPostureFromState defaulted selectorMode
+  // to "clean", or a clean preset dropped the key, these flip.
+  test("PRESET-SM: clean presets resolve selectorMode=clean, research preset stays research", () => {
+    for (const preset of [
+      "agentless-v3-thin-strict-gated",
+      "agentless-v3-thin-strict-counterfactual",
+      "agentless-v3-thin-strict-counterfactual-shadow",
+      "agentless-v3-thin-strict-closure-select-clean",
+    ]) {
+      process.env.QUANTA_BENCH_PRESET = preset
+      expect(benchOptIns().selectorMode).toBe("clean")
+      expect(KNOB_PRESETS[preset]?.["selector-mode"]).toBe("clean")
+    }
+    // A select preset opts into NO selector-mode ⇒ default research projection.
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression"
+    expect(benchOptIns().selectorMode).toBe("research")
+    expect(KNOB_PRESETS["agentless-v3-select-regression"]?.["selector-mode"]).toBeUndefined()
+    // No preset / no env ⇒ default research (byte-identical baseline).
+    delete process.env.QUANTA_BENCH_PRESET
+    expect(benchOptIns().selectorMode).toBe("research")
   })
 
   test("PRESET-16: agentless-v3-select-regression-doubt adds the targeted stall-breaker", () => {

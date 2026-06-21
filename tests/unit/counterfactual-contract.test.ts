@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test"
 import { analyzePatchBudget } from "@/agent/patch-budget"
 import {
-  type CounterfactualContractKind,
   deriveCounterfactualContracts,
   evaluateCounterfactualContracts,
+  type StructuralCounterfactualContractKind,
 } from "@/runner/batch/eval/counterfactual-contract"
 import type { CandidateRiskFacts } from "@/runner/batch/eval/counterfactual-risk"
 
@@ -254,7 +254,10 @@ describe("evaluateCounterfactualContracts (real diffs via analyzePatchBudget)", 
   it("a derived contract the candidate HONORED is absent from violations (multi-contract)", () => {
     // cand0 violated BOTH singleOwnerFile and noNewDefs.
     const contracts = deriveCounterfactualContracts(facts({ crossFile: true, newDefs: 1 }))
-    expect([...contracts].sort()).toEqual(["noNewDefs", "singleOwnerFile"] as CounterfactualContractKind[])
+    expect([...contracts].sort()).toEqual([
+      "noNewDefs",
+      "singleOwnerFile",
+    ] as StructuralCounterfactualContractKind[])
 
     // cand1 stays single-owner-file but STILL adds a def: only noNewDefs violates.
     const verdict = analyzePatchBudget(newDefDiff("pkg/owner.py"), { ownerFiles: ["pkg/owner.py"] })

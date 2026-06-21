@@ -19,6 +19,11 @@ thin cand0
 
 ## 최신 코드 기준 사실
 
+> Authority update: this plan is superseded for selector authority by
+> [`jun-21-heuristic-authority-cleanup`](../jun-21-heuristic-authority-cleanup/README.md).
+> Counterfactual generation remains useful, but `declaredExpected`, issue smoke, and
+> discovered regression are no longer acceptable clean hard-gate authority.
+
 - 현재 후보 생성은 full agent rerun이다. `generateSelectionCandidate()`가 각 후보마다
   `runAgentPhase()`를 호출하고, `runAgentPhase()`는 `withGitSnapshot()`으로 후보 사이 트리를
   reset한다.
@@ -63,7 +68,8 @@ thin cand0
 - round-0는 thin/noexec/source-only/minimal first.
 - risk gate는 "후보를 더 만들지"만 결정한다. correctness authority가 아니다.
 - low-risk cand0도 blind accept하지 않는다. 최소 `applyClean`은 확인한다.
-- 가능한 경우 `declaredExpected`, issue smoke, discovered regression도 cheap validation에 포함한다.
+- `declaredExpected`, issue smoke, discovered regression은 clean cheap validation authority가 아니다.
+  이 신호들은 research/telemetry 또는 witness generation으로만 쓴다.
 - cand1은 owner hint만 받는 재시도가 아니라 counterfactual seed를 받는다.
 - 전역 patch-budget hard reject는 금지한다. 맞는 large patch를 죽일 수 있다.
 - 단, counterfactual candidate가 자기 계약을 어기면 selector에서 강하게 내린다.
@@ -125,4 +131,3 @@ agentless-v3-thin-strict-gated
 - [T-301 — counterfactual contract in selector](tickets/T-301-counterfactual-contract-selector.md)
 - [T-401 — presets and telemetry](tickets/T-401-presets-telemetry.md)
 - [T-501 — optional critic late](tickets/T-501-optional-critic-late.md)
-

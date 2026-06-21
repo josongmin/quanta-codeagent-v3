@@ -1,6 +1,10 @@
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
-import { extractIssueRepro } from "@/agent/verification-plan/extract-issue-repro"
+import {
+  extractIssueRepro,
+  extractIssueReproSeed,
+  type IssueReproSeed,
+} from "@/agent/verification-plan/extract-issue-repro"
 import { reproRunArgv } from "../corpus/dataset"
 import type { Instance } from "../types"
 import { execArgv } from "./exec"
@@ -31,10 +35,7 @@ const smokeExec =
       ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
     })
 
-const smokeArgv = (
-  instance: Pick<Instance, "swebench">,
-  scriptPath: string,
-): readonly string[] =>
+const smokeArgv = (instance: Pick<Instance, "swebench">, scriptPath: string): readonly string[] =>
   instance.swebench?.repo !== undefined
     ? reproRunArgv(instance.swebench.repo, instance.swebench.version, scriptPath)
     : ["python3", scriptPath]
@@ -121,4 +122,99 @@ export const prepareIssueSmokeSelectionPort = async (
       timeoutMs,
       probe: (sb) => runInSandbox(sb),
     })
+}
+
+/**
+ * Expose the public issue MWE as a repro SEED (T-SMK-04), NOT a smoke gate.
+ *
+ * This is the clean-path consumer: the extracted snippet is auxiliary evidence
+ * that may seed repro generation/selection. It carries `provenance: "repro-seed"`
+ * so a downstream consumer cannot mistake "extracted from issue text" for
+ * "validated repro authority". A false-positive extraction has no veto power —
+ * a seed only earns admissibility weight once it survives a real repro run and
+ * enters the validated repro set (where repro consensus decides).
+ */
+export const seedFromIssueSmoke = (
+  instance: Pick<Instance, "problemStatement">,
+): IssueReproSeed | undefined => extractIssueReproSeed(instance.problemStatement)
+
+/**
+ * Auxiliary issue-smoke telemetry for ONE candidate (T-SMK-04).
+ *
+ * `wouldReject` records the LEGACY veto decision (base green + candidate broke
+ * the public MWE) WITHOUT acting on it — it is observe-only telemetry, recorded
+ * separately from any admissibility effect. The driver maps these onto
+ * `aux.issueSmoke.{baseGreen,patchedGreen,wouldReject}`; nothing here returns a
+ * boolean the selector treats as a hard veto.
+ */
+export interface IssueSmokeAux {
+  /** Was the public MWE green on the BASE tree? `null` = setup/exec fail-open. */
+  readonly baseGreen: boolean | null
+  /** Was the public MWE green AFTER applying the candidate? `null` = fail-open. */
+  readonly patchedGreen: boolean | null
+  /**
+   * Would the LEGACY standalone smoke gate have vetoed this candidate? True iff
+   * base was green and the patched run went non-green. Recorded as evidence
+   * ONLY — it has no admissibility effect in the clean path.
+   */
+  readonly wouldReject: boolean
+}
+
+/** Per-candidate aux probe: telemetry only, never a veto boolean. */
+export type IssueSmokeAuxPort = (candidate: Candidate) => Promise<IssueSmokeAux>
+
+/**
+ * Build an AUXILIARY-ONLY issue-smoke probe (T-SMK-04 demotion).
+ *
+ * Same execution as {@link prepareIssueSmokeSelectionPort} — run the public MWE
+ * on base, then per-candidate after rematerialising the patch — but the result
+ * is TELEMETRY ({@link IssueSmokeAux}), not a `boolean|null` the selector feeds
+ * into `smokeGreen`. The legacy veto verdict survives only as the observe-only
+ * `wouldReject` field, so a candidate that fails standalone issue smoke is NOT
+ * made inadmissible: the driver can wire this without granting smoke any clean
+ * hard-veto path.
+ *
+ * Returns `undefined` (no probe) when there is no extractable MWE / baseCommit,
+ * or when base setup fails — base setup failure stays fail-open exactly as the
+ * gate variant does. When base did not run green, the probe is still returned
+ * (so its aux telemetry — `baseGreen` other than `true` — is recorded) but it
+ * never reports `wouldReject`, since the legacy gate only ever vetoed on a
+ * base-green MWE.
+ */
+export const prepareIssueSmokeAux = async (
+  instance: Pick<Instance, "problemStatement" | "localEnv" | "swebench">,
+  sandbox: string,
+  timeoutMs: number,
+  deps: PrepareIssueSmokeSelectionPortDeps = {},
+): Promise<IssueSmokeAuxPort | undefined> => {
+  const source = extractIssueRepro(instance.problemStatement)?.code
+  const baseCommit = instance.swebench?.baseCommit
+  if (source === undefined || baseCommit === undefined) return undefined
+  const reset = deps.resetBase ?? resetToBase
+  const runInSandbox = (sb: string) =>
+    (deps.runScript ?? runIssueSmokeScript)(instance, sb, source, timeoutMs, deps)
+  if (!(await reset(sandbox, baseCommit, timeoutMs))) return undefined
+  let restoredBase = true
+  let baseGreen: boolean | null = null
+  try {
+    baseGreen = await runInSandbox(sandbox)
+  } finally {
+    restoredBase = await reset(sandbox, baseCommit, timeoutMs)
+  }
+  // Base setup failure stays fail-open: no aux probe, no admissibility effect.
+  if (!restoredBase) return undefined
+  const rematerialize = deps.rematerialize ?? withCandidatePatch
+  return async (candidate) => {
+    const patchedGreen = await rematerialize<boolean | null>({
+      sandbox,
+      patch: candidate.patch,
+      baseCommit,
+      timeoutMs,
+      probe: (sb) => runInSandbox(sb),
+    })
+    // The legacy gate only vetoed when base was green AND the candidate broke the
+    // public hot path. We RECORD that verdict; we never act on it.
+    const wouldReject = baseGreen === true && patchedGreen === false
+    return { baseGreen, patchedGreen, wouldReject }
+  }
 }

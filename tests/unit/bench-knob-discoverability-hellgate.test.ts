@@ -58,6 +58,7 @@ describe("bench knob discoverability registries", () => {
     expect(inventoryBacked).toContain("verify-select-early-accept")
     expect(inventoryBacked).toContain("verify-select-counterfactual")
     expect(inventoryBacked).toContain("verify-select-llm-risk-gate")
+    expect(inventoryBacked).toContain("selector-mode")
     expect(inventoryBacked).toContain("verify-select-regression")
     expect(inventoryBacked).toContain("verify-select-repro")
   })

@@ -35,6 +35,7 @@ import {
   knobsForSurface,
   resolveKnobs,
 } from "@/runner/knobs"
+import type { SelectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import type { VerifySelectLlmRiskGateMode } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
 import type { VerifySelectRegressionMode } from "@/runner/knobs/knobs/verify-select-regression"
 import type { VerifySelectReproMode } from "@/runner/knobs/knobs/verify-select-repro"
@@ -244,6 +245,11 @@ export interface BenchPosture {
   /** Optional LLM semantic risk gate layered on top of the structural gate.
    *  `shadow` records advisory telemetry only; `on` expands fail-closed. */
   readonly verifySelectLlmRiskGate: VerifySelectLlmRiskGateMode | undefined
+  /** Selector authority mode. `clean` = only executable/structural hard gates
+   *  decide selection; `research` = legacy heuristic gates additionally allowed.
+   *  Defaults to `"research"` (knob unset ⇒ projected research) so existing
+   *  presets/runs stay byte-identical. */
+  readonly selectorMode: "clean" | "research"
   /**
    * Verify-and-select regression hard-signal source. undefined preserves the
    * existing eval-only PASS_TO_PASS behavior when available; explicit `discovered`
@@ -343,6 +349,7 @@ const isVerifySelectReproMode = (v: unknown): v is VerifySelectReproMode =>
   v === "hard" || v === "positive" || v === "off"
 const isVerifySelectLlmRiskGateMode = (v: unknown): v is VerifySelectLlmRiskGateMode =>
   v === "shadow" || v === "on"
+const isSelectorMode = (v: unknown): v is SelectorModeKnob => v === "clean" || v === "research"
 
 /**
  * Project a resolved {@link BenchKnobState} into the {@link BenchPosture}.
@@ -394,6 +401,10 @@ export const benchPostureFromState = (
     isVerifySelectRegressionMode,
   )
   const verifySelectRepro = readKnobValue(state, "verify-select-repro", isVerifySelectReproMode)
+  // Default-RESEARCH fence: unset ⇒ undefined ⇒ projected to "research" so
+  // existing presets/runs are byte-identical. Only an explicit `clean` (env /
+  // preset) flips the selector to hard-gate-only authority.
+  const selectorMode = readKnobValue(state, "selector-mode", isSelectorMode) ?? "research"
   // Default-TRUE fence: only an explicit `false` from the knob flips it OFF.
   // Unset / any non-false value ⇒ undefined ⇒ inLoopExec stays true (today's
   // exact behavior).
@@ -448,6 +459,7 @@ export const benchPostureFromState = (
     verifySelectRiskGate,
     verifySelectCounterfactual,
     verifySelectLlmRiskGate,
+    selectorMode,
     verifySelectRegression,
     verifySelectRepro,
     inLoopExec,

@@ -48,6 +48,8 @@ import {
   UsageTap,
   verifyAndFinalizeResult,
 } from "@/runner/batch/eval/driver"
+import { buildCleanSelectionPublicContracts } from "@/runner/batch/eval/public-contract-bundle"
+import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
 import { toRegressionGreen } from "@/runner/batch/eval/regression-oracle"
 import { makeBenchRegressionOracle } from "@/runner/batch/eval/regression-oracle-adapter"
 import { candidatePatchAppliesCleanly, withCandidatePatch } from "@/runner/batch/eval/rematerialize"
@@ -655,6 +657,10 @@ const runSelectionPhase = async (
   earlyAccept: boolean,
   riskGate: boolean,
   llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"],
+  counterfactual: boolean,
+  selectorMode: BenchPosture["selectorMode"],
+  publicContracts: PublicContractBundle | undefined,
+  rcaTargetGates: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -719,6 +725,9 @@ const runSelectionPhase = async (
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
     ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
+    ...(counterfactual ? { counterfactual: true } : {}),
+    mode: selectorMode,
+    ...(publicContracts !== undefined ? { publicContracts } : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -781,7 +790,7 @@ const runSelectionPhase = async (
       ...(resolvedKofNSelectionPort !== undefined
         ? { resolvedKofN: resolvedKofNSelectionPort }
         : {}),
-      declaredExpected: makeDeclaredExpectedSelectionPort(instance),
+      ...(rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}),
     },
   })
   if (result.successfulGenerations === 0 && result.generationFailures > 0) {
@@ -827,6 +836,10 @@ const runAppMainPhase = async (args: {
   readonly prepared: PreparedAttemptContext
 }): Promise<Phase> => {
   if (args.prepared.posture.verifySelectN !== undefined && args.instance.swebench !== undefined) {
+    const publicContracts = buildCleanSelectionPublicContracts({
+      declaredExpected: args.prepared.closureSession?.issueDeclaredExpected,
+      candidates: args.prepared.closureSession?.bundle.evidence.candidates,
+    })
     return runSelectionPhase(
       args.instance,
       args.deps,
@@ -838,6 +851,10 @@ const runAppMainPhase = async (args: {
       args.prepared.posture.verifySelectEarlyAccept,
       args.prepared.posture.verifySelectRiskGate,
       args.prepared.posture.verifySelectLlmRiskGate,
+      args.prepared.posture.verifySelectCounterfactual,
+      args.prepared.posture.selectorMode,
+      publicContracts,
+      args.prepared.posture.rcaTargetGates,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

@@ -26,6 +26,7 @@
  * only outside the bundle.
  */
 
+import { isCleanHardVeto, type SelectorMode, SIGNAL_AUTHORITY } from "./authority"
 import { isValidResolvedKofN } from "./resolved-kofn"
 import type { CandidateVerdict, HardGateSignals, ScoredCandidate, SoftScoreSignals } from "./types"
 
@@ -73,26 +74,42 @@ const voterQuorumValue = (v: number | null): number | null => {
 }
 
 /**
- * Score one candidate. Pure. The hard gates are AND-ed with the fail-open
- * rule; the soft score is a weighted sum over present signals.
+ * Score one candidate. Pure. The hard gates are AND-ed with the fail-open rule;
+ * the soft score is a weighted sum over present signals.
+ *
+ * `mode` (default `"research"`, byte-identical to the legacy selector) selects
+ * the authority taxonomy (T-AUTH-01). In `"clean"` mode a `researchOnly` signal
+ * (issue smoke, declaredExpected, rubric) can NEITHER veto admissibility NOR
+ * contribute to the ranking score — only `hardExecutable`/`hardStructural`
+ * authority may reject, and only non-research signals may rank.
  */
-export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): CandidateVerdict => {
+export const scoreCandidate = (
+  hard: HardGateSignals,
+  soft: SoftScoreSignals,
+  opts: { readonly mode?: SelectorMode } = {},
+): CandidateVerdict => {
+  const mode: SelectorMode = opts.mode ?? "research"
   const reasons: string[] = []
 
   // ── HARD GATE (AND; null = fail-open) ────────────────────────────────────
+  // A signal vetoes only if its authority class is allowed to reject in `mode`
+  // (clean mode bars researchOnly signals like smokeGreen from rejecting).
   let admissible = true
-  if (hard.baseValidatedRed === false) {
-    admissible = false
-    reasons.push("hard:baseValidatedRed=false (no validated repro authority)")
+  const veto = (signal: string, isFalse: boolean, reason: string): void => {
+    if (isFalse && isCleanHardVeto(signal, mode)) {
+      admissible = false
+      reasons.push(reason)
+    } else if (isFalse) {
+      reasons.push(`research:${signal}=false (observed; no clean veto)`)
+    }
   }
-  if (hard.patchProduced === false) {
-    admissible = false
-    reasons.push("hard:patchProduced=false (empty patch)")
-  }
-  if (hard.applyClean === false) {
-    admissible = false
-    reasons.push("hard:applyClean=false (patch did not apply)")
-  }
+  veto(
+    "baseValidatedRed",
+    hard.baseValidatedRed === false,
+    "hard:baseValidatedRed=false (no validated repro authority)",
+  )
+  veto("patchProduced", hard.patchProduced === false, "hard:patchProduced=false (empty patch)")
+  veto("applyClean", hard.applyClean === false, "hard:applyClean=false (patch did not apply)")
   if (hard.patchedResolvedKofN !== null) {
     const { votes, k } = hard.patchedResolvedKofN
     if (!isValidResolvedKofN(hard.patchedResolvedKofN)) {
@@ -103,21 +120,29 @@ export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): C
       reasons.push(`hard:patchedResolvedKofN votes=${votes}<k=${k}`)
     }
   }
-  if (hard.regressionGreen === false) {
-    admissible = false
-    reasons.push("hard:regressionGreen=false (candidate regressed a test)")
-  }
-  if (hard.smokeGreen === false) {
-    admissible = false
-    reasons.push("hard:smokeGreen=false (candidate broke a public smoke)")
-  }
+  veto(
+    "regressionGreen",
+    hard.regressionGreen === false,
+    "hard:regressionGreen=false (candidate regressed a test)",
+  )
+  veto(
+    "smokeGreen",
+    hard.smokeGreen === false,
+    "hard:smokeGreen=false (candidate broke a public smoke)",
+  )
 
   // ── SOFT SCORE (weighted sum over present signals) ───────────────────────
   // `voterQuorum` is the consensus RATIO (votes/k, super-quorum ⇒ >1) and uses a
   // dedicated bounded squash so super-quorum stays distinguishable from exact
   // quorum instead of saturating to 1; every other signal is a plain [0,1] coerce.
+  // In clean mode, researchOnly/observeOnly soft signals are excluded from the
+  // ranking (no hidden heuristic authority via the score).
   let score = 0
   for (const key of Object.keys(SOFT_WEIGHTS) as (keyof SoftScoreSignals)[]) {
+    if (mode === "clean") {
+      const authority = SIGNAL_AUTHORITY[key]
+      if (authority === "researchOnly" || authority === "observeOnly") continue
+    }
     const raw = soft[key]
     const value = key === "voterQuorum" ? voterQuorumValue(raw as number | null) : softValue(raw)
     if (value !== null) {

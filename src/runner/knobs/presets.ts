@@ -275,6 +275,7 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select-risk-gate": "1",
     "verify-select-regression": "discovered",
     "verify-select-repro": "off",
+    "selector-mode": "clean",
   },
   // Structural gate + counterfactual cand1 seed. When cand0 trips the structural
   // risk gate, cand1 is seeded from a counterfactual minimal-alternative and
@@ -300,6 +301,7 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select-counterfactual": "on",
     "verify-select-regression": "discovered",
     "verify-select-repro": "off",
+    "selector-mode": "clean",
   },
   // Counterfactual cand1 seed + shadow LLM semantic gate. The semantic advisory
   // is recorded in telemetry only (shadow), so this measures the counterfactual
@@ -325,6 +327,7 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select-llm-risk-gate": "shadow",
     "verify-select-regression": "discovered",
     "verify-select-repro": "off",
+    "selector-mode": "clean",
   },
   // Structural gate + shadow semantic gate. Measures whether the LLM advisory
   // would have expanded candidate 0 without changing submit authority yet.
@@ -421,6 +424,34 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select-early-accept": "1",
     "verify-select-regression": "discovered",
     "verify-select-repro": "positive",
+  },
+  // Clean-authority successor to closure-select. Preserves the same closure-
+  // grounded generation/search posture, but routes final submit authority
+  // through the clean selector lattice.
+  "agentless-v3-thin-strict-closure-select-clean": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "5",
+    "verify-select-early-accept": "1",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+    "selector-mode": "clean",
   },
   // jun-20 no-oracle verify-select arm. Starts from v3-thin, adds N-best
   // selection, uses discovered native repo tests as the hard regression signal,

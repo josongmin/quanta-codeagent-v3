@@ -6,6 +6,9 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8")
 const APP_DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
 
+const declaredExpectedWireCount = (src: string): number =>
+  [...src.matchAll(/declaredExpected:\s*makeDeclaredExpectedSelectionPort\(instance\)/g)].length
+
 describe("runner verify-select and patch-budget driver parity", () => {
   test("runner driver executes verify-select instead of silently ignoring the knob", () => {
     expect(DRIVER_SRC).toContain("const runSelectionPhase = async")
@@ -26,8 +29,14 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("selectionGenerationErrorOf({")
     expect(DRIVER_SRC).toContain("candidatePatchAppliesCleanly")
     expect(DRIVER_SRC).toContain("applyClean: (c) =>")
-    expect(DRIVER_SRC).toContain("declaredExpected: makeDeclaredExpectedSelectionPort(instance)")
-    expect(APP_DRIVER_SRC).toContain("declaredExpected: makeDeclaredExpectedSelectionPort(instance)")
+    expect(DRIVER_SRC).toContain(
+      "rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}",
+    )
+    expect(APP_DRIVER_SRC).toContain(
+      "rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}",
+    )
+    expect(declaredExpectedWireCount(DRIVER_SRC)).toBe(1)
+    expect(declaredExpectedWireCount(APP_DRIVER_SRC)).toBe(1)
   })
 
   test("both drivers preserve empty max-turns authority on the terminal path", () => {

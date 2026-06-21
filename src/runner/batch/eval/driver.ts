@@ -92,6 +92,8 @@ import {
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
+import { buildCleanSelectionPublicContracts } from "./public-contract-bundle"
+import type { PublicContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
@@ -2351,6 +2353,9 @@ const runSelectionPhase = async (
   riskGate: boolean,
   llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"],
   counterfactual: boolean,
+  selectorMode: BenchPosture["selectorMode"],
+  publicContracts: PublicContractBundle | undefined,
+  rcaTargetGates: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -2407,6 +2412,8 @@ const runSelectionPhase = async (
     ...(concurrency !== undefined ? { concurrency } : {}),
     ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
     ...(counterfactual ? { counterfactual: true } : {}),
+    mode: selectorMode,
+    ...(publicContracts !== undefined ? { publicContracts } : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -2461,7 +2468,7 @@ const runSelectionPhase = async (
       ...(resolvedKofNSelectionPort !== undefined
         ? { resolvedKofN: resolvedKofNSelectionPort }
         : {}),
-      declaredExpected: makeDeclaredExpectedSelectionPort(instance),
+      ...(rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}),
     },
   })
   if (result.successfulGenerations === 0 && result.generationFailures > 0) {
@@ -2871,6 +2878,10 @@ const runMainPhase = async (args: {
   readonly prepared: PreparedAttemptContext
 }): Promise<Phase> => {
   if (args.prepared.posture.verifySelectN !== undefined && args.instance.swebench !== undefined) {
+    const publicContracts = buildCleanSelectionPublicContracts({
+      declaredExpected: args.prepared.closureSession?.issueDeclaredExpected,
+      candidates: args.prepared.closureSession?.bundle.evidence.candidates,
+    })
     return runSelectionPhase(
       args.instance,
       args.deps,
@@ -2883,6 +2894,9 @@ const runMainPhase = async (args: {
       args.prepared.posture.verifySelectRiskGate,
       args.prepared.posture.verifySelectLlmRiskGate,
       args.prepared.posture.verifySelectCounterfactual,
+      args.prepared.posture.selectorMode,
+      publicContracts,
+      args.prepared.posture.rcaTargetGates,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

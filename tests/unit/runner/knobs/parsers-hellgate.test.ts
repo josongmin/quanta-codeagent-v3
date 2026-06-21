@@ -26,6 +26,7 @@ import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { rcaTargetGatesKnob } from "@/runner/knobs/knobs/rca-target-gates"
 import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
+import { selectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { verifySelectKnob } from "@/runner/knobs/knobs/verify-select"
@@ -91,6 +92,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["verify-select-counterfactual", verifySelectCounterfactualKnob],
     ["verify-select-early-accept", verifySelectEarlyAcceptKnob],
     ["verify-select-llm-risk-gate", verifySelectLlmRiskGateKnob],
+    ["selector-mode", selectorModeKnob],
     ["verify-select-regression", verifySelectRegressionKnob],
     ["verify-select-repro", verifySelectReproKnob],
     ["verify-select-risk-gate", verifySelectRiskGateKnob],
@@ -215,6 +217,22 @@ describe("verify-select-llm-risk-gate — closed mode enum", () => {
     expect(verifySelectLlmRiskGateKnob.parse("off")).toBeUndefined()
     expect(verifySelectLlmRiskGateKnob.parse("false")).toBeUndefined()
     expect(verifySelectLlmRiskGateKnob.parse("critic")).toBeUndefined()
+  })
+})
+
+describe("selector-mode — closed mode enum", () => {
+  test("accepted modes normalize to canonical values", () => {
+    expect(selectorModeKnob.parse("clean")).toBe("clean")
+    expect(selectorModeKnob.parse("research")).toBe("research")
+  })
+
+  test("garbage / truthy / case-variant forms stay undefined", () => {
+    expect(selectorModeKnob.parse("0")).toBeUndefined()
+    expect(selectorModeKnob.parse("1")).toBeUndefined()
+    expect(selectorModeKnob.parse("on")).toBeUndefined()
+    expect(selectorModeKnob.parse("off")).toBeUndefined()
+    expect(selectorModeKnob.parse("heuristic")).toBeUndefined()
+    expect(selectorModeKnob.parse("strict")).toBeUndefined()
   })
 })
 

@@ -5,6 +5,15 @@ preset/model 별로 실제 통과한 것만 올림. FAIL/미시도는 별도 섹
 
 > **머신리더블 SSOT = [`swebench-leaderboard.yaml`](swebench-leaderboard.yaml)** (run 블록별 resolved 리스트). 이 md는 사람이 보는 큐레이션 뷰 — 전체 resolved 인스턴스는 yaml 참조.
 
+## Audit Split (2026-06-21)
+
+- detailed case notes: [contaminated-cases.md](/Users/songmin/quanta-codeagent-v3/docs/plans/jun-21-heuristic-authority-cleanup/contaminated-cases.md)
+- **contaminated solved**: `django__django-11138`, `django__django-14315`
+- **targeted heuristic present, causality unproven**: `astropy__astropy-13033`
+- **clean rerun required**: `django__django-13417`, `sympy__sympy-24562`, `django__django-16642`
+- **historical heuristic/local pass only — clean board count 금지**: `sympy__sympy-18763`
+- **heuristic recovery였지만 clean SSOT receipt가 따로 있음**: `django__django-10914`, `django__django-15987`, `django__django-9296`
+
 ## 🚀 커버리지 확장 — untried E-class 스윕 (2026-06-19) · **26/26 = 100%**
 `scaffold-solving-summary.md`(500×17 SOTA 스캐폴드 매트릭스)로 **cnt(몇 개 스캐폴드가 푸나)**를 가성비 신호로 사용 — 난이도 라벨(`<15min`)은 CEILING(아무도 못 품)을 섞어 부적합했음. **cnt≥14 (E-class, 14~17/17 스캐폴드가 푸는 = 거의 확실히 회복가능)** untried를 cnt 높은 순으로 타게팅:
 - **batch1 12/12 + batch2 14/14 = 26/26 (100%)** — 전부 cnt=17 django, agentless-v2, on-demand(spot reclaim 회피)+prebaked AMI. run_id `eclass-untried-sweep-2026-06-19`.
@@ -223,6 +232,25 @@ mini가 10개 전부 골드 파일 적중(picks=light 티어). resolved/unresolv
 | steer OFF baseline | agentless-v1-nosteer | ⏳ 미완 | — |
 
 **확정**: steer가 **LSP 사용을 0%→75%로 끌어올림**(메커니즘 실효 측정). **resolved Δ는 미완** — baseline arm이 throttle + 동시런 경합으로 3회 실패(/tmp dataset·spot interrupt·gpt-5.4 throttle), clean 창 필요. 구현: `src/runner/knobs/knobs/lsp-steer.ts`, `knobs-bench.ts`(nav-coupled), `localize-phase-guard.ts`(steer 메시지), `presets.ts`(agentless-v1-nosteer baseline), `remote/full.ts`(concurrency). 테스트: localize 53 + wiring 3 + preset/knob 51 + full-remote 14 = 모두 green.
+
+## Heuristic authority promotion policy
+
+새 heuristic/score 신호를 clean preset의 hard authority로 올리려면
+[promotion policy](./plans/jun-21-heuristic-authority-cleanup/PROMOTION-POLICY.md)의
+5단계(observe-only → shadow → holdout A/B → false-reject audit → clean promotion)를
+순서대로 통과해야 한다. clean preset의 hard veto는 `hardExecutable`/`hardStructural`
+authority(`src/agent/verification-bundle/authority.ts`의 `SIGNAL_AUTHORITY`)만 가능하다.
+
+**clean-score vs research-score는 절대 섞지 않는다.**
+
+- **clean score**: 모든 hard authority가 executable/structural인 preset의 결과. 벤치마크
+  품질로 보고 가능한 유일한 점수.
+- **research score**: NAMED research knob/preset(`research/rca-target-gates/*` 등) 뒤의 결과.
+  항상 `research-contaminated`로 라벨링하고 clean score로 보고하지 않는다.
+
+가드: `tests/unit/authority-promotion-policy.test.ts`가 `researchOnly` 신호가 clean hard
+veto가 되는 순간 RED(`isCleanHardVeto(signal, "clean") === false` 강제) + 분류 없는 신규
+신호 추가 시 RED.
 
 ## 메모
 - baseline 비교용: 과거 기록은 gpt-5/gpt-5-mini(OPENAI_API_KEY). 현재 기록은 chatgpt-oauth gpt-5.4라 직접 비교 주의.

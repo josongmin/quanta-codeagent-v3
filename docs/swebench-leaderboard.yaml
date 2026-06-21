@@ -17,6 +17,51 @@ about: 'SWE-bench Verified — internal results SSOT (machine-readable). Rendere
 # Live-SWE-agent (~/swe-bench-tools/live-login.sh) = optional self-evolve probe, not part of the gating ladder.
 crosscheck_policy_version: 1
 
+audit_flags:
+  source_doc: docs/plans/jun-21-heuristic-authority-cleanup/contaminated-cases.md
+  contaminated_solved:
+  - instance_id: django__django-11138
+    current_board_run_id: unknown_receipt_noted_in_contaminated_cases_doc
+    status: contaminated_solved_clean_resolve_required
+    reason: 'Contaminated-cases audit records an agentless-v3-thin-strict-closure-select solve where selection telemetry used declaredExpected authority (`soft:declaredExpectedMatch=1`; loser inadmissible on `hard:declaredExpectedMatch=false`).'
+  - instance_id: django__django-14315
+    current_board_run_id: unknown_receipt_noted_in_contaminated_cases_doc
+    status: contaminated_solved_clean_resolve_required
+    reason: 'Contaminated-cases audit records an agentless-v3-thin-strict-closure-select solve aligned to the RCA target family (`postgresql/client.py` + `base/client.py`) with declaredExpected/ownerCoverage authority.'
+  targeted_heuristic_present_causality_unproven:
+  - instance_id: astropy__astropy-13033
+    current_board_run_id: unknown_receipt_noted_in_contaminated_cases_doc
+    status: targeted_heuristic_present_solved_by_heuristic_unproven
+    reason: 'Contaminated-cases audit records targeted exception-message steer presence, but the observed solved receipt is `agentless-v3-thin-strict` without verify-select / closure-select authority.'
+  rerun_clean_required:
+  - instance_id: django__django-13417
+    current_board_run_id: q13417-simplicity-2026-06-19
+    status: heuristic_assisted_official_pass
+    reason: 'Resolved under SIMPLICITY steer; leaderboard attribution says same model+scaffold, only delta = the directive.'
+  - instance_id: sympy__sympy-24562
+    current_board_run_id: absorb-simplicity-2026-06-19
+    status: heuristic_assisted_official_pass
+    reason: 'Leaderboard attribution marks 24562 as one of the two proven SIMPLICITY-caused flips.'
+  - instance_id: django__django-16642
+    current_board_run_id: easy-unresolved-recover-2026-06-18
+    status: closure_bundle_official_pass_without_clean_ssot_receipt
+    reason: 'Board pass is registered via closure-bundle recovery; notes say v1/mini also solved it, but this SSOT still lacks a separate clean run block/receipt.'
+  local_only_do_not_count_as_clean_board:
+  - instance_id: sympy__sympy-18763
+    run_id: v3-select-regression-discrim-2026-06-20
+    status: historical_local_only_pass
+    reason: 'Local verify-select pass under heuristic selector; official board receipt came later from clean agentless-v2 sidecar.'
+  clean_receipt_supersedes_heuristic_recovery:
+  - instance_id: django__django-10914
+    clean_run_id: easy-django-t1t2-2026-06-16
+    supersedes_run_id: easy-unresolved-recover-2026-06-18
+  - instance_id: django__django-15987
+    clean_run_id: v2safe-regrade-2026-06-19
+    supersedes_run_id: easy-unresolved-recover-2026-06-18
+  - instance_id: django__django-9296
+    clean_run_id: v2safe-regrade-2026-06-19
+    supersedes_run_id: easy-unresolved-recover-2026-06-18
+
 runs:
 # ── jun-20 lever measurements (knob state recorded for reproducibility) ──
 # NOTE on knob capture: report.json `knobs.resolved` records every REGISTERED,
@@ -381,6 +426,7 @@ runs:
   grading: official swebench python harness, full-remote (remote/full.ts, EC2 c7i.8xlarge x86 native, on-box local grade)
   scope: targeted re-solve of the 6 previously-unresolved easy-django + pylint-4970 (light), agentless-v2 closure bundle (no code change)
   note: 'closure bundle (no-patch-breaker/patch-hygiene/repair-escalation + LSP) recovered 4/7 incl django-10914 (localize-miss the agentless-v1 A/B could NOT get). residual 3 = multi-site (14315) / repro-env-mismatch+near-miss (16667) / guard-placement (pylint-4970). box terminated post-grade.'
+  audit_note: 'Heuristic-assisted recovery run. `django__django-10914` / `15987` / `9296` later got separate clean-safe SSOT receipts; `django__django-16642` still needs a separate clean receipt.'
   resolved_count: 4
   resolved:
   - instance_id: django__django-9296
