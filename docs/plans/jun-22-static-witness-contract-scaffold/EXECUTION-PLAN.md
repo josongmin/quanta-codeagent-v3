@@ -1,5 +1,26 @@
 # jun-22 scaffold — execution plan (incl. jun-21 close-out)
 
+## STATUS (2026-06-22) — all 8 tickets LANDED on main
+
+| Ticket | What | State |
+| --- | --- | --- |
+| SCAFF-01 | static-witness IR | ✅ `static-witness.ts` (10 teeth) |
+| SCAFF-02 | AST witness adapter | ✅ `static-witness-adapter.ts` (11) |
+| SCAFF-03 | owner-evidence lattice (witness → authoritative owner) | ✅ `witnessAuthoritativeOwners` + `fault-evidence` `witnessOwners`/`static-witness` source + `prepareAttemptContext` digest (both drivers); 14 teeth |
+| SCAFF-04 | candidate-family expansion (witness → generated co-change) | ✅ `staticWitnessesToFamilies`/`withStaticWitnessFamilies`, both drivers; 5 teeth |
+| SCAFF-05 | static-witness → required public contracts | ✅ `static-witness-contracts.ts`, both drivers (8) + e2e (3) |
+| SCAFF-06 | executable public MWE proof-state rail | ✅ `mwe-proof.ts` (20) — module landed; selection wiring is a follow-up lever |
+| SCAFF-07 | astropy repro env (`setuptools<60`/extension_helpers) | ✅ `project-env.ts` + test |
+| SCAFF-08 | contamination ratchet (no answer-key in clean authority) | ✅ `static-witness-contamination-ratchet.test.ts` |
+
+Adversarial audit (≥3R) on the integrated wiring caught + fixed: research-mode
+perturbation (witnessOwners now gated to the clean path, legacy byte-identical)
+and a vacuous theater tooth (now a real family→verify / single→commit-now paired
+control). Full SCAFF + fault/owner/closure + parity suite: 245 pass / 0 fail, tsc
+unchanged at 116. The django-RCA co-change fix is proven LIVE via the SCAFF-04
+(generation) + SCAFF-05 (selection contract) chain (`static-witness-selection-e2e`).
+
+
 How to actually build SCAFF-01..08 without rebuilding what jun-21 already shipped,
 with the proven parallel pattern (pure new modules in parallel → chokepoint wiring
 sequential + parity-locked → adversarial hellgate per ticket).
