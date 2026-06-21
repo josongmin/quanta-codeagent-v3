@@ -145,6 +145,7 @@ import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
+import { evaluateStrictPatchRisk } from "./strict-risk-gate"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
 export interface RunInstanceDeps {
@@ -266,6 +267,9 @@ const MESSAGE_FORMAT_STEER =
   "For error/exception message bugs, reproduce the exact state from the issue " +
   "and compare the FULL message. Fix the existing message construction so it " +
   "reports the actual relevant values, including multi-item lists or prefixes; " +
+  "do NOT pass list values into placeholders that still have literal quotes " +
+  "around '{}'; either change the template or render scalar/list values before " +
+  "formatting. " +
   "do NOT add a narrow special-case branch that leaves the original misleading " +
   "formatter reachable for the reproduced scenario."
 
@@ -282,8 +286,10 @@ const EXECUTION_ENV_BOUNDARY_STEER =
   "producer of the env/args and the final execution boundary (for example " +
   "subprocess.run). Empty env maps usually mean 'drop inherited environment', " +
   "not 'no overrides'; use the language's inherit-default when no overrides are " +
-  "needed, and patch backend-specific env construction plus the shared caller " +
-  "when both participate."
+  "needed. Never initialize an env map to None/null and then keep later " +
+  "env[...] writes reachable; build the override map first, return/pass env or " +
+  "None only at the no-overrides boundary, and patch backend-specific env " +
+  "construction plus the shared caller when both participate."
 
 /** Lever A — SIBLING-COMPLETION / co-change consequence check (2026-06-19,
  *  ceiling RCA). Measured failure mode on the multi-file ceiling subset: quanta
@@ -2303,6 +2309,7 @@ const runSelectionPhase = async (
   n: number,
   concurrency: number | undefined,
   earlyAccept: boolean,
+  riskGate: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -2348,6 +2355,17 @@ const runSelectionPhase = async (
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
+    ...(riskGate
+      ? {
+          riskGate: (c) =>
+            evaluateStrictPatchRisk({
+              patch: c.patch,
+              problemStatement: instance.problemStatement,
+              ownerFiles: selectionOwnerCandidates,
+              ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
+            }),
+        }
+      : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -2821,6 +2839,7 @@ const runMainPhase = async (args: {
       args.prepared.posture.verifySelectN,
       args.prepared.posture.verifySelectConcurrency,
       args.prepared.posture.verifySelectEarlyAccept,
+      args.prepared.posture.verifySelectRiskGate,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

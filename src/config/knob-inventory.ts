@@ -1327,6 +1327,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/verify-select-early-accept.ts",
   },
   {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
+    kind: "bool",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: adaptive verify-select cost guard. Candidate 0 submits immediately when static public-issue/patch risk is low; risky patches expand to the remaining candidate budget. Default-OFF.",
+    readSite: "runner/knobs/knobs/verify-select-risk-gate.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
     kind: "enum",
     default: undefined,

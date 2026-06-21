@@ -135,7 +135,11 @@ interface ParsedDatasetRow {
 type RemoteStrictGroundingSupport =
   | { readonly kind: "unavailable" }
   | { readonly kind: "unknown-selection" }
-  | { readonly kind: "unknown-task-language"; readonly instanceId: string }
+  | {
+      readonly kind: "unknown-task-language"
+      readonly instanceId: string
+      readonly files: readonly string[]
+    }
   | { readonly kind: "ok"; readonly targets: readonly RemoteStrictLspProbeTarget[] }
 
 export class UnsupportedRemoteStrictLspGroundingError extends Error {
@@ -253,9 +257,9 @@ const remoteStrictGroundingSupportOf = (args: {
     if (selected !== undefined && !selected.has(instanceId)) continue
     sawSelected = true
     const patch = datasetGoldPatchOf(record)
-    const target =
-      patch !== undefined ? dominantRemoteStrictBinOf(instanceId, filesFromPatch(patch)) : undefined
-    if (target === undefined) return { kind: "unknown-task-language", instanceId }
+    const files = patch !== undefined ? filesFromPatch(patch) : []
+    const target = dominantRemoteStrictBinOf(instanceId, files)
+    if (target === undefined) return { kind: "unknown-task-language", instanceId, files }
     if (!targets.has(target.bin)) targets.set(target.bin, target)
   }
   if (!sawSelected) return { kind: "unknown-selection" }
@@ -307,8 +311,14 @@ export const assertRemoteStrictGroundingSupported = (args: {
     )
   }
   if (support.kind === "unknown-task-language") {
+    const preview = support.files.slice(0, 5).join(", ")
+    const suffix = support.files.length > 5 ? ` (+${support.files.length - 5} more)` : ""
+    const detail =
+      support.files.length === 0
+        ? "its gold patch exposed no parseable diff file headers"
+        : `its gold patch touched ${preview}${suffix}, but none map to a configured language server`
     throw new UnsupportedRemoteStrictLspGroundingError(
-      `[${args.surface}] preset ${args.preset} requires live LSP grounding, but selected task ${support.instanceId} has no gold-patch file mapped to a configured language server. The remote box only bootstraps/proves ${PYRIGHT_LSP_BIN} today, so task language cannot be identified fail-closed.`,
+      `[${args.surface}] preset ${args.preset} requires live LSP grounding, but selected task ${support.instanceId} cannot be grounded: ${detail}. The remote box only bootstraps/proves ${PYRIGHT_LSP_BIN} today, so task language cannot be identified fail-closed.`,
     )
   }
   const unsupported = support.targets.filter((target) => target.bin !== PYRIGHT_LSP_BIN)

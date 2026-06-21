@@ -95,6 +95,17 @@ export interface ScoredEntry {
   verdict: CandidateVerdict
 }
 
+export interface SelectionRiskGateDecision {
+  readonly expand: boolean
+  readonly reasons: readonly string[]
+}
+
+export interface SelectionRiskGateTelemetry {
+  readonly candidateId: string
+  readonly expanded: boolean
+  readonly reasons: readonly string[]
+}
+
 export interface SelectionResult {
   /** Requested candidate count (`args.n`). */
   attempted: number
@@ -119,6 +130,9 @@ export interface SelectionResult {
   admissibleCount: number
   /** Distinct (deduped) candidate count. */
   generated: number
+  /** Adaptive strict@1 gate telemetry, present only when the gate was enabled
+   *  and candidate 0 was produced. */
+  riskGate?: SelectionRiskGateTelemetry
 }
 
 export type ResolvedKofNMode = "hard" | "soft"
@@ -149,6 +163,7 @@ export interface SelectionTelemetry {
   generated: number
   admissibleCount: number
   winnerId: string | null
+  riskGate?: SelectionRiskGateTelemetry
   candidates: readonly CandidateTelemetry[]
 }
 
@@ -163,6 +178,7 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
   generated: result.generated,
   admissibleCount: result.admissibleCount,
   winnerId: result.winner?.id ?? null,
+  ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
   candidates: result.scored.map((s) => ({
     id: s.candidate.id,
     files: s.candidate.files,
@@ -387,6 +403,14 @@ export const runSelection = async (args: {
    *  quorum remain ranking credit / keep-search signals, never global stop
    *  authority. Default false preserves N-best. */
   earlyAccept?: boolean
+  /** Adaptive strict cost guard. Sequential-only: after candidate 0 exists, a
+   *  pure static risk gate may accept it immediately without probing the
+   *  expensive selection ports. If it expands, candidate 0 cannot be
+   *  early-accepted; at least the next candidate is generated and the normal
+   *  selector decides. */
+  riskGate?: (
+    candidate: Candidate,
+  ) => SelectionRiskGateDecision | Promise<SelectionRiskGateDecision>
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
@@ -480,9 +504,55 @@ export const runSelection = async (args: {
       : null
   }
 
+  const staticAccept = async (
+    rawCandidates: readonly Candidate[],
+    candidate: Candidate,
+    riskGate: SelectionRiskGateTelemetry,
+  ): Promise<SelectionResult> => {
+    const isEmpty = candidate.patch.trim() === ""
+    const hard: HardGateSignals = {
+      baseValidatedRed: candidate.baseValidatedRed,
+      patchProduced: !isEmpty,
+      applyClean: null,
+      regressionGreen: null,
+      smokeGreen: null,
+      patchedResolvedKofN: null,
+    }
+    const soft: SoftScoreSignals = {
+      declaredExpectedMatch: await declaredExpectedMatchOf(candidate, isEmpty, args.ports),
+      rubricScore: null,
+      voterQuorum: null,
+      minimality: isEmpty ? null : 1,
+      ownerCoverage: isEmpty ? null : ownerCoverageOf(candidate.files, args.owners),
+    }
+    const entry = {
+      candidate,
+      hard,
+      verdict: scoreCandidate(hard, soft),
+    }
+    const ranked = [{ id: candidate.id, verdict: entry.verdict }]
+    const fallbackRanked = hard.patchProduced ? ranked : []
+    const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
+    const winner = winnerId === candidate.id ? candidate : null
+    return {
+      attempted: args.n,
+      ownerFiles: [...args.owners],
+      earlyAccepted: false,
+      successfulGenerations: rawCandidates.length,
+      generationFailures,
+      winner,
+      terminalCandidate: winner === null ? candidate : null,
+      scored: [entry],
+      admissibleCount: entry.verdict.admissible ? 1 : 0,
+      generated: 1,
+      riskGate,
+    }
+  }
+
   const finalize = async (
     rawCandidates: readonly Candidate[],
     earlyAccepted: boolean,
+    riskGate?: SelectionRiskGateTelemetry,
   ): Promise<SelectionResult> => {
     // ── dedup by normalized diff (Trae's pruning lever) ──────────────────────
     const seen = new Set<string>()
@@ -573,10 +643,12 @@ export const runSelection = async (args: {
       scored,
       admissibleCount: scored.filter((s) => s.verdict.admissible).length,
       generated: cands.length,
+      ...(riskGate !== undefined ? { riskGate } : {}),
     }
   }
 
   let raw: Candidate[]
+  let riskGateTelemetry: SelectionRiskGateTelemetry | undefined
   if (limit <= 1) {
     // Sequential: each candidate is a full agent run sharing the sandbox; the
     // driver resets the tree between them. BYTE-IDENTICAL to the original loop.
@@ -585,8 +657,25 @@ export const runSelection = async (args: {
       const candidate = await tryGenerate(i)
       if (candidate === null) continue
       raw.push(candidate)
+      let riskGateExpanded = false
+      if (i === 0 && args.riskGate !== undefined) {
+        const decision = await args.riskGate(candidate)
+        riskGateTelemetry = {
+          candidateId: candidate.id,
+          expanded: decision.expand,
+          reasons: decision.reasons,
+        }
+        if (!decision.expand) return await staticAccept(raw, candidate, riskGateTelemetry)
+        riskGateExpanded = true
+      }
+      if (riskGateExpanded) continue
       const earlyAccepted = await maybeFinalizeEarlyAccept(raw, candidate)
-      if (earlyAccepted !== null) return earlyAccepted
+      if (earlyAccepted !== null) {
+        if (riskGateTelemetry !== undefined) {
+          return { ...earlyAccepted, riskGate: riskGateTelemetry }
+        }
+        return earlyAccepted
+      }
     }
   } else {
     // Bounded-parallel: at most `limit` generate() calls in flight at once.
@@ -603,5 +692,5 @@ export const runSelection = async (args: {
     )
     raw = maybeRaw.filter((candidate): candidate is Candidate => candidate !== null)
   }
-  return await finalize(raw, false)
+  return await finalize(raw, false, riskGateTelemetry)
 }

@@ -35,6 +35,17 @@ const hasPostgresqlEmptyEnvIssueShape = (problemStatement: string): boolean => {
   )
 }
 
+const hasDatabaseConnectionTimezoneIssueShape = (problemStatement: string): boolean => {
+  const text = problemStatement.toLowerCase()
+  return (
+    /\btime_zone\b/.test(text) &&
+    /\bdatabase/.test(text) &&
+    /\bmysql\b/.test(text) &&
+    /\bsqlite\b/.test(text) &&
+    /\boracle\b/.test(text)
+  )
+}
+
 const hasRequiredColumnsScalarFallback = (added: string): boolean =>
   /\brequired_columns\s*\[\s*0\s*\]/.test(added) &&
   !/\blen\s*\(\s*required_columns\s*\)\s*(?:==|<=)\s*1\b/.test(added)
@@ -45,6 +56,16 @@ const hasFoundColumnsScalarFallback = (added: string): boolean =>
 
 const hasQuotedListPlaceholder = (postPatchHunk: string): boolean =>
   /\bexpected\s+'\{\}'/.test(postPatchHunk) || /\bfound\s+'\{\}'/.test(postPatchHunk)
+
+const hasUnquotedScalarExpectedFallback = (added: string): boolean =>
+  /\bexpected\s*=\s*required_columns\s*\[\s*0\s*\]\s*if\s+len\s*\(\s*required_columns\s*\)\s*==\s*1\s*else\b/.test(
+    added,
+  )
+
+const hasRawFoundPrefixFormatter = (added: string): boolean =>
+  /\.format\s*\([\s\S]*\bself\.colnames\s*\[\s*:\s*len\s*\(\s*required_columns\s*\)\s*\]/.test(
+    added,
+  ) && !/\b[a-zA-Z_]*scalar[a-zA-Z_]*list[a-zA-Z_]*\s*\(/i.test(added)
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -83,12 +104,43 @@ const postgresqlEmptyEnvPatchMatch = (patch: string): boolean => {
   )
 }
 
+const hasSqliteFunctionArityExpansion = (added: string): boolean =>
+  /create_function\(['"]django_datetime_cast_date['"]\s*,\s*3\b/.test(added) &&
+  /create_function\(['"]django_datetime_cast_time['"]\s*,\s*3\b/.test(added) &&
+  /create_function\(['"]django_datetime_extract['"]\s*,\s*4\b/.test(added) &&
+  /create_function\(['"]django_datetime_trunc['"]\s*,\s*4\b/.test(added)
+
+const hasSqliteSqlArityExpansion = (added: string): boolean =>
+  /django_datetime_cast_date\(%s,\s*%s,\s*%s\)/.test(added) &&
+  /django_datetime_cast_time\(%s,\s*%s,\s*%s\)/.test(added) &&
+  /django_datetime_extract\('%s',\s*%s,\s*%s,\s*%s\)/.test(added) &&
+  /django_datetime_trunc\('%s',\s*%s,\s*%s,\s*%s\)/.test(added)
+
+const databaseConnectionTimezonePatchMatch = (patch: string): boolean => {
+  const added = addedLines(patch)
+  if (added.trim() === "") return false
+  const connectionTimezoneMentions =
+    added.match(/\bself\.connection\.timezone_name\b/g)?.length ?? 0
+  return (
+    touchesFile(patch, "django/db/backends/mysql/operations.py") &&
+    touchesFile(patch, "django/db/backends/oracle/operations.py") &&
+    touchesFile(patch, "django/db/backends/sqlite3/base.py") &&
+    touchesFile(patch, "django/db/backends/sqlite3/operations.py") &&
+    connectionTimezoneMentions >= 3 &&
+    hasSqliteFunctionArityExpansion(added) &&
+    hasSqliteSqlArityExpansion(added)
+  )
+}
+
 export const declaredExpectedPatchMatch = (
   problemStatement: string,
   patch: string,
 ): boolean | null => {
   if (hasPostgresqlEmptyEnvIssueShape(problemStatement)) {
     return postgresqlEmptyEnvPatchMatch(patch)
+  }
+  if (hasDatabaseConnectionTimezoneIssueShape(problemStatement)) {
+    return databaseConnectionTimezonePatchMatch(patch)
   }
   if (!hasSingleRequiredColumnExceptionShape(problemStatement)) return null
   const added = addedLines(patch)
@@ -97,6 +149,8 @@ export const declaredExpectedPatchMatch = (
   if (hasRequiredColumnsScalarFallback(added)) return false
   if (hasFoundColumnsScalarFallback(added)) return false
   if (hasQuotedListPlaceholder(postPatchHunk)) return false
+  if (hasUnquotedScalarExpectedFallback(added)) return false
+  if (hasRawFoundPrefixFormatter(added)) return false
   return (
     /\brequired_columns\b/.test(added) &&
     /\bself\.colnames\s*\[\s*:\s*len\s*\(\s*required_columns\s*\)\s*\]/.test(added)

@@ -12,6 +12,7 @@ describe("buildProjectPytestArgv", () => {
     expect(argv).toContain("--no-project")
     expect(hasWithDep(argv, "pytest")).toBe(true)
     expect(hasWithDep(argv, "setuptools")).toBe(true)
+    expect(hasWithDep(argv, "numpy<2")).toBe(true)
     expect(argv).toContain("--with-editable")
     expect(argv[argv.length - 1]).toBe("tests/test_x.py::test_y")
   })
@@ -21,5 +22,9 @@ describe("buildProjectPytestArgv", () => {
     expect(buildAppProjectPytestArgv("pydata/xarray", "2023.1")(tests)).toEqual(
       buildProjectPytestArgv("pydata/xarray", "2023.1")(tests),
     )
+  })
+
+  test("non-xarray repos stay free of the xarray-specific numpy guard", () => {
+    expect(hasWithDep(buildProjectPytestArgv("sympy/sympy", "1.5")(["t"]), "numpy<2")).toBe(false)
   })
 })

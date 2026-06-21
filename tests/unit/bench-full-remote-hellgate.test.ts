@@ -764,6 +764,55 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
   })
 
+  test("thin-strict family surfaces the touched unmapped file when grounding cannot classify the task", async () => {
+    const datasetPath = writeDatasetJsonl("bench-full-unmapped-dataset-", [
+      {
+        instance_id: "acme__docs-1",
+        patch: [
+          "diff --git a/docs/readme.md b/docs/readme.md",
+          "--- a/docs/readme.md",
+          "+++ b/docs/readme.md",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+      },
+    ])
+    const { fn, calls } = mockSpawn()
+    await expect(
+      createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        datasetPath,
+        instanceIds: ["acme__docs-1"],
+        preset: "agentless-v3-thin-strict",
+      }).run(),
+    ).rejects.toThrow(/docs\/readme\.md/i)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
+  test("thin-strict family says when a gold patch exposes no parseable diff file headers", async () => {
+    const datasetPath = writeDatasetJsonl("bench-full-noheaders-dataset-", [
+      {
+        instance_id: "acme__badpatch-1",
+        patch: "this is not a unified diff",
+      },
+    ])
+    const { fn, calls } = mockSpawn()
+    await expect(
+      createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        datasetPath,
+        instanceIds: ["acme__badpatch-1"],
+        preset: "agentless-v3-thin-strict",
+      }).run(),
+    ).rejects.toThrow(/no parseable diff file headers/i)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
   test("selected instanceIds fail closed before launch when the local dataset does not contain them", async () => {
     const datasetPath = writeDatasetJsonl("bench-full-missing-id-", [
       { instance_id: "psf__requests-5414", patch: PY_FIX_PATCH },

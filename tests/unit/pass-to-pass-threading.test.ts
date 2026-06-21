@@ -104,4 +104,22 @@ describe("toInstance — PASS_TO_PASS threading", () => {
     expect(inst.testCmd).toContain("--no-project")
     expect(inst.testCmd).toContain("--with-editable . pytest -x --no-header")
   })
+
+  test("xarray testCmd shell-quotes the numpy<2 guard instead of redirecting it", () => {
+    const inst = toInstance(
+      {
+        instanceId: "pydata__xarray-2905",
+        repo: "pydata/xarray",
+        baseCommit: "deadbeef",
+        problemStatement: "fix the bug",
+        raw: {
+          repo: "pydata/xarray",
+          version: "0.12",
+          FAIL_TO_PASS: JSON.stringify(["xarray/tests/test_variable.py::TestAsCompatibleData::test_unsupported_type"]),
+        },
+      },
+      "/tmp/repo",
+    )
+    expect(inst.testCmd).toContain("--with 'numpy<2'")
+  })
 })

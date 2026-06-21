@@ -32,6 +32,7 @@ import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-
 import { verifySelectEarlyAcceptKnob } from "@/runner/knobs/knobs/verify-select-early-accept"
 import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
 import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
+import { verifySelectRiskGateKnob } from "@/runner/knobs/knobs/verify-select-risk-gate"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 /** Set of adversarial raw strings every parser should reject. */
@@ -86,6 +87,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["verify-select-early-accept", verifySelectEarlyAcceptKnob],
     ["verify-select-regression", verifySelectRegressionKnob],
     ["verify-select-repro", verifySelectReproKnob],
+    ["verify-select-risk-gate", verifySelectRiskGateKnob],
   ] as const
 
   for (const [id, knob] of knobs) {
@@ -153,6 +155,21 @@ describe("verify-select-early-accept — closed truthy bool", () => {
     expect(verifySelectEarlyAcceptKnob.parse("off")).toBeUndefined()
     expect(verifySelectEarlyAcceptKnob.parse("false")).toBeUndefined()
     expect(verifySelectEarlyAcceptKnob.parse("TRUE")).toBeUndefined()
+  })
+})
+
+describe("verify-select-risk-gate — closed truthy bool", () => {
+  test("accepted truthy forms parse to true", () => {
+    expect(verifySelectRiskGateKnob.parse("1")).toBe(true)
+    expect(verifySelectRiskGateKnob.parse("on")).toBe(true)
+    expect(verifySelectRiskGateKnob.parse("true")).toBe(true)
+  })
+
+  test("false/garbage forms stay undefined", () => {
+    expect(verifySelectRiskGateKnob.parse("0")).toBeUndefined()
+    expect(verifySelectRiskGateKnob.parse("off")).toBeUndefined()
+    expect(verifySelectRiskGateKnob.parse("false")).toBeUndefined()
+    expect(verifySelectRiskGateKnob.parse("TRUE")).toBeUndefined()
   })
 })
 

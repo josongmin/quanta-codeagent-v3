@@ -250,14 +250,15 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   const isNodeIdLike = (n: string): boolean => n.includes("::") || n.includes("/")
   const nodeIds = names.filter(isNodeIdLike)
   const keywords = names.filter((n) => !isNodeIdLike(n))
-  const quote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
+  const shellQuote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
+  const shellWord = (s: string): string => (/^[A-Za-z0-9_./:=+-]+$/.test(s) ? s : shellQuote(s))
   const parts: string[] = []
-  for (const n of nodeIds) parts.push(quote(n))
+  for (const n of nodeIds) parts.push(shellQuote(n))
   if (keywords.length > 0) {
     // pytest -k accepts boolean expression over substrings. Join with " or "
     // so any matching test triggers; quote the whole expression so the shell
     // treats it as one argument.
-    parts.push("-k", quote(keywords.join(" or ")))
+    parts.push("-k", shellQuote(keywords.join(" or ")))
   }
   // `uv run` pulls deps + pytest into a cached ephemeral env so the sandbox
   // doesn't need its own venv. `--with setuptools` keeps `pkg_resources`-era imports
@@ -267,7 +268,7 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   // subsequent calls hit uv's cache (~ms).
   const repo = typeof raw.repo === "string" ? raw.repo : ""
   const version = typeof raw.version === "string" ? raw.version : undefined
-  const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"]).join(" ")
+  const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"]).map(shellWord).join(" ")
   return `${prefix} pytest -x --no-header ${parts.join(" ")}`
 }
 

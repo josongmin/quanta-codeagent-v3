@@ -39,6 +39,11 @@ describe("reproRunArgv", () => {
   test("unknown repo ⇒ conservative 3.11 default", () => {
     expect(pyOf(reproRunArgv("some/unknown-repo", undefined, "/s/x.py"))).toBe("3.11")
   })
+
+  test("xarray inherits the legacy numpy<2 guard in its repro env", () => {
+    expect(hasWithDep(reproRunArgv("pydata/xarray", "0.12", "/s/x.py"), "numpy<2")).toBe(true)
+    expect(hasWithDep(reproRunArgv("sympy/sympy", "1.5", "/s/x.py"), "numpy<2")).toBe(false)
+  })
 })
 
 describe("pythonForRepoVersion — (repo,version) ground truth, FLOORED at 3.9", () => {

@@ -18,13 +18,61 @@ const normalizeGitHeaderPath = (raw: string, side: "a" | "b"): string | null => 
   return path.startsWith(`${side}/`) ? path.slice(2) : path
 }
 
+const decodeGitPathToken = (token: string): string | null => {
+  const startsQuoted = token.startsWith('"')
+  const endsQuoted = token.endsWith('"')
+  if (startsQuoted !== endsQuoted) return null
+  return startsQuoted ? unquoteGitPath(token) : token
+}
+
 const unquoteGitPath = (path: string): string => {
   if (!(path.startsWith('"') && path.endsWith('"') && path.length >= 2)) return path
-  return path
-    .slice(1, -1)
-    .replace(/\\([0-7]{1,3}|.)/g, (_m, esc: string) =>
-      /^[0-7]{1,3}$/.test(esc) ? String.fromCharCode(Number.parseInt(esc, 8)) : esc,
-    )
+  const body = path.slice(1, -1)
+  const bytes: number[] = []
+  const pushText = (text: string): void => {
+    bytes.push(...Buffer.from(text, "utf8"))
+  }
+  const escapedByteOf = (esc: string): number[] => {
+    switch (esc) {
+      case "a":
+        return [0x07]
+      case "b":
+        return [0x08]
+      case "f":
+        return [0x0c]
+      case "n":
+        return [0x0a]
+      case "r":
+        return [0x0d]
+      case "t":
+        return [0x09]
+      case "v":
+        return [0x0b]
+      default:
+        return [...Buffer.from(esc, "utf8")]
+    }
+  }
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i]
+    if (ch === undefined) break
+    if (ch !== "\\") {
+      pushText(ch)
+      continue
+    }
+    const a = body[i + 1]
+    if (a === undefined) break
+    if (/[0-7]/.test(a)) {
+      const b = body[i + 2]
+      const c = body[i + 3]
+      const octal = `${a}${/[0-7]/.test(b ?? "") ? b : ""}${/[0-7]/.test(c ?? "") ? c : ""}`
+      bytes.push(Number.parseInt(octal, 8))
+      i += octal.length
+      continue
+    }
+    bytes.push(...escapedByteOf(a))
+    i += 1
+  }
+  return Buffer.from(bytes).toString("utf8")
 }
 
 const readDiffGitToken = (
@@ -69,9 +117,12 @@ const parseDiffGitPaths = (
   if (a === null) return null
   const b = readDiffGitToken(payload, a.next)
   if (b === null) return null
+  const decodedA = decodeGitPathToken(a.token)
+  const decodedB = decodeGitPathToken(b.token)
+  if (decodedA === null || decodedB === null) return null
   return {
-    a: normalizeGitHeaderPath(unquoteGitPath(a.token), "a"),
-    b: normalizeGitHeaderPath(unquoteGitPath(b.token), "b"),
+    a: normalizeGitHeaderPath(decodedA, "a"),
+    b: normalizeGitHeaderPath(decodedB, "b"),
   }
 }
 
@@ -81,7 +132,8 @@ const parseImageHeaderPath = (
   side: "a" | "b",
 ): string | null | undefined => {
   if (!line.startsWith(prefix)) return undefined
-  const raw = unquoteGitPath(line.slice(prefix.length).trim())
+  const raw = decodeGitPathToken(line.slice(prefix.length).trim())
+  if (raw === null) return null
   return normalizeGitHeaderPath(raw, side)
 }
 

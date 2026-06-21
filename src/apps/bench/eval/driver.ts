@@ -64,9 +64,11 @@ import {
   type SelectionTelemetry,
   summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
+import { makeDeclaredExpectedSelectionPort } from "@/runner/batch/eval/selection-declared-expected"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
+import { evaluateStrictPatchRisk } from "@/runner/batch/eval/strict-risk-gate"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage, gateDisabled, logger } from "@/shared"
@@ -651,6 +653,7 @@ const runSelectionPhase = async (
   n: number,
   concurrency: number | undefined,
   earlyAccept: boolean,
+  riskGate: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -705,6 +708,17 @@ const runSelectionPhase = async (
     resolvedKofNMode: reproPolicy.resolvedKofNMode,
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
+    ...(riskGate
+      ? {
+          riskGate: (c) =>
+            evaluateStrictPatchRisk({
+              patch: c.patch,
+              problemStatement: instance.problemStatement,
+              ownerFiles: selectionOwnerCandidates,
+              ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
+            }),
+        }
+      : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -767,6 +781,7 @@ const runSelectionPhase = async (
       ...(resolvedKofNSelectionPort !== undefined
         ? { resolvedKofN: resolvedKofNSelectionPort }
         : {}),
+      declaredExpected: makeDeclaredExpectedSelectionPort(instance),
     },
   })
   if (result.successfulGenerations === 0 && result.generationFailures > 0) {
@@ -821,6 +836,7 @@ const runAppMainPhase = async (args: {
       args.prepared.posture.verifySelectN,
       args.prepared.posture.verifySelectConcurrency,
       args.prepared.posture.verifySelectEarlyAccept,
+      args.prepared.posture.verifySelectRiskGate,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

@@ -231,6 +231,11 @@ export interface BenchPosture {
    *  authority instead of always burning all N. Fail-open null gates never stop
    *  early. */
   readonly verifySelectEarlyAccept: boolean
+  /** Adaptive strict selector: candidate 0 is generated first and submitted
+   *  immediately when the static public-issue/patch risk gate stays green.
+   *  Risky candidate 0 expands to the remaining verify-select candidates and
+   *  lets late selection decide. */
+  readonly verifySelectRiskGate: boolean
   /**
    * Verify-and-select regression hard-signal source. undefined preserves the
    * existing eval-only PASS_TO_PASS behavior when available; explicit `discovered`
@@ -363,6 +368,7 @@ export const benchPostureFromState = (
   const verifySelectConcurrency = readKnobValue(state, "verify-select-concurrency", isNumber)
   const verifySelectEarlyAccept =
     readKnobValue(state, "verify-select-early-accept", isTrue) === true
+  const verifySelectRiskGate = readKnobValue(state, "verify-select-risk-gate", isTrue) === true
   const verifySelectRegression = readKnobValue(
     state,
     "verify-select-regression",
@@ -419,6 +425,7 @@ export const benchPostureFromState = (
     verifySelectN,
     verifySelectConcurrency,
     verifySelectEarlyAccept,
+    verifySelectRiskGate,
     verifySelectRegression,
     verifySelectRepro,
     inLoopExec,

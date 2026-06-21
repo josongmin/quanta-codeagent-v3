@@ -2,6 +2,13 @@ import { pythonForRepoVersion } from "./repo-version-python"
 
 const BASE_PROJECT_ENV_DEPS = ["setuptools"] as const
 
+const repoPinnedDeps = (repo: string): readonly string[] => {
+  // xarray still imports `np.unicode_` on older bench snapshots; numpy 2 removes it.
+  // Until env-prep materializes the official dependency authority, keep xarray on numpy 1.x.
+  if (repo === "pydata/xarray") return ["numpy<2"]
+  return []
+}
+
 /**
  * Shared SWE-bench project env prefix for repo-local repro / verifier commands.
  *
@@ -16,7 +23,7 @@ export const buildProjectEnvUvRunArgv = (
   version: string | undefined,
   extraWith: readonly string[] = [],
 ): readonly string[] => {
-  const deps = [...new Set([...extraWith, ...BASE_PROJECT_ENV_DEPS])]
+  const deps = [...new Set([...extraWith, ...repoPinnedDeps(repo), ...BASE_PROJECT_ENV_DEPS])]
   const argv = ["uv", "run", "--no-project", "--python", pythonForRepoVersion(repo, version)] as string[]
   for (const dep of deps) argv.push("--with", dep)
   argv.push("--with-editable", ".")

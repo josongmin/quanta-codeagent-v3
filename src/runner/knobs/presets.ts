@@ -252,6 +252,30 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-budget": "1",
     "patch-budget-strict": "1",
   },
+  // Adaptive strict arm: generate one thin/noexec strict candidate first. Only
+  // if a static public-issue/patch risk gate fires does it spend candidate #2
+  // and run late selection. Repro consensus is OFF here so low-risk strict@1
+  // does not pay a hidden repro-generation cost before the gate can accept.
+  "agentless-v3-thin-strict-gated": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "patch-hygiene": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "2",
+    "verify-select-concurrency": "1",
+    "verify-select-risk-gate": "1",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "off",
+  },
   // Strict + late critic/select. Candidate generation stays mini-first/noexec;
   // only the outer selector runs regression checks after candidates exist.
   "agentless-v3-thin-strict-select": {

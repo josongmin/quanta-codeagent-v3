@@ -330,6 +330,67 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-0")
   })
 
+  it("riskGate accepts low-risk candidate 0 without spending candidate 1 or selection probes", async () => {
+    let generated = 0
+    let applyCalls = 0
+    let regressionCalls = 0
+    const gen: SelectionPorts["generate"] = async (i) => {
+      generated += 1
+      return cand({ id: `cand-${i}`, patch: `+++ b/x.py\n+fix${i}`, files: ["x.py"] })
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, "Focus on x.py"],
+      owners: new Set(["x.py"]),
+      riskGate: async () => ({ expand: false, reasons: [] }),
+      ports: {
+        generate: gen,
+        applyClean: async () => {
+          applyCalls += 1
+          return true
+        },
+        regression: async () => {
+          regressionCalls += 1
+          return true
+        },
+      },
+    })
+    expect(generated).toBe(1)
+    expect(applyCalls).toBe(0)
+    expect(regressionCalls).toBe(0)
+    expect(r.riskGate).toEqual({ candidateId: "cand-0", expanded: false, reasons: [] })
+    expect(r.successfulGenerations).toBe(1)
+    expect(r.winner?.id).toBe("cand-0")
+  })
+
+  it("riskGate expansion forces candidate 1 even when candidate 0 would early-accept", async () => {
+    let generated = 0
+    const gen: SelectionPorts["generate"] = async (i) => {
+      generated += 1
+      return cand({ id: `cand-${i}`, patch: `+++ b/x.py\n+fix${i}`, files: ["x.py"] })
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, "Focus on x.py"],
+      owners: new Set(["x.py"]),
+      earlyAccept: true,
+      riskGate: async () => ({ expand: true, reasons: ["axis-inversion-overwritten"] }),
+      ports: {
+        generate: gen,
+        applyClean: async () => true,
+        resolvedKofN: async () => ({ votes: 1, k: 1 }),
+      },
+    })
+    expect(generated).toBe(2)
+    expect(r.riskGate).toEqual({
+      candidateId: "cand-0",
+      expanded: true,
+      reasons: ["axis-inversion-overwritten"],
+    })
+    expect(r.successfulGenerations).toBe(2)
+    expect(r.earlyAccepted).toBe(true)
+  })
+
   it("ADVERSARIAL: soft-only repro quorum cannot become early-stop authority", async () => {
     let generated = 0
     const gen: SelectionPorts["generate"] = async (i) => {

@@ -43,6 +43,7 @@ const ENV_KEYS = [
   "QUANTA_BENCH_REPRO_TEST",
   "QUANTA_BENCH_RETRY_TRANSIENT",
   "QUANTA_BENCH_CLOSURE_REPAIR",
+  "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
   "QUANTA_READ_OUTLINE",
   "QUANTA_TEST_RUNNER",
   "QUANTA_REPO_MAP",
@@ -316,6 +317,28 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
       "verify-select-regression": "discovered",
       "verify-select-repro": "positive",
     })
+  })
+
+  test("PRESET-14b: agentless-v3-thin-strict-gated is adaptive strict@2 without repro precompute", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(2)
+    expect(opt.verifySelectConcurrency).toBe(1)
+    expect(opt.verifySelectRiskGate).toBe(true)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("off")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated"]).toMatchObject({
+      "bench-in-loop-exec": "off",
+      "patch-budget-strict": "1",
+      "verify-select": "2",
+      "verify-select-concurrency": "1",
+      "verify-select-risk-gate": "1",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "off",
+    })
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated"]?.["repro-test"]).toBeUndefined()
   })
 
   test("PRESET-15b: agentless-v3-thin-strict-closure-select combines noexec selector with ClosureBundle grounding", () => {

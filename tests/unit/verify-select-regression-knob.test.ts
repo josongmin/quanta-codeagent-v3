@@ -51,6 +51,16 @@ describe("verify-select-early-accept knob wiring", () => {
   })
 })
 
+describe("verify-select-risk-gate knob wiring", () => {
+  test("unset stays off", () => {
+    expect(posture({}).verifySelectRiskGate).toBe(false)
+  })
+
+  test("truthy env reaches BenchPosture", () => {
+    expect(posture({ QUANTA_BENCH_VERIFY_SELECT_RISK_GATE: "1" }).verifySelectRiskGate).toBe(true)
+  })
+})
+
 describe("selectionReproPolicy", () => {
   test("positive mode is soft-only and does not gold-calibrate", () => {
     expect(selectionReproPolicy("positive")).toEqual({
