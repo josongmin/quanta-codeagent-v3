@@ -19,11 +19,12 @@
  *           patchProduced (empty diff = false), applyClean (non-empty diff can
  *           be probed via port), regressionGreen (port, null=fail-open),
  *           smokeGreen (port, null=fail-open), patchedResolvedKofN (port,
- *           null=fail-open).
+ *           null=fail-open), declaredExpected=false (selector-local public
+ *           issue-shape contradiction).
  *   SOFT  — minimality (RELATIVE across the candidate set: smallest diff = 1,
  *           parameter-free), ownerCoverage (fraction of the candidate's files
  *           that are closure-ranked owners; null when no owner set),
- *           declaredExpected (optional public issue-shape patch predicate).
+ *           declaredExpected=true (optional public issue-shape ranking credit).
  *
  * Winner = `selectBest` (highest-scoring admissible) else a constrained
  * best-effort fallback. The fallback may preserve a candidate that merely lacks
@@ -84,8 +85,8 @@ export interface SelectionPorts {
   /** OPTIONAL patched resolved K-of-N hard signal; absent ⇒ null (FAIL-OPEN). */
   resolvedKofN?: (c: Candidate) => Promise<ResolvedKofNSignal | null>
   /** OPTIONAL issue-declared expected-behavior patch-shape signal; absent ⇒ null.
-   *  This is a SOFT selector signal: it can make the right candidate beat a tiny
-   *  near-miss, but it never hard-rejects a patch by itself. */
+   *  `true` is ranking credit. `false` is explicit public issue-shape evidence
+   *  that the patch implements the wrong behavior, so the selector rejects it. */
   declaredExpected?: (c: Candidate) => Promise<boolean | null>
 }
 
@@ -375,6 +376,24 @@ const hardResolvedRejected = (signal: ResolvedKofNSignal | null): boolean => {
   return !isValidResolvedKofN(signal) || signal.votes < signal.k
 }
 
+const DECLARED_EXPECTED_REJECT_REASON =
+  "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)"
+
+const applyDeclaredExpectedHardGate = (
+  verdict: CandidateVerdict,
+  declaredExpectedMatch: boolean | null,
+): CandidateVerdict =>
+  declaredExpectedMatch === false
+    ? {
+        admissible: false,
+        score: verdict.score,
+        reasons: [...verdict.reasons, DECLARED_EXPECTED_REJECT_REASON],
+      }
+    : verdict
+
+const declaredExpectedRejected = (verdict: CandidateVerdict): boolean =>
+  verdict.reasons.includes(DECLARED_EXPECTED_REJECT_REASON)
+
 /**
  * Run the verify-and-select executor. Pure over the injected ports.
  *
@@ -485,7 +504,14 @@ export const runSelection = async (args: {
       minimality: minimalityOf({ isEmpty: probed.isEmpty, size: probed.size, minB, maxB }),
       ownerCoverage: probed.ownerCoverage,
     }
-    return { candidate: c, hard: probed.hard, verdict: scoreCandidate(probed.hard, soft) }
+    return {
+      candidate: c,
+      hard: probed.hard,
+      verdict: applyDeclaredExpectedHardGate(
+        scoreCandidate(probed.hard, soft),
+        probed.declaredExpectedMatch,
+      ),
+    }
   }
 
   const maybeFinalizeEarlyAccept = async (
@@ -528,10 +554,14 @@ export const runSelection = async (args: {
     const entry = {
       candidate,
       hard,
-      verdict: scoreCandidate(hard, soft),
+      verdict: applyDeclaredExpectedHardGate(
+        scoreCandidate(hard, soft),
+        soft.declaredExpectedMatch,
+      ),
     }
     const ranked = [{ id: candidate.id, verdict: entry.verdict }]
-    const fallbackRanked = hard.patchProduced ? ranked : []
+    const fallbackRanked =
+      hard.patchProduced && !declaredExpectedRejected(entry.verdict) ? ranked : []
     const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
     const winner = winnerId === candidate.id ? candidate : null
     return {
@@ -602,7 +632,8 @@ export const runSelection = async (args: {
           s.hard.applyClean !== false &&
           s.hard.regressionGreen !== false &&
           s.hard.smokeGreen !== false &&
-          !hardResolvedRejected(s.hard.patchedResolvedKofN),
+          !hardResolvedRejected(s.hard.patchedResolvedKofN) &&
+          !declaredExpectedRejected(s.verdict),
       )
       .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)

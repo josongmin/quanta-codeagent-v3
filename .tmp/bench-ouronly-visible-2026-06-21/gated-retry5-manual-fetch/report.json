@@ -1,0 +1,464 @@
+{
+  "timestamp": "2026-06-21T02:37:05.137Z",
+  "model": "gpt-5.4",
+  "provider": "chatgpt-oauth",
+  "n": 1,
+  "totals": {
+    "total": 5,
+    "resolved": 1,
+    "resolvedPct": 20
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "completed_unresolved": 4
+    },
+    "bySignal": {}
+  },
+  "perInstance": [
+    {
+      "id": "matplotlib__matplotlib-14623",
+      "passed": false,
+      "turns": 16,
+      "patchBytes": 596,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 1,
+        "passToPassFailed": 0,
+        "passToPassTotal": 400
+      },
+      "reproOracleCalibration": {
+        "goldCalibrated": false,
+        "falseNegative": false,
+        "available": false,
+        "goldVotes": null,
+        "goldK": null
+      },
+      "selectionTelemetry": {
+        "attempted": 2,
+        "ownerFiles": [],
+        "earlyAccepted": false,
+        "successfulGenerations": 1,
+        "generationFailures": 0,
+        "generated": 1,
+        "admissibleCount": 1,
+        "winnerId": "cand-0",
+        "riskGate": {
+          "candidateId": "cand-0",
+          "expanded": false,
+          "reasons": []
+        },
+        "candidates": [
+          {
+            "id": "cand-0",
+            "files": [
+              "lib/matplotlib/scale.py"
+            ],
+            "admissible": true,
+            "score": 0.15,
+            "reasons": [
+              "soft:minimality=1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "matplotlib__matplotlib-20488",
+      "passed": true,
+      "turns": 12,
+      "patchBytes": 778,
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "pass"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": true,
+        "failToPassFailed": 0,
+        "passToPassFailed": 0,
+        "passToPassTotal": 111
+      },
+      "reproOracleCalibration": {
+        "goldCalibrated": false,
+        "falseNegative": false,
+        "available": false,
+        "goldVotes": null,
+        "goldK": null
+      },
+      "selectionTelemetry": {
+        "attempted": 2,
+        "ownerFiles": [
+          "lib/matplotlib/colors.py",
+          "lib/matplotlib/image.py",
+          "lib/matplotlib/tests/test_image.py"
+        ],
+        "earlyAccepted": false,
+        "successfulGenerations": 1,
+        "generationFailures": 0,
+        "generated": 1,
+        "admissibleCount": 1,
+        "winnerId": "cand-0",
+        "riskGate": {
+          "candidateId": "cand-0",
+          "expanded": false,
+          "reasons": []
+        },
+        "candidates": [
+          {
+            "id": "cand-0",
+            "files": [
+              "lib/matplotlib/image.py"
+            ],
+            "admissible": true,
+            "score": 0.35,
+            "reasons": [
+              "soft:minimality=1",
+              "soft:ownerCoverage=1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "matplotlib__matplotlib-20676",
+      "passed": false,
+      "turns": 16,
+      "patchBytes": 1130,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 2,
+        "passToPassFailed": 0,
+        "passToPassTotal": 32
+      },
+      "reproOracleCalibration": {
+        "goldCalibrated": false,
+        "falseNegative": false,
+        "available": false,
+        "goldVotes": null,
+        "goldK": null
+      },
+      "selectionTelemetry": {
+        "attempted": 2,
+        "ownerFiles": [],
+        "earlyAccepted": false,
+        "successfulGenerations": 1,
+        "generationFailures": 0,
+        "generated": 1,
+        "admissibleCount": 1,
+        "winnerId": "cand-0",
+        "riskGate": {
+          "candidateId": "cand-0",
+          "expanded": false,
+          "reasons": []
+        },
+        "candidates": [
+          {
+            "id": "cand-0",
+            "files": [
+              "lib/matplotlib/widgets.py"
+            ],
+            "admissible": true,
+            "score": 0.15,
+            "reasons": [
+              "soft:minimality=1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "matplotlib__matplotlib-22871",
+      "passed": false,
+      "turns": 13,
+      "patchBytes": 539,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 0,
+        "passToPassFailed": 1,
+        "passToPassTotal": 88
+      },
+      "reproOracleCalibration": {
+        "goldCalibrated": false,
+        "falseNegative": false,
+        "available": false,
+        "goldVotes": null,
+        "goldK": null
+      },
+      "selectionTelemetry": {
+        "attempted": 2,
+        "ownerFiles": [],
+        "earlyAccepted": false,
+        "successfulGenerations": 1,
+        "generationFailures": 0,
+        "generated": 1,
+        "admissibleCount": 1,
+        "winnerId": "cand-0",
+        "riskGate": {
+          "candidateId": "cand-0",
+          "expanded": false,
+          "reasons": []
+        },
+        "candidates": [
+          {
+            "id": "cand-0",
+            "files": [
+              "lib/matplotlib/dates.py"
+            ],
+            "admissible": true,
+            "score": 0.15,
+            "reasons": [
+              "soft:minimality=1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mwaskom__seaborn-3187",
+      "passed": false,
+      "turns": 17,
+      "patchBytes": 721,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 2,
+        "passToPassFailed": 0,
+        "passToPassTotal": 248
+      },
+      "reproOracleCalibration": {
+        "goldCalibrated": false,
+        "falseNegative": false,
+        "available": false,
+        "goldVotes": null,
+        "goldK": null
+      },
+      "selectionTelemetry": {
+        "attempted": 2,
+        "ownerFiles": [
+          "seaborn/_core/scales.py",
+          "seaborn/_core/properties.py",
+          "seaborn/_core/plot.py",
+          "seaborn/relational.py",
+          "seaborn/_oldcore.py"
+        ],
+        "earlyAccepted": false,
+        "successfulGenerations": 1,
+        "generationFailures": 0,
+        "generated": 1,
+        "admissibleCount": 1,
+        "winnerId": "cand-0",
+        "riskGate": {
+          "candidateId": "cand-0",
+          "expanded": false,
+          "reasons": []
+        },
+        "candidates": [
+          {
+            "id": "cand-0",
+            "files": [
+              "seaborn/_core/scales.py"
+            ],
+            "admissible": true,
+            "score": 0.35,
+            "reasons": [
+              "soft:minimality=1",
+              "soft:ownerCoverage=1"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "knobs": {
+    "resolved": {
+      "bench-in-loop-exec": {
+        "value": false,
+        "display": "on",
+        "source": "preset"
+      },
+      "issue-hint": {
+        "value": "agentless",
+        "unit": "mode",
+        "display": "agentless (mode)",
+        "source": "preset"
+      },
+      "issue-hint-expected-actual": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "localize-phase": {
+        "value": {
+          "phase1Turns": 5
+        },
+        "unit": "turns",
+        "display": "5 turns",
+        "source": "preset"
+      },
+      "lsp": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-budget": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-budget-strict": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-hygiene": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "read-outline": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "repo-map": {
+        "value": {
+          "enabled": true
+        },
+        "display": "on",
+        "source": "preset"
+      },
+      "retry-transient": {
+        "value": 3,
+        "unit": "retries",
+        "display": "3 retries",
+        "source": "preset"
+      },
+      "round0-minimal": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "spec-fidelity-steer": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "verify-select": {
+        "value": 2,
+        "unit": "candidates",
+        "display": "2 candidates",
+        "source": "preset"
+      },
+      "verify-select-concurrency": {
+        "value": 1,
+        "unit": "concurrent",
+        "display": "1 concurrent",
+        "source": "preset"
+      },
+      "verify-select-regression": {
+        "value": "discovered",
+        "unit": "mode",
+        "display": "discovered (mode)",
+        "source": "preset"
+      },
+      "verify-select-repro": {
+        "value": "off",
+        "unit": "mode",
+        "display": "off (mode)",
+        "source": "preset"
+      },
+      "verify-select-risk-gate": {
+        "value": true,
+        "unit": "toggle",
+        "display": "true (toggle)",
+        "source": "preset"
+      }
+    },
+    "preset": "agentless-v3-thin-strict-gated",
+    "inactive": [
+      "adversarial-repro",
+      "branch-search",
+      "closure-repair",
+      "fault-evidence",
+      "repro-doubt",
+      "lsp-steer",
+      "multi-voter",
+      "must-pass",
+      "network-proxy",
+      "no-patch-breaker",
+      "primary-rail",
+      "repair-escalation",
+      "repro-test",
+      "repro-vote",
+      "verification-plan",
+      "skills",
+      "subagent",
+      "test-runner",
+      "verify-select-early-accept"
+    ]
+  }
+}

@@ -168,11 +168,40 @@ describe("runSelection", () => {
       },
     })
     expect(r.winner?.id).toBe("cand-1")
-    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
-      "soft:declaredExpectedMatch=0",
+    const nearMiss = r.scored.find((s) => s.candidate.id === "cand-0")?.verdict
+    expect(nearMiss?.admissible).toBe(false)
+    expect(nearMiss?.reasons).toContain("soft:declaredExpectedMatch=0")
+    expect(nearMiss?.reasons).toContain(
+      "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)",
     )
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
       "soft:declaredExpectedMatch=1",
+    )
+  })
+
+  it("declared-expected=false is not resurrected by best-effort fallback", async () => {
+    const wrong = cand({
+      id: "cand-0",
+      files: ["astropy/timeseries/core.py"],
+      patch:
+        "+++ b/astropy/timeseries/core.py\n" +
+        "-expected '{}' and found '{}'\n" +
+        "+expected '{}' and found '{}'.format(required_columns, self.colnames[:len(required_columns)])\n",
+    })
+    const { gen } = genFrom([wrong])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(["astropy/timeseries/core.py"]),
+      ports: {
+        generate: gen,
+        declaredExpected: async () => false,
+      },
+    })
+    expect(r.winner).toBeNull()
+    expect(r.admissibleCount).toBe(0)
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)",
     )
   })
 

@@ -270,6 +270,18 @@ const MESSAGE_FORMAT_STEER =
   "do NOT pass list values into placeholders that still have literal quotes " +
   "around '{}'; either change the template or render scalar/list values before " +
   "formatting. " +
+  "When an expected prefix/list is compared with an actual prefix/list, render " +
+  "BOTH sides from the same prefix length; do not keep `expected[0]` / " +
+  "`actual[0]` in the failing branch. Preserve scalar display for one item and " +
+  "list display for multiple items by changing the formatter, not by adding a " +
+  "new branch. Do NOT write `expected = required_columns[0] if len(...) == 1 " +
+  "else required_columns` or the analogous `actual = self.colnames[0] ...`; " +
+  "that still feeds raw unquoted strings/lists into the message. Instead build " +
+  "display strings for BOTH expected and found, for example a small local helper " +
+  "that returns `\"'{}'\".format(values[0])` for one item and `str(values)` for " +
+  "many, then pass `required_columns` and `self.colnames[:len(required_columns)]` " +
+  "through that helper. The message template must use unquoted `{}` placeholders " +
+  "for those pre-rendered display strings. " +
   "do NOT add a narrow special-case branch that leaves the original misleading " +
   "formatter reachable for the reproduced scenario."
 
@@ -279,7 +291,9 @@ const ADAPTER_FAMILY_STEER =
   "implementation and the shared base/helper it calls. If a contract, argument " +
   "arity, SQL function, or conversion rule changes in one backend, patch the " +
   "parallel sites too; a single-backend patch is incomplete unless the issue " +
-  "explicitly limits the bug to one backend."
+  "explicitly limits the bug to one backend. For timezone/date extraction " +
+  "backend bugs, do not stop at MySQL: update Oracle and SQLite too, and for " +
+  "SQLite change BOTH the SQL call arity and the registered Python UDF arity."
 
 const EXECUTION_ENV_BOUNDARY_STEER =
   "For subprocess, shell, command, or environment-variable bugs, trace BOTH the " +
@@ -289,7 +303,9 @@ const EXECUTION_ENV_BOUNDARY_STEER =
   "needed. Never initialize an env map to None/null and then keep later " +
   "env[...] writes reachable; build the override map first, return/pass env or " +
   "None only at the no-overrides boundary, and patch backend-specific env " +
-  "construction plus the shared caller when both participate."
+  "construction plus the shared caller when both participate. If a backend " +
+  "returns `{}` for no overrides, normalize that to None at the subprocess " +
+  "boundary instead of expanding it into a full inherited env."
 
 /** Lever A — SIBLING-COMPLETION / co-change consequence check (2026-06-19,
  *  ceiling RCA). Measured failure mode on the multi-file ceiling subset: quanta

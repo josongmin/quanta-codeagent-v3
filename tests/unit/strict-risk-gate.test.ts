@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { evaluateStrictPatchRisk } from "@/runner/batch/eval/strict-risk-gate"
 
-const SEABORN_AXIS_ISSUE =
-  "Nominal x and y axes should preserve explicit limits, disable grid lines, and keep y axis inverted."
-
-const STRICT_SEABORN_NEAR_MISS = `diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+const SEABORN_SINGLE_FILE_AXIS_PATCH = `diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
 --- a/seaborn/_core/plot.py
 +++ b/seaborn/_core/plot.py
 @@ -1,3 +1,12 @@
@@ -18,18 +15,17 @@ const STRICT_SEABORN_NEAR_MISS = `diff --git a/seaborn/_core/plot.py b/seaborn/_
 +        ax.set(**{f"{axis}lim": (-.5, n - .5)})
 `
 
-const SEABORN_REVERSED_YLIMIT = `diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+const SEABORN_MULTI_FILE_PATCH = `diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
 --- a/seaborn/_core/plot.py
 +++ b/seaborn/_core/plot.py
-@@ -1,3 +1,11 @@
-+    if isinstance(scale, Nominal):
-+        n = len(getattr(ax, f"get_{axis}ticks")())
-+        if axis == "x":
-+            ax.xaxis.grid(False)
-+            ax.set_xlim(-.5, n - .5, auto=None)
-+        else:
-+            ax.yaxis.grid(False)
-+            ax.set_ylim(n - .5, -.5, auto=None)
+@@ -25,7 +25,7 @@
+-from seaborn._core.scales import Scale
++from seaborn._core.scales import Scale, Nominal
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -143,6 +143,7 @@ class Nominal(Scale):
++    _matplotlib_props = {"axis_margin": 0, "grid": False, "inverse": True}
 `
 
 const DJANGO_HELPER_RUNTIME = `diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
@@ -45,27 +41,28 @@ const DJANGO_HELPER_RUNTIME = `diff --git a/django/db/models/sql/query.py b/djan
 `
 
 describe("evaluateStrictPatchRisk", () => {
-  test("flags seaborn-style y inversion overwritten by a later ascending generic limit", () => {
+  test("does not inspect problem-specific axis semantics", () => {
     const decision = evaluateStrictPatchRisk({
-      patch: STRICT_SEABORN_NEAR_MISS,
-      problemStatement: SEABORN_AXIS_ISSUE,
-      ownerFiles: ["seaborn/_core/plot.py"],
-      repo: "mwaskom/seaborn",
-    })
-    expect(decision.expand).toBe(true)
-    expect(decision.reasons).toContain("axis-inversion-overwritten-by-ascending-limit")
-    expect(decision.reasons).toContain("explicit-limit-preservation-not-evidenced")
-  })
-
-  test("accepts direct reversed y-limit axis handling as low risk", () => {
-    const decision = evaluateStrictPatchRisk({
-      patch: SEABORN_REVERSED_YLIMIT,
-      problemStatement: SEABORN_AXIS_ISSUE,
+      patch: SEABORN_SINGLE_FILE_AXIS_PATCH,
+      problemStatement:
+        "Nominal x and y axes should preserve explicit limits, disable grid lines, and keep y axis inverted.",
       ownerFiles: ["seaborn/_core/plot.py"],
       repo: "mwaskom/seaborn",
     })
     expect(decision.expand).toBe(false)
     expect(decision.reasons).toEqual([])
+  })
+
+  test("routes multi-source-file patches to the extra candidate path even when owner-ranked", () => {
+    const decision = evaluateStrictPatchRisk({
+      patch: SEABORN_MULTI_FILE_PATCH,
+      problemStatement: "Any issue text is ignored by the structural gate.",
+      ownerFiles: ["seaborn/_core/plot.py", "seaborn/_core/scales.py"],
+      repo: "mwaskom/seaborn",
+    })
+    expect(decision.expand).toBe(true)
+    expect(decision.patchBudget.budget.sourceFiles).toBe(2)
+    expect(decision.reasons.join("\n")).toContain("patch-budget:source-file budget=1")
   })
 
   test("routes new helper plus compiler setup expansion to the extra candidate path", () => {

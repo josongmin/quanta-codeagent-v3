@@ -39,6 +39,25 @@ const FULL_PREFIX_PATCH = `diff --git a/astropy/timeseries/core.py b/astropy/tim
 +                                         as_scalar_or_list_str(self.colnames[:len(required_columns)])))
 `
 
+const FORMAT_COLNAMES_PREFIX_PATCH = `diff --git a/astropy/timeseries/core.py b/astropy/timeseries/core.py
+--- a/astropy/timeseries/core.py
++++ b/astropy/timeseries/core.py
+@@ -69,13 +69,21 @@ class BaseTimeSeries(QTable):
++            def format_colnames(colnames):
++                if len(colnames) == 1:
++                    return "'{}'".format(colnames[0])
++                return str(colnames)
+             elif self.colnames[:len(required_columns)] != required_columns:
+ 
+-                raise ValueError("{} object is invalid - expected '{}' "
+-                                 "as the first column{} but found '{}'"
+-                                 .format(self.__class__.__name__, required_columns[0], plural, self.colnames[0]))
++                raise ValueError("{} object is invalid - expected {} "
++                                 "as the first column{} but found {}"
++                                 .format(self.__class__.__name__, format_colnames(required_columns),
++                                         plural, format_colnames(self.colnames[:len(required_columns)])))
+`
+
 const QUOTED_CONTEXT_PLACEHOLDER_PATCH = `diff --git a/astropy/timeseries/core.py b/astropy/timeseries/core.py
 --- a/astropy/timeseries/core.py
 +++ b/astropy/timeseries/core.py
@@ -104,6 +123,18 @@ const POSTGRES_ONLY_ENV_OR_NONE_PATCH = `diff --git a/django/db/backends/postgre
 +        return args, (env or None)
 `
 
+const POSTGRES_BASE_ONLY_BOUNDARY_PATCH = `diff --git a/django/db/backends/base/client.py b/django/db/backends/base/client.py
+--- a/django/db/backends/base/client.py
++++ b/django/db/backends/base/client.py
+@@ -21,6 +21,6 @@ class BaseDatabaseClient:
+     def runshell(self, parameters):
+         args, env = self.settings_to_cmd_args_env(self.connection.settings_dict, parameters)
+-        if env:
++        if env is not None:
+             env = {**os.environ, **env}
+         subprocess.run(args, env=env, check=True)
+`
+
 const POSTGRES_GOLD_ENV_PATCH = `diff --git a/django/db/backends/base/client.py b/django/db/backends/base/client.py
 --- a/django/db/backends/base/client.py
 +++ b/django/db/backends/base/client.py
@@ -122,6 +153,56 @@ diff --git a/django/db/backends/postgresql/client.py b/django/db/backends/postgr
              env['PGPASSFILE'] = str(passfile)
 -        return args, env
 +        return args, (env or None)
+`
+
+const POSTGRES_SAFE_NULLABLE_ENV_PATCH = `diff --git a/django/db/backends/base/client.py b/django/db/backends/base/client.py
+--- a/django/db/backends/base/client.py
++++ b/django/db/backends/base/client.py
+@@ -21,6 +21,5 @@ class BaseDatabaseClient:
+     def runshell(self, parameters):
+         args, env = self.settings_to_cmd_args_env(self.connection.settings_dict, parameters)
+-        if env:
++        if env is not None:
+             env = {**os.environ, **env}
+         subprocess.run(args, env=env, check=True)
+diff --git a/django/db/backends/postgresql/client.py b/django/db/backends/postgresql/client.py
+--- a/django/db/backends/postgresql/client.py
++++ b/django/db/backends/postgresql/client.py
+@@ -39,16 +39,16 @@ class DatabaseClient(BaseDatabaseClient):
+-        env = {}
++        env = None
+         if passwd:
+-            env['PGPASSWORD'] = str(passwd)
++            env = {'PGPASSWORD': str(passwd)}
+         if service:
+-            env['PGSERVICE'] = str(service)
++            env = {**env, 'PGSERVICE': str(service)} if env else {'PGSERVICE': str(service)}
+         if passfile:
+-            env['PGPASSFILE'] = str(passfile)
++            env = {**env, 'PGPASSFILE': str(passfile)} if env else {'PGPASSFILE': str(passfile)}
+         return args, env
+`
+
+const POSTGRES_PRODUCER_SAFE_NULLABLE_ONLY_PATCH = `diff --git a/django/db/backends/postgresql/client.py b/django/db/backends/postgresql/client.py
+--- a/django/db/backends/postgresql/client.py
++++ b/django/db/backends/postgresql/client.py
+@@ -39,16 +39,16 @@ class DatabaseClient(BaseDatabaseClient):
+-        env = {}
++        env = None
+         if passwd:
+-            env['PGPASSWORD'] = str(passwd)
++            env = {'PGPASSWORD': str(passwd)}
+         if service:
+-            env['PGSERVICE'] = str(service)
++            if env is None:
++                env = {}
++            env['PGSERVICE'] = str(service)
+         if passfile:
+-            env['PGPASSFILE'] = str(passfile)
++            if env is None:
++                env = {}
++            env['PGPASSFILE'] = str(passfile)
+         return args, env
 `
 
 const DATABASE_TIMEZONE_MYSQL_ONLY_PATCH = `diff --git a/django/db/backends/mysql/operations.py b/django/db/backends/mysql/operations.py
@@ -216,6 +297,12 @@ describe("declaredExpectedPatchMatch", () => {
     expect(declaredExpectedPatchMatch(TIMESERIES_MESSAGE_ISSUE, FULL_PREFIX_PATCH)).toBe(true)
   })
 
+  test("message-prefix issue accepts format_colnames scalar/list display helper", () => {
+    expect(declaredExpectedPatchMatch(TIMESERIES_MESSAGE_ISSUE, FORMAT_COLNAMES_PREFIX_PATCH)).toBe(
+      true,
+    )
+  })
+
   test("message-prefix issue rejects list values left inside scalar quote placeholders", () => {
     expect(
       declaredExpectedPatchMatch(TIMESERIES_MESSAGE_ISSUE, QUOTED_LIST_PLACEHOLDER_PATCH),
@@ -244,14 +331,32 @@ describe("declaredExpectedPatchMatch", () => {
     )
   })
 
-  test("postgres env issue rejects producer-only patch because base still passes empty env", () => {
+  test("postgres env issue accepts producer-only env-or-none return", () => {
     expect(declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_ONLY_ENV_OR_NONE_PATCH)).toBe(
-      false,
+      true,
+    )
+  })
+
+  test("postgres env issue accepts base-only execution-boundary normalization", () => {
+    expect(declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_BASE_ONLY_BOUNDARY_PATCH)).toBe(
+      true,
     )
   })
 
   test("postgres env issue accepts producer plus execution-boundary normalization", () => {
     expect(declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_GOLD_ENV_PATCH)).toBe(true)
+  })
+
+  test("postgres env issue accepts safe nullable producer without base edit", () => {
+    expect(
+      declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_PRODUCER_SAFE_NULLABLE_ONLY_PATCH),
+    ).toBe(true)
+  })
+
+  test("postgres env issue accepts safe nullable producer plus env-is-not-None boundary", () => {
+    expect(declaredExpectedPatchMatch(POSTGRES_ENV_ISSUE, POSTGRES_SAFE_NULLABLE_ENV_PATCH)).toBe(
+      true,
+    )
   })
 
   test("database timezone issue rejects single-backend patch", () => {

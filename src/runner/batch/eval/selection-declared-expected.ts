@@ -65,7 +65,19 @@ const hasUnquotedScalarExpectedFallback = (added: string): boolean =>
 const hasRawFoundPrefixFormatter = (added: string): boolean =>
   /\.format\s*\([\s\S]*\bself\.colnames\s*\[\s*:\s*len\s*\(\s*required_columns\s*\)\s*\]/.test(
     added,
-  ) && !/\b[a-zA-Z_]*scalar[a-zA-Z_]*list[a-zA-Z_]*\s*\(/i.test(added)
+  ) &&
+  !/\b(?:[a-zA-Z_]*scalar[a-zA-Z_]*list[a-zA-Z_]*|format_colnames|format_required_columns)\s*\(/i.test(
+    added,
+  )
+
+const hasScalarOrListDisplayHelper = (added: string): boolean =>
+  /\b(?:[a-zA-Z_]*scalar[a-zA-Z_]*list[a-zA-Z_]*|format_colnames|format_required_columns)\b/i.test(
+    added,
+  ) &&
+  /return\s+(?:f["']\{?['"]\{?\w+\[0\]\}?['"]\}?|["']'\{\}'["']\.format\(\s*\w+\s*\[\s*0\s*\]\s*\))/.test(
+    added,
+  ) &&
+  /return\s+str\s*\(\s*\w+\s*\)/.test(added)
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -75,15 +87,25 @@ const touchesFile = (patch: string, file: string): boolean => {
 }
 
 const hasUnsafeEnvNoneInitialization = (added: string, postPatchHunk: string): boolean =>
-  /\benv\s*=\s*None\b/.test(added) && /\benv\s*\[/.test(postPatchHunk)
+  /\benv\s*=\s*None\b/.test(added) &&
+  /\benv\s*\[/.test(postPatchHunk) &&
+  !/\benv\s*=\s*\{/.test(added)
 
 const hasPostgresEnvOrNoneReturn = (added: string): boolean =>
   /\breturn\s+args\s*,\s*\(?\s*env\s+or\s+None\s*\)?/.test(added) ||
   /\breturn\s+args\s*,\s*None\s+if\s+not\s+env\s+else\s+env\b/.test(added)
 
+const hasPostgresSafeNullableEnvReturn = (added: string, postPatchHunk: string): boolean =>
+  /\benv\s*=\s*None\b/.test(added) &&
+  /\breturn\s+args\s*,\s*env\b/.test(postPatchHunk) &&
+  !hasUnsafeEnvNoneInitialization(added, postPatchHunk)
+
 const hasBaseEmptyEnvNormalization = (added: string): boolean =>
   /\benv\s*=\s*\{\s*\*\*os\.environ\s*,\s*\*\*env\s*\}\s*if\s+env\s+else\s+None\b/.test(added) ||
   /\benv\s*=\s*None\s+if\s+not\s+env\s+else\s+\{\s*\*\*os\.environ\s*,\s*\*\*env\s*\}/.test(
+    added,
+  ) ||
+  /\bif\s+env\s+is\s+not\s+None\s*:\s*\n\s*env\s*=\s*\{\s*\*\*os\.environ\s*,\s*\*\*env\s*\}/.test(
     added,
   ) ||
   /\belse\s*:\s*\n\s*env\s*=\s*None\b/.test(added) ||
@@ -94,14 +116,16 @@ const hasBaseEmptyEnvNormalization = (added: string): boolean =>
 const postgresqlEmptyEnvPatchMatch = (patch: string): boolean => {
   const added = addedLines(patch)
   const postPatchHunk = postPatchHunkLines(patch)
+  const addedOrContext = `${added}\n${postPatchHunk}`
   if (added.trim() === "") return false
   if (hasUnsafeEnvNoneInitialization(added, postPatchHunk)) return false
-  return (
+  const hasSafePostgresProducer =
     touchesFile(patch, "django/db/backends/postgresql/client.py") &&
+    (hasPostgresEnvOrNoneReturn(added) || hasPostgresSafeNullableEnvReturn(added, postPatchHunk))
+  const hasBaseBoundaryNormalization =
     touchesFile(patch, "django/db/backends/base/client.py") &&
-    hasPostgresEnvOrNoneReturn(added) &&
-    hasBaseEmptyEnvNormalization(added)
-  )
+    hasBaseEmptyEnvNormalization(addedOrContext)
+  return hasSafePostgresProducer || hasBaseBoundaryNormalization
 }
 
 const hasSqliteFunctionArityExpansion = (added: string): boolean =>
@@ -153,7 +177,8 @@ export const declaredExpectedPatchMatch = (
   if (hasRawFoundPrefixFormatter(added)) return false
   return (
     /\brequired_columns\b/.test(added) &&
-    /\bself\.colnames\s*\[\s*:\s*len\s*\(\s*required_columns\s*\)\s*\]/.test(added)
+    /\bself\.colnames\s*\[\s*:\s*len\s*\(\s*required_columns\s*\)\s*\]/.test(added) &&
+    hasScalarOrListDisplayHelper(added)
   )
 }
 

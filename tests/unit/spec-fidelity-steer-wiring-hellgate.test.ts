@@ -102,6 +102,11 @@ describe("gap-B spec-fidelity steer prompt wiring", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
     expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("Fix the existing message construction")
     expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("multi-item lists or prefixes")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("same prefix length")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("not by adding a new branch")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("Do NOT write `expected =")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("self.colnames[:len(required_columns)]")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("unquoted `{}` placeholders")
   })
 
   test("SF-5: expected/actual OFF + same exception issue ⇒ message-format steer absent", () => {
@@ -114,12 +119,15 @@ describe("gap-B spec-fidelity steer prompt wiring", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
     expect(userText(BACKEND_FAMILY_ISSUE)).toContain("treat them as one owner-family")
     expect(userText(BACKEND_FAMILY_ISSUE)).toContain("single-backend patch is incomplete")
+    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("SQL call arity")
+    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("registered Python UDF arity")
   })
 
   test("SF-7: expected/actual ON + subprocess env issue ⇒ execution-boundary steer present", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
     expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("trace BOTH the producer")
     expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("drop inherited environment")
+    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("normalize that to None")
   })
 
   test("SF-8: targeted issue steers stay absent when expected/actual is OFF", () => {
