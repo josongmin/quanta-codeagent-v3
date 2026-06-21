@@ -9,7 +9,7 @@
 | SCAFF-03 | owner-evidence lattice (witness → authoritative owner) | ✅ `witnessAuthoritativeOwners` + `fault-evidence` `witnessOwners`/`static-witness` source + `prepareAttemptContext` digest (both drivers); 14 teeth |
 | SCAFF-04 | candidate-family expansion (witness → generated co-change) | ✅ `staticWitnessesToFamilies`/`withStaticWitnessFamilies`, both drivers; 5 teeth |
 | SCAFF-05 | static-witness → required public contracts | ✅ `static-witness-contracts.ts`, both drivers (8) + e2e (3) |
-| SCAFF-06 | executable public MWE proof-state rail | ✅ `mwe-proof.ts` (20) — module landed; selection wiring is a follow-up lever |
+| SCAFF-06 | executable public MWE proof-state rail | ✅ `mwe-proof.ts` (20) + selector TOP tier wired (`mweProofAuthorityRank` → `select-lexicographic` #0 tier, `Candidate.mweReceipt`; 6 wiring-proof teeth). CONSUMPTION-side done; LIVE receipt population in the loop (run the extracted MWE vs base+candidate) is the measured rollout — INERT until then (absent ⇒ byte-identical) |
 | SCAFF-07 | astropy repro env (`setuptools<60`/extension_helpers) | ✅ `project-env.ts` + test |
 | SCAFF-08 | contamination ratchet (no answer-key in clean authority) | ✅ `static-witness-contamination-ratchet.test.ts` |
 
