@@ -42,9 +42,9 @@ import {
   readKnobValue,
   resolveBenchKnobs,
   runRetryLoop,
-  selectionReproPrepK,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
+  selectionReproPrepK,
   UsageTap,
   verifyAndFinalizeResult,
 } from "@/runner/batch/eval/driver"
@@ -56,6 +56,7 @@ import {
   benchRunsRepairPhase,
 } from "@/runner/batch/eval/repair-phase-policy"
 import { makeDiscoveredRepoRegressionPort } from "@/runner/batch/eval/repo-regression-discovery-adapter"
+import { makeDeclaredExpectedSelectionPort } from "@/runner/batch/eval/selection-declared-expected"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -64,7 +65,6 @@ import {
   type SelectionTelemetry,
   summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
-import { makeDeclaredExpectedSelectionPort } from "@/runner/batch/eval/selection-declared-expected"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
