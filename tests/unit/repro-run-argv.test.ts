@@ -11,11 +11,15 @@ import { reproRunArgv } from "@/runner/batch/corpus/dataset"
 import { pythonForRepoVersion } from "@/runner/batch/corpus/repo-version-python"
 
 const pyOf = (argv: readonly string[]): string => argv[argv.indexOf("--python") + 1] as string
+const hasWithDep = (argv: readonly string[], dep: string): boolean =>
+  argv.some((arg, idx) => arg === "--with" && argv[idx + 1] === dep)
 
 describe("reproRunArgv", () => {
-  test("wraps the script in a uvx editable-install env (not a bare python)", () => {
+  test("wraps the script in a uv-run editable-install env (not a bare python)", () => {
     const argv = reproRunArgv("sympy/sympy", "1.5", "/sandbox/__repro_0.py")
-    expect(argv[0]).toBe("uvx")
+    expect(argv.slice(0, 2)).toEqual(["uv", "run"])
+    expect(argv).toContain("--no-project")
+    expect(hasWithDep(argv, "setuptools")).toBe(true)
     expect(argv).toContain("--with-editable")
     expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".")
     expect(argv[argv.length - 1]).toBe("/sandbox/__repro_0.py")

@@ -11,7 +11,7 @@
  * only a `tests: string[]` argument. It MUST NOT import or name any official
  * SWE-bench hidden field — there is no `PASS_TO_PASS` / `FAIL_TO_PASS` /
  * `test_patch` string anywhere in this file. The bench adapter
- * (`src/apps/bench/eval/regression-oracle-adapter.ts`) supplies the concrete
+ * (`src/runner/batch/eval/regression-oracle-adapter.ts`) supplies the concrete
  * test ids (PASS_TO_PASS) from the eval-only oracle side, exactly the same
  * boundary `closure-diagnostics` uses for gold files. A `regression-oracle.ts`
  * that imported PASS_TO_PASS would leak the bench label into the engine SSOT —

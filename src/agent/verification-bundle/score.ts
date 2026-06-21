@@ -11,6 +11,7 @@
  *   - `patchedResolvedKofN` present but malformed      → reject (null ⇒ pass)
  *   - `patchedResolvedKofN` present && `votes < k`    → reject (null ⇒ pass)
  *   - `regressionGreen === false`                     → reject (null ⇒ pass)
+ *   - `smokeGreen === false`                          → reject (`null` ⇒ pass)
  *
  * SOFT SCORE = weighted sum of the available soft signals. Weights are
  * deliberately near-equal conservative constants: per the no-heuristics rule,
@@ -21,7 +22,8 @@
  *
  * `selectBest` returns the highest-scoring ADMISSIBLE candidate (ties broken by
  * first appearance — minimality already lives inside the score), or `null` when
- * none is admissible (the caller then submits a best-effort pick by raw score).
+ * none is admissible. Callers may layer a constrained best-effort fallback, but
+ * only outside the bundle.
  */
 
 import { isValidResolvedKofN } from "./resolved-kofn"
@@ -105,6 +107,10 @@ export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): C
     admissible = false
     reasons.push("hard:regressionGreen=false (candidate regressed a test)")
   }
+  if (hard.smokeGreen === false) {
+    admissible = false
+    reasons.push("hard:smokeGreen=false (candidate broke a public smoke)")
+  }
 
   // ── SOFT SCORE (weighted sum over present signals) ───────────────────────
   // `voterQuorum` is the consensus RATIO (votes/k, super-quorum ⇒ >1) and uses a
@@ -126,8 +132,7 @@ export const scoreCandidate = (hard: HardGateSignals, soft: SoftScoreSignals): C
 /**
  * Pick the best candidate. Highest-scoring ADMISSIBLE candidate wins; ties go
  * to first appearance (minimality is already folded into the score). Returns
- * `null` when no candidate is admissible — the caller submits a best-effort
- * pick (e.g. raw `selectBestEffort`) rather than nothing.
+ * `null` when no candidate is admissible.
  */
 export const selectBest = (cands: readonly ScoredCandidate[]): string | null => {
   let best: ScoredCandidate | null = null

@@ -24,7 +24,6 @@ import {
   latePhaseFailureResultOf,
   makeCalibratedReproConsensusPort,
   makeReproConsensusSelectionPort,
-  maybeStrictBudgetBlockedResult,
   maybeValidateTerminalResult,
   type PreparedAttemptContext,
   type PrepareIssueHintDeps,
@@ -36,12 +35,14 @@ import {
   prepareIssueHint,
   prepareReproTest,
   prepareReproTestDetailed,
+  prepareSelectionReproSources,
   projectOutcome,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
   resolveBenchKnobs,
   runRetryLoop,
+  selectionReproPrepK,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
   UsageTap,
@@ -64,6 +65,7 @@ import {
   summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
+import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
@@ -101,10 +103,12 @@ export {
   prepareIssueHint,
   prepareReproTest,
   prepareReproTestDetailed,
+  prepareSelectionReproSources,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
   resolveBenchKnobs,
+  selectionReproPrepK,
   UsageTap,
 }
 
@@ -687,6 +691,7 @@ const runSelectionPhase = async (
     verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
       : undefined
+  const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
   // No-oracle verify-select (`discovered`) must not let synthesized repro
   // authority veto admissibility. In that mode, impacted repo tests are the hard
   // regression signal and repro consensus is already downgraded to positive-only
@@ -752,6 +757,7 @@ const runSelectionPhase = async (
           },
         })
       },
+      ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
       // SOTA++ repro-vote as the SELECTION scorer: re-materialize each candidate
       // and re-run the reproducing repro set there → the VerificationBundle's
       // `patchedResolvedKofN` HARD signal (votes<k ⇒ reject). So selection picks
@@ -906,18 +912,6 @@ const runInstanceOnce = async (
       signal: abort.signal,
     })
     if (terminal !== undefined) return terminal
-
-    const strictBudgetBlocked = maybeStrictBudgetBlockedResult({
-      instance,
-      phase,
-      reproTest,
-      deps,
-      wiring: w,
-      startedAt,
-      posture: preparedContext.posture,
-      closureSession: preparedContext.closureSession,
-    })
-    if (strictBudgetBlocked !== undefined) return strictBudgetBlocked
 
     // Await inside the try so sandbox cleanup in `finally` cannot race the
     // final verifier. A bare `return promise` here would run `finally`

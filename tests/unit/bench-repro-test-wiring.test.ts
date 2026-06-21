@@ -22,6 +22,7 @@ import {
   parseBenchReproTestK,
   prepareReproTest,
   prepareReproTestDetailed,
+  prepareSelectionReproSources,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
 } from "../../src/apps/bench/eval/driver"
@@ -222,7 +223,7 @@ describe("prepareReproTest", () => {
     expect(t.sampleStderrTail).toContain("command not found")
   })
 
-  test("WIRING: swebench instance ⇒ repro runs under uvx editable-install env (not bare python)", async () => {
+  test("WIRING: swebench instance ⇒ repro runs under uv-run editable-install env (not bare python)", async () => {
     const seen: (readonly string[])[] = []
     await prepareReproTestDetailed(
       mkInstance({
@@ -239,14 +240,16 @@ describe("prepareReproTest", () => {
         },
       },
     )
-    // The exec argv must be the uvx env wrapper — a bare `python3` here is the
+    // The exec argv must be the uv-run env wrapper — a bare `python3` here is the
     // ModuleNotFoundError bug that made primary_rail_present_rate = 0.
-    expect(seen[0]?.[0]).toBe("uvx")
+    expect(seen[0]?.slice(0, 2)).toEqual(["uv", "run"])
+    expect(seen[0]).toContain("--no-project")
+    expect(seen[0]).toContain("setuptools")
     expect(seen[0]).toContain("--with-editable")
     expect(seen[0]?.[seen[0].length - 2]).toBe("python")
   })
 
-  test("WIRING: non-swebench fixture ⇒ repro runs bare python3 (no uvx)", async () => {
+  test("WIRING: non-swebench fixture ⇒ repro runs bare python3 (no uv-run)", async () => {
     const seen: (readonly string[])[] = []
     await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 1, {
       llm: new StubLLM(),
@@ -343,6 +346,53 @@ describe("prepareReproTest", () => {
       samples: 2,
       reproducedCount: 2,
     })
+  })
+
+  test("selection-only repro prep uses verifySelectN as the late selector fallback K", async () => {
+    const out = await prepareSelectionReproSources(
+      mkInstance(),
+      "/tmp/sb",
+      new StubLLM(),
+      {
+        verifySelectN: 3,
+        verifySelectRepro: "positive",
+        reproTestK: undefined,
+        adversarialRepro: false,
+      },
+      {
+        generate: async () => Array.from({ length: 3 }, () => 'print("Issue reproduced")'),
+        exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+        writeFile: async () => {},
+      },
+    )
+    expect(out.telemetry).toEqual({
+      installed: false,
+      reason: "not_installed",
+      samples: 3,
+      reproducedCount: 3,
+    })
+    expect(out.reproSources).toHaveLength(3)
+    expect(new Set(out.reproSources)).toEqual(new Set(['print("Issue reproduced")']))
+  })
+
+  test("selection-only repro prep stays inert when verify-select repro is off", async () => {
+    const out = await prepareSelectionReproSources(
+      mkInstance(),
+      "/tmp/sb",
+      new StubLLM(),
+      {
+        verifySelectN: 5,
+        verifySelectRepro: "off",
+        reproTestK: undefined,
+        adversarialRepro: false,
+      },
+      {
+        generate: async () => {
+          throw new Error("must stay inert")
+        },
+      },
+    )
+    expect(out).toEqual({ telemetry: undefined, reproSources: [] })
   })
 })
 

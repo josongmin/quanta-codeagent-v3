@@ -7,7 +7,7 @@
  */
 
 import type { LocalEnvSelection } from "@/runtime"
-import { pythonForRepoVersion } from "../corpus/repo-version-python"
+import { buildProjectEnvUvRunArgv } from "../corpus/project-env"
 import { execArgv } from "./exec"
 import {
   makeRegressionOracle,
@@ -30,14 +30,7 @@ export const buildPytestArgv = (tests: readonly string[]): readonly string[] => 
 export const buildProjectPytestArgv =
   (repo: string | undefined, version: string | undefined) =>
   (tests: readonly string[]): readonly string[] => [
-    "uvx",
-    "--quiet",
-    "--python",
-    pythonForRepoVersion(repo ?? "", version),
-    "--with",
-    "pytest",
-    "--with-editable",
-    ".",
+    ...buildProjectEnvUvRunArgv(repo ?? "", version, ["pytest"]),
     "pytest",
     "-x",
     "-p",

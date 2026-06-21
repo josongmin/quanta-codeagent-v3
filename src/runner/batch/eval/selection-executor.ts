@@ -18,15 +18,21 @@
  *   HARD  — baseValidatedRed (closure; `null` in no-oracle modes),
  *           patchProduced (empty diff = false), applyClean (non-empty diff can
  *           be probed via port), regressionGreen (port, null=fail-open),
- *           patchedResolvedKofN (port, null=fail-open).
+ *           smokeGreen (port, null=fail-open), patchedResolvedKofN (port,
+ *           null=fail-open).
  *   SOFT  — minimality (RELATIVE across the candidate set: smallest diff = 1,
  *           parameter-free), ownerCoverage (fraction of the candidate's files
- *           that are closure-ranked owners; null when no owner set).
+ *           that are closure-ranked owners; null when no owner set),
+ *           declaredExpected (optional public issue-shape patch predicate).
  *
- * Winner = `selectBest` (highest-scoring admissible) else `selectBestEffort`
- * over STRUCTURALLY SUBMITTABLE candidates only (highest raw score among
- * non-empty, applying patches). We never knowingly submit an empty or
- * non-applying patch.
+ * Winner = `selectBest` (highest-scoring admissible) else a constrained
+ * best-effort fallback. The fallback may preserve a candidate that merely lacks
+ * provable-tier authority (for example `baseValidatedRed=false` after a post-edit
+ * provider error), but it must NEVER resubmit a candidate that already has
+ * explicit negative evidence such as `regressionGreen=false`,
+ * `smokeGreen=false`, `patchedResolvedKofN votes<k`, an empty patch, or a known
+ * non-applying diff.
+ * The executor also preserves a `terminalCandidate` for stop-reason attribution.
  */
 
 import { isAbsolute, relative, sep } from "node:path"
@@ -34,6 +40,7 @@ import type { StopReason } from "@/agent"
 import {
   type CandidateVerdict,
   type HardGateSignals,
+  isValidResolvedKofN,
   type ResolvedKofNSignal,
   resolvedKofNPositive,
   resolvedKofNVoterQuorum,
@@ -42,6 +49,7 @@ import {
   selectBest,
   selectBestEffort,
 } from "@/agent/verification-bundle"
+import { filesFromUnifiedDiff } from "@/shared"
 import { Semaphore } from "@/workflow/semaphore"
 
 export interface Candidate {
@@ -71,8 +79,14 @@ export interface SelectionPorts {
   applyClean?: (c: Candidate) => Promise<boolean | null>
   /** OPTIONAL regression hard signal; absent ⇒ null (FAIL-OPEN). */
   regression?: (c: Candidate) => Promise<boolean | null>
+  /** OPTIONAL public-smoke hard signal; absent ⇒ null (FAIL-OPEN). */
+  smoke?: (c: Candidate) => Promise<boolean | null>
   /** OPTIONAL patched resolved K-of-N hard signal; absent ⇒ null (FAIL-OPEN). */
   resolvedKofN?: (c: Candidate) => Promise<ResolvedKofNSignal | null>
+  /** OPTIONAL issue-declared expected-behavior patch-shape signal; absent ⇒ null.
+   *  This is a SOFT selector signal: it can make the right candidate beat a tiny
+   *  near-miss, but it never hard-rejects a patch by itself. */
+  declaredExpected?: (c: Candidate) => Promise<boolean | null>
 }
 
 export interface ScoredEntry {
@@ -92,9 +106,9 @@ export interface SelectionResult {
   successfulGenerations: number
   /** generate() calls that failed/aborted and were skipped. */
   generationFailures: number
-  /** Winning candidate (admissible best, else best-effort among structurally
-   *  submittable candidates). null when 0 generated OR every candidate is
-   *  structurally unshippable (empty / non-applying). */
+  /** Winning candidate (highest-scoring admissible, else constrained
+   *  best-effort). null when 0 generated OR every structurally submittable
+   *  candidate is explicitly hard-rejected. */
   winner: Candidate | null
   /** Highest-scoring terminal candidate when nothing was submittable. Lets the
    *  caller preserve stop-reason/error/edit metadata even when `winner=null`. */
@@ -212,12 +226,9 @@ export const normalizeSelectionPaths = (
  *  `--- a/<f>` for pure deletions). Used for owner-coverage scoring. */
 export const filesFromPatch = (patch: string): string[] => {
   const files = new Set<string>()
-  for (const line of patch.split("\n")) {
-    const m = /^(?:\+\+\+ b\/|--- a\/)(.+)$/.exec(line)
-    if (m !== null) {
-      const f = normalizeSelectionPath(m[1] as string, undefined)
-      if (f !== null) files.add(f)
-    }
+  for (const raw of filesFromUnifiedDiff(patch)) {
+    const f = normalizeSelectionPath(raw, undefined)
+    if (f !== null) files.add(f)
   }
   return [...files]
 }
@@ -334,6 +345,20 @@ const requireHardResolvedForEarlyAccept = (
   mode: ResolvedKofNMode | undefined,
 ): boolean => ports.resolvedKofN !== undefined && (mode ?? "hard") === "hard"
 
+const declaredExpectedMatchOf = async (
+  c: Candidate,
+  isEmpty: boolean,
+  ports: SelectionPorts,
+): Promise<boolean | null> => {
+  if (isEmpty) return null
+  return (await ports.declaredExpected?.(c)) ?? null
+}
+
+const hardResolvedRejected = (signal: ResolvedKofNSignal | null): boolean => {
+  if (signal === null) return false
+  return !isValidResolvedKofN(signal) || signal.votes < signal.k
+}
+
 /**
  * Run the verify-and-select executor. Pure over the injected ports.
  *
@@ -377,11 +402,12 @@ export const runSelection = async (args: {
     }
   }
   // Per-candidate memo of the EXPENSIVE, candidate-only port probes
-  // (resolvedKofN / applyClean / regression — each a full tree reset + pytest /
-  // repro consensus). These depend ONLY on the candidate, never on the relative
-  // `minB`/`maxB` minimality window, so with `earlyAccept` on we run them ONCE
-  // per candidate (the early-gate probe) and finalize reuses the verdict instead
-  // of re-materializing the tree a second time. Keyed by candidate identity.
+  // (resolvedKofN / applyClean / regression / smoke — each a full tree reset +
+  // pytest / repro consensus / public smoke probe). These depend ONLY on the
+  // candidate, never on the relative `minB`/`maxB` minimality window, so with
+  // `earlyAccept` on we run them ONCE per candidate (the early-gate probe) and
+  // finalize reuses the verdict instead of re-materializing the tree a second
+  // time. Keyed by candidate identity.
   interface ScoredPorts {
     isEmpty: boolean
     size: number
@@ -390,6 +416,7 @@ export const runSelection = async (args: {
     hard: HardGateSignals
     voterQuorum: number | null
     ownerCoverage: number | null
+    declaredExpectedMatch: boolean | null
   }
   const portsMemo = new Map<Candidate, ScoredPorts>()
   const probeOne = async (c: Candidate): Promise<ScoredPorts> => {
@@ -404,6 +431,7 @@ export const runSelection = async (args: {
       patchProduced: !isEmpty,
       applyClean: isEmpty ? null : ((await args.ports.applyClean?.(c)) ?? null),
       regressionGreen: (await args.ports.regression?.(c)) ?? null,
+      smokeGreen: (await args.ports.smoke?.(c)) ?? null,
       patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
     }
     const probed: ScoredPorts = {
@@ -416,6 +444,7 @@ export const runSelection = async (args: {
       // an empty no-patch earns NO owner-coverage credit (even if a caller hands
       // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
       ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
+      declaredExpectedMatch: await declaredExpectedMatchOf(c, isEmpty, args.ports),
     }
     portsMemo.set(c, probed)
     return probed
@@ -423,7 +452,7 @@ export const runSelection = async (args: {
   const scoreOne = async (c: Candidate, minB: number, maxB: number): Promise<ScoredEntry> => {
     const probed = await probeOne(c)
     const soft: SoftScoreSignals = {
-      declaredExpectedMatch: null,
+      declaredExpectedMatch: probed.declaredExpectedMatch,
       rubricScore: null,
       voterQuorum: probed.voterQuorum,
       // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
@@ -497,7 +526,14 @@ export const runSelection = async (args: {
 
     const ranked = scored.map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     const fallbackRanked = scored
-      .filter((s) => s.hard.patchProduced && s.hard.applyClean !== false)
+      .filter(
+        (s) =>
+          s.hard.patchProduced &&
+          s.hard.applyClean !== false &&
+          s.hard.regressionGreen !== false &&
+          s.hard.smokeGreen !== false &&
+          !hardResolvedRejected(s.hard.patchedResolvedKofN),
+      )
       .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
     const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null

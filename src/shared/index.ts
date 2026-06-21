@@ -145,4 +145,5 @@ export type {
 export { AGENT_PROMPT_MODES } from "./turn-policy-types"
 export type { HITLTier, Id, Result, ToolCapability } from "./types"
 export { ALL_HITL_TIERS, err, ok } from "./types"
+export { filesFromUnifiedDiff } from "./unified-diff-files"
 export { embedUntrusted, escapeBoundary } from "./untrusted"

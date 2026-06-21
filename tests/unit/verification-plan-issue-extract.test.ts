@@ -12,12 +12,16 @@ import { extractIssueDeclaredExpected } from "@/agent/verification-plan/extract-
  */
 describe("extractIssueDeclaredExpected — precision-first", () => {
   test("explicit 'should print `LITERAL`' ⇒ extracted", () => {
-    const r = extractIssueDeclaredExpected("Bug: lambdify a 1-tuple. It should print `(1,)` but prints `(1)`.")
+    const r = extractIssueDeclaredExpected(
+      "Bug: lambdify a 1-tuple. It should print `(1,)` but prints `(1)`.",
+    )
     expect(r).toEqual({ kind: "symbolic", value: "(1,)" })
   })
 
   test("'should return' with a quoted literal ⇒ extracted (stdout kind)", () => {
-    const r = extractIssueDeclaredExpected('The function should return "hello world" for this input.')
+    const r = extractIssueDeclaredExpected(
+      'The function should return "hello world" for this input.',
+    )
     expect(r?.value).toBe("hello world")
     expect(r?.kind).toBe("stdout")
   })
@@ -45,7 +49,9 @@ describe("extractIssueDeclaredExpected — precision-first", () => {
   // FAIL-CLOSED cases — the safety net.
   test("no marker ⇒ undefined", () => {
     expect(
-      extractIssueDeclaredExpected("The MathML printer drops the subscript on bold symbols in Safari."),
+      extractIssueDeclaredExpected(
+        "The MathML printer drops the subscript on bold symbols in Safari.",
+      ),
     ).toBeUndefined()
   })
 
@@ -87,9 +93,24 @@ describe("extractIssueDeclaredExpected — precision-first", () => {
   test("FP guard: 'Expected: <unquoted prose>' ⇒ undefined (label needs a delimited value)", () => {
     // Adversarial audit lens-2: the optional-quote branch captured bare prose.
     expect(extractIssueDeclaredExpected("Expected: the function works correctly")).toBeUndefined()
-    expect(extractIssueDeclaredExpected("Expected result: nothing changes in output")).toBeUndefined()
+    expect(
+      extractIssueDeclaredExpected("Expected result: nothing changes in output"),
+    ).toBeUndefined()
     // …but a DELIMITED labelled value still extracts.
     expect(extractIssueDeclaredExpected("Expected output: `[1, 2, 3]`")?.value).toBe("[1, 2, 3]")
+  })
+
+  test("error-message proposal code block extracts the FULL message, not an inner quoted token", () => {
+    const r = extractIssueDeclaredExpected(`Proposal: change the message to the form of:
+\`\`\`
+ValueError: TimeSeries object is invalid - expected ['time', 'flux'] as the first columns but found ['time', 'b']
+\`\`\`
+`)
+    expect(r).toEqual({
+      kind: "stdout",
+      value:
+        "ValueError: TimeSeries object is invalid - expected ['time', 'flux'] as the first columns but found ['time', 'b']",
+    })
   })
 })
 
@@ -111,7 +132,10 @@ describe("buildVerificationPlan — issueDeclaredExpected mapping", () => {
 
   test("symbolic ⇒ symbolic_repr_equals + structure authority", () => {
     const p = withSpec("symbolic", "(1,)")
-    expect(p.required[0]?.successPredicate).toEqual({ type: "symbolic_repr_equals", expectedRepr: "(1,)" })
+    expect(p.required[0]?.successPredicate).toEqual({
+      type: "symbolic_repr_equals",
+      expectedRepr: "(1,)",
+    })
     expect(p.required[0]?.authority).toBe("structure")
   })
 

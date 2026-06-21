@@ -120,4 +120,20 @@ describe("T-4 writeMicrochunks (filesystem) ↔ pool", () => {
   test("baseRunIdFromPath strips extension and sanitizes", () => {
     expect(baseRunIdFromPath("/a/b/SWE bench.verified.jsonl")).toBe("SWE_bench_verified")
   })
+
+  test("assertUniqueChunkRunIds rejects an unsafe runId at the earliest boundary (bugbash #23)", () => {
+    // The pool's pre-grade `mkdir -p ~/runs/<runId>/...` sink runs BEFORE
+    // gradeChunkOnBox's own guard, so the charset must be enforced here. Revert
+    // the assertSafeArtifactSuffix call in the loop and these stop throwing.
+    expect(() =>
+      assertUniqueChunkRunIds([{ runId: "..", datasetPath: "/tmp/a.jsonl" }]),
+    ).toThrow(/unsafe artifact suffix/)
+    expect(() =>
+      assertUniqueChunkRunIds([{ runId: "run$(reboot)", datasetPath: "/tmp/a.jsonl" }]),
+    ).toThrow(/unsafe artifact suffix/)
+    // a normal runId still passes the boundary
+    expect(() =>
+      assertUniqueChunkRunIds([{ runId: "pool-2026-06-21.chunk_1", datasetPath: "/tmp/a.jsonl" }]),
+    ).not.toThrow()
+  })
 })

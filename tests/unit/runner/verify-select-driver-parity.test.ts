@@ -58,22 +58,20 @@ describe("runner verify-select and patch-budget driver parity", () => {
   })
 
   test("runner driver emits patch-budget telemetry when the knob is on", () => {
-    expect(DRIVER_SRC).toContain("buildPhasePatchBudget,")
+    expect(DRIVER_SRC).toContain("buildPhasePatchBudget")
     expect(DRIVER_SRC).toMatch(
       /if \(\((?:args\.)?posture\.patchBudget \|\| (?:args\.)?posture\.patchBudgetStrict\) && (?:args\.)?instance\.swebench !== undefined\)/,
     )
     expect(DRIVER_SRC).toContain("extra.patchBudget = buildPhasePatchBudget({")
   })
 
-  test("runner driver blocks strict over-budget patches before official verify", () => {
-    expect(DRIVER_SRC).toContain("const strictBudgetBlocked =")
+  test("strict patch-budget stays telemetry-only; neither driver keeps terminal-discard residue", () => {
     expect(DRIVER_SRC).toMatch(
-      /(?:args\.)?posture\.patchBudgetStrict && (?:args\.)?instance\.swebench !== undefined/,
+      /if \(\((?:args\.)?posture\.patchBudget \|\| (?:args\.)?posture\.patchBudgetStrict\) && (?:args\.)?instance\.swebench !== undefined\)/,
     )
-    expect(DRIVER_SRC).toContain("maybeStrictBudgetBlockedResult({")
-    expect(DRIVER_SRC).toMatch(/closureSession: prepared(?:Context)?\.closureSession/)
-    expect(DRIVER_SRC).toContain(
-      "if (strictBudgetBlocked !== undefined) return strictBudgetBlocked",
-    )
+    expect(DRIVER_SRC).not.toContain("maybeStrictBudgetBlockedResult({")
+    expect(DRIVER_SRC).not.toContain("const strictBudgetBlocked =")
+    expect(APP_DRIVER_SRC).not.toContain("maybeStrictBudgetBlockedResult({")
+    expect(APP_DRIVER_SRC).not.toContain("const strictBudgetBlocked =")
   })
 })

@@ -21,6 +21,16 @@ import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
 import { detectRateLimit } from "../../src/apps/bench/remote/box-session"
 import { chunkBoxPaths, type PoolChunk, runPool } from "../../src/apps/bench/remote/pool"
 import { acquirePatchGenBudgetLease } from "../../src/apps/bench/remote/token-budget"
+import {
+  createSpawnRecorder,
+  fail,
+  ok,
+  when,
+  whenArgsInclude,
+  whenSshRemote,
+  whenSshRemoteIncludes,
+  whenSshRemoteMatches,
+} from "./bench-spawn-testkit"
 
 const FULL_AUTH = JSON.stringify({
   access_token: "ACCESS-xyz",
@@ -38,9 +48,48 @@ const allocTempDir = (prefix: string): string => {
   return dir
 }
 
+const TS_FIX_PATCH = [
+  "diff --git a/src/index.ts b/src/index.ts",
+  "--- a/src/index.ts",
+  "+++ b/src/index.ts",
+  "@@ -1 +1 @@",
+  "-export const answer = 0",
+  "+export const answer = 42",
+].join("\n")
+
+const writeDatasetJsonl = (prefix: string, rows: readonly Record<string, unknown>[]): string => {
+  const path = join(allocTempDir(prefix), "instances.jsonl")
+  writeFileSync(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`)
+  return path
+}
+
+const writeDatasetJsonlAtPath = (path: string, rows: readonly Record<string, unknown>[]): void => {
+  writeFileSync(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`)
+}
+
+for (const path of [
+  "/tmp/unused.jsonl",
+  "/tmp/c1.jsonl",
+  "/tmp/c2.jsonl",
+  "/tmp/c3.jsonl",
+  "/tmp/d1.jsonl",
+  "/tmp/d2.jsonl",
+  "/tmp/d3.jsonl",
+  "/tmp/d4.jsonl",
+  "/tmp/r1.jsonl",
+  "/tmp/a.jsonl",
+  "/tmp/b.jsonl",
+]) {
+  const id = path.split("/").at(-1)?.replace(/\.jsonl$/, "") ?? "fixture"
+  writeDatasetJsonlAtPath(path, [{ instance_id: `fixture__${id}`, patch: TS_FIX_PATCH }])
+}
+
 const DEFAULT_SINGLE_BOX_GUARD_DIR = join(allocTempDir("bench-pool-single-box-root-"), "guard")
 
 const allocTokenBudgetDir = (): string => allocTempDir("bench-pool-budget-")
+const RUN_EXIT_OK = ok("0\n==XQ-RUN-EXIT-XQ==\n")
+const defaultPoolResolved = (runId: string): string =>
+  JSON.stringify({ resolved_ids: [`x__${runId}-1`] })
 
 afterAll(() => {
   for (const dir of TEMP_DIRS) {
@@ -77,63 +126,46 @@ const mockSpawn = (opts: {
   tokenShipResult?: SpawnResult
   gradeLockReleaseResult?: SpawnResult
 }): Recorder => {
-  const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-  const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
   let launchIdx = -1
-  const reportFor = opts.reportFor ?? (() => JSON.stringify({ resolved_ids: ["x__y-1"] }))
-
-  const routeSsh = (args: string[]): SpawnResult => {
-    const cmd = args[args.length - 1] ?? ""
-    if (cmd.includes("READY")) return ok("READY")
-    if (cmd.includes("setsid bash -c")) return ok("LAUNCHED")
-    if (cmd.includes("run.exit") || cmd.includes("XQ-RUN-EXIT-XQ")) {
-      return ok(`0\n==XQ-RUN-EXIT-XQ==\n`)
-    }
-    // atomic grade lock: a fresh box acquires it (mkdir succeeds ⇒ LOCKED). Match
-    // mkdir/rmdir SPECIFICALLY so the idle probe's `test -d …lock` falls through.
-    if (cmd.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-    if (cmd.includes("rmdir ~/.pool-grade.lock")) return opts.gradeLockReleaseResult ?? ok("")
-    if (cmd.includes("cat > ~/.quanta/auth/chatgpt.json")) return opts.tokenShipResult ?? ok("")
-    // detached-run launch/poll: the `run.exit` sentinel carries the bench exit
-    // code (RCA jun-20 ssh-resilience). Report DONE (exit 0) immediately so the
-    // poll loop terminates in one tick; launch ssh ignores the stdout.
-    if (cmd.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-    // report fetch: `cat ~/runs/<runId>/report.json 2>/dev/null`
-    const m = cmd.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-    if (m) {
-      opts.beforeReportFetch?.()
-      return ok(reportFor(m[1] ?? "", Math.max(0, launchIdx)))
-    }
-    // run.log tail: inject a 429 marker for rate-limited runIds.
-    const t = cmd.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
-    if (t && opts.rateLimited?.has(t[1] ?? ""))
-      return ok("[FAIL][generation_error] z__z-1 (turns=2)")
-    // preds / closure / trajectory / mkdir / token ship / bench run
-    return ok("")
-  }
-  const route = (cmd: string, args: string[]): SpawnResult => {
-    if (args.includes("describe-security-groups")) return ok("sg-abc")
-    if (args.includes("run-instances")) {
+  const reportFor = opts.reportFor ?? ((runId: string) => defaultPoolResolved(runId))
+  return createSpawnRecorder(
+    whenArgsInclude("describe-security-groups", ok("sg-abc")),
+    whenArgsInclude("run-instances", () => {
       launchIdx += 1
       return ok(`i-box${launchIdx}`)
-    }
-    if (args.includes("describe-instances")) return ok("1.2.3.4")
-    if (args.includes("wait")) return ok("")
-    if (args.includes("terminate-instances")) return opts.terminateResult ?? ok("")
-    if (cmd === "ssh") return routeSsh(args)
-    return ok("") // scp / rsync / other aws
-  }
-  const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
-    calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-    if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
-      const runId =
-        (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
-      o?.onData?.(`[info] ${runId} started\n`)
-      o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
-    }
-    return route(cmd, [...args])
-  }
-  return { fn, calls }
+    }),
+    whenArgsInclude("describe-instances", ok("1.2.3.4")),
+    whenArgsInclude("wait", ok("")),
+    whenArgsInclude("terminate-instances", () => opts.terminateResult ?? ok("")),
+    whenSshRemoteIncludes("READY", ok("READY")),
+    whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
+      const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
+      if (remote.includes("cli.ts run")) {
+        onData?.(`[info] ${runId} started\n`)
+        onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
+      }
+      return ok("LAUNCHED")
+    }),
+    whenSshRemote(
+      (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+      RUN_EXIT_OK,
+    ),
+    whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+    whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", () => opts.gradeLockReleaseResult ?? ok("")),
+    whenSshRemoteIncludes(
+      "cat > ~/.quanta/auth/chatgpt.json",
+      () => opts.tokenShipResult ?? ok(""),
+    ),
+    whenSshRemoteMatches(/cat ~\/runs\/([^/]+)\/report\.json/, (match) => {
+      opts.beforeReportFetch?.()
+      return ok(reportFor(match[1] ?? "", Math.max(0, launchIdx)))
+    }),
+    whenSshRemoteMatches(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/, (match) =>
+      opts.rateLimited?.has(match[1] ?? "")
+        ? ok("[FAIL][generation_error] z__z-1 (turns=2)")
+        : ok(""),
+    ),
+  )
 }
 
 const baseProvision = (spawn: SpawnFn) => ({
@@ -288,45 +320,45 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       pollMs: 10,
     })
     try {
-      const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-      const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
       let launchIdx = -1
       let launchedBenchRuns = 0
       let releaseRunExit: (() => void) | undefined
       const runExitGate = new Promise<void>((resolve) => {
         releaseRunExit = resolve
       })
-      const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
-        calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-        if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
-          launchedBenchRuns += 1
-          if (launchedBenchRuns >= 2) releaseRunExit?.()
-        }
-        const a = [...args]
-        if (a.includes("describe-security-groups")) return ok("sg-abc")
-        if (a.includes("run-instances")) {
+      const { fn, calls } = createSpawnRecorder(
+        whenArgsInclude("describe-security-groups", ok("sg-abc")),
+        whenArgsInclude("run-instances", () => {
           launchIdx += 1
           return ok(`i-box${launchIdx}`)
-        }
-        if (a.includes("describe-instances")) return ok("1.2.3.4")
-        if (a.includes("wait")) return ok("")
-        if (a.includes("terminate-instances")) return ok("")
-        if (cmd === "ssh") {
-          const remote = a[a.length - 1] ?? ""
-          if (remote.includes("READY")) return ok("READY")
-          if (remote.includes("setsid bash -c")) return ok("LAUNCHED")
-          if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ")) {
-            if (launchedBenchRuns < 2) await runExitGate
-            return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+        }),
+        whenArgsInclude("describe-instances", ok("1.2.3.4")),
+        whenArgsInclude("wait", ok("")),
+        whenArgsInclude("terminate-instances", ok("")),
+        whenSshRemoteIncludes("READY", ok("READY")),
+        whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
+          if (remote.includes("cli.ts run")) {
+            launchedBenchRuns += 1
+            if (launchedBenchRuns >= 2) releaseRunExit?.()
+            const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
+            onData?.(`[info] ${runId} started\n`)
+            onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
           }
-          if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-          if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
-          const report = remote.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-          if (report) return ok(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
-          return ok("")
-        }
-        return ok("")
-      }
+          return ok("LAUNCHED")
+        }),
+        whenSshRemote(
+          (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+          async () => {
+            if (launchedBenchRuns < 2) await runExitGate
+            return RUN_EXIT_OK
+          },
+        ),
+        whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+        whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+        whenSshRemoteMatches(/cat ~\/runs\/([^/]+)\/report\.json/, (match) =>
+          ok(defaultPoolResolved(match[1] ?? "")),
+        ),
+      )
       await runPool(
         CHUNKS.slice(0, 2),
         poolCfg(fn, {
@@ -562,47 +594,52 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   test("concurrent single-box pool runs FAIL-CLOSED instead of launching a second box", async () => {
     const tokenBudgetDir = allocTokenBudgetDir()
     const singleBoxGuardDir = join(allocTempDir("bench-pool-single-box-root-"), "guard")
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
     let launched = 0
     let releaseFirstRun: (() => void) | undefined
     const firstRunDone = new Promise<void>((resolve) => {
       releaseFirstRun = resolve
     })
     let firstBenchStarted = false
-    const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
-      const a = [...args]
-      calls.push({ cmd, args: a, ...(o?.input !== undefined ? { input: o.input } : {}) })
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances")) {
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", () => {
         launched += 1
         return ok(`i-box${launched - 1}`)
-      }
-      if (a.includes("wait")) return ok("")
-      if (a.includes("--filters") && a.includes("Reservations[].Instances[].InstanceId"))
-        return ok("")
-      if (a.includes("--filters") && a.includes("InstanceId,PublicIpAddress")) return ok("")
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const remote = a[a.length - 1] ?? ""
-        if (remote.includes("READY")) return ok("READY")
-        if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (remote.includes("setsid bash -c") && remote.includes("cli.ts run")) {
+      }),
+      whenArgsInclude("wait", ok("")),
+      when(
+        ({ args }) =>
+          args.includes("--filters") && args.includes("Reservations[].Instances[].InstanceId"),
+        ok(""),
+      ),
+      when(
+        ({ args }) => args.includes("--filters") && args.includes("InstanceId,PublicIpAddress"),
+        ok(""),
+      ),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("setsid bash -c") && remote.includes("cli.ts run"),
+        ({ remote, onData }) => {
           firstBenchStarted = true
+          const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
+          onData?.(`[info] ${runId} started\n`)
+          onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
           return ok("LAUNCHED")
-        }
-        if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ")) {
+        },
+      ),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        async () => {
           if (firstBenchStarted && launched === 1) await firstRunDone
-          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        }
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(remote))
-          return ok(JSON.stringify({ resolved_ids: ["x__y-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+          return RUN_EXIT_OK
+        },
+      ),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () => ok(defaultPoolResolved("y"))),
+    )
 
     const first = runPool(
       [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
@@ -677,37 +714,30 @@ describe("runPool — persistent box, amortised bootstrap", () => {
 
   test("a reprovision failure ABORTS the run instead of silently surfacing a lost chunk", async () => {
     let launches = 0
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances")) {
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", () => {
         launches += 1
         return launches === 1
           ? ok("i-box0")
-          : {
-              code: 254,
-              stdout: "",
-              stderr: "An error occurred (InsufficientInstanceCapacity)",
-            }
-      }
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("wait")) return ok("")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const remote = a[a.length - 1] ?? ""
-        if (remote.includes("READY")) return ok("READY")
-        if (remote.includes("setsid bash -c")) return ok("LAUNCHED")
-        if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"))
-          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(remote)) return ok("")
-        o?.onData?.("[FAIL][generation_error] c1__inst-1 (turns=2)\n")
-        return ok("")
-      }
-      return ok("")
-    }
+          : fail(254, "An error occurred (InsufficientInstanceCapacity)")
+      }),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("wait", ok("")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("setsid bash -c", ({ onData }) => {
+        onData?.("[FAIL][generation_error] c1__inst-1 (turns=2)\n")
+        return ok("LAUNCHED")
+      }),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () => ok("")),
+    )
 
     await expect(
       runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, { maxChunkRetries: 1 })),
@@ -760,32 +790,24 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     // findIdleBox's tag-filtered describe returns a running box; its bootstrap
     // probe says OK and its idle probe says IDLE ⇒ the pool ATTACHES, never
     // launching. attachBox's --instance-ids describe resolves the ip.
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string) => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-instances")) {
-        // findIdleBox (tag filter) ⇒ id+ip row; attachBox (--instance-ids) ⇒ ip.
-        return a.includes("--filters") ? ok("i-warmbox\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
-        if (c.includes("echo OK")) return ok("OK") // bootstrap probe
-        // idle probe (uniquely contains `pgrep`) — checked BEFORE the lock matchers
-        // because the stale-lock-reclaim probe also contains `rmdir …lock`.
-        if (c.includes("pgrep")) return ok("IDLE") // warm box is idle
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warmbox\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("pgrep", ok("IDLE")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     const out = await runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn))
     // TEETH: a warm box was reused ⇒ ZERO launches.
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
@@ -797,28 +819,23 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("an idle live box still blocks a fresh launch when reuseWarm=false unless explicitly opted in", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string) => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-instances")) {
-        return a.includes("--filters") ? ok("i-warmbox\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("pgrep")) return ok("IDLE")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warmbox\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("pgrep", ok("IDLE")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     await expect(
       runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn, { reuseWarm: false })),
     ).rejects.toThrow(/refusing to launch a fresh box|refusing to launch another box/i)
@@ -974,30 +991,24 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     //   - the report fetch returns a VALID resolved report, so if the lock check
     //     were bypassed the chunk would RESOLVE (lost:false) — `lost===true` then
     //     proves the POOL_BUSY path was actually taken, not a no-verdict masquerade.
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances")) return ok("i-fresh")
-      if (a.includes("describe-instances")) {
-        return a.includes("--filters") ? ok("i-busy") : ok("1.2.3.4")
-      }
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY") // lock held by another run
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        // a VALID report — only reachable if the lock check is (wrongly) bypassed.
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", ok("i-fresh")),
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-busy" : "1.2.3.4"),
+      ),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("BUSY")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
       poolCfg(fn, { maxChunkRetries: 1, reuseWarm: false, allowExtraBoxes: true }),
@@ -1012,38 +1023,31 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("a mid-run POOL_BUSY box FAIL-CLOSED unless explicit extra-box opt-in is set", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let launched = false
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances")) {
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", () => {
         launched = true
         return ok("i-fresh")
-      }
-      if (a.includes("describe-instances")) {
-        if (a.includes("--filters")) {
-          return a.some((part) => part.includes("Reservations[].Instances[].InstanceId"))
-            ? ok(launched ? "i-busy" : "")
-            : ok("")
-        }
-        return ok("1.2.3.4")
-      }
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+      }),
+      whenArgsInclude("describe-instances", ({ args }) => {
+        if (!args.includes("--filters")) return ok("1.2.3.4")
+        return args.some((part) => part.includes("Reservations[].Instances[].InstanceId"))
+          ? ok(launched ? "i-busy" : "")
+          : ok("")
+      }),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("BUSY")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     await expect(
       runPool(
         [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
@@ -1055,36 +1059,31 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("a mid-run POOL_BUSY warm-box race ABORTS by default instead of auto-launching another box", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let pgrepCount = 0
     let lockCount = 0
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-instances")) {
-        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("pgrep")) {
-          pgrepCount += 1
-          return ok(pgrepCount <= 2 ? "IDLE" : "BUSY")
-        }
-        if (c.includes("mkdir ~/.pool-grade.lock")) {
-          lockCount += 1
-          return ok(lockCount === 1 ? "BUSY" : "LOCKED")
-        }
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("pgrep", () => {
+        pgrepCount += 1
+        return ok(pgrepCount <= 2 ? "IDLE" : "BUSY")
+      }),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", () => {
+        lockCount += 1
+        return ok(lockCount === 1 ? "BUSY" : "LOCKED")
+      }),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     await expect(
       runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn, { maxChunkRetries: 1 })),
     ).rejects.toThrow(/refusing to launch another box/i)
@@ -1093,39 +1092,34 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("a mid-run POOL_BUSY warm-box race waits, then REUSES the box once it goes idle", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
     const slept: number[] = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let pgrepCount = 0
     let lockCount = 0
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-instances")) {
-        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("pgrep")) {
-          pgrepCount += 1
-          if (pgrepCount <= 2) return ok("IDLE")
-          if (pgrepCount <= 4) return ok("BUSY")
-          return ok("IDLE")
-        }
-        if (c.includes("mkdir ~/.pool-grade.lock")) {
-          lockCount += 1
-          return ok(lockCount === 1 ? "BUSY" : "LOCKED")
-        }
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("pgrep", () => {
+        pgrepCount += 1
+        if (pgrepCount <= 2) return ok("IDLE")
+        if (pgrepCount <= 4) return ok("BUSY")
+        return ok("IDLE")
+      }),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", () => {
+        lockCount += 1
+        return ok(lockCount === 1 ? "BUSY" : "LOCKED")
+      }),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
       poolCfg(fn, {
@@ -1143,26 +1137,19 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("a lock-probe ssh failure on an OWNED box is a hard failure, not BUSY (terminate it)", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances")) return ok("i-owned")
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("wait")) return ok("")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("mkdir ~/.pool-grade.lock"))
-          return { code: 255, stdout: "", stderr: "ssh: connect timeout" }
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", ok("i-owned")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("wait", ok("")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", fail(255, "ssh: connect timeout")),
+    )
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
       poolCfg(fn, { maxChunkRetries: 0, reuseWarm: false }),
@@ -1203,38 +1190,40 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("with explicit multi-worker opt-in, the pool waits for sibling workers to settle before surfacing the first failure", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let authReads = 0
+    let launches = 0
     let releaseSecondRun: (() => void) | undefined
     const secondRunGate = new Promise<void>((resolve) => {
       releaseSecondRun = resolve
     })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances"))
-        return ok(`i-${calls.filter((c) => c.args.includes("run-instances")).length}`)
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("wait")) return ok("")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("setsid bash -c")) return ok("LAUNCHED")
-        if (c.includes("run.exit") || c.includes("XQ-RUN-EXIT-XQ")) {
-          if (c.includes("~/runs/c2/")) await secondRunGate
-          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", () => ok(`i-${launches++}`)),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("wait", ok("")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
+        const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
+        if (remote.includes("cli.ts run")) {
+          onData?.(`[info] ${runId} started\n`)
+          onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
         }
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        const report = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-        if (report) return ok(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
-        return ok("")
-      }
-      return ok("")
-    }
+        return ok("LAUNCHED")
+      }),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        async ({ remote }) => {
+          if (remote.includes("~/runs/c2/")) await secondRunGate
+          return RUN_EXIT_OK
+        },
+      ),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/([^/]+)\/report\.json/, (match) =>
+        ok(defaultPoolResolved(match[1] ?? "")),
+      ),
+    )
     const runPromise = runPool(
       [
         { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
@@ -1268,9 +1257,8 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("after a fatal worker abort, sibling workers do NOT start fresh chunks from the shared queue", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let authReads = 0
+    let launches = 0
     let releaseC2Run: (() => void) | undefined
     const c2RunGate = new Promise<void>((resolve) => {
       releaseC2Run = resolve
@@ -1279,32 +1267,35 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     const c3RunGate = new Promise<void>((resolve) => {
       releaseC3Run = resolve
     })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances"))
-        return ok(`i-${calls.filter((c) => c.args.includes("run-instances")).length}`)
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("wait")) return ok("")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("setsid bash -c")) return ok("LAUNCHED")
-        if (c.includes("run.exit") || c.includes("XQ-RUN-EXIT-XQ")) {
-          if (c.includes("~/runs/c2/")) await c2RunGate
-          if (c.includes("~/runs/c3/")) await c3RunGate
-          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", () => ok(`i-${launches++}`)),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("wait", ok("")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
+        const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
+        if (remote.includes("cli.ts run")) {
+          onData?.(`[info] ${runId} started\n`)
+          onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
         }
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        const report = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-        if (report) return ok(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
-        return ok("")
-      }
-      return ok("")
-    }
+        return ok("LAUNCHED")
+      }),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        async ({ remote }) => {
+          if (remote.includes("~/runs/c2/")) await c2RunGate
+          if (remote.includes("~/runs/c3/")) await c3RunGate
+          return RUN_EXIT_OK
+        },
+      ),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/([^/]+)\/report\.json/, (match) =>
+        ok(defaultPoolResolved(match[1] ?? "")),
+      ),
+    )
     const runPromise = runPool(
       [
         { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
@@ -1352,22 +1343,19 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("a running BUSY box blocks auto-launch of another box unless explicitly opted in", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-instances") && a.includes("--filters")) return ok("i-busy\t9.9.9.9")
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("IDLE")) return ok("BUSY")
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      when(
+        ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
+        ok("i-busy\t9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("IDLE", ok("BUSY")),
+    )
     await expect(
       runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn)),
     ).rejects.toThrow(/refusing to launch another box/i)
@@ -1375,40 +1363,33 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("an idle warm-box hit in the launch window is ATTACHED directly instead of being re-probed into a fresh launch", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let idleProbeCount = 0
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("describe-instances")) {
-        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("pgrep")) {
-          idleProbeCount += 1
-          if (idleProbeCount === 1) return ok("IDLE") // preflight launch-window hit
-          if (idleProbeCount === 2)
-            return { code: 255, stdout: "", stderr: "ssh probe flake before attach" }
-          if (idleProbeCount === 3) return ok("IDLE") // worker launch-window hit
-          if (idleProbeCount === 4)
-            return { code: 255, stdout: "", stderr: "ssh reprobe flake after launch window" }
-          return ok("IDLE")
-        }
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("pgrep", () => {
+        idleProbeCount += 1
+        if (idleProbeCount === 1) return ok("IDLE")
+        if (idleProbeCount === 2) return fail(255, "ssh probe flake before attach")
+        if (idleProbeCount === 3) return ok("IDLE")
+        if (idleProbeCount === 4) return fail(255, "ssh reprobe flake after launch window")
+        return ok("IDLE")
+      }),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     const out = await runPool([{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }], poolCfg(fn))
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
     expect(out[0]?.lost).toBe(false)
@@ -1416,35 +1397,25 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("the pool's top-level preset authority governs box grounding checks during provision", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances")) return ok("i-box0")
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("wait")) return ok("")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("command -v pyright-langserver")) {
-          return { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
-        }
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (c.includes("setsid bash -c")) return ok("LAUNCHED")
-        if (c.includes("run.exit") || c.includes("XQ-RUN-EXIT-XQ")) {
-          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        }
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c)) {
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        }
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("run-instances", ok("i-box0")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("wait", ok("")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("command -v pyright-langserver", fail(7, "", "PYRIGHT_MISSING\n")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteIncludes("setsid bash -c", ok("LAUNCHED")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
       poolCfg(fn, {
@@ -1457,34 +1428,69 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
   })
 
+  test("thin-strict pool fails closed before launch when a chunk needs non-pyright LSP grounding", async () => {
+    const datasetPath = writeDatasetJsonl("bench-pool-ts-dataset-", [
+      { instance_id: "acme__ts-1", patch: TS_FIX_PATCH },
+    ])
+    const { fn, calls } = mockSpawn({})
+    await expect(
+      runPool(
+        [{ runId: "ts-1", datasetPath, instanceIds: ["acme__ts-1"] }],
+        poolCfg(fn, { preset: "agentless-v3-thin-strict" }),
+      ),
+    ).rejects.toThrow(/typescript-language-server/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
+  test("pool fails closed before launch when a chunk selects missing instanceIds", async () => {
+    const datasetPath = writeDatasetJsonl("bench-pool-missing-id-", [
+      { instance_id: "psf__requests-5414", patch: TS_FIX_PATCH },
+    ])
+    const { fn, calls } = mockSpawn({})
+    await expect(
+      runPool(
+        [{ runId: "missing-id", datasetPath, instanceIds: ["missing__case-1"] }],
+        poolCfg(fn, { preset: "agentless-v2" }),
+      ),
+    ).rejects.toThrow(/selected instanceIds are missing/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
+  test("pool fails closed before launch when a chunk dataset is empty", async () => {
+    const datasetPath = writeDatasetJsonl("bench-pool-empty-", [])
+    const { fn, calls } = mockSpawn({})
+    await expect(
+      runPool([{ runId: "empty-dataset", datasetPath }], poolCfg(fn, { preset: "agentless-v2" })),
+    ).rejects.toThrow(/contains no parseable task rows/i)
+    expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
   test("waitForIdle parks behind a busy running box, then REUSES it once it goes idle", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
     const slept: number[] = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let idleProbeCount = 0
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-instances")) {
-        return a.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("pgrep")) {
-          idleProbeCount += 1
-          return ok(idleProbeCount >= 2 ? "IDLE" : "BUSY")
-        }
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("pgrep", () => {
+        idleProbeCount += 1
+        return ok(idleProbeCount >= 2 ? "IDLE" : "BUSY")
+      }),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
       poolCfg(fn, {
@@ -1500,22 +1506,17 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("waitForIdle times out instead of launching past a forever-busy box", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
     const slept: number[] = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let nowMs = 0
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-instances") && a.includes("--filters")) return ok("i-busy\t9.9.9.9")
-      if (a.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("pgrep")) return ok("BUSY")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      when(
+        ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
+        ok("i-busy\t9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("pgrep", ok("BUSY")),
+    )
     await expect(
       runPool(
         [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
@@ -1536,32 +1537,27 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("explicit extra-box opt-in can launch past a running BUSY box", async () => {
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      const a = [...args]
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("describe-instances")) {
-        return a.includes("--filters") ? ok("i-busy\t9.9.9.9") : ok("1.2.3.4")
-      }
-      if (a.includes("run-instances")) return ok("i-fresh")
-      if (a.includes("wait")) return ok("")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n") // detached-run sentinel
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("IDLE")) return ok("BUSY")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (/cat ~\/runs\/[^/]+\/report\.json/.test(c))
-          return ok(JSON.stringify({ resolved_ids: ["w__w-1"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-busy\t9.9.9.9" : "1.2.3.4"),
+      ),
+      whenArgsInclude("run-instances", ok("i-fresh")),
+      whenArgsInclude("wait", ok("")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("IDLE", ok("BUSY")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemoteMatches(/cat ~\/runs\/[^/]+\/report\.json/, () =>
+        ok(JSON.stringify({ resolved_ids: ["w__w-1"] })),
+      ),
+    )
     const out = await runPool(
       [{ runId: "r1", datasetPath: "/tmp/r1.jsonl" }],
       poolCfg(fn, { allowExtraBoxes: true, reuseWarm: false }),

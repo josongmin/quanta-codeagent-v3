@@ -1,0 +1,24 @@
+import { pythonForRepoVersion } from "./repo-version-python"
+
+const BASE_PROJECT_ENV_DEPS = ["setuptools"] as const
+
+/**
+ * Shared SWE-bench project env prefix for repo-local repro / verifier commands.
+ *
+ * `setuptools` is forced into the `uv run` env because older repos still import
+ * `pkg_resources` during module import, even when pytest itself is present.
+ * `--no-project` keeps uv from switching into the repo's own project-managed
+ * environment, which otherwise hides `--with` dependencies behind the project
+ * layer; we install the repo explicitly via `--with-editable .` instead.
+ */
+export const buildProjectEnvUvRunArgv = (
+  repo: string,
+  version: string | undefined,
+  extraWith: readonly string[] = [],
+): readonly string[] => {
+  const deps = [...new Set([...extraWith, ...BASE_PROJECT_ENV_DEPS])]
+  const argv = ["uv", "run", "--no-project", "--python", pythonForRepoVersion(repo, version)] as string[]
+  for (const dep of deps) argv.push("--with", dep)
+  argv.push("--with-editable", ".")
+  return argv
+}

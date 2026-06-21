@@ -29,6 +29,17 @@ import {
   acquirePatchGenBudgetLease,
   readPatchGenBudgetState,
 } from "../../src/apps/bench/remote/token-budget"
+import {
+  createSpawnRecorder,
+  fail,
+  ok,
+  when,
+  whenArgsInclude,
+  whenCmd,
+  whenSshRemote,
+  whenSshRemoteIncludes,
+  whenSshRemoteMatches,
+} from "./bench-spawn-testkit"
 
 const FULL_AUTH = JSON.stringify({
   access_token: "ACCESS-xyz",
@@ -46,8 +57,43 @@ const allocTempDir = (prefix: string): string => {
   return dir
 }
 
+const TS_FIX_PATCH = [
+  "diff --git a/src/index.ts b/src/index.ts",
+  "--- a/src/index.ts",
+  "+++ b/src/index.ts",
+  "@@ -1 +1 @@",
+  "-export const answer = 0",
+  "+export const answer = 42",
+].join("\n")
+
+const PY_FIX_PATCH = [
+  "diff --git a/app.py b/app.py",
+  "--- a/app.py",
+  "+++ b/app.py",
+  "@@ -1 +1 @@",
+  "-answer = 0",
+  "+answer = 42",
+].join("\n")
+
+const writeDatasetJsonl = (prefix: string, rows: readonly Record<string, unknown>[]): string => {
+  const path = join(allocTempDir(prefix), "instances.jsonl")
+  writeFileSync(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`)
+  return path
+}
+
+const writeDatasetJsonlAtPath = (path: string, rows: readonly Record<string, unknown>[]): void => {
+  writeFileSync(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`)
+}
+
+writeDatasetJsonlAtPath("/tmp/ds.jsonl", [
+  { instance_id: "psf__requests-5414", patch: PY_FIX_PATCH },
+  { instance_id: "django__django-12345", patch: PY_FIX_PATCH },
+])
+
 const TOKEN_BUDGET_DIR = allocTempDir("bench-full-budget-")
 const DEFAULT_SINGLE_BOX_GUARD_DIR = join(allocTempDir("bench-full-single-box-root-"), "guard")
+const RUN_EXIT_OK = ok("0\n==XQ-RUN-EXIT-XQ==\n")
+const DEFAULT_FULL_REPORT = JSON.stringify({ resolved_ids: ["psf__requests-5414"] })
 
 afterAll(() => {
   for (const dir of TEMP_DIRS) {
@@ -95,6 +141,11 @@ describe("stripToAccessToken (security crux)", () => {
 /** Mock spawn recording every command + its stdin input. With
  *  `{ emptyReport: true }` the report-fetch (and any `.json` ssh) returns empty
  *  stdout — the "box produced no report" scenario. */
+const isFullSnapshotWrite = (remote: string): boolean =>
+  remote.includes("bench-box-status.json") &&
+  remote.includes("cat > ~/.quanta/bench-box-status.json.tmp") &&
+  remote.includes("mv ~/.quanta/bench-box-status.json.tmp ~/.quanta/bench-box-status.json")
+
 const mockSpawn = (
   o: {
     emptyReport?: boolean
@@ -103,60 +154,30 @@ const mockSpawn = (
     snapshotWriteResult?: SpawnResult
   } = {},
 ): { fn: SpawnFn; calls: Array<{ cmd: string; args: string[]; input?: string }> } => {
-  const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-  const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-  // Split ssh routing into a sub-helper so cognitive complexity stays flat.
-  const routeSsh = (args: string[]): SpawnResult => {
-    if (args.some((a) => a.includes("setsid bash -c"))) return ok("LAUNCHED")
-    if (args.some((a) => a.includes("run.exit") || a.includes("XQ-RUN-EXIT-XQ"))) {
-      return ok(`0\n==XQ-RUN-EXIT-XQ==\n`)
-    }
-    if (args.some((a) => a.includes("bun") && a.includes("READY"))) return ok("READY") // readiness
-    if (args.some((a) => a.includes("command -v pyright-langserver"))) {
-      return ok("pyright 1.1.350\n")
-    }
-    if (
-      args.some((a) => a.includes("bench-box-status.json")) &&
-      args.some((a) => a.includes("cat > ~/.quanta/bench-box-status.json.tmp")) &&
-      args.some((a) => a.includes("mv ~/.quanta/bench-box-status.json.tmp ~/.quanta/bench-box-status.json"))
-    ) {
-      return o.snapshotWriteResult ?? ok("")
-    }
-    // atomic grade lock (a fresh box acquires it cleanly ⇒ LOCKED).
-    if (args.some((a) => a.includes("mkdir ~/.pool-grade.lock"))) return ok("LOCKED")
-    const reportFetch = args.find((a) => /cat ~\/(?:runs\/[^/]+\/)?report\.json/.test(a))
-    if (reportFetch !== undefined) {
+  return createSpawnRecorder(
+    whenArgsInclude("describe-security-groups", ok("sg-abc")),
+    whenCmd("curl", ok("9.9.9.9")),
+    whenArgsInclude("run-instances", ok("i-deadbeef")),
+    whenArgsInclude("describe-instances", ok("1.2.3.4")),
+    whenSshRemoteIncludes("setsid bash -c", ({ onData }) => {
+      onData?.("[info] bench(swebench): 1 task(s)\n")
+      onData?.("[PASS] psf__requests-5414 (turns=2)\n")
+      return ok("LAUNCHED")
+    }),
+    whenSshRemote(
+      (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+      RUN_EXIT_OK,
+    ),
+    whenSshRemote((remote) => remote.includes("bun") && remote.includes("READY"), ok("READY")),
+    whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
+    whenSshRemote(isFullSnapshotWrite, () => o.snapshotWriteResult ?? ok("")),
+    whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+    whenSshRemoteMatches(/cat ~\/(?:runs\/[^/]+\/)?report\.json/, () => {
       o.beforeReportFetch?.()
-      return ok(
-        o.emptyReport
-          ? ""
-          : (o.reportBody ?? JSON.stringify({ resolved_ids: ["psf__requests-5414"] })),
-      )
-    }
-    if (args.some((a) => a.includes("cat ") || a.includes(".json"))) return ok("")
-    return ok("")
-  }
-  const route = (cmd: string, args: string[]): SpawnResult => {
-    if (args.includes("describe-security-groups")) return ok("sg-abc")
-    if (cmd === "curl") return ok("9.9.9.9")
-    if (args.includes("run-instances")) return ok("i-deadbeef")
-    if (args.includes("describe-instances")) return ok("1.2.3.4")
-    if (cmd === "ssh") return routeSsh(args)
-    return ok("")
-  }
-  const fn: SpawnFn = async (cmd, args, opts): Promise<SpawnResult> => {
-    calls.push({
-      cmd,
-      args: [...args],
-      ...(opts?.input !== undefined ? { input: opts.input } : {}),
-    })
-    if (cmd === "ssh" && args.some((a) => a.includes("run --swebench"))) {
-      opts?.onData?.("[info] bench(swebench): 1 task(s)\n")
-      opts?.onData?.("[PASS] psf__requests-5414 (turns=2)\n")
-    }
-    return route(cmd, [...args])
-  }
-  return { fn, calls }
+      return ok(o.emptyReport ? "" : (o.reportBody ?? DEFAULT_FULL_REPORT))
+    }),
+    whenSshRemote((remote) => remote.includes("cat ") || remote.includes(".json"), ok("")),
+  )
 }
 
 const everyShippedString = (calls: Array<{ args: string[]; input?: string }>): string =>
@@ -422,49 +443,51 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   test("concurrent single-box full-remote runs FAIL-CLOSED instead of launching a second box", async () => {
     const tokenBudgetDir = allocTempDir("bench-full-concurrent-budget-")
     const singleBoxGuardDir = join(allocTempDir("bench-full-single-box-root-"), "guard")
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
     let launched = 0
     let releaseFirstRun: (() => void) | undefined
     const firstRunDone = new Promise<void>((resolve) => {
       releaseFirstRun = resolve
     })
     let firstBenchStarted = false
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      const a = [...args]
-      calls.push({ cmd, args: a })
-      if (a.includes("describe-security-groups")) return ok("sg-abc")
-      if (a.includes("run-instances")) {
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", () => {
         launched += 1
         return ok(`i-box${launched - 1}`)
-      }
-      if (a.includes("wait")) return ok("")
-      if (a.includes("--filters") && a.includes("Reservations[].Instances[].InstanceId"))
-        return ok("")
-      if (a.includes("--filters") && a.includes("InstanceId,PublicIpAddress")) return ok("")
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const remote = a[a.length - 1] ?? ""
-        if (remote.includes("READY")) return ok("READY")
-        if (remote.includes("command -v pyright-langserver")) return ok("pyright 1.1.350\n")
-        if (remote.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (remote.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (remote.includes("setsid bash -c") && remote.includes("run --swebench")) {
+      }),
+      whenArgsInclude("wait", ok("")),
+      when(
+        ({ args }) =>
+          args.includes("--filters") && args.includes("Reservations[].Instances[].InstanceId"),
+        ok(""),
+      ),
+      when(
+        ({ args }) => args.includes("--filters") && args.includes("InstanceId,PublicIpAddress"),
+        ok(""),
+      ),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("setsid bash -c") && remote.includes("run --swebench"),
+        () => {
           firstBenchStarted = true
           return ok("LAUNCHED")
-        }
-        if (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ")) {
+        },
+      ),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        async () => {
           if (firstBenchStarted && launched === 1) await firstRunDone
-          return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        }
-        if (/cat ~\/report\.json/.test(remote))
-          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
-        return ok("")
-      }
-      if (cmd === "curl") return ok("9.9.9.9")
-      return ok("")
-    }
+          return RUN_EXIT_OK
+        },
+      ),
+      whenSshRemoteMatches(/cat ~\/report\.json/, () => ok(DEFAULT_FULL_REPORT)),
+    )
 
     const prevConcurrency = process.env.QUANTA_FULL_REMOTE_CONCURRENCY
     process.env.QUANTA_FULL_REMOTE_CONCURRENCY = "8"
@@ -530,6 +553,9 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
           onDemand: true,
           maxReadyPolls: 1,
           singleBoxGuardDir: ${JSON.stringify(join(allocTempDir("bench-full-single-box-root-"), "guard"))},
+          tokenBudgetDir: ${JSON.stringify(allocTempDir("bench-full-ownerproc-budget-"))},
+          tokenBudgetWaitMs: 100,
+          tokenBudgetPollMs: 5,
           onLog: () => {},
         }).run()
         console.error("UNEXPECTED_OK")
@@ -670,26 +696,15 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("thin-strict family fails closed when pyright grounding is inert on a fresh box", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-security-groups"))
-        return { code: 0, stdout: "sg-abc", stderr: "" }
-      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
-      if (args.includes("run-instances")) return { code: 0, stdout: "i-strict", stderr: "" }
-      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
-      if (args.includes("terminate-instances")) return { code: 0, stdout: "", stderr: "" }
-      if (cmd === "ssh") {
-        const remote = args[args.length - 1] ?? ""
-        if (remote.includes("bun") && remote.includes("READY"))
-          return { code: 0, stdout: "READY", stderr: "" }
-        if (remote.includes("command -v pyright-langserver")) {
-          return { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
-        }
-        return { code: 0, stdout: "", stderr: "" }
-      }
-      return { code: 0, stdout: "", stderr: "" }
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-strict")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote((remote) => remote.includes("bun") && remote.includes("READY"), ok("READY")),
+      whenSshRemoteIncludes("command -v pyright-langserver", fail(7, "", "PYRIGHT_MISSING\n")),
+    )
     await expect(
       createFullRemoteBackend({
         ...baseCfg,
@@ -705,30 +720,96 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     ).toBe(false)
   })
 
+  test("thin-strict family fails closed before launch when selected tasks need non-pyright LSP grounding", async () => {
+    const datasetPath = writeDatasetJsonl("bench-full-ts-dataset-", [
+      { instance_id: "acme__ts-1", patch: TS_FIX_PATCH },
+    ])
+    const { fn, calls } = mockSpawn()
+    await expect(
+      createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        datasetPath,
+        instanceIds: ["acme__ts-1"],
+        preset: "agentless-v3-thin-strict",
+      }).run(),
+    ).rejects.toThrow(/typescript-language-server/i)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
+  test("thin-strict family classifies pure rename gold patches before launch", async () => {
+    const datasetPath = writeDatasetJsonl("bench-full-ts-rename-dataset-", [
+      {
+        instance_id: "acme__ts-rename-1",
+        patch: [
+          "diff --git a/src/old.ts b/src/new.ts",
+          "similarity index 100%",
+          "rename from src/old.ts",
+          "rename to src/new.ts",
+        ].join("\n"),
+      },
+    ])
+    const { fn, calls } = mockSpawn()
+    await expect(
+      createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        datasetPath,
+        instanceIds: ["acme__ts-rename-1"],
+        preset: "agentless-v3-thin-strict",
+      }).run(),
+    ).rejects.toThrow(/typescript-language-server/i)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
+  test("selected instanceIds fail closed before launch when the local dataset does not contain them", async () => {
+    const datasetPath = writeDatasetJsonl("bench-full-missing-id-", [
+      { instance_id: "psf__requests-5414", patch: PY_FIX_PATCH },
+    ])
+    const { fn, calls } = mockSpawn()
+    await expect(
+      createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        datasetPath,
+        instanceIds: ["missing__case-1"],
+        preset: "agentless-v2",
+      }).run(),
+    ).rejects.toThrow(/selected instanceIds are missing/i)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
+  test("unreadable local dataset fails closed before launch", async () => {
+    const datasetPath = join(allocTempDir("bench-full-unreadable-"), "missing.jsonl")
+    const { fn, calls } = mockSpawn()
+    await expect(
+      createFullRemoteBackend({
+        ...baseCfg,
+        spawn: fn,
+        datasetPath,
+        instanceIds: undefined,
+        preset: "agentless-v2",
+      }).run(),
+    ).rejects.toThrow(/could not be read before launch/i)
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
+    expect(calls.some((c) => c.cmd === "ssh")).toBe(false)
+  })
+
   test("warm thin-strict boxes re-prove LSP grounding instead of bypassing on attach", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
     let pyrightProbeCount = 0
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
-      if (cmd === "ssh") {
-        const remote = args[args.length - 1] ?? ""
-        if (remote.includes("test -x ~/.bun/bin/bun"))
-          return { code: 0, stdout: "OK\n", stderr: "" }
-        if (remote.includes("command -v pyright-langserver")) {
-          pyrightProbeCount += 1
-          return pyrightProbeCount === 1
-            ? { code: 7, stdout: "PYRIGHT_MISSING\n", stderr: "" }
-            : { code: 0, stdout: "pyright 1.1.350\n", stderr: "" }
-        }
-        if (remote.includes("bun") && remote.includes("READY"))
-          return { code: 0, stdout: "READY", stderr: "" }
-        if (remote.includes("~/swebench-python -c"))
-          return { code: 0, stdout: "2.0.0\n", stderr: "" }
-        return { code: 0, stdout: "", stderr: "" }
-      }
-      return { code: 0, stdout: "", stderr: "" }
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenSshRemoteIncludes("test -x ~/.bun/bin/bun", ok("OK\n")),
+      whenSshRemoteIncludes("command -v pyright-langserver", () => {
+        pyrightProbeCount += 1
+        return pyrightProbeCount === 1 ? fail(7, "", "PYRIGHT_MISSING\n") : ok("pyright 1.1.350\n")
+      }),
+      whenSshRemote((remote) => remote.includes("bun") && remote.includes("READY"), ok("READY")),
+      whenSshRemoteIncludes("~/swebench-python -c", ok("2.0.0\n")),
+    )
     await attachBox(
       {
         ...baseCfg,
@@ -772,52 +853,32 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("a grade-phase termination failure preserves BOTH the primary run error and cleanup error", async () => {
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      if (args.includes("describe-security-groups"))
-        return { code: 0, stdout: "sg-abc", stderr: "" }
-      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
-      if (args.includes("run-instances")) return { code: 0, stdout: "i-xyz", stderr: "" }
-      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
-      if (args.includes("terminate-instances")) {
-        return { code: 254, stdout: "", stderr: "terminate denied" }
-      }
-      if (cmd === "ssh") {
-        const remote = args[args.length - 1] ?? ""
-        if (remote.includes("READY")) return { code: 0, stdout: "READY", stderr: "" }
-        if (remote.includes("command -v pyright-langserver")) {
-          return { code: 0, stdout: "pyright 1.1.350\n", stderr: "" }
-        }
-        if (remote.includes("mkdir ~/.pool-grade.lock")) {
-          return { code: 0, stdout: "LOCKED", stderr: "" }
-        }
-        if (remote.includes("chmod 600 ~/.quanta/auth/chatgpt.json")) {
-          return { code: 1, stdout: "", stderr: "ship boom" }
-        }
-        if (remote.includes("rmdir ~/.pool-grade.lock")) {
-          return { code: 0, stdout: "", stderr: "" }
-        }
-        return { code: 0, stdout: "", stderr: "" }
-      }
-      return { code: 0, stdout: "", stderr: "" }
-    }
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-xyz")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", fail(254, "terminate denied")),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("chmod 600 ~/.quanta/auth/chatgpt.json", fail(1, "ship boom")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+    )
     await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
       /primary=.*ship boom.*cleanup=.*terminate denied|cleanup=.*terminate denied.*primary=.*ship boom/i,
     )
   })
 
   test("a bootstrap cleanup termination failure surfaces explicitly instead of silently succeeding", async () => {
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      if (args.includes("describe-security-groups"))
-        return { code: 0, stdout: "sg-abc", stderr: "" }
-      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
-      if (args.includes("run-instances")) return { code: 0, stdout: "i-xyz", stderr: "" }
-      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
-      if (args.includes("terminate-instances")) {
-        return { code: 254, stdout: "", stderr: "terminate denied" }
-      }
-      if (cmd === "ssh") return { code: 1, stdout: "", stderr: "boom" }
-      return { code: 0, stdout: "", stderr: "" }
-    }
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-xyz")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", fail(254, "terminate denied")),
+      whenSshRemote(() => true, fail(1, "boom")),
+    )
     try {
       await createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()
       throw new Error("UNEXPECTED_OK")
@@ -873,28 +934,25 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("reuses a warm idle box instead of auto-launching a fresh one", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-instances")) {
-        return args.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (args.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = args[args.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("IDLE")) return ok("IDLE")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (c.includes("cat ") || c.includes(".json"))
-          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("IDLE", ok("IDLE")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("cat ") || remote.includes(".json"),
+        ok(DEFAULT_FULL_REPORT),
+      ),
+    )
     await createFullRemoteBackend({ ...baseCfg, spawn: fn })
       .run()
       .catch(() => undefined)
@@ -903,29 +961,26 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("a warm-box lock race ABORTS instead of auto-launching a second box", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-instances")) {
-        return args.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (args.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = args[args.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("command -v pyright-langserver")) return ok("pyright 1.1.350\n")
-        if (c.includes("IDLE")) return ok("IDLE")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("BUSY")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (c.includes("cat ") || c.includes(".json"))
-          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
+      whenSshRemoteIncludes("IDLE", ok("IDLE")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("BUSY")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("cat ") || remote.includes(".json"),
+        ok(DEFAULT_FULL_REPORT),
+      ),
+    )
     await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
       /POOL_BOX_BUSY|grading another run|box busy/i,
     )
@@ -934,32 +989,26 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("a warm-box grade-lock release failure ABORTS instead of silently leaving the box busy", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-instances")) {
-        return args.includes("--filters") ? ok("i-warm\t9.9.9.9") : ok("9.9.9.9")
-      }
-      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (args.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = args[args.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("command -v pyright-langserver")) return ok("pyright 1.1.350\n")
-        if (c.includes("IDLE")) return ok("IDLE")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) {
-          return { code: 1, stdout: "", stderr: "lock release denied" }
-        }
-        if (c.includes("cat ") || c.includes(".json")) {
-          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
-        }
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
+      whenSshRemoteIncludes("IDLE", ok("IDLE")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", fail(1, "lock release denied")),
+      whenSshRemote(
+        (remote) => remote.includes("cat ") || remote.includes(".json"),
+        ok(DEFAULT_FULL_REPORT),
+      ),
+    )
     await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
       /GRADE_LOCK_RELEASE_FAILED|lock release denied/i,
     )
@@ -968,21 +1017,15 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("refuses to auto-launch a second box while another quanta-bench box is already running", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-instances") && args.includes("--filters"))
-        return ok("i-busy\t9.9.9.9")
-      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = args[args.length - 1] ?? ""
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("IDLE")) return ok("BUSY")
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      when(
+        ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
+        ok("i-busy\t9.9.9.9"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("IDLE", ok("BUSY")),
+    )
     await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
       /refusing to launch another box/i,
     )
@@ -990,19 +1033,15 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("refuses to auto-launch while another quanta-bench box is still pending", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-instances") && args.includes("--filters")) return ok("i-pending")
-      if (args.includes("run-instances")) return ok("i-SHOULD-NOT-LAUNCH")
-      if (cmd === "ssh") {
-        const c = args[args.length - 1] ?? ""
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("IDLE")) return ok("BUSY")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      when(
+        ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
+        ok("i-pending"),
+      ),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("IDLE", ok("BUSY")),
+    )
     await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
       /already live \(running\/pending\)/i,
     )
@@ -1010,29 +1049,26 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("explicit extra-box opt-in can launch past the single-box guard", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-security-groups")) return ok("sg-abc")
-      if (args.includes("describe-instances")) {
-        return args.includes("--filters") ? ok("i-busy\t9.9.9.9") : ok("1.2.3.4")
-      }
-      if (args.includes("run-instances")) return ok("i-fresh")
-      if (cmd === "ssh") {
-        const c = args[args.length - 1] ?? ""
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("echo OK")) return ok("OK")
-        if (c.includes("IDLE")) return ok("BUSY")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        if (c.includes("cat ") || c.includes(".json"))
-          return ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] }))
-        return ok("")
-      }
-      return ok("")
-    }
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenArgsInclude("describe-instances", ({ args }) =>
+        ok(args.includes("--filters") ? "i-busy\t9.9.9.9" : "1.2.3.4"),
+      ),
+      whenArgsInclude("run-instances", ok("i-fresh")),
+      whenSshRemote(
+        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        RUN_EXIT_OK,
+      ),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
+      whenSshRemoteIncludes("IDLE", ok("BUSY")),
+      whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
+      whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("cat ") || remote.includes(".json"),
+        ok(DEFAULT_FULL_REPORT),
+      ),
+    )
     await createFullRemoteBackend({ ...baseCfg, spawn: fn, allowExtraBoxes: true })
       .run()
       .catch(() => undefined)
@@ -1057,31 +1093,21 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
 
   test("falls back to the next instance type on InsufficientInstanceCapacity", async () => {
     const launchedTypes: string[] = []
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      if (args.includes("describe-security-groups"))
-        return { code: 0, stdout: "sg-abc", stderr: "" }
-      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
-      if (args.includes("run-instances")) {
-        const it = args[args.indexOf("--instance-type") + 1] ?? ""
-        launchedTypes.push(it)
-        // first type out of capacity; second type succeeds
-        if (it === "c7i.8xlarge")
-          return {
-            code: 254,
-            stdout: "",
-            stderr: "An error occurred (InsufficientInstanceCapacity)",
-          }
-        return { code: 0, stdout: "i-fallback", stderr: "" }
-      }
-      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
-      if (cmd === "ssh" && args.some((a) => a.includes("run.exit")))
-        return { code: 0, stdout: "0\n==XQ-RUN-EXIT-XQ==\n", stderr: "" }
-      if (cmd === "ssh" && args.some((a) => a.includes("READY")))
-        return { code: 0, stdout: "READY", stderr: "" }
-      if (cmd === "ssh" && args.some((a) => a.includes(".json")))
-        return { code: 0, stdout: "{}", stderr: "" }
-      return { code: 0, stdout: "", stderr: "" }
-    }
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ({ args }) => {
+        const instanceType = args[args.indexOf("--instance-type") + 1] ?? ""
+        launchedTypes.push(instanceType)
+        return instanceType === "c7i.8xlarge"
+          ? fail(254, "An error occurred (InsufficientInstanceCapacity)")
+          : ok("i-fallback")
+      }),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenSshRemoteIncludes("run.exit", RUN_EXIT_OK),
+      whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemote((remote) => remote.includes(".json"), ok("{}")),
+    )
     await createFullRemoteBackend({ ...baseCfg, spawn: fn, instanceType: "c7i.8xlarge" })
       .run()
       .catch(() => undefined)
@@ -1116,6 +1142,30 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // TEETH: regressing to a single id (or dropping the join) fails here.
     expect(cmd).toContain("psf__requests-5414")
     expect(cmd).toContain("django__django-12345")
+  })
+
+  test("launch tags derive selection from custom-corpus `id` rows when no explicit instanceIds are passed", async () => {
+    const datasetPath = writeDatasetJsonl("bench-full-custom-id-", [
+      { id: "custom__case-1", goldPatch: PY_FIX_PATCH },
+    ])
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({
+      repoDir: baseCfg.repoDir,
+      authJson: baseCfg.authJson,
+      datasetPath,
+      spawn: fn,
+      tokenBudgetDir: baseCfg.tokenBudgetDir,
+      tokenBudgetWaitMs: baseCfg.tokenBudgetWaitMs,
+      tokenBudgetPollMs: baseCfg.tokenBudgetPollMs,
+      sleep: baseCfg.sleep,
+      maxReadyPolls: baseCfg.maxReadyPolls,
+      singleBoxGuardDir: baseCfg.singleBoxGuardDir,
+    })
+      .run()
+      .catch(() => undefined)
+    const launch = calls.find((c) => c.args.includes("run-instances"))
+    expect(launch).toBeDefined()
+    expect(launch?.args.join(" ")).toContain("Key=QuantaSelection,Value=custom__case-1")
   })
 
   test("shell-quotes preset/model so a crafted value can't break out of the remote command", async () => {

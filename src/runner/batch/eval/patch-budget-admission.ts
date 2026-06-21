@@ -3,6 +3,18 @@ import { type AdmissionBlock, PATCH_BUDGET_STRICT_ADMISSION_KIND } from "@/runne
 import type { InstanceResult } from "@/runner/batch/types"
 import type { ClosureSessionState } from "./closure-session"
 
+export const patchBudgetOwnerFiles = (
+  closureSession: ClosureSessionState | undefined,
+): readonly string[] => {
+  if (closureSession === undefined) return []
+  return [
+    ...new Set([
+      ...closureSession.bundle.evidence.candidates.map((c) => c.file),
+      ...(closureSession.input.evidence.ownerResolved?.map((o) => o.file) ?? []),
+    ]),
+  ]
+}
+
 export const buildPhasePatchBudget = (args: {
   readonly patch: string
   readonly repo: string | undefined
@@ -10,7 +22,7 @@ export const buildPhasePatchBudget = (args: {
   readonly strict: boolean
 }): PatchBudgetVerdict =>
   analyzePatchBudget(args.patch, {
-    ownerFiles: args.closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? [],
+    ownerFiles: patchBudgetOwnerFiles(args.closureSession),
     ...(args.repo !== undefined ? { repo: args.repo } : {}),
     runtimeExpandingPolicy: args.strict ? "gate" : "observe",
   })

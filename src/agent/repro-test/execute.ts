@@ -91,7 +91,7 @@ export interface ExecuteReproTestsArgs {
   pythonBin?: string
   /** Build the FULL argv to execute a repro script. Default `[pythonBin, path]`.
    *  Production SWE-bench wiring overrides this to run the script under the SAME
-   *  project env the test command uses (`uvx --with-editable . python <path>`) —
+   *  project env the test command uses (`uv run --with-editable . python <path>`) —
    *  a bare `python3` cannot `import` the project (it is not pip-installed on the
    *  box host; only the uvx ephemeral env has it), so every repro hit
    *  ModuleNotFoundError. The builder receives the script path and returns argv. */

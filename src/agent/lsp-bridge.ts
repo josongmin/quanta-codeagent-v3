@@ -2,17 +2,24 @@ import { extname } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
 import {
+  CLANGD_BIN,
   ClangdAdapter,
   DefaultCodeActionAdapter,
   DefaultFormatAdapter,
   DefaultRenameApplyAdapter,
   DefaultSignatureHelpAdapter,
+  GOPLS_BIN,
   GoplsAdapter,
+  lspExtensionToServerBin,
+  lspServerBinForFile,
   type LspClient,
   LspRequestError,
+  PYRIGHT_LANGSERVER_BIN,
   PyrightAdapter,
   type RenameWorkspaceEdit,
+  RUST_ANALYZER_BIN,
   RustAnalyzerAdapter,
+  TYPESCRIPT_LANGUAGE_SERVER_BIN,
   TypescriptAdapter,
 } from "@/lsp"
 import { errMessage, logger } from "@/shared"
@@ -75,44 +82,38 @@ interface ServerSpec {
 }
 
 const PYRIGHT: ServerSpec = {
-  bin: "pyright-langserver",
+  bin: PYRIGHT_LANGSERVER_BIN,
   create: (cwd) => new PyrightAdapter({ cwd }),
 }
 const TYPESCRIPT: ServerSpec = {
-  bin: "typescript-language-server",
+  bin: TYPESCRIPT_LANGUAGE_SERVER_BIN,
   create: (cwd) => new TypescriptAdapter({ cwd }),
 }
 const RUST_ANALYZER: ServerSpec = {
-  bin: "rust-analyzer",
+  bin: RUST_ANALYZER_BIN,
   create: (cwd) => new RustAnalyzerAdapter({ cwd }),
 }
 const GOPLS: ServerSpec = {
-  bin: "gopls",
+  bin: GOPLS_BIN,
   create: (cwd) => new GoplsAdapter({ cwd }),
 }
 const CLANGD: ServerSpec = {
-  bin: "clangd",
+  bin: CLANGD_BIN,
   create: (cwd) => new ClangdAdapter({ cwd }),
 }
 
-/**
- * Single source of extension→server truth (OCP): adding a language is ONE
- * array entry, and both {@link specFor} and the `unavailableReason` closures
- * read from this table so the extension logic is never echoed in two places.
- * Extensions are matched case-insensitively (compared lowercase).
- */
-const SERVERS: ReadonlyArray<{ exts: readonly string[]; spec: ServerSpec }> = [
-  { exts: [".py", ".pyi"], spec: PYRIGHT },
-  { exts: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"], spec: TYPESCRIPT },
-  { exts: [".rs"], spec: RUST_ANALYZER },
-  { exts: [".go"], spec: GOPLS },
-  { exts: [".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".h", ".c"], spec: CLANGD },
-]
+const SERVER_SPEC_BY_BIN = new Map<string, ServerSpec>([
+  [PYRIGHT.bin, PYRIGHT],
+  [TYPESCRIPT.bin, TYPESCRIPT],
+  [RUST_ANALYZER.bin, RUST_ANALYZER],
+  [GOPLS.bin, GOPLS],
+  [CLANGD.bin, CLANGD],
+])
 
 /** Pick the server for a file by extension, or `null` if unsupported. */
 const specFor = (filePath: string): ServerSpec | null => {
-  const ext = extname(filePath).toLowerCase()
-  return SERVERS.find((entry) => entry.exts.includes(ext))?.spec ?? null
+  const bin = lspServerBinForFile(filePath)
+  return bin === null ? null : (SERVER_SPEC_BY_BIN.get(bin) ?? null)
 }
 
 /** Decode a `file://` URI from an LSP response into a filesystem path. Uses the
@@ -131,17 +132,13 @@ const uriToPath = (uri: string): string => {
 
 /**
  * ADR-0422 follow-up — lowercase extension → LANGUAGE KEY (the server binary,
- * which is the server identity). Built from the SAME {@link SERVERS} table so
- * the extensions a single server handles (typescript: `.ts`/`.tsx`/`.js`/…)
- * all map to ONE key. The anchor synthesizer keys by this value so a
- * multi-extension language collapses to a single anchor (one server, one
- * session), never one anchor per extension. Frozen. */
+ * which is the server identity). Built from the shared lightweight LSP server
+ * registry so every caller (agent bridge, mention-injection, remote strict
+ * preflight) sees the SAME extension collapse. The anchor synthesizer keys by
+ * this value so a multi-extension language collapses to a single anchor (one
+ * server, one session), never one anchor per extension. Frozen. */
 export const lspExtensionToLanguage = (): ReadonlyMap<string, string> => {
-  const map = new Map<string, string>()
-  for (const entry of SERVERS) {
-    for (const ext of entry.exts) map.set(ext.toLowerCase(), entry.spec.bin)
-  }
-  return map
+  return lspExtensionToServerBin()
 }
 
 /** Probe whether a server binary is launchable. Cached per process so a single

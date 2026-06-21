@@ -176,4 +176,46 @@ describe("bench strict LSP grounding fail-closed", () => {
     }),
     60_000,
   )
+
+  test.serial(
+    "task-relevant gating honors pure-rename gold patches instead of falling back to the repo-dominant language",
+    env.run(async () => {
+      env.set({ QUANTA_BENCH_PRESET: "agentless-v3-thin-strict" })
+      __resetLspAvailabilityCacheForTest()
+      __setLspAvailabilityOverrideForTest((bin) => bin !== "typescript-language-server")
+      const dir = mkdtempSync(join(tmpdir(), "bench-strict-lsp-rename-taskrel-"))
+      try {
+        mkdirSync(join(dir, "pkg"), { recursive: true })
+        writeFileSync(join(dir, "bug.py"), "def add(a, b):\n    return a - b\n")
+        writeFileSync(join(dir, "helper.py"), "def sub(a, b):\n    return a - b\n")
+        writeFileSync(join(dir, "more.py"), "VALUE = 1\n")
+        writeFileSync(join(dir, "pkg", "old.ts"), "export const answer = 0\n")
+        const instance: Instance = {
+          id: "strict-lsp-rename-taskrel",
+          repoPath: dir,
+          problemStatement: "Rename the TS module.",
+          testCmd: "true",
+          goldPatch: [
+            "diff --git a/pkg/old.ts b/pkg/new.ts",
+            "similarity index 100%",
+            "rename from pkg/old.ts",
+            "rename to pkg/new.ts",
+          ].join("\n"),
+        }
+        const llm = new SpyLLM()
+        const result = await runInstance(instance, { llm, maxTurns: 3, timeoutMs: 20_000 })
+        expect(result.passed).toBe(false)
+        expect(result.verdict).toBe("degraded")
+        expect(result.turns).toBe(0)
+        expect(result.error).toContain("requires live LSP grounding")
+        expect(result.error).toContain("typescript-language-server")
+        expect(llm.invoked).toBe(false)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+        __setLspAvailabilityOverrideForTest(null)
+        __resetLspAvailabilityCacheForTest()
+      }
+    }),
+    60_000,
+  )
 })

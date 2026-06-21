@@ -15,6 +15,18 @@ export { RustAnalyzerAdapter } from "./adapters/rust-analyzer"
 export type { TypescriptAdapterOptions } from "./adapters/typescript"
 export { languageIdFor, TypescriptAdapter } from "./adapters/typescript"
 export type { LspPort } from "./ports"
+export {
+  CLANGD_BIN,
+  GOPLS_BIN,
+  lspExtensionToServerBin,
+  lspServerBinForExtension,
+  lspServerBinForFile,
+  LSP_SERVER_REGISTRY,
+  PYRIGHT_LANGSERVER_BIN,
+  RUST_ANALYZER_BIN,
+  TYPESCRIPT_LANGUAGE_SERVER_BIN,
+  type LspServerRegistryEntry,
+} from "./server-registry"
 export type {
   CodeAction,
   CodeActionDocumentEdit,

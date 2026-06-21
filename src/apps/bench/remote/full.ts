@@ -18,6 +18,9 @@
 import { basename } from "node:path"
 import { errMessage } from "@/shared"
 import {
+  assertRemoteDatasetLaunchable,
+  assertRemoteDatasetSelectionExists,
+  assertRemoteStrictGroundingSupported,
   attachBox,
   type BoxSession,
   buildForwardedBenchEnv,
@@ -40,6 +43,9 @@ import {
 // Re-export the public surface so existing importers (tests + callers) keep
 // resolving these from "./full" after the box-session.ts extraction.
 export {
+  assertRemoteDatasetLaunchable,
+  assertRemoteDatasetSelectionExists,
+  assertRemoteStrictGroundingSupported,
   attachBox,
   buildForwardedBenchEnv,
   countLiveBoxes,
@@ -436,6 +442,21 @@ export const createFullRemoteBackend = (
 
   const run = async (): Promise<FullRemoteResult> => {
     if (cfg.dryRun) return { dryRun: true, plan: dryRunPlan(cfg) }
+    assertRemoteDatasetLaunchable({
+      datasetPath: cfg.datasetPath,
+      surface: "full-remote",
+    })
+    assertRemoteDatasetSelectionExists({
+      datasetPath: cfg.datasetPath,
+      ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
+      surface: "full-remote",
+    })
+    assertRemoteStrictGroundingSupported({
+      preset,
+      datasetPath: cfg.datasetPath,
+      ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
+      surface: "full-remote",
+    })
     const guard = await acquireFullRemoteSingleBoxGuard(cfg)
     const attempt = await runFullRemoteAttempt({ cfg, preset, model, concurrency, log })
     const cleanupErr = await releaseFullRemoteResources({

@@ -224,8 +224,13 @@ function presetLabel(file: string, knobs: any): string {
   if (/v1/.test(name)) return "agentless-v1*"
   // 2) SOTA shard campaign (reprovote-ab/sota) = the agentless-v2 baseline
   if (dir === "sota" || /shard/.test(name)) return "agentless-v2 (SOTA)*"
-  // 3) full-remote per-instance sidecars carry no preset in the data
-  if (/^report-i-/.test(name)) return "full-remote · preset 미기록"
+  // 3) full-remote per-instance sidecars DO record the preset — it's in the
+  //    report's knob SSOT (`knobs.preset`, written by full-remote). Read it
+  //    instead of falsely labeling "미기록" (the data was there all along).
+  if (/^report-i-/.test(name)) {
+    const p = knobs?.preset
+    return typeof p === "string" && p.trim() ? `${p} · full-remote` : "full-remote · preset 미기록"
+  }
   if (/^local-/.test(name)) return "local"
   // 4) last resort: knob fingerprint
   try {
@@ -549,10 +554,26 @@ function buildData() {
 // Server
 // ---------------------------------------------------------------------------
 
+// Knob/preset catalog — generated from source by gen-knob-catalog.ts. Read
+// fresh each request so re-running the generator reflects live (no restart).
+function loadKnobCatalog(): any {
+  const p = join(import.meta.dir, "knob-catalog.json")
+  if (!existsSync(p)) return { presets: {}, knobs: {}, presetOrder: [], missing: true }
+  try {
+    return JSON.parse(readFileSync(p, "utf8"))
+  } catch {
+    return { presets: {}, knobs: {}, presetOrder: [], missing: true }
+  }
+}
+
 const server = Bun.serve({
   port: PORT,
   fetch(req) {
     const url = new URL(req.url)
+    if (url.pathname === "/api/knobs")
+      return new Response(JSON.stringify(loadKnobCatalog()), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      })
     if (url.pathname === "/api/oracle") {
       const id = url.searchParams.get("id") || ""
       const d = loadDataset()[id]
@@ -651,6 +672,9 @@ const HTML = /* html */ `<!doctype html>
             border: 1px solid #21262d; border-radius: 6px; padding: 8px; margin: 4px 0; font-size: 11px; }
   details summary { cursor: pointer; padding: 3px 0; }
   tr.mrow { cursor: pointer; }
+  .kbtn { background: #161b22; color: #adbac7; border: 1px solid #30363d; border-radius: 6px;
+          padding: 5px 10px; cursor: pointer; font: inherit; }
+  .kbtn.active { background: #1f6feb33; color: #e6edf3; border-color: #2f81f7; }
   a { color: #2f81f7; text-decoration: none; }
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(1,4,9,.7);
                    z-index: 50; align-items: flex-start; justify-content: center; padding: 40px 16px; }
@@ -676,6 +700,7 @@ const HTML = /* html */ `<!doctype html>
   <button data-tab="matrix" class="active">전체 문제 매트릭스</button>
   <button data-tab="runs">우리 런</button>
   <button data-tab="scaffolds">경쟁 스캐폴드</button>
+  <button data-tab="knobs">Knob / 프로필</button>
   <button data-tab="live">라이브</button>
 </nav>
 <div class="wrap" id="view"></div>
@@ -716,7 +741,148 @@ function render() {
     else renderMatrix(v);
   }
   else if (TAB === "scaffolds") v.innerHTML = renderScaffolds();
+  else if (TAB === "knobs") renderKnobs(v);
   else v.innerHTML = renderLive();
+}
+
+let KNOBS = null, KNOB_VIEW = "matrix";
+async function renderKnobs(v) {
+  if (!KNOBS) {
+    v.innerHTML = '<p class="muted">knob 카탈로그 불러오는 중…</p>';
+    try { KNOBS = await (await fetch("/api/knobs")).json(); }
+    catch (e) { v.innerHTML = '<p class="q-no">카탈로그 로드 실패</p>'; return; }
+  }
+  if (KNOBS.missing) {
+    v.innerHTML = '<p class="muted">knob-catalog.json 없음 — 생성: <code>bun run tools/leaderboard-dashboard/gen-knob-catalog.ts</code></p>';
+    return;
+  }
+  drawKnobs(v);
+}
+
+const kesc = s => (s==null?'':String(s)).replace(/</g,'&lt;');
+
+function knobGroups() {
+  const K = KNOBS, groups = {};
+  for (const id of Object.keys(K.knobs)) { const g = K.knobs[id].group || '기타'; (groups[g] ??= []).push(id); }
+  const order = ["localize","hint","verify","select","repair","patch","structure","exec","기타"].filter(g => groups[g]);
+  return { groups, order };
+}
+
+function showModal(title, html) {
+  document.getElementById("modal-title").textContent = title;
+  const body = document.getElementById("modal-body");
+  body.innerHTML = html;
+  document.getElementById("modal").style.display = "flex";
+  // Cross-links inside the modal (preset ⇄ knob) via data attrs — no inline JS.
+  body.querySelectorAll(".pjump").forEach(e => e.onclick = () => showPresetModal(e.dataset.p));
+  body.querySelectorAll(".kjump").forEach(e => e.onclick = () => showKnobModal(e.dataset.id));
+}
+
+// Full detail for one knob — every field we have.
+function showKnobModal(id) {
+  const k = KNOBS.knobs[id]; if (!k) return;
+  const gl = (KNOBS.groupLabels||{})[k.group] || k.group;
+  let h = '<div style="margin-bottom:8px">'+kesc(k.desc)+'</div>';
+  h += '<table style="margin-bottom:10px"><tbody>'+
+    row("그룹", gl) + row("env 변수", k.envKey||'—') + row("단위", k.unit||'—') +
+    row("상대 비용", k.cost!=null ? ('×'+k.cost+(k.cost>=10?' ⚠️ 비쌈':'')) : '—') +
+    row("충돌(conflicts)", (k.conflicts&&k.conflicts.length)?k.conflicts.join(', '):'—') +
+    row("출처", k.source||'—') +
+    row("적용 경로", k.inRegistry?'framework 레지스트리 (knob.apply)':'bench 드라이버 (benchPostureFromState)') +
+    '</tbody></table>';
+  h += '<h3 style="font-size:12px;color:#768390;margin:10px 0 4px">이 knob을 쓰는 프로필 ('+k.usedBy.length+')</h3>';
+  h += '<table><thead><tr><th class="inst" style="text-align:left">프로필</th><th>값</th></tr></thead><tbody>';
+  for (const u of k.usedBy) h += '<tr><td class="inst pjump" data-p="'+u.preset+'" style="cursor:pointer">'+u.preset+'</td><td><span class="q-yes">'+kesc(u.value)+'</span></td></tr>';
+  h += '</tbody></table>';
+  showModal('🎛 ' + id, h);
+}
+function row(k, v) { return '<tr><td class="muted" style="text-align:left;padding-right:14px">'+k+'</td><td style="text-align:left">'+kesc(v)+'</td></tr>'; }
+
+// Full detail for one preset — rationale + every knob it sets, with descriptions.
+function showPresetModal(name) {
+  const p = KNOBS.presets[name]; if (!p) return;
+  let h = '';
+  if (p.desc) h += '<div style="margin-bottom:10px;line-height:1.6">'+kesc(p.desc)+'</div>';
+  h += '<div class="muted" style="font-size:11px;margin-bottom:6px">'+p.knobCount+' knob 설정</div>';
+  const { groups, order } = knobGroups();
+  h += '<table><thead><tr><th class="inst" style="text-align:left">knob</th><th>값</th><th style="text-align:left">설명</th></tr></thead><tbody>';
+  for (const g of order) for (const id of groups[g]) {
+    if (!(id in p.knobs)) continue;
+    const k = KNOBS.knobs[id];
+    h += '<tr><td class="inst kjump" data-id="'+id+'" style="cursor:pointer">'+id+'</td>'+
+      '<td><span class="q-yes">'+kesc(p.knobs[id])+'</span></td>'+
+      '<td style="text-align:left;font-size:11px" class="muted">'+kesc(k?k.desc:'')+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  showModal('🧩 프로필 · ' + name, h);
+}
+
+function drawKnobs(v) {
+  const K = KNOBS;
+  const { groups, order: groupOrder } = knobGroups();
+  const presets = K.presetOrder.filter(p => K.presets[p] && K.presets[p].knobCount); // drop empty (baseline)
+
+  let h = '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">'+
+    '<button class="kbtn" data-kv="matrix">프로필 × Knob 매트릭스</button>'+
+    '<button class="kbtn" data-kv="presets">프로필 카드</button>'+
+    '<button class="kbtn" data-kv="glossary">Knob 사전</button>'+
+    '<span class="muted" style="font-size:11px">'+presets.length+' 프로필 · '+Object.keys(K.knobs).length+' knob · 행/헤더 클릭=상세 · 값(1=켜짐 / off / 숫자=깊이·예산·후보수)</span></div>';
+
+  if (KNOB_VIEW === "matrix") {
+    h += '<div style="overflow:auto;max-height:75vh"><table><thead><tr><th class="inst" style="text-align:left;position:sticky;left:0;top:0;z-index:3;background:#0d1117">프로필</th>';
+    for (const g of groupOrder) for (const id of groups[g])
+      h += '<th class="kh" data-id="'+id+'" title="'+kesc(K.knobs[id].desc)+'" style="cursor:pointer;writing-mode:vertical-rl;transform:rotate(180deg);height:150px;font-size:10px;white-space:nowrap">'+id+'</th>';
+    h += '</tr></thead><tbody>';
+    for (const p of presets) {
+      const kv = K.presets[p].knobs;
+      h += '<tr><td class="inst kp" data-p="'+p+'" style="cursor:pointer;position:sticky;left:0;background:#0d1117">'+p+'</td>';
+      for (const g of groupOrder) for (const id of groups[g]) {
+        const val = kv[id];
+        const cell = val==null ? '<span class="no">·</span>'
+          : (val==="off" ? '<span class="q-no" style="font-size:10px">off</span>'
+            : '<span class="q-yes">'+kesc(val)+'</span>');
+        h += '<td>'+cell+'</td>';
+      }
+      h += '</tr>';
+    }
+    h += '</tbody></table></div>';
+  } else if (KNOB_VIEW === "presets") {
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px">';
+    for (const p of presets) {
+      const P = K.presets[p];
+      const tags = Object.keys(P.knobs).slice(0,99).map(id => '<span class="pill" style="margin:1px">'+id+(P.knobs[id]!=="1"?'='+kesc(P.knobs[id]):'')+'</span>').join(' ');
+      h += '<div class="card kp" data-p="'+p+'" style="cursor:pointer;display:block;min-width:0">'+
+        '<div style="color:#e6edf3;font-weight:700;margin-bottom:3px">'+p+' <span class="muted" style="font-weight:400;font-size:10px">'+P.knobCount+' knob</span></div>'+
+        (P.desc?'<div class="muted" style="font-size:10px;margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+kesc(P.desc)+'</div>':'')+
+        '<div style="font-size:10px;line-height:1.9">'+tags+'</div></div>';
+    }
+    h += '</div>';
+  } else {
+    for (const g of groupOrder) {
+      const gl = (K.groupLabels||{})[g] || g;
+      h += '<h3 style="margin:14px 0 6px;color:#e6edf3;font-size:13px">'+gl+'</h3>';
+      h += '<table><thead><tr><th class="inst" style="text-align:left">knob</th><th style="text-align:left">설명</th><th>비용</th><th>env</th><th>출처</th><th>프로필</th></tr></thead><tbody>';
+      for (const id of groups[g]) {
+        const k = K.knobs[id];
+        h += '<tr class="kg" data-id="'+id+'" style="cursor:pointer"><td class="inst">'+id+(k.unit?' <span class="muted" style="font-size:10px">'+kesc(k.unit)+'</span>':'')+
+          (k.inRegistry?'':' <span class="pill" title="bench 드라이버가 적용(레지스트리 외)">drv</span>')+'</td>'+
+          '<td style="text-align:left">'+kesc(k.desc)+'</td>'+
+          '<td class="'+(k.cost>=10?'q-no':'muted')+'" style="font-size:10px">'+(k.cost!=null?'×'+k.cost:'—')+'</td>'+
+          '<td class="muted" style="font-size:10px">'+kesc(k.envKey||'—')+'</td>'+
+          '<td class="muted" style="font-size:10px">'+kesc(k.source||'—')+'</td>'+
+          '<td class="muted">'+k.usedBy.length+'</td></tr>';
+      }
+      h += '</tbody></table>';
+    }
+  }
+  v.innerHTML = h;
+  v.querySelectorAll(".kbtn").forEach(b => {
+    b.classList.toggle("active", b.dataset.kv === KNOB_VIEW);
+    b.onclick = () => { KNOB_VIEW = b.dataset.kv; drawKnobs(v); };
+  });
+  v.querySelectorAll(".kh").forEach(e => e.onclick = () => showKnobModal(e.dataset.id));
+  v.querySelectorAll(".kg").forEach(e => e.onclick = () => showKnobModal(e.dataset.id));
+  v.querySelectorAll(".kp").forEach(e => e.onclick = () => showPresetModal(e.dataset.p));
 }
 
 function renderCards() {

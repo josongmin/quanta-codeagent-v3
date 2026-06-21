@@ -16,6 +16,7 @@ const HARD_OK: HardGateSignals = {
   patchProduced: true,
   patchedResolvedKofN: { votes: 3, k: 2 },
   regressionGreen: true,
+  smokeGreen: true,
   applyClean: true,
 }
 /** No soft signals available (isolate the hard-gate behaviour). */
@@ -38,6 +39,14 @@ describe("scoreCandidate — hard gate (red-on-injection, each gate)", () => {
 
   it("PAIRED control: regressionGreen=null (fail-open) ⇒ STILL admissible", () => {
     expect(scoreCandidate({ ...HARD_OK, regressionGreen: null }, SOFT_NONE).admissible).toBe(true)
+  })
+
+  it("smokeGreen=false ⇒ inadmissible", () => {
+    expect(scoreCandidate({ ...HARD_OK, smokeGreen: false }, SOFT_NONE).admissible).toBe(false)
+  })
+
+  it("PAIRED control: smokeGreen=null (fail-open) ⇒ STILL admissible", () => {
+    expect(scoreCandidate({ ...HARD_OK, smokeGreen: null }, SOFT_NONE).admissible).toBe(true)
   })
 
   it("baseValidatedRed=null (no-oracle mode) ⇒ admissible", () => {
@@ -94,6 +103,7 @@ describe("scoreCandidate — hard gate (red-on-injection, each gate)", () => {
       patchProduced: true,
       patchedResolvedKofN: null,
       regressionGreen: null,
+      smokeGreen: null,
       applyClean: null,
     }
     expect(scoreCandidate(hard, SOFT_NONE).admissible).toBe(true)

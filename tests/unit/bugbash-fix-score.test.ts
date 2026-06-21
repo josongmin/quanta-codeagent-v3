@@ -18,6 +18,7 @@ const passingHard = (): HardGateSignals => ({
   patchProduced: true,
   patchedResolvedKofN: null,
   regressionGreen: true,
+  smokeGreen: true,
   applyClean: true,
 })
 

@@ -224,7 +224,7 @@ describe("bench branch-search hellgate — adversarial K values", () => {
     expect(cfg.branchSearch?.defaultN).toBe(3)
     expect(cfg.subagent).toEqual({})
     expect(cfg.skills).toEqual({})
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2 }) // swebench branch wires this
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] }) // swebench branch wires this
     // lsp-nav grows the registry beyond baseline.
     delete process.env.QUANTA_BENCH_LSP
     const ac2 = new AbortController()
@@ -251,7 +251,7 @@ describe("bench branch-search hellgate — adversarial K values", () => {
     const ac = new AbortController()
     const cfg = buildConfig(baseInstance(true), baseDeps, "/tmp/sb", ac.signal, stubStream)
     // verifyGuard auto-wires for swebench (orthogonal).
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2 })
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
     // branchSearch MUST NOT auto-enable (cost discipline — explicit opt-in only).
     expect("branchSearch" in cfg).toBe(false)
   })

@@ -1,0 +1,332 @@
+{
+  "timestamp": "2026-06-20T17:04:26.669Z",
+  "model": "gpt-5.4",
+  "provider": "chatgpt-oauth",
+  "n": 1,
+  "totals": {
+    "total": 8,
+    "resolved": 1,
+    "resolvedPct": 13
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "completed_unresolved": 7
+    },
+    "bySignal": {}
+  },
+  "perInstance": [
+    {
+      "id": "django__django-12965",
+      "passed": false,
+      "turns": 19,
+      "patchBytes": 565,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 1,
+        "passToPassFailed": 1,
+        "passToPassTotal": 52
+      }
+    },
+    {
+      "id": "django__django-13112",
+      "passed": false,
+      "turns": 23,
+      "patchBytes": 596,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 1,
+        "passToPassFailed": 0,
+        "passToPassTotal": 63
+      }
+    },
+    {
+      "id": "django__django-13212",
+      "passed": false,
+      "turns": 30,
+      "patchBytes": 6571,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 2,
+        "passToPassFailed": 0,
+        "passToPassTotal": 2
+      }
+    },
+    {
+      "id": "django__django-13297",
+      "passed": false,
+      "turns": 9,
+      "patchBytes": 672,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 0,
+        "passToPassFailed": 1,
+        "passToPassTotal": 52
+      }
+    },
+    {
+      "id": "django__django-13406",
+      "passed": true,
+      "turns": 13,
+      "patchBytes": 394,
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "pass"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": true,
+        "failToPassFailed": 0,
+        "passToPassFailed": 0,
+        "passToPassTotal": 32
+      }
+    },
+    {
+      "id": "django__django-13449",
+      "passed": false,
+      "turns": 15,
+      "patchBytes": 684,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 1,
+        "passToPassFailed": 0,
+        "passToPassTotal": 46
+      }
+    },
+    {
+      "id": "django__django-14315",
+      "passed": false,
+      "turns": 9,
+      "patchBytes": 505,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 2,
+        "passToPassFailed": 0,
+        "passToPassTotal": 0
+      }
+    },
+    {
+      "id": "django__django-14351",
+      "passed": false,
+      "turns": 14,
+      "patchBytes": 1519,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 1,
+        "passToPassFailed": 0,
+        "passToPassTotal": 58
+      }
+    }
+  ],
+  "knobs": {
+    "resolved": {
+      "bench-in-loop-exec": {
+        "value": false,
+        "display": "on",
+        "source": "preset"
+      },
+      "issue-hint": {
+        "value": "agentless",
+        "unit": "mode",
+        "display": "agentless (mode)",
+        "source": "preset"
+      },
+      "issue-hint-expected-actual": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "localize-phase": {
+        "value": {
+          "phase1Turns": 5
+        },
+        "unit": "turns",
+        "display": "5 turns",
+        "source": "preset"
+      },
+      "lsp": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-budget": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-budget-strict": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-hygiene": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "read-outline": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "repo-map": {
+        "value": {
+          "enabled": true
+        },
+        "display": "on",
+        "source": "preset"
+      },
+      "retry-transient": {
+        "value": 3,
+        "unit": "retries",
+        "display": "3 retries",
+        "source": "preset"
+      },
+      "round0-minimal": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "spec-fidelity-steer": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      }
+    },
+    "preset": "agentless-v3-thin-strict",
+    "inactive": [
+      "adversarial-repro",
+      "branch-search",
+      "closure-repair",
+      "fault-evidence",
+      "repro-doubt",
+      "lsp-steer",
+      "multi-voter",
+      "must-pass",
+      "network-proxy",
+      "no-patch-breaker",
+      "primary-rail",
+      "repair-escalation",
+      "repro-test",
+      "repro-vote",
+      "verification-plan",
+      "skills",
+      "subagent",
+      "test-runner",
+      "verify-select",
+      "verify-select-concurrency",
+      "verify-select-early-accept",
+      "verify-select-regression",
+      "verify-select-repro"
+    ]
+  }
+}

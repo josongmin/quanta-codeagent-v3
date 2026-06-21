@@ -222,7 +222,7 @@ describe("buildConfig — branchSearch wired into AgentConfig", () => {
     const cfg = buildConfig(baseInstance(true), baseDeps, "/tmp/sb", ac.signal, stubStream)
     expect(cfg.branchSearch?.defaultN).toBe(3)
     // verifyGuard is wired by the swebench branch (independent of branchSearch).
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2 })
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
   })
 
   test("env mutation isolation: set → buildConfig → restore yields the SAME (omitted) state", () => {

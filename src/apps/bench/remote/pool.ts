@@ -23,6 +23,10 @@
  */
 import { errMessage } from "@/shared"
 import {
+  assertRemoteDatasetLaunchable,
+  assertRemoteDatasetSelectionExists,
+  assertRemoteStrictGroundingSupported,
+  assertSafeArtifactSuffix,
   attachBox,
   type BoxSession,
   type ChunkPaths,
@@ -145,6 +149,12 @@ export const assertUniqueChunkRunIds = (chunks: readonly PoolChunk[]): void => {
   const seen = new Set<string>()
   const dup = new Set<string>()
   for (const chunk of chunks) {
+    // Defense-in-depth at the EARLIEST boundary (chunk-list construction): a
+    // runId flows unquoted into remote ssh paths (`mkdir -p ~/runs/<runId>/...`
+    // at the pool's pre-grade sink, BEFORE gradeChunkOnBox's own guard). Validate
+    // the charset here so a traversal/injection suffix can never reach any box
+    // command. Redundant-but-belt-and-suspenders with the gradeChunkOnBox guard.
+    assertSafeArtifactSuffix(chunk.runId)
     if (seen.has(chunk.runId)) dup.add(chunk.runId)
     seen.add(chunk.runId)
   }
@@ -1096,6 +1106,23 @@ export const runPool = async (
 ): Promise<PoolChunkResult[]> => {
   assertUniqueChunkRunIds(chunks)
   if (chunks.length === 0) return []
+  for (const chunk of chunks) {
+    assertRemoteDatasetLaunchable({
+      datasetPath: chunk.datasetPath,
+      surface: `pool chunk ${chunk.runId}`,
+    })
+    assertRemoteDatasetSelectionExists({
+      datasetPath: chunk.datasetPath,
+      ...(chunk.instanceIds !== undefined ? { instanceIds: chunk.instanceIds } : {}),
+      surface: `pool chunk ${chunk.runId}`,
+    })
+    assertRemoteStrictGroundingSupported({
+      preset: cfg.preset,
+      datasetPath: chunk.datasetPath,
+      ...(chunk.instanceIds !== undefined ? { instanceIds: chunk.instanceIds } : {}),
+      surface: `pool chunk ${chunk.runId}`,
+    })
+  }
   const workers = Math.max(1, Math.trunc(cfg.workers) || 1)
   if (workers > 1 && cfg.allowExtraWorkers !== true) {
     throw new Error(

@@ -52,6 +52,13 @@ runs:
   knobs_resolved: 'verify-select=5(p), verify-select-regression=discovered(p), verify-select-repro=positive(p), patch-budget=on(p), round0-minimal=on(p), spec-fidelity-steer=on(p), fault-evidence=on(p), issue-hint=agentless(p), localize-phase=5turns(p), lsp=on(e), no-patch-breaker=on(p), patch-hygiene=on(p), primary-rail=on(p), repair-escalation=on(p), repro-test=5(p), retry-transient=3(p), verification-plan=on(p)'
   resolved_count_local: 1
   scope: '6 discriminating set (recoverable-missed + over-eng + ceiling). selectionTelemetry finding: verify-select REGRESSION ORACLE fails on django/pytest (baseValidatedRed=false → no validated repro authority → admissibleCount=0 → degrades to default candidate). Works on sympy (voterQuorum admits 3) — sympy-18763 [PASS local], a recoverable-H (2/17 frontier). sympy-12096 selection picked minimal single-file over 3-file over-broad. NEXT TARGET: make baseValidatedRed (discovered repo regression test, RED baseline) fire on django/pytest.'
+  note: >-
+    Historical local readout only. The `baseValidatedRed=false` discovered-mode
+    blocker in this entry is pre-head interpretation and should not be reused as
+    current-head truth: current driver nulls repro authority in discovered
+    mode, so repo-test regression reruns should be measured again on head. This
+    entry also must not be used to count `pydata__xarray-2905` as a repo-test
+    regression-gate recovery; that case belongs to a separate smoke/boot gap.
 - run_id: ceiling-leverA-2026-06-19
   date: '2026-06-19'
   preset: agentless-v2 + QUANTA_BENCH_SIBLING (Lever A, knob default-OFF)

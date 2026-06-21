@@ -235,12 +235,16 @@ export const OUTCOME_FAILURE_MATCHERS: readonly OutcomeFailureMatcher[] = [
   {
     id: "generic-failure-count",
     ecosystem: "generic",
-    pattern: /(?:^|,\s)(?:[1-9]\d*)\s+failures?\b/m,
+    pattern: /(?:^|,\s|=\s)(?:[1-9]\d*)\s+failures?\b/m,
   },
   {
+    // `=\s` boundary catches the pytest collection-error banner
+    // `==================== 2 errors in 0.53s ====================` (count after
+    // the `= ` banner, not line-start / `, `); incidental prose ("raise 2 errors")
+    // still has no boundary so it does not fire.
     id: "generic-error-count",
     ecosystem: "generic",
-    pattern: /(?:^|,\s)(?:[1-9]\d*)\s+errors?\b/m,
+    pattern: /(?:^|,\s|=\s)(?:[1-9]\d*)\s+errors?\b/m,
   },
   {
     id: "generic-failure-assignment",
@@ -278,8 +282,10 @@ export const OUTCOME_SUCCESS_MATCHERS: readonly OutcomeSuccessMatcher[] = [
   { id: "jest-vitest", ecosystem: "js", pattern: /^Tests:.*\b[1-9]\d*\s+passed\b/m },
   // mocha: `10 passing`
   { id: "mocha", ecosystem: "js", pattern: /^\s*[1-9]\d*\s+passing\b/m },
-  // go test: `ok  github.com/foo/bar/pkg 0.012s`
-  { id: "go", ecosystem: "go", pattern: /^ok\s+\S+/m },
+  // go test: `ok  github.com/foo/bar/pkg 0.012s` (or `(cached)`). Require the
+  // package + duration/cached TAIL — a bare `/^ok\s+\S+/` matches incidental prose
+  // ("ok we should fix this"), a false-GREEN on the non-zero-exit salvage path.
+  { id: "go", ecosystem: "go", pattern: /^ok\s+\S+\s+(?:\(cached\)|[\d.]+m?s\b)/m },
   // cargo test: `test result: ok. 3 passed; 0 failed; ...`
   { id: "cargo", ecosystem: "rust", pattern: /^test result:\s*ok\.\s+[1-9]\d*\s+passed;/m },
   // rspec: `5 examples, 0 failures`

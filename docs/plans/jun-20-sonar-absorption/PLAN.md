@@ -129,6 +129,14 @@ verdict: real reusable methodology, not PR). Three techniques hit our exact gaps
   **NOT** promote either arm from smoke wins alone. Promotion still requires a
   COMPLETE control and `n>=50` on a MEDIUM slice.
 
+- **RCA correction — recoverable 6-case slice (2026-06-21)**:
+  [RCA-6CASE-MEASURE.md](/Users/songmin/quanta-codeagent-v3/docs/plans/jun-20-sonar-absorption/RCA-6CASE-MEASURE.md)
+  is now the source of truth for the corrected regression vs repro vs smoke
+  split, the new 6-case slice files, and the exact A/B matrix. It supersedes
+  any stale wording that treated `xarray-2905` as a repo-test regression win or
+  treated the old `baseValidatedRed` discovered-mode blocker as current-head
+  truth.
+
 ---
 
 ## Phase 0 — Stop the bleeding: tentative-patch retention  〔Sonar #1, highest ROI〕

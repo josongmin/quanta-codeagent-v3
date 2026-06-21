@@ -11,7 +11,7 @@
  *       to fail-closed on incidental "N errors" prose.
  */
 import { describe, expect, test } from "bun:test"
-import { isVerifyOutputFailing } from "@/agent/verify-signal"
+import { isVerifyOutputFailing, isVerifyOutputPassing } from "@/agent/verify-signal"
 import { buildFacts } from "@/runner/batch/eval/closure-diagnostics-io"
 import { verify } from "@/runner/batch/eval/verdict"
 import type { Instance, InstanceResult } from "@/runner/batch/types"
@@ -124,5 +124,58 @@ describe("bugbash grading fixes", () => {
     expect(isVerifyOutputFailing("test_runner", undefined, "5 examples, 3 failures in 0.5s")).toBe(
       true,
     )
+  })
+})
+
+// Reverify (100-point) hardening: the #29 fix added a multi-ecosystem
+// OUTCOME_SUCCESS_MATCHERS surface + ANSI stripping that the salvage path
+// (non-zero exit, no failure marker) trusts. Only the pytest path had teeth;
+// these lock every other matcher AND prove the loosest one can't false-green.
+const passes = (output: string) => isVerifyOutputPassing("verify", undefined, output)
+
+describe("bugbash #29 — isVerifyOutputPassing matchers (settled-tree hardening)", () => {
+  test("go: real `ok <pkg> <duration>` passes; incidental `ok <prose>` does NOT", () => {
+    expect(passes("ok  \tgithub.com/foo/bar\t0.012s")).toBe(true)
+    expect(passes("ok  github.com/foo/bar (cached)")).toBe(true)
+    // Red-on-injection for the tightened `go` matcher: revert it to
+    // `/^ok\s+\S+/m` and this line flips to a FALSE GREEN.
+    expect(passes("ok we should fix this later")).toBe(false)
+  })
+
+  test("each ecosystem matcher: positive passes, near-miss does not", () => {
+    expect(passes("OK")).toBe(true) // unittest
+    expect(passes("OK (skipped=1)")).toBe(true)
+    expect(passes("OK, will do that")).toBe(false)
+    expect(passes("Tests:       5 passed, 5 total")).toBe(true) // jest/vitest
+    expect(passes("  10 passing")).toBe(true) // mocha
+    expect(passes("test result: ok. 3 passed; 0 failed;")).toBe(true) // cargo
+    expect(passes("5 examples, 0 failures")).toBe(true) // rspec
+    expect(passes("5 examples, 2 failures")).toBe(false)
+    expect(passes("OK (5 tests, 12 assertions)")).toBe(true) // phpunit
+    expect(passes("Passed!  - Failed:    0, Passed:     5, Skipped:     0")).toBe(true) // dotnet
+  })
+
+  test("ANSI-decorated success summary still passes (locks stripAnsiCsi)", () => {
+    expect(passes("\x1b[32m===== 5 passed in 0.1s =====\x1b[0m")).toBe(true)
+  })
+
+  test("a zero-test / prose-only output never passes", () => {
+    expect(passes("0 passed in 0.01s")).toBe(false)
+    expect(passes("everything looks ok here")).toBe(false)
+    expect(passes("")).toBe(false)
+  })
+})
+
+describe("bugbash #30 — pytest collection-error banner still recognized as failing", () => {
+  const fails = (output: string) => isVerifyOutputFailing("verify", undefined, output)
+  test("`===== N errors in ... =====` banner fires generic-error-count", () => {
+    // Red-on-injection for the `=\s` boundary: revert generic-error-count to
+    // `/(?:^|,\s).../` and this flips to FALSE (a real pytest collection error
+    // graded as not-failing on the salvage path).
+    expect(fails("==================== 2 errors in 0.53s ====================")).toBe(true)
+    expect(fails("=========== 1 error in 0.10s ===========")).toBe(true)
+  })
+  test("incidental prose with a count is still NOT a failure", () => {
+    expect(fails("this change could raise 2 errors later")).toBe(false)
   })
 })

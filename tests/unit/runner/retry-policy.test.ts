@@ -389,7 +389,7 @@ describe("classifyOutcome — real-fail subkinds", () => {
       patch: "",
       turns: 9,
       error:
-        "verify-select produced no submittable candidate (all candidates were empty or did not apply)",
+        "verify-select produced no submittable candidate (every candidate was either hard-rejected, empty, or did not apply)",
     })
     expect(classifyOutcome(result)).toEqual({
       kind: "real-fail",

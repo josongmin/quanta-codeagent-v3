@@ -1,0 +1,321 @@
+{
+  "timestamp": "2026-06-20T17:02:36.008Z",
+  "model": "gpt-5.4",
+  "provider": "chatgpt-oauth",
+  "n": 1,
+  "totals": {
+    "total": 8,
+    "resolved": 1,
+    "resolvedPct": 13
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "completed_unresolved": 4,
+      "admission_blocked": 3
+    },
+    "bySignal": {}
+  },
+  "perInstance": [
+    {
+      "id": "astropy__astropy-13033",
+      "passed": false,
+      "turns": 12,
+      "patchBytes": 901,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 1,
+        "passToPassFailed": 0,
+        "passToPassTotal": 20
+      }
+    },
+    {
+      "id": "astropy__astropy-13453",
+      "passed": false,
+      "turns": 11,
+      "patchBytes": 659,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 1,
+        "passToPassFailed": 0,
+        "passToPassTotal": 9
+      }
+    },
+    {
+      "id": "django__django-10999",
+      "passed": false,
+      "turns": 9,
+      "patchBytes": 497,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 2,
+        "passToPassFailed": 0,
+        "passToPassTotal": 10
+      }
+    },
+    {
+      "id": "django__django-11138",
+      "passed": false,
+      "turns": 42,
+      "patchBytes": 0,
+      "error": "patch budget exceeded: cross-file budget=0 unless owner-justified (1 file(s) outside owner)",
+      "failure": {
+        "termination": "admission_blocked",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "admission-blocked",
+            "source": "patch_budget_strict",
+            "reason": "patch budget exceeded: cross-file budget=0 unless owner-justified (1 file(s) outside owner)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "django__django-11333",
+      "passed": false,
+      "turns": 9,
+      "patchBytes": 0,
+      "error": "patch budget exceeded: new-def budget=0 (added 1 def/class — prefer in-place edit)",
+      "failure": {
+        "termination": "admission_blocked",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "admission-blocked",
+            "source": "patch_budget_strict",
+            "reason": "patch budget exceeded: new-def budget=0 (added 1 def/class — prefer in-place edit)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "django__django-11400",
+      "passed": false,
+      "turns": 14,
+      "patchBytes": 0,
+      "error": "patch budget exceeded: new-def budget=0 (added 1 def/class — prefer in-place edit)",
+      "failure": {
+        "termination": "admission_blocked",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "admission-blocked",
+            "source": "patch_budget_strict",
+            "reason": "patch budget exceeded: new-def budget=0 (added 1 def/class — prefer in-place edit)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "django__django-11433",
+      "passed": true,
+      "turns": 10,
+      "patchBytes": 910,
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "pass"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": true,
+        "failToPassFailed": 0,
+        "passToPassFailed": 0,
+        "passToPassTotal": 142
+      }
+    },
+    {
+      "id": "django__django-11490",
+      "passed": false,
+      "turns": 19,
+      "patchBytes": 866,
+      "failure": {
+        "termination": "completed_unresolved",
+        "signals": []
+      },
+      "budget": {
+        "baseTimeoutMs": 600000,
+        "adaptedTimeoutMs": 600000,
+        "attempts": 1,
+        "attemptOutcomes": [
+          {
+            "kind": "real-fail",
+            "subkind": "completed_unresolved"
+          }
+        ]
+      },
+      "gradeBreakdown": {
+        "resolved": false,
+        "failToPassFailed": 0,
+        "passToPassFailed": 2,
+        "passToPassTotal": 23
+      }
+    }
+  ],
+  "knobs": {
+    "resolved": {
+      "bench-in-loop-exec": {
+        "value": false,
+        "display": "on",
+        "source": "preset"
+      },
+      "issue-hint": {
+        "value": "agentless",
+        "unit": "mode",
+        "display": "agentless (mode)",
+        "source": "preset"
+      },
+      "issue-hint-expected-actual": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "localize-phase": {
+        "value": {
+          "phase1Turns": 5
+        },
+        "unit": "turns",
+        "display": "5 turns",
+        "source": "preset"
+      },
+      "lsp": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-budget": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-budget-strict": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "patch-hygiene": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "read-outline": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "repo-map": {
+        "value": {
+          "enabled": true
+        },
+        "display": "on",
+        "source": "preset"
+      },
+      "retry-transient": {
+        "value": 3,
+        "unit": "retries",
+        "display": "3 retries",
+        "source": "preset"
+      },
+      "round0-minimal": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      },
+      "spec-fidelity-steer": {
+        "value": true,
+        "display": "on",
+        "source": "preset"
+      }
+    },
+    "preset": "agentless-v3-thin-strict",
+    "inactive": [
+      "adversarial-repro",
+      "branch-search",
+      "closure-repair",
+      "fault-evidence",
+      "repro-doubt",
+      "lsp-steer",
+      "multi-voter",
+      "must-pass",
+      "network-proxy",
+      "no-patch-breaker",
+      "primary-rail",
+      "repair-escalation",
+      "repro-test",
+      "repro-vote",
+      "verification-plan",
+      "skills",
+      "subagent",
+      "test-runner",
+      "verify-select",
+      "verify-select-concurrency",
+      "verify-select-early-accept",
+      "verify-select-regression",
+      "verify-select-repro"
+    ]
+  }
+}

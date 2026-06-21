@@ -41,7 +41,8 @@ const EXPECT_LITERAL_RE =
  *  fires the steer on issues with no concrete declared output. Requiring
  *  delimiters mirrors EXPECT_LITERAL_RE's precision and costs no recall (real
  *  declared-output issues quote the value). */
-const EXPECTED_LABEL_RE = /\bexpected(?:\s+(?:output|result|value))?\s*[::]\s*[`'"]([^`'"\n]{1,200})[`'"]/i
+const EXPECTED_LABEL_RE =
+  /\bexpected(?:\s+(?:output|result|value))?\s*[::]\s*[`'"]([^`'"\n]{1,200})[`'"]/i
 
 /** Desired output declared inside a FENCED CODE BLOCK after an explicit
  *  desired-output marker ("should be:", "better to be ... to:", "expected
@@ -52,6 +53,13 @@ const EXPECTED_LABEL_RE = /\bexpected(?:\s+(?:output|result|value))?\s*[::]\s*[`
  *  never matches — fail-closed. */
 const CODEBLOCK_MARKER_RE =
   /\b(?:should be|better to be|would be better|ought to be|expected output|correct output)\b[^\n]{0,80}?:\s*```[a-zA-Z]*\s*([\s\S]{0,400}?)```/i
+
+/** Exact error-message proposals often appear as:
+ *  "Proposal: change the message to the form of:\n```ValueError: ...```".
+ *  Here the whole block is the expected message; extracting the first quoted
+ *  literal inside it would collapse the spec to a single token like `time`. */
+const MESSAGE_FORM_CODEBLOCK_RE =
+  /\b(?:change|changed|changing)\s+(?:the\s+)?(?:error\s+|exception\s+)?message\b[^\n]{0,120}\b(?:to|as|form of)\b[^\n]{0,80}:\s*```[a-zA-Z]*\s*([\s\S]{0,400}?)```/i
 
 /** First delimited literal inside a captured code-block body. A block with NO
  *  quoted literal yields nothing (avoids grabbing bare example CODE as output). */
@@ -65,7 +73,8 @@ const EMPTY_DECL_RE =
   /\b(?:should|must|expected to|ought to)\s+(?:(?:print|output|report|return|emit|produce|give|show)\s+(?:nothing|no\s+(?:output|duplicates?|results?|errors?|warnings?|messages?)|empty|an?\s+empty)|stop\s+\w+\s+from\s+(?:checking|reporting|flagging|emitting|printing|warning|raising))\b/i
 
 /** LaTeX markers in a captured value. */
-const LATEX_RE = /(?:\\(?:left|right|frac|begin|mathrm|operatorname|cdot|times|sqrt|sum|int)\b|\\[a-zA-Z]+\{|[\^_]\{)/
+const LATEX_RE =
+  /(?:\\(?:left|right|frac|begin|mathrm|operatorname|cdot|times|sqrt|sum|int)\b|\\[a-zA-Z]+\{|[\^_]\{)/
 
 /** Python-repr-ish: a tuple/list/dict/set literal, or a call/Symbol repr. The
  *  delimiters must BOUND the value (after trim) for this to be "symbolic". */
@@ -124,7 +133,15 @@ export const extractIssueDeclaredExpected = (
     return { kind: classify(value), value }
   }
 
-  // 4) Desired output in a FENCED CODE BLOCK after a desired-output marker
+  // 4) Exact error-message proposal in a fenced block. The FULL block is the
+  //    expected stdout/message text, not a quoted sub-literal inside it.
+  const msgBlock = MESSAGE_FORM_CODEBLOCK_RE.exec(problemStatement)
+  if (msgBlock?.[1] !== undefined && isMeaningful(msgBlock[1])) {
+    const value = msgBlock[1].trim()
+    return { kind: classify(value), value }
+  }
+
+  // 5) Desired output in a FENCED CODE BLOCK after a desired-output marker
   //    ("should be:", "better to be ... to:", "expected output:"). The marker
   //    anchors the block AFTER it, so an earlier "gives:"/example block (the
   //    INCORRECT current output) is skipped. Fail-closed twice: the marker is

@@ -17,7 +17,7 @@
  * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
  */
 import type { Instance } from "../types"
-import { pythonForRepoVersion } from "./repo-version-python"
+import { buildProjectEnvUvRunArgv } from "./project-env"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
 export interface SwebenchTask {
@@ -209,7 +209,7 @@ export const prepareTaskRepo = async (
  * target project (it is NOT pip-installed there — only the per-instance Docker
  * image and this uvx ephemeral env carry it), so every Agentless repro hit
  * ModuleNotFoundError and the primary rail never fired. Mirrors
- * `synthesizeTestCmd`'s env strategy: `uvx --with-editable .` installs the repo
+ * `synthesizeTestCmd`'s env strategy: `uv run --with-editable .` installs the repo
  * (from the sandbox cwd's setup.py/pyproject) + resolves transitive deps; the
  * first sample pays the build, the rest hit uv's cache. `repo === ""` (non-
  * SWE-bench fixtures) ⇒ caller should NOT use this (bare python3 is correct).
@@ -223,8 +223,7 @@ export const reproRunArgv = (
   version: string | undefined,
   scriptPath: string,
 ): readonly string[] => {
-  const py = pythonForRepoVersion(repo, version)
-  return ["uvx", "--quiet", "--python", py, "--with-editable", ".", "python", scriptPath]
+  return [...buildProjectEnvUvRunArgv(repo, version), "python", scriptPath]
 }
 
 const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
@@ -260,15 +259,16 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
     // treats it as one argument.
     parts.push("-k", quote(keywords.join(" or ")))
   }
-  // uvx pulls deps + pytest into a cached ephemeral env so the sandbox doesn't
-  // need its own venv. `--with-editable .` installs the repo at the sandbox's
-  // cwd from its `setup.py` / `pyproject.toml` — pip resolves transitive deps.
+  // `uv run` pulls deps + pytest into a cached ephemeral env so the sandbox
+  // doesn't need its own venv. `--with setuptools` keeps `pkg_resources`-era imports
+  // alive; `--with-editable .` installs the repo at the sandbox's cwd from its
+  // `setup.py` / `pyproject.toml` so pip resolves transitive deps.
   // First call per (python ver, repo, base commit) pays the build cost;
   // subsequent calls hit uv's cache (~ms).
   const repo = typeof raw.repo === "string" ? raw.repo : ""
   const version = typeof raw.version === "string" ? raw.version : undefined
-  const py = pythonForRepoVersion(repo, version)
-  return `uvx --quiet --python ${py} --with pytest --with-editable . pytest -x --no-header ${parts.join(" ")}`
+  const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"]).join(" ")
+  return `${prefix} pytest -x --no-header ${parts.join(" ")}`
 }
 
 /** Parse a SWE-bench test-name array field (`PASS_TO_PASS` / `FAIL_TO_PASS`) —

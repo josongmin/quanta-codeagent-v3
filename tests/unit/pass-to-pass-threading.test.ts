@@ -90,4 +90,18 @@ describe("toInstance — PASS_TO_PASS threading", () => {
     // this is belt-and-suspenders, but it fences the eval-only boundary.
     expect(inst.problemStatement).not.toContain("secret_regression_test_xyz")
   })
+
+  test("swebench testCmd installs setuptools in the repo-local verifier env", () => {
+    const inst = toInstance(
+      taskWith({
+        FAIL_TO_PASS: JSON.stringify(["tests/test_x.py::test_y"]),
+        version: "1.5",
+      }),
+      "/tmp/repo",
+    )
+    expect(inst.testCmd).toContain("--with pytest")
+    expect(inst.testCmd).toContain("--with setuptools")
+    expect(inst.testCmd).toContain("--no-project")
+    expect(inst.testCmd).toContain("--with-editable . pytest -x --no-header")
+  })
 })

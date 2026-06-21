@@ -54,26 +54,32 @@ class SlowBashLLM implements LLMPort {
 }
 
 class SequentialEditLLM implements LLMPort {
-  private calls = 0
+  private solveCalls = 0
   private readonly targets = [
     { oldString: "return a - b", newString: "return a + b + 0" },
     { oldString: "return a - b", newString: "return a + b" },
   ] as const
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-    this.calls += 1
     const text = input.messages
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
     const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
-    if (this.calls % 2 === 1) {
+    if (sandbox === "") {
+      yield { type: "text_delta", delta: 'print("Issue reproduced")' }
+      yield { type: "message_stop", stop_reason: "end_turn" }
+      return
+    }
+    this.solveCalls += 1
+    if (this.solveCalls % 2 === 1) {
       const target =
-        this.targets[Math.floor((this.calls - 1) / 2)] ?? this.targets[this.targets.length - 1]
-      yield { type: "tool_use_start", id: `edit-${this.calls}`, name: "edit" }
+        this.targets[Math.floor((this.solveCalls - 1) / 2)] ??
+        this.targets[this.targets.length - 1]
+      yield { type: "tool_use_start", id: `edit-${this.solveCalls}`, name: "edit" }
       yield {
         type: "tool_use_end",
-        id: `edit-${this.calls}`,
+        id: `edit-${this.solveCalls}`,
         input: {
           path: join(sandbox, "math.js"),
           old_string: target.oldString,
@@ -89,16 +95,21 @@ class SequentialEditLLM implements LLMPort {
 }
 
 class EditThenThrowThenNoopLLM implements LLMPort {
-  private calls = 0
+  private solveCalls = 0
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-    this.calls += 1
     const text = input.messages
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
     const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
-    if (this.calls === 1) {
+    if (sandbox === "") {
+      yield { type: "text_delta", delta: 'print("Issue reproduced")' }
+      yield { type: "message_stop", stop_reason: "end_turn" }
+      return
+    }
+    this.solveCalls += 1
+    if (this.solveCalls === 1) {
       yield { type: "tool_use_start", id: "edit-1", name: "edit" }
       yield {
         type: "tool_use_end",
@@ -112,7 +123,7 @@ class EditThenThrowThenNoopLLM implements LLMPort {
       yield { type: "message_stop", stop_reason: "tool_use" }
       return
     }
-    if (this.calls === 2) {
+    if (this.solveCalls === 2) {
       throw new Error("429 Too Many Requests")
     }
     yield { type: "text_delta", delta: "noop" }
@@ -121,16 +132,21 @@ class EditThenThrowThenNoopLLM implements LLMPort {
 }
 
 class EditThenRefuseThenNoopLLM implements LLMPort {
-  private calls = 0
+  private solveCalls = 0
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-    this.calls += 1
     const text = input.messages
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
     const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
-    if (this.calls === 1) {
+    if (sandbox === "") {
+      yield { type: "text_delta", delta: 'print("Issue reproduced")' }
+      yield { type: "message_stop", stop_reason: "end_turn" }
+      return
+    }
+    this.solveCalls += 1
+    if (this.solveCalls === 1) {
       yield { type: "tool_use_start", id: "edit-1", name: "edit" }
       yield {
         type: "tool_use_end",
@@ -144,7 +160,7 @@ class EditThenRefuseThenNoopLLM implements LLMPort {
       yield { type: "message_stop", stop_reason: "tool_use" }
       return
     }
-    if (this.calls === 2) {
+    if (this.solveCalls === 2) {
       yield { type: "text_delta", delta: "I refuse to continue." }
       yield { type: "message_stop", stop_reason: "refusal" }
       return

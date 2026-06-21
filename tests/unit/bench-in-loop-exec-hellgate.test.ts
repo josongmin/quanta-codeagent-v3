@@ -86,7 +86,7 @@ describe("bench-in-loop-exec posture flip", () => {
     const cfg = buildOnce()
     expect(userText(cfg)).toContain("MANDATORY")
     expect(userText(cfg)).toContain(MANDATE)
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2 })
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
   })
 
   // IN-LOOP-2: explicit OFF via env flips the posture.

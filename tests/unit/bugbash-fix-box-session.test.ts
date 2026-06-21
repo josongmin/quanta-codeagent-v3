@@ -83,8 +83,19 @@ describe("#23 runId / artifactSuffix shell-injection boundary", () => {
     expect(() => assertSafeArtifactSuffix("run; reboot")).toThrow(/unsafe artifact suffix/)
   })
 
-  test("accepts a normal filesystem-safe runId", () => {
+  test("rejects a dot-only component (`.`/`..`) that escapes the runId dir", () => {
+    // `..` matches the char-class SAFE_SUFFIX_RE yet is a path component:
+    // `~/runs/../instances.jsonl` escapes. Reverting the dot-only guard makes
+    // these pass — a real traversal hole the regex alone does not close.
+    expect(() => assertSafeArtifactSuffix("..")).toThrow(/unsafe artifact suffix/)
+    expect(() => assertSafeArtifactSuffix(".")).toThrow(/unsafe artifact suffix/)
+    expect(() => assertSafeArtifactSuffix("...")).toThrow(/unsafe artifact suffix/)
+  })
+
+  test("accepts a normal filesystem-safe runId (incl. a leading-dot name)", () => {
     expect(() => assertSafeArtifactSuffix("pool-2026-06-20.chunk_3")).not.toThrow()
+    // a dotfile-style name is still safe (not dot-ONLY)
+    expect(() => assertSafeArtifactSuffix(".hidden-run")).not.toThrow()
   })
 
   test("gradeChunkOnBox throws on an unsafe suffix BEFORE issuing any remote command", async () => {

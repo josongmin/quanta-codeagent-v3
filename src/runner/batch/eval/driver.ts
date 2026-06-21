@@ -90,10 +90,7 @@ import {
   resolveBenchKnobs,
 } from "./knobs-bench"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
-import {
-  buildPhasePatchBudget,
-  buildStrictPatchBudgetBlockedResult,
-} from "./patch-budget-admission"
+import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
@@ -135,6 +132,7 @@ import {
   runRetryLoop,
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
+import { makeDeclaredExpectedSelectionPort } from "./selection-declared-expected"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -144,6 +142,7 @@ import {
   summarizeSelection,
 } from "./selection-executor"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
+import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -262,6 +261,29 @@ const SIMPLICITY_STEER =
   "abstraction; ask 'is there a one-line change to the existing code?' before " +
   "writing new code. Remove any reproduction script or downloaded file you " +
   "created so only the real source fix remains."
+
+const MESSAGE_FORMAT_STEER =
+  "For error/exception message bugs, reproduce the exact state from the issue " +
+  "and compare the FULL message. Fix the existing message construction so it " +
+  "reports the actual relevant values, including multi-item lists or prefixes; " +
+  "do NOT add a narrow special-case branch that leaves the original misleading " +
+  "formatter reachable for the reproduced scenario."
+
+const ADAPTER_FAMILY_STEER =
+  "When the issue names multiple backends, adapters, drivers, providers, or " +
+  "database implementations, treat them as one owner-family. Inspect every named " +
+  "implementation and the shared base/helper it calls. If a contract, argument " +
+  "arity, SQL function, or conversion rule changes in one backend, patch the " +
+  "parallel sites too; a single-backend patch is incomplete unless the issue " +
+  "explicitly limits the bug to one backend."
+
+const EXECUTION_ENV_BOUNDARY_STEER =
+  "For subprocess, shell, command, or environment-variable bugs, trace BOTH the " +
+  "producer of the env/args and the final execution boundary (for example " +
+  "subprocess.run). Empty env maps usually mean 'drop inherited environment', " +
+  "not 'no overrides'; use the language's inherit-default when no overrides are " +
+  "needed, and patch backend-specific env construction plus the shared caller " +
+  "when both participate."
 
 /** Lever A — SIBLING-COMPLETION / co-change consequence check (2026-06-19,
  *  ceiling RCA). Measured failure mode on the multi-file ceiling subset: quanta
@@ -395,6 +417,9 @@ interface SteerLines {
   readonly lsp: string
   readonly findRefs: string
   readonly spec: string
+  readonly messageFormat: string
+  readonly adapterFamily: string
+  readonly executionEnv: string
   readonly simplicity: string
   readonly sibling: string
 }
@@ -425,7 +450,7 @@ const composeBaseText = (
     return `${base}${SWEBENCH_DIRECTIVE_LEAN}${steers.findRefs}`
   }
   const directive = inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC
-  return `${base}${directive}${steers.lsp}${steers.findRefs}${steers.spec}${steers.simplicity}${steers.sibling}`
+  return `${base}${directive}${steers.lsp}${steers.findRefs}${steers.spec}${steers.messageFormat}${steers.adapterFamily}${steers.executionEnv}${steers.simplicity}${steers.sibling}`
 }
 
 /**
@@ -1056,7 +1081,7 @@ export const prepareReproTestDetailed = async (
   // `python3 <script>` on the box host cannot import the target project (it is
   // not pip-installed there), so without this every Agentless repro hit
   // ModuleNotFoundError and the primary rail never fired. For SWE-bench
-  // instances, build a `uvx --with-editable . python <script>` argv keyed on the
+  // instances, build a `uv run --with-editable . python <script>` argv keyed on the
   // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
   const samples = await executeReproCandidateTests(tests, instance, sandbox, deps, config)
   if (samples === null) return failedReproResult("execution_failed")
@@ -1129,6 +1154,46 @@ const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTele
   ...(base.reproducedCount !== undefined ? { reproducedCount: base.reproducedCount } : {}),
 })
 
+const reproducingReproSources = (
+  selection: ReproTestSelection | null | undefined,
+): readonly string[] =>
+  selection?.samples.filter((s) => s.outcome === "reproduced").map((s) => s.source) ?? []
+
+export const selectionReproPrepK = (
+  posture: Pick<BenchPosture, "verifySelectN" | "verifySelectRepro" | "reproTestK">,
+): number | undefined => {
+  if (posture.verifySelectN === undefined) return undefined
+  if (posture.verifySelectRepro === undefined || posture.verifySelectRepro === "off")
+    return undefined
+  return posture.reproTestK ?? posture.verifySelectN
+}
+
+export const prepareSelectionReproSources = async (
+  instance: Instance,
+  sandbox: string,
+  llm: LLMPort,
+  posture: Pick<
+    BenchPosture,
+    "verifySelectN" | "verifySelectRepro" | "reproTestK" | "adversarialRepro"
+  >,
+  deps: Omit<PrepareReproTestDeps, "llm" | "adversarial"> = {},
+): Promise<{
+  readonly telemetry: BenchReproTestTelemetry | undefined
+  readonly reproSources: readonly string[]
+}> => {
+  const reproK = selectionReproPrepK(posture)
+  if (reproK === undefined) return { telemetry: undefined, reproSources: [] }
+  const detail = await prepareReproTestDetailed(instance, sandbox, reproK, {
+    ...deps,
+    llm,
+    ...(posture.adversarialRepro === true ? { adversarial: true } : {}),
+  })
+  return {
+    telemetry: detail.telemetry,
+    reproSources: reproducingReproSources(detail.selection),
+  }
+}
+
 export const installReproTestHint = async (
   instance: Instance,
   sandbox: string,
@@ -1147,9 +1212,7 @@ export const installReproTestHint = async (
   if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
   // #2 repro-vote: keep EVERY reproducing script (not just the selected winner)
   // so the validation-time K-of-N RESOLVED vote can re-run the whole set.
-  const reproSources = selection.samples
-    .filter((s) => s.outcome === "reproduced")
-    .map((s) => s.source)
+  const reproSources = reproducingReproSources(selection)
   const path = `${sandbox}/${REPRO_FILE_NAME}`
   try {
     await Bun.write(path, selection.selected)
@@ -1313,32 +1376,94 @@ const buildDirectiveSteers = (
   lsp: string
   findRefs: string
   spec: string
+  messageFormat: string
+  adapterFamily: string
+  executionEnv: string
   simplicity: string
   sibling: string
-} => ({
-  lsp:
-    instance.swebench && opt.localizePhase?.lspGroundingSteer === true
-      ? `\n-${LSP_GROUNDING_STEER}`
-      : "",
-  findRefs:
-    instance.swebench && gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
-      ? `\n-${FIND_REFS_STEER}`
-      : "",
-  spec:
-    instance.swebench &&
-    opt.specFidelitySteer === true &&
-    extractIssueDeclaredExpected(instance.problemStatement) !== undefined
-      ? `\n-${SPEC_FIDELITY_STEER}`
-      : "",
-  simplicity:
-    instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY")
-      ? `\n-${SIMPLICITY_STEER}`
-      : "",
-  sibling:
-    instance.swebench && gateOn(process.env, "QUANTA_BENCH_SIBLING")
-      ? `\n-${SIBLING_COMPLETION_STEER}`
-      : "",
-})
+} => {
+  const isSwebench = instance.swebench !== undefined
+  return {
+    lsp: steerLine(
+      isSwebench && opt.localizePhase?.lspGroundingSteer === true,
+      LSP_GROUNDING_STEER,
+    ),
+    findRefs: steerLine(
+      isSwebench && gateOn(process.env, "QUANTA_BENCH_FIND_REFS"),
+      FIND_REFS_STEER,
+    ),
+    spec: buildSpecSteer(instance, opt, isSwebench),
+    ...buildIssueShapeSteers(instance, opt, isSwebench),
+    simplicity: steerLine(
+      isSwebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY"),
+      SIMPLICITY_STEER,
+    ),
+    sibling: steerLine(
+      isSwebench && gateOn(process.env, "QUANTA_BENCH_SIBLING"),
+      SIBLING_COMPLETION_STEER,
+    ),
+  }
+}
+
+const steerLine = (enabled: boolean, text: string): string => (enabled ? `\n-${text}` : "")
+
+const buildSpecSteer = (instance: Instance, opt: BenchPosture, isSwebench: boolean): string =>
+  steerLine(
+    isSwebench &&
+      opt.specFidelitySteer === true &&
+      extractIssueDeclaredExpected(instance.problemStatement) !== undefined,
+    SPEC_FIDELITY_STEER,
+  )
+
+const buildIssueShapeSteers = (
+  instance: Instance,
+  opt: BenchPosture,
+  isSwebench: boolean,
+): Pick<SteerLines, "messageFormat" | "adapterFamily" | "executionEnv"> => {
+  const enabled = isSwebench && opt.issueHintExpectedActual === true
+  return {
+    messageFormat: steerLine(
+      enabled && hasExceptionMessageFormatIssue(instance.problemStatement),
+      MESSAGE_FORMAT_STEER,
+    ),
+    adapterFamily: steerLine(
+      enabled && hasAdapterFamilyIssue(instance.problemStatement),
+      ADAPTER_FAMILY_STEER,
+    ),
+    executionEnv: steerLine(
+      enabled && hasExecutionEnvBoundaryIssue(instance.problemStatement),
+      EXECUTION_ENV_BOUNDARY_STEER,
+    ),
+  }
+}
+
+const hasExceptionMessageFormatIssue = (problemStatement: string): boolean => {
+  const text = problemStatement.toLowerCase()
+  const hasMessageSubject =
+    /\b(?:error|exception|valueerror|typeerror|warning)\b/.test(text) &&
+    /\b(?:message|exception|error|valueerror|typeerror|warning)\b/.test(text)
+  if (!hasMessageSubject) return false
+  return /\b(?:misleading|confusing|wrong|incorrect|expected|actual|got|found)\b/.test(text)
+}
+
+const hasAdapterFamilyIssue = (problemStatement: string): boolean => {
+  const text = problemStatement.toLowerCase()
+  const hasFamilySubject = /\b(?:backends?|adapters?|drivers?|providers?|databases?)\b/.test(text)
+  const namedFamilies = new Set<string>()
+  if (text.includes("sqlite")) namedFamilies.add("sqlite")
+  if (text.includes("mysql")) namedFamilies.add("mysql")
+  if (text.includes("oracle")) namedFamilies.add("oracle")
+  if (/\bpostgres(?:ql)?\b/.test(text)) namedFamilies.add("postgresql")
+  if (text.includes("mariadb")) namedFamilies.add("mariadb")
+  return hasFamilySubject && (namedFamilies.size >= 2 || /\b(?:multiple|several|all)\b/.test(text))
+}
+
+const hasExecutionEnvBoundaryIssue = (problemStatement: string): boolean => {
+  const text = problemStatement.toLowerCase()
+  const hasEnv = /\b(?:env|environment|os\.environ|environment variables?)\b/.test(text)
+  const hasExecutionBoundary = /\b(?:subprocess|runshell|dbshell|shell|command)\b/.test(text)
+  return hasEnv && hasExecutionBoundary
+}
 
 const resolveIssueHintText = (
   instance: Instance,
@@ -2213,6 +2338,7 @@ const runSelectionPhase = async (
     verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
       : undefined
+  const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
   const selectionBaseValidatedRed =
     verifySelectRegression === "discovered" ? null : baseValidatedRed
   const result = await runSelection({
@@ -2272,9 +2398,11 @@ const runSelectionPhase = async (
           },
         })
       },
+      ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
       ...(resolvedKofNSelectionPort !== undefined
         ? { resolvedKofN: resolvedKofNSelectionPort }
         : {}),
+      declaredExpected: makeDeclaredExpectedSelectionPort(instance),
     },
   })
   if (result.successfulGenerations === 0 && result.generationFailures > 0) {
@@ -2437,7 +2565,7 @@ const noPatchResult = (args: {
   const noWinnerError =
     args.phase.selectionTelemetry?.winnerId === null
       ? (agentPhaseError(args.phase) ??
-        "verify-select produced no submittable candidate (all candidates were empty or did not apply)")
+        "verify-select produced no submittable candidate (every candidate was either hard-rejected, empty, or did not apply)")
       : undefined
   return {
     id: args.instance.id,
@@ -2539,13 +2667,20 @@ const prepareHintAndReproContext = async (
   const reproInstall = benchInstallsReproHint(posture.inLoopExec)
     ? await installReproTestHint(instance, sandbox, llm)
     : { hint: undefined, telemetry: undefined }
+  const selectionRepro =
+    reproInstall.telemetry !== undefined
+      ? {
+          telemetry: reproInstall.telemetry,
+          reproSources: reproInstall.reproSources ?? [],
+        }
+      : await prepareSelectionReproSources(instance, sandbox, llm, posture)
   return {
     posture,
     precomputedHint,
     localizeCandidates,
     reproHint: reproInstall.hint,
-    reproTest: reproInstall.telemetry,
-    reproSources: reproInstall.reproSources ?? [],
+    reproTest: selectionRepro.telemetry,
+    reproSources: selectionRepro.reproSources,
   }
 }
 
@@ -2743,63 +2878,19 @@ export const maybeValidateTerminalResult = async (args: {
   return { ...rest, passed: false, verdict: "grader_invalid", error: gold.error }
 }
 
-const observeStrictBudgetBlock = (args: {
-  readonly extra: Partial<InstanceResult>
-  readonly deps: RunInstanceDeps
-  readonly instance: Instance
-  readonly wiring: Wiring
-  readonly phase: Phase
-  readonly startedAt: number
-  readonly strictBudget: ReturnType<typeof buildPhasePatchBudget>
-}): void => {
-  if (!(args.deps.observe && args.wiring.observer)) return
-  args.extra.verdict = "ok"
-  args.extra.durationMs = Date.now() - args.startedAt
-  args.extra.patchPath = emitPatch(
-    args.deps.observe,
-    args.instance,
-    args.wiring.observer,
-    args.phase.patch,
-  )
-  const usage = args.wiring.usage?.total()
-  if (usage) args.extra.usage = usage
-  if (args.phase.firstEditFile !== undefined) args.extra.firstEditFile = args.phase.firstEditFile
-  if (args.phase.editCount !== undefined) args.extra.editCount = args.phase.editCount
-  if (args.phase.turnsToFirstEdit !== undefined)
-    args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
-  args.extra.patchBudget = args.strictBudget
-}
-
-export const maybeStrictBudgetBlockedResult = (args: {
-  readonly instance: Instance
-  readonly phase: Phase
-  readonly reproTest: BenchReproTestTelemetry | undefined
-  readonly deps: RunInstanceDeps
-  readonly wiring: Wiring
-  readonly startedAt: number
-  readonly posture: BenchPosture
-  readonly closureSession: ClosureSessionState | undefined
-}): InstanceResult | undefined => {
-  const strictBudget =
-    args.posture.patchBudgetStrict && args.instance.swebench !== undefined
-      ? buildPhasePatchBudget({
-          patch: args.phase.patch,
-          repo: args.instance.swebench.repo,
-          closureSession: args.closureSession,
-          strict: true,
-        })
-      : undefined
-  if (strictBudget === undefined || strictBudget.withinBudget) return undefined
-  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
-  if (args.phase.stopReason !== undefined) extra.stopReason = args.phase.stopReason
-  observeStrictBudgetBlock({ ...args, extra, strictBudget })
-  return buildStrictPatchBudgetBlockedResult({
-    id: args.instance.id,
-    turns: args.phase.turns,
-    verdict: strictBudget,
-    extra,
-  })
-}
+// jun-21 — REMOVED `maybeStrictBudgetBlockedResult` (the strict patch-budget
+// TERMINAL-DISCARD). It violated the patch-budget contract: an over-budget
+// verdict is SOFT — the module header (@/agent/patch-budget) says "never a hard
+// reject", `verdict.escalate` marks it for the late critic/verify path, and
+// `runtimeExpandingCalls` is explicitly OBSERVE-ONLY. Discarding the agent's
+// real patch and returning an empty one (a) KILLED legitimate fixes that need a
+// new helper/method — measured: pytest-dev__pytest-5787 went over-budget on
+// new-def across ALL THREE selector arms and was zeroed every time — and (b)
+// turned a potential win / real miss into a "gate-block" black hole that
+// corrupts the failure taxonomy (a model can't be judged on a patch we threw
+// away). The over-budget verdict is STILL recorded as telemetry on the graded
+// result (`extra.patchBudget`, see the buildPhasePatchBudget block downstream);
+// the patch now flows to grading — escalate, do not discard.
 
 const validateVerifiedOutcome = async (args: {
   readonly instance: Instance
@@ -3119,17 +3210,9 @@ export const runInstanceOnce = async (
       signal: abort.signal,
     })
     if (terminal !== undefined) return terminal
-    const strictBudgetBlocked = maybeStrictBudgetBlockedResult({
-      instance,
-      phase,
-      reproTest,
-      deps,
-      wiring: w,
-      startedAt,
-      posture: preparedContext.posture,
-      closureSession: preparedContext.closureSession,
-    })
-    if (strictBudgetBlocked !== undefined) return strictBudgetBlocked
+    // NOTE (jun-21): no strict patch-budget terminal-discard here anymore — an
+    // over-budget patch ESCALATES to grading (telemetry recorded on the result),
+    // never a hard reject. See the removal note above the old fn site.
     // Await inside the try so sandbox cleanup in `finally` cannot race the
     // final verifier. A bare `return promise` here would run `finally`
     // immediately and tear down the sandbox while verify is still spawning.

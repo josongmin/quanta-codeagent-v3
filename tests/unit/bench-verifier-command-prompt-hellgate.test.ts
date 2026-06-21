@@ -23,7 +23,7 @@ const userText = (instance: Instance): string => {
 describe("bench verifier-command prompt wiring", () => {
   test("swebench prompt surfaces the exact repo-local verifier command above the workspace line", () => {
     const testCmd =
-      "uvx --quiet --python 3.8 --with pytest --with-editable . pytest -x --no-header tests/foo.py"
+      "uv run --no-project --python 3.8 --with pytest --with setuptools --with-editable . pytest -x --no-header tests/foo.py"
     const text = userText({
       id: "x__1",
       repoPath: "/tmp/x",

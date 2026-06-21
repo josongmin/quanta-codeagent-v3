@@ -58,7 +58,7 @@ export interface ReproVoteValidateDeps {
   exec: ReproExecPort
   /** Injected file-write port (writes each script under the sandbox). */
   writeFile: ReproWriteFilePort
-  /** SWE-bench project-env argv builder (`uvx --with-editable . python <p>`),
+  /** SWE-bench project-env argv builder (`uv run --with-editable . python <p>`),
    *  identical to the base-red run so imports resolve. Optional for fixtures. */
   buildArgv?: (scriptPath: string) => readonly string[]
   pythonBin?: string

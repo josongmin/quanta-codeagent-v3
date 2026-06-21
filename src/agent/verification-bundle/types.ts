@@ -16,15 +16,16 @@
  *     self-sabotage we are removing).
  *   - Only an explicit `false` / insufficient hard signal makes a candidate
  *     inadmissible.
- *   - When NO candidate is admissible, the caller still submits a best-effort
- *     pick by soft score (`selectBest` returning a value vs the empty-set
- *     `null` is the caller's branch) — so even the hard gates inform rather
- *     than dictate the final submission.
+ *   - When NO candidate is admissible, the caller may still keep a constrained
+ *     best-effort candidate for reporting/submission, but MUST NOT silently
+ *     resubmit a candidate that already has explicit negative evidence such as a
+ *     regression failure or a known bad patched-side resolved verdict.
  *
  * No oracle leak: these types name no official SWE-bench hidden field
  * (FAIL_TO_PASS / PASS_TO_PASS / test_patch). The regression signal is a bare
  * boolean produced by a bench adapter behind the eval-only boundary; the
- * engine only ever sees `regressionGreen: boolean | null`.
+ * engine only ever sees `regressionGreen: boolean | null`. Likewise the smoke
+ * signal is only the public-script keep-green boolean, never the hidden oracle.
  */
 
 export interface ResolvedKofNSignal {
@@ -57,6 +58,12 @@ export interface HardGateSignals {
    *  / oracle unavailable (FAIL-OPEN — a missing regression run must never
    *  reject a candidate). */
   regressionGreen: boolean | null
+  /** Public issue-smoke result: a base-green issue MWE (or its cheap public
+   *  smoke surrogate) stays green on the patched tree. `false` = the candidate
+   *  broke a public import/hot-path smoke that was known green on base.
+   *  `null` ⇒ no trustworthy smoke source existed or the probe could not run
+   *  (FAIL-OPEN — a missing smoke run must never reject a candidate). */
+  smokeGreen: boolean | null
   /** The candidate diff applied cleanly to the sandbox. `false` ⇒ a patch that
    *  does not apply is never admissible. `null` ⇒ applyability was not probed
    *  / could not be judged (FAIL-OPEN). */

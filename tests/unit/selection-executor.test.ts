@@ -57,7 +57,9 @@ describe("selection input canonicalization", () => {
     expect(normalizeSelectionPath("a/pkg/file.py", sandbox)).toBe("a/pkg/file.py")
     expect(normalizeSelectionPath("b/pkg/file.py", sandbox)).toBe("b/pkg/file.py")
     expect(
-      filesFromPatch("--- a/a/pkg/file.py\n+++ b/a/pkg/file.py\n+changed\n--- a/b/pkg/file.py\n+++ b/b/pkg/file.py\n+changed"),
+      filesFromPatch(
+        "--- a/a/pkg/file.py\n+++ b/a/pkg/file.py\n+changed\n--- a/b/pkg/file.py\n+++ b/b/pkg/file.py\n+changed",
+      ),
     ).toEqual(["a/pkg/file.py", "b/pkg/file.py"])
   })
 
@@ -85,6 +87,34 @@ describe("selection input canonicalization", () => {
     ).toEqual(["sympy/core/function.py"])
     expect(normalizeSelectionPaths(["./a.py", "/dev/null"], undefined)).toEqual(["a.py"])
   })
+
+  it("parses git-quoted diff headers without losing the task file authority", () => {
+    expect(
+      filesFromPatch(
+        [
+          'diff --git "a/src/space name.ts" "b/src/space name.ts"',
+          '--- "a/src/space name.ts"',
+          '+++ "b/src/space name.ts"',
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+      ),
+    ).toEqual(["src/space name.ts"])
+  })
+
+  it("falls back to diff --git post-image for pure rename patches", () => {
+    expect(
+      filesFromPatch(
+        [
+          "diff --git a/src/old.ts b/src/new.ts",
+          "similarity index 100%",
+          "rename from src/old.ts",
+          "rename to src/new.ts",
+        ].join("\n"),
+      ),
+    ).toEqual(["src/new.ts"])
+  })
 })
 
 describe("runSelection", () => {
@@ -104,6 +134,46 @@ describe("runSelection", () => {
       ports: { generate: gen },
     })
     expect(r.winner?.id).toBe("cand-1") // owner-coverage 1.0 beats 0.0
+  })
+
+  it("MESSAGE-FORMAT: declared-expected signal beats smaller scalar-only near-miss", async () => {
+    const scalarOnly = cand({
+      id: "cand-0",
+      files: ["astropy/timeseries/core.py"],
+      patch:
+        "+++ b/astropy/timeseries/core.py\n" +
+        "-.format(self.__class__.__name__, required_columns[0], plural, self.colnames[0])\n" +
+        "+.format(self.__class__.__name__, required_columns[0], plural, self.colnames[:len(required_columns)])\n",
+    })
+    const fullPrefix = cand({
+      id: "cand-1",
+      files: ["astropy/timeseries/core.py"],
+      patch:
+        "+++ b/astropy/timeseries/core.py\n" +
+        "+def as_scalar_or_list_str(obj):\n" +
+        "+    if len(obj) == 1:\n" +
+        "+        return f\"'{obj[0]}'\"\n" +
+        "+    return str(obj)\n" +
+        "+.format(self.__class__.__name__, as_scalar_or_list_str(required_columns), plural,\n" +
+        "+        as_scalar_or_list_str(self.colnames[:len(required_columns)]))\n",
+    })
+    const { gen } = genFrom([scalarOnly, fullPrefix])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["astropy/timeseries/core.py"]),
+      ports: {
+        generate: gen,
+        declaredExpected: async (c) => c.id === "cand-1",
+      },
+    })
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
+      "soft:declaredExpectedMatch=0",
+    )
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
+      "soft:declaredExpectedMatch=1",
+    )
   })
 
   it("wiring-proof: each candidate is generated with its diversity seed", async () => {
@@ -135,6 +205,22 @@ describe("runSelection", () => {
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.admissible).toBe(true)
   })
 
+  it("smoke=false makes a candidate INADMISSIBLE (public hot-path breakage)", async () => {
+    const a = cand({ id: "cand-0", files: ["x.py"], patch: "+++ b/x.py\n+aaa" })
+    const b = cand({ id: "cand-1", files: ["x.py"], patch: "+++ b/x.py\n+bbb" })
+    const { gen } = genFrom([a, b])
+    const ports: SelectionPorts = {
+      generate: gen,
+      smoke: async (c) => c.id !== "cand-0",
+    }
+    const r = await runSelection({ n: 2, seeds: [undefined, undefined], owners: new Set(), ports })
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(false)
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
+      "hard:smokeGreen=false (candidate broke a public smoke)",
+    )
+  })
+
   it("resolvedKofN default mode is hard: insufficient resolved votes reject", async () => {
     const { gen } = genFrom([cand({ id: "cand-0" })])
     const r = await runSelection({
@@ -144,6 +230,19 @@ describe("runSelection", () => {
       ports: { generate: gen, resolvedKofN: async () => ({ votes: 0, k: 1 }) },
     })
     expect(r.scored[0]?.verdict.admissible).toBe(false)
+  })
+
+  it("resolvedKofN hard reject is not resubmitted as best-effort", async () => {
+    const { gen } = genFrom([cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] })])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(),
+      ports: { generate: gen, resolvedKofN: async () => ({ votes: 0, k: 1 }) },
+    })
+    expect(r.admissibleCount).toBe(0)
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate?.id).toBe("cand-0")
   })
 
   it("ADVERSARIAL: malformed hard resolved payload cannot pass as admissible", async () => {
@@ -449,8 +548,9 @@ describe("runSelection", () => {
     expect(r.scored[0]?.verdict.admissible).toBe(true)
   })
 
-  it("best-effort fallback: ALL inadmissible ⇒ still returns a winner (never null)", async () => {
-    // every candidate regresses → none admissible → selectBestEffort picks by score.
+  it("explicit hard rejects fail closed: ALL inadmissible ⇒ winner is null", async () => {
+    // every candidate regresses → none admissible → the selector must not
+    // resubmit a known hard-rejected patch as a "best effort" answer.
     const { gen } = genFrom([
       cand({ id: "cand-0", patch: "+++ b/x.py\n+aaaa", files: ["x.py"] }),
       cand({ id: "cand-1", patch: "+++ b/y.py\n+a", files: ["y.py"] }),
@@ -462,8 +562,24 @@ describe("runSelection", () => {
       ports: { generate: gen, regression: async () => false },
     })
     expect(r.admissibleCount).toBe(0)
-    expect(r.winner).not.toBeNull() // hard gates inform but never submit nothing
-    expect(r.winner?.id).toBe("cand-1") // smaller diff ⇒ higher minimality
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate?.id).toBe("cand-1") // best-effort survives as attribution only
+  })
+
+  it("explicit smoke hard rejects fail closed: no best-effort resubmit", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/x.py\n+aaaa", files: ["x.py"] }),
+      cand({ id: "cand-1", patch: "+++ b/y.py\n+a", files: ["y.py"] }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      ports: { generate: gen, smoke: async () => false },
+    })
+    expect(r.admissibleCount).toBe(0)
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate?.id).toBe("cand-1")
   })
 
   it("dedup: identical patches collapse to one scored entry", async () => {
@@ -481,9 +597,9 @@ describe("runSelection", () => {
     expect(r.scored).toHaveLength(1)
   })
 
-  it("empty no-patch NEVER beats a real patch in best-effort (minimality must not reward size 0)", async () => {
-    // both inadmissible (real regresses; empty has patchProduced=false). The winner
-    // must be the REAL candidate — an empty diff is a non-fix, not a "minimal" fix.
+  it("real regressed patch is not resubmitted just because the alternative is empty", async () => {
+    // both inadmissible (real regresses; empty has patchProduced=false). The
+    // real candidate can remain the terminal representative, but winner must be null.
     const { gen } = genFrom([
       cand({ id: "cand-0", patch: "", files: [] }), // empty no-patch
       cand({ id: "cand-1", patch: "+++ b/x.py\n+real fix", files: ["x.py"] }), // real, but regresses
@@ -495,7 +611,8 @@ describe("runSelection", () => {
       ports: { generate: gen, regression: async (c) => (c.id === "cand-1" ? false : null) },
     })
     expect(r.admissibleCount).toBe(0)
-    expect(r.winner?.id).toBe("cand-1") // real beats empty even when both inadmissible
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate?.id).toBe("cand-1")
   })
 
   it("DEFECT2: same content edit on DIFFERENT files is NOT deduped (cross-file collision)", async () => {
@@ -530,14 +647,17 @@ describe("runSelection", () => {
       n: 2,
       seeds: [undefined, undefined],
       owners: new Set(["owner.py"]),
-      // both inadmissible (real regresses; empty patchProduced=false) ⇒ best-effort,
-      // where the empty's bogus ownerCoverage would win if not hardened.
+      // both inadmissible (real regresses; empty patchProduced=false). Without
+      // the hard-reject fail-closed rule the regressed real patch would be
+      // resubmitted; without the ownerCoverage hardening the empty no-patch
+      // could become the terminal representative.
       ports: { generate: gen, regression: async (c) => (c.id === "cand-1" ? false : null) },
     })
-    expect(r.winner?.id).toBe("cand-1") // real beats empty even though empty "touches" the owner
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate?.id).toBe("cand-1")
   })
 
-  it("best-effort never submits a known non-applying patch", async () => {
+  it("no winner when the only structurally submittable patch is explicitly regressed", async () => {
     const { gen } = genFrom([
       cand({ id: "cand-0", patch: "+++ b/owner.py\n+stale", files: ["owner.py"] }),
       cand({ id: "cand-1", patch: "+++ b/other.py\n+real", files: ["other.py"] }),
@@ -547,7 +667,7 @@ describe("runSelection", () => {
       seeds: [undefined, undefined],
       owners: new Set(["owner.py"]),
       // Both inadmissible: cand-0 is structurally bad (does not apply), cand-1
-      // regresses. Best-effort must prefer the structurally submittable patch.
+      // regresses. The selector must fail closed instead of resubmitting cand-1.
       ports: {
         generate: gen,
         applyClean: async (c) => c.id !== "cand-0",
@@ -555,7 +675,8 @@ describe("runSelection", () => {
       },
     })
     expect(r.admissibleCount).toBe(0)
-    expect(r.winner?.id).toBe("cand-1")
+    expect(r.winner).toBeNull()
+    expect(r.terminalCandidate).not.toBeNull()
   })
 
   it("winner is null when every candidate is structurally unshippable", async () => {

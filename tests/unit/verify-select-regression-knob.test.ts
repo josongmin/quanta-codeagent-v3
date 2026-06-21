@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { selectionReproPolicy } from "@/apps/bench/eval/driver"
+import { selectionReproPolicy, selectionReproPrepK } from "@/apps/bench/eval/driver"
 import { benchPostureFromState, resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
 import "@/runner/knobs/knobs"
 
@@ -79,5 +79,34 @@ describe("selectionReproPolicy", () => {
       goldCalibrate: false,
       resolvedKofNMode: "hard",
     })
+  })
+})
+
+describe("selectionReproPrepK", () => {
+  test("noexec selector arms fall back to verifySelectN when reproTestK is absent", () => {
+    expect(
+      selectionReproPrepK({
+        verifySelectN: 5,
+        verifySelectRepro: "positive",
+        reproTestK: undefined,
+      }),
+    ).toBe(5)
+  })
+
+  test("off or non-selector postures do not prepare a late repro set", () => {
+    expect(
+      selectionReproPrepK({
+        verifySelectN: 5,
+        verifySelectRepro: "off",
+        reproTestK: undefined,
+      }),
+    ).toBeUndefined()
+    expect(
+      selectionReproPrepK({
+        verifySelectN: undefined,
+        verifySelectRepro: "positive",
+        reproTestK: 5,
+      }),
+    ).toBeUndefined()
   })
 })
