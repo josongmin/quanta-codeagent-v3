@@ -54,7 +54,11 @@ export const buildClosureSession = (args: {
       stage1Files: args.stage1Files,
       ...(issueFiles.length > 0 ? { issueFiles } : {}),
       ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
-      ...(args.witnessOwners && args.witnessOwners.length > 0
+      // SCAFF-03: witness owners feed ONLY the rule-based CLEAN path. In legacy/
+      // research mode (ownerClean falsy) they are withheld so the scored owner
+      // packet stays BYTE-IDENTICAL — a `static-witness` source would otherwise
+      // perturb legacy score/corroboration (T-OWN-12 "research unchanged").
+      ...(args.ownerClean === true && args.witnessOwners && args.witnessOwners.length > 0
         ? { witnessOwners: args.witnessOwners }
         : {}),
     },

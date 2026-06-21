@@ -13,6 +13,7 @@ import { describe, expect, it } from "bun:test"
 import { assembleClosureBundle } from "@/agent/closure/bundle"
 import { buildFaultEvidencePacket, ownerStrength } from "@/agent/fault-evidence/build"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
+import { buildClosureSession } from "@/runner/batch/eval/closure-session"
 import { makeStaticWitness, witnessAuthoritativeOwners } from "@/runner/batch/eval/static-witness"
 
 const A = "pkg/base/client.py"
@@ -147,26 +148,66 @@ describe("SCAFF-03 — clean owner admission rests on typed provenance", () => {
   })
 })
 
-describe("SCAFF-03 — authority alone does not bypass verification", () => {
-  it("HELLGATE: a single witness owner with NO repro signal does NOT route to a commit-fast gate", () => {
-    const bundle = assembleClosureBundle({
-      evidence: {
-        issueText: `${SYM} bug`,
-        stage1Files: [{ file: A, score: 1 }],
-        witnessOwners: witnessAuthoritativeOwners([uniqueDefiner]),
-      },
-      ownerClean: true,
-      plan: {},
-      gate: {
-        stakes: { patchFileCount: 1, crossFile: false, destructive: false },
-        uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
-        signal: { reproAvailable: false, lspAvailable: false },
-        issueProvidesFix: false,
-      },
+const bundleFor = (witnessOwners: ReturnType<typeof witnessAuthoritativeOwners>) =>
+  assembleClosureBundle({
+    evidence: { issueText: `${SYM} bug`, stage1Files: [{ file: A, score: 1 }], witnessOwners },
+    ownerClean: true,
+    plan: {},
+    gate: {
+      stakes: { patchFileCount: 1, crossFile: false, destructive: false },
+      uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
+      signal: { reproAvailable: false, lspAvailable: false },
+      issueProvidesFix: false,
+    },
+  })
+
+describe("SCAFF-03 — witness owners feed ONLY the clean path (research byte-identical)", () => {
+  const sessionArgs = (ownerClean: boolean) =>
+    buildClosureSession({
+      problemStatement: `${SYM} bug`,
+      stage1Files: [{ file: A, score: 1 }],
+      witnessOwners: witnessAuthoritativeOwners([uniqueDefiner]),
+      posture: { lspNav: false, primaryRail: false, faultEvidence: true },
+      ownerClean,
     })
-    // Owner is admitted from typed provenance, but the gate must still demand
-    // verification — owner authority alone is not a green light to commit.
+
+  it("CLEAN: the witness owner is AUTHORITATIVE and admitted", () => {
+    const s = sessionArgs(true)
+    const cand = s.bundle.evidence.candidates.find((c) => c.file === A)
+    expect(cand?.sources).toContain("static-witness")
+    expect(s.bundle.owner.admit).toBe(true)
+  })
+
+  it("HELLGATE: LEGACY/research withholds the witness owner — no `static-witness` source, no admit", () => {
+    const s = sessionArgs(false)
+    const cand = s.bundle.evidence.candidates.find((c) => c.file === A)
+    expect(cand?.sources ?? []).not.toContain("static-witness")
+    // stage1-only legacy candidate stays advisory and uncorroborated ⇒ no admit.
+    expect(s.bundle.owner.admit).toBe(false)
+  })
+})
+
+describe("SCAFF-03 — FAMILY authority forces verification (no single-site commit)", () => {
+  it("HELLGATE: a cross-owner override family routes the gate to VERIFY, never commit-now", () => {
+    // The gate action enum is exactly "commit-now" | "verify" — assert the REAL
+    // value so the tooth is not vacuous. Two authoritative owners ⇒ cross-owner
+    // ⇒ uncertain ⇒ a single-site edit must NOT commit-fast; it must verify the
+    // co-change. This is the exact django-RCA safety property SCAFF-03 protects.
+    const bundle = bundleFor(witnessAuthoritativeOwners([overrideFamily]))
+    expect(bundle.owner.coverageExpectation).toBe("cross-owner")
+    expect(bundle.gate.action).toBe("verify")
+  })
+
+  it("PAIRED CONTROL: a single unique-definer owner is single-site (the family veto is family-specific, not a blanket block)", () => {
+    // Honesty tooth: a high-confidence SINGLE owner with no cheap external signal
+    // is a deliberate pre-existing commit-fast shortcut (T-201/202) — SCAFF-03
+    // does not change it. We assert the coverage class, not a commit veto, so the
+    // test states the true contrast rather than a wished-for one.
+    const bundle = bundleFor(witnessAuthoritativeOwners([uniqueDefiner]))
     expect(bundle.owner.admit).toBe(true)
-    expect(bundle.gate.action).not.toBe("commit")
+    expect(bundle.owner.coverageExpectation).toBe("single-site")
+    // gate enum is "commit-now" | "verify"; a certain low-stakes single owner is
+    // the commit-fast case — proving the family branch above is doing real work.
+    expect(bundle.gate.action).toBe("commit-now")
   })
 })
