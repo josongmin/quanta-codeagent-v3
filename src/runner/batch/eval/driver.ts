@@ -158,6 +158,7 @@ import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { witnessAuthoritativeOwners } from "./static-witness"
 import { buildAstStaticWitnesses } from "./static-witness-adapter"
 import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
@@ -2885,6 +2886,7 @@ const buildClosureAttemptState = (args: {
   readonly posture: BenchPosture
   readonly stage1Files: readonly { file: string; score: number }[]
   readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly witnessOwners?: readonly { file: string; forSymbol?: string }[]
   readonly reproTest: BenchReproTestTelemetry | undefined
 }): ClosureSessionState | undefined =>
   args.instance.swebench === undefined
@@ -2893,6 +2895,9 @@ const buildClosureAttemptState = (args: {
         problemStatement: args.instance.problemStatement,
         stage1Files: args.stage1Files,
         ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
+        ...(args.witnessOwners && args.witnessOwners.length > 0
+          ? { witnessOwners: args.witnessOwners }
+          : {}),
         ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
           ? { reproScript: { cmd: `python "${args.reproTest.path}"`, baseValidatedRed: true } }
           : {}),
@@ -2960,11 +2965,27 @@ export const prepareAttemptContext = async (
     sandbox,
     signal,
   })
+  // SCAFF-03: digest typed-relation static witnesses into AUTHORITATIVE owner
+  // files so clean owner admission rests on structural provenance (unique
+  // definer / complete override family / both-ends producer-consumer), not a
+  // heuristic score. Empty for non-swebench / advisory-only ⇒ no change.
+  const witnessOwners =
+    instance.swebench === undefined
+      ? []
+      : witnessAuthoritativeOwners(
+          buildAstStaticWitnesses({
+            problemStatement: instance.problemStatement,
+            ownerCandidates: stage1Files.map((f) => f.file),
+            ...(ownerResolved !== undefined ? { ownerResolved } : {}),
+            readSource: (rel) => readSandboxSource(sandbox, rel),
+          }),
+        )
   const closureSession = buildClosureAttemptState({
     instance,
     posture: hintRepro.posture,
     stage1Files,
     ownerResolved,
+    witnessOwners,
     reproTest: hintRepro.reproTest,
   })
   return {

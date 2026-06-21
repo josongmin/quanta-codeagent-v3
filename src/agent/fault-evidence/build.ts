@@ -16,18 +16,20 @@ import type {
 export type { OwnerStrength } from "./types"
 
 /**
- * T-OWN-12 — PURE strength classifier (additive; reads only `sources`, never
- * `score`). A candidate is AUTHORITATIVE iff it carries an authoritative
- * evidence stream:
+ * T-OWN-12 / SCAFF-03 — PURE strength classifier (additive; reads only
+ * `sources`, never `score`). A candidate is AUTHORITATIVE iff it carries an
+ * authoritative evidence stream:
  *   - `issue-file` — named in public issue text, OR
- *   - a unique-symbol-defining `owner-resolve`.
- * Uniqueness is not tracked on `FaultCandidate.sources` today, so a bare
- * `owner-resolve` is treated as ADVISORY here.
- * TODO(T-OWN-12): when the packet tracks unique-symbol-definer provenance,
- * promote unique `owner-resolve` candidates to authoritative.
+ *   - `static-witness` — named by a TYPED-RELATION static witness that confers
+ *     clean owner authority (unique definer / complete override family /
+ *     both-ends producer-consumer; see `witnessAuthoritativeOwners`).
+ * A bare `owner-resolve` or `stage1` rank stays ADVISORY: uniqueness is not
+ * tracked on those streams, so the typed `static-witness` provenance is what
+ * finally promotes a structurally-proven owner.
  */
+const AUTHORITATIVE_SOURCES: readonly FaultCandidateSource[] = ["issue-file", "static-witness"]
 export const ownerStrength = (candidate: Pick<FaultCandidate, "sources">): OwnerStrength =>
-  candidate.sources.includes("issue-file") ? "authoritative" : "advisory"
+  candidate.sources.some((s) => AUTHORITATIVE_SOURCES.includes(s)) ? "authoritative" : "advisory"
 
 const DEFAULT_MAX_CANDIDATES = 5
 const DEFAULT_MAX_SYMBOLS = 12
@@ -35,6 +37,11 @@ const DEFAULT_MAX_SYMBOLS = 12
  *  stronger owner signal than a bare stage-1 rank hit. */
 const ISSUE_FILE_BOOST = 2
 const OWNER_RESOLVE_BOOST = 3
+/** A typed-relation static witness is the strongest blind owner signal (it
+ *  carries structural authority, not a heuristic rank), so it ranks above a
+ *  bare LSP owner-resolve. Score is advisory-only; authority comes from the
+ *  `static-witness` SOURCE, not this number. */
+const STATIC_WITNESS_BOOST = 4
 
 export type { FaultEvidenceInput, FaultEvidencePacket } from "./types"
 
@@ -60,10 +67,18 @@ export const buildFaultEvidencePacket = (input: FaultEvidenceInput): FaultEviden
   for (const f of input.stage1Files ?? []) bump(f.file, f.score, "stage1")
   for (const f of input.issueFiles ?? []) bump(f, ISSUE_FILE_BOOST, "issue-file")
   for (const o of input.ownerResolved ?? []) bump(o.file, OWNER_RESOLVE_BOOST, "owner-resolve")
+  // SCAFF-03: typed-relation witness owners carry the authoritative
+  // `static-witness` source. Generic `{ file, forSymbol? }` records — the bench
+  // adapter already digested the witness IR, so this stays bench-agnostic.
+  for (const w of input.witnessOwners ?? []) bump(w.file, STATIC_WITNESS_BOOST, "static-witness")
   // attach resolved symbol names (bounded, names only) to their owner file
   for (const o of input.ownerResolved ?? []) {
     const c = byFile.get(o.file)
     if (c && o.forSymbol && !c.symbols.includes(o.forSymbol)) c.symbols.push(o.forSymbol)
+  }
+  for (const w of input.witnessOwners ?? []) {
+    const c = byFile.get(w.file)
+    if (c && w.forSymbol && !c.symbols.includes(w.forSymbol)) c.symbols.push(w.forSymbol)
   }
 
   const ranked = [...byFile.values()].sort(

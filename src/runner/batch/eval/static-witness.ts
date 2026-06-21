@@ -133,7 +133,11 @@ export function makeStaticWitness(args: MakeStaticWitnessArgs): StaticWitness {
   const fromFileTrimmed = args.fromFile?.trim()
   const fromFile = fromFileTrimmed && fromFileTrimmed.length > 0 ? fromFileTrimmed : undefined
 
-  if (args.authority === "authoritative" && isOwnerFamilyKind(args.kind) && subjectFiles.length === 0) {
+  if (
+    args.authority === "authoritative" &&
+    isOwnerFamilyKind(args.kind) &&
+    subjectFiles.length === 0
+  ) {
     throw new Error(
       `makeStaticWitness: authoritative ${args.kind} witness must name at least one subject file`,
     )
@@ -171,6 +175,52 @@ export function canBeCleanAuthority(witness: StaticWitness): boolean {
  */
 export function canBeMultiSiteObligation(witness: StaticWitness): boolean {
   return witness.subjectFiles.length >= 2
+}
+
+/**
+ * Kinds whose AUTHORITATIVE witness promotes its files to CLEAN owner authority
+ * (SCAFF-03 owner-evidence lattice). Conservative — TYPED-RELATION provenance
+ * only: a unique symbol definer, a COMPLETE override family, or a both-ends
+ * producer/consumer. `registration-callback` / `lifecycle-owner` may shape
+ * public contracts but do NOT, on their own, confer owner-admission authority.
+ */
+const CLEAN_OWNER_AUTHORITY_KINDS: ReadonlySet<StaticWitnessKind> = new Set<StaticWitnessKind>([
+  "unique-symbol-definer",
+  "override-family",
+  "producer-consumer",
+])
+
+export interface WitnessOwner {
+  readonly file: string
+  readonly forSymbol?: string
+}
+
+/**
+ * Authoritative owner files derived from typed-relation witnesses (SCAFF-03).
+ *
+ * A witness contributes owner authority ONLY when it `canBeCleanAuthority`, its
+ * kind is a clean-owner-authority kind, and — for the multi-file family kinds —
+ * it is a COMPLETE obligation (>= 2 named files). `unique-symbol-definer` admits
+ * a single owner; `override-family` / `producer-consumer` contribute EVERY family
+ * file, so two-plus authoritative owners become cross-owner/family state
+ * downstream rather than an arbitrary single pick. Advisory witnesses and bare
+ * heuristic streams contribute NOTHING here. Stable, deduped, path-sorted.
+ */
+export function witnessAuthoritativeOwners(witnesses: readonly StaticWitness[]): WitnessOwner[] {
+  const byFile = new Map<string, WitnessOwner>()
+  for (const w of witnesses) {
+    if (!canBeCleanAuthority(w)) continue
+    if (!CLEAN_OWNER_AUTHORITY_KINDS.has(w.kind)) continue
+    if (w.subjectFiles.length === 0) continue
+    // family kinds need a COMPLETE (>= 2 files) obligation to confer authority.
+    if (w.kind !== "unique-symbol-definer" && !canBeMultiSiteObligation(w)) continue
+    const symbol = w.subjectSymbols[0]
+    for (const file of w.subjectFiles) {
+      if (byFile.has(file)) continue
+      byFile.set(file, symbol !== undefined ? { file, forSymbol: symbol } : { file })
+    }
+  }
+  return [...byFile.values()].sort((a, b) => a.file.localeCompare(b.file))
 }
 
 /** Collapse witnesses sharing a `witnessId` to one, preserving first-seen stable order. */

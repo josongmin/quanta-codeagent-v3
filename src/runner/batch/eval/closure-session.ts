@@ -35,6 +35,10 @@ export const buildClosureSession = (args: {
   stage1Files: readonly Stage1RankedFile[]
   issueFiles?: readonly string[]
   ownerResolved?: readonly { file: string; forSymbol: string }[]
+  /** SCAFF-03 — authoritative owner files digested from typed-relation static
+   *  witnesses (see `witnessAuthoritativeOwners`). Omitted/empty ⇒ no witness
+   *  owners (byte-identical to before SCAFF-03). */
+  witnessOwners?: readonly { file: string; forSymbol?: string }[]
   reproScript?: { cmd: string; baseValidatedRed: boolean }
   posture: ClosureSessionPosture
   /** T-OWN-12: opt into rule-based clean owner admission (authoritative/advisory
@@ -50,6 +54,9 @@ export const buildClosureSession = (args: {
       stage1Files: args.stage1Files,
       ...(issueFiles.length > 0 ? { issueFiles } : {}),
       ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
+      ...(args.witnessOwners && args.witnessOwners.length > 0
+        ? { witnessOwners: args.witnessOwners }
+        : {}),
     },
     ...(args.ownerClean === true ? { ownerClean: true } : {}),
     plan: {
