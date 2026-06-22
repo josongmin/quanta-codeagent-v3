@@ -1,6 +1,4 @@
 import { analyzePatchBudget, type PatchBudgetVerdict } from "@/agent/patch-budget"
-import { type AdmissionBlock, PATCH_BUDGET_STRICT_ADMISSION_KIND } from "@/runner/batch/admission"
-import type { InstanceResult } from "@/runner/batch/types"
 import type { ClosureSessionState } from "./closure-session"
 
 export const patchBudgetOwnerFiles = (
@@ -27,29 +25,10 @@ export const buildPhasePatchBudget = (args: {
     runtimeExpandingPolicy: args.strict ? "gate" : "observe",
   })
 
-export const patchBudgetBlockMessage = (verdict: PatchBudgetVerdict): string =>
-  `patch budget exceeded: ${verdict.overBudgetReasons.join("; ")}`
-
-export const strictPatchBudgetAdmissionBlock = (): AdmissionBlock => ({
-  kind: PATCH_BUDGET_STRICT_ADMISSION_KIND,
-})
-
-type StrictPatchBudgetBlockedExtra = Omit<
-  Partial<InstanceResult>,
-  "id" | "passed" | "patch" | "turns" | "error" | "admissionBlock"
->
-
-export const buildStrictPatchBudgetBlockedResult = (args: {
-  readonly id: string
-  readonly turns: number
-  readonly verdict: PatchBudgetVerdict
-  readonly extra?: StrictPatchBudgetBlockedExtra
-}): InstanceResult => ({
-  id: args.id,
-  passed: false,
-  patch: "",
-  turns: args.turns,
-  ...(args.extra ?? {}),
-  error: patchBudgetBlockMessage(args.verdict),
-  admissionBlock: strictPatchBudgetAdmissionBlock(),
-})
+// jun-22: removed the dead `buildStrictPatchBudgetBlockedResult` /
+// `strictPatchBudgetAdmissionBlock` hard-veto builders. They discarded the
+// agent's real patch and returned an empty one when a patch was "over-budget" —
+// unwired jun-21 (it zeroed legitimate fixes, e.g. pytest-5787) but left as a
+// re-wirable footgun. Patch-budget is soft-escalation only; there is no hard
+// reject. (The admission-block READ side stays defensive but is now never
+// produced.)
