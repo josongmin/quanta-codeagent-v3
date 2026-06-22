@@ -22,13 +22,20 @@ import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
 
+/** Per-script repro exec timeout floor: below 5s even a trivial Python import +
+ *  assert can't reliably finish under load, so a smaller value is a misconfig. */
+const MIN_EXEC_TIMEOUT_MS = 5_000
+/** Ceiling: 10min. The sample loop runs up to N scripts, so a per-script cap
+ *  above the typical per-instance budget would let the repro phase blow it. */
+const MAX_EXEC_TIMEOUT_MS = 600_000
+
 const parseReproExecTimeout = (raw: string | undefined): number | undefined => {
   if (raw === undefined) return undefined
   const s = raw.trim()
   if (s === "" || !/^\d+$/.test(s)) return undefined
   const n = Number(s)
   if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
-  if (n < 5_000 || n > 600_000) return undefined
+  if (n < MIN_EXEC_TIMEOUT_MS || n > MAX_EXEC_TIMEOUT_MS) return undefined
   return n
 }
 

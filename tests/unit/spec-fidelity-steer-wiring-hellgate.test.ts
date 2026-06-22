@@ -99,49 +99,40 @@ describe("gap-B spec-fidelity steer prompt wiring", () => {
     expect(userText(WITH_SPEC)).not.toContain(SPEC_MARK)
   })
 
-  test("SF-4: expected/actual ON + confusing exception message ⇒ message-format steer present", () => {
+  // SF-4/6/7/7b (jun-22): the issue-keyword-triggered overfit steers
+  // (message-format / adapter-family / execution-boundary + their RCA gold
+  // recipes) were REMOVED — they hard-coded specific SWE-bench instances' gold
+  // patches into the prompt (answer-key). These now assert they STAY GONE, even
+  // with expected/actual ON and a matching issue (the trigger that used to fire
+  // them), and even with the (removed) rca-target-gates env set.
+  test("SF-4: removed message-format overfit steer stays ABSENT (was astropy required-columns recipe)", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("Fix the existing message construction")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("multi-item lists or prefixes")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("same prefix length")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("not by adding a narrow")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("unquoted placeholders")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).not.toContain("required_columns")
-  })
-
-  test("SF-5: expected/actual OFF + same exception issue ⇒ message-format steer absent", () => {
     expect(userText(CONFUSING_EXCEPTION_MESSAGE)).not.toContain(
       "Fix the existing message construction",
     )
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).not.toContain("required_columns")
   })
 
-  test("SF-6: expected/actual ON + multi-backend issue ⇒ owner-family steer present", () => {
+  test("SF-6: removed adapter-family overfit steer stays ABSENT (was django TIME_ZONE recipe)", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
-    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("treat them as one owner-family")
-    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("single-backend patch is incomplete")
-    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("SQL call arity")
-    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("registered Python UDF arity")
-    expect(userText(BACKEND_FAMILY_ISSUE)).not.toContain("never return raw")
+    expect(userText(BACKEND_FAMILY_ISSUE)).not.toContain("treat them as one owner-family")
+    expect(userText(BACKEND_FAMILY_ISSUE)).not.toContain("registered Python UDF arity")
     expect(userText(BACKEND_FAMILY_ISSUE)).not.toContain(`"'%s'" % tzname`)
   })
 
-  test("SF-7: expected/actual ON + subprocess env issue ⇒ execution-boundary steer present", () => {
+  test("SF-7: removed execution-boundary overfit steer stays ABSENT (was django dbshell recipe)", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
-    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("trace BOTH the producer")
-    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("drop inherited environment")
-    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("normalize that to None")
+    expect(userText(SUBPROCESS_ENV_ISSUE)).not.toContain("trace BOTH the producer")
     expect(userText(SUBPROCESS_ENV_ISSUE)).not.toContain("producer-only or base-only patches fail")
   })
 
-  test("SF-7b: RCA target gates append known-miss specifics only when explicitly enabled", () => {
+  test("SF-7b: the removed rca-target-gates env can no longer inject any gold recipe", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
     process.env.QUANTA_BENCH_RCA_TARGET_GATES = "1"
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("RCA target gate")
-    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).toContain("required_columns")
-    expect(userText(BACKEND_FAMILY_ISSUE)).toContain("never return raw")
-    expect(userText(BACKEND_FAMILY_ISSUE)).toContain(`"'%s'" % tzname`)
-    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("single patch must change both")
-    expect(userText(SUBPROCESS_ENV_ISSUE)).toContain("producer-only or base-only patches fail")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).not.toContain("RCA target gate")
+    expect(userText(CONFUSING_EXCEPTION_MESSAGE)).not.toContain("required_columns")
+    expect(userText(BACKEND_FAMILY_ISSUE)).not.toContain("never return raw")
+    expect(userText(SUBPROCESS_ENV_ISSUE)).not.toContain("single patch must change both")
   })
 
   test("SF-8: targeted issue steers stay absent when expected/actual is OFF", () => {

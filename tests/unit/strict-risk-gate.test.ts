@@ -65,15 +65,19 @@ describe("evaluateStrictPatchRisk", () => {
     expect(decision.reasons.join("\n")).toContain("patch-budget:source-file budget=1")
   })
 
-  test("routes new helper plus compiler setup expansion to the extra candidate path", () => {
+  test("routes a new helper to the extra candidate path (runtime-expand now observe-only)", () => {
     const decision = evaluateStrictPatchRisk({
       patch: DJANGO_HELPER_RUNTIME,
-      problemStatement: "Query ordering should not require compiler setup for a simple group_by guard.",
+      problemStatement:
+        "Query ordering should not require compiler setup for a simple group_by guard.",
       ownerFiles: ["django/db/models/sql/query.py"],
       repo: "django/django",
     })
+    // The new-def dimension still routes to expansion...
     expect(decision.expand).toBe(true)
     expect(decision.reasons.join("\n")).toContain("patch-budget:new-def budget=0")
-    expect(decision.reasons.join("\n")).toContain("patch-budget:runtime-expanding budget=0")
+    // ...but the django-specific runtime-expanding heuristic was demoted to
+    // observe-only (jun-22) — it must NOT over-budget / route on its own.
+    expect(decision.reasons.join("\n")).not.toContain("runtime-expanding")
   })
 })
