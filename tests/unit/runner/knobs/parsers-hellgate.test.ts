@@ -14,8 +14,8 @@
  * fall-through.
  */
 import { describe, expect, test } from "bun:test"
-import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
 import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
+import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"

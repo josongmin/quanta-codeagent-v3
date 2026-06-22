@@ -43,9 +43,7 @@ export type BenchInLoopExecModeKnob = "full" | "repro-only" | "off"
  * Closed tri-state parser. Unset / empty ⇒ `undefined` so the posture default
  * (`"full"`) holds. Explicit tokens map to canonical modes.
  */
-const parseBenchInLoopExec = (
-  raw: string | undefined,
-): BenchInLoopExecModeKnob | undefined => {
+const parseBenchInLoopExec = (raw: string | undefined): BenchInLoopExecModeKnob | undefined => {
   if (raw === undefined) return undefined
   const s = raw.trim().toLowerCase()
   if (s === "") return undefined

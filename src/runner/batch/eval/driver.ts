@@ -410,20 +410,39 @@ const SWEBENCH_DIRECTIVE = [
  * when the knob is ON those steers are omitted — see `composeBaseText`. It is a
  * PARALLEL alternative; the verbose path is untouched and OFF is byte-identical.
  */
-const SWEBENCH_DIRECTIVE_LEAN = [
+const SWEBENCH_DIRECTIVE_LEAN_HEAD = [
   "",
   "",
   "You are fixing a real defect in this repository. An automated grader runs",
   "hidden tests against ONLY your source changes.",
-  "- Test-driven: reproduce the issue with a small script, fix it, then verify",
-  "  with your reproducer AND by finding and running the repository's own",
-  "  relevant regression tests. Never modify, add, or delete any test file.",
+  "- Never modify, add, or delete any test file.",
   "- Solve it the way the problem warrants — reproduction, code inspection, or",
   "  test analysis — and make the SMALLEST change that fixes the root cause. Edit",
   "  the existing code in place; do not add helper methods or reach for runtime",
   "  APIs when an in-place edit works.",
   "- Change source code ONLY; never rewrite or reformat whole files. Your final",
   "  unified diff is the submission.",
+]
+
+const SWEBENCH_DIRECTIVE_LEAN_FULL = [
+  ...SWEBENCH_DIRECTIVE_LEAN_HEAD,
+  "- Test-driven: reproduce the issue with a small script, fix it, then verify",
+  "  with your reproducer AND by finding and running the repository's own",
+  "  relevant regression tests.",
+].join("\n")
+
+const SWEBENCH_DIRECTIVE_LEAN_REPRO_ONLY = [
+  ...SWEBENCH_DIRECTIVE_LEAN_HEAD,
+  "- If useful, reproduce the issue with a small script and verify with that",
+  "  focused reproducer. Do NOT run the repository test suite, pytest, tox, or",
+  "  broad regression sweeps yourself; the grader owns full verification.",
+].join("\n")
+
+const SWEBENCH_DIRECTIVE_LEAN_NOEXEC = [
+  ...SWEBENCH_DIRECTIVE_LEAN_HEAD,
+  "- Do NOT run the repository test suite, pytest, tox, or ad-hoc validation",
+  "  commands yourself. Make the smallest correct source change and stop; the",
+  "  grader decides in the correct environment.",
 ].join("\n")
 
 /**
@@ -517,11 +536,12 @@ interface SteerLines {
  *
  *  - OFF (default, byte-identical to the pre-knob composition): the in-loop /
  *    no-exec verbose directive followed by every gated steer line.
- *  - LEAN ON (`QUANTA_BENCH_LEAN_PROMPT`): the SHORT {@link SWEBENCH_DIRECTIVE_LEAN}
- *    INSTEAD of the verbose directive, and the bolt-on steers (lsp / spec /
- *    simplicity / sibling) OMITTED — LEAN folds their intent in. The
- *    tool-availability `findRefs` steer is retained (it only names an actually-
- *    wired tool and is default-OFF itself).
+ *  - LEAN ON (`QUANTA_BENCH_LEAN_PROMPT`): the SHORT lean-directive family
+ *    INSTEAD of the verbose directive, but STILL preserving the caller's
+ *    execution authority mode (`full` / `repro-only` / `off`). The bolt-on
+ *    steers (lsp / spec / simplicity / sibling) are OMITTED — LEAN folds their
+ *    intent in. The tool-availability `findRefs` steer is retained (it only
+ *    names an actually-wired tool and is default-OFF itself).
  *
  * Non-swebench instances always return `base` unchanged on both arms.
  */
@@ -534,7 +554,13 @@ const composeBaseText = (
 ): string => {
   if (!isSwebench) return base
   if (leanPrompt) {
-    return `${base}${SWEBENCH_DIRECTIVE_LEAN}${steers.findRefs}`
+    const leanDirective =
+      inLoopExecMode === "full"
+        ? SWEBENCH_DIRECTIVE_LEAN_FULL
+        : inLoopExecMode === "repro-only"
+          ? SWEBENCH_DIRECTIVE_LEAN_REPRO_ONLY
+          : SWEBENCH_DIRECTIVE_LEAN_NOEXEC
+    return `${base}${leanDirective}${steers.findRefs}`
   }
   const directive =
     inLoopExecMode === "full"
@@ -904,6 +930,9 @@ export interface PrepareIssueHintDeps {
   /** Soft timeout (ms) for the LLM localization call. On expiry the wiring
    *  falls back to the regex extractor. Default 30_000. */
   readonly timeoutMs?: number
+  /** Resolved posture bit from the SAME bench projection that chose `mode`.
+   *  Required so issue-hint prep never re-reads ambient env. */
+  readonly issueHintExpectedActual: boolean
   /** T-201 observer seam (optional, no-op by default). When the agentless
    *  localizer produces ranked candidate files, they are handed here BEFORE
    *  being collapsed into the hint string — so the caller can build a
@@ -937,8 +966,7 @@ export const prepareIssueHint = async (
   deps: PrepareIssueHintDeps,
 ): Promise<string> => {
   if (mode === "off") return ""
-  const opt = benchOptIns()
-  const extractOpts = { withExpectedActual: opt.issueHintExpectedActual }
+  const extractOpts = { withExpectedActual: deps.issueHintExpectedActual }
   if (mode === "regex") {
     return composeIssueHint(extractIssueHint(instance.problemStatement, extractOpts))
   }
@@ -1303,11 +1331,9 @@ export const prepareSelectionReproSources = async (
 export const installReproTestHint = async (
   instance: Instance,
   sandbox: string,
+  posture: Pick<BenchPosture, "reproTestK" | "adversarialRepro">,
   llm: LLMPort,
 ): Promise<InstallReproTestResult> => {
-  // Unified posture: K resolves from the preset/env via the knob framework
-  // (preset `agentless-v1` ⇒ K=5; explicit QUANTA_BENCH_REPRO_TEST overrides).
-  const posture = benchOptIns()
   const reproK = posture.reproTestK
   if (reproK === undefined) return { hint: undefined, telemetry: undefined }
   const preparation = await prepareReproTestDetailed(instance, sandbox, reproK, {
@@ -1638,8 +1664,7 @@ const buildConfigGuards = (
       ? { lspPrewarm: { enabled: true, warmSignal: signal } }
       : {}),
     ...(verifyGuard !== undefined ? { verifyGuard } : {}),
-    ...(instance.swebench &&
-    !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
+    ...(instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
       ? { protectTestPaths: true }
       : {}),
   }
@@ -2395,6 +2420,248 @@ const generateSelectionCandidate = async (args: {
   }
 }
 
+const mergeSelectionHint = (
+  closureHint: string | undefined,
+  seed: string | undefined,
+): string | undefined => {
+  if (seed === undefined) return closureHint
+  if (closureHint === undefined) return seed
+  return `${closureHint}\n\n${seed}`
+}
+
+const mergeStaticWitnessContracts = (
+  publicContracts: PublicContractBundle | undefined,
+  staticWitnessContracts: ReturnType<typeof buildStaticWitnessContracts>,
+): PublicContractBundle | undefined => {
+  if (staticWitnessContracts.length === 0) return publicContracts
+  return {
+    contracts: [
+      ...new Map(
+        [...(publicContracts?.contracts ?? []), ...staticWitnessContracts].map((contract) => [
+          contract.contractId,
+          contract,
+        ]),
+      ).values(),
+    ],
+  }
+}
+
+const buildSelectionPhaseContracts = (args: {
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly selectionOwnerCandidates: readonly string[]
+  readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly publicContracts: PublicContractBundle | undefined
+  readonly n: number
+}) => {
+  const staticWitnesses = buildAstStaticWitnesses({
+    problemStatement: args.instance.problemStatement,
+    ownerCandidates: args.selectionOwnerCandidates,
+    ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
+    readSource: (rel) => readSandboxSource(args.sandbox, rel),
+  })
+  const candidateFamilyBundle = withStaticWitnessFamilies(
+    buildSelectionCandidateFamilyBundle({
+      problemStatement: args.instance.problemStatement,
+      ownerCandidates: args.selectionOwnerCandidates,
+      ownerResolved: args.ownerResolved,
+      readSource: (rel) => readSandboxSource(args.sandbox, rel),
+    }),
+    staticWitnesses,
+  )
+  const familyPublicContracts = withCandidateFamilyPublicContracts(
+    args.publicContracts,
+    candidateFamilyBundle,
+  )
+  const effectivePublicContracts = mergeStaticWitnessContracts(
+    familyPublicContracts,
+    buildStaticWitnessContracts(staticWitnesses),
+  )
+  const selectionInputs = buildSelectionInputs({
+    n: args.n,
+    ownerCandidates: args.selectionOwnerCandidates,
+    sandbox: args.sandbox,
+    ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
+  })
+  return { effectivePublicContracts, selectionInputs }
+}
+
+const resolveSelectionPhasePorts = async (args: {
+  readonly instance: Instance
+  readonly deps: RunInstanceDeps
+  readonly sandbox: string
+  readonly signal: AbortSignal
+  readonly selectorMode: BenchPosture["selectorMode"]
+  readonly riskGate: boolean
+  readonly llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"]
+  readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
+  readonly verifySelectRepro: BenchPosture["verifySelectRepro"]
+  readonly reproSources: readonly string[]
+  readonly baseValidatedRed: boolean
+  readonly selectionOwnerCandidates: readonly string[]
+}) => {
+  const { reproPolicy, resolvedKofNSelectionPort, calibration } =
+    await resolveSelectionReproConsensus(
+      args.instance,
+      args.sandbox,
+      args.deps.timeoutMs,
+      args.reproSources,
+      args.verifySelectRepro,
+    )
+  const discoveredRegressionPort =
+    args.verifySelectRegression === "discovered"
+      ? makeDiscoveredRepoRegressionPort({
+          instance: args.instance,
+          sandbox: args.sandbox,
+          timeoutMs: args.deps.timeoutMs,
+        })
+      : undefined
+  const regressionSelectionPort = makeSelectionRegressionPort({
+    verifySelectRegression: args.verifySelectRegression,
+    discoveredRegressionPort,
+    instance: args.instance,
+    sandbox: args.sandbox,
+    timeoutMs: args.deps.timeoutMs,
+  })
+  const staticSanitySelectionPort = makeSelectionStaticSanityPort({
+    sandbox: args.sandbox,
+    baseCommit: args.instance.swebench?.baseCommit,
+    timeoutMs: args.deps.timeoutMs,
+  })
+  const smokeSelectionPort = await prepareIssueSmokeSelectionPort(
+    args.instance,
+    args.sandbox,
+    args.deps.timeoutMs,
+  )
+  const mweProofSelectionPort =
+    args.selectorMode === "clean"
+      ? await prepareMweProofSelectionPort(args.instance, args.sandbox, args.deps.timeoutMs)
+      : undefined
+  const selectionRiskGate = buildSelectionRiskGate({
+    structural: args.riskGate,
+    llmMode: args.llmRiskGateMode,
+    llm: args.deps.llm,
+    problemStatement: args.instance.problemStatement,
+    ownerFiles: args.selectionOwnerCandidates,
+    ...(args.instance.swebench?.repo !== undefined ? { repo: args.instance.swebench.repo } : {}),
+    signal: args.signal,
+  })
+  return {
+    reproPolicy,
+    resolvedKofNSelectionPort,
+    calibration,
+    regressionSelectionPort,
+    staticSanitySelectionPort,
+    smokeSelectionPort,
+    mweProofSelectionPort,
+    selectionBaseValidatedRed:
+      args.verifySelectRegression === "discovered" ? null : args.baseValidatedRed,
+    selectionRiskGate,
+  }
+}
+
+const buildSelectionExecutorPorts = (args: {
+  readonly instance: Instance
+  readonly deps: RunInstanceDeps
+  readonly sandbox: string
+  readonly signal: AbortSignal
+  readonly wiring: Wiring
+  readonly precomputedHint: string | undefined
+  readonly reproHint: string | undefined
+  readonly closureHint: string | undefined
+  readonly concurrency: number | undefined
+  readonly generationErrors: Map<number, string>
+  readonly addTurns: (turns: number) => void
+  readonly baseValidatedRed: boolean | null
+  readonly staticSanitySelectionPort: NonNullable<SelectionPorts["staticSanity"]>
+  readonly regressionSelectionPort: NonNullable<SelectionPorts["regression"]>
+  readonly smokeSelectionPort: SelectionPorts["smoke"]
+  readonly mweProofSelectionPort: SelectionPorts["mweProof"]
+  readonly resolvedKofNSelectionPort: SelectionPorts["resolvedKofN"]
+  readonly rcaTargetGates: boolean
+}): SelectionPorts => {
+  const ports: SelectionPorts = {
+    generate: (index, seed) =>
+      generateSelectionCandidate({
+        index,
+        seed,
+        instance: args.instance,
+        deps: args.deps,
+        sandbox: args.sandbox,
+        signal: args.signal,
+        wiring: args.wiring,
+        precomputedHint: args.precomputedHint,
+        reproHint: args.reproHint,
+        mergeHint: (seedHint) => mergeSelectionHint(args.closureHint, seedHint),
+        concurrency: args.concurrency,
+        baseValidatedRed: args.baseValidatedRed,
+        generationErrors: args.generationErrors,
+        addTurns: args.addTurns,
+      }),
+    applyClean: (candidate) =>
+      candidatePatchAppliesCleanly({
+        sandbox: args.sandbox,
+        patch: candidate.patch,
+        baseCommit: args.instance.swebench?.baseCommit,
+        timeoutMs: args.deps.timeoutMs,
+      }),
+    staticSanity: args.staticSanitySelectionPort,
+    regression: args.regressionSelectionPort,
+  }
+  if (args.smokeSelectionPort !== undefined) ports.smoke = args.smokeSelectionPort
+  if (args.mweProofSelectionPort !== undefined) ports.mweProof = args.mweProofSelectionPort
+  if (args.resolvedKofNSelectionPort !== undefined)
+    ports.resolvedKofN = args.resolvedKofNSelectionPort
+  if (args.rcaTargetGates) ports.declaredExpected = makeDeclaredExpectedSelectionPort(args.instance)
+  return ports
+}
+
+const selectionGenerationFailurePhase = (args: {
+  readonly result: Awaited<ReturnType<typeof runSelection>>
+  readonly generationErrors: Map<number, string>
+  readonly totalTurns: number
+  readonly n: number
+  readonly calibration: ReproOracleCalibration | undefined
+}): Phase | undefined => {
+  if (args.result.successfulGenerations > 0 || args.result.generationFailures === 0)
+    return undefined
+  const orderedErrors = [...args.generationErrors.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, error]) => error)
+  const sample = orderedErrors.slice(0, 2).join("; ")
+  return {
+    patch: "",
+    turns: args.totalTurns,
+    stopReason: "error",
+    agentError:
+      "agent stopped with error before verification: " +
+      `verify-select candidate generation failed for all ${args.n} candidates` +
+      (sample === "" ? "" : ` (${sample})`),
+    selectionTelemetry: summarizeSelection(args.result),
+    ...(args.calibration !== undefined ? { reproOracleCalibration: args.calibration } : {}),
+  }
+}
+
+const selectionPhaseResultOf = (args: {
+  readonly result: Awaited<ReturnType<typeof runSelection>>
+  readonly totalTurns: number
+  readonly calibration: ReproOracleCalibration | undefined
+}): Phase => {
+  const phase: Phase = {
+    patch: args.result.winner?.patch ?? "",
+    turns: args.totalTurns,
+    selectionTelemetry: summarizeSelection(args.result),
+    ...(args.calibration !== undefined ? { reproOracleCalibration: args.calibration } : {}),
+  }
+  if (args.result.terminalCandidate?.stopReason !== undefined)
+    phase.stopReason = args.result.terminalCandidate.stopReason
+  if (args.result.terminalCandidate?.agentError !== undefined)
+    phase.agentError = args.result.terminalCandidate.agentError
+  if (args.result.terminalCandidate?.editCount !== undefined)
+    phase.editCount = args.result.terminalCandidate.editCount
+  return phase
+}
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -2428,182 +2695,84 @@ const runSelectionPhase = async (
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
-  // AST static witnesses (built once): feed BOTH generation families (SCAFF-04 —
-  // so a complete co-change candidate is GENERATED) and required contracts
-  // (SCAFF-05 — so it WINS when proof is tied). Authoritative-only; advisory ⇒ none.
-  const staticWitnesses = buildAstStaticWitnesses({
-    problemStatement: instance.problemStatement,
-    ownerCandidates: selectionOwnerCandidates,
-    ...(ownerResolved !== undefined ? { ownerResolved } : {}),
-    readSource: (rel) => readSandboxSource(sandbox, rel),
-  })
-  const candidateFamilyBundle = withStaticWitnessFamilies(
-    buildSelectionCandidateFamilyBundle({
-      problemStatement: instance.problemStatement,
-      ownerCandidates: selectionOwnerCandidates,
-      ownerResolved,
-      readSource: (rel) => readSandboxSource(sandbox, rel),
-    }),
-    staticWitnesses,
-  )
-  const familyPublicContracts = withCandidateFamilyPublicContracts(
-    publicContracts,
-    candidateFamilyBundle,
-  )
-  const staticWitnessContracts = buildStaticWitnessContracts(staticWitnesses)
-  const effectivePublicContracts: PublicContractBundle | undefined =
-    staticWitnessContracts.length === 0
-      ? familyPublicContracts
-      : {
-          contracts: [
-            ...new Map(
-              [...(familyPublicContracts?.contracts ?? []), ...staticWitnessContracts].map((c) => [
-                c.contractId,
-                c,
-              ]),
-            ).values(),
-          ],
-        }
-  const selectionInputs = buildSelectionInputs({
-    n,
-    ownerCandidates: selectionOwnerCandidates,
+  const { effectivePublicContracts, selectionInputs } = buildSelectionPhaseContracts({
+    instance,
     sandbox,
-    ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
+    selectionOwnerCandidates,
+    ownerResolved,
+    publicContracts,
+    n,
   })
   const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
-  const mergeHint = (seed: string | undefined): string | undefined =>
-    seed === undefined
-      ? closureHint
-      : closureHint === undefined
-        ? seed
-        : `${closureHint}\n\n${seed}`
-
   let totalTurns = 0
-  const { reproPolicy, resolvedKofNSelectionPort, calibration } =
-    await resolveSelectionReproConsensus(
-      instance,
-      sandbox,
-      deps.timeoutMs,
-      reproSources,
-      verifySelectRepro,
-    )
-  const discoveredRegressionPort =
-    verifySelectRegression === "discovered"
-      ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
-      : undefined
-  const regressionSelectionPort = makeSelectionRegressionPort({
-    verifySelectRegression,
-    discoveredRegressionPort,
+  const selectionState = await resolveSelectionPhasePorts({
     instance,
+    deps,
     sandbox,
-    timeoutMs: deps.timeoutMs,
-  })
-  const staticSanitySelectionPort = makeSelectionStaticSanityPort({
-    sandbox,
-    baseCommit: instance.swebench?.baseCommit,
-    timeoutMs: deps.timeoutMs,
-  })
-  const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
-  const mweProofSelectionPort =
-    selectorMode === "clean"
-      ? await prepareMweProofSelectionPort(instance, sandbox, deps.timeoutMs)
-      : undefined
-  const selectionBaseValidatedRed =
-    verifySelectRegression === "discovered" ? null : baseValidatedRed
-  const selectionRiskGate = buildSelectionRiskGate({
-    structural: riskGate,
-    llmMode: llmRiskGateMode,
-    llm: deps.llm,
-    problemStatement: instance.problemStatement,
-    ownerFiles: selectionOwnerCandidates,
-    ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
     signal,
+    selectorMode,
+    riskGate,
+    llmRiskGateMode,
+    verifySelectRegression,
+    verifySelectRepro,
+    reproSources,
+    baseValidatedRed,
+    selectionOwnerCandidates,
   })
   const result = await runSelection({
     n,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
-    resolvedKofNMode: reproPolicy.resolvedKofNMode,
+    resolvedKofNMode: selectionState.reproPolicy.resolvedKofNMode,
     earlyAccept,
     ...(concurrency !== undefined ? { concurrency } : {}),
-    ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
+    ...(selectionState.selectionRiskGate !== undefined
+      ? { riskGate: selectionState.selectionRiskGate }
+      : {}),
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
     ...(effectivePublicContracts !== undefined
       ? { publicContracts: effectivePublicContracts }
       : {}),
     ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
-    ports: {
-      generate: (i, seed) =>
-        generateSelectionCandidate({
-          index: i,
-          seed,
-          instance,
-          deps,
-          sandbox,
-          signal,
-          wiring: w,
-          precomputedHint,
-          reproHint,
-          mergeHint,
-          concurrency,
-          baseValidatedRed: selectionBaseValidatedRed,
-          generationErrors,
-          addTurns: (turns) => {
-            totalTurns += turns
-          },
-        }),
-      applyClean: (c) =>
-        candidatePatchAppliesCleanly({
-          sandbox,
-          patch: c.patch,
-          baseCommit: instance.swebench?.baseCommit,
-          timeoutMs: deps.timeoutMs,
-        }),
-      staticSanity: staticSanitySelectionPort,
-      regression: regressionSelectionPort,
-      ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
-      ...(mweProofSelectionPort !== undefined ? { mweProof: mweProofSelectionPort } : {}),
-      ...(resolvedKofNSelectionPort !== undefined
-        ? { resolvedKofN: resolvedKofNSelectionPort }
-        : {}),
-      ...(rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}),
-    },
+    ports: buildSelectionExecutorPorts({
+      instance,
+      deps,
+      sandbox,
+      signal,
+      wiring: w,
+      precomputedHint,
+      reproHint,
+      closureHint,
+      concurrency,
+      generationErrors,
+      addTurns: (turns) => {
+        totalTurns += turns
+      },
+      baseValidatedRed: selectionState.selectionBaseValidatedRed,
+      staticSanitySelectionPort: selectionState.staticSanitySelectionPort,
+      regressionSelectionPort: selectionState.regressionSelectionPort,
+      smokeSelectionPort: selectionState.smokeSelectionPort,
+      mweProofSelectionPort: selectionState.mweProofSelectionPort,
+      resolvedKofNSelectionPort: selectionState.resolvedKofNSelectionPort,
+      rcaTargetGates,
+    }),
   })
-  if (result.successfulGenerations === 0 && result.generationFailures > 0) {
-    const orderedErrors = [...generationErrors.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([, error]) => error)
-    const sample = orderedErrors.slice(0, 2).join("; ")
-    return {
-      patch: "",
-      turns: totalTurns,
-      stopReason: "error",
-      agentError:
-        "agent stopped with error before verification: " +
-        `verify-select candidate generation failed for all ${n} candidates` +
-        (sample === "" ? "" : ` (${sample})`),
-      reproOracleCalibration: calibration,
-      selectionTelemetry: summarizeSelection(result),
-    }
-  }
-  return {
-    patch: result.winner?.patch ?? "",
-    turns: totalTurns,
-    ...(result.terminalCandidate?.stopReason !== undefined
-      ? { stopReason: result.terminalCandidate.stopReason }
-      : {}),
-    ...(result.terminalCandidate?.agentError !== undefined
-      ? { agentError: result.terminalCandidate.agentError }
-      : {}),
-    ...(result.terminalCandidate?.editCount !== undefined
-      ? { editCount: result.terminalCandidate.editCount }
-      : {}),
-    reproOracleCalibration: calibration,
-    selectionTelemetry: summarizeSelection(result),
-  }
+  const generationFailure = selectionGenerationFailurePhase({
+    result,
+    generationErrors,
+    totalTurns,
+    n,
+    calibration: selectionState.calibration,
+  })
+  if (generationFailure !== undefined) return generationFailure
+  return selectionPhaseResultOf({
+    result,
+    totalTurns,
+    calibration: selectionState.calibration,
+  })
 }
 
 const okResult = (
@@ -2917,12 +3086,13 @@ const prepareHintAndReproContext = async (
   let localizeCandidates: readonly string[] = []
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
     llm,
+    issueHintExpectedActual: posture.issueHintExpectedActual,
     onCandidates: (files) => {
       localizeCandidates = files
     },
   })
   const reproInstall = benchInstallsReproHint(posture.inLoopExecMode)
-    ? await installReproTestHint(instance, sandbox, llm)
+    ? await installReproTestHint(instance, sandbox, posture, llm)
     : { hint: undefined, telemetry: undefined }
   const selectionRepro =
     reproInstall.telemetry !== undefined
@@ -3394,6 +3564,43 @@ export const latePhaseFailureResultOf = (args: {
   }
 }
 
+const latePhaseFailureResultFromError = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly error: unknown
+  readonly prepared: PreparedAttemptContext | undefined
+  readonly sandbox: string
+}): InstanceResult => {
+  if (args.error instanceof ObservationError) {
+    return latePhaseFailureResultOf({
+      instance: args.instance,
+      phase: args.phase,
+      reproTest: args.reproTest,
+      verdict: "degraded",
+      error: `observation failed (strict): ${args.error.message}`,
+      ...(args.prepared !== undefined ? { prepared: args.prepared, sandbox: args.sandbox } : {}),
+    })
+  }
+  if (args.error instanceof StrictLspGroundingDegradedError) {
+    return latePhaseFailureResultOf({
+      instance: args.instance,
+      phase: args.phase,
+      reproTest: args.reproTest,
+      verdict: "degraded",
+      error: args.error.message,
+      ...(args.prepared !== undefined ? { prepared: args.prepared, sandbox: args.sandbox } : {}),
+    })
+  }
+  return latePhaseFailureResultOf({
+    instance: args.instance,
+    phase: args.phase,
+    reproTest: args.reproTest,
+    error: errMessage(args.error),
+    ...(args.prepared !== undefined ? { prepared: args.prepared, sandbox: args.sandbox } : {}),
+  })
+}
+
 const buildSuccessfulResultExtra = (args: {
   readonly instance: Instance
   readonly sandbox: string
@@ -3522,32 +3729,13 @@ export const runInstanceOnce = async (
       prepared: preparedContext,
     })
   } catch (e) {
-    if (e instanceof ObservationError) {
-      return latePhaseFailureResultOf({
-        instance,
-        phase,
-        reproTest,
-        verdict: "degraded",
-        error: `observation failed (strict): ${e.message}`,
-        ...(prepared !== undefined ? { prepared, sandbox } : {}),
-      })
-    }
-    if (e instanceof StrictLspGroundingDegradedError) {
-      return latePhaseFailureResultOf({
-        instance,
-        phase,
-        reproTest,
-        verdict: "degraded",
-        error: e.message,
-        ...(prepared !== undefined ? { prepared, sandbox } : {}),
-      })
-    }
-    return latePhaseFailureResultOf({
+    return latePhaseFailureResultFromError({
       instance,
       phase,
       reproTest,
-      error: errMessage(e),
-      ...(prepared !== undefined ? { prepared, sandbox } : {}),
+      error: e,
+      prepared,
+      sandbox,
     })
   } finally {
     if (deadline !== undefined) clearTimeout(deadline)

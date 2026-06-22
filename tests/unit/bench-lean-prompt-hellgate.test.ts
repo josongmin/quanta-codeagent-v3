@@ -20,6 +20,7 @@ import type { Instance } from "../../src/apps/bench/types"
  *  - never select the lean directive ⇒ LEAN-1 (lean text present) RED.
  *  - leave the verbose directive in when lean is on ⇒ LEAN-2 (verbose absent) RED.
  *  - keep emitting the bolt-on steers when lean is on ⇒ LEAN-3 RED.
+ *  - let lean ignore `bench-in-loop-exec` authority ⇒ LEAN-4/5 RED.
  *  - flip the default to ON / change OFF composition ⇒ OFF byte-identity RED.
  */
 
@@ -38,6 +39,7 @@ const ENV_KEYS = [
   "QUANTA_BENCH_SIMPLICITY",
   "QUANTA_BENCH_LSP",
   "QUANTA_BENCH_LSP_STEER",
+  "QUANTA_BENCH_IN_LOOP_EXEC",
   "QUANTA_LSP_TOOLS",
 ] as const
 
@@ -97,6 +99,26 @@ describe("QUANTA_BENCH_LEAN_PROMPT", () => {
     expect(text).toContain(LEAN_MARK) // LEAN-1
     expect(text).not.toContain(VERBOSE_MARK) // LEAN-2
     expect(text).not.toContain(SIMPLICITY_MARK) // LEAN-3
+  })
+
+  test("LEAN-4: ON + in-loop-exec=off preserves NOEXEC authority", () => {
+    process.env.QUANTA_BENCH_LEAN_PROMPT = "1"
+    process.env.QUANTA_BENCH_IN_LOOP_EXEC = "off"
+    const text = userText(buildOnce())
+    expect(text).toContain(LEAN_MARK)
+    expect(text).toContain("Do NOT run the repository test suite, pytest, tox")
+    expect(text).not.toContain("relevant regression tests")
+    expect(text).not.toContain("MANDATORY before you stop")
+  })
+
+  test("LEAN-5: ON + in-loop-exec=repro-only preserves focused repro authority", () => {
+    process.env.QUANTA_BENCH_LEAN_PROMPT = "1"
+    process.env.QUANTA_BENCH_IN_LOOP_EXEC = "repro-only"
+    const text = userText(buildOnce())
+    expect(text).toContain(LEAN_MARK)
+    expect(text).toContain("If useful, reproduce the issue with a small script")
+    expect(text).toContain("Do NOT run the repository test suite, pytest, tox")
+    expect(text).not.toContain("MANDATORY before you stop")
   })
 
   test("OFF byte-identity: text is exactly the pre-knob composition with knob unset vs explicit off", () => {

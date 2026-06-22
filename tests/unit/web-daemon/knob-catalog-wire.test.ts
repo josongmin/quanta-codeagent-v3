@@ -15,6 +15,7 @@ describe("web knob catalog (ADR-0503 P3)", () => {
     expect(cat.get("QUANTA_WEB_PORT")?.home).toBe("runtime-config")
     // runner knob present (side-effect registration worked)
     expect([...cat.values()].some((k) => k.home === "runner-knobs")).toBe(true)
+    expect(cat.get("QUANTA_BENCH_IN_LOOP_EXEC")?.default).toBe(true)
     // CLI-render knob ABSENT (cli sources intentionally empty)
     expect(cat.has("QUANTA_PILLS")).toBe(false)
     expect(cat.has("QUANTA_STATUSBAR")).toBe(false)

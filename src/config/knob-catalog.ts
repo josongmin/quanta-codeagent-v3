@@ -117,14 +117,16 @@ export const mergeKnobCatalog = (sources: CatalogSources): ReadonlyMap<string, U
   }
   // @/runner/knobs win (richest contract: real parse/apply + hot-toggle).
   for (const k of sources.runner) {
+    const prev = out.get(k.envKey)
     out.set(k.envKey, {
       envKey: k.envKey,
       kind: "string", // @/runner Knob<T> encodes type in parse(); surface as string
-      default: asScalar(k.default),
+      default: asScalar(k.default) ?? prev?.default,
       describe: k.describe,
       group: k.category,
       home: "runner-knobs",
       hotToggleable: k.hotToggleable === true,
+      ...(prev?.readSite !== undefined ? { readSite: prev.readSite } : {}),
     })
   }
   return out

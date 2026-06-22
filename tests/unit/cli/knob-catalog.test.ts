@@ -69,6 +69,7 @@ describe("knob-catalog merge/search/resolve (ADR-0503 P3)", () => {
     const shared = cat.get("QUANTA_SHARED")
     expect(shared?.home).toBe("runner-knobs") // runner wins
     expect(shared?.describe).toBe("runner view")
+    expect(shared?.default).toBe("inv") // runner may override behavior, but inventory default survives
     expect(cat.get("QUANTA_PILLS")?.home).toBe("cli")
     expect(cat.get("QUANTA_OTEL_FLUSH_MS")?.home).toBe("runtime-config")
     expect(cat.get("QUANTA_ADVISOR_MODEL")?.hotToggleable).toBe(true)

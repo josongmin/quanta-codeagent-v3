@@ -1,8 +1,8 @@
-import type { BenchInLoopExecMode } from "./knobs-bench"
 import type { PrimaryRailStep } from "@/agent/closure"
 import type { GateDecision } from "@/agent/gate-decision"
 import { decideRepairAdmission } from "@/agent/primary-rail"
 import type { VerificationPlan } from "@/agent/verification-plan"
+import type { BenchInLoopExecMode } from "./knobs-bench"
 
 export const benchInstallsReproHint = (mode: BenchInLoopExecMode): boolean => mode !== "off"
 

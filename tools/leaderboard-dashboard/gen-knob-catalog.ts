@@ -103,13 +103,28 @@ const CURATED: Record<string, { desc: string; group: string }> = {
   "test-runner": { group: "exec", desc: "인루프 test 실행 도구(run-tests) 노출" },
   "bench-in-loop-exec": {
     group: "exec",
-    desc: "인루프 테스트 실행 on/off — off면 NOEXEC 디렉티브+단일패스+repro힌트 없음",
+    desc: "인루프 실행 권한 모드 — full=repo tests, repro-only=작은 재현만 허용, off=submit-only",
   },
   "retry-transient": { group: "exec", desc: "일시적(네트워크/throttle) 오류 재시도 횟수" },
 }
 
 /** Pull the contiguous `//` comment block immediately above each `"preset": {`
  *  line out of presets.ts source — that's the human rationale for the preset. */
+const presetNameOf = (line: string): string | undefined =>
+  line.match(/^\s*"([a-z0-9-]+)":\s*\{/)?.[1]
+
+const commentBlockAbove = (lines: readonly string[], index: number): string[] => {
+  const comments: string[] = []
+  for (let j = index - 1; j >= 0; j--) {
+    const candidate = lines[j]
+    if (candidate === undefined) break
+    const trimmed = candidate.trim()
+    if (!trimmed.startsWith("//")) break
+    comments.unshift(trimmed.replace(/^\/\/\s?/, ""))
+  }
+  return comments
+}
+
 async function presetDescriptions(): Promise<Record<string, string>> {
   const src = await Bun.file(`${import.meta.dir}/../../src/runner/knobs/presets.ts`).text()
   const lines = src.split("\n")
@@ -117,20 +132,11 @@ async function presetDescriptions(): Promise<Record<string, string>> {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (line === undefined) continue
-    const m = line.match(/^\s*"([a-z0-9-]+)":\s*\{/)
-    if (!m) continue
-    const comments: string[] = []
-    for (let j = i - 1; j >= 0; j--) {
-      const candidate = lines[j]
-      if (candidate === undefined) break
-      const t = candidate.trim()
-      if (t.startsWith("//")) comments.unshift(t.replace(/^\/\/\s?/, ""))
-      else break
-    }
-    const presetName = m[1]
-    if (comments.length && presetName !== undefined) {
-      out[presetName] = comments.join(" ").replace(/─+/g, "").trim()
-    }
+    const presetName = presetNameOf(line)
+    if (presetName === undefined) continue
+    const comments = commentBlockAbove(lines, i)
+    if (comments.length === 0) continue
+    out[presetName] = comments.join(" ").replace(/─+/g, "").trim()
   }
   return out
 }

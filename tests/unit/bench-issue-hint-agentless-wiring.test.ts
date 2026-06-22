@@ -104,7 +104,7 @@ describe("prepareIssueHint — async hint computation", () => {
       mkInstance("issue body with requests/models.py"),
       "/tmp/sb",
       "off",
-      { llm: new StubLLM() },
+      { llm: new StubLLM(), issueHintExpectedActual: false },
     )
     expect(hint).toBe("")
   })
@@ -114,7 +114,7 @@ describe("prepareIssueHint — async hint computation", () => {
       mkInstance("See requests/models.py for the bug. UnicodeError"),
       "/tmp/sb",
       "regex",
-      { llm: new StubLLM() },
+      { llm: new StubLLM(), issueHintExpectedActual: false },
     )
     expect(hint).toContain("## Issue evidence (verbatim)")
     expect(hint).toContain("requests/models.py")
@@ -124,6 +124,7 @@ describe("prepareIssueHint — async hint computation", () => {
   test("mode=regex + empty extraction → ''", async () => {
     const hint = await prepareIssueHint(mkInstance("please make it work"), "/tmp/sb", "regex", {
       llm: new StubLLM(),
+      issueHintExpectedActual: false,
     })
     expect(hint).toBe("")
   })
@@ -140,6 +141,7 @@ describe("prepareIssueHint — async hint computation", () => {
       "agentless",
       {
         llm: new StubLLM(),
+        issueHintExpectedActual: false,
         fileTree: async () => ["requests/models.py", "requests/adapters.py"],
         localize: fakeLocalize,
       },
@@ -162,6 +164,7 @@ describe("prepareIssueHint — async hint computation", () => {
       "agentless",
       {
         llm: new StubLLM(),
+        issueHintExpectedActual: false,
         fileTree: async () => ["requests/models.py"],
         localize: fakeLocalize,
       },
@@ -181,6 +184,7 @@ describe("prepareIssueHint — async hint computation", () => {
       "agentless",
       {
         llm: new StubLLM(),
+        issueHintExpectedActual: false,
         fileTree: async () => ["requests/models.py"],
         localize: fakeLocalize,
       },
@@ -202,6 +206,7 @@ describe("prepareIssueHint — async hint computation", () => {
       "agentless",
       {
         llm: new StubLLM(),
+        issueHintExpectedActual: false,
         fileTree: async () => ["requests/models.py"],
         localize: slowLocalize,
         timeoutMs: 20, // trip well before slowLocalize resolves
@@ -219,6 +224,7 @@ describe("prepareIssueHint — async hint computation", () => {
     })
     const hint = await prepareIssueHint(mkInstance(""), "/tmp/sb", "agentless", {
       llm: new StubLLM(),
+      issueHintExpectedActual: false,
       fileTree: async () => ["x.py"],
       localize: fakeLocalize,
     })
@@ -291,6 +297,7 @@ describe("3-path byte-identity proof", () => {
   test("off mode → ''", async () => {
     const hint = await prepareIssueHint(mkInstance(issue), "/tmp/sb", "off", {
       llm: new StubLLM(),
+      issueHintExpectedActual: false,
     })
     expect(hint).toBe("")
   })
@@ -298,6 +305,7 @@ describe("3-path byte-identity proof", () => {
   test("regex mode → composeIssueHint output (legacy parity)", async () => {
     const hint = await prepareIssueHint(mkInstance(issue), "/tmp/sb", "regex", {
       llm: new StubLLM(),
+      issueHintExpectedActual: false,
     })
     // Re-derive the legacy output to verify byte-identity.
     const { composeIssueHint, extractIssueHint } = await import("@/agent")
@@ -312,10 +320,21 @@ describe("3-path byte-identity proof", () => {
     })
     const hint = await prepareIssueHint(mkInstance(issue), "/tmp/sb", "agentless", {
       llm: new StubLLM(),
+      issueHintExpectedActual: false,
       fileTree: async () => ["requests/models.py"],
       localize: fakeLocalize,
     })
     expect(hint).toContain("Agentless localization")
     expect(hint).not.toContain("Issue evidence (verbatim)")
+  })
+
+  test("caller posture owns expected/actual extraction (no ambient env reread)", async () => {
+    const issue = ["Expected: returns 1", "Actual: returns 0", "See foo.py"].join("\n")
+    const hint = await prepareIssueHint(mkInstance(issue), "/tmp/sb", "regex", {
+      llm: new StubLLM(),
+      issueHintExpectedActual: true,
+    })
+    expect(hint).toContain("Expected:")
+    expect(hint).toContain("Actual:")
   })
 })

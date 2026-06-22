@@ -18,8 +18,8 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import type { StreamPort } from "@/stream"
 import { __resetKnobOverrides } from "@/shared/knob-overrides"
+import type { StreamPort } from "@/stream"
 import {
   benchInstallsReproHint,
   benchOptIns,

@@ -101,8 +101,70 @@ interface MatrixData {
   source: string
 }
 
+const emptyMatrixData = (): MatrixData => ({
+  scaffolds: [],
+  rows: {},
+  topScaffolds: [],
+  source: MATRIX_MD,
+})
+
+const updateTopSection = (line: string, inTop: boolean): boolean => {
+  if (line.startsWith("## 2.")) return true
+  if (line.startsWith("## 3.")) return false
+  return inTop
+}
+
+const topScaffoldOf = (line: string): MatrixData["topScaffolds"][number] | undefined => {
+  const match = line.match(
+    /^\|\s*([^|(]+?)\s*\(`([^`]+)`\)\s*\|\s*([^|]+?)\s*\|\s*(\d+)\s*\|\s*([\d.]+)/,
+  )
+  if (match === null) return undefined
+  const [, , key, model, resolved, pct] = match
+  if (key === undefined || model === undefined || resolved === undefined || pct === undefined)
+    return undefined
+  return {
+    key: key.trim(),
+    model: model.trim(),
+    resolved: Number(resolved),
+    pct: Number(pct),
+  }
+}
+
+const tableCellsOf = (line: string): string[] | undefined => {
+  if (!line.startsWith("|")) return undefined
+  const cols = line.split("|").map((segment) => segment.trim())
+  return cols.slice(1, cols.length - 1)
+}
+
+const matrixHeaderOf = (cells: readonly string[]): string[] | undefined =>
+  cells[0] === "instance" ? [...cells] : undefined
+
+const matrixRowOf = (
+  cells: readonly string[],
+  scaffolds: readonly string[],
+): MatrixRow | undefined => {
+  const firstCell = cells[0]
+  if (firstCell === undefined || /^-+$|^:-/.test(firstCell)) return undefined
+  const id = firstCell
+    .replace(/`/g, "")
+    .replace(/^[★*\s]+/, "")
+    .trim()
+  if (!/^[a-z][a-z0-9-]*-\d+$/.test(id)) return undefined
+  const cellMap: Record<string, Cell> = {}
+  scaffolds.forEach((scaffold, index) => {
+    cellMap[scaffold] = cells[1 + index] === "✅"
+  })
+  return {
+    id,
+    repo: id.replace(/-\d+$/, ""),
+    cells: cellMap,
+    hash: Number(cells[cells.length - 2]) || 0,
+    tier: cells[cells.length - 1] || "?",
+  }
+}
+
 function parseMatrix(): MatrixData {
-  const empty: MatrixData = { scaffolds: [], rows: {}, topScaffolds: [], source: MATRIX_MD }
+  const empty = emptyMatrixData()
   if (!existsSync(MATRIX_MD)) return empty
   const lines = readFileSync(MATRIX_MD, "utf8").split("\n")
   let header: string[] | null = null
@@ -112,58 +174,22 @@ function parseMatrix(): MatrixData {
   let inTop = false
 
   for (const line of lines) {
-    // Section 2 holds the headline scaffold leaderboard.
-    if (line.startsWith("## 2.")) inTop = true
-    if (line.startsWith("## 3.")) inTop = false
+    inTop = updateTopSection(line, inTop)
     if (inTop) {
-      // | Sonar (`sonar-o45`) | Opus-4.5 | 396 | 79.2 | 🔒closed | repo |
-      const m = line.match(
-        /^\|\s*([^|(]+?)\s*\(`([^`]+)`\)\s*\|\s*([^|]+?)\s*\|\s*(\d+)\s*\|\s*([\d.]+)/,
-      )
-      if (m) {
-        const [, , key, model, resolved, pct] = m
-        if (
-          key !== undefined &&
-          model !== undefined &&
-          resolved !== undefined &&
-          pct !== undefined
-        ) {
-          topScaffolds.push({
-            key: key.trim(),
-            model: model.trim(),
-            resolved: Number(resolved),
-            pct: Number(pct),
-          })
-        }
-      }
+      const topScaffold = topScaffoldOf(line)
+      if (topScaffold !== undefined) topScaffolds.push(topScaffold)
     }
-
-    if (!line.startsWith("|")) continue
-    const cols = line.split("|").map((s) => s.trim())
-    // drop leading/trailing empties from the split
-    const cells = cols.slice(1, cols.length - 1)
-    const firstCell = cells[0]
-    if (firstCell === "instance") {
-      header = cells // [instance, sonar-o45, ..., #, T]
-      scaffolds = header.slice(1, header.length - 2)
+    const cells = tableCellsOf(line)
+    if (cells === undefined) continue
+    const parsedHeader = matrixHeaderOf(cells)
+    if (parsedHeader !== undefined) {
+      header = parsedHeader
+      scaffolds = parsedHeader.slice(1, parsedHeader.length - 2)
       continue
     }
-    if (!header) continue
-    if (firstCell === undefined || /^-+$|^:-/.test(firstCell)) continue // separator row
-    // Recovered-target rows are prefixed with ★ — strip it (and backticks).
-    const id = firstCell
-      .replace(/`/g, "")
-      .replace(/^[★*\s]+/, "")
-      .trim()
-    if (!/^[a-z][a-z0-9-]*-\d+$/.test(id)) continue
-    const cellMap: Record<string, Cell> = {}
-    scaffolds.forEach((s, i) => {
-      cellMap[s] = cells[1 + i] === "✅"
-    })
-    const hash = Number(cells[cells.length - 2]) || 0
-    const tier = cells[cells.length - 1] || "?"
-    const repo = id.replace(/-\d+$/, "")
-    rows[id] = { id, repo, cells: cellMap, hash, tier }
+    if (header === null) continue
+    const row = matrixRowOf(cells, scaffolds)
+    if (row !== undefined) rows[row.id] = row
   }
   return { scaffolds, rows, topScaffolds, source: MATRIX_MD }
 }
@@ -256,11 +282,7 @@ function walkReports(root: string, acc: string[], depth = 0) {
 // arg that is NOT persisted in report.json. We recover it from the file path
 // (the ground truth of how the campaign was launched). A trailing `*` marks a
 // label inferred from path/knobs rather than read from the data.
-function presetLabel(file: string, knobs: JsonRecord | null): string {
-  const name = basename(file).toLowerCase()
-  const dir = basename(file.replace(/\/[^/]+$/, "")).toLowerCase()
-  // 1) the FILENAME literally encodes the arm. Match name only — the parent
-  //    dir (e.g. `reprovote-ab`) would otherwise poison every file under it.
+const presetFromEncodedFileName = (name: string): string | undefined => {
   if (/v3.?thin.*strict|strict/.test(name)) return "agentless-v3-thin-strict*"
   if (/v3.?thin|v3thin/.test(name)) return "agentless-v3-thin*"
   if (/norepair/.test(name)) return "agentless-v2 · norepair*"
@@ -268,17 +290,19 @@ function presetLabel(file: string, knobs: JsonRecord | null): string {
   if (/v2.?repair|[-_]repair/.test(name)) return "agentless-v2 · repair*"
   if (/v2/.test(name)) return "agentless-v2*"
   if (/v1/.test(name)) return "agentless-v1*"
-  // 2) SOTA shard campaign (reprovote-ab/sota) = the agentless-v2 baseline
-  if (dir === "sota" || /shard/.test(name)) return "agentless-v2 (SOTA)*"
-  // 3) full-remote per-instance sidecars DO record the preset — it's in the
-  //    report's knob SSOT (`knobs.preset`, written by full-remote). Read it
-  //    instead of falsely labeling "미기록" (the data was there all along).
-  if (/^report-i-/.test(name)) {
-    const p = asString(knobs?.preset)
-    return typeof p === "string" && p.trim() ? `${p} · full-remote` : "full-remote · preset 미기록"
-  }
   if (/^local-/.test(name)) return "local"
-  // 4) last resort: knob fingerprint
+  return undefined
+}
+
+const presetFromSidecar = (name: string, knobs: JsonRecord | null): string | undefined => {
+  if (!/^report-i-/.test(name)) return undefined
+  const preset = asString(knobs?.preset)
+  return typeof preset === "string" && preset.trim()
+    ? `${preset} · full-remote`
+    : "full-remote · preset 미기록"
+}
+
+const presetFromFingerprint = (knobs: JsonRecord | null): string => {
   try {
     const resolved = asRecord(knobs?.resolved) ?? {}
     const issueHint = asRecord(resolved["issue-hint"])
@@ -287,10 +311,21 @@ function presetLabel(file: string, knobs: JsonRecord | null): string {
       asString(issueHint?.value),
       asString(reproVote?.display) ?? asString(reproVote?.value),
     ].filter((bit): bit is string => !!bit)
-    return bits.length ? `${bits.join("/")}*` : "preset 미기록"
+    return bits.length > 0 ? `${bits.join("/")}*` : "preset 미기록"
   } catch {
     return "preset 미기록"
   }
+}
+
+function presetLabel(file: string, knobs: JsonRecord | null): string {
+  const name = basename(file).toLowerCase()
+  const dir = basename(file.replace(/\/[^/]+$/, "")).toLowerCase()
+  const encoded = presetFromEncodedFileName(name)
+  if (encoded !== undefined) return encoded
+  if (dir === "sota" || /shard/.test(name)) return "agentless-v2 (SOTA)*"
+  const sidecar = presetFromSidecar(name, knobs)
+  if (sidecar !== undefined) return sidecar
+  return presetFromFingerprint(knobs)
 }
 
 function parseRuns(): Run[] {
@@ -337,64 +372,73 @@ function parseRuns(): Run[] {
   return runs
 }
 
-function parseLive() {
-  const boxes: {
-    dir: string
-    log: string
-    lines: number
-    lastInstance: string
-    mtime: number
-    tail: string
-  }[] = []
-  for (const root of LIVE_ROOTS) {
-    if (!existsSync(root)) continue
-    let entries: string[]
-    try {
-      entries = readdirSync(root)
-    } catch {
-      continue
-    }
-    for (const e of entries) {
-      const dir = join(root, e)
-      let st: Stats
-      try {
-        st = statSync(dir)
-      } catch {
-        continue
-      }
-      if (!st.isDirectory()) continue
-      let logs: string[]
-      try {
-        logs = readdirSync(dir).filter((x) => x.endsWith(".log"))
-      } catch {
-        continue
-      }
-      for (const lg of logs) {
-        const p = join(dir, lg)
-        let txt = ""
-        let mt = 0
-        try {
-          txt = readFileSync(p, "utf8")
-          mt = statSync(p).mtimeMs
-        } catch {
-          continue
-        }
-        // only surface logs touched in the last 6h to avoid stale noise
-        if (Date.now() - mt > 6 * 3600_000) continue
-        const lineArr = txt.split("\n").filter(Boolean)
-        const instMatches = txt.match(/bench-[a-zA-Z0-9_]+__[a-zA-Z0-9_.-]+/g) || []
-        const lastInstance = instMatches.at(-1) ?? ""
-        boxes.push({
-          dir: e,
-          log: lg,
-          lines: lineArr.length,
-          lastInstance,
-          mtime: mt,
-          tail: lineArr.slice(-3).join("\n"),
-        })
-      }
-    }
+interface LiveBox {
+  dir: string
+  log: string
+  lines: number
+  lastInstance: string
+  mtime: number
+  tail: string
+}
+
+const readLiveLog = (dir: string, log: string, file: string): LiveBox | undefined => {
+  let text = ""
+  let mtime = 0
+  try {
+    text = readFileSync(file, "utf8")
+    mtime = statSync(file).mtimeMs
+  } catch {
+    return undefined
   }
+  if (Date.now() - mtime > 6 * 3600_000) return undefined
+  const lines = text.split("\n").filter(Boolean)
+  const instances = text.match(/bench-[a-zA-Z0-9_]+__[a-zA-Z0-9_.-]+/g) || []
+  return {
+    dir,
+    log,
+    lines: lines.length,
+    lastInstance: instances.at(-1) ?? "",
+    mtime,
+    tail: lines.slice(-3).join("\n"),
+  }
+}
+
+const liveBoxesFromDir = (root: string, entry: string): LiveBox[] => {
+  const dir = join(root, entry)
+  let stats: Stats
+  try {
+    stats = statSync(dir)
+  } catch {
+    return []
+  }
+  if (!stats.isDirectory()) return []
+  let logs: string[]
+  try {
+    logs = readdirSync(dir).filter((value) => value.endsWith(".log"))
+  } catch {
+    return []
+  }
+  const boxes: LiveBox[] = []
+  for (const log of logs) {
+    const box = readLiveLog(entry, log, join(dir, log))
+    if (box !== undefined) boxes.push(box)
+  }
+  return boxes
+}
+
+const liveBoxesFromRoot = (root: string): LiveBox[] => {
+  if (!existsSync(root)) return []
+  let entries: string[]
+  try {
+    entries = readdirSync(root)
+  } catch {
+    return []
+  }
+  return entries.flatMap((entry) => liveBoxesFromDir(root, entry))
+}
+
+function parseLive() {
+  const boxes = LIVE_ROOTS.flatMap((root) => liveBoxesFromRoot(root))
   boxes.sort((a, b) => b.mtime - a.mtime)
   return boxes
 }
@@ -411,28 +455,39 @@ interface DatasetRow {
   instanceId: string
 }
 let DATASET_CACHE: Record<string, DatasetRow> | null = null
+
+const datasetEntryOf = (line: string): { key: string; row: DatasetRow } | undefined => {
+  if (!line.trim()) return undefined
+  try {
+    const parsed = asRecord(JSON.parse(line))
+    if (parsed === null) return undefined
+    const instanceId = asString(parsed.instance_id) ?? ""
+    const key = shortId(instanceId)
+    if (key === "") return undefined
+    return {
+      key,
+      row: {
+        difficulty: asString(parsed.difficulty) ?? "?",
+        statement: asString(parsed.problem_statement) ?? "",
+        patch: asString(parsed.patch) ?? "",
+        testPatch: asString(parsed.test_patch) ?? "",
+        repo: asString(parsed.repo) ?? "",
+        baseCommit: asString(parsed.base_commit) ?? "",
+        instanceId,
+      },
+    }
+  } catch {
+    return undefined
+  }
+}
+
 function loadDataset(): Record<string, DatasetRow> {
   if (DATASET_CACHE) return DATASET_CACHE
   const map: Record<string, DatasetRow> = {}
   if (existsSync(DATASET_JSONL)) {
     for (const line of readFileSync(DATASET_JSONL, "utf8").split("\n")) {
-      if (!line.trim()) continue
-      try {
-        const row = asRecord(JSON.parse(line))
-        if (row === null) continue
-        const instanceId = asString(row.instance_id) ?? ""
-        const key = shortId(instanceId)
-        if (key === "") continue
-        map[key] = {
-          difficulty: asString(row.difficulty) ?? "?",
-          statement: asString(row.problem_statement) ?? "",
-          patch: asString(row.patch) ?? "",
-          testPatch: asString(row.test_patch) ?? "",
-          repo: asString(row.repo) ?? "",
-          baseCommit: asString(row.base_commit) ?? "",
-          instanceId,
-        }
-      } catch {}
+      const entry = datasetEntryOf(line)
+      if (entry !== undefined) map[entry.key] = entry.row
     }
   }
   DATASET_CACHE = map
@@ -472,6 +527,43 @@ interface Campaign {
   total: number
 }
 
+const campaignKeyOf = (run: Run): string => {
+  const dir = basename(run.file.replace(/\/[^/]+$/, ""))
+  const shardMatch = run.label.match(/^(.*?)[-_]?shard(\d+)$/i)
+  if (/^report-i-/.test(run.label)) return `${dir} · full-remote (${run.model})`
+  if (shardMatch) return `${dir}/${shardMatch[1] || "shard"}`
+  if (/^local-/.test(run.label)) return `${dir}/local-singles`
+  return run.label
+}
+
+const addRunToCampaign = (
+  groups: Map<string, Campaign & { seen: Map<string, boolean> }>,
+  run: Run,
+): void => {
+  const key = campaignKeyOf(run)
+  let group = groups.get(key)
+  if (!group) {
+    group = {
+      key,
+      members: [],
+      model: run.model,
+      preset: run.preset,
+      mtime: 0,
+      resolved: 0,
+      total: 0,
+      seen: new Map(),
+    }
+    groups.set(key, group)
+  }
+  group.members.push(run.label)
+  group.mtime = Math.max(group.mtime, run.mtime)
+  for (const perInstance of run.perInstance) {
+    const sid = shortId(perInstance.id)
+    if (!sid) continue
+    group.seen.set(sid, (group.seen.get(sid) ?? false) || perInstance.passed)
+  }
+}
+
 // Roll many report files into logical campaigns:
 //   - shards (`clean-shard3`)         → one run (SOTA-clean = 16/36)
 //   - full-remote `report-i-*` sidecars → one campaign per (dir, model)
@@ -480,48 +572,19 @@ interface Campaign {
 // double-count.
 function groupRuns(runs: Run[]): Campaign[] {
   const groups = new Map<string, Campaign & { seen: Map<string, boolean> }>()
-  for (const r of runs) {
-    const dir = basename(r.file.replace(/\/[^/]+$/, ""))
-    const m = r.label.match(/^(.*?)[-_]?shard(\d+)$/i)
-    let key: string
-    if (/^report-i-/.test(r.label)) key = `${dir} · full-remote (${r.model})`
-    else if (m) key = `${dir}/${m[1] || "shard"}`
-    else if (/^local-/.test(r.label)) key = `${dir}/local-singles`
-    else key = r.label
-    let g = groups.get(key)
-    if (!g) {
-      g = {
-        key,
-        members: [],
-        model: r.model,
-        preset: r.preset,
-        mtime: 0,
-        resolved: 0,
-        total: 0,
-        seen: new Map(),
-      }
-      groups.set(key, g)
-    }
-    g.members.push(r.label)
-    g.mtime = Math.max(g.mtime, r.mtime)
-    for (const pi of r.perInstance) {
-      const sid = shortId(pi.id)
-      if (!sid) continue
-      g.seen.set(sid, (g.seen.get(sid) ?? false) || pi.passed)
-    }
-  }
+  for (const run of runs) addRunToCampaign(groups, run)
   const out: Campaign[] = []
-  for (const g of groups.values()) {
-    g.total = g.seen.size
-    g.resolved = [...g.seen.values()].filter(Boolean).length
+  for (const group of groups.values()) {
+    group.total = group.seen.size
+    group.resolved = [...group.seen.values()].filter(Boolean).length
     out.push({
-      key: g.key,
-      members: g.members,
-      model: g.model,
-      preset: g.preset,
-      mtime: g.mtime,
-      resolved: g.resolved,
-      total: g.total,
+      key: group.key,
+      members: group.members,
+      model: group.model,
+      preset: group.preset,
+      mtime: group.mtime,
+      resolved: group.resolved,
+      total: group.total,
     })
   }
   return out.sort(
@@ -530,99 +593,134 @@ function groupRuns(runs: Run[]): Campaign[] {
   )
 }
 
+interface QuantaSummary {
+  passed: boolean
+  attempts: number
+  passes: number
+  bestTurns: number | null
+  failTurns: number | null
+  models: string[]
+  presets: string[]
+  passPreset: string | null
+  passModel: string | null
+  passedBy: string[]
+  fail: FailInfo | null
+  failMtime: number
+}
+
+const datasetPreviewOf = (
+  dataset: Record<string, DatasetRow>,
+): Record<string, { difficulty: string; statement: string }> => {
+  const preview: Record<string, { difficulty: string; statement: string }> = {}
+  for (const [id, row] of Object.entries(dataset)) {
+    preview[id] = { difficulty: row.difficulty, statement: row.statement.slice(0, 400) }
+  }
+  return preview
+}
+
+const isRealSwebenchInstanceId = (id: string): boolean => /^[a-z][a-z0-9-]*-\d+$/.test(id)
+
+const createQuantaSummary = (): QuantaSummary => ({
+  passed: false,
+  attempts: 0,
+  passes: 0,
+  bestTurns: null,
+  failTurns: null,
+  models: [],
+  presets: [],
+  passPreset: null,
+  passModel: null,
+  passedBy: [],
+  fail: null,
+  failMtime: 0,
+})
+
+const ensureQuantaSummary = (quanta: Record<string, QuantaSummary>, id: string): QuantaSummary => {
+  quanta[id] ??= createQuantaSummary()
+  return quanta[id]
+}
+
+const addRunMetadata = (summary: QuantaSummary, run: Run): void => {
+  summary.attempts++
+  if (!summary.models.includes(run.model)) summary.models.push(run.model)
+  if (run.preset && !summary.presets.includes(run.preset)) summary.presets.push(run.preset)
+}
+
+const recordPassingAttempt = (summary: QuantaSummary, run: Run, turns: number): void => {
+  summary.passed = true
+  summary.passes++
+  summary.passedBy.push(run.label)
+  if (turns > 0 && (summary.bestTurns === null || turns < summary.bestTurns)) {
+    summary.bestTurns = turns
+    summary.passPreset = run.preset
+    summary.passModel = run.model
+  }
+  if (!summary.passPreset) {
+    summary.passPreset = run.preset
+    summary.passModel = run.model
+  }
+}
+
+const recordFailingAttempt = (
+  summary: QuantaSummary,
+  run: Run,
+  turns: number,
+  fail: FailInfo | null,
+): void => {
+  if (turns > 0 && (summary.failTurns === null || turns > summary.failTurns)) {
+    summary.failTurns = turns
+  }
+  if (fail !== null && run.mtime >= summary.failMtime) {
+    summary.fail = fail
+    summary.failMtime = run.mtime
+  }
+}
+
+const quantaSummaryOf = (runs: readonly Run[]): Record<string, QuantaSummary> => {
+  const quanta: Record<string, QuantaSummary> = {}
+  for (const run of runs) {
+    for (const perInstance of run.perInstance) {
+      const sid = shortId(perInstance.id)
+      if (!sid || !isRealSwebenchInstanceId(sid)) continue
+      const summary = ensureQuantaSummary(quanta, sid)
+      addRunMetadata(summary, run)
+      if (perInstance.passed) recordPassingAttempt(summary, run, perInstance.turns)
+      else recordFailingAttempt(summary, run, perInstance.turns, perInstance.fail)
+    }
+  }
+  return quanta
+}
+
+const coverageOf = (
+  dataset: Record<string, { difficulty: string; statement: string }>,
+  matrix: MatrixData,
+  quanta: Record<string, QuantaSummary>,
+  runs: readonly Run[],
+) => ({
+  datasetTotal: Object.keys(dataset).length,
+  matrixRows: Object.keys(matrix.rows).length,
+  quantaRan: Object.keys(quanta).length,
+  quantaSolved: Object.values(quanta).filter((summary) => summary.passed).length,
+  reportFiles: runs.length,
+})
+
+const frontierTurnsOf = (
+  frontier: Record<string, { turns: number; file: string }>,
+): Record<string, number> => {
+  const turns: Record<string, number> = {}
+  for (const [id, entry] of Object.entries(frontier)) turns[id] = entry.turns
+  return turns
+}
+
 function buildData() {
   const matrix = parseMatrix()
   const fullDataset = loadDataset()
-  // Lite view for the bulk payload — gold patches are fetched on demand.
-  const dataset: Record<string, { difficulty: string; statement: string }> = {}
-  for (const [id, d] of Object.entries(fullDataset))
-    dataset[id] = { difficulty: d.difficulty, statement: d.statement.slice(0, 400) }
+  const dataset = datasetPreviewOf(fullDataset)
   const runs = parseRuns()
   const campaigns = groupRuns(runs)
-  // Merge our results across every run into one per-instance verdict.
-  const quanta: Record<
-    string,
-    {
-      passed: boolean
-      attempts: number
-      passes: number
-      bestTurns: number | null
-      failTurns: number | null
-      models: string[]
-      presets: string[]
-      passPreset: string | null
-      passModel: string | null
-      passedBy: string[]
-      fail: FailInfo | null
-      failMtime: number
-    }
-  > = {}
-  for (const run of runs) {
-    for (const pi of run.perInstance) {
-      const sid = shortId(pi.id)
-      // Skip synthetic placeholder ids (e.g. `py.repo.swebench_sphinx_doc.012`
-      // from smoke reports) — keep only real `repo-NNNN` SWE-bench instances.
-      if (!sid || !/^[a-z][a-z0-9-]*-\d+$/.test(sid)) continue
-      let q = quanta[sid]
-      if (q === undefined) {
-        q = {
-          passed: false,
-          attempts: 0,
-          passes: 0,
-          bestTurns: null,
-          failTurns: null,
-          models: [],
-          presets: [],
-          passPreset: null,
-          passModel: null,
-          passedBy: [],
-          fail: null,
-          failMtime: 0,
-        }
-        quanta[sid] = q
-      }
-      q.attempts++
-      if (!q.models.includes(run.model)) q.models.push(run.model)
-      if (run.preset && !q.presets.includes(run.preset)) q.presets.push(run.preset)
-      if (pi.passed) {
-        q.passed = true
-        q.passes++
-        q.passedBy.push(run.label)
-        if (pi.turns > 0 && (q.bestTurns === null || pi.turns < q.bestTurns)) {
-          q.bestTurns = pi.turns
-          // Record the profile/model of the cheapest passing run.
-          q.passPreset = run.preset
-          q.passModel = run.model
-        }
-        if (!q.passPreset) {
-          q.passPreset = run.preset
-          q.passModel = run.model
-        }
-      } else {
-        if (pi.turns > 0 && (q.failTurns === null || pi.turns > q.failTurns)) {
-          // Most turns burned on a failing attempt — effort before giving up.
-          q.failTurns = pi.turns
-        }
-        // Keep the failure reason from the most recent failing attempt.
-        if (pi.fail && run.mtime >= q.failMtime) {
-          q.fail = pi.fail
-          q.failMtime = run.mtime
-        }
-      }
-    }
-  }
-  // Surface every instance we have a record for, even if it's not in the
-  // competitor matrix (so nothing we ran silently disappears).
-  const coverage = {
-    datasetTotal: Object.keys(dataset).length,
-    matrixRows: Object.keys(matrix.rows).length,
-    quantaRan: Object.keys(quanta).length,
-    quantaSolved: Object.values(quanta).filter((q) => q.passed).length,
-    reportFiles: runs.length,
-  }
+  const quanta = quantaSummaryOf(runs)
+  const coverage = coverageOf(dataset, matrix, quanta, runs)
   const frontier = loadFrontierTrajs()
-  const frontierTurns: Record<string, number> = {}
-  for (const [id, t] of Object.entries(frontier)) frontierTurns[id] = t.turns
   return {
     generatedAt: new Date().toISOString(),
     matrixSource: matrix.source,
@@ -630,7 +728,7 @@ function buildData() {
     topScaffolds: matrix.topScaffolds,
     rows: matrix.rows,
     dataset,
-    frontierTurns,
+    frontierTurns: frontierTurnsOf(frontier),
     runs,
     campaigns,
     quanta,
@@ -679,62 +777,87 @@ function loadKnobCatalog(): KnobCatalogPayload {
   }
 }
 
+const headerEntriesOf = (headers: ResponseInit["headers"]): [string, string][] => {
+  if (headers === undefined) return []
+  if (Array.isArray(headers)) {
+    const entries: [string, string][] = []
+    for (const entry of headers) {
+      if (!Array.isArray(entry)) continue
+      const [key, value] = entry
+      if (typeof key !== "string" || typeof value !== "string") continue
+      entries.push([key, value])
+    }
+    return entries
+  }
+  if (headers instanceof Headers) return [...headers.entries()]
+  return Object.entries(headers).map(([key, value]): [string, string] => [key, value])
+}
+
+const jsonResponse = (body: unknown, init?: ResponseInit): Response => {
+  const headers = Object.fromEntries(headerEntriesOf(init?.headers))
+  if (!("content-type" in headers)) headers["content-type"] = "application/json"
+  return new Response(JSON.stringify(body), {
+    ...init,
+    headers,
+  })
+}
+
+const knobCatalogResponse = (): Response =>
+  jsonResponse(loadKnobCatalog(), { headers: { "cache-control": "no-store" } })
+
+const oracleResponse = (url: URL): Response => {
+  const id = url.searchParams.get("id") || ""
+  const row = loadDataset()[id]
+  if (!row) return jsonResponse({ error: `no dataset row for ${id}` }, { status: 404 })
+  const github =
+    row.repo && row.baseCommit ? `https://github.com/${row.repo}/commit/${row.baseCommit}` : ""
+  const frontier = loadFrontierTrajs()[id]
+  let frontierTraj: { turns: number; text: string } | null = null
+  if (frontier) {
+    let text = ""
+    try {
+      text = readFileSync(frontier.file, "utf8").slice(0, 20000)
+    } catch {}
+    frontierTraj = { turns: frontier.turns, text }
+  }
+  return jsonResponse(
+    {
+      id,
+      instanceId: row.instanceId,
+      repo: row.repo,
+      difficulty: row.difficulty,
+      statement: row.statement,
+      patch: row.patch,
+      testPatch: row.testPatch,
+      github,
+      frontierTraj,
+    },
+    { headers: { "cache-control": "no-store" } },
+  )
+}
+
+const dataResponse = (): Response => {
+  try {
+    return jsonResponse(buildData(), { headers: { "cache-control": "no-store" } })
+  } catch (error: unknown) {
+    return jsonResponse(
+      { error: error instanceof Error ? (error.stack ?? error.message) : String(error) },
+      { status: 500 },
+    )
+  }
+}
+
+const routeRequest = (url: URL): Response => {
+  if (url.pathname === "/api/knobs") return knobCatalogResponse()
+  if (url.pathname === "/api/oracle") return oracleResponse(url)
+  if (url.pathname === "/api/data") return dataResponse()
+  return new Response(HTML, { headers: { "content-type": "text/html; charset=utf-8" } })
+}
+
 const server = Bun.serve({
   port: PORT,
   fetch(req) {
-    const url = new URL(req.url)
-    if (url.pathname === "/api/knobs")
-      return new Response(JSON.stringify(loadKnobCatalog()), {
-        headers: { "content-type": "application/json", "cache-control": "no-store" },
-      })
-    if (url.pathname === "/api/oracle") {
-      const id = url.searchParams.get("id") || ""
-      const d = loadDataset()[id]
-      if (!d)
-        return new Response(JSON.stringify({ error: `no dataset row for ${id}` }), {
-          status: 404,
-          headers: { "content-type": "application/json" },
-        })
-      const github =
-        d.repo && d.baseCommit ? `https://github.com/${d.repo}/commit/${d.baseCommit}` : ""
-      const ft = loadFrontierTrajs()[id]
-      let frontierTraj: { turns: number; text: string } | null = null
-      if (ft) {
-        let text = ""
-        try {
-          text = readFileSync(ft.file, "utf8").slice(0, 20000)
-        } catch {}
-        frontierTraj = { turns: ft.turns, text }
-      }
-      return new Response(
-        JSON.stringify({
-          id,
-          instanceId: d.instanceId,
-          repo: d.repo,
-          difficulty: d.difficulty,
-          statement: d.statement,
-          patch: d.patch, // the GOLD/oracle patch
-          testPatch: d.testPatch,
-          github,
-          frontierTraj, // competitor winning trajectory (only 4 on disk)
-        }),
-        { headers: { "content-type": "application/json", "cache-control": "no-store" } },
-      )
-    }
-    if (url.pathname === "/api/data") {
-      try {
-        return new Response(JSON.stringify(buildData()), {
-          headers: { "content-type": "application/json", "cache-control": "no-store" },
-        })
-      } catch (e: unknown) {
-        const error = e instanceof Error ? (e.stack ?? e.message) : String(e)
-        return new Response(JSON.stringify({ error }), {
-          status: 500,
-          headers: { "content-type": "application/json" },
-        })
-      }
-    }
-    return new Response(HTML, { headers: { "content-type": "text/html; charset=utf-8" } })
+    return routeRequest(new URL(req.url))
   },
 })
 process.stdout.write(
