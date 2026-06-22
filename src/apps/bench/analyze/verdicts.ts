@@ -172,9 +172,53 @@ const hasPerInstanceProofTelemetry = (perInstance: readonly unknown[]): boolean 
         hasOwn(raw, "contractOnlySubmitted")),
   )
 
+const verdictStatusOf = (row: Record<string, unknown>): VerdictStatus => {
+  if (row.passed === true) {
+    const label = rowScoreLabel(row)
+    if (label === "research_contaminated") return "researchContaminated"
+    if (label === "local_structural") return "localStructural"
+    return rowIsOfficialHarnessResolved(row) ? "resolved" : "localStructural"
+  }
+  if (rowIsErrored(row)) return "errored"
+  if (rowIsEmptyPatch(row)) return "emptyPatch"
+  return "unresolved"
+}
+
+interface CanonicalPerInstanceRow {
+  readonly id: string
+  readonly row: Record<string, unknown>
+  readonly verdict: VerdictStatus
+}
+
+const canonicalPerInstanceRows = (
+  perInstance: readonly unknown[],
+): readonly CanonicalPerInstanceRow[] => {
+  const canonical = new Map<string, { row: Record<string, unknown>; verdict: VerdictStatus; order: number }>()
+  for (const [order, raw] of perInstance.entries()) {
+    if (!isRecord(raw)) continue
+    const id = raw.id
+    if (typeof id !== "string" || id.length === 0) continue
+    const verdict = verdictStatusOf(raw)
+    const existing = canonical.get(id)
+    if (
+      existing === undefined ||
+      VERDICT_STRENGTH[verdict] > VERDICT_STRENGTH[existing.verdict] ||
+      (VERDICT_STRENGTH[verdict] === VERDICT_STRENGTH[existing.verdict] && order > existing.order)
+    ) {
+      canonical.set(id, { row: raw, verdict, order })
+    }
+  }
+  return [...canonical.entries()].map(([id, entry]) => ({
+    id,
+    row: entry.row,
+    verdict: entry.verdict,
+  }))
+}
+
 const reportTotalsFromOurReport = (args: {
   report: Record<string, unknown>
   perInstance: readonly unknown[]
+  telemetryPresenceRows: readonly unknown[]
   proofMissingCount: number
   infraBlockedCount: number
   contractOnlyBlockedCount: number
@@ -182,7 +226,7 @@ const reportTotalsFromOurReport = (args: {
 }): RunReportTotals => {
   const proofTotals = isRecord(args.report.proofTotals) ? args.report.proofTotals : undefined
   const llmEvidenceTotals = isRecord(args.report.llmEvidenceTotals) ? args.report.llmEvidenceTotals : undefined
-  const perInstanceProofTelemetry = hasPerInstanceProofTelemetry(args.perInstance)
+  const perInstanceProofTelemetry = hasPerInstanceProofTelemetry(args.telemetryPresenceRows)
   return {
     submittedWithProof:
       asCount(proofTotals?.submittedWithProof) ??
@@ -211,43 +255,17 @@ const reportTotalsFromOurReport = (args: {
 }
 
 const fromOurReport = (report: Record<string, unknown>, perInstance: readonly unknown[]): RunVerdicts => {
-  const verdictById = new Map<string, VerdictStatus>()
+  const canonicalRows = canonicalPerInstanceRows(perInstance)
+  const canonicalTelemetryRows = canonicalRows.map(({ row }) => row)
   const proofMissing = new Set<string>()
   const infraBlocked = new Set<string>()
   const contractOnlyBlocked = new Set<string>()
   const contractOnlySubmitted = new Set<string>()
-  for (const raw of perInstance) {
-    if (!isRecord(raw)) continue
-    const id = raw.id
-    if (typeof id !== "string" || id.length === 0) continue
-    if (raw.proofRequiredMissing === true) proofMissing.add(id)
-    if (raw.envPrepFailed === true || raw.proofState === "infra_blocked") infraBlocked.add(id)
-    if (raw.contractOnlyBlocked === true) contractOnlyBlocked.add(id)
-    if (raw.contractOnlySubmitted === true) contractOnlySubmitted.add(id)
-    let nextVerdict: VerdictStatus
-    if (raw.passed === true) {
-      const label = rowScoreLabel(raw)
-      if (label === "research_contaminated") nextVerdict = "researchContaminated"
-      else if (label === "local_structural") nextVerdict = "localStructural"
-      else if (rowIsOfficialHarnessResolved(raw)) nextVerdict = "resolved"
-      else nextVerdict = "localStructural"
-    } else if (rowIsErrored(raw)) {
-      // A single failed row can carry both an error termination and an
-      // empty-patch-ish signal. Error authority wins for that row. Across
-      // duplicate rows we keep the strongest observed verdict for the id.
-      nextVerdict = "errored"
-    } else if (rowIsEmptyPatch(raw)) {
-      nextVerdict = "emptyPatch"
-    } else {
-      nextVerdict = "unresolved"
-    }
-    const existing = verdictById.get(id)
-    if (
-      existing === undefined ||
-      VERDICT_STRENGTH[nextVerdict] > VERDICT_STRENGTH[existing]
-    ) {
-      verdictById.set(id, nextVerdict)
-    }
+  for (const { id, row } of canonicalRows) {
+    if (row.proofRequiredMissing === true) proofMissing.add(id)
+    if (row.envPrepFailed === true || row.proofState === "infra_blocked") infraBlocked.add(id)
+    if (row.contractOnlyBlocked === true) contractOnlyBlocked.add(id)
+    if (row.contractOnlySubmitted === true) contractOnlySubmitted.add(id)
   }
   const resolved = new Set<string>()
   const localStructural = new Set<string>()
@@ -255,7 +273,7 @@ const fromOurReport = (report: Record<string, unknown>, perInstance: readonly un
   const unresolved = new Set<string>()
   const errored = new Set<string>()
   const emptyPatch = new Set<string>()
-  for (const [id, verdict] of verdictById) {
+  for (const { id, verdict } of canonicalRows) {
     if (verdict === "resolved") resolved.add(id)
     else if (verdict === "localStructural") localStructural.add(id)
     else if (verdict === "researchContaminated") researchContaminated.add(id)
@@ -265,7 +283,8 @@ const fromOurReport = (report: Record<string, unknown>, perInstance: readonly un
   }
   const reportTotals = reportTotalsFromOurReport({
     report,
-    perInstance,
+    perInstance: canonicalTelemetryRows,
+    telemetryPresenceRows: perInstance,
     proofMissingCount: proofMissing.size,
     infraBlockedCount: infraBlocked.size,
     contractOnlyBlockedCount: contractOnlyBlocked.size,

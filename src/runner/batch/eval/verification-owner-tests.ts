@@ -13,7 +13,6 @@ import {
   discoverImpactedTestCandidates,
   isPythonTestFile,
   normalizeRepoPath,
-  type RepoTextFile,
 } from "./impacted-test-discovery"
 import { listTrackedPythonFiles, readRepoTestFiles } from "./repo-regression-discovery-adapter"
 import { buildProjectPytestArgv, buildPytestArgv } from "./regression-oracle-adapter"
@@ -62,7 +61,7 @@ export const discoverVerificationOwnerTests = async (
 
   const discovered = discoverImpactedTestCandidates({
     changedFiles,
-    repoFiles: repoFiles as readonly RepoTextFile[],
+    repoFiles,
     maxTests: args.maxTests ?? DEFAULT_VERIFICATION_OWNER_TESTS,
   })
   if (discovered.length === 0) return []

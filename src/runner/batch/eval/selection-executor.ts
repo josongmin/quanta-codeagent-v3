@@ -64,13 +64,7 @@ import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfac
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import {
-  buildRepairSeedLlmEvidencePacket,
-  type ContractFact,
-  candidatePatchHash,
   type LlmEvidencePacket,
-  type OwnerEvidenceFact,
-  type ProofReceiptFact,
-  renderLlmEvidencePacket,
   type VerificationTargetFact,
 } from "./llm-evidence-packet"
 import type { MweProofReceipt } from "./mwe-proof"
@@ -113,11 +107,9 @@ import {
   selectionProofStateForEntry,
 } from "./selection-proof-telemetry"
 import {
-  bounded,
-  hardReasonState,
-  mweProofReceiptFacts,
-  publicRegressionReceiptFacts,
-  reproConsensusReceiptFacts,
+  buildOracleFailureRepairSeed,
+  buildRepairPacketText,
+  buildStaticSanityRepairSeed,
 } from "./selection-repair-seed"
 
 export { ownerCoverageOf } from "./selection-gates"
@@ -162,14 +154,6 @@ import type {
   SelectionRiskGateDecision,
   SelectionRiskGateTelemetry,
 } from "./selection-types"
-
-interface SelectorRepairSeedPlan {
-  readonly summary: string
-  readonly directive: string
-  readonly includeFamilyRepair: boolean
-  readonly includeReproFailureTrace: boolean
-  readonly includeOracleFailureSeed: boolean
-}
 
 export interface SelectionInputs {
   readonly ownerFiles: readonly string[]
@@ -590,323 +574,35 @@ export const runSelection = async (args: {
     }
   }
 
-  const hasNonEmptyPatch = (entry: ScoredEntry): boolean => entry.candidate.patch.trim() !== ""
-
-  const mweOracleRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
-    const patched = scored.filter(hasNonEmptyPatch)
-    return (
-      patched.length > 0 &&
-      patched.some((s) => s.candidate.mweReceipt !== undefined) &&
-      !patched.some((s) => s.candidate.mweReceipt?.state === "patched_green") &&
-      patched.every((s) => s.candidate.mweReceipt?.state === "candidate_red")
-    )
-  }
-
-  const unresolvedReproConsensus = (signal: ResolvedKofNSignal | null): boolean =>
-    signal !== null && isValidResolvedKofN(signal) && signal.k > 0 && signal.votes < signal.k
-
-  const reproOracleRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
-    if (args.oracleFailureRepairSeed === undefined) return false
-    const patched = scored.filter(hasNonEmptyPatch)
-    return (
-      patched.length > 0 &&
-      patched.some((s) => s.resolvedKofN !== null) &&
-      !patched.some(
-        (s) =>
-          s.resolvedKofN !== null &&
-          isValidResolvedKofN(s.resolvedKofN) &&
-          s.resolvedKofN.votes >= s.resolvedKofN.k,
-      ) &&
-      patched.every((s) => unresolvedReproConsensus(s.resolvedKofN))
-    )
-  }
-
-  const cleanDriftRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
-    const patched = scored.filter(hasNonEmptyPatch)
-    return (
-      patched.length > 0 &&
-      !patched.some((s) => s.verdict.admissible) &&
-      patched.every((s) => cleanDriftRejected(s.verdict))
-    )
-  }
-
-  const bestMissingFamily = (scored: readonly ScoredEntry[]): CandidateFamily | undefined => {
-    const ranked = scored
-      .map((entry, order) => ({
-        family: familyFromCandidate(entry.candidate),
-        missing: candidateFamilyCoverageMissing(
-          familyFromCandidate(entry.candidate),
-          entry.candidate.files,
-        ),
-        order,
-      }))
-      .filter(
-        (
-          entry,
-        ): entry is {
-          family: CandidateFamily
-          missing: string[]
-          order: number
-        } => entry.family !== undefined && entry.missing.length > 0,
-      )
-      .sort((a, b) => a.family.ownerFiles.length - b.family.ownerFiles.length || a.order - b.order)
-    return ranked[0]?.family
-  }
-
-  const familyRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
-    const family = bestMissingFamily(scored)
-    if (family === undefined) return undefined
-    return seedForCandidateFamilyCoverageRepair(family, candidateFamilyCoverageMissing(family, []))
-  }
-
-  const staticSanityReasons = (entry: ScoredEntry): readonly string[] =>
-    entry.verdict.reasons.filter((reason) => reason.startsWith("hard:staticSanity="))
-
-  const staticSanityInstruction = (reason: string): string => {
-    const noneMutation = /^hard:staticSanity=pythonNoneSubscriptMutation\(([^)]+)\)$/.exec(
-      reason,
-    )?.[1]
-    if (noneMutation !== undefined) {
-      return `Static sanity failure: \`${noneMutation}\` can be None before a subscript write. Regenerate so every \`${noneMutation}[...]\` mutation is protected by a non-None mapping invariant, or guard each mutation site that may observe None.`
-    }
-    const arity = /^hard:staticSanity=pythonCallbackArityMismatch\(([^:]+):(\d+)->(\d+)\)$/.exec(
-      reason,
-    )
-    if (arity !== null) {
-      return `Static sanity failure: callback \`${arity[1]}\` is registered with positional arity ${arity[3]}, but its definition accepts ${arity[2]}. Regenerate so the registration and callback signature agree exactly.`
-    }
-    return `Static sanity failure: ${reason.replace("hard:staticSanity=", "")}. Regenerate from the base tree and remove this deterministic parse-level violation without dropping the stronger structural fix.`
-  }
-
-  const staticSanityRepairSeed = (
-    scored: readonly ScoredEntry[],
-    winner: Candidate | null,
-  ): string | undefined => {
-    const winnerEntry =
-      winner === null ? undefined : scored.find((entry) => entry.candidate.id === winner.id)
-    const target = scored
-      .filter(
-        (entry) => entry.candidate.patch.trim() !== "" && staticSanityReasons(entry).length > 0,
-      )
-      .sort(
-        (a, b) =>
-          b.requiredContractsSatisfied - a.requiredContractsSatisfied ||
-          b.contractsSatisfied - a.contractsSatisfied ||
-          b.candidate.files.length - a.candidate.files.length,
-      )[0]
-    if (target === undefined) return undefined
-    if (
-      winnerEntry !== undefined &&
-      target.requiredContractsSatisfied <= winnerEntry.requiredContractsSatisfied &&
-      target.contractsSatisfied <= winnerEntry.contractsSatisfied
-    ) {
-      return undefined
-    }
-    const targetFamily = familyFromCandidate(target.candidate)
-    return [
-      "Selector feedback: a previous candidate reached stronger structural/public coverage, but it was rejected by deterministic static sanity checks.",
-      ...(targetFamily === undefined ? [] : [seedForCandidateFamily(targetFamily)]),
-      ...staticSanityReasons(target).map(staticSanityInstruction),
-      "Regenerate from the base tree. Preserve the stronger structural coverage while removing the static sanity violation; do not retreat to a smaller partial patch unless the stronger coverage is disproven by public source evidence.",
-    ]
-      .filter((s) => s.trim() !== "")
-      .join("\n\n")
-  }
-  const repairPacketText = (
-    scored: readonly ScoredEntry[],
-    seed: string,
-    winner: Candidate | null,
-  ): string => {
-    const focusCandidate =
-      (winner !== null && winner.patch.trim() !== "" ? winner : null) ??
-      scored.find(hasNonEmptyPatch)?.candidate
-    const patchAuthority = focusCandidate?.patch ?? scored[0]?.candidate.patch ?? seed
-    const proofReceipts: ProofReceiptFact[] = [
-      ...scored.flatMap((entry) => [
-        ...mweProofReceiptFacts(entry.candidate),
-        ...publicRegressionReceiptFacts(entry.candidate),
-        ...reproConsensusReceiptFacts(entry.candidate),
-      ]),
-      ...scored
-        .flatMap((entry) =>
-          entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2),
-        )
-        .map((reason) => ({ source: reason, state: hardReasonState(reason) })),
-    ]
-    const ownerFiles = [
-      ...new Set(
-        focusCandidate === undefined
-          ? scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files)
-          : (focusCandidate.familyOwnerFiles ?? focusCandidate.files),
-      ),
-    ]
-    const ownerEvidence: OwnerEvidenceFact[] = ownerFiles.map((file) => ({
-      file,
-      symbols: [],
-      provenance: "repair-owner",
-    }))
-    const contracts: ContractFact[] =
-      focusCandidate === undefined
-        ? []
-        : (() => {
-            const effectiveContracts = mergePublicContractBundles(
-              contractBundle,
-              focusCandidate.publicContracts,
-            )
-            if (effectiveContracts === undefined) return []
-            const evaluations = new Map(
-              evaluateBundle(effectiveContracts, {
-                touchedFiles: focusCandidate.files,
-                touchedSymbols: diffTouchedSymbols(focusCandidate.patch),
-              }).map((evaluation) => [evaluation.contractId, evaluation]),
-            )
-            return effectiveContracts.contracts.map((contract) => ({
-              contractId: contract.contractId,
-              authority: `${contract.provenance}/${contract.strength}`,
-              satisfied: evaluations.get(contract.contractId)?.satisfied ?? "unknown",
-            }))
-          })()
-    const packet = buildRepairSeedLlmEvidencePacket({
-      problemStatement: args.problemStatement ?? "",
-      candidatePatchHash: candidatePatchHash(patchAuthority),
-      ownerEvidence,
-      proofReceipts,
-      contracts,
-      repairGuidance: seed,
-      ...(args.verificationTarget !== undefined
-        ? { verificationTarget: args.verificationTarget }
-        : {}),
-    })
-    args.recordLlmEvidencePacket?.(packet)
-    return renderLlmEvidencePacket(packet)
-  }
-
-  const reproFailureTraceSeed = (scored: readonly ScoredEntry[]): string | undefined => {
-    const entry = scored.find((s) => {
-      if (!unresolvedReproConsensus(s.resolvedKofN)) return false
-      return reproTraceOf(s.resolvedKofN) !== undefined
-    })
-    if (entry === undefined || entry.resolvedKofN === null) return undefined
-    const trace = reproTraceOf(entry.resolvedKofN)
-    if (trace === undefined) return undefined
-    const samples = trace.samples
-      .filter((sample) => sample.outcome !== "resolved")
-      .slice(0, 2)
-      .map((sample, i) =>
-        [
-          `Patched repro sample ${i + 1}: outcome=${sample.outcome}`,
-          sample.stdoutTail.trim() === ""
-            ? "stdout tail: <empty>"
-            : `stdout tail:\n${bounded(sample.stdoutTail)}`,
-          sample.stderrTail.trim() === ""
-            ? "stderr tail: <empty>"
-            : `stderr tail:\n${bounded(sample.stderrTail)}`,
-        ].join("\n"),
-      )
-    return [
-      `Selector failure trace from ${entry.candidate.id}: votes=${entry.resolvedKofN.votes}, k=${entry.resolvedKofN.k}; vote=${trace.vote.verdict} (resolved=${trace.vote.resolved}, reproduced=${trace.vote.reproduced}, inconclusive=${trace.vote.inconclusive}).`,
-      ...samples,
-    ].join("\n\n")
-  }
-
-  const oracleFailureRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
-    const patched = scored.filter(hasNonEmptyPatch)
-    const proofStates = patched.map((entry) => selectionProofStateForEntry(entry))
-    const plan = ((): SelectorRepairSeedPlan | undefined => {
-      if (
-        proofRequired &&
-        patched.length > 0 &&
-        patched.some(
-          (entry) =>
-            entry.candidate.mweReceipt !== undefined ||
-            entry.candidate.publicRegressionReceipt !== undefined ||
-            entry.candidate.reproConsensusReceipt !== undefined,
-        ) &&
-        proofStates.every((state) => state === "infra_blocked")
-      ) {
-        return {
-          summary:
-            "Selector feedback: every generated candidate reached public proof execution, but each run failed in infra/runtime without producing a candidate-correctness verdict.",
-          directive:
-            "Regenerate from the base tree. Preserve the strongest structural/public coverage already found, but remove candidate-side execution blockers so the named public proof can actually run to completion. Do not widen scope or invent unrelated helpers.",
-          includeFamilyRepair: true,
-          includeReproFailureTrace: false,
-          includeOracleFailureSeed: true,
-        }
-      }
-      if (mweOracleRepairRequired(scored)) {
-        return {
-          summary:
-            "Selector feedback: every generated candidate was executed against a public issue MWE that reproduced on the base tree, and every candidate still failed that MWE.",
-          directive:
-            "Regenerate from the base tree. Treat the public MWE in the issue text as the executable contract: the patch must make that MWE pass without broadening the edit beyond the necessary source change.",
-          includeFamilyRepair: true,
-          includeReproFailureTrace: false,
-          includeOracleFailureSeed: true,
-        }
-      }
-      if (reproOracleRepairRequired(scored)) {
-        return {
-          summary:
-            "Selector feedback: every generated candidate was re-run against the base-red validated reproduction set, and none reached resolved consensus.",
-          directive:
-            "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts report `Issue resolved` without adding unnecessary helpers, files, or unrelated design surface.",
-          includeFamilyRepair: true,
-          includeReproFailureTrace: true,
-          includeOracleFailureSeed: true,
-        }
-      }
-      if (cleanDriftRepairRequired(scored)) {
-        return {
-          summary:
-            "Selector feedback: every generated multi-source candidate was rejected as unproven multi-source drift by clean selector authority because no executable proof or public contract justified touching multiple source files.",
-          directive:
-            "Regenerate from the base tree. Either produce a narrow single-owner patch, or include the complete static/public witness that justifies every source file touched. Do not add helper files, new definitions, or unrelated design surface unless that witness requires them.",
-          includeFamilyRepair: false,
-          includeReproFailureTrace: false,
-          includeOracleFailureSeed: true,
-        }
-      }
-      if (
-        proofRequired &&
-        patched.length > 0 &&
-        !proofStates.some((state) => state === "proof_positive") &&
-        patched.some(hasContractOnlyEvidence)
-      ) {
-        return {
-          summary:
-            "Selector feedback: at least one generated candidate achieved structural/public contract coverage, but no candidate produced positive executed public proof.",
-          directive:
-            "Regenerate from the base tree. Preserve the strongest structural/public coverage already found and make the named public proof run green. Do not broaden file scope, add unrelated helpers, or substitute structural guesses for executed proof.",
-          includeFamilyRepair: true,
-          includeReproFailureTrace: false,
-          includeOracleFailureSeed: true,
-        }
-      }
-      return undefined
-    })()
-    if (plan === undefined) return undefined
-    return [
-      plan.summary,
-      plan.directive,
-      ...(plan.includeFamilyRepair ? [familyRepairSeed(scored)] : []),
-      ...(plan.includeReproFailureTrace ? [reproFailureTraceSeed(scored)] : []),
-      ...(plan.includeOracleFailureSeed ? [args.oracleFailureRepairSeed] : []),
-    ]
-      .filter((s): s is string => s !== undefined && s.trim() !== "")
-      .join("\n\n")
-  }
-
   const maybeAppendSelectorRepair = async (
     rawCandidates: readonly Candidate[],
     result: SelectionResult,
   ): Promise<readonly Candidate[]> => {
     if (mode !== "clean" || rawCandidates.length === 0) return rawCandidates
     const seed =
-      staticSanityRepairSeed(result.scored, result.winner) ?? oracleFailureRepairSeed(result.scored)
+      buildStaticSanityRepairSeed({ scored: result.scored, winner: result.winner }) ??
+      buildOracleFailureRepairSeed({
+        scored: result.scored,
+        proofRequired,
+        ...(args.oracleFailureRepairSeed !== undefined
+          ? { oracleFailureSeedText: args.oracleFailureRepairSeed }
+          : {}),
+      })
     if (seed === undefined) return rawCandidates
     try {
-      const prompt = repairPacketText(result.scored, seed, result.winner)
+      const prompt = buildRepairPacketText({
+        scored: result.scored,
+        seed,
+        winner: result.winner,
+        problemStatement: args.problemStatement ?? "",
+        ...(contractBundle !== undefined ? { contractBundle } : {}),
+        ...(args.verificationTarget !== undefined
+          ? { verificationTarget: args.verificationTarget }
+          : {}),
+        ...(args.recordLlmEvidencePacket !== undefined
+          ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
+          : {}),
+      })
       const repaired = await postprocessGeneratedCandidate(
         await args.ports.generate(rawCandidates.length, prompt),
         rawCandidates.length,

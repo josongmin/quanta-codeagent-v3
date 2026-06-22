@@ -109,7 +109,7 @@ import type {
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
 import { runRepairRounds } from "./repair/index"
-import { buildRepairRoundSeedMessage } from "@/runner/batch/eval/repair/llm-evidence"
+import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
 import { buildWiring, emitSandbox, NullStream, ObservationError, type Wiring } from "./report"
@@ -511,10 +511,11 @@ const runRepairPhase = async (
           ),
         validate,
         buildContext: (ctxArgs) => {
-          if (repair.buildContext !== undefined) {
-            return repair.buildContext({ ...ctxArgs, siblingOwners })
-          }
-          const repairSeed = buildRepairRoundSeedMessage({ ...ctxArgs, siblingOwners })
+          const repairArgs = { ...ctxArgs, siblingOwners }
+          const repairSeed = buildRepairRoundSeedMessage(
+            repairArgs,
+            repair.buildContext?.(repairArgs),
+          )
           recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)
           return repairSeed.seedMsg
         },

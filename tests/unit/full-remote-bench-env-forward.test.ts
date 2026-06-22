@@ -78,4 +78,12 @@ describe("buildForwardedBenchEnv", () => {
     // still NOT a blanket widening — a sibling non-allowlisted var stays home.
     expect(buildForwardedBenchEnv({ QUANTA_RUN_ID: "run-x" })).toBe("")
   })
+
+  test("FWD-8: local bench replay cassette path is rejected for full-remote/pool runs", () => {
+    expect(() =>
+      buildForwardedBenchEnv({
+        QUANTA_BENCH_REPLAY_TRAJECTORY: "/tmp/bench-trajectory.jsonl",
+      }),
+    ).toThrow(/QUANTA_BENCH_REPLAY_TRAJECTORY/)
+  })
 })

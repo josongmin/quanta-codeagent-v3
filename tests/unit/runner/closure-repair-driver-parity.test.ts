@@ -12,8 +12,9 @@ describe("runner closure-repair driver parity", () => {
     expect(DRIVER_SRC).toContain('readFileSync(join(sandbox, rel), "utf8")')
     expect(DRIVER_SRC).toContain("...(ownerResolved !== undefined ? { ownerResolved } : {})")
     expect(DRIVER_SRC).toContain("siblingOwners: readonly string[]")
-    expect(DRIVER_SRC).toContain("if (repair.buildContext !== undefined)")
-    expect(DRIVER_SRC).toContain("buildRepairRoundSeedMessage({ ...ctxArgs, siblingOwners })")
+    expect(DRIVER_SRC).toContain("const repairArgs = { ...ctxArgs, siblingOwners }")
+    expect(DRIVER_SRC).toContain("repair.buildContext?.(repairArgs)")
+    expect(DRIVER_SRC).toContain("buildRepairRoundSeedMessage(")
     expect(DRIVER_SRC).toContain("recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)")
   })
 

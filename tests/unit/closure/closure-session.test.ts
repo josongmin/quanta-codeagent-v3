@@ -23,4 +23,23 @@ describe("buildClosureSession", () => {
     })
     expect(session.input.evidence.ownerResolved).toEqual(ownerResolved)
   })
+
+  test("public owner-near tests are threaded into the verification plan", () => {
+    const session = buildClosureSession({
+      problemStatement: "Fix foo in src/foo.py.",
+      stage1Files: [{ file: "src/foo.py", score: 5 }],
+      ownerNearTests: ["python -m pytest -x -p no:cacheprovider -q --no-header tests/test_foo.py"],
+      posture: { lspNav: true, primaryRail: true, faultEvidence: false },
+    })
+    expect(session.input.plan.ownerNearTests).toEqual([
+      "python -m pytest -x -p no:cacheprovider -q --no-header tests/test_foo.py",
+    ])
+    expect(session.bundle.plan.primaryRail?.kind).toBe("owner-test")
+    expect(session.bundle.plan.primaryRail?.cmd).toBe(
+      "python -m pytest -x -p no:cacheprovider -q --no-header tests/test_foo.py",
+    )
+    expect(session.primaryRailStep?.cmd).toBe(
+      "python -m pytest -x -p no:cacheprovider -q --no-header tests/test_foo.py",
+    )
+  })
 })

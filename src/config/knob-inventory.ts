@@ -1034,6 +1034,26 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/index.ts",
   },
   {
+    envKey: "QUANTA_BENCH_REPLAY_TRAJECTORY",
+    kind: "string",
+    default: "",
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: replay a recorded LLM trajectory cassette during local bench runs. Unset/''/'0' ⇒ off. '1'|'on' ⇒ <cwd>/bench-trajectory.jsonl; any other value ⇒ that path. Default miss behavior is fail-closed (`QUANTA_BENCH_REPLAY_ON_MISS=throw`); remote/pool surfaces reject this local-path seam until explicit cassette upload wiring exists.",
+    readSite: "apps/bench/index.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_REPLAY_ON_MISS",
+    kind: "enum",
+    default: "throw",
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: miss policy for `QUANTA_BENCH_REPLAY_TRAJECTORY`. `throw` (default, fail-closed), `passthrough`, or `record-and-passthrough` for intentional replay-then-diverge troubleshooting.",
+    readSite: "apps/bench/index.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_CLOSURE_DIAG",
     kind: "bool",
     default: false,
@@ -1385,6 +1405,16 @@ const BENCH: readonly KnobInventoryEntry[] = [
     describe:
       "Bench: optional LLM semantic expansion gate layered on top of the structural verify-select gate. Modes: shadow=telemetry only, on=fail-closed expand.",
     readSite: "runner/knobs/knobs/verify-select-llm-risk-gate.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED",
+    kind: "bool",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: require positive executed public proof before verify-select may submit a candidate. Static contracts and keep-green evidence remain ranking/safety signals only. Default-OFF.",
+    readSite: "runner/knobs/knobs/verify-select-proof-required.ts",
   },
   {
     envKey: "QUANTA_BENCH_SELECTOR_MODE",

@@ -124,10 +124,11 @@ export const buildRepairRoundLlmEvidencePacket = (
 
 export const buildRepairRoundSeedMessage = (
   args: BuildRepairContextArgs,
+  seedText: string = buildRepairContext(args),
 ): { readonly packet: LlmEvidencePacket; readonly seedMsg: string } => {
   const packet = buildRepairRoundLlmEvidencePacket(args)
   return {
     packet,
-    seedMsg: `${renderLlmEvidencePacket(packet)}\n\n${buildRepairContext(args)}`,
+    seedMsg: `${renderLlmEvidencePacket(packet)}\n\n${seedText}`,
   }
 }

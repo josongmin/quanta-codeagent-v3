@@ -523,6 +523,8 @@ const EXPLICIT_BOX_ENV: ReadonlySet<string> = new Set([
   "QUANTA_BENCH_PRESET",
   "QUANTA_BENCH_CONCURRENCY",
   "QUANTA_BENCH_RECORD_TRAJECTORY",
+  "QUANTA_BENCH_REPLAY_TRAJECTORY",
+  "QUANTA_BENCH_REPLAY_ON_MISS",
 ])
 
 /** Non-`QUANTA_BENCH_`-prefixed env knobs that ALSO must reach the box. These
@@ -546,8 +548,16 @@ const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set(["QUANTA_MAX_TURNS"])
  * arm is SILENTLY INERT and the whole A/B reads as a null effect (jun-16
  * env-forwarding bug class). The test pins that the experiment knobs survive.
  */
-export const buildForwardedBenchEnv = (env: NodeJS.ProcessEnv): string =>
-  Object.keys(env)
+export const buildForwardedBenchEnv = (env: NodeJS.ProcessEnv): string => {
+  const replayPath = env.QUANTA_BENCH_REPLAY_TRAJECTORY
+  if (replayPath !== undefined && replayPath !== "" && replayPath !== "0") {
+    throw new Error(
+      "[full-remote] QUANTA_BENCH_REPLAY_TRAJECTORY is local-only today; remote/pool runs cannot " +
+        "blindly forward a local cassette path to the box. Run the replay locally or add explicit " +
+        "cassette upload wiring first.",
+    )
+  }
+  return Object.keys(env)
     .filter(
       (k) =>
         (k.startsWith("QUANTA_BENCH_") || FORWARD_EXTRA_ENV.has(k)) &&
@@ -558,6 +568,7 @@ export const buildForwardedBenchEnv = (env: NodeJS.ProcessEnv): string =>
     .sort()
     .map((k) => `${k}=${shq(env[k] as string)} `)
     .join("")
+}
 
 const userData = (ttl: number): string =>
   [

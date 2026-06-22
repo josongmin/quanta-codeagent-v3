@@ -4,6 +4,10 @@ import type { FaultEvidencePacket } from "@/agent/fault-evidence"
 import { extractIssueReproSeed } from "@/agent/verification-plan"
 import type { VerificationPlan } from "@/agent/verification-plan"
 import { normalizePublicIssueText } from "@/shared"
+import type { MweProofState } from "./mwe-proof"
+import type { PublicRegressionProofState } from "./repo-regression-discovery-adapter"
+import type { ReproConsensusProofState } from "./repair/resolved-consensus"
+import type { SelectionProofSource, SelectionProofState } from "./selection-types"
 import type { StaticWitness } from "./static-witness"
 
 /**
@@ -30,6 +34,11 @@ export type LlmEvidencePacketStage =
    * it is not part of the v4 proof-clean runtime authority.
    */
   | "candidate_review"
+  /**
+   * True POST-exec review surface over executed proof receipts. This is
+   * advisory-only diagnosis for the repair round, not winner authority.
+   */
+  | "candidate_post_review"
   | "repair_seed"
   | "selection_explanation"
 
@@ -136,6 +145,8 @@ export interface LlmEvidenceArtifacts {
   readonly intake?: LlmEvidencePacket
   readonly candidateReview?: LlmEvidencePacket
   readonly candidateReviewHistory?: readonly LlmEvidencePacket[]
+  readonly candidatePostReview?: LlmEvidencePacket
+  readonly candidatePostReviewHistory?: readonly LlmEvidencePacket[]
   readonly candidateGeneration?: LlmEvidencePacket
   readonly candidateGenerationHistory?: readonly LlmEvidencePacket[]
   readonly repairSeed?: LlmEvidencePacket
@@ -164,6 +175,8 @@ type MutableLlmEvidenceArtifacts = {
   intake?: LlmEvidencePacket
   candidateReview?: LlmEvidencePacket
   candidateReviewHistory?: LlmEvidencePacket[]
+  candidatePostReview?: LlmEvidencePacket
+  candidatePostReviewHistory?: LlmEvidencePacket[]
   candidateGeneration?: LlmEvidencePacket
   candidateGenerationHistory?: LlmEvidencePacket[]
   repairSeed?: LlmEvidencePacket
@@ -313,6 +326,7 @@ const LLM_EVIDENCE_STAGE_ORDER: readonly LlmEvidencePacketStage[] = [
   "intake",
   "candidate_generation",
   "candidate_review",
+  "candidate_post_review",
   "repair_seed",
   "selection_explanation",
 ]
@@ -325,6 +339,12 @@ const stagePackets = (
   if (stage === "candidate_review") {
     if ((artifacts.candidateReviewHistory?.length ?? 0) > 0) return artifacts.candidateReviewHistory ?? []
     return artifacts.candidateReview !== undefined ? [artifacts.candidateReview] : []
+  }
+  if (stage === "candidate_post_review") {
+    if ((artifacts.candidatePostReviewHistory?.length ?? 0) > 0) {
+      return artifacts.candidatePostReviewHistory ?? []
+    }
+    return artifacts.candidatePostReview !== undefined ? [artifacts.candidatePostReview] : []
   }
   if (stage === "candidate_generation") {
     if ((artifacts.candidateGenerationHistory?.length ?? 0) > 0) return artifacts.candidateGenerationHistory ?? []
@@ -387,6 +407,15 @@ export const recordLlmEvidencePacket = (
   } else if (packet.stage === "candidate_review") {
     sink.candidateReviewHistory = [
       ...(sink.candidateReviewHistory ?? (sink.candidateReview !== undefined ? [sink.candidateReview] : [])),
+      packet,
+    ]
+  } else if (packet.stage === "candidate_post_review" && sink.candidatePostReview === undefined) {
+    sink.candidatePostReview = packet
+    sink.candidatePostReviewHistory = [packet]
+  } else if (packet.stage === "candidate_post_review") {
+    sink.candidatePostReviewHistory = [
+      ...(sink.candidatePostReviewHistory ??
+        (sink.candidatePostReview !== undefined ? [sink.candidatePostReview] : [])),
       packet,
     ]
   } else if (
@@ -819,6 +848,37 @@ export const buildSelectionGenerationLlmEvidencePacket = (
 export const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): string =>
   renderLlmEvidencePacket(buildSelectionGenerationLlmEvidencePacket(input))
 
+export interface SelectionGenerationPromptInput
+  extends Omit<SelectionGenerationPacketInput, "baseValidatedRed"> {
+  readonly baseValidatedRed: boolean | null
+  readonly recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
+}
+
+/**
+ * Shared clean generation prompt SSOT. `baseValidatedRed=null` means no repro
+ * authority exists in this posture, so the field is omitted instead of being
+ * coerced into a false hard gate.
+ */
+export const buildSelectionGenerationPrompt = (
+  input: SelectionGenerationPromptInput,
+): string => {
+  const packet = buildSelectionGenerationLlmEvidencePacket({
+    problemStatement: input.problemStatement,
+    ownerEvidence: input.ownerEvidence,
+    contracts: input.contracts,
+    ...(input.baseValidatedRed !== null ? { baseValidatedRed: input.baseValidatedRed } : {}),
+    ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
+    ...(input.reproCommand !== undefined ? { reproCommand: input.reproCommand } : {}),
+    ...(input.closureHint !== undefined ? { closureHint: input.closureHint } : {}),
+    ...(input.envCaveats !== undefined && input.envCaveats.length > 0
+      ? { envCaveats: input.envCaveats }
+      : {}),
+    ...(input.seed !== undefined ? { seed: input.seed } : {}),
+  })
+  input.recordLlmEvidencePacket?.(packet)
+  return renderLlmEvidencePacket(packet)
+}
+
 /* ------------------------------------------------------------------ */
 /* Candidate review packet (runtime risk screen, shadow/research only)  */
 /* ------------------------------------------------------------------ */
@@ -879,6 +939,69 @@ export const buildCandidateReviewLlmEvidencePacket = (
 
 export const buildCandidateReviewPacket = (input: CandidateReviewPacketInput): string =>
   renderLlmEvidencePacket(buildCandidateReviewLlmEvidencePacket(input))
+
+/* ------------------------------------------------------------------ */
+/* Candidate post-review packet (executed-proof diagnosis)             */
+/* ------------------------------------------------------------------ */
+
+export interface CandidatePostReviewPacketInput {
+  readonly problemStatement: string
+  readonly candidatePatchHash: string
+  readonly ownerEvidence: readonly OwnerEvidenceFact[]
+  readonly proofReceipts: readonly ProofReceiptFact[]
+  readonly contracts: readonly ContractFact[]
+  readonly verificationTarget?: VerificationTargetFact
+  readonly missingEvidence?: readonly MissingEvidenceFact[]
+}
+
+export const buildCandidatePostReviewLlmEvidencePacket = (
+  input: CandidatePostReviewPacketInput,
+): LlmEvidencePacket =>
+  cleanPacket({
+    stage: "candidate_post_review",
+    instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
+    evidenceRevision: "candidate-post-review-v1",
+    candidatePatchHash: input.candidatePatchHash,
+    question:
+      "Diagnose the executed candidate using only these proof receipts, then identify the smallest bounded repair that preserves any stronger public or structural coverage already present.",
+    allowedActions: [
+      "diagnose_executed_candidate",
+      "identify_missing_public_proof",
+      "preserve_supported_structural_coverage",
+    ],
+    forbiddenSources: [
+      "hidden_tests",
+      "gold_patch",
+      "official_harness_results",
+      "benchmark_case_tables",
+      "selection_override",
+    ],
+    publicIssueFacts: describeIssueFacts(input.problemStatement),
+    ownerEvidence: input.ownerEvidence,
+    proofReceipts: input.proofReceipts,
+    contractFacts: input.contracts,
+    staticFacts: [
+      {
+        kind: "review_scope",
+        value:
+          "Post-exec diagnosis only: use executed proof receipts and deterministic hard reasons to decide what the next bounded repair must preserve or fix.",
+      },
+    ],
+    ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
+    missingEvidence:
+      input.missingEvidence ??
+      (input.proofReceipts.some((receipt) => receipt.state !== "not_run" && receipt.state !== "static_only")
+        ? []
+        : [
+            {
+              kind: "executed_public_proof",
+              reason: "no_executed_public_proof_receipts_attached_to_post_exec_review",
+            },
+          ]),
+  })
+
+export const buildCandidatePostReviewPacket = (input: CandidatePostReviewPacketInput): string =>
+  renderLlmEvidencePacket(buildCandidatePostReviewLlmEvidencePacket(input))
 
 /* ------------------------------------------------------------------ */
 /* Repair seed packet (SHARED)                                         */
@@ -951,21 +1074,21 @@ export interface SelectionExplanationCandidateInput {
   readonly files: readonly string[]
   readonly admissible: boolean
   readonly reasons: readonly string[]
-  readonly proofState?: string
-  readonly proofSource?: string
+  readonly proofState?: SelectionProofState
+  readonly proofSource?: SelectionProofSource
   readonly requiredContractsSatisfied?: number
   readonly contractsSatisfied?: number
 }
 
 export interface SelectionExplanationProofSummaryInput {
-  readonly proofState: string
-  readonly proofSource: string
+  readonly proofState: SelectionProofState
+  readonly proofSource: SelectionProofSource
   readonly proofRequiredMissing: boolean
   readonly contractOnlySubmitted: boolean
   readonly contractOnlyBlocked: boolean
-  readonly publicMweState?: string
-  readonly publicRegressionState?: string
-  readonly reproConsensusState?: string
+  readonly publicMweState?: MweProofState
+  readonly publicRegressionState?: PublicRegressionProofState
+  readonly reproConsensusState?: ReproConsensusProofState
   readonly repairOnlyCandidates: number
   readonly submittedCandidateProof: boolean
 }
@@ -984,26 +1107,74 @@ const proofSummaryReceipts = (
   summary: SelectionExplanationProofSummaryInput | undefined,
 ): ProofReceiptFact[] => {
   if (summary === undefined) return [{ source: "selection", state: "not_run" }]
-  const mapState = (s: string | undefined): ProofReceiptState =>
-    s === undefined
-      ? "not_run"
-      : s.includes("infra") || s.includes("env")
-        ? "env_prep_failed"
-        : s.includes("green") || s.includes("resolved")
-          ? "candidate_green"
-          : s.includes("red") || s.includes("unresolved")
-            ? "candidate_red"
-            : "not_run"
+  const publicMweReceiptState = (state: MweProofState | undefined): ProofReceiptState | undefined => {
+    switch (state) {
+      case undefined:
+        return undefined
+      case "base_red":
+        return "base_red"
+      case "base_not_red":
+        return "base_green"
+      case "patched_green":
+        return "candidate_green"
+      case "candidate_red":
+        return "candidate_red"
+      case "execution_failed":
+        return "execution_failed"
+      case "not_found":
+        return "not_run"
+    }
+  }
+  const publicRegressionReceiptState = (
+    state: PublicRegressionProofState | undefined,
+  ): ProofReceiptState | undefined => {
+    switch (state) {
+      case undefined:
+        return undefined
+      case "candidate_red":
+        return "candidate_red"
+      case "safety_green":
+        return "candidate_green"
+      case "execution_failed":
+        return "execution_failed"
+      case "coverage_capped":
+        return "static_only"
+      case "not_available":
+      case "base_not_green":
+        return "not_run"
+    }
+  }
+  const reproConsensusReceiptState = (
+    state: ReproConsensusProofState | undefined,
+  ): ProofReceiptState | undefined => {
+    switch (state) {
+      case undefined:
+        return undefined
+      case "base_red_candidate_green":
+        return "candidate_green"
+      case "base_red_candidate_red":
+        return "candidate_red"
+      case "execution_failed":
+        return "execution_failed"
+      case "false_negative_suspected":
+        return "static_only"
+      case "not_available":
+        return "not_run"
+    }
+  }
   return [
-    ...(summary.publicMweState !== undefined
-      ? [{ source: "public_mwe", state: mapState(summary.publicMweState) }]
-      : []),
-    ...(summary.publicRegressionState !== undefined
-      ? [{ source: "discovered_regression", state: mapState(summary.publicRegressionState) }]
-      : []),
-    ...(summary.reproConsensusState !== undefined
-      ? [{ source: "repro_consensus", state: mapState(summary.reproConsensusState) }]
-      : []),
+    ...(() => {
+      const state = publicMweReceiptState(summary.publicMweState)
+      return state === undefined ? [] : [{ source: "public_mwe", state }]
+    })(),
+    ...(() => {
+      const state = publicRegressionReceiptState(summary.publicRegressionState)
+      return state === undefined ? [] : [{ source: "discovered_regression", state }]
+    })(),
+    ...(() => {
+      const state = reproConsensusReceiptState(summary.reproConsensusState)
+      return state === undefined ? [] : [{ source: "repro_consensus", state }]
+    })(),
   ]
 }
 

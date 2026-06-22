@@ -100,12 +100,11 @@ import {
   buildSelectionOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
-  buildSelectionGenerationLlmEvidencePacket,
+  buildSelectionGenerationPrompt,
   type ContractFact,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
   recordLlmEvidencePacket,
-  renderLlmEvidencePacket,
   type VerificationTargetFact,
   verificationTargetFromPlan,
 } from "./llm-evidence-packet"
@@ -2274,10 +2273,11 @@ const runRepairPhase = async (
           ),
         validate,
         buildContext: (ctxArgs) => {
-          if (repair.buildContext !== undefined) {
-            return repair.buildContext({ ...ctxArgs, siblingOwners })
-          }
-          const repairSeed = buildRepairRoundSeedMessage({ ...ctxArgs, siblingOwners })
+          const repairArgs = { ...ctxArgs, siblingOwners }
+          const repairSeed = buildRepairRoundSeedMessage(
+            repairArgs,
+            repair.buildContext?.(repairArgs),
+          )
           recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)
           return repairSeed.seedMsg
         },
@@ -2689,25 +2689,22 @@ const buildSelectionExecutorPorts = (args: {
         index,
         seed:
           args.verifySelectProofRequired && args.selectorMode === "clean"
-              ? (() => {
-                const packet = buildSelectionGenerationLlmEvidencePacket({
-                  problemStatement: args.instance.problemStatement,
-                  ownerEvidence: args.selectionOwnerEvidence,
-                  contracts: contractFactsFromBundle(args.publicContracts),
-                  ...(args.baseValidatedRed != null
-                    ? { baseValidatedRed: args.baseValidatedRed }
-                    : {}),
-                  ...(args.verificationTarget !== undefined
-                    ? { verificationTarget: args.verificationTarget }
-                    : {}),
-                  ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
-                  ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
-                  ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
-                  ...(seed !== undefined ? { seed } : {}),
-                })
-                args.recordLlmEvidencePacket?.(packet)
-                return renderLlmEvidencePacket(packet)
-              })()
+            ? buildSelectionGenerationPrompt({
+                problemStatement: args.instance.problemStatement,
+                ownerEvidence: args.selectionOwnerEvidence,
+                contracts: contractFactsFromBundle(args.publicContracts),
+                baseValidatedRed: args.baseValidatedRed,
+                ...(args.verificationTarget !== undefined
+                  ? { verificationTarget: args.verificationTarget }
+                  : {}),
+                ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
+                ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+                ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
+                ...(seed !== undefined ? { seed } : {}),
+                ...(args.recordLlmEvidencePacket !== undefined
+                  ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
+                  : {}),
+              })
             : seed,
         instance: args.instance,
         deps: args.deps,
@@ -3355,6 +3352,17 @@ const resolveOwnerResolved = async (args: {
   })
 }
 
+const verificationOwnerCandidatesOf = (args: {
+  readonly witnessOwners?: readonly { file: string; forSymbol?: string }[]
+  readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly stage1Files: readonly { file: string; score: number }[]
+}): readonly string[] =>
+  cleanUniqueList([
+    ...(args.witnessOwners?.map((owner) => owner.file) ?? []),
+    ...(args.ownerResolved?.map((owner) => owner.file) ?? []),
+    ...args.stage1Files.map((file) => file.file),
+  ])
+
 const buildClosureAttemptState = (args: {
   readonly instance: Instance
   readonly posture: BenchPosture
@@ -3362,6 +3370,7 @@ const buildClosureAttemptState = (args: {
   readonly ownerResolved: readonly OwnerSibling[] | undefined
   readonly witnessOwners?: readonly { file: string; forSymbol?: string }[]
   readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly ownerNearTests?: readonly string[]
 }): ClosureSessionState | undefined =>
   args.instance.swebench === undefined
     ? undefined
@@ -3374,6 +3383,9 @@ const buildClosureAttemptState = (args: {
           : {}),
         ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
           ? { reproScript: { cmd: `python "${args.reproTest.path}"`, baseValidatedRed: true } }
+          : {}),
+        ...(args.ownerNearTests !== undefined && args.ownerNearTests.length > 0
+          ? { ownerNearTests: args.ownerNearTests }
           : {}),
         posture: {
           lspNav: args.posture.lspNav,
@@ -3454,6 +3466,24 @@ export const prepareAttemptContext = async (
             readSource: (rel) => readSandboxSource(sandbox, rel),
           }),
         )
+  // Structural fallback: even when no synthesized repro validated red, the
+  // closure plan should still be able to name PUBLIC repo tests near the best
+  // owner candidates. These commands guide verification / repair planning only;
+  // final clean submit authority still comes from executed proof ports.
+  const ownerNearTests =
+    instance.swebench === undefined ||
+    !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
+      ? []
+      : await discoverVerificationOwnerTests({
+          instance,
+          sandbox,
+          timeoutMs: deps.timeoutMs,
+          ownerCandidates: verificationOwnerCandidatesOf({
+            witnessOwners,
+            ownerResolved,
+            stage1Files,
+          }),
+        })
   const closureSession = buildClosureAttemptState({
     instance,
     posture: hintRepro.posture,
@@ -3461,6 +3491,7 @@ export const prepareAttemptContext = async (
     ownerResolved,
     witnessOwners,
     reproTest: hintRepro.reproTest,
+    ownerNearTests,
   })
   const intakeLlmEvidence = buildIntakeLlmEvidencePacket({
     problemStatement: instance.problemStatement,
