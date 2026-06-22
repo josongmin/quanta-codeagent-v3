@@ -165,7 +165,8 @@ export const REPRO_DOUBT = (n: number): KnobModule => ({
 
 // ── Frozen base bundles (the canonical localization/exec anchors) ────────────
 // A base is a KnobModule whose `knobs` is the verbatim frozen literal of the
-// preset of the same name. Presets compose as `expandModules([BASE, ...delta])`.
+// preset of the same name. Presets compose as `composePresetKnobs(BASE, delta)`
+// (the single fold + registry in `./compose-preset.ts`).
 
 /** `agentless-v1` — the 9-knob localization+exec core (FROZEN, reproducibility). */
 export const LOCALIZATION_CORE: KnobModule = {
@@ -221,19 +222,11 @@ export const THIN_STRICT_BASE: KnobModule = {
   },
 }
 
-/**
- * Build-time fold: collapse a module list into a flat raw knob map
- * (last-write-wins on key collision). The static SSOT twin of
- * `withKnobModules`/`derivePhasePosture` (which fold onto a live BenchKnobState
- * at RUNTIME). A preset literal is `expandModules([BASE, ...delta])`; the SAME
- * module arrays feed `PHASE_MODULES`, so preset and phase posture share one
- * source and cannot drift.
- */
-export const expandModules = (modules: readonly KnobModule[]): Readonly<Record<string, string>> => {
-  const out: Record<string, string> = {}
-  for (const m of modules) for (const [k, v] of Object.entries(m.knobs)) out[k] = v
-  return out
-}
+// The build-time fold (composite → flat preset knob map) is `composePresetKnobs`
+// in `./compose-preset.ts` — the SINGLE SSOT registry + fold. It is the static
+// twin of the runtime `withKnobModules`/`derivePhasePosture` fold; the SAME
+// module arrays feed both `PRESET_COMPOSITES` and `PHASE_MODULES`, so a preset
+// literal and its phase posture share one source and cannot drift.
 
 // ── Named composites that reproduce shipped presets EXACTLY ──────────────────
 // (over an `agentless-v3-thin-strict` base — pinned by the equivalence hellgate)

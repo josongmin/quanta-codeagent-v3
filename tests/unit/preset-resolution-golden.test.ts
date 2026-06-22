@@ -1,12 +1,13 @@
 /**
  * GOLDEN byte-identical oracle for the jun-22 v5 posture-SSOT migration (P0).
  *
- * The SSOT refactor converts the composable presets in `presets.ts` from literal
- * knob-maps into `expandModules([...])` compositions. The HARD invariant is that
- * every preset NAME must resolve to the EXACT same knob values before and after
- * (bench results store the preset name, not a hash — so name→knobs must be
- * reproducible). This test freezes the resolved values of EVERY preset as a
- * snapshot; any migration step that perturbs a single resolved knob breaks it.
+ * The SSOT migration keeps the composable preset LITERALS frozen but binds them
+ * to the KnobModule catalog via `composePresetKnobs` (the single fold + registry
+ * in `compose-preset.ts`). The HARD invariant is that every preset NAME resolves
+ * to the EXACT same knob values regardless (bench results store the preset name,
+ * not a hash — so name→knobs must be reproducible). This test freezes the
+ * resolved values of EVERY preset as a snapshot; any change that perturbs a
+ * single resolved knob breaks it.
  *
  * Captured at HEAD before P1. Do NOT update the snapshot to make a refactor pass
  * — a diff here means the composition is wrong.
