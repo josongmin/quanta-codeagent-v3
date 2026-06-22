@@ -104,7 +104,9 @@ describe("adaptive-escalation router contract", () => {
 
   describe("no-drift ratchet (router set ≡ posture map keys ≡ JSON schema enum)", () => {
     test("DRIFT-1: ADAPTIVE_ACTIONS is EXACTLY the PHASE_MODULES keys", () => {
-      expect([...ADAPTIVE_ACTIONS].sort()).toEqual(Object.keys(PHASE_MODULES).sort())
+      // cast the literal-union tuple to string[] so toEqual unifies with the
+      // string[] from Object.keys (same runtime value; satisfies tsc overload).
+      expect(([...ADAPTIVE_ACTIONS] as string[]).sort()).toEqual(Object.keys(PHASE_MODULES).sort())
     })
 
     test("DRIFT-2: the JSON schema action enum matches ADAPTIVE_ACTIONS", () => {
