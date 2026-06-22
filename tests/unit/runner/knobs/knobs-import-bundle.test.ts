@@ -36,6 +36,7 @@ import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
 import { issueHintExpectedActualKnob } from "@/runner/knobs/knobs/issue-hint-expected-actual"
+import { localizeBudgetKnob } from "@/runner/knobs/knobs/localize-budget"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { lspSteerKnob } from "@/runner/knobs/knobs/lsp-steer"
@@ -56,6 +57,7 @@ import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
 import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
+import { reproExecTimeoutKnob } from "@/runner/knobs/knobs/repro-exec-timeout"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { reproVoteKnob } from "@/runner/knobs/knobs/repro-vote"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
@@ -91,6 +93,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(hooksKnob),
   asAnyKnob(issueHintKnob),
   asAnyKnob(issueHintExpectedActualKnob),
+  asAnyKnob(localizeBudgetKnob),
   asAnyKnob(localizePhaseKnob),
   asAnyKnob(lspKnob),
   asAnyKnob(lspSteerKnob),
@@ -111,6 +114,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(repairEscalationKnob),
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproDoubtKnob),
+  asAnyKnob(reproExecTimeoutKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(reproVoteKnob),
   asAnyKnob(retryTransientKnob),

@@ -36,6 +36,7 @@ import {
   resolveKnobs,
 } from "@/runner/knobs"
 import type { BenchInLoopExecModeKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
+import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
 import type { SelectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import type { VerifySelectLlmRiskGateMode } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
 import type { VerifySelectRegressionMode } from "@/runner/knobs/knobs/verify-select-regression"
@@ -203,6 +204,11 @@ export interface BenchPosture {
   readonly issueHintExpectedActual: boolean
   /** Agentless §3.3.1 reproduction-test K (undefined ⇒ no repro pre-compute). */
   readonly reproTestK: number | undefined
+  /** jun-22 config-extraction: per-repro-script exec timeout (ms). undefined ⇒ 60s. */
+  readonly reproExecTimeoutMs: number | undefined
+  /** jun-22 config-extraction: agentless one-shot localizer breadth dials
+   *  (topK/maxTreeChars/maxFiles). undefined ⇒ hardcoded defaults. */
+  readonly localizeBudget: LocalizeBudgetValue | undefined
   /** jun-19 #10999 under-fix lever: ON ⇒ the repro prompt gets the
    *  ADVERSARIAL-coverage block so a shallow happy-path fix stays RED. */
   readonly adversarialRepro: boolean
@@ -347,6 +353,8 @@ const isLocalizeValue = (v: unknown): v is { phase1Turns: number } =>
   v !== null &&
   "phase1Turns" in v &&
   typeof (v as { phase1Turns: unknown }).phase1Turns === "number"
+const isLocalizeBudgetValue = (v: unknown): v is LocalizeBudgetValue =>
+  typeof v === "object" && v !== null && ("topK" in v || "maxTreeChars" in v || "maxFiles" in v)
 const isBranchValue = (v: unknown): v is { defaultN: number; config: BranchSearchConfig } =>
   typeof v === "object" && v !== null && "config" in v
 const isIssueMode = (v: unknown): v is "agentless" | "regex" => v === "agentless" || v === "regex"
@@ -395,6 +403,8 @@ export const benchPostureFromState = (
   const issueHintExpectedActual =
     readKnobValue(state, "issue-hint-expected-actual", isTrue) === true
   const repro = readKnobValue(state, "repro-test", isReproValue)
+  const reproExecTimeoutMs = readKnobValue(state, "repro-exec-timeout", isNumber)
+  const localizeBudget = readKnobValue(state, "localize-budget", isLocalizeBudgetValue)
   const reproDoubt = state.values.has("repro-doubt")
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
@@ -465,6 +475,8 @@ export const benchPostureFromState = (
     issueHintMode,
     issueHintExpectedActual,
     reproTestK: repro !== undefined ? repro.samples : undefined,
+    reproExecTimeoutMs,
+    localizeBudget,
     adversarialRepro,
     reproDoubt,
     retryTransient,

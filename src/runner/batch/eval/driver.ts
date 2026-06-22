@@ -58,6 +58,7 @@ import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verific
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
+import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
 import { errMessage, gateDisabled, gateOn, normalizePublicIssueText } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -890,6 +891,10 @@ export interface PrepareIssueHintDeps {
   /** Soft timeout (ms) for the LLM localization call. On expiry the wiring
    *  falls back to the regex extractor. Default 30_000. */
   readonly timeoutMs?: number
+  /** jun-22 config-extraction: agentless localizer breadth dials (topK /
+   *  maxTreeChars / maxFiles). Sourced from `posture.localizeBudget`; omitted
+   *  fields keep their hardcoded defaults. */
+  readonly localizeBudget?: LocalizeBudgetValue
   /** Resolved posture bit from the SAME bench projection that chose `mode`.
    *  Required so issue-hint prep never re-reads ambient env. */
   readonly issueHintExpectedActual: boolean
@@ -1008,7 +1013,11 @@ export const prepareIssueHint = async (
   let result: AgentlessLocalizeResult
   try {
     result = await Promise.race([
-      localize(problemStatement, { llm: deps.llm, fileTree: readFileTree }),
+      localize(problemStatement, {
+        llm: deps.llm,
+        fileTree: readFileTree,
+        ...(deps.localizeBudget ?? {}),
+      }),
       timeoutP,
     ])
   } catch {
@@ -1078,6 +1087,9 @@ export interface PrepareReproTestDeps {
    *  fix), so a shallow happy-path patch keeps the repro RED. Default-OFF ⇒
    *  byte-identical prompt. Sourced from `benchOptIns().adversarialRepro`. */
   readonly adversarial?: boolean
+  /** jun-22 config-extraction: per-repro-script exec timeout (ms). Sourced from
+   *  `posture.reproExecTimeoutMs`; undefined ⇒ the 60s `DEFAULT_EXEC_TIMEOUT_MS`. */
+  readonly reproExecTimeoutMs?: number
 }
 
 /** Per-instance reproduction-script filename written into the sandbox. The
@@ -1207,7 +1219,10 @@ export const prepareReproTestDetailed = async (
   if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
     return disabledReproResult("empty_problem")
   }
-  const config: ReproTestConfig = { samples: k }
+  const config: ReproTestConfig = {
+    samples: k,
+    ...(deps.reproExecTimeoutMs !== undefined ? { execTimeoutMs: deps.reproExecTimeoutMs } : {}),
+  }
   const select = deps.select ?? selectReproTest
   // jun-18 closure repro-install lever: when the issue body embeds a confidently
   // EXECUTABLE Minimal Working Example (the author's own reproduction), seed the
@@ -1329,7 +1344,7 @@ export const prepareSelectionReproSources = async (
   llm: LLMPort,
   posture: Pick<
     BenchPosture,
-    "verifySelectN" | "verifySelectRepro" | "reproTestK" | "adversarialRepro"
+    "verifySelectN" | "verifySelectRepro" | "reproTestK" | "adversarialRepro" | "reproExecTimeoutMs"
   >,
   deps: Omit<PrepareReproTestDeps, "llm" | "adversarial"> = {},
 ): Promise<{
@@ -1342,6 +1357,9 @@ export const prepareSelectionReproSources = async (
     ...deps,
     llm,
     ...(posture.adversarialRepro === true ? { adversarial: true } : {}),
+    ...(posture.reproExecTimeoutMs !== undefined
+      ? { reproExecTimeoutMs: posture.reproExecTimeoutMs }
+      : {}),
   })
   return {
     telemetry: detail.telemetry,
@@ -3206,6 +3224,7 @@ const prepareHintAndReproContext = async (
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
     llm,
     issueHintExpectedActual: posture.issueHintExpectedActual,
+    ...(posture.localizeBudget !== undefined ? { localizeBudget: posture.localizeBudget } : {}),
     onCandidates: (files) => {
       localizeCandidates = files
     },

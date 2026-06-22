@@ -357,6 +357,7 @@ describe("prepareReproTest", () => {
         verifySelectN: 3,
         verifySelectRepro: "positive",
         reproTestK: undefined,
+        reproExecTimeoutMs: undefined,
         adversarialRepro: false,
       },
       {
@@ -384,6 +385,7 @@ describe("prepareReproTest", () => {
         verifySelectN: 5,
         verifySelectRepro: "off",
         reproTestK: undefined,
+        reproExecTimeoutMs: undefined,
         adversarialRepro: false,
       },
       {

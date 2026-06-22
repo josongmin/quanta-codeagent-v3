@@ -1307,6 +1307,26 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/verify-select.ts",
   },
   {
+    envKey: "QUANTA_BENCH_REPRO_EXEC_TIMEOUT_MS",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: per-repro-script exec timeout (ms). Domain [5000,600000]. Unset ⇒ 60000 (byte-identical). Raise for slow repos; it is the PER-SCRIPT cap, not the per-instance budget.",
+    readSite: "runner/knobs/knobs/repro-exec-timeout.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_LOCALIZE_BUDGET",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: agentless one-shot localizer breadth `topk=N,tree=N,files=N` (defaults 5/12000/3000). Unset ⇒ defaults (byte-identical). Distinct from localize-phase (agent turns).",
+    readSite: "runner/knobs/knobs/localize-budget.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
     kind: "int",
     default: undefined,
