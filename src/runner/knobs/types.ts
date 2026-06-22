@@ -67,10 +67,19 @@ export interface Knob<T = unknown> {
   readonly default?: T | undefined
 }
 
-/** Resolved value with source tracking (for telemetry / debug). */
+/** Resolved value with source tracking (for telemetry / debug).
+ *  `phase-module` = a value folded in by the v5 adaptive controller's per-phase
+ *  capability module (not a resolution layer; not a named preset). */
 export interface KnobValue<T> {
   readonly value: T
-  readonly source: "cli" | "session" | "env" | "config-file" | "preset" | "default"
+  readonly source:
+    | "cli"
+    | "session"
+    | "env"
+    | "config-file"
+    | "preset"
+    | "phase-module"
+    | "default"
 }
 
 /**

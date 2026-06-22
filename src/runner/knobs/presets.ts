@@ -27,12 +27,14 @@
 
 const THIN_STRICT_PRESET_PREFIX = "agentless-v3-thin-strict"
 const PROOF_CLEAN_PRESET_PREFIX = "agentless-v4-proof-clean"
+const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
 
 export const presetRequiresLiveLspGrounding = (preset: string): boolean =>
   preset === THIN_STRICT_PRESET_PREFIX ||
   preset.startsWith(`${THIN_STRICT_PRESET_PREFIX}-`) ||
   preset === PROOF_CLEAN_PRESET_PREFIX ||
-  preset.startsWith(`${PROOF_CLEAN_PRESET_PREFIX}-`)
+  preset.startsWith(`${PROOF_CLEAN_PRESET_PREFIX}-`) ||
+  preset === V5_ADAPTIVE_PRESET
 
 export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   // Explicit no-op. Selecting `baseline` is byte-identical to no preset at all.
@@ -518,6 +520,28 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select-repro": "positive",
     "verify-select-proof-required": "1",
     "selector-mode": "clean",
+  },
+  // jun-22 v5 thin-first ADAPTIVE controller opening. The base posture is exactly
+  // `agentless-v3-thin-strict` (cheap thin/noexec/minimal round-0); the per-phase
+  // capability knobs (expand-select / proof-clean / repair / repro rails) are
+  // injected by the v5 controller via PHASE_MODULES at runtime, NOT baked here.
+  // Selecting this preset is INERT (≡ thin-strict) until `QUANTA_BENCH_V5_ADAPTIVE`
+  // opts the live router in (default-OFF; the brain is gated on the oracle being
+  // measured — see jun-22-agent-v5 plan Wave-2/3). So this literal == thin-strict.
+  "agentless-v5-thin-and-expanded": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "patch-hygiene": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
   },
   // jun-20 no-oracle verify-select arm. Starts from v3-thin, adds N-best
   // selection, uses discovered native repo tests as the hard regression signal,

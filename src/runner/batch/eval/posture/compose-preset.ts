@@ -106,6 +106,9 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
   // ── base-as-self (identity) ──
   { preset: "agentless-v3-thin", base: THIN_BASE.knobs, modules: [] },
   { preset: "agentless-v3-thin-strict", base: THIN_STRICT_BASE.knobs, modules: [] },
+  // v5 opening = the thin-strict base (the controller injects phase modules at
+  // runtime, not into the preset literal).
+  { preset: "agentless-v5-thin-and-expanded", base: THIN_STRICT_BASE.knobs, modules: [] },
   // ── thin-strict base — reuse the SAME composite arrays the controller routes to ──
   {
     preset: "agentless-v3-thin-strict-gated",

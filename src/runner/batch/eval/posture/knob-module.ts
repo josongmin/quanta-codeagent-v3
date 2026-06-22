@@ -78,9 +78,11 @@ export const withKnobModules = (
       if (knob === undefined) continue
       const parsed = knob.parse(raw)
       if (parsed === undefined) continue
-      // Phase modules ARE preset-equivalent capability fragments, so `preset` is
-      // the honest source tag (the controller applies them like a scoped preset).
-      values.set(id, { value: parsed, source: "preset" })
+      // Wave-3 obligation 3: a controller-injected phase value is NOT a named
+      // preset. Tag it `phase-module` so the report attributes it to the v5
+      // controller's per-phase fold instead of misnaming it as a preset that
+      // never set it (the report still names the base preset elsewhere).
+      values.set(id, { value: parsed, source: "phase-module" })
     }
   }
   const inactive = base.inactive.filter((id) => !values.has(id))

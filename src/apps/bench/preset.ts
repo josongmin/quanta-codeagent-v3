@@ -2,7 +2,18 @@ import { gateOn } from "@/shared"
 import { KNOB_PRESETS, presetRequiresLiveLspGrounding } from "@/runner/knobs"
 
 export const CURRENT_BENCH_BASE_PRESET = "agentless-v3-thin-strict"
+export const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
 export { presetRequiresLiveLspGrounding }
+
+/** Is the v5 thin-first ADAPTIVE controller live for this run? Default-OFF and
+ *  STRICT opt-in: true ONLY when the resolved preset is the v5 preset AND
+ *  `QUANTA_BENCH_V5_ADAPTIVE` is explicitly on. Without the opt-in the preset is
+ *  inert (runs as its thin-strict base posture) — so the LLM brain never engages
+ *  until the operator opts in (the oracle-measurement wave gate). */
+export const v5AdaptiveEnabled = (args: {
+  readonly preset: string
+  readonly envVars: Record<string, string | undefined>
+}): boolean => args.preset === V5_ADAPTIVE_PRESET && gateOn(args.envVars, "QUANTA_BENCH_V5_ADAPTIVE")
 
 const asNonEmpty = (raw: string | undefined): string | undefined => {
   const trimmed = raw?.trim()
