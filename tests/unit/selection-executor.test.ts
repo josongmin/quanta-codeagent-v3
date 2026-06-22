@@ -1008,6 +1008,27 @@ describe("runSelection", () => {
     expect(r.terminalCandidate?.id).toBe("cand-1")
   })
 
+  it("clean unproven multi-source drift hard reject is not resubmitted as best-effort", async () => {
+    const risky = cand({
+      id: "cand-0",
+      patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
+      files: ["pkg/a.py", "pkg/b.py"],
+    })
+    const { gen } = genFrom([risky])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: new Set(["pkg/a.py", "pkg/b.py"]),
+      ports: { generate: gen },
+    })
+    expect(r.admissibleCount).toBe(0)
+    expect(r.winner).toBeNull()
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+    )
+  })
+
   it("dedup: identical patches collapse to one scored entry", async () => {
     const { gen } = genFrom([
       cand({ id: "cand-0", patch: "+++ b/x.py\n+same" }),

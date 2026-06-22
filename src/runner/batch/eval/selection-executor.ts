@@ -565,15 +565,15 @@ const cleanUnprovenMultiSourceDriftRisk = (args: {
   return budget.sourceFiles > 1
 }
 
+const CLEAN_DRIFT_REJECT_REASON =
+  "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)"
+
 const applyCleanDriftHardGate = (verdict: CandidateVerdict, risk: boolean): CandidateVerdict =>
   risk
     ? {
         admissible: false,
         score: verdict.score,
-        reasons: [
-          ...verdict.reasons,
-          "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-        ],
+        reasons: [...verdict.reasons, CLEAN_DRIFT_REJECT_REASON],
       }
     : verdict
 
@@ -663,6 +663,23 @@ const buildLexTiers = (
 
 const declaredExpectedRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(DECLARED_EXPECTED_REJECT_REASON)
+
+const cleanDriftRejected = (verdict: CandidateVerdict): boolean =>
+  verdict.reasons.includes(CLEAN_DRIFT_REJECT_REASON)
+
+const bestEffortEligible = (
+  entry: Pick<ScoredEntry, "hard" | "verdict">,
+  mode: SelectorMode,
+): boolean => {
+  if (!entry.hard.patchProduced) return false
+  if (entry.hard.applyClean === false) return false
+  if (entry.hard.regressionGreen === false) return false
+  if (mode !== "clean" && entry.hard.smokeGreen === false) return false
+  if (hardResolvedRejected(entry.hard.patchedResolvedKofN)) return false
+  if (declaredExpectedRejected(entry.verdict)) return false
+  if (cleanDriftRejected(entry.verdict)) return false
+  return true
+}
 
 /**
  * Run the verify-and-select executor. Pure over the injected ports.
@@ -1063,8 +1080,7 @@ export const runSelection = async (args: {
       contractsSatisfied: 0,
     }
     const ranked = [{ id: candidate.id, verdict: entry.verdict }]
-    const fallbackRanked =
-      hard.patchProduced && !declaredExpectedRejected(entry.verdict) ? ranked : []
+    const fallbackRanked = bestEffortEligible(entry, mode) ? ranked : []
     const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
     const winner = winnerId === candidate.id ? candidate : null
     return {
@@ -1156,16 +1172,7 @@ export const runSelection = async (args: {
       .filter((s) => !violatedCounterfactual.has(s.candidate.id))
       .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     const fallbackRanked = scored
-      .filter(
-        (s) =>
-          s.hard.patchProduced &&
-          s.hard.applyClean !== false &&
-          s.hard.regressionGreen !== false &&
-          s.hard.smokeGreen !== false &&
-          !hardResolvedRejected(s.hard.patchedResolvedKofN) &&
-          !declaredExpectedRejected(s.verdict) &&
-          !violatedCounterfactual.has(s.candidate.id),
-      )
+      .filter((s) => bestEffortEligible(s, mode) && !violatedCounterfactual.has(s.candidate.id))
       .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
     // ── clean: contract-first lexicographic selection (T-SEL-06) ─────────────
     // Executable proof dominates contracts dominates family dominates minimality;
@@ -1187,13 +1194,7 @@ export const runSelection = async (args: {
       if (primary !== null) return primary
       // best-effort: structurally-submittable + executable-clean candidates only
       // (researchOnly smoke/declaredExpected carry NO clean veto), ranked lex.
-      const effort = eligible.filter(
-        (s) =>
-          s.hard.patchProduced &&
-          s.hard.applyClean !== false &&
-          s.hard.regressionGreen !== false &&
-          !hardResolvedRejected(s.hard.patchedResolvedKofN),
-      )
+      const effort = eligible.filter((s) => bestEffortEligible(s, mode))
       return selectLexicographic(effort.map((s) => toLex(s, true)))
     }
     const winnerId =

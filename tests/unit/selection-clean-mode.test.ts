@@ -289,6 +289,26 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.requiredContractsSatisfied).toBe(1)
   })
 
+  it("CLEAN: executable proof still beats required contract count — no set-level contract floor", async () => {
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      mode: "clean",
+      publicContracts: {
+        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
+      },
+      ports: {
+        generate: async (i) => [smallBaseOnly, multiSitePatch][i] as Candidate,
+        applyClean: async () => true,
+        resolvedKofN: async (c) => (c.id === "cand-0" ? { votes: 1, k: 1 } : null),
+      },
+    })
+    expect(r.winner?.id).toBe("cand-0")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.admissible).toBe(true)
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.requiredContractsSatisfied).toBe(1)
+  })
+
   it("CLEAN: family rank alone cannot bypass unproven multi-source drift gating", async () => {
     const r = await runSelection({
       n: 2,
