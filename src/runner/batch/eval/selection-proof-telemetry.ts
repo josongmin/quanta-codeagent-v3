@@ -13,12 +13,15 @@ import {
 } from "@/agent/verification-bundle"
 import { candidateFamilyCoverageMissing, candidateFamilyRank } from "./candidate-families"
 import type { MweProofReceipt } from "./mwe-proof"
-import type { PublicRegressionProofReceipt, PublicRegressionProofState } from "./repo-regression-discovery-adapter"
 import type {
   ReproConsensusProofReceipt,
   ReproConsensusProofState,
   ReproConsensusTrace,
 } from "./repair/resolved-consensus"
+import type {
+  PublicRegressionProofReceipt,
+  PublicRegressionProofState,
+} from "./repo-regression-discovery-adapter"
 import type {
   Candidate,
   ScoredEntry,
@@ -91,8 +94,7 @@ export const cleanExecutableProof = (
   resolved: ResolvedKofNSignal | null,
   mweReceipt: MweProofReceipt | undefined,
   reproConsensusReceipt: ReproConsensusProofReceipt | undefined,
-): boolean =>
-  positiveSubmitProofSource({ resolved, mweReceipt, reproConsensusReceipt }) !== "none"
+): boolean => positiveSubmitProofSource({ resolved, mweReceipt, reproConsensusReceipt }) !== "none"
 
 export const selectionProofState = (args: {
   readonly resolved: ResolvedKofNSignal | null
@@ -171,7 +173,8 @@ const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefi
     reproConsensusReceipt: focusEntry.candidate.reproConsensusReceipt,
   })
   const submittedCandidateProof = winnerEntry !== undefined && proofSource !== "none"
-  const contractOnlySubmitted = winnerEntry !== undefined && !submittedCandidateProof && hasContractOnlyEvidence(winnerEntry)
+  const contractOnlySubmitted =
+    winnerEntry !== undefined && !submittedCandidateProof && hasContractOnlyEvidence(winnerEntry)
   const repairOnlyCandidates = result.scored.filter(
     (entry) =>
       entry.candidate.patch.trim() !== "" &&
@@ -184,7 +187,9 @@ const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefi
     proofRequiredMissing: result.noWinnerReason === "proof_required_missing",
     contractOnlySubmitted,
     contractOnlyBlocked:
-      result.winner === null && result.noWinnerReason === "proof_required_missing" && repairOnlyCandidates > 0,
+      result.winner === null &&
+      result.noWinnerReason === "proof_required_missing" &&
+      repairOnlyCandidates > 0,
     ...(focusEntry.candidate.mweReceipt !== undefined
       ? { publicMweState: focusEntry.candidate.mweReceipt.state }
       : {}),

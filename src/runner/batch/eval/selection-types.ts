@@ -18,13 +18,13 @@ import type { LlmEvidencePacket } from "./llm-evidence-packet"
 import type { MweProofReceipt, MweProofState } from "./mwe-proof"
 import type { PublicContractBundle } from "./public-contract-types"
 import type {
-  PublicRegressionProofReceipt,
-  PublicRegressionProofState,
-} from "./repo-regression-discovery-adapter"
-import type {
   ReproConsensusProofReceipt,
   ReproConsensusProofState,
 } from "./repair/resolved-consensus"
+import type {
+  PublicRegressionProofReceipt,
+  PublicRegressionProofState,
+} from "./repo-regression-discovery-adapter"
 
 export interface Candidate {
   /** Stable id (e.g. `cand-0`). */

@@ -36,32 +36,22 @@
  * The executor also preserves a `terminalCandidate` for stop-reason attribution.
  */
 
-import { isAbsolute, relative, sep } from "node:path"
-import type { StopReason } from "@/agent"
-import { analyzePatchBudget, type PatchBudgetVerdict } from "@/agent/patch-budget"
+import { analyzePatchBudget } from "@/agent/patch-budget"
 import {
-  type CandidateVerdict,
   type HardGateSignals,
   isValidResolvedKofN,
-  type LexTiers,
   type ResolvedKofNSignal,
-  resolvedKofNPositive,
-  resolvedKofNVoterQuorum,
   type SelectorMode,
   type SoftScoreSignals,
-  scoreCandidate,
   selectBest,
   selectBestEffort,
   selectLexicographic,
 } from "@/agent/verification-bundle"
-import { filesFromUnifiedDiff } from "@/shared"
 import { Semaphore } from "@/workflow/semaphore"
 import {
   type CandidateFamily,
   type CandidateFamilyBundle,
-  type CandidateFamilyId,
   candidateFamilyCoverageMissing,
-  candidateFamilyRank,
   planFamilyCoverage,
   seedForCandidateFamily,
   seedForCandidateFamilyCoverageRepair,
@@ -74,18 +64,16 @@ import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfac
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import {
-  buildRepairSeedPacket,
   buildRepairSeedLlmEvidencePacket,
-  candidatePatchHash,
   type ContractFact,
+  candidatePatchHash,
   type LlmEvidencePacket,
   type OwnerEvidenceFact,
   type ProofReceiptFact,
-  type ProofReceiptState,
-  type VerificationTargetFact,
   renderLlmEvidencePacket,
+  type VerificationTargetFact,
 } from "./llm-evidence-packet"
-import { type MweProofReceipt, type MweProofState, mweProofAuthorityRank } from "./mwe-proof"
+import type { MweProofReceipt } from "./mwe-proof"
 import {
   contractsSatisfiedCount,
   evaluateBundle,
@@ -93,211 +81,87 @@ import {
   requiredContractsSatisfiedCount,
 } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
-import type { PublicRegressionProofReceipt, PublicRegressionProofState } from "./repo-regression-discovery-adapter"
+import type { ReproConsensusProofReceipt } from "./repair/resolved-consensus"
+import type { PublicRegressionProofReceipt } from "./repo-regression-discovery-adapter"
+import {
+  applyCleanAuthorityHardGate,
+  applyCleanDriftHardGate,
+  applyMweProofHardGate,
+  applyProofRequiredHardGate,
+  applyStaticSanityHardGate,
+  bestEffortEligible,
+  buildLexTiers,
+  cleanDriftRejected,
+  cleanProofAuthorityMissing,
+  cleanUnprovenMultiSourceDriftRisk,
+  declaredExpectedMatchOf,
+  earlyAcceptable,
+  minimalityOf,
+  ownerCoverageOf,
+  requireHardResolvedForEarlyAccept,
+  scoreWithAuthority,
+  staticSanityReasonsOf,
+  strongerTerminalRepresentative,
+  terminalAuthorityRank,
+  voterQuorumOf,
+} from "./selection-gates"
+import { normalizePatch, normalizeSelectionPaths } from "./selection-paths"
+import {
+  hasContractOnlyEvidence,
+  reproTraceOf,
+  selectionProofState,
+  selectionProofStateForEntry,
+} from "./selection-proof-telemetry"
+import {
+  bounded,
+  hardReasonState,
+  mweProofReceiptFacts,
+  publicRegressionReceiptFacts,
+  reproConsensusReceiptFacts,
+} from "./selection-repair-seed"
+
+export { ownerCoverageOf } from "./selection-gates"
+// ── Re-exported public surface (moved to sibling modules, kept importable from
+// `./selection-executor` byte-stable). ──────────────────────────────────────
+export {
+  filesFromPatch,
+  normalizeSelectionPath,
+  normalizeSelectionPaths,
+} from "./selection-paths"
+export { summarizeSelection } from "./selection-proof-telemetry"
+export type {
+  Candidate,
+  CandidateTelemetry,
+  CounterfactualTelemetry,
+  DerivedCandidateStructuralRepair,
+  ResolvedKofNMode,
+  ScoredEntry,
+  SelectionNoWinnerReason,
+  SelectionPorts,
+  SelectionProofSource,
+  SelectionProofState,
+  SelectionProofSummary,
+  SelectionResult,
+  SelectionRiskGateDecision,
+  SelectionRiskGateShadowDecision,
+  SelectionRiskGateShadowTelemetry,
+  SelectionRiskGateTelemetry,
+  SelectionTelemetry,
+} from "./selection-types"
+
+// Type-only imports used by the kept `buildSelectionInputs` + `runSelection`
+// orchestrator bodies.
 import type {
-  ReproConsensusProofReceipt,
-  ReproConsensusProofState,
-  ReproConsensusTrace,
-} from "./repair/resolved-consensus"
-
-export interface Candidate {
-  /** Stable id (e.g. `cand-0`). */
-  id: string
-  /** The captured unified diff (empty string ⇒ no-patch). */
-  patch: string
-  /** Agent turns this candidate consumed (for cost bookkeeping). */
-  turns: number
-  /** Repo-relative files the diff touches (for owner-coverage). */
-  files: readonly string[]
-  /** The instance's repro-authority gate state (same for every candidate).
-   *  `null` = selection mode does not require repro authority. */
-  baseValidatedRed: boolean | null
-  /** Terminal metadata preserved so upper drivers can classify no-winner
-   *  outcomes from the best terminal candidate instead of flattening them to
-   *  a generic empty-patch miss. */
-  stopReason?: StopReason
-  agentError?: string
-  editCount?: number
-  /** Candidate-family provenance supplied by typed static witness generation. */
-  familyId?: CandidateFamilyId
-  familyReason?: string
-  familyOwnerFiles?: readonly string[]
-  /** SCAFF-06 — executable PUBLIC-issue MWE proof receipt for this candidate.
-   *  Drives the selector's top authority tier (`patched_green` admit /
-   *  `candidate_red` veto; infra/absent = no authority). Absent until a real MWE
-   *  execution feeds it ⇒ selection stays byte-identical. */
-  mweReceipt?: MweProofReceipt
-  /** Typed discovered public-regression receipt. Safety only: keep-green may
-   *  reject regressions, but generic discovered tests do not prove the issue was
-   *  fixed. */
-  publicRegressionReceipt?: PublicRegressionProofReceipt
-  /** Typed repro-consensus receipt. When positive, this is executed issue proof. */
-  reproConsensusReceipt?: ReproConsensusProofReceipt
-  /** OPTIONAL candidate-local public contracts discovered only after this
-   *  patch exposed a typed structural witness. Merged with the global clean
-   *  contract bundle for this candidate alone. */
-  publicContracts?: PublicContractBundle
-}
-
-export interface DerivedCandidateStructuralRepair {
-  readonly family?: CandidateFamily
-  readonly publicContracts?: PublicContractBundle
-}
-
-export interface SelectionPorts {
-  /** Generate candidate `index` with optional localization `seed`. */
-  generate: (index: number, seed: string | undefined) => Promise<Candidate>
-  /** OPTIONAL applyability hard signal; absent/null ⇒ non-empty patches fail open. */
-  applyClean?: (c: Candidate) => Promise<boolean | null>
-  /** OPTIONAL regression hard signal; absent ⇒ null (FAIL-OPEN). */
-  regression?: (c: Candidate) => Promise<boolean | null>
-  /** OPTIONAL public-smoke hard signal; absent ⇒ null (FAIL-OPEN). */
-  smoke?: (c: Candidate) => Promise<boolean | null>
-  /** OPTIONAL patched resolved K-of-N hard signal; absent ⇒ null (FAIL-OPEN). */
-  resolvedKofN?: (c: Candidate) => Promise<ResolvedKofNSignal | null>
-  /** OPTIONAL typed discovered public-regression receipt. */
-  publicRegressionProof?: (c: Candidate) => Promise<PublicRegressionProofReceipt | null>
-  /** OPTIONAL typed repro-consensus receipt. */
-  reproConsensusProof?: (c: Candidate) => Promise<ReproConsensusProofReceipt | null>
-  /** OPTIONAL issue-declared expected-behavior patch-shape signal; absent ⇒ null.
-   *  `true` is ranking credit. `false` is explicit public issue-shape evidence
-   *  that the patch implements the wrong behavior, so the selector rejects it. */
-  declaredExpected?: (c: Candidate) => Promise<boolean | null>
-  /** OPTIONAL parsed-static sanity hard signal. Runs on base + candidate patch.
-   *  Non-empty reason list means the patched tree violates a deterministic
-   *  language/runtime invariant and cannot be submitted. Absent/null ⇒ fail-open. */
-  staticSanity?: (c: Candidate) => Promise<readonly string[] | null>
-  /** SCAFF-06 — OPTIONAL executable public-MWE probe. Runs the extracted public
-   *  MWE against base + this candidate (same env) and returns the typed proof
-   *  receipt. Absent ⇒ candidates keep any generation-set receipt (or none), so
-   *  selection is byte-identical. When present it OVERRIDES a generation-set
-   *  receipt — selection-time execution is the authority. `null` ⇒ no receipt. */
-  mweProof?: (c: Candidate) => Promise<MweProofReceipt | null>
-  /** OPTIONAL typed structural family/contract repair derived from an already-
-   *  generated candidate. This is bounded, generic, and patch-local: it can
-   *  only inspect the candidate's touched files plus public source evidence. */
-  deriveCandidateStructuralRepair?: (
-    c: Candidate,
-  ) => Promise<DerivedCandidateStructuralRepair | undefined>
-}
-
-export interface ScoredEntry {
-  candidate: Candidate
-  hard: HardGateSignals
-  resolvedKofN: ResolvedKofNSignal | null
-  voterQuorum: number | null
-  verdict: CandidateVerdict
-  requiredContractsSatisfied: number
-  contractsSatisfied: number
-}
-
-export type SelectionProofState =
-  | "proof_positive"
-  | "proof_missing"
-  | "infra_blocked"
-  | "candidate_red"
-  | "safety_only"
-
-export type SelectionProofSource = "mwe_public_issue" | "repro_consensus" | "none"
-
-export interface SelectionProofSummary {
-  readonly proofState: SelectionProofState
-  readonly proofSource: SelectionProofSource
-  readonly proofRequiredMissing: boolean
-  readonly contractOnlySubmitted: boolean
-  readonly contractOnlyBlocked: boolean
-  readonly publicMweState?: MweProofState
-  readonly publicRegressionState?: PublicRegressionProofState
-  readonly reproConsensusState?: ReproConsensusProofState
-  readonly repairOnlyCandidates: number
-  readonly submittedCandidateProof: boolean
-}
-
-export type SelectionNoWinnerReason =
-  | "proof_required_missing"
-  | "proof_infra_blocked"
-  | "no_submittable_candidate"
-
-export interface SelectionRiskGateDecision {
-  readonly expand: boolean
-  readonly reasons: readonly string[]
-  readonly shadow?: SelectionRiskGateShadowDecision
-  /** Optional typed runtime packet for the PRE-proof candidate-review screen. */
-  readonly llmEvidencePacket?: LlmEvidencePacket
-  /** Structural patch-budget verdict for candidate 0 — forwarded (not re-parsed)
-   *  so the counterfactual seed/contract path consumes typed facts. Present only
-   *  on the structural arm. */
-  readonly patchBudget?: PatchBudgetVerdict
-}
-
-export interface SelectionRiskGateShadowDecision {
-  readonly expand: boolean
-  readonly reasons: readonly string[]
-}
-
-export interface SelectionRiskGateTelemetry {
-  readonly candidateId: string
-  readonly expanded: boolean
-  readonly reasons: readonly string[]
-  readonly shadow?: SelectionRiskGateShadowTelemetry
-}
-
-export interface SelectionRiskGateShadowTelemetry {
-  readonly expanded: boolean
-  readonly reasons: readonly string[]
-}
-
-export interface SelectionResult {
-  /** Requested candidate count (`args.n`). */
-  attempted: number
-  /** Canonical owner files used for seed generation and owner-coverage scoring. */
-  ownerFiles: readonly string[]
-  /** True when an explicit progressive mode stopped before generating all N. */
-  earlyAccepted: boolean
-  /** Successful generate() calls BEFORE dedup. */
-  successfulGenerations: number
-  /** generate() calls that failed/aborted and were skipped. */
-  generationFailures: number
-  /** Winning candidate (highest-scoring admissible, else constrained
-   *  best-effort). null when 0 generated OR every structurally submittable
-   *  candidate is explicitly hard-rejected. */
-  winner: Candidate | null
-  /** Highest-scoring terminal candidate when nothing was submittable. Lets the
-   *  caller preserve stop-reason/error/edit metadata even when `winner=null`. */
-  terminalCandidate: Candidate | null
-  /** Per-candidate scoring (post-dedup), generation order. */
-  scored: ScoredEntry[]
-  /** How many candidates were admissible. */
-  admissibleCount: number
-  /** Distinct (deduped) candidate count. */
-  generated: number
-  /** v4 proof-clean submit rail active for this selection pass. */
-  proofRequired: boolean
-  /** Why no winner existed, when the selector can distinguish the cause. */
-  noWinnerReason?: SelectionNoWinnerReason
-  /** Adaptive strict@1 gate telemetry, present only when the gate was enabled
-   *  and candidate 0 was produced. */
-  riskGate?: SelectionRiskGateTelemetry
-  /** Counterfactual-select telemetry, present only when the counterfactual arm
-   *  was enabled. `seedGenerated=false` means candidate 0 never expanded. */
-  counterfactual?: CounterfactualTelemetry
-}
-
-export interface CounterfactualTelemetry {
-  /** True when the counterfactual arm was active for this selection pass. */
-  readonly enabled: boolean
-  /** True when a counterfactual seed was generated for candidate 1+. */
-  readonly seedGenerated: boolean
-  /** Structural contracts derived from candidate 0's risk facts. */
-  readonly contracts: readonly string[]
-  /** Candidate ids generated under the counterfactual seed. */
-  readonly candidateIds: readonly string[]
-  /** Counterfactual candidate ids that VIOLATED their contract (excluded from
-   *  winning over candidate 0, kept only as terminal metadata). */
-  readonly violatedCandidateIds: readonly string[]
-}
-
-export type ResolvedKofNMode = "hard" | "soft"
+  Candidate,
+  CounterfactualTelemetry,
+  ResolvedKofNMode,
+  ScoredEntry,
+  SelectionNoWinnerReason,
+  SelectionPorts,
+  SelectionResult,
+  SelectionRiskGateDecision,
+  SelectionRiskGateTelemetry,
+} from "./selection-types"
 
 interface SelectorRepairSeedPlan {
   readonly summary: string
@@ -305,333 +169,6 @@ interface SelectorRepairSeedPlan {
   readonly includeFamilyRepair: boolean
   readonly includeReproFailureTrace: boolean
   readonly includeOracleFailureSeed: boolean
-}
-
-/** Compact, JSON-friendly per-candidate view (NO full patch — too big for the
- *  sidecar). The `reasons` carry the hard-gate rejections + soft signals from
- *  {@link scoreCandidate}, so the cause-vs-symptom story is readable directly:
- *  e.g. `{files:[blockmatrix.py], admissible:false, reasons:[hard:regressionGreen=false]}`
- *  next to `{files:[matexpr.py], admissible:true, reasons:[soft:ownerCoverage=1]}`. */
-export interface CandidateTelemetry {
-  id: string
-  files: readonly string[]
-  admissible: boolean
-  score: number
-  reasons: readonly string[]
-  familyId?: CandidateFamilyId
-  familyReason?: string
-  familyOwnerFiles?: readonly string[]
-  familyCoverageMissing?: readonly string[]
-  requiredContractsSatisfied?: number
-  contractsSatisfied?: number
-  /** SCAFF-06 — executable public-MWE proof verdict for this candidate
-   *  (`patched_green` / `candidate_red` / `execution_failed` / …). Present only
-   *  when an MWE receipt was produced, so a resolved/failed case can be ATTRIBUTED
-   *  to the MWE tier (vs contracts/family) when reading the bench report. */
-  mwe?: MweProofState
-  publicRegression?: PublicRegressionProofState
-  reproConsensus?: ReproConsensusProofState
-  /** v4 proof-clean classification: positive proof, missing proof, infra, or
-   *  safety-only keep-green. */
-  proofState?: SelectionProofState
-  proofSource?: SelectionProofSource
-}
-
-/** Eval-only selection telemetry — what the executor decided and WHY, so a
- *  verify-select campaign self-diagnoses (which fix SITES the N candidates
- *  spanned, which were admissible, which won). NEVER fed to the agent loop. */
-export interface SelectionTelemetry {
-  attempted: number
-  /** Canonical owner files used by this selection pass. */
-  ownerFiles: readonly string[]
-  earlyAccepted: boolean
-  successfulGenerations: number
-  generationFailures: number
-  generated: number
-  admissibleCount: number
-  winnerId: string | null
-  proofRequired?: boolean
-  noWinnerReason?: SelectionNoWinnerReason
-  winningFamilyId?: CandidateFamilyId
-  riskGate?: SelectionRiskGateTelemetry
-  counterfactual?: CounterfactualTelemetry
-  proofSummary?: SelectionProofSummary
-  candidates: readonly CandidateTelemetry[]
-}
-
-const publicRegressionStateOf = (args: {
-  readonly hard: HardGateSignals
-  readonly receipt: PublicRegressionProofReceipt | undefined
-}): PublicRegressionProofState | undefined => {
-  if (args.receipt !== undefined) return args.receipt.state
-  if (args.hard.regressionGreen === true) return "safety_green"
-  if (args.hard.regressionGreen === false) return "candidate_red"
-  return undefined
-}
-
-const reproConsensusStateOf = (args: {
-  readonly resolved: ResolvedKofNSignal | null
-  readonly receipt: ReproConsensusProofReceipt | undefined
-}): ReproConsensusProofState | undefined => {
-  if (args.receipt !== undefined) return args.receipt.state
-  if (resolvedKofNPositive(args.resolved)) return "base_red_candidate_green"
-  if (hardResolvedRejected(args.resolved)) return "base_red_candidate_red"
-  return undefined
-}
-
-const positiveSubmitProofSource = (args: {
-  readonly resolved: ResolvedKofNSignal | null
-  readonly mweReceipt: MweProofReceipt | undefined
-  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
-}): SelectionProofSource => {
-  if (args.mweReceipt?.state === "patched_green") return "mwe_public_issue"
-  if (
-    args.reproConsensusReceipt?.state === "base_red_candidate_green" ||
-    resolvedKofNPositive(args.resolved)
-  ) {
-    return "repro_consensus"
-  }
-  return "none"
-}
-
-const selectionProofState = (args: {
-  readonly resolved: ResolvedKofNSignal | null
-  readonly hard: HardGateSignals
-  readonly mweReceipt: MweProofReceipt | undefined
-  readonly publicRegressionReceipt: PublicRegressionProofReceipt | undefined
-  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
-}): SelectionProofState => {
-  if (
-    positiveSubmitProofSource({
-      resolved: args.resolved,
-      mweReceipt: args.mweReceipt,
-      reproConsensusReceipt: args.reproConsensusReceipt,
-    }) !== "none"
-  ) {
-    return "proof_positive"
-  }
-  if (
-    args.mweReceipt?.state === "execution_failed" ||
-    args.publicRegressionReceipt?.state === "execution_failed" ||
-    args.reproConsensusReceipt?.state === "execution_failed"
-  ) {
-    return "infra_blocked"
-  }
-  if (
-    args.mweReceipt?.state === "candidate_red" ||
-    hardResolvedRejected(args.resolved) ||
-    args.publicRegressionReceipt?.state === "candidate_red" ||
-    args.reproConsensusReceipt?.state === "base_red_candidate_red"
-  ) {
-    return "candidate_red"
-  }
-  if (
-    args.hard.regressionGreen === true ||
-    args.publicRegressionReceipt?.state === "safety_green"
-  ) {
-    return "safety_only"
-  }
-  return "proof_missing"
-}
-
-const selectionProofStateForEntry = (
-  entry: Pick<ScoredEntry, "candidate" | "hard" | "resolvedKofN">,
-): SelectionProofState =>
-  selectionProofState({
-    resolved: entry.resolvedKofN,
-    hard: entry.hard,
-    mweReceipt: entry.candidate.mweReceipt,
-    publicRegressionReceipt: entry.candidate.publicRegressionReceipt,
-    reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
-  })
-
-const hasContractOnlyEvidence = (entry: ScoredEntry): boolean =>
-  entry.requiredContractsSatisfied > 0 ||
-  entry.contractsSatisfied > 0 ||
-  familyAuthorityPresent(entry.candidate)
-
-const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefined => {
-  const winnerEntry =
-    result.winner === null
-      ? undefined
-      : result.scored.find((entry) => entry.candidate.id === result.winner?.id)
-  const focusEntry =
-    winnerEntry ?? result.scored.find((entry) => entry.candidate.patch.trim() !== "")
-  if (focusEntry === undefined) return undefined
-  const proofState = selectionProofState({
-    resolved: focusEntry.resolvedKofN,
-    hard: focusEntry.hard,
-    mweReceipt: focusEntry.candidate.mweReceipt,
-    publicRegressionReceipt: focusEntry.candidate.publicRegressionReceipt,
-    reproConsensusReceipt: focusEntry.candidate.reproConsensusReceipt,
-  })
-  const proofSource = positiveSubmitProofSource({
-    resolved: focusEntry.resolvedKofN,
-    mweReceipt: focusEntry.candidate.mweReceipt,
-    reproConsensusReceipt: focusEntry.candidate.reproConsensusReceipt,
-  })
-  const submittedCandidateProof = winnerEntry !== undefined && proofSource !== "none"
-  const contractOnlySubmitted = winnerEntry !== undefined && !submittedCandidateProof && hasContractOnlyEvidence(winnerEntry)
-  const repairOnlyCandidates = result.scored.filter(
-    (entry) =>
-      entry.candidate.patch.trim() !== "" &&
-      selectionProofStateForEntry(entry) !== "proof_positive" &&
-      hasContractOnlyEvidence(entry),
-  ).length
-  return {
-    proofState,
-    proofSource,
-    proofRequiredMissing: result.noWinnerReason === "proof_required_missing",
-    contractOnlySubmitted,
-    contractOnlyBlocked:
-      result.winner === null && result.noWinnerReason === "proof_required_missing" && repairOnlyCandidates > 0,
-    ...(focusEntry.candidate.mweReceipt !== undefined
-      ? { publicMweState: focusEntry.candidate.mweReceipt.state }
-      : {}),
-    ...(() => {
-      const state = publicRegressionStateOf({
-        hard: focusEntry.hard,
-        receipt: focusEntry.candidate.publicRegressionReceipt,
-      })
-      return state === undefined ? {} : { publicRegressionState: state }
-    })(),
-    ...(() => {
-      const state = reproConsensusStateOf({
-        resolved: focusEntry.resolvedKofN,
-        receipt: focusEntry.candidate.reproConsensusReceipt,
-      })
-      return state === undefined ? {} : { reproConsensusState: state }
-    })(),
-    repairOnlyCandidates,
-    submittedCandidateProof,
-  }
-}
-
-/** Project a {@link SelectionResult} into compact eval-only telemetry (drops the
- *  full candidate patches; keeps files + verdict). Pure. */
-export const summarizeSelection = (result: SelectionResult): SelectionTelemetry => {
-  const proofSummary = summarizeProof(result)
-  return {
-    attempted: result.attempted,
-    ownerFiles: result.ownerFiles,
-    earlyAccepted: result.earlyAccepted,
-    successfulGenerations: result.successfulGenerations,
-    generationFailures: result.generationFailures,
-    generated: result.generated,
-    admissibleCount: result.admissibleCount,
-    winnerId: result.winner?.id ?? null,
-    ...(result.proofRequired ? { proofRequired: true } : {}),
-    ...(result.noWinnerReason !== undefined ? { noWinnerReason: result.noWinnerReason } : {}),
-    ...(result.winner?.familyId !== undefined ? { winningFamilyId: result.winner.familyId } : {}),
-    ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
-    ...(result.counterfactual !== undefined ? { counterfactual: result.counterfactual } : {}),
-    ...(proofSummary !== undefined ? { proofSummary } : {}),
-    candidates: result.scored.map((s) => {
-      const publicRegression =
-        s.candidate.publicRegressionReceipt?.state ??
-        publicRegressionStateOf({ hard: s.hard, receipt: undefined })
-      const reproConsensus =
-        s.candidate.reproConsensusReceipt?.state ??
-        reproConsensusStateOf({ resolved: s.resolvedKofN, receipt: undefined })
-      return {
-        id: s.candidate.id,
-        files: s.candidate.files,
-        admissible: s.verdict.admissible,
-        score: s.verdict.score,
-        reasons: s.verdict.reasons,
-        ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
-        ...(s.candidate.familyReason !== undefined
-          ? { familyReason: s.candidate.familyReason }
-          : {}),
-        ...(s.candidate.familyOwnerFiles !== undefined
-          ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
-          : {}),
-        ...(() => {
-          if (s.candidate.familyId === undefined) return {}
-          const missing = candidateFamilyCoverageMissing(
-            {
-              familyId: s.candidate.familyId,
-              ownerFiles: s.candidate.familyOwnerFiles ?? [],
-            },
-            s.candidate.files,
-          )
-          return missing.length === 0 ? {} : { familyCoverageMissing: missing }
-        })(),
-        requiredContractsSatisfied: s.requiredContractsSatisfied,
-        contractsSatisfied: s.contractsSatisfied,
-        ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
-        ...(publicRegression !== undefined ? { publicRegression } : {}),
-        ...(reproConsensus !== undefined ? { reproConsensus } : {}),
-        proofState: selectionProofStateForEntry(s),
-        proofSource: positiveSubmitProofSource({
-          resolved: s.resolvedKofN,
-          mweReceipt: s.candidate.mweReceipt,
-          reproConsensusReceipt: s.candidate.reproConsensusReceipt,
-        }),
-      }
-    }),
-  }
-}
-
-const fwd = (s: string): string => s.split(sep).join("/").replace(/\\/g, "/")
-
-const relInsideSandbox = (path: string, sandbox: string | undefined): string | null => {
-  if (!isAbsolute(path)) return path
-  if (sandbox === undefined) return null
-  const rel = relative(sandbox, path)
-  return rel === "" || rel.startsWith("..") ? null : fwd(rel)
-}
-
-const normalizePathParts = (path: string): string | null => {
-  const parts: string[] = []
-  for (const part of path.split("/")) {
-    if (part === "" || part === ".") continue
-    if (part === "..") return null
-    parts.push(part)
-  }
-  const out = parts.join("/")
-  return out === "" || out === "dev/null" ? null : out
-}
-
-/** Canonical repo-relative path used by selection owners and candidate patches.
- *  Absolute paths are accepted only when they are inside the active sandbox. */
-export const normalizeSelectionPath = (raw: string, sandbox: string | undefined): string | null => {
-  let p = fwd(raw.trim().replace(/^["'`]+|["'`]+$/g, ""))
-  if (p === "" || p === "/dev/null") return null
-  const rel = relInsideSandbox(p, sandbox)
-  if (rel === null) return null
-  p = rel
-  // Generic selection paths are repo-relative authorities, not raw git diff
-  // headers. Stripping a leading `a/` or `b/` here would collapse real paths
-  // like `a/pkg/file.py` onto `pkg/file.py`.
-  p = p.replace(/^\.\//, "")
-  return normalizePathParts(p)
-}
-
-export const normalizeSelectionPaths = (
-  paths: readonly string[],
-  sandbox: string | undefined,
-): string[] => {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const raw of paths) {
-    const p = normalizeSelectionPath(raw, sandbox)
-    if (p === null || seen.has(p)) continue
-    seen.add(p)
-    out.push(p)
-  }
-  return out
-}
-
-/** Repo-relative files a unified diff touches (its `+++ b/<f>` headers, plus
- *  `--- a/<f>` for pure deletions). Used for owner-coverage scoring. */
-export const filesFromPatch = (patch: string): string[] => {
-  const files = new Set<string>()
-  for (const raw of filesFromUnifiedDiff(patch)) {
-    const f = normalizeSelectionPath(raw, undefined)
-    if (f !== null) files.add(f)
-  }
-  return [...files]
 }
 
 export interface SelectionInputs {
@@ -688,408 +225,6 @@ export const buildSelectionInputs = (args: {
     seeds: Array.from({ length: args.n }, (_, i) => seedFor(i)),
     candidateFamilies: Array.from({ length: args.n }, (_, i) => plannedFamilyFor(i)),
   }
-}
-
-/** Normalize a diff to its `+++ b/` / `--- a/` FILE headers plus `+/-` CONTENT
- *  lines (dropping `@@` hunk-offset noise + context) so two patches dedup only
- *  when they make the SAME edit to the SAME file(s). Keeping the file headers is
- *  deliberate: the SAME content edit on DIFFERENT files is a DIFFERENT fix site
- *  (the diversity the executor exists to span) and must NOT collide. */
-const normalizePatch = (patch: string): string =>
-  patch
-    .split("\n")
-    .filter((l) => /^[+-]/.test(l))
-    .map((l) => l.trimEnd())
-    .join("\n")
-
-/** Fraction of a candidate's files that are closure-ranked owners. `null` when
- *  the candidate touches no file OR no owner set is known (uninformative ⇒
- *  fail-open soft signal, contributes nothing rather than a misleading 0). */
-export const ownerCoverageOf = (
-  files: readonly string[],
-  owners: ReadonlySet<string>,
-): number | null => {
-  if (files.length === 0 || owners.size === 0) return null
-  const hit = files.filter((f) => owners.has(f)).length
-  return hit / files.length
-}
-
-const fullyInsideOwners = (files: readonly string[], owners: ReadonlySet<string>): boolean =>
-  owners.size > 0 && files.length > 0 && files.every((f) => owners.has(f))
-
-const earlyAcceptable = (
-  entry: ScoredEntry,
-  owners: ReadonlySet<string>,
-  requireHardResolved: boolean,
-  mode: SelectorMode,
-): boolean => {
-  if (!entry.verdict.admissible) return false
-  // Early-stop authority is STRICTER than admissibility: fail-open `null` gates
-  // keep a candidate admissible, but they are not strong enough to stop the
-  // loop. The progressive shortcut requires an explicitly clean-applying patch.
-  if (!entry.hard.patchProduced || entry.hard.applyClean !== true) return false
-  const resolved = entry.hard.patchedResolvedKofN
-  // Executed proof receipt: a positive validated repro quorum OR an executed
-  // clean keep-green witness result.
-  const executedProof = resolvedKofNPositive(resolved) || entry.hard.regressionGreen === true
-  if (mode === "clean") {
-    // T-SEL-13: clean early-stop requires an EXECUTED proof receipt ONLY. No
-    // static owner/family heuristic may stop the search by itself — a candidate
-    // fully inside the (heuristic) owner set cannot early-accept without proof,
-    // and strong static owner confidence never short-circuits the loop.
-    return executedProof
-  }
-  // research/legacy cost shortcut (byte-identical): owner-coverage gated.
-  // No owner authority => no early stop (collapses to "first positive wins").
-  if (owners.size === 0) return false
-  // A positive candidate may stop the loop only when every touched file is inside
-  // the owner set; broad symptom+stray patches still face later owner siblings.
-  if (!fullyInsideOwners(entry.candidate.files, owners)) return false
-  if (requireHardResolved) return resolvedKofNPositive(resolved)
-  return executedProof
-}
-
-const voterQuorumOf = (
-  mode: ResolvedKofNMode,
-  resolved: ResolvedKofNSignal | null,
-): number | null => (mode === "soft" ? resolvedKofNVoterQuorum(resolved) : null)
-
-const terminalAuthorityRank = (candidate: Candidate): number => {
-  if (
-    candidate.stopReason === "max_turns" ||
-    candidate.stopReason === "budget_exhausted" ||
-    candidate.stopReason === "aborted"
-  ) {
-    return 2
-  }
-  if (candidate.stopReason === "error" || candidate.stopReason === "refusal") return 1
-  return 0
-}
-
-const strongerTerminalRepresentative = (current: Candidate, candidate: Candidate): Candidate =>
-  terminalAuthorityRank(candidate) > terminalAuthorityRank(current) ? candidate : current
-
-const minimalityOf = (args: {
-  readonly isEmpty: boolean
-  readonly size: number
-  readonly minB: number
-  readonly maxB: number
-}): number | null => {
-  if (args.isEmpty) return null
-  return args.maxB === args.minB ? 1 : 1 - (args.size - args.minB) / (args.maxB - args.minB)
-}
-
-const requireHardResolvedForEarlyAccept = (
-  ports: SelectionPorts,
-  mode: ResolvedKofNMode | undefined,
-): boolean => ports.resolvedKofN !== undefined && (mode ?? "hard") === "hard"
-
-const declaredExpectedMatchOf = async (
-  c: Candidate,
-  isEmpty: boolean,
-  ports: SelectionPorts,
-): Promise<boolean | null> => {
-  if (isEmpty) return null
-  return (await ports.declaredExpected?.(c)) ?? null
-}
-
-const staticSanityReasonsOf = async (
-  c: Candidate,
-  isEmpty: boolean,
-  ports: SelectionPorts,
-): Promise<readonly string[]> => {
-  if (isEmpty) return []
-  return (await ports.staticSanity?.(c)) ?? []
-}
-
-const hardResolvedRejected = (signal: ResolvedKofNSignal | null): boolean => {
-  if (signal === null) return false
-  return !isValidResolvedKofN(signal) || signal.votes < signal.k
-}
-
-type ResolvedKofNWithTrace = ResolvedKofNSignal & {
-  readonly reproTrace?: ReproConsensusTrace
-}
-
-const reproTraceOf = (signal: ResolvedKofNSignal | null): ReproConsensusTrace | undefined =>
-  signal === null ? undefined : (signal as ResolvedKofNWithTrace).reproTrace
-
-const cleanExecutableProof = (
-  resolved: ResolvedKofNSignal | null,
-  mweReceipt: MweProofReceipt | undefined,
-  reproConsensusReceipt: ReproConsensusProofReceipt | undefined,
-): boolean =>
-  positiveSubmitProofSource({ resolved, mweReceipt, reproConsensusReceipt }) !== "none"
-
-const cleanUnprovenMultiSourceDriftRisk = (args: {
-  readonly mode: SelectorMode
-  readonly candidate: Candidate
-  readonly owners: ReadonlySet<string>
-  readonly hard: HardGateSignals
-  readonly resolved: ResolvedKofNSignal | null
-  readonly mweReceipt: MweProofReceipt | undefined
-  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
-  readonly requiredContractsSatisfied: number
-  readonly contractsSatisfied: number
-}): boolean => {
-  if (args.mode !== "clean") return false
-  if (
-    cleanExecutableProof(
-      args.resolved,
-      args.mweReceipt,
-      args.reproConsensusReceipt,
-    ) ||
-    args.requiredContractsSatisfied > 0 ||
-    args.contractsSatisfied > 0
-  ) {
-    return false
-  }
-  const budget = analyzePatchBudget(args.candidate.patch, {
-    ownerFiles: [...args.owners],
-  }).budget
-  return budget.sourceFiles > 1
-}
-
-const CLEAN_DRIFT_REJECT_REASON =
-  "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)"
-
-const MWE_CANDIDATE_RED_REJECT_REASON =
-  "hard:mweProof=candidate_red (public issue MWE still fails after patch)"
-
-const CLEAN_AUTHORITY_MISSING_REJECT_REASON =
-  "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)"
-
-const PROOF_REQUIRED_MISSING_REJECT_REASON =
-  "hard:proofRequiredMissing=true (proof-required mode requires positive executed proof; safety or structural evidence alone cannot submit)"
-
-const PROOF_INFRA_BLOCKED_REJECT_REASON =
-  "hard:proofInfraBlocked=true (public proof execution failed; do not treat this as candidate correctness)"
-
-const applyCleanDriftHardGate = (verdict: CandidateVerdict, risk: boolean): CandidateVerdict =>
-  risk
-    ? {
-        admissible: false,
-        score: verdict.score,
-        reasons: [...verdict.reasons, CLEAN_DRIFT_REJECT_REASON],
-      }
-    : verdict
-
-const applyMweProofHardGate = (
-  verdict: CandidateVerdict,
-  mode: SelectorMode,
-  receipt: MweProofReceipt | undefined,
-): CandidateVerdict =>
-  mode === "clean" && receipt?.state === "candidate_red"
-    ? {
-        admissible: false,
-        score: verdict.score,
-        reasons: [...verdict.reasons, MWE_CANDIDATE_RED_REJECT_REASON],
-      }
-    : verdict
-
-const familyAuthorityPresent = (candidate: Candidate): boolean =>
-  candidateFamilyRank(
-    candidate.familyId === undefined
-      ? undefined
-      : {
-          familyId: candidate.familyId,
-          ownerFiles: candidate.familyOwnerFiles ?? [],
-        },
-    candidate.files,
-  ) > 0
-
-const cleanProofAuthorityMissing = (args: {
-  readonly mode: SelectorMode
-  readonly owners: ReadonlySet<string>
-  readonly candidate: Candidate
-  readonly hard: HardGateSignals
-  readonly resolved: ResolvedKofNSignal | null
-  readonly mweReceipt: MweProofReceipt | undefined
-  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
-  readonly requiredContractsSatisfied: number
-  readonly contractsSatisfied: number
-}): boolean =>
-  args.mode === "clean" &&
-  args.candidate.patch.trim() !== "" &&
-  args.owners.size === 0 &&
-  !cleanExecutableProof(
-    args.resolved,
-    args.mweReceipt,
-    args.reproConsensusReceipt,
-  ) &&
-  args.requiredContractsSatisfied === 0 &&
-  args.contractsSatisfied === 0 &&
-  !familyAuthorityPresent(args.candidate)
-
-const applyCleanAuthorityHardGate = (
-  verdict: CandidateVerdict,
-  missing: boolean,
-): CandidateVerdict =>
-  missing
-    ? {
-        admissible: false,
-        score: verdict.score,
-        reasons: [...verdict.reasons, CLEAN_AUTHORITY_MISSING_REJECT_REASON],
-      }
-    : verdict
-
-const applyProofRequiredHardGate = (
-  verdict: CandidateVerdict,
-  enabled: boolean,
-  proofState: SelectionProofState,
-): CandidateVerdict => {
-  if (!enabled || proofState === "proof_positive") return verdict
-  return {
-    admissible: false,
-    score: verdict.score,
-    reasons: [
-      ...verdict.reasons,
-      proofState === "infra_blocked"
-        ? PROOF_INFRA_BLOCKED_REJECT_REASON
-        : PROOF_REQUIRED_MISSING_REJECT_REASON,
-    ],
-  }
-}
-
-const applyStaticSanityHardGate = (
-  verdict: CandidateVerdict,
-  reasons: readonly string[],
-): CandidateVerdict =>
-  reasons.length === 0
-    ? verdict
-    : {
-        admissible: false,
-        score: verdict.score,
-        reasons: [...verdict.reasons, ...reasons],
-      }
-
-const DECLARED_EXPECTED_REJECT_REASON =
-  "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)"
-
-const applyDeclaredExpectedHardGate = (
-  verdict: CandidateVerdict,
-  declaredExpectedMatch: boolean | null,
-): CandidateVerdict =>
-  declaredExpectedMatch === false
-    ? {
-        admissible: false,
-        score: verdict.score,
-        reasons: [...verdict.reasons, DECLARED_EXPECTED_REJECT_REASON],
-      }
-    : verdict
-
-/**
- * Score under the active authority mode (T-AUTH-01 / T-SEL-02). `declaredExpected`
- * is a `researchOnly` signal: it may hard-reject ONLY in `research` mode. In
- * `clean` mode it never vetoes — the answer-key matcher carries no clean
- * benchmark authority (it survives only as research telemetry behind rca-gates).
- */
-const scoreWithAuthority = (
-  hard: HardGateSignals,
-  soft: SoftScoreSignals,
-  declaredExpectedMatch: boolean | null,
-  mode: SelectorMode,
-): CandidateVerdict => {
-  const verdict = scoreCandidate(hard, soft, { mode })
-  return mode === "clean" ? verdict : applyDeclaredExpectedHardGate(verdict, declaredExpectedMatch)
-}
-
-const countAddedSourceLines = (patch: string): number => {
-  let n = 0
-  for (const line of patch.split("\n")) if (line.startsWith("+") && !line.startsWith("+++")) n += 1
-  return n
-}
-
-/**
- * Project a scored candidate into the clean-selector lexicographic tiers
- * (T-SEL-06). Executable proof (`votes/k`) + executed keep-green are the top
- * tiers. The public-contract tier (T-CON-10) is evaluated from `contracts` — but
- * only GENUINELY-sourced contracts the caller supplies; it is empty by default
- * (the closure owner ranking is heuristic and must not be promoted into this
- * tier — see runSelection). The candidate-family tier (T-GEN-09) stays 0 until
- * authoritative family evidence (T-OWN-12) exists; both slot in ABOVE minimality
- * WITHOUT disturbing the executable/structural tiers above.
- */
-const buildLexTiers = (
-  entry: ScoredEntry,
-  order: number,
-  owners: ReadonlySet<string>,
-  contracts: PublicContractBundle,
-): LexTiers => {
-  const kofn = entry.resolvedKofN ?? entry.hard.patchedResolvedKofN
-  const proofStrength =
-    kofn !== null && isValidResolvedKofN(kofn) && kofn.k > 0 ? kofn.votes / kofn.k : 0
-  const budget = analyzePatchBudget(entry.candidate.patch, { ownerFiles: [...owners] }).budget
-  const candidate = {
-    touchedFiles: entry.candidate.files,
-    touchedSymbols: diffTouchedSymbols(entry.candidate.patch),
-  }
-  const effectiveContracts =
-    mergePublicContractBundles(contracts, entry.candidate.publicContracts) ?? contracts
-  return {
-    mweProof: mweProofAuthorityRank(entry.candidate.mweReceipt),
-    proofStrength,
-    executedKeepGreen: entry.hard.regressionGreen === true ? 1 : 0,
-    requiredContractsSatisfied: requiredContractsSatisfiedCount(effectiveContracts, candidate),
-    contractsSatisfied: contractsSatisfiedCount(effectiveContracts, candidate),
-    familyRank: candidateFamilyRank(
-      entry.candidate.familyId === undefined
-        ? undefined
-        : {
-            familyId: entry.candidate.familyId,
-            ownerFiles: entry.candidate.familyOwnerFiles ?? [],
-          },
-      entry.candidate.files,
-    ),
-    sourceFiles: budget.sourceFiles,
-    addedLines: countAddedSourceLines(entry.candidate.patch),
-    newDefs: budget.newDefs,
-    newFiles: budget.newFiles,
-    order,
-  }
-}
-
-const declaredExpectedRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.includes(DECLARED_EXPECTED_REJECT_REASON)
-
-const cleanDriftRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.includes(CLEAN_DRIFT_REJECT_REASON)
-
-const mweCandidateRedRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.includes(MWE_CANDIDATE_RED_REJECT_REASON)
-
-const cleanAuthorityMissingRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.includes(CLEAN_AUTHORITY_MISSING_REJECT_REASON)
-
-const proofRequiredRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.includes(PROOF_REQUIRED_MISSING_REJECT_REASON) ||
-  verdict.reasons.includes(PROOF_INFRA_BLOCKED_REJECT_REASON)
-
-// B#3: a static-sanity hard reject is a DETERMINISTIC parse-level "this patch is
-// broken" signal (e.g. callback arity mismatch, None-subscript mutation). Like
-// the other hard vetoes it must also bar the best-effort fallback — otherwise a
-// no-other-candidate run resurrects the broken patch via best-effort and submits
-// it. (Matches the audit rule: selectBestEffort must not resubmit a candidate
-// carrying explicit negative evidence.)
-const staticSanityRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.some((reason) => reason.startsWith("hard:staticSanity="))
-
-const bestEffortEligible = (
-  entry: Pick<ScoredEntry, "hard" | "verdict">,
-  mode: SelectorMode,
-): boolean => {
-  if (!entry.hard.patchProduced) return false
-  if (entry.hard.applyClean === false) return false
-  if (entry.hard.regressionGreen === false) return false
-  if (mode !== "clean" && entry.hard.smokeGreen === false) return false
-  if (hardResolvedRejected(entry.hard.patchedResolvedKofN)) return false
-  if (declaredExpectedRejected(entry.verdict)) return false
-  if (cleanDriftRejected(entry.verdict)) return false
-  if (mweCandidateRedRejected(entry.verdict)) return false
-  if (cleanAuthorityMissingRejected(entry.verdict)) return false
-  if (proofRequiredRejected(entry.verdict)) return false
-  if (staticSanityRejected(entry.verdict)) return false
-  return true
 }
 
 /**
@@ -1209,7 +344,8 @@ export const runSelection = async (args: {
       : {
           ...candidate,
           publicContracts:
-            mergePublicContractBundles(candidate.publicContracts, publicContracts) ?? publicContracts,
+            mergePublicContractBundles(candidate.publicContracts, publicContracts) ??
+            publicContracts,
         }
   const withFamily = (candidate: Candidate, family: CandidateFamily): Candidate => ({
     ...candidate,
@@ -1263,7 +399,13 @@ export const runSelection = async (args: {
     }
     const derived = await args.ports.deriveCandidateStructuralRepair?.(candidate)
     if (derived?.family !== undefined) {
-      return maybeRepairFamilyCoverage(candidate, derived.family, seed, index, derived.publicContracts)
+      return maybeRepairFamilyCoverage(
+        candidate,
+        derived.family,
+        seed,
+        index,
+        derived.publicContracts,
+      )
     }
     return withCandidatePublicContracts(candidate, derived?.publicContracts)
   }
@@ -1338,8 +480,7 @@ export const runSelection = async (args: {
       mweReceipt: (await args.ports.mweProof?.(c)) ?? c.mweReceipt,
       publicRegressionReceipt:
         (await args.ports.publicRegressionProof?.(c)) ?? c.publicRegressionReceipt,
-      reproConsensusReceipt:
-        (await args.ports.reproConsensusProof?.(c)) ?? c.reproConsensusReceipt,
+      reproConsensusReceipt: (await args.ports.reproConsensusProof?.(c)) ?? c.reproConsensusReceipt,
     }
     portsMemo.set(c, probed)
     return probed
@@ -1489,11 +630,6 @@ export const runSelection = async (args: {
     )
   }
 
-  const bounded = (s: string | undefined, n = 1800): string => {
-    const v = s ?? ""
-    return v.length > n ? v.slice(-n) : v
-  }
-
   const bestMissingFamily = (scored: readonly ScoredEntry[]): CandidateFamily | undefined => {
     const ranked = scored
       .map((entry, order) => ({
@@ -1520,33 +656,38 @@ export const runSelection = async (args: {
   const familyRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
     const family = bestMissingFamily(scored)
     if (family === undefined) return undefined
-    return seedForCandidateFamilyCoverageRepair(
-      family,
-      candidateFamilyCoverageMissing(family, []),
-    )
+    return seedForCandidateFamilyCoverageRepair(family, candidateFamilyCoverageMissing(family, []))
   }
 
   const staticSanityReasons = (entry: ScoredEntry): readonly string[] =>
     entry.verdict.reasons.filter((reason) => reason.startsWith("hard:staticSanity="))
 
   const staticSanityInstruction = (reason: string): string => {
-    const noneMutation =
-      /^hard:staticSanity=pythonNoneSubscriptMutation\(([^)]+)\)$/.exec(reason)?.[1]
+    const noneMutation = /^hard:staticSanity=pythonNoneSubscriptMutation\(([^)]+)\)$/.exec(
+      reason,
+    )?.[1]
     if (noneMutation !== undefined) {
       return `Static sanity failure: \`${noneMutation}\` can be None before a subscript write. Regenerate so every \`${noneMutation}[...]\` mutation is protected by a non-None mapping invariant, or guard each mutation site that may observe None.`
     }
-    const arity =
-      /^hard:staticSanity=pythonCallbackArityMismatch\(([^:]+):(\d+)->(\d+)\)$/.exec(reason)
+    const arity = /^hard:staticSanity=pythonCallbackArityMismatch\(([^:]+):(\d+)->(\d+)\)$/.exec(
+      reason,
+    )
     if (arity !== null) {
       return `Static sanity failure: callback \`${arity[1]}\` is registered with positional arity ${arity[3]}, but its definition accepts ${arity[2]}. Regenerate so the registration and callback signature agree exactly.`
     }
     return `Static sanity failure: ${reason.replace("hard:staticSanity=", "")}. Regenerate from the base tree and remove this deterministic parse-level violation without dropping the stronger structural fix.`
   }
 
-  const staticSanityRepairSeed = (scored: readonly ScoredEntry[], winner: Candidate | null): string | undefined => {
-    const winnerEntry = winner === null ? undefined : scored.find((entry) => entry.candidate.id === winner.id)
+  const staticSanityRepairSeed = (
+    scored: readonly ScoredEntry[],
+    winner: Candidate | null,
+  ): string | undefined => {
+    const winnerEntry =
+      winner === null ? undefined : scored.find((entry) => entry.candidate.id === winner.id)
     const target = scored
-      .filter((entry) => entry.candidate.patch.trim() !== "" && staticSanityReasons(entry).length > 0)
+      .filter(
+        (entry) => entry.candidate.patch.trim() !== "" && staticSanityReasons(entry).length > 0,
+      )
       .sort(
         (a, b) =>
           b.requiredContractsSatisfied - a.requiredContractsSatisfied ||
@@ -1571,97 +712,6 @@ export const runSelection = async (args: {
       .filter((s) => s.trim() !== "")
       .join("\n\n")
   }
-
-  const mweProofReceiptFacts = (candidate: Candidate): ProofReceiptFact[] => {
-    const receipt = candidate.mweReceipt
-    if (receipt === undefined) return []
-    const patchHash =
-      candidate.patch.trim() === "" ? undefined : candidatePatchHash(candidate.patch)
-    const state: ProofReceiptState =
-      receipt.state === "base_red"
-        ? "base_red"
-        : receipt.state === "base_not_red"
-          ? "base_green"
-          : receipt.state === "patched_green"
-            ? "candidate_green"
-            : receipt.state === "candidate_red"
-              ? "candidate_red"
-              : receipt.state === "execution_failed"
-                ? "execution_failed"
-                : "not_run"
-    return [
-      {
-        source: "public_mwe",
-        state,
-        ...(receipt.command !== undefined ? { command: receipt.command } : {}),
-        ...(patchHash !== undefined ? { candidatePatchHash: patchHash } : {}),
-      },
-    ]
-  }
-
-  const publicRegressionReceiptFacts = (candidate: Candidate): ProofReceiptFact[] => {
-    const receipt = candidate.publicRegressionReceipt
-    if (receipt === undefined) return []
-    const patchHash =
-      candidate.patch.trim() === "" ? undefined : candidatePatchHash(candidate.patch)
-    const state: ProofReceiptState =
-      receipt.state === "candidate_red"
-        ? "candidate_red"
-        : receipt.state === "safety_green"
-          ? "candidate_green"
-          : receipt.state === "execution_failed"
-            ? "execution_failed"
-            : "not_run"
-    return [
-      {
-        source: "discovered_regression",
-        state,
-        ...(patchHash !== undefined ? { candidatePatchHash: patchHash } : {}),
-      },
-    ]
-  }
-
-  const reproConsensusReceiptFacts = (candidate: Candidate): ProofReceiptFact[] => {
-    const receipt = candidate.reproConsensusReceipt
-    if (receipt === undefined) return []
-    const patchHash =
-      candidate.patch.trim() === "" ? undefined : candidatePatchHash(candidate.patch)
-    const sample = receipt.reproTrace.samples.find((trace) => trace.outcome !== "resolved")
-    const state: ProofReceiptState =
-      receipt.state === "base_red_candidate_green"
-        ? "candidate_green"
-        : receipt.state === "base_red_candidate_red"
-          ? "candidate_red"
-          : receipt.state === "execution_failed"
-            ? "execution_failed"
-            : "not_run"
-    return [
-      {
-        source: "repro_consensus",
-        state,
-        ...(receipt.state.startsWith("base_red") ? { baseValidatedRed: true } : {}),
-        ...(sample?.stdoutTail !== undefined && sample.stdoutTail.trim() !== ""
-          ? { stdoutTail: bounded(sample.stdoutTail, 600) }
-          : {}),
-        ...(sample?.stderrTail !== undefined && sample.stderrTail.trim() !== ""
-          ? { stderrTail: bounded(sample.stderrTail, 600) }
-          : {}),
-        ...(patchHash !== undefined ? { candidatePatchHash: patchHash } : {}),
-      },
-    ]
-  }
-
-  const hardReasonState = (reason: string): ProofReceiptState =>
-    reason.includes("proofInfraBlocked")
-      ? "execution_failed"
-      : reason.includes("proofRequiredMissing")
-        ? "not_run"
-      : /candidate_red|=false|red\b/.test(reason)
-      ? "candidate_red"
-      : reason.includes("staticSanity")
-        ? "static_only"
-        : "not_run"
-
   const repairPacketText = (
     scored: readonly ScoredEntry[],
     seed: string,
@@ -1678,7 +728,9 @@ export const runSelection = async (args: {
         ...reproConsensusReceiptFacts(entry.candidate),
       ]),
       ...scored
-        .flatMap((entry) => entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2))
+        .flatMap((entry) =>
+          entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2),
+        )
         .map((reason) => ({ source: reason, state: hardReasonState(reason) })),
     ]
     const ownerFiles = [
@@ -1721,7 +773,9 @@ export const runSelection = async (args: {
       proofReceipts,
       contracts,
       repairGuidance: seed,
-      ...(args.verificationTarget !== undefined ? { verificationTarget: args.verificationTarget } : {}),
+      ...(args.verificationTarget !== undefined
+        ? { verificationTarget: args.verificationTarget }
+        : {}),
     })
     args.recordLlmEvidencePacket?.(packet)
     return renderLlmEvidencePacket(packet)
@@ -1758,7 +812,7 @@ export const runSelection = async (args: {
   const oracleFailureRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
     const patched = scored.filter(hasNonEmptyPatch)
     const proofStates = patched.map((entry) => selectionProofStateForEntry(entry))
-    const plan = (() : SelectorRepairSeedPlan | undefined => {
+    const plan = ((): SelectorRepairSeedPlan | undefined => {
       if (
         proofRequired &&
         patched.length > 0 &&
@@ -2062,9 +1116,7 @@ export const runSelection = async (args: {
     if (winner === null) {
       const nonEmpty = scored.filter((entry) => entry.candidate.patch.trim() !== "")
       if (proofRequired && nonEmpty.length > 0) {
-        const proofStates = nonEmpty.map((entry) =>
-          selectionProofStateForEntry(entry),
-        )
+        const proofStates = nonEmpty.map((entry) => selectionProofStateForEntry(entry))
         noWinnerReason = proofStates.every((state) => state === "infra_blocked")
           ? "proof_infra_blocked"
           : "proof_required_missing"
