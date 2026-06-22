@@ -39,6 +39,7 @@ import {
   clampPatchGenConcurrency,
   resolveGlobalPatchGenBudget,
 } from "./token-budget"
+import { absorbFullRemoteResult } from "./verdict-buckets"
 
 // Re-export the public surface so existing importers (tests + callers) keep
 // resolving these from "./full" after the box-session.ts extraction.
@@ -109,10 +110,7 @@ const accumulateRelaunchAttempt = (
   result: FullRemoteResult,
 ): void => {
   if (result.reportPath !== undefined) reportPaths.push(result.reportPath)
-  for (const id of result.resolved ?? []) acc.resolved.add(id)
-  for (const id of result.unresolved ?? []) acc.unresolved.add(id)
-  for (const id of result.errored ?? []) acc.errored.add(id)
-  for (const id of result.emptyPatch ?? []) acc.emptyPatch.add(id)
+  absorbFullRemoteResult(acc, result)
 }
 
 const remainingRelaunchInstances = (

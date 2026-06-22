@@ -252,6 +252,19 @@ describe("loadVerdicts — both report shapes", () => {
     expect([...v.errored]).toEqual(["django__django-4"])
   })
 
+  test("duplicate harness ids keep one strongest bucket per instance", () => {
+    const v = loadVerdicts({
+      resolved_ids: ["demo__1"],
+      unresolved_ids: ["demo__1", "demo__2"],
+      error_ids: ["demo__2", "demo__3"],
+      empty_patch_ids: ["demo__3", "demo__4"],
+    })
+    expect([...v.resolved]).toEqual(["demo__1"])
+    expect([...v.unresolved]).toEqual(["demo__2"])
+    expect([...v.errored]).toEqual(["demo__3"])
+    expect([...v.emptyPatch]).toEqual(["demo__4"])
+  })
+
   test("both shapes yield equivalent RunVerdicts for equivalent data", () => {
     const a = loadVerdicts(ourReport)
     const b = loadVerdicts(harnessReport)
@@ -351,6 +364,84 @@ describe("loadVerdicts — both report shapes", () => {
       blockedEnvFailed: null,
       contractOnlyBlocked: null,
       contractOnlySubmitted: null,
+      packetizedGenerationCount: null,
+      packetizedRepairCount: null,
+      packetizedSelectionExplanationCount: null,
+    })
+  })
+
+  test("duplicate perInstance rows keep the strongest verdict and dedupe fallback proof totals", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      proofTotals: undefined,
+      perInstance: [
+        {
+          id: "demo__same",
+          passed: false,
+          patchBytes: 0,
+          submittedCandidateProof: true,
+          failure: { termination: "completed_unresolved", signals: ["empty_patch"] },
+        },
+        {
+          id: "demo__same",
+          passed: true,
+          patchBytes: 20,
+          submittedCandidateProof: true,
+          scoreLabel: "official_harness",
+        },
+        {
+          id: "demo__other",
+          passed: false,
+          patchBytes: 0,
+          proofRequiredMissing: true,
+          failure: { termination: "completed_unresolved", signals: [] },
+        },
+      ],
+    })
+    expect([...v.resolved]).toEqual(["demo__same"])
+    expect([...v.emptyPatch]).toEqual(["demo__other"])
+    expect(v.unresolved.has("demo__same")).toBe(false)
+    expect([...v.unresolved]).toEqual([])
+    expect(v.reportTotals).toEqual({
+      submittedWithProof: 1,
+      blockedProofMissing: 1,
+      blockedEnvFailed: 0,
+      contractOnlyBlocked: 0,
+      contractOnlySubmitted: 0,
+      packetizedGenerationCount: null,
+      packetizedRepairCount: null,
+      packetizedSelectionExplanationCount: null,
+    })
+  })
+
+  test("duplicate perInstance rows derive proof-missing telemetry from the canonical row only", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      proofTotals: undefined,
+      perInstance: [
+        {
+          id: "demo__same",
+          passed: false,
+          patchBytes: 0,
+          proofRequiredMissing: true,
+          failure: { termination: "completed_unresolved", signals: ["empty_patch"] },
+        },
+        {
+          id: "demo__same",
+          passed: true,
+          patchBytes: 20,
+          scoreLabel: "official_harness",
+        },
+      ],
+    })
+    expect([...v.resolved]).toEqual(["demo__same"])
+    expect([...v.proofMissing]).toEqual([])
+    expect(v.reportTotals).toEqual({
+      submittedWithProof: 0,
+      blockedProofMissing: 0,
+      blockedEnvFailed: 0,
+      contractOnlyBlocked: 0,
+      contractOnlySubmitted: 0,
       packetizedGenerationCount: null,
       packetizedRepairCount: null,
       packetizedSelectionExplanationCount: null,

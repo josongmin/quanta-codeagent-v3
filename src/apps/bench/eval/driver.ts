@@ -108,8 +108,8 @@ import type {
 } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
-import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
+import { buildRepairRoundSeedMessage } from "@/runner/batch/eval/repair/llm-evidence"
 import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
 import { buildWiring, emitSandbox, NullStream, ObservationError, type Wiring } from "./report"
@@ -479,6 +479,7 @@ const runRepairPhase = async (
   let repairFalseGreen = false
   let repairFalseRed = false
   let repairRounds = 0
+  const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: K-of-N RESOLVED majority gate when the knob is on AND a
   // reproducing set exists; else byte-identical `repair.validate ?? defaultValidate`.
   const validate = buildReproVoteValidate(
@@ -509,11 +510,14 @@ const runRepairPhase = async (
             closureHint,
           ),
         validate,
-        // WS2 widen: bind sibling co-change owners into every repair seed (the
-        // gate's `sibling_coverage_missing` record made actionable for the
-        // model). Empty list ⇒ byte-identical to the base builder.
-        buildContext: (ctxArgs) =>
-          (repair.buildContext ?? buildRepairContext)({ ...ctxArgs, siblingOwners }),
+        buildContext: (ctxArgs) => {
+          if (repair.buildContext !== undefined) {
+            return repair.buildContext({ ...ctxArgs, siblingOwners })
+          }
+          const repairSeed = buildRepairRoundSeedMessage({ ...ctxArgs, siblingOwners })
+          recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)
+          return repairSeed.seedMsg
+        },
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
@@ -535,6 +539,7 @@ const runRepairPhase = async (
     primaryFalseGreen: repairFalseGreen,
     primaryFalseRed: repairFalseRed,
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
+    ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
   }
 }
 

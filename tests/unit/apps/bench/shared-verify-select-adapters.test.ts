@@ -17,4 +17,9 @@ describe("apps bench driver shared verify-select adapters", () => {
     expect(SHARED_DRIVER_SRC).toContain('from "./regression-oracle-adapter"')
     expect(SHARED_DRIVER_SRC).toContain('from "./repo-regression-discovery-adapter"')
   })
+
+  test("apps driver routes repair llm evidence through the bench-local repair facade", () => {
+    expect(APP_DRIVER_SRC).toContain('from "./repair/llm-evidence"')
+    expect(APP_DRIVER_SRC).not.toContain('from "@/runner/batch/eval/repair/llm-evidence"')
+  })
 })

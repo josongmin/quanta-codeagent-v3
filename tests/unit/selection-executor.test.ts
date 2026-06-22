@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test"
 import {
+  buildCandidateReviewLlmEvidencePacket,
+  type LlmEvidencePacket,
+} from "@/runner/batch/eval/llm-evidence-packet"
+import {
   buildMultiSiteFamilyContract,
   buildOwnerMustTouchContracts,
 } from "@/runner/batch/eval/public-contract-bundle"
@@ -1028,6 +1032,42 @@ describe("runSelection", () => {
     )
   })
 
+  it("capped discovered-regression keep-green stays proof-missing, not safety-only", async () => {
+    const { gen } = genFrom([
+      cand({
+        id: "cand-0",
+        patch: patchForFiles(["pkg/a.py"]),
+        files: ["pkg/a.py"],
+      }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: new Set(["pkg/a.py"]),
+      ports: {
+        generate: gen,
+        regression: async () => null,
+        publicRegressionProof: async () => ({
+          state: "coverage_capped",
+          regressionGreen: true,
+          candidateTests: ["tests/test_a.py", "tests/test_b.py"],
+          sourceEvidence: new Map(),
+          baseGreenTests: ["tests/test_a.py"],
+          executedTests: ["tests/test_a.py"],
+          failures: [],
+          cappedWitnesses: { discovered: 2, executed: 1 },
+        }),
+      },
+    })
+
+    const summary = summarizeSelection(r)
+    expect(summary.proofSummary?.publicRegressionState).toBe("coverage_capped")
+    expect(summary.proofSummary?.proofState).toBe("proof_missing")
+    expect(summary.candidates[0]?.publicRegression).toBe("coverage_capped")
+    expect(summary.candidates[0]?.proofState).toBe("proof_missing")
+  })
+
   it("clean mode allows multi-source candidates when a public multi-site contract is satisfied", async () => {
     const contractComplete = cand({
       id: "cand-0",
@@ -1129,6 +1169,42 @@ describe("runSelection", () => {
     expect(r.riskGate).toEqual({ candidateId: "cand-0", expanded: false, reasons: [] })
     expect(r.successfulGenerations).toBe(1)
     expect(r.winner?.id).toBe("cand-0")
+  })
+
+  it("riskGate records candidate_review runtime packets when the gate emits them", async () => {
+    const recorded: LlmEvidencePacket[] = []
+    const reviewPacket = buildCandidateReviewLlmEvidencePacket({
+      problemStatement: "Axis inversion still fails when limits are preserved.",
+      candidatePatchHash: "deadbeef",
+      candidateFiles: ["x.py"],
+      ownerEvidence: [
+        {
+          file: "x.py",
+          symbols: ["invert_axis"],
+          provenance: "selection-owner",
+          sourceSlice: "def invert_axis(ax):\n    ax.set_xlim(...)",
+        },
+      ],
+    })
+    await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(["x.py"]),
+      riskGate: async () => ({
+        expand: false,
+        reasons: [],
+        llmEvidencePacket: reviewPacket,
+      }),
+      recordLlmEvidencePacket: (packet) => {
+        recorded.push(packet)
+      },
+      ports: {
+        generate: async () => cand({ id: "cand-0", patch: "+++ b/x.py\n+fix", files: ["x.py"] }),
+      },
+    })
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]?.stage).toBe("candidate_review")
+    expect(recorded[0]?.ownerEvidence[0]?.sourceSlice).toContain("invert_axis")
   })
 
   it("riskGate expansion forces candidate 1 even when candidate 0 would early-accept", async () => {

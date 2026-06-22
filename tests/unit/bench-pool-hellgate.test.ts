@@ -797,6 +797,28 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(new Set(out[0]?.result.resolved ?? [])).toEqual(new Set(["demo__1", "demo__2"]))
   })
 
+  test("later retry verdict overrides the same instance's earlier bucket instead of leaving split-brain buckets", async () => {
+    const datasetPath = writeDatasetJsonl("bench-pool-bucket-override-", [
+      { instance_id: "demo__1", patch: TS_FIX_PATCH },
+      { instance_id: "demo__2", patch: TS_FIX_PATCH },
+    ])
+    const { fn } = mockSpawn({
+      reportFor: (_runId, launchIdx) =>
+        JSON.stringify(
+          launchIdx === 0
+            ? { unresolved_ids: ["demo__1"] }
+            : { resolved_ids: ["demo__1", "demo__2"] },
+        ),
+    })
+    const out = await runPool(
+      [{ runId: "bucket-override", datasetPath, instanceIds: ["demo__1", "demo__2"] }],
+      poolCfg(fn, { maxChunkRetries: 1 }),
+    )
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.result.resolved).toEqual(["demo__1", "demo__2"])
+    expect(out[0]?.result.unresolved).toBeUndefined()
+  })
+
   test("PROACTIVE rotation retires a TTL-aged box WITHOUT counting a chunk failure", async () => {
     const { fn, calls } = mockSpawn({})
     // Clock advances hugely on each read ⇒ every rotation check sees the box as

@@ -44,6 +44,7 @@ import {
 import type { PoolAuthLease, PoolAuthProvider } from "./pool-auth"
 import { acquireSingleBoxGuard, type SingleBoxGuard } from "./single-box-guard"
 import { acquirePatchGenBudgetLease, clampPatchGenConcurrency } from "./token-budget"
+import { absorbFullRemoteResult } from "./verdict-buckets"
 
 /** One unit of work for the pool: a runId-tagged dataset slice. */
 export interface PoolChunk {
@@ -184,10 +185,7 @@ const chunkCoverageAccumulatorFor = (
 const accumulateChunkCoverage = (acc: ChunkCoverageAccumulator, result: FullRemoteResult): void => {
   if (result.reportPath !== undefined) acc.reportPath = result.reportPath
   if (result.rateLimited === true) acc.rateLimited = true
-  for (const id of result.resolved ?? []) acc.resolved.add(id)
-  for (const id of result.unresolved ?? []) acc.unresolved.add(id)
-  for (const id of result.errored ?? []) acc.errored.add(id)
-  for (const id of result.emptyPatch ?? []) acc.emptyPatch.add(id)
+  absorbFullRemoteResult(acc, result)
 }
 
 const chunkCoverageResult = (acc: ChunkCoverageAccumulator): FullRemoteResult => ({

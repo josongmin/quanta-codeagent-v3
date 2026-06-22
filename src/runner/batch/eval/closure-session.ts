@@ -40,6 +40,7 @@ export const buildClosureSession = (args: {
    *  owners (byte-identical to before SCAFF-03). */
   witnessOwners?: readonly { file: string; forSymbol?: string }[]
   reproScript?: { cmd: string; baseValidatedRed: boolean }
+  ownerNearTests?: readonly string[]
   posture: ClosureSessionPosture
   /** T-OWN-12: opt into rule-based clean owner admission (authoritative/advisory
    *  lattice, no additive score). Default/omitted ⇒ legacy scored behavior,
@@ -65,6 +66,9 @@ export const buildClosureSession = (args: {
     ...(args.ownerClean === true ? { ownerClean: true } : {}),
     plan: {
       ...(args.reproScript !== undefined ? { reproScript: args.reproScript } : {}),
+      ...(args.ownerNearTests !== undefined && args.ownerNearTests.length > 0
+        ? { ownerNearTests: args.ownerNearTests }
+        : {}),
       ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
     },
     gate: {

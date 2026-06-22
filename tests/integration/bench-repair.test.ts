@@ -283,6 +283,9 @@ describe("b2 — bench repair rounds integration", () => {
         expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
         expect(r.passed).toBe(true)
         expect(r.patch).toContain("return a + b")
+        expect(r.llmEvidence?.repairSeedHistory?.[0]?.stage).toBe("repair_seed")
+        expect(r.llmEvidence?.repairSeedHistory?.[0]?.evidenceRevision).toBe("repair-round-v1")
+        expect(llm.seedTextsSeen[1] ?? "").toContain('"stage": "repair_seed"')
       })
     },
     // b2 flake root-cause: this test was the canary because it is THE one that
@@ -345,6 +348,50 @@ describe("b2 — bench repair rounds integration", () => {
         expect(validateCalls).toBe(3)
         // Official grader: exactly once at the end.
         expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
+      })
+    },
+    RUN_INSTANCE_TIMEOUT_MS,
+  )
+
+  test(
+    "2b. custom repair buildContext still gets packetized and recorded",
+    async () => {
+      await withTmp(async (dir) => {
+        const inst = makeSwebenchInstance(dir, "custom-build-context-packetized")
+        const llm = new ScriptedLLM([
+          {
+            kind: "editAndBash",
+            file: "math.js",
+            old: "return a - b",
+            new: "return a * b",
+            bash: `node -e "require('./math.js')"`,
+          },
+          {
+            kind: "editAndBash",
+            file: "math.js",
+            old: "return a * b",
+            new: "return a + b",
+            bash: `node -e "require('./math.js')"`,
+          },
+        ])
+        let validateCalls = 0
+        const fakeValidate = async (_args: ValidateArgs): Promise<ValidatorResult> => {
+          validateCalls += 1
+          return validateCalls === 1 ? { ok: false, failTail: "still wrong" } : { ok: true }
+        }
+        const r = await runInstance(inst, {
+          ...DEPS,
+          llm,
+          repair: {
+            maxRounds: 2,
+            validate: fakeValidate,
+            buildContext: () => "CUSTOM_REPAIR_CONTEXT",
+          },
+        })
+        expect(r.passed).toBe(true)
+        expect(r.llmEvidence?.repairSeedHistory?.[0]?.stage).toBe("repair_seed")
+        expect(llm.seedTextsSeen[1] ?? "").toContain('"stage": "repair_seed"')
+        expect(llm.seedTextsSeen[1] ?? "").toContain("CUSTOM_REPAIR_CONTEXT")
       })
     },
     RUN_INSTANCE_TIMEOUT_MS,

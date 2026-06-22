@@ -49,6 +49,23 @@ export interface RunReportTotals {
   readonly packetizedSelectionExplanationCount: RunReportCount
 }
 
+type VerdictStatus =
+  | "resolved"
+  | "localStructural"
+  | "researchContaminated"
+  | "unresolved"
+  | "errored"
+  | "emptyPatch"
+
+const VERDICT_STRENGTH: Record<VerdictStatus, number> = {
+  emptyPatch: 0,
+  errored: 1,
+  unresolved: 2,
+  researchContaminated: 3,
+  localStructural: 4,
+  resolved: 5,
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
@@ -127,14 +144,18 @@ const rowIsOfficialHarnessResolved = (row: Record<string, unknown>): boolean => 
 const asCount = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : undefined
 
-const countRows = (
+const countDistinctIds = (
   perInstance: readonly unknown[],
   predicate: (row: Record<string, unknown>) => boolean,
-): number =>
-  perInstance.reduce<number>(
-    (total: number, raw) => (isRecord(raw) && predicate(raw) ? total + 1 : total),
-    0,
-  )
+): number => {
+  const ids = new Set<string>()
+  for (const raw of perInstance) {
+    if (!isRecord(raw) || !predicate(raw)) continue
+    const id = raw.id
+    if (typeof id === "string" && id.length > 0) ids.add(id)
+  }
+  return ids.size
+}
 
 const hasOwn = (row: Record<string, unknown>, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(row, key)
@@ -166,7 +187,7 @@ const reportTotalsFromOurReport = (args: {
     submittedWithProof:
       asCount(proofTotals?.submittedWithProof) ??
       (perInstanceProofTelemetry
-        ? countRows(args.perInstance, (row) => row.submittedCandidateProof === true)
+        ? countDistinctIds(args.perInstance, (row) => row.submittedCandidateProof === true)
         : null),
     blockedProofMissing:
       asCount(proofTotals?.blockedProofMissing) ??
@@ -190,16 +211,11 @@ const reportTotalsFromOurReport = (args: {
 }
 
 const fromOurReport = (report: Record<string, unknown>, perInstance: readonly unknown[]): RunVerdicts => {
-  const resolved = new Set<string>()
-  const localStructural = new Set<string>()
-  const researchContaminated = new Set<string>()
+  const verdictById = new Map<string, VerdictStatus>()
   const proofMissing = new Set<string>()
   const infraBlocked = new Set<string>()
   const contractOnlyBlocked = new Set<string>()
   const contractOnlySubmitted = new Set<string>()
-  const unresolved = new Set<string>()
-  const errored = new Set<string>()
-  const emptyPatch = new Set<string>()
   for (const raw of perInstance) {
     if (!isRecord(raw)) continue
     const id = raw.id
@@ -208,24 +224,44 @@ const fromOurReport = (report: Record<string, unknown>, perInstance: readonly un
     if (raw.envPrepFailed === true || raw.proofState === "infra_blocked") infraBlocked.add(id)
     if (raw.contractOnlyBlocked === true) contractOnlyBlocked.add(id)
     if (raw.contractOnlySubmitted === true) contractOnlySubmitted.add(id)
+    let nextVerdict: VerdictStatus
     if (raw.passed === true) {
       const label = rowScoreLabel(raw)
-      if (label === "research_contaminated") researchContaminated.add(id)
-      else if (label === "local_structural") localStructural.add(id)
-      else if (rowIsOfficialHarnessResolved(raw)) resolved.add(id)
-      else localStructural.add(id)
-      continue
-    }
-    // A failed instance can be BOTH errored and empty-patch-ish; classify it
-    // into the most specific failure bucket first (errored > emptyPatch >
-    // unresolved) so each id lands in exactly one set.
-    if (rowIsErrored(raw)) {
-      errored.add(id)
+      if (label === "research_contaminated") nextVerdict = "researchContaminated"
+      else if (label === "local_structural") nextVerdict = "localStructural"
+      else if (rowIsOfficialHarnessResolved(raw)) nextVerdict = "resolved"
+      else nextVerdict = "localStructural"
+    } else if (rowIsErrored(raw)) {
+      // A single failed row can carry both an error termination and an
+      // empty-patch-ish signal. Error authority wins for that row. Across
+      // duplicate rows we keep the strongest observed verdict for the id.
+      nextVerdict = "errored"
     } else if (rowIsEmptyPatch(raw)) {
-      emptyPatch.add(id)
+      nextVerdict = "emptyPatch"
     } else {
-      unresolved.add(id)
+      nextVerdict = "unresolved"
     }
+    const existing = verdictById.get(id)
+    if (
+      existing === undefined ||
+      VERDICT_STRENGTH[nextVerdict] > VERDICT_STRENGTH[existing]
+    ) {
+      verdictById.set(id, nextVerdict)
+    }
+  }
+  const resolved = new Set<string>()
+  const localStructural = new Set<string>()
+  const researchContaminated = new Set<string>()
+  const unresolved = new Set<string>()
+  const errored = new Set<string>()
+  const emptyPatch = new Set<string>()
+  for (const [id, verdict] of verdictById) {
+    if (verdict === "resolved") resolved.add(id)
+    else if (verdict === "localStructural") localStructural.add(id)
+    else if (verdict === "researchContaminated") researchContaminated.add(id)
+    else if (verdict === "unresolved") unresolved.add(id)
+    else if (verdict === "errored") errored.add(id)
+    else emptyPatch.add(id)
   }
   const reportTotals = reportTotalsFromOurReport({
     report,
@@ -250,18 +286,43 @@ const fromOurReport = (report: Record<string, unknown>, perInstance: readonly un
   }
 }
 
-const fromHarnessReport = (r: Record<string, unknown>): RunVerdicts => ({
-  resolved: new Set(strArray(r.resolved_ids)),
-  localStructural: new Set<string>(),
-  researchContaminated: new Set<string>(),
-  proofMissing: new Set<string>(),
-  infraBlocked: new Set<string>(),
-  contractOnlyBlocked: new Set<string>(),
-  contractOnlySubmitted: new Set<string>(),
-  unresolved: new Set(strArray(r.unresolved_ids)),
-  errored: new Set(strArray(r.error_ids)),
-  emptyPatch: new Set(strArray(r.empty_patch_ids)),
-})
+const fromHarnessReport = (r: Record<string, unknown>): RunVerdicts => {
+  const verdictById = new Map<string, VerdictStatus>()
+  const remember = (ids: readonly string[], verdict: VerdictStatus): void => {
+    for (const id of ids) {
+      const existing = verdictById.get(id)
+      if (existing === undefined || VERDICT_STRENGTH[verdict] > VERDICT_STRENGTH[existing]) {
+        verdictById.set(id, verdict)
+      }
+    }
+  }
+  remember(strArray(r.empty_patch_ids), "emptyPatch")
+  remember(strArray(r.error_ids), "errored")
+  remember(strArray(r.unresolved_ids), "unresolved")
+  remember(strArray(r.resolved_ids), "resolved")
+  const resolved = new Set<string>()
+  const unresolved = new Set<string>()
+  const errored = new Set<string>()
+  const emptyPatch = new Set<string>()
+  for (const [id, verdict] of verdictById) {
+    if (verdict === "resolved") resolved.add(id)
+    else if (verdict === "unresolved") unresolved.add(id)
+    else if (verdict === "errored") errored.add(id)
+    else if (verdict === "emptyPatch") emptyPatch.add(id)
+  }
+  return {
+    resolved,
+    localStructural: new Set<string>(),
+    researchContaminated: new Set<string>(),
+    proofMissing: new Set<string>(),
+    infraBlocked: new Set<string>(),
+    contractOnlyBlocked: new Set<string>(),
+    contractOnlySubmitted: new Set<string>(),
+    unresolved,
+    errored,
+    emptyPatch,
+  }
+}
 
 export const loadVerdicts = (reportJson: unknown): RunVerdicts => {
   if (!isRecord(reportJson)) {

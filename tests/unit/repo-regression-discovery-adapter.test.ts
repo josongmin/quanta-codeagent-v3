@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   candidateKeepsBaseGreenTests,
   executeWitnessTestsOnPatched,
+  publicRegressionProofReceiptOf,
+  regressionAuthorityOf,
   keepBaseGreenDiscoveredTests,
 } from "@/apps/bench/eval/repo-regression-discovery-adapter"
 
@@ -123,5 +125,19 @@ describe("repo regression discovery adapter helpers", () => {
         regressionGreen: true,
       })(),
     ).toBe("safety_green")
+  })
+
+  test("capped positive witness stays coverage_capped and cannot promote back-compat authority", () => {
+    const receipt = publicRegressionProofReceiptOf({
+      regressionGreen: true,
+      candidateTests: ["tests/test_a.py", "tests/test_b.py"],
+      sourceEvidence: new Map(),
+      baseGreenTests: ["tests/test_a.py"],
+      executedTests: ["tests/test_a.py"],
+      failures: [],
+      cappedWitnesses: { discovered: 2, executed: 1 },
+    })
+    expect(receipt.state).toBe("coverage_capped")
+    expect(regressionAuthorityOf(receipt)).toBeNull()
   })
 })

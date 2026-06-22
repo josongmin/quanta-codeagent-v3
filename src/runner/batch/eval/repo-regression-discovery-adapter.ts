@@ -71,7 +71,7 @@ const buildBaseGreenBatchArgv =
 
 const keyOf = (xs: readonly string[]): string => [...xs].map(normalizeRepoPath).sort().join("\n")
 
-const listTrackedPythonFiles = async (
+export const listTrackedPythonFiles = async (
   sandbox: string,
   timeoutMs: number,
 ): Promise<readonly string[]> => {
@@ -82,7 +82,7 @@ const listTrackedPythonFiles = async (
   return r.stdout.split("\0").map(normalizeRepoPath).filter(Boolean)
 }
 
-const readRepoTestFiles = async (
+export const readRepoTestFiles = async (
   sandbox: string,
   paths: readonly string[],
 ): Promise<readonly RepoTextFile[]> => {
@@ -265,11 +265,19 @@ export interface ExecutedWitnessResult {
   readonly executedTests: readonly string[]
   /** Executed witnesses that broke on the patched tree (the rejection cause). */
   readonly failures: readonly string[]
+  /** #6: set when the `maxTests` cap dropped lower-ranked admissible witnesses
+   *  from the executed set (`discovered > executed`). A capped gate can miss a
+   *  regression in a dropped witness, so this surfaces the coverage gap rather
+   *  than letting it pass silently. Absent ⇒ no witnesses were dropped. */
+  readonly cappedWitnesses?: { readonly discovered: number; readonly executed: number }
 }
 
 export type PublicRegressionProofState =
   | "not_available"
   | "base_not_green"
+  /** Executed subset stayed green, but the witness cap dropped admissible tests.
+   *  Negative evidence would still be authoritative; positive proof is partial. */
+  | "coverage_capped"
   | "safety_green"
   | "candidate_red"
   | "execution_failed"
@@ -316,6 +324,8 @@ export const makeDiscoveredRepoRegressionWitness = (
 
   const discoveryCache = new Map<string, Promise<readonly ImpactedTestCandidate[]>>()
   const baseGreenCache = new Map<string, Promise<readonly string[] | null>>()
+  // #6: cap-truncation telemetry per changed-file key (witnesses dropped by maxTests).
+  const cappedByKey = new Map<string, { readonly discovered: number; readonly executed: number }>()
   let repoTestSnapshot: Promise<readonly RepoTextFile[] | null> | undefined
 
   const repoTestsOnBase = (): Promise<readonly RepoTextFile[] | null> => {
@@ -342,6 +352,7 @@ export const makeDiscoveredRepoRegressionWitness = (
         changedFiles: candidate.files,
         repoFiles,
         maxTests,
+        onCap: (info) => cappedByKey.set(key, info),
       })
     })()
     discoveryCache.set(key, p)
@@ -387,6 +398,9 @@ export const makeDiscoveredRepoRegressionWitness = (
 
   return async (candidate: Candidate): Promise<ExecutedWitnessResult> => {
     const candidates = await discoverFor(candidate)
+    const capped = cappedByKey.get(keyOf(candidate.files))
+    const withCap = (r: ExecutedWitnessResult): ExecutedWitnessResult =>
+      capped === undefined ? r : { ...r, cappedWitnesses: capped }
     // Empty witness candidate set → fail-open null (NEVER a reject).
     if (candidates.length === 0) return emptyWitnessResult(null, candidates)
 
@@ -394,7 +408,7 @@ export const makeDiscoveredRepoRegressionWitness = (
     const baseGreenTests = await baseGreenFor(tests)
     // No witness is green on base → nothing executable can speak → fail-open.
     if (baseGreenTests === null || baseGreenTests.length === 0) {
-      return emptyWitnessResult(null, candidates)
+      return withCap(emptyWitnessResult(null, candidates))
     }
 
     const outcome = await withCandidatePatch<ExecutedWitnessOutcome>({
@@ -412,28 +426,28 @@ export const makeDiscoveredRepoRegressionWitness = (
     // Re-materialization failure (null) → fail-open. The verdict ONLY exists when
     // the witnesses actually ran on the patched tree.
     if (outcome === null) {
-      return {
+      return withCap({
         regressionGreen: null,
         candidateTests: tests,
         sourceEvidence: new Map(candidates.map((c) => [c.path, c.evidence])),
         baseGreenTests,
         executedTests: [],
         failures: [],
-      }
+      })
     }
 
-    return {
+    return withCap({
       regressionGreen: outcome.regressionGreen,
       candidateTests: tests,
       sourceEvidence: new Map(candidates.map((c) => [c.path, c.evidence])),
       baseGreenTests,
       executedTests: outcome.executedTests,
       failures: outcome.failures,
-    }
+    })
   }
 }
 
-const toPublicRegressionProofReceipt = (
+export const publicRegressionProofReceiptOf = (
   result: ExecutedWitnessResult,
 ): PublicRegressionProofReceipt => {
   const state: PublicRegressionProofState =
@@ -441,33 +455,39 @@ const toPublicRegressionProofReceipt = (
       ? "not_available"
       : result.baseGreenTests.length === 0
         ? "base_not_green"
-        : result.regressionGreen === true
-          ? "safety_green"
-          : result.regressionGreen === false
-            ? "candidate_red"
-            : "execution_failed"
+        : result.regressionGreen === false
+          ? "candidate_red"
+          : result.cappedWitnesses !== undefined && result.regressionGreen === true
+            ? "coverage_capped"
+            : result.regressionGreen === true
+              ? "safety_green"
+              : "execution_failed"
   return { state, ...result }
 }
+
+export const regressionAuthorityOf = (receipt: PublicRegressionProofReceipt): boolean | null =>
+  receipt.state === "candidate_red" ? false : receipt.state === "safety_green" ? true : null
 
 export const makeDiscoveredRepoRegressionProofPort = (
   args: DiscoveredRepoRegressionPortArgs,
 ): ((c: Candidate) => Promise<PublicRegressionProofReceipt>) => {
   const witness = makeDiscoveredRepoRegressionWitness(args)
   return async (candidate: Candidate): Promise<PublicRegressionProofReceipt> =>
-    toPublicRegressionProofReceipt(await witness(candidate))
+    publicRegressionProofReceiptOf(await witness(candidate))
 }
 
 /**
  * Back-compat port: same `(candidate) => Promise<boolean | null>` signature the
  * selector wires today. It is a pure projection of {@link ExecutedWitnessResult}
  * — `regressionGreen` — so the `false` it returns is ALWAYS execution-backed
- * (non-empty `executedTests` + a real `failures` entry), and an empty witness
- * set / non-materializable candidate is `null` (fail-open).
+ * (non-empty `executedTests` + a real `failures` entry). Positive authority is
+ * narrower: a capped witness set (`coverage_capped`) must FAIL-OPEN to `null`
+ * because the unexecuted dropped witnesses could still hide a regression.
  */
 export const makeDiscoveredRepoRegressionPort = (
   args: DiscoveredRepoRegressionPortArgs,
 ): ((c: Candidate) => Promise<boolean | null>) => {
   const proof = makeDiscoveredRepoRegressionProofPort(args)
   return async (candidate: Candidate): Promise<boolean | null> =>
-    (await proof(candidate)).regressionGreen
+    regressionAuthorityOf(await proof(candidate))
 }

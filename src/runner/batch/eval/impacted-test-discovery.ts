@@ -65,6 +65,13 @@ export interface DiscoverImpactedTestsArgs {
   readonly changedFiles: readonly string[]
   readonly repoFiles: readonly RepoTextFile[]
   readonly maxTests?: number
+  /** #6: invoked when the `maxTests` cap DROPS lower-ranked admissible witnesses
+   *  from the executed set. The drop is otherwise INVISIBLE — and unlike the
+   *  header's "can't reject a passing candidate" safety claim, a dropped witness
+   *  can let a REGRESSING candidate pass (its breaking test never runs). The
+   *  caller surfaces `{discovered, executed}` (e.g. into regression-gate
+   *  telemetry / a log) so capped coverage is attributable, never a silent gap. */
+  readonly onCap?: (info: { readonly discovered: number; readonly executed: number }) => void
 }
 
 export const DEFAULT_MAX_TESTS = 12
@@ -337,9 +344,17 @@ export const discoverImpactedTestCandidates = (
 
   // ORDERING-ONLY sort: rank desc, then path for determinism. Slicing by
   // `maxTests` bounds how many witnesses we will actually execute.
-  return [...byPath.values()]
-    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
-    .slice(0, maxTests)
+  const ranked = [...byPath.values()].sort(
+    (a, b) => b.score - a.score || a.path.localeCompare(b.path),
+  )
+  // #6: a strict truncation drops real, admissible witnesses from the executed
+  // set with no other signal. Surface it so a capped regression gate is never a
+  // silent coverage gap (a regressing candidate whose breaking test was capped
+  // out would otherwise read as `regressionGreen`).
+  if (ranked.length > maxTests) {
+    args.onCap?.({ discovered: ranked.length, executed: maxTests })
+  }
+  return ranked.slice(0, maxTests)
 }
 
 /** Merge evidence from multiple changed sources for the same test, deduped. */

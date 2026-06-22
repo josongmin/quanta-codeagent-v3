@@ -90,10 +90,12 @@ describe("runner verify-select and patch-budget driver parity", () => {
 
   test("proof-clean generation and repair thread the same verificationTarget through both drivers", () => {
     expect(APP_DRIVER_SRC).toContain("args.prepared.verificationPlan,")
+    expect(APP_DRIVER_SRC).toContain("args.prepared.reproTest,")
     expect(APP_DRIVER_SRC).toMatch(
       /\.\.\.\(verificationTarget !== undefined \? \{ verificationTarget \} : \{\}\)/,
     )
     expect(DRIVER_SRC).toContain("args.prepared.verificationPlan,")
+    expect(DRIVER_SRC).toContain("args.prepared.reproTest,")
     expect(DRIVER_SRC).toMatch(
       /\.\.\.\(verificationTarget !== undefined \? \{ verificationTarget \} : \{\}\)/,
     )
@@ -106,8 +108,12 @@ describe("runner verify-select and patch-budget driver parity", () => {
   test("proof-clean generation in both drivers uses shared structural owner evidence packetization", () => {
     expect(DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
     expect(APP_DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
-    expect(DRIVER_SRC).toContain("staticWitnesses: args.staticWitnesses")
-    expect(APP_DRIVER_SRC).toContain("staticWitnesses,")
+    expect(DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
+    expect(APP_DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
+    expect(DRIVER_SRC).toContain("ownerEvidence: args.selectionOwnerEvidence")
+    expect(DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
+    expect(APP_DRIVER_SRC).toContain("ownerEvidence: selectionOwnerEvidence")
+    expect(APP_DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
   })
 
   test("runner driver emits patch-budget telemetry when the knob is on", () => {

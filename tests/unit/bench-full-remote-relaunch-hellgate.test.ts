@@ -155,4 +155,25 @@ describe("runWithRelaunch — instance-aware, fresh box per loss", () => {
     expect(calls).toBe(1) // both got a verdict ⇒ nothing missing ⇒ no relaunch
     expect(out.missing).toEqual([])
   })
+
+  test("later attempts overwrite an earlier bucket for the same instance instead of keeping split-brain verdicts", async () => {
+    const out = await runWithRelaunch(
+      (() => {
+        let calls = 0
+        return () => {
+          calls += 1
+          return {
+            run: async () =>
+              calls === 1
+                ? { unresolved: ["a__1"] }
+                : { resolved: ["a__1", "b__2"] },
+          }
+        }
+      })(),
+      { expected: ["a__1", "b__2"], maxRelaunch: 1 },
+    )
+    expect(out.resolved).toEqual(["a__1", "b__2"])
+    expect(out.unresolved).toEqual([])
+    expect(out.missing).toEqual([])
+  })
 })

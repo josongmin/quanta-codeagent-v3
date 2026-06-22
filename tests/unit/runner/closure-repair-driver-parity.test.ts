@@ -12,18 +12,16 @@ describe("runner closure-repair driver parity", () => {
     expect(DRIVER_SRC).toContain('readFileSync(join(sandbox, rel), "utf8")')
     expect(DRIVER_SRC).toContain("...(ownerResolved !== undefined ? { ownerResolved } : {})")
     expect(DRIVER_SRC).toContain("siblingOwners: readonly string[]")
-    expect(DRIVER_SRC).toContain(
-      "(repair.buildContext ?? buildRepairContext)({ ...ctxArgs, siblingOwners })",
-    )
+    expect(DRIVER_SRC).toContain("if (repair.buildContext !== undefined)")
+    expect(DRIVER_SRC).toContain("buildRepairRoundSeedMessage({ ...ctxArgs, siblingOwners })")
+    expect(DRIVER_SRC).toContain("recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)")
   })
 
   test("surfaces false-red and sibling-coverage telemetry", () => {
     expect(DRIVER_SRC).toContain("primaryFalseRed?: boolean")
     expect(DRIVER_SRC).toContain("repairFalseRed = out.primaryFalseRed")
     expect(DRIVER_SRC).toContain("primaryFalseRed: repairFalseRed")
-    expect(DRIVER_SRC).toContain("extra.primaryFalseRed = phase.primaryFalseRed")
-    expect(DRIVER_SRC).toContain(
-      "siblingFiles: ownerResolved !== undefined ? ownerResolved.map((o) => o.file) : []",
-    )
+    expect(DRIVER_SRC).toContain("args.extra.primaryFalseRed = args.phase.primaryFalseRed")
+    expect(DRIVER_SRC).toContain("siblingFiles: ownerResolved?.map((o) => o.file) ?? []")
   })
 })

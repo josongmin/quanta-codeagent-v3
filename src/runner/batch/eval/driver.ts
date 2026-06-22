@@ -123,8 +123,8 @@ import type { PublicContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
-import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
+import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import { makeReproVoteValidate } from "./repair/repro-vote"
 import {
   makePatchedResolvedConsensus,
@@ -185,6 +185,7 @@ import { witnessAuthoritativeOwners } from "./static-witness"
 import { buildAstStaticWitnesses } from "./static-witness-adapter"
 import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
+import { discoverVerificationOwnerTests } from "./verification-owner-tests"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
 export interface RunInstanceDeps {
@@ -2238,6 +2239,7 @@ const runRepairPhase = async (
   let repairFalseGreen = false
   let repairFalseRed = false
   let repairRounds = 0
+  const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: when the knob is on AND we have a reproducing set, the
   // validator becomes the K-of-N RESOLVED majority vote (re-run the set on the
   // patched tree); it falls back to the legacy gate on an empty set / fail /
@@ -2271,8 +2273,14 @@ const runRepairPhase = async (
             closureHint,
           ),
         validate,
-        buildContext: (ctxArgs) =>
-          (repair.buildContext ?? buildRepairContext)({ ...ctxArgs, siblingOwners }),
+        buildContext: (ctxArgs) => {
+          if (repair.buildContext !== undefined) {
+            return repair.buildContext({ ...ctxArgs, siblingOwners })
+          }
+          const repairSeed = buildRepairRoundSeedMessage({ ...ctxArgs, siblingOwners })
+          recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)
+          return repairSeed.seedMsg
+        },
         sandbox,
         exec,
         timeoutMs: deps.timeoutMs,
@@ -2298,6 +2306,7 @@ const runRepairPhase = async (
     primaryFalseGreen: repairFalseGreen,
     primaryFalseRed: repairFalseRed,
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
+    ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
   }
 }
 

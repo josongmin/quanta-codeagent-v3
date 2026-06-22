@@ -100,9 +100,8 @@ describe("buildSelectionRiskGate", () => {
       ownerFiles: ["pkg/x.py"],
     })
     const decision = await gate?.(candidate("+++ b/pkg/x.py\n+fix", ["pkg/x.py"]))
-    expect(decision).toEqual({
-      expand: true,
-      reasons: ["llm:invalid-output"],
-    })
+    expect(decision?.expand).toBe(true)
+    expect(decision?.reasons).toEqual(["llm:invalid-output"])
+    expect(decision?.llmEvidencePacket?.stage).toBe("candidate_review")
   })
 })
