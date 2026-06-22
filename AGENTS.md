@@ -51,6 +51,27 @@ freely but cannot be imported from outside their own slice.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the slice fence and
 ports/adapters contract.
 
+## Code quality — SE metrics (god-code is a ratchet, fix on sight)
+
+A `bun test tests/unit/god-code-ratchet.test.ts` ratchet (source: `tools/god-code/detect.ts`,
+frozen `tools/god-code/allowlist.json`) enforces two structural SE metrics:
+
+- **god-MODULE** — a source file > **1000 lines**.
+- **god-FUNCTION** — a function/method body > **150 lines** (LENGTH; cognitive
+  COMPLEXITY is separately gated by Biome `noExcessiveCognitiveComplexity` = 15).
+
+The ratchet only goes DOWN: a NEW violation **fails the build — you must split it,
+never add it to the allowlist**; and when a refactor drops a file/function below
+threshold you **remove its stale allowlist entry** (the test demands it).
+
+**Proactive rule — fix on sight.** Whenever you open, edit, or even pass through a
+god-module or god-function (or any obvious SE smell — a 20-arg signature, a copy-
+pasted block, a 5-level nest), **split/clean it as part of your change** rather
+than working around it. Don't grow the allowlist to "get unblocked"; shrinking it
+is the goal. Touching a god-file is the moment to decompose it into cohesive
+ports/adapters per the slice fence above. Regenerate the allowlist only to REMOVE
+fixed entries (re-run the detector), never to add.
+
 ## When you edit features
 
 1. Edit the relevant YAML under `tools/feature-catalog/features/`.
