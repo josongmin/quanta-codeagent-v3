@@ -24,6 +24,7 @@ exports[`preset resolution — golden byte-identical oracle (P0) preset roster i
   "agentless-v3-thin-strict-gated-llm-shadow",
   "agentless-v3-thin-strict-select",
   "agentless-v4-proof-clean",
+  "agentless-v5-thin-and-expanded",
   "baseline",
   "everything",
   "everything-v1",
@@ -1775,7 +1776,74 @@ exports[`preset resolution — golden byte-identical oracle (P0) golden resolved
 ]
 `;
 
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v5-thin-and-expanded: agentless-v5-thin-and-expanded 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "off",
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "patch-budget",
+    true,
+  ],
+  [
+    "patch-budget-strict",
+    true,
+  ],
+  [
+    "patch-hygiene",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "round0-minimal",
+    true,
+  ],
+  [
+    "spec-fidelity-steer",
+    true,
+  ],
+]
+`;
+
 exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: baseline: baseline 1`] = `[]`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: everything: everything 1`] = `
+{
+  "__throws": "knob conflicts: branch-search<->localize-phase",
+}
+`;
 
 exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: everything-v1: everything-v1 1`] = `
 [
@@ -1839,10 +1907,4 @@ exports[`preset resolution — golden byte-identical oracle (P0) golden resolved
     "regex",
   ],
 ]
-`;
-
-exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: everything: everything 1`] = `
-{
-  "__throws": "knob conflicts: branch-search<->localize-phase",
-}
 `;
