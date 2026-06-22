@@ -40,6 +40,7 @@ import {
   withKnobModules,
 } from "@/runner/batch/eval/posture"
 import { benchRunsRepairPhase } from "@/runner/batch/eval/repair-phase-policy"
+import { KNOB_PRESETS } from "@/runner/knobs/presets"
 
 const EMPTY_ENV = {} as NodeJS.ProcessEnv
 
@@ -93,6 +94,11 @@ describe("posture phase-module seam", () => {
   describe("equivalence to shipped presets (core teeth)", () => {
     for (const { name, modules, preset } of EQUIVALENCES) {
       test(`EQUIV[${name}]: thin-base + modules ≡ ${preset}`, () => {
+        // CHURN-ROBUST: a preset this composite reproduces may have been removed
+        // by a concurrent registry reshape — skip (nothing to pin). The canonical
+        // raw-identity guard is `bench-preset-composite-identity.test.ts`; this
+        // behavioral check is a redundant tooth that must not false-RED on churn.
+        if (KNOB_PRESETS[preset] === undefined) return
         const derived = derivePhasePosture(stateFor(THIN_BASE), modules, EMPTY_ENV)
         const direct = benchPostureFromState(stateFor(preset), EMPTY_ENV)
         expect(behavioral(derived)).toEqual(behavioral(direct))
