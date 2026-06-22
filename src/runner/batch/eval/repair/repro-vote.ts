@@ -50,6 +50,39 @@ import type { ValidateArgs, ValidatorResult } from "./types"
 
 const DEFAULT_TAIL = 2000
 
+/**
+ * The decision path this validator took on a given round. Mirrors the five
+ * returns of {@link makeReproVoteValidate} 1:1 (3 fallback paths + resolved +
+ * unresolved), so the A/B campaign can attribute how often the vote was
+ * DECISIVE (`vote_resolved` / `vote_unresolved`) vs deferred to the legacy gate
+ * (`empty_sources` / `exec_failed` / `vote_inconclusive`). See the MEASUREMENT
+ * NOTE above — the bare result carries none of this, which is the confound.
+ */
+export type ReproVoteOutcome =
+  | "empty_sources"
+  | "exec_failed"
+  | "vote_resolved"
+  | "vote_unresolved"
+  | "vote_inconclusive"
+
+/** Vote tally carried with the three VOTE outcomes (omitted for the two
+ *  pre-vote fallback paths, where no vote was taken). */
+export interface ReproVoteOutcomeDetail {
+  /** Samples that flipped to "Issue resolved" on the patched tree. */
+  resolved: number
+  /** Samples that still print "Issue reproduced". */
+  reproduced: number
+  /** Non-decisive samples (post-fix crash / no-op / unknown). */
+  inconclusive: number
+}
+
+/** Optional, injectable observation sink. Absent ⇒ NO-OP ⇒ the validator result
+ *  is byte-identical (additive observation only, never affects `ok`/`failTail`). */
+export type RecordReproVoteOutcome = (
+  outcome: ReproVoteOutcome,
+  detail?: ReproVoteOutcomeDetail,
+) => void
+
 export interface ReproVoteValidateDeps {
   /** Reproducing scripts (outcome === "reproduced" on the un-patched tree). The
    *  vote is meaningless without them, so an empty set ⇒ pure fallback. */
@@ -65,6 +98,10 @@ export interface ReproVoteValidateDeps {
   config?: ReproTestConfig
   /** Legacy gate, used for empty-set / fail-open / inconclusive. */
   fallback: (args: ValidateArgs) => Promise<ValidatorResult>
+  /** OPTIONAL measurement seam — emits the {@link ReproVoteOutcome} taken on this
+   *  round (with the vote tally for the three vote paths) so the A/B campaign can
+   *  attribute decisive-vs-inconclusive. Absent ⇒ NO-OP ⇒ behavior unchanged. */
+  recordReproVoteOutcome?: RecordReproVoteOutcome
 }
 
 /** Tail of a representative still-reproducing sample, for the next-round seed. */
@@ -78,7 +115,10 @@ const reproducedTail = (samples: readonly ReproTestSample[], bound: number): str
 export const makeReproVoteValidate =
   (deps: ReproVoteValidateDeps) =>
   async (args: ValidateArgs): Promise<ValidatorResult> => {
-    if (deps.sources.length === 0) return deps.fallback(args)
+    if (deps.sources.length === 0) {
+      deps.recordReproVoteOutcome?.("empty_sources")
+      return deps.fallback(args)
+    }
     let samples: readonly ReproTestSample[]
     try {
       samples = await executeReproTests({
@@ -92,14 +132,25 @@ export const makeReproVoteValidate =
       })
     } catch {
       // A broken exec port must never be a silent pass — defer to the legacy gate.
+      deps.recordReproVoteOutcome?.("exec_failed")
       return deps.fallback(args)
     }
     const vote = voteResolved(samples)
-    if (vote.verdict === "resolved") return { ok: true }
+    const detail: ReproVoteOutcomeDetail = {
+      resolved: vote.resolved,
+      reproduced: vote.reproduced,
+      inconclusive: vote.inconclusive,
+    }
+    if (vote.verdict === "resolved") {
+      deps.recordReproVoteOutcome?.("vote_resolved", detail)
+      return { ok: true }
+    }
     if (vote.verdict === "reproduced") {
+      deps.recordReproVoteOutcome?.("vote_unresolved", detail)
       const failTail = reproducedTail(samples, args.tailBytes ?? DEFAULT_TAIL)
       return { ok: false, failTail }
     }
     // Inconclusive (tie / all-noisy): don't guess — fall back to the legacy gate.
+    deps.recordReproVoteOutcome?.("vote_inconclusive", detail)
     return deps.fallback(args)
   }

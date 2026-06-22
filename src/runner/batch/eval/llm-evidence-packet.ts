@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { extractIssueHint } from "@/agent/issue-hint"
 import type { FaultEvidencePacket } from "@/agent/fault-evidence"
 import { extractIssueReproSeed } from "@/agent/verification-plan"
-import type { VerificationPlan } from "@/agent/verification-plan"
+import type { VerificationPlan, VerificationStep } from "@/agent/verification-plan"
 import { normalizePublicIssueText } from "@/shared"
 import type { MweProofState } from "./mwe-proof"
 import type { PublicRegressionProofState } from "./repo-regression-discovery-adapter"
@@ -621,12 +621,7 @@ export const verificationTargetFromPlan = (
   plan: VerificationPlan | undefined,
 ): VerificationTargetFact | undefined => {
   if (plan === undefined) return undefined
-  const toStep = (step: {
-    kind: string
-    cmd: string
-    authority?: string
-    successPredicate?: { type: string }
-  }): VerificationStepFact => {
+  const toStep = (step: VerificationStep): VerificationStepFact => {
     const cmdIsBlind = step.kind === "repro"
     return {
       kind: step.kind,
