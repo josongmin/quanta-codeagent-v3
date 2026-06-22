@@ -46,7 +46,7 @@ export interface ReceiptEvidence {
 
 export type ResearchContaminationPosture = Pick<
   BenchPosture,
-  "verifySelectLlmRiskGate" | "verifySelectRegression" | "reproDoubt"
+  "verifySelectLlmRiskGate" | "verifySelectRegression" | "reproDoubt" | "verifySelectRepro"
 >
 
 /** `discovered` is the executed-witness path and is admissible in clean mode.
@@ -63,6 +63,12 @@ export const researchContaminationReasons = (
   const reasons: string[] = []
   if (posture.verifySelectLlmRiskGate === "on") reasons.push("verify-select-llm-risk-gate=on")
   if (posture.reproDoubt) reasons.push("repro-doubt")
+  // jun-22 F3 defense-in-depth: `verify-select-repro=hard` runs the eval-only
+  // GOLD-calibrated repro gate (selectionReproPolicy goldCalibrate=true), which
+  // materialises the gold patch. The clean presets pin `positive` (no gold), so
+  // this never flags a clean run — it makes any explicit gold-calibrate run show
+  // up as research_contaminated, matching the doc-vs-code intent.
+  if (posture.verifySelectRepro === "hard") reasons.push("verify-select-repro=hard(gold-calibrate)")
   if (isContaminatingRegressionSource(posture.verifySelectRegression)) {
     reasons.push("verify-select-regression(magic-score)")
   }

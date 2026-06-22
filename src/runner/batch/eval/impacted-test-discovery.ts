@@ -67,7 +67,7 @@ export interface DiscoverImpactedTestsArgs {
   readonly maxTests?: number
 }
 
-const DEFAULT_MAX_TESTS = 12
+export const DEFAULT_MAX_TESTS = 12
 
 /**
  * ── ORDERING-ONLY rank weights ──────────────────────────────────────────────
@@ -156,7 +156,7 @@ const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$
 const tokenizePath = (path: string): string[] =>
   normalizeRepoPath(path)
     .replace(/\.py$/, "")
-    .split(/[\/_.-]+/)
+    .split(/[/_.-]+/)
     .map((token) => token.trim().toLowerCase())
     .filter(Boolean)
 
@@ -220,7 +220,8 @@ const evidenceForTestSource = (
 
   const contextTokens = [...new Set(sourceParts.slice(0, -1).flatMap((part) => tokenizePath(part)))]
   for (const token of contextTokens) {
-    if (!isMeaningfulDiscoveryToken(token) || token === sourceToken || !testTokens.has(token)) continue
+    if (!isMeaningfulDiscoveryToken(token) || token === sourceToken || !testTokens.has(token))
+      continue
     evidence.push({ kind: "context-token", detail: token })
   }
 

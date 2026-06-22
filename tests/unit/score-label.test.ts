@@ -105,17 +105,29 @@ describe("score-label taxonomy (T-RESOLVE-14)", () => {
         verifySelectLlmRiskGate: "on",
         verifySelectRegression: "gold",
         reproDoubt: true,
+        verifySelectRepro: "hard",
       }),
     ).toEqual([
       "verify-select-llm-risk-gate=on",
       "repro-doubt",
+      "verify-select-repro=hard(gold-calibrate)",
       "verify-select-regression(magic-score)",
     ])
+    // positive (the clean-preset value) is NOT contaminating.
+    expect(
+      researchContaminationReasons({
+        verifySelectLlmRiskGate: undefined,
+        verifySelectRegression: "discovered",
+        reproDoubt: false,
+        verifySelectRepro: "positive",
+      }),
+    ).toEqual([])
     expect(
       researchKnobTouched({
         verifySelectLlmRiskGate: undefined,
         verifySelectRegression: "discovered",
         reproDoubt: false,
+        verifySelectRepro: "positive",
       }),
     ).toBe(false)
     expect(isContaminatingRegressionSource("gold")).toBe(true)

@@ -29,8 +29,10 @@
 
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import type { Instance } from "../types"
 import { execArgv } from "./exec"
 import {
+  DEFAULT_MAX_TESTS,
   discoverImpactedTestCandidates,
   type ImpactedTestCandidate,
   isPythonTestFile,
@@ -39,12 +41,13 @@ import {
   type WitnessEvidence,
 } from "./impacted-test-discovery"
 import { toRegressionGreen } from "./regression-oracle"
+import { buildProjectPytestArgv, makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { resetToBase, withCandidatePatch } from "./rematerialize"
 import type { Candidate } from "./selection-executor"
-import type { Instance } from "../types"
-import { buildProjectPytestArgv, makeBenchRegressionOracle } from "./regression-oracle-adapter"
 
-const DEFAULT_DISCOVERY_MAX_TESTS = 12
+// jun-22: deduped to one SSOT (was a second `= 12`). The configurable override
+// flows in via `args.maxTests` (the regression-max-tests knob).
+const DEFAULT_DISCOVERY_MAX_TESTS = DEFAULT_MAX_TESTS
 
 const keyOf = (xs: readonly string[]): string => [...xs].map(normalizeRepoPath).sort().join("\n")
 
