@@ -36,10 +36,11 @@ describe("bugbash #10 — EXPECT_LITERAL_RE verbs missing from the old pre-gate 
   })
 
   test("'should gives `LITERAL`' (plural verb form) ⇒ extracted", () => {
-    const r = extractIssueDeclaredExpected("It should gives `True` on this input.")
-    // bare common word <4 chars stays admissible only with structure; "True" is
-    // 4 chars so isMeaningful passes.
-    expect(r?.value).toBe("True")
+    // The literal is STRUCTURED (has a digit) so it survives FIX A's bare-word
+    // tightening — this test pins the PLURAL VERB FORM (`gives`) extraction, not
+    // the admissibility of a broad bare token like `True`.
+    const r = extractIssueDeclaredExpected("It should gives `value 42` on this input.")
+    expect(r?.value).toBe("value 42")
   })
 
   test("control: singular verb already covered ⇒ still extracts (no regression)", () => {

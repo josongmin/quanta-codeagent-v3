@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import {
   type HardGateSignals,
+  type LexCandidate,
+  type LexTiers,
   resolvedKofNPositive,
   resolvedKofNVoterQuorum,
   type ScoredCandidate,
@@ -8,6 +10,7 @@ import {
   scoreCandidate,
   selectBest,
   selectBestEffort,
+  selectLexicographic,
 } from "@/agent/verification-bundle"
 
 /** All hard gates SATISFIED (the admissible baseline to inject failures into). */
@@ -176,5 +179,61 @@ describe("selectBest / selectBestEffort", () => {
   it("empty input ⇒ null", () => {
     expect(selectBest([])).toBeNull()
     expect(selectBestEffort([])).toBeNull()
+  })
+})
+
+describe("FIX B — clean-mode soft score is TELEMETRY-ONLY, not a selection input", () => {
+  // The clean-mode submission path is `selectLexicographic` over LexTiers, which
+  // structurally cannot read `verdict.score`. This pins that contract: when the
+  // soft-score ordering CONTRADICTS the lexicographic ordering, the lexicographic
+  // authority wins. A regression that routed clean selection through the soft
+  // score (e.g. a stray `selectBest(ranked)` in clean mode) would flip this.
+
+  const baseTiers: LexTiers = {
+    proofStrength: 0,
+    executedKeepGreen: 0,
+    requiredContractsSatisfied: 0,
+    contractsSatisfied: 0,
+    familyRank: 0,
+    sourceFiles: 1,
+    addedLines: 1,
+    newDefs: 0,
+    newFiles: 0,
+    order: 0,
+  }
+  const lex = (id: string, over: Partial<LexTiers>): LexCandidate => ({
+    id,
+    admissible: true,
+    tiers: { ...baseTiers, ...over },
+  })
+
+  it("lexicographic winner is chosen even when a loser has the higher clean soft score", () => {
+    // `weakProof` has the STRONGER soft score (it would win selectBest)…
+    const weakProof = scoreCandidate(
+      HARD_OK,
+      { ...SOFT_NONE, minimality: 1, voterQuorum: 10 },
+      {
+        mode: "clean",
+      },
+    )
+    // …`strongProof` has a WEAKER soft score but DOMINATES on the proof tier.
+    const strongProof = scoreCandidate(HARD_OK, { ...SOFT_NONE, minimality: 0 }, { mode: "clean" })
+    expect(weakProof.score).toBeGreaterThan(strongProof.score) // soft order: weakProof first
+
+    // Lexicographic order (the real clean submission authority) puts proof first,
+    // so `strongProof` must win regardless of the contradicting soft score.
+    const winner = selectLexicographic([
+      lex("weakProof", { proofStrength: 0.1 }),
+      lex("strongProof", { proofStrength: 0.9 }),
+    ])
+    expect(winner).toBe("strongProof")
+  })
+
+  it("clean-mode score is still a non-zero TELEMETRY value for softTieBreak signals", () => {
+    // Telemetry contract is preserved (documented-telemetry-only route): the
+    // softTieBreak signal still contributes, so dashboards/readouts keep meaning.
+    const v = scoreCandidate(HARD_OK, { ...SOFT_NONE, minimality: 1 }, { mode: "clean" })
+    expect(v.score).toBeGreaterThan(0)
+    expect(v.reasons.some((r) => r.startsWith("soft:minimality"))).toBe(true)
   })
 })

@@ -119,6 +119,16 @@ export interface VerifyGuardConfig {
   exactCommands?: readonly string[]
 }
 
+/**
+ * Read a config field as an OWN property only. The `Object.hasOwn` guard is a
+ * prototype-pollution defense — NOT dead indirection: callers may pass a `cfg`
+ * whose `mustPass`/`maxTrips`/`exactCommands` lives on the PROTOTYPE
+ * (`Object.create({ mustPass: true })`), and a plain `cfg.field` read would
+ * traverse the chain and silently activate guard behavior from an injected
+ * proto. Reading own-only treats a proto-injected field as ABSENT. See the
+ * `verify-guard-must-pass-hellgate` "HELLGATE — adversarial inputs" prototype
+ * tests, which go RED if this is replaced with a direct `cfg.field ?? DEFAULT`.
+ */
 const ownVerifyGuardField = <K extends keyof VerifyGuardConfig>(
   cfg: VerifyGuardConfig,
   key: K,

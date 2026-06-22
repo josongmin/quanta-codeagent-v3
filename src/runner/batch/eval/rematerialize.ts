@@ -40,8 +40,20 @@ const CAND_PATCH_FILE = ".quanta-cand.patch"
 
 /** Bench git prefix (shell-string form) — matches {@link withGitSnapshot}'s `G`
  *  exactly: pinned identity + `gpgsign=false` so a host signing config never
- *  blocks the reset/apply. */
-const G = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
+ *  blocks the reset/apply. Exported as the SSOT so reset AND apply share ONE
+ *  identity (the "matches withGitSnapshot's G exactly" invariant), and tests can
+ *  pin that both git seams use it. */
+export const PINNED_GIT_IDENTITY = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
+const G = PINNED_GIT_IDENTITY
+
+/** Build the `git apply` command for a candidate patch file. Uses the pinned
+ *  identity prefix (`G`) — NOT a bare `git` — so it is symmetric with
+ *  {@link resetToBase} and a host `commit.gpgsign=true` / signing hook can never
+ *  influence re-materialization. `git apply` does not commit, so this is
+ *  behaviorally identical to the prior bare form; the prefix removes the
+ *  asymmetry / latent footgun. Pure + exported for a wiring-proof test. */
+export const buildApplyCommand = (patchFile: string): string =>
+  `${G} apply --whitespace=nowarn ${patchFile}`
 
 /**
  * Hard-reset the sandbox to `baseCommit`: discard ALL worktree edits + untracked
@@ -84,7 +96,7 @@ export const applyCandidatePatch = async (
   } catch {
     return false
   }
-  const r = await exec(`git apply --whitespace=nowarn ${CAND_PATCH_FILE}`, sandbox, timeoutMs)
+  const r = await exec(buildApplyCommand(CAND_PATCH_FILE), sandbox, timeoutMs)
   // Best-effort unlink; a failure here is harmless (the next reset's `clean -fdx`
   // sweeps the untracked file, and it is never part of a probe's collection).
   await exec(`rm -f ${CAND_PATCH_FILE}`, sandbox, timeoutMs)

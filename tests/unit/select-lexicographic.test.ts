@@ -55,7 +55,9 @@ describe("compareLexTiers (direct comparator)", () => {
   })
 
   it("DESC tiers: higher proofStrength is better (negative)", () => {
-    expect(compareLexTiers(tiers({ proofStrength: 0.9 }), tiers({ proofStrength: 0.1 }))).toBeLessThan(0)
+    expect(
+      compareLexTiers(tiers({ proofStrength: 0.9 }), tiers({ proofStrength: 0.1 })),
+    ).toBeLessThan(0)
   })
 
   it("ASC tiers: smaller sourceFiles is better (negative) when earlier tiers tie", () => {
@@ -125,7 +127,12 @@ describe("selectLexicographic — each authority tier independently dominates si
 
 describe("selectLexicographic — minimality only when authority tiers all tie", () => {
   it("smaller sourceFiles wins only when proof, contracts, family ALL tied", () => {
-    const shared = { proofStrength: 0.5, contractsSatisfied: 2, requiredContractsSatisfied: 1, familyRank: 2 }
+    const shared = {
+      proofStrength: 0.5,
+      contractsSatisfied: 2,
+      requiredContractsSatisfied: 1,
+      familyRank: 2,
+    }
     const big = cand("big", { ...shared, sourceFiles: 5 })
     const small = cand("small", { ...shared, sourceFiles: 1 })
     expect(selectLexicographic([big, small])).toBe("small")
@@ -157,7 +164,13 @@ describe("selectLexicographic — minimality only when authority tiers all tie",
   })
 
   it("a smaller patch CANNOT beat a stronger-proof patch (the whole point)", () => {
-    const stronger = cand("stronger", { proofStrength: 0.9, sourceFiles: 8, addedLines: 800, newDefs: 8, newFiles: 8 })
+    const stronger = cand("stronger", {
+      proofStrength: 0.9,
+      sourceFiles: 8,
+      addedLines: 800,
+      newDefs: 8,
+      newFiles: 8,
+    })
     const tiny = cand("tiny", { proofStrength: 0.1, ...tinyOver })
     expect(selectLexicographic([tiny, stronger])).toBe("stronger")
   })
@@ -205,5 +218,68 @@ describe("selectLexicographic — deterministic tie-break and admissibility", ()
     const b = cand("b", { proofStrength: 0.5, order: 0 })
     expect(selectLexicographic([a, b])).toBe("a")
     expect(selectLexicographic([b, a])).toBe("b")
+  })
+})
+
+describe("compareLexTiers — NaN tier value yields a TOTAL, transitive order (FIX A)", () => {
+  // A NaN in any DESC tier (e.g. a proofStrength built from a 0/0 ratio) made
+  // every `(b - a) !== 0` test false, so the comparator silently fell through —
+  // a non-total order that violates sort transitivity (undefined V8 sort).
+  // A NaN must deterministically sort LAST (treated as the worst value) so the
+  // comparator is total and antisymmetric.
+
+  it("NaN proofStrength compares as the WORST value (loses to any finite tier)", () => {
+    const nan = tiers({ proofStrength: Number.NaN })
+    const finite = tiers({ proofStrength: 0 })
+    // finite must win (negative => `finite` sorts first); NaN must lose (positive).
+    expect(compareLexTiers(finite, nan)).toBeLessThan(0)
+    expect(compareLexTiers(nan, finite)).toBeGreaterThan(0)
+  })
+
+  it("is sign-antisymmetric even with NaN present (compare(a,b) = -compare(b,a) sign)", () => {
+    const nan = tiers({ proofStrength: Number.NaN })
+    const finite = tiers({ proofStrength: 0.3 })
+    expect(compareLexTiers(nan, finite)).toBeGreaterThan(0)
+    expect(compareLexTiers(finite, nan)).toBeLessThan(0)
+  })
+
+  it("two NaN-bearing tiers fall through to later finite tiers (still total)", () => {
+    // Both NaN on proofStrength → that tier is a tie; later tiers must still decide.
+    const a = tiers({ proofStrength: Number.NaN, sourceFiles: 1 })
+    const b = tiers({ proofStrength: Number.NaN, sourceFiles: 5 })
+    expect(compareLexTiers(a, b)).toBeLessThan(0) // smaller sourceFiles wins
+    expect(compareLexTiers(b, a)).toBeGreaterThan(0)
+  })
+
+  it("NaN in an ASC minimality tier also sorts last (worst), order stays total", () => {
+    const nan = tiers({ proofStrength: 0.5, sourceFiles: Number.NaN })
+    const finite = tiers({ proofStrength: 0.5, sourceFiles: 9 })
+    expect(compareLexTiers(finite, nan)).toBeLessThan(0)
+    expect(compareLexTiers(nan, finite)).toBeGreaterThan(0)
+  })
+
+  it("selectLexicographic: a NaN-tier candidate never wins over a finite one and sort is deterministic", () => {
+    const good = cand("good", { proofStrength: 0.5 })
+    const bad = cand("bad", { proofStrength: Number.NaN })
+    expect(selectLexicographic([good, bad])).toBe("good")
+    expect(selectLexicographic([bad, good])).toBe("good")
+  })
+
+  it("a full array sort with NaN candidates is stable/total (NaN-bearing sort last, no throw)", () => {
+    const list: LexCandidate[] = [
+      cand("nan1", { proofStrength: Number.NaN, order: 0 }),
+      cand("hi", { proofStrength: 0.9, order: 1 }),
+      cand("nan2", { proofStrength: Number.NaN, order: 2 }),
+      cand("lo", { proofStrength: 0.1, order: 3 }),
+    ]
+    // Sorting by the comparator must not throw and must be deterministic; the
+    // finite candidates lead, the NaN ones trail (worst), in a stable order.
+    const sorted = [...list].sort((x, y) => compareLexTiers(x.tiers, y.tiers)).map((c) => c.id)
+    expect(sorted).toEqual(["hi", "lo", "nan1", "nan2"])
+    // re-sorting the SAME input yields the identical order (deterministic / total)
+    const reSorted = [...list].sort((x, y) => compareLexTiers(x.tiers, y.tiers)).map((c) => c.id)
+    expect(reSorted).toEqual(sorted)
+    // the lexicographic winner is the strongest finite candidate
+    expect(selectLexicographic(list)).toBe("hi")
   })
 })

@@ -12,6 +12,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   classifyStdout,
+  defaultTempPath,
   type ExecuteReproTestsArgs,
   executeReproTests,
 } from "../../../src/agent/repro-test/execute"
@@ -221,5 +222,42 @@ describe("executeReproTests", () => {
   test("returns empty array for empty input", async () => {
     const out = await executeReproTests(mkArgs({ tests: [] }))
     expect(out).toEqual([])
+  })
+})
+
+describe("defaultTempPath — fallback collision-resistance (FIX B)", () => {
+  test("with crypto present ⇒ paths inside repoRoot, embed index", () => {
+    const p = defaultTempPath("/sandbox", 2)
+    expect(p.startsWith("/sandbox/__repro_2_")).toBe(true)
+    expect(p.endsWith(".py")).toBe(true)
+  })
+
+  test("crypto-undefined fallback ⇒ DISTINCT paths for same-ms same-index calls", () => {
+    // Freeze the clock so Date.now() is identical across both calls — this is the
+    // concurrent same-millisecond / same-index collision the old `${Date.now()}-${i}`
+    // fallback produced (identical path ⇒ cross-contaminated repro scripts).
+    const realNow = Date.now
+    Date.now = () => 1_700_000_000_000
+    try {
+      const a = defaultTempPath("/sandbox", 0, null)
+      const b = defaultTempPath("/sandbox", 0, null)
+      expect(a).not.toBe(b) // RED on the old fallback: a === b
+      expect(a.startsWith("/sandbox/__repro_0_")).toBe(true)
+      expect(b.startsWith("/sandbox/__repro_0_")).toBe(true)
+    } finally {
+      Date.now = realNow
+    }
+  })
+
+  test("fallback ids are unique across many same-ms same-index calls", () => {
+    const realNow = Date.now
+    Date.now = () => 1_700_000_000_000
+    try {
+      const seen = new Set<string>()
+      for (let k = 0; k < 1000; k++) seen.add(defaultTempPath("/sandbox", 0, null))
+      expect(seen.size).toBe(1000)
+    } finally {
+      Date.now = realNow
+    }
   })
 })

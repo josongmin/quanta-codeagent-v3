@@ -65,6 +65,42 @@ describe("extractIssueDeclaredExpected — precision-first", () => {
     expect(extractIssueDeclaredExpected("It should be `ok` now.")).toBeUndefined()
   })
 
+  // FIX A — broad bare single-word literals must NOT become a stdout_contains
+  // substring (a patched tree that prints the word ANYWHERE would false-pass).
+  test("FP guard: broad bare common words (none/null/pass/true/error) ⇒ NOT a stdout substring", () => {
+    // build.ts routes kind:"stdout" → { type:"stdout_contains", substring:value }.
+    // For a bare common word that is a false-green spec rail, so it must NOT
+    // surface as a stdout-kind extract (either undefined, or never stdout-kind).
+    for (const word of ["none", "null", "pass", "true", "error", "false"]) {
+      const r = extractIssueDeclaredExpected(`The function should return \`${word}\` for this input.`)
+      // Either rejected outright, or — if some other rule admits it — it must NOT
+      // be the broad stdout_contains substring path.
+      if (r !== undefined) {
+        expect(r.kind).not.toBe("stdout")
+      } else {
+        expect(r).toBeUndefined()
+      }
+    }
+  })
+
+  test("structured expected outputs are STILL admitted (no over-tightening)", () => {
+    // Punctuation: a KeyError message (no nested delimiter, which the capture
+    // class `[^`'"]` would otherwise terminate on).
+    expect(
+      extractIssueDeclaredExpected("It should print `KeyError: foo` instead of succeeding.")?.value,
+    ).toBe("KeyError: foo")
+    // Whitespace + digits.
+    expect(
+      extractIssueDeclaredExpected("The assertion should print `expected 3 got 5` on failure.")
+        ?.value,
+    ).toBe("expected 3 got 5")
+    // Multi-token whitespace value (existing 'hello world' shape).
+    expect(
+      extractIssueDeclaredExpected('The function should return "hello world" for this input.')
+        ?.value,
+    ).toBe("hello world")
+  })
+
   test("a 'should fix' sentence WITHOUT a delimited literal ⇒ undefined", () => {
     expect(
       extractIssueDeclaredExpected("We should print the result correctly instead of crashing."),

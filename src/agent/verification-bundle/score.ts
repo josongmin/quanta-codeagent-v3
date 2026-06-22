@@ -137,6 +137,21 @@ export const scoreCandidate = (
   // quorum instead of saturating to 1; every other signal is a plain [0,1] coerce.
   // In clean mode, researchOnly/observeOnly soft signals are excluded from the
   // ranking (no hidden heuristic authority via the score).
+  //
+  // ⚠ CLEAN-MODE SCORE IS TELEMETRY-ONLY — NOT A SUBMISSION-SELECTION INPUT.
+  // The clean-mode submission winner is decided by `selectLexicographic`
+  // (select-lexicographic.ts), a STRICT authority lattice over LexTiers that
+  // does NOT read `verdict.score`. The soft `score` is still computed in clean
+  // mode (so readouts/telemetry keep meaning, and softTieBreak signals like
+  // minimality/voterQuorum stay non-zero — see verification-bundle-authority
+  // and verification-bundle-score "FIX B" tests), but it is a LATENT TRAP for
+  // any caller: this weighted sum mixes tie-break + consensus weights that can
+  // CONTRADICT the lexicographic lattice. Do NOT route clean-mode selection
+  // through `selectBest(ranked)` / `verdict.score` — that would let a small
+  // symptom patch buy its way past a stronger root-cause patch, the exact
+  // failure the lexicographic order exists to forbid. (selectBest/selectBestEffort
+  // over this score are RESEARCH-mode selection only; in clean mode they appear
+  // solely for no-winner *terminal attribution*, never for the submission.)
   let score = 0
   for (const key of Object.keys(SOFT_WEIGHTS) as (keyof SoftScoreSignals)[]) {
     if (mode === "clean") {

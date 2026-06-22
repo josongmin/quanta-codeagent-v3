@@ -17,7 +17,9 @@ import {
 } from "@/runner/batch/eval/regression-oracle"
 import {
   applyCandidatePatch,
+  buildApplyCommand,
   candidatePatchAppliesCleanly,
+  PINNED_GIT_IDENTITY,
   resetToBase,
   withCandidatePatch,
 } from "@/runner/batch/eval/rematerialize"
@@ -326,6 +328,23 @@ describe("primitives", () => {
     expect(ok).toBe(true)
     expect(readFileSync(join(repo, "foo.txt"), "utf8")).toBe("base\n")
     expect(existsSync(join(repo, "untracked.txt"))).toBe(false)
+  })
+
+  // FIX C — apply uses the SAME pinned-identity prefix (`G`) as resetToBase, so
+  // the "matches withGitSnapshot's G exactly" invariant holds on BOTH git seams.
+  // A host `commit.gpgsign=true` / signing hook must never be able to influence
+  // re-materialization, and the identity must be uniform across reset + apply.
+  test("buildApplyCommand carries the pinned-identity prefix (G), not a bare git", () => {
+    const cmd = buildApplyCommand(".quanta-cand.patch")
+    // Must start with the SSOT identity prefix (the same string resetToBase uses).
+    expect(cmd.startsWith(`${PINNED_GIT_IDENTITY} apply `)).toBe(true)
+    // Not a bare `git apply` (the asymmetry FIX C removes).
+    expect(cmd.startsWith("git apply ")).toBe(false)
+    // gpgsign pin must be present.
+    expect(cmd).toContain("commit.gpgsign=false")
+    // Still passes --whitespace=nowarn and the patch file.
+    expect(cmd).toContain("--whitespace=nowarn")
+    expect(cmd).toContain(".quanta-cand.patch")
   })
 
   test("applyCandidatePatch returns false for a non-applying diff", async () => {

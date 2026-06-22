@@ -919,6 +919,44 @@ interface ChunkOutcome {
 
 const OUTCOME_LOST: ChunkOutcome = { rateLimited: false, completed: false, lostBox: true }
 
+/**
+ * Route a chunk-grade exception to its requeue/abort handler by inspecting the
+ * stamped error markers. ORDER MATTERS: a genuine box death (BUG 1) also fails
+ * its grade-lock release, so the {@link BOX_DIED_DURING_RUN_ERROR} substring
+ * must be matched BEFORE {@link GRADE_LOCK_RELEASE_ERROR} or a real box death
+ * would mis-route to the lock-rethrow branch. A bare grade-lock failure (no box
+ * death) is unrecoverable and rethrown; anything else is treated as a dead box.
+ */
+const routeChunkGradeError = async (
+  err: unknown,
+  workerId: number,
+  queue: ChunkQueue,
+  chunk: PoolChunk,
+  attempt: number,
+  runtime: WorkerRuntime,
+  state: WorkerState,
+  out: Map<string, PoolChunkResult>,
+): Promise<void> => {
+  const msg = errMessage(err)
+  if (msg.includes(POOL_BUSY_ERROR)) {
+    handlePoolBusyChunkError(workerId, queue, chunk, attempt, runtime, state, out)
+    return
+  }
+  if (msg.includes(BOX_DIED_DURING_RUN_ERROR)) {
+    // BUG 1: the detached poll loop confirmed the box DIED mid-run (spot reclaim
+    // / wall-clock ceiling). Route to the dead-box requeue path FIRST — even
+    // though a dead box also fails its grade-lock release (the secondary
+    // GRADE_LOCK_RELEASE_FAILED gets wrapped in), that lock-release substring
+    // must NOT mis-route a genuine box death to the rethrow branch below.
+    await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
+    return
+  }
+  if (msg.includes(GRADE_LOCK_RELEASE_ERROR)) {
+    throw err
+  }
+  await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
+}
+
 const gradeChunkAttempt = async (
   workerId: number,
   queue: ChunkQueue,
@@ -965,21 +1003,7 @@ const gradeChunkAttempt = async (
     await handleNoVerdictChunk(workerId, queue, chunk, attempt, runtime, state, out, result)
     return { rateLimited: result.rateLimited === true, completed: false, lostBox: true }
   } catch (err) {
-    const msg = errMessage(err)
-    if (msg.includes(POOL_BUSY_ERROR)) {
-      handlePoolBusyChunkError(workerId, queue, chunk, attempt, runtime, state, out)
-    } else if (msg.includes(BOX_DIED_DURING_RUN_ERROR)) {
-      // BUG 1: the detached poll loop confirmed the box DIED mid-run (spot reclaim
-      // / wall-clock ceiling). Route to the dead-box requeue path FIRST — even
-      // though a dead box also fails its grade-lock release (the secondary
-      // GRADE_LOCK_RELEASE_FAILED gets wrapped in), that lock-release substring
-      // must NOT mis-route a genuine box death to the abort branch below.
-      await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
-    } else if (msg.includes(GRADE_LOCK_RELEASE_ERROR)) {
-      throw err
-    } else {
-      await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
-    }
+    await routeChunkGradeError(err, workerId, queue, chunk, attempt, runtime, state, out)
     return OUTCOME_LOST
   }
 }
@@ -1114,12 +1138,9 @@ const runWorker = async (
  * {@link PoolChunkResult} per chunk (keyed back to its runId), preserving the
  * input order. Bootstrap is paid ONCE per worker box, not per chunk.
  */
-export const runPool = async (
-  chunks: readonly PoolChunk[],
-  cfg: PoolConfig,
-): Promise<PoolChunkResult[]> => {
-  assertUniqueChunkRunIds(chunks)
-  if (chunks.length === 0) return []
+/** Per-chunk launchability preflight — dataset reachable, selection non-empty,
+ *  and strict-grounding supported for the configured preset. Throws on any gap. */
+const assertPoolChunksLaunchable = (chunks: readonly PoolChunk[], cfg: PoolConfig): void => {
   for (const chunk of chunks) {
     assertRemoteDatasetLaunchable({
       datasetPath: chunk.datasetPath,
@@ -1137,6 +1158,11 @@ export const runPool = async (
       surface: `pool chunk ${chunk.runId}`,
     })
   }
+}
+
+/** Normalize + gate the requested worker count: parallel workers can launch
+ *  parallel boxes, so multi-worker runs require BOTH explicit opt-ins. */
+const resolvePoolWorkerCount = (cfg: PoolConfig): number => {
   const workers = Math.max(1, Math.trunc(cfg.workers) || 1)
   if (workers > 1 && cfg.allowExtraWorkers !== true) {
     throw new Error(
@@ -1149,6 +1175,38 @@ export const runPool = async (
         "(allowExtraBoxes=true): parallel workers can launch parallel boxes",
     )
   }
+  return workers
+}
+
+/** Reconcile the single-box guard release with the run's primary error: a
+ *  release failure is folded into the primary error when one exists, else it
+ *  becomes the thrown error; otherwise the run's result/primary error stands. */
+const settlePoolOutcome = (
+  result: PoolChunkResult[] | undefined,
+  primaryErr: unknown,
+  guardReleaseErr: unknown,
+): PoolChunkResult[] => {
+  if (guardReleaseErr !== undefined) {
+    if (primaryErr !== undefined) {
+      throw new Error(
+        `[pool] failed to release the single-box guard after ${errMessage(primaryErr)}: ${errMessage(guardReleaseErr)}`,
+      )
+    }
+    throw guardReleaseErr
+  }
+  if (primaryErr !== undefined) throw primaryErr
+  if (result !== undefined) return result
+  throw new Error("[pool] run completed without a result or error")
+}
+
+export const runPool = async (
+  chunks: readonly PoolChunk[],
+  cfg: PoolConfig,
+): Promise<PoolChunkResult[]> => {
+  assertUniqueChunkRunIds(chunks)
+  if (chunks.length === 0) return []
+  assertPoolChunksLaunchable(chunks, cfg)
+  const workers = resolvePoolWorkerCount(cfg)
   const guard = await acquirePoolSingleBoxGuard(chunks, cfg)
   let result: PoolChunkResult[] | undefined
   let primaryErr: unknown
@@ -1193,16 +1251,5 @@ export const runPool = async (
     guardReleaseErr = err
   }
 
-  if (guardReleaseErr !== undefined) {
-    if (primaryErr !== undefined) {
-      throw new Error(
-        `[pool] failed to release the single-box guard after ${errMessage(primaryErr)}: ${errMessage(guardReleaseErr)}`,
-      )
-    }
-    throw guardReleaseErr
-  }
-
-  if (primaryErr !== undefined) throw primaryErr
-  if (result !== undefined) return result
-  throw new Error("[pool] run completed without a result or error")
+  return settlePoolOutcome(result, primaryErr, guardReleaseErr)
 }

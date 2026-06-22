@@ -82,12 +82,22 @@ const LATEX_RE =
  *  delimiters must BOUND the value (after trim) for this to be "symbolic". */
 const SYMBOLIC_RE = /^[([{].*[)\]}]$|^[A-Za-z_][\w.]*\(.*\)$/
 
+/** A "bare word" = letters only, no punctuation / whitespace / digit. Such a
+ *  value classifies as `stdout` (neither LATEX nor SYMBOLIC matches) and so
+ *  build.ts turns it into a `{ type: "stdout_contains", substring }` contract —
+ *  satisfied if the patched tree prints the word ANYWHERE. Common broad tokens
+ *  (`none`/`null`/`pass`/`true`/`error`/`false`, ≤5 chars) are therefore a
+ *  false-green spec rail. We require STRUCTURE (punctuation / whitespace / a
+ *  digit) OR a higher length bound (>6 chars) before admitting a bare word —
+ *  a STRUCTURAL rule, not a denylist, so any short broad token is rejected while
+ *  genuinely-specific structured / multi-token outputs still pass. */
+const BARE_WORD_MIN_LEN = 7
 const isMeaningful = (v: string): boolean => {
   const t = v.trim()
   if (t.length === 0) return false
-  // Reject a bare single common word (e.g. "true", "this") — too weak to be an
-  // exact spec. A value with structure (punctuation/space/digit) is admissible.
-  if (/^[A-Za-z]+$/.test(t) && t.length < 4) return false
+  // A bare alpha-only single word with no structure is admissible only when it
+  // is long enough to be a specific substring; short common words are rejected.
+  if (/^[A-Za-z]+$/.test(t) && t.length < BARE_WORD_MIN_LEN) return false
   return true
 }
 

@@ -23,7 +23,7 @@ import {
   type GradeOutcome,
   type SpawnFn,
 } from "./backend"
-import { createSshBackend } from "./ssh"
+import { createSshBackend, type SshBackendConfig } from "./ssh"
 
 export interface Ec2BackendConfig {
   readonly region?: string
@@ -126,6 +126,26 @@ export const lookupCurrentPublicIpv4 = async (spawn: SpawnFn, surface: string): 
   }
   return myIp
 }
+
+/**
+ * Build the SSH backend config for grading against a freshly-launched box,
+ * folding the EC2 backend's optional knobs (model name / sleep / poll cadence)
+ * through to the ssh layer. PURE — isolates the four optional-field spreads out
+ * of {@link createEc2Backend}'s `grade` so that step stays readable.
+ */
+const buildSshBackendConfig = (
+  cfg: Ec2BackendConfig,
+  params: { ip: string; keyPath: string; maxWorkers: number; spawn: SpawnFn },
+): SshBackendConfig => ({
+  host: `ubuntu@${params.ip}`,
+  keyPath: params.keyPath,
+  maxWorkers: params.maxWorkers,
+  spawn: params.spawn,
+  ...(cfg.modelName ? { modelName: cfg.modelName } : {}),
+  ...(cfg.sleep ? { sleep: cfg.sleep } : {}),
+  ...(cfg.pollIntervalMs !== undefined ? { pollIntervalMs: cfg.pollIntervalMs } : {}),
+  ...(cfg.maxPolls !== undefined ? { maxPolls: cfg.maxPolls } : {}),
+})
 
 export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   const spawn = cfg.spawn ?? defaultSpawn
@@ -355,16 +375,7 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
       const ip = await waitForHost(iid)
       await waitForSsh(ip) // sshd + cloud-init bootstrap ready before scp/grade
       // Stages 3–5: delegate to the ssh backend against the fresh box.
-      const ssh = createSshBackend({
-        host: `ubuntu@${ip}`,
-        keyPath,
-        maxWorkers,
-        spawn,
-        ...(cfg.modelName ? { modelName: cfg.modelName } : {}),
-        ...(cfg.sleep ? { sleep: cfg.sleep } : {}),
-        ...(cfg.pollIntervalMs !== undefined ? { pollIntervalMs: cfg.pollIntervalMs } : {}),
-        ...(cfg.maxPolls !== undefined ? { maxPolls: cfg.maxPolls } : {}),
-      })
+      const ssh = createSshBackend(buildSshBackendConfig(cfg, { ip, keyPath, maxWorkers, spawn }))
       const outcome = await ssh.grade(predictionsPath, { ...opts, maxWorkers })
       if (!keep) await terminate(iid)
       return outcome

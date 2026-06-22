@@ -63,6 +63,35 @@ export interface LexCandidate {
 }
 
 /**
+ * Compare two tier values with a TOTAL, transitive, NaN-safe order.
+ *
+ * The naive `(b - a)` / `(a - b)` + `!== 0` short-circuit is a footgun when any
+ * tier value is NaN (e.g. a proofStrength built from a 0/0 ratio): NaN makes the
+ * subtraction NaN, every `!== 0` test is false, and the comparator silently falls
+ * through to later tiers. That is a NON-TOTAL order — it violates antisymmetry and
+ * transitivity, which makes `Array.prototype.sort` behavior undefined.
+ *
+ * Here NaN is deterministically treated as the WORST possible value regardless of
+ * direction: a NaN-bearing candidate always loses this tier to a finite one, and
+ * two NaNs tie (so later finite tiers still decide). `dir` is +1 for DESC tiers
+ * (larger value wins, i.e. the better candidate sorts first ⇒ negative) and -1 for
+ * ASC tiers (smaller value wins).
+ *
+ * Returns a negative number when `av` is the better value, positive when `bv` is
+ * better, and 0 when they tie. Total and antisymmetric for ALL finite/NaN inputs.
+ */
+const cmpTier = (av: number, bv: number, dir: 1 | -1): number => {
+  const aNaN = Number.isNaN(av)
+  const bNaN = Number.isNaN(bv)
+  if (aNaN || bNaN) {
+    if (aNaN && bNaN) return 0 // both worst ⇒ tie, defer to later tiers
+    return aNaN ? 1 : -1 // the NaN side is the worst value ⇒ it loses (positive)
+  }
+  // DESC (dir=+1): better = larger ⇒ (b - a); ASC (dir=-1): better = smaller ⇒ (a - b).
+  return dir === 1 ? bv - av : av - bv
+}
+
+/**
  * Strict lexicographic comparator over the authority lattice.
  *
  * Returns a negative number if `a` is the better (winning) candidate, a positive
@@ -70,47 +99,48 @@ export interface LexCandidate {
  * tier-by-tier: the first differing tier decides, so a later tier can NEVER
  * overturn an earlier one. This is the whole point — minimality (a late tier)
  * cannot beat stronger proof / contracts / family (early tiers).
+ *
+ * Every tier goes through {@link cmpTier}, which keeps the order TOTAL even if a
+ * tier value is NaN (NaN sorts last as the worst value) — a non-total order would
+ * make `sort` undefined and could silently corrupt selection.
  */
 export const compareLexTiers = (a: LexTiers, b: LexTiers): number => {
-  // DESC tiers: the larger value is better, so the better candidate sorts first
-  // (negative). We compute (b - a) so a larger `a` yields a negative result.
-
   // SCAFF-06 top tier — executable public-MWE verdict. Absent ⇒ 0, so a pair of
   // receipt-less candidates compares EXACTLY as before (the field never flips the
   // result until a real MWE execution populates it).
-  const mwe = (b.mweProof ?? 0) - (a.mweProof ?? 0)
+  const mwe = cmpTier(a.mweProof ?? 0, b.mweProof ?? 0, 1)
   if (mwe !== 0) return mwe
 
-  const proof = b.proofStrength - a.proofStrength
+  // DESC authority tiers (larger value is the better, winning candidate).
+  const proof = cmpTier(a.proofStrength, b.proofStrength, 1)
   if (proof !== 0) return proof
 
-  const keepGreen = b.executedKeepGreen - a.executedKeepGreen
+  const keepGreen = cmpTier(a.executedKeepGreen, b.executedKeepGreen, 1)
   if (keepGreen !== 0) return keepGreen
 
-  const required = b.requiredContractsSatisfied - a.requiredContractsSatisfied
+  const required = cmpTier(a.requiredContractsSatisfied, b.requiredContractsSatisfied, 1)
   if (required !== 0) return required
 
-  const contracts = b.contractsSatisfied - a.contractsSatisfied
+  const contracts = cmpTier(a.contractsSatisfied, b.contractsSatisfied, 1)
   if (contracts !== 0) return contracts
 
-  const family = b.familyRank - a.familyRank
+  const family = cmpTier(a.familyRank, b.familyRank, 1)
   if (family !== 0) return family
 
-  // ASC tiers: the smaller value is better. We compute (a - b) so a smaller `a`
-  // yields a negative result.
-  const files = a.sourceFiles - b.sourceFiles
+  // ASC minimality tiers (smaller value is the better candidate).
+  const files = cmpTier(a.sourceFiles, b.sourceFiles, -1)
   if (files !== 0) return files
 
-  const lines = a.addedLines - b.addedLines
+  const lines = cmpTier(a.addedLines, b.addedLines, -1)
   if (lines !== 0) return lines
 
-  const defs = a.newDefs - b.newDefs
+  const defs = cmpTier(a.newDefs, b.newDefs, -1)
   if (defs !== 0) return defs
 
-  const newFiles = a.newFiles - b.newFiles
+  const newFiles = cmpTier(a.newFiles, b.newFiles, -1)
   if (newFiles !== 0) return newFiles
 
-  return a.order - b.order
+  return cmpTier(a.order, b.order, -1)
 }
 
 /**

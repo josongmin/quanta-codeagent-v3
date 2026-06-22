@@ -1941,6 +1941,53 @@ const parseDetachedProbe = (stdout: string): { exitCode?: number; freshLines: st
 }
 
 /**
+ * Drain the fresh log lines from a SUCCESSFUL probe and surface the run's exit
+ * code when the sentinel has landed. Mutates the caller's line-cursor (`seen`)
+ * via the returned count so the next probe asks only for unseen lines. Pure of
+ * IO beyond the supplied `onLine` sink.
+ */
+const applyDetachedProbeSuccess = (
+  stdout: string,
+  seen: number,
+  onLine: (chunk: string) => void,
+): { seen: number; exitCode?: number } => {
+  const parsed = parseDetachedProbe(stdout)
+  let next = seen
+  for (const line of parsed.freshLines) {
+    onLine(`${line}\n`)
+    next += 1
+  }
+  if (parsed.exitCode === undefined) return { seen: next }
+  return { seen: next, exitCode: parsed.exitCode }
+}
+
+/**
+ * Box-death bound for an UNBROKEN run of failed polls (BUG 1 fix). Once the
+ * consecutive-failure threshold trips, CONFIRM box liveness: a dead box THROWS
+ * a {@link BoxDiedDuringRunError} so the pool requeues the chunk; a still-live
+ * but unreachable box resets the counter (returns 0) so the next window earns
+ * its own confirmation rather than hammering AWS every tick.
+ */
+const confirmBoxLivenessOnPollFailures = async (
+  aws: (awsArgs: readonly string[]) => Promise<SpawnResult>,
+  iid: string,
+  consecFailures: number,
+  log: (msg: string) => void,
+): Promise<number> => {
+  if (consecFailures < RUN_MAX_CONSEC_POLL_FAILURES) return consecFailures
+  log(`[full-remote] ${consecFailures} consecutive failed polls — confirming box ${iid} liveness…`)
+  if (!(await isInstanceStillLive(aws, iid))) {
+    throw new BoxDiedDuringRunError(
+      `${BOX_DIED_DURING_RUN_ERROR}: box ${iid} is no longer running (spot reclaim / unreachable) after ${consecFailures} consecutive failed polls — run.exit will never land`,
+    )
+  }
+  // Still live but persistently unreachable over ssh — reset the counter so the
+  // next window gets its own confirmation rather than re-probing AWS every tick,
+  // and lean on the wall-clock ceiling backstop.
+  return 0
+}
+
+/**
  * Detached run + poll — ssh-resilience (RCA jun-20). Launches `benchCmd` under
  * `setsid` so it is its OWN session leader: an ssh teardown's SIGHUP never
  * reaches it, and the bench runs to completion regardless of any local-side
@@ -1986,30 +2033,19 @@ const runBenchDetachedPoll = async (args: {
     const probe = await args.ssh(detachedProbeCommand(args.runExit, args.runLog, seen))
     if (probe.code === 0) {
       consecFailures = 0 // a successful poll resets the box-death suspicion.
-      const parsed = parseDetachedProbe(probe.stdout)
-      for (const line of parsed.freshLines) {
-        args.onLine(`${line}\n`)
-        seen += 1
-      }
-      if (parsed.exitCode !== undefined) return { code: parsed.exitCode }
+      const applied = applyDetachedProbeSuccess(probe.stdout, seen, args.onLine)
+      seen = applied.seen
+      if (applied.exitCode !== undefined) return { code: applied.exitCode }
     } else {
       // A failed/dropped poll is non-fatal IN ISOLATION (NAT-drop ⇒ next tick
       // reconnects), but an UNBROKEN run of them is the box-death signature.
       consecFailures += 1
-      if (consecFailures >= RUN_MAX_CONSEC_POLL_FAILURES) {
-        log(
-          `[full-remote] ${consecFailures} consecutive failed polls — confirming box ${args.iid} liveness…`,
-        )
-        if (!(await isInstanceStillLive(args.aws, args.iid))) {
-          throw new BoxDiedDuringRunError(
-            `${BOX_DIED_DURING_RUN_ERROR}: box ${args.iid} is no longer running (spot reclaim / unreachable) after ${consecFailures} consecutive failed polls — run.exit will never land`,
-          )
-        }
-        // Still live but persistently unreachable over ssh — reset the counter so
-        // the next window gets its own confirmation rather than re-probing AWS
-        // every tick, and lean on the wall-clock ceiling below.
-        consecFailures = 0
-      }
+      consecFailures = await confirmBoxLivenessOnPollFailures(
+        args.aws,
+        args.iid,
+        consecFailures,
+        log,
+      )
     }
     if (now() - startedAt >= RUN_WALL_CEILING_MS) {
       throw new BoxDiedDuringRunError(
@@ -2051,6 +2087,9 @@ interface GradeChunkState {
   finalErroredCount?: number
   finalEmptyPatchCount?: number
   finalRateLimited: boolean
+  /** #9: report bytes were present but failed to parse (truncated/corrupt fetch),
+   *  distinct from a genuinely-absent report. */
+  finalReportUnparseable?: boolean
   latestLogLine?: string
   sawLiveLogLine: boolean
   lastSnapshotFlushAt: number
@@ -2437,6 +2476,25 @@ export const parseVerdicts = (reportText: string): GradeChunkVerdicts => {
   }
 }
 
+/** #9: distinguish a GENUINELY-ABSENT report (`empty`) from a report that WAS
+ *  written but arrived truncated/half-flushed/corrupt (`unparseable`). The
+ *  pre-fix code collapsed both into `emptyVerdicts()`, so a successful grade
+ *  whose report suffered a transport/flush glitch was silently reclassified as a
+ *  box-loss (and re-graded on a fresh box, wasting it — or eventually marked
+ *  lost despite grading having succeeded). The caller treats `unparseable`
+ *  loudly + (a fetch-retry, not a whole-grade discard). */
+export type ReportTextStatus = "empty" | "unparseable" | "ok"
+
+export const classifyReportText = (reportText: string): ReportTextStatus => {
+  if (reportText.trim() === "") return "empty"
+  try {
+    JSON.parse(reportText)
+    return "ok"
+  } catch {
+    return "unparseable"
+  }
+}
+
 /** Total instances that earned ANY verdict — 0 ⇒ the chunk produced nothing
  *  gradeable (drives the "no verdicts in report" diagnostics + box-loss path). */
 export const verdictCount = (verdicts: GradeChunkVerdicts): number =>
@@ -2452,7 +2510,7 @@ const assignVerdictCounts = (state: GradeChunkState, verdicts: GradeChunkVerdict
   state.finalEmptyPatchCount = verdicts.emptyPatch.length
 }
 
-const collectRunDiagnostics = async (args: {
+export const collectRunDiagnostics = async (args: {
   ssh: BoxSession["ssh"]
   runLogPath: string
   latestLogLine: string | undefined
@@ -2461,6 +2519,16 @@ const collectRunDiagnostics = async (args: {
   log: (msg: string) => void
 }): Promise<{ lastLogLine?: string; rateLimited: boolean }> => {
   const tail = await args.ssh(`tail -60 ${args.runLogPath} 2>/dev/null`)
+  // #8: the rate-limit signal drives ALL worker backoff. Reading only the last 60
+  // lines makes a 429 storm that happened during patch-gen invisible once grading
+  // output scrolls past it → no backoff → the next chunk hammers a still-throttled
+  // login. Scan the FULL log for throttle markers; the tail is kept ONLY for the
+  // human-facing status line. The TS `detectRateLimit` regex stays authoritative —
+  // the remote grep merely hauls candidate lines out of the whole file so they
+  // survive into the window we re-validate.
+  const throttleScan = await args.ssh(
+    `grep -aiE 'generation_error|too many requests|rate[ _-]?limit|(http|status)[ /:]*429' ${args.runLogPath} 2>/dev/null | head -20`,
+  )
   const lastLogLine = normalizeStatusText(
     tail.stdout
       .split("\n")
@@ -2470,7 +2538,7 @@ const collectRunDiagnostics = async (args: {
       args.latestLogLine ??
       "",
   )
-  const rateLimited = detectRateLimit(tail.stdout)
+  const rateLimited = detectRateLimit(tail.stdout) || detectRateLimit(throttleScan.stdout)
   if (args.emptyVerdicts) {
     args.log(
       `[full-remote] ⚠️ no verdicts in report (run exit ${args.remoteRunCode}). Box run.log tail:`,
@@ -2549,6 +2617,17 @@ export const gradeChunkOnBox = async (
       log,
     })
     const parsed = parseVerdicts(fetched.reportText)
+    // #9: a non-empty report that fails to parse is NOT the same as "box produced
+    // nothing" — surface it loudly with a byte count so a successful grade lost to
+    // a truncated/half-flushed fetch is visible (caller can refetch) instead of
+    // being silently downgraded to a box-loss.
+    const reportStatus = classifyReportText(fetched.reportText)
+    if (reportStatus === "unparseable") {
+      state.finalReportUnparseable = true
+      log(
+        `[full-remote] ⚠️ report present but UNPARSEABLE (${fetched.reportText.length} bytes, run exit ${state.finalExitCode ?? -1}) — likely truncated/half-flushed fetch, NOT a clean box-loss. Re-fetch before treating as lost.`,
+      )
+    }
     assignVerdictCounts(state, parsed)
     const diagnostics = await collectRunDiagnostics({
       ssh,

@@ -99,8 +99,7 @@ export interface ExecuteReproTestsArgs {
 }
 
 /** Compact a thrown value to a single-line string for the stderr diagnostic. */
-const errText = (e: unknown): string =>
-  e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+const errText = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e))
 
 /** Classify stdout into a {@link ReproTestOutcome}, applying the
  *  last-marker-wins rule. `code` decides between `"exec_failed"` and
@@ -126,15 +125,40 @@ export const classifyStdout = (stdout: string, code: number): ReproTestOutcome =
   return "other"
 }
 
+/** Process-lifetime monotonic counter — guarantees that the crypto-less
+ *  fallback id is distinct even for two calls in the SAME millisecond with the
+ *  SAME sample index (the exact concurrent-collision the prior `${Date.now()}-${i}`
+ *  fallback silently corrupted: two `runInstance` calls would write the SAME
+ *  temp script path and cross-contaminate). */
+let fallbackCounter = 0
+
+/** Minimal shape of the global `crypto` we depend on (just `randomUUID`). */
+type CryptoLike = { randomUUID: () => string }
+
 /** Default temp-path generator. Path lives inside `repoRoot` so the
  *  script can `import` project modules. The filename embeds the sample
- *  index for human inspection during debugging, plus a UUID4 fragment so
- *  parallel `runInstance` calls cannot collide. */
-const defaultTempPath = (repoRoot: string, i: number): string => {
-  // UUID is generated via `crypto.randomUUID()` — available on Node 19+ and
-  // Bun. We don't import `node:crypto` (which would pull a heavier dep) —
-  // the global `crypto` works on both runtimes.
-  const rnd = typeof crypto !== "undefined" ? crypto.randomUUID() : `${Date.now()}-${i}`
+ *  index for human inspection during debugging, plus a unique fragment so
+ *  parallel `runInstance` calls cannot collide.
+ *
+ *  `cryptoRef` is injectable ONLY so the no-crypto fallback can be exercised
+ *  deterministically in tests; production omits it and the global `crypto`
+ *  (present on Bun and Node 19+) is used. We don't import `node:crypto` (heavier
+ *  dep). Pass `null` to FORCE the fallback path (test seam); `undefined`/omitted
+ *  resolves to the global. (A defaulted `undefined` param can't force the
+ *  fallback — JS default-params fire on `undefined` — hence the explicit `null`.)
+ *
+ *  Exported for direct unit testing of the fallback collision-resistance. */
+export const defaultTempPath = (
+  repoRoot: string,
+  i: number,
+  cryptoRef: CryptoLike | null | undefined = undefined,
+): string => {
+  const c: CryptoLike | null =
+    cryptoRef === undefined ? (typeof crypto !== "undefined" ? crypto : null) : cryptoRef
+  // Robust fallback: even with NO `crypto`, fold in process.pid + a monotonic
+  // counter so two same-ms / same-index calls can NEVER produce the same path
+  // (the old `${Date.now()}-${i}` form collided ⇒ cross-contaminated repros).
+  const rnd = c !== null ? c.randomUUID() : `${Date.now()}-${process.pid}-${i}-${fallbackCounter++}`
   return `${repoRoot}/__repro_${i}_${rnd}.py`
 }
 
@@ -165,7 +189,8 @@ const executeOne = async (
     return { source, stdout: "", stderr: `[writeFile threw] ${errText(e)}`, outcome: "exec_failed" }
   }
   try {
-    const argv = args.buildArgv !== undefined ? args.buildArgv(path) : [args.pythonBin ?? "python3", path]
+    const argv =
+      args.buildArgv !== undefined ? args.buildArgv(path) : [args.pythonBin ?? "python3", path]
     const r = await args.exec(argv, args.repoRoot, timeoutMs)
     const stdout = typeof r.stdout === "string" ? r.stdout : ""
     const stderr = typeof r.stderr === "string" ? r.stderr : ""
