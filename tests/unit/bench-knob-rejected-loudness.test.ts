@@ -48,6 +48,24 @@ describe("resolveBenchKnobs rejected loudness (#5)", () => {
     expect(state.rejected).toEqual([])
   })
 
+  // A boolean ON/OFF flag (unit omitted) parses every non-truthy raw to undefined
+  // BY DESIGN — `=0/=off/=false` is an intentional opt-out (a documented baseline
+  // idiom), not a misconfig. Flagging it would defeat the whole distinction.
+  it("does NOT flag a boolean knob turned off with 0/false/off (intentional opt-out)", () => {
+    for (const off of ["0", "false", "off"]) {
+      const state = resolveBenchKnobs({ envVars: { QUANTA_BENCH_LSP: off } })
+      expect(state.rejected).toEqual([])
+      // and it is treated as a normal unset/off knob, not a misconfig
+      expect(state.rejected.map((r) => r.envKey)).not.toContain("QUANTA_BENCH_LSP")
+    }
+  })
+
+  it("STILL flags a VALUED knob with garbage even if the garbage looks falsy-ish", () => {
+    // a numeric knob set to non-numeric garbage is a real typo regardless of spelling
+    const state = resolveBenchKnobs({ envVars: { [REGRESSION_KEY]: "nope" } })
+    expect(state.rejected.map((r) => r.id)).toContain("regression-max-tests")
+  })
+
   it("a phase module that ACTIVATES a rejected knob clears it from `rejected` (symmetry with inactive)", () => {
     // env raw is invalid (rejected) …
     const base = resolveBenchKnobs({ envVars: { [REGRESSION_KEY]: "300" } })

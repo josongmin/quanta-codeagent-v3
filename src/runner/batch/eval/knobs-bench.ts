@@ -108,8 +108,19 @@ export const resolveBenchKnobs = (args: ResolveBenchKnobsArgs): BenchKnobState =
     // keep it OUT of `inactive`, so the report cleanly separates "never set" from
     // "set wrong". The resolver stays pure — this detection is the surface's job;
     // only the env layer is inspected.
+    //
+    // ONLY VALUED knobs (`unit` defined — numeric/structured) have a "rejected"
+    // state. A boolean ON/OFF flag (unit OMITTED, per the Knob contract) treats
+    // EVERY non-truthy raw as an intentional opt-out — `QUANTA_BENCH_LSP=0/off/
+    // false` is byte-identical to unset, a documented baseline idiom, NOT a typo.
+    // Flagging those would defeat the misconfig/intentional-default distinction.
     const raw = args.envVars[knob.envKey]
-    if (raw !== undefined && raw.trim() !== "" && knob.parse(raw) === undefined) {
+    if (
+      knob.unit !== undefined &&
+      raw !== undefined &&
+      raw.trim() !== "" &&
+      knob.parse(raw) === undefined
+    ) {
       rejected.push({ id, envKey: knob.envKey, raw })
       continue
     }
