@@ -74,32 +74,82 @@ export type SpawnFn = (
   },
 ) => Promise<SpawnResult>
 
-/** Real {@link SpawnFn} via `Bun.spawn` — argv-array (no shell ⇒ no injection). */
-export const defaultSpawn: SpawnFn = async (cmd, args, opts) => {
-  const proc = Bun.spawn([cmd, ...args], {
-    ...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
-    stdin: opts?.input === undefined ? "ignore" : new TextEncoder().encode(opts.input),
+/**
+ * The minimal slice of a spawned child the reader logic depends on. Extracted
+ * so {@link spawnWithProc} is testable with a fake proc (no real process), which
+ * lets us prove the leak-safe reaping on a stdout-read throw.
+ */
+export interface SpawnedProc {
+  readonly stdout: ReadableStream<Uint8Array>
+  readonly stderr: ReadableStream<Uint8Array>
+  readonly exited: Promise<number>
+  kill(): void
+}
+
+/** Factory that produces a {@link SpawnedProc} for the given argv + io. */
+export type SpawnProcFactory = (
+  cmd: string,
+  args: readonly string[],
+  opts: { readonly cwd?: string; readonly input?: string },
+) => SpawnedProc
+
+/** Real proc factory via `Bun.spawn` — argv-array (no shell ⇒ no injection). */
+const bunSpawnProcFactory: SpawnProcFactory = (cmd, args, opts) =>
+  Bun.spawn([cmd, ...args], {
+    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+    stdin: opts.input === undefined ? "ignore" : new TextEncoder().encode(opts.input),
     stdout: "pipe",
     stderr: "pipe",
-  })
-  // Streaming path: tee stdout to `onData` chunk-by-chunk while accumulating the
-  // full text (needed for downstream parsing). Without onData, the simple
-  // buffer-until-exit read is byte-identical to before.
-  const readStdout = async (): Promise<string> => {
-    if (opts?.onData === undefined) return new Response(proc.stdout).text()
-    const decoder = new TextDecoder()
-    let acc = ""
-    for await (const bytes of proc.stdout as ReadableStream<Uint8Array>) {
-      const chunk = decoder.decode(bytes, { stream: true })
-      acc += chunk
-      opts.onData(chunk)
+  }) as unknown as SpawnedProc
+
+/**
+ * Core {@link SpawnFn} parameterized over the proc factory.
+ *
+ * Leak-safe: if reading stdout/stderr throws (e.g. a chunk callback raises, or a
+ * stream errors mid-read), the child is killed and `exited` is awaited before
+ * rethrowing — otherwise the ssh child is never reaped and zombies accumulate
+ * across a many-chunk pool run. The success path is byte-identical to the prior
+ * direct `Bun.spawn` flow.
+ */
+export const spawnWithProc = (factory: SpawnProcFactory): SpawnFn => {
+  return async (cmd, args, opts) => {
+    const proc = factory(cmd, args, {
+      ...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
+      ...(opts?.input !== undefined ? { input: opts.input } : {}),
+    })
+    // Streaming path: tee stdout to `onData` chunk-by-chunk while accumulating the
+    // full text (needed for downstream parsing). Without onData, the simple
+    // buffer-until-exit read is byte-identical to before.
+    const readStdout = async (): Promise<string> => {
+      if (opts?.onData === undefined) return new Response(proc.stdout).text()
+      const decoder = new TextDecoder()
+      let acc = ""
+      for await (const bytes of proc.stdout as ReadableStream<Uint8Array>) {
+        const chunk = decoder.decode(bytes, { stream: true })
+        acc += chunk
+        opts.onData(chunk)
+      }
+      return acc
     }
-    return acc
+    try {
+      const [stdout, stderr] = await Promise.all([readStdout(), new Response(proc.stderr).text()])
+      const code = await proc.exited
+      return { code, stdout, stderr }
+    } catch (err) {
+      // Any read-path failure leaks the child unless we reap it here.
+      try {
+        proc.kill()
+      } catch {
+        // best-effort: a kill failure must not mask the original error
+      }
+      await proc.exited.catch(() => undefined)
+      throw err
+    }
   }
-  const [stdout, stderr] = await Promise.all([readStdout(), new Response(proc.stderr).text()])
-  const code = await proc.exited
-  return { code, stdout, stderr }
 }
+
+/** Real {@link SpawnFn} via `Bun.spawn` — argv-array (no shell ⇒ no injection). */
+export const defaultSpawn: SpawnFn = spawnWithProc(bunSpawnProcFactory)
 
 /** Coerce an unknown json field to a string array of ids (defensive). */
 const asIdArray = (v: unknown): readonly string[] => {

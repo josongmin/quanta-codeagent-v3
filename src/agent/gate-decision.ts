@@ -54,26 +54,48 @@ export const decideGate = (s: GateSignals): GateDecision => {
   // `&& !reproAvailable`; the issue-provides-fix branch must be consistent.)
   if (!highStakes(s) && !uncertain(s) && !s.signal.reproAvailable) {
     if (s.commitFast.issueProvidesFix) {
-      return { action: "commit-now", reason: "issue supplies the fix, single-file low-stakes, no execution rail — commit without exploration loop" }
+      return {
+        action: "commit-now",
+        reason:
+          "issue supplies the fix, single-file low-stakes, no execution rail — commit without exploration loop",
+      }
     }
     if (s.commitFast.highConfidenceSingleOwner) {
-      return { action: "commit-now", reason: "high-confidence single owner, no cheap external signal to add — commit" }
+      return {
+        action: "commit-now",
+        reason: "high-confidence single owner, no cheap external signal to add — commit",
+      }
     }
   }
 
   // ── verify (anti under-verify) — only EXTERNAL sources ───────────────────
-  const sources: GateSource[] = []
-  if (s.signal.reproAvailable) sources.push("repro")
+  // Compute the EXTERNAL sources first (repro / structure). Hygiene is a free,
+  // always-applicable diff fact, so it is NOT external: a verify that names ONLY
+  // hygiene, with no stakes and no uncertainty, is not worth an exploration loop
+  // and collapses to commit-now. Any external source — or any stakes/uncertainty
+  // — makes the verify worthwhile, in which case hygiene rides along.
+  const external: GateSource[] = []
+  if (s.signal.reproAvailable) external.push("repro")
   if (s.signal.lspAvailable && (s.uncertainty.unresolvedSymbols || s.stakes.crossFile)) {
-    sources.push("structure")
-  }
-  sources.push("hygiene") // free + deterministic diff facts always apply
-
-  // a verify with only hygiene and no stakes/uncertainty is not worth a loop
-  if (sources.length === 1 && !highStakes(s) && !uncertain(s)) {
-    return { action: "commit-now", reason: "low-stakes, certain, no execution/structure signal — commit with hygiene check only" }
+    external.push("structure")
   }
 
-  const why = highStakes(s) ? "high stakes" : uncertain(s) ? "uncertain localization" : "external signal available"
-  return { action: "verify", sources, reason: `${why} — ground on [${sources.join(", ")}] before commit` }
+  if (external.length === 0 && !highStakes(s) && !uncertain(s)) {
+    return {
+      action: "commit-now",
+      reason: "low-stakes, certain, no execution/structure signal — commit with hygiene check only",
+    }
+  }
+
+  const sources: GateSource[] = [...external, "hygiene"]
+  const why = highStakes(s)
+    ? "high stakes"
+    : uncertain(s)
+      ? "uncertain localization"
+      : "external signal available"
+  return {
+    action: "verify",
+    sources,
+    reason: `${why} — ground on [${sources.join(", ")}] before commit`,
+  }
 }

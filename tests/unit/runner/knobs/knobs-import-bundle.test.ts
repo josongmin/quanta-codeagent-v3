@@ -76,6 +76,7 @@ import { verifySelectConcurrencyKnob } from "@/runner/knobs/knobs/verify-select-
 import { verifySelectCounterfactualKnob } from "@/runner/knobs/knobs/verify-select-counterfactual"
 import { verifySelectEarlyAcceptKnob } from "@/runner/knobs/knobs/verify-select-early-accept"
 import { verifySelectLlmRiskGateKnob } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
+import { verifySelectProofRequiredKnob } from "@/runner/knobs/knobs/verify-select-proof-required"
 import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-regression"
 import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { verifySelectRiskGateKnob } from "@/runner/knobs/knobs/verify-select-risk-gate"
@@ -135,6 +136,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(verifySelectCounterfactualKnob),
   asAnyKnob(verifySelectEarlyAcceptKnob),
   asAnyKnob(verifySelectLlmRiskGateKnob),
+  asAnyKnob(verifySelectProofRequiredKnob),
   asAnyKnob(verifySelectRegressionKnob),
   asAnyKnob(verifySelectReproKnob),
   asAnyKnob(verifySelectRiskGateKnob),

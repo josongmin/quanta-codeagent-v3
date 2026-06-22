@@ -4,7 +4,15 @@
  *   Every assertion below is CONTRACT.
  */
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { acquireSingleBoxGuard } from "../../src/apps/bench/remote/single-box-guard"
@@ -166,6 +174,52 @@ describe("single-box guard hellgate", () => {
       }
     }
     expect(firstReleaseErr).toBeUndefined()
+  })
+
+  // FIX B: stale-reclaim must be a BOUNDED loop, not unbounded self-recursion.
+  // A pathological race where the lock dir always EEXISTs AND always looks stale
+  // (another process keeps winning the create race on the same stale lock) used
+  // to recurse forever, growing the stack until overflow. We simulate "always
+  // EEXIST + always stale + reclaim can't clear it" by pre-seeding a stale owner
+  // record then making the lock dir read-only: every reclaim's recursive `rm`
+  // fails (caught/ignored), so owner.json survives, `lockLooksStale` stays true,
+  // and the next `mkdir` re-hits EEXIST. The acquire MUST terminate with a clear
+  // bound error (no stack overflow / no infinite loop).
+  test("repeated stale-reclaim TERMINATES with a bounded error (no infinite recursion)", async () => {
+    const root = allocTempDir("bench-single-box-reclaim-bound-")
+    const dir = join(root, "guard")
+    const ownerMeta = join(dir, "owner.json")
+    // Pre-seed a STALE, reclaimable owner: dead pid + ancient heartbeat.
+    mkdirSync(dir)
+    writeFileSync(
+      ownerMeta,
+      `${JSON.stringify({
+        label: "ghost",
+        pid: 2_147_483_646, // not a live pid on this box
+        acquiredAt: new Date(0).toISOString(),
+        heartbeatAt: new Date(0).toISOString(),
+      })}\n`,
+    )
+    // Read-only lock dir: rm(dir, {recursive}) cannot unlink owner.json (needs
+    // write on dir), so the stale record persists across every reclaim and the
+    // next mkdir keeps throwing EEXIST — the pathological "always stale" race.
+    chmodSync(dir, 0o555)
+    let caught: unknown
+    try {
+      await acquireSingleBoxGuard({
+        label: "racer",
+        dir,
+        staleHeartbeatMs: 1_000,
+        now: () => Date.now() + 60_000, // make the seeded heartbeat look stale
+      })
+    } catch (err) {
+      caught = err
+    } finally {
+      chmodSync(dir, 0o755)
+    }
+    // Terminated (didn't overflow / hang) AND surfaced the bound error.
+    expect(caught).toBeInstanceOf(Error)
+    expect(String((caught as Error).message)).toMatch(/stale reclaim/i)
   })
 
   test("a failed release keeps the heartbeat alive so external deletion still cannot open a second launch lane", async () => {

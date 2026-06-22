@@ -75,3 +75,49 @@ describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07)", () => {
     )
   })
 })
+
+// Characterization (FIX C): the per-repo overrides were consolidated from
+// scattered `if (repo === ...)` branches into ONE table. These pin the EXACT
+// pins+flags for every known repo so the consolidation is proven behavior-
+// preserving — a regression that drops/changes a pin fails here.
+describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidation)", () => {
+  test("xarray pins numpy<2 (np.unicode_ removed in numpy 2) and NO build-isolation flag", () => {
+    const argv = buildProjectEnvUvRunArgv("pydata/xarray", "2022.03")
+    expect(hasWithDep(argv, "numpy<2")).toBe(true)
+    // xarray gets NO build-flag override (only astropy disables isolation).
+    expect(argv).not.toContain("--no-build-isolation")
+    // ...still inherits the shared base env (control not vacuous).
+    expect(argv).toContain("--no-project")
+    expect(hasWithDep(argv, "setuptools")).toBe(true)
+    expect(argv).toContain("--with-editable")
+  })
+
+  test("astropy carries BOTH override axes (pins + build flag) from the single table", () => {
+    const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
+    expect(hasWithDep(argv, "setuptools<60")).toBe(true)
+    expect(hasWithDep(argv, "extension_helpers")).toBe(true)
+    expect(argv).toContain("--no-build-isolation")
+  })
+
+  test("an unlisted repo gets NEITHER pins nor build flags (only the base env)", () => {
+    const argv = buildProjectEnvUvRunArgv("django/django", "4.1")
+    expect(hasWithDep(argv, "numpy<2")).toBe(false)
+    expect(hasWithDep(argv, "setuptools<60")).toBe(false)
+    expect(hasWithDep(argv, "extension_helpers")).toBe(false)
+    expect(argv).not.toContain("--no-build-isolation")
+    expect(hasWithDep(argv, "setuptools")).toBe(true) // base dep still present
+  })
+
+  // Ordering invariant: build flags precede `--with` deps, which precede
+  // `--with-editable .` — the consolidation must not reshuffle the argv shape.
+  test("argv shape preserved: base flags → build flags → --with deps → --with-editable .", () => {
+    const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
+    const isoIdx = argv.indexOf("--no-build-isolation")
+    const firstWith = argv.indexOf("--with")
+    const editIdx = argv.indexOf("--with-editable")
+    expect(isoIdx).toBeGreaterThan(argv.indexOf("--no-project"))
+    expect(firstWith).toBeGreaterThan(isoIdx)
+    expect(editIdx).toBeGreaterThan(firstWith)
+    expect(argv[editIdx + 1]).toBe(".")
+  })
+})

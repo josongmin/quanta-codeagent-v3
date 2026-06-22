@@ -2,22 +2,44 @@ import { pythonForRepoVersion } from "./repo-version-python"
 
 const BASE_PROJECT_ENV_DEPS = ["setuptools"] as const
 
-const repoPinnedDeps = (repo: string): readonly string[] => {
-  // Legacy astropy setup imports setuptools.dep_util and extension_helpers
-  // during editable install, but older snapshots don't declare both for uv.
-  if (repo === "astropy/astropy") return ["setuptools<60", "extension_helpers"]
-  // xarray still imports `np.unicode_` on older bench snapshots; numpy 2 removes it.
-  // Until env-prep materializes the official dependency authority, keep xarray on numpy 1.x.
-  if (repo === "pydata/xarray") return ["numpy<2"]
-  return []
+/**
+ * Per-repo env-prep override (NOT answer-key logic): each entry compensates for
+ * a known import/build failure of a repo's OLD bench snapshot under uv, keyed on
+ * the exact `owner/name` slug. This is dependency materialization, not source-
+ * path/keyword matching against the gold patch.
+ *
+ * Each entry carries a one-line comment naming the failing import it fixes so a
+ * future reader can verify it against current snapshots and retire it once the
+ * official dependency authority makes it unnecessary.
+ */
+interface RepoEnvOverride {
+  /** Extra `--with <dep>` pins forced into the uv env. */
+  readonly pinnedDeps?: readonly string[]
+  /** Extra `uv run` flags (e.g. `--no-build-isolation`). */
+  readonly buildFlags?: readonly string[]
 }
 
-const repoBuildFlags = (repo: string): readonly string[] => {
-  // Astropy imports setuptools.dep_util while building the editable install.
-  // Build isolation hides the pinned setuptools, so disable it only for astropy.
-  if (repo === "astropy/astropy") return ["--no-build-isolation"]
-  return []
+const REPO_ENV_OVERRIDES: Record<string, RepoEnvOverride> = {
+  // Legacy astropy setup imports `setuptools.dep_util` + `extension_helpers`
+  // during the editable install; old snapshots declare neither for uv, and build
+  // isolation hides the pinned setuptools<60 (the last to still ship dep_util)
+  // from the build backend — so pin both and disable isolation.
+  "astropy/astropy": {
+    pinnedDeps: ["setuptools<60", "extension_helpers"],
+    buildFlags: ["--no-build-isolation"],
+  },
+  // xarray still imports `np.unicode_` on older bench snapshots; numpy 2 removed
+  // it, so keep xarray on numpy 1.x until env-prep materializes the official deps.
+  "pydata/xarray": {
+    pinnedDeps: ["numpy<2"],
+  },
 }
+
+const repoPinnedDeps = (repo: string): readonly string[] =>
+  REPO_ENV_OVERRIDES[repo]?.pinnedDeps ?? []
+
+const repoBuildFlags = (repo: string): readonly string[] =>
+  REPO_ENV_OVERRIDES[repo]?.buildFlags ?? []
 
 /**
  * Shared SWE-bench project env prefix for repo-local repro / verifier commands.

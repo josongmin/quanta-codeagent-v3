@@ -14,8 +14,11 @@
 import { describe, expect, test } from "bun:test"
 import {
   parseSwebenchReport,
+  type SpawnedProc,
   type SpawnFn,
+  type SpawnProcFactory,
   type SpawnResult,
+  spawnWithProc,
 } from "../../src/apps/bench/remote/backend"
 import { createEc2Backend } from "../../src/apps/bench/remote/ec2"
 import { createSshBackend } from "../../src/apps/bench/remote/ssh"
@@ -52,6 +55,113 @@ const SAMPLE_REPORT = {
 }
 
 const ok = (stdout = ""): SpawnResult => ({ code: 0, stdout, stderr: "" })
+
+// ── spawnWithProc leak-safety (FIX A) ───────────────────────────────────────
+
+/** A fake proc whose streams/exit are controllable, recording kill + exit-await. */
+interface FakeProc extends SpawnedProc {
+  readonly killed: () => boolean
+  readonly exitedAwaited: () => boolean
+}
+
+const makeFakeProc = (opts: {
+  readonly stdout: ReadableStream<Uint8Array>
+  readonly stderr?: ReadableStream<Uint8Array>
+  readonly exitCode?: number
+}): FakeProc => {
+  let killed = false
+  let exitedAwaited = false
+  const okStream = (): ReadableStream<Uint8Array> =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close()
+      },
+    })
+  return {
+    stdout: opts.stdout,
+    stderr: opts.stderr ?? okStream(),
+    get exited(): Promise<number> {
+      exitedAwaited = true
+      return Promise.resolve(opts.exitCode ?? 0)
+    },
+    kill() {
+      killed = true
+    },
+    killed: () => killed,
+    exitedAwaited: () => exitedAwaited,
+  }
+}
+
+/** A stdout stream that errors mid-read (simulates a broken pipe / stream error). */
+const throwingStdout = (): ReadableStream<Uint8Array> =>
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("partial"))
+      controller.error(new Error("stdout boom"))
+    },
+  })
+
+describe("spawnWithProc — leak-safe reaping on stdout-read throw (FIX A)", () => {
+  test("a stdout reader throw STILL kills the child and awaits proc.exited before rethrow", async () => {
+    let captured: FakeProc | undefined
+    const factory: SpawnProcFactory = () => {
+      captured = makeFakeProc({ stdout: throwingStdout() })
+      return captured
+    }
+    const spawn = spawnWithProc(factory)
+    await expect(
+      // onData forces the streaming `for await` path, which surfaces the stream error.
+      spawn("ssh", ["host", "cmd"], { onData: () => {} }),
+    ).rejects.toThrow(/stdout boom/)
+    expect(captured?.killed()).toBe(true) // child was reaped (no zombie)
+    expect(captured?.exitedAwaited()).toBe(true) // exit was awaited (fully reaped)
+  })
+
+  test("an onData callback that throws still kills + reaps the child", async () => {
+    const oneChunk = (): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data"))
+          controller.close()
+        },
+      })
+    let captured: FakeProc | undefined
+    const factory: SpawnProcFactory = () => {
+      captured = makeFakeProc({ stdout: oneChunk() })
+      return captured
+    }
+    const spawn = spawnWithProc(factory)
+    await expect(
+      spawn("ssh", ["host", "cmd"], {
+        onData: () => {
+          throw new Error("callback boom")
+        },
+      }),
+    ).rejects.toThrow(/callback boom/)
+    expect(captured?.killed()).toBe(true)
+    expect(captured?.exitedAwaited()).toBe(true)
+  })
+
+  test("happy path: NO kill is issued, exit code + stdout returned (byte-identical)", async () => {
+    const fullStdout = (): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("hello\nworld\n"))
+          controller.close()
+        },
+      })
+    let captured: FakeProc | undefined
+    const factory: SpawnProcFactory = () => {
+      captured = makeFakeProc({ stdout: fullStdout(), exitCode: 0 })
+      return captured
+    }
+    const spawn = spawnWithProc(factory)
+    const res = await spawn("ssh", ["host", "cmd"])
+    expect(res.code).toBe(0)
+    expect(res.stdout).toBe("hello\nworld\n")
+    expect(captured?.killed()).toBe(false) // success path must NOT kill
+  })
+})
 
 // ── parseSwebenchReport ────────────────────────────────────────────────────
 

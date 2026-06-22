@@ -231,10 +231,13 @@ export const OUTCOME_FAILURE_MATCHERS: readonly OutcomeFailureMatcher[] = [
   // (`1 passed, 2 failed in 0.01s`), or after the `= ` banner fill
   // (`===== 3 failed in 0.4s =====`) — so ALL three ambiguous count words
   // (`failed`/`failures?`/`errors?`) anchor to that boundary. #13: `failed` was
-  // previously left unanchored, which flipped a real PASS to fail-closed whenever
-  // the output carried "N failed" in prose / log noise ("3 failed connections,
-  // then OK"). Anchoring keeps every true summary positive (the count is always
-  // at a boundary) while dropping the prose false-RED.
+  // previously fully unanchored (`\b3 failed\b`), so it fired on a count appearing
+  // MID-line in prose / log noise ("retried 3 failed connections, then OK"). The
+  // boundary anchor drops that mid-line case while keeping every real summary
+  // positive. NOTE (honest scope): with the `m` flag `^` matches every line start,
+  // so a line that BEGINS "N failed …" still fires — that is intended (real
+  // runner summaries do start a line that way; over-blocking there is the safe
+  // direction under maxTrips=1, and false-NEGATIVE would defeat the guard).
   {
     id: "generic-failed-count",
     ecosystem: "generic",
@@ -332,6 +335,17 @@ export const isVerifyOutputFailing = (
 ): boolean => {
   const normalized = normalizeVerifyOutput(output)
   if (normalized === null) return false
+  return outputHasFailureMarker(normalized)
+}
+
+/**
+ * Failure-registry scan over an ALREADY-normalized string. Factored out so both
+ * public recognizers normalize the output exactly once: `isVerifyOutputPassing`
+ * previously re-fed its normalized text through `isVerifyOutputFailing`, which
+ * normalized a SECOND time (a redundant `stripAnsiCsi` pass on the hot output
+ * path). `stripAnsiCsi` is idempotent, so this is behavior-preserving.
+ */
+const outputHasFailureMarker = (normalized: string): boolean => {
   for (const m of OUTCOME_FAILURE_MATCHERS) {
     if (m.pattern.test(normalized)) return true
   }
@@ -346,13 +360,15 @@ export const isVerifyOutputFailing = (
  * failures`, never on broad prose.
  */
 export const isVerifyOutputPassing = (
-  name: string,
-  arg: string | undefined,
+  _name: string,
+  _arg: string | undefined,
   output: string,
 ): boolean => {
   const normalized = normalizeVerifyOutput(output)
   if (normalized === null) return false
-  if (isVerifyOutputFailing(name, arg, normalized)) return false
+  // Scan the failure registry directly on the already-normalized string rather
+  // than re-entering `isVerifyOutputFailing` (which would normalize a 2nd time).
+  if (outputHasFailureMarker(normalized)) return false
   for (const m of OUTCOME_SUCCESS_MATCHERS) {
     if (m.pattern.test(normalized)) return true
   }

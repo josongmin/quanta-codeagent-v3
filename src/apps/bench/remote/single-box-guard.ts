@@ -242,10 +242,29 @@ const createSingleBoxGuardHandle = (
   }
 }
 
-const tryAcquireSingleBoxGuard = async (
+/**
+ * Max stale-reclaim retries within a single acquire attempt. A pathological
+ * race (two processes both seeing the lock stale) can ping-pong
+ * reclaim→re-create→reclaim; bounding the retries to a small constant turns the
+ * former unbounded self-recursion into a terminating loop that fails loudly
+ * instead of overflowing the stack.
+ */
+const MAX_STALE_RECLAIMS = 3
+
+/** A single acquire attempt's outcome — `reclaim` signals "stale lock cleared, retry". */
+type SingleBoxAcquireStep = SingleBoxAcquireAttempt | { readonly kind: "reclaim" }
+
+/** Clear a stale lock dir + its shadow so the next mkdir can win the create. */
+const clearStaleLock = async (opts: ResolvedAcquireSingleBoxGuardOptions): Promise<void> => {
+  await rm(opts.dir, { recursive: true, force: true }).catch(() => undefined)
+  await rm(ownerShadowMetaPath(opts.dir), { force: true }).catch(() => undefined)
+}
+
+/** One acquire attempt: create+claim the lock, or report waiting / stale-reclaim. */
+const tryAcquireSingleBoxGuardOnce = async (
   opts: ResolvedAcquireSingleBoxGuardOptions,
-): Promise<SingleBoxAcquireAttempt> => {
-  const nowMs = opts.now()
+  nowMs: number,
+): Promise<SingleBoxAcquireStep> => {
   const shadowOwner = await readShadowOwnerRecord(opts.dir)
   if (shadowOwner !== undefined) {
     if (!ownerRecordIsReclaimable(shadowOwner, nowMs, opts.staleHeartbeatMs)) {
@@ -263,26 +282,37 @@ const tryAcquireSingleBoxGuard = async (
     try {
       await writeSingleBoxOwnerRecord(opts, acquiredAt)
     } catch (err) {
-      await rm(opts.dir, { recursive: true, force: true }).catch(() => undefined)
-      await rm(ownerShadowMetaPath(opts.dir), { force: true }).catch(() => undefined)
+      await clearStaleLock(opts)
       throw err
     }
-    return {
-      kind: "acquired",
-      guard: createSingleBoxGuardHandle(opts, acquiredAt),
-    }
+    return { kind: "acquired", guard: createSingleBoxGuardHandle(opts, acquiredAt) }
   } catch (err) {
     if (errorCodeOf(err) !== "EEXIST") throw err
-    if (await lockLooksStale(opts.dir, nowMs, opts.staleHeartbeatMs)) {
-      await rm(opts.dir, { recursive: true, force: true }).catch(() => undefined)
-      await rm(ownerShadowMetaPath(opts.dir), { force: true }).catch(() => undefined)
-      return tryAcquireSingleBoxGuard(opts)
-    }
+    if (await lockLooksStale(opts.dir, nowMs, opts.staleHeartbeatMs)) return { kind: "reclaim" }
     return {
       kind: "waiting",
       owner: await effectiveOwnerRecord(opts.dir),
       timedOut: opts.deadline !== undefined && nowMs >= opts.deadline,
     }
+  }
+}
+
+const tryAcquireSingleBoxGuard = async (
+  opts: ResolvedAcquireSingleBoxGuardOptions,
+): Promise<SingleBoxAcquireAttempt> => {
+  // Bounded iterative stale-reclaim: each EEXIST-on-stale clears the lock and
+  // retries in-loop (no self-recursion). After MAX_STALE_RECLAIMS reclaims that
+  // all lose the create race to another reclaimer, give up with a clear error.
+  for (let staleReclaims = 0; ; staleReclaims += 1) {
+    const step = await tryAcquireSingleBoxGuardOnce(opts, opts.now())
+    if (step.kind !== "reclaim") return step
+    if (staleReclaims >= MAX_STALE_RECLAIMS) {
+      throw new Error(
+        `[single-box] could not acquire single-box guard after ${MAX_STALE_RECLAIMS} stale reclaims ` +
+          `for ${opts.dir} — another process is racing reclaim of the same stale lock`,
+      )
+    }
+    await clearStaleLock(opts)
   }
 }
 
