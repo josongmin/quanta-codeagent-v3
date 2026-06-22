@@ -331,8 +331,6 @@ export interface BenchPosture {
   /** gap-B: spec-fidelity steer (minimal-literal-fix; fires only when the issue
    *  declares an exact expected output). */
   readonly specFidelitySteer: boolean
-  /** Explicit targeted-RCA gates. This is not a clean general profile signal. */
-  readonly rcaTargetGates: boolean
   /** WS1 mini-parity: thin the round-0 prompt — suppress the repro directive
    *  prose at round 0 (the agent's first attempt), re-attaching it only on
    *  repair rounds ≥1. The one-line closure (first-edit) hint is kept. */
@@ -455,7 +453,6 @@ export const benchPostureFromState = (
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
-  const rcaTargetGates = readKnobValue(state, "rca-target-gates", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
   return {
@@ -500,7 +497,6 @@ export const benchPostureFromState = (
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,
-    rcaTargetGates,
     round0Minimal,
   }
 }

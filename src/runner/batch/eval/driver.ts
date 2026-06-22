@@ -96,11 +96,12 @@ import {
   resolveBenchKnobs,
 } from "./knobs-bench"
 import {
+  assembleOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
+  buildSelectionGenerationPacket,
+  type ContractFact,
   type LlmEvidencePacket,
-  opaqueInstanceIdHash,
-  renderLlmEvidencePacket,
 } from "./llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
@@ -160,7 +161,6 @@ import {
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
 import { labelForReceipt, type ReceiptEvidence, researchKnobTouched } from "./score-label"
-import { makeDeclaredExpectedSelectionPort } from "./selection-declared-expected"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -287,13 +287,12 @@ export interface RunInstanceDeps {
  *  or invents a helper), which the existing diff-SIZE rules do not catch. */
 const SIMPLICITY_STEER =
   "Prefer the SIMPLEST mechanism that already exists. If a plain attribute or " +
-  "field on the object answers the question (e.g. `self.query.group_by`), read " +
-  "it DIRECTLY — do NOT build or call a runtime/execution/compiler object " +
-  "(e.g. get_compiler(), pre_sql_setup(), running the query) and do NOT add a " +
-  "new helper method, function, or class when editing the existing expression " +
-  "in place would do. Eliminating a special case beats adding a branch or a new " +
-  "abstraction; ask 'is there a one-line change to the existing code?' before " +
-  "writing new code. Remove any reproduction script or downloaded file you " +
+  "field on the object already holds the answer, read it DIRECTLY — do NOT build " +
+  "or call a runtime/execution/compiler object (or re-run the operation) and do " +
+  "NOT add a new helper method, function, or class when editing the existing " +
+  "expression in place would do. Eliminating a special case beats adding a branch " +
+  "or a new abstraction; ask 'is there a one-line change to the existing code?' " +
+  "before writing new code. Remove any reproduction script or downloaded file you " +
   "created so only the real source fix remains."
 
 // REMOVED (jun-22): benchmark-overfit issue-keyword directive steers
@@ -2425,44 +2424,15 @@ const mergeSelectionHint = (
   return `${closureHint}\n\n${seed}`
 }
 
-const selectionContractIds = (contracts: PublicContractBundle | undefined): readonly string[] =>
-  contracts?.contracts.map((contract) => contract.contractId) ?? []
-
-const buildSelectionGenerationPacket = (args: {
-  readonly problemStatement: string
-  readonly ownerFiles: readonly string[]
-  readonly contractIds: readonly string[]
-  readonly closureHint: string | undefined
-  readonly seed: string | undefined
-  readonly reproHint: string | undefined
-}): string =>
-  renderLlmEvidencePacket({
-    stage: "candidate_generation",
-    instanceIdHash: opaqueInstanceIdHash(args.problemStatement),
-    evidenceRevision: "selection-generation-v1",
-    question: "Produce one minimal candidate patch against the bounded owner/proof surface below.",
-    allowedActions: [
-      "edit_candidate_sandbox_only",
-      "inspect_named_owner_files",
-      "produce_minimal_patch",
-    ],
-    forbiddenSources: [
-      "hidden_tests",
-      "gold_patch",
-      "official_harness_results",
-      "benchmark_case_tables",
-      "broad_multifile_drift_without_public_evidence",
-    ],
-    publicIssueFacts: [
-      "Use only the public issue statement already attached in the main task prompt as issue authority.",
-    ],
-    ownerEvidence: args.ownerFiles,
-    proofReceipts:
-      args.reproHint === undefined ? ["no public repro hint installed"] : [args.reproHint],
-    contractFacts: args.contractIds,
-    staticFacts: [args.closureHint ?? "", args.seed ?? ""],
-    missingEvidence: args.reproHint === undefined ? ["no_executable_public_repro_hint"] : [],
-  })
+/** Map a public-contract bundle into typed, provenance-carrying contract facts. */
+const contractFactsFromBundle = (
+  contracts: PublicContractBundle | undefined,
+): readonly ContractFact[] =>
+  contracts?.contracts.map((c) => ({
+    contractId: c.contractId,
+    authority: `${c.provenance}/${c.strength}`,
+    satisfied: "unknown" as const,
+  })) ?? []
 
 const mergeStaticWitnessContracts = (
   publicContracts: PublicContractBundle | undefined,
@@ -2641,7 +2611,6 @@ const buildSelectionExecutorPorts = (args: {
   readonly mweProofSelectionPort: SelectionPorts["mweProof"]
   readonly resolvedKofNSelectionPort: SelectionPorts["resolvedKofN"]
   readonly reproConsensusProofSelectionPort: SelectionPorts["reproConsensusProof"]
-  readonly rcaTargetGates: boolean
 }): SelectionPorts => {
   const ports: SelectionPorts = {
     generate: (index, seed) =>
@@ -2651,11 +2620,16 @@ const buildSelectionExecutorPorts = (args: {
           args.verifySelectProofRequired && args.selectorMode === "clean"
             ? buildSelectionGenerationPacket({
                 problemStatement: args.instance.problemStatement,
-                ownerFiles: args.selectionOwnerFiles,
-                contractIds: selectionContractIds(args.publicContracts),
-                closureHint: args.closureHint,
-                seed,
-                reproHint: args.reproHint,
+                ownerEvidence: assembleOwnerEvidence({
+                  ownerFiles: args.selectionOwnerFiles,
+                  issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+                  readSource: (rel) => readSandboxSource(args.sandbox, rel),
+                }),
+                contracts: contractFactsFromBundle(args.publicContracts),
+                baseValidatedRed: args.baseValidatedRed,
+                ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
+                ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+                ...(seed !== undefined ? { seed } : {}),
               })
             : seed,
         instance: args.instance,
@@ -2701,7 +2675,6 @@ const buildSelectionExecutorPorts = (args: {
         signal: args.signal,
       })
   }
-  if (args.rcaTargetGates) ports.declaredExpected = makeDeclaredExpectedSelectionPort(args.instance)
   return ports
 }
 
@@ -2774,7 +2747,6 @@ const runSelectionPhase = async (
   selectorMode: BenchPosture["selectorMode"],
   verifySelectProofRequired: boolean,
   publicContracts: PublicContractBundle | undefined,
-  rcaTargetGates: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -2854,7 +2826,6 @@ const runSelectionPhase = async (
       verifySelectProofRequired,
       selectionOwnerFiles: selectionInputs.ownerFiles,
       publicContracts: effectivePublicContracts,
-      rcaTargetGates,
     }),
   })
   const generationFailure = selectionGenerationFailurePhase({
@@ -3435,7 +3406,6 @@ const runMainPhase = async (args: {
       args.prepared.posture.selectorMode,
       args.prepared.posture.verifySelectProofRequired,
       publicContracts,
-      args.prepared.posture.rcaTargetGates,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

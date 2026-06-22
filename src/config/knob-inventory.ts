@@ -1327,16 +1327,6 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/verify-select-early-accept.ts",
   },
   {
-    envKey: "QUANTA_BENCH_RCA_TARGET_GATES",
-    kind: "bool",
-    default: undefined,
-    group: "bench",
-    home: "bench",
-    describe:
-      "Bench: targeted RCA recovery gates for known miss families. Default-OFF; runs with this enabled must not be reported as clean general-profile results.",
-    readSite: "runner/knobs/knobs/rca-target-gates.ts",
-  },
-  {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
     kind: "bool",
     default: undefined,

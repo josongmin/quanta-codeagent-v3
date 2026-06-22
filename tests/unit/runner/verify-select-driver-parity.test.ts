@@ -6,14 +6,6 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8")
 const APP_DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
 
-const declaredExpectedWireCount = (src: string): number =>
-  [
-    ...src.matchAll(/declaredExpected:\s*makeDeclaredExpectedSelectionPort\(instance\)/g),
-    ...src.matchAll(
-      /ports\.declaredExpected\s*=\s*makeDeclaredExpectedSelectionPort\(args\.instance\)/g,
-    ),
-  ].length
-
 describe("runner verify-select and patch-budget driver parity", () => {
   test("runner driver executes verify-select instead of silently ignoring the knob", () => {
     expect(DRIVER_SRC).toContain("const runSelectionPhase = async")
@@ -48,19 +40,19 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain('selectorMode === "clean"')
     expect(APP_DRIVER_SRC).toContain('selectorMode === "clean"')
     expect(DRIVER_SRC).toContain("ports.mweProof = args.mweProofSelectionPort")
-    expect(DRIVER_SRC).toContain("ports.publicRegressionProof = args.publicRegressionProofSelectionPort")
-    expect(DRIVER_SRC).toContain("ports.reproConsensusProof = args.reproConsensusProofSelectionPort")
+    expect(DRIVER_SRC).toContain(
+      "ports.publicRegressionProof = args.publicRegressionProofSelectionPort",
+    )
+    expect(DRIVER_SRC).toContain(
+      "ports.reproConsensusProof = args.reproConsensusProofSelectionPort",
+    )
     expect(APP_DRIVER_SRC).toContain("mweProof: mweProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("publicRegressionProof: publicRegressionProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("reproConsensusProof: reproConsensusProofSelectionPort")
-    expect(DRIVER_SRC).toContain(
-      "if (args.rcaTargetGates) ports.declaredExpected = makeDeclaredExpectedSelectionPort(args.instance)",
-    )
-    expect(APP_DRIVER_SRC).toContain(
-      "rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}",
-    )
-    expect(declaredExpectedWireCount(DRIVER_SRC)).toBe(1)
-    expect(declaredExpectedWireCount(APP_DRIVER_SRC)).toBe(1)
+    // jun-22: the answer-key `declaredExpected` gold-patch matcher was removed from
+    // both drivers (selection-declared-expected.ts deleted). Parity = absent in both.
+    expect(DRIVER_SRC).not.toContain("makeDeclaredExpectedSelectionPort")
+    expect(APP_DRIVER_SRC).not.toContain("makeDeclaredExpectedSelectionPort")
   })
 
   test("both drivers preserve empty max-turns authority on the terminal path", () => {

@@ -34,16 +34,13 @@
 
 import { describe, expect, test } from "bun:test"
 import { SIGNAL_AUTHORITY } from "@/agent/verification-bundle/authority"
-import { KNOB_PRESETS } from "@/runner/knobs"
 import {
   isContaminatingRegressionSource,
   researchContaminationReasons,
 } from "@/runner/batch/eval/score-label"
-import {
-  type BenchPosture,
-  benchPostureFromState,
-} from "../../src/runner/batch/eval/knobs-bench"
+import { KNOB_PRESETS } from "@/runner/knobs"
 import { resolveBenchKnobs } from "../../src/apps/bench/eval/driver"
+import { type BenchPosture, benchPostureFromState } from "../../src/runner/batch/eval/knobs-bench"
 
 // ── env hygiene: a stale dev shell must not perturb a resolved posture ────────
 const ENV_KEYS = [
@@ -85,7 +82,9 @@ const cleanSelectorOrFalse = (preset: string): boolean => {
 /** Thin pass-through to the runtime scorer's SSOT helper, so the clean-preset
  *  allowlist cannot drift from the labeler that marks a solved receipt
  *  contaminated. */
-const researchViolations = (posture: BenchPosture): string[] => [...researchContaminationReasons(posture)]
+const researchViolations = (posture: BenchPosture): string[] => [
+  ...researchContaminationReasons(posture),
+]
 
 describe("T-PRESET-07: clean presets carry NO research-only authority knob", () => {
   // ── dynamic discovery: every preset whose RESOLVED posture is selectorMode=clean ──
@@ -119,12 +118,9 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
     const violations = researchViolations(posture)
     expect(violations).toEqual([])
 
-    expect(posture.rcaTargetGates).toBe(false)
     expect(posture.verifySelectLlmRiskGate).not.toBe("on")
-    // declaredExpected authority off: the port is gated behind rcaTargetGates
-    // (driver.ts:2481 builds it ONLY when rcaTargetGates), so rcaTargetGates===false
-    // already proves the answer-key matcher is unwired.
-    expect(posture.rcaTargetGates).toBe(false)
+    // The answer-key declaredExpected matcher was DELETED (jun-22) — there is no
+    // longer any rca-target-gates knob to gate it; it is unwired by absence.
     expect(posture.reproDoubt).toBe(false)
     expect(isContaminatingRegressionSource(posture.verifySelectRegression)).toBe(false)
     if (posture.verifySelectRegression !== undefined) {
@@ -150,9 +146,6 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   test("red-on-injection: researchViolations rejects each injected research-only authority", () => {
     const base = resolvePreset("agentless-v3-thin-strict-gated")
     expect(researchViolations(base)).toEqual([])
-
-    const rcaInjected: BenchPosture = { ...base, rcaTargetGates: true }
-    expect(researchViolations(rcaInjected)).toContain("rca-target-gates")
 
     const llmInjected: BenchPosture = { ...base, verifySelectLlmRiskGate: "on" }
     expect(researchViolations(llmInjected)).toContain("verify-select-llm-risk-gate=on")
@@ -180,13 +173,11 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
     expect(
       researchContaminationReasons({
         ...resolvePreset("agentless-v3-thin-strict-gated"),
-        rcaTargetGates: true,
         verifySelectLlmRiskGate: "on",
         reproDoubt: true,
         verifySelectRegression: "gold",
       }),
     ).toEqual([
-      "rca-target-gates",
       "verify-select-llm-risk-gate=on",
       "repro-doubt",
       "verify-select-regression(magic-score)",

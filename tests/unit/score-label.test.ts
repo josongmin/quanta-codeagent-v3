@@ -102,20 +102,17 @@ describe("score-label taxonomy (T-RESOLVE-14)", () => {
   it("research contamination helper is the SSOT for runtime/report preset checks", () => {
     expect(
       researchContaminationReasons({
-        rcaTargetGates: true,
         verifySelectLlmRiskGate: "on",
         verifySelectRegression: "gold",
         reproDoubt: true,
       }),
     ).toEqual([
-      "rca-target-gates",
       "verify-select-llm-risk-gate=on",
       "repro-doubt",
       "verify-select-regression(magic-score)",
     ])
     expect(
       researchKnobTouched({
-        rcaTargetGates: false,
         verifySelectLlmRiskGate: undefined,
         verifySelectRegression: "discovered",
         reproDoubt: false,

@@ -24,7 +24,6 @@ import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { patchBudgetStrictKnob } from "@/runner/knobs/knobs/patch-budget-strict"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
-import { rcaTargetGatesKnob } from "@/runner/knobs/knobs/rca-target-gates"
 import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { selectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
@@ -85,7 +84,6 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["must-pass", mustPassKnob],
     ["patch-budget-strict", patchBudgetStrictKnob],
     ["persona", personaKnob],
-    ["rca-target-gates", rcaTargetGatesKnob],
     ["working-state", workingStateKnob],
     ["closeout-guard", closeoutGuardKnob],
     ["hooks", hooksKnob],

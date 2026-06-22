@@ -20,6 +20,7 @@ import {
   buildSelectionCandidateFamilyBundle,
   composeWithReproHint,
   DEFAULT_POLICY,
+  deriveCandidateStructuralRepair,
   emitKnobsApplied,
   enumerateRepoSources,
   envPrepFailedResult,
@@ -39,7 +40,6 @@ import {
   parseBenchReproTestK,
   parseLocalizePhaseEnv,
   prepareAttemptContext,
-  deriveCandidateStructuralRepair,
   prepareIssueHint,
   prepareReproTest,
   prepareReproTestDetailed,
@@ -58,6 +58,12 @@ import {
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
+import {
+  assembleOwnerEvidence,
+  buildSelectionGenerationPacket,
+  type ContractFact,
+} from "@/runner/batch/eval/llm-evidence-packet"
+import { extractIssueHint } from "@/agent/issue-hint"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
 import { buildCleanSelectionPublicContracts } from "@/runner/batch/eval/public-contract-bundle"
 import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
@@ -70,7 +76,6 @@ import {
   makeDiscoveredRepoRegressionPort,
   makeDiscoveredRepoRegressionProofPort,
 } from "@/runner/batch/eval/repo-regression-discovery-adapter"
-import { makeDeclaredExpectedSelectionPort } from "@/runner/batch/eval/selection-declared-expected"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -82,10 +87,6 @@ import {
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
-import {
-  opaqueInstanceIdHash,
-  renderLlmEvidencePacket,
-} from "@/runner/batch/eval/llm-evidence-packet"
 import { buildAstStaticWitnesses } from "@/runner/batch/eval/static-witness-adapter"
 import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
@@ -677,41 +678,15 @@ const readSandboxSource = (sandbox: string, rel: string): string | null => {
   }
 }
 
-const selectionContractIds = (contracts: PublicContractBundle | undefined): readonly string[] =>
-  contracts?.contracts.map((contract) => contract.contractId) ?? []
-
-const buildSelectionGenerationPacket = (args: {
-  readonly problemStatement: string
-  readonly ownerFiles: readonly string[]
-  readonly contractIds: readonly string[]
-  readonly closureHint: string | undefined
-  readonly seed: string | undefined
-  readonly reproHint: string | undefined
-}): string =>
-  renderLlmEvidencePacket({
-    stage: "candidate_generation",
-    instanceIdHash: opaqueInstanceIdHash(args.problemStatement),
-    evidenceRevision: "selection-generation-v1",
-    question: "Produce one minimal candidate patch against the bounded owner/proof surface below.",
-    allowedActions: ["edit_candidate_sandbox_only", "inspect_named_owner_files", "produce_minimal_patch"],
-    forbiddenSources: [
-      "hidden_tests",
-      "gold_patch",
-      "official_harness_results",
-      "benchmark_case_tables",
-      "broad_multifile_drift_without_public_evidence",
-    ],
-    publicIssueFacts: [
-      "Use only the public issue statement already attached in the main task prompt as issue authority.",
-    ],
-    ownerEvidence: args.ownerFiles,
-    proofReceipts:
-      args.reproHint === undefined ? ["no public repro hint installed"] : [args.reproHint],
-    contractFacts: args.contractIds,
-    staticFacts: [args.closureHint ?? "", args.seed ?? ""],
-    missingEvidence:
-      args.reproHint === undefined ? ["no_executable_public_repro_hint"] : [],
-  })
+/** Map a public-contract bundle into typed, provenance-carrying contract facts. */
+const contractFactsFromBundle = (
+  contracts: PublicContractBundle | undefined,
+): readonly ContractFact[] =>
+  contracts?.contracts.map((c) => ({
+    contractId: c.contractId,
+    authority: `${c.provenance}/${c.strength}`,
+    satisfied: "unknown" as const,
+  })) ?? []
 
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
@@ -736,7 +711,6 @@ const runSelectionPhase = async (
   selectorMode: BenchPosture["selectorMode"],
   verifySelectProofRequired: boolean,
   publicContracts: PublicContractBundle | undefined,
-  rcaTargetGates: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
@@ -794,11 +768,16 @@ const runSelectionPhase = async (
     verifySelectProofRequired && selectorMode === "clean"
       ? buildSelectionGenerationPacket({
           problemStatement: instance.problemStatement,
-          ownerFiles: selectionInputs.ownerFiles,
-          contractIds: selectionContractIds(effectivePublicContracts),
-          closureHint,
-          seed,
-          reproHint,
+          ownerEvidence: assembleOwnerEvidence({
+            ownerFiles: selectionInputs.ownerFiles,
+            issueSymbols: extractIssueHint(instance.problemStatement).symbols,
+            readSource: (rel) => readSandboxSource(sandbox, rel),
+          }),
+          contracts: contractFactsFromBundle(effectivePublicContracts),
+          baseValidatedRed,
+          ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
+          ...(closureHint !== undefined ? { closureHint } : {}),
+          ...(seed !== undefined ? { seed } : {}),
         })
       : seed === undefined
         ? closureHint
@@ -933,7 +912,6 @@ const runSelectionPhase = async (
               }),
           }
         : {}),
-      ...(rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}),
     },
   })
   if (result.successfulGenerations === 0 && result.generationFailures > 0) {
@@ -999,7 +977,6 @@ const runAppMainPhase = async (args: {
       args.prepared.posture.selectorMode,
       args.prepared.posture.verifySelectProofRequired,
       publicContracts,
-      args.prepared.posture.rcaTargetGates,
       args.prepared.posture.verifySelectRegression,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??

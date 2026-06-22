@@ -462,7 +462,6 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectEarlyAccept).toBe(true)
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("positive")
-    expect(opt.rcaTargetGates).toBe(false)
     expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]).toMatchObject({
       "bench-in-loop-exec": "off",
       "fault-evidence": "1",
@@ -536,7 +535,9 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("off")
     expect(opt.selectorMode).toBe("clean")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean-witness-only"]).toMatchObject({
+    expect(
+      KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean-witness-only"],
+    ).toMatchObject({
       "bench-in-loop-exec": "off",
       "fault-evidence": "1",
       "verification-plan": "1",

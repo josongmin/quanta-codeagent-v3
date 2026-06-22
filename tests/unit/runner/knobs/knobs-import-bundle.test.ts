@@ -52,7 +52,6 @@ import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
 import { primaryRailKnob } from "@/runner/knobs/knobs/primary-rail"
 import { ratelimitNoticeKnob } from "@/runner/knobs/knobs/ratelimit-notice"
-import { rcaTargetGatesKnob } from "@/runner/knobs/knobs/rca-target-gates"
 import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
 import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
@@ -108,7 +107,6 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(policyMergeKnob),
   asAnyKnob(primaryRailKnob),
   asAnyKnob(ratelimitNoticeKnob),
-  asAnyKnob(rcaTargetGatesKnob),
   asAnyKnob(readOutlineKnob),
   asAnyKnob(repairEscalationKnob),
   asAnyKnob(repoMapKnob),

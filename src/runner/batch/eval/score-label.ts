@@ -46,7 +46,7 @@ export interface ReceiptEvidence {
 
 export type ResearchContaminationPosture = Pick<
   BenchPosture,
-  "rcaTargetGates" | "verifySelectLlmRiskGate" | "verifySelectRegression" | "reproDoubt"
+  "verifySelectLlmRiskGate" | "verifySelectRegression" | "reproDoubt"
 >
 
 /** `discovered` is the executed-witness path and is admissible in clean mode.
@@ -61,7 +61,6 @@ export const researchContaminationReasons = (
   posture: ResearchContaminationPosture,
 ): readonly string[] => {
   const reasons: string[] = []
-  if (posture.rcaTargetGates) reasons.push("rca-target-gates")
   if (posture.verifySelectLlmRiskGate === "on") reasons.push("verify-select-llm-risk-gate=on")
   if (posture.reproDoubt) reasons.push("repro-doubt")
   if (isContaminatingRegressionSource(posture.verifySelectRegression)) {

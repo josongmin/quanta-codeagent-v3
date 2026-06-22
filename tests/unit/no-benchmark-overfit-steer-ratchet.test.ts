@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const DRIVER = join(import.meta.dir, "../../src/runner/batch/eval/driver.ts")
@@ -96,5 +96,38 @@ describe("no-benchmark-overfit-steer ratchet", () => {
       [...GOLD_RECIPE, ...INSTANCE_FRAMING, ...FRAMEWORK].some((n) => s.body.includes(n)),
     )
     expect(tripped).toBe(true)
+  })
+
+  it("the deleted gold-patch-matcher answer-key files stay gone", () => {
+    // selection-declared-expected.ts matched candidate patches against the EXACT
+    // gold-patch file paths + symbol/arity literals for django/astropy instances.
+    // rca-target-gates was the knob that wired it. Both deleted jun-22.
+    for (const f of [
+      "src/runner/batch/eval/selection-declared-expected" + ".ts",
+      "src/runner/knobs/knobs/rca-target-gates" + ".ts",
+    ]) {
+      expect(`${f}:${existsSync(join(import.meta.dir, "../../", f))}`).toBe(`${f}:false`)
+    }
+  })
+
+  it("no bench-selection source matches candidate patches against gold file paths/symbols", () => {
+    // A gold-patch matcher hardcodes specific repo file paths + gold code fragments
+    // and tests the candidate patch against them. Scan the selection/driver sources.
+    const files = [
+      "../../src/runner/batch/eval/driver.ts",
+      "../../src/apps/bench/eval/driver.ts",
+    ].map((p) => readFileSync(join(import.meta.dir, p), "utf8"))
+    const needles = [
+      "db/backends/" + "mysql/operations.py",
+      "db/backends/" + "postgresql/client.py",
+      "create" + "_function('django_datetime",
+      "self.connection.timezone" + "_name",
+      "self.colnames[:len(required" + "_columns)]",
+    ]
+    for (const src of files) {
+      for (const n of needles) {
+        expect(`hit:${src.includes(n)}`).toBe("hit:false")
+      }
+    }
   })
 })
