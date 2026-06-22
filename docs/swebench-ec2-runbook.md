@@ -133,6 +133,21 @@ The above is the manual runbook. `quanta-bench grade --backend ec2` (ADR-0536) a
 exactly these stages: create-SG → run-instances(spot) → wait → scp preds → ssh
 run_evaluation → scp report → terminate. The `ssh:<host>` backend skips stages 0–2 (BYO box).
 
+## Troubleshooting *why* an instance fails (without re-paying)
+
+Don't re-run the whole pipeline on every fix. Two cheap-iteration paths:
+- **Trajectory cassette** — `QUANTA_BENCH_RECORD_TRAJECTORY=1` records the agent's
+  full LLM stream once (full-remote fetches it as `trajectory-<suffix>.jsonl`);
+  `QUANTA_BENCH_REPLAY_TRAJECTORY=<file>` replays it for **zero tokens** while you
+  change deterministic code (oracle/build-env/selection).
+- **`quanta-bench evaluate-repro --corpus <dir> {--probe | --repro-scripts <f>}`** —
+  re-runs repro scripts / a build-env import probe against a fresh base checkout
+  with **zero LLM**, to watch the repro oracle flip `exec_failed → reproduced`.
+
+Start from `closure-<suffix>.json` → `synth_repro_base_red_rate` (0 ⇒ oracle never
+established = the usual bottleneck) and `report-<suffix>.json` →
+`perInstance[].reproTest.reason`. Full workflow: **[swebench-agent-troubleshooting.md](swebench-agent-troubleshooting.md)**.
+
 ## Gotchas (this account/region)
 
 - `key-name` is literally `pickinstead_korea.pem` (registered with the `.pem` suffix) — you

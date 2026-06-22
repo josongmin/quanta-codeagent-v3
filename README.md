@@ -99,6 +99,10 @@ retry가 최내곽, fallback이 최외곽이며 `QUANTA_PERMISSION=auto` 분류�
 | `bun test` | 단위+통합 (결정론 게이트). 머지 기준 |
 | `bun run test:contract` | 실 Docker·언어서버 (환경게이트, `REQUIRE_CONTRACT`로 하드화) |
 | `bun run test:eval` | 실 LLM SWE-bench (비차단, 점수) |
+| `bun run smoke` / `:live` / `:report` / `:record` | 스모크 배터리(실 loop + 도구/LLM replay + LLM-judge). `:live`=실 LLM, `:record`=cassette 녹화 |
+| `bun run e2e:pty` | raw-mode 인터랙티브 CLI e2e (FFI openpty; 입력층 LLM0 결정론) |
+| `bun run bench …` | 통합 SWE-bench CLI (`quanta-bench`; `grade`/`run`/`evaluate-repro`/`pool`/`auth`). §벤치 참조 |
+| `bun fc list` | 기능 카탈로그 (AGENTS.md 워크플로우) |
 | `bun run test:cov` | 커버리지 측정 (게이트 아님) |
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run lint` | Biome 검사 (슬라이스 격리 강제 포함) |
@@ -121,3 +125,89 @@ per-input concurrency 배칭, hook, 프롬프트 캐시 프리픽스 고정(ADR-
 SWE-bench 하니스 + Best-of-N 샘플러. MCP·Best-of-N 구현됨. subagent/skills는
 SOTA++ 흡수로 wired(ADR-0011, `buildSessionFeatures` — env knob 설정 시 ON,
 미설정 시 도구 미등록·루프 불변).
+
+## 벤치 (SWE-bench)
+
+진입점은 통합 CLI `bun run bench <sub>` (= `src/apps/bench/cli.ts`, ADR-0536):
+`run`(로컬 patch-gen) · `grade --mode full`(EC2 spot/on-demand patch-gen + 채점) ·
+`evaluate-repro`(오프라인 repro-오라클 rescore) · `pool` · `auth` · `presets`.
+
+### 돌리는 법 (복붙 가능)
+
+```bash
+# 0) 프리셋 목록 (기본: agentless-v3-thin-strict)
+bun run bench presets
+
+# 1) 인증 — 단일 chatgpt.json 또는 풀(chatgpt-acct-*.json + bench-pool.yaml).
+#    토큰 만료(401 token exchange failed) 시 재발급:
+bun run bench auth login --auth-label a --auth-file ~/.quanta/auth/chatgpt-acct-a.json
+bun run bench auth status
+
+# 2) 데이터셋 — SWE-bench Verified jsonl. 서브셋은 instance_id로 grep:
+grep -E '"(astropy__astropy-13033|django__django-11138)"' \
+  docs/analysis/swe-bench-verified-analysis/_data/verified-full.jsonl > /tmp/subset.jsonl
+
+# 3) DRY-RUN — LLM 없이 플랜만 확인 (먼저 이걸로 검증)
+bun run bench run --swebench /tmp/subset.jsonl --dry-run
+
+# 4) FULL-REMOTE grade (정본 경로) — EC2서 patch-gen + 공식 harness 채점.
+#    on-demand=reclaim 면역(~3× 비용), spot 용량 크런치 때. 결과는 resolved/unresolved.
+QUANTA_BENCH_PRESET=agentless-v3-thin-strict \
+QUANTA_FULL_REMOTE_ONDEMAND=1 QUANTA_FULL_REMOTE_CONCURRENCY=3 \
+  bun run bench grade --mode full --allow-remote-secrets --allow-extra-boxes \
+  --auth-file ~/.quanta/auth/chatgpt-acct-a.json \
+  --dataset /tmp/subset.jsonl \
+  --instance astropy__astropy-13033,django__django-11138 \
+  --preset agentless-v3-thin-strict --model gpt-5.4
+
+# (옵션) +녹화: 위 명령 앞에 QUANTA_BENCH_RECORD_TRAJECTORY=1 → cassette 캡처(이후 무료 재생)
+
+# 5) 로컬 patch-gen (채점 없이 예측만; 채점은 remote가 정본)
+bun run bench run --swebench /tmp/subset.jsonl --predictions /tmp/preds.jsonl --n 1
+```
+
+산출물(full-remote)은 `~/Library/quanta-codeagent-v3/bench/full-remote/`에
+`report-<suffix>.json`(verdict + reproTest + selection) · `closure-<suffix>.json`
+(오라클/localize 지표) · `preds-<suffix>.jsonl` · `runlog-<suffix>.log` ·
+`trajectory-<suffix>.jsonl`(녹화 시) 로 떨어진다(런 종료 로그에 경로 출력).
+
+주요 env: `QUANTA_BENCH_PRESET`(값 셀렉터) · `QUANTA_FULL_REMOTE_ONDEMAND=1`(spot
+대신 on-demand) · `QUANTA_FULL_REMOTE_CONCURRENCY`(박스당 patch-gen 동시성, **채점은
+항상 serial**) · `QUANTA_BENCH_RECORD_TRAJECTORY` / `QUANTA_BENCH_REPLAY_TRAJECTORY`.
+개별 `QUANTA_BENCH_*` 노브는 프리셋 값을 override.
+
+**2대 하드룰 (어기면 측정이 거짓말):**
+- **채점은 SERIAL** — 동시 채점은 false-negative를 만든다. verdict만 믿지 말고 패치를 까서(gold-identical / apply-check) 검증.
+- **채점은 remote가 정본** — 로컬 docker 쓰지 말 것; `grade --mode full --allow-remote-secrets`가 EC2서 공식 swebench harness로 채점.
+
+문서: 측정 인프라·EC2 런북([docs/swebench-ec2-runbook.md](docs/swebench-ec2-runbook.md)) ·
+실패 디버깅([docs/swebench-agent-troubleshooting.md](docs/swebench-agent-troubleshooting.md)) ·
+스모크 기준선(`tests/smoke/swebench/`).
+
+### 실패 디버깅 — 토큰 안 태우고 반복
+
+매번 풀 파이프라인(LLM patch-gen + repro-gen + EC2)을 재실행하지 말 것. 비싼 건
+stochastic LLM rollout뿐이고 결정론부(repro실행/빌드env/grade/selection)는 공짜
+재구동된다. 두 경로:
+- **Trajectory cassette (녹화→재생)**: `QUANTA_BENCH_RECORD_TRAJECTORY=1`로 LLM
+  스트림 전체를 1회 녹화 → `QUANTA_BENCH_REPLAY_TRAJECTORY=<file>`(⚠️generic
+  `QUANTA_LLM_REPLAY` 아님)로 토큰 0에 재생(결정론 코드 수정 반복용).
+- **`bun run bench evaluate-repro --corpus <dir> {--probe | --repro-scripts <f>}`**:
+  repro 스크립트/빌드env import probe를 fresh base에 LLM 0으로 재실행 → 오라클
+  `exec_failed → reproduced` flip 관찰.
+
+진단 시작점: `closure-*.json` → `synth_repro_base_red_rate`(0 = repro 오라클 미수립 =
+통상 병목; localize 아님). 전체 워크플로우 + 실패 taxonomy는
+**[docs/swebench-agent-troubleshooting.md](docs/swebench-agent-troubleshooting.md)**.
+
+## 개발/디버깅 흔한 함정 (자주 헛삽질)
+
+- **stale 컴파일 바이너리** — `~/.local/bin/quanta`는 컴파일된 스냅샷이다. 소스를
+  고쳐도 `bun run install:cli` 재빌드 전엔 반영 안 됨. "CLI가 내 수정대로 안 돌아"
+  #1 원인.
+- **knob/config는 병렬 3시스템** — 설정 추가 전 `grep` 필수(`@/runner/knobs`
+  프레임워크 + runtime-config + src/config). 안 하면 같은 노브 재발명.
+- **`bun run lint:fix`은 repo-wide** — 무관 파일 대량 churn. 내 파일만 고치려면
+  `node_modules/.bin/biome check --write <paths>`.
+- **`git add -u` 금지** — 사용자가 백그라운드 sweep 중일 수 있음(의도 안 한 스테이징
+  사고). 내가 만진 경로만 명시적으로 add.
