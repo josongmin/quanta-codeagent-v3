@@ -45,7 +45,7 @@ describe("T5 batch report schema parity", () => {
     }
   })
 
-  test("report json keeps totals, scoreTotals, proofTotals, perInstance, and failureBreakdown", async () => {
+  test("report json keeps totals, scoreTotals, proofTotals, llmEvidenceTotals, perInstance, and failureBreakdown", async () => {
     const dir = mkdtempSync(join(tmpdir(), "batch-report-parity-"))
     try {
       const predictionsFile = join(dir, "predictions.jsonl")
@@ -66,6 +66,7 @@ describe("T5 batch report schema parity", () => {
       expect("totals" in report).toBe(true)
       expect("scoreTotals" in report).toBe(true)
       expect("proofTotals" in report).toBe(true)
+      expect("llmEvidenceTotals" in report).toBe(true)
       expect("perInstance" in report).toBe(true)
       expect("failureBreakdown" in report).toBe(true)
     } finally {

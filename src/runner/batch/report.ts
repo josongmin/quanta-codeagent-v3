@@ -27,6 +27,11 @@ import {
   type FailureBreakdown,
   type FailureClassification,
 } from "./corpus/failure-classifier"
+import {
+  summarizeLlmEvidenceArtifacts,
+  type LlmEvidencePacketStage,
+  type LlmEvidenceRevisionByStage,
+} from "./eval/llm-evidence-packet"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 import { resolvedTotals, scoreTotals } from "./observe"
 import type {
@@ -110,6 +115,12 @@ export interface PerInstanceReport {
   scoreEvidence?: ReceiptEvidence
   /** OPC-07 report-only typed packets for intake / deterministic selection RCA. */
   llmEvidence?: LlmEvidenceArtifacts
+  /** OPC-06/07 packet coverage — which typed evidence stages were actually emitted. */
+  llmEvidenceStages?: readonly LlmEvidencePacketStage[]
+  /** Packet evidence revision by emitted stage (e.g. intake-v2, selector-repair-v2). */
+  llmEvidenceRevision?: LlmEvidenceRevisionByStage
+  /** Union of missing-evidence kinds across all emitted packets for this instance. */
+  llmEvidenceMissingKinds?: readonly string[]
 }
 
 /** `totals.resolved` stays the legacy pass-count headline for backwards
@@ -131,6 +142,12 @@ export interface BenchProofTotals {
   contractOnlySubmitted: number
 }
 
+export interface BenchLlmEvidenceTotals {
+  packetizedGenerationCount: number
+  packetizedRepairCount: number
+  packetizedSelectionExplanationCount: number
+}
+
 export interface BenchReport {
   timestamp: string
   model: string
@@ -143,6 +160,7 @@ export interface BenchReport {
   }
   scoreTotals: BenchScoreTotals
   proofTotals: BenchProofTotals
+  llmEvidenceTotals: BenchLlmEvidenceTotals
   /** Aggregated failure counts across results. `byTermination` is a covering
    *  partition; `bySignal` is non-exclusive (one failure can carry multiple
    *  signals). Both are emitted in every report; empty objects when 0/n
@@ -196,6 +214,21 @@ export const buildReport = (
       contractOnlySubmitted: 0,
     },
   )
+  const llmEvidenceTotals = results.reduce<BenchLlmEvidenceTotals>(
+    (totals, r) => {
+      if (r.llmEvidence?.candidateGeneration !== undefined) totals.packetizedGenerationCount += 1
+      if (r.llmEvidence?.repairSeed !== undefined) totals.packetizedRepairCount += 1
+      if (r.llmEvidence?.selectionExplanation !== undefined) {
+        totals.packetizedSelectionExplanationCount += 1
+      }
+      return totals
+    },
+    {
+      packetizedGenerationCount: 0,
+      packetizedRepairCount: 0,
+      packetizedSelectionExplanationCount: 0,
+    },
+  )
   return {
     timestamp: meta.timestamp ?? new Date().toISOString(),
     model: meta.model,
@@ -208,10 +241,13 @@ export const buildReport = (
     },
     scoreTotals: score,
     proofTotals,
+    llmEvidenceTotals,
     failureBreakdown: aggregate(failedClassifications),
     perInstance: results.map((r, i) => {
       const c = classifications[i] ?? { termination: "unknown", signals: [] }
       const proofSummary: SelectionProofSummary | undefined = r.selectionTelemetry?.proofSummary
+      const llmEvidenceSummary =
+        r.llmEvidence !== undefined ? summarizeLlmEvidenceArtifacts(r.llmEvidence) : undefined
       return {
         id: r.id,
         passed: r.passed,
@@ -250,6 +286,13 @@ export const buildReport = (
         ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
         ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
         ...(r.llmEvidence !== undefined ? { llmEvidence: r.llmEvidence } : {}),
+        ...(llmEvidenceSummary !== undefined
+          ? {
+              llmEvidenceStages: llmEvidenceSummary.stages,
+              llmEvidenceRevision: llmEvidenceSummary.revisionByStage,
+              llmEvidenceMissingKinds: llmEvidenceSummary.missingKinds,
+            }
+          : {}),
       }
     }),
     knobs,

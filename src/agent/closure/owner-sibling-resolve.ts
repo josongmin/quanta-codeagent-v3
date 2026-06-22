@@ -40,6 +40,22 @@ export interface OwnerSiblingArgs {
   /** DI: sandbox-relative files that DEFINE `symbol`. Default = ripgrep over the
    *  cwd. Injected by tests to run without a working tree. */
   readonly listDefiners?: (symbol: string) => readonly string[]
+  /** Discrimination bound: an anchor symbol defined in MORE than this many files
+   *  is treated as a ubiquitous common method (not a small override family) and is
+   *  NOT expanded — including it would flood `ownerResolved` with noise at the top
+   *  owner-resolve boost. NAMED + configurable on purpose (was a buried magic
+   *  constant): the caller/knob owns the value and it is recorded, and crossing it
+   *  fires {@link onTruncate} so the drop is VISIBLE and MEASURED, never silent.
+   *  Final precision is the downstream typed static-witness layer's job (it
+   *  re-derives override families from real class-inheritance), so this is a
+   *  recall-side cost bound, not a correctness gate. Default
+   *  {@link DEFAULT_MAX_SIBLING_DEFINERS}. */
+  readonly maxSiblingDefiners?: number
+  /** Telemetry: invoked once per anchor whose definer count EXCEEDS
+   *  `maxSiblingDefiners`, so a truncated override family is attributable in logs
+   *  instead of silently vanishing. `definerCount` is the TOTAL definers (incl.
+   *  the owner); `cap` is the effective bound applied. */
+  readonly onTruncate?: (event: { symbol: string; definerCount: number; cap: number }) => void
 }
 
 export interface OwnerSibling {
@@ -49,12 +65,26 @@ export interface OwnerSibling {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-/** A symbol defined in MORE than this many files is treated as ubiquitous (a
- *  common method, not an override family) and dropped as a non-discriminating
- *  anchor. Override families — one method overridden across a class hierarchy —
- *  are small in practice (single digits, e.g. 5 django db-backend clients), so a
- *  generous cap excludes only genuine noise (`save` ~25 files, `get` ~38). */
-const UBIQUITY_CAP = 16
+/**
+ * Default discrimination bound for {@link OwnerSiblingArgs.maxSiblingDefiners}.
+ *
+ * An anchor symbol defined in MORE than this many files is a ubiquitous common
+ * method, not an override family, so we don't expand it (it would flood
+ * `ownerResolved` with noise at the strongest owner-resolve boost). Real override
+ * families — one method overridden across a class hierarchy — run from single
+ * digits (≈6 django db-backend clients) up to a couple dozen for large plugin /
+ * handler hierarchies; ubiquitous methods are far larger (`save` ~25, `get` ~38).
+ * 24 admits genuine multi-site families (the previous 16 silently truncated a
+ * real 17-member family to ZERO siblings — a multi-site false negative) while
+ * still bounding clear floods.
+ *
+ * IMPORTANT: this is the DEFAULT for a NAMED, caller-overridable arg, not a buried
+ * gate — when it truncates, {@link OwnerSiblingArgs.onTruncate} fires so the drop
+ * is recorded. Definitive precision is the downstream typed static-witness layer
+ * (`static-witness-adapter` re-derives override families from real `class X(Base)`
+ * inheritance, NOT a file count), so this stays a recall-side cost bound.
+ */
+const DEFAULT_MAX_SIBLING_DEFINERS = 24
 
 const DEF_RE = /^[ \t]*(?:async[ \t]+)?def[ \t]+(\w+)|^[ \t]*class[ \t]+(\w+)/gm
 
@@ -113,6 +143,7 @@ export const resolveOwnerSiblings =
   async (args: OwnerSiblingArgs): Promise<OwnerSibling[]> => {
     const maxFiles = args.maxFiles ?? 3
     const maxResults = args.maxResults ?? 8
+    const maxSiblingDefiners = args.maxSiblingDefiners ?? DEFAULT_MAX_SIBLING_DEFINERS
     const definers = args.listDefiners ?? ripgrepDefiners(args.cwd, args.signal)
     const out: OwnerSibling[] = []
     const seen = new Set<string>()
@@ -139,14 +170,18 @@ export const resolveOwnerSiblings =
       const anchors = defsInSource(source).filter((sym) => issueMentions(args.issueText, sym))
       for (const sym of anchors) {
         const defs = [...new Set(definers(sym))].sort()
-        // A symbol defined in MORE than UBIQUITY_CAP files is NON-DISCRIMINATING —
-        // a ubiquitous method (`save` ~25 django files, `get` ~38), not an override
-        // family. Including it would flood ownerResolved with noise at the top
-        // owner-resolve boost (+3, the strongest), outranking the real owner. An
-        // override family (e.g. `runshell` across 5 backend clients) stays well
-        // under the cap. This is an anchor-DISCRIMINATION bound, distinct from
-        // `maxResults` (the output size bound) — they must not be the same number.
-        if (defs.length > UBIQUITY_CAP) continue
+        // A symbol defined in MORE than `maxSiblingDefiners` files is
+        // NON-DISCRIMINATING — a ubiquitous method (`save` ~25 django files,
+        // `get` ~38), not an override family. Including it would flood
+        // ownerResolved with noise at the top owner-resolve boost (+3, strongest),
+        // outranking the real owner. This is an anchor-DISCRIMINATION (recall-side
+        // cost) bound, distinct from `maxResults` (output size). It is a NAMED arg
+        // (not a buried constant), and when it truncates we EMIT telemetry so a
+        // dropped override family is attributable instead of silently vanishing.
+        if (defs.length > maxSiblingDefiners) {
+          args.onTruncate?.({ symbol: sym, definerCount: defs.length, cap: maxSiblingDefiners })
+          continue
+        }
         const bucket = defs
           // sibling only: not the owner itself, not an already-localized file.
           .filter((file) => file !== "" && file !== sf.file && !stage1Set.has(file))

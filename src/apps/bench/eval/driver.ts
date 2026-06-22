@@ -61,9 +61,13 @@ import {
 } from "@/runner/batch/eval/driver"
 import {
   assembleOwnerEvidence,
-  buildSelectionGenerationPacket,
+  buildSelectionGenerationLlmEvidencePacket,
   type ContractFact,
+  type LlmEvidenceArtifacts,
+  type LlmEvidencePacket,
   PacketBlindnessViolation,
+  recordLlmEvidencePacket,
+  renderLlmEvidencePacket,
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
@@ -298,6 +302,8 @@ interface Phase {
    *  self-diagnose which fix sites were spanned, which candidates were
    *  admissible, and why the winner won without re-parsing trajectories. */
   selectionTelemetry?: SelectionTelemetry
+  /** OPC-07 — stage packets actually used during this phase. */
+  llmEvidence?: LlmEvidenceArtifacts
 }
 
 // Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
@@ -768,23 +774,28 @@ const runSelectionPhase = async (
   })
   const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
+  const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   const verificationTarget = verificationTargetFromPlan(verificationPlan)
   const mergeHint = (seed: string | undefined): string | undefined =>
     verifySelectProofRequired && selectorMode === "clean"
-      ? buildSelectionGenerationPacket({
-          problemStatement: instance.problemStatement,
-          ownerEvidence: assembleOwnerEvidence({
-            ownerFiles: selectionInputs.ownerFiles,
-            issueSymbols: extractIssueHint(instance.problemStatement).symbols,
-            readSource: (rel) => readSandboxSource(sandbox, rel),
-          }),
-          contracts: contractFactsFromBundle(effectivePublicContracts),
-          baseValidatedRed,
-          ...(verificationTarget !== undefined ? { verificationTarget } : {}),
-          ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
-          ...(closureHint !== undefined ? { closureHint } : {}),
-          ...(seed !== undefined ? { seed } : {}),
-        })
+      ? (() => {
+          const packet = buildSelectionGenerationLlmEvidencePacket({
+            problemStatement: instance.problemStatement,
+            ownerEvidence: assembleOwnerEvidence({
+              ownerFiles: selectionInputs.ownerFiles,
+              issueSymbols: extractIssueHint(instance.problemStatement).symbols,
+              readSource: (rel) => readSandboxSource(sandbox, rel),
+            }),
+            contracts: contractFactsFromBundle(effectivePublicContracts),
+            baseValidatedRed,
+            ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+            ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
+            ...(closureHint !== undefined ? { closureHint } : {}),
+            ...(seed !== undefined ? { seed } : {}),
+          })
+          recordLlmEvidencePacket(selectionLlmEvidence, packet)
+          return renderLlmEvidencePacket(packet)
+        })()
       : seed === undefined
         ? closureHint
         : closureHint === undefined
@@ -863,6 +874,9 @@ const runSelectionPhase = async (
       ? { publicContracts: effectivePublicContracts }
       : {}),
     ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
+    recordLlmEvidencePacket: (packet: LlmEvidencePacket) => {
+      recordLlmEvidencePacket(selectionLlmEvidence, packet)
+    },
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
@@ -937,6 +951,7 @@ const runSelectionPhase = async (
         (sample === "" ? "" : ` (${sample})`),
       reproOracleCalibration: calibration,
       selectionTelemetry: summarizeSelection(result),
+      ...(Object.keys(selectionLlmEvidence).length > 0 ? { llmEvidence: selectionLlmEvidence } : {}),
     }
   }
   return {
@@ -953,6 +968,7 @@ const runSelectionPhase = async (
       : {}),
     reproOracleCalibration: calibration,
     selectionTelemetry: summarizeSelection(result),
+    ...(Object.keys(selectionLlmEvidence).length > 0 ? { llmEvidence: selectionLlmEvidence } : {}),
   }
 }
 

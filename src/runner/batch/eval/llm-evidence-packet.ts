@@ -133,7 +133,26 @@ export interface LlmEvidencePacket {
 
 export interface LlmEvidenceArtifacts {
   readonly intake?: LlmEvidencePacket
+  readonly candidateGeneration?: LlmEvidencePacket
+  readonly repairSeed?: LlmEvidencePacket
   readonly selectionExplanation?: LlmEvidencePacket
+}
+
+export type LlmEvidenceRevisionByStage = Readonly<
+  Partial<Record<LlmEvidencePacketStage, string>>
+>
+
+export interface LlmEvidenceSummary {
+  readonly stages: readonly LlmEvidencePacketStage[]
+  readonly revisionByStage: LlmEvidenceRevisionByStage
+  readonly missingKinds: readonly string[]
+}
+
+type MutableLlmEvidenceArtifacts = {
+  intake?: LlmEvidencePacket
+  candidateGeneration?: LlmEvidencePacket
+  repairSeed?: LlmEvidencePacket
+  selectionExplanation?: LlmEvidencePacket
 }
 
 /* ------------------------------------------------------------------ */
@@ -272,6 +291,65 @@ export const renderLlmEvidencePacket = (packet: LlmEvidencePacket): string =>
     JSON.stringify(cleanPacket(packet), null, 2),
     "```",
   ].join("\n")
+
+const LLM_EVIDENCE_STAGE_ORDER: readonly LlmEvidencePacketStage[] = [
+  "intake",
+  "candidate_generation",
+  "candidate_review",
+  "repair_seed",
+  "selection_explanation",
+]
+
+const packetsFromArtifacts = (artifacts: LlmEvidenceArtifacts): readonly LlmEvidencePacket[] =>
+  LLM_EVIDENCE_STAGE_ORDER.flatMap((stage) => {
+    if (stage === "intake" && artifacts.intake !== undefined) return [artifacts.intake]
+    if (stage === "candidate_generation" && artifacts.candidateGeneration !== undefined)
+      return [artifacts.candidateGeneration]
+    if (stage === "repair_seed" && artifacts.repairSeed !== undefined) return [artifacts.repairSeed]
+    if (stage === "selection_explanation" && artifacts.selectionExplanation !== undefined) {
+      return [artifacts.selectionExplanation]
+    }
+    return []
+  })
+
+export const summarizeLlmEvidenceArtifacts = (
+  artifacts: LlmEvidenceArtifacts | undefined,
+): LlmEvidenceSummary | undefined => {
+  if (artifacts === undefined) return undefined
+  const packets = packetsFromArtifacts(artifacts)
+  if (packets.length === 0) return undefined
+  const revisionByStage: Partial<Record<LlmEvidencePacketStage, string>> = {}
+  for (const packet of packets) revisionByStage[packet.stage] = packet.evidenceRevision
+  return {
+    stages: packets.map((packet) => packet.stage),
+    revisionByStage,
+    missingKinds: uniqueLines(
+      packets.flatMap((packet) => packet.missingEvidence.map((missing) => missing.kind)),
+    ),
+  }
+}
+
+export const recordLlmEvidencePacket = (
+  artifacts: Partial<LlmEvidenceArtifacts>,
+  packet: LlmEvidencePacket,
+): void => {
+  const sink = artifacts as MutableLlmEvidenceArtifacts
+  if (packet.stage === "intake" && sink.intake === undefined) {
+    sink.intake = packet
+  } else if (
+    packet.stage === "candidate_generation" &&
+    sink.candidateGeneration === undefined
+  ) {
+    sink.candidateGeneration = packet
+  } else if (packet.stage === "repair_seed" && sink.repairSeed === undefined) {
+    sink.repairSeed = packet
+  } else if (
+    packet.stage === "selection_explanation" &&
+    sink.selectionExplanation === undefined
+  ) {
+    sink.selectionExplanation = packet
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Typed evidence assembly helpers (shared by all builders)            */
@@ -555,7 +633,9 @@ export interface SelectionGenerationPacketInput {
  * carries actual public issue facts + the active proof target, so it never
  * points back to ambient prompt text. Returns the rendered prompt string.
  */
-export const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): string => {
+export const buildSelectionGenerationLlmEvidencePacket = (
+  input: SelectionGenerationPacketInput,
+): LlmEvidencePacket => {
   const missingEvidence: MissingEvidenceFact[] = [
     ...(input.reproCommand === undefined
       ? [{ kind: "public_repro", reason: "no_executable_public_repro_hint" }]
@@ -578,7 +658,7 @@ export const buildSelectionGenerationPacket = (input: SelectionGenerationPacketI
             ...(input.baseValidatedRed !== undefined ? { baseValidatedRed: input.baseValidatedRed } : {}),
           },
         ]
-  return renderLlmEvidencePacket({
+  return cleanPacket({
     stage: "candidate_generation",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
     evidenceRevision: "selection-generation-v2",
@@ -611,6 +691,9 @@ export const buildSelectionGenerationPacket = (input: SelectionGenerationPacketI
   })
 }
 
+export const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): string =>
+  renderLlmEvidencePacket(buildSelectionGenerationLlmEvidencePacket(input))
+
 /* ------------------------------------------------------------------ */
 /* Repair seed packet (SHARED)                                         */
 /* ------------------------------------------------------------------ */
@@ -633,8 +716,10 @@ export interface RepairSeedPacketInput {
  * issue facts) and instanceIdHash is the SAME opaque problem-statement hash as
  * every other stage; candidate identity lives in `candidatePatchHash`.
  */
-export const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
-  renderLlmEvidencePacket({
+export const buildRepairSeedLlmEvidencePacket = (
+  input: RepairSeedPacketInput,
+): LlmEvidencePacket =>
+  cleanPacket({
     stage: "repair_seed",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
     evidenceRevision: "selector-repair-v2",
@@ -667,6 +752,9 @@ export const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
         ? [{ kind: "executed_public_proof", reason: "no_positive_executed_public_proof_attached" }]
         : []),
   })
+
+export const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
+  renderLlmEvidencePacket(buildRepairSeedLlmEvidencePacket(input))
 
 /* ------------------------------------------------------------------ */
 /* Selection explanation packet (report-only RCA)                      */

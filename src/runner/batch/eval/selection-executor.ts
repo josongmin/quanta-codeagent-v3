@@ -75,12 +75,15 @@ import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import {
   buildRepairSeedPacket,
+  buildRepairSeedLlmEvidencePacket,
   candidatePatchHash,
   type ContractFact,
+  type LlmEvidencePacket,
   type OwnerEvidenceFact,
   type ProofReceiptFact,
   type ProofReceiptState,
   type VerificationTargetFact,
+  renderLlmEvidencePacket,
 } from "./llm-evidence-packet"
 import { type MweProofReceipt, type MweProofState, mweProofAuthorityRank } from "./mwe-proof"
 import {
@@ -1147,6 +1150,9 @@ export const runSelection = async (args: {
    *  verificationTargetFromPlan). Surfaced in the repair_seed packet so the
    *  repair instruction names the public proof to satisfy. */
   verificationTarget?: VerificationTargetFact
+  /** OPC-07 runtime packet recorder. Stores which bounded packet stages were
+   *  actually used on the live clean path without changing selector authority. */
+  recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
@@ -1669,7 +1675,7 @@ export const runSelection = async (args: {
       authority: `requiredContractsSatisfied=${entry.requiredContractsSatisfied}; contractsSatisfied=${entry.contractsSatisfied}`,
       satisfied: entry.verdict.admissible,
     }))
-    return buildRepairSeedPacket({
+    const packet = buildRepairSeedLlmEvidencePacket({
       problemStatement: args.problemStatement ?? "",
       candidatePatchHash: candidatePatchHash(patchAuthority),
       ownerEvidence,
@@ -1678,6 +1684,8 @@ export const runSelection = async (args: {
       repairGuidance: seed,
       ...(args.verificationTarget !== undefined ? { verificationTarget: args.verificationTarget } : {}),
     })
+    args.recordLlmEvidencePacket?.(packet)
+    return renderLlmEvidencePacket(packet)
   }
 
   const reproFailureTraceSeed = (scored: readonly ScoredEntry[]): string | undefined => {

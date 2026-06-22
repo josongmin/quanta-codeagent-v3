@@ -56,7 +56,12 @@ export const runRepairRounds = async (
   let prevRun: RunOnceResult = r0
   let prevValidator: ValidatorResult = v0
   let validated = false
-  let falseGreen = false
+  // ANY round (incl. round 0) whose exit-code-green was a false green (rail
+  // predicate evaluable AND matched===false). SEEDED from round 0 and STICKY —
+  // symmetric to `falseRed`. The round-0 case is reachable when a primary rail is
+  // set and the finish gate WITHHELD clearing on a spurious exit-code green, so
+  // the loop ran on without ever recording the false green it already saw.
+  let falseGreen = isFalseGreen(v0)
   // ANY round whose rail exit-code rejected a repro-says-resolved patch (RCA instrument).
   let falseRed = isFalseRed(v0)
   for (let i = 1; i <= maxRounds; i++) {
@@ -79,8 +84,9 @@ export const runRepairRounds = async (
     if (isFalseRed(vi)) falseRed = true
     // Record the (observe-only) false-green signal for EVERY exit-code-green
     // round, even when the finish gate withholds clearing — the diagnostic must
-    // reflect what happened, not whether the gate let it pass.
-    if (vi.ok) falseGreen = isFalseGreen(vi)
+    // reflect what happened, not whether the gate let it pass. STICKY (matches
+    // `falseRed`): a later honest green must not erase an earlier false green.
+    if (vi.ok && isFalseGreen(vi)) falseGreen = true
     if (clearedAsValidated(args, vi)) {
       validated = true
       break

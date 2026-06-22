@@ -99,6 +99,34 @@ const buildUserData = (ttlMinutes: number): string =>
 /** Pull the first non-empty trimmed token from aws cli `--output text`. */
 const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
 
+/**
+ * SSOT for the current public IPv4 used to scope the bench SG `:22` ingress to a
+ * `/32` (never `0.0.0.0/0`). Shared by both SG-authorizing sites — the ec2
+ * grading backend ({@link createEc2Backend}) AND the full-remote box session
+ * ({@link ../box-session}) — so they can NEVER drift back into one world-opening
+ * the SAME named SG the other carefully restricts.
+ *
+ * Forces IPv4 (`-4`): on dual-stack/IPv6-preferred connections curl returns an
+ * IPv6 address, which fails the IPv4 validation below and aborts grading (the
+ * `--cidr` SG rule is IPv4-only). The EC2 SG `:22` rule must match the IPv4 the
+ * ssh control connection actually egresses from.
+ *
+ * FAIL-CLOSED: a failed/proxied curl can return an HTML error page whose first
+ * token is non-empty but not an IP, which would build a bogus `--cidr` and leave
+ * the box unreachable with only a misleading later timeout to show for it — so a
+ * non-IPv4 result THROWS rather than silently widening or proceeding.
+ */
+export const lookupCurrentPublicIpv4 = async (spawn: SpawnFn, surface: string): Promise<string> => {
+  const ipRes = await spawn("curl", ["-4", "-s", "ifconfig.me"])
+  const myIp = oneLine(ipRes.stdout)
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(myIp)) {
+    throw new Error(
+      `[${surface}] could not determine a valid public IP via ifconfig.me (got "${myIp.slice(0, 60)}")`,
+    )
+  }
+  return myIp
+}
+
 export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   const spawn = cfg.spawn ?? defaultSpawn
   const region = cfg.region ?? DEFAULTS.region
@@ -166,22 +194,9 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
       sgId = oneLine(created.stdout)
     }
 
-    // Authorize :22 from the current public IP only. ifconfig.me ⇒ public IP.
-    // Force IPv4 (`-4`): on dual-stack/IPv6-preferred connections curl returns an
-    // IPv6 address, which fails the IPv4 validation below and aborts grading (the
-    // `--cidr` SG rule is IPv4-only). The EC2 SG :22 rule must match the IPv4 the
-    // ssh control connection actually egresses from.
-    const ipRes = await spawn("curl", ["-4", "-s", "ifconfig.me"])
-    const myIp = oneLine(ipRes.stdout)
-    // Validate it's actually an IPv4 — a failed/proxied curl can return an HTML
-    // error page whose first token is non-empty but not an IP, which would build
-    // a bogus `--cidr` and (since authorize errors were swallowed) leave the box
-    // unreachable with only a misleading later timeout to show for it.
-    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(myIp)) {
-      throw new Error(
-        `[ec2-backend] could not determine a valid public IP via ifconfig.me (got "${myIp.slice(0, 60)}")`,
-      )
-    }
+    // Authorize :22 from the current public IPv4 only (SSOT helper — shared with
+    // box-session.ts so neither path can drift back into world-opening this SG).
+    const myIp = await lookupCurrentPublicIpv4(spawn, "ec2-backend")
     // Idempotent: a DUPLICATE rule returns non-zero (InvalidPermission.Duplicate),
     // which we tolerate — the rule already being present is the desired state. A
     // REAL failure (wrong VPC / perms) must fail fast: otherwise the box launches

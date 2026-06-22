@@ -100,9 +100,12 @@ import {
   assembleOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
-  buildSelectionGenerationPacket,
+  buildSelectionGenerationLlmEvidencePacket,
   type ContractFact,
+  type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
+  recordLlmEvidencePacket,
+  renderLlmEvidencePacket,
   type VerificationTargetFact,
   verificationTargetFromPlan,
 } from "./llm-evidence-packet"
@@ -1857,6 +1860,8 @@ interface Phase {
    *  self-diagnose which fix sites were spanned, which candidates were
    *  admissible, and why the winner won without re-parsing trajectories. */
   selectionTelemetry?: SelectionTelemetry
+  /** OPC-07 — stage packets actually used during this phase. */
+  llmEvidence?: LlmEvidenceArtifacts
 }
 
 /**
@@ -2628,6 +2633,7 @@ const buildSelectionExecutorPorts = (args: {
   readonly selectionOwnerFiles: readonly string[]
   readonly publicContracts: PublicContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
+  readonly recordLlmEvidencePacket: ((packet: LlmEvidencePacket) => void) | undefined
   readonly concurrency: number | undefined
   readonly generationErrors: Map<number, string>
   readonly addTurns: (turns: number) => void
@@ -2646,24 +2652,28 @@ const buildSelectionExecutorPorts = (args: {
         index,
         seed:
           args.verifySelectProofRequired && args.selectorMode === "clean"
-            ? buildSelectionGenerationPacket({
-                problemStatement: args.instance.problemStatement,
-                ownerEvidence: assembleOwnerEvidence({
-                  ownerFiles: args.selectionOwnerFiles,
-                  issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
-                  readSource: (rel) => readSandboxSource(args.sandbox, rel),
-                }),
-                contracts: contractFactsFromBundle(args.publicContracts),
-                ...(args.baseValidatedRed != null
-                  ? { baseValidatedRed: args.baseValidatedRed }
-                  : {}),
-                ...(args.verificationTarget !== undefined
-                  ? { verificationTarget: args.verificationTarget }
-                  : {}),
-                ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
-                ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
-                ...(seed !== undefined ? { seed } : {}),
-              })
+            ? (() => {
+                const packet = buildSelectionGenerationLlmEvidencePacket({
+                  problemStatement: args.instance.problemStatement,
+                  ownerEvidence: assembleOwnerEvidence({
+                    ownerFiles: args.selectionOwnerFiles,
+                    issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+                    readSource: (rel) => readSandboxSource(args.sandbox, rel),
+                  }),
+                  contracts: contractFactsFromBundle(args.publicContracts),
+                  ...(args.baseValidatedRed != null
+                    ? { baseValidatedRed: args.baseValidatedRed }
+                    : {}),
+                  ...(args.verificationTarget !== undefined
+                    ? { verificationTarget: args.verificationTarget }
+                    : {}),
+                  ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
+                  ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+                  ...(seed !== undefined ? { seed } : {}),
+                })
+                args.recordLlmEvidencePacket?.(packet)
+                return renderLlmEvidencePacket(packet)
+              })()
             : seed,
         instance: args.instance,
         deps: args.deps,
@@ -2802,6 +2812,7 @@ const runSelectionPhase = async (
   })
   const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
+  const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   const verificationTarget = verificationTargetFromPlan(verificationPlan)
   let totalTurns = 0
   const selectionState = await resolveSelectionPhasePorts({
@@ -2839,6 +2850,9 @@ const runSelectionPhase = async (
       ? { publicContracts: effectivePublicContracts }
       : {}),
     ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
+    recordLlmEvidencePacket: (packet) => {
+      recordLlmEvidencePacket(selectionLlmEvidence, packet)
+    },
     ports: buildSelectionExecutorPorts({
       instance,
       deps,
@@ -2866,6 +2880,9 @@ const runSelectionPhase = async (
       selectionOwnerFiles: selectionInputs.ownerFiles,
       publicContracts: effectivePublicContracts,
       verificationTarget,
+      recordLlmEvidencePacket: (packet) => {
+        recordLlmEvidencePacket(selectionLlmEvidence, packet)
+      },
     }),
   })
   const generationFailure = selectionGenerationFailurePhase({
@@ -2876,11 +2893,13 @@ const runSelectionPhase = async (
     calibration: selectionState.calibration,
   })
   if (generationFailure !== undefined) return generationFailure
-  return selectionPhaseResultOf({
+  const phase = selectionPhaseResultOf({
     result,
     totalTurns,
     calibration: selectionState.calibration,
   })
+  if (Object.keys(selectionLlmEvidence).length > 0) phase.llmEvidence = selectionLlmEvidence
+  return phase
 }
 
 const okResult = (
@@ -3638,10 +3657,12 @@ const attachLlmEvidenceArtifacts = (args: {
             : {}),
           candidates: args.phase.selectionTelemetry.candidates,
         })
-  args.extra.llmEvidence = {
+  const llmEvidence: LlmEvidenceArtifacts = {
     intake: args.prepared.intakeLlmEvidence,
+    ...(args.phase.llmEvidence ?? {}),
     ...(selectionExplanation !== undefined ? { selectionExplanation } : {}),
   }
+  if (Object.keys(llmEvidence).length > 0) args.extra.llmEvidence = llmEvidence
 }
 
 const attachSelectionAndClosureArtifacts = (args: {

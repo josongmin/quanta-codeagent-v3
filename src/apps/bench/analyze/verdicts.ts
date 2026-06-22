@@ -32,6 +32,19 @@ export interface RunVerdicts {
   readonly unresolved: ReadonlySet<string>
   readonly errored: ReadonlySet<string>
   readonly emptyPatch: ReadonlySet<string>
+  /** Bench-report-only aggregate telemetry. Absent for harness-only report shapes. */
+  readonly reportTotals?: RunReportTotals
+}
+
+export interface RunReportTotals {
+  readonly submittedWithProof: number
+  readonly blockedProofMissing: number
+  readonly blockedEnvFailed: number
+  readonly contractOnlyBlocked: number
+  readonly contractOnlySubmitted: number
+  readonly packetizedGenerationCount: number
+  readonly packetizedRepairCount: number
+  readonly packetizedSelectionExplanationCount: number
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -109,7 +122,66 @@ const rowIsOfficialHarnessResolved = (row: Record<string, unknown>): boolean => 
   return isRecord(breakdown) && breakdown.resolved === true
 }
 
-const fromOurReport = (perInstance: readonly unknown[]): RunVerdicts => {
+const asCount = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : undefined
+
+const rowHasPacketStage = (
+  row: Record<string, unknown>,
+  stage: "candidate_generation" | "repair_seed" | "selection_explanation",
+): boolean => {
+  const llmEvidence = row.llmEvidence
+  if (isRecord(llmEvidence)) {
+    if (stage === "candidate_generation" && llmEvidence.candidateGeneration !== undefined) return true
+    if (stage === "repair_seed" && llmEvidence.repairSeed !== undefined) return true
+    if (stage === "selection_explanation" && llmEvidence.selectionExplanation !== undefined) return true
+  }
+  const stages = row.llmEvidenceStages
+  return Array.isArray(stages) && stages.includes(stage)
+}
+
+const countRows = (
+  perInstance: readonly unknown[],
+  predicate: (row: Record<string, unknown>) => boolean,
+): number =>
+  perInstance.reduce<number>(
+    (total: number, raw) => (isRecord(raw) && predicate(raw) ? total + 1 : total),
+    0,
+  )
+
+const reportTotalsFromOurReport = (args: {
+  report: Record<string, unknown>
+  perInstance: readonly unknown[]
+  proofMissingCount: number
+  infraBlockedCount: number
+  contractOnlyBlockedCount: number
+  contractOnlySubmittedCount: number
+}): RunReportTotals => {
+  const proofTotals = isRecord(args.report.proofTotals) ? args.report.proofTotals : undefined
+  const llmEvidenceTotals = isRecord(args.report.llmEvidenceTotals) ? args.report.llmEvidenceTotals : undefined
+  return {
+    submittedWithProof:
+      asCount(proofTotals?.submittedWithProof) ??
+      countRows(args.perInstance, (row) => row.submittedCandidateProof === true),
+    blockedProofMissing:
+      asCount(proofTotals?.blockedProofMissing) ?? args.proofMissingCount,
+    blockedEnvFailed: asCount(proofTotals?.blockedEnvFailed) ?? args.infraBlockedCount,
+    contractOnlyBlocked:
+      asCount(proofTotals?.contractOnlyBlocked) ?? args.contractOnlyBlockedCount,
+    contractOnlySubmitted:
+      asCount(proofTotals?.contractOnlySubmitted) ?? args.contractOnlySubmittedCount,
+    packetizedGenerationCount:
+      asCount(llmEvidenceTotals?.packetizedGenerationCount) ??
+      countRows(args.perInstance, (row) => rowHasPacketStage(row, "candidate_generation")),
+    packetizedRepairCount:
+      asCount(llmEvidenceTotals?.packetizedRepairCount) ??
+      countRows(args.perInstance, (row) => rowHasPacketStage(row, "repair_seed")),
+    packetizedSelectionExplanationCount:
+      asCount(llmEvidenceTotals?.packetizedSelectionExplanationCount) ??
+      countRows(args.perInstance, (row) => rowHasPacketStage(row, "selection_explanation")),
+  }
+}
+
+const fromOurReport = (report: Record<string, unknown>, perInstance: readonly unknown[]): RunVerdicts => {
   const resolved = new Set<string>()
   const localStructural = new Set<string>()
   const researchContaminated = new Set<string>()
@@ -147,6 +219,14 @@ const fromOurReport = (perInstance: readonly unknown[]): RunVerdicts => {
       unresolved.add(id)
     }
   }
+  const reportTotals = reportTotalsFromOurReport({
+    report,
+    perInstance,
+    proofMissingCount: proofMissing.size,
+    infraBlockedCount: infraBlocked.size,
+    contractOnlyBlockedCount: contractOnlyBlocked.size,
+    contractOnlySubmittedCount: contractOnlySubmitted.size,
+  })
   return {
     resolved,
     localStructural,
@@ -158,6 +238,7 @@ const fromOurReport = (perInstance: readonly unknown[]): RunVerdicts => {
     unresolved,
     errored,
     emptyPatch,
+    reportTotals,
   }
 }
 
@@ -179,7 +260,7 @@ export const loadVerdicts = (reportJson: unknown): RunVerdicts => {
     throw new Error("loadVerdicts: report is not an object")
   }
   if (Array.isArray(reportJson.perInstance)) {
-    return fromOurReport(reportJson.perInstance)
+    return fromOurReport(reportJson, reportJson.perInstance)
   }
   if (
     "resolved_ids" in reportJson ||

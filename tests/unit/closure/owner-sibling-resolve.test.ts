@@ -157,16 +157,61 @@ describe("resolveOwnerSiblings (WS2 grep + issueText anchor)", () => {
     }
   })
 
-  test("ubiquitous anchor (defined in > UBIQUITY_CAP files) is dropped as noise", async () => {
-    const many = Array.from({ length: 20 }, (_, i) => `f${i}.py`) // 20 > 16 cap
+  test("ubiquitous anchor over the discrimination cap is truncated (telemetry-visible)", async () => {
+    const many = Array.from({ length: 30 }, (_, i) => `f${i}.py`) // 31 definers > default 24
+    const truncations: { symbol: string; definerCount: number; cap: number }[] = []
     const out = await resolveOwnerSiblings()({
       stage1Files: [{ file: "owner.py", score: 5 }],
       issueText: "the save method is broken",
       cwd: "/repo",
       readSource: () => "class C:\n    def save(self):\n        pass",
       listDefiners: stubDefiners({ save: ["owner.py", ...many] }),
+      onTruncate: (ev) => truncations.push(ev),
     })
-    expect(out).toEqual([]) // ubiquitous method ⇒ non-discriminating ⇒ no flood
+    expect(out).toEqual([]) // over-cap method ⇒ non-discriminating ⇒ no flood
+    // RED on the silent-constant code: the drop must be VISIBLE, not buried.
+    expect(truncations).toEqual([{ symbol: "save", definerCount: 31, cap: 24 }])
+  })
+
+  // #11 RED: a REAL override family with 17 members (just over the anecdotal 16
+  // cap) is silently truncated to ZERO siblings by the buried constant — a
+  // false-negative on multi-site coverage. After the structural fix the family is
+  // configurable, and the default cap is raised above real-family size so a true
+  // 17-member override family is RETAINED rather than silently dropped.
+  test("17-member real override family is NOT silently dropped (default retains)", async () => {
+    const family = Array.from({ length: 17 }, (_, i) => `backend${i}/client.py`)
+    const out = await resolveOwnerSiblings()({
+      stage1Files: [{ file: family[0] as string, score: 5 }],
+      issueText: "runshell across the db backends is broken",
+      cwd: "/repo",
+      readSource: (f) =>
+        f === family[0] ? "class Base:\n    def runshell(self):\n        pass" : null,
+      listDefiners: stubDefiners({ runshell: family }),
+      maxResults: 32, // don't let the OUTPUT bound mask the discrimination bound
+    })
+    // 17 definers = owner + 16 siblings. The owner is excluded; all 16 siblings
+    // must survive (no silent count-gate eating the whole family).
+    expect(out.length).toBe(16)
+    expect(out.every((o) => o.forSymbol === "runshell")).toBe(true)
+    expect(out.map((o) => o.file).includes(family[0] as string)).toBe(false)
+  })
+
+  // #11: the discrimination bound is a NAMED, configurable arg — not a buried
+  // constant — and crossing it emits telemetry so the drop is measured.
+  test("maxSiblingDefiners is configurable and its crossing is telemetered", async () => {
+    const truncations: { symbol: string; definerCount: number; cap: number }[] = []
+    const out = await resolveOwnerSiblings()({
+      stage1Files: [{ file: "owner.py", score: 5 }],
+      issueText: "runshell is broken",
+      cwd: "/repo",
+      readSource: () => "class C:\n    def runshell(self):\n        pass",
+      // 4 definers; set the cap to 3 ⇒ over cap ⇒ truncated + telemetered.
+      listDefiners: stubDefiners({ runshell: ["owner.py", "a.py", "b.py", "c.py"] }),
+      maxSiblingDefiners: 3,
+      onTruncate: (ev) => truncations.push(ev),
+    })
+    expect(out).toEqual([])
+    expect(truncations).toEqual([{ symbol: "runshell", definerCount: 4, cap: 3 }])
   })
 
   test("dedup against FULL stage1: a lower-ranked localized file is not re-added", async () => {

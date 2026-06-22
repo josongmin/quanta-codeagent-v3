@@ -392,17 +392,103 @@ const minorTuple = (v: string): readonly [number, number] => {
  *  "3.6 no-interpreter". */
 const UV_FLOOR = "3.9"
 
-/** CPython minor for an instance's repro/test env. Exact (repo,version) swebench
- *  ground-truth → per-repo high fallback → conservative 3.11 for an unknown repo,
- *  then FLOORED at {@link UV_FLOOR} (uv cannot provide < 3.8, and 3.9 is the
- *  proven-runnable floor for the old codebases swebench pins to 3.5/3.6). */
-export const pythonForRepoVersion = (repo: string, version: string | undefined): string => {
-  let py = REPO_FALLBACK_PYTHON[repo] ?? "3.11"
-  if (version !== undefined) {
-    const exact = REPO_VERSION_PYTHON[repo]?.[version]
-    if (exact !== undefined) py = exact
-  }
-  const [pa, pb] = minorTuple(py)
-  const [fa, fb] = minorTuple(UV_FLOOR)
-  return pa < fa || (pa === fa && pb < fb) ? UV_FLOOR : py
+/** `a` is a strictly-lower CPython minor than `b` ("3.6" < "3.9"). */
+const isLowerMinor = (a: string, b: string): boolean => {
+  const [aa, ab] = minorTuple(a)
+  const [ba, bb] = minorTuple(b)
+  return aa < ba || (aa === ba && ab < bb)
 }
+
+/** The default python for a repo with NO entry in either map (truly unknown). */
+const UNKNOWN_REPO_DEFAULT = "3.11"
+
+/** Telemetry sinks for the two cases where the chosen python is NOT exact swebench
+ *  ground truth — so a downstream repro failure is attributable to the ENV override
+ *  rather than mis-scored as a model failure. Both are optional; default = no-op. */
+export interface PythonResolveTelemetry {
+  /** Fired when {@link UV_FLOOR} overrode the (repo,version) ground-truth python. */
+  readonly onFloor?: (event: {
+    repo: string
+    version: string
+    /** swebench ground-truth python that was overridden. */
+    truth: string
+    /** floored python actually used. */
+    used: string
+  }) => void
+  /** Fired when a (repo,version) had NO exact map entry and fell to a per-repo /
+   *  conservative guess. */
+  readonly onFallback?: (event: { repo: string; version: string; used: string }) => void
+}
+
+/** When the UV_FLOOR overrode the swebench ground truth, the truth + used pair —
+ *  so a floored instance is attributable to the env, not the model. */
+export interface PythonFloored {
+  readonly truth: string
+  readonly used: string
+}
+
+/** Rich (attributable) result of {@link resolvePythonForRepoVersion}. */
+export interface ResolvedRepoPython {
+  /** The CPython minor the repro/test env should use. */
+  readonly used: string
+  /** swebench ground-truth python for this (repo,version) when an exact map entry
+   *  exists (PRE-floor); `undefined` when the value came from a fallback guess. */
+  readonly truth?: string
+  /** Present iff {@link UV_FLOOR} overrode `truth` (truth < floor). The signal the
+   *  caller needs to NOT mis-score a floored repro as a model failure. */
+  readonly pythonFloored?: PythonFloored
+  /** Present iff no exact (repo,version) entry existed and a per-repo /
+   *  conservative guess was used. A silent guess made visible. */
+  readonly fallbackUsed?: { repo: string; version: string; used: string }
+}
+
+/**
+ * Attributable resolver: exact (repo,version) swebench ground-truth → per-repo high
+ * fallback → conservative {@link UNKNOWN_REPO_DEFAULT}, then FLOORED at
+ * {@link UV_FLOOR} (uv cannot provide < 3.8; 3.9 is the proven-runnable floor for
+ * the old codebases swebench pins to 3.5/3.6).
+ *
+ * Unlike the bare {@link pythonForRepoVersion} string shim, this surfaces WHY the
+ * chosen python differs from ground truth:
+ *  - `pythonFloored` when UV_FLOOR overrode an exact truth (so a repro failure on a
+ *    floored instance is an ENV override, not a model miss — same class as the prior
+ *    13% static-mapping bug, opposite direction), and
+ *  - `fallbackUsed` when no exact entry existed (a silent guess made visible).
+ * Both also fire the matching {@link PythonResolveTelemetry} sink for logging.
+ */
+export const resolvePythonForRepoVersion = (
+  repo: string,
+  version: string | undefined,
+  telemetry?: PythonResolveTelemetry,
+): ResolvedRepoPython => {
+  const exact = version !== undefined ? REPO_VERSION_PYTHON[repo]?.[version] : undefined
+  const truth = exact // PRE-floor swebench ground truth, when known.
+  const py = exact ?? REPO_FALLBACK_PYTHON[repo] ?? UNKNOWN_REPO_DEFAULT
+  const floored = isLowerMinor(py, UV_FLOOR)
+  const used = floored ? UV_FLOOR : py
+
+  let pythonFloored: PythonFloored | undefined
+  if (floored && truth !== undefined) {
+    pythonFloored = { truth, used }
+    telemetry?.onFloor?.({ repo, version: version ?? "", truth, used })
+  }
+
+  let fallbackUsed: ResolvedRepoPython["fallbackUsed"]
+  if (exact === undefined) {
+    fallbackUsed = { repo, version: version ?? "", used }
+    telemetry?.onFallback?.({ repo, version: version ?? "", used })
+  }
+
+  return {
+    used,
+    ...(truth !== undefined ? { truth } : {}),
+    ...(pythonFloored !== undefined ? { pythonFloored } : {}),
+    ...(fallbackUsed !== undefined ? { fallbackUsed } : {}),
+  }
+}
+
+/** CPython minor for an instance's repro/test env. Thin string-returning shim over
+ *  {@link resolvePythonForRepoVersion} — kept for callers that only need the value.
+ *  Use the resolver directly to get floor/fallback ATTRIBUTION (see #12). */
+export const pythonForRepoVersion = (repo: string, version: string | undefined): string =>
+  resolvePythonForRepoVersion(repo, version).used

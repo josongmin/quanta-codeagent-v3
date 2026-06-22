@@ -33,6 +33,7 @@ import { loadVerdicts } from "../analyze/verdicts"
 import { benchHome } from "../corpus"
 import { CURRENT_BENCH_BASE_PRESET, presetRequiresLiveLspGrounding } from "../preset"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "./backend"
+import { lookupCurrentPublicIpv4 } from "./ec2"
 
 /** Durable dir for fetched full-remote artifacts (predictions / report / closure
  *  sidecar / trajectory). NEVER /tmp — the OS reaps it on the next session and
@@ -475,6 +476,12 @@ const BOX_STATUS_TMP_PATH = "~/.quanta/bench-box-status.json.tmp"
  *  The pool drops the box WITHOUT terminating it (it belongs to the other run). */
 export const POOL_BUSY_ERROR = "POOL_BOX_BUSY"
 export const GRADE_LOCK_RELEASE_ERROR = "GRADE_LOCK_RELEASE_FAILED"
+/** Stable marker the detached run+poll loop stamps into a {@link BoxDiedDuringRunError}
+ *  so the pool can route it to the dead-box REQUEUE path even when a SECONDARY
+ *  grade-lock-release failure (the dead box's ssh also 255s) gets wrapped around
+ *  it — otherwise the lock-release substring would mis-route a real box death to
+ *  the abort branch. */
+export const BOX_DIED_DURING_RUN_ERROR = "BOX_DIED_DURING_RUN"
 
 /** Single-quote a value for safe interpolation into a remote bash command
  *  string. Without this, a preset/model/instance-id containing a space, `;`,
@@ -790,6 +797,12 @@ export interface GradeChunkParams {
   /** jun-20 multi-auth (T-6): auth-pool account that leased this chunk. Surfaced
    *  in the box status snapshot for operator attribution. Omitted in single-auth. */
   readonly accountLabel?: string
+  /** Test seam — injectable sleep for the detached run+poll loop (default real). */
+  readonly pollSleep?: (ms: number) => Promise<void>
+  /** Test seam — detached run+poll cadence (default {@link RUN_POLL_INTERVAL_MS}). */
+  readonly pollIntervalMs?: number
+  /** Test seam — injectable clock for the detached run+poll wall-clock ceiling. */
+  readonly pollNow?: () => number
 }
 
 export interface BoxStatusSnapshot {
@@ -1306,11 +1319,15 @@ const makeSsh =
     )
 
 /** Find-or-create the SG + open :22. Without an attached SG the box lands in the
- *  default SG (no inbound :22) ⇒ ssh times out. Ingress is `0.0.0.0/0` (public,
- *  key-only, throwaway TTL box). Throws on a REAL failure (never masks a
- *  connectivity error by blindly creating). */
+ *  default SG (no inbound :22) ⇒ ssh times out. Ingress is scoped to the current
+ *  public IPv4 `/32` (via the SSOT {@link lookupCurrentPublicIpv4}, shared with
+ *  ec2.ts) — NOT `0.0.0.0/0`: both sites authorize the SAME named SG, so a
+ *  world-open rule here would permanently widen the SG the ec2 path restricts.
+ *  Throws on a REAL failure (never masks a connectivity error by blindly
+ *  creating, and fail-closes on an unresolvable IP rather than world-opening). */
 const ensureSecurityGroup = async (
   awsFn: (args: readonly string[]) => Promise<SpawnResult>,
+  spawn: SpawnFn,
   sgName: string,
   vpcId: string,
   region: string,
@@ -1353,6 +1370,7 @@ const ensureSecurityGroup = async (
     }
     sgId = oneLine(created.stdout)
   }
+  const myIp = await lookupCurrentPublicIpv4(spawn, "full-remote")
   const auth = await awsFn([
     "ec2",
     "authorize-security-group-ingress",
@@ -1363,7 +1381,7 @@ const ensureSecurityGroup = async (
     "--port",
     "22",
     "--cidr",
-    "0.0.0.0/0",
+    `${myIp}/32`,
   ])
   if (auth.code !== 0 && !/Duplicate/i.test(auth.stderr)) {
     throw new Error(
@@ -1555,6 +1573,7 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
   log("[full-remote] ensuring security group (:22 from your IP)…")
   const sgId = await ensureSecurityGroup(
     awsFn,
+    spawn,
     cfg.sgName ?? D.sgName,
     cfg.vpcId ?? D.vpcId,
     region,
@@ -1845,8 +1864,66 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
  */
 /** Poll cadence for the detached run. The box does the work; we just re-check. */
 const RUN_POLL_INTERVAL_MS = 15_000
+/** Consecutive failed polls (ssh exit !== 0) before a LIVENESS confirmation runs.
+ *  ~20 × 15s ≈ 5min of unbroken ssh failure is the signal that the box may be
+ *  gone (spot reclaim), not a transient NAT-drop the next tick recovers from.
+ *  A spot reclaim NEVER writes `run.exit`, so without this bound the old `for(;;)`
+ *  loop polled FOREVER at the 15s cadence, defeating the box-death-requeue
+ *  invariant (rotation only re-checks BETWEEN chunks). */
+const RUN_MAX_CONSEC_POLL_FAILURES = 20
+/** Absolute wall-clock ceiling on the detached run+poll loop — a backstop in case
+ *  the liveness probe ITSELF keeps reporting "running" (e.g. an AWS describe lies
+ *  / the box is half-zombied) yet `run.exit` never lands. The EC2 TTL backstop
+ *  (`shutdown -h +<ttlMinutes>`, ≤ 360min) self-terminates the box, so a ceiling
+ *  comfortably above the longest legitimate chunk (a few hours) guarantees the
+ *  poll can never outlive the box it is polling. */
+const RUN_WALL_CEILING_MS = 6 * 60 * 60 * 1000
+/** Box-running states from `describe-instances …State.Name`. Anything else
+ *  (`shutting-down`, `terminated`, `stopping`, `stopped`) — or an empty/None
+ *  result (the instance vanished from the API) — means the box is GONE. */
+const LIVE_INSTANCE_STATES: ReadonlySet<string> = new Set(["running", "pending"])
 /** Sentinel splitting the exit-code field from the fresh run.log tail in one poll. */
 const RUN_EXIT_MARK = "==XQ-RUN-EXIT-XQ=="
+
+/**
+ * The box this poll loop was watching DIED mid-run (spot reclaim / unreachable),
+ * so `run.exit` will never land. Thrown to break the otherwise-forever poll so
+ * the pool's existing dead-box requeue path ({@link ../pool} handleDeadBoxChunkError)
+ * fires on a fresh box instead of the worker spinning at the 15s cadence forever.
+ */
+export class BoxDiedDuringRunError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "BoxDiedDuringRunError"
+  }
+}
+
+/** Liveness confirmation: is the instance still in a running/pending state? An
+ *  AWS describe FAILURE is treated as INCONCLUSIVE (returns true) — a transient
+ *  control-plane error must NOT be mistaken for a dead box and abort a healthy
+ *  run; only a CONCLUSIVE non-live / vanished state returns false. */
+const isInstanceStillLive = async (
+  awsFn: (args: readonly string[]) => Promise<SpawnResult>,
+  iid: string,
+): Promise<boolean> => {
+  const desc = await awsFn([
+    "ec2",
+    "describe-instances",
+    "--instance-ids",
+    iid,
+    "--query",
+    "Reservations[0].Instances[0].State.Name",
+    "--output",
+    "text",
+  ])
+  // A describe error (network/creds/throttle) is INCONCLUSIVE — keep polling.
+  if (desc.code !== 0) return true
+  const state = oneLine(desc.stdout)
+  // Empty / "None" = the instance is gone from the API ⇒ dead. A throttle that
+  // exits 0 with empty stdout is rare; the wall-clock ceiling is the backstop.
+  if (state === "" || state === "None") return false
+  return LIVE_INSTANCE_STATES.has(state)
+}
 const detachedLaunchCommand = (benchCmd: string, runLog: string, runExit: string): string =>
   `rm -f ${runExit}; setsid bash -c ${shq(`${benchCmd} > ${runLog} 2>&1; echo $? > ${runExit}`)} </dev/null >/dev/null 2>&1 & echo LAUNCHED`
 
@@ -1875,32 +1952,71 @@ const parseDetachedProbe = (stdout: string): { exitCode?: number; freshLines: st
  */
 const runBenchDetachedPoll = async (args: {
   ssh: (cmd: string, input?: string, onData?: (chunk: string) => void) => Promise<SpawnResult>
+  aws: (awsArgs: readonly string[]) => Promise<SpawnResult>
+  iid: string
   benchCmd: string
   runLog: string
   runExit: string
   onLine: (chunk: string) => void
+  log?: (msg: string) => void
   sleep?: (ms: number) => Promise<void>
   pollIntervalMs?: number
+  now?: () => number
 }): Promise<{ code: number }> => {
   const sleep = args.sleep ?? defaultSleep
+  const now = args.now ?? (() => Date.now())
+  const log = args.log ?? (() => {})
   const launch = await args.ssh(detachedLaunchCommand(args.benchCmd, args.runLog, args.runExit))
   if (launch.code !== 0) {
     throw new Error(
       `[full-remote] detached bench launch failed (code ${launch.code}): ${launch.stderr}`,
     )
   }
+  const startedAt = now()
   let seen = 0
+  // BUG 1 fix: a spot reclaim mid-grade never writes `run.exit`, and every ssh
+  // poll to the dead box returns 255 — the old `for(;;)` ignored that and spun
+  // forever. Bound CONSECUTIVE poll failures: after the threshold, CONFIRM box
+  // liveness (aws describe-instances) and THROW a BoxDiedDuringRunError if it is
+  // gone, so the pool requeues the chunk on a fresh box. A wall-clock ceiling is
+  // the backstop if the liveness probe itself can't conclude.
+  let consecFailures = 0
   for (;;) {
     // ONE short ssh per tick: exit sentinel (empty until done) + NEW run.log lines.
     const probe = await args.ssh(detachedProbeCommand(args.runExit, args.runLog, seen))
-    // A failed/dropped poll (ssh non-zero) is NON-FATAL — just retry next tick.
     if (probe.code === 0) {
+      consecFailures = 0 // a successful poll resets the box-death suspicion.
       const parsed = parseDetachedProbe(probe.stdout)
       for (const line of parsed.freshLines) {
         args.onLine(`${line}\n`)
         seen += 1
       }
       if (parsed.exitCode !== undefined) return { code: parsed.exitCode }
+    } else {
+      // A failed/dropped poll is non-fatal IN ISOLATION (NAT-drop ⇒ next tick
+      // reconnects), but an UNBROKEN run of them is the box-death signature.
+      consecFailures += 1
+      if (consecFailures >= RUN_MAX_CONSEC_POLL_FAILURES) {
+        log(
+          `[full-remote] ${consecFailures} consecutive failed polls — confirming box ${args.iid} liveness…`,
+        )
+        if (!(await isInstanceStillLive(args.aws, args.iid))) {
+          throw new BoxDiedDuringRunError(
+            `${BOX_DIED_DURING_RUN_ERROR}: box ${args.iid} is no longer running (spot reclaim / unreachable) after ${consecFailures} consecutive failed polls — run.exit will never land`,
+          )
+        }
+        // Still live but persistently unreachable over ssh — reset the counter so
+        // the next window gets its own confirmation rather than re-probing AWS
+        // every tick, and lean on the wall-clock ceiling below.
+        consecFailures = 0
+      }
+    }
+    if (now() - startedAt >= RUN_WALL_CEILING_MS) {
+      throw new BoxDiedDuringRunError(
+        `${BOX_DIED_DURING_RUN_ERROR}: detached run on box ${args.iid} exceeded the ${Math.round(
+          RUN_WALL_CEILING_MS / 60000,
+        )}min wall-clock ceiling without an exit sentinel — abandoning to the pool's requeue path`,
+      )
     }
     await sleep(args.pollIntervalMs ?? RUN_POLL_INTERVAL_MS)
   }
@@ -2167,6 +2283,8 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
 
 const runChunkBench = async (args: {
   ssh: BoxSession["ssh"]
+  aws: BoxSession["aws"]
+  iid: string
   log: (msg: string) => void
   keyPath: string
   host: string
@@ -2180,10 +2298,18 @@ const runChunkBench = async (args: {
   )
   const remoteRun = await runBenchDetachedPoll({
     ssh: args.ssh,
+    aws: args.aws,
+    iid: args.iid,
+    log: args.log,
     benchCmd: buildBenchCommand(args.params, args.paths),
     runLog: args.paths.runLog,
     runExit: args.paths.runLog.replace(/run\.log$/, "run.exit"),
     onLine: args.onLine,
+    ...(args.params.pollSleep !== undefined ? { sleep: args.params.pollSleep } : {}),
+    ...(args.params.pollIntervalMs !== undefined
+      ? { pollIntervalMs: args.params.pollIntervalMs }
+      : {}),
+    ...(args.params.pollNow !== undefined ? { now: args.params.pollNow } : {}),
   })
   return remoteRun.code
 }
@@ -2402,6 +2528,8 @@ export const gradeChunkOnBox = async (
     await shipAccessToken(ssh, log, params.authJson)
     state.finalExitCode = await runChunkBench({
       ssh,
+      aws: session.aws.bind(session),
+      iid: session.iid,
       log,
       keyPath,
       host,

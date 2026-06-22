@@ -8,12 +8,24 @@ const commitNowMessage = (turnsUsed: number, maxTurns: number): string =>
 const isTurnBudgetStop = (stopReason: StopReason | undefined): boolean =>
   stopReason === "max_turns" || stopReason === "budget_exhausted"
 
+/**
+ * FIX 4 — guard the force-commit fraction at the boundary. The fraction feeds
+ * `Math.floor(cap * frac)` in `decideNoPatch`; `frac >= 1` makes the commit-now
+ * trigger unreachable and `frac <= 0` forces a commit on turn 0. Mirror
+ * `parseRetryTransientEnv`'s discipline: REJECT any out-of-(0,1) (or non-finite)
+ * value and drop the override so `decideNoPatch` falls back to its built-in
+ * default. Only a finite fraction strictly inside (0,1) survives.
+ */
+export const sanitizeForceCommitFraction = (frac?: number): number | undefined =>
+  frac !== undefined && Number.isFinite(frac) && frac > 0 && frac < 1 ? frac : undefined
+
 export const attachNoPatchBreaker = (
   hooks: HookBus,
   maxTurns: number,
   forceCommitAtFraction?: number,
 ): HookBus => {
   const cap = Number.isFinite(maxTurns) && maxTurns > 0 ? Math.floor(maxTurns) : 1
+  const safeFraction = sanitizeForceCommitFraction(forceCommitAtFraction)
   let hasMutatingEdit = false
   let injected = false
 
@@ -29,7 +41,7 @@ export const attachNoPatchBreaker = (
       turnsUsed: event.turn,
       maxTurns: cap,
       hasMutatingEdit,
-      ...(forceCommitAtFraction !== undefined ? { forceCommitAtFraction } : {}),
+      ...(safeFraction !== undefined ? { forceCommitAtFraction: safeFraction } : {}),
     })
     if (decision.action === "continue") return
     injected = true

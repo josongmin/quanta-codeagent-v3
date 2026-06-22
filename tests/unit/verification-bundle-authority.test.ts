@@ -53,6 +53,16 @@ describe("T-AUTH-01 — authority taxonomy completeness", () => {
     expect(SIGNAL_AUTHORITY.regressionGreen).toBe("hardExecutable")
     expect(SIGNAL_AUTHORITY.patchedResolvedKofN).toBe("hardExecutable")
   })
+
+  // FIX 2 — voterQuorum is a SoftScoreSignals member consumed ONLY in the soft
+  // weighted loop; it is never a hard gate. Misclassifying it `hardExecutable`
+  // lied about the channel it flows on and (per the taxonomy doc) would let it
+  // veto a clean candidate. Its true role is a final tie-break.
+  it("classifies voterQuorum as softTieBreak (its actual role), NOT a hard gate", () => {
+    expect(SIGNAL_AUTHORITY.voterQuorum).toBe("softTieBreak")
+    // It must not be admitted as a clean-mode hard veto.
+    expect(isCleanHardVeto("voterQuorum", "clean")).toBe(false)
+  })
 })
 
 describe("T-AUTH-01 — clean vs research veto", () => {
@@ -107,5 +117,15 @@ describe("T-AUTH-01 — clean-mode ranking excludes researchOnly soft signals", 
   it("RED-ON-INJECTION: a clean candidate cannot be ranked up by declaredExpected alone", () => {
     const clean = scoreCandidate(hard(), soft({ declaredExpectedMatch: true }), { mode: "clean" })
     expect(clean.score).toBe(0)
+  })
+
+  // FIX 2 — voterQuorum is softTieBreak, so it STILL contributes to the clean
+  // ranking (only researchOnly/observeOnly are excluded), and it is NEVER a hard
+  // gate: a present voterQuorum does not change admissibility.
+  it("voterQuorum (softTieBreak) still ranks in clean mode and never gates admissibility", () => {
+    const clean = scoreCandidate(hard(), soft({ voterQuorum: 1 }), { mode: "clean" })
+    expect(clean.admissible).toBe(true)
+    expect(clean.reasons.some((r) => r.startsWith("soft:voterQuorum"))).toBe(true)
+    expect(clean.score).toBeGreaterThan(0)
   })
 })

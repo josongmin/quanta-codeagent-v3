@@ -50,7 +50,6 @@ export const SIGNAL_AUTHORITY: Record<string, SignalAuthority> = {
   baseValidatedRed: "hardExecutable",
   patchedResolvedKofN: "hardExecutable",
   regressionGreen: "hardExecutable",
-  voterQuorum: "hardExecutable",
   // hard — structural impossibility
   patchProduced: "hardStructural",
   applyClean: "hardStructural",
@@ -58,7 +57,10 @@ export const SIGNAL_AUTHORITY: Record<string, SignalAuthority> = {
   smokeGreen: "researchOnly",
   declaredExpectedMatch: "researchOnly",
   rubricScore: "researchOnly",
-  // soft tie-break
+  // soft tie-break — voterQuorum is a SoftScoreSignals member consumed ONLY by
+  // the soft weighted loop (score.ts), never as a hard gate; classifying it as a
+  // hard authority lied about its channel. It is a final tie-break, like the rest.
+  voterQuorum: "softTieBreak",
   minimality: "softTieBreak",
   ownerCoverage: "softTieBreak",
 }

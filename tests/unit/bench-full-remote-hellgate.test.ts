@@ -1113,6 +1113,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   test("explicit extra-box opt-in can launch past the single-box guard", async () => {
     const { fn, calls } = createSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-busy\t9.9.9.9" : "1.2.3.4"),
       ),
@@ -1252,7 +1253,8 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   test("authorize-ingress REAL failure fails fast (not a misleading downstream error)", async () => {
     // Self-audit R2: a real authorize failure used to be swallowed → box with no
     // :22 → misleading ssh/cloud-init timeout. Fail fast at the SG stage.
-    const fn: SpawnFn = async (_cmd, args): Promise<SpawnResult> => {
+    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
+      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
       if (args.includes("describe-security-groups")) return { code: 0, stdout: "sg", stderr: "" }
       if (args.includes("authorize-security-group-ingress"))
         return { code: 255, stdout: "", stderr: "An error occurred (UnauthorizedOperation)" }

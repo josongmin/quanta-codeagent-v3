@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-22T03:36:36.550Z",
+  "generatedAt": "2026-06-22T09:29:46.982Z",
   "presets": {
     "baseline": {
       "name": "baseline",
@@ -437,6 +437,40 @@
       "desc": "Witness-only clean closure-select arm. Keeps the same closure-grounded generation/search posture as closure-select-clean, but removes progressive early accept and generated repro ranking so final submit authority comes only from the clean selector's executed-witness / structural / contract lattice over the full N-best candidate set.",
       "knobCount": 22
     },
+    "agentless-v4-proof-clean": {
+      "name": "agentless-v4-proof-clean",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "repro-only",
+        "repro-test": "10",
+        "adversarial-repro": "1",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-concurrency": "3",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive",
+        "verify-select-proof-required": "1",
+        "selector-mode": "clean"
+      },
+      "desc": "v4 proof-clean arm. Successor to the v3 closure-select-clean family: keep closure-grounded generation and clean selector authority, but restore bounded executable public-repro feedback in repro-only mode. This makes the selector consume proof receipts instead of relying on minimality-only wins.",
+      "knobCount": 27
+    },
     "agentless-v3-select-regression": {
       "name": "agentless-v3-select-regression",
       "knobs": {
@@ -548,17 +582,35 @@
     }
   },
   "knobs": {
-    "bench-in-loop-exec": {
-      "id": "bench-in-loop-exec",
-      "desc": "인루프 실행 권한 모드 — full=repo tests, repro-only=작은 재현만 허용, off=submit-only",
-      "group": "exec",
-      "category": null,
-      "envKey": null,
+    "adversarial-repro": {
+      "id": "adversarial-repro",
+      "desc": "Adversarial repro coverage (boundary/must-reject/no-copy-suggested-fix) so a shallow fix stays RED (#10999 under-fix class)",
+      "group": "tool",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_ADVERSARIAL_REPRO",
       "unit": null,
-      "source": null,
+      "source": "jun-19 repro-quality domino (10999 RCA: weak repro false-GREEN on under-fix)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        }
+      ]
+    },
+    "bench-in-loop-exec": {
+      "id": "bench-in-loop-exec",
+      "desc": "Bench: execution authority mode (default full). full = repo tests in-loop; repro-only = focused issue reproduction only; off = edit-and-submit with no execution.",
+      "group": "exec",
+      "category": "verify",
+      "envKey": "QUANTA_BENCH_IN_LOOP_EXEC",
+      "unit": "mode",
+      "source": "mini-swe posture absorption (pytest-7982 incompatible-host-env flail)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2-safe",
@@ -603,6 +655,10 @@
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "off"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "repro-only"
         }
       ]
     },
@@ -632,15 +688,15 @@
     },
     "closure-repair": {
       "id": "closure-repair",
-      "desc": "verify-first 클로저 기반 repair 실행기 — 값=최대 라운드 수",
+      "desc": "Repair-round budget for the closure gate's verify-first path (max N rounds)",
       "group": "repair",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_CLOSURE_REPAIR",
+      "unit": "rounds",
+      "source": "closure-driven runner (jun-18) — the execution half of T-302",
+      "cost": 10,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2-repair",
@@ -654,15 +710,15 @@
     },
     "fault-evidence": {
       "id": "fault-evidence",
-      "desc": "패치 전에 결함 증거(어디가 왜 틀렸는지)를 요구",
+      "desc": "T-201 typed FaultEvidencePacket (bounded owner-context, no raw source)",
       "group": "verify",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_FAULT_EVIDENCE",
       "unit": null,
-      "source": null,
+      "source": "jun-17 proof-driven bench closure (T-201)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2",
@@ -694,6 +750,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "1"
         },
         {
@@ -791,6 +851,10 @@
           "value": "agentless"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "agentless"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "agentless"
         },
@@ -818,15 +882,15 @@
     },
     "issue-hint-expected-actual": {
       "id": "issue-hint-expected-actual",
-      "desc": "이슈에서 기대동작/실제동작을 추출해 힌트로 주입",
+      "desc": "Extract structured expected/actual evidence to ground the issue-hint signal",
       "group": "hint",
-      "category": null,
-      "envKey": null,
+      "category": "hint",
+      "envKey": "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL",
       "unit": null,
-      "source": null,
+      "source": "Agentless paper §3.1",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v1",
@@ -901,6 +965,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -913,6 +981,19 @@
           "value": "1"
         }
       ]
+    },
+    "localize-budget": {
+      "id": "localize-budget",
+      "desc": "Bench: agentless one-shot localizer breadth — `topk=N,tree=N,files=N` (defaults 5/12000/3000). The most localization-recall-sensitive levers, was un-sweepable.",
+      "group": "hint",
+      "category": "hint",
+      "envKey": "QUANTA_BENCH_LOCALIZE_BUDGET",
+      "unit": "spec",
+      "source": "jun-22 magic-number config-extraction (agentless-localize DEFAULT_TOP_K/MAX_TREE_CHARS/MAX_FILES)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
     },
     "localize-phase": {
       "id": "localize-phase",
@@ -998,6 +1079,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "5"
         },
         {
@@ -1103,6 +1188,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -1122,15 +1211,15 @@
     },
     "lsp-steer": {
       "id": "lsp-steer",
-      "desc": "localize 단계에서 LSP nav(정의/참조 점프)를 쓰도록 모델을 유도하는 스티어",
+      "desc": "append LSP-nav grounding nudge to the localize-phase block message",
       "group": "localize",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_LSP_STEER",
       "unit": null,
-      "source": null,
-      "cost": null,
+      "source": "jun-17 measured LSP-nav usage gap",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v1-nosteer",
@@ -1138,17 +1227,56 @@
         }
       ]
     },
-    "no-patch-breaker": {
-      "id": "no-patch-breaker",
-      "desc": "기존 통과 테스트(PASS_TO_PASS)를 깨는 패치를 차단하는 가드",
-      "group": "patch",
-      "category": null,
-      "envKey": null,
+    "multi-voter": {
+      "id": "multi-voter",
+      "desc": "Adversarial multi-voter verification — N refute-biased voters per candidate (ADR-0433)",
+      "group": "verify",
+      "category": "verify",
+      "envKey": "QUANTA_MULTI_VOTER",
       "unit": null,
-      "source": null,
+      "source": "ADR-0433 / Agentless §4.2 sample-and-vote",
+      "cost": 3,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "must-pass": {
+      "id": "must-pass",
+      "desc": "verify-guard outcome-gate (must pass, not just presence)",
+      "group": "verify",
+      "category": "verify",
+      "envKey": "QUANTA_BENCH_MUST_PASS",
+      "unit": null,
+      "source": "RCA 2026-05-25 sanity",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "network-proxy": {
+      "id": "network-proxy",
+      "desc": "Socket-level egress proxy — gate subprocess sockets through the host allowlist (ADR-0428)",
+      "group": "tool",
+      "category": "tool",
+      "envKey": "QUANTA_NETWORK_PROXY",
+      "unit": null,
+      "source": "ADR-0428 / Codex 0.135 [network_proxy]",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "no-patch-breaker": {
+      "id": "no-patch-breaker",
+      "desc": "T-501 post-localization commit rail + no-patch exhausted verdict",
+      "group": "patch",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_NO_PATCH_BREAKER",
+      "unit": null,
+      "source": "jun-17 proof-driven bench closure (T-501)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2",
@@ -1183,6 +1311,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -1192,17 +1324,30 @@
         }
       ]
     },
+    "no-patch-force-fraction": {
+      "id": "no-patch-force-fraction",
+      "desc": "Bench: no-patch breaker fires at this fraction of the turn budget (default 0.8). Domain (0,1). Only active when no-patch-breaker is on.",
+      "group": "agent",
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_NO_PATCH_FORCE_FRACTION",
+      "unit": "fraction",
+      "source": "jun-22 magic-number config-extraction (was hardcoded DEFAULT_FORCE_FRACTION=0.8)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
     "patch-budget": {
       "id": "patch-budget",
-      "desc": "패치 크기/시도 예산 — 과도하게 큰 변경 억제",
+      "desc": "Minimal-edit admission: emit PatchBudget over the diff (#13417 over-engineer class)",
       "group": "patch",
-      "category": null,
-      "envKey": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_PATCH_BUDGET",
       "unit": null,
-      "source": null,
+      "source": "jun-19 minimal-patch admission (Agentless 3-phase / mini-SWE thin scaffold)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin",
@@ -1246,6 +1391,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "1"
         },
         {
@@ -1260,15 +1409,15 @@
     },
     "patch-budget-strict": {
       "id": "patch-budget-strict",
-      "desc": "패치 예산 엄격 모드(초과 시 하드 컷)",
+      "desc": "Hard minimal-edit admission: block over-budget final patches from submission",
       "group": "patch",
-      "category": null,
-      "envKey": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_PATCH_BUDGET_STRICT",
       "unit": null,
-      "source": null,
+      "source": "jun-20 SOTA++ strict minimal-edit admission",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict",
@@ -1309,20 +1458,24 @@
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
         }
       ]
     },
     "patch-hygiene": {
       "id": "patch-hygiene",
-      "desc": "패치 위생 — 무관한 변경/노이즈/디버그 잔재 제거",
+      "desc": "T-401 patch hygiene gate (stray-file deny, owner-outside telemetry)",
       "group": "patch",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_PATCH_HYGIENE",
       "unit": null,
-      "source": null,
+      "source": "jun-17 proof-driven bench closure (T-401)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2",
@@ -1382,6 +1535,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "1"
         },
         {
@@ -1396,15 +1553,15 @@
     },
     "primary-rail": {
       "id": "primary-rail",
-      "desc": "주 레일 — 하네스가 강제하는 구조적 실행 경로 활성화",
+      "desc": "T-302 primary-rail enforcement + commit-vs-verify gate + repair admission",
       "group": "structure",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_PRIMARY_RAIL",
       "unit": null,
-      "source": null,
+      "source": "jun-17 proof-driven bench closure (T-302)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2",
@@ -1439,6 +1596,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -1450,15 +1611,15 @@
     },
     "read-outline": {
       "id": "read-outline",
-      "desc": "파일 심볼 아웃라인 먼저 읽기 — 전체 파일 덤프 대신 구조 파악",
+      "desc": "Outline-first read mode (structural map before full file body)",
       "group": "localize",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_READ_OUTLINE",
       "unit": null,
-      "source": null,
+      "source": "Agentless absorption / Codex realtime-startup-context",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v1",
@@ -1530,6 +1691,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "1"
         },
         {
@@ -1546,17 +1711,30 @@
         }
       ]
     },
+    "regression-max-tests": {
+      "id": "regression-max-tests",
+      "desc": "Bench: max discovered keep-green regression witnesses executed per candidate (default 12). Domain [1,200]. Raise for higher regression-gate recall.",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_REGRESSION_MAX_TESTS",
+      "unit": "tests",
+      "source": "jun-22 magic-number config-extraction (was hardcoded/duplicated DEFAULT_MAX_TESTS=12)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
     "repair-escalation": {
       "id": "repair-escalation",
-      "desc": "초기 패치 실패 시 더 강한 repair 전략으로 에스컬레이션",
+      "desc": "T-601 multi-owner escalation decision (closed reason taxonomy)",
       "group": "repair",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_REPAIR_ESCALATION",
       "unit": null,
-      "source": null,
+      "source": "jun-17 proof-driven bench closure (T-601)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2",
@@ -1591,6 +1769,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -1602,15 +1784,15 @@
     },
     "repo-map": {
       "id": "repo-map",
-      "desc": "레포 구조 맵(디렉토리/심볼 개요)을 컨텍스트로 제공",
+      "desc": "Inject a bounded repo-map tree into the turn-0 env block (one-time orientation)",
       "group": "localize",
-      "category": null,
-      "envKey": null,
+      "category": "hint",
+      "envKey": "QUANTA_REPO_MAP",
       "unit": null,
-      "source": null,
-      "cost": null,
+      "source": "RFC jun-6 §4 / Codex realtime-startup-context mirror",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v1",
@@ -1682,6 +1864,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "1"
         },
         {
@@ -1700,21 +1886,34 @@
     },
     "repro-doubt": {
       "id": "repro-doubt",
-      "desc": "재현이 verify_loop_stuck일 때 repro 유효성을 의심하도록 스티어",
+      "desc": "After N test re-runs with no edit, steer the agent to doubt its repro test (break verify_loop_stuck)",
       "group": "verify",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_REPRO_DOUBT",
+      "unit": "runs",
+      "source": "jun-20-bestofn-wrong-repro-oracle-root",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-select-regression-doubt",
           "value": "5"
         }
       ]
+    },
+    "repro-exec-timeout": {
+      "id": "repro-exec-timeout",
+      "desc": "Bench: per-repro-script exec timeout (ms, default 60000). Raise for slow repos whose repro scripts exceed 60s; it is the PER-SCRIPT cap, not the per-instance budget.",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_REPRO_EXEC_TIMEOUT_MS",
+      "unit": "ms",
+      "source": "jun-22 magic-number config-extraction (was hardcoded DEFAULT_EXEC_TIMEOUT_MS=60000)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
     },
     "repro-test": {
       "id": "repro-test",
@@ -1757,6 +1956,10 @@
           "value": "5"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "10"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "5"
         },
@@ -1780,15 +1983,15 @@
     },
     "repro-vote": {
       "id": "repro-vote",
-      "desc": "재현셋을 패치 트리에서 재실행해 K-of-N RESOLVED 다수결 게이트",
+      "desc": "K-of-N resolved gate: re-run the reproducing repro set on the patched tree and majority-vote 'Issue resolved' (removes the false-NEGATIVE single-script oracle)",
       "group": "verify",
-      "category": null,
-      "envKey": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_REPRO_VOTE",
       "unit": null,
-      "source": null,
+      "source": "jun-19 repro oracle quality (Agentless §3.3.1 resolved-side majority vote)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2-reprovote",
@@ -1798,15 +2001,15 @@
     },
     "retry-transient": {
       "id": "retry-transient",
-      "desc": "일시적(네트워크/throttle) 오류 재시도 횟수",
+      "desc": "Retry cap for transient failures (empty-patch / infra-fail; real-fail never retried)",
       "group": "exec",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_RETRY_TRANSIENT",
+      "unit": "retries",
+      "source": "measurement-stability wrapper",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v1",
@@ -1881,6 +2084,10 @@
           "value": "3"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "3"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "3"
         },
@@ -1896,15 +2103,15 @@
     },
     "round0-minimal": {
       "id": "round0-minimal",
-      "desc": "라운드0를 최소 컨텍스트로 시작(점진적 확장)",
+      "desc": "WS1 mini-parity: thin round-0 prompt (defer repro prose to repair rounds)",
       "group": "structure",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_ROUND0_MINIMAL",
       "unit": null,
-      "source": null,
+      "source": "jun-18 mini-parity baseline-penalty removal (WS1)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-mini-parity",
@@ -1955,6 +2162,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -1966,15 +2177,15 @@
     },
     "selector-mode": {
       "id": "selector-mode",
-      "desc": "(설명 미작성)",
-      "group": "기타",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "desc": "Selector authority mode: clean (only executable/structural hard gates) vs research (legacy heuristic gates allowed)",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_SELECTOR_MODE",
+      "unit": "mode",
+      "source": "jun-21 heuristic authority cleanup",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-gated",
@@ -1994,6 +2205,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "clean"
         }
       ]
@@ -2022,15 +2237,15 @@
     },
     "spec-fidelity-steer": {
       "id": "spec-fidelity-steer",
-      "desc": "이슈 요구사항(스펙) 충실도를 지키도록 모델 스티어",
+      "desc": "gap-B spec-fidelity steer (minimal-literal-fix; fires only when issue declares an exact expected output)",
       "group": "hint",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_SPEC_FIDELITY_STEER",
       "unit": null,
-      "source": null,
+      "source": "jun-17 strategy-failure-fix plan (Top-1)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin",
@@ -2074,6 +2289,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "1"
         },
         {
@@ -2110,15 +2329,15 @@
     },
     "test-runner": {
       "id": "test-runner",
-      "desc": "인루프 test 실행 도구(run-tests) 노출",
+      "desc": "Expose the structured test_runner tool (typed suite execution)",
       "group": "exec",
-      "category": null,
-      "envKey": null,
+      "category": "verify",
+      "envKey": "QUANTA_TEST_RUNNER",
       "unit": null,
-      "source": null,
+      "source": "Agentless absorption",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v1",
@@ -2149,6 +2368,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -2164,15 +2387,15 @@
     },
     "verification-plan": {
       "id": "verification-plan",
-      "desc": "검증 계획 단계 — 패치 후 무엇을 어떻게 확인할지 계획",
+      "desc": "T-301 typed VerificationPlan (primary rail + typed successPredicates)",
       "group": "verify",
-      "category": null,
-      "envKey": null,
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_VERIFICATION_PLAN",
       "unit": null,
-      "source": null,
+      "source": "jun-17 proof-driven bench closure (T-301)",
       "cost": null,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v2",
@@ -2207,6 +2430,10 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -2218,15 +2445,15 @@
     },
     "verify-select": {
       "id": "verify-select",
-      "desc": "verify-and-select — N개 후보 패치 생성 후 채점기준으로 1개 선택. 값=후보 수",
+      "desc": "Verify-and-select: generate N candidates, score via VerificationBundle, submit the best",
       "group": "select",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT",
+      "unit": "candidates",
+      "source": "verify-and-select Phase 1 (jun-19) — TD selection executor",
+      "cost": 8,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-gated",
@@ -2265,6 +2492,10 @@
           "value": "5"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "5"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "5"
         },
@@ -2276,15 +2507,15 @@
     },
     "verify-select-concurrency": {
       "id": "verify-select-concurrency",
-      "desc": "(설명 미작성)",
-      "group": "기타",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "desc": "Verify-and-select: max candidates generated concurrently (requires isolated generate)",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
+      "unit": "concurrent",
+      "source": "verify-and-select Phase 1 (jun-19) — bounded-parallel candidate gen",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-gated",
@@ -2305,20 +2536,24 @@
         {
           "preset": "agentless-v3-thin-strict-gated-llm",
           "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "3"
         }
       ]
     },
     "verify-select-counterfactual": {
       "id": "verify-select-counterfactual",
-      "desc": "(설명 미작성)",
-      "group": "기타",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "desc": "Verify-and-select counterfactual candidate: when cand0 trips structural risk, generate cand1 from a counterfactual minimal-alternative seed and bind it to structural contracts",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
+      "unit": "toggle",
+      "source": "jun-21 counterfactual select",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-counterfactual",
@@ -2332,15 +2567,15 @@
     },
     "verify-select-early-accept": {
       "id": "verify-select-early-accept",
-      "desc": "후보가 명백히 통과면 조기 수락(나머지 후보 생성 생략)",
+      "desc": "Verify-and-select: stop after first clean owner-scoped candidate with explicit hard-positive authority",
       "group": "select",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
+      "unit": "toggle",
+      "source": "verify-and-select Phase 2 (jun-20) — progressive early accept",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-select",
@@ -2366,15 +2601,15 @@
     },
     "verify-select-llm-risk-gate": {
       "id": "verify-select-llm-risk-gate",
-      "desc": "(설명 미작성)",
-      "group": "기타",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "desc": "Verify-and-select semantic expansion gate: shadow telemetry or fail-closed LLM expand",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE",
+      "unit": "mode",
+      "source": "jun-21 llm semantic selector gate",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-counterfactual-shadow",
@@ -2390,17 +2625,35 @@
         }
       ]
     },
+    "verify-select-proof-required": {
+      "id": "verify-select-proof-required",
+      "desc": "Require positive executed public proof before verify-select may submit a candidate",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED",
+      "unit": null,
+      "source": "jun-22 v4 proof-clean submit gate",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        }
+      ]
+    },
     "verify-select-regression": {
       "id": "verify-select-regression",
-      "desc": "regression(기존테스트 깸) 게이트를 후보 선택 기준에 포함",
+      "desc": "Verify-and-select regression source: discovered repo tests, eval-only gold PASS_TO_PASS, or off",
       "group": "select",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
+      "unit": "mode",
+      "source": "verify-and-select no-oracle regression gate",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-gated",
@@ -2436,6 +2689,10 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
           "value": "discovered"
         },
         {
@@ -2450,15 +2707,15 @@
     },
     "verify-select-repro": {
       "id": "verify-select-repro",
-      "desc": "repro 정합성(재현테스트 결과)을 후보 선택 점수로 사용",
+      "desc": "Verify-and-select generated repro consensus mode: hard gate, positive-only soft signal, or off",
       "group": "select",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_REPRO",
+      "unit": "mode",
+      "source": "verify-and-select no-oracle repro consensus demotion",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-gated",
@@ -2497,6 +2754,10 @@
           "value": "off"
         },
         {
+          "preset": "agentless-v4-proof-clean",
+          "value": "positive"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "positive"
         },
@@ -2508,15 +2769,15 @@
     },
     "verify-select-risk-gate": {
       "id": "verify-select-risk-gate",
-      "desc": "(설명 미작성)",
-      "group": "기타",
-      "category": null,
-      "envKey": null,
-      "unit": null,
-      "source": null,
-      "cost": null,
+      "desc": "Verify-and-select: generate candidate 0 first, expand to N only when static risk triggers",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
+      "unit": "toggle",
+      "source": "jun-21 adaptive thin-strict selector gate",
+      "cost": 1,
       "conflicts": null,
-      "inRegistry": false,
+      "inRegistry": true,
       "usedBy": [
         {
           "preset": "agentless-v3-thin-strict-gated",
@@ -2561,6 +2822,7 @@
     "agentless-v3-thin-strict-closure-select",
     "agentless-v3-thin-strict-closure-select-clean",
     "agentless-v3-thin-strict-closure-select-clean-witness-only",
+    "agentless-v4-proof-clean",
     "agentless-v3-select-regression",
     "agentless-v3-select-regression-doubt",
     "everything-v1",
@@ -2577,6 +2839,9 @@
     "patch": "패치 품질 (patch)",
     "structure": "구조 (structure)",
     "exec": "실행 (exec)",
+    "validation": "검증·게이트 (validation)",
+    "agent": "에이전트 (agent)",
+    "tool": "도구 (tool)",
     "기타": "기타"
   }
 }

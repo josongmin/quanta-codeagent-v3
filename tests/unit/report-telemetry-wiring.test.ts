@@ -154,18 +154,47 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     // Build with the real typed builders so the round-trip exercises the actual
     // packet shape (not a hand-faked literal that can drift from the schema).
     const problem = "repro exists in run() for the public issue"
-    const llmEvidence: LlmEvidenceArtifacts = {
+    const llmEvidence = {
       intake: buildIntakeLlmEvidencePacket({
         problemStatement: problem,
         localizeCandidates: ["pkg/core.py"],
       }),
+      candidateGeneration: {
+        stage: "candidate_generation",
+        instanceIdHash: "abc123",
+        evidenceRevision: "selection-generation-v2",
+        question: "Produce one minimal candidate patch.",
+        allowedActions: [],
+        forbiddenSources: [],
+        publicIssueFacts: ["issue summary: repro exists"],
+        ownerEvidence: [],
+        proofReceipts: [],
+        contractFacts: [],
+        staticFacts: [],
+        missingEvidence: [{ kind: "verification_target", reason: "missing" }],
+      },
+      repairSeed: {
+        stage: "repair_seed",
+        instanceIdHash: "abc123",
+        evidenceRevision: "selector-repair-v2",
+        candidatePatchHash: "deadbeef",
+        question: "Generate a bounded repair instruction.",
+        allowedActions: [],
+        forbiddenSources: [],
+        publicIssueFacts: ["issue summary: repro exists"],
+        ownerEvidence: [],
+        proofReceipts: [{ source: "public_mwe", state: "execution_failed" }],
+        contractFacts: [],
+        staticFacts: [],
+        missingEvidence: [{ kind: "executed_public_proof", reason: "not green yet" }],
+      },
       selectionExplanation: buildSelectionExplanationPacket({
         problemStatement: problem,
         ownerFiles: ["pkg/core.py"],
         winnerId: null,
         candidates: [],
       }),
-    }
+    } as LlmEvidenceArtifacts
     const rep = buildReport(meta, [baseResult({ llmEvidence })])
     expect(rep.perInstance[0]?.llmEvidence).toEqual(llmEvidence)
     // Teeth: the serialized packets are the typed shape, not free strings.
@@ -173,6 +202,32 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     expect(rep.perInstance[0]?.llmEvidence?.selectionExplanation?.ownerEvidence[0]?.file).toBe(
       "pkg/core.py",
     )
+    expect(rep.perInstance[0]?.llmEvidenceStages).toEqual([
+      "intake",
+      "candidate_generation",
+      "repair_seed",
+      "selection_explanation",
+    ])
+    expect(rep.perInstance[0]?.llmEvidenceRevision).toEqual({
+      intake: "intake-v2",
+      candidate_generation: "selection-generation-v2",
+      repair_seed: "selector-repair-v2",
+      selection_explanation: "selection-explanation-v2",
+    })
+    expect(rep.perInstance[0]?.llmEvidenceMissingKinds).toEqual([
+      "fault_evidence",
+      "verification_plan",
+      "public_mwe_seed",
+      "public_mwe_base",
+      "verification_target",
+      "executed_public_proof",
+      "winner",
+    ])
+    expect(rep.llmEvidenceTotals).toEqual({
+      packetizedGenerationCount: 1,
+      packetizedRepairCount: 1,
+      packetizedSelectionExplanationCount: 1,
+    })
   })
 
   // Byte-identical contract: absent telemetry ⇒ keys omitted (not null).
@@ -185,5 +240,8 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     expect("scoreLabel" in (rep.perInstance[0] ?? {})).toBe(false)
     expect("scoreEvidence" in (rep.perInstance[0] ?? {})).toBe(false)
     expect("llmEvidence" in (rep.perInstance[0] ?? {})).toBe(false)
+    expect("llmEvidenceStages" in (rep.perInstance[0] ?? {})).toBe(false)
+    expect("llmEvidenceRevision" in (rep.perInstance[0] ?? {})).toBe(false)
+    expect("llmEvidenceMissingKinds" in (rep.perInstance[0] ?? {})).toBe(false)
   })
 })

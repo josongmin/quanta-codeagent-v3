@@ -14,9 +14,37 @@
  * editing presets or adding knobs; the server only reads the emitted JSON so it
  * stays standalone.
  */
-import type { AnyKnob } from "@/runner/knobs"
+// Side-effect barrel import: registers EVERY bench/agent knob module so the
+// registry is complete before we read it. Without this, env-only override knobs
+// that no preset references (e.g. regression-max-tests, repro-exec-timeout)
+// would be invisible to `collectKnobsForDocs` → silently dropped from the
+// catalog. The drift-guard test (gen-knob-catalog.test.ts) pins this.
+import "@/runner/knobs/knobs"
+import type { AnyKnob, Surface } from "@/runner/knobs"
 import { KNOB_PRESETS } from "@/runner/knobs/presets"
 import { collectKnobsForDocs } from "../gen-knob-docs"
+
+/** Surface whose knobs the leaderboard catalog documents. */
+const CATALOG_SURFACE: Surface = "bench"
+
+/** Group labels for the dashboard's Knob/Profile tab. Every value reachable as
+ *  an entry's `group` (a curated group OR a fallthrough `category`) MUST have a
+ *  label here, else it renders ungrouped. */
+const GROUP_LABELS: Record<string, string> = {
+  localize: "위치추정 (localize)",
+  hint: "힌트 (hint)",
+  verify: "검증 (verify)",
+  select: "후보선택 (verify-select)",
+  repair: "수리 (repair)",
+  patch: "패치 품질 (patch)",
+  structure: "구조 (structure)",
+  exec: "실행 (exec)",
+  // KnobCategory fallthroughs (used when a registered knob has no CURATED group)
+  validation: "검증·게이트 (validation)",
+  agent: "에이전트 (agent)",
+  tool: "도구 (tool)",
+  기타: "기타",
+}
 
 // Curated descriptions for bench-driver knobs absent from the framework
 // registry (their effect is applied by the bench driver, not the knob `apply`).
@@ -169,19 +197,42 @@ interface PresetCatalogEntry {
   readonly knobCount: number
 }
 
-async function main() {
-  const reg = new Map<string, AnyKnob>()
-  for (const k of await collectKnobsForDocs()) reg.set(k.id, k)
-  const presetDesc = await presetDescriptions()
-  const presetEntries = Object.entries(KNOB_PRESETS) as [string, PresetKnobValues][]
+export interface KnobCatalog {
+  readonly generatedAt: string
+  readonly presets: Record<string, PresetCatalogEntry>
+  readonly knobs: Record<string, KnobCatalogEntry>
+  readonly presetOrder: readonly string[]
+  readonly groupLabels: Record<string, string>
+}
 
-  // Union of every knob id any preset touches.
+/** The id set the catalog must describe: every registered knob on the catalog
+ *  surface UNION every id any preset references. The registry half catches
+ *  env-only override knobs that no preset touches; the preset half catches any
+ *  curated-only id that isn't a registered knob (e.g. driver-applied knobs). */
+export const catalogKnobIds = (
+  registry: ReadonlyMap<string, AnyKnob>,
+  presetEntries: readonly [string, PresetKnobValues][],
+): readonly string[] => {
   const ids = new Set<string>()
+  for (const k of registry.values()) {
+    if (k.surfaces.includes(CATALOG_SURFACE)) ids.add(k.id)
+  }
   for (const [, preset] of presetEntries) for (const id of Object.keys(preset)) ids.add(id)
+  return [...ids].sort()
+}
 
+/** PURE catalog builder — deterministic given (registry, presets, descriptions,
+ *  timestamp). All I/O lives in {@link main}. Exported for the drift-guard test. */
+export const buildCatalog = (args: {
+  readonly registry: ReadonlyMap<string, AnyKnob>
+  readonly presetEntries: readonly [string, PresetKnobValues][]
+  readonly presetDesc: Record<string, string>
+  readonly generatedAt: string
+}): KnobCatalog => {
+  const { registry, presetEntries, presetDesc, generatedAt } = args
   const knobs: Record<string, KnobCatalogEntry> = {}
-  for (const id of [...ids].sort()) {
-    const r = reg.get(id)
+  for (const id of catalogKnobIds(registry, presetEntries)) {
+    const r = registry.get(id)
     const c = CURATED[id]
     knobs[id] = {
       id,
@@ -212,27 +263,33 @@ async function main() {
     }
   }
 
-  const catalog = {
-    generatedAt: new Date().toISOString(),
+  return {
+    generatedAt,
     presets,
     knobs,
-    presetOrder: Object.keys(KNOB_PRESETS),
-    groupLabels: {
-      localize: "위치추정 (localize)",
-      hint: "힌트 (hint)",
-      verify: "검증 (verify)",
-      select: "후보선택 (verify-select)",
-      repair: "수리 (repair)",
-      patch: "패치 품질 (patch)",
-      structure: "구조 (structure)",
-      exec: "실행 (exec)",
-      기타: "기타",
-    },
+    presetOrder: presetEntries.map(([name]) => name),
+    groupLabels: { ...GROUP_LABELS },
   }
+}
+
+async function main() {
+  const reg = new Map<string, AnyKnob>()
+  for (const k of await collectKnobsForDocs()) reg.set(k.id, k)
+  const presetDesc = await presetDescriptions()
+  const presetEntries = Object.entries(KNOB_PRESETS) as [string, PresetKnobValues][]
+
+  const catalog = buildCatalog({
+    registry: reg,
+    presetEntries,
+    presetDesc,
+    generatedAt: new Date().toISOString(),
+  })
+
   const out = `${import.meta.dir}/knob-catalog.json`
   await Bun.write(out, `${JSON.stringify(catalog, null, 2)}\n`)
   process.stdout.write(
-    `wrote ${out} — ${Object.keys(presets).length} presets (${Object.values(presetDesc).length} described), ${Object.keys(knobs).length} knobs\n`,
+    `wrote ${out} — ${Object.keys(catalog.presets).length} presets (${Object.values(presetDesc).length} described), ${Object.keys(catalog.knobs).length} knobs\n`,
   )
 }
-await main()
+
+if (import.meta.main) await main()

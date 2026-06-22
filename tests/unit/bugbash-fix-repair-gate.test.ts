@@ -104,6 +104,8 @@ describe("bugbash #1 — primary-rail finish gate wired into repair loop", () =>
     })
     expect(out.rounds).toBe(2) // round 0 did NOT stop the loop
     expect(out.validated).toBe(true) // round 1's genuine green cleared it
-    expect(out.primaryFalseGreen).toBe(false) // the LAST cleared round was honest
+    // FIX 1: the signal is STICKY — round 0's false green is recorded even though
+    // round 1 cleared honestly (was last-write-wins ⇒ false; corrected ⇒ true).
+    expect(out.primaryFalseGreen).toBe(true)
   })
 })

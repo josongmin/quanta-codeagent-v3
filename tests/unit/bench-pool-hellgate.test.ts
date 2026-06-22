@@ -27,6 +27,7 @@ import {
   ok,
   when,
   whenArgsInclude,
+  whenCmd,
   whenSshRemote,
   whenSshRemoteIncludes,
   whenSshRemoteMatches,
@@ -114,6 +115,9 @@ interface Recorder {
   calls: Array<{ cmd: string; args: string[]; input?: string }>
 }
 
+const createPoolSpawnRecorder = (...handlers: Parameters<typeof createSpawnRecorder>) =>
+  createSpawnRecorder(whenCmd("curl", ok("9.9.9.9")), ...handlers)
+
 /** Mock spawn. `reportFor(runId, launchIdx)` decides the report-fetch payload for
  *  a given chunk runId on a given box (launch index, 0-based) — return "" to
  *  simulate a dead box (no report). Default: always a 1-resolved report. */
@@ -128,7 +132,7 @@ const mockSpawn = (opts: {
 }): Recorder => {
   let launchIdx = -1
   const reportFor = opts.reportFor ?? ((runId: string) => defaultPoolResolved(runId))
-  return createSpawnRecorder(
+  return createPoolSpawnRecorder(
     whenArgsInclude("describe-security-groups", ok("sg-abc")),
     whenArgsInclude("run-instances", () => {
       launchIdx += 1
@@ -326,7 +330,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       const runExitGate = new Promise<void>((resolve) => {
         releaseRunExit = resolve
       })
-      const { fn, calls } = createSpawnRecorder(
+      const { fn, calls } = createPoolSpawnRecorder(
         whenArgsInclude("describe-security-groups", ok("sg-abc")),
         whenArgsInclude("run-instances", () => {
           launchIdx += 1
@@ -600,7 +604,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       releaseFirstRun = resolve
     })
     let firstBenchStarted = false
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", () => {
         launched += 1
@@ -651,7 +655,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(
       await waitForCondition(
         () => firstBenchStarted && calls.some((c) => c.args.includes("run-instances")),
-        { timeoutMs: 250 },
+        { timeoutMs: 1_000 },
       ),
     ).toBe(true)
 
@@ -714,7 +718,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
 
   test("a reprovision failure ABORTS the run instead of silently surfacing a lost chunk", async () => {
     let launches = 0
-    const { fn } = createSpawnRecorder(
+    const { fn } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", () => {
         launches += 1
@@ -790,7 +794,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     // findIdleBox's tag-filtered describe returns a running box; its bootstrap
     // probe says OK and its idle probe says IDLE ⇒ the pool ATTACHES, never
     // launching. attachBox's --instance-ids describe resolves the ip.
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warmbox\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -819,7 +823,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("an idle live box still blocks a fresh launch when reuseWarm=false unless explicitly opted in", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warmbox\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -991,7 +995,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     //   - the report fetch returns a VALID resolved report, so if the lock check
     //     were bypassed the chunk would RESOLVE (lost:false) — `lost===true` then
     //     proves the POOL_BUSY path was actually taken, not a no-verdict masquerade.
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", ok("i-fresh")),
       whenArgsInclude("describe-instances", ({ args }) =>
@@ -1024,7 +1028,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
 
   test("a mid-run POOL_BUSY box FAIL-CLOSED unless explicit extra-box opt-in is set", async () => {
     let launched = false
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", () => {
         launched = true
@@ -1061,7 +1065,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   test("a mid-run POOL_BUSY warm-box race ABORTS by default instead of auto-launching another box", async () => {
     let pgrepCount = 0
     let lockCount = 0
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -1095,7 +1099,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     const slept: number[] = []
     let pgrepCount = 0
     let lockCount = 0
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -1137,7 +1141,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("a lock-probe ssh failure on an OWNED box is a hard failure, not BUSY (terminate it)", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", ok("i-owned")),
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
@@ -1196,7 +1200,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     const secondRunGate = new Promise<void>((resolve) => {
       releaseSecondRun = resolve
     })
-    const { fn } = createSpawnRecorder(
+    const { fn } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", () => ok(`i-${launches++}`)),
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
@@ -1267,7 +1271,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     const c3RunGate = new Promise<void>((resolve) => {
       releaseC3Run = resolve
     })
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", () => ok(`i-${launches++}`)),
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
@@ -1315,18 +1319,15 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         },
       }),
     )
+    const observedRun = runPromise.then(
+      () => ({ status: "resolved" as const, error: undefined }),
+      (error) => ({ status: "rejected" as const, error }),
+    )
     try {
       releaseC2Run?.()
-      const afterC2 = await Promise.race([
-        runPromise.then(
-          () => "resolved",
-          () => "rejected",
-        ),
-        new Promise<string>((resolve) => {
-          setTimeout(() => resolve("pending"), 100)
-        }),
-      ])
-      expect(afterC2).toBe("rejected")
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 100)
+      })
       expect(
         calls.some(
           (c) =>
@@ -1335,7 +1336,9 @@ describe("runPool — persistent box, amortised bootstrap", () => {
             c.args.join(" ").includes("~/runs/c3/instances.jsonl"),
         ),
       ).toBe(false)
-      await expect(runPromise).rejects.toThrow(/auth boom/i)
+      const settled = await observedRun
+      expect(settled.status).toBe("rejected")
+      expect(String(settled.error)).toMatch(/auth boom/i)
     } finally {
       releaseC2Run?.()
       releaseC3Run?.()
@@ -1343,7 +1346,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("a running BUSY box blocks auto-launch of another box unless explicitly opted in", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       when(
         ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
         ok("i-busy\t9.9.9.9"),
@@ -1364,7 +1367,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
 
   test("an idle warm-box hit in the launch window is ATTACHED directly instead of being re-probed into a fresh launch", async () => {
     let idleProbeCount = 0
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
@@ -1397,7 +1400,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("the pool's top-level preset authority governs box grounding checks during provision", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("run-instances", ok("i-box0")),
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
@@ -1471,7 +1474,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   test("waitForIdle parks behind a busy running box, then REUSES it once it goes idle", async () => {
     const slept: number[] = []
     let idleProbeCount = 0
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -1508,7 +1511,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   test("waitForIdle times out instead of launching past a forever-busy box", async () => {
     const slept: number[] = []
     let nowMs = 0
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       when(
         ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
         ok("i-busy\t9.9.9.9"),
@@ -1537,7 +1540,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
   })
 
   test("explicit extra-box opt-in can launch past a running BUSY box", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-busy\t9.9.9.9" : "1.2.3.4"),

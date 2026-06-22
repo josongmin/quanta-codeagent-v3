@@ -8,9 +8,14 @@
  * a regression-bearing test ranked 13th never ran — bounding regression-gate
  * recall in a way a researcher could not sweep.
  *
- * Default-UNSET ⇒ 12 (byte-identical to the prior hardcode; now a single SSOT).
- * Domain: integer in [1, 200]. APPLY IS A NOOP — consumed out of band
- * (`posture.regressionMaxTests` → `makeDiscoveredRepoRegressionWitness.maxTests`).
+ * Default-UNSET ⇒ the discovery port's own `DEFAULT_MAX_TESTS` (the single
+ * runtime SSOT in `@/runner/batch/eval/impacted-test-discovery`; byte-identical
+ * to the prior hardcode). This knob does NOT redeclare that literal — it cannot
+ * import the batch slice (cross-slice fence, see cross-slice-cycle hellgate), so
+ * the unset default is supplied where the value is consumed (the bench driver
+ * passes `posture.regressionMaxTests` through to `makeDiscoveredRepoRegression-
+ * Witness.maxTests`, which falls back to `DEFAULT_MAX_TESTS` when undefined).
+ * Domain: integer in [1, 200]. APPLY IS A NOOP — consumed out of band.
  */
 
 import type { AgentConfig } from "@/agent"
@@ -18,10 +23,6 @@ import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
-
-/** The hardcoded default, promoted to one SSOT (was duplicated in
- *  impacted-test-discovery.ts + repo-regression-discovery-adapter.ts). */
-export const DEFAULT_REGRESSION_MAX_TESTS = 12
 
 const parseRegressionMaxTests = (raw: string | undefined): number | undefined => {
   if (raw === undefined) return undefined

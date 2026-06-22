@@ -29,6 +29,7 @@
 
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { buildProjectEnvUvRunArgv } from "../corpus/project-env"
 import type { Instance } from "../types"
 import { execArgv } from "./exec"
 import {
@@ -48,6 +49,25 @@ import type { Candidate } from "./selection-executor"
 // jun-22: deduped to one SSOT (was a second `= 12`). The configurable override
 // flows in via `args.maxTests` (the regression-max-tests knob).
 const DEFAULT_DISCOVERY_MAX_TESTS = DEFAULT_MAX_TESTS
+
+/**
+ * Batch base-green pytest argv: same project-env wrapper as
+ * {@link buildProjectPytestArgv} but WITHOUT `-x`. The per-witness preflight uses
+ * `-x` harmlessly (single test), but the batched base-green run must let EVERY
+ * witness reach a verdict — `-x` would stop at the first failure and leave the
+ * rest unattributable (mis-classifying them green). All other flags are identical.
+ */
+const buildBaseGreenBatchArgv =
+  (repo: string | undefined, version: string | undefined) =>
+  (tests: readonly string[]): readonly string[] => [
+    ...buildProjectEnvUvRunArgv(repo ?? "", version, ["pytest"]),
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "--no-header",
+    ...tests,
+  ]
 
 const keyOf = (xs: readonly string[]): string => [...xs].map(normalizeRepoPath).sort().join("\n")
 
@@ -93,6 +113,92 @@ export const keepBaseGreenDiscoveredTests = async (
     if ((await run(test)) === true) kept.push(test)
   }
   return kept
+}
+
+/**
+ * A single batched base-green run over the WHOLE witness set (one reset, one
+ * pytest invocation). The base tree is identical across every witness in a
+ * batch, so the per-witness reset+cold-pytest loop was pure O(N) waste on large
+ * repos. The batch is run WITHOUT `-x` so every witness reaches a verdict.
+ *
+ * `ran` mirrors {@link RegressionResult.ran}: pytest reached a real pass/fail
+ * verdict (exit 0/1). `failed` is the {@link parseFailedTests} node-id list.
+ */
+export interface BatchBaseResult {
+  readonly ran: boolean
+  readonly failed: readonly string[]
+}
+
+/** A witness FILE is base-green iff the batch reached a verdict AND no failure
+ *  node-id is attributable to that file. Witnesses are FILE paths (e.g.
+ *  `tests/test_a.py`); a failing function inside the file is reported as
+ *  `tests/test_a.py::test_fn` — so a witness file owns a failure when a failed
+ *  node-id equals it OR starts with `<file>::`. */
+const isFailureForWitness = (witness: string, failedId: string): boolean => {
+  const w = normalizeRepoPath(witness)
+  const f = normalizeRepoPath(failedId)
+  return f === w || f.startsWith(`${w}::`)
+}
+
+/**
+ * Partition a witness set into the base-green subset using a SINGLE batched run.
+ *
+ * Returns `null` when the batch did NOT reach a verdict (`!batch.ran` — pytest
+ * collection error / interrupt / empty). The caller MUST then fall back to the
+ * per-test path so the green/red partition stays byte-identical to the
+ * (slow) per-witness path even in the pathological non-verdict case. This is the
+ * ONLY behavior-preserving way to attribute a whole-batch non-verdict per test.
+ *
+ * On a real verdict the partition is exact: a witness is green iff no parsed
+ * failure id is attributable to it — which equals the per-test path's "the
+ * single-test run exited 0" (a function that fails inside the file makes the
+ * file non-green in BOTH paths).
+ */
+export const partitionBaseGreenFromBatch = (
+  tests: readonly string[],
+  batch: BatchBaseResult,
+): readonly string[] | null => {
+  if (!batch.ran) return null
+  return tests.filter((t) => !batch.failed.some((f) => isFailureForWitness(t, f)))
+}
+
+/** Injected ports for {@link collectBaseGreenBatched} — keeps the reset/run
+ *  count assertable without a real git sandbox. */
+export interface BaseGreenBatchPorts {
+  /** Reset the shared sandbox to base. Returns false if the seam is unavailable. */
+  readonly reset: () => Promise<boolean>
+  /** Run the WHOLE witness set in one (no-`-x`) pytest after the single reset.
+   *  `null` ⇒ the run could not be performed (exec threw). */
+  readonly runBatch: (tests: readonly string[]) => Promise<BatchBaseResult | null>
+  /** Per-test fallback (the legacy reset-per-witness path), used ONLY when the
+   *  batch did not reach a verdict so the partition stays byte-identical. */
+  readonly perTest: SingleTestVerdictPort
+}
+
+/**
+ * Collect the base-green witness subset with ONE reset + ONE batched pytest.
+ *
+ * Reset-count contract (the perf fix): on the verdict path `reset` is called
+ * EXACTLY ONCE regardless of |tests| (was once-per-witness). On the non-verdict
+ * fallback path the per-test port owns its own resets — the partition there is
+ * byte-identical to the legacy loop. The injected ports make both claims
+ * deterministically testable.
+ */
+export const collectBaseGreenBatched = async (
+  tests: readonly string[],
+  ports: BaseGreenBatchPorts,
+): Promise<readonly string[]> => {
+  if (tests.length === 0) return []
+  if (!(await ports.reset())) {
+    // Reset seam unavailable for the batch — fall back to the per-test path,
+    // which re-attempts its own reset per witness (and fails open the same way).
+    return [...(await keepBaseGreenDiscoveredTests(tests, ports.perTest))]
+  }
+  const batch = await ports.runBatch(tests)
+  const partitioned = batch === null ? null : partitionBaseGreenFromBatch(tests, batch)
+  if (partitioned !== null) return [...partitioned]
+  // Whole-batch non-verdict ⇒ per-test fallback (identical partition).
+  return [...(await keepBaseGreenDiscoveredTests(tests, ports.perTest))]
 }
 
 /**
@@ -201,6 +307,12 @@ export const makeDiscoveredRepoRegressionWitness = (
     buildProjectPytestArgv(instance.swebench?.repo, instance.swebench?.version),
     instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {},
   )
+  // Batch oracle (no `-x`): runs the whole base-green witness set in ONE pytest
+  // invocation after a SINGLE reset, replacing the O(N) reset+cold-pytest loop.
+  const batchOracle = makeBenchRegressionOracle(
+    buildBaseGreenBatchArgv(instance.swebench?.repo, instance.swebench?.version),
+    instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {},
+  )
 
   const discoveryCache = new Map<string, Promise<readonly ImpactedTestCandidate[]>>()
   const baseGreenCache = new Map<string, Promise<readonly string[] | null>>()
@@ -243,13 +355,30 @@ export const makeDiscoveredRepoRegressionWitness = (
     return toRegressionGreen([test], r)
   }
 
+  // Reset ONCE, then run the WHOLE witness set in a single (no-`-x`) pytest. The
+  // base tree is identical across every witness in a batch, so this is the same
+  // partition the per-test loop produces at 1/N the resets + cold starts. A
+  // whole-batch non-verdict (collection error / interrupt) falls back to the
+  // per-test path inside collectBaseGreenBatched — keeping the partition exact.
+  const batchPorts: BaseGreenBatchPorts = {
+    reset: () =>
+      baseCommit === undefined
+        ? Promise.resolve(false)
+        : resetToBase(sandbox, baseCommit, timeoutMs),
+    runBatch: async (tests) => {
+      const r = await batchOracle.run({ tests, sandbox, timeoutMs }).catch(() => null)
+      return r === null ? null : { ran: r.ran, failed: r.failed }
+    },
+    perTest: runOneBaseTest,
+  }
+
   const baseGreenFor = (tests: readonly string[]): Promise<readonly string[] | null> => {
     const key = keyOf(tests)
     const cached = baseGreenCache.get(key)
     if (cached !== undefined) return cached
     const p = (async (): Promise<readonly string[] | null> => {
       if (baseCommit === undefined || tests.length === 0) return null
-      const green = await keepBaseGreenDiscoveredTests(tests, runOneBaseTest)
+      const green = await collectBaseGreenBatched(tests, batchPorts)
       return green.length > 0 ? green : null
     })()
     baseGreenCache.set(key, p)

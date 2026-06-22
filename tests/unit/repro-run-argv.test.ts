@@ -8,7 +8,10 @@
  */
 import { describe, expect, test } from "bun:test"
 import { reproRunArgv } from "@/runner/batch/corpus/dataset"
-import { pythonForRepoVersion } from "@/runner/batch/corpus/repo-version-python"
+import {
+  pythonForRepoVersion,
+  resolvePythonForRepoVersion,
+} from "@/runner/batch/corpus/repo-version-python"
 
 const pyOf = (argv: readonly string[]): string => argv[argv.indexOf("--python") + 1] as string
 const hasWithDep = (argv: readonly string[], dep: string): boolean =>
@@ -82,5 +85,61 @@ describe("pythonForRepoVersion — (repo,version) ground truth, FLOORED at 3.9",
 
   test("undefined version ⇒ per-repo high fallback (never the too-low failure)", () => {
     expect(pythonForRepoVersion("django/django", undefined)).toBe("3.11")
+  })
+})
+
+describe("resolvePythonForRepoVersion — floor/fallback attribution (#12)", () => {
+  // #12 RED: when UV_FLOOR overrides the swebench ground truth, the override must
+  // be ATTRIBUTABLE — a repro failure on a floored instance is an ENV override,
+  // not a model failure. The bare `string` API surfaces no such signal.
+  test("floored old sklearn (truth 3.6 → used 3.9) surfaces pythonFloored", () => {
+    const r = resolvePythonForRepoVersion("scikit-learn/scikit-learn", "0.20")
+    expect(r.used).toBe("3.9")
+    expect(r.pythonFloored).toEqual({ truth: "3.6", used: "3.9" })
+  })
+
+  test("floored old astropy (truth 3.6 → used 3.9) surfaces pythonFloored", () => {
+    const r = resolvePythonForRepoVersion("astropy/astropy", "1.1")
+    expect(r.used).toBe("3.9")
+    expect(r.pythonFloored).toEqual({ truth: "3.6", used: "3.9" })
+  })
+
+  test("a NON-floored exact match carries no pythonFloored signal", () => {
+    const r = resolvePythonForRepoVersion("django/django", "5.0")
+    expect(r.used).toBe("3.11")
+    expect(r.pythonFloored).toBeUndefined()
+    expect(r.fallbackUsed).toBeUndefined()
+  })
+
+  // #12: an UNMAPPED (repo,version) hits the silent per-repo fallback guess — log
+  // it (telemetry callback) and flag it on the result so it's not invisible.
+  test("unmapped (repo,version) flags fallbackUsed and logs", () => {
+    const events: { repo: string; version: string; used: string }[] = []
+    const r = resolvePythonForRepoVersion("django/django", "99.0", {
+      onFallback: (ev) => events.push(ev),
+    })
+    expect(r.used).toBe("3.11") // django fallback, floored is a no-op (3.11 ≥ 3.9)
+    expect(r.fallbackUsed).toEqual({ repo: "django/django", version: "99.0", used: "3.11" })
+    expect(events).toEqual([{ repo: "django/django", version: "99.0", used: "3.11" }])
+  })
+
+  // #12: an unmapped (repo,version) that ALSO floors records BOTH signals and the
+  // floor telemetry fires.
+  test("unmapped repo falls to 3.11 default; mapped+floored fires floor telemetry", () => {
+    const floors: { repo: string; version: string; truth: string; used: string }[] = []
+    const r = resolvePythonForRepoVersion("scikit-learn/scikit-learn", "0.20", {
+      onFloor: (ev) => floors.push(ev),
+    })
+    expect(r.used).toBe("3.9")
+    expect(floors).toEqual([
+      { repo: "scikit-learn/scikit-learn", version: "0.20", truth: "3.6", used: "3.9" },
+    ])
+  })
+
+  test("pythonForRepoVersion is a thin string-returning shim over the resolver", () => {
+    expect(pythonForRepoVersion("scikit-learn/scikit-learn", "0.20")).toBe(
+      resolvePythonForRepoVersion("scikit-learn/scikit-learn", "0.20").used,
+    )
+    expect(pythonForRepoVersion("django/django", "5.0")).toBe("3.11")
   })
 })

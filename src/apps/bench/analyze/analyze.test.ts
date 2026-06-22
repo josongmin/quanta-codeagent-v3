@@ -97,6 +97,16 @@ describe("loadVerdicts — both report shapes", () => {
     expect([...v.unresolved]).toEqual(["django__django-2"])
     expect([...v.emptyPatch]).toEqual(["django__django-3"])
     expect([...v.errored]).toEqual(["django__django-4"])
+    expect(v.reportTotals).toEqual({
+      submittedWithProof: 0,
+      blockedProofMissing: 1,
+      blockedEnvFailed: 0,
+      contractOnlyBlocked: 1,
+      contractOnlySubmitted: 0,
+      packetizedGenerationCount: 0,
+      packetizedRepairCount: 0,
+      packetizedSelectionExplanationCount: 0,
+    })
   })
 
   test("passing rows with weaker score labels stay out of official resolved", () => {
@@ -280,6 +290,46 @@ describe("loadVerdicts — both report shapes", () => {
     const v = loadVerdictsFromFile(p)
     expect([...v.resolved]).toEqual(["django__django-1"])
   })
+
+  test("top-level proofTotals and llmEvidenceTotals win when present", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      proofTotals: {
+        submittedWithProof: 7,
+        blockedProofMissing: 3,
+        blockedEnvFailed: 2,
+        contractOnlyBlocked: 5,
+        contractOnlySubmitted: 1,
+      },
+      llmEvidenceTotals: {
+        packetizedGenerationCount: 9,
+        packetizedRepairCount: 4,
+        packetizedSelectionExplanationCount: 2,
+      },
+      perInstance: [
+        {
+          id: "django__django-proof",
+          passed: false,
+          turns: 3,
+          patchBytes: 12,
+          proofRequiredMissing: true,
+          submittedCandidateProof: true,
+          llmEvidenceStages: ["candidate_generation", "repair_seed", "selection_explanation"],
+          failure: { termination: "completed_unresolved", signals: [] },
+        },
+      ],
+    })
+    expect(v.reportTotals).toEqual({
+      submittedWithProof: 7,
+      blockedProofMissing: 3,
+      blockedEnvFailed: 2,
+      contractOnlyBlocked: 5,
+      contractOnlySubmitted: 1,
+      packetizedGenerationCount: 9,
+      packetizedRepairCount: 4,
+      packetizedSelectionExplanationCount: 2,
+    })
+  })
 })
 
 // ── diff: A resolved {x,y}, B resolved {y,z} ───────────────────────────────
@@ -331,6 +381,72 @@ describe("diffRuns", () => {
     expect(out).toContain("newly broken")
     expect(out).toContain("x")
     expect(out).toContain("still resolved")
+  })
+
+  test("renderDiff surfaces authority and packet telemetry deltas when present", () => {
+    const a = {
+      ...mk(["x"]),
+      reportTotals: {
+        submittedWithProof: 1,
+        blockedProofMissing: 3,
+        blockedEnvFailed: 2,
+        contractOnlyBlocked: 4,
+        contractOnlySubmitted: 1,
+        packetizedGenerationCount: 0,
+        packetizedRepairCount: 0,
+        packetizedSelectionExplanationCount: 0,
+      },
+    }
+    const b = {
+      ...mk(["x", "y"]),
+      reportTotals: {
+        submittedWithProof: 2,
+        blockedProofMissing: 1,
+        blockedEnvFailed: 1,
+        contractOnlyBlocked: 2,
+        contractOnlySubmitted: 0,
+        packetizedGenerationCount: 8,
+        packetizedRepairCount: 3,
+        packetizedSelectionExplanationCount: 8,
+      },
+    }
+    const out = renderDiff(diffRuns(a, b))
+    expect(out).toContain("authority/proof telemetry:")
+    expect(out).toContain("submittedWithProof: A=1  B=2  delta=+1")
+    expect(out).toContain("blockedProofMissing: A=3  B=1  delta=-2")
+    expect(out).toContain("packet coverage:")
+    expect(out).toContain("packetizedGenerationCount: A=0  B=8  delta=+8")
+    expect(out).toContain("packetizedRepairCount: A=0  B=3  delta=+3")
+  })
+
+  test("throttle/infra-miss in B is NOT a regression — bucketed as unmeasured", () => {
+    // A resolved {X, Y, Z}. In B: X errored (throttle/harness), Y empty-patch,
+    // Z genuinely unresolved-with-patch. Only Z is a real regression.
+    const a = {
+      resolved: new Set(["X", "Y", "Z"]),
+      localStructural: new Set<string>(),
+      researchContaminated: new Set<string>(),
+      unresolved: new Set<string>(),
+      errored: new Set<string>(),
+      emptyPatch: new Set<string>(),
+    }
+    const b = {
+      resolved: new Set<string>(),
+      localStructural: new Set<string>(),
+      researchContaminated: new Set<string>(),
+      unresolved: new Set(["Z"]),
+      errored: new Set(["X"]),
+      emptyPatch: new Set(["Y"]),
+    }
+    const d = diffRuns(a, b)
+    expect(d.newlyBroken).toEqual(["Z"])
+    expect(d.newlyBroken).not.toContain("X")
+    expect(d.newlyBroken).not.toContain("Y")
+    expect([...d.bUnmeasured].sort()).toEqual(["X", "Y"])
+    const out = renderDiff(d)
+    expect(out).toContain("unmeasured")
+    expect(out).toContain("X")
+    expect(out).toContain("Y")
   })
 })
 

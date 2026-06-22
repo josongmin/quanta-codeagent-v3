@@ -28,6 +28,7 @@ import {
   assertRemoteStrictGroundingSupported,
   assertSafeArtifactSuffix,
   attachBox,
+  BOX_DIED_DURING_RUN_ERROR,
   type BoxSession,
   type ChunkPaths,
   countLiveBoxes,
@@ -951,6 +952,11 @@ const gradeChunkAttempt = async (
       forwardedBenchEnv: cfg.forwardedBenchEnv ?? "",
       // jun-20 multi-auth (T-6): surface the leased account in the box status snapshot.
       ...(accountLabel !== undefined ? { accountLabel } : {}),
+      // BUG 1 test seams: forward the box-side injectable sleep/clock into the
+      // detached run+poll loop so a test can drive the box-death bound offline
+      // (default real setTimeout / Date.now in production — byte-identical).
+      ...(cfg.provision.sleep !== undefined ? { pollSleep: cfg.provision.sleep } : {}),
+      ...(cfg.now !== undefined ? { pollNow: cfg.now } : {}),
     })
     if (earnedVerdict(result)) {
       recordSuccessfulChunk(out, chunk, result, attempt)
@@ -959,9 +965,17 @@ const gradeChunkAttempt = async (
     await handleNoVerdictChunk(workerId, queue, chunk, attempt, runtime, state, out, result)
     return { rateLimited: result.rateLimited === true, completed: false, lostBox: true }
   } catch (err) {
-    if (errMessage(err).includes(POOL_BUSY_ERROR)) {
+    const msg = errMessage(err)
+    if (msg.includes(POOL_BUSY_ERROR)) {
       handlePoolBusyChunkError(workerId, queue, chunk, attempt, runtime, state, out)
-    } else if (errMessage(err).includes(GRADE_LOCK_RELEASE_ERROR)) {
+    } else if (msg.includes(BOX_DIED_DURING_RUN_ERROR)) {
+      // BUG 1: the detached poll loop confirmed the box DIED mid-run (spot reclaim
+      // / wall-clock ceiling). Route to the dead-box requeue path FIRST — even
+      // though a dead box also fails its grade-lock release (the secondary
+      // GRADE_LOCK_RELEASE_FAILED gets wrapped in), that lock-release substring
+      // must NOT mis-route a genuine box death to the abort branch below.
+      await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
+    } else if (msg.includes(GRADE_LOCK_RELEASE_ERROR)) {
       throw err
     } else {
       await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)

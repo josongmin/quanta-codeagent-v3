@@ -328,6 +328,55 @@ function presetLabel(file: string, knobs: JsonRecord | null): string {
   return presetFromFingerprint(knobs)
 }
 
+// Per-file parse memo keyed on (path, mtimeMs). The directory walk + statSync
+// still run on every call (so added / removed / EDITED files are always seen —
+// a content edit bumps mtimeMs, which is the cache key, forcing a re-parse), but
+// the expensive readFileSync + JSON.parse + Run construction is skipped for
+// reports whose mtime hasn't moved since the last poll. Same shape as the
+// dataset / frontier caches above, but invalidating instead of permanent.
+const RUN_PARSE_CACHE = new Map<string, { mtime: number; run: Run | null }>()
+
+function parseReportFile(f: string, mtime: number): Run | null {
+  // mtime === 0 means statSync failed; never trust an unknowable key — parse
+  // fresh and don't poison the cache (matches the prior always-reparse behavior).
+  if (mtime === 0) return buildRunFromFile(f, 0)
+  const hit = RUN_PARSE_CACHE.get(f)
+  if (hit && hit.mtime === mtime) return hit.run
+  const run = buildRunFromFile(f, mtime)
+  RUN_PARSE_CACHE.set(f, { mtime, run })
+  return run
+}
+
+function buildRunFromFile(f: string, mtime: number): Run | null {
+  let report: JsonRecord | null
+  try {
+    report = asRecord(JSON.parse(readFileSync(f, "utf8")))
+  } catch {
+    return null
+  }
+  if (report === null || !Array.isArray(report.perInstance)) return null
+  const perInstance: Run["perInstance"] = report.perInstance.map((pi) => {
+    const row = asRecord(pi)
+    return {
+      id: asString(row?.id) ?? "",
+      passed: row?.passed === true,
+      turns: Number(row?.turns) || 0,
+      fail: classifyFail(pi),
+    }
+  })
+  const resolved = perInstance.filter((p: (typeof perInstance)[number]) => p.passed).length
+  return {
+    label: basename(f).replace(/\.report\.json$/, ""),
+    file: f,
+    model: asString(report.model) ?? "?",
+    preset: presetLabel(f, asRecord(report.knobs)),
+    mtime,
+    resolved,
+    total: perInstance.length,
+    perInstance,
+  }
+}
+
 function parseRuns(): Run[] {
   const files: string[] = []
   for (const root of REPORT_ROOTS) walkReports(root, files)
@@ -336,37 +385,12 @@ function parseRuns(): Run[] {
   for (const f of files) {
     if (seen.has(f)) continue
     seen.add(f)
-    let report: JsonRecord | null
-    try {
-      report = asRecord(JSON.parse(readFileSync(f, "utf8")))
-    } catch {
-      continue
-    }
-    if (report === null || !Array.isArray(report.perInstance)) continue
-    const perInstance: Run["perInstance"] = report.perInstance.map((pi) => {
-      const row = asRecord(pi)
-      return {
-        id: asString(row?.id) ?? "",
-        passed: row?.passed === true,
-        turns: Number(row?.turns) || 0,
-        fail: classifyFail(pi),
-      }
-    })
-    const resolved = perInstance.filter((p: (typeof perInstance)[number]) => p.passed).length
     let mtime = 0
     try {
       mtime = statSync(f).mtimeMs
     } catch {}
-    runs.push({
-      label: basename(f).replace(/\.report\.json$/, ""),
-      file: f,
-      model: asString(report.model) ?? "?",
-      preset: presetLabel(f, asRecord(report.knobs)),
-      mtime,
-      resolved,
-      total: perInstance.length,
-      perInstance,
-    })
+    const run = parseReportFile(f, mtime)
+    if (run !== null) runs.push(run)
   }
   runs.sort((a, b) => b.mtime - a.mtime)
   return runs
@@ -961,7 +985,10 @@ const HTML = /* html */ `<!doctype html>
 let DATA = null, TAB = "matrix", SORT = { key: "hash", dir: -1 };
 const SCAF_SHOW = ["sonar-o45","trae-dbo","OH-o45","live-gem3","prom-gpt5"];
 const SCAF_LABEL = { "sonar-o45":"Sonar", "trae-dbo":"Trae", "OH-o45":"OpenHands", "live-gem3":"Live-SWE", "prom-gpt5":"Prometheus" };
-function esc(s){ return (s||"").replace(/</g,"&lt;").replace(/"/g,"&quot;"); }
+// HTML-escape covering & < > " ' — & MUST be replaced first so we never
+// double-escape (turning a later &lt; into &amp;lt;). Used for BOTH text and
+// attribute contexts (title="...", data-...), which is why ' and " are both here.
+function esc(s){ return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 
 async function poll() {
   try {
@@ -1005,7 +1032,7 @@ async function renderKnobs(v) {
   drawKnobs(v);
 }
 
-const kesc = s => (s==null?'':String(s)).replace(/</g,'&lt;');
+const kesc = s => esc(s);
 
 function knobGroups() {
   const K = KNOBS, groups = {};
@@ -1153,8 +1180,8 @@ function renderCards() {
     ["라이브 박스", DATA.live.length],
   ];
   document.getElementById("cards").innerHTML = cards.map(c =>
-    '<div class="card"><div class="n">'+c[1]+'</div><div class="l">'+c[0]+'</div>'+
-    (c[2]? '<div class="muted" style="font-size:10px">'+c[2]+'</div>':'')+'</div>').join("");
+    '<div class="card"><div class="n">'+esc(c[1])+'</div><div class="l">'+esc(c[0])+'</div>'+
+    (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
 }
 
 function renderRuns() {
@@ -1164,7 +1191,7 @@ function renderRuns() {
   h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th><th>갱신</th></tr></thead><tbody>';
   for (const r of camps) {
     const pct = r.total ? Math.round(100*r.resolved/r.total) : 0;
-    h += '<tr><td class="inst" title="'+r.members.join(", ")+'">'+r.key+'</td><td class="muted">'+r.model+'</td><td class="muted">'+r.preset+'</td>'+
+    h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
       '<td class="muted">'+r.members.length+'</td>'+
       '<td>'+r.resolved+'/'+r.total+'</td>'+
       '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%</td>'+
@@ -1317,7 +1344,7 @@ function drawMatrix() {
   for (const r of rows) {
     const me = r.me;
     let qcell = '<td class="muted">·</td>';
-    if (me && me.passed) qcell = '<td class="q-yes" title="'+me.passedBy.slice(0,8).join(", ")+'">✅<span class="muted" style="font-size:10px"> '+me.passes+'/'+me.attempts+'</span></td>';
+    if (me && me.passed) qcell = '<td class="q-yes" title="'+esc(me.passedBy.slice(0,8).join(", "))+'">✅<span class="muted" style="font-size:10px"> '+me.passes+'/'+me.attempts+'</span></td>';
     else if (me) {
       const fk = me.fail ? me.fail.klass : '';
       const ftitle = me.fail ? (me.fail.klass+' · '+me.fail.termination+(me.fail.repro?' · repro:'+me.fail.repro:'')+' · F2P'+me.fail.f2p+'/P2P'+me.fail.p2p) : ('시도 '+me.attempts+'회');
@@ -1344,7 +1371,7 @@ function drawMatrix() {
     const tierCell = r.tier === '?' ? '<span class="muted">—</span>' : '<span class="'+tierClass(r.tier)+'">'+r.tier+'</span>';
     const ftn = (DATA.frontierTurns||{})[r.id];
     const ftBadge = ftn ? ' <span class="pill" title="프론티어 경쟁사 풀이 턴">🏆'+ftn+'t</span>' : '';
-    h += '<tr class="mrow" data-id="'+r.id+'"><td class="inst">'+r.id+(r.statement?' <span class="muted">ⓘ</span>':'')+ftBadge+'</td>'+qcell+
+    h += '<tr class="mrow" data-id="'+esc(r.id)+'"><td class="inst">'+esc(r.id)+(r.statement?' <span class="muted">ⓘ</span>':'')+ftBadge+'</td>'+qcell+
       '<td class="muted">'+turns+'</td><td class="profile muted">'+presetCell+'</td><td class="muted" style="font-size:11px">'+r.difficulty+'</td>';
     for (const s of SCAF_SHOW) h += '<td class="'+(r.cells[s]?'yes':'no')+'">'+(r.cells[s]?'✅':'·')+'</td>';
     h += '<td>'+hashCell+'</td><td>'+tierCell+'</td></tr>';
@@ -1362,7 +1389,7 @@ function drawMatrix() {
 function renderScaffolds() {
   let h = '<table><thead><tr><th class="inst" style="text-align:left">스캐폴드</th><th>모델</th><th>resolved/500</th><th>%</th></tr></thead><tbody>';
   for (const s of DATA.topScaffolds) {
-    h += '<tr><td class="inst">'+s.key+'</td><td class="muted">'+s.model+'</td><td>'+s.resolved+'</td>'+
+    h += '<tr><td class="inst">'+esc(s.key)+'</td><td class="muted">'+esc(s.model)+'</td><td>'+s.resolved+'</td>'+
       '<td><span class="bar"><i style="width:'+s.pct+'%"></i></span> '+s.pct+'%</td></tr>';
   }
   return h + '</tbody></table>';
@@ -1371,11 +1398,11 @@ function renderScaffolds() {
 function renderLive() {
   if (!DATA.live.length) return '<p class="muted">최근 6시간 내 라이브 로그 없음.</p>';
   return DATA.live.map(b =>
-    '<div class="live"><b>'+b.dir+'</b> / '+b.log+
+    '<div class="live"><b>'+esc(b.dir)+'</b> / '+esc(b.log)+
     ' <span class="pill">'+b.lines+' lines</span>'+
-    (b.lastInstance? ' <span class="pill">'+b.lastInstance+'</span>':'')+
+    (b.lastInstance? ' <span class="pill">'+esc(b.lastInstance)+'</span>':'')+
     ' <span class="muted">'+new Date(b.mtime).toLocaleTimeString()+'</span>'+
-    '<pre>'+ (b.tail||'').replace(/</g,'&lt;') +'</pre></div>'
+    '<pre>'+ esc(b.tail||'') +'</pre></div>'
   ).join("");
 }
 
