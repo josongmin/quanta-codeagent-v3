@@ -24,6 +24,13 @@ export {
   parseAdaptiveDecision,
 } from "./decision-schema"
 export {
+  ACTION_DESCRIPTIONS,
+  buildRouterInstruction,
+  buildRouterPrompt,
+  EVIDENCE_GAP_DESCRIPTIONS,
+  ROUTER_RULES,
+} from "./router-prompt"
+export {
   type ActionClass,
   type AdaptiveLimits,
   type Admission,
