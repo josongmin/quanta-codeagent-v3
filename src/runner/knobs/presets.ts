@@ -453,6 +453,35 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select-repro": "positive",
     "selector-mode": "clean",
   },
+  // Witness-only clean closure-select arm. Keeps the same closure-grounded
+  // generation/search posture as closure-select-clean, but removes progressive
+  // early accept and generated repro ranking so final submit authority comes
+  // only from the clean selector's executed-witness / structural / contract
+  // lattice over the full N-best candidate set.
+  "agentless-v3-thin-strict-closure-select-clean-witness-only": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "5",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "off",
+    "selector-mode": "clean",
+  },
   // jun-20 no-oracle verify-select arm. Starts from v3-thin, adds N-best
   // selection, uses discovered native repo tests as the hard regression signal,
   // and demotes self-generated repro consensus to positive-only soft ranking so

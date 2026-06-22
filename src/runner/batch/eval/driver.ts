@@ -98,6 +98,7 @@ import {
 import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
+import { probePatchStaticSanity } from "./patch-static-sanity"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import {
   buildCleanSelectionPublicContracts,
@@ -2466,6 +2467,11 @@ const runSelectionPhase = async (
     sandbox,
     timeoutMs: deps.timeoutMs,
   })
+  const staticSanitySelectionPort = makeSelectionStaticSanityPort({
+    sandbox,
+    baseCommit: instance.swebench?.baseCommit,
+    timeoutMs: deps.timeoutMs,
+  })
   const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
   const mweProofSelectionPort =
     selectorMode === "clean"
@@ -2524,6 +2530,7 @@ const runSelectionPhase = async (
           baseCommit: instance.swebench?.baseCommit,
           timeoutMs: deps.timeoutMs,
         }),
+      staticSanity: staticSanitySelectionPort,
       regression: regressionSelectionPort,
       ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
       ...(mweProofSelectionPort !== undefined ? { mweProof: mweProofSelectionPort } : {}),
@@ -2847,6 +2854,26 @@ export const makeSelectionRegressionPort = (args: {
       },
     })
   }
+}
+
+export const makeSelectionStaticSanityPort = (args: {
+  readonly sandbox: string
+  readonly baseCommit: string | undefined
+  readonly timeoutMs: number
+}): NonNullable<SelectionPorts["staticSanity"]> => {
+  return (candidate) =>
+    withCandidatePatch({
+      sandbox: args.sandbox,
+      patch: candidate.patch,
+      baseCommit: args.baseCommit,
+      timeoutMs: args.timeoutMs,
+      probe: (sb) =>
+        probePatchStaticSanity({
+          cwd: sb,
+          files: candidate.files,
+          timeoutMs: args.timeoutMs,
+        }),
+    }).catch(() => null)
 }
 
 const prepareHintAndReproContext = async (

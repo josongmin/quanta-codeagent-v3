@@ -122,6 +122,10 @@ export interface SelectionPorts {
    *  `true` is ranking credit. `false` is explicit public issue-shape evidence
    *  that the patch implements the wrong behavior, so the selector rejects it. */
   declaredExpected?: (c: Candidate) => Promise<boolean | null>
+  /** OPTIONAL parsed-static sanity hard signal. Runs on base + candidate patch.
+   *  Non-empty reason list means the patched tree violates a deterministic
+   *  language/runtime invariant and cannot be submitted. Absent/null ⇒ fail-open. */
+  staticSanity?: (c: Candidate) => Promise<readonly string[] | null>
   /** SCAFF-06 — OPTIONAL executable public-MWE probe. Runs the extracted public
    *  MWE against base + this candidate (same env) and returns the typed proof
    *  receipt. Absent ⇒ candidates keep any generation-set receipt (or none), so
@@ -520,6 +524,15 @@ const declaredExpectedMatchOf = async (
   return (await ports.declaredExpected?.(c)) ?? null
 }
 
+const staticSanityReasonsOf = async (
+  c: Candidate,
+  isEmpty: boolean,
+  ports: SelectionPorts,
+): Promise<readonly string[]> => {
+  if (isEmpty) return []
+  return (await ports.staticSanity?.(c)) ?? []
+}
+
 const hardResolvedRejected = (signal: ResolvedKofNSignal | null): boolean => {
   if (signal === null) return false
   return !isValidResolvedKofN(signal) || signal.votes < signal.k
@@ -576,6 +589,18 @@ const applyCleanDriftHardGate = (verdict: CandidateVerdict, risk: boolean): Cand
         reasons: [...verdict.reasons, CLEAN_DRIFT_REJECT_REASON],
       }
     : verdict
+
+const applyStaticSanityHardGate = (
+  verdict: CandidateVerdict,
+  reasons: readonly string[],
+): CandidateVerdict =>
+  reasons.length === 0
+    ? verdict
+    : {
+        admissible: false,
+        score: verdict.score,
+        reasons: [...verdict.reasons, ...reasons],
+      }
 
 const DECLARED_EXPECTED_REJECT_REASON =
   "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)"
@@ -834,6 +859,7 @@ export const runSelection = async (args: {
     voterQuorum: number | null
     ownerCoverage: number | null
     declaredExpectedMatch: boolean | null
+    staticSanityReasons: readonly string[]
     /** SCAFF-06 selection-time MWE receipt (port-derived, else generation-set). */
     mweReceipt: MweProofReceipt | undefined
   }
@@ -864,6 +890,7 @@ export const runSelection = async (args: {
       // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
       ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
       declaredExpectedMatch: await declaredExpectedMatchOf(c, isEmpty, args.ports),
+      staticSanityReasons: await staticSanityReasonsOf(c, isEmpty, args.ports),
       // SCAFF-06: a selection-time MWE run (port) is authoritative; it overrides a
       // generation-set receipt. Absent port ⇒ keep the generation-set one (or none).
       mweReceipt: (await args.ports.mweProof?.(c)) ?? c.mweReceipt,
@@ -892,7 +919,10 @@ export const runSelection = async (args: {
       contractCandidate,
     )
     const contractsSatisfied = contractsSatisfiedCount(contractBundle, contractCandidate)
-    const verdict = scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode)
+    const verdict = applyStaticSanityHardGate(
+      scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode),
+      probed.staticSanityReasons,
+    )
     return {
       // SCAFF-06: carry the selection-time MWE receipt on the scored candidate so
       // the lexicographic top tier (buildLexTiers) sees it. Identity-preserving

@@ -29,6 +29,7 @@ import {
   makeCalibratedReproConsensusPort,
   makeReproConsensusSelectionPort,
   makeSelectionRegressionPort,
+  makeSelectionStaticSanityPort,
   maybeValidateTerminalResult,
   type PreparedAttemptContext,
   type PrepareIssueHintDeps,
@@ -762,6 +763,11 @@ const runSelectionPhase = async (
     sandbox,
     timeoutMs: deps.timeoutMs,
   })
+  const staticSanitySelectionPort = makeSelectionStaticSanityPort({
+    sandbox,
+    baseCommit: instance.swebench?.baseCommit,
+    timeoutMs: deps.timeoutMs,
+  })
   const smokeSelectionPort = await prepareIssueSmokeSelectionPort(instance, sandbox, deps.timeoutMs)
   const mweProofSelectionPort =
     selectorMode === "clean"
@@ -824,6 +830,7 @@ const runSelectionPhase = async (
           baseCommit: instance.swebench?.baseCommit,
           timeoutMs: deps.timeoutMs,
         }),
+      staticSanity: staticSanitySelectionPort,
       regression: regressionSelectionPort,
       ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
       ...(mweProofSelectionPort !== undefined ? { mweProof: mweProofSelectionPort } : {}),

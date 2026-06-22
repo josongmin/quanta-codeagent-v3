@@ -511,6 +511,43 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 
+  test("PRESET-15e: agentless-v3-thin-strict-closure-select-clean-witness-only keeps closure grounding but removes early accept and generated repro ranking", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-closure-select-clean-witness-only"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.faultEvidence).toBe(true)
+    expect(opt.verificationPlan).toBe(true)
+    expect(opt.primaryRail).toBe(true)
+    expect(opt.patchHygiene).toBe(true)
+    expect(opt.noPatchBreaker).toBe(true)
+    expect(opt.repairEscalation).toBe(true)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectEarlyAccept).toBe(false)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("off")
+    expect(opt.selectorMode).toBe("clean")
+    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean-witness-only"]).toMatchObject({
+      "bench-in-loop-exec": "off",
+      "fault-evidence": "1",
+      "verification-plan": "1",
+      "primary-rail": "1",
+      "patch-hygiene": "1",
+      "no-patch-breaker": "1",
+      "repair-escalation": "1",
+      "patch-budget-strict": "1",
+      "verify-select": "5",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "off",
+      "selector-mode": "clean",
+    })
+    expect(
+      KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean-witness-only"]?.[
+        "verify-select-early-accept"
+      ],
+    ).toBeUndefined()
+  })
+
   test("PRESET-15c: no named preset may bake in targeted RCA gates", () => {
     const contaminated = Object.entries(KNOB_PRESETS).filter(
       ([, preset]) => preset["rca-target-gates"] !== undefined,
@@ -528,6 +565,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
       "agentless-v3-thin-strict-counterfactual",
       "agentless-v3-thin-strict-counterfactual-shadow",
       "agentless-v3-thin-strict-closure-select-clean",
+      "agentless-v3-thin-strict-closure-select-clean-witness-only",
     ]) {
       process.env.QUANTA_BENCH_PRESET = preset
       expect(benchOptIns().selectorMode).toBe("clean")

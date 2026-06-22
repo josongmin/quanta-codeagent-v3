@@ -309,6 +309,32 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.requiredContractsSatisfied).toBe(1)
   })
 
+  it("CLEAN: static sanity rejects a contract-satisfying but structurally invalid patch", async () => {
+    const invalidMultiSite = { ...multiSitePatch, id: "cand-0" }
+    const validBaseOnly = { ...smallBaseOnly, id: "cand-1" }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      mode: "clean",
+      publicContracts: {
+        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
+      },
+      ports: {
+        generate: async (i) => [invalidMultiSite, validBaseOnly][i] as Candidate,
+        applyClean: async () => true,
+        staticSanity: async (c) =>
+          c.id === "cand-0"
+            ? ["hard:staticSanity=pythonCallbackArityMismatch(_callback:2->3)"]
+            : [],
+      },
+    })
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
+      "hard:staticSanity=pythonCallbackArityMismatch(_callback:2->3)",
+    )
+  })
+
   it("CLEAN: family rank alone cannot bypass unproven multi-source drift gating", async () => {
     const r = await runSelection({
       n: 2,

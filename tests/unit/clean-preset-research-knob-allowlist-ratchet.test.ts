@@ -158,6 +158,7 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
       "agentless-v3-thin-strict-counterfactual",
       "agentless-v3-thin-strict-counterfactual-shadow",
       "agentless-v3-thin-strict-closure-select-clean",
+      "agentless-v3-thin-strict-closure-select-clean-witness-only",
     ]) {
       expect(cleanPresets).toContain(known)
     }
