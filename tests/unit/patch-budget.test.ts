@@ -173,7 +173,10 @@ diff --git a/a/y.py b/a/y.py
     expect(v.withinBudget).toBe(true)
   })
 
-  test("strict mode gates runtime-expanding compiler calls (#13417 helper class)", () => {
+  test("runtime-expanding calls are OBSERVE-ONLY: counted but NEVER over-budget, even under gate (jun-22)", () => {
+    // The runtime-expanding matcher was a django-specific over-engineering heuristic
+    // (get_compiler/.cursor()/…) with no general validity — a correct ORM fix may
+    // legitimately add such a call. It is now counted telemetry, never a gate.
     const dbCall = `diff --git a/django/db/models/query.py b/django/db/models/query.py
 --- a/django/db/models/query.py
 +++ b/django/db/models/query.py
@@ -186,8 +189,8 @@ diff --git a/a/y.py b/a/y.py
       ownerFiles: ["django/db/models/query.py"],
       runtimeExpandingPolicy: "gate",
     })
-    expect(v.budget.runtimeExpandingCalls).toBeGreaterThanOrEqual(1)
-    expect(v.withinBudget).toBe(false)
-    expect(v.overBudgetReasons.join(" ")).toContain("runtime-expanding budget=0")
+    expect(v.budget.runtimeExpandingCalls).toBeGreaterThanOrEqual(1) // still COUNTED
+    expect(v.withinBudget).toBe(true) // but NEVER over-budget
+    expect(v.overBudgetReasons.join(" ")).not.toContain("runtime-expanding")
   })
 })

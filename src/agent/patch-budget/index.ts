@@ -67,7 +67,8 @@ const isSource = (f: string): boolean =>
 
 /** Names whose ADDED call expands runtime surface (django over-engineer smell).
  *  Observe-only — counted, never gated, until measured. */
-const RUNTIME_EXPAND = /\b(get_compiler|pre_sql_setup|execute_sql|subprocess\.|os\.system|\.cursor\(\))/
+const RUNTIME_EXPAND =
+  /\b(get_compiler|pre_sql_setup|execute_sql|subprocess\.|os\.system|\.cursor\(\))/
 
 interface Block {
   file: string
@@ -85,8 +86,12 @@ const parseDiff = (diff: string): Block[] => {
     const added = /^new file mode /m.test(part)
     const lines = part.split(/\r?\n/)
     // hunk body: "+"/"-" lines, excluding the "+++ "/"--- " file headers.
-    const addedLines = lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1))
-    const removedLines = lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).map((l) => l.slice(1))
+    const addedLines = lines
+      .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+      .map((l) => l.slice(1))
+    const removedLines = lines
+      .filter((l) => l.startsWith("-") && !l.startsWith("---"))
+      .map((l) => l.slice(1))
     blocks.push({ file, added, addedLines, removedLines })
   }
   return blocks
@@ -161,10 +166,10 @@ export const analyzePatchBudget = (
   // no owner evidence at all + >1 source file ⇒ over (single owner is the budget).
   if (budget.sourceFiles > 1 && owner.size === 0)
     reasons.push(`source-file budget=1 (no owner evidence to justify ${budget.sourceFiles})`)
-  if (input.runtimeExpandingPolicy === "gate" && budget.runtimeExpandingCalls > 0)
-    reasons.push(
-      `runtime-expanding budget=0 (added ${budget.runtimeExpandingCalls} compiler/IO/runtime call(s))`,
-    )
+  // jun-22: runtimeExpandingCalls is OBSERVE-ONLY, never a gate. The matcher is a
+  // django-specific symbol list (get_compiler/.cursor()/…) — an over-engineering
+  // heuristic with no general validity (a correct ORM fix may legitimately add
+  // those calls). It stays a counted telemetry field; it never vetoes/over-budgets.
 
   const withinBudget = reasons.length === 0
   return { budget, withinBudget, overBudgetReasons: reasons, escalate: !withinBudget }

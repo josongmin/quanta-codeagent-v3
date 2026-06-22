@@ -2626,7 +2626,9 @@ const buildSelectionExecutorPorts = (args: {
                   readSource: (rel) => readSandboxSource(args.sandbox, rel),
                 }),
                 contracts: contractFactsFromBundle(args.publicContracts),
-                baseValidatedRed: args.baseValidatedRed,
+                ...(args.baseValidatedRed != null
+                  ? { baseValidatedRed: args.baseValidatedRed }
+                  : {}),
                 ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
                 ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
                 ...(seed !== undefined ? { seed } : {}),
@@ -3144,7 +3146,13 @@ export const makeSelectionRegressionPort = (args: {
   readonly timeoutMs: number
 }): NonNullable<SelectionPorts["regression"]> => {
   return (candidate) => {
-    if (args.verifySelectRegression === "off") return Promise.resolve(null)
+    // FAIL-CLOSED (jun-22): unset ⇒ `off`. The hidden PASS_TO_PASS branch below
+    // reads the grader's answer-key regression set, so it must require an EXPLICIT
+    // opt-in (the `gold`/`pass-to-pass` mode). Previously `undefined` fell through
+    // to it AND escaped the contamination tagger — a one-forgotten-preset-line
+    // answer-key leak. Now only an explicit non-off/non-discovered mode reaches it.
+    if (args.verifySelectRegression === "off" || args.verifySelectRegression === undefined)
+      return Promise.resolve(null)
     if (args.verifySelectRegression === "discovered") {
       return args.discoveredRegressionPort?.(candidate) ?? Promise.resolve(null)
     }

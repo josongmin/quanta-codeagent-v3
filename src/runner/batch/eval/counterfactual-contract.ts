@@ -39,7 +39,6 @@ export type StructuralCounterfactualContractKind =
   | "singleOwnerFile"
   | "noNewDefs"
   | "noNewFiles"
-  | "noRuntimeExpansion"
   | "nonEmptyPatch"
 
 /** Semantic contract kinds (T-CF-11) — the "opposite side of the failed public
@@ -56,9 +55,13 @@ export type CounterfactualContractKind =
   | StructuralCounterfactualContractKind
   | SemanticCounterfactualContractKind
 
-const STRUCTURAL_KINDS: ReadonlySet<CounterfactualContractKind> = new Set<CounterfactualContractKind>(
-  ["singleOwnerFile", "noNewDefs", "noNewFiles", "noRuntimeExpansion", "nonEmptyPatch"],
-)
+const STRUCTURAL_KINDS: ReadonlySet<CounterfactualContractKind> =
+  new Set<CounterfactualContractKind>([
+    "singleOwnerFile",
+    "noNewDefs",
+    "noNewFiles",
+    "nonEmptyPatch",
+  ])
 
 /** True for the structural (patch-budget) contract kinds; false for semantic. */
 export const isStructuralCounterfactualContract = (
@@ -76,7 +79,6 @@ export const deriveCounterfactualContracts = (
     contracts.push("singleOwnerFile")
   if (facts.newDefs > 0) contracts.push("noNewDefs")
   if (facts.newFiles > 0) contracts.push("noNewFiles")
-  if (facts.runtimeExpandingCalls > 0) contracts.push("noRuntimeExpansion")
   if (facts.emptyPatch === true) contracts.push("nonEmptyPatch")
   return contracts
 }
@@ -248,8 +250,6 @@ export const evaluateCounterfactualContracts = (args: {
         return b.newDefs > 0
       case "noNewFiles":
         return b.newFiles > 0
-      case "noRuntimeExpansion":
-        return b.runtimeExpandingCalls > 0
       case "nonEmptyPatch":
         return args.emptyPatch === true
     }

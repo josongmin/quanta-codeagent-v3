@@ -57,9 +57,9 @@ describe("deriveCounterfactualContracts", () => {
     expect(deriveCounterfactualContracts(facts({ touchedSourceFiles: 2 }))).toContain(
       "singleOwnerFile",
     )
-    expect(
-      deriveCounterfactualContracts(facts({ filesOutsideOwner: ["pkg/other.py"] })),
-    ).toContain("singleOwnerFile")
+    expect(deriveCounterfactualContracts(facts({ filesOutsideOwner: ["pkg/other.py"] }))).toContain(
+      "singleOwnerFile",
+    )
   })
 
   it("derives a contract per violated dimension and nothing for clean dimensions", () => {
@@ -80,7 +80,9 @@ describe("deriveCounterfactualContracts", () => {
 
 describe("evaluateCounterfactualContracts (real diffs via analyzePatchBudget)", () => {
   it("singleOwnerFile: cand1 touching 2 source files violates; owner-only satisfies", () => {
-    const contracts = deriveCounterfactualContracts(facts({ crossFile: true, touchedSourceFiles: 2 }))
+    const contracts = deriveCounterfactualContracts(
+      facts({ crossFile: true, touchedSourceFiles: 2 }),
+    )
     expect(contracts).toEqual(["singleOwnerFile"])
 
     const twoFileDiff = inPlaceDiff("pkg/owner.py") + inPlaceDiff("pkg/elsewhere.py")
@@ -113,7 +115,9 @@ describe("evaluateCounterfactualContracts (real diffs via analyzePatchBudget)", 
   })
 
   it("singleOwnerFile binds cand1 to the EXACT seeded owner file, not any owner-set file", () => {
-    const contracts = deriveCounterfactualContracts(facts({ crossFile: true, touchedSourceFiles: 2 }))
+    const contracts = deriveCounterfactualContracts(
+      facts({ crossFile: true, touchedSourceFiles: 2 }),
+    )
     const verdict = analyzePatchBudget(inPlaceDiff("pkg/owner_b.py"), {
       ownerFiles: ["pkg/owner_a.py", "pkg/owner_b.py"],
     })
@@ -161,38 +165,22 @@ describe("evaluateCounterfactualContracts (real diffs via analyzePatchBudget)", 
     expect(ok.violations).toEqual([])
   })
 
-  it("noRuntimeExpansion: cand1 adding a runtime-expanding call violates; in-place edit satisfies", () => {
+  it("runtime-expanding is OBSERVE-ONLY (jun-22): derives NO contract, never bars a candidate", () => {
+    // The runtime-expanding matcher was a django-specific over-engineering heuristic
+    // (get_compiler/.cursor()/…). It is now counted-only: it must NOT produce a
+    // counterfactual contract that could veto a candidate.
     const contracts = deriveCounterfactualContracts(facts({ runtimeExpandingCalls: 1 }))
-    expect(contracts).toEqual(["noRuntimeExpansion"])
+    expect(contracts).toEqual([])
 
+    // The call is still COUNTED in the budget telemetry...
     const verdict = analyzePatchBudget(runtimeExpandDiff("pkg/owner.py"), {
       ownerFiles: ["pkg/owner.py"],
       runtimeExpandingPolicy: "gate",
     })
     expect(verdict.budget.runtimeExpandingCalls).toBeGreaterThan(0)
-    const over = evaluateCounterfactualContracts({
-      contracts,
-      verdict,
-      emptyPatch: false,
-      candidateFiles: ["pkg/owner.py"],
-      targetOwnerFile: "pkg/owner.py",
-    })
-    expect(over.satisfied).toBe(false)
-    expect(over.violations).toEqual(["noRuntimeExpansion"])
-
-    const inPlace = analyzePatchBudget(inPlaceDiff("pkg/owner.py"), {
-      ownerFiles: ["pkg/owner.py"],
-      runtimeExpandingPolicy: "gate",
-    })
-    const ok = evaluateCounterfactualContracts({
-      contracts,
-      verdict: inPlace,
-      emptyPatch: false,
-      candidateFiles: ["pkg/owner.py"],
-      targetOwnerFile: "pkg/owner.py",
-    })
-    expect(ok.satisfied).toBe(true)
-    expect(ok.violations).toEqual([])
+    // ...but even under "gate" policy it is NOT over-budget (observe-only).
+    expect(verdict.overBudgetReasons.join(" ")).not.toContain("runtime-expanding")
+    expect(verdict.withinBudget).toBe(true)
   })
 
   it("nonEmptyPatch: cand1 empty violates; non-empty satisfies", () => {
