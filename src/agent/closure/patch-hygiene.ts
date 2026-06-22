@@ -18,6 +18,20 @@ export const HYGIENE_ALLOWLIST: readonly string[] = ["reproduce_issue.py"]
 const JUNK_EXT = /\.(Z|br|orig|rej|bak|swp|tmp)$/i
 const JUNK_NAME = /(^|\/)test\.html\./
 
+/**
+ * Canonicalize a path for owner-membership comparison so a cosmetic skew
+ * (a/ b/ diff prefix, leading `./`, `\` separators, trailing `/`) between an
+ * `ownerFiles` string and a `parseDiff`-captured `a/(\S+)` path never makes a
+ * legitimately-owned file look out-of-owner. Path-preserving (unlike basename,
+ * which the allowlist uses) so `pkg/foo.py` ≠ `other/foo.py`.
+ */
+const canonPath = (p: string): string =>
+  p
+    .replace(/\\/g, "/") // normalize separators
+    .replace(/^[ab]\//, "") // strip a/ or b/ diff prefix
+    .replace(/^(?:\.\/)+/, "") // strip leading ./ (repeated)
+    .replace(/\/+$/, "") // trim trailing slash(es)
+
 const basename = (p: string): string => p.slice(p.lastIndexOf("/") + 1)
 
 interface FileBlock {
@@ -43,7 +57,9 @@ export const buildPatchHygiene = (
   opts: { ownerFiles?: readonly string[]; allowlist?: readonly string[] } = {},
 ): PatchHygieneReport => {
   const allow = new Set((opts.allowlist ?? HYGIENE_ALLOWLIST).map(basename))
-  const owner = new Set(opts.ownerFiles ?? [])
+  // Owner membership is compared canonically on BOTH sides (SSOT canonPath) so a
+  // cosmetic prefix/separator skew never falsely reports an owned file outside.
+  const owner = new Set((opts.ownerFiles ?? []).map(canonPath))
   const blocks = parseDiff(diff)
   const files = [...new Set(blocks.map((b) => b.file))]
   const addedFiles = [...new Set(blocks.filter((b) => b.added).map((b) => b.file))]
@@ -51,7 +67,8 @@ export const buildPatchHygiene = (
     if (allow.has(basename(f))) return false
     return JUNK_EXT.test(f) || JUNK_NAME.test(f)
   })
-  const filesOutsideOwner = owner.size === 0 ? [] : files.filter((f) => !owner.has(f))
+  const filesOutsideOwner =
+    owner.size === 0 ? [] : [...new Set(files.map(canonPath))].filter((f) => !owner.has(f))
   return {
     patchFileCount: files.length,
     addedFiles,

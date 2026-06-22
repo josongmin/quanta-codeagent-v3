@@ -11,7 +11,10 @@ const block = (file: string, added: boolean) =>
 
 describe("buildPatchHygiene", () => {
   test("flags #16642-class stray added files (.Z/.br)", () => {
-    const diff = block("django/http/response.py", false) + block("test.html.Z", true) + block("test.html.br", true)
+    const diff =
+      block("django/http/response.py", false) +
+      block("test.html.Z", true) +
+      block("test.html.br", true)
     const r = buildPatchHygiene(diff)
     expect(r.strayAddedFiles.sort()).toEqual(["test.html.Z", "test.html.br"])
     expect(r.violation).toBe(true)
@@ -45,7 +48,9 @@ describe("buildPatchHygiene", () => {
   })
 
   test("owner-outside is telemetry only, never a deny", () => {
-    const r = buildPatchHygiene(block("django/wrong.py", false), { ownerFiles: ["django/right.py"] })
+    const r = buildPatchHygiene(block("django/wrong.py", false), {
+      ownerFiles: ["django/right.py"],
+    })
     expect(r.filesOutsideOwner).toEqual(["django/wrong.py"])
     expect(r.violation).toBe(false) // outside-owner alone never blocks in v1
   })
@@ -55,8 +60,50 @@ describe("buildPatchHygiene", () => {
     expect(r.filesOutsideOwner).toEqual([])
   })
 
+  // P1 false-positive: a legitimately-OWNED file must NOT show up in
+  // filesOutsideOwner because of a cosmetic prefix/separator mismatch between
+  // the owner string and parseDiff's `a/(\S+)` capture. Both sides must be
+  // canonicalized (strip leading ./, normalize separators to /, strip a/ b/,
+  // trim trailing slash) before the set-membership test. On the old exact-
+  // equality code (`!owner.has(f)`) each of these owned files is wrongly
+  // reported outside owner → RED. A genuinely out-of-owner file (control) must
+  // still be reported.
+  test("cosmetic owner/diff prefix mismatch does not falsely flag owned files (control still flagged)", () => {
+    // diff captures `pkg/foo.py`, `pkg/bar.py`, `pkg/sub/baz.py`, `out/of.py`.
+    const diff =
+      block("pkg/foo.py", false) +
+      block("pkg/bar.py", false) +
+      block("pkg/sub/baz.py", false) +
+      block("out/of.py", false)
+    const r = buildPatchHygiene(diff, {
+      ownerFiles: [
+        "./pkg/foo.py", // leading ./
+        "a/pkg/bar.py", // a/ prefix
+        "pkg\\sub\\baz.py", // backslash separators + (no trailing here)
+        "pkg/right/", // trailing slash (does not match any diff file → irrelevant)
+      ],
+    })
+    // All three owned files are present despite cosmetic skew; only the genuine
+    // out-of-owner file remains.
+    expect(r.filesOutsideOwner).toEqual(["out/of.py"])
+    expect(r.violation).toBe(false) // owner-outside never denies in v1
+  })
+
+  // Mirror: cosmetic skew on the DIFF side (./, a/, backslash, trailing) against
+  // a clean owner string must also canonicalize away.
+  test("cosmetic skew on the diff-captured path also canonicalizes to owned", () => {
+    const diff = block("./pkg/foo.py", false) + block("a/pkg/bar.py", false)
+    const r = buildPatchHygiene(diff, { ownerFiles: ["pkg/foo.py", "pkg/bar.py"] })
+    expect(r.filesOutsideOwner).toEqual([])
+  })
+
   test("empty diff degrades cleanly", () => {
     const r = buildPatchHygiene("")
-    expect(r).toMatchObject({ patchFileCount: 0, addedFiles: [], strayAddedFiles: [], violation: false })
+    expect(r).toMatchObject({
+      patchFileCount: 0,
+      addedFiles: [],
+      strayAddedFiles: [],
+      violation: false,
+    })
   })
 })
