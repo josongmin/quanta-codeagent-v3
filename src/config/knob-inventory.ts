@@ -1327,6 +1327,26 @@ const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/localize-budget.ts",
   },
   {
+    envKey: "QUANTA_BENCH_NO_PATCH_FORCE_FRACTION",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: no-patch breaker fires at this fraction of the turn budget (float in (0,1)). Unset ⇒ 0.8 (byte-identical). Only active when no-patch-breaker is on.",
+    readSite: "runner/knobs/knobs/no-patch-force-fraction.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_REGRESSION_MAX_TESTS",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: max discovered keep-green regression witnesses executed per candidate. Domain [1,200]. Unset ⇒ 12 (byte-identical).",
+    readSite: "runner/knobs/knobs/regression-max-tests.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
     kind: "int",
     default: undefined,

@@ -46,6 +46,7 @@ import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
 import { noPatchBreakerKnob } from "@/runner/knobs/knobs/no-patch-breaker"
+import { noPatchForceFractionKnob } from "@/runner/knobs/knobs/no-patch-force-fraction"
 import { patchBudgetKnob } from "@/runner/knobs/knobs/patch-budget"
 import { patchBudgetStrictKnob } from "@/runner/knobs/knobs/patch-budget-strict"
 import { patchHygieneKnob } from "@/runner/knobs/knobs/patch-hygiene"
@@ -54,6 +55,7 @@ import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
 import { primaryRailKnob } from "@/runner/knobs/knobs/primary-rail"
 import { ratelimitNoticeKnob } from "@/runner/knobs/knobs/ratelimit-notice"
 import { readOutlineKnob } from "@/runner/knobs/knobs/read-outline"
+import { regressionMaxTestsKnob } from "@/runner/knobs/knobs/regression-max-tests"
 import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
@@ -103,6 +105,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(mustPassKnob),
   asAnyKnob(networkProxyKnob),
   asAnyKnob(noPatchBreakerKnob),
+  asAnyKnob(noPatchForceFractionKnob),
   asAnyKnob(patchBudgetKnob),
   asAnyKnob(patchBudgetStrictKnob),
   asAnyKnob(patchHygieneKnob),
@@ -111,6 +114,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(primaryRailKnob),
   asAnyKnob(ratelimitNoticeKnob),
   asAnyKnob(readOutlineKnob),
+  asAnyKnob(regressionMaxTestsKnob),
   asAnyKnob(repairEscalationKnob),
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproDoubtKnob),

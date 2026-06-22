@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
+import { extractIssueHint } from "@/agent/issue-hint"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { Message } from "@/llm"
@@ -62,8 +63,9 @@ import {
   assembleOwnerEvidence,
   buildSelectionGenerationPacket,
   type ContractFact,
+  PacketBlindnessViolation,
+  verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
-import { extractIssueHint } from "@/agent/issue-hint"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
 import { buildCleanSelectionPublicContracts } from "@/runner/batch/eval/public-contract-bundle"
 import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
@@ -712,10 +714,12 @@ const runSelectionPhase = async (
   verifySelectProofRequired: boolean,
   publicContracts: PublicContractBundle | undefined,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
+  regressionMaxTests: number | undefined,
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
   ownerResolved: PreparedAttemptContext["ownerResolved"],
   baseValidatedRed: boolean,
+  verificationPlan: PreparedAttemptContext["verificationPlan"],
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
@@ -764,6 +768,7 @@ const runSelectionPhase = async (
   })
   const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
+  const verificationTarget = verificationTargetFromPlan(verificationPlan)
   const mergeHint = (seed: string | undefined): string | undefined =>
     verifySelectProofRequired && selectorMode === "clean"
       ? buildSelectionGenerationPacket({
@@ -775,6 +780,7 @@ const runSelectionPhase = async (
           }),
           contracts: contractFactsFromBundle(effectivePublicContracts),
           baseValidatedRed,
+          ...(verificationTarget !== undefined ? { verificationTarget } : {}),
           ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
           ...(closureHint !== undefined ? { closureHint } : {}),
           ...(seed !== undefined ? { seed } : {}),
@@ -842,6 +848,7 @@ const runSelectionPhase = async (
   const result = await runSelection({
     n,
     problemStatement: instance.problemStatement,
+    ...(verificationTarget !== undefined ? { verificationTarget } : {}),
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
@@ -979,11 +986,13 @@ const runAppMainPhase = async (args: {
       args.prepared.posture.verifySelectProofRequired,
       publicContracts,
       args.prepared.posture.verifySelectRegression,
+      args.prepared.posture.regressionMaxTests,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??
         args.prepared.localizeCandidates,
       args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
+      args.prepared.verificationPlan,
       args.prepared.precomputedHint,
       args.prepared.reproHint,
       args.prepared.closureHint,
@@ -1105,6 +1114,20 @@ const runInstanceOnce = async (
         reproTest,
         verdict: "degraded",
         error: error.message,
+        ...(prepared !== undefined ? { prepared, sandbox } : {}),
+      })
+    }
+    if (error instanceof PacketBlindnessViolation) {
+      // A blindness-guard throw means an evidence packet was built from a
+      // forbidden source — a CONSTRUCTION bug, not a candidate miss. Classify
+      // `degraded` (excluded from resolved/total) so it can never silently
+      // confound a measurement run as a real failure.
+      return latePhaseFailureResultOf({
+        instance,
+        phase,
+        reproTest,
+        verdict: "degraded",
+        error: `evidence packet blindness violation (build aborted): ${error.message}`,
         ...(prepared !== undefined ? { prepared, sandbox } : {}),
       })
     }

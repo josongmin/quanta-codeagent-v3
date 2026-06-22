@@ -1809,7 +1809,9 @@ export const buildConfig = (
     // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
   }
   const knobApplied = applyBenchKnobs(baseConfig, state, { instance, sandbox })
-  const noPatchApplied = opt.noPatchBreaker ? wireNoPatchBreaker(knobApplied) : knobApplied
+  const noPatchApplied = opt.noPatchBreaker
+    ? wireNoPatchBreaker(knobApplied, opt.noPatchForceFraction)
+    : knobApplied
   return wireOptionalAgentPorts(
     {
       ...noPatchApplied,
@@ -2531,6 +2533,7 @@ const resolveSelectionPhasePorts = async (args: {
   readonly llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"]
   readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
   readonly verifySelectRepro: BenchPosture["verifySelectRepro"]
+  readonly regressionMaxTests: number | undefined
   readonly reproSources: readonly string[]
   readonly baseValidatedRed: boolean
   readonly selectionOwnerCandidates: readonly string[]
@@ -2543,12 +2546,15 @@ const resolveSelectionPhasePorts = async (args: {
       args.reproSources,
       args.verifySelectRepro,
     )
+  const regressionMaxTests =
+    args.regressionMaxTests !== undefined ? { maxTests: args.regressionMaxTests } : {}
   const discoveredRegressionPort =
     args.verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({
           instance: args.instance,
           sandbox: args.sandbox,
           timeoutMs: args.deps.timeoutMs,
+          ...regressionMaxTests,
         })
       : undefined
   const publicRegressionProofSelectionPort =
@@ -2557,6 +2563,7 @@ const resolveSelectionPhasePorts = async (args: {
           instance: args.instance,
           sandbox: args.sandbox,
           timeoutMs: args.deps.timeoutMs,
+          ...regressionMaxTests,
         })
       : undefined
   const regressionSelectionPort = makeSelectionRegressionPort({
@@ -2768,6 +2775,7 @@ const runSelectionPhase = async (
   verifySelectProofRequired: boolean,
   publicContracts: PublicContractBundle | undefined,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
+  regressionMaxTests: number | undefined,
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
   ownerResolved: readonly OwnerSibling[] | undefined,
@@ -2797,6 +2805,7 @@ const runSelectionPhase = async (
     riskGate,
     llmRiskGateMode,
     verifySelectRegression,
+    regressionMaxTests,
     verifySelectRepro,
     reproSources,
     baseValidatedRed,
@@ -3435,6 +3444,7 @@ const runMainPhase = async (args: {
       args.prepared.posture.verifySelectProofRequired,
       publicContracts,
       args.prepared.posture.verifySelectRegression,
+      args.prepared.posture.regressionMaxTests,
       args.prepared.posture.verifySelectRepro,
       args.prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ??
         args.prepared.localizeCandidates,

@@ -8,7 +8,11 @@ const commitNowMessage = (turnsUsed: number, maxTurns: number): string =>
 const isTurnBudgetStop = (stopReason: StopReason | undefined): boolean =>
   stopReason === "max_turns" || stopReason === "budget_exhausted"
 
-export const attachNoPatchBreaker = (hooks: HookBus, maxTurns: number): HookBus => {
+export const attachNoPatchBreaker = (
+  hooks: HookBus,
+  maxTurns: number,
+  forceCommitAtFraction?: number,
+): HookBus => {
   const cap = Number.isFinite(maxTurns) && maxTurns > 0 ? Math.floor(maxTurns) : 1
   let hasMutatingEdit = false
   let injected = false
@@ -25,6 +29,7 @@ export const attachNoPatchBreaker = (hooks: HookBus, maxTurns: number): HookBus 
       turnsUsed: event.turn,
       maxTurns: cap,
       hasMutatingEdit,
+      ...(forceCommitAtFraction !== undefined ? { forceCommitAtFraction } : {}),
     })
     if (decision.action === "continue") return
     injected = true
@@ -38,8 +43,15 @@ export const attachNoPatchBreaker = (hooks: HookBus, maxTurns: number): HookBus 
   return hooks
 }
 
-export const wireNoPatchBreaker = (config: AgentConfig): AgentConfig => {
-  const hooks = attachNoPatchBreaker(config.hooks ?? new HookBus(), config.maxTurns)
+export const wireNoPatchBreaker = (
+  config: AgentConfig,
+  forceCommitAtFraction?: number,
+): AgentConfig => {
+  const hooks = attachNoPatchBreaker(
+    config.hooks ?? new HookBus(),
+    config.maxTurns,
+    forceCommitAtFraction,
+  )
   return config.hooks === undefined ? { ...config, hooks } : config
 }
 

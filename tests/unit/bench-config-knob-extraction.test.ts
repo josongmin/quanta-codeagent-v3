@@ -9,6 +9,8 @@
  */
 import { describe, expect, it } from "bun:test"
 import { localizeBudgetKnob } from "@/runner/knobs/knobs/localize-budget"
+import { noPatchForceFractionKnob } from "@/runner/knobs/knobs/no-patch-force-fraction"
+import { regressionMaxTestsKnob } from "@/runner/knobs/knobs/regression-max-tests"
 import { reproExecTimeoutKnob } from "@/runner/knobs/knobs/repro-exec-timeout"
 
 describe("repro-exec-timeout knob", () => {
@@ -60,5 +62,43 @@ describe("localize-budget knob (structured)", () => {
     expect(p("bogus=5")).toBeUndefined()
     expect(p("topk=abc")).toBeUndefined()
     expect(p("topk")).toBeUndefined()
+  })
+})
+
+describe("no-patch-force-fraction knob (float)", () => {
+  const p = noPatchForceFractionKnob.parse
+  it("unset ⇒ undefined (breaker keeps 0.8 default, byte-identical)", () => {
+    expect(p(undefined)).toBeUndefined()
+    expect(p("")).toBeUndefined()
+  })
+  it("parses a float in (0,1)", () => {
+    expect(p("0.6")).toBe(0.6)
+    expect(p(".9")).toBe(0.9)
+  })
+  it("rejects out-of-range / non-float (0, 1, integers, >1)", () => {
+    expect(p("0")).toBeUndefined()
+    expect(p("1")).toBeUndefined()
+    expect(p("1.2")).toBeUndefined()
+    expect(p("8")).toBeUndefined()
+    expect(p("abc")).toBeUndefined()
+  })
+})
+
+describe("regression-max-tests knob (int)", () => {
+  const p = regressionMaxTestsKnob.parse
+  it("unset ⇒ undefined (keeps 12 default SSOT, byte-identical)", () => {
+    expect(p(undefined)).toBeUndefined()
+    expect(p("")).toBeUndefined()
+  })
+  it("parses + clamps [1,200]", () => {
+    expect(p("30")).toBe(30)
+    expect(p("0")).toBeUndefined()
+    expect(p("201")).toBeUndefined()
+    expect(p("1")).toBe(1)
+    expect(p("200")).toBe(200)
+  })
+  it("rejects non-integer", () => {
+    expect(p("12.5")).toBeUndefined()
+    expect(p("x")).toBeUndefined()
   })
 })

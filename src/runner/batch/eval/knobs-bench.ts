@@ -209,6 +209,10 @@ export interface BenchPosture {
   /** jun-22 config-extraction: agentless one-shot localizer breadth dials
    *  (topK/maxTreeChars/maxFiles). undefined ⇒ hardcoded defaults. */
   readonly localizeBudget: LocalizeBudgetValue | undefined
+  /** jun-22 config-extraction: no-patch breaker fire fraction. undefined ⇒ 0.8. */
+  readonly noPatchForceFraction: number | undefined
+  /** jun-22 config-extraction: max discovered regression witnesses run. undefined ⇒ 12. */
+  readonly regressionMaxTests: number | undefined
   /** jun-19 #10999 under-fix lever: ON ⇒ the repro prompt gets the
    *  ADVERSARIAL-coverage block so a shallow happy-path fix stays RED. */
   readonly adversarialRepro: boolean
@@ -405,6 +409,8 @@ export const benchPostureFromState = (
   const repro = readKnobValue(state, "repro-test", isReproValue)
   const reproExecTimeoutMs = readKnobValue(state, "repro-exec-timeout", isNumber)
   const localizeBudget = readKnobValue(state, "localize-budget", isLocalizeBudgetValue)
+  const noPatchForceFraction = readKnobValue(state, "no-patch-force-fraction", isNumber)
+  const regressionMaxTests = readKnobValue(state, "regression-max-tests", isNumber)
   const reproDoubt = state.values.has("repro-doubt")
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
@@ -477,6 +483,8 @@ export const benchPostureFromState = (
     reproTestK: repro !== undefined ? repro.samples : undefined,
     reproExecTimeoutMs,
     localizeBudget,
+    noPatchForceFraction,
+    regressionMaxTests,
     adversarialRepro,
     reproDoubt,
     retryTransient,
