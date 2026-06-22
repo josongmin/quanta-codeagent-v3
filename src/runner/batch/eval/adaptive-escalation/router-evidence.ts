@@ -62,7 +62,11 @@ export const deriveEvidenceFactsFromPacket = (packet: LlmEvidencePacket): Eviden
     regressionSignal: receipts.some((r) => r.source === "discovered_regression"),
     infraBlocked:
       receipts.some((r) => r.state === "execution_failed" || r.state === "env_prep_failed") ||
-      packet.missingEvidence.some((m) => m.kind.includes("infra")),
+      // The packet emits the infra-blocked signal as a `public_proof` missing
+      // entry (reason `public_proof_infra_blocked`, llm-evidence-packet.ts:1185);
+      // there is NO `*infra*` kind, so the prior `includes("infra")` was dead.
+      // Match the real kind so a build/env block surfaces from missingEvidence too.
+      packet.missingEvidence.some((m) => m.kind === "public_proof"),
   }
 }
 

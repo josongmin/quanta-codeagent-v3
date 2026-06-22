@@ -131,10 +131,23 @@ describe("router evidence projection (P5)", () => {
         }),
         gap: "infra_blocked",
       },
+      {
+        // teeth for the dead-check fix: the infra-blocked signal also arrives as a
+        // `public_proof` missingEvidence entry; the prior `includes("infra")` never
+        // matched it (no *infra* kind exists), so this path was silently inert.
+        name: "missing public_proof (infra-blocked) → infra_blocked from missingEvidence",
+        mutate: (p) => ({
+          ...p,
+          missingEvidence: [{ kind: "public_proof", reason: "public_proof_infra_blocked" }],
+        }),
+        gap: "infra_blocked",
+      },
     ]
     for (const { name, mutate, gap } of cases) {
       test(name, () => {
-        const gaps = deriveEvidenceGaps(deriveEvidenceFactsFromPacket(mutate(goodPacket())))
+        const gaps: readonly string[] = deriveEvidenceGaps(
+          deriveEvidenceFactsFromPacket(mutate(goodPacket())),
+        )
         expect(gaps).toContain(gap)
         // paired-control: the baseline had NONE of these gaps, so the mutation
         // is what introduced exactly this one (cross-check it's not always-on).
