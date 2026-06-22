@@ -310,6 +310,39 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     })
   })
 
+  test("candidate_post_review stage survives per-instance llmEvidence summary even though it is not counted in submission totals", () => {
+    const reviewPacket = {
+      stage: "candidate_post_review" as const,
+      instanceIdHash: "abc123",
+      evidenceRevision: "candidate-post-review-v1",
+      question: "q",
+      allowedActions: [],
+      forbiddenSources: [],
+      publicIssueFacts: [],
+      ownerEvidence: [],
+      proofReceipts: [{ source: "public_mwe", state: "candidate_red" as const }],
+      contractFacts: [],
+      staticFacts: [],
+      missingEvidence: [],
+    }
+    const rep = buildReport(meta, [
+      baseResult({
+        llmEvidence: {
+          candidatePostReview: reviewPacket,
+        } as LlmEvidenceArtifacts & { candidatePostReview: typeof reviewPacket },
+      }),
+    ])
+    expect(rep.perInstance[0]?.llmEvidenceStages).toEqual(["candidate_post_review"])
+    expect(rep.perInstance[0]?.llmEvidenceRevision).toEqual({
+      candidate_post_review: "candidate-post-review-v1",
+    })
+    expect(rep.llmEvidenceTotals).toEqual({
+      packetizedGenerationCount: 0,
+      packetizedRepairCount: 0,
+      packetizedSelectionExplanationCount: 0,
+    })
+  })
+
   // Byte-identical contract: absent telemetry ⇒ keys omitted (not null).
   test("absent telemetry ⇒ keys omitted (byte-identical)", () => {
     const rep = buildReport(meta, [baseResult({})])

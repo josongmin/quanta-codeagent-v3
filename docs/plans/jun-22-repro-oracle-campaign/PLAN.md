@@ -47,9 +47,11 @@ stochastic LLM rollout. Today we re-pay full rollout+EC2 per fix because:
 - there's no "re-score cached candidates with new oracle" mode.
 
 Existing infra (verified): `QUANTA_BENCH_RECORD_TRAJECTORY=1` records full LLM
-stream → `trajectory.jsonl`; `QUANTA_LLM_REPLAY=<cassette>` replays it for 0
-tokens; repro executor is fully port-injected (exec/writeFile/buildArgv) so it
-runs offline; `grade --predictions` already decouples grade from gen.
+stream → `trajectory.jsonl`; **`QUANTA_BENCH_REPLAY_TRAJECTORY=<cassette>`** replays
+it for 0 tokens (bench cassette axis, `src/apps/bench/index.ts:709` — NOT the
+generic `QUANTA_LLM_REPLAY`); repro executor is fully port-injected
+(exec/writeFile/buildArgv) so it runs offline; `grade --predictions` already
+decouples grade from gen.
 **Caveat A3**: replay reuses the SAME LLM outputs → only DETERMINISTIC fixes are
 free to iterate; repro-gen PROMPT changes still need fresh paid generation.
 
@@ -61,23 +63,38 @@ free; two-phase `generate`(paid,cached) × `evaluate`(free,re-runnable).
 
 ## Plan (phased, each gated on a measured readout)
 
-### Phase 0 — free de-risk (0 tokens, 0 EC2)
-- [ ] Read official swebench spec install for astropy-13033 / these django ids.
-      Confirm the exact build-dep handling so the fix MIRRORS spec (anti-answer-key gate).
-- [ ] Local uv repro: checkout astropy@base, reproduce `extension_helpers` failure,
-      test `--no-build-isolation` + declared build-system.requires → `import astropy` OK.
-- [ ] Decide principled build-env approach (prefer `--no-build-isolation` + repo's
-      own build-system.requires over a hand-maintained per-repo map; avoid sprawl).
+### Phase 0 — bypass-path AUDIT, not new design (0 tokens, 0 EC2)
+The shared env builder ALREADY has astropy's `setuptools<60` + `extension_helpers`
++ `--no-build-isolation` (`src/runner/batch/corpus/project-env.ts:5`). So the
+astropy `exec_failed` is most likely a **proof path that does NOT route through
+this builder**, not a missing fix.
+- [ ] Trace the repro/MWE/smoke exec argv for astropy and find WHICH path bypasses
+      `buildProjectEnvUvRunArgv` (the one whose stderr was `No module named
+      'extension_helpers'`). Likely an exec seam that builds argv without the env
+      stanza.
+- [ ] (kept) anti-answer-key gate: upstream swebench astropy install stanza file
+      not yet confirmed — keep mirroring-spec discipline; do not invent per-repo deps.
+- [ ] Verify the fix via Phase-1 offline rescore once the harness exists (free).
 
 ### Phase 1 — free-iteration harness (build + hermetic test, ~0 tokens) — HIGHEST ROI
-- [ ] Persist artifacts (gated/observe-only, byte-identical when off):
-      repro-script sources + ALL K candidate patches → `repro-scripts-*.jsonl` /
-      `candidates-*.jsonl` alongside preds.
-- [ ] Add re-score mode (`evaluate-repro` / `grade --oracle-only`): cached
-      candidates+scripts → re-run deterministic repro exec + selection with current
-      oracle code. Zero LLM.
-- [ ] Hermetic unit test (pattern: tests/unit/bench-repro-test-wiring.test.ts).
-      Readout: re-score reproduces the recorded outcomes byte-for-byte before any fix.
+Implementation ORDER: sidecars → offline rescore → byte-identical round-trip test
+→ (Phase 2) 1 paid cassette seed. Hellgate protocol: RED e2e first, then TDD.
+- [ ] **Sidecar persistence — ALL K, not just selected** (gated/observe-only,
+      byte-identical when off). Current telemetry intentionally DROPS full patches
+      (`selection-types.ts:29`, `selection-proof-telemetry.ts:216`) and the repro
+      helper keeps only `outcome==="reproduced"` (`driver.ts:1302`) — insufficient
+      for exact-parity rescore. Persist:
+      - ALL K repro script SOURCES (every sample, every outcome), and
+      - ALL K candidate patch DIFFs (every candidate, not just the winner),
+      → `repro-scripts-*.jsonl` / `candidates-*.jsonl` alongside preds.
+- [ ] **Offline rescore command — `evaluate-repro` (or `rescore-oracle`), NOT
+      `grade --oracle-only`** (`grade` = official harness grading; keep surfaces
+      distinct). Input: cached candidates + scripts (+ dataset for base checkout);
+      re-run deterministic repro exec + selection with current oracle code. Zero LLM.
+- [ ] Hermetic unit tests (TDD; pattern: tests/unit/bench-repro-test-wiring.test.ts).
+- [ ] **Byte-identical round-trip e2e (RED-first hellgate)**: rescore of cached
+      artifacts reproduces the recorded outcomes/selection byte-for-byte BEFORE any
+      oracle fix. This is the harness's correctness proof.
 
 ### Phase 2 — seed ONE cassette (1 paid run, the only paid step for a while)
 - [ ] Re-run the 3 with `QUANTA_BENCH_RECORD_TRAJECTORY=1` + Phase-0 astropy fix +

@@ -62,13 +62,12 @@ import {
 } from "@/runner/batch/eval/driver"
 import {
   buildSelectionOwnerEvidence,
-  buildSelectionGenerationLlmEvidencePacket,
+  buildSelectionGenerationPrompt,
   type ContractFact,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
   PacketBlindnessViolation,
   recordLlmEvidencePacket,
-  renderLlmEvidencePacket,
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
@@ -790,27 +789,28 @@ const runSelectionPhase = async (
     staticWitnesses,
     readSource: (rel) => readSandboxSource(sandbox, rel),
   })
+  const selectionBaseValidatedRed =
+    verifySelectRegression === "discovered" ? null : baseValidatedRed
   const generationEnvCaveats = selectionGenerationEnvCaveats({
     reproHint,
     reproTest,
   })
   const mergeHint = (seed: string | undefined): string | undefined =>
     verifySelectProofRequired && selectorMode === "clean"
-      ? (() => {
-          const packet = buildSelectionGenerationLlmEvidencePacket({
-            problemStatement: instance.problemStatement,
-            ownerEvidence: selectionOwnerEvidence,
-            contracts: contractFactsFromBundle(effectivePublicContracts),
-            baseValidatedRed,
-            ...(verificationTarget !== undefined ? { verificationTarget } : {}),
-            ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
-            ...(closureHint !== undefined ? { closureHint } : {}),
-            ...(generationEnvCaveats.length > 0 ? { envCaveats: generationEnvCaveats } : {}),
-            ...(seed !== undefined ? { seed } : {}),
-          })
-          recordLlmEvidencePacket(selectionLlmEvidence, packet)
-          return renderLlmEvidencePacket(packet)
-        })()
+      ? buildSelectionGenerationPrompt({
+          problemStatement: instance.problemStatement,
+          ownerEvidence: selectionOwnerEvidence,
+          contracts: contractFactsFromBundle(effectivePublicContracts),
+          baseValidatedRed: selectionBaseValidatedRed,
+          ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+          ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
+          ...(closureHint !== undefined ? { closureHint } : {}),
+          ...(generationEnvCaveats.length > 0 ? { envCaveats: generationEnvCaveats } : {}),
+          ...(seed !== undefined ? { seed } : {}),
+          recordLlmEvidencePacket: (packet) => {
+            recordLlmEvidencePacket(selectionLlmEvidence, packet)
+          },
+        })
       : seed === undefined
         ? closureHint
         : closureHint === undefined
@@ -860,8 +860,6 @@ const runSelectionPhase = async (
   // authority veto admissibility. In that mode, impacted repo tests are the hard
   // regression signal and repro consensus is already downgraded to positive-only
   // soft credit / fail-open; keep repro-authority absent as `null`, not `false`.
-  const selectionBaseValidatedRed =
-    verifySelectRegression === "discovered" ? null : baseValidatedRed
   const selectionRiskGate = buildSelectionRiskGate({
     structural: riskGate,
     llmMode: llmRiskGateMode,

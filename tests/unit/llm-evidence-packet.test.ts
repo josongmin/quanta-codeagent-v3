@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  buildCandidatePostReviewPacket,
   assembleOwnerEvidence,
   assertPacketBlind,
   buildCandidateReviewPacket,
@@ -8,6 +9,7 @@ import {
   buildRepairSeedPacket,
   buildSelectionExplanationPacket,
   buildSelectionGenerationPacket,
+  buildSelectionGenerationPrompt,
   candidatePatchHash,
   extractSymbolSlice,
   type LlmEvidenceArtifacts,
@@ -220,6 +222,35 @@ describe("llm evidence packet — stage builders", () => {
     expect(rendered).toContain("env caveat:")
     expect(rendered).toContain("attempted public repro helper failed to execute")
   })
+
+  test("post-exec review packet carries executed proof receipts without pretending to be a winner decision", () => {
+    const rendered = buildCandidatePostReviewPacket({
+      problemStatement: "Axis inversion still fails when explicit limits are preserved.",
+      candidatePatchHash: "deadbeef",
+      ownerEvidence: [{ file: "pkg/axis.py", symbols: ["invert_axis"], provenance: "repair-owner" }],
+      proofReceipts: [
+        { source: "public_mwe", state: "candidate_red", command: "python repro.py" },
+        { source: "hard:proofRequiredMissing", state: "not_run" },
+      ],
+      contracts: [{ contractId: "owner-touch", authority: "static-witness/weak", satisfied: true }],
+    })
+    expect(rendered).toContain('"stage": "candidate_post_review"')
+    expect(rendered).toContain('"candidatePatchHash": "deadbeef"')
+    expect(rendered).toContain('"source": "public_mwe"')
+    expect(rendered).toContain('"state": "candidate_red"')
+    expect(rendered).not.toContain("select_winner")
+  })
+
+  test("shared clean generation prompt omits baseValidatedRed when repro authority is null", () => {
+    const rendered = buildSelectionGenerationPrompt({
+      problemStatement: "dbshell ignores connection settings.",
+      ownerEvidence: [],
+      contracts: [],
+      baseValidatedRed: null,
+    })
+    expect(rendered).toContain('"stage": "candidate_generation"')
+    expect(rendered).not.toContain("baseValidatedRed")
+  })
 })
 
 describe("llm evidence packet — stage history aggregation", () => {
@@ -269,6 +300,28 @@ describe("llm evidence packet — stage history aggregation", () => {
     expect(summary?.stages).toEqual(["candidate_review"])
     expect(summary?.revisionByStage).toEqual({ candidate_review: "risk-gate-v2" })
     expect(summary?.missingKinds).toEqual(["risk_context"])
+  })
+
+  test("candidate_post_review stage is retained in artifact summaries", () => {
+    const packet: LlmEvidencePacket = {
+      stage: "candidate_post_review",
+      instanceIdHash: "x",
+      evidenceRevision: "candidate-post-review-v1",
+      question: "q",
+      allowedActions: [],
+      forbiddenSources: [],
+      publicIssueFacts: [],
+      ownerEvidence: [],
+      proofReceipts: [{ source: "public_mwe", state: "candidate_red" }],
+      contractFacts: [],
+      staticFacts: [],
+      missingEvidence: [],
+    }
+    const artifacts: Partial<LlmEvidenceArtifacts> = {}
+    recordLlmEvidencePacket(artifacts, packet)
+    const summary = summarizeLlmEvidenceArtifacts(artifacts)
+    expect(summary?.stages).toEqual(["candidate_post_review"])
+    expect(summary?.revisionByStage).toEqual({ candidate_post_review: "candidate-post-review-v1" })
   })
 })
 
@@ -467,6 +520,32 @@ describe("llm evidence packet — selection explanation (report-only, no submit 
     expect(packet.staticFacts.some((s) => s.kind === "selected_candidate" && s.value === "<none>")).toBe(true)
     expect(packet.contractFacts.some((c) => c.contractId === "candidate:cand-0")).toBe(true)
     expect(packet.missingEvidence.some((m) => m.reason === "no_positive_executed_public_proof")).toBe(true)
+  })
+
+  test("maps proof receipts by exact proof-state enums instead of string heuristics", () => {
+    const mapped = buildSelectionExplanationPacket({
+      problemStatement: "Time zone conversion is wrong across backends",
+      ownerFiles: ["django/db/backends/mysql/operations.py"],
+      winnerId: null,
+      proofSummary: {
+        proofState: "proof_missing",
+        proofSource: "none",
+        proofRequiredMissing: false,
+        contractOnlySubmitted: false,
+        contractOnlyBlocked: false,
+        publicMweState: "base_not_red",
+        publicRegressionState: "coverage_capped",
+        reproConsensusState: "false_negative_suspected",
+        repairOnlyCandidates: 0,
+        submittedCandidateProof: false,
+      },
+      candidates: [],
+    })
+    expect(mapped.proofReceipts).toEqual([
+      { source: "public_mwe", state: "base_green" },
+      { source: "discovered_regression", state: "static_only" },
+      { source: "repro_consensus", state: "static_only" },
+    ])
   })
 })
 

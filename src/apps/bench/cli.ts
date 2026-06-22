@@ -21,6 +21,17 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { loadCorpus } from "@/runner/batch/corpus/loader"
+import { reproRunArgv } from "@/runner/batch/corpus/dataset"
+import { execArgv } from "@/runner/batch/eval/exec"
+import {
+  buildImportProbeInputs,
+  enrichInputsFromInstances,
+  parseReproScriptsSidecar,
+  type RescoreInstanceCoords,
+  runReproRescore,
+} from "@/runner/batch/eval/repro-rescore-run"
+import { cleanupSandbox, copyRepo, createSandbox } from "@/runner/batch/eval/sandbox"
 import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
@@ -86,6 +97,8 @@ const KNOWN_SUBCOMMANDS = new Set([
   "leaderboard",
   "cost",
   "presets",
+  "evaluate-repro",
+  "rescore-oracle",
   "help",
   "--help",
   "-h",
@@ -1881,6 +1894,139 @@ const cmdPresets = (): void => {
   for (const line of renderBenchPresetListLines()) logger.info(line)
 }
 
+/**
+ * `evaluate-repro` — DETERMINISTIC OFFLINE repro-oracle rescore (ADR jun-22).
+ *
+ * Re-runs already-generated repro scripts (or a synthetic build-env import
+ * probe) against a freshly checked-out base tree, under the CURRENT build-env /
+ * exec code, with ZERO LLM. Lets us iterate repro-oracle / build-env fixes (e.g.
+ * astropy `extension_helpers`) for free and watch `exec_failed → reproduced`
+ * flip, instead of paying for a full remote patch-gen run each time.
+ *
+ *   quanta-bench evaluate-repro --corpus <dir> --probe
+ *   quanta-bench evaluate-repro --corpus <dir> --repro-scripts <sidecar.jsonl>
+ *     [--instance a,b]  [--exec-timeout-ms 120000]
+ */
+const cmdEvaluateRepro = async (): Promise<void> => {
+  const corpusRoot = argValue("--corpus") ?? process.env.QUANTA_SWEBENCH_CORPUS_ROOT
+  const reproScriptsPath = argValue("--repro-scripts")
+  const probe = hasFlag("--probe")
+  if (corpusRoot === undefined) {
+    logger.info("evaluate-repro requires --corpus <dir> (a provisioned SWE-bench corpus root)")
+    process.exit(2)
+  }
+  if (reproScriptsPath === undefined && !probe) {
+    logger.info(
+      "evaluate-repro needs either --repro-scripts <sidecar.jsonl> or --probe (synthetic import probe)",
+    )
+    process.exit(2)
+  }
+  const onlyInstance = argValue("--instance")
+  const wanted = onlyInstance !== undefined ? new Set(onlyInstance.split(",")) : undefined
+  // Default MUST match production's DEFAULT_EXEC_TIMEOUT_MS (60s): a longer cap
+  // here would let a slow repro pass in rescore that the live run kills → a
+  // false parity=drift. Override with --exec-timeout-ms when intentionally
+  // probing the timeout boundary.
+  const execTimeoutMs = Number(argValue("--exec-timeout-ms") ?? "60000")
+
+  const all = await loadCorpus(corpusRoot)
+  const instances = (wanted !== undefined ? all.filter((i) => wanted.has(i.id)) : all).filter(
+    (i) => i.swebench?.repo !== undefined,
+  )
+  if (instances.length === 0) {
+    logger.info(`evaluate-repro: no swebench instances matched under ${corpusRoot}`)
+    return
+  }
+  const byId = new Map(instances.map((i) => [i.id, i]))
+  const coordsById = new Map<string, RescoreInstanceCoords>(
+    instances.map((i) => [
+      i.id,
+      {
+        instanceId: i.id,
+        ...(i.swebench?.repo !== undefined ? { repo: i.swebench.repo } : {}),
+        ...(i.swebench?.version !== undefined ? { version: i.swebench.version } : {}),
+        ...(i.swebench?.baseCommit !== undefined ? { baseCommit: i.swebench.baseCommit } : {}),
+      },
+    ]),
+  )
+
+  let inputs
+  if (probe) {
+    inputs = buildImportProbeInputs(
+      instances.map((i) => ({
+        instanceId: i.id,
+        repo: i.swebench?.repo as string,
+        ...(i.swebench?.version !== undefined ? { version: i.swebench.version } : {}),
+        ...(i.swebench?.baseCommit !== undefined ? { baseCommit: i.swebench.baseCommit } : {}),
+      })),
+    )
+  } else {
+    const parsed = parseReproScriptsSidecar(readFileSync(reproScriptsPath as string, "utf8"))
+    const { enriched, unmatched } = enrichInputsFromInstances(parsed, coordsById)
+    if (unmatched.length > 0) {
+      logger.info(
+        `evaluate-repro: ${unmatched.length} sidecar instance(s) absent from corpus (skipped): ${unmatched.join(", ")}`,
+      )
+    }
+    inputs = enriched
+  }
+
+  const sandboxes: string[] = []
+  const { results, summary, skipped } = await runReproRescore(inputs, {
+    prepareSandbox: async (input) => {
+      const inst = byId.get(input.instanceId)
+      if (inst === undefined) throw new Error(`no corpus instance for ${input.instanceId}`)
+      const sb = await createSandbox(inst)
+      await copyRepo(inst, sb)
+      sandboxes.push(sb)
+      return sb
+    },
+    exec: (argv, cwd, t) => execArgv(argv, cwd, t),
+    // NO bare-python fallback: a swebench repro run outside the project build-env
+    // ALWAYS fails to import the project → a false exec_failed that looks like a
+    // real build-env failure. If repo is missing here it is a corpus/sidecar gap;
+    // surface it (rescoreOne catches → result.error) instead of lying.
+    buildArgv: (input, scriptPath) => {
+      if (input.repo === undefined) {
+        throw new Error(`evaluate-repro: ${input.instanceId} has no repo (corpus/sidecar gap)`)
+      }
+      return reproRunArgv(input.repo, input.version, scriptPath)
+    },
+    config: { execTimeoutMs },
+  })
+
+  for (const r of results) {
+    const recorded = r.recordedOutcomes.filter((o) => o !== undefined).join(",")
+    logger.info(
+      `  ${r.instanceId}: outcomes=[${r.outcomes.join(",")}] reproduced=${r.reproducedCount} parity=${r.parity}` +
+        (recorded !== "" ? ` (was [${recorded}])` : "") +
+        (r.error !== undefined ? ` ERROR ${r.error}` : ""),
+    )
+  }
+  logger.info(
+    `evaluate-repro: total=${summary.total} instancesReproduced=${summary.instancesReproduced} drift=${summary.drift} errored=${summary.errored}` +
+      (skipped > 0 ? ` SKIPPED=${skipped}` : ""),
+  )
+
+  for (const sb of sandboxes) {
+    try {
+      await cleanupSandbox(sb)
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
+  // Loud failure: if the run produced NO usable signal (every instance errored,
+  // or some were skipped by abort), do not exit 0 — a `drift=0` summary would
+  // otherwise read as "no regressions" when in truth nothing was evaluated.
+  if (skipped > 0 || (summary.total > 0 && summary.errored === summary.total)) {
+    logger.info(
+      `evaluate-repro: incomplete — ${summary.errored}/${summary.total} errored, ${skipped} skipped`,
+    )
+    process.exit(1)
+  }
+}
+
 const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
 
   run          local patch-gen + optional local grading (legacy flat flags)
@@ -1890,6 +2036,8 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   leaderboard  render an official/local/research split table from run report(s)
   cost         token / $ / wall-clock summary for a run report
   presets      list bench presets
+  evaluate-repro  OFFLINE repro-oracle rescore (zero LLM): re-run cached repro
+                  scripts / build-env import probe against a fresh base checkout
 
 Default live execution preset: ${CURRENT_BENCH_BASE_PRESET}
 Explicit selectors still win: QUANTA_BENCH_PRESET > QUANTA_BENCH_SOTA > QUANTA_KNOBS_PRESET > --preset.
@@ -1942,6 +2090,10 @@ const main = async (): Promise<void> => {
       return
     case "presets":
       cmdPresets()
+      return
+    case "evaluate-repro":
+    case "rescore-oracle":
+      await cmdEvaluateRepro()
       return
     default:
       printBlock(HELP)

@@ -603,6 +603,7 @@ describe("runSelection", () => {
     expect(r.winner).toBeNull()
     expect(r.noWinnerReason).toBe("proof_infra_blocked")
     expect(seeds).toHaveLength(3)
+    expect(seeds[2]).toContain('"stage": "candidate_post_review"')
     expect(seeds[2]).toContain('"stage": "repair_seed"')
     expect(seeds[2]).toContain('"source": "public_mwe"')
     expect(seeds[2]).toContain("proofInfraBlocked")
@@ -641,12 +642,43 @@ describe("runSelection", () => {
     expect(r.winner).toBeNull()
     expect(r.noWinnerReason).toBe("proof_required_missing")
     expect(seeds).toHaveLength(2)
+    expect(seeds[1]).toContain('"stage": "candidate_post_review"')
     expect(seeds[1]).toContain('"stage": "repair_seed"')
     expect(seeds[1]).toContain('"verificationTarget"')
     expect(seeds[1]).toContain("proofRequiredMissing")
     expect(seeds[1]).toContain("no_positive_executed_public_proof_attached")
     expect(seeds[1]).toContain("owner-must-touch:pkg/owner.py")
     expect(seeds[1]).not.toContain("requiredContractsSatisfied=1")
+  })
+
+  it("records candidate_post_review before repair_seed on the repair path", async () => {
+    const recorded: LlmEvidencePacket[] = []
+    await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      problemStatement: "Public issue text for a proof-required contract-only miss.",
+      seeds: [undefined],
+      owners: new Set(["pkg/owner.py"]),
+      publicContracts: {
+        contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]),
+      },
+      recordLlmEvidencePacket: (packet) => {
+        recorded.push(packet)
+      },
+      ports: {
+        generate: async (i) =>
+          cand({
+            id: `cand-${i}`,
+            patch: patchForFiles(["pkg/owner.py"]),
+            files: ["pkg/owner.py"],
+          }),
+      },
+    })
+    expect(recorded.map((packet) => packet.stage)).toEqual([
+      "candidate_post_review",
+      "repair_seed",
+    ])
   })
 
   it("proof-required mode bypasses blind staticAccept and keeps searching through finalize", async () => {

@@ -110,9 +110,12 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
     expect(DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
     expect(APP_DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
+    expect(DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
+    expect(APP_DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
     expect(DRIVER_SRC).toContain("ownerEvidence: args.selectionOwnerEvidence")
     expect(DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
     expect(APP_DRIVER_SRC).toContain("ownerEvidence: selectionOwnerEvidence")
+    expect(APP_DRIVER_SRC).toContain("baseValidatedRed: selectionBaseValidatedRed")
     expect(APP_DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
   })
 
