@@ -841,6 +841,7 @@ const runSelectionPhase = async (
   })
   const result = await runSelection({
     n,
+    problemStatement: instance.problemStatement,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
