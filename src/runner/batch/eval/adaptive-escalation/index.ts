@@ -31,6 +31,11 @@ export {
   renderEvidenceFacts,
 } from "./evidence-facts"
 export {
+  deriveEvidenceFactsFromPacket,
+  projectRouterEvidence,
+  type RouterEvidence,
+} from "./router-evidence"
+export {
   ACTION_DESCRIPTIONS,
   buildRouterInstruction,
   buildRouterPrompt,
