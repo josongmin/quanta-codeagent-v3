@@ -4,6 +4,7 @@ import type { FaultEvidencePacket } from "@/agent/fault-evidence"
 import { extractIssueReproSeed } from "@/agent/verification-plan"
 import type { VerificationPlan } from "@/agent/verification-plan"
 import { normalizePublicIssueText } from "@/shared"
+import type { StaticWitness } from "./static-witness"
 
 /**
  * OPC-07 — typed, stage-scoped LLM evidence packet.
@@ -133,14 +134,25 @@ export interface LlmEvidencePacket {
 
 export interface LlmEvidenceArtifacts {
   readonly intake?: LlmEvidencePacket
+  readonly candidateReview?: LlmEvidencePacket
+  readonly candidateReviewHistory?: readonly LlmEvidencePacket[]
   readonly candidateGeneration?: LlmEvidencePacket
+  readonly candidateGenerationHistory?: readonly LlmEvidencePacket[]
   readonly repairSeed?: LlmEvidencePacket
+  readonly repairSeedHistory?: readonly LlmEvidencePacket[]
   readonly selectionExplanation?: LlmEvidencePacket
+  readonly selectionExplanationHistory?: readonly LlmEvidencePacket[]
 }
 
 export type LlmEvidenceRevisionByStage = Readonly<
   Partial<Record<LlmEvidencePacketStage, string>>
 >
+
+export interface LlmEvidencePacketCounts {
+  readonly candidateGeneration: number
+  readonly repairSeed: number
+  readonly selectionExplanation: number
+}
 
 export interface LlmEvidenceSummary {
   readonly stages: readonly LlmEvidencePacketStage[]
@@ -150,9 +162,14 @@ export interface LlmEvidenceSummary {
 
 type MutableLlmEvidenceArtifacts = {
   intake?: LlmEvidencePacket
+  candidateReview?: LlmEvidencePacket
+  candidateReviewHistory?: LlmEvidencePacket[]
   candidateGeneration?: LlmEvidencePacket
+  candidateGenerationHistory?: LlmEvidencePacket[]
   repairSeed?: LlmEvidencePacket
+  repairSeedHistory?: LlmEvidencePacket[]
   selectionExplanation?: LlmEvidencePacket
+  selectionExplanationHistory?: LlmEvidencePacket[]
 }
 
 /* ------------------------------------------------------------------ */
@@ -300,17 +317,45 @@ const LLM_EVIDENCE_STAGE_ORDER: readonly LlmEvidencePacketStage[] = [
   "selection_explanation",
 ]
 
-const packetsFromArtifacts = (artifacts: LlmEvidenceArtifacts): readonly LlmEvidencePacket[] =>
-  LLM_EVIDENCE_STAGE_ORDER.flatMap((stage) => {
-    if (stage === "intake" && artifacts.intake !== undefined) return [artifacts.intake]
-    if (stage === "candidate_generation" && artifacts.candidateGeneration !== undefined)
-      return [artifacts.candidateGeneration]
-    if (stage === "repair_seed" && artifacts.repairSeed !== undefined) return [artifacts.repairSeed]
-    if (stage === "selection_explanation" && artifacts.selectionExplanation !== undefined) {
-      return [artifacts.selectionExplanation]
+const stagePackets = (
+  artifacts: LlmEvidenceArtifacts,
+  stage: LlmEvidencePacketStage,
+): readonly LlmEvidencePacket[] => {
+  if (stage === "intake") return artifacts.intake !== undefined ? [artifacts.intake] : []
+  if (stage === "candidate_review") {
+    if ((artifacts.candidateReviewHistory?.length ?? 0) > 0) return artifacts.candidateReviewHistory ?? []
+    return artifacts.candidateReview !== undefined ? [artifacts.candidateReview] : []
+  }
+  if (stage === "candidate_generation") {
+    if ((artifacts.candidateGenerationHistory?.length ?? 0) > 0) return artifacts.candidateGenerationHistory ?? []
+    return artifacts.candidateGeneration !== undefined ? [artifacts.candidateGeneration] : []
+  }
+  if (stage === "repair_seed") {
+    if ((artifacts.repairSeedHistory?.length ?? 0) > 0) return artifacts.repairSeedHistory ?? []
+    return artifacts.repairSeed !== undefined ? [artifacts.repairSeed] : []
+  }
+  if (stage === "selection_explanation") {
+    if ((artifacts.selectionExplanationHistory?.length ?? 0) > 0) {
+      return artifacts.selectionExplanationHistory ?? []
     }
-    return []
-  })
+    return artifacts.selectionExplanation !== undefined ? [artifacts.selectionExplanation] : []
+  }
+  return []
+}
+
+const packetsFromArtifacts = (artifacts: LlmEvidenceArtifacts): readonly LlmEvidencePacket[] =>
+  LLM_EVIDENCE_STAGE_ORDER.flatMap((stage) => stagePackets(artifacts, stage))
+
+export const llmEvidencePacketCounts = (
+  artifacts: LlmEvidenceArtifacts | undefined,
+): LlmEvidencePacketCounts | undefined => {
+  if (artifacts === undefined) return undefined
+  const candidateGeneration = stagePackets(artifacts, "candidate_generation").length
+  const repairSeed = stagePackets(artifacts, "repair_seed").length
+  const selectionExplanation = stagePackets(artifacts, "selection_explanation").length
+  if (candidateGeneration === 0 && repairSeed === 0 && selectionExplanation === 0) return undefined
+  return { candidateGeneration, repairSeed, selectionExplanation }
+}
 
 export const summarizeLlmEvidenceArtifacts = (
   artifacts: LlmEvidenceArtifacts | undefined,
@@ -321,7 +366,7 @@ export const summarizeLlmEvidenceArtifacts = (
   const revisionByStage: Partial<Record<LlmEvidencePacketStage, string>> = {}
   for (const packet of packets) revisionByStage[packet.stage] = packet.evidenceRevision
   return {
-    stages: packets.map((packet) => packet.stage),
+    stages: LLM_EVIDENCE_STAGE_ORDER.filter((stage) => stagePackets(artifacts, stage).length > 0),
     revisionByStage,
     missingKinds: uniqueLines(
       packets.flatMap((packet) => packet.missingEvidence.map((missing) => missing.kind)),
@@ -336,18 +381,45 @@ export const recordLlmEvidencePacket = (
   const sink = artifacts as MutableLlmEvidenceArtifacts
   if (packet.stage === "intake" && sink.intake === undefined) {
     sink.intake = packet
+  } else if (packet.stage === "candidate_review" && sink.candidateReview === undefined) {
+    sink.candidateReview = packet
+    sink.candidateReviewHistory = [packet]
+  } else if (packet.stage === "candidate_review") {
+    sink.candidateReviewHistory = [
+      ...(sink.candidateReviewHistory ?? (sink.candidateReview !== undefined ? [sink.candidateReview] : [])),
+      packet,
+    ]
   } else if (
     packet.stage === "candidate_generation" &&
     sink.candidateGeneration === undefined
   ) {
     sink.candidateGeneration = packet
+    sink.candidateGenerationHistory = [packet]
+  } else if (packet.stage === "candidate_generation") {
+    sink.candidateGenerationHistory = [
+      ...(sink.candidateGenerationHistory ?? (sink.candidateGeneration !== undefined ? [sink.candidateGeneration] : [])),
+      packet,
+    ]
   } else if (packet.stage === "repair_seed" && sink.repairSeed === undefined) {
     sink.repairSeed = packet
+    sink.repairSeedHistory = [packet]
+  } else if (packet.stage === "repair_seed") {
+    sink.repairSeedHistory = [
+      ...(sink.repairSeedHistory ?? (sink.repairSeed !== undefined ? [sink.repairSeed] : [])),
+      packet,
+    ]
   } else if (
     packet.stage === "selection_explanation" &&
     sink.selectionExplanation === undefined
   ) {
     sink.selectionExplanation = packet
+    sink.selectionExplanationHistory = [packet]
+  } else if (packet.stage === "selection_explanation") {
+    sink.selectionExplanationHistory = [
+      ...(sink.selectionExplanationHistory ??
+        (sink.selectionExplanation !== undefined ? [sink.selectionExplanation] : [])),
+      packet,
+    ]
   }
 }
 
@@ -452,6 +524,59 @@ export const assembleOwnerEvidence = (args: {
   }
   return out
 }
+
+/**
+ * Static-witness-backed owner evidence. Carries witness kind/provenance/authority
+ * and attaches an exact symbol slice when the witnessed symbol is statically
+ * resolvable in that file.
+ */
+export const assembleStaticWitnessOwnerEvidence = (args: {
+  readonly witnesses: readonly StaticWitness[]
+  readonly readSource?: (rel: string) => string | null
+}): OwnerEvidenceFact[] => {
+  const out: OwnerEvidenceFact[] = []
+  for (const witness of args.witnesses) {
+    const files = uniqueLines(witness.subjectFiles)
+    const symbols = uniqueLines(witness.subjectSymbols)
+    for (const file of files) {
+      const source = args.readSource?.(file) ?? null
+      const slice =
+        source === null
+          ? undefined
+          : symbols.map((symbol) => extractSymbolSlice(source, symbol)).find((s) => s !== undefined)
+      out.push({
+        file,
+        symbols,
+        provenance: `static-witness:${witness.kind}/${witness.provenance}/${witness.authority}`,
+        ...(slice !== undefined ? { sourceSlice: slice } : {}),
+      })
+    }
+  }
+  return uniqueObjects(out)
+}
+
+/**
+ * Shared owner evidence surface for candidate-generation packets: public issue
+ * owners plus structural static-witness owners, deduped but otherwise preserving
+ * their distinct provenance.
+ */
+export const buildSelectionOwnerEvidence = (args: {
+  readonly ownerFiles: readonly string[]
+  readonly issueSymbols?: readonly string[]
+  readonly staticWitnesses?: readonly StaticWitness[]
+  readonly readSource?: (rel: string) => string | null
+}): OwnerEvidenceFact[] =>
+  uniqueObjects([
+    ...assembleOwnerEvidence({
+      ownerFiles: args.ownerFiles,
+      ...(args.issueSymbols !== undefined ? { issueSymbols: args.issueSymbols } : {}),
+      ...(args.readSource !== undefined ? { readSource: args.readSource } : {}),
+    }),
+    ...assembleStaticWitnessOwnerEvidence({
+      witnesses: args.staticWitnesses ?? [],
+      ...(args.readSource !== undefined ? { readSource: args.readSource } : {}),
+    }),
+  ])
 
 /**
  * Flatten the typed VerificationPlan into the active proof target — ANSWER-KEY
@@ -693,6 +818,67 @@ export const buildSelectionGenerationLlmEvidencePacket = (
 
 export const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): string =>
   renderLlmEvidencePacket(buildSelectionGenerationLlmEvidencePacket(input))
+
+/* ------------------------------------------------------------------ */
+/* Candidate review packet (runtime risk screen, shadow/research only)  */
+/* ------------------------------------------------------------------ */
+
+export interface CandidateReviewPacketInput {
+  readonly problemStatement: string
+  readonly candidatePatchHash: string
+  readonly candidateFiles: readonly string[]
+  readonly ownerEvidence: readonly OwnerEvidenceFact[]
+}
+
+/**
+ * LEGACY-NAMED stage. This is the PRE-proof expansion risk screen for
+ * candidate 0 ("should the selector expand?"), not a post-exec correctness
+ * review. It carries no submit authority; the deterministic selector still
+ * decides.
+ */
+export const buildCandidateReviewLlmEvidencePacket = (
+  input: CandidateReviewPacketInput,
+): LlmEvidencePacket =>
+  cleanPacket({
+    stage: "candidate_review",
+    instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
+    evidenceRevision: "risk-gate-v2",
+    candidatePatchHash: input.candidatePatchHash,
+    question:
+      "Should the outer selector expand beyond candidate 0, or is the current patch already low-risk enough to stop?",
+    allowedActions: ["expand", "do_not_expand"],
+    forbiddenSources: [
+      "hidden_tests",
+      "gold_patch",
+      "official_harness_results",
+      "benchmark_case_tables",
+    ],
+    publicIssueFacts: describeIssueFacts(input.problemStatement),
+    ownerEvidence: input.ownerEvidence,
+    proofReceipts: [],
+    contractFacts: [],
+    staticFacts: [
+      { kind: "stage_scope", value: "This stage does not judge correctness or select a winner." },
+      {
+        kind: "expand_when",
+        value:
+          "Expand when the patch may miss explicit issue conditions, may implement only a surfaced symptom, may overfit a public example, changes behavior without clear evidence, or you are unsure.",
+      },
+      {
+        kind: "candidate_touched_files",
+        value: input.candidateFiles.length > 0 ? input.candidateFiles.join(", ") : "<none>",
+      },
+    ],
+    missingEvidence: [
+      {
+        kind: "executed_public_proof",
+        reason: "no_executed_public_proof_receipts_attached_to_risk_gate",
+      },
+    ],
+  })
+
+export const buildCandidateReviewPacket = (input: CandidateReviewPacketInput): string =>
+  renderLlmEvidencePacket(buildCandidateReviewLlmEvidencePacket(input))
 
 /* ------------------------------------------------------------------ */
 /* Repair seed packet (SHARED)                                         */

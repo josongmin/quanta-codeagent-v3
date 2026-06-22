@@ -2,18 +2,24 @@ import { describe, expect, test } from "bun:test"
 import {
   assembleOwnerEvidence,
   assertPacketBlind,
+  buildCandidateReviewPacket,
+  buildSelectionOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildRepairSeedPacket,
   buildSelectionExplanationPacket,
   buildSelectionGenerationPacket,
   candidatePatchHash,
   extractSymbolSlice,
+  type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
   opaqueInstanceIdHash,
   PacketBlindnessViolation,
+  recordLlmEvidencePacket,
   renderLlmEvidencePacket,
+  summarizeLlmEvidenceArtifacts,
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
+import { makeStaticWitness } from "@/runner/batch/eval/static-witness"
 
 /** Parse the JSON body out of a rendered packet. */
 const parseRendered = (rendered: string): Record<string, unknown> =>
@@ -181,6 +187,91 @@ describe("llm evidence packet — cleanPacket dedup (teeth for uniqueLines/uniqu
   })
 })
 
+describe("llm evidence packet — stage builders", () => {
+  test("candidate_review builder preserves the stage-scoped question and exact owner evidence", () => {
+    const rendered = buildCandidateReviewPacket({
+      problemStatement: "Axis inversion still fails when explicit limits are preserved.",
+      candidatePatchHash: "deadbeef",
+      candidateFiles: ["pkg/axis.py"],
+      ownerEvidence: [
+        {
+          file: "pkg/axis.py",
+          symbols: ["invert_axis"],
+          provenance: "selection-owner",
+          sourceSlice: "def invert_axis(ax):\n    ax.set_xlim(...)",
+        },
+      ],
+    })
+    expect(rendered).toContain('"stage": "candidate_review"')
+    expect(rendered).toContain('"candidatePatchHash": "deadbeef"')
+    expect(rendered).toContain("invert_axis")
+    expect(rendered).toContain("sourceSlice")
+  })
+
+  test("generation packet renders explicit env caveats when they are provided", () => {
+    const rendered = buildSelectionGenerationPacket({
+      problemStatement: "Crash in resolve_owner when env prep differs.",
+      ownerEvidence: [],
+      contracts: [],
+      envCaveats: [
+        "attempted public repro helper failed to execute on the base environment; no executable public repro command is attached",
+      ],
+    })
+    expect(rendered).toContain("env caveat:")
+    expect(rendered).toContain("attempted public repro helper failed to execute")
+  })
+})
+
+describe("llm evidence packet — stage history aggregation", () => {
+  test("multiple packets in the same stage preserve history for summary/count surfaces", () => {
+    const packet = (revision: string, missingKind: string): LlmEvidencePacket => ({
+      stage: "candidate_generation",
+      instanceIdHash: "x",
+      evidenceRevision: revision,
+      question: "q",
+      allowedActions: [],
+      forbiddenSources: [],
+      publicIssueFacts: [],
+      ownerEvidence: [],
+      proofReceipts: [],
+      contractFacts: [],
+      staticFacts: [],
+      missingEvidence: [{ kind: missingKind, reason: missingKind }],
+    })
+    const artifacts: Partial<LlmEvidenceArtifacts> = {}
+    recordLlmEvidencePacket(artifacts, packet("v1", "first"))
+    recordLlmEvidencePacket(artifacts, packet("v2", "second"))
+    const summary = summarizeLlmEvidenceArtifacts(artifacts)
+    expect(summary?.stages).toEqual(["candidate_generation"])
+    expect(summary?.revisionByStage).toEqual({ candidate_generation: "v2" })
+    expect(summary?.missingKinds).toEqual(["first", "second"])
+    expect((artifacts as { candidateGenerationHistory?: unknown[] }).candidateGenerationHistory).toHaveLength(2)
+  })
+
+  test("candidate_review stage is retained in artifact summaries", () => {
+    const packet: LlmEvidencePacket = {
+      stage: "candidate_review",
+      instanceIdHash: "x",
+      evidenceRevision: "risk-gate-v2",
+      question: "q",
+      allowedActions: [],
+      forbiddenSources: [],
+      publicIssueFacts: [],
+      ownerEvidence: [],
+      proofReceipts: [],
+      contractFacts: [],
+      staticFacts: [],
+      missingEvidence: [{ kind: "risk_context", reason: "risk_context" }],
+    }
+    const artifacts: Partial<LlmEvidenceArtifacts> = {}
+    recordLlmEvidencePacket(artifacts, packet)
+    const summary = summarizeLlmEvidenceArtifacts(artifacts)
+    expect(summary?.stages).toEqual(["candidate_review"])
+    expect(summary?.revisionByStage).toEqual({ candidate_review: "risk-gate-v2" })
+    expect(summary?.missingKinds).toEqual(["risk_context"])
+  })
+})
+
 describe("llm evidence packet — bounded source slice (assembleOwnerEvidence / extractSymbolSlice)", () => {
   const SRC = "import os\n\ndef foo(x):\n    y = x + 1\n    return y\n\ndef bar():\n    pass\n"
 
@@ -214,6 +305,32 @@ describe("llm evidence packet — bounded source slice (assembleOwnerEvidence / 
     expect(ev[0]?.file).toBe("m.py")
     expect(ev[0]?.sourceSlice).toBeUndefined()
     expect(ev[0]?.symbols).toEqual([])
+  })
+
+  test("buildSelectionOwnerEvidence keeps static witness provenance and exact slices", () => {
+    const ev = buildSelectionOwnerEvidence({
+      ownerFiles: ["pkg/owner.py"],
+      issueSymbols: ["foo"],
+      staticWitnesses: [
+        makeStaticWitness({
+          kind: "override-family",
+          authority: "authoritative",
+          provenance: "ast",
+          subjectFiles: ["pkg/owner.py"],
+          subjectSymbols: ["foo"],
+          reason: "shared method across owner files",
+        }),
+      ],
+      readSource: () => SRC,
+    })
+    expect(ev.some((fact) => fact.provenance === "selection-owner")).toBe(true)
+    expect(
+      ev.some(
+        (fact) =>
+          fact.provenance === "static-witness:override-family/ast/authoritative" &&
+          fact.sourceSlice?.includes("def foo(x):") === true,
+      ),
+    ).toBe(true)
   })
 })
 

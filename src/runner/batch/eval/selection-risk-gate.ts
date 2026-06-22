@@ -1,5 +1,6 @@
 import type { LLMPort } from "@/llm"
 import type { VerifySelectLlmRiskGateMode } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
+import type { OwnerEvidenceFact } from "./llm-evidence-packet"
 import { evaluateLlmPatchRisk } from "./llm-risk-gate"
 import type { Candidate, SelectionRiskGateDecision } from "./selection-executor"
 import { evaluateStrictPatchRisk } from "./strict-risk-gate"
@@ -10,6 +11,7 @@ export interface BuildSelectionRiskGateArgs {
   readonly llm: LLMPort
   readonly problemStatement: string
   readonly ownerFiles?: readonly string[]
+  readonly ownerEvidence?: readonly OwnerEvidenceFact[]
   readonly repo?: string
   readonly signal?: AbortSignal
 }
@@ -38,12 +40,14 @@ const llmDecisionOf = async (
     problemStatement: args.problemStatement,
     patch: candidate.patch,
     candidateFiles: candidate.files,
+    ...(args.ownerEvidence !== undefined ? { ownerEvidence: args.ownerEvidence } : {}),
     ...(args.ownerFiles !== undefined ? { ownerFiles: args.ownerFiles } : {}),
     ...(args.signal !== undefined ? { signal: args.signal } : {}),
   })
   return {
     expand: llm.expand,
     reasons: llmReasonPrefix(llm.reasons),
+    llmEvidencePacket: llm.packet,
   }
 }
 
@@ -61,6 +65,7 @@ export const buildSelectionRiskGate = (
           expand: structural.expand,
           reasons: structural.reasons,
           ...(structural.patchBudget !== undefined ? { patchBudget: structural.patchBudget } : {}),
+          ...(llm.llmEvidencePacket !== undefined ? { llmEvidencePacket: llm.llmEvidencePacket } : {}),
           shadow: {
             expand: llm.expand,
             reasons: llm.reasons,
@@ -70,6 +75,7 @@ export const buildSelectionRiskGate = (
           expand: structural.expand || llm.expand,
           reasons: [...structural.reasons, ...llm.reasons],
           ...(structural.patchBudget !== undefined ? { patchBudget: structural.patchBudget } : {}),
+          ...(llm.llmEvidencePacket !== undefined ? { llmEvidencePacket: llm.llmEvidencePacket } : {}),
         }
   }
 }

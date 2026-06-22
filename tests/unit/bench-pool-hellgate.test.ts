@@ -760,6 +760,43 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(out.filter((r) => r.lost).length).toBe(1)
   })
 
+  test("a partial chunk report is NOT recorded as success; uncovered instanceIds are surfaced", async () => {
+    const datasetPath = writeDatasetJsonl("bench-pool-partial-", [
+      { instance_id: "demo__1", patch: TS_FIX_PATCH },
+      { instance_id: "demo__2", patch: TS_FIX_PATCH },
+    ])
+    const { fn } = mockSpawn({
+      reportFor: () => JSON.stringify({ resolved_ids: ["demo__1"] }),
+    })
+    const out = await runPool(
+      [{ runId: "partial", datasetPath, instanceIds: ["demo__1", "demo__2"] }],
+      poolCfg(fn, { maxChunkRetries: 1 }),
+    )
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.attempts).toBe(2)
+    expect(out[0]?.result.resolved).toEqual(["demo__1"])
+    expect(out[0]?.missing).toEqual(["demo__2"])
+  })
+
+  test("coverage is accumulated across retries for the same chunk", async () => {
+    const datasetPath = writeDatasetJsonl("bench-pool-accumulate-", [
+      { instance_id: "demo__1", patch: TS_FIX_PATCH },
+      { instance_id: "demo__2", patch: TS_FIX_PATCH },
+    ])
+    const { fn } = mockSpawn({
+      reportFor: (_runId, launchIdx) =>
+        JSON.stringify({ resolved_ids: [launchIdx === 0 ? "demo__1" : "demo__2"] }),
+    })
+    const out = await runPool(
+      [{ runId: "accumulate", datasetPath, instanceIds: ["demo__1", "demo__2"] }],
+      poolCfg(fn, { maxChunkRetries: 1 }),
+    )
+    expect(out[0]?.lost).toBe(false)
+    expect(out[0]?.attempts).toBe(2)
+    expect(out[0]?.missing).toBeUndefined()
+    expect(new Set(out[0]?.result.resolved ?? [])).toEqual(new Set(["demo__1", "demo__2"]))
+  })
+
   test("PROACTIVE rotation retires a TTL-aged box WITHOUT counting a chunk failure", async () => {
     const { fn, calls } = mockSpawn({})
     // Clock advances hugely on each read ⇒ every rotation check sees the box as

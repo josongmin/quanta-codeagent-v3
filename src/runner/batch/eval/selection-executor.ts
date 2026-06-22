@@ -88,6 +88,7 @@ import {
 import { type MweProofReceipt, type MweProofState, mweProofAuthorityRank } from "./mwe-proof"
 import {
   contractsSatisfiedCount,
+  evaluateBundle,
   mergePublicContractBundles,
   requiredContractsSatisfiedCount,
 } from "./public-contract-bundle"
@@ -221,6 +222,8 @@ export interface SelectionRiskGateDecision {
   readonly expand: boolean
   readonly reasons: readonly string[]
   readonly shadow?: SelectionRiskGateShadowDecision
+  /** Optional typed runtime packet for the PRE-proof candidate-review screen. */
+  readonly llmEvidencePacket?: LlmEvidencePacket
   /** Structural patch-budget verdict for candidate 0 — forwarded (not re-parsed)
    *  so the counterfactual seed/contract path consumes typed facts. Present only
    *  on the structural arm. */
@@ -295,6 +298,14 @@ export interface CounterfactualTelemetry {
 }
 
 export type ResolvedKofNMode = "hard" | "soft"
+
+interface SelectorRepairSeedPlan {
+  readonly summary: string
+  readonly directive: string
+  readonly includeFamilyRepair: boolean
+  readonly includeReproFailureTrace: boolean
+  readonly includeOracleFailureSeed: boolean
+}
 
 /** Compact, JSON-friendly per-candidate view (NO full patch — too big for the
  *  sidecar). The `reasons` carry the hard-gate rejections + soft signals from
@@ -805,12 +816,10 @@ const reproTraceOf = (signal: ResolvedKofNSignal | null): ReproConsensusTrace | 
 
 const cleanExecutableProof = (
   resolved: ResolvedKofNSignal | null,
-  hard: HardGateSignals,
   mweReceipt: MweProofReceipt | undefined,
   reproConsensusReceipt: ReproConsensusProofReceipt | undefined,
 ): boolean =>
-  positiveSubmitProofSource({ resolved, mweReceipt, reproConsensusReceipt }) !== "none" ||
-  hard.regressionGreen === true
+  positiveSubmitProofSource({ resolved, mweReceipt, reproConsensusReceipt }) !== "none"
 
 const cleanUnprovenMultiSourceDriftRisk = (args: {
   readonly mode: SelectorMode
@@ -827,7 +836,6 @@ const cleanUnprovenMultiSourceDriftRisk = (args: {
   if (
     cleanExecutableProof(
       args.resolved,
-      args.hard,
       args.mweReceipt,
       args.reproConsensusReceipt,
     ) ||
@@ -906,7 +914,6 @@ const cleanProofAuthorityMissing = (args: {
   args.owners.size === 0 &&
   !cleanExecutableProof(
     args.resolved,
-    args.hard,
     args.mweReceipt,
     args.reproConsensusReceipt,
   ) &&
@@ -1058,6 +1065,15 @@ const proofRequiredRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(PROOF_REQUIRED_MISSING_REJECT_REASON) ||
   verdict.reasons.includes(PROOF_INFRA_BLOCKED_REJECT_REASON)
 
+// B#3: a static-sanity hard reject is a DETERMINISTIC parse-level "this patch is
+// broken" signal (e.g. callback arity mismatch, None-subscript mutation). Like
+// the other hard vetoes it must also bar the best-effort fallback — otherwise a
+// no-other-candidate run resurrects the broken patch via best-effort and submits
+// it. (Matches the audit rule: selectBestEffort must not resubmit a candidate
+// carrying explicit negative evidence.)
+const staticSanityRejected = (verdict: CandidateVerdict): boolean =>
+  verdict.reasons.some((reason) => reason.startsWith("hard:staticSanity="))
+
 const bestEffortEligible = (
   entry: Pick<ScoredEntry, "hard" | "verdict">,
   mode: SelectorMode,
@@ -1072,6 +1088,7 @@ const bestEffortEligible = (
   if (mweCandidateRedRejected(entry.verdict)) return false
   if (cleanAuthorityMissingRejected(entry.verdict)) return false
   if (proofRequiredRejected(entry.verdict)) return false
+  if (staticSanityRejected(entry.verdict)) return false
   return true
 }
 
@@ -1650,8 +1667,10 @@ export const runSelection = async (args: {
     seed: string,
     winner: Candidate | null,
   ): string => {
-    const patchAuthority =
-      winner !== null && winner.patch.trim() !== "" ? winner.patch : scored[0]?.candidate.patch ?? seed
+    const focusCandidate =
+      (winner !== null && winner.patch.trim() !== "" ? winner : null) ??
+      scored.find(hasNonEmptyPatch)?.candidate
+    const patchAuthority = focusCandidate?.patch ?? scored[0]?.candidate.patch ?? seed
     const proofReceipts: ProofReceiptFact[] = [
       ...scored.flatMap((entry) => [
         ...mweProofReceiptFacts(entry.candidate),
@@ -1663,18 +1682,38 @@ export const runSelection = async (args: {
         .map((reason) => ({ source: reason, state: hardReasonState(reason) })),
     ]
     const ownerFiles = [
-      ...new Set(scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files)),
+      ...new Set(
+        focusCandidate === undefined
+          ? scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files)
+          : (focusCandidate.familyOwnerFiles ?? focusCandidate.files),
+      ),
     ]
     const ownerEvidence: OwnerEvidenceFact[] = ownerFiles.map((file) => ({
       file,
       symbols: [],
       provenance: "repair-owner",
     }))
-    const contracts: ContractFact[] = scored.map((entry) => ({
-      contractId: `candidate:${entry.candidate.id}`,
-      authority: `requiredContractsSatisfied=${entry.requiredContractsSatisfied}; contractsSatisfied=${entry.contractsSatisfied}`,
-      satisfied: entry.verdict.admissible,
-    }))
+    const contracts: ContractFact[] =
+      focusCandidate === undefined
+        ? []
+        : (() => {
+            const effectiveContracts = mergePublicContractBundles(
+              contractBundle,
+              focusCandidate.publicContracts,
+            )
+            if (effectiveContracts === undefined) return []
+            const evaluations = new Map(
+              evaluateBundle(effectiveContracts, {
+                touchedFiles: focusCandidate.files,
+                touchedSymbols: diffTouchedSymbols(focusCandidate.patch),
+              }).map((evaluation) => [evaluation.contractId, evaluation]),
+            )
+            return effectiveContracts.contracts.map((contract) => ({
+              contractId: contract.contractId,
+              authority: `${contract.provenance}/${contract.strength}`,
+              satisfied: evaluations.get(contract.contractId)?.satisfied ?? "unknown",
+            }))
+          })()
     const packet = buildRepairSeedLlmEvidencePacket({
       problemStatement: args.problemStatement ?? "",
       candidatePatchHash: candidatePatchHash(patchAuthority),
@@ -1719,72 +1758,89 @@ export const runSelection = async (args: {
   const oracleFailureRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
     const patched = scored.filter(hasNonEmptyPatch)
     const proofStates = patched.map((entry) => selectionProofStateForEntry(entry))
-    if (
-      proofRequired &&
-      patched.length > 0 &&
-      patched.some(
-        (entry) =>
-          entry.candidate.mweReceipt !== undefined ||
-          entry.candidate.publicRegressionReceipt !== undefined ||
-          entry.candidate.reproConsensusReceipt !== undefined,
-      ) &&
-      proofStates.every((state) => state === "infra_blocked")
-    ) {
-      return [
-        "Selector feedback: every generated candidate reached public proof execution, but each run failed in infra/runtime without producing a candidate-correctness verdict.",
-        "Regenerate from the base tree. Preserve the strongest structural/public coverage already found, but remove candidate-side execution blockers so the named public proof can actually run to completion. Do not widen scope or invent unrelated helpers.",
-        familyRepairSeed(scored),
-        args.oracleFailureRepairSeed,
-      ]
-        .filter((s): s is string => s !== undefined && s.trim() !== "")
-        .join("\n\n")
-    }
-    if (mweOracleRepairRequired(scored)) {
-      return [
-        "Selector feedback: every generated candidate was executed against a public issue MWE that reproduced on the base tree, and every candidate still failed that MWE.",
-        "Regenerate from the base tree. Treat the public MWE in the issue text as the executable contract: the patch must make that MWE pass without broadening the edit beyond the necessary source change.",
-        familyRepairSeed(scored),
-        args.oracleFailureRepairSeed,
-      ]
-        .filter((s): s is string => s !== undefined && s.trim() !== "")
-        .join("\n\n")
-    }
-    if (reproOracleRepairRequired(scored)) {
-      return [
-        "Selector feedback: every generated candidate was re-run against the base-red validated reproduction set, and none reached resolved consensus.",
-        "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts report `Issue resolved` without adding unnecessary helpers, files, or unrelated design surface.",
-        familyRepairSeed(scored),
-        reproFailureTraceSeed(scored),
-        args.oracleFailureRepairSeed,
-      ]
-        .filter((s): s is string => s !== undefined && s.trim() !== "")
-        .join("\n\n")
-    }
-    if (cleanDriftRepairRequired(scored)) {
-      return [
-        "Selector feedback: every generated multi-source candidate was rejected as unproven multi-source drift by clean selector authority because no executable proof or public contract justified touching multiple source files.",
-        "Regenerate from the base tree. Either produce a narrow single-owner patch, or include the complete static/public witness that justifies every source file touched. Do not add helper files, new definitions, or unrelated design surface unless that witness requires them.",
-        args.oracleFailureRepairSeed,
-      ]
-        .filter((s): s is string => s !== undefined && s.trim() !== "")
-        .join("\n\n")
-    }
-    if (
-      proofRequired &&
-      patched.length > 0 &&
-      !proofStates.some((state) => state === "proof_positive") &&
-      patched.some(hasContractOnlyEvidence)
-    ) {
-      return [
-        "Selector feedback: at least one generated candidate achieved structural/public contract coverage, but no candidate produced positive executed public proof.",
-        "Regenerate from the base tree. Preserve the strongest structural/public coverage already found and make the named public proof run green. Do not broaden file scope, add unrelated helpers, or substitute structural guesses for executed proof.",
-        familyRepairSeed(scored),
-        args.oracleFailureRepairSeed,
-      ]
-        .filter((s): s is string => s !== undefined && s.trim() !== "")
-        .join("\n\n")
-    }
-    return undefined
+    const plan = (() : SelectorRepairSeedPlan | undefined => {
+      if (
+        proofRequired &&
+        patched.length > 0 &&
+        patched.some(
+          (entry) =>
+            entry.candidate.mweReceipt !== undefined ||
+            entry.candidate.publicRegressionReceipt !== undefined ||
+            entry.candidate.reproConsensusReceipt !== undefined,
+        ) &&
+        proofStates.every((state) => state === "infra_blocked")
+      ) {
+        return {
+          summary:
+            "Selector feedback: every generated candidate reached public proof execution, but each run failed in infra/runtime without producing a candidate-correctness verdict.",
+          directive:
+            "Regenerate from the base tree. Preserve the strongest structural/public coverage already found, but remove candidate-side execution blockers so the named public proof can actually run to completion. Do not widen scope or invent unrelated helpers.",
+          includeFamilyRepair: true,
+          includeReproFailureTrace: false,
+          includeOracleFailureSeed: true,
+        }
+      }
+      if (mweOracleRepairRequired(scored)) {
+        return {
+          summary:
+            "Selector feedback: every generated candidate was executed against a public issue MWE that reproduced on the base tree, and every candidate still failed that MWE.",
+          directive:
+            "Regenerate from the base tree. Treat the public MWE in the issue text as the executable contract: the patch must make that MWE pass without broadening the edit beyond the necessary source change.",
+          includeFamilyRepair: true,
+          includeReproFailureTrace: false,
+          includeOracleFailureSeed: true,
+        }
+      }
+      if (reproOracleRepairRequired(scored)) {
+        return {
+          summary:
+            "Selector feedback: every generated candidate was re-run against the base-red validated reproduction set, and none reached resolved consensus.",
+          directive:
+            "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts report `Issue resolved` without adding unnecessary helpers, files, or unrelated design surface.",
+          includeFamilyRepair: true,
+          includeReproFailureTrace: true,
+          includeOracleFailureSeed: true,
+        }
+      }
+      if (cleanDriftRepairRequired(scored)) {
+        return {
+          summary:
+            "Selector feedback: every generated multi-source candidate was rejected as unproven multi-source drift by clean selector authority because no executable proof or public contract justified touching multiple source files.",
+          directive:
+            "Regenerate from the base tree. Either produce a narrow single-owner patch, or include the complete static/public witness that justifies every source file touched. Do not add helper files, new definitions, or unrelated design surface unless that witness requires them.",
+          includeFamilyRepair: false,
+          includeReproFailureTrace: false,
+          includeOracleFailureSeed: true,
+        }
+      }
+      if (
+        proofRequired &&
+        patched.length > 0 &&
+        !proofStates.some((state) => state === "proof_positive") &&
+        patched.some(hasContractOnlyEvidence)
+      ) {
+        return {
+          summary:
+            "Selector feedback: at least one generated candidate achieved structural/public contract coverage, but no candidate produced positive executed public proof.",
+          directive:
+            "Regenerate from the base tree. Preserve the strongest structural/public coverage already found and make the named public proof run green. Do not broaden file scope, add unrelated helpers, or substitute structural guesses for executed proof.",
+          includeFamilyRepair: true,
+          includeReproFailureTrace: false,
+          includeOracleFailureSeed: true,
+        }
+      }
+      return undefined
+    })()
+    if (plan === undefined) return undefined
+    return [
+      plan.summary,
+      plan.directive,
+      ...(plan.includeFamilyRepair ? [familyRepairSeed(scored)] : []),
+      ...(plan.includeReproFailureTrace ? [reproFailureTraceSeed(scored)] : []),
+      ...(plan.includeOracleFailureSeed ? [args.oracleFailureRepairSeed] : []),
+    ]
+      .filter((s): s is string => s !== undefined && s.trim() !== "")
+      .join("\n\n")
   }
 
   const maybeAppendSelectorRepair = async (
@@ -2069,6 +2125,9 @@ export const runSelection = async (args: {
       let riskGateExpanded = false
       if (i === 0 && args.riskGate !== undefined) {
         const decision = await args.riskGate(candidate)
+        if (decision.llmEvidencePacket !== undefined) {
+          args.recordLlmEvidencePacket?.(decision.llmEvidencePacket)
+        }
         riskGateTelemetry = {
           candidateId: candidate.id,
           expanded: decision.expand,
@@ -2083,11 +2142,15 @@ export const runSelection = async (args: {
             : {}),
         }
         if (!decision.expand) {
-          // T-101: the counterfactual arm refuses a BLIND static accept — even a
-          // low-risk cand0 must clear cheap validation (real applyClean /
-          // regression / smoke ports via finalize). The legacy arm keeps the
-          // cost-saving static accept (byte-identical).
-          return args.counterfactual === true || proofRequired
+          // T-101 + clean-gate closure (B#3): clean mode must NEVER blind-static-
+          // accept. A no-expand cand0 still has to clear the real clean hard-gate
+          // chain (staticSanity / clean-authority / drift / mwe) and probe the
+          // wired ports via `finalize` — `staticAccept` hard-codes those ports to
+          // null and would launder a deterministically-broken cand0 straight to
+          // selection. Only the legacy/research arm keeps the cost-saving static
+          // accept (byte-identical for non-clean modes). Validating cand0 through
+          // finalize does NOT expand generation, so the cost rationale is intact.
+          return args.counterfactual === true || proofRequired || mode === "clean"
             ? await finalize(raw, false, riskGateTelemetry)
             : await staticAccept(raw, candidate, riskGateTelemetry)
         }

@@ -136,20 +136,21 @@ describe("validate (non-leaking repair validator)", () => {
 })
 
 // ---------- STRUCTURAL NO-LEAK GOLDEN (MERGE-GATE-CLASS) ----------
-// Scan the SOURCE TEXT of the three repair files and assert ZERO occurrences
-// of forbidden tokens, and that they import ONLY from `./types`. One self-
+// Scan the SOURCE TEXT of the repair files and assert ZERO occurrences of
+// forbidden tokens, and that they import ONLY local repair helpers. One self-
 // protecting test = the no-leak invariant becomes a build gate.
 describe("structural no-leak invariant (build gate)", () => {
   const ROOT = resolve(__dirname, "../../src/runner/batch/eval/repair")
-  const FILES = ["validator.ts", "context.ts", "index.ts"] as const
+  const FILES = ["validator.ts", "context.ts", "index.ts", "repro-outcome.ts"] as const
   // Forbidden dataset/grader tokens. These names MUST NOT appear in source
   // text — the validator/context/orchestrator must be structurally incapable
   // of touching them.
   const FORBIDDEN_TOKENS = ["FAIL_TO_PASS", "PASS_TO_PASS", "test_patch", "goldPatch"]
   const FORBIDDEN_REGEXES: RegExp[] = [/\.report\.json/, /swebench\.harness/]
-  // Imports allow-list: ONLY `./types` (and no `@/*`, no `node:*`, no `child_process`,
-  // no `Bun.spawn`). Match FULL import statements (possibly multi-line) by
-  // scanning `import ... from "X"` patterns across the source text.
+  // Imports allow-list: ONLY local repair helpers (and no `@/*`, no `node:*`,
+  // no `child_process`, no `Bun.spawn`). Match FULL import statements
+  // (possibly multi-line) by scanning `import ... from "X"` patterns across the
+  // source text.
   const IMPORT_STMT_RE = /import\s+(?:[\s\S]*?)\s+from\s+["']([^"']+)["']/g
   const FORBIDDEN_RUNTIME_RES: RegExp[] = [
     /Bun\.spawn/,
@@ -168,7 +169,18 @@ describe("structural no-leak invariant (build gate)", () => {
       expect(re.test(src), `forbidden runtime ${re} in ${f}`).toBe(false)
     }
   }
-  const assertImportsOnlyTypes = (src: string, f: string): void => {
+  const allowedImportsOf = (f: (typeof FILES)[number]): readonly string[] => {
+    switch (f) {
+      case "validator.ts":
+      case "index.ts":
+        return ["./types", "./repro-outcome"]
+      case "repro-outcome.ts":
+        return ["./types"]
+      case "context.ts":
+        return ["./types"]
+    }
+  }
+  const assertImportsOnlyAllowed = (src: string, f: (typeof FILES)[number]): void => {
     const sources: string[] = []
     // Reset lastIndex (defensive: regex is module-scoped above).
     IMPORT_STMT_RE.lastIndex = 0
@@ -178,15 +190,40 @@ describe("structural no-leak invariant (build gate)", () => {
       m = IMPORT_STMT_RE.exec(src)
     }
     expect(sources.length, `no import statements found in ${f}`).toBeGreaterThan(0)
+    const allowed = allowedImportsOf(f)
     for (const s of sources) {
-      expect(s, `${f} import source must be "./types", got "${s}"`).toBe("./types")
+      expect(allowed.includes(s), `${f} import source must be one of ${allowed.join(", ")}, got "${s}"`).toBe(true)
     }
   }
   for (const f of FILES) {
-    test(`${f}: no forbidden tokens, imports only ./types`, () => {
+    test(`${f}: no forbidden tokens, imports only local repair helpers`, () => {
       const src = readFileSync(resolve(ROOT, f), "utf8")
       assertNoForbidden(src, f)
-      assertImportsOnlyTypes(src, f)
+      assertImportsOnlyAllowed(src, f)
     })
   }
+})
+
+describe("repair repro-outcome SSOT", () => {
+  const ROOT = resolve(__dirname, "../../src/runner/batch/eval/repair")
+  const HELPER = readFileSync(resolve(ROOT, "repro-outcome.ts"), "utf8")
+  const INDEX = readFileSync(resolve(ROOT, "index.ts"), "utf8")
+  const VALIDATOR = readFileSync(resolve(ROOT, "validator.ts"), "utf8")
+  const LOCAL_CLASSIFIER_RE = /\b(?:const|function)\s+classifyReproOutcome\b/
+  const LOCAL_MARKER_RE = /\bMARKER_(?:REPRODUCED|RESOLVED|OTHER)\b/
+
+  test("helper owns the classifier implementation", () => {
+    expect(HELPER).toContain('export const MARKER_REPRODUCED = "Issue reproduced"')
+    expect(HELPER).toContain('export const MARKER_RESOLVED = "Issue resolved"')
+    expect(HELPER).toContain('export const MARKER_OTHER = "Other issues"')
+    expect(HELPER).toContain("export const classifyReproOutcome =")
+  })
+
+  test("index and validator import the shared helper instead of redefining markers/classifier", () => {
+    for (const src of [INDEX, VALIDATOR]) {
+      expect(src).toContain('from "./repro-outcome"')
+      expect(LOCAL_CLASSIFIER_RE.test(src)).toBe(false)
+      expect(LOCAL_MARKER_RE.test(src)).toBe(false)
+    }
+  })
 })

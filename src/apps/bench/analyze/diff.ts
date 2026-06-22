@@ -7,7 +7,7 @@
  * size. This is the headline signal for "did knob change X help?".
  */
 
-import type { RunVerdicts } from "./verdicts"
+import type { RunReportCount, RunVerdicts } from "./verdicts"
 
 export interface RunDiff {
   /** in B resolved, not in A resolved */
@@ -44,13 +44,21 @@ export interface RunReportTotalsDiff {
 }
 
 export interface CountDiff {
-  readonly a: number
-  readonly b: number
-  readonly delta: number
+  readonly a: RunReportCount
+  readonly b: RunReportCount
+  readonly delta: number | null
 }
 
 const sorted = (s: Iterable<string>): string[] => [...s].sort()
-const countDiff = (a: number, b: number): CountDiff => ({ a, b, delta: b - a })
+const countDiff = (a: RunReportCount | undefined, b: RunReportCount | undefined): CountDiff => {
+  const left = a ?? null
+  const right = b ?? null
+  return {
+    a: left,
+    b: right,
+    delta: left === null || right === null ? null : right - left,
+  }
+}
 
 /** Every instance id observed in a run, across all verdict buckets. */
 const allIds = (v: RunVerdicts): Set<string> =>
@@ -86,36 +94,36 @@ export const diffRuns = (a: RunVerdicts, b: RunVerdicts): RunDiff => {
       ? undefined
       : {
           submittedWithProof: countDiff(
-            a.reportTotals?.submittedWithProof ?? 0,
-            b.reportTotals?.submittedWithProof ?? 0,
+            a.reportTotals?.submittedWithProof,
+            b.reportTotals?.submittedWithProof,
           ),
           blockedProofMissing: countDiff(
-            a.reportTotals?.blockedProofMissing ?? 0,
-            b.reportTotals?.blockedProofMissing ?? 0,
+            a.reportTotals?.blockedProofMissing,
+            b.reportTotals?.blockedProofMissing,
           ),
           blockedEnvFailed: countDiff(
-            a.reportTotals?.blockedEnvFailed ?? 0,
-            b.reportTotals?.blockedEnvFailed ?? 0,
+            a.reportTotals?.blockedEnvFailed,
+            b.reportTotals?.blockedEnvFailed,
           ),
           contractOnlyBlocked: countDiff(
-            a.reportTotals?.contractOnlyBlocked ?? 0,
-            b.reportTotals?.contractOnlyBlocked ?? 0,
+            a.reportTotals?.contractOnlyBlocked,
+            b.reportTotals?.contractOnlyBlocked,
           ),
           contractOnlySubmitted: countDiff(
-            a.reportTotals?.contractOnlySubmitted ?? 0,
-            b.reportTotals?.contractOnlySubmitted ?? 0,
+            a.reportTotals?.contractOnlySubmitted,
+            b.reportTotals?.contractOnlySubmitted,
           ),
           packetizedGenerationCount: countDiff(
-            a.reportTotals?.packetizedGenerationCount ?? 0,
-            b.reportTotals?.packetizedGenerationCount ?? 0,
+            a.reportTotals?.packetizedGenerationCount,
+            b.reportTotals?.packetizedGenerationCount,
           ),
           packetizedRepairCount: countDiff(
-            a.reportTotals?.packetizedRepairCount ?? 0,
-            b.reportTotals?.packetizedRepairCount ?? 0,
+            a.reportTotals?.packetizedRepairCount,
+            b.reportTotals?.packetizedRepairCount,
           ),
           packetizedSelectionExplanationCount: countDiff(
-            a.reportTotals?.packetizedSelectionExplanationCount ?? 0,
-            b.reportTotals?.packetizedSelectionExplanationCount ?? 0,
+            a.reportTotals?.packetizedSelectionExplanationCount,
+            b.reportTotals?.packetizedSelectionExplanationCount,
           ),
         }
   return {
@@ -138,8 +146,11 @@ const list = (label: string, ids: readonly string[]): string => {
   return `${label} (${ids.length}):\n${lines}`
 }
 
+const countText = (n: RunReportCount): string => (n === null ? "unknown" : `${n}`)
 const telemetryLine = (label: string, diff: CountDiff): string =>
-  `  ${label}: A=${diff.a}  B=${diff.b}  delta=${signed(diff.delta)}`
+  `  ${label}: A=${countText(diff.a)}  B=${countText(diff.b)}  delta=${
+    diff.delta === null ? "unknown" : signed(diff.delta)
+  }`
 
 export const renderDiff = (d: RunDiff): string =>
   [

@@ -97,7 +97,7 @@ import {
   resolveBenchKnobs,
 } from "./knobs-bench"
 import {
-  assembleOwnerEvidence,
+  buildSelectionOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
   buildSelectionGenerationLlmEvidencePacket,
@@ -2461,6 +2461,31 @@ const contractFactsFromBundle = (
     satisfied: "unknown" as const,
   })) ?? []
 
+export const selectionGenerationEnvCaveats = (args: {
+  readonly reproHint: string | undefined
+  readonly reproTest: BenchReproTestTelemetry | undefined
+}): readonly string[] => {
+  if (args.reproHint !== undefined && args.reproHint.trim() !== "") return []
+  const repro = args.reproTest
+  if (repro === undefined || repro.installed) return []
+  switch (repro.reason) {
+    case "not_installed":
+      return ["public repro helper is unavailable in this runtime; no executable public repro command is attached"]
+    case "generation_failed":
+      return ["public repro helper synthesis failed before execution; no executable public repro command is attached"]
+    case "generation_empty":
+      return ["public repro helper synthesis produced no runnable script; no executable public repro command is attached"]
+    case "write_failed":
+      return ["public repro helper could not be written into the sandbox; no executable public repro command is attached"]
+    case "execution_failed":
+      return ["attempted public repro helper failed to execute on the base environment; no executable public repro command is attached"]
+    case "no_reproduced_candidate":
+      return ["generated public repro helpers did not reproduce on the base environment; no executable public repro command is attached"]
+    default:
+      return []
+  }
+}
+
 const mergeStaticWitnessContracts = (
   publicContracts: PublicContractBundle | undefined,
   staticWitnessContracts: ReturnType<typeof buildStaticWitnessContracts>,
@@ -2515,7 +2540,7 @@ const buildSelectionStructuralPlan = (args: {
     sandbox: args.sandbox,
     ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
-  return { candidateFamilyBundle, effectivePublicContracts, selectionInputs }
+  return { candidateFamilyBundle, effectivePublicContracts, selectionInputs, staticWitnesses }
 }
 
 const buildSelectionPhaseContracts = (args: {
@@ -2526,8 +2551,8 @@ const buildSelectionPhaseContracts = (args: {
   readonly publicContracts: PublicContractBundle | undefined
   readonly n: number
 }) => {
-  const { effectivePublicContracts, selectionInputs } = buildSelectionStructuralPlan(args)
-  return { effectivePublicContracts, selectionInputs }
+  const { effectivePublicContracts, selectionInputs, staticWitnesses } = buildSelectionStructuralPlan(args)
+  return { effectivePublicContracts, selectionInputs, staticWitnesses }
 }
 
 const resolveSelectionPhasePorts = async (args: {
@@ -2544,6 +2569,7 @@ const resolveSelectionPhasePorts = async (args: {
   readonly reproSources: readonly string[]
   readonly baseValidatedRed: boolean
   readonly selectionOwnerCandidates: readonly string[]
+  readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
 }) => {
   const { reproPolicy, resolvedKofNSelectionPort, reproConsensusProofSelectionPort, calibration } =
     await resolveSelectionReproConsensus(
@@ -2600,6 +2626,7 @@ const resolveSelectionPhasePorts = async (args: {
     llm: args.deps.llm,
     problemStatement: args.instance.problemStatement,
     ownerFiles: args.selectionOwnerCandidates,
+    ownerEvidence: args.selectionOwnerEvidence,
     ...(args.instance.swebench?.repo !== undefined ? { repo: args.instance.swebench.repo } : {}),
     signal: args.signal,
   })
@@ -2630,7 +2657,8 @@ const buildSelectionExecutorPorts = (args: {
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly closureHint: string | undefined
-  readonly selectionOwnerFiles: readonly string[]
+  readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
+  readonly envCaveats: readonly string[]
   readonly publicContracts: PublicContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly recordLlmEvidencePacket: ((packet: LlmEvidencePacket) => void) | undefined
@@ -2652,14 +2680,10 @@ const buildSelectionExecutorPorts = (args: {
         index,
         seed:
           args.verifySelectProofRequired && args.selectorMode === "clean"
-            ? (() => {
+              ? (() => {
                 const packet = buildSelectionGenerationLlmEvidencePacket({
                   problemStatement: args.instance.problemStatement,
-                  ownerEvidence: assembleOwnerEvidence({
-                    ownerFiles: args.selectionOwnerFiles,
-                    issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
-                    readSource: (rel) => readSandboxSource(args.sandbox, rel),
-                  }),
+                  ownerEvidence: args.selectionOwnerEvidence,
                   contracts: contractFactsFromBundle(args.publicContracts),
                   ...(args.baseValidatedRed != null
                     ? { baseValidatedRed: args.baseValidatedRed }
@@ -2669,6 +2693,7 @@ const buildSelectionExecutorPorts = (args: {
                     : {}),
                   ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
                   ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+                  ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
                   ...(seed !== undefined ? { seed } : {}),
                 })
                 args.recordLlmEvidencePacket?.(packet)
@@ -2797,12 +2822,13 @@ const runSelectionPhase = async (
   ownerResolved: readonly OwnerSibling[] | undefined,
   baseValidatedRed: boolean,
   verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined,
+  reproTest: BenchReproTestTelemetry | undefined,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
 ): Promise<Phase> => {
-  const { effectivePublicContracts, selectionInputs } = buildSelectionPhaseContracts({
+  const { effectivePublicContracts, selectionInputs, staticWitnesses } = buildSelectionPhaseContracts({
     instance,
     sandbox,
     selectionOwnerCandidates,
@@ -2814,6 +2840,16 @@ const runSelectionPhase = async (
   const generationErrors = new Map<number, string>()
   const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   const verificationTarget = verificationTargetFromPlan(verificationPlan)
+  const selectionOwnerEvidence = buildSelectionOwnerEvidence({
+    ownerFiles: selectionInputs.ownerFiles,
+    issueSymbols: extractIssueHint(instance.problemStatement).symbols,
+    staticWitnesses,
+    readSource: (rel) => readSandboxSource(sandbox, rel),
+  })
+  const generationEnvCaveats = selectionGenerationEnvCaveats({
+    reproHint,
+    reproTest,
+  })
   let totalTurns = 0
   const selectionState = await resolveSelectionPhasePorts({
     instance,
@@ -2829,6 +2865,7 @@ const runSelectionPhase = async (
     reproSources,
     baseValidatedRed,
     selectionOwnerCandidates,
+    selectionOwnerEvidence,
   })
   const result = await runSelection({
     n,
@@ -2877,7 +2914,8 @@ const runSelectionPhase = async (
       resolvedKofNSelectionPort: selectionState.resolvedKofNSelectionPort,
       reproConsensusProofSelectionPort: selectionState.reproConsensusProofSelectionPort,
       verifySelectProofRequired,
-      selectionOwnerFiles: selectionInputs.ownerFiles,
+      selectionOwnerEvidence,
+      envCaveats: generationEnvCaveats,
       publicContracts: effectivePublicContracts,
       verificationTarget,
       recordLlmEvidencePacket: (packet) => {
@@ -3480,6 +3518,7 @@ const runMainPhase = async (args: {
       args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
       args.prepared.verificationPlan,
+      args.prepared.reproTest,
       args.prepared.precomputedHint,
       args.prepared.reproHint,
       args.prepared.closureHint,

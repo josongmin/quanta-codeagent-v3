@@ -4,7 +4,8 @@
  * Pure policy over an injected `runOnce` (one agent run) and `validate` (one
  * validator run). The orchestrator never imports `@/agent` directly — the
  * bench runner stays the sole composer of the agent slice. This file imports
- * only from `./types` so the no-leak invariant is structural.
+ * only local repair helpers (`./types`, `./repro-outcome`) so the no-leak
+ * invariant stays structural.
  *
  * Loop shape (continue-from-patched-tree — the bench runner side is
  * responsible for NOT resetting the sandbox between rounds):
@@ -30,6 +31,7 @@ import type {
   RunRepairRoundsResult,
   ValidatorResult,
 } from "./types"
+import { classifyReproOutcome } from "./repro-outcome"
 
 export const runRepairRounds = async (
   args: RunRepairRoundsArgs,
@@ -120,24 +122,8 @@ const clearedAsValidated = (args: RunRepairRoundsArgs, v: ValidatorResult): bool
   // `decidePrimaryRailFinishGate`'s decision (block ⇔ rail present AND state !==
   // "green") specialised to this site; it is INLINED rather than imported from
   // `@/agent/primary-rail` so the repair slice keeps its structural no-leak fence
-  // (imports only `./types`). Keep in sync with the keystone decider.
+  // (imports only local repair helpers). Keep in sync with the keystone decider.
   return !isFalseGreen(v)
-}
-
-const MARKER_REPRODUCED = "Issue reproduced"
-const MARKER_RESOLVED = "Issue resolved"
-const MARKER_OTHER = "Other issues"
-
-const classifyReproOutcome = (stdout: string, code: number): RepairReproOutcome => {
-  const s = typeof stdout === "string" ? stdout : ""
-  const iReproduced = s.lastIndexOf(MARKER_REPRODUCED)
-  const iResolved = s.lastIndexOf(MARKER_RESOLVED)
-  const iOther = s.lastIndexOf(MARKER_OTHER)
-  const max = Math.max(iReproduced, iResolved, iOther)
-  if (max < 0) return code !== 0 ? "exec_failed" : "unknown"
-  if (max === iResolved) return "resolved"
-  if (max === iReproduced) return "reproduced"
-  return "other"
 }
 
 const reproOutcomeOf = (v: ValidatorResult): RepairReproOutcome | undefined => {

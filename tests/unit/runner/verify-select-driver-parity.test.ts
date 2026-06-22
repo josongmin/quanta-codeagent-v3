@@ -103,6 +103,13 @@ describe("runner verify-select and patch-budget driver parity", () => {
     )
   })
 
+  test("proof-clean generation in both drivers uses shared structural owner evidence packetization", () => {
+    expect(DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
+    expect(APP_DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
+    expect(DRIVER_SRC).toContain("staticWitnesses: args.staticWitnesses")
+    expect(APP_DRIVER_SRC).toContain("staticWitnesses,")
+  })
+
   test("runner driver emits patch-budget telemetry when the knob is on", () => {
     expect(DRIVER_SRC).toContain("buildPhasePatchBudget")
     expect(DRIVER_SRC).toMatch(

@@ -36,15 +36,17 @@ export interface RunVerdicts {
   readonly reportTotals?: RunReportTotals
 }
 
+export type RunReportCount = number | null
+
 export interface RunReportTotals {
-  readonly submittedWithProof: number
-  readonly blockedProofMissing: number
-  readonly blockedEnvFailed: number
-  readonly contractOnlyBlocked: number
-  readonly contractOnlySubmitted: number
-  readonly packetizedGenerationCount: number
-  readonly packetizedRepairCount: number
-  readonly packetizedSelectionExplanationCount: number
+  readonly submittedWithProof: RunReportCount
+  readonly blockedProofMissing: RunReportCount
+  readonly blockedEnvFailed: RunReportCount
+  readonly contractOnlyBlocked: RunReportCount
+  readonly contractOnlySubmitted: RunReportCount
+  readonly packetizedGenerationCount: RunReportCount
+  readonly packetizedRepairCount: RunReportCount
+  readonly packetizedSelectionExplanationCount: RunReportCount
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -125,20 +127,6 @@ const rowIsOfficialHarnessResolved = (row: Record<string, unknown>): boolean => 
 const asCount = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : undefined
 
-const rowHasPacketStage = (
-  row: Record<string, unknown>,
-  stage: "candidate_generation" | "repair_seed" | "selection_explanation",
-): boolean => {
-  const llmEvidence = row.llmEvidence
-  if (isRecord(llmEvidence)) {
-    if (stage === "candidate_generation" && llmEvidence.candidateGeneration !== undefined) return true
-    if (stage === "repair_seed" && llmEvidence.repairSeed !== undefined) return true
-    if (stage === "selection_explanation" && llmEvidence.selectionExplanation !== undefined) return true
-  }
-  const stages = row.llmEvidenceStages
-  return Array.isArray(stages) && stages.includes(stage)
-}
-
 const countRows = (
   perInstance: readonly unknown[],
   predicate: (row: Record<string, unknown>) => boolean,
@@ -146,6 +134,21 @@ const countRows = (
   perInstance.reduce<number>(
     (total: number, raw) => (isRecord(raw) && predicate(raw) ? total + 1 : total),
     0,
+  )
+
+const hasOwn = (row: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(row, key)
+
+const hasPerInstanceProofTelemetry = (perInstance: readonly unknown[]): boolean =>
+  perInstance.some(
+    (raw) =>
+      isRecord(raw) &&
+      (hasOwn(raw, "submittedCandidateProof") ||
+        hasOwn(raw, "proofRequiredMissing") ||
+        hasOwn(raw, "envPrepFailed") ||
+        raw.proofState === "infra_blocked" ||
+        hasOwn(raw, "contractOnlyBlocked") ||
+        hasOwn(raw, "contractOnlySubmitted")),
   )
 
 const reportTotalsFromOurReport = (args: {
@@ -158,26 +161,31 @@ const reportTotalsFromOurReport = (args: {
 }): RunReportTotals => {
   const proofTotals = isRecord(args.report.proofTotals) ? args.report.proofTotals : undefined
   const llmEvidenceTotals = isRecord(args.report.llmEvidenceTotals) ? args.report.llmEvidenceTotals : undefined
+  const perInstanceProofTelemetry = hasPerInstanceProofTelemetry(args.perInstance)
   return {
     submittedWithProof:
       asCount(proofTotals?.submittedWithProof) ??
-      countRows(args.perInstance, (row) => row.submittedCandidateProof === true),
+      (perInstanceProofTelemetry
+        ? countRows(args.perInstance, (row) => row.submittedCandidateProof === true)
+        : null),
     blockedProofMissing:
-      asCount(proofTotals?.blockedProofMissing) ?? args.proofMissingCount,
-    blockedEnvFailed: asCount(proofTotals?.blockedEnvFailed) ?? args.infraBlockedCount,
+      asCount(proofTotals?.blockedProofMissing) ??
+      (perInstanceProofTelemetry ? args.proofMissingCount : null),
+    blockedEnvFailed:
+      asCount(proofTotals?.blockedEnvFailed) ??
+      (perInstanceProofTelemetry ? args.infraBlockedCount : null),
     contractOnlyBlocked:
-      asCount(proofTotals?.contractOnlyBlocked) ?? args.contractOnlyBlockedCount,
+      asCount(proofTotals?.contractOnlyBlocked) ??
+      (perInstanceProofTelemetry ? args.contractOnlyBlockedCount : null),
     contractOnlySubmitted:
-      asCount(proofTotals?.contractOnlySubmitted) ?? args.contractOnlySubmittedCount,
+      asCount(proofTotals?.contractOnlySubmitted) ??
+      (perInstanceProofTelemetry ? args.contractOnlySubmittedCount : null),
     packetizedGenerationCount:
-      asCount(llmEvidenceTotals?.packetizedGenerationCount) ??
-      countRows(args.perInstance, (row) => rowHasPacketStage(row, "candidate_generation")),
+      asCount(llmEvidenceTotals?.packetizedGenerationCount) ?? null,
     packetizedRepairCount:
-      asCount(llmEvidenceTotals?.packetizedRepairCount) ??
-      countRows(args.perInstance, (row) => rowHasPacketStage(row, "repair_seed")),
+      asCount(llmEvidenceTotals?.packetizedRepairCount) ?? null,
     packetizedSelectionExplanationCount:
-      asCount(llmEvidenceTotals?.packetizedSelectionExplanationCount) ??
-      countRows(args.perInstance, (row) => rowHasPacketStage(row, "selection_explanation")),
+      asCount(llmEvidenceTotals?.packetizedSelectionExplanationCount) ?? null,
   }
 }
 

@@ -227,11 +227,19 @@ export const OUTCOME_FAILURE_MATCHERS: readonly OutcomeFailureMatcher[] = [
   // The `failures?`/`errors?` words also appear in incidental NON-summary prose
   // ("will raise 2 errors", "fixes 3 failures"), where firing would flip a real
   // PASS to fail-closed. Test-runner summaries always place the count at a
-  // segment boundary — start of a summary line, or after a `, ` separator
-  // (`1 passed, 2 errors in 0.01s`) — so anchor those two ambiguous words to
-  // that boundary. `failed` is left unanchored: the bare verb is summary-only
-  // (no common prose like "raise N failed"), so it keeps its broader reach.
-  { id: "generic-failed-count", ecosystem: "generic", pattern: /\b(?:[1-9]\d*)\s+failed\b/m },
+  // segment boundary — start of a summary line, after a `, ` separator
+  // (`1 passed, 2 failed in 0.01s`), or after the `= ` banner fill
+  // (`===== 3 failed in 0.4s =====`) — so ALL three ambiguous count words
+  // (`failed`/`failures?`/`errors?`) anchor to that boundary. #13: `failed` was
+  // previously left unanchored, which flipped a real PASS to fail-closed whenever
+  // the output carried "N failed" in prose / log noise ("3 failed connections,
+  // then OK"). Anchoring keeps every true summary positive (the count is always
+  // at a boundary) while dropping the prose false-RED.
+  {
+    id: "generic-failed-count",
+    ecosystem: "generic",
+    pattern: /(?:^|,\s|=\s)(?:[1-9]\d*)\s+failed\b/m,
+  },
   {
     id: "generic-failure-count",
     ecosystem: "generic",

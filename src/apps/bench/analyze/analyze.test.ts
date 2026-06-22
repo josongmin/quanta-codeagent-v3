@@ -103,9 +103,9 @@ describe("loadVerdicts — both report shapes", () => {
       blockedEnvFailed: 0,
       contractOnlyBlocked: 1,
       contractOnlySubmitted: 0,
-      packetizedGenerationCount: 0,
-      packetizedRepairCount: 0,
-      packetizedSelectionExplanationCount: 0,
+      packetizedGenerationCount: null,
+      packetizedRepairCount: null,
+      packetizedSelectionExplanationCount: null,
     })
   })
 
@@ -330,6 +330,32 @@ describe("loadVerdicts — both report shapes", () => {
       packetizedSelectionExplanationCount: 2,
     })
   })
+
+  test("packet totals stay unknown when an old report lacks top-level llmEvidenceTotals", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      perInstance: [
+        {
+          id: "django__django-old-packet-report",
+          passed: false,
+          turns: 3,
+          patchBytes: 12,
+          llmEvidenceStages: ["candidate_generation", "repair_seed"],
+          failure: { termination: "completed_unresolved", signals: [] },
+        },
+      ],
+    })
+    expect(v.reportTotals).toEqual({
+      submittedWithProof: null,
+      blockedProofMissing: null,
+      blockedEnvFailed: null,
+      contractOnlyBlocked: null,
+      contractOnlySubmitted: null,
+      packetizedGenerationCount: null,
+      packetizedRepairCount: null,
+      packetizedSelectionExplanationCount: null,
+    })
+  })
 })
 
 // ── diff: A resolved {x,y}, B resolved {y,z} ───────────────────────────────
@@ -417,6 +443,26 @@ describe("diffRuns", () => {
     expect(out).toContain("packet coverage:")
     expect(out).toContain("packetizedGenerationCount: A=0  B=8  delta=+8")
     expect(out).toContain("packetizedRepairCount: A=0  B=3  delta=+3")
+  })
+
+  test("renderDiff keeps missing telemetry unknown instead of coercing it to zero", () => {
+    const a = mk(["x"])
+    const b = {
+      ...mk(["x"]),
+      reportTotals: {
+        submittedWithProof: 2,
+        blockedProofMissing: 1,
+        blockedEnvFailed: 0,
+        contractOnlyBlocked: 0,
+        contractOnlySubmitted: 0,
+        packetizedGenerationCount: 5,
+        packetizedRepairCount: 2,
+        packetizedSelectionExplanationCount: 1,
+      },
+    }
+    const out = renderDiff(diffRuns(a, b))
+    expect(out).toContain("submittedWithProof: A=unknown  B=2  delta=unknown")
+    expect(out).toContain("packetizedGenerationCount: A=unknown  B=5  delta=unknown")
   })
 
   test("throttle/infra-miss in B is NOT a regression — bucketed as unmeasured", () => {

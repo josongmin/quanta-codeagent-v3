@@ -28,10 +28,20 @@ describe("buildSelectionRiskGate", () => {
       problemStatement:
         "Fix the patch so explicit axis inversion still works when limits are preserved.",
       ownerFiles: ["pkg/axis.py"],
+      ownerEvidence: [
+        {
+          file: "pkg/axis.py",
+          symbols: ["invert_axis"],
+          provenance: "selection-owner",
+          sourceSlice: "def invert_axis(ax):\n    ax.set_xlim(...)",
+        },
+      ],
     })
     const decision = await gate?.(candidate("+++ b/pkg/axis.py\n+fix", ["pkg/axis.py"]))
     expect(decision?.expand).toBe(true)
     expect(decision?.reasons).toEqual(["llm:issue-condition-not-evidenced"])
+    expect(decision?.llmEvidencePacket?.stage).toBe("candidate_review")
+    expect(decision?.llmEvidencePacket?.ownerEvidence[0]?.sourceSlice).toContain("invert_axis")
     // structural arm forwards cand0's typed patch-budget verdict (a single clean
     // file is within budget) so the counterfactual path consumes facts directly.
     expect(decision?.patchBudget?.withinBudget).toBe(true)

@@ -641,6 +641,8 @@ describe("runSelection", () => {
     expect(seeds[1]).toContain('"verificationTarget"')
     expect(seeds[1]).toContain("proofRequiredMissing")
     expect(seeds[1]).toContain("no_positive_executed_public_proof_attached")
+    expect(seeds[1]).toContain("owner-must-touch:pkg/owner.py")
+    expect(seeds[1]).not.toContain("requiredContractsSatisfied=1")
   })
 
   it("proof-required mode bypasses blind staticAccept and keeps searching through finalize", async () => {
@@ -941,6 +943,32 @@ describe("runSelection", () => {
     )
   })
 
+  it("clean mode does not treat discovered regression keep-green as executable proof when owner authority is empty", async () => {
+    const { gen } = genFrom([
+      cand({
+        id: "cand-0",
+        patch: patchForFiles(["pkg/a.py"]),
+        files: ["pkg/a.py"],
+      }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: new Set(),
+      ports: {
+        generate: gen,
+        regression: async () => true,
+      },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(summarizeSelection(r).proofSummary?.proofState).toBe("safety_only")
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)",
+    )
+  })
+
   it("clean mode allows multi-source candidates when executable repro proof is positive", async () => {
     const riskyButProven = cand({
       id: "cand-0",
@@ -966,6 +994,36 @@ describe("runSelection", () => {
 
     expect(r.winner?.id).toBe("cand-0")
     expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).not.toContain(
+      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+    )
+  })
+
+  it("clean mode keeps discovered regression keep-green as safety-only for multi-source drift", async () => {
+    const riskyButOnlySafe = cand({
+      id: "cand-0",
+      patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
+      files: ["pkg/a.py", "pkg/b.py"],
+    })
+    const narrow = cand({
+      id: "cand-1",
+      patch: patchForFiles(["pkg/a.py"]),
+      files: ["pkg/a.py"],
+    })
+    const { gen } = genFrom([riskyButOnlySafe, narrow])
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py", "pkg/b.py"]),
+      ports: {
+        generate: gen,
+        regression: async (c) => (c.id === "cand-0" ? true : null),
+      },
+    })
+
+    expect(r.winner?.id).toBe("cand-1")
+    expect(summarizeSelection(r).candidates[0]?.proofState).toBe("safety_only")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
       "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
     )
   })

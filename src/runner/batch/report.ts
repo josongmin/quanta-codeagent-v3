@@ -28,6 +28,7 @@ import {
   type FailureClassification,
 } from "./corpus/failure-classifier"
 import {
+  llmEvidencePacketCounts,
   summarizeLlmEvidenceArtifacts,
   type LlmEvidencePacketStage,
   type LlmEvidenceRevisionByStage,
@@ -216,11 +217,10 @@ export const buildReport = (
   )
   const llmEvidenceTotals = results.reduce<BenchLlmEvidenceTotals>(
     (totals, r) => {
-      if (r.llmEvidence?.candidateGeneration !== undefined) totals.packetizedGenerationCount += 1
-      if (r.llmEvidence?.repairSeed !== undefined) totals.packetizedRepairCount += 1
-      if (r.llmEvidence?.selectionExplanation !== undefined) {
-        totals.packetizedSelectionExplanationCount += 1
-      }
+      const counts = llmEvidencePacketCounts(r.llmEvidence)
+      totals.packetizedGenerationCount += counts?.candidateGeneration ?? 0
+      totals.packetizedRepairCount += counts?.repairSeed ?? 0
+      totals.packetizedSelectionExplanationCount += counts?.selectionExplanation ?? 0
       return totals
     },
     {

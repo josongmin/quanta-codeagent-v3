@@ -32,6 +32,7 @@ import {
   type BoxSession,
   type ChunkPaths,
   countLiveBoxes,
+  coveredInstances,
   type FullRemoteConfig,
   type FullRemoteResult,
   findIdleBox,
@@ -144,7 +145,59 @@ export interface PoolChunkResult {
   /** True when the chunk never earned ANY verdict across all attempts — a genuine
    *  loss the operator must see (NOT silently counted as resolved=0). */
   readonly lost: boolean
+  /** #2: instances this chunk REQUESTED (via {@link PoolChunk.instanceIds}) but
+   *  that never earned any verdict after all attempts — a PARTIAL coverage gap.
+   *  Present (non-empty) only when the chunk graded a strict subset; never let
+   *  these vanish silently (the box-died-after-grading-N confound). Empty/absent
+   *  when coverage was complete or the chunk had no declared instance set. */
+  readonly missing?: readonly string[]
 }
+
+interface ChunkCoverageAccumulator {
+  readonly resolved: Set<string>
+  readonly unresolved: Set<string>
+  readonly errored: Set<string>
+  readonly emptyPatch: Set<string>
+  reportPath?: string
+  rateLimited: boolean
+}
+
+const createChunkCoverageAccumulator = (): ChunkCoverageAccumulator => ({
+  resolved: new Set<string>(),
+  unresolved: new Set<string>(),
+  errored: new Set<string>(),
+  emptyPatch: new Set<string>(),
+  rateLimited: false,
+})
+
+const chunkCoverageAccumulatorFor = (
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
+  runId: string,
+): ChunkCoverageAccumulator => {
+  let acc = coverageByRun.get(runId)
+  if (acc !== undefined) return acc
+  acc = createChunkCoverageAccumulator()
+  coverageByRun.set(runId, acc)
+  return acc
+}
+
+const accumulateChunkCoverage = (acc: ChunkCoverageAccumulator, result: FullRemoteResult): void => {
+  if (result.reportPath !== undefined) acc.reportPath = result.reportPath
+  if (result.rateLimited === true) acc.rateLimited = true
+  for (const id of result.resolved ?? []) acc.resolved.add(id)
+  for (const id of result.unresolved ?? []) acc.unresolved.add(id)
+  for (const id of result.errored ?? []) acc.errored.add(id)
+  for (const id of result.emptyPatch ?? []) acc.emptyPatch.add(id)
+}
+
+const chunkCoverageResult = (acc: ChunkCoverageAccumulator): FullRemoteResult => ({
+  ...(acc.reportPath !== undefined ? { reportPath: acc.reportPath } : {}),
+  ...(acc.resolved.size > 0 ? { resolved: [...acc.resolved] } : {}),
+  ...(acc.unresolved.size > 0 ? { unresolved: [...acc.unresolved] } : {}),
+  ...(acc.errored.size > 0 ? { errored: [...acc.errored] } : {}),
+  ...(acc.emptyPatch.size > 0 ? { emptyPatch: [...acc.emptyPatch] } : {}),
+  ...(acc.rateLimited ? { rateLimited: true } : {}),
+})
 
 export const assertUniqueChunkRunIds = (chunks: readonly PoolChunk[]): void => {
   const seen = new Set<string>()
@@ -350,6 +403,30 @@ const earnedVerdict = (r: FullRemoteResult): boolean =>
     (r.errored?.length ?? 0) +
     (r.emptyPatch?.length ?? 0) >
   0
+
+/** #2: instances the chunk REQUESTED but that earned no verdict. Empty when the
+ *  chunk declares no instance set (we then fall back to the any-verdict test). */
+export const missingInstances = (r: FullRemoteResult, chunk: PoolChunk): string[] => {
+  if (chunk.instanceIds === undefined || chunk.instanceIds.length === 0) return []
+  const covered = coveredInstances(r)
+  return chunk.instanceIds.filter((id) => !covered.has(id))
+}
+
+/** #2: a chunk is DONE only when it covered EVERY requested instance. A strict
+ *  subset (box died after grading N of M, spot reclaim, ssh-255 mid-grade) must
+ *  NOT be recorded as a clean completion — the uncovered instances would silently
+ *  vanish (counted as neither resolved nor lost). When the chunk declares no
+ *  instance set, fall back to "earned any verdict" (legacy behavior). */
+export const coverageComplete = (r: FullRemoteResult, chunk: PoolChunk): boolean =>
+  chunk.instanceIds === undefined || chunk.instanceIds.length === 0
+    ? earnedVerdict(r)
+    : missingInstances(r, chunk).length === 0
+
+const accumulatedMissingInstances = (acc: ChunkCoverageAccumulator, chunk: PoolChunk): string[] =>
+  missingInstances(chunkCoverageResult(acc), chunk)
+
+const accumulatedCoverageComplete = (acc: ChunkCoverageAccumulator, chunk: PoolChunk): boolean =>
+  coverageComplete(chunkCoverageResult(acc), chunk)
 
 /** A simple shared queue. Workers pull until empty; a re-queued (box-died) chunk
  *  goes back to the FRONT so it retries promptly on the next provisioned box. */
@@ -564,9 +641,21 @@ const loseChunk = (
   out: Map<string, PoolChunkResult>,
   chunk: PoolChunk,
   attempt: number,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
   result: FullRemoteResult = {},
 ): void => {
-  out.set(chunk.runId, { chunk, result, attempts: attempt, lost: true })
+  const acc = coverageByRun.get(chunk.runId)
+  const aggregated = acc === undefined ? result : chunkCoverageResult(acc)
+  const missing = acc === undefined ? [] : accumulatedMissingInstances(acc, chunk)
+  const partial = earnedVerdict(aggregated) && missing.length > 0
+  out.set(chunk.runId, {
+    chunk,
+    result: aggregated,
+    attempts: attempt,
+    lost: !partial,
+    ...(partial ? { missing } : {}),
+  })
+  coverageByRun.delete(chunk.runId)
 }
 
 const requeueOrLoseChunk = (
@@ -575,13 +664,14 @@ const requeueOrLoseChunk = (
   chunk: PoolChunk,
   attempt: number,
   maxRetries: number,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
   result: FullRemoteResult = {},
 ): void => {
   if (attempt <= maxRetries) {
     queue.requeueFront(chunk)
     return
   }
-  loseChunk(out, chunk, attempt, result)
+  loseChunk(out, chunk, attempt, coverageByRun, result)
 }
 
 const clearWorkerSession = (state: WorkerState): BoxSession | undefined => {
@@ -675,11 +765,13 @@ const recordSuccessfulChunk = (
   chunk: PoolChunk,
   result: FullRemoteResult,
   attempt: number,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
 ): void => {
   out.set(chunk.runId, { chunk, result, attempts: attempt, lost: false })
+  coverageByRun.delete(chunk.runId)
 }
 
-const handleNoVerdictChunk = async (
+const handleIncompleteChunk = async (
   workerId: number,
   queue: ChunkQueue,
   chunk: PoolChunk,
@@ -687,14 +779,21 @@ const handleNoVerdictChunk = async (
   runtime: WorkerRuntime,
   state: WorkerState,
   out: Map<string, PoolChunkResult>,
-  result: FullRemoteResult,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
+  _result: FullRemoteResult,
 ): Promise<void> => {
+  const acc = chunkCoverageAccumulatorFor(coverageByRun, chunk.runId)
+  const aggregated = chunkCoverageResult(acc)
+  const missing = accumulatedMissingInstances(acc, chunk)
+  const partial = earnedVerdict(aggregated) && missing.length > 0
   if (attempt > runtime.maxRetries) {
-    loseChunk(out, chunk, attempt, result)
+    loseChunk(out, chunk, attempt, coverageByRun, aggregated)
     return
   }
   runtime.log(
-    `[pool] worker ${workerId}: chunk ${chunk.runId} produced no verdict (box died?) — requeue (attempt ${attempt}/${runtime.maxRetries + 1})`,
+    partial
+      ? `[pool] worker ${workerId}: chunk ${chunk.runId} graded a strict subset (${missing.length} missing: ${missing.join(", ")}) — requeue to recover the rest (attempt ${attempt}/${runtime.maxRetries + 1})`
+      : `[pool] worker ${workerId}: chunk ${chunk.runId} produced no verdict (box died?) — requeue (attempt ${attempt}/${runtime.maxRetries + 1})`,
   )
   await terminateWorkerSession(state)
   queue.requeueFront(chunk)
@@ -708,6 +807,7 @@ const handlePoolBusyChunkError = (
   runtime: WorkerRuntime,
   state: WorkerState,
   out: Map<string, PoolChunkResult>,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
 ): void => {
   clearWorkerSession(state)
   if (!runtime.reuseWarm && !runtime.allowExtraBoxes) {
@@ -722,7 +822,7 @@ const handlePoolBusyChunkError = (
   runtime.log(
     `[pool] worker ${workerId}: chunk ${chunk.runId} — box busy (another run); requeue on a fresh box`,
   )
-  requeueOrLoseChunk(queue, out, chunk, attempt, runtime.maxRetries)
+  requeueOrLoseChunk(queue, out, chunk, attempt, runtime.maxRetries, coverageByRun)
 }
 
 const handleDeadBoxChunkError = async (
@@ -733,6 +833,7 @@ const handleDeadBoxChunkError = async (
   runtime: WorkerRuntime,
   state: WorkerState,
   out: Map<string, PoolChunkResult>,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
   err: unknown,
 ): Promise<void> => {
   runtime.log(`[pool] worker ${workerId}: chunk ${chunk.runId} threw: ${errMessage(err)}`)
@@ -743,7 +844,7 @@ const handleDeadBoxChunkError = async (
       `[pool] worker ${workerId}: failed to terminate box after chunk ${chunk.runId} threw ${errMessage(err)}: ${errMessage(cleanupErr)}`,
     )
   }
-  requeueOrLoseChunk(queue, out, chunk, attempt, runtime.maxRetries)
+  requeueOrLoseChunk(queue, out, chunk, attempt, runtime.maxRetries, coverageByRun)
 }
 
 const handleChunkBudgetWaitError = (
@@ -770,6 +871,7 @@ const gradeWorkerChunk = async (args: {
   readonly runtime: WorkerRuntime
   readonly state: WorkerState
   readonly out: Map<string, PoolChunkResult>
+  readonly coverageByRun: Map<string, ChunkCoverageAccumulator>
   readonly auth: WorkerChunkAuthState
   readonly budgetGrant: GrantedChunkBudgetLease
   readonly multiAuth: boolean
@@ -802,6 +904,7 @@ const gradeWorkerChunk = async (args: {
     args.runtime,
     args.state,
     args.out,
+    args.coverageByRun,
     authJson,
     args.budgetGrant.concurrency,
     args.auth.leasedAccountLabel,
@@ -819,6 +922,7 @@ const processWorkerChunk = async (args: {
   readonly runtime: WorkerRuntime
   readonly state: WorkerState
   readonly out: Map<string, PoolChunkResult>
+  readonly coverageByRun: Map<string, ChunkCoverageAccumulator>
   readonly multiAuth: boolean
 }): Promise<void> => {
   const auth = await acquireWorkerChunkAuth(
@@ -936,10 +1040,11 @@ const routeChunkGradeError = async (
   runtime: WorkerRuntime,
   state: WorkerState,
   out: Map<string, PoolChunkResult>,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
 ): Promise<void> => {
   const msg = errMessage(err)
   if (msg.includes(POOL_BUSY_ERROR)) {
-    handlePoolBusyChunkError(workerId, queue, chunk, attempt, runtime, state, out)
+    handlePoolBusyChunkError(workerId, queue, chunk, attempt, runtime, state, out, coverageByRun)
     return
   }
   if (msg.includes(BOX_DIED_DURING_RUN_ERROR)) {
@@ -948,13 +1053,33 @@ const routeChunkGradeError = async (
     // though a dead box also fails its grade-lock release (the secondary
     // GRADE_LOCK_RELEASE_FAILED gets wrapped in), that lock-release substring
     // must NOT mis-route a genuine box death to the rethrow branch below.
-    await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
+    await handleDeadBoxChunkError(
+      workerId,
+      queue,
+      chunk,
+      attempt,
+      runtime,
+      state,
+      out,
+      coverageByRun,
+      err,
+    )
     return
   }
   if (msg.includes(GRADE_LOCK_RELEASE_ERROR)) {
     throw err
   }
-  await handleDeadBoxChunkError(workerId, queue, chunk, attempt, runtime, state, out, err)
+  await handleDeadBoxChunkError(
+    workerId,
+    queue,
+    chunk,
+    attempt,
+    runtime,
+    state,
+    out,
+    coverageByRun,
+    err,
+  )
 }
 
 const gradeChunkAttempt = async (
@@ -966,6 +1091,7 @@ const gradeChunkAttempt = async (
   runtime: WorkerRuntime,
   state: WorkerState,
   out: Map<string, PoolChunkResult>,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
   authJson: string,
   chunkConcurrency: number,
   accountLabel: string | undefined,
@@ -996,14 +1122,40 @@ const gradeChunkAttempt = async (
       ...(cfg.provision.sleep !== undefined ? { pollSleep: cfg.provision.sleep } : {}),
       ...(cfg.now !== undefined ? { pollNow: cfg.now } : {}),
     })
-    if (earnedVerdict(result)) {
-      recordSuccessfulChunk(out, chunk, result, attempt)
+    // #2: "completed" requires covering EVERY requested instance, not merely
+    // earning ≥1 verdict. A strict-subset grade (box died after N of M) flows to
+    // the incomplete handler, which requeues to recover the rest and — on attempt
+    // exhaustion — surfaces the gap as `missing` instead of silently dropping it.
+    const acc = chunkCoverageAccumulatorFor(coverageByRun, chunk.runId)
+    accumulateChunkCoverage(acc, result)
+    if (accumulatedCoverageComplete(acc, chunk)) {
+      recordSuccessfulChunk(out, chunk, chunkCoverageResult(acc), attempt, coverageByRun)
       return { rateLimited: result.rateLimited === true, completed: true, lostBox: false }
     }
-    await handleNoVerdictChunk(workerId, queue, chunk, attempt, runtime, state, out, result)
+    await handleIncompleteChunk(
+      workerId,
+      queue,
+      chunk,
+      attempt,
+      runtime,
+      state,
+      out,
+      coverageByRun,
+      result,
+    )
     return { rateLimited: result.rateLimited === true, completed: false, lostBox: true }
   } catch (err) {
-    await routeChunkGradeError(err, workerId, queue, chunk, attempt, runtime, state, out)
+    await routeChunkGradeError(
+      err,
+      workerId,
+      queue,
+      chunk,
+      attempt,
+      runtime,
+      state,
+      out,
+      coverageByRun,
+    )
     return OUTCOME_LOST
   }
 }
@@ -1099,6 +1251,7 @@ const runWorker = async (
   cfg: PoolConfig,
   attemptsByRun: Map<string, number>,
   out: Map<string, PoolChunkResult>,
+  coverageByRun: Map<string, ChunkCoverageAccumulator>,
 ): Promise<void> => {
   const runtime = createWorkerRuntime(cfg)
   const state: WorkerState = {
@@ -1123,6 +1276,7 @@ const runWorker = async (
         runtime,
         state,
         out,
+        coverageByRun,
         multiAuth,
       })
     }
@@ -1215,9 +1369,10 @@ export const runPool = async (
     const queue = new ChunkQueue(chunks)
     const attemptsByRun = new Map<string, number>()
     const out = new Map<string, PoolChunkResult>()
+    const coverageByRun = new Map<string, ChunkCoverageAccumulator>()
     const workerRuns = Array.from({ length: workers }, (_unused, i) => ({
       workerId: i + 1,
-      promise: runWorker(i + 1, queue, cfg, attemptsByRun, out),
+      promise: runWorker(i + 1, queue, cfg, attemptsByRun, out, coverageByRun),
     }))
     const settled = await Promise.allSettled(workerRuns.map((worker) => worker.promise))
     const workerErrors = settled.flatMap((result, idx) =>

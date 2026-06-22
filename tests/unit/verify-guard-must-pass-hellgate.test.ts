@@ -377,6 +377,82 @@ describe("HELLGATE — synthetic demo of the sanity-observed false-done", () => 
   })
 })
 
+/**
+ * FIX C (investigated, NOT removed) — explicit-`undefined` OWN field ≡ ABSENT
+ * field, but `Object.hasOwn` in `ownVerifyGuardField` is NOT dead indirection:
+ * it is a PROTOTYPE-POLLUTION defense (see the "HELLGATE — adversarial inputs"
+ * proto tests above — proto-injected mustPass/maxTrips/exactCommands MUST be
+ * ignored). The audit's premise that hasOwn never changes behavior is false.
+ *
+ * These tests pin the one equivalence that IS real: for OWN properties, an
+ * explicit `undefined` produces a BYTE-IDENTICAL decision to omitting the key
+ * (because `undefined ?? X === X`). They sit alongside the proto tests, which
+ * pin the case where hasOwn DOES matter — together they fence the exact
+ * boundary so the indirection cannot be naively "simplified" away.
+ */
+describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does NOT, see above)", () => {
+  // History where the PRESENCE branch would fire (edit, no verify after) — this
+  // exercises the maxTrips read. And one where the MUST-PASS branch fires —
+  // exercises mustPass + exactCommands reads.
+  const editOnly = h({ name: "edit" })
+  const editThenFailingVerify = h(
+    { name: "edit" },
+    { name: "test_runner", id: "c1", ok: false, output: "FAILED tests/test_x.py" },
+  )
+
+  const decide = (
+    history: readonly Entry[],
+    cfg: Parameters<typeof decideVerifyGuard>[0]["cfg"],
+  ): { v: ReturnType<typeof decideVerifyGuard>; trips: number } => {
+    const state = createVerifyGuardState()
+    const v = decideVerifyGuard({ history, cfg, state })
+    return { v, trips: state.trips }
+  }
+
+  test("maxTrips: {maxTrips: undefined} ≡ {} (both fall back to DEFAULT_MAX_TRIPS=1)", () => {
+    // Spend the single default trip, then attempt a second on the SAME state.
+    const runCap = (cfg: NonNullable<Parameters<typeof decideVerifyGuard>[0]["cfg"]>) => {
+      const state = createVerifyGuardState()
+      const first = decideVerifyGuard({ history: editOnly, cfg, state })
+      const second = decideVerifyGuard({ history: editOnly, cfg, state })
+      return { first, second, trips: state.trips }
+    }
+    const absent = runCap({})
+    const explicitUndef = runCap({ maxTrips: undefined })
+    expect(absent.first.block).toBe(true)
+    expect(absent.second.block).toBe(false) // default cap=1 exhausted
+    expect(explicitUndef).toEqual(absent) // byte-identical decision + trip count
+  })
+
+  test("mustPass: {mustPass: undefined} ≡ {} (both ⇒ presence-only, no outcome gate)", () => {
+    // A failing verify ran AFTER the edit ⇒ presence is satisfied. Without the
+    // must-pass gate, neither config blocks; the explicit-undefined must match.
+    const absent = decide(editThenFailingVerify, {})
+    const explicitUndef = decide(editThenFailingVerify, { mustPass: undefined })
+    expect(absent.v.block).toBe(false)
+    expect(explicitUndef).toEqual(absent)
+    // paired control: an EXPLICIT true DOES change behavior (proves the read is live).
+    const enabled = decide(editThenFailingVerify, { mustPass: true })
+    expect(enabled.v.block).toBe(true)
+  })
+
+  test("exactCommands: {exactCommands: undefined} ≡ {} (registry default recognizer)", () => {
+    // A bash command that the default registry recognizes as a real test run.
+    const editThenPytest = h({ name: "edit" }, { name: "bash", arg: "pytest tests/test_x.py" })
+    const absent = decide(editThenPytest, {})
+    const explicitUndef = decide(editThenPytest, { exactCommands: undefined })
+    // pytest satisfies presence under the default registry ⇒ no block, identical.
+    expect(absent.v.block).toBe(false)
+    expect(explicitUndef).toEqual(absent)
+  })
+
+  test("all-undefined config ≡ {} across both branches (full equivalence)", () => {
+    const allUndef = { maxTrips: undefined, mustPass: undefined, exactCommands: undefined }
+    expect(decide(editOnly, allUndef)).toEqual(decide(editOnly, {}))
+    expect(decide(editThenFailingVerify, allUndef)).toEqual(decide(editThenFailingVerify, {}))
+  })
+})
+
 /* ------------------------------------------------------------------ */
 /* merged from verify-guard-must-pass.test.ts */
 /* ------------------------------------------------------------------ */

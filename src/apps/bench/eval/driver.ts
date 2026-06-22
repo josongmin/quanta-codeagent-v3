@@ -54,13 +54,14 @@ import {
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
   selectionReproPrepK,
+  selectionGenerationEnvCaveats,
   UsageTap,
   validatedReproRepairSeed,
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
 import {
-  assembleOwnerEvidence,
+  buildSelectionOwnerEvidence,
   buildSelectionGenerationLlmEvidencePacket,
   type ContractFact,
   type LlmEvidenceArtifacts,
@@ -726,6 +727,7 @@ const runSelectionPhase = async (
   ownerResolved: PreparedAttemptContext["ownerResolved"],
   baseValidatedRed: boolean,
   verificationPlan: PreparedAttemptContext["verificationPlan"],
+  reproTest: BenchReproTestTelemetry | undefined,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
@@ -776,21 +778,28 @@ const runSelectionPhase = async (
   const generationErrors = new Map<number, string>()
   const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   const verificationTarget = verificationTargetFromPlan(verificationPlan)
+  const selectionOwnerEvidence = buildSelectionOwnerEvidence({
+    ownerFiles: selectionInputs.ownerFiles,
+    issueSymbols: extractIssueHint(instance.problemStatement).symbols,
+    staticWitnesses,
+    readSource: (rel) => readSandboxSource(sandbox, rel),
+  })
+  const generationEnvCaveats = selectionGenerationEnvCaveats({
+    reproHint,
+    reproTest,
+  })
   const mergeHint = (seed: string | undefined): string | undefined =>
     verifySelectProofRequired && selectorMode === "clean"
       ? (() => {
           const packet = buildSelectionGenerationLlmEvidencePacket({
             problemStatement: instance.problemStatement,
-            ownerEvidence: assembleOwnerEvidence({
-              ownerFiles: selectionInputs.ownerFiles,
-              issueSymbols: extractIssueHint(instance.problemStatement).symbols,
-              readSource: (rel) => readSandboxSource(sandbox, rel),
-            }),
+            ownerEvidence: selectionOwnerEvidence,
             contracts: contractFactsFromBundle(effectivePublicContracts),
             baseValidatedRed,
             ...(verificationTarget !== undefined ? { verificationTarget } : {}),
             ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
             ...(closureHint !== undefined ? { closureHint } : {}),
+            ...(generationEnvCaveats.length > 0 ? { envCaveats: generationEnvCaveats } : {}),
             ...(seed !== undefined ? { seed } : {}),
           })
           recordLlmEvidencePacket(selectionLlmEvidence, packet)
@@ -853,6 +862,7 @@ const runSelectionPhase = async (
     llm: deps.llm,
     problemStatement: instance.problemStatement,
     ownerFiles: selectionOwnerCandidates,
+    ownerEvidence: selectionOwnerEvidence,
     ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
     signal,
   })
@@ -1009,6 +1019,7 @@ const runAppMainPhase = async (args: {
       args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
       args.prepared.verificationPlan,
+      args.prepared.reproTest,
       args.prepared.precomputedHint,
       args.prepared.reproHint,
       args.prepared.closureHint,

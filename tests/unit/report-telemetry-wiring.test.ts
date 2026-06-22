@@ -230,6 +230,86 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     })
   })
 
+  test("multiple packets from one stage preserve exact stage counts and unioned missing kinds", () => {
+    const mkPacket = (
+      stage: "candidate_generation" | "repair_seed",
+      revision: string,
+      missingKind: string,
+    ) => ({
+      stage,
+      instanceIdHash: "abc123",
+      evidenceRevision: revision,
+      question: "q",
+      allowedActions: [],
+      forbiddenSources: [],
+      publicIssueFacts: [],
+      ownerEvidence: [],
+      proofReceipts: [],
+      contractFacts: [],
+      staticFacts: [],
+      missingEvidence: [{ kind: missingKind, reason: missingKind }],
+    })
+    const rep = buildReport(meta, [
+      baseResult({
+        llmEvidence: {
+          candidateGeneration: mkPacket("candidate_generation", "gen-v1", "first_generation"),
+          candidateGenerationHistory: [
+            mkPacket("candidate_generation", "gen-v1", "first_generation"),
+            mkPacket("candidate_generation", "gen-v1", "second_generation"),
+          ],
+          repairSeed: mkPacket("repair_seed", "repair-v1", "first_repair"),
+          repairSeedHistory: [
+            mkPacket("repair_seed", "repair-v1", "first_repair"),
+            mkPacket("repair_seed", "repair-v1", "second_repair"),
+          ],
+        } as LlmEvidenceArtifacts,
+      }),
+    ])
+    expect(rep.llmEvidenceTotals).toEqual({
+      packetizedGenerationCount: 2,
+      packetizedRepairCount: 2,
+      packetizedSelectionExplanationCount: 0,
+    })
+    expect(rep.perInstance[0]?.llmEvidenceMissingKinds).toEqual([
+      "first_generation",
+      "second_generation",
+      "first_repair",
+      "second_repair",
+    ])
+  })
+
+  test("candidate_review stage survives per-instance llmEvidence summary even though it is not counted in submission totals", () => {
+    const reviewPacket = {
+      stage: "candidate_review" as const,
+      instanceIdHash: "abc123",
+      evidenceRevision: "risk-gate-v2",
+      question: "q",
+      allowedActions: [],
+      forbiddenSources: [],
+      publicIssueFacts: [],
+      ownerEvidence: [],
+      proofReceipts: [],
+      contractFacts: [],
+      staticFacts: [],
+      missingEvidence: [{ kind: "risk_context", reason: "risk_context" }],
+    }
+    const rep = buildReport(meta, [
+      baseResult({
+        llmEvidence: {
+          candidateReview: reviewPacket,
+        } as LlmEvidenceArtifacts & { candidateReview: typeof reviewPacket },
+      }),
+    ])
+    expect(rep.perInstance[0]?.llmEvidenceStages).toEqual(["candidate_review"])
+    expect(rep.perInstance[0]?.llmEvidenceRevision).toEqual({ candidate_review: "risk-gate-v2" })
+    expect(rep.perInstance[0]?.llmEvidenceMissingKinds).toEqual(["risk_context"])
+    expect(rep.llmEvidenceTotals).toEqual({
+      packetizedGenerationCount: 0,
+      packetizedRepairCount: 0,
+      packetizedSelectionExplanationCount: 0,
+    })
+  })
+
   // Byte-identical contract: absent telemetry ⇒ keys omitted (not null).
   test("absent telemetry ⇒ keys omitted (byte-identical)", () => {
     const rep = buildReport(meta, [baseResult({})])

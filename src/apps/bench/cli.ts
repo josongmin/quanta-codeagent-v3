@@ -697,19 +697,34 @@ const cmdPool = async (): Promise<void> => {
   summarizePoolRun(out, chunks.length)
 }
 
-/** Print the per-chunk + total outcome of a pool run. */
-const summarizePoolRun = (out: Awaited<ReturnType<typeof runPool>>, chunkCount: number): void => {
+export const summarizePoolRunLines = (
+  out: Awaited<ReturnType<typeof runPool>>,
+  chunkCount: number,
+): string[] => {
   let resolved = 0
   let lost = 0
+  let partial = 0
+  const lines: string[] = []
   for (const r of out) {
     resolved += r.result.resolved?.length ?? 0
     if (r.lost) lost += 1
-    const tag = r.lost ? "❓ LOST" : "ok"
-    logger.info(
-      `[pool] chunk ${r.chunk.runId}: ${tag} — resolved ${r.result.resolved?.length ?? 0} | unresolved ${r.result.unresolved?.length ?? 0} | attempts ${r.attempts}`,
+    const missing = r.missing?.length ?? 0
+    if (!r.lost && missing > 0) partial += 1
+    const tag = r.lost ? "❓ LOST" : missing > 0 ? "⚠️ PARTIAL" : "ok"
+    lines.push(
+      `[pool] chunk ${r.chunk.runId}: ${tag} — resolved ${r.result.resolved?.length ?? 0} | unresolved ${r.result.unresolved?.length ?? 0} | missing ${missing} | attempts ${r.attempts}`,
     )
+    for (const id of r.missing ?? []) lines.push(`[pool]   ❓ MISSING ${id}`)
   }
-  logger.info(`[pool] DONE — total resolved ${resolved} across ${chunkCount} chunks; ${lost} lost`)
+  lines.push(
+    `[pool] DONE — total resolved ${resolved} across ${chunkCount} chunks; ${lost} lost; ${partial} partial`,
+  )
+  return lines
+}
+
+/** Print the per-chunk + total outcome of a pool run. */
+const summarizePoolRun = (out: Awaited<ReturnType<typeof runPool>>, chunkCount: number): void => {
+  for (const line of summarizePoolRunLines(out, chunkCount)) logger.info(line)
 }
 
 /**
