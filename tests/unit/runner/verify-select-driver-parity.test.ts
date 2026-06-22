@@ -88,6 +88,21 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toMatch(expected)
   })
 
+  test("proof-clean generation and repair thread the same verificationTarget through both drivers", () => {
+    expect(APP_DRIVER_SRC).toContain("args.prepared.verificationPlan,")
+    expect(APP_DRIVER_SRC).toMatch(
+      /\.\.\.\(verificationTarget !== undefined \? \{ verificationTarget \} : \{\}\)/,
+    )
+    expect(DRIVER_SRC).toContain("args.prepared.verificationPlan,")
+    expect(DRIVER_SRC).toMatch(
+      /\.\.\.\(verificationTarget !== undefined \? \{ verificationTarget \} : \{\}\)/,
+    )
+    expect(DRIVER_SRC).toMatch(/verificationTarget:\s*args\.verificationTarget/)
+    expect(DRIVER_SRC).toMatch(
+      /\.\.\.\(args\.verificationTarget !== undefined\s*\?\s*\{\s*verificationTarget:\s*args\.verificationTarget\s*\}\s*:\s*\{\}\)/,
+    )
+  })
+
   test("runner driver emits patch-budget telemetry when the knob is on", () => {
     expect(DRIVER_SRC).toContain("buildPhasePatchBudget")
     expect(DRIVER_SRC).toMatch(

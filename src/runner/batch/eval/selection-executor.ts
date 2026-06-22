@@ -73,7 +73,15 @@ import {
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
-import { candidatePatchHash, renderLlmEvidencePacket } from "./llm-evidence-packet"
+import {
+  buildRepairSeedPacket,
+  candidatePatchHash,
+  type ContractFact,
+  type OwnerEvidenceFact,
+  type ProofReceiptFact,
+  type ProofReceiptState,
+  type VerificationTargetFact,
+} from "./llm-evidence-packet"
 import { type MweProofReceipt, type MweProofState, mweProofAuthorityRank } from "./mwe-proof"
 import {
   contractsSatisfiedCount,
@@ -412,6 +420,17 @@ const selectionProofState = (args: {
   return "proof_missing"
 }
 
+const selectionProofStateForEntry = (
+  entry: Pick<ScoredEntry, "candidate" | "hard" | "resolvedKofN">,
+): SelectionProofState =>
+  selectionProofState({
+    resolved: entry.resolvedKofN,
+    hard: entry.hard,
+    mweReceipt: entry.candidate.mweReceipt,
+    publicRegressionReceipt: entry.candidate.publicRegressionReceipt,
+    reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
+  })
+
 const hasContractOnlyEvidence = (entry: ScoredEntry): boolean =>
   entry.requiredContractsSatisfied > 0 ||
   entry.contractsSatisfied > 0 ||
@@ -442,13 +461,7 @@ const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefi
   const repairOnlyCandidates = result.scored.filter(
     (entry) =>
       entry.candidate.patch.trim() !== "" &&
-      selectionProofState({
-        resolved: entry.resolvedKofN,
-        hard: entry.hard,
-        mweReceipt: entry.candidate.mweReceipt,
-        publicRegressionReceipt: entry.candidate.publicRegressionReceipt,
-        reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
-      }) !== "proof_positive" &&
+      selectionProofStateForEntry(entry) !== "proof_positive" &&
       hasContractOnlyEvidence(entry),
   ).length
   return {
@@ -535,13 +548,7 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
         ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
         ...(publicRegression !== undefined ? { publicRegression } : {}),
         ...(reproConsensus !== undefined ? { reproConsensus } : {}),
-        proofState: selectionProofState({
-          resolved: s.resolvedKofN,
-          hard: s.hard,
-          mweReceipt: s.candidate.mweReceipt,
-          publicRegressionReceipt: s.candidate.publicRegressionReceipt,
-          reproConsensusReceipt: s.candidate.reproConsensusReceipt,
-        }),
+        proofState: selectionProofStateForEntry(s),
         proofSource: positiveSubmitProofSource({
           resolved: s.resolvedKofN,
           mweReceipt: s.candidate.mweReceipt,
@@ -1132,6 +1139,14 @@ export const runSelection = async (args: {
   /** v4 clean submit rail. When on, only positive executed public proof may
    *  submit; keep-green regression stays safety-only. */
   proofRequired?: boolean
+  /** Public issue text — threaded so the post-exec repair_seed packet is
+   *  self-contained (real issue facts) and carries the SAME opaque per-instance
+   *  id as every other stage. Absent ⇒ neutral empty-issue fallback. */
+  problemStatement?: string
+  /** Blind-by-construction active proof target (repro steps only; see
+   *  verificationTargetFromPlan). Surfaced in the repair_seed packet so the
+   *  repair instruction names the public proof to satisfy. */
+  verificationTarget?: VerificationTargetFact
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
@@ -1534,6 +1549,96 @@ export const runSelection = async (args: {
       .join("\n\n")
   }
 
+  const mweProofReceiptFacts = (candidate: Candidate): ProofReceiptFact[] => {
+    const receipt = candidate.mweReceipt
+    if (receipt === undefined) return []
+    const patchHash =
+      candidate.patch.trim() === "" ? undefined : candidatePatchHash(candidate.patch)
+    const state: ProofReceiptState =
+      receipt.state === "base_red"
+        ? "base_red"
+        : receipt.state === "base_not_red"
+          ? "base_green"
+          : receipt.state === "patched_green"
+            ? "candidate_green"
+            : receipt.state === "candidate_red"
+              ? "candidate_red"
+              : receipt.state === "execution_failed"
+                ? "execution_failed"
+                : "not_run"
+    return [
+      {
+        source: "public_mwe",
+        state,
+        ...(receipt.command !== undefined ? { command: receipt.command } : {}),
+        ...(patchHash !== undefined ? { candidatePatchHash: patchHash } : {}),
+      },
+    ]
+  }
+
+  const publicRegressionReceiptFacts = (candidate: Candidate): ProofReceiptFact[] => {
+    const receipt = candidate.publicRegressionReceipt
+    if (receipt === undefined) return []
+    const patchHash =
+      candidate.patch.trim() === "" ? undefined : candidatePatchHash(candidate.patch)
+    const state: ProofReceiptState =
+      receipt.state === "candidate_red"
+        ? "candidate_red"
+        : receipt.state === "safety_green"
+          ? "candidate_green"
+          : receipt.state === "execution_failed"
+            ? "execution_failed"
+            : "not_run"
+    return [
+      {
+        source: "discovered_regression",
+        state,
+        ...(patchHash !== undefined ? { candidatePatchHash: patchHash } : {}),
+      },
+    ]
+  }
+
+  const reproConsensusReceiptFacts = (candidate: Candidate): ProofReceiptFact[] => {
+    const receipt = candidate.reproConsensusReceipt
+    if (receipt === undefined) return []
+    const patchHash =
+      candidate.patch.trim() === "" ? undefined : candidatePatchHash(candidate.patch)
+    const sample = receipt.reproTrace.samples.find((trace) => trace.outcome !== "resolved")
+    const state: ProofReceiptState =
+      receipt.state === "base_red_candidate_green"
+        ? "candidate_green"
+        : receipt.state === "base_red_candidate_red"
+          ? "candidate_red"
+          : receipt.state === "execution_failed"
+            ? "execution_failed"
+            : "not_run"
+    return [
+      {
+        source: "repro_consensus",
+        state,
+        ...(receipt.state.startsWith("base_red") ? { baseValidatedRed: true } : {}),
+        ...(sample?.stdoutTail !== undefined && sample.stdoutTail.trim() !== ""
+          ? { stdoutTail: bounded(sample.stdoutTail, 600) }
+          : {}),
+        ...(sample?.stderrTail !== undefined && sample.stderrTail.trim() !== ""
+          ? { stderrTail: bounded(sample.stderrTail, 600) }
+          : {}),
+        ...(patchHash !== undefined ? { candidatePatchHash: patchHash } : {}),
+      },
+    ]
+  }
+
+  const hardReasonState = (reason: string): ProofReceiptState =>
+    reason.includes("proofInfraBlocked")
+      ? "execution_failed"
+      : reason.includes("proofRequiredMissing")
+        ? "not_run"
+      : /candidate_red|=false|red\b/.test(reason)
+      ? "candidate_red"
+      : reason.includes("staticSanity")
+        ? "static_only"
+        : "not_run"
+
   const repairPacketText = (
     scored: readonly ScoredEntry[],
     seed: string,
@@ -1541,41 +1646,37 @@ export const runSelection = async (args: {
   ): string => {
     const patchAuthority =
       winner !== null && winner.patch.trim() !== "" ? winner.patch : scored[0]?.candidate.patch ?? seed
-    const proofReceipts = scored.flatMap((entry) =>
-      entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2),
-    )
-    return renderLlmEvidencePacket({
-      stage: "repair_seed",
-      instanceIdHash: candidatePatchHash(
-        scored.map((entry) => `${entry.candidate.id}:${entry.candidate.files.join(",")}`).join("\n"),
-      ),
-      evidenceRevision: "selector-repair-v1",
-      candidatePatchHash: candidatePatchHash(patchAuthority),
-      question: "Generate a bounded repair instruction for the next candidate.",
-      allowedActions: [
-        "bounded_repair_only",
-        "preserve_stronger_structural_coverage",
-        "satisfy_named_public_proof",
-      ],
-      forbiddenSources: [
-        "hidden_tests",
-        "gold_patch",
-        "official_harness_results",
-        "benchmark_case_tables",
-        "try_harder_generic_retry",
-      ],
-      publicIssueFacts: [
-        "Use only the public issue text already attached in the main task prompt as issue authority.",
-      ],
-      ownerEvidence: scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files),
-      proofReceipts,
-      contractFacts: scored.flatMap((entry) => [
-        `requiredContractsSatisfied=${entry.requiredContractsSatisfied}`,
-        `contractsSatisfied=${entry.contractsSatisfied}`,
+    const proofReceipts: ProofReceiptFact[] = [
+      ...scored.flatMap((entry) => [
+        ...mweProofReceiptFacts(entry.candidate),
+        ...publicRegressionReceiptFacts(entry.candidate),
+        ...reproConsensusReceiptFacts(entry.candidate),
       ]),
-      staticFacts: [seed],
-      missingEvidence:
-        proofReceipts.length === 0 ? ["no_positive_executed_public_proof_attached"] : [],
+      ...scored
+        .flatMap((entry) => entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2))
+        .map((reason) => ({ source: reason, state: hardReasonState(reason) })),
+    ]
+    const ownerFiles = [
+      ...new Set(scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files)),
+    ]
+    const ownerEvidence: OwnerEvidenceFact[] = ownerFiles.map((file) => ({
+      file,
+      symbols: [],
+      provenance: "repair-owner",
+    }))
+    const contracts: ContractFact[] = scored.map((entry) => ({
+      contractId: `candidate:${entry.candidate.id}`,
+      authority: `requiredContractsSatisfied=${entry.requiredContractsSatisfied}; contractsSatisfied=${entry.contractsSatisfied}`,
+      satisfied: entry.verdict.admissible,
+    }))
+    return buildRepairSeedPacket({
+      problemStatement: args.problemStatement ?? "",
+      candidatePatchHash: candidatePatchHash(patchAuthority),
+      ownerEvidence,
+      proofReceipts,
+      contracts,
+      repairGuidance: seed,
+      ...(args.verificationTarget !== undefined ? { verificationTarget: args.verificationTarget } : {}),
     })
   }
 
@@ -1608,6 +1709,28 @@ export const runSelection = async (args: {
   }
 
   const oracleFailureRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
+    const patched = scored.filter(hasNonEmptyPatch)
+    const proofStates = patched.map((entry) => selectionProofStateForEntry(entry))
+    if (
+      proofRequired &&
+      patched.length > 0 &&
+      patched.some(
+        (entry) =>
+          entry.candidate.mweReceipt !== undefined ||
+          entry.candidate.publicRegressionReceipt !== undefined ||
+          entry.candidate.reproConsensusReceipt !== undefined,
+      ) &&
+      proofStates.every((state) => state === "infra_blocked")
+    ) {
+      return [
+        "Selector feedback: every generated candidate reached public proof execution, but each run failed in infra/runtime without producing a candidate-correctness verdict.",
+        "Regenerate from the base tree. Preserve the strongest structural/public coverage already found, but remove candidate-side execution blockers so the named public proof can actually run to completion. Do not widen scope or invent unrelated helpers.",
+        familyRepairSeed(scored),
+        args.oracleFailureRepairSeed,
+      ]
+        .filter((s): s is string => s !== undefined && s.trim() !== "")
+        .join("\n\n")
+    }
     if (mweOracleRepairRequired(scored)) {
       return [
         "Selector feedback: every generated candidate was executed against a public issue MWE that reproduced on the base tree, and every candidate still failed that MWE.",
@@ -1633,6 +1756,21 @@ export const runSelection = async (args: {
       return [
         "Selector feedback: every generated multi-source candidate was rejected as unproven multi-source drift by clean selector authority because no executable proof or public contract justified touching multiple source files.",
         "Regenerate from the base tree. Either produce a narrow single-owner patch, or include the complete static/public witness that justifies every source file touched. Do not add helper files, new definitions, or unrelated design surface unless that witness requires them.",
+        args.oracleFailureRepairSeed,
+      ]
+        .filter((s): s is string => s !== undefined && s.trim() !== "")
+        .join("\n\n")
+    }
+    if (
+      proofRequired &&
+      patched.length > 0 &&
+      !proofStates.some((state) => state === "proof_positive") &&
+      patched.some(hasContractOnlyEvidence)
+    ) {
+      return [
+        "Selector feedback: at least one generated candidate achieved structural/public contract coverage, but no candidate produced positive executed public proof.",
+        "Regenerate from the base tree. Preserve the strongest structural/public coverage already found and make the named public proof run green. Do not broaden file scope, add unrelated helpers, or substitute structural guesses for executed proof.",
+        familyRepairSeed(scored),
         args.oracleFailureRepairSeed,
       ]
         .filter((s): s is string => s !== undefined && s.trim() !== "")
@@ -1861,13 +1999,7 @@ export const runSelection = async (args: {
       const nonEmpty = scored.filter((entry) => entry.candidate.patch.trim() !== "")
       if (proofRequired && nonEmpty.length > 0) {
         const proofStates = nonEmpty.map((entry) =>
-          selectionProofState({
-            resolved: entry.resolvedKofN,
-            hard: entry.hard,
-            mweReceipt: entry.candidate.mweReceipt,
-            publicRegressionReceipt: entry.candidate.publicRegressionReceipt,
-            reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
-          }),
+          selectionProofStateForEntry(entry),
         )
         noWinnerReason = proofStates.every((state) => state === "infra_blocked")
           ? "proof_infra_blocked"

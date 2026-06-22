@@ -9,6 +9,10 @@
  * tree-green. These teeth assert the map survives, red-on-injection if dropped.
  */
 import { describe, expect, test } from "bun:test"
+import {
+  buildIntakeLlmEvidencePacket,
+  buildSelectionExplanationPacket,
+} from "@/runner/batch/eval/llm-evidence-packet"
 import { buildReport } from "@/runner/batch/report"
 import type {
   GradeBreakdown,
@@ -147,38 +151,28 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
   })
 
   test("llmEvidence survives for report-only RCA packets", () => {
+    // Build with the real typed builders so the round-trip exercises the actual
+    // packet shape (not a hand-faked literal that can drift from the schema).
+    const problem = "repro exists in run() for the public issue"
     const llmEvidence: LlmEvidenceArtifacts = {
-      intake: {
-        stage: "intake",
-        instanceIdHash: "deadbeefdeadbeef",
-        evidenceRevision: "intake-v1",
-        question: "Which allowed evidence source should be collected next?",
-        allowedActions: ["generate_candidate"],
-        forbiddenSources: ["hidden_tests"],
-        publicIssueFacts: ["issue summary: repro exists"],
-        ownerEvidence: ["owner[0]: pkg/core.py"],
-        proofReceipts: ["public MWE: static_only extracted from issue text"],
-        contractFacts: ["verification plan: baseValidatedRed=false; primaryRail=repro"],
-        staticFacts: ["fault evidence: partial=false; truncated=false"],
-        missingEvidence: ["public_mwe_base_not_attempted"],
-      },
-      selectionExplanation: {
-        stage: "selection_explanation",
-        instanceIdHash: "deadbeefdeadbeef",
-        evidenceRevision: "selection-explanation-v1",
-        question: "Explain the deterministic selection outcome and the remaining missing public evidence.",
-        allowedActions: ["explain_selection_outcome"],
-        forbiddenSources: ["selection_override"],
-        publicIssueFacts: ["issue summary: repro exists"],
-        ownerEvidence: ["owner[0]: pkg/core.py"],
-        proofReceipts: ["proof summary: state=proof_missing; source=none; submittedCandidateProof=false"],
-        contractFacts: ["candidate cand-0: admissible=false"],
-        staticFacts: ["selected candidate: <none>"],
-        missingEvidence: ["no_positive_executed_public_proof"],
-      },
+      intake: buildIntakeLlmEvidencePacket({
+        problemStatement: problem,
+        localizeCandidates: ["pkg/core.py"],
+      }),
+      selectionExplanation: buildSelectionExplanationPacket({
+        problemStatement: problem,
+        ownerFiles: ["pkg/core.py"],
+        winnerId: null,
+        candidates: [],
+      }),
     }
     const rep = buildReport(meta, [baseResult({ llmEvidence })])
     expect(rep.perInstance[0]?.llmEvidence).toEqual(llmEvidence)
+    // Teeth: the serialized packets are the typed shape, not free strings.
+    expect(rep.perInstance[0]?.llmEvidence?.intake?.stage).toBe("intake")
+    expect(rep.perInstance[0]?.llmEvidence?.selectionExplanation?.ownerEvidence[0]?.file).toBe(
+      "pkg/core.py",
+    )
   })
 
   // Byte-identical contract: absent telemetry ⇒ keys omitted (not null).

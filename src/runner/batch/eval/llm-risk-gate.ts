@@ -2,7 +2,9 @@ import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from
 import { errMessage } from "@/shared"
 import {
   candidatePatchHash,
+  describeIssueFacts,
   opaqueInstanceIdHash,
+  type OwnerEvidenceFact,
   renderLlmEvidencePacket,
 } from "./llm-evidence-packet"
 
@@ -103,12 +105,23 @@ const parseDecision = (raw: string): LlmPatchRiskDecision => {
   }
 }
 
+/**
+ * LEGACY-NAMED stage. `candidate_review` here is a PRE-proof expansion risk
+ * SCREEN ("should the selector expand beyond candidate 0?"), NOT a post-exec
+ * correctness review. Per OPC-07 minimum-scope it is shadow/research only and
+ * carries no proof authority — the deterministic selector still decides.
+ */
 const buildUserPrompt = (input: LlmPatchRiskInput): string => {
+  const ownerEvidence: readonly OwnerEvidenceFact[] = (input.ownerFiles ?? []).map((file) => ({
+    file,
+    symbols: [],
+    provenance: "selection-owner",
+  }))
   return [
     renderLlmEvidencePacket({
       stage: "candidate_review",
       instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
-      evidenceRevision: "risk-gate-v1",
+      evidenceRevision: "risk-gate-v2",
       candidatePatchHash: candidatePatchHash(input.patch),
       question: "Should the outer selector expand beyond candidate 0, or is the current patch already low-risk enough to stop?",
       allowedActions: ["expand", "do_not_expand"],
@@ -118,19 +131,28 @@ const buildUserPrompt = (input: LlmPatchRiskInput): string => {
         "official_harness_results",
         "benchmark_case_tables",
       ],
-      publicIssueFacts: [input.problemStatement.trim()],
-      ownerEvidence: input.ownerFiles ?? [],
-      proofReceipts: [
-        input.candidateFiles.length > 0
-          ? `candidate touched files: ${input.candidateFiles.join(", ")}`
-          : "candidate touched files: <none>",
-      ],
+      publicIssueFacts: describeIssueFacts(input.problemStatement),
+      ownerEvidence,
+      proofReceipts: [],
       contractFacts: [],
       staticFacts: [
-        "This stage does not judge correctness or select a winner.",
-        "Expand when the patch may miss explicit issue conditions, may implement only a surfaced symptom, may overfit a public example, changes behavior without clear evidence, or you are unsure.",
+        { kind: "stage_scope", value: "This stage does not judge correctness or select a winner." },
+        {
+          kind: "expand_when",
+          value:
+            "Expand when the patch may miss explicit issue conditions, may implement only a surfaced symptom, may overfit a public example, changes behavior without clear evidence, or you are unsure.",
+        },
+        {
+          kind: "candidate_touched_files",
+          value: input.candidateFiles.length > 0 ? input.candidateFiles.join(", ") : "<none>",
+        },
       ],
-      missingEvidence: ["no_executed_public_proof_receipts_attached_to_risk_gate"],
+      missingEvidence: [
+        {
+          kind: "executed_public_proof",
+          reason: "no_executed_public_proof_receipts_attached_to_risk_gate",
+        },
+      ],
     }),
     "",
     "Candidate patch (unified diff):",

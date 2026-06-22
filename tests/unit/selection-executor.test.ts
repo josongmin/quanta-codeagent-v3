@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import { buildMultiSiteFamilyContract } from "@/runner/batch/eval/public-contract-bundle"
+import {
+  buildMultiSiteFamilyContract,
+  buildOwnerMustTouchContracts,
+} from "@/runner/batch/eval/public-contract-bundle"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -562,6 +565,82 @@ describe("runSelection", () => {
       "hard:proofInfraBlocked=true (public proof execution failed; do not treat this as candidate correctness)",
     )
     expect(summarizeSelection(r).candidates[0]?.proofState).toBe("infra_blocked")
+  })
+
+  it("repair seed preserves proofInfraBlocked as execution_failed instead of collapsing it to not_run", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return i === 2
+        ? cand({
+            id: "cand-2",
+            patch: patchForFiles(["pkg/a.py"]),
+            files: ["pkg/a.py"],
+          })
+        : cand({
+            id: `cand-${i}`,
+            patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
+            files: ["pkg/a.py", "pkg/b.py"],
+          })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      proofRequired: true,
+      problemStatement: "Public issue text for proof infra failure.",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py", "pkg/b.py"]),
+      ports: {
+        generate: gen,
+        mweProof: async () => ({ state: "execution_failed" }),
+      },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.noWinnerReason).toBe("proof_infra_blocked")
+    expect(seeds).toHaveLength(3)
+    expect(seeds[2]).toContain('"stage": "repair_seed"')
+    expect(seeds[2]).toContain('"source": "public_mwe"')
+    expect(seeds[2]).toContain("proofInfraBlocked")
+    expect(seeds[2]).toContain('"state": "execution_failed"')
+  })
+
+  it("proof-required mode appends one bounded repair candidate for contract-only evidence", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return cand({
+        id: `cand-${i}`,
+        patch: patchForFiles(["pkg/owner.py"]),
+        files: ["pkg/owner.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      problemStatement: "Public issue text for a proof-required contract-only miss.",
+      verificationTarget: {
+        primaryRail: { kind: "repro", cmd: "python repro.py" },
+        required: [{ kind: "repro", cmd: "python repro.py" }],
+        optional: [],
+        baseValidatedRed: true,
+      },
+      publicContracts: {
+        contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]),
+      },
+      seeds: [undefined],
+      owners: new Set(["pkg/owner.py"]),
+      ports: { generate: gen },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.noWinnerReason).toBe("proof_required_missing")
+    expect(seeds).toHaveLength(2)
+    expect(seeds[1]).toContain('"stage": "repair_seed"')
+    expect(seeds[1]).toContain('"verificationTarget"')
+    expect(seeds[1]).toContain("proofRequiredMissing")
+    expect(seeds[1]).toContain("no_positive_executed_public_proof_attached")
   })
 
   it("proof-required mode bypasses blind staticAccept and keeps searching through finalize", async () => {

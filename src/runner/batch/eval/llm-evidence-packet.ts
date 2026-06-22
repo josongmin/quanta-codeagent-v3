@@ -86,10 +86,19 @@ export interface MissingEvidenceFact {
   readonly reason: string
 }
 
-/** One step of the typed VerificationPlan, flattened for the LLM. */
+/**
+ * One step of the typed VerificationPlan, flattened for the LLM. `cmd` is
+ * OPTIONAL by design: only blind-by-construction `repro` step commands (a
+ * synthesized sandbox-temp script) are ever surfaced. Non-repro step commands
+ * (`owner-test`/`module-smoke`) are withheld because their command can be a path
+ * to a hidden test — a leak `assertPacketBlind` cannot catch (it scans for
+ * uppercase dataset keys, not paths). The successPredicate is always just the
+ * discriminant `.type` (never its selector/substring), so it is leak-free.
+ */
 export interface VerificationStepFact {
   readonly kind: string
-  readonly cmd: string
+  readonly cmd?: string
+  readonly cmdWithheld?: boolean
   readonly authority?: string
   readonly successPredicate?: string
 }
@@ -132,17 +141,20 @@ export interface LlmEvidenceArtifacts {
 /* ------------------------------------------------------------------ */
 
 /**
- * Structural SWE-bench dataset keys. These are not natural-language tokens —
- * their presence inside an EVIDENCE field means a hidden-oracle leak (the packet
- * was built from a forbidden source). Matched only against evidence content,
- * never the meta menu (`forbiddenSources` legitimately *names* `gold_patch`
- * etc. as things the LLM must not use).
+ * Structural SWE-bench dataset KEYS. These uppercase identifiers are not
+ * natural-language tokens — their presence inside an evidence field means a
+ * hidden-oracle leak (a dataset record was stringified into the packet). They
+ * have zero false-positive risk in legitimate public issue prose, so the guard
+ * can THROW on them even on the live path. (Lowercase field names like
+ * `test_patch` are intentionally NOT listed: they collide with ordinary issue
+ * prose, and a throw on the live intake path would fail a real instance. The
+ * structural defense against those is construction-time discipline — builders
+ * only consume the allowed blind inputs — not a content scan.)
+ *
+ * Matched only against evidence content, never the meta menu (`forbiddenSources`
+ * legitimately *names* `gold_patch` as a thing the LLM must not use).
  */
-export const FORBIDDEN_PACKET_MARKERS: readonly string[] = [
-  "FAIL_TO_PASS",
-  "PASS_TO_PASS",
-  "test_patch",
-]
+export const FORBIDDEN_PACKET_MARKERS: readonly string[] = ["FAIL_TO_PASS", "PASS_TO_PASS"]
 
 export class PacketBlindnessViolation extends Error {
   constructor(
@@ -177,7 +189,7 @@ const evidenceStrings = (packet: LlmEvidencePacket): string[] => {
       ...packet.verificationTarget.optional,
     ]
     for (const st of steps) {
-      out.push(st.cmd)
+      if (st.cmd !== undefined) out.push(st.cmd)
       if (st.successPredicate !== undefined) out.push(st.successPredicate)
     }
   }
@@ -363,7 +375,16 @@ export const assembleOwnerEvidence = (args: {
   return out
 }
 
-/** Flatten the typed VerificationPlan into the active proof target. */
+/**
+ * Flatten the typed VerificationPlan into the active proof target — ANSWER-KEY
+ * SAFE BY CONSTRUCTION. Only `repro` step commands are surfaced (those are a
+ * synthesized sandbox-temp script, blind by construction). `owner-test` /
+ * `module-smoke` step commands are WITHHELD (cmdWithheld:true) because they can
+ * encode a path to a hidden test — a leak the content scanner cannot detect.
+ * The successPredicate is reduced to its discriminant `.type`, never its
+ * selector/substring value. This fence must hold before OPC-04 wires
+ * test-file-derived steps.
+ */
 export const verificationTargetFromPlan = (
   plan: VerificationPlan | undefined,
 ): VerificationTargetFact | undefined => {
@@ -373,12 +394,15 @@ export const verificationTargetFromPlan = (
     cmd: string
     authority?: string
     successPredicate?: { type: string }
-  }): VerificationStepFact => ({
-    kind: step.kind,
-    cmd: step.cmd,
-    ...(step.authority !== undefined ? { authority: step.authority } : {}),
-    ...(step.successPredicate !== undefined ? { successPredicate: step.successPredicate.type } : {}),
-  })
+  }): VerificationStepFact => {
+    const cmdIsBlind = step.kind === "repro"
+    return {
+      kind: step.kind,
+      ...(cmdIsBlind ? { cmd: step.cmd } : { cmdWithheld: true }),
+      ...(step.authority !== undefined ? { authority: step.authority } : {}),
+      ...(step.successPredicate !== undefined ? { successPredicate: step.successPredicate.type } : {}),
+    }
+  }
   return {
     primaryRail: plan.primaryRail === null ? null : toStep(plan.primaryRail),
     required: plan.required.map(toStep),
@@ -597,6 +621,8 @@ export interface RepairSeedPacketInput {
   readonly ownerEvidence: readonly OwnerEvidenceFact[]
   readonly proofReceipts: readonly ProofReceiptFact[]
   readonly contracts: readonly ContractFact[]
+  /** Deterministic repair instruction text (bounded) assembled by the selector. */
+  readonly repairGuidance?: string
   readonly verificationTarget?: VerificationTargetFact
   readonly missingEvidence?: readonly MissingEvidenceFact[]
 }
@@ -630,7 +656,10 @@ export const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
     ownerEvidence: input.ownerEvidence,
     proofReceipts: input.proofReceipts,
     contractFacts: input.contracts,
-    staticFacts: [],
+    staticFacts:
+      input.repairGuidance !== undefined && input.repairGuidance.trim() !== ""
+        ? [{ kind: "repair_guidance", value: bounded(input.repairGuidance, 1800) }]
+        : [],
     ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
     missingEvidence:
       input.missingEvidence ??

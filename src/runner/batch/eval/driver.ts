@@ -103,6 +103,8 @@ import {
   buildSelectionGenerationPacket,
   type ContractFact,
   type LlmEvidencePacket,
+  type VerificationTargetFact,
+  verificationTargetFromPlan,
 } from "./llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
@@ -2625,6 +2627,7 @@ const buildSelectionExecutorPorts = (args: {
   readonly closureHint: string | undefined
   readonly selectionOwnerFiles: readonly string[]
   readonly publicContracts: PublicContractBundle | undefined
+  readonly verificationTarget: VerificationTargetFact | undefined
   readonly concurrency: number | undefined
   readonly generationErrors: Map<number, string>
   readonly addTurns: (turns: number) => void
@@ -2653,6 +2656,9 @@ const buildSelectionExecutorPorts = (args: {
                 contracts: contractFactsFromBundle(args.publicContracts),
                 ...(args.baseValidatedRed != null
                   ? { baseValidatedRed: args.baseValidatedRed }
+                  : {}),
+                ...(args.verificationTarget !== undefined
+                  ? { verificationTarget: args.verificationTarget }
                   : {}),
                 ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
                 ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
@@ -2780,6 +2786,7 @@ const runSelectionPhase = async (
   selectionOwnerCandidates: readonly string[],
   ownerResolved: readonly OwnerSibling[] | undefined,
   baseValidatedRed: boolean,
+  verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
@@ -2795,6 +2802,7 @@ const runSelectionPhase = async (
   })
   const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
+  const verificationTarget = verificationTargetFromPlan(verificationPlan)
   let totalTurns = 0
   const selectionState = await resolveSelectionPhasePorts({
     instance,
@@ -2814,6 +2822,7 @@ const runSelectionPhase = async (
   const result = await runSelection({
     n,
     problemStatement: instance.problemStatement,
+    ...(verificationTarget !== undefined ? { verificationTarget } : {}),
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
@@ -2856,6 +2865,7 @@ const runSelectionPhase = async (
       verifySelectProofRequired,
       selectionOwnerFiles: selectionInputs.ownerFiles,
       publicContracts: effectivePublicContracts,
+      verificationTarget,
     }),
   })
   const generationFailure = selectionGenerationFailurePhase({
@@ -3450,6 +3460,7 @@ const runMainPhase = async (args: {
         args.prepared.localizeCandidates,
       args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
+      args.prepared.verificationPlan,
       args.prepared.precomputedHint,
       args.prepared.reproHint,
       args.prepared.closureHint,
