@@ -1,21 +1,30 @@
 /**
- * Knob: `bench-in-loop-exec` — controls whether the bench agent is told to RUN
- * the repository's tests inside its own solve loop (today's behavior) or to
- * edit-and-submit in the mini-swe posture (the grader runs the tests).
+ * Knob: `bench-in-loop-exec` — controls how much execution authority the bench
+ * agent gets inside its own solve loop.
  *
- * Default-ON (the byte-identical fence): when the knob is UNSET, `parse` returns
- * `undefined`, the posture defaults `inLoopExec` to `true`, and the driver emits
- * the exact SWEBENCH_DIRECTIVE + verifyGuard it does today.
+ * Default-ON/FULL (the byte-identical fence): when the knob is UNSET, `parse`
+ * returns `undefined`, the posture defaults the mode to `"full"`, and the
+ * driver emits the exact SWEBENCH_DIRECTIVE + verifyGuard it does today.
+ *
+ * FULL (explicit "1"/"on"/"true"/"full"): run the repository tests in-loop
+ * (today's behavior).
+ *
+ * REPRO-ONLY (explicit "repro-only"/"repro"): allow ONLY narrow issue
+ * reproduction in-loop. The driver emits a focused directive that permits a
+ * small reproducer or issue script but still forbids broad repo-test / pytest /
+ * tox execution, keeps verifyGuard OFF, and keeps the repair loop OFF. This
+ * splits "run a tiny reproducer" from "run the full regression suite" so the
+ * bench can keep executable issue evidence without reintroducing host-env flail.
  *
  * OFF (explicit "0"/"off"/"false"): the driver swaps to SWEBENCH_DIRECTIVE_NOEXEC
- * (no "run the tests" mandate), drops verifyGuard, forces single-pass, and skips
- * the host-python repro-test hint. This removes a self-defeating forcing function
- * on instances whose host test-env is incompatible (e.g. pytest-7982), where the
+ * (no execution), drops verifyGuard, forces single-pass, and skips the
+ * repro-test hint entirely. This removes a self-defeating forcing function on
+ * instances whose host test-env is incompatible (e.g. pytest-7982), where the
  * agent obeys a MANDATORY "run the tests" directive it cannot satisfy, flails,
  * and aborts → empty_patch.
  *
  * APPLY IS A NOOP — like the other bench knobs the EFFECT is delivered out of
- * band by the driver (`benchPostureFromState` projection → `opt.inLoopExec`).
+ * band by the driver (`benchPostureFromState` projection → `opt.inLoopExecMode`).
  * This registry entry exists ONLY so the bench resolver / report / preset layer
  * can SEE the knob.
  */
@@ -25,22 +34,30 @@ import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
-const DISABLING = new Set(["0", "off", "false"])
+const OFF = new Set(["0", "off", "false"])
+const FULL = new Set(["1", "on", "true", "full"])
+
+export type BenchInLoopExecModeKnob = "full" | "repro-only" | "off"
 
 /**
- * Returns `false` ONLY for an explicit off token; any other (including unset)
- * resolves `undefined` so the posture default (ON) holds. Default-ON inverts the
- * usual default-OFF bench knob: the absence of the knob preserves today's
- * exact behavior, and the operator must opt OUT.
+ * Closed tri-state parser. Unset / empty ⇒ `undefined` so the posture default
+ * (`"full"`) holds. Explicit tokens map to canonical modes.
  */
-const parseBenchInLoopExec = (raw: string | undefined): false | undefined => {
+const parseBenchInLoopExec = (
+  raw: string | undefined,
+): BenchInLoopExecModeKnob | undefined => {
   if (raw === undefined) return undefined
-  return DISABLING.has(raw.trim().toLowerCase()) ? false : undefined
+  const s = raw.trim().toLowerCase()
+  if (s === "") return undefined
+  if (OFF.has(s)) return "off"
+  if (s === "repro-only" || s === "repro") return "repro-only"
+  if (FULL.has(s)) return "full"
+  return undefined
 }
 
 const applyBenchInLoopExec = (cfg: AgentConfig): AgentConfig => cfg
 
-export const benchInLoopExecKnob: Knob<false> = {
+export const benchInLoopExecKnob: Knob<BenchInLoopExecModeKnob> = {
   id: "bench-in-loop-exec",
   envKey: "QUANTA_BENCH_IN_LOOP_EXEC",
   category: "verify",
@@ -48,7 +65,8 @@ export const benchInLoopExecKnob: Knob<false> = {
   parse: parseBenchInLoopExec,
   apply: applyBenchInLoopExec,
   describe:
-    "Bench: in-loop test execution (default-ON). OFF ⇒ mini-swe posture (edit-and-submit; grader runs tests, no run-the-tests directive, no verifyGuard, single-pass, no repro hint).",
+    "Bench: execution authority mode (default full). full = repo tests in-loop; repro-only = focused issue reproduction only; off = edit-and-submit with no execution.",
+  unit: "mode",
   source: "mini-swe posture absorption (pytest-7982 incompatible-host-env flail)",
 }
 

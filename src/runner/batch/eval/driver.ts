@@ -428,7 +428,7 @@ const SWEBENCH_DIRECTIVE_LEAN = [
 
 /**
  * Edit-and-submit variant of {@link SWEBENCH_DIRECTIVE} — used when the
- * `bench-in-loop-exec` knob is OFF (`opt.inLoopExec === false`, mini-swe posture).
+ * `bench-in-loop-exec` mode resolves to `"off"`.
  *
  * Keeps every source-discipline rule (source-only, smallest change, no test
  * edits, no git-checkout, V4A format) but DELETES the "Reproduce first" and the
@@ -466,6 +466,37 @@ const SWEBENCH_DIRECTIVE_NOEXEC = [
   "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
 ].join("\n")
 
+/**
+ * Focused execution variant between FULL and NOEXEC. It keeps the mini-swe
+ * source-discipline rules, still forbids broad repo-test execution, but allows
+ * a tiny direct reproducer when the issue can be demonstrated narrowly.
+ */
+const SWEBENCH_DIRECTIVE_REPRO_ONLY = [
+  "",
+  "",
+  "You are fixing a real defect in this repository; an automated grader runs",
+  "hidden tests against ONLY your source changes. Hard rules:",
+  "- Change library/source code ONLY. NEVER create, edit, or delete any test",
+  "  file or anything under a tests/ or test/ dir — the grader supplies its own",
+  "  tests; your test edits are discarded and only waste turns.",
+  "- Make the SMALLEST correct change. Use `edit` for targeted hunks. Do NOT",
+  "  rewrite or reformat whole files; do NOT `write` over an existing file.",
+  "- NEVER run `git checkout`/`reset`/`clean`/`stash`/`restore`, re-clone, or",
+  "  any command that discards your own edits. Your final git diff IS the",
+  "  submission — do not let bash commands wipe it.",
+  "- Infer the EXACT required behavior (signatures, error messages, return",
+  "  values, edge cases) from the issue and match it precisely — a fix that is",
+  "  close but not exact still fails the hidden test.",
+  "- If useful, you MAY run a tiny issue reproducer or a focused script that",
+  "  demonstrates the bug directly. Do NOT run the repository test suite,",
+  "  pytest, tox, or broad regression sweeps yourself; the grader owns full",
+  "  verification in the correct environment.",
+  "- Keep the final diff minimal and isolated to the fix.",
+  "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
+  "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
+  "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
+].join("\n")
+
 /** Pre-composed steer lines (already include their leading `\n-` separator, or
  *  are `""` when their gate is off). Factored into a record so {@link composeBaseText}
  *  can append them verbatim in the OFF path and drop them all in the LEAN path. */
@@ -497,7 +528,7 @@ interface SteerLines {
 const composeBaseText = (
   base: string,
   isSwebench: boolean,
-  inLoopExec: boolean,
+  inLoopExecMode: "full" | "repro-only" | "off",
   steers: SteerLines,
   leanPrompt: boolean,
 ): string => {
@@ -505,7 +536,12 @@ const composeBaseText = (
   if (leanPrompt) {
     return `${base}${SWEBENCH_DIRECTIVE_LEAN}${steers.findRefs}`
   }
-  const directive = inLoopExec ? SWEBENCH_DIRECTIVE : SWEBENCH_DIRECTIVE_NOEXEC
+  const directive =
+    inLoopExecMode === "full"
+      ? SWEBENCH_DIRECTIVE
+      : inLoopExecMode === "repro-only"
+        ? SWEBENCH_DIRECTIVE_REPRO_ONLY
+        : SWEBENCH_DIRECTIVE_NOEXEC
   return `${base}${directive}${steers.lsp}${steers.findRefs}${steers.spec}${steers.messageFormat}${steers.adapterFamily}${steers.executionEnv}${steers.simplicity}${steers.sibling}`
 }
 
@@ -1569,7 +1605,7 @@ const buildPromptText = (args: {
   const baseText = composeBaseText(
     buildBaseProblemText(args.instance, args.sandbox),
     Boolean(args.instance.swebench),
-    args.opt.inLoopExec,
+    args.opt.inLoopExecMode,
     buildDirectiveSteers(args.instance, args.opt),
     leanPrompt,
   )
@@ -1591,7 +1627,7 @@ const buildConfigGuards = (
 ): Partial<AgentConfig> => {
   const exactCommands = benchVerifyAuthorityCommandsOf(instance)
   const verifyGuard =
-    instance.swebench && opt.inLoopExec
+    instance.swebench && opt.inLoopExecMode === "full"
       ? exactCommands !== undefined
         ? { mustPass: true, maxTrips: 2, exactCommands }
         : { mustPass: true, maxTrips: 2 }
@@ -1603,7 +1639,6 @@ const buildConfigGuards = (
       : {}),
     ...(verifyGuard !== undefined ? { verifyGuard } : {}),
     ...(instance.swebench &&
-    opt.inLoopExec &&
     !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
       ? { protectTestPaths: true }
       : {}),
@@ -1668,9 +1703,9 @@ export const buildConfig = (
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
   // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
   // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
-  // `bench-in-loop-exec` knob (default-ON ⇒ byte-identical): ON uses the
-  // test-running SWEBENCH_DIRECTIVE; OFF (mini-swe posture) swaps to the
-  // edit-and-submit SWEBENCH_DIRECTIVE_NOEXEC.
+  // `bench-in-loop-exec` knob (default-FULL ⇒ byte-identical): FULL uses the
+  // test-running directive; REPRO-ONLY permits only a narrow reproducer; OFF
+  // swaps to edit-and-submit with no in-loop execution.
   // LSP-nav GROUNDING steer (agentless-v2 / `lsp-steer`). The localize-phase
   // guard ALSO carries this steer, but ONLY fires it when the model attempts an
   // early edit during Phase 1 — a localize-first agent explores with read/grep
@@ -1755,18 +1790,15 @@ export const buildConfig = (
     // gives one budget slot per branch (presence + must-pass) so a single run
     // can hit both before the cap; SWE-bench prioritizes measurement integrity
     // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
-    // Gated additionally on `opt.inLoopExec`: the mini-swe (OFF) posture
-    // edits-and-submits, so a "must verify" guard is moot (and would push the
-    // agent at the same unrunnable host test-env). ON ⇒ byte-identical.
-    // Test-scope guard (RCA 2026-06-19, django-13417). DEFAULT-ON for real
-    // swebench in-loop runs (the no-test-edit rule is already DECLARED in the
-    // bench system prompt — this ENFORCES it at the dispatch layer so the
-    // model can't edit tests, chase its own modified tests, and regress a
-    // correct minimal fix). Off-switch `QUANTA_BENCH_PROTECT_TESTS=0` yields
-    // the A/B baseline arm (advisory-only, the pre-fix behavior). Gated on
-    // `inLoopExec` like verifyGuard: the mini-swe posture (OFF) edits-and-
-    // submits with test edits already stripped at diff time, so the guard is
-    // moot there.
+    // Gated additionally on `"full"` execution: the noexec / repro-only
+    // postures deliberately avoid broad repo-test execution, so a must-verify
+    // guard would reintroduce the same host-env flail they are designed to
+    // avoid.
+    // Test-scope guard (RCA 2026-06-19, django-13417). DEFAULT-ON for ALL real
+    // swebench modes, not just full execution: source-only is a benchmark
+    // invariant, so the dispatch layer must enforce it even in submit-only or
+    // repro-only runs. Off-switch `QUANTA_BENCH_PROTECT_TESTS=0` yields the
+    // advisory-only baseline.
     ...buildConfigGuards(instance, opt, signal),
     // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
     // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
@@ -2889,7 +2921,7 @@ const prepareHintAndReproContext = async (
       localizeCandidates = files
     },
   })
-  const reproInstall = benchInstallsReproHint(posture.inLoopExec)
+  const reproInstall = benchInstallsReproHint(posture.inLoopExecMode)
     ? await installReproTestHint(instance, sandbox, llm)
     : { hint: undefined, telemetry: undefined }
   const selectionRepro =
@@ -2977,7 +3009,7 @@ const resolveRepairState = (args: {
   const repairGateEligible = benchRunsRepairPhase(
     effectiveRepair !== undefined,
     args.instance.swebench !== undefined,
-    args.posture.inLoopExec,
+    args.posture.inLoopExecMode,
   )
   const gateDecisionVerify =
     repairGateEligible && args.closureSession?.bundle.gate.action === "verify"

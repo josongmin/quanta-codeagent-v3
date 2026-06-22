@@ -9,11 +9,11 @@
  * `SWEBENCH_DIRECTIVE` / `verifyGuard` via the apps driver calling `buildConfig`.
  *
  * Red-on-injection:
- *  - revert the `:896` branch to always-SWEBENCH_DIRECTIVE ⇒ IN-LOOP-3 (OFF
+ *  - revert the directive branch to always-SWEBENCH_DIRECTIVE ⇒ IN-LOOP-3 (OFF
  *    posture must NOT contain the MANDATORY-run-tests clause) goes RED.
- *  - revert the `:955` verifyGuard gate to drop `&& opt.inLoopExec` ⇒ IN-LOOP-4
+ *  - revert the verifyGuard gate to drop the `"full"`-mode check ⇒ IN-LOOP-4
  *    goes RED.
- *  - flip the BenchPosture default (`inLoopExec` from true→false) ⇒ IN-LOOP-1
+ *  - flip the BenchPosture default (`inLoopExecMode` from "full"→"off") ⇒ IN-LOOP-1
  *    (default ON byte-identical) goes RED.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -83,16 +83,19 @@ describe("bench-in-loop-exec posture flip", () => {
   // IN-LOOP-1: DEFAULT (no knob, no preset) = ON, byte-identical to today.
   test("IN-LOOP-1: default ⇒ inLoopExec true, MANDATE present, verifyGuard present", () => {
     expect(benchOptIns().inLoopExec).toBe(true)
+    expect(benchOptIns().inLoopExecMode).toBe("full")
     const cfg = buildOnce()
     expect(userText(cfg)).toContain("MANDATORY")
     expect(userText(cfg)).toContain(MANDATE)
     expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
+    expect(cfg.protectTestPaths).toBe(true)
   })
 
   // IN-LOOP-2: explicit OFF via env flips the posture.
   test("IN-LOOP-2: QUANTA_BENCH_IN_LOOP_EXEC=off ⇒ inLoopExec false", () => {
     process.env.QUANTA_BENCH_IN_LOOP_EXEC = "off"
     expect(benchOptIns().inLoopExec).toBe(false)
+    expect(benchOptIns().inLoopExecMode).toBe("off")
   })
 
   // IN-LOOP-3: OFF posture removes the run-the-tests MANDATE (the real driver of
@@ -111,7 +114,9 @@ describe("bench-in-loop-exec posture flip", () => {
   // IN-LOOP-4: OFF drops verifyGuard.
   test("IN-LOOP-4: OFF ⇒ no verifyGuard", () => {
     process.env.QUANTA_BENCH_IN_LOOP_EXEC = "false"
-    expect(buildOnce().verifyGuard).toBeUndefined()
+    const cfg = buildOnce()
+    expect(cfg.verifyGuard).toBeUndefined()
+    expect(cfg.protectTestPaths).toBe(true)
   })
 
   // IN-LOOP-5: the agentless-v2-safe preset resolves the knob OFF AND drops the
@@ -120,25 +125,43 @@ describe("bench-in-loop-exec posture flip", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v2-safe"
     const opt = benchOptIns()
     expect(opt.inLoopExec).toBe(false)
+    expect(opt.inLoopExecMode).toBe("off")
     expect(opt.reproTestK).toBeUndefined()
     expect(opt.lspNav).toBe(true) // localization stack preserved
     const cfg = buildOnce()
     expect(userText(cfg)).not.toContain(MANDATE)
     expect(cfg.verifyGuard).toBeUndefined()
+    expect(cfg.protectTestPaths).toBe(true)
   })
 
-  // IN-LOOP-6: the apps-side phase/repro decisions flip on inLoopExec. These pin
-  // the two `runInstanceOnce` posture branches (the buildConfig tests can't reach
-  // them). Red-on-injection: drop the `inLoopExec` term from either predicate and
-  // these go RED.
-  test("IN-LOOP-6: repro-hint install gated on inLoopExec", () => {
-    expect(benchInstallsReproHint(true)).toBe(true) // ON ⇒ install (byte-identical)
-    expect(benchInstallsReproHint(false)).toBe(false) // OFF ⇒ skip
+  test("IN-LOOP-6: REPRO-ONLY ⇒ focused reproducer allowed, no full-suite mandate, no verifyGuard", () => {
+    process.env.QUANTA_BENCH_IN_LOOP_EXEC = "repro-only"
+    const opt = benchOptIns()
+    expect(opt.inLoopExecMode).toBe("repro-only")
+    expect(opt.inLoopExec).toBe(false)
+    const cfg = buildOnce()
+    const txt = userText(cfg)
+    expect(txt).not.toContain(MANDATE)
+    expect(txt).toContain("you MAY run a tiny issue reproducer")
+    expect(txt).toContain("Do NOT run the repository test suite")
+    expect(cfg.verifyGuard).toBeUndefined()
+    expect(cfg.protectTestPaths).toBe(true)
   })
-  test("IN-LOOP-7: repair phase requires inLoopExec (OFF ⇒ single-pass)", () => {
-    expect(benchRunsRepairPhase(true, true, true)).toBe(true) // repair+swebench+ON
-    expect(benchRunsRepairPhase(true, true, false)).toBe(false) // OFF ⇒ forced single-pass
-    expect(benchRunsRepairPhase(false, true, true)).toBe(false) // no repair config
-    expect(benchRunsRepairPhase(true, false, true)).toBe(false) // non-swebench
+
+  // IN-LOOP-7/8: the apps-side phase/repro decisions flip on execution mode.
+  // These pin the two `runInstanceOnce` posture branches (the buildConfig tests
+  // can't reach them). Red-on-injection: collapse the mode checks back to a
+  // boolean or make repro/repair share one branch again, and these go RED.
+  test("IN-LOOP-7: repro-hint install gated on execution mode", () => {
+    expect(benchInstallsReproHint("full")).toBe(true)
+    expect(benchInstallsReproHint("repro-only")).toBe(true)
+    expect(benchInstallsReproHint("off")).toBe(false)
+  })
+  test("IN-LOOP-8: repair phase remains FULL-only", () => {
+    expect(benchRunsRepairPhase(true, true, "full")).toBe(true)
+    expect(benchRunsRepairPhase(true, true, "repro-only")).toBe(false)
+    expect(benchRunsRepairPhase(true, true, "off")).toBe(false)
+    expect(benchRunsRepairPhase(false, true, "full")).toBe(false)
+    expect(benchRunsRepairPhase(true, false, "full")).toBe(false)
   })
 })

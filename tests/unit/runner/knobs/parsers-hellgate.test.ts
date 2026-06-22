@@ -15,6 +15,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
+import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
@@ -77,6 +78,7 @@ describe("hellgate / parsers — universal garbage rejection (no parser throws o
     ["skills", skillsKnob],
     ["localize-phase", localizePhaseKnob],
     ["branch-search", branchSearchKnob],
+    ["bench-in-loop-exec", benchInLoopExecKnob],
     ["issue-hint", issueHintKnob],
     ["repro-doubt", reproDoubtKnob],
     ["repro-test", reproTestKnob],
@@ -233,6 +235,26 @@ describe("selector-mode — closed mode enum", () => {
     expect(selectorModeKnob.parse("off")).toBeUndefined()
     expect(selectorModeKnob.parse("heuristic")).toBeUndefined()
     expect(selectorModeKnob.parse("strict")).toBeUndefined()
+  })
+})
+
+describe("bench-in-loop-exec — closed mode enum", () => {
+  test("accepted modes normalize to canonical values", () => {
+    expect(benchInLoopExecKnob.parse("1")).toBe("full")
+    expect(benchInLoopExecKnob.parse("on")).toBe("full")
+    expect(benchInLoopExecKnob.parse("true")).toBe("full")
+    expect(benchInLoopExecKnob.parse("full")).toBe("full")
+    expect(benchInLoopExecKnob.parse("repro-only")).toBe("repro-only")
+    expect(benchInLoopExecKnob.parse("repro")).toBe("repro-only")
+    expect(benchInLoopExecKnob.parse("off")).toBe("off")
+    expect(benchInLoopExecKnob.parse("0")).toBe("off")
+    expect(benchInLoopExecKnob.parse("false")).toBe("off")
+  })
+
+  test("unknown modes reject", () => {
+    expect(benchInLoopExecKnob.parse("focused")).toBeUndefined()
+    expect(benchInLoopExecKnob.parse("tests-only")).toBeUndefined()
+    expect(benchInLoopExecKnob.parse("suite")).toBeUndefined()
   })
 })
 

@@ -35,6 +35,7 @@ import {
   knobsForSurface,
   resolveKnobs,
 } from "@/runner/knobs"
+import type { BenchInLoopExecModeKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
 import type { SelectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import type { VerifySelectLlmRiskGateMode } from "@/runner/knobs/knobs/verify-select-llm-risk-gate"
 import type { VerifySelectRegressionMode } from "@/runner/knobs/knobs/verify-select-regression"
@@ -169,6 +170,7 @@ export const knobsForReport = (
 /** Bench issue-hint mode tri-state. `"off"` = no hint; `"regex"` = legacy
  *  verbatim-evidence extractor; `"agentless"` = LLM Stage-1 localization. */
 export type BenchIssueHintMode = "off" | "regex" | "agentless"
+export type BenchInLoopExecMode = "full" | "repro-only" | "off"
 
 /**
  * The bench A/B posture, derived ENTIRELY from a resolved {@link BenchKnobState}
@@ -263,12 +265,16 @@ export interface BenchPosture {
    */
   readonly verifySelectRepro: VerifySelectReproMode | undefined
   /**
-   * In-loop test execution (default TRUE = today's byte-identical behavior).
-   * TRUE ⇒ the agent is told to run the repo's tests inside its own solve loop
-   * (SWEBENCH_DIRECTIVE + verifyGuard + repair phase + repro hint). FALSE ⇒
-   * mini-swe posture: edit-and-submit, the grader runs the tests
-   * (SWEBENCH_DIRECTIVE_NOEXEC, no verifyGuard, single-pass, no repro hint).
-   * OFF ONLY when the `bench-in-loop-exec` knob explicitly resolves `false`.
+   * Execution authority mode (default `"full"` = today's byte-identical
+   * behavior). `"full"` runs repo tests in-loop; `"repro-only"` allows a small
+   * issue reproducer but still forbids full repo-test execution; `"off"` is
+   * pure edit-and-submit. This field is the authoritative switch for prompt,
+   * verifyGuard, repair, and repro-hint wiring.
+   */
+  readonly inLoopExecMode: BenchInLoopExecMode
+  /**
+   * Back-compat boolean projection: TRUE only for `"full"`. Existing callers
+   * that mean "broad repo-test execution allowed" can keep reading this.
    */
   readonly inLoopExec: boolean
   /** envKeys to push into the runtime-config live-override store (read at wire
@@ -327,6 +333,8 @@ export interface BenchPosture {
 
 const isTrue = (v: unknown): v is true => v === true
 const isFalse = (v: unknown): v is false => v === false
+const isInLoopExecMode = (v: unknown): v is BenchInLoopExecModeKnob =>
+  v === "full" || v === "repro-only" || v === "off"
 const isNumber = (v: unknown): v is number => typeof v === "number"
 const isLocalizeValue = (v: unknown): v is { phase1Turns: number } =>
   typeof v === "object" &&
@@ -405,10 +413,9 @@ export const benchPostureFromState = (
   // existing presets/runs are byte-identical. Only an explicit `clean` (env /
   // preset) flips the selector to hard-gate-only authority.
   const selectorMode = readKnobValue(state, "selector-mode", isSelectorMode) ?? "research"
-  // Default-TRUE fence: only an explicit `false` from the knob flips it OFF.
-  // Unset / any non-false value ⇒ undefined ⇒ inLoopExec stays true (today's
-  // exact behavior).
-  const inLoopExec = readKnobValue(state, "bench-in-loop-exec", isFalse) !== false
+  // Default-FULL fence: unset ⇒ undefined ⇒ `"full"` (today's exact behavior).
+  const inLoopExecMode = readKnobValue(state, "bench-in-loop-exec", isInLoopExecMode) ?? "full"
+  const inLoopExec = inLoopExecMode === "full"
   const liveOverrides: string[] = []
   if (readKnobValue(state, "read-outline", isTrue) === true)
     liveOverrides.push("QUANTA_READ_OUTLINE")
@@ -462,6 +469,7 @@ export const benchPostureFromState = (
     selectorMode,
     verifySelectRegression,
     verifySelectRepro,
+    inLoopExecMode,
     inLoopExec,
     liveOverrides,
     preset: state.preset,

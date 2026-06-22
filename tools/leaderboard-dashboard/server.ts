@@ -17,9 +17,9 @@
  * The browser polls `/api/data` every few seconds and re-renders. Nothing here
  * imports from the app — it runs standalone on plain Bun.
  */
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs"
-import { join, basename } from "node:path"
+import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs"
 import { homedir } from "node:os"
+import { basename, join } from "node:path"
 
 const HOME = homedir()
 const REPO = join(import.meta.dir, "..", "..")
@@ -42,8 +42,7 @@ const REPORT_ROOTS = [
   join(HOME, "Library", "quanta-codeagent-v3", "bench-slices"),
 ]
 const MATRIX_MD =
-  argOf("--matrix") ??
-  join(REPO, "_scaffold-summary", "scaffold-solving-summary.md")
+  argOf("--matrix") ?? join(REPO, "_scaffold-summary", "scaffold-solving-summary.md")
 // SWE-bench Verified dataset (500) → problem statement + official difficulty.
 const DATASET_JSONL =
   argOf("--dataset") ??
@@ -53,7 +52,8 @@ const LIVE_ROOTS = [...argsOf("--live"), join(HOME, "easy-more")]
 // disk. The broad per-submission turn data lived in a swe-bench/experiments
 // clone that's gone; only the parsed ✅/· matrix md survived.
 const FRONTIER_TRAJ_DIR =
-  argOf("--frontier-trajs") ?? join(HOME, "Library", "quanta-codeagent-v3", "frontier-winning", "trajs")
+  argOf("--frontier-trajs") ??
+  join(HOME, "Library", "quanta-codeagent-v3", "frontier-winning", "trajs")
 
 function argOf(flag: string): string | undefined {
   const i = process.argv.indexOf(flag)
@@ -62,11 +62,25 @@ function argOf(flag: string): string | undefined {
 function argsOf(flag: string): string[] {
   const out: string[] = []
   for (let i = 0; i < process.argv.length; i++)
-    if (process.argv[i] === flag && process.argv[i + 1]) out.push(process.argv[i + 1])
+    if (process.argv[i] === flag) {
+      const value = process.argv[i + 1]
+      if (value) out.push(value)
+    }
   return out
 }
 
-const shortId = (full: string) => (full && full.includes("__") ? full.split("__")[1] : full || "")
+const shortId = (full: string): string => {
+  if (!full) return ""
+  if (!full.includes("__")) return full
+  return full.split("__")[1] ?? ""
+}
+
+type JsonRecord = Record<string, unknown>
+
+const asRecord = (value: unknown): JsonRecord | null =>
+  typeof value === "object" && value !== null ? (value as JsonRecord) : null
+
+const asString = (value: unknown): string | null => (typeof value === "string" ? value : null)
 
 // ---------------------------------------------------------------------------
 // Evidence parsers (run fresh on every /api/data request)
@@ -103,23 +117,44 @@ function parseMatrix(): MatrixData {
     if (line.startsWith("## 3.")) inTop = false
     if (inTop) {
       // | Sonar (`sonar-o45`) | Opus-4.5 | 396 | 79.2 | 🔒closed | repo |
-      const m = line.match(/^\|\s*([^|(]+?)\s*\(`([^`]+)`\)\s*\|\s*([^|]+?)\s*\|\s*(\d+)\s*\|\s*([\d.]+)/)
-      if (m) topScaffolds.push({ key: m[2].trim(), model: m[3].trim(), resolved: Number(m[4]), pct: Number(m[5]) })
+      const m = line.match(
+        /^\|\s*([^|(]+?)\s*\(`([^`]+)`\)\s*\|\s*([^|]+?)\s*\|\s*(\d+)\s*\|\s*([\d.]+)/,
+      )
+      if (m) {
+        const [, , key, model, resolved, pct] = m
+        if (
+          key !== undefined &&
+          model !== undefined &&
+          resolved !== undefined &&
+          pct !== undefined
+        ) {
+          topScaffolds.push({
+            key: key.trim(),
+            model: model.trim(),
+            resolved: Number(resolved),
+            pct: Number(pct),
+          })
+        }
+      }
     }
 
     if (!line.startsWith("|")) continue
     const cols = line.split("|").map((s) => s.trim())
     // drop leading/trailing empties from the split
     const cells = cols.slice(1, cols.length - 1)
-    if (cells[0] === "instance") {
+    const firstCell = cells[0]
+    if (firstCell === "instance") {
       header = cells // [instance, sonar-o45, ..., #, T]
       scaffolds = header.slice(1, header.length - 2)
       continue
     }
     if (!header) continue
-    if (/^-+$|^:-/.test(cells[0])) continue // separator row
+    if (firstCell === undefined || /^-+$|^:-/.test(firstCell)) continue // separator row
     // Recovered-target rows are prefixed with ★ — strip it (and backticks).
-    const id = cells[0].replace(/`/g, "").replace(/^[★*\s]+/, "").trim()
+    const id = firstCell
+      .replace(/`/g, "")
+      .replace(/^[★*\s]+/, "")
+      .trim()
     if (!/^[a-z][a-z0-9-]*-\d+$/.test(id)) continue
     const cellMap: Record<string, Cell> = {}
     scaffolds.forEach((s, i) => {
@@ -153,10 +188,15 @@ interface FailInfo {
 }
 
 // Turn the raw grade/termination signals into a one-line failure reason.
-function classifyFail(pi: any): FailInfo | null {
-  if (pi.passed) return null
-  const gb = pi.gradeBreakdown ?? {}
-  const term = pi.failure?.termination ?? pi.budget?.attemptOutcomes?.slice(-1)?.[0]?.subkind ?? "unknown"
+function classifyFail(pi: unknown): FailInfo | null {
+  const row = asRecord(pi)
+  if (row?.passed === true) return null
+  const gb = asRecord(row?.gradeBreakdown) ?? {}
+  const failure = asRecord(row?.failure)
+  const budget = asRecord(row?.budget)
+  const attemptOutcomes = Array.isArray(budget?.attemptOutcomes) ? budget.attemptOutcomes : []
+  const lastOutcome = asRecord(attemptOutcomes.at(-1))
+  const term = asString(failure?.termination) ?? asString(lastOutcome?.subkind) ?? "unknown"
   const f2p = Number(gb.failToPassFailed) || 0
   const p2p = Number(gb.passToPassFailed) || 0
   let klass: string
@@ -164,22 +204,28 @@ function classifyFail(pi: any): FailInfo | null {
     klass = "기존테스트깸" // patch broke PASS_TO_PASS (regression)
   else if (f2p > 0)
     klass = "패치햇는데틀림" // patch graded but FAIL_TO_PASS still red — wrong fix
-  else if (/timeout/i.test(term))
-    klass = "타임아웃"
+  else if (/timeout/i.test(term)) klass = "타임아웃"
   else if (/admission|blocked|gate/i.test(term))
     klass = "게이트차단" // admission gate blocked the patch before grading
   else if (/error|harness|exec/i.test(term))
     klass = "채점/실행에러" // infra error, not a model miss
   else if (/no_patch|empty|no_repro|no_diff/i.test(term))
     klass = "패치생성실패" // model produced no usable patch
-  else
-    klass = "미제출(불명)" // completed without a graded patch, no clear signal
-  return { termination: term, klass, repro: pi.reproTest?.reason ?? "", f2p, p2p }
+  else klass = "미제출(불명)" // completed without a graded patch, no clear signal
+  const reproTest = asRecord(row?.reproTest)
+  return {
+    termination: term,
+    klass,
+    repro: asString(reproTest?.reason) ?? "",
+    f2p,
+    p2p,
+  }
 }
 
 // Dirs that are source checkouts / caches — never hold our reports but contain
 // thousands of files. Pruning them keeps the scan from exploding.
-const PRUNE_DIR = /^(repo|repo-.*|swebench-.*|node_modules|__pycache__|\.git|venv|\.venv|site-packages)$/
+const PRUNE_DIR =
+  /^(repo|repo-.*|swebench-.*|node_modules|__pycache__|\.git|venv|\.venv|site-packages)$/
 
 function walkReports(root: string, acc: string[], depth = 0) {
   if (depth > 3 || !existsSync(root)) return
@@ -192,7 +238,7 @@ function walkReports(root: string, acc: string[], depth = 0) {
   for (const e of entries) {
     if (e.startsWith(".") || PRUNE_DIR.test(e)) continue
     const p = join(root, e)
-    let st
+    let st: Stats
     try {
       st = statSync(p)
     } catch {
@@ -210,7 +256,7 @@ function walkReports(root: string, acc: string[], depth = 0) {
 // arg that is NOT persisted in report.json. We recover it from the file path
 // (the ground truth of how the campaign was launched). A trailing `*` marks a
 // label inferred from path/knobs rather than read from the data.
-function presetLabel(file: string, knobs: any): string {
+function presetLabel(file: string, knobs: JsonRecord | null): string {
   const name = basename(file).toLowerCase()
   const dir = basename(file.replace(/\/[^/]+$/, "")).toLowerCase()
   // 1) the FILENAME literally encodes the arm. Match name only — the parent
@@ -228,15 +274,20 @@ function presetLabel(file: string, knobs: any): string {
   //    report's knob SSOT (`knobs.preset`, written by full-remote). Read it
   //    instead of falsely labeling "미기록" (the data was there all along).
   if (/^report-i-/.test(name)) {
-    const p = knobs?.preset
+    const p = asString(knobs?.preset)
     return typeof p === "string" && p.trim() ? `${p} · full-remote` : "full-remote · preset 미기록"
   }
   if (/^local-/.test(name)) return "local"
   // 4) last resort: knob fingerprint
   try {
-    const r = knobs?.resolved ?? {}
-    const bits = [r["issue-hint"]?.value, r["repro-vote"]?.display ?? r["repro-vote"]?.value].filter(Boolean)
-    return bits.length ? bits.join("/") + "*" : "preset 미기록"
+    const resolved = asRecord(knobs?.resolved) ?? {}
+    const issueHint = asRecord(resolved["issue-hint"])
+    const reproVote = asRecord(resolved["repro-vote"])
+    const bits = [
+      asString(issueHint?.value),
+      asString(reproVote?.display) ?? asString(reproVote?.value),
+    ].filter((bit): bit is string => !!bit)
+    return bits.length ? `${bits.join("/")}*` : "preset 미기록"
   } catch {
     return "preset 미기록"
   }
@@ -250,20 +301,23 @@ function parseRuns(): Run[] {
   for (const f of files) {
     if (seen.has(f)) continue
     seen.add(f)
-    let r: any
+    let report: JsonRecord | null
     try {
-      r = JSON.parse(readFileSync(f, "utf8"))
+      report = asRecord(JSON.parse(readFileSync(f, "utf8")))
     } catch {
       continue
     }
-    if (!Array.isArray(r.perInstance)) continue
-    const perInstance = r.perInstance.map((pi: any) => ({
-      id: pi.id,
-      passed: !!pi.passed,
-      turns: Number(pi.turns) || 0,
-      fail: classifyFail(pi),
-    }))
-    const resolved = perInstance.filter((p) => p.passed).length
+    if (report === null || !Array.isArray(report.perInstance)) continue
+    const perInstance: Run["perInstance"] = report.perInstance.map((pi) => {
+      const row = asRecord(pi)
+      return {
+        id: asString(row?.id) ?? "",
+        passed: row?.passed === true,
+        turns: Number(row?.turns) || 0,
+        fail: classifyFail(pi),
+      }
+    })
+    const resolved = perInstance.filter((p: (typeof perInstance)[number]) => p.passed).length
     let mtime = 0
     try {
       mtime = statSync(f).mtimeMs
@@ -271,8 +325,8 @@ function parseRuns(): Run[] {
     runs.push({
       label: basename(f).replace(/\.report\.json$/, ""),
       file: f,
-      model: r.model ?? "?",
-      preset: presetLabel(f, r.knobs),
+      model: asString(report.model) ?? "?",
+      preset: presetLabel(f, asRecord(report.knobs)),
       mtime,
       resolved,
       total: perInstance.length,
@@ -284,7 +338,14 @@ function parseRuns(): Run[] {
 }
 
 function parseLive() {
-  const boxes: { dir: string; log: string; lines: number; lastInstance: string; mtime: number; tail: string }[] = []
+  const boxes: {
+    dir: string
+    log: string
+    lines: number
+    lastInstance: string
+    mtime: number
+    tail: string
+  }[] = []
   for (const root of LIVE_ROOTS) {
     if (!existsSync(root)) continue
     let entries: string[]
@@ -295,7 +356,7 @@ function parseLive() {
     }
     for (const e of entries) {
       const dir = join(root, e)
-      let st
+      let st: Stats
       try {
         st = statSync(dir)
       } catch {
@@ -322,7 +383,7 @@ function parseLive() {
         if (Date.now() - mt > 6 * 3600_000) continue
         const lineArr = txt.split("\n").filter(Boolean)
         const instMatches = txt.match(/bench-[a-zA-Z0-9_]+__[a-zA-Z0-9_.-]+/g) || []
-        const lastInstance = instMatches.length ? instMatches[instMatches.length - 1] : ""
+        const lastInstance = instMatches.at(-1) ?? ""
         boxes.push({
           dir: e,
           log: lg,
@@ -357,15 +418,19 @@ function loadDataset(): Record<string, DatasetRow> {
     for (const line of readFileSync(DATASET_JSONL, "utf8").split("\n")) {
       if (!line.trim()) continue
       try {
-        const o = JSON.parse(line)
-        map[shortId(o.instance_id)] = {
-          difficulty: o.difficulty ?? "?",
-          statement: o.problem_statement ?? "",
-          patch: o.patch ?? "",
-          testPatch: o.test_patch ?? "",
-          repo: o.repo ?? "",
-          baseCommit: o.base_commit ?? "",
-          instanceId: o.instance_id ?? "",
+        const row = asRecord(JSON.parse(line))
+        if (row === null) continue
+        const instanceId = asString(row.instance_id) ?? ""
+        const key = shortId(instanceId)
+        if (key === "") continue
+        map[key] = {
+          difficulty: asString(row.difficulty) ?? "?",
+          statement: asString(row.problem_statement) ?? "",
+          patch: asString(row.patch) ?? "",
+          testPatch: asString(row.test_patch) ?? "",
+          repo: asString(row.repo) ?? "",
+          baseCommit: asString(row.base_commit) ?? "",
+          instanceId,
         }
       } catch {}
     }
@@ -388,7 +453,8 @@ function loadFrontierTrajs() {
       try {
         const txt = readFileSync(p, "utf8")
         const turns = (txt.match(/<function_results>/g) || []).length
-        map[shortId(f.replace(/\.txt$/, ""))] = { turns, file: p }
+        const key = shortId(f.replace(/\.txt$/, ""))
+        if (key !== "") map[key] = { turns, file: p }
       } catch {}
     }
   }
@@ -424,7 +490,16 @@ function groupRuns(runs: Run[]): Campaign[] {
     else key = r.label
     let g = groups.get(key)
     if (!g) {
-      g = { key, members: [], model: r.model, preset: r.preset, mtime: 0, resolved: 0, total: 0, seen: new Map() }
+      g = {
+        key,
+        members: [],
+        model: r.model,
+        preset: r.preset,
+        mtime: 0,
+        resolved: 0,
+        total: 0,
+        seen: new Map(),
+      }
       groups.set(key, g)
     }
     g.members.push(r.label)
@@ -439,9 +514,20 @@ function groupRuns(runs: Run[]): Campaign[] {
   for (const g of groups.values()) {
     g.total = g.seen.size
     g.resolved = [...g.seen.values()].filter(Boolean).length
-    out.push({ key: g.key, members: g.members, model: g.model, preset: g.preset, mtime: g.mtime, resolved: g.resolved, total: g.total })
+    out.push({
+      key: g.key,
+      members: g.members,
+      model: g.model,
+      preset: g.preset,
+      mtime: g.mtime,
+      resolved: g.resolved,
+      total: g.total,
+    })
   }
-  return out.sort((a, b) => b.total - a.total || b.resolved / Math.max(1, b.total) - a.resolved / Math.max(1, a.total))
+  return out.sort(
+    (a, b) =>
+      b.total - a.total || b.resolved / Math.max(1, b.total) - a.resolved / Math.max(1, a.total),
+  )
 }
 
 function buildData() {
@@ -477,20 +563,24 @@ function buildData() {
       // Skip synthetic placeholder ids (e.g. `py.repo.swebench_sphinx_doc.012`
       // from smoke reports) — keep only real `repo-NNNN` SWE-bench instances.
       if (!sid || !/^[a-z][a-z0-9-]*-\d+$/.test(sid)) continue
-      const q = (quanta[sid] ??= {
-        passed: false,
-        attempts: 0,
-        passes: 0,
-        bestTurns: null,
-        failTurns: null,
-        models: [],
-        presets: [],
-        passPreset: null,
-        passModel: null,
-        passedBy: [],
-        fail: null,
-        failMtime: 0,
-      })
+      let q = quanta[sid]
+      if (q === undefined) {
+        q = {
+          passed: false,
+          attempts: 0,
+          passes: 0,
+          bestTurns: null,
+          failTurns: null,
+          models: [],
+          presets: [],
+          passPreset: null,
+          passModel: null,
+          passedBy: [],
+          fail: null,
+          failMtime: 0,
+        }
+        quanta[sid] = q
+      }
       q.attempts++
       if (!q.models.includes(run.model)) q.models.push(run.model)
       if (run.preset && !q.presets.includes(run.preset)) q.presets.push(run.preset)
@@ -556,13 +646,36 @@ function buildData() {
 
 // Knob/preset catalog — generated from source by gen-knob-catalog.ts. Read
 // fresh each request so re-running the generator reflects live (no restart).
-function loadKnobCatalog(): any {
+interface KnobCatalogPayload {
+  readonly presets: Record<string, unknown>
+  readonly knobs: Record<string, unknown>
+  readonly presetOrder: readonly string[]
+  readonly missing?: boolean
+}
+
+const EMPTY_KNOB_CATALOG: KnobCatalogPayload = {
+  presets: {},
+  knobs: {},
+  presetOrder: [],
+  missing: true,
+}
+
+function loadKnobCatalog(): KnobCatalogPayload {
   const p = join(import.meta.dir, "knob-catalog.json")
-  if (!existsSync(p)) return { presets: {}, knobs: {}, presetOrder: [], missing: true }
+  if (!existsSync(p)) return EMPTY_KNOB_CATALOG
   try {
-    return JSON.parse(readFileSync(p, "utf8"))
+    const parsed = asRecord(JSON.parse(readFileSync(p, "utf8")))
+    if (parsed === null) return EMPTY_KNOB_CATALOG
+    return {
+      presets: asRecord(parsed.presets) ?? {},
+      knobs: asRecord(parsed.knobs) ?? {},
+      presetOrder: Array.isArray(parsed.presetOrder)
+        ? parsed.presetOrder.filter((value): value is string => typeof value === "string")
+        : [],
+      ...(parsed.missing === true ? { missing: true } : {}),
+    }
   } catch {
-    return { presets: {}, knobs: {}, presetOrder: [], missing: true }
+    return EMPTY_KNOB_CATALOG
   }
 }
 
@@ -577,8 +690,13 @@ const server = Bun.serve({
     if (url.pathname === "/api/oracle") {
       const id = url.searchParams.get("id") || ""
       const d = loadDataset()[id]
-      if (!d) return new Response(JSON.stringify({ error: "no dataset row for " + id }), { status: 404, headers: { "content-type": "application/json" } })
-      const github = d.repo && d.baseCommit ? `https://github.com/${d.repo}/commit/${d.baseCommit}` : ""
+      if (!d)
+        return new Response(JSON.stringify({ error: `no dataset row for ${id}` }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        })
+      const github =
+        d.repo && d.baseCommit ? `https://github.com/${d.repo}/commit/${d.baseCommit}` : ""
       const ft = loadFrontierTrajs()[id]
       let frontierTraj: { turns: number; text: string } | null = null
       if (ft) {
@@ -608,8 +726,9 @@ const server = Bun.serve({
         return new Response(JSON.stringify(buildData()), {
           headers: { "content-type": "application/json", "cache-control": "no-store" },
         })
-      } catch (e: any) {
-        return new Response(JSON.stringify({ error: String(e?.stack || e) }), {
+      } catch (e: unknown) {
+        const error = e instanceof Error ? (e.stack ?? e.message) : String(e)
+        return new Response(JSON.stringify({ error }), {
           status: 500,
           headers: { "content-type": "application/json" },
         })
@@ -618,9 +737,13 @@ const server = Bun.serve({
     return new Response(HTML, { headers: { "content-type": "text/html; charset=utf-8" } })
   },
 })
-console.log(`leaderboard-dashboard → http://localhost:${server.port}`)
-console.log(`  reports roots: ${REPORT_ROOTS.join(", ")}`)
-console.log(`  matrix: ${MATRIX_MD}`)
+process.stdout.write(
+  `${[
+    `leaderboard-dashboard → http://localhost:${server.port}`,
+    `  reports roots: ${REPORT_ROOTS.join(", ")}`,
+    `  matrix: ${MATRIX_MD}`,
+  ].join("\n")}\n`,
+)
 
 const HTML = /* html */ `<!doctype html>
 <html lang="ko">
@@ -1023,7 +1146,7 @@ function unifiedRows() {
   const ids = new Set([...Object.keys(rows), ...Object.keys(ds), ...Object.keys(q)]);
   const out = [];
   for (const id of ids) {
-    const m = rows[id] || { id, repo: id.replace(/-\d+$/, ""), cells: {}, hash: -1, tier: "?" };
+    const m = rows[id] || { id, repo: id.replace(/-\\d+$/, ""), cells: {}, hash: -1, tier: "?" };
     const d = ds[id] || {};
     out.push({
       id,

@@ -1,15 +1,16 @@
+import type { BenchInLoopExecMode } from "./knobs-bench"
 import type { PrimaryRailStep } from "@/agent/closure"
 import type { GateDecision } from "@/agent/gate-decision"
 import { decideRepairAdmission } from "@/agent/primary-rail"
 import type { VerificationPlan } from "@/agent/verification-plan"
 
-export const benchInstallsReproHint = (inLoopExec: boolean): boolean => inLoopExec
+export const benchInstallsReproHint = (mode: BenchInLoopExecMode): boolean => mode !== "off"
 
 export const benchRunsRepairPhase = (
   hasRepair: boolean,
   isSwebench: boolean,
-  inLoopExec: boolean,
-): boolean => hasRepair && isSwebench && inLoopExec
+  mode: BenchInLoopExecMode,
+): boolean => hasRepair && isSwebench && mode === "full"
 
 export const benchShouldRunRepairPhase = (args: {
   eligible: boolean

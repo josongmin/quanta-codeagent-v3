@@ -1109,12 +1109,12 @@ const BENCH: readonly KnobInventoryEntry[] = [
   },
   {
     envKey: "QUANTA_BENCH_IN_LOOP_EXEC",
-    kind: "bool",
+    kind: "string",
     default: true,
     group: "bench",
     home: "bench",
     describe:
-      "Bench: in-loop test execution (default-ON ⇒ byte-identical). Explicit 0/off/false ⇒ mini-swe posture (SWEBENCH_DIRECTIVE_NOEXEC, no verifyGuard, single-pass, no repro hint; the grader runs the tests). Used by preset agentless-v2-safe.",
+      "Bench: execution authority mode. Default unset => full (byte-identical). Explicit repro-only => allow a tiny issue reproducer but forbid repo-test/pytest/tox execution. Explicit 0/off/false => submit-only posture (no verifyGuard, no repair, no repro hint).",
     readSite: "runner/knobs/knobs/bench-in-loop-exec.ts",
   },
   {
