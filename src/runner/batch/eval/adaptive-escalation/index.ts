@@ -5,6 +5,7 @@
  * wiring are deferred to Wave 3 (gate on a measured oracle, never on n=1).
  */
 
+export { type AdaptiveRunDeps, runAdaptiveBenchAttempt } from "./adaptive-run"
 export {
   type AdaptiveControllerArgs,
   type AdaptiveExecutorInput,
