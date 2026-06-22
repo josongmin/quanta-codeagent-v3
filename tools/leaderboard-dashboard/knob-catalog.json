@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-20T16:39:46.192Z",
+  "generatedAt": "2026-06-22T03:36:36.550Z",
   "presets": {
     "baseline": {
       "name": "baseline",
@@ -192,6 +192,139 @@
       "desc": "jun-20 strict arm: mini-first + hard patch-budget admission + source-only sanitizer. It keeps the localization stack, turns host in-loop execution OFF for round-0 thinness, and blocks over-budget final patches from submission. Existing v3-thin remains observe-only because it has already been measured.",
       "knobCount": 13
     },
+    "agentless-v3-thin-strict-gated": {
+      "name": "agentless-v3-thin-strict-gated",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Adaptive strict arm: generate one thin/noexec strict candidate first. Only if a static public-issue/patch risk gate fires does it spend candidate #2 and run late selection. Repro consensus is OFF here so low-risk strict@1 does not pay a hidden repro-generation cost before the gate can accept.",
+      "knobCount": 19
+    },
+    "agentless-v3-thin-strict-counterfactual": {
+      "name": "agentless-v3-thin-strict-counterfactual",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-counterfactual": "on",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Structural gate + counterfactual cand1 seed. When cand0 trips the structural risk gate, cand1 is seeded from a counterfactual minimal-alternative and bound to the structural contracts (widens late-selection diversity along the flagged dimension).",
+      "knobCount": 20
+    },
+    "agentless-v3-thin-strict-counterfactual-shadow": {
+      "name": "agentless-v3-thin-strict-counterfactual-shadow",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-counterfactual": "on",
+        "verify-select-llm-risk-gate": "shadow",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Counterfactual cand1 seed + shadow LLM semantic gate. The semantic advisory is recorded in telemetry only (shadow), so this measures the counterfactual seed's effect while observing what the LLM gate would have expanded.",
+      "knobCount": 21
+    },
+    "agentless-v3-thin-strict-gated-llm-shadow": {
+      "name": "agentless-v3-thin-strict-gated-llm-shadow",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-llm-risk-gate": "shadow",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off"
+      },
+      "desc": "Structural gate + shadow semantic gate. Measures whether the LLM advisory would have expanded candidate 0 without changing submit authority yet.",
+      "knobCount": 19
+    },
+    "agentless-v3-thin-strict-gated-llm": {
+      "name": "agentless-v3-thin-strict-gated-llm",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-llm-risk-gate": "on",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off"
+      },
+      "desc": "Structural gate + semantic LLM expand in the live path. Winner authority still stays with late select / VerificationBundle after expansion.",
+      "knobCount": 19
+    },
     "agentless-v3-thin-strict-select": {
       "name": "agentless-v3-thin-strict-select",
       "knobs": {
@@ -243,6 +376,65 @@
         "verify-select-repro": "positive"
       },
       "desc": "Structural selector candidate arm. Keeps the cheap mini-swe/noexec candidate generation from thin-strict-select, but restores the closure grounding knobs from v3-thin so verify-select owner seeds/ownerCoverage are driven by the ClosureBundle evidence SSOT instead of raw localizer fallback. Repair executor stays OFF: this is late select, not repair churn.",
+      "knobCount": 22
+    },
+    "agentless-v3-thin-strict-closure-select-clean": {
+      "name": "agentless-v3-thin-strict-closure-select-clean",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-early-accept": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive",
+        "selector-mode": "clean"
+      },
+      "desc": "Clean-authority successor to closure-select. Preserves the same closure- grounded generation/search posture, but routes final submit authority through the clean selector lattice.",
+      "knobCount": 23
+    },
+    "agentless-v3-thin-strict-closure-select-clean-witness-only": {
+      "name": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Witness-only clean closure-select arm. Keeps the same closure-grounded generation/search posture as closure-select-clean, but removes progressive early accept and generated repro ranking so final submit authority comes only from the clean selector's executed-witness / structural / contract lattice over the full N-best candidate set.",
       "knobCount": 22
     },
     "agentless-v3-select-regression": {
@@ -358,7 +550,7 @@
   "knobs": {
     "bench-in-loop-exec": {
       "id": "bench-in-loop-exec",
-      "desc": "인루프 테스트 실행 on/off — off면 NOEXEC 디렉티브+단일패스+repro힌트 없음",
+      "desc": "인루프 실행 권한 모드 — full=repo tests, repro-only=작은 재현만 허용, off=submit-only",
       "group": "exec",
       "category": null,
       "envKey": null,
@@ -377,11 +569,39 @@
           "value": "off"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "off"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "off"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "off"
         }
       ]
@@ -469,6 +689,14 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -527,11 +755,39 @@
           "value": "agentless"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "agentless"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "agentless"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "agentless"
         },
         {
@@ -609,11 +865,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -681,11 +965,39 @@
           "value": "5"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "5"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "5"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "5"
         },
         {
@@ -755,11 +1067,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -835,6 +1175,14 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -865,11 +1213,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -899,11 +1275,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         }
       ]
@@ -945,11 +1349,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -996,6 +1428,14 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -1057,11 +1497,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -1112,6 +1580,14 @@
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -1173,11 +1649,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -1341,11 +1845,39 @@
           "value": "3"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "3"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "3"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "3"
         },
         {
@@ -1387,11 +1919,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -1401,6 +1961,40 @@
         {
           "preset": "agentless-v3-select-regression-doubt",
           "value": "1"
+        }
+      ]
+    },
+    "selector-mode": {
+      "id": "selector-mode",
+      "desc": "(설명 미작성)",
+      "group": "기타",
+      "category": null,
+      "envKey": null,
+      "unit": null,
+      "source": null,
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": false,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "clean"
         }
       ]
     },
@@ -1447,11 +2041,39 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "1"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "1"
         },
         {
@@ -1577,6 +2199,14 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
@@ -1599,11 +2229,39 @@
       "inRegistry": false,
       "usedBy": [
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "2"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "5"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "5"
         },
         {
@@ -1613,6 +2271,62 @@
         {
           "preset": "agentless-v3-select-regression-doubt",
           "value": "5"
+        }
+      ]
+    },
+    "verify-select-concurrency": {
+      "id": "verify-select-concurrency",
+      "desc": "(설명 미작성)",
+      "group": "기타",
+      "category": null,
+      "envKey": null,
+      "unit": null,
+      "source": null,
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": false,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        }
+      ]
+    },
+    "verify-select-counterfactual": {
+      "id": "verify-select-counterfactual",
+      "desc": "(설명 미작성)",
+      "group": "기타",
+      "category": null,
+      "envKey": null,
+      "unit": null,
+      "source": null,
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": false,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "on"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "on"
         }
       ]
     },
@@ -1637,12 +2351,42 @@
           "value": "1"
         },
         {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "1"
         },
         {
           "preset": "agentless-v3-select-regression-doubt",
           "value": "1"
+        }
+      ]
+    },
+    "verify-select-llm-risk-gate": {
+      "id": "verify-select-llm-risk-gate",
+      "desc": "(설명 미작성)",
+      "group": "기타",
+      "category": null,
+      "envKey": null,
+      "unit": null,
+      "source": null,
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": false,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "shadow"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "shadow"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "on"
         }
       ]
     },
@@ -1659,11 +2403,39 @@
       "inRegistry": false,
       "usedBy": [
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "discovered"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "discovered"
         },
         {
           "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
           "value": "discovered"
         },
         {
@@ -1689,6 +2461,26 @@
       "inRegistry": false,
       "usedBy": [
         {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "off"
+        },
+        {
           "preset": "agentless-v3-thin-strict-select",
           "value": "positive"
         },
@@ -1697,12 +2489,54 @@
           "value": "positive"
         },
         {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "positive"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "off"
+        },
+        {
           "preset": "agentless-v3-select-regression",
           "value": "positive"
         },
         {
           "preset": "agentless-v3-select-regression-doubt",
           "value": "positive"
+        }
+      ]
+    },
+    "verify-select-risk-gate": {
+      "id": "verify-select-risk-gate",
+      "desc": "(설명 미작성)",
+      "group": "기타",
+      "category": null,
+      "envKey": null,
+      "unit": null,
+      "source": null,
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": false,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
         }
       ]
     }
@@ -1718,8 +2552,15 @@
     "agentless-mini-parity",
     "agentless-v3-thin",
     "agentless-v3-thin-strict",
+    "agentless-v3-thin-strict-gated",
+    "agentless-v3-thin-strict-counterfactual",
+    "agentless-v3-thin-strict-counterfactual-shadow",
+    "agentless-v3-thin-strict-gated-llm-shadow",
+    "agentless-v3-thin-strict-gated-llm",
     "agentless-v3-thin-strict-select",
     "agentless-v3-thin-strict-closure-select",
+    "agentless-v3-thin-strict-closure-select-clean",
+    "agentless-v3-thin-strict-closure-select-clean-witness-only",
     "agentless-v3-select-regression",
     "agentless-v3-select-regression-doubt",
     "everything-v1",
