@@ -56,6 +56,17 @@ export interface BenchKnobState {
   readonly preset: string | undefined
   /** Registered-but-inactive knob ids (no value resolved + no default). */
   readonly inactive: readonly string[]
+  /** #5: env vars set to a PRESENT, non-empty value whose parser REJECTED it
+   *  (out of domain / malformed) so it silently fell through to the default.
+   *  Distinct from `inactive` (genuinely unset / intentionally empty): a stray
+   *  `QUANTA_BENCH_REGRESSION_MAX_TESTS=300` is a MISCONFIG that would otherwise
+   *  run the wrong config while the report looked clean. Surfaced loudly so the
+   *  report SSOT shows `REJECTED(env="300")`, not a phantom default. */
+  readonly rejected: readonly {
+    readonly id: string
+    readonly envKey: string
+    readonly raw: string
+  }[]
 }
 
 export interface ResolveBenchKnobsArgs {
@@ -89,14 +100,27 @@ export const resolveBenchKnobs = (args: ResolveBenchKnobsArgs): BenchKnobState =
   }
   const values = resolveKnobs(resolveArgs)
   const inactive: string[] = []
-  for (const id of knobs.keys()) {
-    if (!values.has(id)) inactive.push(id)
+  const rejected: { id: string; envKey: string; raw: string }[] = []
+  for (const [id, knob] of knobs) {
+    if (values.has(id)) continue
+    // #5: a present, non-empty env raw whose own parser rejects it is a MISCONFIG
+    // (silent-default footgun), NOT an unset knob. Classify it as `rejected` and
+    // keep it OUT of `inactive`, so the report cleanly separates "never set" from
+    // "set wrong". The resolver stays pure — this detection is the surface's job;
+    // only the env layer is inspected.
+    const raw = args.envVars[knob.envKey]
+    if (raw !== undefined && raw.trim() !== "" && knob.parse(raw) === undefined) {
+      rejected.push({ id, envKey: knob.envKey, raw })
+      continue
+    }
+    inactive.push(id)
   }
   return {
     knobs,
     values,
     preset,
     inactive,
+    rejected,
   }
 }
 

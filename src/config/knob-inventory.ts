@@ -1348,7 +1348,7 @@ const BENCH: readonly KnobInventoryEntry[] = [
   },
   {
     envKey: "QUANTA_BENCH_NO_PATCH_FORCE_FRACTION",
-    kind: "string",
+    kind: "float",
     default: undefined,
     group: "bench",
     home: "bench",

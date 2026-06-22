@@ -70,6 +70,15 @@ export interface BenchReportKnobs {
   /** Registered-but-inactive knob ids (no value in any layer, no default).
    *  Sorted by registry iteration order for stability. */
   readonly inactive: readonly string[]
+  /** #5: env vars set to a present-but-INVALID value (parser rejected it) that
+   *  silently fell through to the hardcoded default. Disjoint from `inactive`
+   *  (unset): this is a MISCONFIG the operator must see — the SSOT loudness that
+   *  keeps a typo'd `QUANTA_BENCH_*=<bad>` from masquerading as a clean default. */
+  readonly rejected?: readonly {
+    readonly id: string
+    readonly envKey: string
+    readonly raw: string
+  }[]
 }
 
 export interface PerInstanceReport {

@@ -177,5 +177,8 @@ export const collectBenchKnobsTelemetry = (): BenchReportKnobs => {
     resolved,
     ...(state.preset !== undefined ? { preset: state.preset } : {}),
     inactive: state.inactive,
+    // #5: surface present-but-rejected env knobs in the report SSOT so a typo'd
+    // override is visible, never a silent default. Omitted when none rejected.
+    ...(state.rejected.length > 0 ? { rejected: state.rejected } : {}),
   }
 }
