@@ -150,21 +150,45 @@ describe("bench observability (RFC-0002 W-D)", () => {
       expect(metrics.pricingVersion).toBe("pricing.v2")
       expect(metrics.snapshot.counters.instances).toBe(1)
       expect(metrics.snapshot.counters.passed).toBe(1)
+      const scoreCounter =
+        r.scoreLabel === "official_harness"
+          ? "officialHarness"
+          : r.scoreLabel === "local_structural"
+            ? "localStructural"
+            : r.scoreLabel === "research_contaminated"
+              ? "researchContaminated"
+              : "unlabeledPassed"
+      expect(metrics.snapshot.counters[scoreCounter]).toBe(1)
       const summary = JSON.parse(readFileSync(summaryFile, "utf8")) as {
         runId: string
         resolved: number
         total: number
         degraded: number
-        instances: Array<{ id: string; passed: boolean; verdict: string; patchPath?: string }>
+        score: {
+          officialHarness: number
+          localStructural: number
+          researchContaminated: number
+          unlabeledPassed: number
+          officialResolvedPct: number
+        }
+        instances: Array<{
+          id: string
+          passed: boolean
+          verdict: string
+          patchPath?: string
+          scoreLabel?: string
+        }>
       }
       expect(summary.runId).toBe(runId)
       expect(summary.total).toBe(1)
       expect(summary.resolved).toBe(1)
       expect(summary.degraded).toBe(0)
+      expect(summary.score[scoreCounter]).toBe(1)
       expect(summary.instances).toHaveLength(1)
       expect(summary.instances[0]?.id).toBe(add.id)
       expect(summary.instances[0]?.passed).toBe(true)
       expect(summary.instances[0]?.verdict).toBe("ok")
+      expect(summary.instances[0]?.scoreLabel).toBe(r.scoreLabel)
     })
   })
 
@@ -305,7 +329,14 @@ describe("bench observability (RFC-0002 W-D)", () => {
   test("C8: 1 degraded of 2 ⇒ printSummary/report resolved/total equals summary.json", async () => {
     await withTmp(async (dir) => {
       // One OK+passed instance, one strict-degraded instance.
-      const okR: InstanceResult = { id: "a", passed: true, patch: "", turns: 1, verdict: "ok" }
+      const okR: InstanceResult = {
+        id: "a",
+        passed: true,
+        patch: "",
+        turns: 1,
+        verdict: "ok",
+        scoreLabel: "local_structural",
+      }
       const degR: InstanceResult = {
         id: "b",
         passed: false,
@@ -327,6 +358,7 @@ describe("bench observability (RFC-0002 W-D)", () => {
       expect(report.totals.total).toBe(summary.total)
       expect(report.totals.resolved).toBe(summary.resolved)
       expect(report.totals.resolvedPct).toBe(100)
+      expect(report.scoreTotals).toEqual(summary.score)
 
       // printSummary's headline uses resolvedTotals(summary.results) — assert
       // that same helper (the single source) yields the summary.json numbers.
@@ -334,10 +366,13 @@ describe("bench observability (RFC-0002 W-D)", () => {
         resolved: number
         total: number
         degraded: number
+        score: { localStructural: number; officialHarness: number }
       }
       expect(onDisk.total).toBe(1)
       expect(onDisk.resolved).toBe(1)
       expect(onDisk.degraded).toBe(1)
+      expect(onDisk.score.localStructural).toBe(1)
+      expect(onDisk.score.officialHarness).toBe(0)
     })
   })
 

@@ -206,6 +206,10 @@ export interface BenchPosture {
   /** jun-19 #10999 under-fix lever: ON ⇒ the repro prompt gets the
    *  ADVERSARIAL-coverage block so a shallow happy-path fix stays RED. */
   readonly adversarialRepro: boolean
+  /** repro-doubt steer active. The knob folds into AgentConfig at runtime,
+   *  but the score-label authority layer needs a posture-level bit so report
+   *  contamination accounting does not re-read raw knob state elsewhere. */
+  readonly reproDoubt: boolean
   /** Transient-failure retry cap (undefined ⇒ single attempt). */
   readonly retryTransient: number | undefined
   /**
@@ -247,6 +251,10 @@ export interface BenchPosture {
   /** Optional LLM semantic risk gate layered on top of the structural gate.
    *  `shadow` records advisory telemetry only; `on` expands fail-closed. */
   readonly verifySelectLlmRiskGate: VerifySelectLlmRiskGateMode | undefined
+  /** v4 clean submit rail: only candidates with positive executed public proof
+   *  may be submitted. Contracts/family/minimality remain advisory or
+   *  structural ranking signals only. */
+  readonly verifySelectProofRequired: boolean
   /** Selector authority mode. `clean` = only executable/structural hard gates
    *  decide selection; `research` = legacy heuristic gates additionally allowed.
    *  Defaults to `"research"` (knob unset ⇒ projected research) so existing
@@ -389,6 +397,7 @@ export const benchPostureFromState = (
   const issueHintExpectedActual =
     readKnobValue(state, "issue-hint-expected-actual", isTrue) === true
   const repro = readKnobValue(state, "repro-test", isReproValue)
+  const reproDoubt = state.values.has("repro-doubt")
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
   const verifySelectN = readKnobValue(state, "verify-select", isNumber)
@@ -403,6 +412,8 @@ export const benchPostureFromState = (
     "verify-select-llm-risk-gate",
     isVerifySelectLlmRiskGateMode,
   )
+  const verifySelectProofRequired =
+    readKnobValue(state, "verify-select-proof-required", isTrue) === true
   const verifySelectRegression = readKnobValue(
     state,
     "verify-select-regression",
@@ -458,6 +469,7 @@ export const benchPostureFromState = (
     issueHintExpectedActual,
     reproTestK: repro !== undefined ? repro.samples : undefined,
     adversarialRepro,
+    reproDoubt,
     retryTransient,
     repairRounds,
     verifySelectN,
@@ -466,6 +478,7 @@ export const benchPostureFromState = (
     verifySelectRiskGate,
     verifySelectCounterfactual,
     verifySelectLlmRiskGate,
+    verifySelectProofRequired,
     selectorMode,
     verifySelectRegression,
     verifySelectRepro,

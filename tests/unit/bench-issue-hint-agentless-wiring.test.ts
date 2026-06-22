@@ -174,6 +174,34 @@ describe("prepareIssueHint — async hint computation", () => {
     expect(hint).toContain("requests/models.py")
   })
 
+  test("mode=agentless + empty result resolves regex file hints back onto repo candidates", async () => {
+    const seen: string[][] = []
+    const fakeLocalize = async (): Promise<AgentlessLocalizeResult> => ({
+      files: [],
+      rationales: [],
+      rawResponse: "",
+    })
+    const hint = await prepareIssueHint(
+      mkInstance("See 1.11.x/django/db/backends/mysql/operations.py for the timezone bug."),
+      "/tmp/sb",
+      "agentless",
+      {
+        llm: new StubLLM(),
+        issueHintExpectedActual: false,
+        fileTree: async () => [
+          "django/db/backends/mysql/operations.py",
+          "django/db/backends/sqlite3/operations.py",
+        ],
+        localize: fakeLocalize,
+        onCandidates: (files) => {
+          seen.push([...files])
+        },
+      },
+    )
+    expect(hint).toContain("1.11.x/django/db/backends/mysql/operations.py")
+    expect(seen).toEqual([["django/db/backends/mysql/operations.py"]])
+  })
+
   test("mode=agentless + localizer throws → regex fallback (no crash)", async () => {
     const fakeLocalize = async (): Promise<AgentlessLocalizeResult> => {
       throw new Error("localizer crashed")

@@ -102,7 +102,7 @@ import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry
 import { finalizeRun, runInstance } from "./eval"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
-import { resolvedTotals } from "./observe"
+import { resolvedTotals, scoreTotals } from "./observe"
 import { renderBenchPresetListLines, seedBenchExecutionPreset } from "./preset"
 import { evaluateWithPythonSwebench } from "./python-swebench"
 import { patchVote, sampleBestOfN } from "./sampler"
@@ -223,9 +223,10 @@ const logInstanceSummary = (result: InstanceResult): void => {
           ? " GRADER_INVALID"
           : ""
   const mark = result.passed ? "PASS" : "FAIL"
+  const score = result.passed ? `[${result.scoreLabel ?? "unlabeled_pass"}]` : ""
   const tag = failureTag(result)
   const extra = result.error ? ` (${result.error})` : ""
-  logger.info(`  [${mark}${verdict}]${tag} ${result.id} (turns=${result.turns})${extra}`)
+  logger.info(`  [${mark}${verdict}]${score}${tag} ${result.id} (turns=${result.turns})${extra}`)
 }
 
 const printHelp = (): void => {
@@ -249,9 +250,13 @@ const printSummary = (summary: BenchSummary): void => {
   // C8: the operator-visible headline uses the SAME degraded-excluding
   // denominator as observe.summarize / summary.json — never results.length.
   const { resolved, total, degraded } = resolvedTotals(summary.results)
+  const score = scoreTotals(summary.results)
   const pct = total === 0 ? 0 : Math.round((resolved / total) * 100)
   const deg = degraded > 0 ? ` (${degraded} degraded)` : ""
-  logger.info(`resolved ${resolved}/${total} (${pct}%)${deg}`)
+  logger.info(`passed ${resolved}/${total} (${pct}%)${deg}`)
+  logger.info(
+    `score official_harness ${score.officialHarness}/${total} (${score.officialResolvedPct}%) | local_structural ${score.localStructural} | research_contaminated ${score.researchContaminated} | unlabeled_passed ${score.unlabeledPassed}`,
+  )
   // Failure-pattern rollup — one line per axis, suppressed when 0 failed.
   const failed = summary.results.filter((r) => !r.passed).map((r) => classify(r))
   if (failed.length === 0) return
@@ -562,7 +567,7 @@ export const writeArtifacts = async (
 }
 
 /** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and
- *  log resolved/total/degraded. No-op when observe is OFF. */
+ *  log passed/total plus the official-harness split. No-op when observe is OFF. */
 const finalizeObserve = async (
   obs: ObserveCtx | undefined,
   results: InstanceResult[],
@@ -570,7 +575,8 @@ const finalizeObserve = async (
   if (obs === undefined) return
   const summary = await finalizeRun(obs, results)
   logger.info(
-    `observe: ${join(obs.dir, obs.runId)} — resolved ${summary.resolved}/${summary.total}` +
+    `observe: ${join(obs.dir, obs.runId)} — passed ${summary.resolved}/${summary.total}` +
+      ` | official_harness ${summary.score.officialHarness}/${summary.total}` +
       ` (${summary.degraded} degraded)`,
   )
 }

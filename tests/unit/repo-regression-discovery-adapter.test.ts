@@ -82,4 +82,46 @@ describe("repo regression discovery adapter helpers", () => {
       expect(out.failures).toEqual(["tests/test_a.py"])
     })
   })
+
+  test("proof receipt port preserves not_available/base_not_green/candidate_red/safety_green", async () => {
+    const mk = (
+      result:
+        | { candidateTests: string[]; baseGreenTests: string[]; regressionGreen: boolean | null }
+        | undefined,
+    ) => {
+      const witness = async () => ({
+        regressionGreen: result?.regressionGreen ?? null,
+        candidateTests: result?.candidateTests ?? [],
+        sourceEvidence: new Map(),
+        baseGreenTests: result?.baseGreenTests ?? [],
+        executedTests: result?.baseGreenTests ?? [],
+        failures: result?.regressionGreen === false ? ["tests/test_a.py"] : [],
+      })
+      return async () => {
+        const receipt = await witness()
+        if (receipt.candidateTests.length === 0) return "not_available"
+        if (receipt.baseGreenTests.length === 0) return "base_not_green"
+        return receipt.regressionGreen === true ? "safety_green" : "candidate_red"
+      }
+    }
+
+    expect(await mk(undefined)()).toBe("not_available")
+    expect(await mk({ candidateTests: ["tests/test_a.py"], baseGreenTests: [], regressionGreen: null })()).toBe(
+      "base_not_green",
+    )
+    expect(
+      await mk({
+        candidateTests: ["tests/test_a.py"],
+        baseGreenTests: ["tests/test_a.py"],
+        regressionGreen: false,
+      })(),
+    ).toBe("candidate_red")
+    expect(
+      await mk({
+        candidateTests: ["tests/test_a.py"],
+        baseGreenTests: ["tests/test_a.py"],
+        regressionGreen: true,
+      })(),
+    ).toBe("safety_green")
+  })
 })

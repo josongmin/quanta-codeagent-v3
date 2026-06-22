@@ -66,6 +66,23 @@ describe("terminalAgentResult", () => {
     })
   })
 
+  test("proof-required no-winner surfaces proof-miss instead of generic no-submittable wording", () => {
+    const result = mkTerminal({
+      stopReason: "end_turn",
+      selectionTelemetry: {
+        ...NO_WINNER_TELEMETRY,
+        proofRequired: true,
+        noWinnerReason: "proof_required_missing",
+      },
+    })
+
+    expect(result.error).toContain("proof-required mode produced no submittable candidate")
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "completed_unresolved",
+    })
+  })
+
   test("verify-select no-winner preserves max_turns authority from the terminal candidate", () => {
     const result = mkTerminal({
       stopReason: "max_turns",

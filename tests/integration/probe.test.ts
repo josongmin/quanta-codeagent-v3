@@ -96,8 +96,15 @@ beforeEach(() => {
       resolved: 1,
       total: 2,
       degraded: 0,
+      score: {
+        officialHarness: 1,
+        localStructural: 0,
+        researchContaminated: 0,
+        unlabeledPassed: 0,
+        officialResolvedPct: 50,
+      },
       instances: [
-        { id: "pass1", passed: true, verdict: "ok", turns: 1 },
+        { id: "pass1", passed: true, verdict: "ok", turns: 1, scoreLabel: "official_harness" },
         { id: "fail1", passed: false, verdict: "ok", turns: 1 },
       ],
     }),
@@ -122,7 +129,9 @@ describe("probe main — integration", () => {
     const text = read()
     expect(text).toMatch(/pass1/)
     expect(text).toMatch(/fail1/)
-    expect(text).toMatch(/1\s*\/\s*2|resolved 1/)
+    expect(text).toMatch(/passed 1\/2/)
+    expect(text).toMatch(/official_harness 1\/2/)
+    expect(text).toMatch(/\[PASS\]\[official_harness\] pass1/)
   })
 
   test("default single trajectory → timeline with tool span + usage line", async () => {
@@ -158,6 +167,7 @@ describe("probe main — integration", () => {
     // which bumps when the cost model changes — don't pin a specific number).
     expect(text).toMatch(/pricing\.v\d/)
     expect(text).toMatch(/\$|n\/a/)
+    expect(text).toMatch(/official_harness/)
   })
 
   test("--json parses and carries NO certainty field", async () => {
@@ -167,6 +177,8 @@ describe("probe main — integration", () => {
     expect(code).toBe(0)
     const parsed = JSON.parse(read())
     expect(parsed).toBeTypeOf("object")
+    expect(parsed.summary.score.officialHarness).toBe(1)
+    expect(parsed.summary.instances[0].scoreLabel).toBe("official_harness")
     expect(JSON.stringify(parsed).toLowerCase()).not.toMatch(
       /"verdict"|definitive|"certain"|proven/,
     )

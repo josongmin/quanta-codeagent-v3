@@ -2,11 +2,13 @@
  * ADR-0536 P0 — cross-run leaderboard (PURE).
  *
  * Flattens one or more `RunVerdicts` into per-instance rows tagged with the
- * run's preset + model, then renders a markdown report split into resolved /
- * unresolved tables. When the same instance appears in multiple rows (e.g. the
- * same instance graded under two presets, or resolved in one run + unresolved
- * in another) we dedup by instanceId keeping the RESOLVED row — the leaderboard
- * answers "is this instance solvable by us at all", so a single green wins.
+ * run's preset + model, then renders a markdown report split by score
+ * authority. When the same instance appears in multiple rows we keep the
+ * STRONGEST status:
+ *
+ *   official_harness > local_structural > research_contaminated > unresolved
+ *
+ * Only `official_harness` counts as leaderboard-resolved.
  */
 
 import { byteCompare } from "@/shared/byte-compare"
@@ -17,7 +19,7 @@ export interface LeaderRow {
   readonly repo: string
   readonly preset: string
   readonly model: string
-  readonly resolved: boolean
+  readonly status: "official_harness" | "local_structural" | "research_contaminated" | "unresolved"
 }
 
 /** repo = the segment before `__` in a swebench instance id
@@ -34,10 +36,32 @@ export const rowsFromRun = (
 ): readonly LeaderRow[] => {
   const rows: LeaderRow[] = []
   for (const id of v.resolved) {
-    rows.push({ instanceId: id, repo: repoOf(id), preset: meta.preset, model: meta.model, resolved: true })
+    rows.push({
+      instanceId: id,
+      repo: repoOf(id),
+      preset: meta.preset,
+      model: meta.model,
+      status: "official_harness",
+    })
   }
-  // Everything not resolved (unresolved / errored / empty-patch) is "not
-  // resolved" for the leaderboard's binary question.
+  for (const id of v.localStructural) {
+    rows.push({
+      instanceId: id,
+      repo: repoOf(id),
+      preset: meta.preset,
+      model: meta.model,
+      status: "local_structural",
+    })
+  }
+  for (const id of v.researchContaminated) {
+    rows.push({
+      instanceId: id,
+      repo: repoOf(id),
+      preset: meta.preset,
+      model: meta.model,
+      status: "research_contaminated",
+    })
+  }
   for (const set of [v.unresolved, v.errored, v.emptyPatch]) {
     for (const id of set) {
       rows.push({
@@ -45,15 +69,22 @@ export const rowsFromRun = (
         repo: repoOf(id),
         preset: meta.preset,
         model: meta.model,
-        resolved: false,
+        status: "unresolved",
       })
     }
   }
   return rows
 }
 
-/** Dedup by instanceId, keeping resolved > unresolved. Among rows of equal
- *  resolved-ness the first-seen row wins (stable). */
+const RANK: Record<LeaderRow["status"], number> = {
+  unresolved: 0,
+  research_contaminated: 1,
+  local_structural: 2,
+  official_harness: 3,
+}
+
+/** Dedup by instanceId, keeping the strongest status. Among equally-strong
+ *  rows the first-seen row wins (stable). */
 const dedup = (rows: readonly LeaderRow[]): LeaderRow[] => {
   const byId = new Map<string, LeaderRow>()
   for (const row of rows) {
@@ -62,8 +93,7 @@ const dedup = (rows: readonly LeaderRow[]): LeaderRow[] => {
       byId.set(row.instanceId, row)
       continue
     }
-    // Upgrade an unresolved entry to a resolved one; never downgrade.
-    if (!existing.resolved && row.resolved) byId.set(row.instanceId, row)
+    if (RANK[row.status] > RANK[existing.status]) byId.set(row.instanceId, row)
   }
   return [...byId.values()]
 }
@@ -85,16 +115,29 @@ export const renderLeaderboardMarkdown = (
   title = "Bench leaderboard",
 ): string => {
   const deduped = dedup(rows)
-  const resolved = deduped.filter((r) => r.resolved)
-  const unresolved = deduped.filter((r) => !r.resolved)
+  const official = deduped.filter((r) => r.status === "official_harness")
+  const localStructural = deduped.filter((r) => r.status === "local_structural")
+  const researchContaminated = deduped.filter((r) => r.status === "research_contaminated")
+  const unresolved = deduped.filter((r) => r.status === "unresolved")
   return [
     `# ${title}`,
     "",
-    `Resolved: ${resolved.length} / ${deduped.length}`,
+    `Official harness resolved: ${official.length} / ${deduped.length}`,
+    `Local structural only: ${localStructural.length}`,
+    `Research contaminated: ${researchContaminated.length}`,
+    `Unresolved: ${unresolved.length}`,
     "",
-    `## Resolved (${resolved.length})`,
+    `## Official Harness (${official.length})`,
     "",
-    table(resolved),
+    table(official),
+    "",
+    `## Local Structural (${localStructural.length})`,
+    "",
+    table(localStructural),
+    "",
+    `## Research Contaminated (${researchContaminated.length})`,
+    "",
+    table(researchContaminated),
     "",
     `## Unresolved (${unresolved.length})`,
     "",

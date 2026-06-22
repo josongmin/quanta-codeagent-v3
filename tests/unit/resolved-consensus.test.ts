@@ -2,7 +2,10 @@ import { describe, expect, it } from "bun:test"
 import type { ReproExecPort, ReproWriteFilePort } from "@/agent/repro-test/execute"
 import type { ReproTestOutcome, ReproTestSample } from "@/agent/repro-test/types"
 import { resolvedConsensus } from "@/agent/repro-test/vote"
-import { makePatchedResolvedConsensus } from "@/runner/batch/eval/repair/resolved-consensus"
+import {
+  makePatchedResolvedConsensus,
+  makePatchedResolvedConsensusProof,
+} from "@/runner/batch/eval/repair/resolved-consensus"
 
 const sample = (outcome: ReproTestOutcome): ReproTestSample =>
   ({ outcome, stdout: "", stderr: "", code: 0 }) as unknown as ReproTestSample
@@ -113,6 +116,32 @@ describe("makePatchedResolvedConsensus (port)", () => {
     }
     const r = await makePatchedResolvedConsensus({ sources: ["a"], exec, writeFile: noWrite })("/p")
     expect(r).toBeNull()
+  })
+
+  it("typed proof port preserves empty/infra/false-negative states", async () => {
+    const empty = await makePatchedResolvedConsensusProof({
+      sources: [],
+      exec: async () => ({ code: 0, stdout: "Issue resolved", stderr: "" }),
+      writeFile: noWrite,
+    })("/p")
+    expect(empty.state).toBe("not_available")
+
+    const execFailed = await makePatchedResolvedConsensusProof({
+      sources: ["a"],
+      exec: async () => ({ code: 0, stdout: "Issue resolved", stderr: "" }),
+      writeFile: async () => {
+        throw new Error("boom")
+      },
+    })("/p")
+    expect(execFailed.state).toBe("execution_failed")
+
+    const { exec, writeFile } = makeExec(["Other issues", "Other issues"])
+    const inconclusive = await makePatchedResolvedConsensusProof({
+      sources: ["a", "b"],
+      exec,
+      writeFile,
+    })("/p")
+    expect(inconclusive.state).toBe("false_negative_suspected")
   })
 
   it("DEFECT1: crashed (inconclusive) samples must NOT inflate the quorum (decisive-only default k)", async () => {

@@ -159,9 +159,10 @@ const costRow = (instanceId: string, attempts: AttemptTraj[]): CostRow => {
   }
 }
 
-const passedOf = (summary: RunSummaryLike | undefined, id: string): string => {
+const statusOf = (summary: RunSummaryLike | undefined, id: string): string => {
   const hit = summary?.instances?.find((i) => i.id === id)
   if (hit === undefined) return ""
+  if (hit.scoreLabel !== undefined) return ` [${hit.scoreLabel}]`
   return hit.passed === true ? " [passed]" : " [not resolved]"
 }
 
@@ -175,7 +176,7 @@ export const renderCost = (
     const r = costRow(id, attempts)
     const usd = r.usd === null ? "n/a" : `$${r.usd.toFixed(4)}`
     lines.push(
-      `  ${id}: ${r.inputTokens} in / ${r.outputTokens} out  (${r.model}) ${usd}${passedOf(summary, id)}`,
+      `  ${id}: ${r.inputTokens} in / ${r.outputTokens} out  (${r.model}) ${usd}${statusOf(summary, id)}`,
     )
   }
   if (instances.size === 0) lines.push("  (no instances)")

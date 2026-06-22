@@ -126,6 +126,20 @@ describe("buildAstStaticWitnesses", () => {
     expect(uniq[0]?.subjectSymbols).toEqual([sym])
   })
 
+  test("HTML comments in the issue text do not create witnesses", () => {
+    const input: StaticWitnessProviderInput = {
+      problemStatement: [
+        "<!-- hidden_helper should not count as a public symbol mention -->",
+        "Visible issue text does not mention any owner symbol.",
+      ].join("\n"),
+      ownerCandidates: ["pkg/only.py"],
+      readSource: sourceMap({
+        "pkg/only.py": ["def hidden_helper():", "    return 1"].join("\n"),
+      }),
+    }
+    expect(buildAstStaticWitnesses(input)).toEqual([])
+  })
+
   test("producer-consumer: symbol defined in one owner file, called in another => authoritative", () => {
     const input: StaticWitnessProviderInput = {
       problemStatement: "Pipeline wiring issue.",

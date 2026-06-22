@@ -193,6 +193,12 @@ describe("swebench-dataset", () => {
     })
     expect(result.error).toBeUndefined()
     expect(result.patch).toContain("return a + b")
+    expect(result.scoreLabel).toBe("official_harness")
+    expect(result.scoreEvidence).toEqual({
+      officialHarnessResolved: true,
+      localExecutedGreen: true,
+      researchKnobTouched: false,
+    })
 
     const prediction: Prediction = {
       instance_id: result.id,

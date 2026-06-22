@@ -2,7 +2,7 @@
  * ADR-0536 P0 — bench ANALYSIS layer (PURE).
  *
  * Normalises the two report shapes the bench world produces into one
- * `RunVerdicts` value (four disjoint-ish sets of instance ids):
+ * `RunVerdicts` value (six disjoint-ish sets of instance ids):
  *
  *   1. OUR bench `report.json` (built by `@/runner/batch/report` →
  *      `src/apps/bench/index.ts writeArtifacts`):
@@ -23,6 +23,12 @@ import { readFileSync } from "node:fs"
 
 export interface RunVerdicts {
   readonly resolved: ReadonlySet<string>
+  readonly localStructural: ReadonlySet<string>
+  readonly researchContaminated: ReadonlySet<string>
+  readonly proofMissing: ReadonlySet<string>
+  readonly infraBlocked: ReadonlySet<string>
+  readonly contractOnlyBlocked: ReadonlySet<string>
+  readonly contractOnlySubmitted: ReadonlySet<string>
   readonly unresolved: ReadonlySet<string>
   readonly errored: ReadonlySet<string>
   readonly emptyPatch: ReadonlySet<string>
@@ -85,8 +91,32 @@ const rowIsErrored = (row: Record<string, unknown>): boolean => {
   return false
 }
 
+const rowScoreLabel = (
+  row: Record<string, unknown>,
+): "official_harness" | "local_structural" | "research_contaminated" | undefined => {
+  const raw = row.scoreLabel
+  return raw === "official_harness" ||
+    raw === "local_structural" ||
+    raw === "research_contaminated"
+    ? raw
+    : undefined
+}
+
+const rowIsOfficialHarnessResolved = (row: Record<string, unknown>): boolean => {
+  const label = rowScoreLabel(row)
+  if (label !== undefined) return label === "official_harness"
+  const breakdown = row.gradeBreakdown
+  return isRecord(breakdown) && breakdown.resolved === true
+}
+
 const fromOurReport = (perInstance: readonly unknown[]): RunVerdicts => {
   const resolved = new Set<string>()
+  const localStructural = new Set<string>()
+  const researchContaminated = new Set<string>()
+  const proofMissing = new Set<string>()
+  const infraBlocked = new Set<string>()
+  const contractOnlyBlocked = new Set<string>()
+  const contractOnlySubmitted = new Set<string>()
   const unresolved = new Set<string>()
   const errored = new Set<string>()
   const emptyPatch = new Set<string>()
@@ -94,8 +124,16 @@ const fromOurReport = (perInstance: readonly unknown[]): RunVerdicts => {
     if (!isRecord(raw)) continue
     const id = raw.id
     if (typeof id !== "string" || id.length === 0) continue
+    if (raw.proofRequiredMissing === true) proofMissing.add(id)
+    if (raw.envPrepFailed === true || raw.proofState === "infra_blocked") infraBlocked.add(id)
+    if (raw.contractOnlyBlocked === true) contractOnlyBlocked.add(id)
+    if (raw.contractOnlySubmitted === true) contractOnlySubmitted.add(id)
     if (raw.passed === true) {
-      resolved.add(id)
+      const label = rowScoreLabel(raw)
+      if (label === "research_contaminated") researchContaminated.add(id)
+      else if (label === "local_structural") localStructural.add(id)
+      else if (rowIsOfficialHarnessResolved(raw)) resolved.add(id)
+      else localStructural.add(id)
       continue
     }
     // A failed instance can be BOTH errored and empty-patch-ish; classify it
@@ -109,11 +147,28 @@ const fromOurReport = (perInstance: readonly unknown[]): RunVerdicts => {
       unresolved.add(id)
     }
   }
-  return { resolved, unresolved, errored, emptyPatch }
+  return {
+    resolved,
+    localStructural,
+    researchContaminated,
+    proofMissing,
+    infraBlocked,
+    contractOnlyBlocked,
+    contractOnlySubmitted,
+    unresolved,
+    errored,
+    emptyPatch,
+  }
 }
 
 const fromHarnessReport = (r: Record<string, unknown>): RunVerdicts => ({
   resolved: new Set(strArray(r.resolved_ids)),
+  localStructural: new Set<string>(),
+  researchContaminated: new Set<string>(),
+  proofMissing: new Set<string>(),
+  infraBlocked: new Set<string>(),
+  contractOnlyBlocked: new Set<string>(),
+  contractOnlySubmitted: new Set<string>(),
   unresolved: new Set(strArray(r.unresolved_ids)),
   errored: new Set(strArray(r.error_ids)),
   emptyPatch: new Set(strArray(r.empty_patch_ids)),

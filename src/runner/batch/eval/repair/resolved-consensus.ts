@@ -74,6 +74,17 @@ export interface PatchedResolvedConsensusSignal {
   readonly reproTrace: ReproConsensusTrace
 }
 
+export type ReproConsensusProofState =
+  | "not_available"
+  | "base_red_candidate_green"
+  | "base_red_candidate_red"
+  | "false_negative_suspected"
+  | "execution_failed"
+
+export interface ReproConsensusProofReceipt extends PatchedResolvedConsensusSignal {
+  readonly state: ReproConsensusProofState
+}
+
 /** Strict-majority quorum over a sample count (⌊n/2⌋+1). */
 const majorityQuorum = (n: number): number => Math.floor(n / 2) + 1
 
@@ -105,14 +116,14 @@ const withTrace = (
 }
 
 /**
- * Build the patched-resolved consensus probe. Returns a function that, given a
- * PATCHED sandbox, re-runs the reproducing set there and yields the
- * `{votes, k} | null` hard signal.
+ * Build the patched-resolved consensus proof probe. Returns a function that,
+ * given a PATCHED sandbox, re-runs the reproducing set there and yields a typed
+ * receipt preserving the executed trace.
  */
-export const makePatchedResolvedConsensus =
+export const makePatchedResolvedConsensusProof =
   (deps: PatchedResolvedConsensusDeps) =>
-  async (sandbox: string): Promise<PatchedResolvedConsensusSignal | null> => {
-    if (deps.sources.length === 0) return null
+  async (sandbox: string): Promise<ReproConsensusProofReceipt> => {
+    if (deps.sources.length === 0) return { state: "not_available", votes: 0, k: 0, reproTrace: { vote: { verdict: "inconclusive", resolved: 0, reproduced: 0, inconclusive: 0 }, samples: [] } }
     try {
       const samples = await executeReproTests({
         tests: deps.sources,
@@ -128,9 +139,52 @@ export const makePatchedResolvedConsensus =
       const v = voteResolved(samples)
       const k = deps.k ?? majorityQuorum(v.resolved + v.reproduced)
       const signal = resolvedConsensus(samples, k)
-      return signal === null ? null : withTrace(signal, samples)
+      if (signal === null) {
+        const everyExecFailed =
+          samples.length > 0 && samples.every((sample) => sample.outcome === "exec_failed")
+        return {
+          state: everyExecFailed ? "execution_failed" : "false_negative_suspected",
+          votes: v.resolved,
+          k,
+          reproTrace: {
+            vote: v,
+            samples: traceSamples(samples),
+          },
+        }
+      }
+      return {
+        state: signal.votes >= signal.k ? "base_red_candidate_green" : "base_red_candidate_red",
+        ...withTrace(signal, samples),
+      }
     } catch {
       // A broken exec must never be a false-RED rejection — fail-open to null.
-      return null
+      return {
+        state: "execution_failed",
+        votes: 0,
+        k: deps.k ?? majorityQuorum(deps.sources.length),
+        reproTrace: {
+          vote: { verdict: "inconclusive", resolved: 0, reproduced: 0, inconclusive: 0 },
+          samples: [],
+        },
+      }
     }
+  }
+
+/**
+ * Back-compat projection: only executed candidate-green/candidate-red receipts
+ * speak to the legacy `{votes,k} | null` signal. Missing/infra/false-negative
+ * receipts remain fail-open null.
+ */
+export const makePatchedResolvedConsensus =
+  (deps: PatchedResolvedConsensusDeps) =>
+  async (sandbox: string): Promise<PatchedResolvedConsensusSignal | null> => {
+    const receipt = await makePatchedResolvedConsensusProof(deps)(sandbox)
+    return receipt.state === "base_red_candidate_green" ||
+      receipt.state === "base_red_candidate_red"
+      ? {
+          votes: receipt.votes,
+          k: receipt.k,
+          reproTrace: receipt.reproTrace,
+        }
+      : null
   }

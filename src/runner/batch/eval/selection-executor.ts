@@ -73,10 +73,20 @@ import {
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
+import { candidatePatchHash, renderLlmEvidencePacket } from "./llm-evidence-packet"
 import { type MweProofReceipt, type MweProofState, mweProofAuthorityRank } from "./mwe-proof"
-import { contractsSatisfiedCount, requiredContractsSatisfiedCount } from "./public-contract-bundle"
+import {
+  contractsSatisfiedCount,
+  mergePublicContractBundles,
+  requiredContractsSatisfiedCount,
+} from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
-import type { ReproConsensusTrace } from "./repair/resolved-consensus"
+import type { PublicRegressionProofReceipt, PublicRegressionProofState } from "./repo-regression-discovery-adapter"
+import type {
+  ReproConsensusProofReceipt,
+  ReproConsensusProofState,
+  ReproConsensusTrace,
+} from "./repair/resolved-consensus"
 
 export interface Candidate {
   /** Stable id (e.g. `cand-0`). */
@@ -105,6 +115,21 @@ export interface Candidate {
    *  `candidate_red` veto; infra/absent = no authority). Absent until a real MWE
    *  execution feeds it ⇒ selection stays byte-identical. */
   mweReceipt?: MweProofReceipt
+  /** Typed discovered public-regression receipt. Safety only: keep-green may
+   *  reject regressions, but generic discovered tests do not prove the issue was
+   *  fixed. */
+  publicRegressionReceipt?: PublicRegressionProofReceipt
+  /** Typed repro-consensus receipt. When positive, this is executed issue proof. */
+  reproConsensusReceipt?: ReproConsensusProofReceipt
+  /** OPTIONAL candidate-local public contracts discovered only after this
+   *  patch exposed a typed structural witness. Merged with the global clean
+   *  contract bundle for this candidate alone. */
+  publicContracts?: PublicContractBundle
+}
+
+export interface DerivedCandidateStructuralRepair {
+  readonly family?: CandidateFamily
+  readonly publicContracts?: PublicContractBundle
 }
 
 export interface SelectionPorts {
@@ -118,6 +143,10 @@ export interface SelectionPorts {
   smoke?: (c: Candidate) => Promise<boolean | null>
   /** OPTIONAL patched resolved K-of-N hard signal; absent ⇒ null (FAIL-OPEN). */
   resolvedKofN?: (c: Candidate) => Promise<ResolvedKofNSignal | null>
+  /** OPTIONAL typed discovered public-regression receipt. */
+  publicRegressionProof?: (c: Candidate) => Promise<PublicRegressionProofReceipt | null>
+  /** OPTIONAL typed repro-consensus receipt. */
+  reproConsensusProof?: (c: Candidate) => Promise<ReproConsensusProofReceipt | null>
   /** OPTIONAL issue-declared expected-behavior patch-shape signal; absent ⇒ null.
    *  `true` is ranking credit. `false` is explicit public issue-shape evidence
    *  that the patch implements the wrong behavior, so the selector rejects it. */
@@ -132,6 +161,12 @@ export interface SelectionPorts {
    *  selection is byte-identical. When present it OVERRIDES a generation-set
    *  receipt — selection-time execution is the authority. `null` ⇒ no receipt. */
   mweProof?: (c: Candidate) => Promise<MweProofReceipt | null>
+  /** OPTIONAL typed structural family/contract repair derived from an already-
+   *  generated candidate. This is bounded, generic, and patch-local: it can
+   *  only inspect the candidate's touched files plus public source evidence. */
+  deriveCandidateStructuralRepair?: (
+    c: Candidate,
+  ) => Promise<DerivedCandidateStructuralRepair | undefined>
 }
 
 export interface ScoredEntry {
@@ -143,6 +178,33 @@ export interface ScoredEntry {
   requiredContractsSatisfied: number
   contractsSatisfied: number
 }
+
+export type SelectionProofState =
+  | "proof_positive"
+  | "proof_missing"
+  | "infra_blocked"
+  | "candidate_red"
+  | "safety_only"
+
+export type SelectionProofSource = "mwe_public_issue" | "repro_consensus" | "none"
+
+export interface SelectionProofSummary {
+  readonly proofState: SelectionProofState
+  readonly proofSource: SelectionProofSource
+  readonly proofRequiredMissing: boolean
+  readonly contractOnlySubmitted: boolean
+  readonly contractOnlyBlocked: boolean
+  readonly publicMweState?: MweProofState
+  readonly publicRegressionState?: PublicRegressionProofState
+  readonly reproConsensusState?: ReproConsensusProofState
+  readonly repairOnlyCandidates: number
+  readonly submittedCandidateProof: boolean
+}
+
+export type SelectionNoWinnerReason =
+  | "proof_required_missing"
+  | "proof_infra_blocked"
+  | "no_submittable_candidate"
 
 export interface SelectionRiskGateDecision {
   readonly expand: boolean
@@ -195,6 +257,10 @@ export interface SelectionResult {
   admissibleCount: number
   /** Distinct (deduped) candidate count. */
   generated: number
+  /** v4 proof-clean submit rail active for this selection pass. */
+  proofRequired: boolean
+  /** Why no winner existed, when the selector can distinguish the cause. */
+  noWinnerReason?: SelectionNoWinnerReason
   /** Adaptive strict@1 gate telemetry, present only when the gate was enabled
    *  and candidate 0 was produced. */
   riskGate?: SelectionRiskGateTelemetry
@@ -241,6 +307,12 @@ export interface CandidateTelemetry {
    *  when an MWE receipt was produced, so a resolved/failed case can be ATTRIBUTED
    *  to the MWE tier (vs contracts/family) when reading the bench report. */
   mwe?: MweProofState
+  publicRegression?: PublicRegressionProofState
+  reproConsensus?: ReproConsensusProofState
+  /** v4 proof-clean classification: positive proof, missing proof, infra, or
+   *  safety-only keep-green. */
+  proofState?: SelectionProofState
+  proofSource?: SelectionProofSource
 }
 
 /** Eval-only selection telemetry — what the executor decided and WHY, so a
@@ -256,53 +328,229 @@ export interface SelectionTelemetry {
   generated: number
   admissibleCount: number
   winnerId: string | null
+  proofRequired?: boolean
+  noWinnerReason?: SelectionNoWinnerReason
   winningFamilyId?: CandidateFamilyId
   riskGate?: SelectionRiskGateTelemetry
   counterfactual?: CounterfactualTelemetry
+  proofSummary?: SelectionProofSummary
   candidates: readonly CandidateTelemetry[]
+}
+
+const publicRegressionStateOf = (args: {
+  readonly hard: HardGateSignals
+  readonly receipt: PublicRegressionProofReceipt | undefined
+}): PublicRegressionProofState | undefined => {
+  if (args.receipt !== undefined) return args.receipt.state
+  if (args.hard.regressionGreen === true) return "safety_green"
+  if (args.hard.regressionGreen === false) return "candidate_red"
+  return undefined
+}
+
+const reproConsensusStateOf = (args: {
+  readonly resolved: ResolvedKofNSignal | null
+  readonly receipt: ReproConsensusProofReceipt | undefined
+}): ReproConsensusProofState | undefined => {
+  if (args.receipt !== undefined) return args.receipt.state
+  if (resolvedKofNPositive(args.resolved)) return "base_red_candidate_green"
+  if (hardResolvedRejected(args.resolved)) return "base_red_candidate_red"
+  return undefined
+}
+
+const positiveSubmitProofSource = (args: {
+  readonly resolved: ResolvedKofNSignal | null
+  readonly mweReceipt: MweProofReceipt | undefined
+  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
+}): SelectionProofSource => {
+  if (args.mweReceipt?.state === "patched_green") return "mwe_public_issue"
+  if (
+    args.reproConsensusReceipt?.state === "base_red_candidate_green" ||
+    resolvedKofNPositive(args.resolved)
+  ) {
+    return "repro_consensus"
+  }
+  return "none"
+}
+
+const selectionProofState = (args: {
+  readonly resolved: ResolvedKofNSignal | null
+  readonly hard: HardGateSignals
+  readonly mweReceipt: MweProofReceipt | undefined
+  readonly publicRegressionReceipt: PublicRegressionProofReceipt | undefined
+  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
+}): SelectionProofState => {
+  if (
+    positiveSubmitProofSource({
+      resolved: args.resolved,
+      mweReceipt: args.mweReceipt,
+      reproConsensusReceipt: args.reproConsensusReceipt,
+    }) !== "none"
+  ) {
+    return "proof_positive"
+  }
+  if (
+    args.mweReceipt?.state === "execution_failed" ||
+    args.publicRegressionReceipt?.state === "execution_failed" ||
+    args.reproConsensusReceipt?.state === "execution_failed"
+  ) {
+    return "infra_blocked"
+  }
+  if (
+    args.mweReceipt?.state === "candidate_red" ||
+    hardResolvedRejected(args.resolved) ||
+    args.publicRegressionReceipt?.state === "candidate_red" ||
+    args.reproConsensusReceipt?.state === "base_red_candidate_red"
+  ) {
+    return "candidate_red"
+  }
+  if (
+    args.hard.regressionGreen === true ||
+    args.publicRegressionReceipt?.state === "safety_green"
+  ) {
+    return "safety_only"
+  }
+  return "proof_missing"
+}
+
+const hasContractOnlyEvidence = (entry: ScoredEntry): boolean =>
+  entry.requiredContractsSatisfied > 0 ||
+  entry.contractsSatisfied > 0 ||
+  familyAuthorityPresent(entry.candidate)
+
+const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefined => {
+  const winnerEntry =
+    result.winner === null
+      ? undefined
+      : result.scored.find((entry) => entry.candidate.id === result.winner?.id)
+  const focusEntry =
+    winnerEntry ?? result.scored.find((entry) => entry.candidate.patch.trim() !== "")
+  if (focusEntry === undefined) return undefined
+  const proofState = selectionProofState({
+    resolved: focusEntry.resolvedKofN,
+    hard: focusEntry.hard,
+    mweReceipt: focusEntry.candidate.mweReceipt,
+    publicRegressionReceipt: focusEntry.candidate.publicRegressionReceipt,
+    reproConsensusReceipt: focusEntry.candidate.reproConsensusReceipt,
+  })
+  const proofSource = positiveSubmitProofSource({
+    resolved: focusEntry.resolvedKofN,
+    mweReceipt: focusEntry.candidate.mweReceipt,
+    reproConsensusReceipt: focusEntry.candidate.reproConsensusReceipt,
+  })
+  const submittedCandidateProof = winnerEntry !== undefined && proofSource !== "none"
+  const contractOnlySubmitted = winnerEntry !== undefined && !submittedCandidateProof && hasContractOnlyEvidence(winnerEntry)
+  const repairOnlyCandidates = result.scored.filter(
+    (entry) =>
+      entry.candidate.patch.trim() !== "" &&
+      selectionProofState({
+        resolved: entry.resolvedKofN,
+        hard: entry.hard,
+        mweReceipt: entry.candidate.mweReceipt,
+        publicRegressionReceipt: entry.candidate.publicRegressionReceipt,
+        reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
+      }) !== "proof_positive" &&
+      hasContractOnlyEvidence(entry),
+  ).length
+  return {
+    proofState,
+    proofSource,
+    proofRequiredMissing: result.noWinnerReason === "proof_required_missing",
+    contractOnlySubmitted,
+    contractOnlyBlocked:
+      result.winner === null && result.noWinnerReason === "proof_required_missing" && repairOnlyCandidates > 0,
+    ...(focusEntry.candidate.mweReceipt !== undefined
+      ? { publicMweState: focusEntry.candidate.mweReceipt.state }
+      : {}),
+    ...(() => {
+      const state = publicRegressionStateOf({
+        hard: focusEntry.hard,
+        receipt: focusEntry.candidate.publicRegressionReceipt,
+      })
+      return state === undefined ? {} : { publicRegressionState: state }
+    })(),
+    ...(() => {
+      const state = reproConsensusStateOf({
+        resolved: focusEntry.resolvedKofN,
+        receipt: focusEntry.candidate.reproConsensusReceipt,
+      })
+      return state === undefined ? {} : { reproConsensusState: state }
+    })(),
+    repairOnlyCandidates,
+    submittedCandidateProof,
+  }
 }
 
 /** Project a {@link SelectionResult} into compact eval-only telemetry (drops the
  *  full candidate patches; keeps files + verdict). Pure. */
-export const summarizeSelection = (result: SelectionResult): SelectionTelemetry => ({
-  attempted: result.attempted,
-  ownerFiles: result.ownerFiles,
-  earlyAccepted: result.earlyAccepted,
-  successfulGenerations: result.successfulGenerations,
-  generationFailures: result.generationFailures,
-  generated: result.generated,
-  admissibleCount: result.admissibleCount,
-  winnerId: result.winner?.id ?? null,
-  ...(result.winner?.familyId !== undefined ? { winningFamilyId: result.winner.familyId } : {}),
-  ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
-  ...(result.counterfactual !== undefined ? { counterfactual: result.counterfactual } : {}),
-  candidates: result.scored.map((s) => ({
-    id: s.candidate.id,
-    files: s.candidate.files,
-    admissible: s.verdict.admissible,
-    score: s.verdict.score,
-    reasons: s.verdict.reasons,
-    ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
-    ...(s.candidate.familyReason !== undefined ? { familyReason: s.candidate.familyReason } : {}),
-    ...(s.candidate.familyOwnerFiles !== undefined
-      ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
-      : {}),
-    ...(() => {
-      if (s.candidate.familyId === undefined) return {}
-      const missing = candidateFamilyCoverageMissing(
-        {
-          familyId: s.candidate.familyId,
-          ownerFiles: s.candidate.familyOwnerFiles ?? [],
-        },
-        s.candidate.files,
-      )
-      return missing.length === 0 ? {} : { familyCoverageMissing: missing }
-    })(),
-    requiredContractsSatisfied: s.requiredContractsSatisfied,
-    contractsSatisfied: s.contractsSatisfied,
-    ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
-  })),
-})
+export const summarizeSelection = (result: SelectionResult): SelectionTelemetry => {
+  const proofSummary = summarizeProof(result)
+  return {
+    attempted: result.attempted,
+    ownerFiles: result.ownerFiles,
+    earlyAccepted: result.earlyAccepted,
+    successfulGenerations: result.successfulGenerations,
+    generationFailures: result.generationFailures,
+    generated: result.generated,
+    admissibleCount: result.admissibleCount,
+    winnerId: result.winner?.id ?? null,
+    ...(result.proofRequired ? { proofRequired: true } : {}),
+    ...(result.noWinnerReason !== undefined ? { noWinnerReason: result.noWinnerReason } : {}),
+    ...(result.winner?.familyId !== undefined ? { winningFamilyId: result.winner.familyId } : {}),
+    ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
+    ...(result.counterfactual !== undefined ? { counterfactual: result.counterfactual } : {}),
+    ...(proofSummary !== undefined ? { proofSummary } : {}),
+    candidates: result.scored.map((s) => {
+      const publicRegression =
+        s.candidate.publicRegressionReceipt?.state ??
+        publicRegressionStateOf({ hard: s.hard, receipt: undefined })
+      const reproConsensus =
+        s.candidate.reproConsensusReceipt?.state ??
+        reproConsensusStateOf({ resolved: s.resolvedKofN, receipt: undefined })
+      return {
+        id: s.candidate.id,
+        files: s.candidate.files,
+        admissible: s.verdict.admissible,
+        score: s.verdict.score,
+        reasons: s.verdict.reasons,
+        ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
+        ...(s.candidate.familyReason !== undefined
+          ? { familyReason: s.candidate.familyReason }
+          : {}),
+        ...(s.candidate.familyOwnerFiles !== undefined
+          ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
+          : {}),
+        ...(() => {
+          if (s.candidate.familyId === undefined) return {}
+          const missing = candidateFamilyCoverageMissing(
+            {
+              familyId: s.candidate.familyId,
+              ownerFiles: s.candidate.familyOwnerFiles ?? [],
+            },
+            s.candidate.files,
+          )
+          return missing.length === 0 ? {} : { familyCoverageMissing: missing }
+        })(),
+        requiredContractsSatisfied: s.requiredContractsSatisfied,
+        contractsSatisfied: s.contractsSatisfied,
+        ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
+        ...(publicRegression !== undefined ? { publicRegression } : {}),
+        ...(reproConsensus !== undefined ? { reproConsensus } : {}),
+        proofState: selectionProofState({
+          resolved: s.resolvedKofN,
+          hard: s.hard,
+          mweReceipt: s.candidate.mweReceipt,
+          publicRegressionReceipt: s.candidate.publicRegressionReceipt,
+          reproConsensusReceipt: s.candidate.reproConsensusReceipt,
+        }),
+        proofSource: positiveSubmitProofSource({
+          resolved: s.resolvedKofN,
+          mweReceipt: s.candidate.mweReceipt,
+          reproConsensusReceipt: s.candidate.reproConsensusReceipt,
+        }),
+      }
+    }),
+  }
+}
 
 const fwd = (s: string): string => s.split(sep).join("/").replace(/\\/g, "/")
 
@@ -549,10 +797,10 @@ const cleanExecutableProof = (
   resolved: ResolvedKofNSignal | null,
   hard: HardGateSignals,
   mweReceipt: MweProofReceipt | undefined,
+  reproConsensusReceipt: ReproConsensusProofReceipt | undefined,
 ): boolean =>
-  resolvedKofNPositive(resolved) ||
-  hard.regressionGreen === true ||
-  mweReceipt?.state === "patched_green"
+  positiveSubmitProofSource({ resolved, mweReceipt, reproConsensusReceipt }) !== "none" ||
+  hard.regressionGreen === true
 
 const cleanUnprovenMultiSourceDriftRisk = (args: {
   readonly mode: SelectorMode
@@ -561,12 +809,18 @@ const cleanUnprovenMultiSourceDriftRisk = (args: {
   readonly hard: HardGateSignals
   readonly resolved: ResolvedKofNSignal | null
   readonly mweReceipt: MweProofReceipt | undefined
+  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
   readonly requiredContractsSatisfied: number
   readonly contractsSatisfied: number
 }): boolean => {
   if (args.mode !== "clean") return false
   if (
-    cleanExecutableProof(args.resolved, args.hard, args.mweReceipt) ||
+    cleanExecutableProof(
+      args.resolved,
+      args.hard,
+      args.mweReceipt,
+      args.reproConsensusReceipt,
+    ) ||
     args.requiredContractsSatisfied > 0 ||
     args.contractsSatisfied > 0
   ) {
@@ -581,6 +835,18 @@ const cleanUnprovenMultiSourceDriftRisk = (args: {
 const CLEAN_DRIFT_REJECT_REASON =
   "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)"
 
+const MWE_CANDIDATE_RED_REJECT_REASON =
+  "hard:mweProof=candidate_red (public issue MWE still fails after patch)"
+
+const CLEAN_AUTHORITY_MISSING_REJECT_REASON =
+  "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)"
+
+const PROOF_REQUIRED_MISSING_REJECT_REASON =
+  "hard:proofRequiredMissing=true (proof-required mode requires positive executed proof; safety or structural evidence alone cannot submit)"
+
+const PROOF_INFRA_BLOCKED_REJECT_REASON =
+  "hard:proofInfraBlocked=true (public proof execution failed; do not treat this as candidate correctness)"
+
 const applyCleanDriftHardGate = (verdict: CandidateVerdict, risk: boolean): CandidateVerdict =>
   risk
     ? {
@@ -589,6 +855,84 @@ const applyCleanDriftHardGate = (verdict: CandidateVerdict, risk: boolean): Cand
         reasons: [...verdict.reasons, CLEAN_DRIFT_REJECT_REASON],
       }
     : verdict
+
+const applyMweProofHardGate = (
+  verdict: CandidateVerdict,
+  mode: SelectorMode,
+  receipt: MweProofReceipt | undefined,
+): CandidateVerdict =>
+  mode === "clean" && receipt?.state === "candidate_red"
+    ? {
+        admissible: false,
+        score: verdict.score,
+        reasons: [...verdict.reasons, MWE_CANDIDATE_RED_REJECT_REASON],
+      }
+    : verdict
+
+const familyAuthorityPresent = (candidate: Candidate): boolean =>
+  candidateFamilyRank(
+    candidate.familyId === undefined
+      ? undefined
+      : {
+          familyId: candidate.familyId,
+          ownerFiles: candidate.familyOwnerFiles ?? [],
+        },
+    candidate.files,
+  ) > 0
+
+const cleanProofAuthorityMissing = (args: {
+  readonly mode: SelectorMode
+  readonly owners: ReadonlySet<string>
+  readonly candidate: Candidate
+  readonly hard: HardGateSignals
+  readonly resolved: ResolvedKofNSignal | null
+  readonly mweReceipt: MweProofReceipt | undefined
+  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
+  readonly requiredContractsSatisfied: number
+  readonly contractsSatisfied: number
+}): boolean =>
+  args.mode === "clean" &&
+  args.candidate.patch.trim() !== "" &&
+  args.owners.size === 0 &&
+  !cleanExecutableProof(
+    args.resolved,
+    args.hard,
+    args.mweReceipt,
+    args.reproConsensusReceipt,
+  ) &&
+  args.requiredContractsSatisfied === 0 &&
+  args.contractsSatisfied === 0 &&
+  !familyAuthorityPresent(args.candidate)
+
+const applyCleanAuthorityHardGate = (
+  verdict: CandidateVerdict,
+  missing: boolean,
+): CandidateVerdict =>
+  missing
+    ? {
+        admissible: false,
+        score: verdict.score,
+        reasons: [...verdict.reasons, CLEAN_AUTHORITY_MISSING_REJECT_REASON],
+      }
+    : verdict
+
+const applyProofRequiredHardGate = (
+  verdict: CandidateVerdict,
+  enabled: boolean,
+  proofState: SelectionProofState,
+): CandidateVerdict => {
+  if (!enabled || proofState === "proof_positive") return verdict
+  return {
+    admissible: false,
+    score: verdict.score,
+    reasons: [
+      ...verdict.reasons,
+      proofState === "infra_blocked"
+        ? PROOF_INFRA_BLOCKED_REJECT_REASON
+        : PROOF_REQUIRED_MISSING_REJECT_REASON,
+    ],
+  }
+}
 
 const applyStaticSanityHardGate = (
   verdict: CandidateVerdict,
@@ -663,12 +1007,14 @@ const buildLexTiers = (
     touchedFiles: entry.candidate.files,
     touchedSymbols: diffTouchedSymbols(entry.candidate.patch),
   }
+  const effectiveContracts =
+    mergePublicContractBundles(contracts, entry.candidate.publicContracts) ?? contracts
   return {
     mweProof: mweProofAuthorityRank(entry.candidate.mweReceipt),
     proofStrength,
     executedKeepGreen: entry.hard.regressionGreen === true ? 1 : 0,
-    requiredContractsSatisfied: requiredContractsSatisfiedCount(contracts, candidate),
-    contractsSatisfied: contractsSatisfiedCount(contracts, candidate),
+    requiredContractsSatisfied: requiredContractsSatisfiedCount(effectiveContracts, candidate),
+    contractsSatisfied: contractsSatisfiedCount(effectiveContracts, candidate),
     familyRank: candidateFamilyRank(
       entry.candidate.familyId === undefined
         ? undefined
@@ -692,6 +1038,16 @@ const declaredExpectedRejected = (verdict: CandidateVerdict): boolean =>
 const cleanDriftRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(CLEAN_DRIFT_REJECT_REASON)
 
+const mweCandidateRedRejected = (verdict: CandidateVerdict): boolean =>
+  verdict.reasons.includes(MWE_CANDIDATE_RED_REJECT_REASON)
+
+const cleanAuthorityMissingRejected = (verdict: CandidateVerdict): boolean =>
+  verdict.reasons.includes(CLEAN_AUTHORITY_MISSING_REJECT_REASON)
+
+const proofRequiredRejected = (verdict: CandidateVerdict): boolean =>
+  verdict.reasons.includes(PROOF_REQUIRED_MISSING_REJECT_REASON) ||
+  verdict.reasons.includes(PROOF_INFRA_BLOCKED_REJECT_REASON)
+
 const bestEffortEligible = (
   entry: Pick<ScoredEntry, "hard" | "verdict">,
   mode: SelectorMode,
@@ -703,6 +1059,9 @@ const bestEffortEligible = (
   if (hardResolvedRejected(entry.hard.patchedResolvedKofN)) return false
   if (declaredExpectedRejected(entry.verdict)) return false
   if (cleanDriftRejected(entry.verdict)) return false
+  if (mweCandidateRedRejected(entry.verdict)) return false
+  if (cleanAuthorityMissingRejected(entry.verdict)) return false
+  if (proofRequiredRejected(entry.verdict)) return false
   return true
 }
 
@@ -770,11 +1129,15 @@ export const runSelection = async (args: {
    *  resolves it. Driver-supplied text may include base-red validated repro
    *  sources; absent keeps behavior byte-identical. */
   oracleFailureRepairSeed?: string
+  /** v4 clean submit rail. When on, only positive executed public proof may
+   *  submit; keep-green regression stays safety-only. */
+  proofRequired?: boolean
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
   // dedup ("first wins") and scoring stay deterministic.
   const mode: SelectorMode = args.mode ?? "research"
+  const proofRequired = mode === "clean" && args.proofRequired === true
   // Clean contract-dominance tier is fed ONLY by genuinely-sourced public
   // contracts the caller supplies (T-CON-10: public issue text / public tests /
   // validated repros / AUTHORITATIVE static-witness owners). We intentionally do
@@ -799,19 +1162,44 @@ export const runSelection = async (args: {
   let counterfactualOwnerFile: string | undefined
   let counterfactualSeed: string | undefined
   const counterfactualCandidateIds = new Set<string>()
+  const withCandidatePublicContracts = (
+    candidate: Candidate,
+    publicContracts: PublicContractBundle | undefined,
+  ): Candidate =>
+    publicContracts === undefined
+      ? candidate
+      : {
+          ...candidate,
+          publicContracts:
+            mergePublicContractBundles(candidate.publicContracts, publicContracts) ?? publicContracts,
+        }
   const withFamily = (candidate: Candidate, family: CandidateFamily): Candidate => ({
     ...candidate,
     familyId: family.familyId,
     familyReason: family.reason,
     familyOwnerFiles: family.ownerFiles,
   })
+  const familyFromCandidate = (candidate: Candidate): CandidateFamily | undefined =>
+    candidate.familyId === undefined || candidate.familyOwnerFiles === undefined
+      ? undefined
+      : {
+          familyId: candidate.familyId,
+          ownerFiles: candidate.familyOwnerFiles,
+          reason: candidate.familyReason ?? `candidate-derived ${candidate.familyId} family`,
+          seed: undefined,
+          sourceEvidence: ["selection-candidate"],
+        }
   const maybeRepairFamilyCoverage = async (
     candidate: Candidate,
     family: CandidateFamily,
     seed: string | undefined,
     index: number,
+    publicContracts?: PublicContractBundle,
   ): Promise<Candidate> => {
-    const candidateWithFamily = withFamily(candidate, family)
+    const candidateWithFamily = withFamily(
+      withCandidatePublicContracts(candidate, publicContracts),
+      family,
+    )
     const missing = candidateFamilyCoverageMissing(family, candidate.files)
     if (missing.length === 0 || candidate.patch.trim() === "") return candidateWithFamily
     const repairSeed =
@@ -820,11 +1208,26 @@ export const runSelection = async (args: {
       const repaired = await args.ports.generate(index, repairSeed)
       const repairedMissing = candidateFamilyCoverageMissing(family, repaired.files)
       return repaired.patch.trim() !== "" && repairedMissing.length < missing.length
-        ? withFamily(repaired, family)
+        ? withFamily(withCandidatePublicContracts(repaired, publicContracts), family)
         : candidateWithFamily
     } catch {
       return candidateWithFamily
     }
+  }
+  const postprocessGeneratedCandidate = async (
+    candidate: Candidate,
+    index: number,
+    seed: string | undefined,
+    plannedFamily?: CandidateFamily,
+  ): Promise<Candidate> => {
+    if (plannedFamily !== undefined) {
+      return maybeRepairFamilyCoverage(candidate, plannedFamily, seed, index)
+    }
+    const derived = await args.ports.deriveCandidateStructuralRepair?.(candidate)
+    if (derived?.family !== undefined) {
+      return maybeRepairFamilyCoverage(candidate, derived.family, seed, index, derived.publicContracts)
+    }
+    return withCandidatePublicContracts(candidate, derived?.publicContracts)
   }
   const tryGenerate = async (i: number): Promise<Candidate | null> => {
     try {
@@ -836,8 +1239,7 @@ export const runSelection = async (args: {
       const candidate = await args.ports.generate(i, seed)
       if (useCounterfactual) counterfactualCandidateIds.add(candidate.id)
       const family = useCounterfactual ? undefined : args.candidateFamilies?.[i]
-      if (family !== undefined) return maybeRepairFamilyCoverage(candidate, family, seed, i)
-      return candidate
+      return await postprocessGeneratedCandidate(candidate, i, seed, family)
     } catch {
       generationFailures += 1
       return null
@@ -862,6 +1264,8 @@ export const runSelection = async (args: {
     staticSanityReasons: readonly string[]
     /** SCAFF-06 selection-time MWE receipt (port-derived, else generation-set). */
     mweReceipt: MweProofReceipt | undefined
+    publicRegressionReceipt: PublicRegressionProofReceipt | undefined
+    reproConsensusReceipt: ReproConsensusProofReceipt | undefined
   }
   const portsMemo = new Map<Candidate, ScoredPorts>()
   const probeOne = async (c: Candidate): Promise<ScoredPorts> => {
@@ -894,6 +1298,10 @@ export const runSelection = async (args: {
       // SCAFF-06: a selection-time MWE run (port) is authoritative; it overrides a
       // generation-set receipt. Absent port ⇒ keep the generation-set one (or none).
       mweReceipt: (await args.ports.mweProof?.(c)) ?? c.mweReceipt,
+      publicRegressionReceipt:
+        (await args.ports.publicRegressionProof?.(c)) ?? c.publicRegressionReceipt,
+      reproConsensusReceipt:
+        (await args.ports.reproConsensusProof?.(c)) ?? c.reproConsensusReceipt,
     }
     portsMemo.set(c, probed)
     return probed
@@ -914,20 +1322,62 @@ export const runSelection = async (args: {
       touchedFiles: c.files,
       touchedSymbols: diffTouchedSymbols(c.patch),
     }
+    const effectiveContracts = mergePublicContractBundles(contractBundle, c.publicContracts)
+    const scoredContracts = effectiveContracts ?? contractBundle
     const requiredContractsSatisfied = requiredContractsSatisfiedCount(
-      contractBundle,
+      scoredContracts,
       contractCandidate,
     )
-    const contractsSatisfied = contractsSatisfiedCount(contractBundle, contractCandidate)
-    const verdict = applyStaticSanityHardGate(
-      scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode),
-      probed.staticSanityReasons,
+    const contractsSatisfied = contractsSatisfiedCount(scoredContracts, contractCandidate)
+    const baseVerdict = scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode)
+    const proofState = selectionProofState({
+      resolved: probed.resolvedKofN,
+      hard: probed.hard,
+      mweReceipt: probed.mweReceipt,
+      publicRegressionReceipt: probed.publicRegressionReceipt,
+      reproConsensusReceipt: probed.reproConsensusReceipt,
+    })
+    const verdict = applyProofRequiredHardGate(
+      applyCleanAuthorityHardGate(
+        applyMweProofHardGate(
+          applyStaticSanityHardGate(baseVerdict, probed.staticSanityReasons),
+          mode,
+          probed.mweReceipt,
+        ),
+        cleanProofAuthorityMissing({
+          mode,
+          owners: args.owners,
+          candidate: c,
+          hard: probed.hard,
+          resolved: probed.resolvedKofN,
+          mweReceipt: probed.mweReceipt,
+          reproConsensusReceipt: probed.reproConsensusReceipt,
+          requiredContractsSatisfied,
+          contractsSatisfied,
+        }),
+      ),
+      proofRequired,
+      proofState,
     )
     return {
       // SCAFF-06: carry the selection-time MWE receipt on the scored candidate so
       // the lexicographic top tier (buildLexTiers) sees it. Identity-preserving
       // when there is no receipt (byte-identical to the pre-SCAFF-06 path).
-      candidate: probed.mweReceipt !== undefined ? { ...c, mweReceipt: probed.mweReceipt } : c,
+      candidate:
+        probed.mweReceipt !== undefined ||
+        probed.publicRegressionReceipt !== undefined ||
+        probed.reproConsensusReceipt !== undefined
+          ? {
+              ...c,
+              ...(probed.mweReceipt !== undefined ? { mweReceipt: probed.mweReceipt } : {}),
+              ...(probed.publicRegressionReceipt !== undefined
+                ? { publicRegressionReceipt: probed.publicRegressionReceipt }
+                : {}),
+              ...(probed.reproConsensusReceipt !== undefined
+                ? { reproConsensusReceipt: probed.reproConsensusReceipt }
+                : {}),
+            }
+          : c,
       hard: probed.hard,
       resolvedKofN: probed.resolvedKofN,
       voterQuorum: probed.voterQuorum,
@@ -953,6 +1403,7 @@ export const runSelection = async (args: {
           hard: entry.hard,
           resolved: entry.resolvedKofN,
           mweReceipt: entry.candidate.mweReceipt,
+          reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
           requiredContractsSatisfied: entry.requiredContractsSatisfied,
           contractsSatisfied: entry.contractsSatisfied,
         }),
@@ -991,9 +1442,141 @@ export const runSelection = async (args: {
     )
   }
 
+  const cleanDriftRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
+    const patched = scored.filter(hasNonEmptyPatch)
+    return (
+      patched.length > 0 &&
+      !patched.some((s) => s.verdict.admissible) &&
+      patched.every((s) => cleanDriftRejected(s.verdict))
+    )
+  }
+
   const bounded = (s: string | undefined, n = 1800): string => {
     const v = s ?? ""
     return v.length > n ? v.slice(-n) : v
+  }
+
+  const bestMissingFamily = (scored: readonly ScoredEntry[]): CandidateFamily | undefined => {
+    const ranked = scored
+      .map((entry, order) => ({
+        family: familyFromCandidate(entry.candidate),
+        missing: candidateFamilyCoverageMissing(
+          familyFromCandidate(entry.candidate),
+          entry.candidate.files,
+        ),
+        order,
+      }))
+      .filter(
+        (
+          entry,
+        ): entry is {
+          family: CandidateFamily
+          missing: string[]
+          order: number
+        } => entry.family !== undefined && entry.missing.length > 0,
+      )
+      .sort((a, b) => a.family.ownerFiles.length - b.family.ownerFiles.length || a.order - b.order)
+    return ranked[0]?.family
+  }
+
+  const familyRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
+    const family = bestMissingFamily(scored)
+    if (family === undefined) return undefined
+    return seedForCandidateFamilyCoverageRepair(
+      family,
+      candidateFamilyCoverageMissing(family, []),
+    )
+  }
+
+  const staticSanityReasons = (entry: ScoredEntry): readonly string[] =>
+    entry.verdict.reasons.filter((reason) => reason.startsWith("hard:staticSanity="))
+
+  const staticSanityInstruction = (reason: string): string => {
+    const noneMutation =
+      /^hard:staticSanity=pythonNoneSubscriptMutation\(([^)]+)\)$/.exec(reason)?.[1]
+    if (noneMutation !== undefined) {
+      return `Static sanity failure: \`${noneMutation}\` can be None before a subscript write. Regenerate so every \`${noneMutation}[...]\` mutation is protected by a non-None mapping invariant, or guard each mutation site that may observe None.`
+    }
+    const arity =
+      /^hard:staticSanity=pythonCallbackArityMismatch\(([^:]+):(\d+)->(\d+)\)$/.exec(reason)
+    if (arity !== null) {
+      return `Static sanity failure: callback \`${arity[1]}\` is registered with positional arity ${arity[3]}, but its definition accepts ${arity[2]}. Regenerate so the registration and callback signature agree exactly.`
+    }
+    return `Static sanity failure: ${reason.replace("hard:staticSanity=", "")}. Regenerate from the base tree and remove this deterministic parse-level violation without dropping the stronger structural fix.`
+  }
+
+  const staticSanityRepairSeed = (scored: readonly ScoredEntry[], winner: Candidate | null): string | undefined => {
+    const winnerEntry = winner === null ? undefined : scored.find((entry) => entry.candidate.id === winner.id)
+    const target = scored
+      .filter((entry) => entry.candidate.patch.trim() !== "" && staticSanityReasons(entry).length > 0)
+      .sort(
+        (a, b) =>
+          b.requiredContractsSatisfied - a.requiredContractsSatisfied ||
+          b.contractsSatisfied - a.contractsSatisfied ||
+          b.candidate.files.length - a.candidate.files.length,
+      )[0]
+    if (target === undefined) return undefined
+    if (
+      winnerEntry !== undefined &&
+      target.requiredContractsSatisfied <= winnerEntry.requiredContractsSatisfied &&
+      target.contractsSatisfied <= winnerEntry.contractsSatisfied
+    ) {
+      return undefined
+    }
+    const targetFamily = familyFromCandidate(target.candidate)
+    return [
+      "Selector feedback: a previous candidate reached stronger structural/public coverage, but it was rejected by deterministic static sanity checks.",
+      ...(targetFamily === undefined ? [] : [seedForCandidateFamily(targetFamily)]),
+      ...staticSanityReasons(target).map(staticSanityInstruction),
+      "Regenerate from the base tree. Preserve the stronger structural coverage while removing the static sanity violation; do not retreat to a smaller partial patch unless the stronger coverage is disproven by public source evidence.",
+    ]
+      .filter((s) => s.trim() !== "")
+      .join("\n\n")
+  }
+
+  const repairPacketText = (
+    scored: readonly ScoredEntry[],
+    seed: string,
+    winner: Candidate | null,
+  ): string => {
+    const patchAuthority =
+      winner !== null && winner.patch.trim() !== "" ? winner.patch : scored[0]?.candidate.patch ?? seed
+    const proofReceipts = scored.flatMap((entry) =>
+      entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2),
+    )
+    return renderLlmEvidencePacket({
+      stage: "repair_seed",
+      instanceIdHash: candidatePatchHash(
+        scored.map((entry) => `${entry.candidate.id}:${entry.candidate.files.join(",")}`).join("\n"),
+      ),
+      evidenceRevision: "selector-repair-v1",
+      candidatePatchHash: candidatePatchHash(patchAuthority),
+      question: "Generate a bounded repair instruction for the next candidate.",
+      allowedActions: [
+        "bounded_repair_only",
+        "preserve_stronger_structural_coverage",
+        "satisfy_named_public_proof",
+      ],
+      forbiddenSources: [
+        "hidden_tests",
+        "gold_patch",
+        "official_harness_results",
+        "benchmark_case_tables",
+        "try_harder_generic_retry",
+      ],
+      publicIssueFacts: [
+        "Use only the public issue text already attached in the main task prompt as issue authority.",
+      ],
+      ownerEvidence: scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files),
+      proofReceipts,
+      contractFacts: scored.flatMap((entry) => [
+        `requiredContractsSatisfied=${entry.requiredContractsSatisfied}`,
+        `contractsSatisfied=${entry.contractsSatisfied}`,
+      ]),
+      staticFacts: [seed],
+      missingEvidence:
+        proofReceipts.length === 0 ? ["no_positive_executed_public_proof_attached"] : [],
+    })
   }
 
   const reproFailureTraceSeed = (scored: readonly ScoredEntry[]): string | undefined => {
@@ -1029,6 +1612,7 @@ export const runSelection = async (args: {
       return [
         "Selector feedback: every generated candidate was executed against a public issue MWE that reproduced on the base tree, and every candidate still failed that MWE.",
         "Regenerate from the base tree. Treat the public MWE in the issue text as the executable contract: the patch must make that MWE pass without broadening the edit beyond the necessary source change.",
+        familyRepairSeed(scored),
         args.oracleFailureRepairSeed,
       ]
         .filter((s): s is string => s !== undefined && s.trim() !== "")
@@ -1038,7 +1622,17 @@ export const runSelection = async (args: {
       return [
         "Selector feedback: every generated candidate was re-run against the base-red validated reproduction set, and none reached resolved consensus.",
         "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts report `Issue resolved` without adding unnecessary helpers, files, or unrelated design surface.",
+        familyRepairSeed(scored),
         reproFailureTraceSeed(scored),
+        args.oracleFailureRepairSeed,
+      ]
+        .filter((s): s is string => s !== undefined && s.trim() !== "")
+        .join("\n\n")
+    }
+    if (cleanDriftRepairRequired(scored)) {
+      return [
+        "Selector feedback: every generated multi-source candidate was rejected as unproven multi-source drift by clean selector authority because no executable proof or public contract justified touching multiple source files.",
+        "Regenerate from the base tree. Either produce a narrow single-owner patch, or include the complete static/public witness that justifies every source file touched. Do not add helper files, new definitions, or unrelated design surface unless that witness requires them.",
         args.oracleFailureRepairSeed,
       ]
         .filter((s): s is string => s !== undefined && s.trim() !== "")
@@ -1047,15 +1641,21 @@ export const runSelection = async (args: {
     return undefined
   }
 
-  const maybeAppendOracleRepair = async (
+  const maybeAppendSelectorRepair = async (
     rawCandidates: readonly Candidate[],
     result: SelectionResult,
   ): Promise<readonly Candidate[]> => {
     if (mode !== "clean" || rawCandidates.length === 0) return rawCandidates
-    const seed = oracleFailureRepairSeed(result.scored)
+    const seed =
+      staticSanityRepairSeed(result.scored, result.winner) ?? oracleFailureRepairSeed(result.scored)
     if (seed === undefined) return rawCandidates
     try {
-      const repaired = await args.ports.generate(rawCandidates.length, seed)
+      const prompt = repairPacketText(result.scored, seed, result.winner)
+      const repaired = await postprocessGeneratedCandidate(
+        await args.ports.generate(rawCandidates.length, prompt),
+        rawCandidates.length,
+        prompt,
+      )
       return repaired.patch.trim() === "" ? rawCandidates : [...rawCandidates, repaired]
     } catch {
       return rawCandidates
@@ -1100,14 +1700,23 @@ export const runSelection = async (args: {
       minimality: isEmpty ? null : 1,
       ownerCoverage: isEmpty ? null : ownerCoverageOf(candidate.files, args.owners),
     }
+    const contractCandidate = {
+      touchedFiles: candidate.files,
+      touchedSymbols: diffTouchedSymbols(candidate.patch),
+    }
+    const effectiveContracts =
+      mergePublicContractBundles(contractBundle, candidate.publicContracts) ?? contractBundle
     const entry = {
       candidate,
       hard,
       resolvedKofN: null,
       voterQuorum: null,
       verdict: scoreWithAuthority(hard, soft, soft.declaredExpectedMatch, mode),
-      requiredContractsSatisfied: 0,
-      contractsSatisfied: 0,
+      requiredContractsSatisfied: requiredContractsSatisfiedCount(
+        effectiveContracts,
+        contractCandidate,
+      ),
+      contractsSatisfied: contractsSatisfiedCount(effectiveContracts, contractCandidate),
     }
     const ranked = [{ id: candidate.id, verdict: entry.verdict }]
     const fallbackRanked = bestEffortEligible(entry, mode) ? ranked : []
@@ -1124,6 +1733,8 @@ export const runSelection = async (args: {
       scored: [entry],
       admissibleCount: entry.verdict.admissible ? 1 : 0,
       generated: 1,
+      proofRequired,
+      ...(proofRequired ? { noWinnerReason: "proof_required_missing" as const } : {}),
       riskGate,
     }
   }
@@ -1245,7 +1856,25 @@ export const runSelection = async (args: {
         : undefined
     const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
     let terminalCandidate: Candidate | null = null
+    let noWinnerReason: SelectionNoWinnerReason | undefined
     if (winner === null) {
+      const nonEmpty = scored.filter((entry) => entry.candidate.patch.trim() !== "")
+      if (proofRequired && nonEmpty.length > 0) {
+        const proofStates = nonEmpty.map((entry) =>
+          selectionProofState({
+            resolved: entry.resolvedKofN,
+            hard: entry.hard,
+            mweReceipt: entry.candidate.mweReceipt,
+            publicRegressionReceipt: entry.candidate.publicRegressionReceipt,
+            reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
+          }),
+        )
+        noWinnerReason = proofStates.every((state) => state === "infra_blocked")
+          ? "proof_infra_blocked"
+          : "proof_required_missing"
+      } else if (scored.length > 0) {
+        noWinnerReason = "no_submittable_candidate"
+      }
       const bestTerminalRank = scored.reduce(
         (best, entry) =>
           Math.max(
@@ -1280,6 +1909,8 @@ export const runSelection = async (args: {
       scored,
       admissibleCount: scored.filter((s) => s.verdict.admissible).length,
       generated: cands.length,
+      proofRequired,
+      ...(noWinnerReason !== undefined ? { noWinnerReason } : {}),
       ...(riskGate !== undefined ? { riskGate } : {}),
       ...(counterfactual !== undefined ? { counterfactual } : {}),
     }
@@ -1316,7 +1947,7 @@ export const runSelection = async (args: {
           // low-risk cand0 must clear cheap validation (real applyClean /
           // regression / smoke ports via finalize). The legacy arm keeps the
           // cost-saving static accept (byte-identical).
-          return args.counterfactual === true
+          return args.counterfactual === true || proofRequired
             ? await finalize(raw, false, riskGateTelemetry)
             : await staticAccept(raw, candidate, riskGateTelemetry)
         }
@@ -1362,8 +1993,8 @@ export const runSelection = async (args: {
   }
   let result = await finalize(raw, false, riskGateTelemetry)
   let repairedRaw = raw
-  for (let repairRound = 0; repairRound < 2; repairRound++) {
-    const nextRaw = await maybeAppendOracleRepair(repairedRaw, result)
+  for (let repairRound = 0; repairRound < 1; repairRound++) {
+    const nextRaw = await maybeAppendSelectorRepair(repairedRaw, result)
     if (nextRaw.length === repairedRaw.length) return result
     repairedRaw = [...nextRaw]
     result = await finalize(repairedRaw, false, riskGateTelemetry)

@@ -13,6 +13,7 @@ import { buildReport } from "@/runner/batch/report"
 import type {
   GradeBreakdown,
   InstanceResult,
+  LlmEvidenceArtifacts,
   ReproOracleCalibration,
   SelectionTelemetry,
 } from "@/runner/batch/types"
@@ -62,6 +63,18 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
       generated: 2,
       admissibleCount: 1,
       winnerId: "cand-1",
+      proofRequired: true,
+      proofSummary: {
+        proofState: "proof_positive",
+        proofSource: "repro_consensus",
+        proofRequiredMissing: false,
+        contractOnlySubmitted: false,
+        contractOnlyBlocked: false,
+        publicRegressionState: "safety_green",
+        reproConsensusState: "base_red_candidate_green",
+        repairOnlyCandidates: 1,
+        submittedCandidateProof: true,
+      },
       candidates: [
         {
           id: "cand-0",
@@ -69,6 +82,7 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
           admissible: false,
           score: 0.2,
           reasons: ["hard:regressionGreen=false"],
+          proofState: "candidate_red",
         },
         {
           id: "cand-1",
@@ -76,11 +90,95 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
           admissible: true,
           score: 0.9,
           reasons: ["soft:ownerCoverage=1"],
+          proofState: "proof_positive",
         },
       ],
     }
     const rep = buildReport(meta, [baseResult({ selectionTelemetry: t })])
     expect(rep.perInstance[0]?.selectionTelemetry).toEqual(t)
+    expect(rep.perInstance[0]?.proofState).toBe("proof_positive")
+    expect(rep.perInstance[0]?.proofSource).toBe("repro_consensus")
+    expect(rep.perInstance[0]?.publicRegressionState).toBe("safety_green")
+    expect(rep.perInstance[0]?.reproConsensusState).toBe("base_red_candidate_green")
+    expect(rep.proofTotals).toEqual({
+      submittedWithProof: 1,
+      blockedProofMissing: 0,
+      blockedEnvFailed: 0,
+      contractOnlyBlocked: 0,
+      contractOnlySubmitted: 0,
+    })
+  })
+
+  test("scoreLabel + scoreEvidence survive and feed scoreTotals", () => {
+    const rep = buildReport(meta, [
+      baseResult({
+        passed: true,
+        scoreLabel: "research_contaminated",
+        scoreEvidence: {
+          officialHarnessResolved: true,
+          localExecutedGreen: true,
+          researchKnobTouched: true,
+        },
+      }),
+      baseResult({
+        id: "sympy__sympy-2",
+        passed: true,
+        scoreLabel: "official_harness",
+        scoreEvidence: {
+          officialHarnessResolved: true,
+          localExecutedGreen: true,
+          researchKnobTouched: false,
+        },
+      }),
+    ])
+    expect(rep.perInstance[0]?.scoreLabel).toBe("research_contaminated")
+    expect(rep.perInstance[0]?.scoreEvidence).toEqual({
+      officialHarnessResolved: true,
+      localExecutedGreen: true,
+      researchKnobTouched: true,
+    })
+    expect(rep.scoreTotals).toEqual({
+      officialHarness: 1,
+      localStructural: 0,
+      researchContaminated: 1,
+      unlabeledPassed: 0,
+      officialResolvedPct: 50,
+    })
+  })
+
+  test("llmEvidence survives for report-only RCA packets", () => {
+    const llmEvidence: LlmEvidenceArtifacts = {
+      intake: {
+        stage: "intake",
+        instanceIdHash: "deadbeefdeadbeef",
+        evidenceRevision: "intake-v1",
+        question: "Which allowed evidence source should be collected next?",
+        allowedActions: ["generate_candidate"],
+        forbiddenSources: ["hidden_tests"],
+        publicIssueFacts: ["issue summary: repro exists"],
+        ownerEvidence: ["owner[0]: pkg/core.py"],
+        proofReceipts: ["public MWE: static_only extracted from issue text"],
+        contractFacts: ["verification plan: baseValidatedRed=false; primaryRail=repro"],
+        staticFacts: ["fault evidence: partial=false; truncated=false"],
+        missingEvidence: ["public_mwe_base_not_attempted"],
+      },
+      selectionExplanation: {
+        stage: "selection_explanation",
+        instanceIdHash: "deadbeefdeadbeef",
+        evidenceRevision: "selection-explanation-v1",
+        question: "Explain the deterministic selection outcome and the remaining missing public evidence.",
+        allowedActions: ["explain_selection_outcome"],
+        forbiddenSources: ["selection_override"],
+        publicIssueFacts: ["issue summary: repro exists"],
+        ownerEvidence: ["owner[0]: pkg/core.py"],
+        proofReceipts: ["proof summary: state=proof_missing; source=none; submittedCandidateProof=false"],
+        contractFacts: ["candidate cand-0: admissible=false"],
+        staticFacts: ["selected candidate: <none>"],
+        missingEvidence: ["no_positive_executed_public_proof"],
+      },
+    }
+    const rep = buildReport(meta, [baseResult({ llmEvidence })])
+    expect(rep.perInstance[0]?.llmEvidence).toEqual(llmEvidence)
   })
 
   // Byte-identical contract: absent telemetry ⇒ keys omitted (not null).
@@ -89,5 +187,9 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     expect("gradeBreakdown" in (rep.perInstance[0] ?? {})).toBe(false)
     expect("reproOracleCalibration" in (rep.perInstance[0] ?? {})).toBe(false)
     expect("selectionTelemetry" in (rep.perInstance[0] ?? {})).toBe(false)
+    expect("proofState" in (rep.perInstance[0] ?? {})).toBe(false)
+    expect("scoreLabel" in (rep.perInstance[0] ?? {})).toBe(false)
+    expect("scoreEvidence" in (rep.perInstance[0] ?? {})).toBe(false)
+    expect("llmEvidence" in (rep.perInstance[0] ?? {})).toBe(false)
   })
 })

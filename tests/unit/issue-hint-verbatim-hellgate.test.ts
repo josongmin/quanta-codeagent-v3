@@ -255,4 +255,23 @@ describe("issue-hint verbatim-evidence hellgate (20+ cases)", () => {
     expect(a).toEqual(b)
     expect(b).toEqual(c)
   })
+
+  test("v26: HTML comments are stripped before extraction", () => {
+    const text = [
+      "<!-- hidden/path.py should never surface -->",
+      "<!-- ```python",
+      "import hidden",
+      "hidden.run()",
+      "``` -->",
+      "Visible path is pkg/real.py",
+      "```python",
+      "import visible",
+      "visible.run()",
+      "```",
+    ].join("\n")
+    const h = extractIssueHint(text)
+    expect(h.files).not.toContain("hidden/path.py")
+    expect(h.files).toContain("pkg/real.py")
+    expect(h.codeFences).toEqual(["import visible\nvisible.run()"])
+  })
 })

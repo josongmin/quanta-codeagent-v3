@@ -36,7 +36,10 @@ import { describe, expect, test } from "bun:test"
 import { SIGNAL_AUTHORITY } from "@/agent/verification-bundle/authority"
 import { KNOB_PRESETS } from "@/runner/knobs"
 import {
-  type BenchKnobState,
+  isContaminatingRegressionSource,
+  researchContaminationReasons,
+} from "@/runner/batch/eval/score-label"
+import {
   type BenchPosture,
   benchPostureFromState,
 } from "../../src/runner/batch/eval/knobs-bench"
@@ -49,24 +52,21 @@ const ENV_KEYS = [
   "QUANTA_KNOBS_PRESET",
   "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
   "QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE",
+  "QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED",
   "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
   "QUANTA_BENCH_REPRO_DOUBT",
   "QUANTA_BENCH_RCA_TARGET_GATES",
   "QUANTA_LSP_TOOLS",
 ] as const
 
-/** Resolve a named preset to its (posture, raw knob-state) pair under a CLEAN
- *  env (every QUANTA_BENCH_* scrubbed) so only the preset layer drives the
- *  result. The posture carries the projected authority fields; the raw state is
- *  needed for knobs that fold into AgentConfig (repro-doubt) rather than the
- *  posture, so the checker can inspect BOTH. */
-const resolvePreset = (preset: string | undefined): { posture: BenchPosture; state: BenchKnobState } => {
+/** Resolve a named preset to its posture under a CLEAN env (every
+ *  QUANTA_BENCH_* scrubbed) so only the preset layer drives the result. */
+const resolvePreset = (preset: string | undefined): BenchPosture => {
   const env: NodeJS.ProcessEnv = {}
   for (const k of ENV_KEYS) delete env[k]
   if (preset !== undefined) env.QUANTA_BENCH_PRESET = preset
   const state = resolveBenchKnobs({ envVars: env })
-  const posture = benchPostureFromState(state, env)
-  return { posture, state }
+  return benchPostureFromState(state, env)
 }
 
 /** Resolve to selectorMode, treating an UNRESOLVABLE preset (knob conflict — e.g.
@@ -76,70 +76,16 @@ const resolvePreset = (preset: string | undefined): { posture: BenchPosture; sta
  *  kept preset, so a preset reaching the body is guaranteed resolvable. */
 const cleanSelectorOrFalse = (preset: string): boolean => {
   try {
-    return resolvePreset(preset).posture.selectorMode === "clean"
+    return resolvePreset(preset).selectorMode === "clean"
   } catch {
     return false
   }
 }
 
-// ── the closed research-only authority knob set (the allowlist's complement) ──
-//
-// A clean preset is admissible iff NONE of these is active. Each entry pairs a
-// human-readable reason with a predicate over the resolved (posture, state).
-// Adding a new research-only knob = add ONE row here and every clean preset is
-// instantly enforced against it.
-interface ResearchKnobCheck {
-  readonly id: string
-  readonly reason: string
-  /** TRUE ⇒ this research-only authority is ACTIVE (forbidden in clean). */
-  readonly active: (p: BenchPosture, s: BenchKnobState) => boolean
-}
-
-/** The contaminating regression sources: a value that grants discovered-regression
- *  "magic score" hard authority WITHOUT an executed witness. `discovered` is
- *  witness-backed (authority.ts: regressionGreen is hardExecutable ONLY because
- *  T-REG-03 enforces executed-witness provenance) so it is ALLOWED in clean;
- *  `gold` is the eval-only hidden PASS_TO_PASS answer-key and is NOT. undefined
- *  (no regression signal) is also fine. So the only safe non-undefined value is
- *  exactly "discovered". */
-const isContaminatingRegression = (mode: BenchPosture["verifySelectRegression"]): boolean =>
-  mode !== undefined && mode !== "discovered"
-
-const RESEARCH_ONLY_KNOBS: readonly ResearchKnobCheck[] = [
-  {
-    id: "rca-target-gates",
-    reason:
-      "targeted-RCA gates — wires the declaredExpected answer-key port (driver.ts: the port is built ONLY when rcaTargetGates) and adds RCA steers; researchOnly authority.",
-    active: (p) => p.rcaTargetGates === true,
-  },
-  {
-    id: "verify-select-llm-risk-gate=on",
-    reason:
-      "LLM semantic risk gate at `on` grants the LLM rubric (rubricScore=researchOnly) live fail-closed expansion authority; only `shadow` (telemetry-only) is clean.",
-    active: (p) => p.verifySelectLlmRiskGate === "on",
-  },
-  {
-    id: "repro-doubt",
-    reason:
-      "repro-doubt steer is a research-contaminating knob (score-label.ts researchKnobTouched lists it explicitly).",
-    // repro-doubt folds into AgentConfig (cfg.reproDoubt), NOT the posture, so
-    // read the resolved knob value straight off the state.
-    active: (_p, s) => s.values.has("repro-doubt"),
-  },
-  {
-    id: "verify-select-regression(magic-score)",
-    reason:
-      "a non-discovered regression source (e.g. `gold` eval-only PASS_TO_PASS) is a magic-score / answer-key signal with no executed-witness provenance; researchOnly in clean.",
-    active: (p) => isContaminatingRegression(p.verifySelectRegression),
-  },
-] as const
-
-/** The single admissibility checker. Returns the list of VIOLATED research-only
- *  knob ids for a resolved preset (empty ⇒ clean-admissible). Exported shape so
- *  both the live ratchet AND the synthetic-mutation paired-control exercise the
- *  EXACT same logic (no parallel re-implementation that could drift). */
-const researchViolations = (posture: BenchPosture, state: BenchKnobState): string[] =>
-  RESEARCH_ONLY_KNOBS.filter((k) => k.active(posture, state)).map((k) => k.id)
+/** Thin pass-through to the runtime scorer's SSOT helper, so the clean-preset
+ *  allowlist cannot drift from the labeler that marks a solved receipt
+ *  contaminated. */
+const researchViolations = (posture: BenchPosture): string[] => [...researchContaminationReasons(posture)]
 
 describe("T-PRESET-07: clean presets carry NO research-only authority knob", () => {
   // ── dynamic discovery: every preset whose RESOLVED posture is selectorMode=clean ──
@@ -150,7 +96,7 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   // floor — a refactor that breaks `selector-mode:clean` resolution trips here
   // instead of silently disarming every per-preset assertion below.
   test("auto-discovers a non-empty clean-preset set (anti-vacuous floor)", () => {
-    expect(cleanPresets.length).toBeGreaterThanOrEqual(4)
+    expect(cleanPresets.length).toBeGreaterThanOrEqual(5)
     // And every known-clean preset (these set `selector-mode:clean` literally)
     // is in the discovered set — the discovery isn't dropping any.
     for (const known of [
@@ -159,6 +105,7 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
       "agentless-v3-thin-strict-counterfactual-shadow",
       "agentless-v3-thin-strict-closure-select-clean",
       "agentless-v3-thin-strict-closure-select-clean-witness-only",
+      "agentless-v4-proof-clean",
     ]) {
       expect(cleanPresets).toContain(known)
     }
@@ -166,30 +113,20 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
 
   // ── the ratchet body: NONE of the research-only knobs active on ANY clean preset ──
   test.each(cleanPresets)("clean preset %s enables no research-only authority knob", (name) => {
-    const { posture, state } = resolvePreset(name)
-    // Sanity: we only assert this for presets we actually resolved as clean.
+    const posture = resolvePreset(name)
     expect(posture.selectorMode).toBe("clean")
 
-    const violations = researchViolations(posture, state)
-    // Unconditional assert first, then narrow — so a checker that silently
-    // returned [] for everything (vacuous) would still have to face the
-    // field-level assertions below.
+    const violations = researchViolations(posture)
     expect(violations).toEqual([])
 
-    // Field-level pins (the prompt's explicit list) — narrowing assertions that
-    // document EACH forbidden authority independently of the aggregate checker:
-    expect(posture.rcaTargetGates).toBe(false) // NOT rca-target-gates
-    expect(posture.verifySelectLlmRiskGate).not.toBe("on") // shadow OK, `on` not
+    expect(posture.rcaTargetGates).toBe(false)
+    expect(posture.verifySelectLlmRiskGate).not.toBe("on")
     // declaredExpected authority off: the port is gated behind rcaTargetGates
     // (driver.ts:2481 builds it ONLY when rcaTargetGates), so rcaTargetGates===false
     // already proves the answer-key matcher is unwired.
     expect(posture.rcaTargetGates).toBe(false)
-    // repro-doubt absent (config-fold knob — assert via raw resolved state).
-    expect(state.values.has("repro-doubt")).toBe(false)
-    // discovered-regression magic score: the clean presets use the EXECUTED-witness
-    // path. Assert the actual SAFE value — either no regression signal, or exactly
-    // "discovered" (never a contaminating answer-key source like "gold").
-    expect(isContaminatingRegression(posture.verifySelectRegression)).toBe(false)
+    expect(posture.reproDoubt).toBe(false)
+    expect(isContaminatingRegressionSource(posture.verifySelectRegression)).toBe(false)
     if (posture.verifySelectRegression !== undefined) {
       expect(posture.verifySelectRegression).toBe("discovered")
     }
@@ -198,77 +135,57 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   // ── HELLGATE teeth #1: paired-control — a RESEARCH preset is NOT subject to the
   // allowlist, proving the ratchet body isn't vacuously green (it really filters). ──
   test("paired-control: a research-mode preset is excluded from the clean set (ratchet is live, not vacuous)", () => {
-    // agentless-v3-select-regression sets NO selector-mode ⇒ resolves to research.
-    const { posture } = resolvePreset("agentless-v3-select-regression")
+    const posture = resolvePreset("agentless-v3-select-regression")
     expect(posture.selectorMode).toBe("research")
-    // It is NOT in the clean-preset set ⇒ the allowlist body above never asserts
-    // on it. (If discovery wrongly classed research presets as clean, the body
-    // would falsely constrain them — and the floor test's `selectorMode==="clean"`
-    // re-assert would catch a misroute.)
     expect(cleanPresets).not.toContain("agentless-v3-select-regression")
-    // Concretely: research presets MAY carry authority the clean allowlist forbids.
-    // agentless-v3-thin-strict-gated-llm runs the LLM gate at `on` and is research.
+
     const llm = resolvePreset("agentless-v3-thin-strict-gated-llm")
-    expect(llm.posture.selectorMode).toBe("research")
-    expect(llm.posture.verifySelectLlmRiskGate).toBe("on")
+    expect(llm.selectorMode).toBe("research")
+    expect(llm.verifySelectLlmRiskGate).toBe("on")
     expect(cleanPresets).not.toContain("agentless-v3-thin-strict-gated-llm")
   })
 
   // ── HELLGATE teeth #2: red-on-injection mutation — the checker REJECTS a
-  // synthetic clean posture that an injected `rca-target-gates:1` would produce. ──
-  // This is the documented mutation: "if you flipped a clean preset to add
-  // rca-target-gates:1, the test would go red." We construct the posture that
-  // edit WOULD yield and prove the checker (the same `researchViolations` the
-  // ratchet body uses) flags it.
+  // synthetic clean posture that an injected research-only knob would produce. ──
   test("red-on-injection: researchViolations rejects each injected research-only authority", () => {
-    // Start from a genuinely-clean resolved preset as the base posture/state.
     const base = resolvePreset("agentless-v3-thin-strict-gated")
-    expect(researchViolations(base.posture, base.state)).toEqual([]) // baseline clean
+    expect(researchViolations(base)).toEqual([])
 
-    // (a) inject rca-target-gates:1 → posture.rcaTargetGates flips true.
-    const rcaInjected: BenchPosture = { ...base.posture, rcaTargetGates: true }
-    expect(researchViolations(rcaInjected, base.state)).toContain("rca-target-gates")
+    const rcaInjected: BenchPosture = { ...base, rcaTargetGates: true }
+    expect(researchViolations(rcaInjected)).toContain("rca-target-gates")
 
-    // (b) inject verify-select-llm-risk-gate:on (would be researchOnly authority live).
-    const llmInjected: BenchPosture = { ...base.posture, verifySelectLlmRiskGate: "on" }
-    expect(researchViolations(llmInjected, base.state)).toContain("verify-select-llm-risk-gate=on")
-    // shadow stays CLEAN (telemetry-only) — proves the check distinguishes mode.
-    const shadow: BenchPosture = { ...base.posture, verifySelectLlmRiskGate: "shadow" }
-    expect(researchViolations(shadow, base.state)).toEqual([])
+    const llmInjected: BenchPosture = { ...base, verifySelectLlmRiskGate: "on" }
+    expect(researchViolations(llmInjected)).toContain("verify-select-llm-risk-gate=on")
+    const shadow: BenchPosture = { ...base, verifySelectLlmRiskGate: "shadow" }
+    expect(researchViolations(shadow)).toEqual([])
 
-    // (c) inject a contaminating regression source (gold answer-key).
-    const goldInjected: BenchPosture = { ...base.posture, verifySelectRegression: "gold" }
-    expect(researchViolations(goldInjected, base.state)).toContain(
-      "verify-select-regression(magic-score)",
-    )
-    // discovered (executed-witness) stays CLEAN.
-    const discovered: BenchPosture = { ...base.posture, verifySelectRegression: "discovered" }
-    expect(researchViolations(discovered, base.state)).toEqual([])
+    const goldInjected: BenchPosture = { ...base, verifySelectRegression: "gold" }
+    expect(researchViolations(goldInjected)).toContain("verify-select-regression(magic-score)")
+    const discovered: BenchPosture = { ...base, verifySelectRegression: "discovered" }
+    expect(researchViolations(discovered)).toEqual([])
 
-    // (d) inject repro-doubt:5 into the raw knob state (config-fold knob path).
-    const reproState: BenchKnobState = {
-      ...base.state,
-      values: new Map(base.state.values).set("repro-doubt", {
-        value: { stuckRuns: 5 },
-        source: "preset",
-      }),
-    }
-    expect(researchViolations(base.posture, reproState)).toContain("repro-doubt")
+    const reproInjected: BenchPosture = { ...base, reproDoubt: true }
+    expect(researchViolations(reproInjected)).toContain("repro-doubt")
   })
 
   // ── Wiring-proof: the research-only knob ids the checker enforces correspond to
   // signals classed `researchOnly` in the authority SSOT — so the checker can't
   // drift from the taxonomy it claims to enforce. ──
   test("checker's authority basis aligns with SIGNAL_AUTHORITY researchOnly classification", () => {
-    // The taxonomy SSOT classifies these selector signals as researchOnly; the
-    // bench knobs the checker forbids are precisely the ones that ARM them.
     expect(SIGNAL_AUTHORITY.declaredExpectedMatch).toBe("researchOnly")
     expect(SIGNAL_AUTHORITY.rubricScore).toBe("researchOnly")
     // regressionGreen is hardExecutable ONLY under executed-witness provenance —
     // which is why `discovered` (witness-backed) is allowed but `gold` is not.
     expect(SIGNAL_AUTHORITY.regressionGreen).toBe("hardExecutable")
-    // The checker enumerates exactly the four research-only authority knobs.
-    expect(RESEARCH_ONLY_KNOBS.map((k) => k.id)).toEqual([
+    expect(
+      researchContaminationReasons({
+        ...resolvePreset("agentless-v3-thin-strict-gated"),
+        rcaTargetGates: true,
+        verifySelectLlmRiskGate: "on",
+        reproDoubt: true,
+        verifySelectRegression: "gold",
+      }),
+    ).toEqual([
       "rca-target-gates",
       "verify-select-llm-risk-gate=on",
       "repro-doubt",

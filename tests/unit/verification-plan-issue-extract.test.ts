@@ -112,6 +112,14 @@ ValueError: TimeSeries object is invalid - expected ['time', 'flux'] as the firs
         "ValueError: TimeSeries object is invalid - expected ['time', 'flux'] as the first columns but found ['time', 'b']",
     })
   })
+
+  test("HTML-commented expected markers are ignored", () => {
+    expect(
+      extractIssueDeclaredExpected(
+        "<!-- Expected: `hidden` -->\nThe function should return `visible` for this input.",
+      ),
+    ).toEqual({ kind: "stdout", value: "visible" })
+  })
 })
 
 describe("buildVerificationPlan — issueDeclaredExpected mapping", () => {

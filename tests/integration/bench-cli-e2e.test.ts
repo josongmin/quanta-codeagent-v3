@@ -125,7 +125,7 @@ describe("quanta-bench CLI e2e", () => {
 
   test("leaderboard renders a resolved table", async () => {
     const { out } = await run("leaderboard", join(dir, "a.json"))
-    expect(out.toLowerCase()).toContain("resolved")
+    expect(out).toContain("Official harness resolved")
     expect(out).toContain("| instance |")
   })
 

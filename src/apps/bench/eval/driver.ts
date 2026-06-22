@@ -27,6 +27,7 @@ import {
   knobsForReport,
   latePhaseFailureResultOf,
   makeCalibratedReproConsensusPort,
+  makeReproConsensusProofSelectionPort,
   makeReproConsensusSelectionPort,
   makeSelectionRegressionPort,
   makeSelectionStaticSanityPort,
@@ -38,6 +39,7 @@ import {
   parseBenchReproTestK,
   parseLocalizePhaseEnv,
   prepareAttemptContext,
+  deriveCandidateStructuralRepair,
   prepareIssueHint,
   prepareReproTest,
   prepareReproTestDetailed,
@@ -64,7 +66,10 @@ import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
 } from "@/runner/batch/eval/repair-phase-policy"
-import { makeDiscoveredRepoRegressionPort } from "@/runner/batch/eval/repo-regression-discovery-adapter"
+import {
+  makeDiscoveredRepoRegressionPort,
+  makeDiscoveredRepoRegressionProofPort,
+} from "@/runner/batch/eval/repo-regression-discovery-adapter"
 import { makeDeclaredExpectedSelectionPort } from "@/runner/batch/eval/selection-declared-expected"
 import {
   buildSelectionInputs,
@@ -77,6 +82,10 @@ import {
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
+import {
+  opaqueInstanceIdHash,
+  renderLlmEvidencePacket,
+} from "@/runner/batch/eval/llm-evidence-packet"
 import { buildAstStaticWitnesses } from "@/runner/batch/eval/static-witness-adapter"
 import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
@@ -563,6 +572,7 @@ const resolveSelectionReproConsensus = async (
     return {
       reproPolicy,
       resolvedKofNSelectionPort: undefined,
+      reproConsensusProofSelectionPort: undefined,
       calibration: calibrationUnavailable,
     }
   }
@@ -576,12 +586,24 @@ const resolveSelectionReproConsensus = async (
     return {
       reproPolicy,
       resolvedKofNSelectionPort: port,
+      reproConsensusProofSelectionPort: makeReproConsensusProofSelectionPort(
+        instance,
+        reproSources,
+        sandbox,
+        timeoutMs,
+      ),
       calibration,
     }
   }
   return {
     reproPolicy,
     resolvedKofNSelectionPort: makeReproConsensusSelectionPort(
+      instance,
+      reproSources,
+      sandbox,
+      timeoutMs,
+    ),
+    reproConsensusProofSelectionPort: makeReproConsensusProofSelectionPort(
       instance,
       reproSources,
       sandbox,
@@ -655,6 +677,42 @@ const readSandboxSource = (sandbox: string, rel: string): string | null => {
   }
 }
 
+const selectionContractIds = (contracts: PublicContractBundle | undefined): readonly string[] =>
+  contracts?.contracts.map((contract) => contract.contractId) ?? []
+
+const buildSelectionGenerationPacket = (args: {
+  readonly problemStatement: string
+  readonly ownerFiles: readonly string[]
+  readonly contractIds: readonly string[]
+  readonly closureHint: string | undefined
+  readonly seed: string | undefined
+  readonly reproHint: string | undefined
+}): string =>
+  renderLlmEvidencePacket({
+    stage: "candidate_generation",
+    instanceIdHash: opaqueInstanceIdHash(args.problemStatement),
+    evidenceRevision: "selection-generation-v1",
+    question: "Produce one minimal candidate patch against the bounded owner/proof surface below.",
+    allowedActions: ["edit_candidate_sandbox_only", "inspect_named_owner_files", "produce_minimal_patch"],
+    forbiddenSources: [
+      "hidden_tests",
+      "gold_patch",
+      "official_harness_results",
+      "benchmark_case_tables",
+      "broad_multifile_drift_without_public_evidence",
+    ],
+    publicIssueFacts: [
+      "Use only the public issue statement already attached in the main task prompt as issue authority.",
+    ],
+    ownerEvidence: args.ownerFiles,
+    proofReceipts:
+      args.reproHint === undefined ? ["no public repro hint installed"] : [args.reproHint],
+    contractFacts: args.contractIds,
+    staticFacts: [args.closureHint ?? "", args.seed ?? ""],
+    missingEvidence:
+      args.reproHint === undefined ? ["no_executable_public_repro_hint"] : [],
+  })
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -676,6 +734,7 @@ const runSelectionPhase = async (
   llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"],
   counterfactual: boolean,
   selectorMode: BenchPosture["selectorMode"],
+  verifySelectProofRequired: boolean,
   publicContracts: PublicContractBundle | undefined,
   rcaTargetGates: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
@@ -732,11 +791,20 @@ const runSelectionPhase = async (
   const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
   const mergeHint = (seed: string | undefined): string | undefined =>
-    seed === undefined
-      ? closureHint
-      : closureHint === undefined
-        ? seed
-        : `${closureHint}\n\n${seed}`
+    verifySelectProofRequired && selectorMode === "clean"
+      ? buildSelectionGenerationPacket({
+          problemStatement: instance.problemStatement,
+          ownerFiles: selectionInputs.ownerFiles,
+          contractIds: selectionContractIds(effectivePublicContracts),
+          closureHint,
+          seed,
+          reproHint,
+        })
+      : seed === undefined
+        ? closureHint
+        : closureHint === undefined
+          ? seed
+          : `${closureHint}\n\n${seed}`
 
   let totalTurns = 0
   // jun-20 — GOLD-CALIBRATE the resolved-consensus oracle BEFORE generation (it
@@ -744,7 +812,7 @@ const runSelectionPhase = async (
   // resolvedKofN port fails open (never rejects a candidate); the calibration is
   // surfaced as eval-only telemetry so the campaign self-measures the oracle's
   // false-negative rate (the verify-and-select bottleneck).
-  const { reproPolicy, resolvedKofNSelectionPort, calibration } =
+  const { reproPolicy, resolvedKofNSelectionPort, reproConsensusProofSelectionPort, calibration } =
     await resolveSelectionReproConsensus(
       instance,
       sandbox,
@@ -755,6 +823,10 @@ const runSelectionPhase = async (
   const discoveredRegressionPort =
     verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
+      : undefined
+  const publicRegressionProofSelectionPort =
+    verifySelectRegression === "discovered"
+      ? makeDiscoveredRepoRegressionProofPort({ instance, sandbox, timeoutMs: deps.timeoutMs })
       : undefined
   const regressionSelectionPort = makeSelectionRegressionPort({
     verifySelectRegression,
@@ -799,6 +871,7 @@ const runSelectionPhase = async (
     ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
+    ...(verifySelectProofRequired ? { proofRequired: true } : {}),
     ...(effectivePublicContracts !== undefined
       ? { publicContracts: effectivePublicContracts }
       : {}),
@@ -832,6 +905,9 @@ const runSelectionPhase = async (
         }),
       staticSanity: staticSanitySelectionPort,
       regression: regressionSelectionPort,
+      ...(publicRegressionProofSelectionPort !== undefined
+        ? { publicRegressionProof: publicRegressionProofSelectionPort }
+        : {}),
       ...(smokeSelectionPort !== undefined ? { smoke: smokeSelectionPort } : {}),
       ...(mweProofSelectionPort !== undefined ? { mweProof: mweProofSelectionPort } : {}),
       // SOTA++ repro-vote as the SELECTION scorer: re-materialize each candidate
@@ -842,6 +918,20 @@ const runSelectionPhase = async (
       // false-negative oracle is failed open so it never rejects a correct fix.
       ...(resolvedKofNSelectionPort !== undefined
         ? { resolvedKofN: resolvedKofNSelectionPort }
+        : {}),
+      ...(reproConsensusProofSelectionPort !== undefined
+        ? { reproConsensusProof: reproConsensusProofSelectionPort }
+        : {}),
+      ...(selectorMode === "clean"
+        ? {
+            deriveCandidateStructuralRepair: (candidate: Candidate) =>
+              deriveCandidateStructuralRepair({
+                instance,
+                candidate,
+                sandbox,
+                signal,
+              }),
+          }
         : {}),
       ...(rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}),
     },
@@ -907,6 +997,7 @@ const runAppMainPhase = async (args: {
       args.prepared.posture.verifySelectLlmRiskGate,
       args.prepared.posture.verifySelectCounterfactual,
       args.prepared.posture.selectorMode,
+      args.prepared.posture.verifySelectProofRequired,
       publicContracts,
       args.prepared.posture.rcaTargetGates,
       args.prepared.posture.verifySelectRegression,
@@ -999,6 +1090,8 @@ const runInstanceOnce = async (
       wiring: w,
       startedAt,
       signal: abort.signal,
+      prepared: preparedContext,
+      sandbox,
     })
     if (terminal !== undefined) return terminal
 

@@ -20,6 +20,8 @@
  * Pure + deterministic: no I/O, no LLM, no clock/random.
  */
 
+import { normalizePublicIssueText } from "@/shared"
+
 export type IssueDeclaredKind = "latex" | "symbolic" | "stdout" | "stdout-empty"
 
 export interface IssueDeclaredExpected {
@@ -104,12 +106,13 @@ const classify = (value: string): IssueDeclaredKind => {
 export const extractIssueDeclaredExpected = (
   problemStatement: string | undefined,
 ): IssueDeclaredExpected | undefined => {
-  if (problemStatement === undefined || problemStatement.trim() === "") return undefined
+  const normalized = normalizePublicIssueText(problemStatement)
+  if (normalized === undefined || normalized.trim() === "") return undefined
 
   // 1) Explicit empty-output declaration ⇒ stdout-empty. Checked FIRST: an
   //    "empty" decl can co-exist with a nearby literal, and the empty contract is
   //    the stronger, less-ambiguous signal.
-  if (EMPTY_DECL_RE.test(problemStatement)) {
+  if (EMPTY_DECL_RE.test(normalized)) {
     return { kind: "stdout-empty", value: "issue declares the correct output is empty" }
   }
 
@@ -120,14 +123,14 @@ export const extractIssueDeclaredExpected = (
   //    EXPECT_LITERAL_RE, so it could ONLY subtract valid matches — adding zero
   //    precision while silently dropping real declared outputs like
   //    "should equal `(1,)`".)
-  const m = EXPECT_LITERAL_RE.exec(problemStatement)
+  const m = EXPECT_LITERAL_RE.exec(normalized)
   if (m?.[1] !== undefined && isMeaningful(m[1])) {
     const value = m[1].trim()
     return { kind: classify(value), value }
   }
 
   // 3) "Expected[ output]: LITERAL" label.
-  const labelled = EXPECTED_LABEL_RE.exec(problemStatement)
+  const labelled = EXPECTED_LABEL_RE.exec(normalized)
   if (labelled?.[1] !== undefined && isMeaningful(labelled[1])) {
     const value = labelled[1].trim()
     return { kind: classify(value), value }
@@ -135,7 +138,7 @@ export const extractIssueDeclaredExpected = (
 
   // 4) Exact error-message proposal in a fenced block. The FULL block is the
   //    expected stdout/message text, not a quoted sub-literal inside it.
-  const msgBlock = MESSAGE_FORM_CODEBLOCK_RE.exec(problemStatement)
+  const msgBlock = MESSAGE_FORM_CODEBLOCK_RE.exec(normalized)
   if (msgBlock?.[1] !== undefined && isMeaningful(msgBlock[1])) {
     const value = msgBlock[1].trim()
     return { kind: classify(value), value }
@@ -147,7 +150,7 @@ export const extractIssueDeclaredExpected = (
   //    INCORRECT current output) is skipped. Fail-closed twice: the marker is
   //    required, AND a QUOTED literal must exist in the block (bare example code
   //    yields nothing). Recall lift for sympy-18763-class repr/LaTeX issues.
-  const cb = CODEBLOCK_MARKER_RE.exec(problemStatement)
+  const cb = CODEBLOCK_MARKER_RE.exec(normalized)
   if (cb?.[1] !== undefined) {
     const q = QUOTED_IN_BODY.exec(cb[1])
     if (q?.[1] !== undefined && isMeaningful(q[1])) {

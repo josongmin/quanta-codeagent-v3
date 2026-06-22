@@ -87,7 +87,20 @@ describe("loadRun", () => {
     writeFileSync(join(dir, "i1.0.jsonl"), line(0, "session_start"))
     writeFileSync(
       join(dir, "summary.json"),
-      JSON.stringify({ runId: "r1", resolved: 1, total: 2, degraded: 0, instances: [] }),
+      JSON.stringify({
+        runId: "r1",
+        resolved: 1,
+        total: 2,
+        degraded: 0,
+        score: {
+          officialHarness: 1,
+          localStructural: 0,
+          researchContaminated: 0,
+          unlabeledPassed: 0,
+          officialResolvedPct: 50,
+        },
+        instances: [{ id: "i1", passed: true, verdict: "ok", turns: 1, scoreLabel: "official_harness" }],
+      }),
     )
     writeFileSync(
       join(dir, "metrics.json"),
@@ -95,6 +108,8 @@ describe("loadRun", () => {
     )
     const run = loadRun(dir)
     expect(run.summary?.resolved).toBe(1)
+    expect(run.summary?.score?.officialHarness).toBe(1)
+    expect(run.summary?.instances?.[0]?.scoreLabel).toBe("official_harness")
     expect(run.metrics?.pricingVersion).toBe("pricing.v1")
     expect(run.runId).toBe("r1")
   })

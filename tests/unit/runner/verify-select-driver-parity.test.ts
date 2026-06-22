@@ -7,7 +7,12 @@ const DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts
 const APP_DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
 
 const declaredExpectedWireCount = (src: string): number =>
-  [...src.matchAll(/declaredExpected:\s*makeDeclaredExpectedSelectionPort\(instance\)/g)].length
+  [
+    ...src.matchAll(/declaredExpected:\s*makeDeclaredExpectedSelectionPort\(instance\)/g),
+    ...src.matchAll(
+      /ports\.declaredExpected\s*=\s*makeDeclaredExpectedSelectionPort\(args\.instance\)/g,
+    ),
+  ].length
 
 describe("runner verify-select and patch-budget driver parity", () => {
   test("runner driver executes verify-select instead of silently ignoring the knob", () => {
@@ -21,22 +26,35 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain("posture.verifySelectLlmRiskGate")
     expect(DRIVER_SRC).toContain("posture.verifySelectRepro")
     expect(APP_DRIVER_SRC).toContain("posture.verifySelectLlmRiskGate")
-    expect(DRIVER_SRC).toContain("reproOracleCalibration: calibration")
-    expect(DRIVER_SRC).toContain("selectionTelemetry: summarizeSelection(result)")
+    expect(DRIVER_SRC).toContain("selectionGenerationFailurePhase({")
+    expect(DRIVER_SRC).toContain("selectionPhaseResultOf({")
+    expect(DRIVER_SRC).toContain("calibration: selectionState.calibration")
+    expect(DRIVER_SRC).toContain("selectionTelemetry: summarizeSelection(args.result)")
     expect(DRIVER_SRC).toContain("result.terminalCandidate?.stopReason")
     expect(APP_DRIVER_SRC).toContain("result.terminalCandidate?.stopReason")
     expect(DRIVER_SRC).toContain("selectionGenerationErrorOf({")
     expect(APP_DRIVER_SRC).toContain("selectionGenerationErrorOf({")
     expect(DRIVER_SRC).toContain("candidatePatchAppliesCleanly")
-    expect(DRIVER_SRC).toContain("applyClean: (c) =>")
+    expect(DRIVER_SRC).toContain("applyClean: (candidate) =>")
+    expect(APP_DRIVER_SRC).toContain("applyClean: (c) =>")
     expect(DRIVER_SRC).toContain("prepareMweProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("prepareMweProofSelectionPort")
+    expect(DRIVER_SRC).toContain("makeDiscoveredRepoRegressionProofPort")
+    expect(APP_DRIVER_SRC).toContain("makeDiscoveredRepoRegressionProofPort")
+    expect(DRIVER_SRC).toContain("makeReproConsensusProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("makeReproConsensusProofSelectionPort")
+    expect(DRIVER_SRC).toContain("deriveCandidateStructuralRepair")
+    expect(APP_DRIVER_SRC).toContain("deriveCandidateStructuralRepair")
     expect(DRIVER_SRC).toContain('selectorMode === "clean"')
     expect(APP_DRIVER_SRC).toContain('selectorMode === "clean"')
-    expect(DRIVER_SRC).toContain("mweProof: mweProofSelectionPort")
+    expect(DRIVER_SRC).toContain("ports.mweProof = args.mweProofSelectionPort")
+    expect(DRIVER_SRC).toContain("ports.publicRegressionProof = args.publicRegressionProofSelectionPort")
+    expect(DRIVER_SRC).toContain("ports.reproConsensusProof = args.reproConsensusProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("mweProof: mweProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("publicRegressionProof: publicRegressionProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("reproConsensusProof: reproConsensusProofSelectionPort")
     expect(DRIVER_SRC).toContain(
-      "rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}",
+      "if (args.rcaTargetGates) ports.declaredExpected = makeDeclaredExpectedSelectionPort(args.instance)",
     )
     expect(APP_DRIVER_SRC).toContain(
       "rcaTargetGates ? { declaredExpected: makeDeclaredExpectedSelectionPort(instance) } : {}",
@@ -53,7 +71,9 @@ describe("runner verify-select and patch-budget driver parity", () => {
   test("both drivers preserve phase stopReason through late catch paths", () => {
     expect(DRIVER_SRC).toContain("latePhaseFailureResultOf({")
     expect(DRIVER_SRC).toContain('verdict: "degraded"')
-    expect(DRIVER_SRC).toContain("...(prepared !== undefined ? { prepared, sandbox } : {})")
+    expect(DRIVER_SRC).toContain(
+      "...(args.prepared !== undefined ? { prepared: args.prepared, sandbox: args.sandbox } : {})",
+    )
     expect(APP_DRIVER_SRC).toContain("latePhaseFailureResultOf({")
     expect(APP_DRIVER_SRC).toContain('verdict: "degraded"')
     expect(APP_DRIVER_SRC).toContain("...(prepared !== undefined ? { prepared, sandbox } : {})")

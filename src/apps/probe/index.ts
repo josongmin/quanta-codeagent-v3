@@ -75,6 +75,17 @@ const isFailed = (summary: RunSummaryLike | undefined, id: string): boolean => {
   return hit.passed !== true || hit.verdict === "degraded"
 }
 
+const scoreLine = (summary: RunSummaryLike | undefined): string | undefined => {
+  const score = summary?.score
+  if (score === undefined) return undefined
+  const total = summary?.total ?? 0
+  return (
+    `score official_harness ${score.officialHarness ?? 0}/${total} ` +
+    `(${score.officialResolvedPct ?? 0}%) | local_structural ${score.localStructural ?? 0} | ` +
+    `research_contaminated ${score.researchContaminated ?? 0} | unlabeled_passed ${score.unlabeledPassed ?? 0}`
+  )
+}
+
 const skippedTotal = (run: ParsedRun): number => {
   let n = 0
   for (const list of run.instances.values()) for (const a of list) n += a.parsed.skipped
@@ -85,12 +96,16 @@ const renderOverview = (run: ParsedRun, args: Args): void => {
   const s = run.summary
   emit(`run ${run.runId ?? "(unknown id)"}`)
   if (s !== undefined) {
-    emit(`resolved ${s.resolved ?? 0}/${s.total ?? 0} (${s.degraded ?? 0} degraded)`)
+    emit(`passed ${s.resolved ?? 0}/${s.total ?? 0} (${s.degraded ?? 0} degraded)`)
+    const line = scoreLine(s)
+    if (line !== undefined) emit(line)
   }
   for (const [id, attempts] of selectInstances(run, args.instance)) {
-    const passed = s?.instances?.find((i) => i.id === id)?.passed
+    const hit = s?.instances?.find((i) => i.id === id)
+    const passed = hit?.passed
     const mark = passed === true ? "PASS" : passed === false ? "FAIL" : "----"
-    emit(`  [${mark}] ${id} (${attempts.length} attempt(s))`)
+    const score = hit?.scoreLabel !== undefined ? `[${hit.scoreLabel}]` : ""
+    emit(`  [${mark}]${score} ${id} (${attempts.length} attempt(s))`)
   }
   const skipped = skippedTotal(run)
   if (skipped > 0) emit(`note: skipped ${skipped} unparseable/foreign line(s)`)
@@ -115,10 +130,12 @@ const summaryJson = (s: RunSummaryLike | undefined): unknown => {
     resolved: s.resolved ?? 0,
     total: s.total ?? 0,
     degraded: s.degraded ?? 0,
+    ...(s.score !== undefined ? { score: s.score } : {}),
     instances: (s.instances ?? []).map((i) => ({
       id: i.id,
       passed: i.passed === true,
       turns: i.turns ?? 0,
+      ...(i.scoreLabel !== undefined ? { scoreLabel: i.scoreLabel } : {}),
     })),
   }
 }

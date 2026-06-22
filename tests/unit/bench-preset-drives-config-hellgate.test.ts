@@ -16,7 +16,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { KNOB_PRESETS } from "@/runner/knobs"
+import { KNOB_PRESETS, presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import { __resetKnobOverrides, getKnobOverride } from "@/shared/knob-overrides"
 import type { StreamPort } from "@/stream"
 import {
@@ -41,10 +41,19 @@ const ENV_KEYS = [
   "QUANTA_BENCH_ISSUE_HINT",
   "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL",
   "QUANTA_BENCH_REPRO_TEST",
+  "QUANTA_BENCH_ADVERSARIAL_REPRO",
   "QUANTA_BENCH_RETRY_TRANSIENT",
   "QUANTA_BENCH_CLOSURE_REPAIR",
+  "QUANTA_BENCH_IN_LOOP_EXEC",
+  "QUANTA_BENCH_VERIFY_SELECT",
+  "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
+  "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
+  "QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED",
+  "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
+  "QUANTA_BENCH_VERIFY_SELECT_REPRO",
   "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
   "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
+  "QUANTA_BENCH_SELECTOR_MODE",
   "QUANTA_READ_OUTLINE",
   "QUANTA_TEST_RUNNER",
   "QUANTA_REPO_MAP",
@@ -548,6 +557,51 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     ).toBeUndefined()
   })
 
+  test("PRESET-15f: agentless-v4-proof-clean promotes clean selector to bounded executable proof mode", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.inLoopExecMode).toBe("repro-only")
+    expect(opt.reproTestK).toBe(10)
+    expect(opt.adversarialRepro).toBe(true)
+    expect(opt.faultEvidence).toBe(true)
+    expect(opt.verificationPlan).toBe(true)
+    expect(opt.primaryRail).toBe(true)
+    expect(opt.patchHygiene).toBe(true)
+    expect(opt.noPatchBreaker).toBe(true)
+    expect(opt.repairEscalation).toBe(true)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectConcurrency).toBe(3)
+    expect(opt.verifySelectEarlyAccept).toBe(false)
+    expect(opt.verifySelectProofRequired).toBe(true)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    expect(opt.selectorMode).toBe("clean")
+    expect(KNOB_PRESETS["agentless-v4-proof-clean"]).toMatchObject({
+      "bench-in-loop-exec": "repro-only",
+      "repro-test": "10",
+      "adversarial-repro": "1",
+      "test-runner": "1",
+      "fault-evidence": "1",
+      "verification-plan": "1",
+      "primary-rail": "1",
+      "patch-hygiene": "1",
+      "no-patch-breaker": "1",
+      "repair-escalation": "1",
+      "patch-budget-strict": "1",
+      "verify-select": "5",
+      "verify-select-concurrency": "3",
+      "verify-select-proof-required": "1",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "positive",
+      "selector-mode": "clean",
+    })
+    expect(KNOB_PRESETS["agentless-v4-proof-clean"]?.["verify-select-early-accept"]).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v4-proof-clean"]?.["rca-target-gates"]).toBeUndefined()
+    expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean")).toBe(true)
+  })
+
   test("PRESET-15c: no named preset may bake in targeted RCA gates", () => {
     const contaminated = Object.entries(KNOB_PRESETS).filter(
       ([, preset]) => preset["rca-target-gates"] !== undefined,
@@ -566,6 +620,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
       "agentless-v3-thin-strict-counterfactual-shadow",
       "agentless-v3-thin-strict-closure-select-clean",
       "agentless-v3-thin-strict-closure-select-clean-witness-only",
+      "agentless-v4-proof-clean",
     ]) {
       process.env.QUANTA_BENCH_PRESET = preset
       expect(benchOptIns().selectorMode).toBe("clean")

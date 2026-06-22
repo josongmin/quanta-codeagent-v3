@@ -58,14 +58,16 @@ describe("SCAFF-06 — mwe-proof port (base-red oracle, fake exec)", () => {
     expect((await port?.(cand("c0")))?.state).toBe("execution_failed")
   })
 
-  it("base GREEN (does not reproduce) ⇒ NO port (not a fix oracle)", async () => {
+  it("base GREEN (does not reproduce) ⇒ typed base_not_red receipt (not a fix oracle)", async () => {
     const port = await prepareMweProofSelectionPort(instance, "sb", 1000, fakeDeps(true, true))
-    expect(port).toBeUndefined()
+    expect(port).toBeDefined()
+    expect((await port?.(cand("c0")))?.state).toBe("base_not_red")
   })
 
-  it("base INFRA (null run) ⇒ NO port (not a proven oracle)", async () => {
+  it("base INFRA (null run) ⇒ typed execution_failed receipt", async () => {
     const port = await prepareMweProofSelectionPort(instance, "sb", 1000, fakeDeps(null, true))
-    expect(port).toBeUndefined()
+    expect(port).toBeDefined()
+    expect((await port?.(cand("c0")))?.state).toBe("execution_failed")
   })
 
   it("no extractable MWE ⇒ NO port", async () => {

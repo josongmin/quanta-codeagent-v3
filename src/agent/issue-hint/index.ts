@@ -27,6 +27,7 @@ import { extractRefs } from "./extract-refs"
 import { extractSymbols } from "./extract-symbols"
 import { extractTracebacks } from "./extract-tracebacks"
 import type { IssueHint } from "./types"
+import { normalizePublicIssueText } from "@/shared"
 
 export type {
   AgentlessLocalizeDeps,
@@ -80,17 +81,19 @@ const EMPTY_RESULT: IssueHint = {
  *  OMITTED entirely (exactOptionalPropertyTypes-compatible). */
 export const extractIssueHint = (text: string, opts?: ExtractIssueHintOptions): IssueHint => {
   if (typeof text !== "string" || text === "") return EMPTY_RESULT
+  const normalized = normalizePublicIssueText(text)
+  if (normalized === undefined || normalized === "") return EMPTY_RESULT
   const base: IssueHint = {
-    files: extractFiles(text),
-    symbols: extractSymbols(text),
-    errors: extractErrors(text),
-    codeFences: extractCodeFences(text),
-    tracebacks: extractTracebacks(text),
-    tracebackPaths: extractTracebackPaths(text),
-    refs: extractRefs(text),
+    files: extractFiles(normalized),
+    symbols: extractSymbols(normalized),
+    errors: extractErrors(normalized),
+    codeFences: extractCodeFences(normalized),
+    tracebacks: extractTracebacks(normalized),
+    tracebackPaths: extractTracebackPaths(normalized),
+    refs: extractRefs(normalized),
   }
   if (opts?.withExpectedActual === true) {
-    const ea = extractExpectedActual(text)
+    const ea = extractExpectedActual(normalized)
     if (ea.length > 0) return { ...base, expectedActual: ea }
   }
   return base

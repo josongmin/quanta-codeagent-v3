@@ -95,7 +95,13 @@ import {
   knobsForReport,
   resolveBenchKnobs,
 } from "./knobs-bench"
-import { opaqueInstanceIdHash, renderLlmEvidencePacket } from "./llm-evidence-packet"
+import {
+  buildIntakeLlmEvidencePacket,
+  buildSelectionExplanationPacket,
+  type LlmEvidencePacket,
+  opaqueInstanceIdHash,
+  renderLlmEvidencePacket,
+} from "./llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
@@ -113,7 +119,10 @@ import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerializ
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import { makeReproVoteValidate } from "./repair/repro-vote"
-import { makePatchedResolvedConsensus } from "./repair/resolved-consensus"
+import {
+  makePatchedResolvedConsensus,
+  makePatchedResolvedConsensusProof,
+} from "./repair/resolved-consensus"
 import type {
   BuildRepairContextArgs,
   RunOnceResult,
@@ -127,7 +136,10 @@ import {
   benchShouldRunRepairPhase,
   primaryRailRedAfterRepair,
 } from "./repair-phase-policy"
-import { makeDiscoveredRepoRegressionPort } from "./repo-regression-discovery-adapter"
+import {
+  makeDiscoveredRepoRegressionPort,
+  makeDiscoveredRepoRegressionProofPort,
+} from "./repo-regression-discovery-adapter"
 import {
   buildWiring,
   emitPatch,
@@ -2095,6 +2107,26 @@ export const makeReproConsensusSelectionPort = (
     })
 }
 
+export const makeReproConsensusProofSelectionPort = (
+  instance: Instance,
+  reproSources: readonly string[],
+  sandbox: string,
+  timeoutMs: number,
+) => {
+  const probe = makePatchedResolvedConsensusProof({
+    sources: reproSources,
+    ...reproExecBundle(instance),
+  })
+  return (c: Candidate) =>
+    withCandidatePatch({
+      sandbox,
+      patch: c.patch,
+      baseCommit: instance.swebench?.baseCommit,
+      timeoutMs,
+      probe: (sb) => probe(sb),
+    })
+}
+
 const CALIBRATION_UNAVAILABLE: ReproOracleCalibration = {
   goldCalibrated: false,
   falseNegative: false,
@@ -2287,6 +2319,7 @@ const resolveSelectionReproConsensus = async (
     return {
       reproPolicy,
       resolvedKofNSelectionPort: undefined,
+      reproConsensusProofSelectionPort: undefined,
       calibration: calibrationUnavailable,
     }
   }
@@ -2300,12 +2333,24 @@ const resolveSelectionReproConsensus = async (
     return {
       reproPolicy,
       resolvedKofNSelectionPort: port,
+      reproConsensusProofSelectionPort: makeReproConsensusProofSelectionPort(
+        instance,
+        reproSources,
+        sandbox,
+        timeoutMs,
+      ),
       calibration,
     }
   }
   return {
     reproPolicy,
     resolvedKofNSelectionPort: makeReproConsensusSelectionPort(
+      instance,
+      reproSources,
+      sandbox,
+      timeoutMs,
+    ),
+    reproConsensusProofSelectionPort: makeReproConsensusProofSelectionPort(
       instance,
       reproSources,
       sandbox,
@@ -2502,7 +2547,7 @@ const resolveSelectionPhasePorts = async (args: {
   readonly baseValidatedRed: boolean
   readonly selectionOwnerCandidates: readonly string[]
 }) => {
-  const { reproPolicy, resolvedKofNSelectionPort, calibration } =
+  const { reproPolicy, resolvedKofNSelectionPort, reproConsensusProofSelectionPort, calibration } =
     await resolveSelectionReproConsensus(
       args.instance,
       args.sandbox,
@@ -2513,6 +2558,14 @@ const resolveSelectionPhasePorts = async (args: {
   const discoveredRegressionPort =
     args.verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({
+          instance: args.instance,
+          sandbox: args.sandbox,
+          timeoutMs: args.deps.timeoutMs,
+        })
+      : undefined
+  const publicRegressionProofSelectionPort =
+    args.verifySelectRegression === "discovered"
+      ? makeDiscoveredRepoRegressionProofPort({
           instance: args.instance,
           sandbox: args.sandbox,
           timeoutMs: args.deps.timeoutMs,
@@ -2553,6 +2606,8 @@ const resolveSelectionPhasePorts = async (args: {
     resolvedKofNSelectionPort,
     calibration,
     regressionSelectionPort,
+    publicRegressionProofSelectionPort,
+    reproConsensusProofSelectionPort,
     staticSanitySelectionPort,
     smokeSelectionPort,
     mweProofSelectionPort,
@@ -2581,9 +2636,11 @@ const buildSelectionExecutorPorts = (args: {
   readonly baseValidatedRed: boolean | null
   readonly staticSanitySelectionPort: NonNullable<SelectionPorts["staticSanity"]>
   readonly regressionSelectionPort: NonNullable<SelectionPorts["regression"]>
+  readonly publicRegressionProofSelectionPort: SelectionPorts["publicRegressionProof"]
   readonly smokeSelectionPort: SelectionPorts["smoke"]
   readonly mweProofSelectionPort: SelectionPorts["mweProof"]
   readonly resolvedKofNSelectionPort: SelectionPorts["resolvedKofN"]
+  readonly reproConsensusProofSelectionPort: SelectionPorts["reproConsensusProof"]
   readonly rcaTargetGates: boolean
 }): SelectionPorts => {
   const ports: SelectionPorts = {
@@ -2629,8 +2686,12 @@ const buildSelectionExecutorPorts = (args: {
   }
   if (args.smokeSelectionPort !== undefined) ports.smoke = args.smokeSelectionPort
   if (args.mweProofSelectionPort !== undefined) ports.mweProof = args.mweProofSelectionPort
+  if (args.publicRegressionProofSelectionPort !== undefined)
+    ports.publicRegressionProof = args.publicRegressionProofSelectionPort
   if (args.resolvedKofNSelectionPort !== undefined)
     ports.resolvedKofN = args.resolvedKofNSelectionPort
+  if (args.reproConsensusProofSelectionPort !== undefined)
+    ports.reproConsensusProof = args.reproConsensusProofSelectionPort
   if (args.selectorMode === "clean") {
     ports.deriveCandidateStructuralRepair = (candidate) =>
       deriveCandidateStructuralRepair({
@@ -2785,9 +2846,11 @@ const runSelectionPhase = async (
       baseValidatedRed: selectionState.selectionBaseValidatedRed,
       staticSanitySelectionPort: selectionState.staticSanitySelectionPort,
       regressionSelectionPort: selectionState.regressionSelectionPort,
+      publicRegressionProofSelectionPort: selectionState.publicRegressionProofSelectionPort,
       smokeSelectionPort: selectionState.smokeSelectionPort,
       mweProofSelectionPort: selectionState.mweProofSelectionPort,
       resolvedKofNSelectionPort: selectionState.resolvedKofNSelectionPort,
+      reproConsensusProofSelectionPort: selectionState.reproConsensusProofSelectionPort,
       verifySelectProofRequired,
       selectionOwnerFiles: selectionInputs.ownerFiles,
       publicContracts: effectivePublicContracts,
@@ -2993,6 +3056,7 @@ export interface PreparedAttemptContext extends HintReproContext {
   readonly verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined
   readonly primaryRailStep: PrimaryRailStep | undefined
   readonly closureHint: string | undefined
+  readonly intakeLlmEvidence: LlmEvidencePacket
   readonly effectiveRepair: RepairConfig | undefined
   readonly repairGateEligible: boolean
   readonly gateDecisionVerify: boolean
@@ -3314,6 +3378,17 @@ export const prepareAttemptContext = async (
     witnessOwners,
     reproTest: hintRepro.reproTest,
   })
+  const intakeLlmEvidence = buildIntakeLlmEvidencePacket({
+    problemStatement: instance.problemStatement,
+    localizeCandidates: hintRepro.localizeCandidates,
+    ...(closureSession?.bundle.evidence !== undefined
+      ? { faultEvidence: closureSession.bundle.evidence }
+      : {}),
+    ...(closureSession?.bundle.plan !== undefined
+      ? { verificationPlan: closureSession.bundle.plan }
+      : {}),
+    ...(hintRepro.reproTest !== undefined ? { reproTest: hintRepro.reproTest } : {}),
+  })
   return {
     ...hintRepro,
     ownerResolved,
@@ -3321,6 +3396,7 @@ export const prepareAttemptContext = async (
     verificationPlan: closureSession?.bundle.plan,
     primaryRailStep: closureSession?.primaryRailStep,
     closureHint: closureSession?.closureHint,
+    intakeLlmEvidence,
     ...resolveRepairState({
       deps,
       instance,
@@ -3408,14 +3484,28 @@ export const maybeValidateTerminalResult = async (args: {
   readonly wiring: Wiring
   readonly startedAt: number
   readonly signal: AbortSignal
+  readonly prepared: PreparedAttemptContext
+  readonly sandbox: string
 }): Promise<InstanceResult | undefined> => {
   const terminal = terminalAgentResult(args)
   if (terminal === undefined) return undefined
-  if (!shouldValidateGold(args.deps, false)) return terminal
-  const gold = await validateGoldPatch(args.instance, { ...args.deps, signal: args.signal })
-  if (gold.ok) return terminal
-  const { error: _prevError, ...rest } = terminal
-  return { ...rest, passed: false, verdict: "grader_invalid", error: gold.error }
+  let result = terminal
+  if (shouldValidateGold(args.deps, false)) {
+    const gold = await validateGoldPatch(args.instance, { ...args.deps, signal: args.signal })
+    if (!gold.ok) {
+      const { error: _prevError, ...rest } = result
+      result = { ...rest, passed: false, verdict: "grader_invalid", error: gold.error }
+    }
+  }
+  const extra: Partial<InstanceResult> = {}
+  attachLateFailureArtifacts({
+    extra,
+    instance: args.instance,
+    sandbox: args.sandbox,
+    phase: args.phase,
+    prepared: args.prepared,
+  })
+  return { ...result, ...extra }
 }
 
 // jun-21 — REMOVED `maybeStrictBudgetBlockedResult` (the strict patch-budget
@@ -3507,6 +3597,34 @@ const attachClosureMetrics = (args: {
   }
 }
 
+const attachLlmEvidenceArtifacts = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+}): void => {
+  const selectionExplanation =
+    args.phase.selectionTelemetry === undefined
+      ? undefined
+      : buildSelectionExplanationPacket({
+          problemStatement: args.instance.problemStatement,
+          ownerFiles: args.phase.selectionTelemetry.ownerFiles,
+          winnerId: args.phase.selectionTelemetry.winnerId,
+          ...(args.phase.selectionTelemetry.noWinnerReason !== undefined
+            ? { noWinnerReason: args.phase.selectionTelemetry.noWinnerReason }
+            : {}),
+          ...(args.phase.selectionTelemetry.proofRequired === true ? { proofRequired: true } : {}),
+          ...(args.phase.selectionTelemetry.proofSummary !== undefined
+            ? { proofSummary: args.phase.selectionTelemetry.proofSummary }
+            : {}),
+          candidates: args.phase.selectionTelemetry.candidates,
+        })
+  args.extra.llmEvidence = {
+    intake: args.prepared.intakeLlmEvidence,
+    ...(selectionExplanation !== undefined ? { selectionExplanation } : {}),
+  }
+}
+
 const attachSelectionAndClosureArtifacts = (args: {
   readonly extra: Partial<InstanceResult>
   readonly instance: Instance
@@ -3522,6 +3640,7 @@ const attachSelectionAndClosureArtifacts = (args: {
   if (args.phase.selectionTelemetry !== undefined) {
     args.extra.selectionTelemetry = args.phase.selectionTelemetry
   }
+  attachLlmEvidenceArtifacts(args)
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
   const hygiene =
     args.instance.swebench !== undefined
@@ -3797,6 +3916,8 @@ export const runInstanceOnce = async (
       wiring: w,
       startedAt,
       signal: abort.signal,
+      prepared: preparedContext,
+      sandbox,
     })
     if (terminal !== undefined) return terminal
     // NOTE (jun-21): no strict patch-budget terminal-discard here anymore — an

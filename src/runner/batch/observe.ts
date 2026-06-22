@@ -30,6 +30,7 @@ import type { PatchData, RunContext, SandboxData, VerifyData } from "@/shared"
 import { makeEvent, redactValue } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder } from "@/stream"
+import type { ScoreLabel } from "./eval/score-label"
 import type { InstanceResult, InstanceUsage } from "./types"
 
 /**
@@ -166,6 +167,15 @@ interface SummaryInstance {
   verdict: "ok" | "degraded" | "env_prep_failed" | "grader_invalid"
   turns: number
   patchPath?: string
+  scoreLabel?: ScoreLabel
+}
+
+export interface RunScoreSummary {
+  officialHarness: number
+  localStructural: number
+  researchContaminated: number
+  unlabeledPassed: number
+  officialResolvedPct: number
 }
 
 export interface RunSummary {
@@ -176,6 +186,8 @@ export interface RunSummary {
   total: number
   /** Instances whose observation failed in strict mode. */
   degraded: number
+  /** Authority split for passing receipts. */
+  score: RunScoreSummary
   instances: SummaryInstance[]
 }
 
@@ -207,6 +219,29 @@ export const resolvedTotals = (
   }
 }
 
+/** Run-level pass authority split. `officialResolvedPct` uses the SAME
+ * degraded-excluding denominator as {@link resolvedTotals}. */
+export const scoreTotals = (results: readonly InstanceResult[]): RunScoreSummary => {
+  let officialHarness = 0
+  let localStructural = 0
+  let researchContaminated = 0
+  let unlabeledPassed = 0
+  for (const r of results) {
+    if (r.scoreLabel === "official_harness") officialHarness += 1
+    else if (r.scoreLabel === "local_structural") localStructural += 1
+    else if (r.scoreLabel === "research_contaminated") researchContaminated += 1
+    else if (r.passed) unlabeledPassed += 1
+  }
+  const { total } = resolvedTotals(results)
+  return {
+    officialHarness,
+    localStructural,
+    researchContaminated,
+    unlabeledPassed,
+    officialResolvedPct: total === 0 ? 0 : Math.round((officialHarness / total) * 100),
+  }
+}
+
 const summarize = (runId: string, results: readonly InstanceResult[]): RunSummary => {
   const instances: SummaryInstance[] = results.map((r) => ({
     id: r.id,
@@ -214,6 +249,7 @@ const summarize = (runId: string, results: readonly InstanceResult[]): RunSummar
     verdict: verdictOf(r),
     turns: r.turns,
     ...(r.patchPath !== undefined ? { patchPath: r.patchPath } : {}),
+    ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
   }))
   const t = resolvedTotals(results)
   return {
@@ -221,6 +257,7 @@ const summarize = (runId: string, results: readonly InstanceResult[]): RunSummar
     resolved: t.resolved,
     total: t.total,
     degraded: t.degraded,
+    score: scoreTotals(results),
     instances,
   }
 }
@@ -234,8 +271,13 @@ const summarize = (runId: string, results: readonly InstanceResult[]): RunSummar
 const buildMetrics = (results: readonly InstanceResult[]): Metrics => {
   const m = new Metrics()
   const ok = results.filter((r) => verdictOf(r) === "ok")
+  const score = scoreTotals(results)
   m.counter("instances").inc(ok.length)
   m.counter("degraded").inc(results.length - ok.length)
+  m.counter("officialHarness").inc(score.officialHarness)
+  m.counter("localStructural").inc(score.localStructural)
+  m.counter("researchContaminated").inc(score.researchContaminated)
+  m.counter("unlabeledPassed").inc(score.unlabeledPassed)
   for (const r of ok) {
     if (r.passed) m.counter("passed").inc()
     m.timer("turns").record(r.turns)

@@ -8,6 +8,7 @@
 
 import type { StopReason } from "@/agent"
 import type { LocalEnvSelection } from "@/runtime"
+import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 
 /** Official SWE-bench instance metadata, present only for instances loaded
  *  from the real `swebench.verified` corpus. Consumed by the optional Python
@@ -132,6 +133,14 @@ export interface ReproOracleCalibration {
 }
 
 export type SelectionTelemetry = import("./eval/selection-executor").SelectionTelemetry
+export type SelectionProofSummary = import("./eval/selection-executor").SelectionProofSummary
+export type SelectionProofState = import("./eval/selection-executor").SelectionProofState
+export type SelectionProofSource = import("./eval/selection-executor").SelectionProofSource
+export type PublicRegressionProofState =
+  import("./eval/repo-regression-discovery-adapter").PublicRegressionProofState
+export type ReproConsensusProofState =
+  import("./eval/repair/resolved-consensus").ReproConsensusProofState
+export type LlmEvidenceArtifacts = import("./eval/llm-evidence-packet").LlmEvidenceArtifacts
 
 /** Outcome of running one instance once. */
 export interface InstanceResult {
@@ -291,6 +300,15 @@ export interface InstanceResult {
    *  campaign can diagnose selection without re-reading the trajectory. */
   selectionTelemetry?: SelectionTelemetry
   /**
+   * Honest score claim for PASSING receipts only. `official_harness` is the
+   * only label that may feed clean leaderboard-resolved counts; the weaker
+   * labels stay visible for RCA/reporting but must not be promoted.
+   */
+  scoreLabel?: ScoreLabel
+  /** Executed evidence underlying {@link scoreLabel}. Present only when
+   *  {@link scoreLabel} is present. */
+  scoreEvidence?: ReceiptEvidence
+  /**
    * T-301 — the typed VerificationPlan computed for this run (primaryRail +
    * required/optional steps + per-step successPredicate). Emitted only when the
    * `verification-plan` knob is on AND observing; ABSENT ⇒ byte-identical report.
@@ -312,6 +330,12 @@ export interface InstanceResult {
    * observing. Feeds sibling_coverage_expected_rate / miss_rate. Telemetry-only.
    */
   ownerAdmission?: import("@/agent/owner-admission").OwnerAdmission
+  /**
+   * OPC-07 — typed LLM evidence packets recorded for report-only RCA surfaces.
+   * Advisory only: these packets may explain intake / deterministic selection,
+   * but they never alter submit authority.
+   */
+  llmEvidence?: LlmEvidenceArtifacts
   /**
    * T-601 — RepairEscalationDecision (escalate to multi-owner / branch-search,
    * with a structured reason). Emitted only when the `repair-escalation` knob is

@@ -25,6 +25,7 @@
 import { extractIssueRepro } from "@/agent/verification-plan/extract-issue-repro"
 import type { Instance } from "../types"
 import {
+  baseReceipt,
   classifyBaseMwe,
   classifyPatchedMwe,
   type MweProofReceipt,
@@ -48,11 +49,11 @@ const baseStateFromRun = (run: boolean | null): MweProofState =>
  * Build the OPTIONAL executable public-MWE proof port.
  *
  * Returns `undefined` (no port) when there is no extractable MWE / baseCommit, or
- * when the base reset fails, or when the base MWE did NOT reproduce the public
- * failure (`base !== base_red` ⇒ not a valid fix oracle; a base-green MWE is the
- * smoke path's job, not this one). Otherwise returns a per-candidate probe that
- * rematerialises the patch, re-runs the MWE, and classifies the result into a
- * typed {@link MweProofReceipt}.
+ * when the base reset fails. Otherwise returns a per-candidate probe that
+ * rematerialises the patch, re-runs the MWE when a base-red oracle exists, and
+ * otherwise propagates the typed BASE receipt (`base_not_red` or
+ * `execution_failed`) so selector/report surfaces can classify proof infra vs
+ * "no oracle" instead of silently dropping the evidence.
  */
 export const prepareMweProofSelectionPort = async (
   instance: Pick<Instance, "problemStatement" | "localEnv" | "swebench">,
@@ -77,10 +78,7 @@ export const prepareMweProofSelectionPort = async (
   }
   if (!restoredBase) return undefined
   const base = baseStateFromRun(baseRun)
-  // Only a PROVEN base-red oracle can confer candidate authority. A base that did
-  // not reproduce (base_not_red / execution_failed) gives this port nothing to
-  // say — return undefined so it is never supplied as a selection signal.
-  if (base !== "base_red") return undefined
+  if (base !== "base_red") return async () => baseReceipt(base)
 
   const rematerialize = deps.rematerialize ?? withCandidatePatch
   return async (candidate) => {

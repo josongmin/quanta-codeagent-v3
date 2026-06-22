@@ -16,6 +16,10 @@
  * which is the user-explicit requirement: a benchmark report MUST capture
  * its own knob posture so two runs are comparable. Empty registry (knob
  * files not yet imported) ⇒ all three subfields collapse to safe empties.
+ *
+ * Score honesty: `totals.resolved` stays the legacy pass-count headline for
+ * backwards compatibility; `scoreTotals` carries the authority split so only an
+ * official harness green can count as clean leaderboard score.
  */
 import {
   aggregate,
@@ -23,13 +27,20 @@ import {
   type FailureBreakdown,
   type FailureClassification,
 } from "./corpus/failure-classifier"
-import { resolvedTotals } from "./observe"
+import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
+import { resolvedTotals, scoreTotals } from "./observe"
 import type {
   BenchInstanceBudget,
   BenchReproTestTelemetry,
   GradeBreakdown,
   InstanceResult,
+  LlmEvidenceArtifacts,
+  PublicRegressionProofState,
   ReproOracleCalibration,
+  ReproConsensusProofState,
+  SelectionProofSource,
+  SelectionProofState,
+  SelectionProofSummary,
   SelectionTelemetry,
 } from "./types"
 
@@ -81,6 +92,43 @@ export interface PerInstanceReport {
    *  report preserve candidate/admissibility/winner diagnosis without carrying
    *  the full patches or requiring trajectory replay. */
   selectionTelemetry?: SelectionTelemetry
+  proofState?: SelectionProofState
+  proofSource?: SelectionProofSource
+  proofRequiredMissing?: boolean
+  contractOnlySubmitted?: boolean
+  contractOnlyBlocked?: boolean
+  envPrepFailed?: boolean
+  publicMweState?: import("./eval/mwe-proof").MweProofState
+  publicRegressionState?: PublicRegressionProofState
+  reproConsensusState?: ReproConsensusProofState
+  repairOnlyCandidates?: number
+  submittedCandidateProof?: boolean
+  /** Honest score claim for a PASSING receipt. Absent on failures and legacy
+   *  synthetic rows that never went through the runtime scorer. */
+  scoreLabel?: ScoreLabel
+  /** Executed evidence underlying {@link scoreLabel}. */
+  scoreEvidence?: ReceiptEvidence
+  /** OPC-07 report-only typed packets for intake / deterministic selection RCA. */
+  llmEvidence?: LlmEvidenceArtifacts
+}
+
+/** `totals.resolved` stays the legacy pass-count headline for backwards
+ *  compatibility. `scoreTotals` carries the strict split: only
+ *  `officialHarness` counts as clean leaderboard score. */
+export interface BenchScoreTotals {
+  officialHarness: number
+  localStructural: number
+  researchContaminated: number
+  unlabeledPassed: number
+  officialResolvedPct: number
+}
+
+export interface BenchProofTotals {
+  submittedWithProof: number
+  blockedProofMissing: number
+  blockedEnvFailed: number
+  contractOnlyBlocked: number
+  contractOnlySubmitted: number
 }
 
 export interface BenchReport {
@@ -93,6 +141,8 @@ export interface BenchReport {
     resolved: number
     resolvedPct: number
   }
+  scoreTotals: BenchScoreTotals
+  proofTotals: BenchProofTotals
   /** Aggregated failure counts across results. `byTermination` is a covering
    *  partition; `bySignal` is non-exclusive (one failure can carry multiple
    *  signals). Both are emitted in every report; empty objects when 0/n
@@ -120,11 +170,32 @@ export const buildReport = (
   // C8: degraded-excluding denominator — the SAME source as observe.summarize
   // / summary.json. Never count a strict-degraded instance here.
   const { resolved, total } = resolvedTotals(results)
+  const score = scoreTotals(results)
   const classifications = results.map((r) => classify(r))
   const failedClassifications = classifications.filter((c) => c.termination !== "passed")
   // `knobs` defaults to an empty marker so the JSON shape is stable across
   // runs even when the registry is empty (current worktree state).
   const knobs: BenchReportKnobs = meta.knobs ?? { resolved: {}, inactive: [] }
+  const proofTotals = results.reduce<BenchProofTotals>(
+    (totals, r) => {
+      const summary = r.selectionTelemetry?.proofSummary
+      if (summary?.submittedCandidateProof === true) totals.submittedWithProof += 1
+      if (summary?.proofRequiredMissing === true) totals.blockedProofMissing += 1
+      if ((r.verdict ?? "ok") === "env_prep_failed" || summary?.proofState === "infra_blocked") {
+        totals.blockedEnvFailed += 1
+      }
+      if (summary?.contractOnlyBlocked === true) totals.contractOnlyBlocked += 1
+      if (summary?.contractOnlySubmitted === true) totals.contractOnlySubmitted += 1
+      return totals
+    },
+    {
+      submittedWithProof: 0,
+      blockedProofMissing: 0,
+      blockedEnvFailed: 0,
+      contractOnlyBlocked: 0,
+      contractOnlySubmitted: 0,
+    },
+  )
   return {
     timestamp: meta.timestamp ?? new Date().toISOString(),
     model: meta.model,
@@ -135,9 +206,12 @@ export const buildReport = (
       resolved,
       resolvedPct: total === 0 ? 0 : Math.round((resolved / total) * 100),
     },
+    scoreTotals: score,
+    proofTotals,
     failureBreakdown: aggregate(failedClassifications),
     perInstance: results.map((r, i) => {
       const c = classifications[i] ?? { termination: "unknown", signals: [] }
+      const proofSummary: SelectionProofSummary | undefined = r.selectionTelemetry?.proofSummary
       return {
         id: r.id,
         passed: r.passed,
@@ -152,6 +226,30 @@ export const buildReport = (
           ? { reproOracleCalibration: r.reproOracleCalibration }
           : {}),
         ...(r.selectionTelemetry !== undefined ? { selectionTelemetry: r.selectionTelemetry } : {}),
+        ...(proofSummary !== undefined
+          ? {
+              proofState: proofSummary.proofState,
+              proofSource: proofSummary.proofSource,
+              proofRequiredMissing: proofSummary.proofRequiredMissing,
+              contractOnlySubmitted: proofSummary.contractOnlySubmitted,
+              contractOnlyBlocked: proofSummary.contractOnlyBlocked,
+              ...(proofSummary.publicMweState !== undefined
+                ? { publicMweState: proofSummary.publicMweState }
+                : {}),
+              ...(proofSummary.publicRegressionState !== undefined
+                ? { publicRegressionState: proofSummary.publicRegressionState }
+                : {}),
+              ...(proofSummary.reproConsensusState !== undefined
+                ? { reproConsensusState: proofSummary.reproConsensusState }
+                : {}),
+              repairOnlyCandidates: proofSummary.repairOnlyCandidates,
+              submittedCandidateProof: proofSummary.submittedCandidateProof,
+            }
+          : {}),
+        ...(r.verdict === "env_prep_failed" ? { envPrepFailed: true } : {}),
+        ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
+        ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
+        ...(r.llmEvidence !== undefined ? { llmEvidence: r.llmEvidence } : {}),
       }
     }),
     knobs,

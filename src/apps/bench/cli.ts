@@ -1872,7 +1872,7 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   grade        grade existing predictions on a remote backend (ec2 | ssh:host)
   diff         compare two run reports (A/B, regression)
   explain      agent-vs-gold failure analysis for one instance
-  leaderboard  render a resolved/unresolved table from run report(s)
+  leaderboard  render an official/local/research split table from run report(s)
   cost         token / $ / wall-clock summary for a run report
   presets      list bench presets
 

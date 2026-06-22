@@ -47,12 +47,20 @@ export interface RunSummaryLike {
   resolved?: number
   total?: number
   degraded?: number
+  score?: {
+    officialHarness?: number
+    localStructural?: number
+    researchContaminated?: number
+    unlabeledPassed?: number
+    officialResolvedPct?: number
+  }
   instances?: Array<{
     id: string
     passed?: boolean
     verdict?: string
     turns?: number
     patchPath?: string
+    scoreLabel?: "official_harness" | "local_structural" | "research_contaminated"
   }>
 }
 

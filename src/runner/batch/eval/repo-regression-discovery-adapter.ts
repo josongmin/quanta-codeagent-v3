@@ -158,6 +158,17 @@ export interface ExecutedWitnessResult {
   readonly failures: readonly string[]
 }
 
+export type PublicRegressionProofState =
+  | "not_available"
+  | "base_not_green"
+  | "safety_green"
+  | "candidate_red"
+  | "execution_failed"
+
+export interface PublicRegressionProofReceipt extends ExecutedWitnessResult {
+  readonly state: PublicRegressionProofState
+}
+
 const emptyWitnessResult = (
   regressionGreen: boolean | null,
   candidates: readonly ImpactedTestCandidate[],
@@ -290,6 +301,30 @@ export const makeDiscoveredRepoRegressionWitness = (
   }
 }
 
+const toPublicRegressionProofReceipt = (
+  result: ExecutedWitnessResult,
+): PublicRegressionProofReceipt => {
+  const state: PublicRegressionProofState =
+    result.candidateTests.length === 0
+      ? "not_available"
+      : result.baseGreenTests.length === 0
+        ? "base_not_green"
+        : result.regressionGreen === true
+          ? "safety_green"
+          : result.regressionGreen === false
+            ? "candidate_red"
+            : "execution_failed"
+  return { state, ...result }
+}
+
+export const makeDiscoveredRepoRegressionProofPort = (
+  args: DiscoveredRepoRegressionPortArgs,
+): ((c: Candidate) => Promise<PublicRegressionProofReceipt>) => {
+  const witness = makeDiscoveredRepoRegressionWitness(args)
+  return async (candidate: Candidate): Promise<PublicRegressionProofReceipt> =>
+    toPublicRegressionProofReceipt(await witness(candidate))
+}
+
 /**
  * Back-compat port: same `(candidate) => Promise<boolean | null>` signature the
  * selector wires today. It is a pure projection of {@link ExecutedWitnessResult}
@@ -300,7 +335,7 @@ export const makeDiscoveredRepoRegressionWitness = (
 export const makeDiscoveredRepoRegressionPort = (
   args: DiscoveredRepoRegressionPortArgs,
 ): ((c: Candidate) => Promise<boolean | null>) => {
-  const witness = makeDiscoveredRepoRegressionWitness(args)
+  const proof = makeDiscoveredRepoRegressionProofPort(args)
   return async (candidate: Candidate): Promise<boolean | null> =>
-    (await witness(candidate)).regressionGreen
+    (await proof(candidate)).regressionGreen
 }

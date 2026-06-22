@@ -2,8 +2,11 @@ import { describe, expect, it } from "bun:test"
 import {
   canPromoteLabel,
   countsAsOfficialClean,
+  isContaminatingRegressionSource,
   labelForReceipt,
   officialCleanCount,
+  researchContaminationReasons,
+  researchKnobTouched,
   type ScoreLabel,
   weakestLabel,
 } from "@/runner/batch/eval/score-label"
@@ -94,5 +97,31 @@ describe("score-label taxonomy (T-RESOLVE-14)", () => {
         researchKnobTouched: true,
       }),
     ).toBe(false)
+  })
+
+  it("research contamination helper is the SSOT for runtime/report preset checks", () => {
+    expect(
+      researchContaminationReasons({
+        rcaTargetGates: true,
+        verifySelectLlmRiskGate: "on",
+        verifySelectRegression: "gold",
+        reproDoubt: true,
+      }),
+    ).toEqual([
+      "rca-target-gates",
+      "verify-select-llm-risk-gate=on",
+      "repro-doubt",
+      "verify-select-regression(magic-score)",
+    ])
+    expect(
+      researchKnobTouched({
+        rcaTargetGates: false,
+        verifySelectLlmRiskGate: undefined,
+        verifySelectRegression: "discovered",
+        reproDoubt: false,
+      }),
+    ).toBe(false)
+    expect(isContaminatingRegressionSource("gold")).toBe(true)
+    expect(isContaminatingRegressionSource("discovered")).toBe(false)
   })
 })

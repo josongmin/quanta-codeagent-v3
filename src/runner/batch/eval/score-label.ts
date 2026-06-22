@@ -22,6 +22,8 @@
  * `official_harness` without an actual harness run. Pure + deterministic.
  */
 
+import type { BenchPosture } from "./knobs-bench"
+
 export type ScoreLabel = "official_harness" | "local_structural" | "research_contaminated"
 
 /** Strength rank (higher = stronger claim). */
@@ -37,10 +39,39 @@ export interface ReceiptEvidence {
   readonly officialHarnessResolved: boolean
   /** An executed local witness / keep-green / repro consensus came back green. */
   readonly localExecutedGreen: boolean
-  /** The run touched a research-only knob/preset (declaredExpected authority,
-   *  rca-target-gates, repro-doubt, discovered-regression magic score, research/*). */
+  /** The run touched a research-only authority knob (declaredExpected gates,
+   *  live LLM risk veto, repro-doubt, non-witness regression source). */
   readonly researchKnobTouched: boolean
 }
+
+export type ResearchContaminationPosture = Pick<
+  BenchPosture,
+  "rcaTargetGates" | "verifySelectLlmRiskGate" | "verifySelectRegression" | "reproDoubt"
+>
+
+/** `discovered` is the executed-witness path and is admissible in clean mode.
+ *  Any other explicit regression source is an answer-key / magic-score signal. */
+export const isContaminatingRegressionSource = (
+  mode: ResearchContaminationPosture["verifySelectRegression"],
+): boolean => mode !== undefined && mode !== "discovered"
+
+/** Closed set of research-only authority reasons. One SSOT used by the runtime
+ *  scorer and the preset allowlist ratchet. */
+export const researchContaminationReasons = (
+  posture: ResearchContaminationPosture,
+): readonly string[] => {
+  const reasons: string[] = []
+  if (posture.rcaTargetGates) reasons.push("rca-target-gates")
+  if (posture.verifySelectLlmRiskGate === "on") reasons.push("verify-select-llm-risk-gate=on")
+  if (posture.reproDoubt) reasons.push("repro-doubt")
+  if (isContaminatingRegressionSource(posture.verifySelectRegression)) {
+    reasons.push("verify-select-regression(magic-score)")
+  }
+  return reasons
+}
+
+export const researchKnobTouched = (posture: ResearchContaminationPosture): boolean =>
+  researchContaminationReasons(posture).length > 0
 
 /**
  * Derive the receipt's label from its evidence — the WEAKEST justified claim.

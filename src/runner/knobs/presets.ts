@@ -26,9 +26,13 @@
  */
 
 const THIN_STRICT_PRESET_PREFIX = "agentless-v3-thin-strict"
+const PROOF_CLEAN_PRESET_PREFIX = "agentless-v4-proof-clean"
 
 export const presetRequiresLiveLspGrounding = (preset: string): boolean =>
-  preset === THIN_STRICT_PRESET_PREFIX || preset.startsWith(`${THIN_STRICT_PRESET_PREFIX}-`)
+  preset === THIN_STRICT_PRESET_PREFIX ||
+  preset.startsWith(`${THIN_STRICT_PRESET_PREFIX}-`) ||
+  preset === PROOF_CLEAN_PRESET_PREFIX ||
+  preset.startsWith(`${PROOF_CLEAN_PRESET_PREFIX}-`)
 
 export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   // Explicit no-op. Selecting `baseline` is byte-identical to no preset at all.
@@ -480,6 +484,39 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select": "5",
     "verify-select-regression": "discovered",
     "verify-select-repro": "off",
+    "selector-mode": "clean",
+  },
+  // v4 proof-clean arm. Successor to the v3 closure-select-clean family:
+  // keep closure-grounded generation and clean selector authority, but restore
+  // bounded executable public-repro feedback in repro-only mode. This makes the
+  // selector consume proof receipts instead of relying on minimality-only wins.
+  "agentless-v4-proof-clean": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "repro-only",
+    "repro-test": "10",
+    "adversarial-repro": "1",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "5",
+    "verify-select-concurrency": "3",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+    "verify-select-proof-required": "1",
     "selector-mode": "clean",
   },
   // jun-20 no-oracle verify-select arm. Starts from v3-thin, adds N-best

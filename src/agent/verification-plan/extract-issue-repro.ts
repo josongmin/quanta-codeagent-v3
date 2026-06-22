@@ -17,6 +17,8 @@
  * (it becomes a runnable repro); precision matters because it IS executed.
  */
 
+import { normalizePublicIssueText } from "@/shared"
+
 export interface IssueRepro {
   /** The extracted python source (verbatim from the fenced block, trimmed). */
   readonly code: string
@@ -92,8 +94,9 @@ const stripPrompts = (body: string): string => {
  * only if its content is executable python.
  */
 export const extractIssueRepro = (problemStatement: string | undefined): IssueRepro | undefined => {
-  if (problemStatement === undefined || problemStatement.trim() === "") return undefined
-  for (const m of problemStatement.matchAll(FENCE_RE)) {
+  const normalized = normalizePublicIssueText(problemStatement)
+  if (normalized === undefined || normalized.trim() === "") return undefined
+  for (const m of normalized.matchAll(FENCE_RE)) {
     const lang = m[1] ?? ""
     const body = m[2] ?? ""
     if (isExecutablePython(lang, body)) {

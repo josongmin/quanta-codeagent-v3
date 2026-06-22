@@ -2,6 +2,7 @@ export type {
   AttemptObservation,
   MetricsArtifact,
   RunObservation,
+  RunScoreSummary,
   RunSummary,
 } from "@/runner/batch/observe"
 export {
@@ -10,6 +11,7 @@ export {
   countDiff,
   finalizeRun,
   resolvedTotals,
+  scoreTotals,
   UsageTap,
   verifyLogTail,
 } from "@/runner/batch/observe"

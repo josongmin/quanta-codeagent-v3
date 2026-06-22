@@ -338,6 +338,59 @@ describe("runSelection", () => {
     expect(repaired?.files).toEqual(["pkg/base.py", "pkg/backend.py"])
   })
 
+  it("clean mode can derive a structural family from cand0 and upgrade it with candidate-local contracts", async () => {
+    const seeds: (string | undefined)[] = []
+    let calls = 0
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      calls += 1
+      return calls === 1
+        ? cand({
+            id: "cand-0",
+            patch: patchForFiles(["pkg/postgresql/client.py"]),
+            files: ["pkg/postgresql/client.py"],
+          })
+        : cand({
+            id: "cand-0",
+            patch: patchForFiles(["pkg/base/client.py", "pkg/postgresql/client.py"]),
+            files: ["pkg/base/client.py", "pkg/postgresql/client.py"],
+          })
+    }
+
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: new Set(["pkg/base/client.py", "pkg/postgresql/client.py"]),
+      ports: {
+        generate: gen,
+        deriveCandidateStructuralRepair: async () => ({
+          family: {
+            familyId: "override-family",
+            ownerFiles: ["pkg/base/client.py", "pkg/postgresql/client.py"],
+            reason: "shared override family",
+            seed: undefined,
+            sourceEvidence: ["static-witness:ast"],
+          },
+          publicContracts: {
+            contracts: buildMultiSiteFamilyContract([
+              "pkg/base/client.py",
+              "pkg/postgresql/client.py",
+            ]),
+          },
+        }),
+      },
+    })
+
+    expect(seeds).toHaveLength(2)
+    expect(seeds[1]).toContain("Previous attempt missed required family owner files")
+    expect(r.winner?.files).toEqual(["pkg/base/client.py", "pkg/postgresql/client.py"])
+    expect(r.scored[0]?.requiredContractsSatisfied).toBeGreaterThan(0)
+    expect(r.scored[0]?.verdict.reasons).not.toContain(
+      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+    )
+  })
+
   it("regression=false makes a candidate INADMISSIBLE (red-on-injection)", async () => {
     const a = cand({ id: "cand-0", files: ["x.py"], patch: "+++ b/x.py\n+aaa" })
     const b = cand({ id: "cand-1", files: ["x.py"], patch: "+++ b/x.py\n+bbb" })
@@ -461,6 +514,75 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-1")
   })
 
+  it("proof-required mode blocks safety-only regression candidates and reports proof_required_missing", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/x.py\n+safe_only", files: ["x.py"] }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      seeds: [undefined],
+      owners: new Set(["x.py"]),
+      ports: {
+        generate: gen,
+        regression: async () => true,
+      },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.proofRequired).toBe(true)
+    expect(r.noWinnerReason).toBe("proof_required_missing")
+    expect(r.scored[0]?.verdict.admissible).toBe(false)
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:proofRequiredMissing=true (proof-required mode requires positive executed proof; safety or structural evidence alone cannot submit)",
+    )
+    expect(summarizeSelection(r).candidates[0]?.proofState).toBe("safety_only")
+  })
+
+  it("proof-required mode treats MWE execution_failed as infra_blocked instead of candidate-positive", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/x.py\n+maybe_fix", files: ["x.py"] }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      seeds: [undefined],
+      owners: new Set(["x.py"]),
+      ports: {
+        generate: gen,
+        mweProof: async () => ({ state: "execution_failed" }),
+      },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.noWinnerReason).toBe("proof_infra_blocked")
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:proofInfraBlocked=true (public proof execution failed; do not treat this as candidate correctness)",
+    )
+    expect(summarizeSelection(r).candidates[0]?.proofState).toBe("infra_blocked")
+  })
+
+  it("proof-required mode bypasses blind staticAccept and keeps searching through finalize", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/x.py\n+unguarded", files: ["x.py"] }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      seeds: [undefined],
+      owners: new Set(["x.py"]),
+      riskGate: async () => ({ expand: false, reasons: [] }),
+      ports: { generate: gen },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.proofRequired).toBe(true)
+    expect(r.noWinnerReason).toBe("proof_required_missing")
+  })
+
   it("clean mode appends one MWE repair candidate when all generated candidates are candidate_red", async () => {
     const seeds: (string | undefined)[] = []
     const gen: SelectionPorts["generate"] = async (i, seed) => {
@@ -489,6 +611,82 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-2")
     expect(r.scored.find((s) => s.candidate.id === "cand-2")?.candidate.mweReceipt?.state).toBe(
       "patched_green",
+    )
+  })
+
+  it("clean mode enriches MWE repair with missed family coverage guidance", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      if (i === 0) {
+        return cand({
+          id: "cand-0",
+          patch: patchForFiles(["pkg/unrelated.py"]),
+          files: ["pkg/unrelated.py"],
+        })
+      }
+      if (i === 1) {
+        return cand({
+          id: "cand-1",
+          patch:
+            "diff --git a/pkg/unrelated.py b/pkg/unrelated.py\n--- a/pkg/unrelated.py\n+++ b/pkg/unrelated.py\n@@ -1,1 +1,2 @@\n-old\n+new\n+family_attempt",
+          files: ["pkg/unrelated.py"],
+          familyId: "unique-owner",
+          familyReason: "single authoritative owner",
+          familyOwnerFiles: ["pkg/owner.py"],
+        })
+      }
+      return cand({
+        id: "cand-2",
+        patch: patchForFiles(["pkg/owner.py"]),
+        files: ["pkg/owner.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/owner.py"]),
+      ports: {
+        generate: gen,
+        mweProof: async (c) => ({
+          state: c.id === "cand-2" ? "patched_green" : "candidate_red",
+        }),
+      },
+    })
+
+    expect(seeds).toHaveLength(3)
+    expect(seeds[2]).toContain("Previous attempt missed required family owner files")
+    expect(seeds[2]).toContain("`pkg/owner.py`")
+    expect(r.winner?.id).toBe("cand-2")
+  })
+
+  it("clean mode does not submit a public-MWE candidate_red after repair also stays red", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return cand({
+        id: `cand-${i}`,
+        patch: `+++ b/x.py\n+fix${i}`,
+        files: ["x.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      ports: {
+        generate: gen,
+        mweProof: async () => ({ state: "candidate_red" }),
+      },
+    })
+
+    expect(seeds).toHaveLength(3)
+    expect(r.winner).toBeNull()
+    expect(r.scored.every((s) => s.verdict.admissible === false)).toBe(true)
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:mweProof=candidate_red (public issue MWE still fails after patch)",
     )
   })
 
@@ -538,6 +736,84 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-2")
   })
 
+  it("clean mode appends one static-sanity repair candidate when a stronger structural patch is blocked only by deterministic sanity", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      if (i === 0) {
+        return cand({
+          id: "cand-0",
+          patch:
+            "diff --git a/pkg/base.py b/pkg/base.py\n--- a/pkg/base.py\n+++ b/pkg/base.py\n@@ -1,1 +1,1 @@\n-old\n+unsafe_base\n" +
+            "diff --git a/pkg/backend.py b/pkg/backend.py\n--- a/pkg/backend.py\n+++ b/pkg/backend.py\n@@ -1,1 +1,1 @@\n-old\n+unsafe_backend",
+          files: ["pkg/base.py", "pkg/backend.py"],
+        })
+      }
+      if (i === 1) {
+        return cand({
+          id: "cand-1",
+          patch: patchForFiles(["pkg/base.py"]),
+          files: ["pkg/base.py"],
+        })
+      }
+      return cand({
+        id: "cand-2",
+        patch:
+          "diff --git a/pkg/base.py b/pkg/base.py\n--- a/pkg/base.py\n+++ b/pkg/base.py\n@@ -1,1 +1,1 @@\n-old\n+safe_base\n" +
+          "diff --git a/pkg/backend.py b/pkg/backend.py\n--- a/pkg/backend.py\n+++ b/pkg/backend.py\n@@ -1,1 +1,1 @@\n-old\n+safe_backend",
+        files: ["pkg/base.py", "pkg/backend.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      publicContracts: {
+        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
+      },
+      ports: {
+        generate: gen,
+        staticSanity: async (c) =>
+          c.id === "cand-0" ? ["hard:staticSanity=pythonNoneSubscriptMutation(env)"] : [],
+      },
+    })
+
+    expect(seeds).toHaveLength(3)
+    expect(seeds[2]).toContain("deterministic static sanity checks")
+    expect(seeds[2]).toContain("`env` can be None before a subscript write")
+    expect(r.winner?.id).toBe("cand-2")
+  })
+
+  it("clean mode appends one structural repair candidate when all generated candidates are unproven multi-source drift", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return i === 2
+        ? cand({
+            id: "cand-2",
+            patch: patchForFiles(["pkg/a.py"]),
+            files: ["pkg/a.py"],
+          })
+        : cand({
+            id: `cand-${i}`,
+            patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
+            files: ["pkg/a.py", "pkg/b.py"],
+          })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py", "pkg/b.py"]),
+      ports: { generate: gen },
+    })
+
+    expect(seeds).toHaveLength(3)
+    expect(seeds[2]).toContain("unproven multi-source")
+    expect(r.winner?.id).toBe("cand-2")
+  })
+
   it("clean mode hard-rejects unproven multi-source drift without executable proof or public contract", async () => {
     const risky = cand({
       id: "cand-0",
@@ -561,6 +837,28 @@ describe("runSelection", () => {
     expect(r.winner?.id).toBe("cand-1")
     expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
       "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+    )
+  })
+
+  it("clean mode does not submit a proofless patch when owner authority is empty", async () => {
+    const { gen } = genFrom([
+      cand({
+        id: "cand-0",
+        patch: patchForFiles(["pkg/a.py"]),
+        files: ["pkg/a.py"],
+      }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: new Set(),
+      ports: { generate: gen },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)",
     )
   })
 
@@ -1340,10 +1638,12 @@ describe("runSelection", () => {
     expect(t.generationFailures).toBe(0)
     expect(t.generated).toBe(2)
     expect(t.winnerId).toBe("cand-1") // owner-coverage winner
+    expect(t.proofRequired).toBeUndefined()
     expect(t.candidates.map((c) => c.id)).toEqual(["cand-0", "cand-1"])
     expect(t.candidates[0]?.files).toEqual(["blockmatrix.py"])
     expect(t.candidates[0]?.familyCoverageMissing).toEqual(["matexpr.py"])
     expect(t.candidates[1]?.files).toEqual(["matexpr.py"])
+    expect(t.candidates[0]?.proofState).toBe("proof_missing")
     // no full patch leaked into telemetry
     expect(JSON.stringify(t)).not.toContain("+++")
     // reasons carry the WHY (soft signals fired for the admissible winner)

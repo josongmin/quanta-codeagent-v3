@@ -41,6 +41,7 @@ import {
   makeStaticWitness,
   type StaticWitness,
 } from "./static-witness"
+import { normalizePublicIssueText } from "@/shared"
 
 export interface StaticWitnessProviderInput {
   readonly problemStatement: string
@@ -425,10 +426,11 @@ const legacySiblingWitnesses = (input: StaticWitnessProviderInput): StaticWitnes
 export const buildAstStaticWitnesses = (
   input: StaticWitnessProviderInput,
 ): StaticWitness[] => {
+  const problemStatement = normalizePublicIssueText(input.problemStatement) ?? input.problemStatement
   const facts = collectFacts(input)
   const witnesses: StaticWitness[] = [
-    ...overrideFamilyWitnesses(facts, input.problemStatement),
-    ...uniqueDefinerWitnesses(facts, input.problemStatement),
+    ...overrideFamilyWitnesses(facts, problemStatement),
+    ...uniqueDefinerWitnesses(facts, problemStatement),
     ...producerConsumerWitnesses(facts),
     ...registrationCallbackWitnesses(facts),
     ...legacySiblingWitnesses(input),

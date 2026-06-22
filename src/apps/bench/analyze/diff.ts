@@ -25,9 +25,20 @@ export interface RunDiff {
 
 const sorted = (s: Iterable<string>): string[] => [...s].sort()
 
-/** Every instance id observed in a run, across all four verdict buckets. */
+/** Every instance id observed in a run, across all verdict buckets. */
 const allIds = (v: RunVerdicts): Set<string> =>
-  new Set<string>([...v.resolved, ...v.unresolved, ...v.errored, ...v.emptyPatch])
+  new Set<string>([
+    ...v.resolved,
+    ...v.localStructural,
+    ...v.researchContaminated,
+    ...(v.proofMissing ?? []),
+    ...(v.infraBlocked ?? []),
+    ...(v.contractOnlyBlocked ?? []),
+    ...(v.contractOnlySubmitted ?? []),
+    ...v.unresolved,
+    ...v.errored,
+    ...v.emptyPatch,
+  ])
 
 export const diffRuns = (a: RunVerdicts, b: RunVerdicts): RunDiff => {
   const newlyResolved = sorted([...b.resolved].filter((id) => !a.resolved.has(id)))

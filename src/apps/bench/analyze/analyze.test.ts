@@ -25,13 +25,34 @@ describe("loadVerdicts — both report shapes", () => {
     provider: "p",
     n: 4,
     totals: { total: 4, resolved: 1, resolvedPct: 25 },
+    scoreTotals: {
+      officialHarness: 1,
+      localStructural: 0,
+      researchContaminated: 0,
+      unlabeledPassed: 0,
+      officialResolvedPct: 25,
+    },
     perInstance: [
-      { id: "django__django-1", passed: true, turns: 3, patchBytes: 120 },
+      {
+        id: "django__django-1",
+        passed: true,
+        turns: 3,
+        patchBytes: 120,
+        scoreLabel: "official_harness",
+        scoreEvidence: {
+          officialHarnessResolved: true,
+          localExecutedGreen: true,
+          researchKnobTouched: false,
+        },
+      },
       {
         id: "django__django-2",
         passed: false,
         turns: 5,
         patchBytes: 40,
+        proofState: "proof_missing",
+        proofRequiredMissing: true,
+        contractOnlyBlocked: true,
         failure: { termination: "admission_blocked", signals: [] },
       }, // unresolved in our report shape too
       {
@@ -65,12 +86,71 @@ describe("loadVerdicts — both report shapes", () => {
     empty_patch_ids: ["django__django-3"],
   }
 
-  test("our bench report → correct four buckets", () => {
+  test("our bench report → correct official + failure buckets", () => {
     const v = loadVerdicts(ourReport)
     expect([...v.resolved]).toEqual(["django__django-1"])
+    expect([...v.localStructural]).toEqual([])
+    expect([...v.researchContaminated]).toEqual([])
+    expect([...v.proofMissing]).toEqual(["django__django-2"])
+    expect([...v.contractOnlyBlocked]).toEqual(["django__django-2"])
+    expect([...v.infraBlocked]).toEqual([])
     expect([...v.unresolved]).toEqual(["django__django-2"])
     expect([...v.emptyPatch]).toEqual(["django__django-3"])
     expect([...v.errored]).toEqual(["django__django-4"])
+  })
+
+  test("passing rows with weaker score labels stay out of official resolved", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      perInstance: [
+        {
+          id: "django__django-local",
+          passed: true,
+          turns: 2,
+          patchBytes: 10,
+          scoreLabel: "local_structural",
+        },
+        {
+          id: "django__django-research",
+          passed: true,
+          turns: 2,
+          patchBytes: 10,
+          scoreLabel: "research_contaminated",
+        },
+      ],
+    })
+    expect([...v.resolved]).toEqual([])
+    expect([...v.localStructural]).toEqual(["django__django-local"])
+    expect([...v.researchContaminated]).toEqual(["django__django-research"])
+  })
+
+  test("legacy fallback: gradeBreakdown-resolved stays official; unlabeled pass without breakdown stays local", () => {
+    const v = loadVerdicts({
+      ...ourReport,
+      perInstance: [
+        {
+          id: "django__django-harness-legacy",
+          passed: true,
+          turns: 1,
+          patchBytes: 12,
+          gradeBreakdown: {
+            resolved: true,
+            failToPassFailed: 0,
+            passToPassFailed: 0,
+            passToPassTotal: 40,
+          },
+        },
+        {
+          id: "django__django-local-legacy",
+          passed: true,
+          turns: 1,
+          patchBytes: 12,
+        },
+      ],
+    })
+    expect([...v.resolved]).toEqual(["django__django-harness-legacy"])
+    expect([...v.localStructural]).toEqual(["django__django-local-legacy"])
+    expect([...v.researchContaminated]).toEqual([])
   })
 
   test("typed admission_blocked stays unresolved, not errored", () => {
@@ -155,6 +235,8 @@ describe("loadVerdicts — both report shapes", () => {
   test("harness report → correct four buckets", () => {
     const v = loadVerdicts(harnessReport)
     expect([...v.resolved]).toEqual(["django__django-1"])
+    expect([...v.localStructural]).toEqual([])
+    expect([...v.researchContaminated]).toEqual([])
     expect([...v.unresolved]).toEqual(["django__django-2"])
     expect([...v.emptyPatch]).toEqual(["django__django-3"])
     expect([...v.errored]).toEqual(["django__django-4"])
@@ -163,7 +245,14 @@ describe("loadVerdicts — both report shapes", () => {
   test("both shapes yield equivalent RunVerdicts for equivalent data", () => {
     const a = loadVerdicts(ourReport)
     const b = loadVerdicts(harnessReport)
-    for (const k of ["resolved", "unresolved", "emptyPatch", "errored"] as const) {
+    for (const k of [
+      "resolved",
+      "localStructural",
+      "researchContaminated",
+      "unresolved",
+      "emptyPatch",
+      "errored",
+    ] as const) {
       expect([...a[k]].sort()).toEqual([...b[k]].sort())
     }
   })
@@ -198,6 +287,8 @@ describe("loadVerdicts — both report shapes", () => {
 describe("diffRuns", () => {
   const mk = (resolved: string[], rest: string[] = []) => ({
     resolved: new Set(resolved),
+    localStructural: new Set<string>(),
+    researchContaminated: new Set<string>(),
     unresolved: new Set(rest),
     errored: new Set<string>(),
     emptyPatch: new Set<string>(),
@@ -358,11 +449,13 @@ describe("explainFailure", () => {
 // ── leaderboard: dedup keeps resolved when same instance appears twice ──────
 
 describe("renderLeaderboardMarkdown", () => {
-  test("rowsFromRun derives repo from instanceId and resolved flag", () => {
+  test("rowsFromRun derives repo from instanceId and score status", () => {
     const rows = rowsFromRun(
       {
         resolved: new Set(["django__django-1"]),
-        unresolved: new Set(["flask__flask-9"]),
+        localStructural: new Set(["flask__flask-9"]),
+        researchContaminated: new Set<string>(),
+        unresolved: new Set<string>(),
         errored: new Set<string>(),
         emptyPatch: new Set<string>(),
       },
@@ -370,30 +463,51 @@ describe("renderLeaderboardMarkdown", () => {
     )
     const byId = new Map(rows.map((r) => [r.instanceId, r]))
     expect(byId.get("django__django-1")?.repo).toBe("django")
-    expect(byId.get("django__django-1")?.resolved).toBe(true)
+    expect(byId.get("django__django-1")?.status).toBe("official_harness")
     expect(byId.get("flask__flask-9")?.repo).toBe("flask")
-    expect(byId.get("flask__flask-9")?.resolved).toBe(false)
+    expect(byId.get("flask__flask-9")?.status).toBe("local_structural")
   })
 
-  test("dedup keeps RESOLVED when an instance appears resolved + unresolved", () => {
+  test("dedup keeps strongest status when an instance appears multiple times", () => {
     const rows: LeaderRow[] = [
-      { instanceId: "x__1", repo: "x", preset: "a", model: "m", resolved: false },
-      { instanceId: "x__1", repo: "x", preset: "b", model: "m", resolved: true },
+      {
+        instanceId: "x__1",
+        repo: "x",
+        preset: "a",
+        model: "m",
+        status: "research_contaminated",
+      },
+      {
+        instanceId: "x__1",
+        repo: "x",
+        preset: "b",
+        model: "m",
+        status: "official_harness",
+      },
     ]
     const md = renderLeaderboardMarkdown(rows)
-    // 1 instance total, counted as resolved.
-    expect(md).toContain("Resolved: 1 / 1")
-    // x__1 must appear under the resolved table; the unresolved table is empty.
-    const [, resolvedSection = "", unresolvedSection = ""] = md.split(/## (?:Resolved|Unresolved)/)
-    expect(resolvedSection).toContain("x__1")
-    expect(unresolvedSection).not.toContain("x__1")
+    expect(md).toContain("Official harness resolved: 1 / 1")
+    const [, official = "", local = "", research = "", unresolved = ""] = md.split(
+      /## (?:Official Harness|Local Structural|Research Contaminated|Unresolved)/,
+    )
+    expect(official).toContain("x__1")
+    expect(local).not.toContain("x__1")
+    expect(research).not.toContain("x__1")
+    expect(unresolved).not.toContain("x__1")
   })
 
-  test("red-on-injection: an only-unresolved instance is NOT promoted to resolved", () => {
+  test("red-on-injection: local structural does NOT promote to official harness", () => {
     const rows: LeaderRow[] = [
-      { instanceId: "y__2", repo: "y", preset: "a", model: "m", resolved: false },
+      {
+        instanceId: "y__2",
+        repo: "y",
+        preset: "a",
+        model: "m",
+        status: "local_structural",
+      },
     ]
     const md = renderLeaderboardMarkdown(rows)
-    expect(md).toContain("Resolved: 0 / 1")
+    expect(md).toContain("Official harness resolved: 0 / 1")
+    expect(md).toContain("Local structural only: 1")
   })
 })

@@ -50,6 +50,20 @@ describe("extractIssueRepro", () => {
       "import os\nos.getcwd()",
     )
   })
+
+  test("HTML-commented repro fences are ignored", () => {
+    const ps = [
+      "<!-- ```python",
+      "import hidden",
+      "hidden.run()",
+      "``` -->",
+      "```python",
+      "import visible",
+      "visible.run()",
+      "```",
+    ].join("\n")
+    expect(extractIssueRepro(ps)?.code).toBe("import visible\nvisible.run()")
+  })
 })
 
 /**

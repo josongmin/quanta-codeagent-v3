@@ -83,6 +83,7 @@ export {
 export type { NoThrowErrorSink } from "./no-throw-dispatch"
 export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-throw-dispatch"
 export { omitUndef } from "./optional"
+export { normalizePublicIssueText, stripHtmlComments } from "./public-issue-text"
 export { quantaHomeDir, quantaHomeDirFrom, quantaHomePath } from "./quanta-home"
 export { RECONCILE_PLACEHOLDER_TEXT, reconcileToolPairing } from "./reconcile-tool-pairing"
 export { isTestFilePath } from "./test-path"

@@ -1,5 +1,10 @@
 import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
 import { errMessage } from "@/shared"
+import {
+  candidatePatchHash,
+  opaqueInstanceIdHash,
+  renderLlmEvidencePacket,
+} from "./llm-evidence-packet"
 
 const LLM_RISK_GATE_SYSTEM = [
   "You are a strict semantic expansion gate for candidate 0 in SWE-bench verify-select.",
@@ -99,27 +104,39 @@ const parseDecision = (raw: string): LlmPatchRiskDecision => {
 }
 
 const buildUserPrompt = (input: LlmPatchRiskInput): string => {
-  const owners =
-    input.ownerFiles !== undefined && input.ownerFiles.length > 0
-      ? input.ownerFiles.join("\n")
-      : "(none)"
-  const files = input.candidateFiles.length > 0 ? input.candidateFiles.join("\n") : "(none)"
   return [
-    "Public issue text:",
-    input.problemStatement.trim(),
-    "",
-    "Closure-ranked owner files:",
-    owners,
-    "",
-    "Candidate touched files:",
-    files,
+    renderLlmEvidencePacket({
+      stage: "candidate_review",
+      instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
+      evidenceRevision: "risk-gate-v1",
+      candidatePatchHash: candidatePatchHash(input.patch),
+      question: "Should the outer selector expand beyond candidate 0, or is the current patch already low-risk enough to stop?",
+      allowedActions: ["expand", "do_not_expand"],
+      forbiddenSources: [
+        "hidden_tests",
+        "gold_patch",
+        "official_harness_results",
+        "benchmark_case_tables",
+      ],
+      publicIssueFacts: [input.problemStatement.trim()],
+      ownerEvidence: input.ownerFiles ?? [],
+      proofReceipts: [
+        input.candidateFiles.length > 0
+          ? `candidate touched files: ${input.candidateFiles.join(", ")}`
+          : "candidate touched files: <none>",
+      ],
+      contractFacts: [],
+      staticFacts: [
+        "This stage does not judge correctness or select a winner.",
+        "Expand when the patch may miss explicit issue conditions, may implement only a surfaced symptom, may overfit a public example, changes behavior without clear evidence, or you are unsure.",
+      ],
+      missingEvidence: ["no_executed_public_proof_receipts_attached_to_risk_gate"],
+    }),
     "",
     "Candidate patch (unified diff):",
     "```diff",
     input.patch === "" ? "(empty patch)" : input.patch,
     "```",
-    "",
-    "Set expand=true when the patch may miss explicit issue conditions, may implement only a surfaced symptom, may overfit a public example, changes behavior without clear evidence, or you are unsure.",
   ].join("\n")
 }
 
