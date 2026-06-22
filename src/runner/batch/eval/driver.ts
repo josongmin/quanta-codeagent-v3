@@ -58,7 +58,7 @@ import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verific
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
-import { errMessage, gateDisabled, gateOn } from "@/shared"
+import { errMessage, gateDisabled, gateOn, normalizePublicIssueText } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Tool } from "@/tool"
@@ -95,6 +95,7 @@ import {
   knobsForReport,
   resolveBenchKnobs,
 } from "./knobs-bench"
+import { opaqueInstanceIdHash, renderLlmEvidencePacket } from "./llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
@@ -146,10 +147,12 @@ import {
   runRetryLoop,
 } from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
+import { labelForReceipt, type ReceiptEvidence, researchKnobTouched } from "./score-label"
 import { makeDeclaredExpectedSelectionPort } from "./selection-declared-expected"
 import {
   buildSelectionInputs,
   type Candidate,
+  type DerivedCandidateStructuralRepair,
   filesFromPatch,
   runSelection,
   type SelectionPorts,
@@ -281,65 +284,14 @@ const SIMPLICITY_STEER =
   "writing new code. Remove any reproduction script or downloaded file you " +
   "created so only the real source fix remains."
 
-const MESSAGE_FORMAT_STEER =
-  "For error/exception message bugs, reproduce the exact state from the issue " +
-  "and compare the FULL message. Fix the existing message construction so it " +
-  "reports the actual relevant values, including multi-item lists or prefixes; " +
-  "do NOT pass list values into placeholders that still have literal quotes " +
-  "around '{}'; either change the template or render scalar/list values before " +
-  "formatting. " +
-  "When an expected prefix/list is compared with an actual prefix/list, render " +
-  "BOTH sides from the same prefix length; do not keep scalar-only indexing in " +
-  "the failing branch. Preserve scalar display for one item and list display for " +
-  "multiple items by changing the formatter, not by adding a narrow special-case " +
-  "branch. The message template must use unquoted placeholders for pre-rendered " +
-  "display strings. " +
-  "do NOT add a narrow special-case branch that leaves the original misleading " +
-  "formatter reachable for the reproduced scenario."
-
-const RCA_MESSAGE_FORMAT_STEER =
-  "RCA target gate: for the Astropy TimeSeries required-columns issue, do NOT " +
-  "write `expected = required_columns[0] if len(...) == 1 else required_columns` " +
-  "or the analogous `actual = self.colnames[0] ...`; instead build display " +
-  "strings for BOTH expected and found, for example a small local helper that " +
-  "returns `\"'{}'\".format(values[0])` for one item and `str(values)` for many, " +
-  "then pass `required_columns` and `self.colnames[:len(required_columns)]` " +
-  "through that helper."
-
-const ADAPTER_FAMILY_STEER =
-  "When the issue names multiple backends, adapters, drivers, providers, or " +
-  "database implementations, treat them as one owner-family. Inspect every named " +
-  "implementation and the shared base/helper it calls. If a contract, argument " +
-  "arity, SQL function, or conversion rule changes in one backend, patch the " +
-  "parallel sites too; a single-backend patch is incomplete unless the issue " +
-  "explicitly limits the bug to one backend. For timezone/date extraction " +
-  "backend bugs, do not stop at MySQL: update Oracle and SQLite too, and for " +
-  "SQLite change BOTH the SQL call arity and the registered Python UDF arity."
-
-const RCA_ADAPTER_FAMILY_STEER =
-  "RCA target gate: for the Django database TIME_ZONE backend issue, SQLite " +
-  "timezone helper tuples must format both returned SQL string entries: " +
-  "`return \"'%s'\" % tzname, \"'%s'\" % self.connection.timezone_name` " +
-  "or return `'NULL', 'NULL'` when timezone conversion is disabled; never " +
-  "return raw `\"'%s'\"` as the first tuple element."
-
-const EXECUTION_ENV_BOUNDARY_STEER =
-  "For subprocess, shell, command, or environment-variable bugs, trace BOTH the " +
-  "producer of the env/args and the final execution boundary (for example " +
-  "subprocess.run). Empty env maps usually mean 'drop inherited environment', " +
-  "not 'no overrides'; use the language's inherit-default when no overrides are " +
-  "needed. Never initialize an env map to None/null and then keep later " +
-  "env[...] writes reachable; build the override map first, return/pass env or " +
-  "None only at the no-overrides boundary, and patch backend-specific env " +
-  "construction plus the shared caller when both participate. If a backend " +
-  "returns `{}` for no overrides, normalize that to None at the subprocess " +
-  "boundary instead of expanding it into a full inherited env."
-
-const RCA_EXECUTION_ENV_BOUNDARY_STEER =
-  "RCA target gate: for the Django PostgreSQL dbshell empty-env issue, a single " +
-  "patch must change both the PostgreSQL producer (`return args, env or None`) " +
-  "and the base subprocess boundary (`env = {**os.environ, **env} if env else " +
-  "None`); producer-only or base-only patches fail the official tests."
+// REMOVED (jun-22): benchmark-overfit issue-keyword directive steers
+// (MESSAGE_FORMAT / ADAPTER_FAMILY / EXECUTION_ENV_BOUNDARY + their RCA variants).
+// They hard-coded specific SWE-bench instances' gold-patch recipes (astropy
+// TimeSeries required-columns, django TIME_ZONE backend, django PostgreSQL dbshell)
+// into prompt steers triggered by keyword-matching the issue text — answer-key /
+// leaderboard-gaming, banned by the no-heuristic-authority rule. The structural
+// steers (LSP grounding / find-refs / spec-fidelity / simplicity / sibling-
+// completion) remain: they are general method guidance, not instance-tuned.
 
 /** Lever A — SIBLING-COMPLETION / co-change consequence check (2026-06-19,
  *  ceiling RCA). Measured failure mode on the multi-file ceiling subset: quanta
@@ -523,9 +475,6 @@ interface SteerLines {
   readonly lsp: string
   readonly findRefs: string
   readonly spec: string
-  readonly messageFormat: string
-  readonly adapterFamily: string
-  readonly executionEnv: string
   readonly simplicity: string
   readonly sibling: string
 }
@@ -568,7 +517,7 @@ const composeBaseText = (
       : inLoopExecMode === "repro-only"
         ? SWEBENCH_DIRECTIVE_REPRO_ONLY
         : SWEBENCH_DIRECTIVE_NOEXEC
-  return `${base}${directive}${steers.lsp}${steers.findRefs}${steers.spec}${steers.messageFormat}${steers.adapterFamily}${steers.executionEnv}${steers.simplicity}${steers.sibling}`
+  return `${base}${directive}${steers.lsp}${steers.findRefs}${steers.spec}${steers.simplicity}${steers.sibling}`
 }
 
 /**
@@ -944,6 +893,53 @@ export interface PrepareIssueHintDeps {
 
 const DEFAULT_PREPARE_TIMEOUT_MS = 30_000
 
+const cleanUniqueList = (values: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of values) {
+    const value = raw.trim()
+    if (value === "" || seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+  }
+  return out
+}
+
+const normalizeIssuePathCandidate = (raw: string): string => {
+  let value = raw.trim().replaceAll("\\", "/")
+  while (value.startsWith("./")) value = value.slice(2)
+  while (value.startsWith("/")) value = value.slice(1)
+  return value
+}
+
+const uniqueRepoSuffixMatch = (
+  extractedPath: string,
+  repoFiles: readonly string[],
+): string | undefined => {
+  const normalized = normalizeIssuePathCandidate(extractedPath)
+  if (normalized === "") return undefined
+  const repoSet = new Set(repoFiles)
+  if (repoSet.has(normalized)) return normalized
+  const parts = normalized.split("/").filter((part) => part !== "")
+  for (let start = 1; start < parts.length; start += 1) {
+    const suffix = parts.slice(start).join("/")
+    const matches = repoFiles.filter((file) => file === suffix || file.endsWith(`/${suffix}`))
+    if (matches.length === 1) return matches[0]
+  }
+  return undefined
+}
+
+const resolveIssueHintRepoCandidates = (
+  extractedFiles: readonly string[],
+  repoFiles: readonly string[],
+): readonly string[] =>
+  cleanUniqueList(
+    extractedFiles.flatMap((file) => {
+      const resolved = uniqueRepoSuffixMatch(file, repoFiles)
+      return resolved === undefined ? [] : [resolved]
+    }),
+  )
+
 /** Compute the hint string to PREPEND onto the user message, deciding
  *  between the new Agentless LLM path and the legacy regex path based on
  *  `mode`.
@@ -966,18 +962,32 @@ export const prepareIssueHint = async (
   deps: PrepareIssueHintDeps,
 ): Promise<string> => {
   if (mode === "off") return ""
+  const problemStatement =
+    normalizePublicIssueText(instance.problemStatement) ?? instance.problemStatement
   const extractOpts = { withExpectedActual: deps.issueHintExpectedActual }
   if (mode === "regex") {
-    return composeIssueHint(extractIssueHint(instance.problemStatement, extractOpts))
+    return composeIssueHint(extractIssueHint(problemStatement, extractOpts))
   }
   // mode === "agentless"
-  const regexFallback = (): string =>
-    composeIssueHint(extractIssueHint(instance.problemStatement, extractOpts))
+  const fileTree = deps.fileTree ?? (async () => enumerateRepoSources(sandbox))
+  let repoFilesPromise: Promise<string[]> | undefined
+  const readFileTree = async (): Promise<string[]> => {
+    repoFilesPromise ??= fileTree()
+    return repoFilesPromise
+  }
+  const regexFallback = async (): Promise<string> => {
+    const hint = extractIssueHint(problemStatement, extractOpts)
+    if (hint.files.length > 0) {
+      const repoFiles = await readFileTree().catch(() => [])
+      const resolved = resolveIssueHintRepoCandidates(hint.files, repoFiles)
+      if (resolved.length > 0) deps.onCandidates?.(resolved)
+    }
+    return composeIssueHint(hint)
+  }
   // Empty problem statement ⇒ regex also yields "" ⇒ byte-identical.
-  if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
+  if (typeof problemStatement !== "string" || problemStatement.length === 0) {
     return regexFallback()
   }
-  const fileTree = deps.fileTree ?? (async () => enumerateRepoSources(sandbox))
   const localize = deps.localize ?? agentlessLocalize
   const timeoutMs = deps.timeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -987,7 +997,7 @@ export const prepareIssueHint = async (
   let result: AgentlessLocalizeResult
   try {
     result = await Promise.race([
-      localize(instance.problemStatement, { llm: deps.llm, fileTree }),
+      localize(problemStatement, { llm: deps.llm, fileTree: readFileTree }),
       timeoutP,
     ])
   } catch {
@@ -1496,9 +1506,11 @@ const buildBenchRegistry = (instance: Instance, opt: BenchPosture): ToolRegistry
 
 const buildBaseProblemText = (instance: Instance, sandbox: string): string => {
   const verifierHint = repoLocalVerifierHint(instance)
+  const problemStatement =
+    normalizePublicIssueText(instance.problemStatement) ?? instance.problemStatement
   return verifierHint === ""
-    ? `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
-    : `${instance.problemStatement}\n\nWork inside ${sandbox}.\n${verifierHint}\nWhen done, stop.`
+    ? `${problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
+    : `${problemStatement}\n\nWork inside ${sandbox}.\n${verifierHint}\nWhen done, stop.`
 }
 
 const buildDirectiveSteers = (
@@ -1508,9 +1520,6 @@ const buildDirectiveSteers = (
   lsp: string
   findRefs: string
   spec: string
-  messageFormat: string
-  adapterFamily: string
-  executionEnv: string
   simplicity: string
   sibling: string
 } => {
@@ -1525,7 +1534,6 @@ const buildDirectiveSteers = (
       FIND_REFS_STEER,
     ),
     spec: buildSpecSteer(instance, opt, isSwebench),
-    ...buildIssueShapeSteers(instance, opt, isSwebench),
     simplicity: steerLine(
       isSwebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY"),
       SIMPLICITY_STEER,
@@ -1546,63 +1554,6 @@ const buildSpecSteer = (instance: Instance, opt: BenchPosture, isSwebench: boole
       extractIssueDeclaredExpected(instance.problemStatement) !== undefined,
     SPEC_FIDELITY_STEER,
   )
-
-const buildIssueShapeSteers = (
-  instance: Instance,
-  opt: BenchPosture,
-  isSwebench: boolean,
-): Pick<SteerLines, "messageFormat" | "adapterFamily" | "executionEnv"> => {
-  const enabled = isSwebench && opt.issueHintExpectedActual === true
-  const messageFormatSteer =
-    MESSAGE_FORMAT_STEER + (opt.rcaTargetGates ? ` ${RCA_MESSAGE_FORMAT_STEER}` : "")
-  const adapterFamilySteer =
-    ADAPTER_FAMILY_STEER + (opt.rcaTargetGates ? ` ${RCA_ADAPTER_FAMILY_STEER}` : "")
-  const executionEnvSteer =
-    EXECUTION_ENV_BOUNDARY_STEER +
-    (opt.rcaTargetGates ? ` ${RCA_EXECUTION_ENV_BOUNDARY_STEER}` : "")
-  return {
-    messageFormat: steerLine(
-      enabled && hasExceptionMessageFormatIssue(instance.problemStatement),
-      messageFormatSteer,
-    ),
-    adapterFamily: steerLine(
-      enabled && hasAdapterFamilyIssue(instance.problemStatement),
-      adapterFamilySteer,
-    ),
-    executionEnv: steerLine(
-      enabled && hasExecutionEnvBoundaryIssue(instance.problemStatement),
-      executionEnvSteer,
-    ),
-  }
-}
-
-const hasExceptionMessageFormatIssue = (problemStatement: string): boolean => {
-  const text = problemStatement.toLowerCase()
-  const hasMessageSubject =
-    /\b(?:error|exception|valueerror|typeerror|warning)\b/.test(text) &&
-    /\b(?:message|exception|error|valueerror|typeerror|warning)\b/.test(text)
-  if (!hasMessageSubject) return false
-  return /\b(?:misleading|confusing|wrong|incorrect|expected|actual|got|found)\b/.test(text)
-}
-
-const hasAdapterFamilyIssue = (problemStatement: string): boolean => {
-  const text = problemStatement.toLowerCase()
-  const hasFamilySubject = /\b(?:backends?|adapters?|drivers?|providers?|databases?)\b/.test(text)
-  const namedFamilies = new Set<string>()
-  if (text.includes("sqlite")) namedFamilies.add("sqlite")
-  if (text.includes("mysql")) namedFamilies.add("mysql")
-  if (text.includes("oracle")) namedFamilies.add("oracle")
-  if (/\bpostgres(?:ql)?\b/.test(text)) namedFamilies.add("postgresql")
-  if (text.includes("mariadb")) namedFamilies.add("mariadb")
-  return hasFamilySubject && (namedFamilies.size >= 2 || /\b(?:multiple|several|all)\b/.test(text))
-}
-
-const hasExecutionEnvBoundaryIssue = (problemStatement: string): boolean => {
-  const text = problemStatement.toLowerCase()
-  const hasEnv = /\b(?:env|environment|os\.environ|environment variables?)\b/.test(text)
-  const hasExecutionBoundary = /\b(?:subprocess|runshell|dbshell|shell|command)\b/.test(text)
-  return hasEnv && hasExecutionBoundary
-}
 
 const resolveIssueHintText = (
   instance: Instance,
@@ -2429,6 +2380,45 @@ const mergeSelectionHint = (
   return `${closureHint}\n\n${seed}`
 }
 
+const selectionContractIds = (contracts: PublicContractBundle | undefined): readonly string[] =>
+  contracts?.contracts.map((contract) => contract.contractId) ?? []
+
+const buildSelectionGenerationPacket = (args: {
+  readonly problemStatement: string
+  readonly ownerFiles: readonly string[]
+  readonly contractIds: readonly string[]
+  readonly closureHint: string | undefined
+  readonly seed: string | undefined
+  readonly reproHint: string | undefined
+}): string =>
+  renderLlmEvidencePacket({
+    stage: "candidate_generation",
+    instanceIdHash: opaqueInstanceIdHash(args.problemStatement),
+    evidenceRevision: "selection-generation-v1",
+    question: "Produce one minimal candidate patch against the bounded owner/proof surface below.",
+    allowedActions: [
+      "edit_candidate_sandbox_only",
+      "inspect_named_owner_files",
+      "produce_minimal_patch",
+    ],
+    forbiddenSources: [
+      "hidden_tests",
+      "gold_patch",
+      "official_harness_results",
+      "benchmark_case_tables",
+      "broad_multifile_drift_without_public_evidence",
+    ],
+    publicIssueFacts: [
+      "Use only the public issue statement already attached in the main task prompt as issue authority.",
+    ],
+    ownerEvidence: args.ownerFiles,
+    proofReceipts:
+      args.reproHint === undefined ? ["no public repro hint installed"] : [args.reproHint],
+    contractFacts: args.contractIds,
+    staticFacts: [args.closureHint ?? "", args.seed ?? ""],
+    missingEvidence: args.reproHint === undefined ? ["no_executable_public_repro_hint"] : [],
+  })
+
 const mergeStaticWitnessContracts = (
   publicContracts: PublicContractBundle | undefined,
   staticWitnessContracts: ReturnType<typeof buildStaticWitnessContracts>,
@@ -2446,7 +2436,7 @@ const mergeStaticWitnessContracts = (
   }
 }
 
-const buildSelectionPhaseContracts = (args: {
+const buildSelectionStructuralPlan = (args: {
   readonly instance: Instance
   readonly sandbox: string
   readonly selectionOwnerCandidates: readonly string[]
@@ -2483,6 +2473,18 @@ const buildSelectionPhaseContracts = (args: {
     sandbox: args.sandbox,
     ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
+  return { candidateFamilyBundle, effectivePublicContracts, selectionInputs }
+}
+
+const buildSelectionPhaseContracts = (args: {
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly selectionOwnerCandidates: readonly string[]
+  readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly publicContracts: PublicContractBundle | undefined
+  readonly n: number
+}) => {
+  const { effectivePublicContracts, selectionInputs } = buildSelectionStructuralPlan(args)
   return { effectivePublicContracts, selectionInputs }
 }
 
@@ -2565,10 +2567,14 @@ const buildSelectionExecutorPorts = (args: {
   readonly deps: RunInstanceDeps
   readonly sandbox: string
   readonly signal: AbortSignal
+  readonly selectorMode: BenchPosture["selectorMode"]
+  readonly verifySelectProofRequired: boolean
   readonly wiring: Wiring
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly closureHint: string | undefined
+  readonly selectionOwnerFiles: readonly string[]
+  readonly publicContracts: PublicContractBundle | undefined
   readonly concurrency: number | undefined
   readonly generationErrors: Map<number, string>
   readonly addTurns: (turns: number) => void
@@ -2584,7 +2590,17 @@ const buildSelectionExecutorPorts = (args: {
     generate: (index, seed) =>
       generateSelectionCandidate({
         index,
-        seed,
+        seed:
+          args.verifySelectProofRequired && args.selectorMode === "clean"
+            ? buildSelectionGenerationPacket({
+                problemStatement: args.instance.problemStatement,
+                ownerFiles: args.selectionOwnerFiles,
+                contractIds: selectionContractIds(args.publicContracts),
+                closureHint: args.closureHint,
+                seed,
+                reproHint: args.reproHint,
+              })
+            : seed,
         instance: args.instance,
         deps: args.deps,
         sandbox: args.sandbox,
@@ -2592,7 +2608,10 @@ const buildSelectionExecutorPorts = (args: {
         wiring: args.wiring,
         precomputedHint: args.precomputedHint,
         reproHint: args.reproHint,
-        mergeHint: (seedHint) => mergeSelectionHint(args.closureHint, seedHint),
+        mergeHint: (seedHint) =>
+          args.verifySelectProofRequired && args.selectorMode === "clean"
+            ? seedHint
+            : mergeSelectionHint(args.closureHint, seedHint),
         concurrency: args.concurrency,
         baseValidatedRed: args.baseValidatedRed,
         generationErrors: args.generationErrors,
@@ -2612,6 +2631,15 @@ const buildSelectionExecutorPorts = (args: {
   if (args.mweProofSelectionPort !== undefined) ports.mweProof = args.mweProofSelectionPort
   if (args.resolvedKofNSelectionPort !== undefined)
     ports.resolvedKofN = args.resolvedKofNSelectionPort
+  if (args.selectorMode === "clean") {
+    ports.deriveCandidateStructuralRepair = (candidate) =>
+      deriveCandidateStructuralRepair({
+        instance: args.instance,
+        candidate,
+        sandbox: args.sandbox,
+        signal: args.signal,
+      })
+  }
   if (args.rcaTargetGates) ports.declaredExpected = makeDeclaredExpectedSelectionPort(args.instance)
   return ports
 }
@@ -2683,6 +2711,7 @@ const runSelectionPhase = async (
   llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"],
   counterfactual: boolean,
   selectorMode: BenchPosture["selectorMode"],
+  verifySelectProofRequired: boolean,
   publicContracts: PublicContractBundle | undefined,
   rcaTargetGates: boolean,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
@@ -2733,6 +2762,7 @@ const runSelectionPhase = async (
       : {}),
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
+    ...(verifySelectProofRequired ? { proofRequired: true } : {}),
     ...(effectivePublicContracts !== undefined
       ? { publicContracts: effectivePublicContracts }
       : {}),
@@ -2742,6 +2772,7 @@ const runSelectionPhase = async (
       deps,
       sandbox,
       signal,
+      selectorMode,
       wiring: w,
       precomputedHint,
       reproHint,
@@ -2757,6 +2788,9 @@ const runSelectionPhase = async (
       smokeSelectionPort: selectionState.smokeSelectionPort,
       mweProofSelectionPort: selectionState.mweProofSelectionPort,
       resolvedKofNSelectionPort: selectionState.resolvedKofNSelectionPort,
+      verifySelectProofRequired,
+      selectionOwnerFiles: selectionInputs.ownerFiles,
+      publicContracts: effectivePublicContracts,
       rcaTargetGates,
     }),
   })
@@ -2901,7 +2935,11 @@ const noPatchResult = (args: {
   const noWinnerError =
     args.phase.selectionTelemetry?.winnerId === null
       ? (agentPhaseError(args.phase) ??
-        "verify-select produced no submittable candidate (every candidate was either hard-rejected, empty, or did not apply)")
+        (args.phase.selectionTelemetry?.noWinnerReason === "proof_required_missing"
+          ? "verify-select proof-required mode produced no submittable candidate (no candidate achieved positive executed public proof)"
+          : args.phase.selectionTelemetry?.noWinnerReason === "proof_infra_blocked"
+            ? "verify-select proof-required mode produced no submittable candidate (public proof execution was infra-blocked)"
+            : "verify-select produced no submittable candidate (every candidate was either hard-rejected, empty, or did not apply)"))
       : undefined
   return {
     id: args.instance.id,
@@ -2998,11 +3036,12 @@ export const buildSelectionCandidateFamilyBundle = (args: {
   readonly ownerResolved: readonly OwnerSibling[] | undefined
   readonly readSource: (relFile: string) => string | null
 }) => {
+  const problemStatement = normalizePublicIssueText(args.problemStatement) ?? args.problemStatement
   const symbolOwners = args.ownerCandidates.flatMap((file) => {
     const source = args.readSource(file)
     if (source === null) return []
     const symbols = defsInSource(source).filter((symbol) =>
-      issueMentionsSymbol(args.problemStatement, symbol),
+      issueMentionsSymbol(problemStatement, symbol),
     )
     return symbols.length === 0 ? [] : [{ file, symbols }]
   })
@@ -3010,6 +3049,42 @@ export const buildSelectionCandidateFamilyBundle = (args: {
     symbolOwners,
     ownerResolved: args.ownerResolved ?? [],
   })
+}
+
+export const deriveCandidateStructuralRepair = async (args: {
+  readonly instance: Instance
+  readonly candidate: Candidate
+  readonly sandbox: string
+  readonly signal: AbortSignal
+}): Promise<DerivedCandidateStructuralRepair | undefined> => {
+  if (args.candidate.files.length === 0) return undefined
+  const ownerResolved = await resolveOwnerSiblings()({
+    stage1Files: stage1FilesOf(args.candidate.files),
+    issueText: args.instance.problemStatement,
+    cwd: args.sandbox,
+    readSource: (rel) => readSandboxSource(args.sandbox, rel),
+    signal: args.signal,
+  })
+  const selectionOwnerCandidates = cleanUniqueList([
+    ...args.candidate.files,
+    ...ownerResolved.map((owner) => owner.file),
+  ])
+  const structural = buildSelectionStructuralPlan({
+    instance: args.instance,
+    sandbox: args.sandbox,
+    selectionOwnerCandidates,
+    ownerResolved,
+    publicContracts: undefined,
+    n: 2,
+  })
+  const family = structural.selectionInputs.candidateFamilies[1]
+  if (family === undefined && structural.effectivePublicContracts === undefined) return undefined
+  return {
+    ...(family !== undefined ? { family } : {}),
+    ...(structural.effectivePublicContracts !== undefined
+      ? { publicContracts: structural.effectivePublicContracts }
+      : {}),
+  }
 }
 
 export const withCandidateFamilyPublicContracts = (
@@ -3282,6 +3357,7 @@ const runMainPhase = async (args: {
       args.prepared.posture.verifySelectLlmRiskGate,
       args.prepared.posture.verifySelectCounterfactual,
       args.prepared.posture.selectorMode,
+      args.prepared.posture.verifySelectProofRequired,
       publicContracts,
       args.prepared.posture.rcaTargetGates,
       args.prepared.posture.verifySelectRegression,
@@ -3625,6 +3701,18 @@ const buildSuccessfulResultExtra = (args: {
     prepared: args.prepared,
   })
   if (args.verified.breakdown !== undefined) extra.gradeBreakdown = args.verified.breakdown
+  if (args.verified.passed) {
+    const scoreEvidence: ReceiptEvidence = {
+      officialHarnessResolved:
+        args.instance.swebench !== undefined &&
+        args.deps.pythonSwebench?.evaluate !== undefined &&
+        args.graderInvalid === false,
+      localExecutedGreen: true,
+      researchKnobTouched: researchKnobTouched(args.prepared.posture),
+    }
+    extra.scoreEvidence = scoreEvidence
+    extra.scoreLabel = labelForReceipt(scoreEvidence)
+  }
   return extra
 }
 
