@@ -62,4 +62,29 @@ describe("collectRunDiagnostics full-log throttle scan (#8)", () => {
     })
     expect(diag.rateLimited).toBe(false)
   })
+
+  it("the throttle scan greps the FULL log file (not a tail pipe) — mutation guard", async () => {
+    // Teeth: a regression to `tail -N | grep` would re-introduce the scroll-out
+    // blind spot. Pin that the scan command targets the whole runLogPath directly
+    // and never pipes from `tail`.
+    const seen: string[] = []
+    const ssh = async (cmd: string): Promise<SpawnResult> => {
+      seen.push(cmd)
+      return ok()
+    }
+    await collectRunDiagnostics({
+      ssh,
+      runLogPath: "~/runs/chunk-7/run.log",
+      latestLogLine: undefined,
+      remoteRunCode: 0,
+      emptyVerdicts: false,
+      log: () => {},
+    })
+    const scan = seen.find((c) => c.includes("grep -aiE"))
+    expect(scan).toBeDefined()
+    // greps the whole file by path …
+    expect(scan).toContain("~/runs/chunk-7/run.log")
+    // … and does NOT derive its input from a bounded `tail` (the original bug).
+    expect(/tail\b[^|]*\|\s*grep/.test(scan ?? "")).toBe(false)
+  })
 })
