@@ -845,6 +845,11 @@ export interface BoxStatusSnapshot {
   readonly rateLimited?: boolean
   readonly lastExitCode?: number
   readonly lastLogLine?: string
+  /** #9: the report bytes were present but failed to parse (truncated / corrupt
+   *  fetch) — distinct from a genuinely-empty box-loss. Surfaced as machine-
+   *  readable telemetry (not just a log) so `box ls` / postmortems can attribute
+   *  a zero-verdict chunk to a corrupt fetch rather than a real miss. */
+  readonly reportUnparseable?: boolean
 }
 
 export interface BoxRuntimeProbe {
@@ -2157,6 +2162,7 @@ const idleSnapshotExtras = (state: GradeChunkState): Partial<BoxStatusSnapshot> 
     ? { emptyPatchCount: state.finalEmptyPatchCount }
     : {}),
   ...(state.finalRateLimited ? { rateLimited: true } : {}),
+  ...(state.finalReportUnparseable ? { reportUnparseable: true } : {}),
   ...(state.finalLastLogLine !== undefined && state.finalLastLogLine !== ""
     ? { lastLogLine: state.finalLastLogLine }
     : {}),
@@ -2629,9 +2635,11 @@ export const gradeChunkOnBox = async (
     })
     const parsed = parseVerdicts(fetched.reportText)
     // #9: a non-empty report that fails to parse is NOT the same as "box produced
-    // nothing" — surface it loudly with a byte count so a successful grade lost to
-    // a truncated/half-flushed fetch is visible (caller can refetch) instead of
-    // being silently downgraded to a box-loss.
+    // nothing". Surface it loudly (byte-count log) AND as machine-readable status
+    // (`reportUnparseable`), so a successful grade lost to a truncated/half-flushed
+    // fetch is attributable rather than blamed on the box. The chunk still routes
+    // through the no-verdict requeue (a fresh box re-grades) — the safe direction —
+    // instead of being silently counted as a real zero.
     const reportStatus = classifyReportText(fetched.reportText)
     if (reportStatus === "unparseable") {
       state.finalReportUnparseable = true

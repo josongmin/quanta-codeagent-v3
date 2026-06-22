@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { collectBenchKnobsTelemetry } from "@/runner/batch/core"
 import { resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
+import { withKnobModules } from "@/runner/batch/eval/posture/knob-module"
 
 // #5: a PRESENT-but-malformed bench knob env (e.g. out-of-domain) silently fell
 // through to the hardcoded default AND was recorded in `inactive` — byte-
@@ -45,6 +46,19 @@ describe("resolveBenchKnobs rejected loudness (#5)", () => {
   it("does NOT flag an explicitly-empty env (intentional 'use defaults')", () => {
     const state = resolveBenchKnobs({ envVars: { [REGRESSION_KEY]: "  " } })
     expect(state.rejected).toEqual([])
+  })
+
+  it("a phase module that ACTIVATES a rejected knob clears it from `rejected` (symmetry with inactive)", () => {
+    // env raw is invalid (rejected) …
+    const base = resolveBenchKnobs({ envVars: { [REGRESSION_KEY]: "300" } })
+    expect(base.rejected.map((r) => r.id)).toContain("regression-max-tests")
+    // … but a phase module supplies a VALID value ⇒ the knob is now active and
+    // must NOT linger in `rejected` (stale otherwise via the `...base` spread).
+    const folded = withKnobModules(base, [
+      { id: "m", knobs: { "regression-max-tests": "50" } },
+    ])
+    expect(folded.values.has("regression-max-tests")).toBe(true)
+    expect(folded.rejected).toEqual([])
   })
 
   it("WIRING: the rejected list reaches the report SSOT (collectBenchKnobsTelemetry)", () => {
