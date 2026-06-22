@@ -462,7 +462,7 @@ const firstNonEmptyLine = (text: string): string | undefined =>
     .map((line) => line.trim())
     .find((line) => line.length > 0)
 
-const bounded = (text: string, max = 220): string =>
+const boundHead = (text: string, max = 220): string =>
   text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`
 
 const fmtList = (values: readonly string[], empty = "<none>"): string =>
@@ -475,7 +475,7 @@ export const describeIssueFacts = (problemStatement: string): string[] => {
   const normalized = normalizePublicIssueText(problemStatement)?.trim() ?? problemStatement.trim()
   const hint = extractIssueHint(problemStatement)
   return [
-    `issue summary: ${bounded(firstNonEmptyLine(normalized) ?? "<empty issue text>")}`,
+    `issue summary: ${boundHead(firstNonEmptyLine(normalized) ?? "<empty issue text>")}`,
     `issue symbols: ${fmtList(hint.symbols)}`,
     `issue files: ${fmtList(hint.files)}`,
   ]
@@ -700,8 +700,8 @@ const reproReceipts = (repro: IntakeReproTelemetry | undefined): ProofReceiptFac
     {
       source: "public_mwe",
       state: repro.reason.includes("env") ? "env_prep_failed" : "execution_failed",
-      ...(repro.sampleStdoutTail !== undefined ? { stdoutTail: bounded(repro.sampleStdoutTail, 600) } : {}),
-      ...(repro.sampleStderrTail !== undefined ? { stderrTail: bounded(repro.sampleStderrTail, 600) } : {}),
+      ...(repro.sampleStdoutTail !== undefined ? { stdoutTail: boundHead(repro.sampleStdoutTail, 600) } : {}),
+      ...(repro.sampleStderrTail !== undefined ? { stderrTail: boundHead(repro.sampleStderrTail, 600) } : {}),
     },
   ]
 }
@@ -823,7 +823,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     publicIssueFacts: [
       ...describeIssueFacts(input.problemStatement),
       ...(input.closureHint !== undefined && input.closureHint.trim() !== ""
-        ? [`co-change hint: ${bounded(input.closureHint, 400)}`]
+        ? [`co-change hint: ${boundHead(input.closureHint, 400)}`]
         : []),
       ...(input.envCaveats ?? []).map((c) => `env caveat: ${c}`),
     ],
@@ -832,7 +832,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     contractFacts: input.contracts,
     staticFacts: [
       ...(input.seed !== undefined && input.seed.trim() !== ""
-        ? [{ kind: "diversity_seed", value: bounded(input.seed, 400) }]
+        ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
         : []),
     ],
     ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
@@ -1047,7 +1047,7 @@ export const buildRepairSeedLlmEvidencePacket = (
     contractFacts: input.contracts,
     staticFacts:
       input.repairGuidance !== undefined && input.repairGuidance.trim() !== ""
-        ? [{ kind: "repair_guidance", value: bounded(input.repairGuidance, 1800) }]
+        ? [{ kind: "repair_guidance", value: boundHead(input.repairGuidance, 1800) }]
         : [],
     ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
     missingEvidence:

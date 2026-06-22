@@ -14,7 +14,7 @@ import type { BuildRepairContextArgs } from "@/runner/batch/eval/repair/types"
 import type { RepairValidationSource } from "@/runner/batch/eval/repair/types"
 import { filesFromUnifiedDiff } from "@/shared"
 
-const bounded = (s: string | undefined, n = 1200): string => {
+const boundHeadMarker = (s: string | undefined, n = 1200): string => {
   const v = s?.trim() ?? ""
   if (v === "") return ""
   return v.length > n ? `${v.slice(0, n)}\n... <${v.length - n} bytes truncated>` : v
@@ -63,16 +63,16 @@ const staticFactsOf = (args: BuildRepairContextArgs): readonly StaticFact[] => {
       value: touchedFiles.length > 0 ? touchedFiles.join(", ") : "<none>",
     },
     ...(args.cumulativeDiff.trim() !== ""
-      ? [{ kind: "cumulative_patch_excerpt", value: bounded(args.cumulativeDiff, 1600) }]
+      ? [{ kind: "cumulative_patch_excerpt", value: boundHeadMarker(args.cumulativeDiff, 1600) }]
       : []),
     ...(args.failTail.trim() !== ""
-      ? [{ kind: "validation_fail_tail", value: bounded(args.failTail, 1000) }]
+      ? [{ kind: "validation_fail_tail", value: boundHeadMarker(args.failTail, 1000) }]
       : []),
     ...(args.validationSource !== undefined
       ? [{ kind: "validation_source", value: args.validationSource }]
       : []),
     ...(args.predicateSummary !== undefined && args.predicateSummary.trim() !== ""
-      ? [{ kind: "typed_predicate_summary", value: bounded(args.predicateSummary, 600) }]
+      ? [{ kind: "typed_predicate_summary", value: boundHeadMarker(args.predicateSummary, 600) }]
       : []),
   ]
 }
@@ -110,7 +110,7 @@ export const buildRepairRoundLlmEvidencePacket = (
       "generic_retry_without_addressing_failure",
     ],
     publicIssueFacts: [
-      `issue summary: ${bounded(args.problem, 500)}`,
+      `issue summary: ${boundHeadMarker(args.problem, 500)}`,
       ...(args.siblingOwners !== undefined && args.siblingOwners.length > 0
         ? [`co_change_sites: ${[...new Set(args.siblingOwners)].join(", ")}`]
         : []),
