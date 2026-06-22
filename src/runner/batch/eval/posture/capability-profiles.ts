@@ -26,10 +26,20 @@ import type { KnobModule } from "./knob-module"
 
 // ── Primitive capability modules (deltas over the thin-strict base) ──────────
 
-/** N-best verify-select with the no-oracle discovered-repo regression signal. */
+/** N-best verify-select candidate count. ONE capability per module: the
+ *  regression signal is the separate {@link REGRESSION} module (split jun-22 so
+ *  DETACH paired-control holds — `verify-select` and `verify-select-regression`
+ *  are independent fields). */
 export const SELECT_N = (n: number): KnobModule => ({
   id: `select-n-${n}`,
-  knobs: { "verify-select": String(n), "verify-select-regression": "discovered" },
+  knobs: { "verify-select": String(n) },
+})
+
+/** Hard regression signal source for verify-select (no-oracle `discovered` repo
+ *  tests by default; `gold`/`off` for ablations). */
+export const REGRESSION = (mode: "discovered" | "gold" | "off"): KnobModule => ({
+  id: `regression-${mode}`,
+  knobs: { "verify-select-regression": mode },
 })
 
 /** Progressive early-accept: stop after the first hard-positive owner candidate. */
@@ -115,12 +125,123 @@ export const REPAIR_BOUNDED = (rounds: number): KnobModule => ({
   knobs: { "closure-repair": String(rounds) },
 })
 
+/** Closure-repair loop with N rounds (preset spelling of {@link REPAIR_BOUNDED}). */
+export const CLOSURE_REPAIR = REPAIR_BOUNDED
+
+/** LSP-nav grounding steer OFF (the agentless-v1 A/B baseline arm). */
+export const STEER_OFF: KnobModule = { id: "steer-off", knobs: { "lsp-steer": "off" } }
+
+/** Patch hygiene gate (stray-file deny / owner-outside telemetry). */
+export const PATCH_HYGIENE: KnobModule = { id: "patch-hygiene", knobs: { "patch-hygiene": "1" } }
+
+/** Round-0 minimal prompt (suppress repro prose at round 0). */
+export const ROUND0_MINIMAL: KnobModule = { id: "round0-minimal", knobs: { "round0-minimal": "1" } }
+
+/** Multi-agent axis: subagent + bundled skills (the `everything` posture). */
+export const MULTI_AGENT: KnobModule = { id: "multi-agent", knobs: { subagent: "1", skills: "1" } }
+
+/** Counterfactual cand-1 seed when cand-0 trips the structural risk gate. */
+export const COUNTERFACTUAL: KnobModule = {
+  id: "counterfactual",
+  knobs: { "verify-select-counterfactual": "on" },
+}
+
+/** Optional LLM semantic risk gate layered on the structural gate (`shadow` =
+ *  advisory telemetry only; `on` = expands fail-closed). */
+export const LLM_RISK_GATE = (mode: "shadow" | "on"): KnobModule => ({
+  id: `llm-risk-gate-${mode}`,
+  knobs: { "verify-select-llm-risk-gate": mode },
+})
+
+/** K-of-N RESOLVED repro-consensus gate (removes the single-script false-neg). */
+export const REPRO_VOTE: KnobModule = { id: "repro-vote", knobs: { "repro-vote": "1" } }
+
+/** Repro-doubt steer: doubt the repro test (not the fix) when the verify loop
+ *  stalls. N = the steer's trip threshold. */
+export const REPRO_DOUBT = (n: number): KnobModule => ({
+  id: `repro-doubt-${n}`,
+  knobs: { "repro-doubt": String(n) },
+})
+
+// ── Frozen base bundles (the canonical localization/exec anchors) ────────────
+// A base is a KnobModule whose `knobs` is the verbatim frozen literal of the
+// preset of the same name. Presets compose as `expandModules([BASE, ...delta])`.
+
+/** `agentless-v1` — the 9-knob localization+exec core (FROZEN, reproducibility). */
+export const LOCALIZATION_CORE: KnobModule = {
+  id: "agentless-v1",
+  knobs: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+  },
+}
+
+/** `agentless-v3-thin` — localization core + closure grounding + minimal-edit. */
+export const THIN_BASE: KnobModule = {
+  id: "agentless-v3-thin",
+  knobs: {
+    ...LOCALIZATION_CORE.knobs,
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+  },
+}
+
+/** `agentless-v3-thin-strict` — 13-knob mini-first/noexec strict base (the base
+ *  the thin-strict family + v4-proof-clean compose over). */
+export const THIN_STRICT_BASE: KnobModule = {
+  id: "agentless-v3-thin-strict",
+  knobs: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "patch-hygiene": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+  },
+}
+
+/**
+ * Build-time fold: collapse a module list into a flat raw knob map
+ * (last-write-wins on key collision). The static SSOT twin of
+ * `withKnobModules`/`derivePhasePosture` (which fold onto a live BenchKnobState
+ * at RUNTIME). A preset literal is `expandModules([BASE, ...delta])`; the SAME
+ * module arrays feed `PHASE_MODULES`, so preset and phase posture share one
+ * source and cannot drift.
+ */
+export const expandModules = (modules: readonly KnobModule[]): Readonly<Record<string, string>> => {
+  const out: Record<string, string> = {}
+  for (const m of modules) for (const [k, v] of Object.entries(m.knobs)) out[k] = v
+  return out
+}
+
 // ── Named composites that reproduce shipped presets EXACTLY ──────────────────
 // (over an `agentless-v3-thin-strict` base — pinned by the equivalence hellgate)
 
 /** ≡ `agentless-v3-thin-strict-gated`. */
 export const GATED_MODULES: readonly KnobModule[] = [
   SELECT_N(2),
+  REGRESSION("discovered"),
   RISK_GATE,
   SELECT_REPRO_OFF,
   CLEAN_SELECTOR,
@@ -129,6 +250,7 @@ export const GATED_MODULES: readonly KnobModule[] = [
 /** ≡ `agentless-v3-thin-strict-select`. */
 export const SELECT_MODULES: readonly KnobModule[] = [
   SELECT_N(5),
+  REGRESSION("discovered"),
   SELECT_EARLY_ACCEPT,
   SELECT_REPRO_POSITIVE,
 ]
@@ -136,6 +258,7 @@ export const SELECT_MODULES: readonly KnobModule[] = [
 /** ≡ `agentless-v3-thin-strict-closure-select-clean`. */
 export const CLOSURE_SELECT_CLEAN_MODULES: readonly KnobModule[] = [
   SELECT_N(5),
+  REGRESSION("discovered"),
   SELECT_EARLY_ACCEPT,
   SELECT_REPRO_POSITIVE,
   CLOSURE_GROUNDING,
@@ -145,6 +268,7 @@ export const CLOSURE_SELECT_CLEAN_MODULES: readonly KnobModule[] = [
 /** ≡ `agentless-v4-proof-clean`. */
 export const PROOF_CLEAN_MODULES: readonly KnobModule[] = [
   SELECT_N(5),
+  REGRESSION("discovered"),
   SELECT_REPRO_POSITIVE,
   CLOSURE_GROUNDING,
   REPRO_EXEC,
@@ -157,6 +281,7 @@ export const PROOF_CLEAN_MODULES: readonly KnobModule[] = [
  *  oracle and let late selection rank, but do not yet hard-gate submit on it. */
 export const REPRO_RAILS_MODULES: readonly KnobModule[] = [
   SELECT_N(5),
+  REGRESSION("discovered"),
   SELECT_REPRO_POSITIVE,
   CLOSURE_GROUNDING,
   REPRO_EXEC,
