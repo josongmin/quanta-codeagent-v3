@@ -60,9 +60,11 @@ import {
   type CandidateFamily,
   type CandidateFamilyBundle,
   type CandidateFamilyId,
+  candidateFamilyCoverageMissing,
   candidateFamilyRank,
   planFamilyCoverage,
   seedForCandidateFamily,
+  seedForCandidateFamilyCoverageRepair,
 } from "./candidate-families"
 import {
   deriveCounterfactualContracts,
@@ -74,6 +76,7 @@ import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { type MweProofReceipt, type MweProofState, mweProofAuthorityRank } from "./mwe-proof"
 import { contractsSatisfiedCount, requiredContractsSatisfiedCount } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
+import type { ReproConsensusTrace } from "./repair/resolved-consensus"
 
 export interface Candidate {
   /** Stable id (e.g. `cand-0`). */
@@ -130,6 +133,8 @@ export interface SelectionPorts {
 export interface ScoredEntry {
   candidate: Candidate
   hard: HardGateSignals
+  resolvedKofN: ResolvedKofNSignal | null
+  voterQuorum: number | null
   verdict: CandidateVerdict
   requiredContractsSatisfied: number
   contractsSatisfied: number
@@ -224,6 +229,7 @@ export interface CandidateTelemetry {
   familyId?: CandidateFamilyId
   familyReason?: string
   familyOwnerFiles?: readonly string[]
+  familyCoverageMissing?: readonly string[]
   requiredContractsSatisfied?: number
   contractsSatisfied?: number
   /** SCAFF-06 — executable public-MWE proof verdict for this candidate
@@ -277,6 +283,17 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
     ...(s.candidate.familyOwnerFiles !== undefined
       ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
       : {}),
+    ...(() => {
+      if (s.candidate.familyId === undefined) return {}
+      const missing = candidateFamilyCoverageMissing(
+        {
+          familyId: s.candidate.familyId,
+          ownerFiles: s.candidate.familyOwnerFiles ?? [],
+        },
+        s.candidate.files,
+      )
+      return missing.length === 0 ? {} : { familyCoverageMissing: missing }
+    })(),
     requiredContractsSatisfied: s.requiredContractsSatisfied,
     contractsSatisfied: s.contractsSatisfied,
     ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
@@ -508,6 +525,58 @@ const hardResolvedRejected = (signal: ResolvedKofNSignal | null): boolean => {
   return !isValidResolvedKofN(signal) || signal.votes < signal.k
 }
 
+type ResolvedKofNWithTrace = ResolvedKofNSignal & {
+  readonly reproTrace?: ReproConsensusTrace
+}
+
+const reproTraceOf = (signal: ResolvedKofNSignal | null): ReproConsensusTrace | undefined =>
+  signal === null ? undefined : (signal as ResolvedKofNWithTrace).reproTrace
+
+const cleanExecutableProof = (
+  resolved: ResolvedKofNSignal | null,
+  hard: HardGateSignals,
+  mweReceipt: MweProofReceipt | undefined,
+): boolean =>
+  resolvedKofNPositive(resolved) ||
+  hard.regressionGreen === true ||
+  mweReceipt?.state === "patched_green"
+
+const cleanUnprovenMultiSourceDriftRisk = (args: {
+  readonly mode: SelectorMode
+  readonly candidate: Candidate
+  readonly owners: ReadonlySet<string>
+  readonly hard: HardGateSignals
+  readonly resolved: ResolvedKofNSignal | null
+  readonly mweReceipt: MweProofReceipt | undefined
+  readonly requiredContractsSatisfied: number
+  readonly contractsSatisfied: number
+}): boolean => {
+  if (args.mode !== "clean") return false
+  if (
+    cleanExecutableProof(args.resolved, args.hard, args.mweReceipt) ||
+    args.requiredContractsSatisfied > 0 ||
+    args.contractsSatisfied > 0
+  ) {
+    return false
+  }
+  const budget = analyzePatchBudget(args.candidate.patch, {
+    ownerFiles: [...args.owners],
+  }).budget
+  return budget.sourceFiles > 1
+}
+
+const applyCleanDriftHardGate = (verdict: CandidateVerdict, risk: boolean): CandidateVerdict =>
+  risk
+    ? {
+        admissible: false,
+        score: verdict.score,
+        reasons: [
+          ...verdict.reasons,
+          "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+        ],
+      }
+    : verdict
+
 const DECLARED_EXPECTED_REJECT_REASON =
   "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)"
 
@@ -561,7 +630,7 @@ const buildLexTiers = (
   owners: ReadonlySet<string>,
   contracts: PublicContractBundle,
 ): LexTiers => {
-  const kofn = entry.hard.patchedResolvedKofN
+  const kofn = entry.resolvedKofN ?? entry.hard.patchedResolvedKofN
   const proofStrength =
     kofn !== null && isValidResolvedKofN(kofn) && kofn.k > 0 ? kofn.votes / kofn.k : 0
   const budget = analyzePatchBudget(entry.candidate.patch, { ownerFiles: [...owners] }).budget
@@ -653,6 +722,12 @@ export const runSelection = async (args: {
    *  Families steer exploration and clean lexicographic family rank only after
    *  the generated patch actually touches the family files. */
   candidateFamilies?: readonly (CandidateFamily | undefined)[]
+  /** CLEAN-only, validated-public-oracle repair seed. This is not a heuristic:
+   *  the executor appends one extra candidate only after every generated
+   *  candidate has been executed against the relevant public oracle and none
+   *  resolves it. Driver-supplied text may include base-red validated repro
+   *  sources; absent keeps behavior byte-identical. */
+  oracleFailureRepairSeed?: string
 }): Promise<SelectionResult> => {
   // ── generate ──────────────────────────────────────────────────────────────
   // Results are collected in INDEX order regardless of completion timing, so
@@ -682,26 +757,44 @@ export const runSelection = async (args: {
   let counterfactualOwnerFile: string | undefined
   let counterfactualSeed: string | undefined
   const counterfactualCandidateIds = new Set<string>()
+  const withFamily = (candidate: Candidate, family: CandidateFamily): Candidate => ({
+    ...candidate,
+    familyId: family.familyId,
+    familyReason: family.reason,
+    familyOwnerFiles: family.ownerFiles,
+  })
+  const maybeRepairFamilyCoverage = async (
+    candidate: Candidate,
+    family: CandidateFamily,
+    seed: string | undefined,
+    index: number,
+  ): Promise<Candidate> => {
+    const candidateWithFamily = withFamily(candidate, family)
+    const missing = candidateFamilyCoverageMissing(family, candidate.files)
+    if (missing.length === 0 || candidate.patch.trim() === "") return candidateWithFamily
+    const repairSeed =
+      `${seed ?? ""}\n\n${seedForCandidateFamilyCoverageRepair(family, missing)}`.trim()
+    try {
+      const repaired = await args.ports.generate(index, repairSeed)
+      const repairedMissing = candidateFamilyCoverageMissing(family, repaired.files)
+      return repaired.patch.trim() !== "" && repairedMissing.length < missing.length
+        ? withFamily(repaired, family)
+        : candidateWithFamily
+    } catch {
+      return candidateWithFamily
+    }
+  }
   const tryGenerate = async (i: number): Promise<Candidate | null> => {
     try {
       // The counterfactual seed replaces ONLY cand1 (the primary minimal
       // alternative). cand2+ keep their owner-focus seeds so the extra budget
       // still spans DIFFERENT fix sites — diversity, not N copies of one seed.
       const useCounterfactual = counterfactualSeed !== undefined && i === 1
-      const candidate = await args.ports.generate(
-        i,
-        useCounterfactual ? counterfactualSeed : args.seeds[i],
-      )
+      const seed = useCounterfactual ? counterfactualSeed : args.seeds[i]
+      const candidate = await args.ports.generate(i, seed)
       if (useCounterfactual) counterfactualCandidateIds.add(candidate.id)
       const family = useCounterfactual ? undefined : args.candidateFamilies?.[i]
-      if (family !== undefined) {
-        return {
-          ...candidate,
-          familyId: family.familyId,
-          familyReason: family.reason,
-          familyOwnerFiles: family.ownerFiles,
-        }
-      }
+      if (family !== undefined) return maybeRepairFamilyCoverage(candidate, family, seed, i)
       return candidate
     } catch {
       generationFailures += 1
@@ -777,18 +870,148 @@ export const runSelection = async (args: {
       touchedFiles: c.files,
       touchedSymbols: diffTouchedSymbols(c.patch),
     }
+    const requiredContractsSatisfied = requiredContractsSatisfiedCount(
+      contractBundle,
+      contractCandidate,
+    )
+    const contractsSatisfied = contractsSatisfiedCount(contractBundle, contractCandidate)
+    const verdict = scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode)
     return {
       // SCAFF-06: carry the selection-time MWE receipt on the scored candidate so
       // the lexicographic top tier (buildLexTiers) sees it. Identity-preserving
       // when there is no receipt (byte-identical to the pre-SCAFF-06 path).
       candidate: probed.mweReceipt !== undefined ? { ...c, mweReceipt: probed.mweReceipt } : c,
       hard: probed.hard,
-      verdict: scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode),
-      requiredContractsSatisfied: requiredContractsSatisfiedCount(
-        contractBundle,
-        contractCandidate,
-      ),
-      contractsSatisfied: contractsSatisfiedCount(contractBundle, contractCandidate),
+      resolvedKofN: probed.resolvedKofN,
+      voterQuorum: probed.voterQuorum,
+      verdict,
+      requiredContractsSatisfied,
+      contractsSatisfied,
+    }
+  }
+
+  const applySetLevelCleanDriftGate = (scored: ScoredEntry[]): void => {
+    if (mode !== "clean") return
+    // If any executable public-MWE receipt exists, the MWE tier is the stronger
+    // authority. Do not let broad-drift protection overturn a candidate_red vs
+    // no-receipt ordering; the drift gate is only for proofless sets.
+    if (scored.some((s) => s.candidate.mweReceipt !== undefined)) return
+    for (const entry of scored) {
+      entry.verdict = applyCleanDriftHardGate(
+        entry.verdict,
+        cleanUnprovenMultiSourceDriftRisk({
+          mode,
+          candidate: entry.candidate,
+          owners: args.owners,
+          hard: entry.hard,
+          resolved: entry.resolvedKofN,
+          mweReceipt: entry.candidate.mweReceipt,
+          requiredContractsSatisfied: entry.requiredContractsSatisfied,
+          contractsSatisfied: entry.contractsSatisfied,
+        }),
+      )
+    }
+  }
+
+  const hasNonEmptyPatch = (entry: ScoredEntry): boolean => entry.candidate.patch.trim() !== ""
+
+  const mweOracleRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
+    const patched = scored.filter(hasNonEmptyPatch)
+    return (
+      patched.length > 0 &&
+      patched.some((s) => s.candidate.mweReceipt !== undefined) &&
+      !patched.some((s) => s.candidate.mweReceipt?.state === "patched_green") &&
+      patched.every((s) => s.candidate.mweReceipt?.state === "candidate_red")
+    )
+  }
+
+  const unresolvedReproConsensus = (signal: ResolvedKofNSignal | null): boolean =>
+    signal !== null && isValidResolvedKofN(signal) && signal.k > 0 && signal.votes < signal.k
+
+  const reproOracleRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
+    if (args.oracleFailureRepairSeed === undefined) return false
+    const patched = scored.filter(hasNonEmptyPatch)
+    return (
+      patched.length > 0 &&
+      patched.some((s) => s.resolvedKofN !== null) &&
+      !patched.some(
+        (s) =>
+          s.resolvedKofN !== null &&
+          isValidResolvedKofN(s.resolvedKofN) &&
+          s.resolvedKofN.votes >= s.resolvedKofN.k,
+      ) &&
+      patched.every((s) => unresolvedReproConsensus(s.resolvedKofN))
+    )
+  }
+
+  const bounded = (s: string | undefined, n = 1800): string => {
+    const v = s ?? ""
+    return v.length > n ? v.slice(-n) : v
+  }
+
+  const reproFailureTraceSeed = (scored: readonly ScoredEntry[]): string | undefined => {
+    const entry = scored.find((s) => {
+      if (!unresolvedReproConsensus(s.resolvedKofN)) return false
+      return reproTraceOf(s.resolvedKofN) !== undefined
+    })
+    if (entry === undefined || entry.resolvedKofN === null) return undefined
+    const trace = reproTraceOf(entry.resolvedKofN)
+    if (trace === undefined) return undefined
+    const samples = trace.samples
+      .filter((sample) => sample.outcome !== "resolved")
+      .slice(0, 2)
+      .map((sample, i) =>
+        [
+          `Patched repro sample ${i + 1}: outcome=${sample.outcome}`,
+          sample.stdoutTail.trim() === ""
+            ? "stdout tail: <empty>"
+            : `stdout tail:\n${bounded(sample.stdoutTail)}`,
+          sample.stderrTail.trim() === ""
+            ? "stderr tail: <empty>"
+            : `stderr tail:\n${bounded(sample.stderrTail)}`,
+        ].join("\n"),
+      )
+    return [
+      `Selector failure trace from ${entry.candidate.id}: votes=${entry.resolvedKofN.votes}, k=${entry.resolvedKofN.k}; vote=${trace.vote.verdict} (resolved=${trace.vote.resolved}, reproduced=${trace.vote.reproduced}, inconclusive=${trace.vote.inconclusive}).`,
+      ...samples,
+    ].join("\n\n")
+  }
+
+  const oracleFailureRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
+    if (mweOracleRepairRequired(scored)) {
+      return [
+        "Selector feedback: every generated candidate was executed against a public issue MWE that reproduced on the base tree, and every candidate still failed that MWE.",
+        "Regenerate from the base tree. Treat the public MWE in the issue text as the executable contract: the patch must make that MWE pass without broadening the edit beyond the necessary source change.",
+        args.oracleFailureRepairSeed,
+      ]
+        .filter((s): s is string => s !== undefined && s.trim() !== "")
+        .join("\n\n")
+    }
+    if (reproOracleRepairRequired(scored)) {
+      return [
+        "Selector feedback: every generated candidate was re-run against the base-red validated reproduction set, and none reached resolved consensus.",
+        "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts report `Issue resolved` without adding unnecessary helpers, files, or unrelated design surface.",
+        reproFailureTraceSeed(scored),
+        args.oracleFailureRepairSeed,
+      ]
+        .filter((s): s is string => s !== undefined && s.trim() !== "")
+        .join("\n\n")
+    }
+    return undefined
+  }
+
+  const maybeAppendOracleRepair = async (
+    rawCandidates: readonly Candidate[],
+    result: SelectionResult,
+  ): Promise<readonly Candidate[]> => {
+    if (mode !== "clean" || rawCandidates.length === 0) return rawCandidates
+    const seed = oracleFailureRepairSeed(result.scored)
+    if (seed === undefined) return rawCandidates
+    try {
+      const repaired = await args.ports.generate(rawCandidates.length, seed)
+      return repaired.patch.trim() === "" ? rawCandidates : [...rawCandidates, repaired]
+    } catch {
+      return rawCandidates
     }
   }
 
@@ -833,6 +1056,8 @@ export const runSelection = async (args: {
     const entry = {
       candidate,
       hard,
+      resolvedKofN: null,
+      voterQuorum: null,
       verdict: scoreWithAuthority(hard, soft, soft.declaredExpectedMatch, mode),
       requiredContractsSatisfied: 0,
       contractsSatisfied: 0,
@@ -901,6 +1126,7 @@ export const runSelection = async (args: {
     for (let i = 0; i < cands.length; i++) {
       scored.push(await scoreOne(cands[i] as Candidate, minB, maxB))
     }
+    applySetLevelCleanDriftGate(scored)
 
     // ── counterfactual contract gate (T-301) ────────────────────────────────
     // A candidate spawned under the counterfactual seed that VIOLATES its own
@@ -1103,5 +1329,13 @@ export const runSelection = async (args: {
     )
     raw = maybeRaw.filter((candidate): candidate is Candidate => candidate !== null)
   }
-  return await finalize(raw, false, riskGateTelemetry)
+  let result = await finalize(raw, false, riskGateTelemetry)
+  let repairedRaw = raw
+  for (let repairRound = 0; repairRound < 2; repairRound++) {
+    const nextRaw = await maybeAppendOracleRepair(repairedRaw, result)
+    if (nextRaw.length === repairedRaw.length) return result
+    repairedRaw = [...nextRaw]
+    result = await finalize(repairedRaw, false, riskGateTelemetry)
+  }
+  return result
 }

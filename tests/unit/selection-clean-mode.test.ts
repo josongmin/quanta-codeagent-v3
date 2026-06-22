@@ -289,7 +289,7 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.requiredContractsSatisfied).toBe(1)
   })
 
-  it("CLEAN: multi-site family rank applies only when the candidate touches every family file", async () => {
+  it("CLEAN: family rank alone cannot bypass unproven multi-source drift gating", async () => {
     const r = await runSelection({
       n: 2,
       seeds: [undefined, undefined],
@@ -301,8 +301,10 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
         applyClean: async () => true,
       },
     })
-    expect(r.winner?.id).toBe("cand-1")
-    expect(r.winner?.familyId).toBe("multi-site")
+    expect(r.winner?.id).toBe("cand-0")
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
+      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+    )
   })
 })
 

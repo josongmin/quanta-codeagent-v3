@@ -95,6 +95,7 @@ import {
   knobsForReport,
   resolveBenchKnobs,
 } from "./knobs-bench"
+import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
@@ -156,7 +157,6 @@ import {
 } from "./selection-executor"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
-import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { witnessAuthoritativeOwners } from "./static-witness"
@@ -1213,6 +1213,20 @@ const reproducingReproSources = (
   selection: ReproTestSelection | null | undefined,
 ): readonly string[] =>
   selection?.samples.filter((s) => s.outcome === "reproduced").map((s) => s.source) ?? []
+
+export const validatedReproRepairSeed = (sources: readonly string[]): string | undefined => {
+  if (sources.length === 0) return undefined
+  const scripts = sources
+    .map((source, i) =>
+      [`Validated reproduction script ${i + 1}:`, "```python", source.trim(), "```"].join("\n"),
+    )
+    .join("\n\n")
+  return [
+    "The following reproduction script(s) were generated from the public issue and executed on the base tree; each printed `Issue reproduced` there.",
+    "They are admissible public oracle evidence for repair generation only after candidate selection has already shown every candidate unresolved.",
+    scripts,
+  ].join("\n\n")
+}
 
 export const selectionReproPrepK = (
   posture: Pick<BenchPosture, "verifySelectN" | "verifySelectRepro" | "reproTestK">,
@@ -2423,6 +2437,7 @@ const runSelectionPhase = async (
     sandbox,
     ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
+  const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
   const mergeHint = (seed: string | undefined): string | undefined =>
     seed === undefined
@@ -2481,6 +2496,7 @@ const runSelectionPhase = async (
     ...(effectivePublicContracts !== undefined
       ? { publicContracts: effectivePublicContracts }
       : {}),
+    ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({

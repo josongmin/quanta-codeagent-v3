@@ -106,8 +106,26 @@ const cleanList = (xs: readonly string[]): string[] => {
 const hasAny = (xs: readonly string[], ys: ReadonlySet<string>): boolean =>
   xs.some((x) => ys.has(x))
 
-const hasAll = (xs: readonly string[], ys: ReadonlySet<string>): boolean =>
-  xs.every((x) => ys.has(x))
+const isCoChangeFamily = (familyId: CandidateFamilyId): boolean => COCHANGE_FAMILY_IDS.has(familyId)
+
+/**
+ * Files still missing from this candidate's structural family coverage.
+ *
+ * This is deliberately a pure structural check over typed family evidence and
+ * touched files. It does not inspect issue text, benchmark ids, hidden tests, or
+ * path-specific case rules.
+ */
+export const candidateFamilyCoverageMissing = (
+  family: Pick<CandidateFamily, "familyId" | "ownerFiles"> | undefined,
+  touchedFiles: readonly string[],
+): string[] => {
+  if (family === undefined) return []
+  const ownerFiles = cleanList(family.ownerFiles)
+  if (ownerFiles.length === 0) return []
+  const touched = new Set(touchedFiles)
+  if (isCoChangeFamily(family.familyId)) return ownerFiles.filter((file) => !touched.has(file))
+  return hasAny(ownerFiles, touched) ? [] : ownerFiles
+}
 
 export const candidateFamilyRank = (
   family: Pick<CandidateFamily, "familyId" | "ownerFiles"> | undefined,
@@ -116,11 +134,7 @@ export const candidateFamilyRank = (
   if (family === undefined) return 0
   const ownerFiles = cleanList(family.ownerFiles)
   if (ownerFiles.length === 0) return 0
-  const touched = new Set(touchedFiles)
-  const isCoChange = COCHANGE_FAMILY_IDS.has(family.familyId)
-  if (isCoChange && !hasAll(ownerFiles, touched)) return 0
-  if (!isCoChange && !hasAny(ownerFiles, touched)) return 0
-  return 1
+  return candidateFamilyCoverageMissing(family, touchedFiles).length === 0 ? 1 : 0
 }
 
 export const seedForCandidateFamily = (family: CandidateFamily): string => {
@@ -133,7 +147,27 @@ export const seedForCandidateFamily = (family: CandidateFamily): string => {
     family.seed === undefined || family.seed.trim() === ""
       ? ""
       : ` Static seed: ${family.seed.trim()}`
-  return `Explore the \`${family.familyId}\` candidate family.${fileLine}${seedLine} Use this static witness only to choose where to inspect; edit only after confirming the root cause from public source evidence.`
+  const coverageLine =
+    files.length === 0
+      ? ""
+      : isCoChangeFamily(family.familyId)
+        ? ` Family coverage postcondition: if public source evidence confirms this family is relevant, the final patch must touch every family owner file listed above; if source evidence disproves this family, leave this candidate with no patch rather than producing a partial single-site patch.`
+        : ` Family coverage postcondition: if public source evidence confirms this family is relevant, the final patch must touch at least one family owner file listed above; if source evidence disproves this family, leave this candidate with no patch rather than editing an unrelated file.`
+  return `Explore the \`${family.familyId}\` candidate family.${fileLine}${seedLine}${coverageLine} Use this static witness only to choose where to inspect; edit only after confirming the root cause from public source evidence.`
+}
+
+export const seedForCandidateFamilyCoverageRepair = (
+  family: CandidateFamily,
+  missingFiles: readonly string[],
+): string => {
+  const missing = cleanList(missingFiles)
+  const missingLine =
+    missing.length === 0
+      ? ""
+      : ` Previous attempt missed required family owner files: ${missing
+          .map((file) => `\`${file}\``)
+          .join(", ")}.`
+  return `${seedForCandidateFamily(family)}${missingLine} Regenerate this same candidate from the base tree and satisfy the family coverage postcondition, or produce no patch if public source evidence disproves the family.`
 }
 
 const rootOwnerFamilyOf = (rootOwnerFiles: readonly string[]): CandidateFamily | undefined => {

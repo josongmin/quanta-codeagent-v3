@@ -80,14 +80,20 @@ describe("makePatchedResolvedConsensus (port)", () => {
     ])
     const probe = makePatchedResolvedConsensus({ sources: ["a", "b", "c"], exec, writeFile })
     const r = await probe("/patched")
-    expect(r).toEqual({ votes: 2, k: 2 }) // majority(3)=2; 2 resolved ⇒ admits
+    expect(r).toMatchObject({ votes: 2, k: 2 }) // majority(3)=2; 2 resolved ⇒ admits
+    expect(r?.reproTrace.vote).toEqual({
+      verdict: "resolved",
+      resolved: 2,
+      reproduced: 1,
+      inconclusive: 0,
+    })
   })
 
   it("RED-on-injection: one fewer resolved ⇒ votes drops under the majority quorum", async () => {
     const { exec, writeFile } = makeExec(["Issue resolved", "Issue reproduced", "Issue reproduced"])
     const probe = makePatchedResolvedConsensus({ sources: ["a", "b", "c"], exec, writeFile })
     const r = await probe("/patched")
-    expect(r).toEqual({ votes: 1, k: 2 }) // 1 < 2 ⇒ bundle rejects
+    expect(r).toMatchObject({ votes: 1, k: 2 }) // 1 < 2 ⇒ bundle rejects
   })
 
   it("FAIL-OPEN: empty sources ⇒ null without exec", async () => {
@@ -125,7 +131,7 @@ describe("makePatchedResolvedConsensus (port)", () => {
       exec,
       writeFile,
     })("/p")
-    expect(r).toEqual({ votes: 2, k: 2 }) // admits; NOT { votes:2, k:3 }
+    expect(r).toMatchObject({ votes: 2, k: 2 }) // admits; NOT { votes:2, k:3 }
   })
 
   it("explicit k overrides the majority default", async () => {
@@ -133,6 +139,6 @@ describe("makePatchedResolvedConsensus (port)", () => {
     const r = await makePatchedResolvedConsensus({ sources: ["a", "b"], exec, writeFile, k: 1 })(
       "/p",
     )
-    expect(r).toEqual({ votes: 2, k: 1 })
+    expect(r).toMatchObject({ votes: 2, k: 1 })
   })
 })

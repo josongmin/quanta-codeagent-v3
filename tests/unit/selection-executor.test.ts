@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { buildMultiSiteFamilyContract } from "@/runner/batch/eval/public-contract-bundle"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -30,6 +31,20 @@ const genFrom = (
   }
   return { gen, seeds }
 }
+
+const patchForFiles = (files: readonly string[]): string =>
+  files
+    .map((file) =>
+      [
+        `diff --git a/${file} b/${file}`,
+        `--- a/${file}`,
+        `+++ b/${file}`,
+        "@@ -1,1 +1,1 @@",
+        "-old",
+        "+new",
+      ].join("\n"),
+    )
+    .join("\n")
 
 describe("ownerCoverageOf", () => {
   it("fraction of files that are owners; null when no files / no owners", () => {
@@ -281,6 +296,48 @@ describe("runSelection", () => {
     expect(seeds).toEqual([undefined, "Focus on y.py"])
   })
 
+  it("repairs family candidates once when generated patch misses structural owner coverage", async () => {
+    const seeds: (string | undefined)[] = []
+    let familyCalls = 0
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      if (i === 1) {
+        familyCalls += 1
+        return familyCalls === 1
+          ? cand({ id: "cand-1", files: ["pkg/base.py"], patch: "+++ b/pkg/base.py\n+partial" })
+          : cand({
+              id: "cand-1",
+              files: ["pkg/base.py", "pkg/backend.py"],
+              patch: "+++ b/pkg/base.py\n+base\n+++ b/pkg/backend.py\n+backend",
+            })
+      }
+      return cand({ id: "cand-0", files: ["pkg/other.py"] })
+    }
+
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, "family seed"],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      candidateFamilies: [
+        undefined,
+        {
+          familyId: "multi-site",
+          ownerFiles: ["pkg/base.py", "pkg/backend.py"],
+          reason: "shared symbol",
+          seed: undefined,
+          sourceEvidence: ["static-symbol-witness"],
+        },
+      ],
+      ports: { generate: gen },
+    })
+
+    const repaired = r.scored.find((entry) => entry.candidate.id === "cand-1")?.candidate
+    expect(familyCalls).toBe(2)
+    expect(seeds[2]).toContain("Previous attempt missed required family owner files")
+    expect(seeds[2]).toContain("`pkg/backend.py`")
+    expect(repaired?.files).toEqual(["pkg/base.py", "pkg/backend.py"])
+  })
+
   it("regression=false makes a candidate INADMISSIBLE (red-on-injection)", async () => {
     const a = cand({ id: "cand-0", files: ["x.py"], patch: "+++ b/x.py\n+aaa" })
     const b = cand({ id: "cand-1", files: ["x.py"], patch: "+++ b/x.py\n+bbb" })
@@ -377,6 +434,191 @@ describe("runSelection", () => {
     // k=1 ⇒ ratio 1 ⇒ 1/(1+1) = 0.5 (was clamped to 1 before the fix).
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
       "soft:voterQuorum=0.5",
+    )
+  })
+
+  it("clean lex uses soft resolvedKofN as positive proofStrength, not only hard gates", async () => {
+    const { gen } = genFrom([
+      cand({ id: "cand-0", patch: "+++ b/a.py\n+small", files: ["a.py"] }),
+      cand({
+        id: "cand-1",
+        patch: "+++ b/b.py\n+larger\n+but\n+validated",
+        files: ["b.py"],
+      }),
+    ])
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(),
+      resolvedKofNMode: "soft",
+      ports: {
+        generate: gen,
+        resolvedKofN: async (c) => (c.id === "cand-1" ? { votes: 1, k: 1 } : { votes: 0, k: 1 }),
+      },
+    })
+
+    expect(r.winner?.id).toBe("cand-1")
+  })
+
+  it("clean mode appends one MWE repair candidate when all generated candidates are candidate_red", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return cand({
+        id: `cand-${i}`,
+        patch: `+++ b/x.py\n+fix${i}`,
+        files: ["x.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      ports: {
+        generate: gen,
+        mweProof: async (c) => ({
+          state: c.id === "cand-2" ? "patched_green" : "candidate_red",
+        }),
+      },
+    })
+
+    expect(seeds).toHaveLength(3)
+    expect(seeds[2]).toContain("public issue MWE")
+    expect(r.winner?.id).toBe("cand-2")
+    expect(r.scored.find((s) => s.candidate.id === "cand-2")?.candidate.mweReceipt?.state).toBe(
+      "patched_green",
+    )
+  })
+
+  it("clean mode appends one validated-repro repair candidate when every candidate stays unresolved", async () => {
+    const seeds: (string | undefined)[] = []
+    const unresolvedWithTrace = {
+      votes: 0,
+      k: 1,
+      reproTrace: {
+        vote: { verdict: "reproduced", resolved: 0, reproduced: 1, inconclusive: 0 },
+        samples: [
+          {
+            outcome: "reproduced",
+            stdoutTail: "Issue reproduced",
+            stderrTail: "AssertionError: env {} should stay None",
+            source: "print('Issue reproduced')",
+          },
+        ],
+      },
+    } as const
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return cand({
+        id: `cand-${i}`,
+        patch: `+++ b/x.py\n+fix${i}`,
+        files: ["x.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      resolvedKofNMode: "soft",
+      oracleFailureRepairSeed: "validated repro source",
+      ports: {
+        generate: gen,
+        resolvedKofN: async (c) => (c.id === "cand-2" ? { votes: 1, k: 1 } : unresolvedWithTrace),
+      },
+    })
+
+    expect(seeds).toHaveLength(3)
+    expect(seeds[2]).toContain("base-red validated reproduction set")
+    expect(seeds[2]).toContain("Selector failure trace from cand-0")
+    expect(seeds[2]).toContain("AssertionError: env {} should stay None")
+    expect(seeds[2]).toContain("validated repro source")
+    expect(r.winner?.id).toBe("cand-2")
+  })
+
+  it("clean mode hard-rejects unproven multi-source drift without executable proof or public contract", async () => {
+    const risky = cand({
+      id: "cand-0",
+      patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
+      files: ["pkg/a.py", "pkg/b.py"],
+    })
+    const narrow = cand({
+      id: "cand-1",
+      patch: patchForFiles(["pkg/a.py"]),
+      files: ["pkg/a.py"],
+    })
+    const { gen } = genFrom([risky, narrow])
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py", "pkg/b.py"]),
+      ports: { generate: gen },
+    })
+
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
+      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+    )
+  })
+
+  it("clean mode allows multi-source candidates when executable repro proof is positive", async () => {
+    const riskyButProven = cand({
+      id: "cand-0",
+      patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
+      files: ["pkg/a.py", "pkg/b.py"],
+    })
+    const narrow = cand({
+      id: "cand-1",
+      patch: patchForFiles(["pkg/a.py"]),
+      files: ["pkg/a.py"],
+    })
+    const { gen } = genFrom([riskyButProven, narrow])
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py", "pkg/b.py"]),
+      ports: {
+        generate: gen,
+        resolvedKofN: async (c) => (c.id === "cand-0" ? { votes: 1, k: 1 } : null),
+      },
+    })
+
+    expect(r.winner?.id).toBe("cand-0")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).not.toContain(
+      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
+    )
+  })
+
+  it("clean mode allows multi-source candidates when a public multi-site contract is satisfied", async () => {
+    const contractComplete = cand({
+      id: "cand-0",
+      patch: patchForFiles(["pkg/base.py", "pkg/backend.py"]),
+      files: ["pkg/base.py", "pkg/backend.py"],
+    })
+    const incomplete = cand({
+      id: "cand-1",
+      patch: patchForFiles(["pkg/base.py"]),
+      files: ["pkg/base.py"],
+    })
+    const { gen } = genFrom([contractComplete, incomplete])
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      publicContracts: {
+        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
+      },
+      ports: { generate: gen },
+    })
+
+    expect(r.winner?.id).toBe("cand-0")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).not.toContain(
+      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
     )
   })
 
@@ -1054,7 +1296,13 @@ describe("runSelection", () => {
   it("summarizeSelection: compact eval-only telemetry (files + verdict, NO patch) for diagnosis", async () => {
     // the cause-vs-symptom diagnostic: which sites the candidates spanned + who won.
     const { gen } = genFrom([
-      cand({ id: "cand-0", files: ["blockmatrix.py"], patch: "+++ b/blockmatrix.py\n+sym" }),
+      cand({
+        id: "cand-0",
+        files: ["blockmatrix.py"],
+        patch: "+++ b/blockmatrix.py\n+sym",
+        familyId: "override-family",
+        familyOwnerFiles: ["blockmatrix.py", "matexpr.py"],
+      }),
       cand({ id: "cand-1", files: ["matexpr.py"], patch: "+++ b/matexpr.py\n+root" }),
     ])
     const r = await runSelection({
@@ -1073,6 +1321,7 @@ describe("runSelection", () => {
     expect(t.winnerId).toBe("cand-1") // owner-coverage winner
     expect(t.candidates.map((c) => c.id)).toEqual(["cand-0", "cand-1"])
     expect(t.candidates[0]?.files).toEqual(["blockmatrix.py"])
+    expect(t.candidates[0]?.familyCoverageMissing).toEqual(["matexpr.py"])
     expect(t.candidates[1]?.files).toEqual(["matexpr.py"])
     // no full patch leaked into telemetry
     expect(JSON.stringify(t)).not.toContain("+++")

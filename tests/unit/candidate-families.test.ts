@@ -4,9 +4,12 @@ import {
   type CandidateFamily,
   type CandidateFamilyBundle,
   type CandidateFamilyId,
+  candidateFamilyCoverageMissing,
   candidateFamilyRank,
   planFamilyCoverage,
   planFamilyCoverageIds,
+  seedForCandidateFamily,
+  seedForCandidateFamilyCoverageRepair,
 } from "@/runner/batch/eval/candidate-families"
 
 /** Build a family with the given id and owner files (default: one owner). */
@@ -148,6 +151,58 @@ describe("candidateFamilyRank — family label has no authority unless touched",
     const rootFamily = family("root-owner", ["pkg/root.py"])
     expect(candidateFamilyRank(rootFamily, ["pkg/other.py"])).toBe(0)
     expect(candidateFamilyRank(rootFamily, ["pkg/root.py"])).toBeGreaterThan(0)
+  })
+})
+
+describe("candidate family coverage — structural postcondition", () => {
+  it("co-change families report each missing owner file", () => {
+    const overrideFamily = family("override-family", [
+      "django/db/backends/base/client.py",
+      "django/db/backends/postgresql/client.py",
+    ])
+
+    expect(
+      candidateFamilyCoverageMissing(overrideFamily, ["django/db/backends/postgresql/client.py"]),
+    ).toEqual(["django/db/backends/base/client.py"])
+    expect(
+      candidateFamilyCoverageMissing(overrideFamily, [
+        "django/db/backends/base/client.py",
+        "django/db/backends/postgresql/client.py",
+      ]),
+    ).toEqual([])
+  })
+
+  it("single-owner families require at least one owner touch, not every owner", () => {
+    const rootFamily = family("root-owner", ["pkg/root.py", "pkg/alternate.py"])
+
+    expect(candidateFamilyCoverageMissing(rootFamily, ["pkg/root.py"])).toEqual([])
+    expect(candidateFamilyCoverageMissing(rootFamily, ["pkg/other.py"])).toEqual([
+      "pkg/root.py",
+      "pkg/alternate.py",
+    ])
+  })
+
+  it("co-change seed carries an explicit generation coverage postcondition", () => {
+    const seed = seedForCandidateFamily(
+      family("override-family", ["pkg/base.py", "pkg/backend.py"]),
+    )
+
+    expect(seed).toContain("Family coverage postcondition")
+    expect(seed).toContain("final patch must touch every family owner file")
+    expect(seed).toContain("no patch rather than producing a partial single-site patch")
+  })
+
+  it("coverage-repair seed carries only missing structural owner files", () => {
+    const seed = seedForCandidateFamilyCoverageRepair(
+      family("multi-site", ["pkg/base.py", "pkg/backend.py"]),
+      ["pkg/base.py"],
+    )
+
+    expect(seed).toContain("Previous attempt missed required family owner files")
+    const missingLine = seed.split("Previous attempt missed required family owner files: ")[1] ?? ""
+    expect(missingLine).toContain("`pkg/base.py`")
+    expect(missingLine).not.toContain("`pkg/backend.py`")
+    expect(seed).toContain("Regenerate this same candidate from the base tree")
   })
 })
 

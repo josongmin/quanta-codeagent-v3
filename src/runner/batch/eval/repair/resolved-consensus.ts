@@ -33,8 +33,8 @@ import {
   type ReproExecPort,
   type ReproWriteFilePort,
 } from "@/agent/repro-test/execute"
-import type { ReproTestConfig } from "@/agent/repro-test/types"
-import { resolvedConsensus, voteResolved } from "@/agent/repro-test/vote"
+import type { ReproTestConfig, ReproTestOutcome, ReproTestSample } from "@/agent/repro-test/types"
+import { type ReproResolvedVerdict, resolvedConsensus, voteResolved } from "@/agent/repro-test/vote"
 
 export interface PatchedResolvedConsensusDeps {
   /** Reproducing scripts (outcome === "reproduced" on the un-patched tree). */
@@ -51,8 +51,58 @@ export interface PatchedResolvedConsensusDeps {
   k?: number
 }
 
+export interface ReproConsensusTraceSample {
+  readonly outcome: ReproTestOutcome
+  readonly stdoutTail: string
+  readonly stderrTail: string
+  readonly source: string
+}
+
+export interface ReproConsensusTrace {
+  readonly vote: {
+    readonly verdict: ReproResolvedVerdict
+    readonly resolved: number
+    readonly reproduced: number
+    readonly inconclusive: number
+  }
+  readonly samples: readonly ReproConsensusTraceSample[]
+}
+
+export interface PatchedResolvedConsensusSignal {
+  readonly votes: number
+  readonly k: number
+  readonly reproTrace: ReproConsensusTrace
+}
+
 /** Strict-majority quorum over a sample count (⌊n/2⌋+1). */
 const majorityQuorum = (n: number): number => Math.floor(n / 2) + 1
+
+const tail = (s: string | undefined, n = 1200): string => {
+  const v = s ?? ""
+  return v.length > n ? v.slice(-n) : v
+}
+
+const traceSamples = (samples: readonly ReproTestSample[]): readonly ReproConsensusTraceSample[] =>
+  samples.map((sample) => ({
+    outcome: sample.outcome,
+    stdoutTail: tail(sample.stdout),
+    stderrTail: tail(sample.stderr),
+    source: sample.source,
+  }))
+
+const withTrace = (
+  signal: { readonly votes: number; readonly k: number },
+  samples: readonly ReproTestSample[],
+): PatchedResolvedConsensusSignal => {
+  const vote = voteResolved(samples)
+  return {
+    ...signal,
+    reproTrace: {
+      vote,
+      samples: traceSamples(samples),
+    },
+  }
+}
 
 /**
  * Build the patched-resolved consensus probe. Returns a function that, given a
@@ -61,7 +111,7 @@ const majorityQuorum = (n: number): number => Math.floor(n / 2) + 1
  */
 export const makePatchedResolvedConsensus =
   (deps: PatchedResolvedConsensusDeps) =>
-  async (sandbox: string): Promise<{ votes: number; k: number } | null> => {
+  async (sandbox: string): Promise<PatchedResolvedConsensusSignal | null> => {
     if (deps.sources.length === 0) return null
     try {
       const samples = await executeReproTests({
@@ -77,7 +127,8 @@ export const makePatchedResolvedConsensus =
       // post-fix crashes don't inflate the bar. Explicit `k` is honored as-is.
       const v = voteResolved(samples)
       const k = deps.k ?? majorityQuorum(v.resolved + v.reproduced)
-      return resolvedConsensus(samples, k)
+      const signal = resolvedConsensus(samples, k)
+      return signal === null ? null : withTrace(signal, samples)
     } catch {
       // A broken exec must never be a false-RED rejection — fail-open to null.
       return null

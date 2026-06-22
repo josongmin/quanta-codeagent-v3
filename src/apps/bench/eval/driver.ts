@@ -51,9 +51,11 @@ import {
   StrictLspGroundingDegradedError,
   selectionReproPrepK,
   UsageTap,
+  validatedReproRepairSeed,
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
+import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
 import { buildCleanSelectionPublicContracts } from "@/runner/batch/eval/public-contract-bundle"
 import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
 import { candidatePatchAppliesCleanly } from "@/runner/batch/eval/rematerialize"
@@ -73,7 +75,6 @@ import {
 } from "@/runner/batch/eval/selection-executor"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
-import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
 import { buildAstStaticWitnesses } from "@/runner/batch/eval/static-witness-adapter"
 import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-contracts"
@@ -727,6 +728,7 @@ const runSelectionPhase = async (
     sandbox,
     ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
+  const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
   const generationErrors = new Map<number, string>()
   const mergeHint = (seed: string | undefined): string | undefined =>
     seed === undefined
@@ -794,6 +796,7 @@ const runSelectionPhase = async (
     ...(effectivePublicContracts !== undefined
       ? { publicContracts: effectivePublicContracts }
       : {}),
+    ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
     ports: {
       generate: (i, seed) =>
         generateSelectionCandidate({
