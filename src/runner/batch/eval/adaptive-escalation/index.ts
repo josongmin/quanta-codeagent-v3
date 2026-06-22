@@ -24,6 +24,13 @@ export {
   parseAdaptiveDecision,
 } from "./decision-schema"
 export {
+  deriveEvidenceGaps,
+  type EvidenceFacts,
+  evidenceIdsOf,
+  fullyEvidencedFacts,
+  renderEvidenceFacts,
+} from "./evidence-facts"
+export {
   ACTION_DESCRIPTIONS,
   buildRouterInstruction,
   buildRouterPrompt,
