@@ -304,19 +304,37 @@ const emitStartupLine = (log: Logger | undefined, msg: string): void => {
   log?.info(msg)
 }
 
-/** Resolve feature flags, tooling, resume state, and reusable session deps that
- *  do not require terminal-specific host wiring.
- *
- *  Surface-agnostic: the supplied {@link SessionBootstrapDeps} carries every
- *  env-bound / terminal-bound factory. The CLI surface composes them by
- *  wrapping its `apps/cli/internal` helpers; a Web/Tauri surface composes the
- *  same shape from its own HTTP/IPC adapters.
- */
-export const bootstrapSession = async (
+/** The terminal-agnostic prerequisites the bootstrap assembles BEFORE the
+ *  feature/tooling wiring: the structured logger, idle guards, mutable
+ *  permission posture, session abort controller, effort/brief stores, the main
+ *  LLM stack, the AI titler, the session egress proxy, and the loaded feature
+ *  bundle. Order is load-bearing (proxy opens BEFORE `loadFeatures` spawns MCP
+ *  children); the helper preserves it verbatim. */
+interface PreparedSessionRuntime {
+  readonly slog: StructuredLogger
+  readonly idleMonitor: ReturnType<SessionBootstrapDeps["buildIdleGuards"]>["idleMonitor"]
+  readonly rejectCounter: ReturnType<SessionBootstrapDeps["buildIdleGuards"]>["rejectCounter"]
+  readonly permission: PermissionContext
+  readonly permissionModeState: ReturnType<typeof createPermissionModeSessionState>
+  readonly abort: AbortController
+  readonly effortStore: ReturnType<typeof createEffortStore>
+  readonly briefStore: ReturnType<typeof createBriefStore>
+  readonly finalLLM: LLMPort
+  readonly autoTitlePort: ReturnType<SessionBootstrapDeps["buildAutoTitlePort"]>
+  readonly sessionProxy: Awaited<ReturnType<typeof openSessionEgressProxy>>
+  readonly features: BootstrapFeatures
+}
+
+/** Build {@link PreparedSessionRuntime} — the verbatim pre-feature prologue of
+ *  `bootstrapSession`. An LLM build failure short-circuits via
+ *  {@link failSessionBootstrap} (a `never` throw); a `loadFeatures` failure
+ *  closes the freshly-bound egress proxy before re-throwing so no listening
+ *  port leaks. Order and conditional logs are byte-identical to the prior
+ *  inline body. */
+const prepareSessionRuntime = async (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfigShape,
-  featureCfg: SessionFeatureConfig,
-): Promise<SessionBootstrapResult> => {
+): Promise<PreparedSessionRuntime> => {
   const slog = new StructuredLogger()
   // ADR-0503 P3 — armed, read-only capability consistency probe. Gated on the
   // strict master gate inside the runner; OFF ⇒ byte-identical no-op (no probe,
@@ -395,98 +413,210 @@ export const bootstrapSession = async (
     await sessionProxy.close()
     throw e
   }
-  try {
-    const {
-      pills: lifecyclePills,
-      taskRegistry: lifecycleTaskRegistry,
-      followUpQueue: lifecycleFollowUpQueue,
-      activityStore: lifecycleActivityStore,
-    } = deps.buildLifecycleBundle(featureCfg)
+  return {
+    slog,
+    idleMonitor,
+    rejectCounter,
+    permission,
+    permissionModeState,
+    abort,
+    effortStore,
+    briefStore,
+    finalLLM,
+    autoTitlePort,
+    sessionProxy,
+    features,
+  }
+}
 
-    // ADR-0432 — session budget meter for the self-edit memory write-guard.
-    // Constructed ONLY when the operator opted in via QUANTA_MEMORY_WRITE_GUARD_PCT
-    // (the single activation gate), so the absent-env path constructs NO meter,
-    // sets nothing on the config, and is byte-identical to today. The meter has
-    // NO dials by itself (so the loop's `checkExhausted` never trips — the CLI's
-    // own `maxTurns` remains the sole stop) and serves as the LIVE 0..100
-    // `remainingPercent()` source the write-guard reads; the loop's existing
-    // tick sites (`config.budgetMeter?.tick(...)`) feed it once it is set on the
-    // config in `context-binding.ts`. Without this thread the guard was inert
-    // because the surface never supplied a `budgetRemainingPercent` closure.
-    const writeGuardActive = runtime.env.QUANTA_MEMORY_WRITE_GUARD_PCT !== undefined
-    const budgetMeter = writeGuardActive ? new BudgetMeter() : undefined
-
-    const tooling = deps.buildTooling(
-      features.mcpTools,
-      features.lspTools,
-      features.lspNavTools,
-      features.gitToolList,
-      features.astGrepTools,
-      slog,
-      lifecycleTaskRegistry,
-      features.metrics,
-      budgetMeter !== undefined ? () => budgetMeter.remainingPercent() : undefined,
-      lifecycleActivityStore,
+/** Wire the loaded features into the full {@link SessionBootstrapResult}:
+ *  lifecycle bundle, budget meter, tooling, MCP surface/pills, streaming,
+ *  seed images, startup logs, resume resolution, prompt state, session config
+ *  port, and the MCP shutdown hook. This is the verbatim body of the inner
+ *  `try` block; the caller wraps it in the MCP/proxy-cleanup `catch`. */
+/** Emit the gated startup lines, run the resume FSM, and switch to the resumed
+ *  session's cwd. Returns the resolved `{ cwd, idMeta, history, sessionId }`.
+ *  Verbatim relocation of the inline resume cluster — same conditional logs,
+ *  same `failSessionBootstrap` short-circuits, same cwd-switch order. */
+const resolveSessionResume = async (
+  deps: SessionBootstrapDeps,
+  runtime: SessionRuntimeConfigShape,
+  slog: StructuredLogger,
+  features: BootstrapFeatures,
+  initialSessionId: string,
+): Promise<{
+  readonly cwd: string
+  readonly idMeta: Awaited<ReturnType<SessionBootstrapDeps["resolveResume"]>>["idMeta"]
+  readonly history: Message[]
+  readonly sessionId: string
+}> => {
+  let cwd = runtime.cwd
+  // `startupLog` is `undefined` when the welcome banner will render (see
+  // `startupReadyLogger`), so the `?.info` below no-ops the redundant
+  // "quanta ready" / "session:" lines; `quietIdModeLog` likewise suppresses
+  // the structured `session.id_mode.on` echo. Non-interactive ⇒ live logger.
+  const startupLog = startupReadyLogger(runtime)
+  const inIdModeAtStart =
+    runtime.newSession || (features.resume !== undefined && !isPathLikeToken(features.resume))
+  if (!inIdModeAtStart) {
+    emitStartupLine(
+      startupLog,
+      `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd})`,
     )
+  }
+  const resolved = await deps.resolveResume({
+    resume: features.resume,
+    newSession: runtime.newSession,
+    title: runtime.title,
+    cwd,
+    initialSessionId,
+    slog,
+    quietIdModeLog: startupLog === undefined,
+    onSessionMinted: (id) => emitStartupLine(startupLog, `session: ${id}`),
+  })
+  if (resolved.conflictError !== undefined) {
+    failSessionBootstrap("resume_conflict", resolved.conflictError)
+  }
+  if (resolved.missingIdError !== undefined) {
+    failSessionBootstrap(
+      "resume_missing_id",
+      `--resume: session id not found: ${resolved.missingIdError}`,
+    )
+  }
+  const { idMeta } = resolved
+  const history: Message[] = resolved.history
+  const sessionId = resolved.sessionId
+  if (idMeta) cwd = deps.switchToSessionCwd(cwd, idMeta.cwd, slog)
+  if (inIdModeAtStart && idMeta) {
+    emitStartupLine(
+      startupLog,
+      `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd}, session=${idMeta.id})`,
+    )
+  }
+  return { cwd, idMeta, history, sessionId }
+}
 
-    const mcpSurface = deps.buildMcpSurfaceInfo({
-      configs: features.mcpConfigs,
-      bridgedTools: features.mcpTools,
-      configPath: runtime.mcpConfigPath,
+/** Build the lifecycle bundle, optional budget meter, per-run tooling registry,
+ *  and MCP surface descriptor; wire MCP pills when servers are present. Verbatim
+ *  relocation of the inline lifecycle/tooling/MCP cluster — same construction
+ *  order and the same `lifecyclePills.update` mutation. */
+const buildToolingBundle = (
+  deps: SessionBootstrapDeps,
+  runtime: SessionRuntimeConfigShape,
+  featureCfg: SessionFeatureConfig,
+  slog: StructuredLogger,
+  features: BootstrapFeatures,
+): {
+  readonly lifecyclePills: ReturnType<SessionBootstrapDeps["buildLifecycleBundle"]>["pills"]
+  readonly lifecycleTaskRegistry: ReturnType<
+    SessionBootstrapDeps["buildLifecycleBundle"]
+  >["taskRegistry"]
+  readonly lifecycleFollowUpQueue: ReturnType<
+    SessionBootstrapDeps["buildLifecycleBundle"]
+  >["followUpQueue"]
+  readonly lifecycleActivityStore: ReturnType<
+    SessionBootstrapDeps["buildLifecycleBundle"]
+  >["activityStore"]
+  readonly budgetMeter: BudgetMeter | undefined
+  readonly tooling: ReturnType<SessionBootstrapDeps["buildTooling"]>
+  readonly mcpSurface: ReturnType<SessionBootstrapDeps["buildMcpSurfaceInfo"]>
+} => {
+  const {
+    pills: lifecyclePills,
+    taskRegistry: lifecycleTaskRegistry,
+    followUpQueue: lifecycleFollowUpQueue,
+    activityStore: lifecycleActivityStore,
+  } = deps.buildLifecycleBundle(featureCfg)
+
+  // ADR-0432 — session budget meter for the self-edit memory write-guard.
+  // Constructed ONLY when the operator opted in via QUANTA_MEMORY_WRITE_GUARD_PCT
+  // (the single activation gate), so the absent-env path constructs NO meter,
+  // sets nothing on the config, and is byte-identical to today. The meter has
+  // NO dials by itself (so the loop's `checkExhausted` never trips — the CLI's
+  // own `maxTurns` remains the sole stop) and serves as the LIVE 0..100
+  // `remainingPercent()` source the write-guard reads; the loop's existing
+  // tick sites (`config.budgetMeter?.tick(...)`) feed it once it is set on the
+  // config in `context-binding.ts`. Without this thread the guard was inert
+  // because the surface never supplied a `budgetRemainingPercent` closure.
+  const writeGuardActive = runtime.env.QUANTA_MEMORY_WRITE_GUARD_PCT !== undefined
+  const budgetMeter = writeGuardActive ? new BudgetMeter() : undefined
+
+  const tooling = deps.buildTooling(
+    features.mcpTools,
+    features.lspTools,
+    features.lspNavTools,
+    features.gitToolList,
+    features.astGrepTools,
+    slog,
+    lifecycleTaskRegistry,
+    features.metrics,
+    budgetMeter !== undefined ? () => budgetMeter.remainingPercent() : undefined,
+    lifecycleActivityStore,
+  )
+
+  const mcpSurface = deps.buildMcpSurfaceInfo({
+    configs: features.mcpConfigs,
+    bridgedTools: features.mcpTools,
+    configPath: runtime.mcpConfigPath,
+  })
+
+  if (features.mcpClients.length > 0) {
+    lifecyclePills.update({
+      mcp: { servers: [...deps.deriveMcpPillServers(features.mcpTools)] },
     })
+  }
+  return {
+    lifecyclePills,
+    lifecycleTaskRegistry,
+    lifecycleFollowUpQueue,
+    lifecycleActivityStore,
+    budgetMeter,
+    tooling,
+    mcpSurface,
+  }
+}
 
-    if (features.mcpClients.length > 0) {
-      lifecyclePills.update({
-        mcp: { servers: [...deps.deriveMcpPillServers(features.mcpTools)] },
-      })
-    }
+const assembleBootstrapResult = async (
+  deps: SessionBootstrapDeps,
+  runtime: SessionRuntimeConfigShape,
+  featureCfg: SessionFeatureConfig,
+  prepared: PreparedSessionRuntime,
+): Promise<SessionBootstrapResult> => {
+  const {
+    slog,
+    idleMonitor,
+    rejectCounter,
+    permission,
+    permissionModeState,
+    abort,
+    effortStore,
+    briefStore,
+    finalLLM,
+    autoTitlePort,
+    sessionProxy,
+    features,
+  } = prepared
+  {
+    const {
+      lifecyclePills,
+      lifecycleTaskRegistry,
+      lifecycleFollowUpQueue,
+      lifecycleActivityStore,
+      budgetMeter,
+      tooling,
+      mcpSurface,
+    } = buildToolingBundle(deps, runtime, featureCfg, slog, features)
 
     const { stream, run } = deps.buildStreaming(runtime.observeDir, slog)
     const pendingImages = loadSeedImages(runtime, deps.loadImageBlock)
 
-    let cwd = runtime.cwd
-    // `startupLog` is `undefined` when the welcome banner will render (see
-    // `startupReadyLogger`), so the `?.info` below no-ops the redundant
-    // "quanta ready" / "session:" lines; `quietIdModeLog` likewise suppresses
-    // the structured `session.id_mode.on` echo. Non-interactive ⇒ live logger.
-    const startupLog = startupReadyLogger(runtime)
-    const inIdModeAtStart =
-      runtime.newSession || (features.resume !== undefined && !isPathLikeToken(features.resume))
-    if (!inIdModeAtStart) {
-      emitStartupLine(
-        startupLog,
-        `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd})`,
-      )
-    }
-    const resolved = await deps.resolveResume({
-      resume: features.resume,
-      newSession: runtime.newSession,
-      title: runtime.title,
-      cwd,
-      initialSessionId: tooling.sessionId,
+    const { cwd, idMeta, history, sessionId } = await resolveSessionResume(
+      deps,
+      runtime,
       slog,
-      quietIdModeLog: startupLog === undefined,
-      onSessionMinted: (id) => emitStartupLine(startupLog, `session: ${id}`),
-    })
-    if (resolved.conflictError !== undefined) {
-      failSessionBootstrap("resume_conflict", resolved.conflictError)
-    }
-    if (resolved.missingIdError !== undefined) {
-      failSessionBootstrap(
-        "resume_missing_id",
-        `--resume: session id not found: ${resolved.missingIdError}`,
-      )
-    }
-    const { idMeta } = resolved
-    const history: Message[] = resolved.history
-    const sessionId = resolved.sessionId
-    if (idMeta) cwd = deps.switchToSessionCwd(cwd, idMeta.cwd, slog)
-    if (inIdModeAtStart && idMeta) {
-      emitStartupLine(
-        startupLog,
-        `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd}, session=${idMeta.id})`,
-      )
-    }
+      features,
+      tooling.sessionId,
+    )
 
     const {
       system,
@@ -582,11 +712,30 @@ export const bootstrapSession = async (
       createSubagentBackedGuardianReview: deps.createSubagentBackedGuardianReview,
       createSubagentBackedGuardianAssess: deps.createSubagentBackedGuardianAssess,
     }
+  }
+}
+
+/** Resolve feature flags, tooling, resume state, and reusable session deps that
+ *  do not require terminal-specific host wiring.
+ *
+ *  Surface-agnostic: the supplied {@link SessionBootstrapDeps} carries every
+ *  env-bound / terminal-bound factory. The CLI surface composes them by
+ *  wrapping its `apps/cli/internal` helpers; a Web/Tauri surface composes the
+ *  same shape from its own HTTP/IPC adapters.
+ */
+export const bootstrapSession = async (
+  deps: SessionBootstrapDeps,
+  runtime: SessionRuntimeConfigShape,
+  featureCfg: SessionFeatureConfig,
+): Promise<SessionBootstrapResult> => {
+  const prepared = await prepareSessionRuntime(deps, runtime)
+  try {
+    return await assembleBootstrapResult(deps, runtime, featureCfg, prepared)
   } catch (error) {
-    await stopMcpClients(features.mcpClients)
+    await stopMcpClients(prepared.features.mcpClients)
     // H3 (jun-10) — a failure AFTER the MCP fleet started must also release the
     // session egress proxy bound above (no-op when OFF) so no listening port leaks.
-    await sessionProxy.close()
+    await prepared.sessionProxy.close()
     throw error
   }
 }
