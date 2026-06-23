@@ -65,35 +65,56 @@ For a chosen target set (e.g. the SWE-bench grounding-preset slice):
   on a live measurement run on the user's box (offline harness here cannot
   produce a fair latency distribution), filled into the table below.
 
-## Measurement A — local real-pyright ready-proof (token-free, no EC2)
+## Measurement A — local real-pyright, PHASE-SEPARATED (token-free, no EC2)
 
-Run via `proveStrictLspReady` directly against a small-but-real Python package
-(cross-file imports + stdlib that pyright must index to resolve). Real installed
-pyright-langserver; no LLM, no clone, no EC2. This VALIDATES the instrumentation
-end-to-end with real timings and isolates the cold-vs-warm question; it is NOT a
-substitute for the SWE-bench-repo distribution (Measurement B, below).
+Method: drive `PyrightAdapter` directly against a real bench repo (sympy
+`c50643a`, fresh shallow clone), timing each phase separately —
+`start()` (spawn+init) vs `prime()` (didOpen) vs the `definition` poll on the
+file's first import probe (the exact readiness signal `ensurePyrightFileReady`
+uses). This is the CORRECTED measurement; an earlier opaque
+`proveStrictLspReady` total-wall-time run was mislabeled — see the retraction.
 
-| arm | n | ready_ok | ready_timeout | fatal_transport | ready ms (min/med/max) |
-|-----|---|----------|---------------|-----------------|------------------------|
-| small pkg, cold (fresh cwd) | 5 | 5 | 0 | 0 | 14236 / 16909 / 19202 |
-| small pkg, cold→warm reuse | 1+1 | ok / ok | 0 | 0 | cold 9576 → **warm 5** |
-| **real bench repo (sympy, 1311 .py / 40M), cold** | 1 | 1 | 0 | 0 | **28477** |
-| real bench repo (sympy), warm reuse | 1 | 1 | 0 | 0 | **16** |
+| file (size) | spawn | cold-server 1st resolve | polls |
+|-------------|-------|-------------------------|-------|
+| crypto/crypto.py (2528L) | ~0.4 s | **4.3 s** | 1 |
+| core/add.py (1068L) | ~0.3 s | **9.0 s** | 1 |
+| solvers/solvers.py (3594L) | ~0.2 s | **10.4 s** | 1 |
+| matrices/dense.py (1446L) | ~0.2 s | **5.0 s** | 1 |
 
-Findings:
-- A REAL bench repo (sympy `c50643a`, target `sympy/crypto/crypto.py`) cold-indexes
-  to ready in **~28.5 s** — under the 90 s `PYRIGHT_READY_TIMEOUT_MS` budget, so it
-  resolves `ok` (no timeout). Warm reuse is **16 ms**. So indexing IS slow on a real
-  repo, but the current budget comfortably absorbs sympy-class repos.
-- Cold ready proof on a TRIVIAL 4-file package is already ~14–19 s — pyright
-  cold-start + initial index + first-definition resolve dominates.
-- Warm reuse (the pool keeps the entry warm: `proveReady` releases, never evicts)
-  is ~5 ms — a **~1900× speedup**. This empirically confirms prewarm/warm-pool is
-  the dominant latency lever, and that the strict gate adds ~no cold overhead to
-  the solve WHEN prewarm has already warmed the cwd.
-- 0 ready_timeout / 0 fatal_transport here — the 90 s budget is not stressed by a
-  small package. A large repo (django/sympy) cold-index will be far slower and is
-  exactly where `ready_timeout` becomes plausible → that is Measurement B.
+Same pyright server reused across files (warm-server path), sequential:
+
+| call | resolve |
+|------|---------|
+| 1st (cold server) crypto.py | 3.4 s |
+| 2nd add.py / 3rd solvers / 4th dense | **4 ms / 37 ms / 29 ms** |
+
+Findings (machine-warm binary, fresh per-instance workspace = the realistic
+per-bench-instance cold):
+- **spawn ≈ 0.2–0.4 s** (pyright binary already paged in).
+- **cold-server first definition resolves in ~3–10 s, in ONE poll** — pyright is
+  LAZY: `definition` blocks while it binds that import's transitive subgraph,
+  then returns. It does NOT return null and re-poll. Time scales with the
+  symbol's dependency depth (add/solvers deeper → ~9–10 s; crypto/dense ~4–5 s).
+- **warm-server subsequent files = 4–40 ms** — once the first call has bound the
+  core graph, everything else is near-instant. This is the prewarm/pool lever:
+  pay one ~3–10 s cold-server resolve (ideally in background prewarm), then the
+  gate + solve hit ms.
+- The 90 s `PYRIGHT_READY_TIMEOUT_MS` budget is ~9× the worst cold-server resolve
+  observed (~10 s) — comfortable; the budget is NOT the binding constraint.
+
+RETRACTION (jun-23): earlier rows claiming sympy "cold-index ~28.5 s" and a small
+package "14–19 s" with a "~1900× speedup" were CONFOUNDED — they measured opaque
+total wall-time (cold pyright/node spawn + cold-disk I/O of the 40 MB repo +
+module-load), mislabeled as "indexing", and decayed across the session (28→11→9→2 s)
+as the OS page cache warmed. A single `add.py` run reported ~90/101 s; that was a
+cold-first-spawn fluke (clean phase-separated value: 9.0 s, never a timeout). The
+phase-separated numbers above are the truth.
+
+MACHINE-COLD first spawn (box just booted, pyright/node/repo not yet paged from
+disk) could NOT be isolated here — dropping the OS page cache needs `sudo purge`.
+It is a ONE-TIME-per-box cost; the early opaque ~28–30 s is the rough ceiling for
+it. So budget for up to ~30 s on the very first LSP call per box; every call after
+is cold-server (~3–10 s) or warm (ms).
 
 ## Measurement B — SWE-bench grounding-preset slice (operator-run, pending)
 
@@ -115,9 +136,13 @@ NOT auto-run: it spends LLM tokens / EC2 and must not collide with a live bench
 
 ## Status
 
-- Instrumentation: LANDED (typed receipts + report/box-ls surfacing + summary + aggregator).
-- Measurement A: DONE (above) — pipeline validated, warm-pool lever quantified (~1900×).
+- Instrumentation: LANDED (typed receipts + report/box-ls surfacing + summary + aggregator
+  + `QUANTA_LSP_READY_TIMEOUT_MS` knob).
+- Measurement A: DONE + CORRECTED (phase-separated) — spawn ~0.3 s, cold-server first
+  resolve ~3–10 s (1 poll), warm-server ~ms. pyright is lazy/fast; the earlier
+  "~28 s indexing / 1900×" was a confounded opaque-wall-time mislabel (retracted above).
 - Measurement B: PENDING an operator-run grounding bench.
-- Budget/anchor change: **NONE** — `PYRIGHT_READY_TIMEOUT_MS` / `PYRIGHT_READY_RETRY_MS`
-  and the anchor selector are UNCHANGED. Measurement A does not justify a change
-  (small package, 0 timeouts); a change waits on Measurement B's distribution.
+- Budget/anchor change: **NONE** — `PYRIGHT_READY_TIMEOUT_MS` (90 s) is ~9× the worst
+  cold-server resolve (~10 s) and comfortably covers the one-time machine-cold first
+  spawn (~30 s ceiling), so it is NOT the binding constraint. The knob lets an operator
+  raise it per-run; the default waits on Measurement B's distribution before any change.
