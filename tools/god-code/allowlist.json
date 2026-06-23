@@ -48,7 +48,6 @@
     "src/apps/eval/grounding/normalization/structural.ts::normalizeGroundingDecisionStructurally",
     "src/apps/web-daemon/runtime-factory.ts::<anonymous@241>",
     "src/apps/web-daemon/runtime-factory.ts::buildProductionRuntimeFactory",
-    "src/apps/web-daemon/server.ts::startWebDaemon",
     "src/browser/cdp-adapter.ts::createCdpBrowser",
     "src/browser/cdp/cdp-session.ts::createCdpSession",
     "src/browser/headless-stub.ts::createHeadlessBrowser",
