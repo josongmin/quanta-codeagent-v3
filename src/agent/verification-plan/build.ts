@@ -62,48 +62,74 @@ const issueExpectedPredicate = (
   }
 }
 
-export const buildVerificationPlan = (input: VerificationPlanInput): VerificationPlan => {
-  const maxRequired = input.maxRequired ?? DEFAULT_MAX_REQUIRED
-  const baseValidatedRed = input.reproScript?.baseValidatedRed ?? false
-
-  const ownerSteps: VerificationStep[] = (input.ownerNearTests ?? []).map((cmd) => ({
+const ownerStepsOf = (input: VerificationPlanInput): VerificationStep[] =>
+  (input.ownerNearTests ?? []).map((cmd) => ({
     kind: "owner-test",
     cmd,
   }))
-  const smokeSteps: VerificationStep[] = (input.touchedModuleSmoke ?? []).map((cmd) => ({
+
+const smokeStepsOf = (input: VerificationPlanInput): VerificationStep[] =>
+  (input.touchedModuleSmoke ?? []).map((cmd) => ({
     kind: "module-smoke",
     cmd,
   }))
-  const reproStep: VerificationStep | undefined = input.reproScript
-    ? { kind: "repro", cmd: input.reproScript.cmd }
+
+const reproStepOf = (input: VerificationPlanInput): VerificationStep | undefined =>
+  input.reproScript
+    ? {
+        kind: "repro",
+        cmd: input.reproScript.cmd,
+        ...(input.reproScript.pytestReportPath !== undefined
+          ? { pytestReportPath: input.reproScript.pytestReportPath }
+          : {}),
+      }
     : undefined
 
-  // primaryRail authority order: a RED-validated repro > owner-near test > smoke.
-  const primaryRail: VerificationStep | null =
-    reproStep && baseValidatedRed ? reproStep : (ownerSteps[0] ?? smokeSteps[0] ?? null)
+const primaryRailOf = (args: {
+  readonly reproStep: VerificationStep | undefined
+  readonly baseValidatedRed: boolean
+  readonly ownerSteps: readonly VerificationStep[]
+  readonly smokeSteps: readonly VerificationStep[]
+}): VerificationStep | null =>
+  args.reproStep && args.baseValidatedRed
+    ? args.reproStep
+    : (args.ownerSteps[0] ?? args.smokeSteps[0] ?? null)
 
+const partitionVerificationSteps = (args: {
+  readonly ownerSteps: readonly VerificationStep[]
+  readonly smokeSteps: readonly VerificationStep[]
+  readonly reproStep: VerificationStep | undefined
+  readonly primaryRail: VerificationStep | null
+  readonly maxRequired: number
+}): Pick<VerificationPlan, "required" | "optional"> => {
   const required: VerificationStep[] = []
   const optional: VerificationStep[] = []
-  if (primaryRail) required.push(primaryRail)
+  if (args.primaryRail) required.push(args.primaryRail)
 
   // remaining owner tests fill required up to the cap; the rest are optional.
-  for (const s of ownerSteps) {
-    if (s === primaryRail) continue
-    if (required.length < maxRequired) required.push(s)
+  for (const s of args.ownerSteps) {
+    if (s === args.primaryRail) continue
+    if (required.length < args.maxRequired) required.push(s)
     else optional.push(s)
   }
-  for (const s of smokeSteps) {
-    if (s === primaryRail) continue
+  for (const s of args.smokeSteps) {
+    if (s === args.primaryRail) continue
     optional.push(s)
   }
   // a repro that did NOT validate red is demoted to optional — never required.
-  if (reproStep && reproStep !== primaryRail) optional.push(reproStep)
+  if (args.reproStep && args.reproStep !== args.primaryRail) optional.push(args.reproStep)
+  return { required, optional }
+}
 
+const attachRequiredPredicates = (
+  required: VerificationStep[],
+  issueDeclaredExpected: VerificationPlanInput["issueDeclaredExpected"],
+): void => {
   // Attach a typed successPredicate + authority to every required step. The
   // primary/required step gets the issue-declared exact-output contract when the
   // public problem statement exposes one; the rest default to execution proofs.
-  const issueExpected = input.issueDeclaredExpected
-    ? issueExpectedPredicate(input.issueDeclaredExpected)
+  const issueExpected = issueDeclaredExpected
+    ? issueExpectedPredicate(issueDeclaredExpected)
     : undefined
   for (let i = 0; i < required.length; i++) {
     const step = required[i]
@@ -116,6 +142,24 @@ export const buildVerificationPlan = (input: VerificationPlanInput): Verificatio
       step.authority = "execution"
     }
   }
+}
+
+export const buildVerificationPlan = (input: VerificationPlanInput): VerificationPlan => {
+  const maxRequired = input.maxRequired ?? DEFAULT_MAX_REQUIRED
+  const baseValidatedRed = input.reproScript?.baseValidatedRed ?? false
+  const ownerSteps = ownerStepsOf(input)
+  const smokeSteps = smokeStepsOf(input)
+  const reproStep = reproStepOf(input)
+  // primaryRail authority order: a RED-validated repro > owner-near test > smoke.
+  const primaryRail = primaryRailOf({ reproStep, baseValidatedRed, ownerSteps, smokeSteps })
+  const { required, optional } = partitionVerificationSteps({
+    ownerSteps,
+    smokeSteps,
+    reproStep,
+    primaryRail,
+    maxRequired,
+  })
+  attachRequiredPredicates(required, input.issueDeclaredExpected)
 
   return { primaryRail, required, optional, baseValidatedRed }
 }

@@ -30,7 +30,7 @@ export interface ClosureSessionState {
   closureHint?: string
 }
 
-export const buildClosureSession = (args: {
+type BuildClosureSessionArgs = {
   problemStatement: string
   stage1Files: readonly Stage1RankedFile[]
   issueFiles?: readonly string[]
@@ -39,37 +39,54 @@ export const buildClosureSession = (args: {
    *  witnesses. They stay advisory in clean owner admission; omitted/empty ⇒ no
    *  witness owner evidence (byte-identical to before SCAFF-03). */
   witnessOwners?: readonly { file: string; forSymbol?: string }[]
-  reproScript?: { cmd: string; baseValidatedRed: boolean }
+  reproScript?: { cmd: string; baseValidatedRed: boolean; pytestReportPath?: string }
   ownerNearTests?: readonly string[]
   posture: ClosureSessionPosture
   /** T-OWN-12: opt into rule-based clean owner admission (authoritative/advisory
    *  lattice, no additive score). Default/omitted ⇒ legacy scored behavior,
    *  byte-identical to research mode. */
   ownerClean?: boolean
-}): ClosureSessionState => {
-  const issueDeclaredExpected = extractIssueDeclaredExpected(args.problemStatement)
-  const issueFiles = args.issueFiles ?? extractIssueHint(args.problemStatement).files
-  const input: ClosureBundleInput = {
+}
+
+const sessionIssueFilesOf = (args: BuildClosureSessionArgs): readonly string[] =>
+  args.issueFiles ?? extractIssueHint(args.problemStatement).files
+
+const sessionWitnessOwnersOf = (
+  args: BuildClosureSessionArgs,
+): ClosureBundleInput["evidence"]["witnessOwners"] =>
+  args.ownerClean === true && args.witnessOwners && args.witnessOwners.length > 0
+    ? args.witnessOwners
+    : undefined
+
+const closureBundleInputOf = (args: {
+  readonly session: BuildClosureSessionArgs
+  readonly issueDeclaredExpected: IssueDeclaredExpected | undefined
+  readonly issueFiles: readonly string[]
+}): ClosureBundleInput => {
+  const witnessOwners = sessionWitnessOwnersOf(args.session)
+  return {
     evidence: {
-      issueText: args.problemStatement,
-      stage1Files: args.stage1Files,
-      ...(issueFiles.length > 0 ? { issueFiles } : {}),
-      ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
+      issueText: args.session.problemStatement,
+      stage1Files: args.session.stage1Files,
+      ...(args.issueFiles.length > 0 ? { issueFiles: args.issueFiles } : {}),
+      ...(args.session.ownerResolved !== undefined
+        ? { ownerResolved: args.session.ownerResolved }
+        : {}),
       // SCAFF-03: witness owners feed ONLY the rule-based CLEAN path as advisory
       // structural evidence. In legacy/research mode (ownerClean falsy) they are
       // withheld so the scored owner packet stays BYTE-IDENTICAL (T-OWN-12
       // "research unchanged").
-      ...(args.ownerClean === true && args.witnessOwners && args.witnessOwners.length > 0
-        ? { witnessOwners: args.witnessOwners }
-        : {}),
+      ...(witnessOwners !== undefined ? { witnessOwners } : {}),
     },
-    ...(args.ownerClean === true ? { ownerClean: true } : {}),
+    ...(args.session.ownerClean === true ? { ownerClean: true } : {}),
     plan: {
-      ...(args.reproScript !== undefined ? { reproScript: args.reproScript } : {}),
-      ...(args.ownerNearTests !== undefined && args.ownerNearTests.length > 0
-        ? { ownerNearTests: args.ownerNearTests }
+      ...(args.session.reproScript !== undefined ? { reproScript: args.session.reproScript } : {}),
+      ...(args.session.ownerNearTests !== undefined && args.session.ownerNearTests.length > 0
+        ? { ownerNearTests: args.session.ownerNearTests }
         : {}),
-      ...(issueDeclaredExpected !== undefined ? { issueDeclaredExpected } : {}),
+      ...(args.issueDeclaredExpected !== undefined
+        ? { issueDeclaredExpected: args.issueDeclaredExpected }
+        : {}),
     },
     gate: {
       // `stakes` (crossFile / destructive / patchFileCount) are PRE-PATCH
@@ -90,24 +107,36 @@ export const buildClosureSession = (args: {
       stakes: { patchFileCount: 1, crossFile: false, destructive: false },
       uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
       signal: {
-        reproAvailable: args.reproScript?.baseValidatedRed === true,
-        lspAvailable: args.posture.lspNav,
+        reproAvailable: args.session.reproScript?.baseValidatedRed === true,
+        lspAvailable: args.session.posture.lspNav,
       },
-      issueProvidesFix: issueDeclaredExpected !== undefined,
+      issueProvidesFix: args.issueDeclaredExpected !== undefined,
     },
   }
+}
+
+const closureHintOf = (args: {
+  readonly bundle: ClosureBundle
+  readonly session: BuildClosureSessionArgs
+}): string | undefined =>
+  args.session.posture.faultEvidence
+    ? renderClosurePrompt(
+        args.bundle.owner,
+        (args.session.ownerResolved ?? []).map((o) => o.file),
+      )
+    : undefined
+
+export const buildClosureSession = (args: BuildClosureSessionArgs): ClosureSessionState => {
+  const issueDeclaredExpected = extractIssueDeclaredExpected(args.problemStatement)
+  const issueFiles = sessionIssueFilesOf(args)
+  const input = closureBundleInputOf({ session: args, issueDeclaredExpected, issueFiles })
   const bundle = assembleClosureBundle(input)
   const primaryRailStep = args.posture.primaryRail
     ? buildPrimaryRailStep(bundle.plan.primaryRail)
     : undefined
   // Pass the feeder's resolved sibling files so the round-0 hint can list every
   // co-change site (WS2 widen at round 0 — the round that always runs).
-  const closureHint = args.posture.faultEvidence
-    ? renderClosurePrompt(
-        bundle.owner,
-        (args.ownerResolved ?? []).map((o) => o.file),
-      )
-    : undefined
+  const closureHint = closureHintOf({ bundle, session: args })
   return {
     input,
     bundle,

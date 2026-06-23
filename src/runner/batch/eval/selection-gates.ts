@@ -18,7 +18,11 @@ import {
   type SoftScoreSignals,
   scoreCandidate,
 } from "@/agent/verification-bundle"
-import { candidateFamilyRank } from "./candidate-families"
+import {
+  candidateFamilyCoverageMissing,
+  candidateFamilyRank,
+  isCoChangeFamily,
+} from "./candidate-families"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { type MweProofReceipt, mweProofAuthorityRank } from "./mwe-proof"
 import {
@@ -28,11 +32,7 @@ import {
 } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
 import type { ReproConsensusProofReceipt } from "./repair/resolved-consensus"
-import {
-  cleanExecutableProof,
-  familyAuthorityPresent,
-  hardResolvedRejected,
-} from "./selection-proof-telemetry"
+import { cleanExecutableProof, hardResolvedRejected } from "./selection-proof-telemetry"
 import type {
   Candidate,
   ResolvedKofNMode,
@@ -176,13 +176,16 @@ const MWE_CANDIDATE_RED_REJECT_REASON =
   "hard:mweProof=candidate_red (public issue MWE still fails after patch)"
 
 const CLEAN_AUTHORITY_MISSING_REJECT_REASON =
-  "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)"
+  "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)"
 
 const PROOF_REQUIRED_MISSING_REJECT_REASON =
   "hard:proofRequiredMissing=true (proof-required mode requires positive executed proof; safety or structural evidence alone cannot submit)"
 
 const PROOF_INFRA_BLOCKED_REJECT_REASON =
   "hard:proofInfraBlocked=true (public proof execution failed; do not treat this as candidate correctness)"
+
+const familyCoverageMissingRejectReason = (missing: readonly string[]): string =>
+  `hard:familyCoverageMissing=${missing.join(",")} (typed co-change family postcondition not satisfied)`
 
 export const applyCleanDriftHardGate = (
   verdict: CandidateVerdict,
@@ -225,8 +228,7 @@ export const cleanProofAuthorityMissing = (args: {
   args.owners.size === 0 &&
   !cleanExecutableProof(args.resolved, args.mweReceipt, args.reproConsensusReceipt) &&
   args.requiredContractsSatisfied === 0 &&
-  args.contractsSatisfied === 0 &&
-  !familyAuthorityPresent(args.candidate)
+  args.contractsSatisfied === 0
 
 export const applyCleanAuthorityHardGate = (
   verdict: CandidateVerdict,
@@ -269,6 +271,19 @@ export const applyStaticSanityHardGate = (
         score: verdict.score,
         reasons: [...verdict.reasons, ...reasons],
       }
+
+export const familyCoverageMissingHardReasons = (candidate: Candidate): readonly string[] => {
+  if (candidate.patch.trim() === "" || candidate.familyId === undefined) return []
+  if (!isCoChangeFamily(candidate.familyId)) return []
+  const missing = candidateFamilyCoverageMissing(
+    {
+      familyId: candidate.familyId,
+      ownerFiles: candidate.familyOwnerFiles ?? [],
+    },
+    candidate.files,
+  )
+  return missing.length === 0 ? [] : [familyCoverageMissingRejectReason(missing)]
+}
 
 const DECLARED_EXPECTED_REJECT_REASON =
   "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)"

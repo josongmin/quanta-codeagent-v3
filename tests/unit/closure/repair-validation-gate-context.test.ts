@@ -165,12 +165,13 @@ describe("runRepairRounds — validation gate context", () => {
     expect(captured?.validationExitCode).toBe(1)
   })
 
-  test("repro path is surfaced as the validation gate when verify command is absent", async () => {
+  test("explicit repro command is surfaced as the validation gate when verify command is absent", async () => {
     let captured: BuildRepairContextArgs | undefined
     const runOnce = async (_seed: string | undefined): Promise<RunOnceResult> => ({
       patch: "diff --git a/x b/x\n",
       turns: 1,
       reproPath: "repro.py",
+      reproCmd: 'python3 -s "repro.py"',
     })
     const validate = async (_args: ValidateArgs): Promise<ValidatorResult> => ({
       ok: false,
@@ -193,7 +194,7 @@ describe("runRepairRounds — validation gate context", () => {
     })
 
     expect(captured?.validationSource).toBe("repro")
-    expect(captured?.validationCmd).toBe('python "repro.py"')
+    expect(captured?.validationCmd).toBe('python3 -s "repro.py"')
     expect(captured?.validationExitCode).toBe(1)
   })
 })

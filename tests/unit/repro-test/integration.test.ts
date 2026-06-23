@@ -3,14 +3,15 @@
  *
  * Mocks the LLM port + exec port; demonstrates the algorithm on a synthetic
  * 5-sample run shaped after the requests-5414 issue (IDNAError on invalid URL).
- * The generated candidates are PYTEST tests; the exec port returns pytest
- * summaries ("1 failed" / "no tests ran"); the outcome is grounded in pytest's
- * exit semantics, NOT a model-printed sentinel.
+ * The generated candidates are PYTEST tests; the exec port writes structured
+ * pytest sidecar reports. The outcome is grounded in that report, NOT stdout or
+ * a model-printed sentinel.
  */
 import { describe, expect, test } from "bun:test"
 import {
   type ExecuteReproTestsArgs,
   executeReproTests,
+  pytestReportPathFor,
 } from "../../../src/agent/repro-test/execute"
 import { ensurePytestFooter, generateReproTests } from "../../../src/agent/repro-test/generate"
 import { selectReproTest } from "../../../src/agent/repro-test/select"
@@ -69,6 +70,27 @@ const TEST_B_DIFFERENT = [
 // A candidate that collects NO tests (no def test_*) ⇒ pytest "no tests ran".
 const TEST_NO_TESTS = ["import requests", "", "x = 1  # no test function here"].join("\n")
 
+const report = (args: {
+  collected: number
+  exitstatus: number
+  reports?: readonly Record<string, unknown>[]
+}): string =>
+  JSON.stringify({
+    schema: 1,
+    collected: args.collected,
+    exitstatus: args.exitstatus,
+    reports: args.reports ?? [],
+  })
+
+const REPORT_FAILED = report({
+  collected: 1,
+  exitstatus: 1,
+  reports: [
+    { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" },
+  ],
+})
+const REPORT_NO_TESTS = report({ collected: 0, exitstatus: 5 })
+
 describe("repro-test end-to-end — requests-5414 shape", () => {
   test("5-sample run picks the majority test, returning original source", async () => {
     // 3 variants of test A (collapse to same normalised key) + 1 different test
@@ -90,9 +112,9 @@ describe("repro-test end-to-end — requests-5414 shape", () => {
     expect(tests).toHaveLength(5)
     expect(llm.calls).toBe(5)
 
-    // Execute — synthetic exec port mimicking pytest: a candidate with a
-    // `def test_` FAILS its assertion on the buggy base tree ("1 failed" ⇒
-    // reproduced); the no-tests candidate yields "no tests ran" ⇒ unknown.
+    // Execute — synthetic exec port writes the same sidecar shape the footer
+    // writes: assertion failure ⇒ reproduced; no tests ⇒ unknown.
+    const reports = new Map<string, string>()
     const args: ExecuteReproTestsArgs = {
       tests,
       repoRoot: "/sandbox",
@@ -103,10 +125,13 @@ describe("repro-test end-to-end — requests-5414 shape", () => {
         const idx = Number.parseInt(/_(\d+)\.py$/.exec(path)?.[1] ?? "0", 10)
         const src = tests[idx] ?? ""
         if (!src.includes("def test_")) {
+          reports.set(pytestReportPathFor(path), REPORT_NO_TESTS)
           return { code: 5, stdout: "no tests ran in 0.1s", stderr: "" }
         }
+        reports.set(pytestReportPathFor(path), REPORT_FAILED)
         return { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
       },
+      readFile: async (path) => reports.get(path) ?? "",
     }
     const samples = await executeReproTests(args)
     expect(samples).toHaveLength(5)
@@ -135,6 +160,7 @@ describe("repro-test end-to-end — requests-5414 shape", () => {
       writeFile: async () => {},
       tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
       exec: async () => ({ code: 5, stdout: "no tests ran in 0.1s", stderr: "" }),
+      readFile: async () => REPORT_NO_TESTS,
     })
     const sel = selectReproTest(samples)
     expect(sel.selected).toBeNull()
@@ -160,6 +186,7 @@ describe("repro-test end-to-end — requests-5414 shape", () => {
       writeFile: async () => {},
       tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
       exec: async () => ({ code: 1, stdout: "1 failed in 0.1s", stderr: "" }),
+      readFile: async () => REPORT_FAILED,
     })
     const sel = selectReproTest(samples)
     expect(sel.selected).toBe(ensurePytestFooter(TEST_A_NAMED))

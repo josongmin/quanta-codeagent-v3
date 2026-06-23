@@ -33,7 +33,9 @@ import {
   lspExtensionToLanguage,
   lspNavToolList,
   proveStrictLspReady,
+  pytestReportPathFor,
   type ReproExecPort,
+  type ReproReadFilePort,
   type ReproTestConfig,
   type ReproTestSelection,
   type ReproWriteFilePort,
@@ -146,8 +148,9 @@ import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { probePatchStaticSanity } from "./patch-static-sanity"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
-import { buildCleanSelectionPublicContracts } from "./public-contract-bundle"
+import { buildCleanSelectionAuthorityContracts } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
+import { renderContractAuthorityLabel } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
@@ -189,6 +192,7 @@ import {
   ObservationError,
   type Wiring,
 } from "./report"
+import { reproValidationCmd } from "./repro-command"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
 import {
   type AttemptOutcome,
@@ -1195,7 +1199,8 @@ const resolveChaMultisiteSteer = async (args: {
   readonly localizeCandidates: readonly string[]
 }): Promise<string | undefined> => {
   if (!args.posture.chaMultisiteSteer || args.instance.swebench === undefined) return undefined
-  const query = normalizePublicIssueText(args.instance.problemStatement) ?? args.instance.problemStatement
+  const query =
+    normalizePublicIssueText(args.instance.problemStatement) ?? args.instance.problemStatement
   if (typeof query !== "string" || query.trim() === "") return undefined
   const candidates = cleanUniqueList(args.localizeCandidates)
     .filter((file) => file.endsWith(".py"))
@@ -1397,6 +1402,7 @@ const executeReproCandidateTests = async (
         (async (path: string, content: string): Promise<void> => {
           await Bun.write(path, content)
         }),
+      readFile: async (path: string): Promise<string> => Bun.file(path).text(),
       config,
       ...(buildArgv !== undefined ? { buildArgv } : {}),
     })
@@ -1936,6 +1942,34 @@ const buildConfigGuards = (
   }
 }
 
+const userPromptMessages = (text: string): Message[] => [
+  {
+    role: "user",
+    content: [{ type: "text", text }],
+  },
+]
+
+const localizePhaseConfigOf = (
+  opt: BenchPosture,
+  chaMultisiteSteer: string | undefined,
+): AgentConfig["localizePhase"] | undefined => {
+  if (opt.localizePhase === undefined) return undefined
+  if (chaMultisiteSteer === undefined || chaMultisiteSteer === "") return opt.localizePhase
+  return { ...opt.localizePhase, chaMultisiteSteer }
+}
+
+const wirePostureAgentPorts = (args: {
+  readonly config: AgentConfig
+  readonly opt: BenchPosture
+  readonly localizePhase: AgentConfig["localizePhase"] | undefined
+}): AgentConfig => ({
+  ...args.config,
+  ...(args.opt.subagent !== undefined ? { subagent: args.opt.subagent } : {}),
+  ...(args.opt.skills !== undefined ? { skills: args.opt.skills } : {}),
+  ...(args.localizePhase !== undefined ? { localizePhase: args.localizePhase } : {}),
+  ...(args.opt.branchSearch !== undefined ? { branchSearch: args.opt.branchSearch } : {}),
+})
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -2044,12 +2078,7 @@ export const buildConfig = (
     ...(closureHint !== undefined ? { closureHint } : {}),
     ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
-  const messages: Message[] = [
-    {
-      role: "user",
-      content: [{ type: "text", text }],
-    },
-  ]
+  const messages = userPromptMessages(text)
   const budgetMeter = deps.budgetMeterFactory?.()
   const baseConfig = {
     llm: deps.llm,
@@ -2110,23 +2139,9 @@ export const buildConfig = (
   const noPatchApplied = opt.noPatchBreaker
     ? wireNoPatchBreaker(knobApplied, opt.noPatchForceFraction)
     : knobApplied
-  const localizePhase =
-    opt.localizePhase !== undefined
-      ? {
-          ...opt.localizePhase,
-          ...(chaMultisiteSteer !== undefined && chaMultisiteSteer !== ""
-            ? { chaMultisiteSteer }
-            : {}),
-        }
-      : undefined
+  const localizePhase = localizePhaseConfigOf(opt, chaMultisiteSteer)
   return wireOptionalAgentPorts(
-    {
-      ...noPatchApplied,
-      ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
-      ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
-      ...(localizePhase !== undefined ? { localizePhase } : {}),
-      ...(opt.branchSearch !== undefined ? { branchSearch: opt.branchSearch } : {}),
-    },
+    wirePostureAgentPorts({ config: noPatchApplied, opt, localizePhase }),
     process.env,
   )
 }
@@ -2372,11 +2387,10 @@ const runAgentPhase = async (
  * (runner core + apps prod wrapper) so the production exec wiring is identical.
  *
  * Default-OFF byte-identical: returns `fallback` UNCHANGED unless the
- * `repro-vote` knob is on AND a reproducing set exists. ON ⇒ wraps the
- * K-of-N RESOLVED majority vote that re-runs the reproducing set on the patched
- * sandbox (`makeReproVoteValidate`), with `fallback` as the inconclusive/empty/
- * fail-open path. The exec port mirrors the base-red run (uvx project-env argv
- * for SWE-bench, the instance's `localEnv`) so imports resolve identically.
+ * `repro-vote` knob is on. ON ⇒ wraps the K-of-N RESOLVED majority vote that
+ * re-runs the reproducing set on the patched sandbox (`makeReproVoteValidate`).
+ * Empty/inconclusive/infra states fail closed inside that validator; they do not
+ * fall back to legacy markers. The exec port mirrors the base-red run.
  */
 /** Shared repro exec wiring — uvx project-env argv (SWE-bench) + the instance's
  *  localEnv, mirroring the base-red run so imports resolve identically. Used by
@@ -2387,6 +2401,7 @@ const reproExecBundle = (
 ): {
   exec: ReproExecPort
   writeFile: ReproWriteFilePort
+  readFile: ReproReadFilePort
   buildArgv?: (s: string) => readonly string[]
 } => {
   const repo = instance.swebench?.repo
@@ -2399,6 +2414,7 @@ const reproExecBundle = (
     writeFile: async (p: string, c: string): Promise<void> => {
       await Bun.write(p, c)
     },
+    readFile: async (p: string): Promise<string> => Bun.file(p).text(),
     ...(repo !== undefined
       ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, version, scriptPath) }
       : {}),
@@ -2410,7 +2426,7 @@ export const buildReproVoteValidate = (
   reproSources: readonly string[],
   fallback: (args: ValidateArgs) => Promise<ValidatorResult>,
 ): ((args: ValidateArgs) => Promise<ValidatorResult>) => {
-  if (benchOptIns().reproVote !== true || reproSources.length === 0) return fallback
+  if (benchOptIns().reproVote !== true) return fallback
   return makeReproVoteValidate({ sources: reproSources, ...reproExecBundle(instance), fallback })
 }
 
@@ -2565,9 +2581,10 @@ const runRepairPhase = async (
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: when the knob is on AND we have a reproducing set, the
   // validator becomes the K-of-N RESOLVED majority vote (re-run the set on the
-  // patched tree); it falls back to the legacy gate on an empty set / fail /
-  // tie. Default-OFF or no repro ⇒ `baseValidate` ⇒ byte-identical. The exec
-  // wiring lives in the SHARED `buildReproVoteValidate` so both drivers agree.
+  // patched tree). Empty sources, execution failure, and inconclusive votes are
+  // fail-closed inside that validator. Default-OFF returns `baseValidate`
+  // unchanged. The exec wiring lives in the SHARED `buildReproVoteValidate` so
+  // both drivers agree.
   const validate = buildReproVoteValidate(
     instance,
     reproSources,
@@ -2616,6 +2633,7 @@ const runRepairPhase = async (
         },
         sandbox,
         exec,
+        readFile: async (path: string): Promise<string> => Bun.file(path).text(),
         timeoutMs: deps.timeoutMs,
         evaluatePredicate: evaluateSuccessPredicate,
         ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
@@ -2713,7 +2731,7 @@ const calibrateProofOracle = async (
  *
  * A proof-required submit gate built on a CONFIRMED gold false-negative canonical
  * oracle would WITHHOLD the canonical-correct fix forever: the broken oracle can
- * never print "Issue resolved", so `applyProofRequiredHardGate` rejects every
+ * never report a resolved sidecar, so `applyProofRequiredHardGate` rejects every
  * candidate. A proven-broken oracle must NOT hold hard submit authority ⇒ LIFT
  * proofRequired for this instance (mirror of the soft-port fail-open in
  * {@link makeCalibratedReproConsensusPort}). When the oracle is trustworthy
@@ -2887,7 +2905,7 @@ const contractFactsFromBundle = (
 ): readonly ContractFact[] =>
   contracts?.contracts.map((c) => ({
     contractId: c.contractId,
-    authority: `${c.provenance}/${c.strength}`,
+    authority: renderContractAuthorityLabel(c),
     satisfied: "unknown" as const,
   })) ?? []
 
@@ -2928,7 +2946,7 @@ export const selectionGenerationEnvCaveats = (args: {
   }
 }
 
-const mergeStaticWitnessContracts = (
+const mergeAdvisoryStaticWitnessContracts = (
   publicContracts: PublicContractBundle | undefined,
   staticWitnessContracts: ReturnType<typeof buildStaticWitnessContracts>,
 ): PublicContractBundle | undefined => {
@@ -2974,12 +2992,15 @@ const buildSelectionStructuralPlan = (args: {
     }),
     staticWitnesses,
   )
-  const familyPublicContracts = withCandidateFamilyPublicContracts(
+  // Split the contract surface here:
+  // selector authority gets only caller-supplied public contracts; prompt/advisory
+  // context may additionally include structural static-witness contracts.
+  const selectionAuthorityContracts = withCandidateFamilyAuthorityContracts(
     args.publicContracts,
     candidateFamilyBundle,
   )
-  const effectivePublicContracts = mergeStaticWitnessContracts(
-    familyPublicContracts,
+  const advisoryPromptContracts = mergeAdvisoryStaticWitnessContracts(
+    selectionAuthorityContracts,
     buildStaticWitnessContracts(staticWitnesses),
   )
   const selectionInputs = buildSelectionInputs({
@@ -2989,8 +3010,9 @@ const buildSelectionStructuralPlan = (args: {
     ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
   return {
+    advisoryPromptContracts,
     candidateFamilyBundle,
-    effectivePublicContracts,
+    selectionAuthorityContracts,
     selectionInputs,
     staticWitnesses,
     staticWitnessDiagnostics,
@@ -3005,9 +3027,20 @@ const buildSelectionPhaseContracts = (args: {
   readonly publicContracts: PublicContractBundle | undefined
   readonly n: number
 }) => {
-  const { effectivePublicContracts, selectionInputs, staticWitnesses, staticWitnessDiagnostics } =
-    buildSelectionStructuralPlan(args)
-  return { effectivePublicContracts, selectionInputs, staticWitnesses, staticWitnessDiagnostics }
+  const {
+    advisoryPromptContracts,
+    selectionAuthorityContracts,
+    selectionInputs,
+    staticWitnesses,
+    staticWitnessDiagnostics,
+  } = buildSelectionStructuralPlan(args)
+  return {
+    advisoryPromptContracts,
+    selectionAuthorityContracts,
+    selectionInputs,
+    staticWitnesses,
+    staticWitnessDiagnostics,
+  }
 }
 
 const resolveSelectionPhasePorts = async (args: {
@@ -3109,7 +3142,7 @@ const resolveSelectionPhasePorts = async (args: {
   }
 }
 
-const buildSelectionExecutorPorts = (args: {
+type SelectionExecutorPortsArgs = {
   readonly instance: Instance
   readonly deps: RunInstanceDeps
   readonly sandbox: string
@@ -3141,58 +3174,74 @@ const buildSelectionExecutorPorts = (args: {
   readonly mweProofSelectionPort: SelectionPorts["mweProof"]
   readonly resolvedKofNSelectionPort: SelectionPorts["resolvedKofN"]
   readonly reproConsensusProofSelectionPort: SelectionPorts["reproConsensusProof"]
-}): SelectionPorts => {
+}
+
+const cleanSelectionPromptEnabled = (args: SelectionExecutorPortsArgs): boolean =>
+  args.verifySelectProofRequired && args.selectorMode === "clean"
+
+const selectionCandidateSeed = (
+  args: SelectionExecutorPortsArgs,
+  seed: string | undefined,
+): string | undefined => {
+  if (!cleanSelectionPromptEnabled(args)) return seed
+  return buildSelectionGenerationPrompt({
+    problemStatement: args.instance.problemStatement,
+    ownerEvidence: args.selectionOwnerEvidence,
+    contracts: contractFactsFromBundle(args.publicContracts),
+    baseValidatedRed: args.baseValidatedRed,
+    ...(args.verificationTarget !== undefined
+      ? { verificationTarget: args.verificationTarget }
+      : {}),
+    ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
+    ...(args.validatedReproScripts.length > 0
+      ? { validatedReproScripts: args.validatedReproScripts }
+      : {}),
+    ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+    ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
+    ...(args.staticWitnessDiagnostics.length > 0
+      ? { staticWitnessDiagnostics: args.staticWitnessDiagnostics }
+      : {}),
+    // Scripts reach generation ONCE via `validatedReproScripts` staticFacts;
+    // NOT also merged into `seed` (that destroyed the diversity seed via the
+    // seed length cap + duplicated the scripts).
+    ...(seed !== undefined ? { seed } : {}),
+    ...(args.recordLlmEvidencePacket !== undefined
+      ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
+      : {}),
+  })
+}
+
+const selectionMergeHint = (
+  args: SelectionExecutorPortsArgs,
+  seedHint: string | undefined,
+): string | undefined =>
+  cleanSelectionPromptEnabled(args) ? seedHint : mergeSelectionHint(args.closureHint, seedHint)
+
+const generateSelectionPort =
+  (args: SelectionExecutorPortsArgs) => (index: number, seed?: string) =>
+    generateSelectionCandidate({
+      index,
+      seed: selectionCandidateSeed(args, seed),
+      instance: args.instance,
+      deps: args.deps,
+      sandbox: args.sandbox,
+      signal: args.signal,
+      wiring: args.wiring,
+      precomputedHint: args.precomputedHint,
+      reproHint: args.reproHint,
+      postureOverride: args.postureOverride,
+      stateOverride: args.stateOverride,
+      chaMultisiteSteer: args.chaMultisiteSteer,
+      mergeHint: (seedHint) => selectionMergeHint(args, seedHint),
+      concurrency: args.concurrency,
+      baseValidatedRed: args.baseValidatedRed,
+      generationErrors: args.generationErrors,
+      addTurns: args.addTurns,
+    })
+
+const buildSelectionExecutorPorts = (args: SelectionExecutorPortsArgs): SelectionPorts => {
   const ports: SelectionPorts = {
-    generate: (index, seed) =>
-      generateSelectionCandidate({
-        index,
-        seed:
-          args.verifySelectProofRequired && args.selectorMode === "clean"
-            ? buildSelectionGenerationPrompt({
-                problemStatement: args.instance.problemStatement,
-                ownerEvidence: args.selectionOwnerEvidence,
-                contracts: contractFactsFromBundle(args.publicContracts),
-                baseValidatedRed: args.baseValidatedRed,
-                ...(args.verificationTarget !== undefined
-                  ? { verificationTarget: args.verificationTarget }
-                  : {}),
-                ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
-                ...(args.validatedReproScripts.length > 0
-                  ? { validatedReproScripts: args.validatedReproScripts }
-                  : {}),
-                ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
-                ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
-                ...(args.staticWitnessDiagnostics.length > 0
-                  ? { staticWitnessDiagnostics: args.staticWitnessDiagnostics }
-                  : {}),
-                // Scripts reach generation ONCE via `validatedReproScripts`
-                // staticFacts; NOT also merged into `seed` (that destroyed the
-                // diversity seed via the seed length cap + duplicated the scripts).
-                ...(seed !== undefined ? { seed } : {}),
-                ...(args.recordLlmEvidencePacket !== undefined
-                  ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
-                  : {}),
-              })
-            : seed,
-        instance: args.instance,
-        deps: args.deps,
-        sandbox: args.sandbox,
-        signal: args.signal,
-        wiring: args.wiring,
-        precomputedHint: args.precomputedHint,
-        reproHint: args.reproHint,
-        postureOverride: args.postureOverride,
-        stateOverride: args.stateOverride,
-        chaMultisiteSteer: args.chaMultisiteSteer,
-        mergeHint: (seedHint) =>
-          args.verifySelectProofRequired && args.selectorMode === "clean"
-            ? seedHint
-            : mergeSelectionHint(args.closureHint, seedHint),
-        concurrency: args.concurrency,
-        baseValidatedRed: args.baseValidatedRed,
-        generationErrors: args.generationErrors,
-        addTurns: args.addTurns,
-      }),
+    generate: generateSelectionPort(args),
     applyClean: (candidate) =>
       candidatePatchAppliesCleanly({
         sandbox: args.sandbox,
@@ -3309,15 +3358,20 @@ const runSelectionPhase = async (
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
 ): Promise<Phase> => {
-  const { effectivePublicContracts, selectionInputs, staticWitnesses, staticWitnessDiagnostics } =
-    buildSelectionPhaseContracts({
-      instance,
-      sandbox,
-      selectionOwnerCandidates,
-      ownerResolved,
-      publicContracts,
-      n,
-    })
+  const {
+    advisoryPromptContracts,
+    selectionAuthorityContracts,
+    selectionInputs,
+    staticWitnesses,
+    staticWitnessDiagnostics,
+  } = buildSelectionPhaseContracts({
+    instance,
+    sandbox,
+    selectionOwnerCandidates,
+    ownerResolved,
+    publicContracts,
+    n,
+  })
   // jun-23 split: ADVISORY repair seed = canonical (submit-gate) scripts FIRST,
   // then any hardening scripts as extra coverage guidance. Hardening NEVER gates
   // submit; it only seeds repair / breaks ties. Canonical-only ⇒ byte-identical.
@@ -3359,7 +3413,7 @@ const runSelectionPhase = async (
   // P4 PROOF-GATE FAIL-OPEN (THE structural fix for Defect 2): when the CANONICAL
   // repro oracle is a CONFIRMED gold false-negative, a proof-required gate built on
   // it would WITHHOLD the canonical-correct fix (the proven-broken oracle can never
-  // print "Issue resolved", so `applyProofRequiredHardGate` rejects every candidate).
+  // report a resolved sidecar, so `applyProofRequiredHardGate` rejects every candidate).
   // A proven-broken oracle must NOT hold hard submit authority ⇒ LIFT proofRequired
   // for this instance. This is the EXACT decision point (mirror of the soft-port
   // fail-open in makeCalibratedReproConsensusPort). Gold is EVAL-ONLY telemetry — it
@@ -3390,8 +3444,8 @@ const runSelectionPhase = async (
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
     ...(effectiveProofRequired ? { proofRequired: true } : {}),
-    ...(effectivePublicContracts !== undefined
-      ? { publicContracts: effectivePublicContracts }
+    ...(selectionAuthorityContracts !== undefined
+      ? { publicContracts: selectionAuthorityContracts }
       : {}),
     ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
     recordLlmEvidencePacket: (packet) => {
@@ -3428,7 +3482,7 @@ const runSelectionPhase = async (
       envCaveats: generationEnvCaveats,
       validatedReproScripts: reproSources,
       staticWitnessDiagnostics,
-      publicContracts: effectivePublicContracts,
+      publicContracts: advisoryPromptContracts,
       verificationTarget,
       recordLlmEvidencePacket: (packet) => {
         recordLlmEvidencePacket(selectionLlmEvidence, packet)
@@ -3800,16 +3854,16 @@ export const deriveCandidateStructuralRepair = async (args: {
           structural.selectionInputs.candidateFamilies[1],
           chaFamily,
         )
-  if (family === undefined && structural.effectivePublicContracts === undefined) return undefined
+  if (family === undefined && structural.advisoryPromptContracts === undefined) return undefined
   return {
     ...(family !== undefined ? { family } : {}),
-    ...(structural.effectivePublicContracts !== undefined
-      ? { publicContracts: structural.effectivePublicContracts }
+    ...(structural.advisoryPromptContracts !== undefined
+      ? { advisoryContracts: structural.advisoryPromptContracts }
       : {}),
   }
 }
 
-export const withCandidateFamilyPublicContracts = (
+export const withCandidateFamilyAuthorityContracts = (
   publicContracts: PublicContractBundle | undefined,
   _candidateFamilyBundle: CandidateFamilyBundle | undefined,
 ): PublicContractBundle | undefined =>
@@ -3817,6 +3871,8 @@ export const withCandidateFamilyPublicContracts = (
   // localization/generation/repair, but they do not mint required contracts
   // without executable public proof.
   publicContracts
+
+export const withCandidateFamilyPublicContracts = withCandidateFamilyAuthorityContracts
 
 export const makeSelectionRegressionPort = (args: {
   readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
@@ -3972,7 +4028,17 @@ const buildClosureAttemptState = (args: {
           ? { witnessOwners: args.witnessOwners }
           : {}),
         ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
-          ? { reproScript: { cmd: `python "${args.reproTest.path}"`, baseValidatedRed: true } }
+          ? {
+              reproScript: {
+                cmd: reproValidationCmd({
+                  repo: args.instance.swebench.repo,
+                  version: args.instance.swebench.version,
+                  scriptPath: args.reproTest.path,
+                }),
+                pytestReportPath: pytestReportPathFor(args.reproTest.path),
+                baseValidatedRed: true,
+              },
+            }
           : {}),
         ...(args.ownerNearTests !== undefined && args.ownerNearTests.length > 0
           ? { ownerNearTests: args.ownerNearTests }
@@ -4126,7 +4192,7 @@ const runMainPhase = async (args: {
   readonly prepared: PreparedAttemptContext
 }): Promise<Phase> => {
   if (args.prepared.posture.verifySelectN !== undefined && args.instance.swebench !== undefined) {
-    const publicContracts = buildCleanSelectionPublicContracts({
+    const publicContracts = buildCleanSelectionAuthorityContracts({
       declaredExpected: args.prepared.closureSession?.issueDeclaredExpected,
       candidates: args.prepared.closureSession?.bundle.evidence.candidates,
       apiSymbols: args.prepared.closureSession?.bundle.evidence.issueSymbols,
@@ -4447,62 +4513,56 @@ export const buildAdaptivePhasePacket = (args: {
 }): LlmEvidencePacket =>
   toPhaseRoutingContract(buildAdaptivePhaseEvidence(args), ROUTING_ACTION_MENU)
 
-/** The evidence BODY for the router packet, before the A10 routing re-contract
- *  ({@link buildAdaptivePhasePacket} applies the contract). Kept separate so the
- *  evidence assembly is unit-testable independent of the stage rewrite. */
-const buildAdaptivePhaseEvidence = (args: {
+type AdaptivePhaseEvidenceArgs = {
   readonly instance: Instance
   readonly phase: Phase
   readonly prepared: PreparedAttemptContext
   readonly sandbox: string
-}): LlmEvidencePacket => {
-  const proofSummary = args.phase.selectionTelemetry?.proofSummary
-  const ownerFiles =
-    args.phase.selectionTelemetry?.ownerFiles ??
-    cleanUniqueList([
-      ...(args.prepared.closureSession?.bundle.evidence.candidates.map(
-        (candidate) => candidate.file,
-      ) ?? []),
-      ...(args.prepared.ownerResolved?.map((owner) => owner.file) ?? []),
-      ...args.prepared.localizeCandidates,
-    ])
-  const { staticWitnesses, staticWitnessDiagnostics } = adaptiveStaticWitnessEvidence({
-    problemStatement: args.instance.problemStatement,
-    ownerFiles,
-    ownerResolved: args.prepared.ownerResolved,
-    sandbox: args.sandbox,
-  })
-  if (args.phase.selectionTelemetry !== undefined) {
-    return buildSelectionExplanationPacket({
-      problemStatement: args.instance.problemStatement,
-      ownerFiles,
-      winnerId: args.phase.selectionTelemetry.winnerId,
-      ...(args.phase.selectionTelemetry.noWinnerReason !== undefined
-        ? { noWinnerReason: args.phase.selectionTelemetry.noWinnerReason }
-        : {}),
-      ...(args.phase.selectionTelemetry.proofRequired === true ? { proofRequired: true } : {}),
-      ...(proofSummary !== undefined ? { proofSummary } : {}),
-      candidates: args.phase.selectionTelemetry.candidates,
-      ...(staticWitnessDiagnostics.length > 0 ? { staticWitnessDiagnostics } : {}),
-    })
-  }
-  const ownerEvidence = buildSelectionOwnerEvidence({
-    ownerFiles,
-    issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
-    staticWitnesses,
-    readSource: (rel) => readSandboxSource(args.sandbox, rel),
-  })
-  const verificationTarget = verificationTargetFromPlan(args.prepared.verificationPlan)
-  const missingEvidence: MissingEvidenceFact[] = []
-  const receipts = dedupeProofReceipts([
-    ...adaptiveBaseReproReceipts(args.prepared.reproTest),
-    ...adaptiveSelectionProofReceipts(proofSummary),
+}
+
+const adaptiveOwnerFilesOf = (args: AdaptivePhaseEvidenceArgs): readonly string[] =>
+  args.phase.selectionTelemetry?.ownerFiles ??
+  cleanUniqueList([
+    ...(args.prepared.closureSession?.bundle.evidence.candidates.map(
+      (candidate) => candidate.file,
+    ) ?? []),
+    ...(args.prepared.ownerResolved?.map((owner) => owner.file) ?? []),
+    ...args.prepared.localizeCandidates,
   ])
-  if (!receipts.some((receipt) => receipt.state === "candidate_green")) {
+
+const buildAdaptiveSelectionEvidence = (args: {
+  readonly problemStatement: string
+  readonly telemetry: SelectionTelemetry
+  readonly ownerFiles: readonly string[]
+  readonly proofSummary: Parameters<typeof adaptiveSelectionProofReceipts>[0]
+  readonly staticWitnessDiagnostics: readonly StaticWitnessDiagnostic[]
+}): LlmEvidencePacket =>
+  buildSelectionExplanationPacket({
+    problemStatement: args.problemStatement,
+    ownerFiles: args.ownerFiles,
+    winnerId: args.telemetry.winnerId,
+    ...(args.telemetry.noWinnerReason !== undefined
+      ? { noWinnerReason: args.telemetry.noWinnerReason }
+      : {}),
+    ...(args.telemetry.proofRequired === true ? { proofRequired: true } : {}),
+    ...(args.proofSummary !== undefined ? { proofSummary: args.proofSummary } : {}),
+    candidates: args.telemetry.candidates,
+    ...(args.staticWitnessDiagnostics.length > 0
+      ? { staticWitnessDiagnostics: args.staticWitnessDiagnostics }
+      : {}),
+  })
+
+const adaptiveMissingEvidenceOf = (args: {
+  readonly phase: Phase
+  readonly proofSummary: Parameters<typeof adaptiveSelectionProofReceipts>[0]
+  readonly receipts: readonly ProofReceiptFact[]
+}): readonly MissingEvidenceFact[] => {
+  const missingEvidence: MissingEvidenceFact[] = []
+  if (!args.receipts.some((receipt) => receipt.state === "candidate_green")) {
     missingEvidence.push({
       kind: "executed_public_proof",
       reason:
-        proofSummary?.proofState === "infra_blocked"
+        args.proofSummary?.proofState === "infra_blocked"
           ? "public_proof_infra_blocked"
           : "no_positive_executed_public_proof",
     })
@@ -4513,17 +4573,75 @@ const buildAdaptivePhaseEvidence = (args: {
       reason: args.phase.agentError.slice(0, 240),
     })
   }
-  const candidateEditSurface = candidateEditSurfaceFromPatch(args.phase.patch)
+  return missingEvidence
+}
+
+const buildAdaptiveCandidatePostReviewEvidence = (args: {
+  readonly phaseArgs: AdaptivePhaseEvidenceArgs
+  readonly ownerFiles: readonly string[]
+  readonly staticWitnesses: ReturnType<typeof adaptiveStaticWitnessEvidence>["staticWitnesses"]
+  readonly staticWitnessDiagnostics: readonly StaticWitnessDiagnostic[]
+  readonly proofSummary: Parameters<typeof adaptiveSelectionProofReceipts>[0]
+}): LlmEvidencePacket => {
+  const ownerEvidence = buildSelectionOwnerEvidence({
+    ownerFiles: args.ownerFiles,
+    issueSymbols: extractIssueHint(args.phaseArgs.instance.problemStatement).symbols,
+    staticWitnesses: args.staticWitnesses,
+    readSource: (rel) => readSandboxSource(args.phaseArgs.sandbox, rel),
+  })
+  const verificationTarget = verificationTargetFromPlan(args.phaseArgs.prepared.verificationPlan)
+  const receipts = dedupeProofReceipts([
+    ...adaptiveBaseReproReceipts(args.phaseArgs.prepared.reproTest),
+    ...adaptiveSelectionProofReceipts(args.proofSummary),
+  ])
+  const missingEvidence = adaptiveMissingEvidenceOf({
+    phase: args.phaseArgs.phase,
+    proofSummary: args.proofSummary,
+    receipts,
+  })
+  const candidateEditSurface = candidateEditSurfaceFromPatch(args.phaseArgs.phase.patch)
   return buildCandidatePostReviewLlmEvidencePacket({
-    problemStatement: args.instance.problemStatement,
-    candidatePatchHash: candidatePatchHash(args.phase.patch),
+    problemStatement: args.phaseArgs.instance.problemStatement,
+    candidatePatchHash: candidatePatchHash(args.phaseArgs.phase.patch),
     ownerEvidence,
     proofReceipts: receipts,
     contracts: [],
     ...(verificationTarget !== undefined ? { verificationTarget } : {}),
     ...(candidateEditSurface !== undefined ? { candidateEditSurface } : {}),
-    ...(staticWitnessDiagnostics.length > 0 ? { staticWitnessDiagnostics } : {}),
+    ...(args.staticWitnessDiagnostics.length > 0
+      ? { staticWitnessDiagnostics: args.staticWitnessDiagnostics }
+      : {}),
     ...(missingEvidence.length > 0 ? { missingEvidence } : {}),
+  })
+}
+
+/** The evidence BODY for the router packet, before the A10 routing re-contract
+ *  ({@link buildAdaptivePhasePacket} applies the contract). Kept separate so the
+ *  evidence assembly is unit-testable independent of the stage rewrite. */
+const buildAdaptivePhaseEvidence = (args: AdaptivePhaseEvidenceArgs): LlmEvidencePacket => {
+  const proofSummary = args.phase.selectionTelemetry?.proofSummary
+  const ownerFiles = adaptiveOwnerFilesOf(args)
+  const { staticWitnesses, staticWitnessDiagnostics } = adaptiveStaticWitnessEvidence({
+    problemStatement: args.instance.problemStatement,
+    ownerFiles,
+    ownerResolved: args.prepared.ownerResolved,
+    sandbox: args.sandbox,
+  })
+  if (args.phase.selectionTelemetry !== undefined) {
+    return buildAdaptiveSelectionEvidence({
+      problemStatement: args.instance.problemStatement,
+      telemetry: args.phase.selectionTelemetry,
+      ownerFiles,
+      proofSummary,
+      staticWitnessDiagnostics,
+    })
+  }
+  return buildAdaptiveCandidatePostReviewEvidence({
+    phaseArgs: args,
+    ownerFiles,
+    staticWitnesses,
+    staticWitnessDiagnostics,
+    proofSummary,
   })
 }
 
@@ -4606,43 +4724,55 @@ const attachObservedSuccessBasics = (args: {
     args.extra.turnsToFirstEdit = args.phase.turnsToFirstEdit
 }
 
+const attachLspClosureMetric = (
+  extra: Partial<InstanceResult>,
+  lspGrounding: LspGroundingReceipt | undefined,
+): void => {
+  if (lspGrounding === undefined) return
+  const status = foldGroundingReceipts([lspGrounding])
+  if (status !== undefined) extra.lspGrounding = status
+}
+
+const attachPrimaryRailMetrics = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+}): void => {
+  if (!(args.prepared.posture.verificationPlan || args.prepared.posture.primaryRail)) return
+  args.extra.primaryRailPresent = args.prepared.primaryRailStep !== undefined
+  args.extra.requiredVerificationCovered =
+    args.prepared.verificationPlan?.required.some((s) => s.successPredicate !== undefined) ?? false
+  if (args.prepared.verificationPlan !== undefined)
+    args.extra.synthReproBaseRed = args.prepared.verificationPlan.baseValidatedRed
+  if (args.prepared.primaryRailStep !== undefined && args.phase.primaryFalseGreen !== undefined) {
+    args.extra.primaryFalseGreen = args.phase.primaryFalseGreen
+  }
+  if (args.prepared.primaryRailStep !== undefined && args.phase.primaryFalseRed !== undefined) {
+    args.extra.primaryFalseRed = args.phase.primaryFalseRed
+  }
+}
+
+const attachRepairGateMetrics = (args: {
+  readonly extra: Partial<InstanceResult>
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+}): void => {
+  if (!args.prepared.repairGateEligible) return
+  args.extra.gateEntered = args.prepared.gateDecisionVerify
+  args.extra.gateBypassed = !args.prepared.gateDecisionVerify
+  if (args.phase.verifyRounds !== undefined) args.extra.verifyRounds = args.phase.verifyRounds
+}
+
 const attachClosureMetrics = (args: {
   readonly extra: Partial<InstanceResult>
   readonly phase: Phase
   readonly prepared: PreparedAttemptContext
 }): void => {
-  const {
-    posture,
-    verificationPlan,
-    primaryRailStep,
-    repairGateEligible,
-    gateDecisionVerify,
-    lspGrounding,
-  } = args.prepared
   // LSP-02: carry the strict gate's typed grounding receipt into the report as a
   // folded status so the report/CLI render the SAME outcome the gate proved.
-  if (lspGrounding !== undefined) {
-    const status = foldGroundingReceipts([lspGrounding])
-    if (status !== undefined) args.extra.lspGrounding = status
-  }
-  if (posture.verificationPlan || posture.primaryRail) {
-    args.extra.primaryRailPresent = primaryRailStep !== undefined
-    args.extra.requiredVerificationCovered =
-      verificationPlan?.required.some((s) => s.successPredicate !== undefined) ?? false
-    if (verificationPlan !== undefined)
-      args.extra.synthReproBaseRed = verificationPlan.baseValidatedRed
-    if (primaryRailStep !== undefined && args.phase.primaryFalseGreen !== undefined) {
-      args.extra.primaryFalseGreen = args.phase.primaryFalseGreen
-    }
-    if (primaryRailStep !== undefined && args.phase.primaryFalseRed !== undefined) {
-      args.extra.primaryFalseRed = args.phase.primaryFalseRed
-    }
-  }
-  if (repairGateEligible) {
-    args.extra.gateEntered = gateDecisionVerify
-    args.extra.gateBypassed = !gateDecisionVerify
-    if (args.phase.verifyRounds !== undefined) args.extra.verifyRounds = args.phase.verifyRounds
-  }
+  attachLspClosureMetric(args.extra, args.prepared.lspGrounding)
+  attachPrimaryRailMetrics(args)
+  attachRepairGateMetrics(args)
 }
 
 const attachLlmEvidenceArtifacts = (args: {

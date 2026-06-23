@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { pytestReportPathFor } from "../../src/agent/repro-test/pytest-report"
 import type { ExecFn } from "../../src/apps/bench/eval/repair/types"
 import { validate } from "../../src/apps/bench/eval/repair/validator"
 
@@ -86,7 +87,7 @@ describe("validate (non-leaking repair validator)", () => {
     expect((r.failTail ?? "").length).toBeLessThanOrEqual(2000)
   })
 
-  test('repro fallback: only reproPath ⇒ exec called with `python "<reproPath>"`', async () => {
+  test("repro fallback: only reproPath ⇒ no runnable gate (bare python forbidden)", async () => {
     const log: Captured[] = []
     const exec = makeExec({ code: 0, stdout: "", stderr: "" }, log)
     const r = await validate({
@@ -95,9 +96,34 @@ describe("validate (non-leaking repair validator)", () => {
       exec,
       timeoutMs: 1234,
     })
+    expect(r.ok).toBe(false)
+    expect(r.failTail).toBe("")
+    expect(log).toHaveLength(0)
+  })
+
+  test("repro fallback: explicit reproCmd ⇒ execs that project-env command", async () => {
+    const log: Captured[] = []
+    const exec = makeExec({ code: 0, stdout: "", stderr: "" }, log)
+    const reproPath = "/sbx/repro.py"
+    const r = await validate({
+      sandbox: HARNESS_SANDBOX,
+      reproPath,
+      reproCmd: "uv run --with-editable . python -s /sbx/repro.py",
+      exec,
+      readFile: async (path) => {
+        expect(path).toBe(pytestReportPathFor(reproPath))
+        return JSON.stringify({
+          schema: 1,
+          collected: 1,
+          exitstatus: 0,
+          reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+        })
+      },
+      timeoutMs: 1234,
+    })
     expect(r.ok).toBe(true)
     expect(log).toHaveLength(1)
-    expect(log[0]?.cmd).toBe('python "/sbx/repro.py"')
+    expect(log[0]?.cmd).toBe("uv run --with-editable . python -s /sbx/repro.py")
     expect(log[0]?.cwd).toBe(HARNESS_SANDBOX)
     expect(log[0]?.timeoutMs).toBe(1234)
   })
@@ -150,7 +176,7 @@ describe("validate (non-leaking repair validator)", () => {
 // protecting test = the no-leak invariant becomes a build gate.
 describe("structural no-leak invariant (build gate)", () => {
   const ROOT = resolve(__dirname, "../../src/runner/batch/eval/repair")
-  const FILES = ["validator.ts", "context.ts", "index.ts", "repro-outcome.ts"] as const
+  const FILES = ["validator.ts", "context.ts", "index.ts"] as const
   // Forbidden dataset/grader tokens. These names MUST NOT appear in source
   // text — the validator/context/orchestrator must be structurally incapable
   // of touching them.
@@ -182,9 +208,7 @@ describe("structural no-leak invariant (build gate)", () => {
     switch (f) {
       case "validator.ts":
       case "index.ts":
-        return ["./types", "./repro-outcome"]
-      case "repro-outcome.ts":
-        return ["./types"]
+        return ["./types", "./pytest-report"]
       case "context.ts":
         return ["./types"]
     }
@@ -201,7 +225,10 @@ describe("structural no-leak invariant (build gate)", () => {
     expect(sources.length, `no import statements found in ${f}`).toBeGreaterThan(0)
     const allowed = allowedImportsOf(f)
     for (const s of sources) {
-      expect(allowed.includes(s), `${f} import source must be one of ${allowed.join(", ")}, got "${s}"`).toBe(true)
+      expect(
+        allowed.includes(s),
+        `${f} import source must be one of ${allowed.join(", ")}, got "${s}"`,
+      ).toBe(true)
     }
   }
   for (const f of FILES) {
@@ -213,24 +240,21 @@ describe("structural no-leak invariant (build gate)", () => {
   }
 })
 
-describe("repair repro-outcome SSOT", () => {
+describe("repair legacy marker oracle retirement", () => {
   const ROOT = resolve(__dirname, "../../src/runner/batch/eval/repair")
-  const HELPER = readFileSync(resolve(ROOT, "repro-outcome.ts"), "utf8")
   const INDEX = readFileSync(resolve(ROOT, "index.ts"), "utf8")
   const VALIDATOR = readFileSync(resolve(ROOT, "validator.ts"), "utf8")
   const LOCAL_CLASSIFIER_RE = /\b(?:const|function)\s+classifyReproOutcome\b/
   const LOCAL_MARKER_RE = /\bMARKER_(?:REPRODUCED|RESOLVED|OTHER)\b/
 
-  test("helper owns the classifier implementation", () => {
-    expect(HELPER).toContain('export const MARKER_REPRODUCED = "Issue reproduced"')
-    expect(HELPER).toContain('export const MARKER_RESOLVED = "Issue resolved"')
-    expect(HELPER).toContain('export const MARKER_OTHER = "Other issues"')
-    expect(HELPER).toContain("export const classifyReproOutcome =")
+  test("legacy marker helper file is gone", () => {
+    expect(existsSync(resolve(ROOT, "repro-outcome.ts"))).toBe(false)
   })
 
-  test("index and validator import the shared helper instead of redefining markers/classifier", () => {
+  test("index and validator never define or import marker classifiers", () => {
+    expect(VALIDATOR).not.toContain('from "./repro-outcome"')
+    expect(INDEX).not.toContain('from "./repro-outcome"')
     for (const src of [INDEX, VALIDATOR]) {
-      expect(src).toContain('from "./repro-outcome"')
       expect(LOCAL_CLASSIFIER_RE.test(src)).toBe(false)
       expect(LOCAL_MARKER_RE.test(src)).toBe(false)
     }

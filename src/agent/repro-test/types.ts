@@ -29,7 +29,7 @@
  * The KIND of a reproduction-test candidate (jun-23 canonical/hardening split).
  *
  *   - `"canonical"`  — exercises the issue's CORE symptom ONLY. The minimal
- *                       correct fix MUST be able to flip it to "Issue resolved".
+ *                       correct fix MUST be able to flip it to sidecar resolved.
  *                       NO adversarial over-strictness, NO "every incidental
  *                       case must pass". THIS is the submit-gate oracle (the set
  *                       the proof gate calibrates + gates on).
@@ -86,27 +86,21 @@ export interface ReproTestConfig {
 
 /** Outcome of executing one repro-test candidate on the original repo.
  *
- * P1 (jun-23): the verdict is now EXECUTION-GROUNDED — derived from pytest's
- * process exit code + summary line (`classifyPytest`), NOT a model-printed
- * sentinel. The union is UNCHANGED; only HOW each value is computed changed, so
- * downstream consumers (driver, calibration, vote) are byte-stable.
+ * The verdict is execution-grounded and sidecar-authoritative: the controlled
+ * pytest footer writes a structured report, and stdout/process-code-only output
+ * is not a proof surface.
  *
- *   - `"reproduced"` — a pytest assertion FAILED on the base tree (summary
- *                       "N failed"). The bug is present / red. The minimal
- *                       correct fix should flip this to "resolved".
- *   - `"resolved"`   — pytest PASSED (summary "N passed", no failures). The
- *                       expected behaviour held — green. On the ORIGINAL repo
- *                       this is rare (means the test is wrong or HEAD already
- *                       fixed it).
+ *   - `"reproduced"` — a call-phase AssertionError/pytest.fail occurred on the
+ *                       base tree. The bug is present / red.
+ *   - `"resolved"`   — collected call reports passed. The expected behaviour
+ *                       held — green.
  *   - `"other"`      — pytest itself errored indeterminately (internal/usage
  *                       error, exit 3/4) — ran, but produced a result distinct
  *                       from a clean pass/fail. Meaningful, not a catch-all.
- *   - `"exec_failed"`— the test could not be RUN: a collection / setup /
- *                       fixture error (summary "N error[s]"), a top-level import
- *                       crash (project not importable — no summary, exit≠0),
- *                       syntax error, or a timeout-kill. Infra, NOT a verdict.
- *   - `"unknown"`    — pytest collected no test items ("no tests ran" / exit 5),
- *                       or ran cleanly (exit 0) with no test signal at all.
+ *   - `"exec_failed"`— raw call exception, collection/setup/teardown failure,
+ *                       missing/malformed sidecar, top-level import crash,
+ *                       syntax error, or timeout. Infra/invalid test, NOT red.
+ *   - `"unknown"`    — pytest collected no test items.
  *                       Either the prompt was malformed or the LLM emitted a
  *                       no-op (no `def test_*`).
  *
@@ -122,14 +116,9 @@ export interface ReproTestSample {
   stdout: string
   /** Stderr from execution. Captured so an `exec_failed` outcome can be
    *  attributed (ModuleNotFoundError ⇒ project not importable in the exec env;
-   *  SyntaxError ⇒ bad LLM script; nothing ⇒ timeout) AND so `classifyPytest`
-   *  can see a pytest summary that landed on stderr. Empty string when the exec
-   *  port reported no stderr or threw before producing any. */
+   *  SyntaxError ⇒ bad LLM script; missing sidecar ⇒ footer did not complete). */
   stderr?: string
-  /** Outcome derived from pytest exit semantics (exit code + summary line) by
-   *  `classifyPytest` — NOT from a model-printed sentinel. A failing assertion
-   *  ⇒ "reproduced"; a clean pass ⇒ "resolved"; a collection/setup error ⇒
-   *  "exec_failed"; no collected tests ⇒ "unknown". */
+  /** Outcome derived from the controlled pytest sidecar — NOT stdout. */
   outcome: ReproTestOutcome
   /** jun-23 canonical/hardening split. Defaults to `"canonical"` when the
    *  generator did not tag a kind (back-compat: the legacy single-set path is

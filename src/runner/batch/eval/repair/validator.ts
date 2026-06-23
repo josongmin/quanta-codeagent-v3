@@ -1,19 +1,20 @@
 /**
  * b2 — Non-leaking validator (RFC §16, ADR-0014).
  *
- * Re-executes EXACTLY the agent's own last verification command (or, as a
- * fallback, runs the agent-authored reproduction script as `python <path>`) in
- * the patched sandbox. The validator is structurally incapable of peeking at
+ * Re-executes EXACTLY the agent's own last verification command (or an explicit
+ * adapter-supplied reproduction command) in the patched sandbox. The validator
+ * is structurally incapable of peeking at
  * any official dataset hidden field because its sole input contract
  * (`ValidateArgs`) does not expose those — and this file only imports local
- * repair helpers (`./types`, `./repro-outcome`). All I/O is via the INJECTED
+ * repair helpers (`./types`, `./pytest-report`). All I/O is via the INJECTED
  * `exec` port, so the validator is
  * hermetic-by-injection in tests (no node fs / child-process / process spawn
  * reachable from here).
  *
  * Mapping:
  *   - cmd non-empty   ⇒ exec(cmd, sandbox, timeoutMs)
- *   - else reproPath  ⇒ exec(`python "<reproPath>"`, sandbox, timeoutMs)
+ *   - else reproCmd   ⇒ exec(reproCmd, sandbox, timeoutMs)
+ *   - else reproPath  ⇒ no runnable gate; path-only cannot define interpreter
  *   - else            ⇒ { ok:false, failTail:"" }  (degenerate; NOT a silent pass)
  *
  * Tail bound: default 2000, applied to `stdout + "\n" + stderr` by CHARACTER
@@ -21,11 +22,10 @@
  * Bun and Node `string.slice`. The tail is taken from the END (the failure
  * tends to be at the tail of test runner output).
  */
+import { classifyPytestReportText, pytestReportPathFor } from "./pytest-report"
 import { buildValidationFailureEvidence, type ValidateArgs, type ValidatorResult } from "./types"
-import { classifyPytestReproOutcome, classifyReproOutcome } from "./repro-outcome"
 
 const DEFAULT_TAIL = 2000
-const HAS_PYTEST_SUMMARY = /\b(?:\d+\s+failed|\d+\s+errors?|\d+\s+passed|no tests ran)\b/
 
 export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => {
   const tailBound = args.tailBytes ?? DEFAULT_TAIL
@@ -37,11 +37,11 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
   }
   const r = await args.exec(picked.cmd, args.sandbox, args.timeoutMs)
 
-  // T-1: record the observation + typed predicate verdict. The PREDICATE stays
-  // observe-only (it never decides `ok`); the `ok` decision is the repro SENTINEL
-  // (below) when present, else the legacy exit code. The predicate is fail-open by
-  // construction (evaluator returns evaluable:false for anything it can't
-  // confidently judge). Recorded for diagnostics / repair seed pressure.
+  // T-1: record the observation + typed predicate verdict. The predicate stays
+  // observe-only (it never decides `ok`). A repro-authority command is decided
+  // solely by the controlled pytest sidecar; non-repro validation commands keep
+  // the command exit-code contract. Recorded for diagnostics / repair seed
+  // pressure only.
   const observed = { exitCode: r.code, stdout: r.stdout, stderr: r.stderr }
   const predicate =
     args.successPredicate !== undefined && args.evaluatePredicate !== undefined
@@ -54,46 +54,79 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
     tailBytes: tailBound,
   })
   const reproOutcome = picked.reproAuthority
-    ? classifyValidationReproOutcome(r.stdout, r.stderr, r.code)
-    : classifyReproOutcome(r.stdout, r.code)
+    ? await classifyValidationReproOutcome(args, picked)
+    : undefined
+  const reproOutcomeField = reproOutcome !== undefined ? { reproOutcome } : {}
   const ok = (result: boolean): ValidatorResult =>
     result
-      ? { ok: true, observed, reproOutcome, ...(predicate !== undefined ? { predicate } : {}) }
+      ? {
+          ok: true,
+          observed,
+          ...reproOutcomeField,
+          ...(predicate !== undefined ? { predicate } : {}),
+        }
       : {
           ok: false,
           failTail: failureEvidence.combinedTail,
           failureEvidence,
           observed,
-          reproOutcome,
+          ...reproOutcomeField,
           ...(predicate !== undefined ? { predicate } : {}),
         }
 
-  // P1 (jun-23): a repro is now an execution-grounded pytest test, so the
-  // patched resolution check must read the SAME signal as the base-side oracle:
-  // pytest pass/fail semantics. For compatibility with older scripted repros we
-  // still fall back to the legacy sentinel markers when no pytest summary is
-  // present. Non-repro verify commands keep the legacy exit-code decision below.
+  // Repro authority is the controlled pytest sidecar only. No stdout marker or
+  // output summary is allowed to green/red a proof rail.
   if (picked.reproAuthority) {
     if (reproOutcome === "resolved") return ok(true)
     if (reproOutcome === "reproduced" || reproOutcome === "other") return ok(false)
+    return ok(false)
   }
 
-  // No repro sentinel — legacy exit-code decision (byte-identical to pre-fix).
+  // Non-repro validation command: use its process exit code.
   return ok(r.code === 0)
 }
 
-const classifyValidationReproOutcome = (stdout: string, stderr: string, code: number) => {
-  const combined = `${stdout}\n${stderr}`
-  if (!HAS_PYTEST_SUMMARY.test(combined)) return classifyReproOutcome(stdout, code)
-  return classifyPytestReproOutcome(stdout, stderr, code)
+const classifyValidationReproOutcome = async (
+  args: ValidateArgs,
+  picked: { readonly pytestReportPath?: string; readonly reproPath?: string },
+) => {
+  const reportPath = picked.pytestReportPath ?? reproReportPathFrom(picked.reproPath)
+  if (args.readFile === undefined || reportPath === undefined) return "exec_failed"
+  try {
+    return classifyPytestReportText(await args.readFile(reportPath))
+  } catch {
+    return "exec_failed"
+  }
 }
+
+const reproReportPathFrom = (reproPath: string | undefined): string | undefined =>
+  reproPath === undefined || reproPath === "" ? undefined : pytestReportPathFor(reproPath)
 
 const pickCmd = (
   args: ValidateArgs,
-): { readonly cmd: string; readonly reproAuthority: boolean } | undefined => {
+):
+  | {
+      readonly cmd: string
+      readonly reproAuthority: boolean
+      readonly reproPath?: string
+      readonly pytestReportPath?: string
+    }
+  | undefined => {
   const cmd = args.cmd ?? ""
-  if (cmd !== "") return { cmd, reproAuthority: args.reproAuthority === true }
-  const repro = args.reproPath ?? ""
-  if (repro !== "") return { cmd: `python "${repro}"`, reproAuthority: true }
+  if (cmd !== "")
+    return {
+      cmd,
+      reproAuthority: args.reproAuthority === true,
+      ...(args.reproPath !== undefined ? { reproPath: args.reproPath } : {}),
+      ...(args.pytestReportPath !== undefined ? { pytestReportPath: args.pytestReportPath } : {}),
+    }
+  const reproCmd = args.reproCmd ?? ""
+  if (reproCmd !== "")
+    return {
+      cmd: reproCmd,
+      reproAuthority: true,
+      ...(args.reproPath !== undefined ? { reproPath: args.reproPath } : {}),
+      ...(args.pytestReportPath !== undefined ? { pytestReportPath: args.pytestReportPath } : {}),
+    }
   return undefined
 }

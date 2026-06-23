@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "bun:test"
-import type { ReproExecPort, ReproWriteFilePort } from "@/agent/repro-test/execute"
+import {
+  pytestReportPathFor,
+  type ReproExecPort,
+  type ReproReadFilePort,
+  type ReproWriteFilePort,
+} from "@/agent/repro-test/execute"
 import {
   drainReproVoteOutcomes,
   makeReproVoteValidate,
@@ -24,25 +29,35 @@ import type { ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/t
 
 const noWrite: ReproWriteFilePort = async () => {}
 
-/** Exec port that maps each script (in WRITE order) → a canned stdout, so the
- *  test can drive the vote into each verdict deterministically. */
-// P1 (pytest-grounded): translate the legacy intent strings into the pytest
-// exec result `classifyPytest` reads (exit code + summary). Extra text is
-// preserved so failTail assertions still hold.
-const toPytestResult = (intent: string): { code: number; stdout: string; stderr: string } => {
-  if (intent.includes("Issue reproduced")) {
-    return { code: 1, stdout: `${intent}\n1 failed in 0.1s`, stderr: "" }
+type Intent = "resolved" | "reproduced" | "unknown"
+
+const sidecarFor = (intent: Intent): string => {
+  if (intent === "reproduced") {
+    return JSON.stringify({
+      schema: 1,
+      collected: 1,
+      exitstatus: 1,
+      reports: [
+        { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" },
+      ],
+    })
   }
-  if (intent.includes("Issue resolved")) {
-    return { code: 0, stdout: `${intent}\n1 passed in 0.1s`, stderr: "" }
+  if (intent === "resolved") {
+    return JSON.stringify({
+      schema: 1,
+      collected: 1,
+      exitstatus: 0,
+      reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+    })
   }
-  return { code: 0, stdout: intent, stderr: "" }
+  return JSON.stringify({ schema: 1, collected: 0, exitstatus: 5, reports: [] })
 }
 
 const makeExec = (
-  stdoutByIndex: readonly string[],
-): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
+  intentByIndex: readonly Intent[],
+): { exec: ReproExecPort; writeFile: ReproWriteFilePort; readFile: ReproReadFilePort } => {
   const pathToIdx = new Map<string, number>()
+  const reports = new Map<string, string>()
   let n = 0
   const writeFile: ReproWriteFilePort = async (path) => {
     pathToIdx.set(path, n)
@@ -51,9 +66,12 @@ const makeExec = (
   const exec: ReproExecPort = async (argv) => {
     const path = argv[argv.length - 1] as string
     const idx = pathToIdx.get(path) ?? 0
-    return toPytestResult(stdoutByIndex[idx] ?? "")
+    const intent = intentByIndex[idx] ?? "unknown"
+    reports.set(pytestReportPathFor(path), sidecarFor(intent))
+    if (intent === "reproduced") return { code: 1, stdout: "assertion failed", stderr: "" }
+    return { code: intent === "resolved" ? 0 : 5, stdout: "", stderr: "" }
   }
-  return { exec, writeFile }
+  return { exec, writeFile, readFile: async (path) => reports.get(path) ?? "" }
 }
 
 const baseArgs = (): ValidateArgs => ({
@@ -73,17 +91,18 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
   })
 
   it("records 'vote_resolved' + the tally with NO injected recorder", async () => {
-    const { exec, writeFile } = makeExec([
-      "Issue resolved",
-      "Issue resolved",
-      "Issue resolved",
-      "Issue reproduced",
+    const { exec, writeFile, readFile } = makeExec([
+      "resolved",
+      "resolved",
+      "resolved",
+      "reproduced",
     ])
     // PRODUCTION SHAPE: deps WITHOUT recordReproVoteOutcome (what the driver passes).
     const result = await makeReproVoteValidate({
       sources: ["a", "b", "c", "d"],
       exec,
       writeFile,
+      readFile,
       fallback: LOUD_FALLBACK,
     })(baseArgs())
 
@@ -96,15 +115,12 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
   })
 
   it("records 'vote_unresolved' + the tally with NO injected recorder", async () => {
-    const { exec, writeFile } = makeExec([
-      "boom\nIssue reproduced",
-      "Issue reproduced",
-      "Issue resolved",
-    ])
+    const { exec, writeFile, readFile } = makeExec(["reproduced", "reproduced", "resolved"])
     const result = await makeReproVoteValidate({
       sources: ["a", "b", "c"],
       exec,
       writeFile,
+      readFile,
       fallback: LOUD_FALLBACK,
     })(baseArgs())
 
@@ -116,15 +132,17 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
   })
 
   it("records 'vote_inconclusive' + the tally with NO injected recorder", async () => {
-    const { exec, writeFile } = makeExec(["Issue resolved", "Issue reproduced"])
+    const { exec, writeFile, readFile } = makeExec(["resolved", "reproduced"])
     const result = await makeReproVoteValidate({
       sources: ["a", "b"],
       exec,
       writeFile,
+      readFile,
       fallback: LOUD_FALLBACK,
     })(baseArgs())
 
-    expect(result).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    expect(result.ok).toBe(false)
+    expect(result.failTail).not.toBe("FALLBACK_RAN")
     const drained = drainReproVoteOutcomes()
     expect(drained).toHaveLength(1)
     expect(drained[0]?.outcome).toBe("vote_inconclusive")
@@ -139,7 +157,8 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
       fallback: LOUD_FALLBACK,
     })(baseArgs())
 
-    expect(result).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    expect(result.ok).toBe(false)
+    expect(result.failTail).toContain("empty_sources")
     const drained = drainReproVoteOutcomes()
     expect(drained).toHaveLength(1)
     expect(drained[0]?.outcome).toBe("empty_sources")
@@ -165,23 +184,26 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
       fallback: LOUD_FALLBACK,
     })(baseArgs())
 
-    expect(result).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    expect(result).toEqual({
+      ok: false,
+      failTail: "repro vote execution failed",
+      reproOutcome: "exec_failed",
+    })
     const drained = drainReproVoteOutcomes()
     expect(drained).toHaveLength(1)
     expect(drained[0]?.outcome).toBe("exec_failed")
     expect(drained[0]?.detail).toBeUndefined()
   })
 
-  it("VOTE-DECIDED visibility: the confound is observable — an analyst can SEE that the round was vote-decided vs fallback-deferred", async () => {
+  it("VOTE-DECIDED visibility: outcome sink distinguishes decisive vs unavailable", async () => {
     // Two runs: one decided by the vote (vote_resolved), one deferred to the
-    // legacy gate (empty_sources). The sink must distinguish them so the
-    // documented primary_false_red_rate confound (vote-decided rounds suppress
-    // that signal) is VISIBLE rather than conflated.
-    const decided = makeExec(["Issue resolved", "Issue resolved"])
+    // unavailable proof source (empty_sources). The sink must distinguish them.
+    const decided = makeExec(["resolved", "resolved"])
     await makeReproVoteValidate({
       sources: ["a", "b"],
       exec: decided.exec,
       writeFile: decided.writeFile,
+      readFile: decided.readFile,
       fallback: LOUD_FALLBACK,
     })(baseArgs())
     await makeReproVoteValidate({
@@ -195,27 +217,32 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
     expect(drained.map((e) => e.outcome)).toEqual(["vote_resolved", "empty_sources"])
     const voteDecided = new Set(["vote_resolved", "vote_unresolved", "vote_inconclusive"])
     const decidedCount = drained.filter((e) => voteDecided.has(e.outcome)).length
-    const deferredCount = drained.length - decidedCount
+    const unavailableCount = drained.length - decidedCount
     expect(decidedCount).toBe(1)
-    expect(deferredCount).toBe(1)
+    expect(unavailableCount).toBe(1)
   })
 
   it("drain is consuming: a second drain returns empty (each campaign read is exclusive)", async () => {
-    const { exec, writeFile } = makeExec(["Issue resolved", "Issue resolved"])
-    await makeReproVoteValidate({ sources: ["a", "b"], exec, writeFile, fallback: LOUD_FALLBACK })(
-      baseArgs(),
-    )
+    const { exec, writeFile, readFile } = makeExec(["resolved", "resolved"])
+    await makeReproVoteValidate({
+      sources: ["a", "b"],
+      exec,
+      writeFile,
+      readFile,
+      fallback: LOUD_FALLBACK,
+    })(baseArgs())
     expect(drainReproVoteOutcomes()).toHaveLength(1)
     expect(drainReproVoteOutcomes()).toHaveLength(0)
   })
 
   it("FAN-OUT: an injected recorder STILL fires AND the default sink ALSO records (no override)", async () => {
     const injected: string[] = []
-    const { exec, writeFile } = makeExec(["Issue resolved", "Issue resolved"])
+    const { exec, writeFile, readFile } = makeExec(["resolved", "resolved"])
     await makeReproVoteValidate({
       sources: ["a", "b"],
       exec,
       writeFile,
+      readFile,
       fallback: LOUD_FALLBACK,
       recordReproVoteOutcome: (outcome) => injected.push(outcome),
     })(baseArgs())

@@ -17,6 +17,7 @@ import { execFileSync } from "node:child_process"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { ensurePytestFooter } from "@/agent/repro-test/generate"
 import { makeCalibratedReproConsensusPort } from "@/runner/batch/eval/driver"
 import type { Candidate } from "@/runner/batch/eval/selection-executor"
 import type { Instance } from "@/runner/batch/types"
@@ -49,24 +50,15 @@ const goldFix = (): string => {
   return p
 }
 
-// P1 (pytest-grounded): a repro is now a pytest test whose verdict is the
-// process EXIT CODE (the self-driving footer runs pytest on the file). The
-// driver invokes it as `python3 <script>`; the footer drives pytest.
-const FOOTER = [
-  "",
-  "",
-  'if __name__ == "__main__":',
-  "    import sys, pytest",
-  '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
-].join("\n")
-
 // A repro that recognizes the fix: PASSES (resolved) iff marker==FIXED, else the
 // assertion FAILS (reproduced). On the buggy base tree it is red; on the gold
 // fix it is green — a TRUSTWORTHY oracle.
-const GOOD_REPRO = `def test_marker():\n    assert "FIXED" in open("marker.txt").read()${FOOTER}`
+const GOOD_REPRO = ensurePytestFooter(
+  `def test_marker():\n    assert "FIXED" in open("marker.txt").read()`,
+)
 // A BROKEN oracle: its assertion ALWAYS fails, so it NEVER reports resolved even
 // when the gold fix is applied (the false-negative the calibration must catch).
-const BAD_REPRO = `def test_always_red():\n    assert False${FOOTER}`
+const BAD_REPRO = ensurePytestFooter(`def test_always_red():\n    assert False`)
 
 const CAND: Candidate = {
   id: "c0",

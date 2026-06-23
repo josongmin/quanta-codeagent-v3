@@ -1,15 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { runRepairRounds } from "@/runner/batch/eval/repair/index"
-import { validate as realValidate } from "@/runner/batch/eval/repair/validator"
 import type { RunOnceResult, ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/types"
+import { validate as realValidate } from "@/runner/batch/eval/repair/validator"
 
 /**
- * jun-18 RCA OBSERVE-ONLY — `primaryFalseRed`: a round did NOT clear (`ok:false`,
- * exit-code ≠ 0 on the rail) YET the repro's OWN sentinel says the bug is fixed
- * (`classifyStdout(stdout) === "resolved"`). This is the false-RED the
- * measurement is meant to quantify: the exit-code gate rejecting a patch the
- * repro reports as resolved, which forces wasteful repair churn. Recorded,
- * never flips `validated` (no blind loop change — the fix is gated on THIS rate).
+ * jun-18 RCA OBSERVE-ONLY — `primaryFalseRed`: a round did NOT clear
+ * (`ok:false`) YET the validator's explicit repro outcome says the bug is fixed
+ * (`reproOutcome === "resolved"`). Legacy stdout markers are not an authority or
+ * telemetry fallback. Recorded, never flips `validated`.
  */
 const runOnce = async (_seed: string | undefined): Promise<RunOnceResult> => ({
   patch: "diff --git a/x b/x\n",
@@ -28,31 +26,42 @@ const base = {
   runOnce,
 }
 
-/** A failing validator (ok:false) whose OBSERVED repro stdout carries a marker. */
-const failWithStdout = (stdout: string): ValidatorResult => ({
+const failWithStdout = (
+  stdout: string,
+  reproOutcome?: ValidatorResult["reproOutcome"],
+): ValidatorResult => ({
   ok: false,
   failTail: stdout,
   observed: { exitCode: 1, stdout, stderr: "" },
+  ...(reproOutcome !== undefined ? { reproOutcome } : {}),
 })
 
 describe("runRepairRounds — primaryFalseRed (RCA observe-only)", () => {
-  test("🔴 not cleared (exit≠0) BUT repro stdout says 'Issue resolved' ⇒ primaryFalseRed:true", async () => {
+  test("not cleared + legacy stdout marker only ⇒ primaryFalseRed:false", async () => {
     const out = await runRepairRounds({
       ...base,
       config: { maxRounds: 1 },
       validate: validatorReturning(failWithStdout("running...\nIssue resolved\n")),
     })
-    // The loop never clears (exit-code gate) — the wasteful churn the RCA found.
     expect(out.validated).toBe(false)
-    // …but the false-RED (repro itself reports resolved) is RECORDED.
-    expect(out.primaryFalseRed).toBe(true)
+    expect(out.primaryFalseRed).toBe(false)
   })
 
-  test("paired control: not cleared AND repro says 'Issue reproduced' ⇒ NOT a false red (repro agrees)", async () => {
+  test("not cleared + explicit validator outcome resolved ⇒ primaryFalseRed:true", async () => {
     const out = await runRepairRounds({
       ...base,
       config: { maxRounds: 1 },
-      validate: validatorReturning(failWithStdout("running...\nIssue reproduced\n")),
+      validate: validatorReturning(failWithStdout("running...\nIssue resolved\n", "resolved")),
+    })
+    expect(out.validated).toBe(false)
+    expect(out.primaryFalseRed).toBe(true)
+  })
+
+  test("paired control: not cleared + explicit outcome reproduced ⇒ NOT a false red", async () => {
+    const out = await runRepairRounds({
+      ...base,
+      config: { maxRounds: 1 },
+      validate: validatorReturning(failWithStdout("running...\nIssue reproduced\n", "reproduced")),
     })
     expect(out.validated).toBe(false)
     expect(out.primaryFalseRed).toBe(false)
@@ -62,7 +71,10 @@ describe("runRepairRounds — primaryFalseRed (RCA observe-only)", () => {
     const out = await runRepairRounds({
       ...base,
       config: { maxRounds: 0 },
-      validate: validatorReturning({ ok: true, observed: { exitCode: 0, stdout: "Issue resolved", stderr: "" } }),
+      validate: validatorReturning({
+        ok: true,
+        observed: { exitCode: 0, stdout: "Issue resolved", stderr: "" },
+      }),
     })
     expect(out.primaryFalseRed).toBe(false)
   })
@@ -80,19 +92,18 @@ describe("runRepairRounds — primaryFalseRed (RCA observe-only)", () => {
     const out = await runRepairRounds({
       ...base,
       config: { maxRounds: 0 },
-      validate: validatorReturning(failWithStdout("Issue resolved\n")),
+      validate: validatorReturning(failWithStdout("Issue resolved\n", "resolved")),
     })
     expect(out.primaryFalseRed).toBe(true)
   })
 })
 
 /**
- * END-TO-END: the REAL validator (not a mock) through runRepairRounds. This is
- * the actual proof that the sentinel-gating fix eliminates the false-RED — a
- * repro that prints "Issue resolved" but exits ≠0 now CLEARS the round at round 0
- * (no wasteful churn), whereas the legacy exit-code gate would have re-seeded.
+ * END-TO-END: the REAL validator (not a mock) through runRepairRounds. Repro
+ * authority is the structured pytest sidecar; a printed legacy marker alone is
+ * not enough to clear a proof rail.
  */
-describe("runRepairRounds — REAL validator sentinel-gating (false-RED eliminated end-to-end)", () => {
+describe("runRepairRounds — REAL validator sidecar gating", () => {
   const railBase = {
     config: { maxRounds: 3 },
     problem: "fix it",
@@ -114,7 +125,7 @@ describe("runRepairRounds — REAL validator sentinel-gating (false-RED eliminat
     }),
   }
 
-  test("🔴 repro prints 'Issue resolved' but exits 1 ⇒ round CLEARS at round 0 (was a false-RED)", async () => {
+  test("repro prints 'Issue resolved' but has no sidecar ⇒ does NOT clear", async () => {
     let execCalls = 0
     const out = await runRepairRounds({
       ...railBase,
@@ -124,10 +135,35 @@ describe("runRepairRounds — REAL validator sentinel-gating (false-RED eliminat
         return { code: 1, stdout: "DeprecationWarning...\nIssue resolved\n", stderr: "warn" }
       },
     })
+    expect(out.validated).toBe(false)
+    expect(out.rounds).toBe(4)
+    expect(execCalls).toBe(4)
+    expect(out.primaryFalseRed).toBe(false)
+  })
+
+  test("repro sidecar resolved + predicate output ⇒ clears at round 0", async () => {
+    let execCalls = 0
+    const out = await runRepairRounds({
+      ...railBase,
+      readFile: async () =>
+        JSON.stringify({
+          schema: 1,
+          collected: 1,
+          exitstatus: 0,
+          reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+        }),
+      primaryRailStep: {
+        ...railBase.primaryRailStep,
+        pytestReportPath: "/tmp/sb/reproduce_issue.py.pytest-report.json",
+      },
+      exec: async () => {
+        execCalls += 1
+        return { code: 1, stdout: "Issue resolved\n", stderr: "warn" }
+      },
+    })
     expect(out.validated).toBe(true)
-    expect(out.rounds).toBe(1) // cleared at round 0 — NO wasteful re-seed
-    expect(execCalls).toBe(1) // validated exactly once, no churn
-    expect(out.primaryFalseRed).toBe(false) // the fix removed the false-RED
+    expect(out.rounds).toBe(1)
+    expect(execCalls).toBe(1)
   })
 
   test("repro prints 'Issue reproduced' (still broken) ⇒ does NOT clear, churns to maxRounds", async () => {

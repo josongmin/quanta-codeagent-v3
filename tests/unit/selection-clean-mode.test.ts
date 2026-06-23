@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import type { CandidateFamily } from "@/runner/batch/eval/candidate-families"
 import {
-  buildApiSurfaceContracts,
+  buildCleanSelectionAuthorityContracts,
   buildMultiSiteFamilyContract,
   buildOwnerMustTouchContracts,
 } from "@/runner/batch/eval/public-contract-bundle"
+import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
 import {
   type Candidate,
   runSelection,
@@ -83,6 +84,29 @@ const runPair = (mode: "clean" | "research", resolvedKofN: SelectionPorts["resol
     },
   })
 
+const issueOwnerContracts = (file: string): PublicContractBundle =>
+  buildCleanSelectionAuthorityContracts({
+    candidates: [{ file, sources: ["issue-file"] }],
+  }) ?? { contracts: [] }
+
+const issueApiContracts = (symbol: string): PublicContractBundle =>
+  buildCleanSelectionAuthorityContracts({
+    apiSymbols: [symbol],
+  }) ?? { contracts: [] }
+
+const publicMultiSiteContracts = (files: readonly string[]): PublicContractBundle => ({
+  contracts: [
+    {
+      contractId: `multi-site-family:${files.join("|")}`,
+      kind: "multi-site-family",
+      strength: "required",
+      provenance: "public-test",
+      subjectFiles: [...files],
+      subjectSymbols: [],
+    },
+  ],
+})
+
 describe("clean-mode lexicographic selection (T-SEL-06 live wiring)", () => {
   it("CLEAN: a BIGGER patch WITH validated proof beats a smaller one WITHOUT — proof dominates size", async () => {
     // cand-0 (2 files) has resolved quorum; cand-1 (1 file) has none.
@@ -130,7 +154,7 @@ describe("clean-mode lexicographic selection (T-SEL-06 live wiring)", () => {
     expect(r.winner?.id).toBe("cand-1") // smaller wins — owner heuristic does NOT dominate
   })
 
-  it("CLEAN: a SUPPLIED genuine contract DOES dominate size — bigger contract-satisfying patch beats smaller drift", async () => {
+  it("CLEAN: a supplied STATIC-WITNESS owner contract is ignored — smaller drift still wins on proof tie", async () => {
     // owner = pkg/a.py. cand-0 (2 files) touches the owner; cand-1 (1 file) drifts to pkg/z.py.
     const ownerBig: Candidate = {
       id: "cand-0",
@@ -154,9 +178,72 @@ describe("clean-mode lexicographic selection (T-SEL-06 live wiring)", () => {
       seeds: [undefined, undefined],
       owners: new Set(["pkg/a.py"]),
       mode: "clean",
-      // genuine, explicitly-supplied contract (the seam a future authoritative
-      // owner / public-test source feeds) — NOT the heuristic owner default.
       publicContracts: { contracts: buildOwnerMustTouchContracts(["pkg/a.py"]) },
+      ports: {
+        generate: async (i) => [ownerBig, driftSmall][i] as Candidate,
+        applyClean: async () => true,
+      },
+    })
+    expect(r.winner?.id).toBe("cand-1")
+  })
+
+  it("CLEAN: a generated candidate-local STATIC-WITNESS owner contract is ignored too", async () => {
+    const ownerBig: Candidate = {
+      id: "cand-0",
+      patch:
+        "diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n@@ -1,1 +1,1 @@\n-old\n+fix_a\n" +
+        "diff --git a/pkg/c.py b/pkg/c.py\n--- a/pkg/c.py\n+++ b/pkg/c.py\n@@ -1,1 +1,1 @@\n-old\n+fix_c",
+      turns: 1,
+      files: ["pkg/a.py", "pkg/c.py"],
+      baseValidatedRed: true,
+      publicContracts: { contracts: buildOwnerMustTouchContracts(["pkg/a.py"]) },
+    }
+    const driftSmall: Candidate = {
+      id: "cand-1",
+      patch:
+        "diff --git a/pkg/z.py b/pkg/z.py\n--- a/pkg/z.py\n+++ b/pkg/z.py\n@@ -1,1 +1,1 @@\n-old\n+fix_z",
+      turns: 1,
+      files: ["pkg/z.py"],
+      baseValidatedRed: true,
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py"]),
+      mode: "clean",
+      ports: {
+        generate: async (i) => [ownerBig, driftSmall][i] as Candidate,
+        applyClean: async () => true,
+      },
+    })
+    expect(r.winner?.id).toBe("cand-1")
+    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.requiredContractsSatisfied).toBe(0)
+  })
+
+  it("CLEAN: a supplied PUBLIC owner contract DOES dominate size — bigger contract-satisfying patch beats smaller drift", async () => {
+    const ownerBig: Candidate = {
+      id: "cand-0",
+      patch:
+        "diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n@@ -1,1 +1,1 @@\n-old\n+fix_a\n" +
+        "diff --git a/pkg/c.py b/pkg/c.py\n--- a/pkg/c.py\n+++ b/pkg/c.py\n@@ -1,1 +1,1 @@\n-old\n+fix_c",
+      turns: 1,
+      files: ["pkg/a.py", "pkg/c.py"],
+      baseValidatedRed: true,
+    }
+    const driftSmall: Candidate = {
+      id: "cand-1",
+      patch:
+        "diff --git a/pkg/z.py b/pkg/z.py\n--- a/pkg/z.py\n+++ b/pkg/z.py\n@@ -1,1 +1,1 @@\n-old\n+fix_z",
+      turns: 1,
+      files: ["pkg/z.py"],
+      baseValidatedRed: true,
+    }
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/a.py"]),
+      mode: "clean",
+      publicContracts: issueOwnerContracts("pkg/a.py"),
       ports: {
         generate: async (i) => [ownerBig, driftSmall][i] as Candidate,
         applyClean: async () => true,
@@ -235,7 +322,7 @@ describe("clean-mode api-surface contract (T-CON-10 symbol tier)", () => {
       seeds: [undefined, undefined],
       owners: new Set(["pkg/a.py"]),
       mode: "clean",
-      publicContracts: { contracts: buildApiSurfaceContracts(["target_fn"]) },
+      publicContracts: issueApiContracts("target_fn"),
       ports: {
         generate: async (i) => [touchesSymbol, wrongSymbol][i] as Candidate,
         applyClean: async () => true,
@@ -245,7 +332,7 @@ describe("clean-mode api-surface contract (T-CON-10 symbol tier)", () => {
   })
 })
 
-describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
+describe("clean-mode multi-site authority (public provenance only)", () => {
   const smallBaseOnly: Candidate = {
     id: "cand-0",
     patch:
@@ -271,7 +358,7 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
     sourceEvidence: ["static-symbol-witness"],
   }
 
-  it("CLEAN: required multi-site contract beats smaller single-site patch", async () => {
+  it("CLEAN: a supplied STATIC-WITNESS multi-site contract is ignored", async () => {
     const r = await runSelection({
       n: 2,
       seeds: [undefined, undefined],
@@ -280,6 +367,42 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
       publicContracts: {
         contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
       },
+      ports: {
+        generate: async (i) => [smallBaseOnly, multiSitePatch][i] as Candidate,
+        applyClean: async () => true,
+      },
+    })
+    expect(r.winner?.id).toBe("cand-0")
+    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.requiredContractsSatisfied).toBe(0)
+  })
+
+  it("CLEAN: partial co-change family patch is inadmissible", async () => {
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      candidateFamilies: [multiSiteFamily],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      mode: "clean",
+      ports: {
+        generate: async () => smallBaseOnly,
+        applyClean: async () => true,
+      },
+    })
+    const entry = r.scored[0]
+    expect(entry?.candidate.familyId).toBe("multi-site")
+    expect(entry?.verdict.admissible).toBe(false)
+    expect(entry?.verdict.reasons).toContain(
+      "hard:familyCoverageMissing=pkg/backend.py (typed co-change family postcondition not satisfied)",
+    )
+  })
+
+  it("CLEAN: required PUBLIC multi-site contract beats smaller single-site patch", async () => {
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, undefined],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      mode: "clean",
+      publicContracts: publicMultiSiteContracts(["pkg/base.py", "pkg/backend.py"]),
       ports: {
         generate: async (i) => [smallBaseOnly, multiSitePatch][i] as Candidate,
         applyClean: async () => true,
@@ -295,9 +418,7 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
       seeds: [undefined, undefined],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
       mode: "clean",
-      publicContracts: {
-        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
-      },
+      publicContracts: publicMultiSiteContracts(["pkg/base.py", "pkg/backend.py"]),
       ports: {
         generate: async (i) => [smallBaseOnly, multiSitePatch][i] as Candidate,
         applyClean: async () => true,
@@ -317,9 +438,7 @@ describe("clean-mode multi-site authority (T-GEN-09 / T-CON-10)", () => {
       seeds: [undefined, undefined],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
       mode: "clean",
-      publicContracts: {
-        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
-      },
+      publicContracts: publicMultiSiteContracts(["pkg/base.py", "pkg/backend.py"]),
       ports: {
         generate: async (i) => [invalidMultiSite, validBaseOnly][i] as Candidate,
         applyClean: async () => true,

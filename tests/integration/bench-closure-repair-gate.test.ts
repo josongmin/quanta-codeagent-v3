@@ -25,9 +25,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { PrimaryRailStep } from "@/agent/closure"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { buildClosureSession } from "@/runner/batch/eval/closure-session"
 import { benchShouldRunRepairPhase } from "@/runner/batch/eval/repair-phase-policy"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { runInstance } from "../../src/apps/bench/eval"
 import { buildRepairContext } from "../../src/apps/bench/eval/repair/context"
 import { runRepairRounds } from "../../src/apps/bench/eval/repair/index"
@@ -160,9 +160,21 @@ const withEnv = async (
 describe("CR-1 preset enables repair (core wiring)", () => {
   const scenes: readonly Scene[] = [
     // round0: wrong fix (a*b ⇒ add(2,3)=6) + the add-check verify (EXITS 1).
-    { kind: "editAndBash", file: "math.js", old: "return a - b", new: "return a * b", bash: ADD_CHECK },
+    {
+      kind: "editAndBash",
+      file: "math.js",
+      old: "return a - b",
+      new: "return a * b",
+      bash: ADD_CHECK,
+    },
     // round1: correct fix (a+b) + the same add-check verify (EXITS 0).
-    { kind: "editAndBash", file: "math.js", old: "return a * b", new: "return a + b", bash: ADD_CHECK },
+    {
+      kind: "editAndBash",
+      file: "math.js",
+      old: "return a * b",
+      new: "return a + b",
+      bash: ADD_CHECK,
+    },
   ]
 
   test(
@@ -260,13 +272,13 @@ describe("CR-2 false-green killed (driver level)", () => {
     const session = buildClosureSession({
       problemStatement: PROBLEM,
       stage1Files: [{ file: "math.js", score: 1 }],
-      reproScript: { cmd: `python "/tmp/repro.py"`, baseValidatedRed: true },
+      reproScript: { cmd: `python3 "/tmp/repro.py"`, baseValidatedRed: true },
       posture: { lspNav: false, primaryRail: true, faultEvidence: false },
     })
     // The reproduced repro is promoted to the primary rail; the gate enters verify.
     expect(session.bundle.gate.action).toBe("verify")
     expect(session.primaryRailStep).toBeDefined()
-    expect(session.primaryRailStep?.cmd).toBe(`python "/tmp/repro.py"`)
+    expect(session.primaryRailStep?.cmd).toBe(`python3 "/tmp/repro.py"`)
     expect(session.bundle.plan.baseValidatedRed).toBe(true)
     // The exact predicate the prod driver consults (driver.ts benchShouldRunRepairPhase).
     expect(

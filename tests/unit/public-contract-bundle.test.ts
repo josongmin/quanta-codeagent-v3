@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import {
   buildApiSurfaceContracts,
-  buildCleanSelectionPublicContracts,
+  buildCleanSelectionAuthorityContracts,
   buildMultiSiteFamilyContract,
   buildOwnerMustTouchContracts,
   buildPublicContractBundle,
@@ -11,7 +11,12 @@ import {
   evaluateContractSatisfaction,
   requiredContractsSatisfiedCount,
 } from "@/runner/batch/eval/public-contract-bundle"
-import type { ContractCandidate, PublicContract } from "@/runner/batch/eval/public-contract-types"
+import {
+  type ContractCandidate,
+  filterAuthorityContractBundle,
+  type PublicContract,
+  renderContractAuthorityLabel,
+} from "@/runner/batch/eval/public-contract-types"
 
 /** A candidate that touches the given files/symbols (generic, no oracle label). */
 const candidate = (
@@ -59,6 +64,34 @@ describe("owner-must-touch teeth", () => {
 
   it("mutation teeth: an empty-touch candidate violates (not vacuously satisfied)", () => {
     expect(evaluateContractSatisfaction(contract, candidate([])).satisfied).toBe(false)
+  })
+})
+
+describe("contract authority labels", () => {
+  it("prefixes static-witness contracts as advisory in model-facing packets", () => {
+    expect(
+      renderContractAuthorityLabel({
+        provenance: "static-witness",
+        strength: "required",
+      }),
+    ).toBe("advisory:static-witness/required")
+    expect(
+      renderContractAuthorityLabel({
+        provenance: "public-issue-text",
+        strength: "required",
+      }),
+    ).toBe("public-issue-text/required")
+  })
+
+  it("filters static-witness contracts out of clean submit authority", () => {
+    const authorityOnly = filterAuthorityContractBundle(
+      buildPublicContractBundle({
+        apiSymbols: ["MyClass.reset"],
+        ownerFiles: ["pkg/owner.py"],
+        publicTests: [{ testName: "tests/test_owner.py::test_owner", coveredFile: "pkg/owner.py" }],
+      }),
+    )
+    expect(authorityOnly?.contracts.map((contract) => contract.provenance)).toEqual(["public-test"])
   })
 })
 
@@ -135,7 +168,7 @@ describe("required-contract violation distinguishes candidates (selector dominan
 
 describe("clean selection public contracts", () => {
   it("includes exact-output + issue-file owner contracts, but excludes stage1/owner-resolve-only files", () => {
-    const bundle = buildCleanSelectionPublicContracts({
+    const bundle = buildCleanSelectionAuthorityContracts({
       declaredExpected: { kind: "stdout", value: "expected text" },
       candidates: [
         { file: "pkg/root.py", sources: ["issue-file", "stage1"] },
@@ -153,7 +186,7 @@ describe("clean selection public contracts", () => {
   })
 
   it("clean mode emits only issue/output/api contracts, never a static-only multi-site family", () => {
-    const bundle = buildCleanSelectionPublicContracts({
+    const bundle = buildCleanSelectionAuthorityContracts({
       declaredExpected: { kind: "stdout", value: "expected text" },
       candidates: [{ file: "pkg/root.py", sources: ["issue-file"] }],
       apiSymbols: ["pkg.fn"],
@@ -170,7 +203,7 @@ describe("clean selection public contracts", () => {
 
   it("returns undefined when no clean-authority contracts exist", () => {
     expect(
-      buildCleanSelectionPublicContracts({
+      buildCleanSelectionAuthorityContracts({
         candidates: [
           { file: "pkg/localize_only.py", sources: ["stage1"] },
           { file: "pkg/sibling.py", sources: ["owner-resolve"] },

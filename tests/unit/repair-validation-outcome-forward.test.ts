@@ -123,13 +123,11 @@ describe("jun-23 A3 producer — validator exec-failure outcome forwarded into r
     expect(receipt?.state).toBe("candidate_red")
   })
 
-  test("EXEC-3: outcome is sourced from validator.observed fallback (no explicit reproOutcome) — exec_failed via classifyReproOutcome", async () => {
+  test("EXEC-3: no explicit reproOutcome ⇒ no marker-derived validationOutcome is forwarded", async () => {
     const cap = captureBuildContext()
-    // The validator omits reproOutcome but its observed output has NO repro marker
-    // and a nonzero exit ⇒ classifyReproOutcome ⇒ "exec_failed". The producer must
-    // still forward that derived outcome (reproOutcomeOf fallback path), proving
-    // the outcome is genuinely sourced from the validator's signal, not the
-    // explicit field alone.
+    // The validator omits reproOutcome. The producer must not infer one from
+    // observed stdout/exit code: the sidecar/validator classification is the
+    // authority, and legacy marker projection is not a fallback.
     const validate = async (_a: ValidateArgs): Promise<ValidatorResult> => ({
       ok: false,
       failTail: "Segmentation fault",
@@ -144,9 +142,9 @@ describe("jun-23 A3 producer — validator exec-failure outcome forwarded into r
 
     const ctx = cap.captured[0]
     if (ctx === undefined) throw new Error("no context captured")
-    expect(ctx.validationOutcome).toBe("exec_failed")
+    expect(ctx.validationOutcome).toBeUndefined()
 
     const packet = buildRepairRoundLlmEvidencePacket(ctx)
-    expect(packet.proofReceipts?.[0]?.state).toBe("execution_failed")
+    expect(packet.proofReceipts?.[0]?.state).toBe("candidate_red")
   })
 })

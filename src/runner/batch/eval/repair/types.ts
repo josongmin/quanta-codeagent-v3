@@ -98,9 +98,14 @@ export interface RunOnceResult {
    *  (the round is degenerate but not silently "passed"). */
   lastVerifyCmd?: string
   /** Optional path (sandbox-relative or absolute) to a reproduction script
-   *  the agent wrote; if present and `lastVerifyCmd` absent, the validator
-   *  may invoke `python <reproPath>` as the validation command. */
+   *  the agent wrote. This is telemetry/diagnostic unless paired with
+   *  `reproCmd`; the validator must not fabricate a bare host `python` command
+   *  from this path because SWE-bench repros require the prepared project env. */
   reproPath?: string
+  /** Exact command that runs `reproPath` under the owning project environment.
+   *  When present and `lastVerifyCmd` absent, this is the only runnable repro
+   *  fallback the validator may execute. */
+  reproCmd?: string
 }
 
 /** Minimal shell-exec port for the validator. SAME shape as `runner.ts`'s
@@ -113,6 +118,8 @@ export type ExecFn = (
   timeoutMs: number,
 ) => Promise<{ code: number; stdout: string; stderr: string }>
 
+export type ReadTextFileFn = (path: string) => Promise<string>
+
 /** Inputs to the non-leaking validator. By design this signature CANNOT
  *  reference instance/dataset fields — the validator is structurally
  *  incapable of peeking at `FAIL_TO_PASS`, `test_patch`, or the official
@@ -121,15 +128,22 @@ export interface ValidateArgs {
   sandbox: string
   /** The agent's last verification command (re-executed verbatim). */
   cmd?: string
-  /** Or the path to a repro script the agent created (run as
-   *  `python <reproPath>`). */
+  /** Or the path to a repro script the agent created. Path-only is not runnable:
+   *  callers must also provide `reproCmd` so the adapter, not the validator,
+   *  supplies the correct project-env interpreter. */
   reproPath?: string
-  /** Explicit authority bit for sentinel-mode repro validation. Use when the
+  /** Exact project-env command for `reproPath`. */
+  reproCmd?: string
+  /** Structured pytest sidecar path for repro authority commands. */
+  pytestReportPath?: string
+  /** Explicit authority bit for sidecar-mode repro validation. Use when the
    *  validator is running a repro THROUGH `cmd` (for example a selected primary
-   *  rail), so stdout markers are authoritative and may override exit code.
+   *  rail), so the pytest sidecar is authoritative and may override exit code.
    *  Absent/false ⇒ a plain `cmd` is treated as an ordinary verify command. */
   reproAuthority?: boolean
   exec: ExecFn
+  /** Reads the controlled pytest report sidecar. Required for repro authority. */
+  readFile?: ReadTextFileFn
   timeoutMs: number
   /** Bound on captured tail bytes from stdout+stderr (default 2000). */
   tailBytes?: number
@@ -259,6 +273,7 @@ export interface RunRepairRoundsArgs {
   /** Sandbox dir (forwarded to validator only). */
   sandbox: string
   exec: ExecFn
+  readFile?: ReadTextFileFn
   timeoutMs: number
   /** T-302/T-2 primary-rail enforcement (default-OFF). When set (driver passes the
    *  VerificationPlan's selected primary rail as a TYPED step), the per-round
@@ -295,12 +310,9 @@ export interface RunRepairRoundsResult {
    *  withheld is still counted. Does NOT change `validated` in v1 (fail-open /
    *  observe-first). False only when NO round was a false green. */
   primaryFalseGreen: boolean
-  /** jun-18 RCA OBSERVE-ONLY: ANY round whose rail (exit-code) rejected a patch
-   *  the repro's OWN sentinel reports as resolved (`classifyStdout==="resolved"`
-   *  yet `ok:false`). This is the false-RED that forces wasteful repair churn
-   *  (measured 46→131 turns re-deriving the same correct patch). If this rate is
-   *  high, the validator must gate on the repro sentinel (its Agentless contract),
-   *  not the incidental exit code. Records, never flips `validated`. */
+  /** RCA OBSERVE-ONLY: ANY round whose rail stayed red while the validator's
+   *  classified repro outcome says `resolved`. Records, never flips
+   *  `validated`. */
   primaryFalseRed: boolean
   /** Per-round bookkeeping (for observability/tests). */
   history: readonly RoundResult[]

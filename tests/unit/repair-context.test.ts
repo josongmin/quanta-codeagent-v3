@@ -5,7 +5,12 @@ const SMALL_PROBLEM = "Fix the `foo()` function so that `foo(0)` returns 1 inste
 
 describe("buildRepairContext (pure repair seed builder)", () => {
   test("WS2 widen: siblingOwners ⇒ co-change section (deduped); empty ⇒ byte-identical", () => {
-    const base = buildRepairContext({ problem: "p", cumulativeDiff: "", failTail: "boom", round: 1 })
+    const base = buildRepairContext({
+      problem: "p",
+      cumulativeDiff: "",
+      failTail: "boom",
+      round: 1,
+    })
     expect(base).not.toContain("Co-change sites")
 
     const widened = buildRepairContext({
@@ -26,7 +31,13 @@ describe("buildRepairContext (pure repair seed builder)", () => {
     expect(widened.split("postgresql/client.py").length - 1).toBe(1)
     // empty list ⇒ byte-identical to the no-sibling seed
     expect(
-      buildRepairContext({ problem: "p", cumulativeDiff: "", failTail: "boom", round: 1, siblingOwners: [] }),
+      buildRepairContext({
+        problem: "p",
+        cumulativeDiff: "",
+        failTail: "boom",
+        round: 1,
+        siblingOwners: [],
+      }),
     ).toBe(base)
   })
 
@@ -91,7 +102,7 @@ describe("buildRepairContext (pure repair seed builder)", () => {
       cumulativeDiff: huge,
       failTail: huge,
       validationSource: "primary_rail",
-      validationCmd: `python "${"a".repeat(500)}"`,
+      validationCmd: `python3 "${"a".repeat(500)}"`,
       validationExitCode: 1,
       round: 2,
       maxBytes: 256,

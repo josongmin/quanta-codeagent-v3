@@ -5,9 +5,10 @@ import {
   type LlmEvidencePacket,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import {
+  buildCleanSelectionAuthorityContracts,
   buildMultiSiteFamilyContract,
-  buildOwnerMustTouchContracts,
 } from "@/runner/batch/eval/public-contract-bundle"
+import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -53,6 +54,24 @@ const patchForFiles = (files: readonly string[]): string =>
       ].join("\n"),
     )
     .join("\n")
+
+const issueOwnerContracts = (file: string): PublicContractBundle =>
+  buildCleanSelectionAuthorityContracts({
+    candidates: [{ file, sources: ["issue-file"] }],
+  }) ?? { contracts: [] }
+
+const publicMultiSiteContracts = (files: readonly string[]): PublicContractBundle => ({
+  contracts: [
+    {
+      contractId: `multi-site-family:${files.join("|")}`,
+      kind: "multi-site-family",
+      strength: "required",
+      provenance: "public-test",
+      subjectFiles: [...files],
+      subjectSymbols: [],
+    },
+  ],
+})
 
 describe("ownerCoverageOf", () => {
   it("fraction of files that are owners; null when no files / no owners", () => {
@@ -380,6 +399,12 @@ describe("runSelection", () => {
             seed: undefined,
             sourceEvidence: ["static-witness:ast"],
           },
+          advisoryContracts: {
+            contracts: buildMultiSiteFamilyContract([
+              "pkg/base/client.py",
+              "pkg/postgresql/client.py",
+            ]),
+          },
         }),
       },
     })
@@ -632,9 +657,7 @@ describe("runSelection", () => {
         optional: [],
         baseValidatedRed: true,
       },
-      publicContracts: {
-        contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]),
-      },
+      publicContracts: issueOwnerContracts("pkg/owner.py"),
       seeds: [undefined],
       owners: new Set(["pkg/owner.py"]),
       ports: { generate: gen },
@@ -675,7 +698,7 @@ describe("runSelection", () => {
       problemStatement: "Public issue for a proof-required miss.",
       seeds: [undefined],
       owners: new Set(["pkg/owner.py"]),
-      publicContracts: { contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]) },
+      publicContracts: issueOwnerContracts("pkg/owner.py"),
       ports: { generate: gen },
     })
     expect(calls).toBe(2) // cand-0 + one repair attempt that throws
@@ -748,9 +771,7 @@ describe("runSelection", () => {
       problemStatement: "Public issue text for a proof-required contract-only miss.",
       seeds: [undefined],
       owners: new Set(["pkg/owner.py"]),
-      publicContracts: {
-        contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]),
-      },
+      publicContracts: issueOwnerContracts("pkg/owner.py"),
       recordLlmEvidencePacket: (packet) => {
         recorded.push(packet)
       },
@@ -1004,9 +1025,7 @@ describe("runSelection", () => {
       n: 1,
       mode: "clean",
       proofRequired: true,
-      publicContracts: {
-        contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]),
-      },
+      publicContracts: issueOwnerContracts("pkg/owner.py"),
       seeds: [undefined],
       owners: new Set(["pkg/owner.py"]),
       ports: { generate: gen },
@@ -1122,9 +1141,7 @@ describe("runSelection", () => {
       mode: "clean",
       seeds: [undefined, undefined],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
-      publicContracts: {
-        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
-      },
+      publicContracts: publicMultiSiteContracts(["pkg/base.py", "pkg/backend.py"]),
       ports: {
         generate: gen,
         staticSanity: async (c) =>
@@ -1211,7 +1228,31 @@ describe("runSelection", () => {
 
     expect(r.winner).toBeNull()
     expect(r.scored[0]?.verdict.reasons).toContain(
-      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)",
+      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)",
+    )
+  })
+
+  it("clean mode does not treat family coverage alone as submit authority when owner authority is empty", async () => {
+    const { gen } = genFrom([
+      cand({
+        id: "cand-0",
+        patch: patchForFiles(["pkg/a.py"]),
+        files: ["pkg/a.py"],
+        familyId: "unique-owner",
+        familyOwnerFiles: ["pkg/a.py"],
+      }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: new Set(),
+      ports: { generate: gen },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.scored[0]?.verdict.reasons).toContain(
+      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)",
     )
   })
 
@@ -1237,7 +1278,7 @@ describe("runSelection", () => {
     expect(r.winner).toBeNull()
     expect(summarizeSelection(r).proofSummary?.proofState).toBe("safety_only")
     expect(r.scored[0]?.verdict.reasons).toContain(
-      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)",
+      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)",
     )
   })
 
@@ -1353,9 +1394,7 @@ describe("runSelection", () => {
       mode: "clean",
       seeds: [undefined, undefined],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
-      publicContracts: {
-        contracts: buildMultiSiteFamilyContract(["pkg/base.py", "pkg/backend.py"]),
-      },
+      publicContracts: publicMultiSiteContracts(["pkg/base.py", "pkg/backend.py"]),
       ports: { generate: gen },
     })
 

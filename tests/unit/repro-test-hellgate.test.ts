@@ -114,10 +114,30 @@ describe("generate hellgate", () => {
   })
 })
 
-// ─── classifyPytest / execute hellgate (P1: exit-code grounded) ────────────
+// ─── structured pytest sidecar / execute hellgate ─────────────────────────
+
+const report = (args: {
+  collected: number
+  exitstatus: number
+  reports?: readonly Record<string, unknown>[]
+}): string =>
+  JSON.stringify({
+    schema: 1,
+    collected: args.collected,
+    exitstatus: args.exitstatus,
+    reports: args.reports ?? [],
+  })
+
+const reportFailed = report({
+  collected: 1,
+  exitstatus: 1,
+  reports: [
+    { nodeid: "x.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" },
+  ],
+})
 
 describe("execute hellgate", () => {
-  test("pytest precedence — 'failed' alongside 'passed' ⇒ reproduced", async () => {
+  test("sidecar AssertionError call failure ⇒ reproduced", async () => {
     const out = await executeReproTests({
       tests: ["x"],
       repoRoot: "/s",
@@ -128,23 +148,27 @@ describe("execute hellgate", () => {
         stdout: ".F\n1 failed, 1 passed in 0.3s\n",
         stderr: "",
       }),
+      readFile: async () => reportFailed,
     })
     // A real assertion failed ⇒ the bug is present, even though one case passed.
     expect(out[0]?.outcome).toBe("reproduced")
   })
 
-  test("binary-junk stdout — no pytest summary, exit 0 ⇒ unknown", async () => {
+  test("binary-junk stdout and no sidecar ⇒ exec_failed", async () => {
     const out = await executeReproTests({
       tests: ["x"],
       repoRoot: "/s",
       writeFile: async () => {},
       tempPath: () => "/s/x.py",
       exec: async () => ({ code: 0, stdout: "\x00\x01\x02BINARY", stderr: "" }),
+      readFile: async () => {
+        throw new Error("missing")
+      },
     })
-    expect(out[0]?.outcome).toBe("unknown")
+    expect(out[0]?.outcome).toBe("exec_failed")
   })
 
-  test("ANSI/unicode noise around the pytest summary — still classified", async () => {
+  test("ANSI/unicode stdout noise does not affect sidecar classification", async () => {
     const out = await executeReproTests({
       tests: ["x"],
       repoRoot: "/s",
@@ -155,6 +179,7 @@ describe("execute hellgate", () => {
         stdout: "\x1b[33mDEBUG\x1b[0m\n한글\n1 failed in 0.2s\n",
         stderr: "",
       }),
+      readFile: async () => reportFailed,
     })
     expect(out[0]?.outcome).toBe("reproduced")
   })

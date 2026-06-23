@@ -14,7 +14,7 @@
 import { describe, expect, it } from "bun:test"
 import {
   buildSelectionCandidateFamilyBundle,
-  withCandidateFamilyPublicContracts,
+  withCandidateFamilyAuthorityContracts,
 } from "@/runner/batch/eval/driver"
 
 const pyDef = (name: string): string => `def ${name}(x):\n    return x\n`
@@ -76,7 +76,7 @@ describe("clean family generation is genuine, not heuristic (T-GEN-09 ratchet)",
       ownerResolved: undefined,
       readSource: () => pyDef("shared_sym"),
     })
-    const contracts = withCandidateFamilyPublicContracts(undefined, bundle)
+    const contracts = withCandidateFamilyAuthorityContracts(undefined, bundle)
 
     expect(bundle?.families).toHaveLength(1)
     expect(bundle?.families[0]?.familyId).toBe("multi-site")

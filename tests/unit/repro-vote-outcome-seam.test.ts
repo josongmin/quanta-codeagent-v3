@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test"
-import type { ReproExecPort, ReproWriteFilePort } from "@/agent/repro-test/execute"
+import {
+  pytestReportPathFor,
+  type ReproExecPort,
+  type ReproReadFilePort,
+  type ReproWriteFilePort,
+} from "@/agent/repro-test/execute"
 import {
   makeReproVoteValidate,
   type ReproVoteOutcome,
@@ -9,28 +14,32 @@ import type { ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/t
 
 const noWrite: ReproWriteFilePort = async () => {}
 
-// P1 (pytest-grounded): the verdict comes from pytest's exit code + summary, not
-// a printed sentinel. We keep the legacy intent strings ("Issue resolved" /
-// "Issue reproduced") as the test vocabulary and TRANSLATE each into the pytest
-// exec result `classifyPytest` reads — appending the matching summary (and exit
-// code) while preserving any extra text (e.g. "boom\n...") so failTail
-// assertions on that text still hold.
-const toPytestResult = (intent: string): { code: number; stdout: string; stderr: string } => {
-  if (intent.includes("Issue reproduced")) {
-    return { code: 1, stdout: `${intent}\n1 failed in 0.1s`, stderr: "" }
-  }
-  if (intent.includes("Issue resolved")) {
-    return { code: 0, stdout: `${intent}\n1 passed in 0.1s`, stderr: "" }
-  }
-  return { code: 0, stdout: intent, stderr: "" }
-}
+type Intent = "resolved" | "reproduced"
+
+const sidecarFor = (intent: Intent): string =>
+  intent === "reproduced"
+    ? JSON.stringify({
+        schema: 1,
+        collected: 1,
+        exitstatus: 1,
+        reports: [
+          { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" },
+        ],
+      })
+    : JSON.stringify({
+        schema: 1,
+        collected: 1,
+        exitstatus: 0,
+        reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+      })
 
 /** Exec port that maps each script (in WRITE order) → a canned pytest result, so
  *  the test can drive the vote into each verdict deterministically. */
 const makeExec = (
-  stdoutByIndex: readonly string[],
-): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
+  intentByIndex: readonly Intent[],
+): { exec: ReproExecPort; writeFile: ReproWriteFilePort; readFile: ReproReadFilePort } => {
   const pathToIdx = new Map<string, number>()
+  const reports = new Map<string, string>()
   let n = 0
   const writeFile: ReproWriteFilePort = async (path) => {
     pathToIdx.set(path, n)
@@ -39,9 +48,13 @@ const makeExec = (
   const exec: ReproExecPort = async (argv) => {
     const path = argv[argv.length - 1] as string
     const idx = pathToIdx.get(path) ?? 0
-    return toPytestResult(stdoutByIndex[idx] ?? "")
+    const intent = intentByIndex[idx] ?? "resolved"
+    reports.set(pytestReportPathFor(path), sidecarFor(intent))
+    return intent === "reproduced"
+      ? { code: 1, stdout: "assertion failed", stderr: "" }
+      : { code: 0, stdout: "", stderr: "" }
   }
-  return { exec, writeFile }
+  return { exec, writeFile, readFile: async (path) => reports.get(path) ?? "" }
 }
 
 const baseArgs = (): ValidateArgs => ({
@@ -84,8 +97,8 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
     expect(emitted).toHaveLength(1)
     expect(emitted[0]?.outcome).toBe("empty_sources")
     expect(emitted[0]?.detail).toBeUndefined()
-    // result still the legacy fallback, unchanged.
-    expect(result).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    expect(result.ok).toBe(false)
+    expect(result.failTail).toContain("empty_sources")
   })
 
   it("executeReproTests THROWS (not a per-script throw) ⇒ emits 'exec_failed' (no vote detail)", async () => {
@@ -115,20 +128,25 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
     expect(emitted).toHaveLength(1)
     expect(emitted[0]?.outcome).toBe("exec_failed")
     expect(emitted[0]?.detail).toBeUndefined()
-    expect(result).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    expect(result).toEqual({
+      ok: false,
+      failTail: "repro vote execution failed",
+      reproOutcome: "exec_failed",
+    })
   })
 
   it("resolved majority ⇒ emits 'vote_resolved' with the vote tally", async () => {
-    const { exec, writeFile } = makeExec([
-      "Issue resolved",
-      "Issue resolved",
-      "Issue resolved",
-      "Issue reproduced",
+    const { exec, writeFile, readFile } = makeExec([
+      "resolved",
+      "resolved",
+      "resolved",
+      "reproduced",
     ])
     const { result, emitted } = await runWithSink({
       sources: ["a", "b", "c", "d"],
       exec,
       writeFile,
+      readFile,
       fallback: LOUD_FALLBACK,
     })
     expect(emitted).toHaveLength(1)
@@ -138,62 +156,60 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
   })
 
   it("reproduced majority ⇒ emits 'vote_unresolved' with the vote tally", async () => {
-    const { exec, writeFile } = makeExec([
-      "boom\nIssue reproduced",
-      "Issue reproduced",
-      "Issue resolved",
-    ])
+    const { exec, writeFile, readFile } = makeExec(["reproduced", "reproduced", "resolved"])
     const { result, emitted } = await runWithSink({
       sources: ["a", "b", "c"],
       exec,
       writeFile,
+      readFile,
       fallback: LOUD_FALLBACK,
     })
     expect(emitted).toHaveLength(1)
     expect(emitted[0]?.outcome).toBe("vote_unresolved")
     expect(emitted[0]?.detail).toEqual({ resolved: 1, reproduced: 2, inconclusive: 0 })
     expect(result.ok).toBe(false)
-    expect(result.failTail).toContain("Issue reproduced")
+    expect(result.failTail).toContain("assertion failed")
   })
 
-  it("tie ⇒ emits 'vote_inconclusive' with the vote tally, then falls back", async () => {
-    const { exec, writeFile } = makeExec(["Issue resolved", "Issue reproduced"])
+  it("tie ⇒ emits 'vote_inconclusive' with the vote tally, then fail-closes", async () => {
+    const { exec, writeFile, readFile } = makeExec(["resolved", "reproduced"])
     const { result, emitted } = await runWithSink({
       sources: ["a", "b"],
       exec,
       writeFile,
+      readFile,
       fallback: LOUD_FALLBACK,
     })
     expect(emitted).toHaveLength(1)
     expect(emitted[0]?.outcome).toBe("vote_inconclusive")
     expect(emitted[0]?.detail).toEqual({ resolved: 1, reproduced: 1, inconclusive: 0 })
-    expect(result).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    expect(result.ok).toBe(false)
+    expect(result.failTail).not.toBe("FALLBACK_RAN")
   })
 
   it("PAIRED CONTROL: with NO sink, every branch's result is byte-identical (no-op seam)", async () => {
     // resolved
-    const resolved = makeExec(["Issue resolved", "Issue resolved"])
+    const resolved = makeExec(["resolved", "resolved"])
     expect(
       await makeReproVoteValidate({ sources: ["a", "b"], ...resolved, fallback: LOUD_FALLBACK })(
         baseArgs(),
       ),
     ).toEqual({ ok: true })
     // reproduced
-    const reproduced = makeExec(["Issue reproduced", "Issue reproduced"])
+    const reproduced = makeExec(["reproduced", "reproduced"])
     const rRepro = await makeReproVoteValidate({
       sources: ["a", "b"],
       ...reproduced,
       fallback: LOUD_FALLBACK,
     })(baseArgs())
     expect(rRepro.ok).toBe(false)
-    expect(rRepro.failTail).toContain("Issue reproduced")
-    // tie / empty / throw all defer to the loud fallback, unchanged
-    const tie = makeExec(["Issue resolved", "Issue reproduced"])
+    expect(rRepro.failTail).toContain("assertion failed")
+    const tie = makeExec(["resolved", "reproduced"])
     expect(
       await makeReproVoteValidate({ sources: ["a", "b"], ...tie, fallback: LOUD_FALLBACK })(
         baseArgs(),
       ),
-    ).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    ).toMatchObject({ ok: false })
     expect(
       await makeReproVoteValidate({
         sources: [],
@@ -201,6 +217,6 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
         writeFile: noWrite,
         fallback: LOUD_FALLBACK,
       })(baseArgs()),
-    ).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    ).toMatchObject({ ok: false })
   })
 })

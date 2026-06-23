@@ -84,7 +84,7 @@ describe("deriveCandidateStructuralRepair", () => {
 
     expect(repair?.family?.familyId).toBe("override-family")
     expect(repair?.family?.ownerFiles).toEqual([BASE, PG])
-    expect(repair?.publicContracts).toBeUndefined()
+    expect(repair?.advisoryContracts).toBeUndefined()
   })
 
   test("expands a single touched override site into sibling backend owners via CHA", async () => {

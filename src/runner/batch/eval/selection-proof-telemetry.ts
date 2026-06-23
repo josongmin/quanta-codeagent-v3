@@ -11,7 +11,7 @@ import {
   type ResolvedKofNSignal,
   resolvedKofNPositive,
 } from "@/agent/verification-bundle"
-import { candidateFamilyCoverageMissing, candidateFamilyRank } from "./candidate-families"
+import { candidateFamilyCoverageMissing } from "./candidate-families"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import type { MweProofReceipt } from "./mwe-proof"
 import type {
@@ -24,7 +24,7 @@ import type {
   PublicRegressionProofState,
 } from "./repo-regression-discovery-adapter"
 import type {
-  Candidate,
+  CandidateTelemetry,
   ScoredEntry,
   SelectionProofSource,
   SelectionProofState,
@@ -44,17 +44,6 @@ type ResolvedKofNWithTrace = ResolvedKofNSignal & {
 
 export const reproTraceOf = (signal: ResolvedKofNSignal | null): ReproConsensusTrace | undefined =>
   signal === null ? undefined : (signal as ResolvedKofNWithTrace).reproTrace
-
-export const familyAuthorityPresent = (candidate: Candidate): boolean =>
-  candidateFamilyRank(
-    candidate.familyId === undefined
-      ? undefined
-      : {
-          familyId: candidate.familyId,
-          ownerFiles: candidate.familyOwnerFiles ?? [],
-        },
-    candidate.files,
-  ) > 0
 
 export const publicRegressionStateOf = (args: {
   readonly hard: HardGateSignals
@@ -149,9 +138,7 @@ export const selectionProofStateForEntry = (
   })
 
 export const hasContractOnlyEvidence = (entry: ScoredEntry): boolean =>
-  entry.requiredContractsSatisfied > 0 ||
-  entry.contractsSatisfied > 0 ||
-  familyAuthorityPresent(entry.candidate)
+  entry.requiredContractsSatisfied > 0 || entry.contractsSatisfied > 0
 
 const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefined => {
   const winnerEntry =
@@ -223,6 +210,52 @@ const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefi
   }
 }
 
+const selectionCandidateTelemetryOf = (s: ScoredEntry): CandidateTelemetry => {
+  const publicRegression =
+    s.candidate.publicRegressionReceipt?.state ??
+    publicRegressionStateOf({ hard: s.hard, receipt: undefined })
+  const reproConsensus =
+    s.candidate.reproConsensusReceipt?.state ??
+    reproConsensusStateOf({ resolved: s.resolvedKofN, receipt: undefined })
+  const familyCoverage =
+    s.candidate.familyId === undefined
+      ? []
+      : candidateFamilyCoverageMissing(
+          {
+            familyId: s.candidate.familyId,
+            ownerFiles: s.candidate.familyOwnerFiles ?? [],
+          },
+          s.candidate.files,
+        )
+  return {
+    id: s.candidate.id,
+    files: s.candidate.files,
+    ...(s.candidate.patch.trim() !== ""
+      ? { touchedSymbols: diffTouchedSymbols(s.candidate.patch) }
+      : {}),
+    admissible: s.verdict.admissible,
+    score: s.verdict.score,
+    reasons: s.verdict.reasons,
+    ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
+    ...(s.candidate.familyReason !== undefined ? { familyReason: s.candidate.familyReason } : {}),
+    ...(s.candidate.familyOwnerFiles !== undefined
+      ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
+      : {}),
+    ...(familyCoverage.length === 0 ? {} : { familyCoverageMissing: familyCoverage }),
+    requiredContractsSatisfied: s.requiredContractsSatisfied,
+    contractsSatisfied: s.contractsSatisfied,
+    ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
+    ...(publicRegression !== undefined ? { publicRegression } : {}),
+    ...(reproConsensus !== undefined ? { reproConsensus } : {}),
+    proofState: selectionProofStateForEntry(s),
+    proofSource: positiveSubmitProofSource({
+      resolved: s.resolvedKofN,
+      mweReceipt: s.candidate.mweReceipt,
+      reproConsensusReceipt: s.candidate.reproConsensusReceipt,
+    }),
+  }
+}
+
 /** Project a {@link SelectionResult} into compact eval-only telemetry (drops the
  *  full candidate patches; keeps files + verdict). Pure. */
 export const summarizeSelection = (result: SelectionResult): SelectionTelemetry => {
@@ -248,52 +281,6 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
       ? { repairFeedbackStopReason: result.repairFeedbackStopReason }
       : {}),
     ...(proofSummary !== undefined ? { proofSummary } : {}),
-    candidates: result.scored.map((s) => {
-      const publicRegression =
-        s.candidate.publicRegressionReceipt?.state ??
-        publicRegressionStateOf({ hard: s.hard, receipt: undefined })
-      const reproConsensus =
-        s.candidate.reproConsensusReceipt?.state ??
-        reproConsensusStateOf({ resolved: s.resolvedKofN, receipt: undefined })
-      return {
-        id: s.candidate.id,
-        files: s.candidate.files,
-        ...(s.candidate.patch.trim() !== ""
-          ? { touchedSymbols: diffTouchedSymbols(s.candidate.patch) }
-          : {}),
-        admissible: s.verdict.admissible,
-        score: s.verdict.score,
-        reasons: s.verdict.reasons,
-        ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
-        ...(s.candidate.familyReason !== undefined
-          ? { familyReason: s.candidate.familyReason }
-          : {}),
-        ...(s.candidate.familyOwnerFiles !== undefined
-          ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
-          : {}),
-        ...(() => {
-          if (s.candidate.familyId === undefined) return {}
-          const missing = candidateFamilyCoverageMissing(
-            {
-              familyId: s.candidate.familyId,
-              ownerFiles: s.candidate.familyOwnerFiles ?? [],
-            },
-            s.candidate.files,
-          )
-          return missing.length === 0 ? {} : { familyCoverageMissing: missing }
-        })(),
-        requiredContractsSatisfied: s.requiredContractsSatisfied,
-        contractsSatisfied: s.contractsSatisfied,
-        ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),
-        ...(publicRegression !== undefined ? { publicRegression } : {}),
-        ...(reproConsensus !== undefined ? { reproConsensus } : {}),
-        proofState: selectionProofStateForEntry(s),
-        proofSource: positiveSubmitProofSource({
-          resolved: s.resolvedKofN,
-          mweReceipt: s.candidate.mweReceipt,
-          reproConsensusReceipt: s.candidate.reproConsensusReceipt,
-        }),
-      }
-    }),
+    candidates: result.scored.map(selectionCandidateTelemetryOf),
   }
 }

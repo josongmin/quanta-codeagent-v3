@@ -4,7 +4,7 @@
  * Pure policy over an injected `runOnce` (one agent run) and `validate` (one
  * validator run). The orchestrator never imports `@/agent` directly — the
  * bench runner stays the sole composer of the agent slice. This file imports
- * only local repair helpers (`./types`, `./repro-outcome`) so the no-leak
+ * only local repair helpers (`./types`) so the no-leak
  * invariant stays structural.
  *
  * Loop shape (continue-from-patched-tree — the bench runner side is
@@ -22,7 +22,6 @@
  * validator failures are normal and never throw.
  */
 
-import { classifyReproOutcome } from "./repro-outcome"
 import type {
   BuildRepairContextArgs,
   RepairReproOutcome,
@@ -31,6 +30,7 @@ import type {
   RunOnceResult,
   RunRepairRoundsArgs,
   RunRepairRoundsResult,
+  ValidateArgs,
   ValidatorResult,
 } from "./types"
 
@@ -52,7 +52,7 @@ export const runRepairRounds = async (
   // NOT match (false green) does NOT clear as validated — the rail is not proven.
   // Knob ABSENT ⇒ `clearedAsValidated` is identically `v.ok` ⇒ byte-identical.
   const v0Cleared = clearedAsValidated(args, v0)
-  if (v0Cleared || maxRounds <= 0) {
+  if (shouldFinishAfterRound0(v0Cleared, maxRounds)) {
     return finalize(history, turnsTotal, v0Cleared, r0.patch, isFalseGreen(v0), isFalseRed(v0))
   }
 
@@ -92,7 +92,7 @@ export const runRepairRounds = async (
     // round, even when the finish gate withholds clearing — the diagnostic must
     // reflect what happened, not whether the gate let it pass. STICKY (matches
     // `falseRed`): a later honest green must not erase an earlier false green.
-    if (vi.ok && isFalseGreen(vi)) falseGreen = true
+    if (hasFalseGreenSignal(vi)) falseGreen = true
     if (clearedAsValidated(args, vi)) {
       validated = true
       break
@@ -107,6 +107,11 @@ export const runRepairRounds = async (
  *  predicate is NOT a false green (never penalizes). */
 const isFalseGreen = (v: ValidatorResult): boolean =>
   v.ok && v.predicate?.evaluable === true && v.predicate.matched === false
+
+const hasFalseGreenSignal = (v: ValidatorResult): boolean => v.ok && isFalseGreen(v)
+
+const shouldFinishAfterRound0 = (cleared: boolean, maxRounds: number): boolean =>
+  cleared || maxRounds <= 0
 
 /** T-302 finish-gate ENFORCEMENT (default-OFF). Whether an exit-code-green
  *  round may be treated as VALIDATED. With no primary rail set the answer is
@@ -132,22 +137,13 @@ const clearedAsValidated = (args: RunRepairRoundsArgs, v: ValidatorResult): bool
 
 const reproOutcomeOf = (v: ValidatorResult): RepairReproOutcome | undefined => {
   if (v.reproOutcome !== undefined) return v.reproOutcome
-  return v.observed !== undefined
-    ? classifyReproOutcome(v.observed.stdout, v.observed.exitCode)
-    : undefined
+  return undefined
 }
 
-/** OBSERVE-ONLY measurement (jun-18 RCA instrument): the round did NOT clear
- *  (`ok:false`, exit-code ≠ 0 on the rail) YET the repro's OWN sentinel says the
- *  bug is fixed (`classifyStdout(stdout) === "resolved"`). This is a false-RED:
- *  the exit-code gate rejected a patch the repro itself reports as resolved,
- *  forcing wasteful repair churn (measured: repair runs all rounds, 46→131 turns,
- *  re-deriving the SAME correct patch). If this rate is high, the validator must
- *  gate on the repro's sentinel (its actual Agentless contract) rather than the
- *  incidental exit code. Records, never flips `ok` — the fix is the next step,
- *  gated on THIS measurement (no blind loop change). Prefer the validator's
- *  recorded `reproOutcome`; custom / test validators that omit it still
- *  participate via `observed.stdout` fallback. */
+/** OBSERVE-ONLY measurement: the round did NOT clear (`ok:false`) yet the
+ * validator-classified repro outcome says the patch resolved the issue. The
+ * outcome must be explicit on `ValidatorResult`; stdout markers are not a
+ * telemetry fallback. */
 const isFalseRed = (v: ValidatorResult): boolean => !v.ok && reproOutcomeOf(v) === "resolved"
 
 const predicateSummaryOf = (v: ValidatorResult): string | undefined => {
@@ -175,10 +171,9 @@ const validationGateContextOf = (
   // A3 (producer): forward the validator's OWN classified repro/exec outcome so
   // the downstream packet builder (`proofStateOf`) can represent an infra/exec
   // crash as `execution_failed` instead of coercing it to `candidate_red`. The
-  // outcome is taken verbatim from the validator's classification
-  // (`reproOutcomeOf` — prefers the recorded `reproOutcome`, else classifies the
-  // observed stdout/exit code); NOTHING is inferred/thresholded here. Absent ⇒
-  // the consumer falls back to the exit-code path, byte-identical to before.
+  // outcome is taken verbatim from the validator's classification. NOTHING is
+  // inferred from stdout markers here. Absent ⇒ the consumer falls back to the
+  // exit-code path, byte-identical to before.
   const outcome = reproOutcomeOf(validator)
   const withExit = <
     T extends {
@@ -211,10 +206,16 @@ const validationGateContextOf = (
     })
   }
   const reproPath = run.reproPath
-  if (typeof reproPath === "string" && reproPath !== "") {
+  const reproCmd = run.reproCmd
+  if (
+    typeof reproPath === "string" &&
+    reproPath !== "" &&
+    typeof reproCmd === "string" &&
+    reproCmd !== ""
+  ) {
     return withExit({
       validationSource: "repro",
-      validationCmd: `python "${reproPath}"`,
+      validationCmd: reproCmd,
     })
   }
   // No runnable gate ⇒ no proof receipt is produced downstream; do not attach an
@@ -222,40 +223,47 @@ const validationGateContextOf = (
   return { validationSource: "none" }
 }
 
-const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<ValidatorResult> => {
-  // T-302: when a primary rail is set, IT is the gate — the agent's own
-  // `lastVerifyCmd`/repro can no longer clear the round (a non-primary green is
-  // not proof). The validator clears only when the primary rail passes; an
-  // unset rail (default) falls back to the agent-command gate, byte-identical.
-  // exactOptionalPropertyTypes: conditionally include optional fields only when
-  // present — never set them to explicit `undefined`.
-  const validateArgs =
-    args.primaryRailStep !== undefined
-      ? {
-          sandbox: args.sandbox,
-          exec: args.exec,
-          timeoutMs: args.timeoutMs,
-          cmd: args.primaryRailStep.cmd,
-          ...(args.primaryRailStep.kind === "repro" ? { reproAuthority: true } : {}),
-          // T-1 wired: evaluate the rail's typed predicate over the observed
-          // output (observe-only in v1 — validator records, does NOT flip ok).
-          successPredicate: args.primaryRailStep.successPredicate,
-          ...(args.evaluatePredicate !== undefined
-            ? { evaluatePredicate: args.evaluatePredicate }
-            : {}),
-        }
-      : {
-          sandbox: args.sandbox,
-          exec: args.exec,
-          timeoutMs: args.timeoutMs,
-          ...(r.lastVerifyCmd !== undefined ? { cmd: r.lastVerifyCmd } : {}),
-          ...(r.reproPath !== undefined ? { reproPath: r.reproPath } : {}),
-          ...(args.evaluatePredicate !== undefined
-            ? { evaluatePredicate: args.evaluatePredicate }
-            : {}),
-        }
-  return args.validate(validateArgs)
-}
+type PrimaryRailStep = NonNullable<RunRepairRoundsArgs["primaryRailStep"]>
+
+const commonValidateArgs = (
+  args: RunRepairRoundsArgs,
+): Pick<ValidateArgs, "sandbox" | "exec" | "timeoutMs" | "readFile" | "evaluatePredicate"> => ({
+  sandbox: args.sandbox,
+  exec: args.exec,
+  timeoutMs: args.timeoutMs,
+  ...(args.readFile !== undefined ? { readFile: args.readFile } : {}),
+  ...(args.evaluatePredicate !== undefined ? { evaluatePredicate: args.evaluatePredicate } : {}),
+})
+
+const primaryRailValidateArgs = (
+  args: RunRepairRoundsArgs,
+  primaryRailStep: PrimaryRailStep,
+): ValidateArgs => ({
+  ...commonValidateArgs(args),
+  cmd: primaryRailStep.cmd,
+  ...(primaryRailStep.kind === "repro" ? { reproAuthority: true } : {}),
+  ...(primaryRailStep.pytestReportPath !== undefined
+    ? { pytestReportPath: primaryRailStep.pytestReportPath }
+    : {}),
+  // T-1 wired: evaluate the rail's typed predicate over the observed output
+  // (observe-only in v1 — validator records, does NOT flip ok).
+  successPredicate: primaryRailStep.successPredicate,
+})
+
+const agentRunValidateArgs = (args: RunRepairRoundsArgs, r: RunOnceResult): ValidateArgs => ({
+  ...commonValidateArgs(args),
+  ...(r.lastVerifyCmd !== undefined ? { cmd: r.lastVerifyCmd } : {}),
+  ...(r.reproPath !== undefined ? { reproPath: r.reproPath } : {}),
+  ...(r.reproCmd !== undefined ? { reproCmd: r.reproCmd } : {}),
+})
+
+const buildValidateArgs = (args: RunRepairRoundsArgs, r: RunOnceResult): ValidateArgs =>
+  args.primaryRailStep !== undefined
+    ? primaryRailValidateArgs(args, args.primaryRailStep)
+    : agentRunValidateArgs(args, r)
+
+const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<ValidatorResult> =>
+  args.validate(buildValidateArgs(args, r))
 
 const finalize = (
   history: readonly RoundResult[],

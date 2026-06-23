@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { evaluateSuccessPredicate } from "@/agent/closure"
-import { validate } from "@/runner/batch/eval/repair/validator"
+import { pytestReportPathFor } from "@/agent/repro-test/pytest-report"
 import type { ExecFn, ValidateArgs } from "@/runner/batch/eval/repair/types"
+import { validate } from "@/runner/batch/eval/repair/validator"
 
 /**
  * T-1 — validator predicate integration is OBSERVE-ONLY.
@@ -15,6 +16,35 @@ import type { ExecFn, ValidateArgs } from "@/runner/batch/eval/repair/types"
 const fakeExec =
   (code: number, stdout = "", stderr = ""): ExecFn =>
   async () => ({ code, stdout, stderr })
+
+const sidecar = (outcome: "resolved" | "reproduced" | "error"): string => {
+  if (outcome === "resolved") {
+    return JSON.stringify({
+      schema: 1,
+      collected: 1,
+      exitstatus: 0,
+      reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+    })
+  }
+  if (outcome === "reproduced") {
+    return JSON.stringify({
+      schema: 1,
+      collected: 1,
+      exitstatus: 1,
+      reports: [
+        { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" },
+      ],
+    })
+  }
+  return JSON.stringify({
+    schema: 1,
+    collected: 1,
+    exitstatus: 1,
+    reports: [
+      { nodeid: "t.py::test_x", when: "setup", outcome: "failed", exc_type: "RuntimeError" },
+    ],
+  })
+}
 
 const base = (over: Partial<ValidateArgs>): ValidateArgs => ({
   sandbox: "/tmp/x",
@@ -34,7 +64,10 @@ describe("validator — observe-only predicate", () => {
 
   test("exit 0 + matching predicate ⇒ ok:true, predicate.matched:true", async () => {
     const r = await validate(
-      base({ exec: fakeExec(0, "3 PASSED"), successPredicate: { type: "stdout_contains", substring: "PASSED" } }),
+      base({
+        exec: fakeExec(0, "3 PASSED"),
+        successPredicate: { type: "stdout_contains", substring: "PASSED" },
+      }),
     )
     expect(r.ok).toBe(true)
     expect(r.predicate).toEqual({ evaluable: true, matched: true })
@@ -90,10 +123,16 @@ describe("validator — observe-only predicate", () => {
  */
 describe("validator — execution-grounded repro gating", () => {
   test("pytest-green repro authority: exit 0 + passed summary ⇒ ok:true", async () => {
+    const reproPath = "/tmp/x/reproduce_issue.py"
     const r = await validate({
       sandbox: "/tmp/x",
-      reproPath: "/tmp/x/reproduce_issue.py",
+      reproPath,
+      reproCmd: "python3 -s /tmp/x/reproduce_issue.py",
       exec: fakeExec(0, "1 passed in 0.12s"),
+      readFile: async (path) => {
+        expect(path).toBe(pytestReportPathFor(reproPath))
+        return sidecar("resolved")
+      },
       timeoutMs: 1000,
       evaluatePredicate: evaluateSuccessPredicate,
     })
@@ -101,15 +140,21 @@ describe("validator — execution-grounded repro gating", () => {
   })
 
   test("non-repro cmd printing 'Issue resolved' does NOT override exit code", async () => {
-    const r = await validate(base({ exec: fakeExec(1, "warn...\nIssue resolved\n", "DeprecationWarning") }))
+    const r = await validate(
+      base({ exec: fakeExec(1, "warn...\nIssue resolved\n", "DeprecationWarning") }),
+    )
     expect(r.ok).toBe(false)
+    expect(r.reproOutcome).toBeUndefined()
   })
 
   test("pytest-red repro authority: exit 1 + failed summary ⇒ ok:false", async () => {
+    const reproPath = "/tmp/x/reproduce_issue.py"
     const r = await validate({
       sandbox: "/tmp/x",
-      reproPath: "/tmp/x/reproduce_issue.py",
+      reproPath,
+      reproCmd: "python3 -s /tmp/x/reproduce_issue.py",
       exec: fakeExec(1, "F\n1 failed in 0.12s"),
+      readFile: async () => sidecar("reproduced"),
       timeoutMs: 1000,
       evaluatePredicate: evaluateSuccessPredicate,
     })
@@ -120,29 +165,33 @@ describe("validator — execution-grounded repro gating", () => {
     const r = await validate({
       sandbox: "/tmp/x",
       reproPath: "/tmp/x/reproduce_issue.py",
+      reproCmd: "python3 -s /tmp/x/reproduce_issue.py",
       exec: fakeExec(1, "", "1 error in 0.12s"),
+      readFile: async () => sidecar("error"),
       timeoutMs: 1000,
       evaluatePredicate: evaluateSuccessPredicate,
     })
     expect(r.ok).toBe(false)
   })
 
-  test("legacy marker fallback still works when no pytest summary exists", async () => {
+  test("legacy marker without sidecar is fail-closed for repro authority", async () => {
     const r = await validate({
       sandbox: "/tmp/x",
       reproPath: "/tmp/x/reproduce_issue.py",
+      reproCmd: "python3 -s /tmp/x/reproduce_issue.py",
       exec: fakeExec(1, "Issue reproduced\n...fixed...\nIssue resolved\n"),
       timeoutMs: 1000,
       evaluatePredicate: evaluateSuccessPredicate,
     })
-    expect(r.ok).toBe(true)
+    expect(r.ok).toBe(false)
+    expect(r.reproOutcome).toBe("exec_failed")
   })
 
-  test("NO sentinel + exit 0 ⇒ ok:true (byte-identical fallback)", async () => {
+  test("non-repro exit 0 ⇒ ok:true", async () => {
     expect((await validate(base({ exec: fakeExec(0, "3 passed") }))).ok).toBe(true)
   })
 
-  test("NO sentinel + exit 1 ⇒ ok:false (byte-identical fallback)", async () => {
+  test("non-repro exit 1 ⇒ ok:false", async () => {
     expect((await validate(base({ exec: fakeExec(1, "1 failed") }))).ok).toBe(false)
   })
 })

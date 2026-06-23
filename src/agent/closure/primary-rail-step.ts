@@ -18,5 +18,6 @@ export const buildPrimaryRailStep = (
     cmd: step.cmd,
     authority: step.authority ?? "execution",
     successPredicate: step.successPredicate ?? { type: "test_exit_zero" },
+    ...(step.pytestReportPath !== undefined ? { pytestReportPath: step.pytestReportPath } : {}),
   }
 }

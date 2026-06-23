@@ -247,7 +247,7 @@ describe("FIX 2 — hardReasonState maps from the structured kind", () => {
     ],
     ["hard:mweProof=candidate_red (public issue MWE still fails after patch)", "candidate_red"],
     [
-      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, public contract, or static witness authority)",
+      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)",
       "not_run",
     ],
     [

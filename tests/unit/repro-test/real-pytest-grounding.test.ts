@@ -26,7 +26,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { writeFile as fsWriteFile, mkdtemp, rm } from "node:fs/promises"
+import { writeFile as fsWriteFile, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ensurePytestFooter } from "../../../src/agent/repro-test/generate"
@@ -54,7 +54,7 @@ const runAsPython = async (
   dir: string,
   name: string,
   source: string,
-): Promise<{ code: number; stdout: string; stderr: string }> => {
+): Promise<{ code: number; stdout: string; stderr: string; path: string }> => {
   const path = join(dir, name)
   await fsWriteFile(path, source, "utf8")
   const proc = Bun.spawnSync(["python3", path], { cwd: dir })
@@ -62,15 +62,19 @@ const runAsPython = async (
     code: proc.exitCode,
     stdout: new TextDecoder().decode(proc.stdout),
     stderr: new TextDecoder().decode(proc.stderr),
+    path,
   }
 }
 
-// Re-derive the outcome the SAME way execute.ts does (classifyPytest) so the
-// test asserts the production mapping, not a re-implementation.
-import { classifyPytest } from "../../../src/agent/repro-test/execute"
+// Re-derive the outcome from the SAME structured sidecar report execute.ts
+// reads; stdout is not an authority surface.
+import {
+  classifyPytestReportText,
+  pytestReportPathFor,
+} from "../../../src/agent/repro-test/execute"
 
-const outcomeOf = (r: { code: number; stdout: string; stderr: string }) =>
-  classifyPytest(r.stdout, r.stderr, r.code)
+const outcomeOf = async (path: string) =>
+  classifyPytestReportText(await readFile(pytestReportPathFor(path), "utf8"))
 
 describe("real-pytest grounding (capability-gated)", () => {
   let dir = ""
@@ -85,14 +89,14 @@ describe("real-pytest grounding (capability-gated)", () => {
     const src = ensurePytestFooter("def test_bug():\n    assert 1 == 2  # buggy")
     const r = await runAsPython(dir, "t_fail.py", src)
     expect(r.code).not.toBe(0) // pytest exit ≠ 0 for a failure
-    expect(outcomeOf(r)).toBe("reproduced")
+    expect(await outcomeOf(r.path)).toBe("reproduced")
   })
 
   test.skipIf(!HAS_PYTEST)("passing assertion ⇒ resolved (real pytest exit)", async () => {
     const src = ensurePytestFooter("def test_fixed():\n    assert 1 == 1  # fixed")
     const r = await runAsPython(dir, "t_pass.py", src)
     expect(r.code).toBe(0)
-    expect(outcomeOf(r)).toBe("resolved")
+    expect(await outcomeOf(r.path)).toBe("resolved")
   })
 
   test.skipIf(!HAS_PYTEST)("top-level import error ⇒ exec_failed (NOT reproduced)", async () => {
@@ -101,14 +105,14 @@ describe("real-pytest grounding (capability-gated)", () => {
     )
     const r = await runAsPython(dir, "t_import.py", src)
     expect(r.code).not.toBe(0)
-    // The crash happens before the footer drives pytest ⇒ no summary ⇒ infra.
-    expect(outcomeOf(r)).toBe("exec_failed")
+    // The crash happens before the footer drives pytest ⇒ no sidecar.
+    await expect(readFile(pytestReportPathFor(r.path), "utf8")).rejects.toThrow()
   })
 
   test.skipIf(!HAS_PYTEST)("no def test_* ⇒ unknown (no tests ran)", async () => {
     const src = ensurePytestFooter("x = 1\ny = x + 1")
     const r = await runAsPython(dir, "t_none.py", src)
-    expect(outcomeOf(r)).toBe("unknown")
+    expect(await outcomeOf(r.path)).toBe("unknown")
   })
 
   test.skipIf(!HAS_PYTEST)(
@@ -120,13 +124,13 @@ describe("real-pytest grounding (capability-gated)", () => {
       const noFooter = "def test_bug():\n    assert 1 == 2"
       const r = await runAsPython(dir, "t_nofooter.py", noFooter)
       expect(r.code).toBe(0) // no footer ⇒ no pytest ⇒ false green
-      expect(outcomeOf(r)).toBe("unknown")
+      await expect(readFile(pytestReportPathFor(r.path), "utf8")).rejects.toThrow()
 
       // WITH the footer the very same body now reports the failure.
       const withFooter = ensurePytestFooter(noFooter)
       const r2 = await runAsPython(dir, "t_withfooter.py", withFooter)
       expect(r2.code).not.toBe(0)
-      expect(outcomeOf(r2)).toBe("reproduced")
+      expect(await outcomeOf(r2.path)).toBe("reproduced")
     },
   )
 
@@ -141,7 +145,7 @@ describe("real-pytest grounding (capability-gated)", () => {
       )
       const r = await runAsPython(dir, "t_mutation.py", src)
       expect(r.stdout).toContain("Issue resolved") // the sentinel IS printed
-      expect(outcomeOf(r)).toBe("reproduced") // …but it cannot fake a green
+      expect(await outcomeOf(r.path)).toBe("reproduced") // …but it cannot fake a green
     },
   )
 

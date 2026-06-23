@@ -60,14 +60,18 @@ export interface Candidate {
   /** Typed repro-consensus receipt. When positive, this is executed issue proof. */
   reproConsensusReceipt?: ReproConsensusProofReceipt
   /** OPTIONAL candidate-local public contracts discovered only after this
-   *  patch exposed a typed structural witness. Merged with the global clean
-   *  contract bundle for this candidate alone. */
+   *  patch exposed additional public structure. In clean mode the executor
+   *  strips non-public provenance before these can affect submit authority. */
   publicContracts?: PublicContractBundle
+  /** OPTIONAL candidate-local advisory structural contracts. These may be shown
+   *  to the LLM in repair/review packets, but they never participate in submit
+   *  authority or clean contract dominance. */
+  advisoryContracts?: PublicContractBundle
 }
 
 export interface DerivedCandidateStructuralRepair {
   readonly family?: CandidateFamily
-  readonly publicContracts?: PublicContractBundle
+  readonly advisoryContracts?: PublicContractBundle
 }
 
 export interface SelectionPorts {

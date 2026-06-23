@@ -115,21 +115,30 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
     expect(DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
     expect(APP_DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
-    expect(DRIVER_SRC).toContain("const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(")
-    expect(APP_DRIVER_SRC).toContain("const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(")
-    expect(DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
-    expect(APP_DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
     expect(DRIVER_SRC).toContain(
-      "...(args.staticWitnessDiagnostics.length > 0",
+      "const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(",
     )
     expect(APP_DRIVER_SRC).toContain(
-      "...(staticWitnessDiagnostics.length > 0",
+      "const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(",
     )
+    expect(DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
+    expect(APP_DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
+    expect(DRIVER_SRC).toContain("...(args.staticWitnessDiagnostics.length > 0")
+    expect(APP_DRIVER_SRC).toContain("...(staticWitnessDiagnostics.length > 0")
     expect(DRIVER_SRC).toContain("ownerEvidence: args.selectionOwnerEvidence")
     expect(DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
     expect(APP_DRIVER_SRC).toContain("ownerEvidence: selectionOwnerEvidence")
     expect(APP_DRIVER_SRC).toContain("baseValidatedRed: selectionBaseValidatedRed")
     expect(APP_DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
+  })
+
+  test("both drivers split selector authority contracts from advisory prompt contracts", () => {
+    expect(DRIVER_SRC).toContain("selectionAuthorityContracts")
+    expect(DRIVER_SRC).toContain("advisoryPromptContracts")
+    expect(APP_DRIVER_SRC).toContain("selectionAuthorityContracts")
+    expect(APP_DRIVER_SRC).toContain("advisoryPromptContracts")
+    expect(DRIVER_SRC).not.toContain("const effectivePublicContracts")
+    expect(APP_DRIVER_SRC).not.toContain("const effectivePublicContracts")
   })
 
   test("both drivers use the shared unavailable repro calibration constructor", () => {

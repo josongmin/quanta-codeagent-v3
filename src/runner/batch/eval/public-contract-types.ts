@@ -1,14 +1,19 @@
 /**
- * Public contract bundle — typed obligations a clean selector candidate must
- * honor, with EXPLICIT provenance (T-CON-10).
+ * Selection contract bundle — typed obligations / hints the clean selector may
+ * use, with EXPLICIT provenance (T-CON-10).
  *
- * A `PublicContract` expresses *what must hold* about a repair, derived ONLY
+ * A `SelectionContract` expresses *what must hold* about a repair, derived ONLY
  * from public, generic inputs:
  *  - public issue text (e.g. a declared expected output),
  *  - public tests already present in the repo,
  *  - validated repro scripts,
  *  - a static witness bundle (owner files/symbols from lsp_definition /
  *    find_references / repo-map / closure evidence).
+ *
+ * IMPORTANT: not every contract provenance is submit authority. Public issue /
+ * test / validated-repro contracts can participate in clean selector authority;
+ * static-witness contracts are bounded STRUCTURAL ADVICE only and must be
+ * filtered out before any clean submit decision.
  *
  * It is DELIBERATELY NOT an issue-family regex tuned to recover a known
  * benchmark miss, NOT a known-instance patch/file-path match, and NEVER carries
@@ -47,14 +52,29 @@ export type PublicContractStrength = "required" | "supporting"
  *  - `validated-repro`: presence of a validated reproduction script.
  *  - `static-witness`: owner files/symbols from the static witness bundle.
  */
-export type ContractProvenance =
-  | "public-issue-text"
-  | "public-test"
-  | "validated-repro"
-  | "static-witness"
+export type AuthorityContractProvenance = "public-issue-text" | "public-test" | "validated-repro"
+export type AdvisoryContractProvenance = "static-witness"
+export type ContractProvenance = AuthorityContractProvenance | AdvisoryContractProvenance
 
-/** A single typed, provenance-carrying public obligation. */
-export interface PublicContract {
+export const AUTHORITY_CONTRACT_PROVENANCE: ReadonlySet<AuthorityContractProvenance> = new Set([
+  "public-issue-text",
+  "public-test",
+  "validated-repro",
+])
+
+export const isAuthorityContractProvenance = (
+  provenance: ContractProvenance,
+): provenance is AuthorityContractProvenance =>
+  provenance === "public-issue-text" ||
+  provenance === "public-test" ||
+  provenance === "validated-repro"
+
+export const isAdvisoryContractProvenance = (
+  provenance: ContractProvenance,
+): provenance is AdvisoryContractProvenance => provenance === "static-witness"
+
+/** A single typed, provenance-carrying selector obligation or advisory hint. */
+export interface SelectionContract {
   readonly contractId: string
   readonly kind: PublicContractKind
   readonly strength: PublicContractStrength
@@ -65,10 +85,14 @@ export interface PublicContract {
   readonly subjectSymbols: readonly string[]
 }
 
-/** A typed bundle of public contracts for one instance's clean selection. */
-export interface PublicContractBundle {
-  readonly contracts: readonly PublicContract[]
+/** A typed bundle of selector contracts for one instance's clean selection. */
+export interface SelectionContractBundle {
+  readonly contracts: readonly SelectionContract[]
 }
+
+/** Back-compat names retained while runtime callers migrate. */
+export type PublicContract = SelectionContract
+export type PublicContractBundle = SelectionContractBundle
 
 /**
  * The observable facts about a candidate patch that a contract is evaluated
@@ -87,3 +111,31 @@ export interface ContractSatisfaction {
   readonly strength: PublicContractStrength
   readonly satisfied: boolean
 }
+
+/**
+ * Keep only the submit-authoritative subset of a bundle. Structural
+ * static-witness contracts are deliberately excluded here.
+ */
+export const filterAuthorityContractBundle = (
+  bundle: SelectionContractBundle | undefined,
+): SelectionContractBundle | undefined => {
+  if (bundle === undefined) return undefined
+  const contracts = bundle.contracts.filter((contract) =>
+    isAuthorityContractProvenance(contract.provenance),
+  )
+  return contracts.length === 0 ? undefined : { contracts }
+}
+
+/**
+ * Render a contract label for model-facing packets.
+ *
+ * Static-witness contracts remain useful as bounded structural guidance, but
+ * they are ADVISORY on the clean path. Prefix them so packets do not present
+ * them with the same wording as executable/public submit authority.
+ */
+export const renderContractAuthorityLabel = (
+  contract: Pick<SelectionContract, "provenance" | "strength">,
+): string =>
+  isAdvisoryContractProvenance(contract.provenance)
+    ? `advisory:${contract.provenance}/${contract.strength}`
+    : `${contract.provenance}/${contract.strength}`

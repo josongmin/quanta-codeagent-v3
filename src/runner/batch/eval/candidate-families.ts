@@ -113,7 +113,8 @@ const cleanList = (xs: readonly string[]): string[] => {
 const hasAny = (xs: readonly string[], ys: ReadonlySet<string>): boolean =>
   xs.some((x) => ys.has(x))
 
-const isCoChangeFamily = (familyId: CandidateFamilyId): boolean => COCHANGE_FAMILY_IDS.has(familyId)
+export const isCoChangeFamily = (familyId: CandidateFamilyId): boolean =>
+  COCHANGE_FAMILY_IDS.has(familyId)
 
 /**
  * Files still missing from this candidate's structural family coverage.
@@ -253,6 +254,52 @@ const WITNESS_KIND_TO_FAMILY: Readonly<Record<StaticWitness["kind"], CandidateFa
   "unique-symbol-definer": "unique-owner",
 }
 
+const directedProducerOf = (
+  witness: StaticWitness,
+  ownerFiles: readonly string[],
+): string | undefined => {
+  const producer = witness.fromFile?.trim()
+  return producer !== undefined && producer !== "" && ownerFiles.includes(producer)
+    ? producer
+    : undefined
+}
+
+const staticWitnessSeedOf = (args: {
+  readonly witness: StaticWitness
+  readonly directed: string | undefined
+  readonly ownerFiles: readonly string[]
+}): string | undefined => {
+  if (args.directed === undefined) return undefined
+  const consumers = args.ownerFiles.filter((f) => f !== args.directed)
+  const symbol = cleanList([...args.witness.subjectSymbols])[0]
+  return `Directed ${args.witness.kind}: \`${args.directed}\` produces${
+    symbol === undefined ? "" : ` \`${symbol}\``
+  } consumed by ${consumers.map((f) => `\`${f}\``).join(", ")}. Fix the root cause at the producer, not only the consumption site.`
+}
+
+const familyFromStaticWitness = (witness: StaticWitness): CandidateFamily | undefined => {
+  if (!canBeCleanAuthority(witness)) return undefined
+  const familyId = WITNESS_KIND_TO_FAMILY[witness.kind]
+  if (COCHANGE_FAMILY_IDS.has(familyId) && !canBeMultiSiteObligation(witness)) return undefined
+  const ownerFiles = cleanList(witness.subjectFiles)
+  if (ownerFiles.length === 0) return undefined
+  // A6: CONSUME the directional edge (`fromFile`). When the witness carries a
+  // producer endpoint that is one of the owner files, surface it structurally
+  // (`producerFile` + producer-lead ordering) and bake the direction into the
+  // model-facing seed, instead of discarding it into `witnessId` only.
+  const directed = directedProducerOf(witness, ownerFiles)
+  const orderedFiles =
+    directed === undefined ? ownerFiles : [directed, ...ownerFiles.filter((f) => f !== directed)]
+  return {
+    familyId,
+    ownerFiles: orderedFiles,
+    reason: witness.reason,
+    seed: staticWitnessSeedOf({ witness, directed, ownerFiles }),
+    sourceEvidence: [`static-witness:${witness.provenance}`],
+    ...(directed === undefined ? {} : { producerFile: directed }),
+  }
+}
+
 /**
  * SCAFF-04: typed structural candidate families from the AST static-witness
  * adapter. Only AUTHORITATIVE witnesses (genuine relation provenance) become
@@ -260,46 +307,10 @@ const WITNESS_KIND_TO_FAMILY: Readonly<Record<StaticWitness["kind"], CandidateFa
  * skipped — a family label alone has no authority, and `candidateFamilyRank`
  * still requires a candidate to touch every co-change file.
  */
-export const staticWitnessesToFamilies = (
-  witnesses: readonly StaticWitness[],
-): CandidateFamily[] => {
-  const families: CandidateFamily[] = []
-  for (const w of witnesses) {
-    if (!canBeCleanAuthority(w)) continue
-    const familyId = WITNESS_KIND_TO_FAMILY[w.kind]
-    if (COCHANGE_FAMILY_IDS.has(familyId) && !canBeMultiSiteObligation(w)) continue
-    const ownerFiles = cleanList(w.subjectFiles)
-    if (ownerFiles.length === 0) continue
-    // A6: CONSUME the directional edge (`fromFile`). When the witness carries a
-    // producer endpoint that is one of the owner files, surface it structurally
-    // (`producerFile` + producer-lead ordering) and bake the direction into the
-    // model-facing seed, instead of discarding it into `witnessId` only.
-    const producer = w.fromFile?.trim()
-    const directed =
-      producer !== undefined && producer !== "" && ownerFiles.includes(producer)
-        ? producer
-        : undefined
-    const orderedFiles =
-      directed === undefined ? ownerFiles : [directed, ...ownerFiles.filter((f) => f !== directed)]
-    const consumers = directed === undefined ? [] : ownerFiles.filter((f) => f !== directed)
-    const symbol = cleanList([...w.subjectSymbols])[0]
-    const seed =
-      directed === undefined
-        ? undefined
-        : `Directed ${w.kind}: \`${directed}\` produces${
-            symbol === undefined ? "" : ` \`${symbol}\``
-          } consumed by ${consumers.map((f) => `\`${f}\``).join(", ")}. Fix the root cause at the producer, not only the consumption site.`
-    families.push({
-      familyId,
-      ownerFiles: orderedFiles,
-      reason: w.reason,
-      seed,
-      sourceEvidence: [`static-witness:${w.provenance}`],
-      ...(directed === undefined ? {} : { producerFile: directed }),
-    })
-  }
-  return families
-}
+export const staticWitnessesToFamilies = (witnesses: readonly StaticWitness[]): CandidateFamily[] =>
+  witnesses
+    .map((witness) => familyFromStaticWitness(witness))
+    .filter((family): family is CandidateFamily => family !== undefined)
 
 /** Merge static-witness families into an existing family bundle (dedup by
  *  familyId+files), so AST structural co-change families also seed generation. */

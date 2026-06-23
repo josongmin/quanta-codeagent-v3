@@ -63,7 +63,7 @@ import {
   UsageTap,
   validatedReproRepairSeed,
   verifyAndFinalizeResult,
-  withCandidateFamilyPublicContracts,
+  withCandidateFamilyAuthorityContracts,
 } from "@/runner/batch/eval/driver"
 import {
   buildSelectionGenerationPrompt,
@@ -77,8 +77,11 @@ import {
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
-import { buildCleanSelectionPublicContracts } from "@/runner/batch/eval/public-contract-bundle"
-import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
+import { buildCleanSelectionAuthorityContracts } from "@/runner/batch/eval/public-contract-bundle"
+import {
+  type PublicContractBundle,
+  renderContractAuthorityLabel,
+} from "@/runner/batch/eval/public-contract-types"
 import { candidatePatchAppliesCleanly } from "@/runner/batch/eval/rematerialize"
 import {
   benchInstallsReproHint,
@@ -731,9 +734,26 @@ const contractFactsFromBundle = (
 ): readonly ContractFact[] =>
   contracts?.contracts.map((c) => ({
     contractId: c.contractId,
-    authority: `${c.provenance}/${c.strength}`,
+    authority: renderContractAuthorityLabel(c),
     satisfied: "unknown" as const,
   })) ?? []
+
+const mergeAdvisoryStaticWitnessContracts = (
+  publicContracts: PublicContractBundle | undefined,
+  staticWitnessContracts: readonly PublicContractBundle["contracts"][number][],
+): PublicContractBundle | undefined => {
+  if (staticWitnessContracts.length === 0) return publicContracts
+  return {
+    contracts: [
+      ...new Map(
+        [...(publicContracts?.contracts ?? []), ...staticWitnessContracts].map((contract) => [
+          contract.contractId,
+          contract,
+        ]),
+      ).values(),
+    ],
+  }
+}
 
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
@@ -777,8 +797,8 @@ const runSelectionPhase = async (
     selectionOwnerCandidates,
     sandbox,
   )
-  // SCAFF-04/05 parity (see runner driver): AST witnesses feed BOTH generation
-  // families (complete candidate is generated) and required contracts (it wins).
+  // AST witnesses still seed generation/repair structure, but clean selector
+  // authority stays on public issue/test/repro contracts only.
   const staticWitnesses = buildAstStaticWitnesses({
     problemStatement: instance.problemStatement,
     ownerCandidates: normalizedSelectionOwnerCandidates,
@@ -794,24 +814,14 @@ const runSelectionPhase = async (
     }),
     staticWitnesses,
   )
-  const familyPublicContracts = withCandidateFamilyPublicContracts(
+  const selectionAuthorityContracts = withCandidateFamilyAuthorityContracts(
     publicContracts,
     candidateFamilyBundle,
   )
-  const staticWitnessContracts = buildStaticWitnessContracts(staticWitnesses)
-  const effectivePublicContracts: PublicContractBundle | undefined =
-    staticWitnessContracts.length === 0
-      ? familyPublicContracts
-      : {
-          contracts: [
-            ...new Map(
-              [...(familyPublicContracts?.contracts ?? []), ...staticWitnessContracts].map((c) => [
-                c.contractId,
-                c,
-              ]),
-            ).values(),
-          ],
-        }
+  const advisoryPromptContracts = mergeAdvisoryStaticWitnessContracts(
+    selectionAuthorityContracts,
+    buildStaticWitnessContracts(staticWitnesses),
+  )
   const selectionInputs = buildSelectionInputs({
     n,
     ownerCandidates: normalizedSelectionOwnerCandidates,
@@ -845,7 +855,7 @@ const runSelectionPhase = async (
       ? buildSelectionGenerationPrompt({
           problemStatement: instance.problemStatement,
           ownerEvidence: selectionOwnerEvidence,
-          contracts: contractFactsFromBundle(effectivePublicContracts),
+          contracts: contractFactsFromBundle(advisoryPromptContracts),
           baseValidatedRed: selectionBaseValidatedRed,
           ...(verificationTarget !== undefined ? { verificationTarget } : {}),
           ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
@@ -939,8 +949,8 @@ const runSelectionPhase = async (
     repairReadSource: (rel) => readSandboxSource(sandbox, rel),
     repairIssueSymbols: extractIssueHint(instance.problemStatement).symbols,
     repairOwnerEvidence: selectionOwnerEvidence,
-    ...(effectivePublicContracts !== undefined
-      ? { publicContracts: effectivePublicContracts }
+    ...(selectionAuthorityContracts !== undefined
+      ? { publicContracts: selectionAuthorityContracts }
       : {}),
     ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
     recordLlmEvidencePacket: (packet: LlmEvidencePacket) => {
@@ -1054,7 +1064,7 @@ const runAppMainPhase = async (args: {
   readonly prepared: PreparedAttemptContext
 }): Promise<Phase> => {
   if (args.prepared.posture.verifySelectN !== undefined && args.instance.swebench !== undefined) {
-    const publicContracts = buildCleanSelectionPublicContracts({
+    const publicContracts = buildCleanSelectionAuthorityContracts({
       declaredExpected: args.prepared.closureSession?.issueDeclaredExpected,
       candidates: args.prepared.closureSession?.bundle.evidence.candidates,
       apiSymbols: args.prepared.closureSession?.bundle.evidence.issueSymbols,

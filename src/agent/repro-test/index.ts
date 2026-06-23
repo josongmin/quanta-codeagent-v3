@@ -3,7 +3,7 @@
  *
  * Pipeline: `generateReproTests` (LLM × K — pytest tests) → `executeReproTests`
  * (each run as `python <path>` which self-drives pytest; the verdict is the
- * process exit code + parsed pytest summary, NOT a model-printed sentinel) →
+ * controlled pytest sidecar report, NOT a model-printed sentinel or stdout) →
  * `selectReproTest` (majority vote among "reproduced" outcomes). The bench
  * driver wires this behind a default-OFF env gate (`QUANTA_BENCH_REPRO_TEST=K`)
  * — byte-identical measurement when the flag is unset.
@@ -15,6 +15,7 @@ export {
   type ExecuteReproTestsArgs,
   executeReproTests,
   type ReproExecPort,
+  type ReproReadFilePort,
   type ReproWriteFilePort,
 } from "./execute"
 export {
@@ -26,6 +27,12 @@ export {
   MAX_SAMPLES,
   stripMarkdownFences,
 } from "./generate"
+export {
+  classifyPytestExecutionReport,
+  classifyPytestReportText,
+  parsePytestExecutionReport,
+  pytestReportPathFor,
+} from "./pytest-report"
 export {
   normaliseReproSource,
   selectReproTest,

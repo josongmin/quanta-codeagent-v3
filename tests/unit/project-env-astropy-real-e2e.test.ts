@@ -21,14 +21,14 @@
  */
 import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
-import { readFile, readdir, stat, writeFile } from "node:fs/promises"
+import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { prepareTaskRepo, type SwebenchTask } from "@/apps/bench/corpus"
 import { reproRunArgv } from "@/runner/batch/corpus/dataset"
 import {
-  prepareProjectEnvSandbox,
   type ProjectEnvSandboxFs,
+  prepareProjectEnvSandbox,
 } from "@/runner/batch/corpus/project-env"
 import { execArgv } from "@/runner/batch/eval/exec"
 import { withCandidatePatch } from "@/runner/batch/eval/rematerialize"
@@ -43,7 +43,9 @@ const has = (bin: string, ...args: string[]): boolean => {
 }
 
 const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && has("git", "--version") && has("uv", "--version")
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
+  has("git", "--version") &&
+  has("uv", "--version")
     ? describe
     : describe.skip
 

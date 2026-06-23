@@ -1,11 +1,15 @@
 /**
- * Public contract bundle — PURE builders + evaluator (T-CON-10).
+ * Selection contract bundle — PURE builders + evaluator (T-CON-10).
  *
  * Derives a typed {@link PublicContractBundle} from GENERIC, typed inputs only:
  *  - an issue-declared expected value (public issue text),
  *  - public test names already present in the repo,
  *  - whether a validated repro is present,
  *  - a static witness of owner files / API symbols.
+ *
+ * Static-witness-derived contracts are STRUCTURAL ADVICE, not clean submit
+ * authority. Runtime clean authority must explicitly filter to public issue /
+ * public test / validated repro provenance.
  *
  * It NEVER derives obligations from a known-instance patch or file-path regex,
  * from an issue-family regex tuned to a benchmark miss, or from a hidden oracle
@@ -158,7 +162,7 @@ export const authoritativeIssueOwnerContracts = (
  * exploration evidence and are deliberately excluded from contract authority.
  * Empty inputs => `undefined`.
  */
-export const buildCleanSelectionPublicContracts = (args: {
+export const buildCleanSelectionAuthorityContracts = (args: {
   readonly declaredExpected?:
     | { readonly kind?: string | undefined; readonly value: string }
     | undefined
@@ -179,6 +183,8 @@ export const buildCleanSelectionPublicContracts = (args: {
   }
   return { contracts: [...byId.values()] }
 }
+
+export const buildCleanSelectionPublicContracts = buildCleanSelectionAuthorityContracts
 
 /** Clean-path api-surface contracts sourced from issue text, not static witness. */
 const buildIssueApiSurfaceContracts = (apiSymbols: readonly string[]): PublicContract[] =>

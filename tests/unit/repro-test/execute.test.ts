@@ -1,10 +1,8 @@
 /**
- * Repro-test execution — unit contract (P1: pytest-exit-grounded verdict).
+ * Repro-test execution — unit contract (structured pytest sidecar verdict).
  *
- *   - classifyPytest: verdict from pytest exit code + parsed summary line, NOT a
- *     model-printed sentinel. "N failed" ⇒ reproduced; "N error" ⇒ exec_failed;
- *     "N passed" ⇒ resolved; "no tests ran" / exit 5 ⇒ unknown; non-zero exit
- *     with no summary (import crash) ⇒ exec_failed; exit 3/4 ⇒ other.
+ *   - classifyPytest: verdict from the controlled pytest sidecar JSON, NOT a
+ *     model-printed sentinel and NOT stdout summary text.
  *   - executeReproTests: writes each candidate to a unique path; invokes the
  *     exec port with argv form; returns one sample per input; survives
  *     individual write / exec failures.
@@ -17,14 +15,50 @@ import {
   defaultTempPath,
   type ExecuteReproTestsArgs,
   executeReproTests,
+  pytestReportPathFor,
 } from "../../../src/agent/repro-test/execute"
 
-/** Real pytest summary lines (terse `-q` mode) — captured from pytest 6.x so
- *  the classifier tests exercise the EXACT strings pytest emits, not a guess. */
-const SUM_FAILED = "FAILED t.py::test_x - assert 1 == 2\n1 failed in 0.24s"
-const SUM_PASSED = ".                                            [100%]\n1 passed in 0.21s"
-const SUM_ERROR = "ERROR t.py::test_x - RuntimeError: setup boom\n1 error in 0.26s"
-const SUM_NO_TESTS = "no tests ran in 0.20s"
+const report = (args: {
+  collected: number
+  exitstatus: number
+  reports?: readonly Record<string, unknown>[]
+}): string =>
+  JSON.stringify({
+    schema: 1,
+    collected: args.collected,
+    exitstatus: args.exitstatus,
+    reports: args.reports ?? [],
+  })
+
+const REPORT_FAILED = report({
+  collected: 1,
+  exitstatus: 1,
+  reports: [
+    { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" },
+  ],
+})
+const REPORT_PYTEST_FAIL = report({
+  collected: 1,
+  exitstatus: 1,
+  reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "Failed" }],
+})
+const REPORT_PASSED = report({
+  collected: 1,
+  exitstatus: 0,
+  reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+})
+const REPORT_SETUP_ERROR = report({
+  collected: 1,
+  exitstatus: 1,
+  reports: [{ nodeid: "t.py::test_x", when: "setup", outcome: "failed", exc_type: "RuntimeError" }],
+})
+const REPORT_NO_TESTS = report({ collected: 0, exitstatus: 5 })
+const REPORT_RAW_EXCEPTION = report({
+  collected: 1,
+  exitstatus: 1,
+  reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "TypeError" }],
+})
+const REPORT_INTERNAL = report({ collected: 1, exitstatus: 3 })
 
 const mkArgs = (
   overrides: Partial<ExecuteReproTestsArgs> & {
@@ -36,85 +70,47 @@ const mkArgs = (
   repoRoot: "/sandbox",
   exec: overrides.exec ?? (async () => ({ code: 0, stdout: "", stderr: "" })),
   writeFile: overrides.writeFile ?? (async () => {}),
+  readFile: overrides.readFile ?? (async () => REPORT_PASSED),
   tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
   ...overrides,
 })
 
-describe("classifyPytest — pytest exit/summary → outcome", () => {
-  test("'N failed' summary ⇒ reproduced (assertion failed = bug present)", () => {
-    expect(classifyPytest(SUM_FAILED, "", 1)).toBe("reproduced")
+describe("classifyPytest — pytest sidecar → outcome", () => {
+  test("AssertionError call failure ⇒ reproduced", () => {
+    expect(classifyPytest(REPORT_FAILED, "", 1)).toBe("reproduced")
   })
 
-  test("'N passed' summary ⇒ resolved (green)", () => {
-    expect(classifyPytest(SUM_PASSED, "", 0)).toBe("resolved")
+  test("pytest.fail call failure ⇒ reproduced", () => {
+    expect(classifyPytest(REPORT_PYTEST_FAIL, "", 1)).toBe("reproduced")
   })
 
-  test("'N error' summary (collection/setup) ⇒ exec_failed (NOT a verdict)", () => {
-    // pytest exits 1 for a setup/collection error JUST LIKE a real failure — the
-    // summary "error" (not "failed") is the ONLY thing that disambiguates them.
-    expect(classifyPytest(SUM_ERROR, "", 1)).toBe("exec_failed")
+  test("passed call report ⇒ resolved", () => {
+    expect(classifyPytest(REPORT_PASSED, "", 0)).toBe("resolved")
   })
 
-  test("'no tests ran' ⇒ unknown; exit 5 (no tests collected) ⇒ unknown", () => {
-    expect(classifyPytest(SUM_NO_TESTS, "", 5)).toBe("unknown")
-    expect(classifyPytest("", "", 5)).toBe("unknown")
+  test("setup/collection style failure ⇒ exec_failed", () => {
+    expect(classifyPytest(REPORT_SETUP_ERROR, "", 1)).toBe("exec_failed")
   })
 
-  test("failed WINS over passed/error in the same run (a failure is a failure)", () => {
-    // "1 failed, 1 passed" ⇒ the bug still reproduces ⇒ reproduced.
-    expect(classifyPytest("1 failed, 1 passed in 0.3s", "", 1)).toBe("reproduced")
-    // "1 failed, 1 error" ⇒ still reproduced.
-    expect(classifyPytest("1 failed, 1 error in 0.3s", "", 1)).toBe("reproduced")
+  test("no collected tests ⇒ unknown", () => {
+    expect(classifyPytest(REPORT_NO_TESTS, "", 5)).toBe("unknown")
   })
 
-  test("import crash: exit≠0 + NO pytest summary ⇒ exec_failed (project not importable)", () => {
-    // The script died at `import projectlib` BEFORE the footer drove pytest, so
-    // there is no summary line at all. This is infra (project not importable),
-    // NOT a reproduced bug — the exact import-crash-vs-failure confound.
-    expect(classifyPytest("", "ModuleNotFoundError: No module named 'foo'", 1)).toBe("exec_failed")
+  test("raw exception bubbling out of call phase ⇒ exec_failed", () => {
+    expect(classifyPytest(REPORT_RAW_EXCEPTION, "", 1)).toBe("exec_failed")
+  })
+
+  test("malformed/missing sidecar ⇒ exec_failed", () => {
     expect(classifyPytest("", "", 1)).toBe("exec_failed")
+    expect(classifyPytest("not json", "", 1)).toBe("exec_failed")
   })
 
-  test("timeout-kill (code 137, no summary) ⇒ exec_failed", () => {
-    expect(classifyPytest("", "killed", 137)).toBe("exec_failed")
-    expect(classifyPytest("", "", -1)).toBe("exec_failed")
+  test("pytest internal/usage sidecar status ⇒ other", () => {
+    expect(classifyPytest(REPORT_INTERNAL, "", 3)).toBe("other")
   })
 
-  test("pytest internal/usage error (exit 3/4, no summary) ⇒ other", () => {
-    expect(classifyPytest("INTERNALERROR> ...", "", 3)).toBe("other")
-    expect(classifyPytest("ERROR: usage", "", 4)).toBe("other")
-  })
-
-  test("exit 0 with no summary at all ⇒ unknown (ran clean, no signal)", () => {
-    expect(classifyPytest("just some output\n", "", 0)).toBe("unknown")
-    expect(classifyPytest("", "", 0)).toBe("unknown")
-  })
-
-  test("summary may land on stderr — classifier reads BOTH streams", () => {
-    expect(classifyPytest("", "1 failed in 0.2s", 1)).toBe("reproduced")
-    expect(classifyPytest("", "1 passed in 0.2s", 0)).toBe("resolved")
-  })
-
-  test("non-string stdout/stderr treated as empty (no runtime crash)", () => {
-    expect(classifyPytest(undefined as unknown as string, "", 0)).toBe("unknown")
-    expect(classifyPytest(null as unknown as string, null as unknown as string, 0)).toBe("unknown")
-  })
-
-  test("word-boundary: a test NAME containing 'failed' does NOT spoof the summary", () => {
-    // Only "<N> failed" (digits + space + failed) counts as a summary token; a
-    // passing test whose name mentions 'failed' must NOT classify reproduced.
-    const out = "test_failed_path PASSED\n1 passed in 0.1s"
-    expect(classifyPytest(out, "", 0)).toBe("resolved")
-  })
-
-  test("MUTATION: a script that PRINTS 'Issue resolved' but whose pytest FAILS ⇒ reproduced", () => {
-    // This is the EXACT fakeability we removed. The legacy sentinel scan would
-    // have read "Issue resolved" and returned `resolved` (a fake green). The
-    // pytest-grounded classifier ignores the printed string entirely and trusts
-    // the "1 failed" summary ⇒ reproduced. If this ever returns "resolved" the
-    // sentinel scan has crept back in.
-    const fakeGreen = "Issue resolved\nIssue resolved\nFAILED t.py::test_x\n1 failed in 0.2s"
-    expect(classifyPytest(fakeGreen, "", 1)).toBe("reproduced")
+  test("stdout-looking pytest summaries are not authority", () => {
+    expect(classifyPytest("1 failed in 0.1s", "", 1)).toBe("exec_failed")
   })
 })
 
@@ -122,6 +118,7 @@ describe("executeReproTests", () => {
   test("writes each test to a unique path with argv-form python invocation", async () => {
     const calls: { path: string; content: string }[] = []
     const execCalls: { argv: readonly string[]; cwd: string }[] = []
+    const reports = new Map<string, string>()
     const out = await executeReproTests(
       mkArgs({
         tests: ["def test_a(): assert False", "def test_b(): assert True"],
@@ -133,10 +130,12 @@ describe("executeReproTests", () => {
           const last = argv[argv.length - 1] ?? ""
           // Map test path → pytest result by index in path.
           const idx = last.includes("__repro_0") ? 0 : 1
+          reports.set(pytestReportPathFor(last), idx === 0 ? REPORT_FAILED : REPORT_PASSED)
           return idx === 0
             ? { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
             : { code: 0, stdout: "1 passed in 0.1s", stderr: "" }
         },
+        readFile: async (path) => reports.get(path) ?? "",
       }),
     )
     expect(calls).toHaveLength(2)
@@ -146,7 +145,7 @@ describe("executeReproTests", () => {
     expect(execCalls[0]?.argv).toEqual(["python3", "/sandbox/__repro_0.py"])
     expect(execCalls[0]?.cwd).toBe("/sandbox")
     expect(out).toHaveLength(2)
-    // pytest "1 failed" ⇒ reproduced; "1 passed" ⇒ resolved.
+    // sidecar AssertionError ⇒ reproduced; sidecar pass ⇒ resolved.
     expect(out[0]?.outcome).toBe("reproduced")
     expect(out[1]?.outcome).toBe("resolved")
   })
@@ -154,6 +153,7 @@ describe("executeReproTests", () => {
   test("empty source ⇒ unknown, no write, no exec", async () => {
     let writeCount = 0
     let execCount = 0
+    const reports = new Map<string, string>()
     const out = await executeReproTests(
       mkArgs({
         tests: ["", "def test_x(): assert False"],
@@ -162,8 +162,10 @@ describe("executeReproTests", () => {
         },
         exec: async () => {
           execCount++
+          reports.set(pytestReportPathFor("/sandbox/__repro_1.py"), REPORT_FAILED)
           return { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
         },
+        readFile: async (path) => reports.get(path) ?? "",
       }),
     )
     expect(writeCount).toBe(1)
@@ -188,16 +190,19 @@ describe("executeReproTests", () => {
 
   test("exec throws ⇒ exec_failed for that sample, continues", async () => {
     let firstCall = true
+    const reports = new Map<string, string>()
     const out = await executeReproTests(
       mkArgs({
         tests: ["a", "b"],
-        exec: async () => {
+        exec: async (argv) => {
           if (firstCall) {
             firstCall = false
             throw new Error("python missing")
           }
+          reports.set(pytestReportPathFor(argv[argv.length - 1] ?? ""), REPORT_FAILED)
           return { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
         },
+        readFile: async (path) => reports.get(path) ?? "",
       }),
     )
     expect(out[0]?.outcome).toBe("exec_failed")
@@ -241,10 +246,13 @@ describe("executeReproTests", () => {
     expect(out).toHaveLength(1)
   })
 
-  test("exec returns malformed result ⇒ classifyStdout handles it", async () => {
+  test("exec returns malformed result and no sidecar ⇒ exec_failed", async () => {
     const out = await executeReproTests(
       mkArgs({
         tests: ["a"],
+        readFile: async () => {
+          throw new Error("missing report")
+        },
         exec: async () => ({
           code: undefined as unknown as number,
           stdout: undefined as unknown as string,
@@ -252,7 +260,6 @@ describe("executeReproTests", () => {
         }),
       }),
     )
-    // No stdout / no code ⇒ exec_failed (code defaults to -1).
     expect(out[0]?.outcome).toBe("exec_failed")
   })
 

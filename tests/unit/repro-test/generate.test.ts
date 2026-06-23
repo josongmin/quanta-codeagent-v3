@@ -106,6 +106,15 @@ describe("buildReproTestPrompt", () => {
     expect(prompt).toContain("pytest.main")
     expect(prompt).toContain("no:cacheprovider")
   })
+
+  test("prompt steers away from guessed internals and raw exceptions", () => {
+    const prompt = buildReproTestPrompt("some bug")
+    expect(prompt).toContain("Use the public API shape stated by the issue")
+    expect(prompt).toContain("Do not guess private method signatures")
+    expect(prompt).toContain("do not call one")
+    expect(prompt).toContain("pytest.fail")
+    expect(prompt).toContain("raw exception bubbling out of the test body")
+  })
 })
 
 describe("buildReproTestPrompt — MWE grounding (jun-18 repro-install lever)", () => {
@@ -359,12 +368,14 @@ describe("ensurePytestFooter — python <path> → pytest bridge guarantee", () 
     const out = ensurePytestFooter(src)
     expect(out).toContain(src)
     expect(out).toContain('if __name__ == "__main__"')
-    expect(out).toContain('PYTEST_DISABLE_PLUGIN_AUTOLOAD')
+    expect(out).toContain("PYTEST_DISABLE_PLUGIN_AUTOLOAD")
+    expect(out).toContain("_QuantaPytestReport")
+    expect(out).toContain(".pytest-report.json")
     expect(out).toContain("pytest.main([__file__")
     expect(out).toContain("sys.exit")
   })
 
-  test("LEAVES a compliant source byte-identical (no double-append)", () => {
+  test("replaces legacy pytest footer that lacks the sidecar report", () => {
     const compliant = [
       "def test_x():",
       "    assert f() == 1",
@@ -376,9 +387,11 @@ describe("ensurePytestFooter — python <path> → pytest bridge guarantee", () 
       "    import sys, pytest",
       '    sys.exit(pytest.main([__file__, "-q"]))',
     ].join("\n")
-    expect(ensurePytestFooter(compliant)).toBe(compliant)
-    // Exactly one footer (one __main__ guard).
-    const guards = ensurePytestFooter(compliant).match(/if __name__ == "__main__"/g) ?? []
+    const out = ensurePytestFooter(compliant)
+    expect(out).not.toBe(compliant)
+    expect(out).toContain("_QuantaPytestReport")
+    expect(out).toContain(".pytest-report.json")
+    const guards = out.match(/if __name__ == "__main__"/g) ?? []
     expect(guards).toHaveLength(1)
   })
 
@@ -389,8 +402,15 @@ describe("ensurePytestFooter — python <path> → pytest bridge guarantee", () 
   })
 
   test("recognises a footer that uses single quotes / different args (no double-append)", () => {
-    const single =
-      "def test_x():\n    assert True\nif __name__ == '__main__':\n    import pytest, sys; sys.exit(pytest.main([__file__]))"
+    const single = [
+      "def test_x():",
+      "    assert True",
+      "if __name__ == '__main__':",
+      "    import pytest, sys",
+      "    class _QuantaPytestReport: pass",
+      "    _p = __file__ + '.pytest-report.json'",
+      "    sys.exit(pytest.main([__file__]))",
+    ].join("\n")
     expect(ensurePytestFooter(single)).toBe(single)
   })
 })

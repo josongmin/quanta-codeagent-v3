@@ -274,15 +274,8 @@ const renderProjectEnvSourceShimBlock = (originalLine: string, replacementLine: 
   ].join("\n")
 }
 
-const rewriteSourceImportShim = (
-  content: string,
-  fromModule: string,
-  toModule: string,
-): string => {
-  const lineRe = new RegExp(
-    `^([ \\t]*from ${escapeRegExp(fromModule)} import [^\\n]+)$`,
-    "gm",
-  )
+const rewriteSourceImportShim = (content: string, fromModule: string, toModule: string): string => {
+  const lineRe = new RegExp(`^([ \\t]*from ${escapeRegExp(fromModule)} import [^\\n]+)$`, "gm")
   const fromClause = `from ${fromModule} import`
   const toClause = `from ${toModule} import`
   return content.replace(lineRe, (originalLine: string) =>

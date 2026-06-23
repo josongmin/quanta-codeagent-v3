@@ -36,7 +36,7 @@ import {
   type VerificationTargetFact,
 } from "./llm-evidence-packet"
 import { evaluateBundle, mergePublicContractBundles } from "./public-contract-bundle"
-import type { PublicContractBundle } from "./public-contract-types"
+import { type PublicContractBundle, renderContractAuthorityLabel } from "./public-contract-types"
 import { cleanDriftRejected } from "./selection-gates"
 import {
   hasContractOnlyEvidence,
@@ -59,26 +59,33 @@ export const boundTail = (s: string | undefined, n = 1800): string => {
 const joinSeedSections = (parts: readonly (string | undefined)[]): string =>
   parts.filter((s): s is string => s !== undefined && s.trim() !== "").join("\n\n")
 
+const mweProofReceiptState = (
+  state: NonNullable<Candidate["mweReceipt"]>["state"],
+): ProofReceiptState => {
+  switch (state) {
+    case "base_red":
+      return "base_red"
+    case "base_not_red":
+      return "base_green"
+    case "patched_green":
+      return "candidate_green"
+    case "candidate_red":
+      return "candidate_red"
+    case "execution_failed":
+      return "execution_failed"
+    default:
+      return "not_run"
+  }
+}
+
 export const mweProofReceiptFacts = (candidate: Candidate): ProofReceiptFact[] => {
   const receipt = candidate.mweReceipt
   if (receipt === undefined) return []
   const patchHash = candidate.patch.trim() === "" ? undefined : candidatePatchHash(candidate.patch)
-  const state: ProofReceiptState =
-    receipt.state === "base_red"
-      ? "base_red"
-      : receipt.state === "base_not_red"
-        ? "base_green"
-        : receipt.state === "patched_green"
-          ? "candidate_green"
-          : receipt.state === "candidate_red"
-            ? "candidate_red"
-            : receipt.state === "execution_failed"
-              ? "execution_failed"
-              : "not_run"
   return [
     {
       source: "public_mwe",
-      state,
+      state: mweProofReceiptState(receipt.state),
       ...(receipt.command !== undefined ? { command: receipt.command } : {}),
       ...(patchHash !== undefined ? { candidatePatchHash: patchHash } : {}),
     },
@@ -478,7 +485,7 @@ export const buildOracleFailureRepairSeed = (args: {
   ])
 }
 
-export const buildRepairPacketText = (args: {
+type BuildRepairPacketTextArgs = {
   readonly scored: readonly ScoredEntry[]
   readonly seed: string
   readonly winner: Candidate | null
@@ -497,30 +504,78 @@ export const buildRepairPacketText = (args: {
    *  public source context only; it never changes selector admission authority. */
   readonly structuralOwnerEvidence?: readonly OwnerEvidenceFact[]
   readonly recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
-}): string => {
-  const latestNonEmpty = [...args.scored].reverse().find(hasNonEmptyPatch)?.candidate
-  const focusCandidate =
-    (args.winner !== null && args.winner.patch.trim() !== "" ? args.winner : null) ?? latestNonEmpty
+}
+
+const repairFocusCandidateOf = (
+  scored: readonly ScoredEntry[],
+  winner: Candidate | null,
+): Candidate | undefined => {
+  const latestNonEmpty = [...scored].reverse().find(hasNonEmptyPatch)?.candidate
+  return (winner !== null && winner.patch.trim() !== "" ? winner : null) ?? latestNonEmpty
+}
+
+const repairProofReceiptsOf = (scored: readonly ScoredEntry[]): ProofReceiptFact[] => [
+  ...scored.flatMap((entry) => [
+    ...mweProofReceiptFacts(entry.candidate),
+    ...publicRegressionReceiptFacts(entry.candidate),
+    ...reproConsensusReceiptFacts(entry.candidate),
+  ]),
+  ...scored
+    .flatMap((entry) =>
+      entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2),
+    )
+    .map((reason) => ({ source: reason, state: hardReasonState(reason) })),
+]
+
+const repairOwnerFilesOf = (
+  scored: readonly ScoredEntry[],
+  focusCandidate: Candidate | undefined,
+): readonly string[] => [
+  ...new Set(
+    focusCandidate === undefined
+      ? scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files)
+      : (focusCandidate.familyOwnerFiles ?? focusCandidate.files),
+  ),
+]
+
+const candidateEditSurfaceOf = (
+  focusCandidate: Candidate | undefined,
+): CandidateEditSurfaceFact | undefined =>
+  focusCandidate === undefined || focusCandidate.patch.trim() === ""
+    ? undefined
+    : {
+        touchedFiles: focusCandidate.files,
+        touchedSymbols: diffTouchedSymbols(focusCandidate.patch),
+      }
+
+const repairContractsOf = (
+  args: BuildRepairPacketTextArgs,
+  focusCandidate: Candidate | undefined,
+): ContractFact[] => {
+  if (focusCandidate === undefined) return []
+  const effectiveContracts = mergePublicContractBundles(
+    mergePublicContractBundles(args.contractBundle, focusCandidate.publicContracts),
+    focusCandidate.advisoryContracts,
+  )
+  if (effectiveContracts === undefined) return []
+  const evaluations = new Map(
+    evaluateBundle(effectiveContracts, {
+      touchedFiles: focusCandidate.files,
+      touchedSymbols: diffTouchedSymbols(focusCandidate.patch),
+    }).map((evaluation) => [evaluation.contractId, evaluation]),
+  )
+  return effectiveContracts.contracts.map((contract) => ({
+    contractId: contract.contractId,
+    authority: renderContractAuthorityLabel(contract),
+    satisfied: evaluations.get(contract.contractId)?.satisfied ?? "unknown",
+  }))
+}
+
+export const buildRepairPacketText = (args: BuildRepairPacketTextArgs): string => {
+  const focusCandidate = repairFocusCandidateOf(args.scored, args.winner)
   const patchAuthority = focusCandidate?.patch ?? args.scored[0]?.candidate.patch ?? args.seed
-  const proofReceipts: ProofReceiptFact[] = [
-    ...args.scored.flatMap((entry) => [
-      ...mweProofReceiptFacts(entry.candidate),
-      ...publicRegressionReceiptFacts(entry.candidate),
-      ...reproConsensusReceiptFacts(entry.candidate),
-    ]),
-    ...args.scored
-      .flatMap((entry) =>
-        entry.verdict.reasons.filter((reason) => reason.startsWith("hard:")).slice(0, 2),
-      )
-      .map((reason) => ({ source: reason, state: hardReasonState(reason) })),
-  ]
-  const ownerFiles = [
-    ...new Set(
-      focusCandidate === undefined
-        ? args.scored.flatMap((entry) => entry.candidate.familyOwnerFiles ?? entry.candidate.files)
-        : (focusCandidate.familyOwnerFiles ?? focusCandidate.files),
-    ),
-  ]
+  const proofReceipts = repairProofReceiptsOf(args.scored)
+  const ownerFiles = repairOwnerFilesOf(args.scored, focusCandidate)
   const ownerEvidence = repairOwnerEvidence({
     ownerFiles,
     ...(args.issueSymbols !== undefined ? { issueSymbols: args.issueSymbols } : {}),
@@ -531,34 +586,8 @@ export const buildRepairPacketText = (args: {
   })
   // B7: the focus candidate's SOURCE-ONLY edit surface (touched files/symbols
   // from its OWN diff). Never a hidden-test path / command. Empty patch ⇒ none.
-  const candidateEditSurface: CandidateEditSurfaceFact | undefined =
-    focusCandidate === undefined || focusCandidate.patch.trim() === ""
-      ? undefined
-      : {
-          touchedFiles: focusCandidate.files,
-          touchedSymbols: diffTouchedSymbols(focusCandidate.patch),
-        }
-  const contracts: ContractFact[] =
-    focusCandidate === undefined
-      ? []
-      : (() => {
-          const effectiveContracts = mergePublicContractBundles(
-            args.contractBundle,
-            focusCandidate.publicContracts,
-          )
-          if (effectiveContracts === undefined) return []
-          const evaluations = new Map(
-            evaluateBundle(effectiveContracts, {
-              touchedFiles: focusCandidate.files,
-              touchedSymbols: diffTouchedSymbols(focusCandidate.patch),
-            }).map((evaluation) => [evaluation.contractId, evaluation]),
-          )
-          return effectiveContracts.contracts.map((contract) => ({
-            contractId: contract.contractId,
-            authority: `${contract.provenance}/${contract.strength}`,
-            satisfied: evaluations.get(contract.contractId)?.satisfied ?? "unknown",
-          }))
-        })()
+  const candidateEditSurface = candidateEditSurfaceOf(focusCandidate)
+  const contracts = repairContractsOf(args, focusCandidate)
   const packet = buildRepairSeedLlmEvidencePacket({
     problemStatement: args.problemStatement,
     candidatePatchHash: candidatePatchHash(patchAuthority),

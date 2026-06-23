@@ -217,7 +217,7 @@ export const ownerTestResultReceipt = (args: {
   }
 }
 
-/** A typed, provenance-carrying public obligation (mirrors PublicContract). */
+/** A typed, provenance-carrying selector contract fact (mirrors SelectionContract). */
 export interface ContractFact {
   readonly contractId: string
   /** provenance/strength label — NEVER a hidden oracle. */
@@ -382,43 +382,54 @@ export const assertEvidenceTextBlind = (
 }
 
 /** All strings drawn from EVIDENCE fields only (not the meta action menu). */
-const evidenceStrings = (packet: LlmEvidencePacket): string[] => {
-  const out: string[] = [...packet.publicIssueFacts]
-  for (const o of packet.ownerEvidence) {
-    out.push(o.file, o.provenance, ...o.symbols)
-    if (o.sourceSlice !== undefined) out.push(o.sourceSlice)
-  }
-  for (const r of packet.proofReceipts) {
-    out.push(r.source, r.state)
-    if (r.command !== undefined) out.push(r.command)
-    if (r.stdoutTail !== undefined) out.push(r.stdoutTail)
-    if (r.stderrTail !== undefined) out.push(r.stderrTail)
-  }
-  for (const c of packet.contractFacts) out.push(c.contractId, c.authority)
-  for (const s of packet.staticFacts) out.push(s.kind, s.value)
-  for (const m of packet.missingEvidence) out.push(m.kind, m.reason)
-  if (packet.candidateEditSurface !== undefined) {
-    out.push(
-      ...packet.candidateEditSurface.touchedFiles,
-      ...packet.candidateEditSurface.touchedSymbols,
-    )
-    if (packet.candidateEditSurface.patchSummary !== undefined) {
-      out.push(packet.candidateEditSurface.patchSummary)
-    }
-  }
-  if (packet.verificationTarget !== undefined) {
-    const steps = [
-      ...(packet.verificationTarget.primaryRail ? [packet.verificationTarget.primaryRail] : []),
-      ...packet.verificationTarget.required,
-      ...packet.verificationTarget.optional,
-    ]
-    for (const st of steps) {
-      if (st.cmd !== undefined) out.push(st.cmd)
-      if (st.successPredicate !== undefined) out.push(st.successPredicate)
-    }
-  }
-  return out
-}
+const ownerEvidenceStrings = (o: OwnerEvidenceFact): string[] => [
+  o.file,
+  o.provenance,
+  ...o.symbols,
+  ...(o.sourceSlice !== undefined ? [o.sourceSlice] : []),
+]
+
+const proofReceiptStrings = (r: ProofReceiptFact): string[] => [
+  r.source,
+  r.state,
+  ...(r.command !== undefined ? [r.command] : []),
+  ...(r.stdoutTail !== undefined ? [r.stdoutTail] : []),
+  ...(r.stderrTail !== undefined ? [r.stderrTail] : []),
+]
+
+const candidateEditSurfaceStrings = (surface: CandidateEditSurfaceFact | undefined): string[] =>
+  surface === undefined
+    ? []
+    : [
+        ...surface.touchedFiles,
+        ...surface.touchedSymbols,
+        ...(surface.patchSummary !== undefined ? [surface.patchSummary] : []),
+      ]
+
+const verificationStepStrings = (step: VerificationStepFact): string[] => [
+  ...(step.cmd !== undefined ? [step.cmd] : []),
+  ...(step.successPredicate !== undefined ? [step.successPredicate] : []),
+]
+
+const verificationTargetStrings = (target: VerificationTargetFact | undefined): string[] =>
+  target === undefined
+    ? []
+    : [
+        ...(target.primaryRail !== null ? [target.primaryRail] : []),
+        ...target.required,
+        ...target.optional,
+      ].flatMap(verificationStepStrings)
+
+const evidenceStrings = (packet: LlmEvidencePacket): string[] => [
+  ...packet.publicIssueFacts,
+  ...packet.ownerEvidence.flatMap(ownerEvidenceStrings),
+  ...packet.proofReceipts.flatMap(proofReceiptStrings),
+  ...packet.contractFacts.flatMap((c) => [c.contractId, c.authority]),
+  ...packet.staticFacts.flatMap((s) => [s.kind, s.value]),
+  ...packet.missingEvidence.flatMap((m) => [m.kind, m.reason]),
+  ...candidateEditSurfaceStrings(packet.candidateEditSurface),
+  ...verificationTargetStrings(packet.verificationTarget),
+]
 
 /**
  * Throw if any forbidden benchmark marker leaked into an evidence field. HARD
@@ -508,39 +519,34 @@ const LLM_EVIDENCE_STAGE_ORDER: readonly LlmEvidencePacketStage[] = [
   "selection_explanation",
 ]
 
+const singletonPacket = (packet: LlmEvidencePacket | undefined): readonly LlmEvidencePacket[] =>
+  packet === undefined ? [] : [packet]
+
+const packetHistory = (
+  current: LlmEvidencePacket | undefined,
+  history: readonly LlmEvidencePacket[] | undefined,
+): readonly LlmEvidencePacket[] =>
+  history !== undefined && history.length > 0 ? history : singletonPacket(current)
+
+const STAGE_PACKET_READERS: Readonly<
+  Partial<Record<LlmEvidencePacketStage, (artifacts: LlmEvidenceArtifacts) => readonly LlmEvidencePacket[]>>
+> = {
+  intake: (artifacts) => singletonPacket(artifacts.intake),
+  candidate_review: (artifacts) =>
+    packetHistory(artifacts.candidateReview, artifacts.candidateReviewHistory),
+  candidate_post_review: (artifacts) =>
+    packetHistory(artifacts.candidatePostReview, artifacts.candidatePostReviewHistory),
+  candidate_generation: (artifacts) =>
+    packetHistory(artifacts.candidateGeneration, artifacts.candidateGenerationHistory),
+  repair_seed: (artifacts) => packetHistory(artifacts.repairSeed, artifacts.repairSeedHistory),
+  selection_explanation: (artifacts) =>
+    packetHistory(artifacts.selectionExplanation, artifacts.selectionExplanationHistory),
+}
+
 const stagePackets = (
   artifacts: LlmEvidenceArtifacts,
   stage: LlmEvidencePacketStage,
-): readonly LlmEvidencePacket[] => {
-  if (stage === "intake") return artifacts.intake !== undefined ? [artifacts.intake] : []
-  if (stage === "candidate_review") {
-    if ((artifacts.candidateReviewHistory?.length ?? 0) > 0)
-      return artifacts.candidateReviewHistory ?? []
-    return artifacts.candidateReview !== undefined ? [artifacts.candidateReview] : []
-  }
-  if (stage === "candidate_post_review") {
-    if ((artifacts.candidatePostReviewHistory?.length ?? 0) > 0) {
-      return artifacts.candidatePostReviewHistory ?? []
-    }
-    return artifacts.candidatePostReview !== undefined ? [artifacts.candidatePostReview] : []
-  }
-  if (stage === "candidate_generation") {
-    if ((artifacts.candidateGenerationHistory?.length ?? 0) > 0)
-      return artifacts.candidateGenerationHistory ?? []
-    return artifacts.candidateGeneration !== undefined ? [artifacts.candidateGeneration] : []
-  }
-  if (stage === "repair_seed") {
-    if ((artifacts.repairSeedHistory?.length ?? 0) > 0) return artifacts.repairSeedHistory ?? []
-    return artifacts.repairSeed !== undefined ? [artifacts.repairSeed] : []
-  }
-  if (stage === "selection_explanation") {
-    if ((artifacts.selectionExplanationHistory?.length ?? 0) > 0) {
-      return artifacts.selectionExplanationHistory ?? []
-    }
-    return artifacts.selectionExplanation !== undefined ? [artifacts.selectionExplanation] : []
-  }
-  return []
-}
+): readonly LlmEvidencePacket[] => STAGE_PACKET_READERS[stage]?.(artifacts) ?? []
 
 const packetsFromArtifacts = (artifacts: LlmEvidenceArtifacts): readonly LlmEvidencePacket[] =>
   LLM_EVIDENCE_STAGE_ORDER.flatMap((stage) => stagePackets(artifacts, stage))
@@ -573,57 +579,55 @@ export const summarizeLlmEvidenceArtifacts = (
   }
 }
 
+type PacketSingletonKey =
+  | "candidateReview"
+  | "candidatePostReview"
+  | "candidateGeneration"
+  | "repairSeed"
+  | "selectionExplanation"
+
+type PacketHistoryKey =
+  | "candidateReviewHistory"
+  | "candidatePostReviewHistory"
+  | "candidateGenerationHistory"
+  | "repairSeedHistory"
+  | "selectionExplanationHistory"
+
+const recordHistoricalPacket = (
+  sink: MutableLlmEvidenceArtifacts,
+  packet: LlmEvidencePacket,
+  singletonKey: PacketSingletonKey,
+  historyKey: PacketHistoryKey,
+): void => {
+  const current = sink[singletonKey]
+  if (current === undefined) {
+    sink[singletonKey] = packet
+    sink[historyKey] = [packet]
+    return
+  }
+  sink[historyKey] = [...(sink[historyKey] ?? [current]), packet]
+}
+
 export const recordLlmEvidencePacket = (
   artifacts: Partial<LlmEvidenceArtifacts>,
   packet: LlmEvidencePacket,
 ): void => {
   const sink = artifacts as MutableLlmEvidenceArtifacts
-  if (packet.stage === "intake" && sink.intake === undefined) {
-    sink.intake = packet
-  } else if (packet.stage === "candidate_review" && sink.candidateReview === undefined) {
-    sink.candidateReview = packet
-    sink.candidateReviewHistory = [packet]
-  } else if (packet.stage === "candidate_review") {
-    sink.candidateReviewHistory = [
-      ...(sink.candidateReviewHistory ??
-        (sink.candidateReview !== undefined ? [sink.candidateReview] : [])),
-      packet,
-    ]
-  } else if (packet.stage === "candidate_post_review" && sink.candidatePostReview === undefined) {
-    sink.candidatePostReview = packet
-    sink.candidatePostReviewHistory = [packet]
-  } else if (packet.stage === "candidate_post_review") {
-    sink.candidatePostReviewHistory = [
-      ...(sink.candidatePostReviewHistory ??
-        (sink.candidatePostReview !== undefined ? [sink.candidatePostReview] : [])),
-      packet,
-    ]
-  } else if (packet.stage === "candidate_generation" && sink.candidateGeneration === undefined) {
-    sink.candidateGeneration = packet
-    sink.candidateGenerationHistory = [packet]
-  } else if (packet.stage === "candidate_generation") {
-    sink.candidateGenerationHistory = [
-      ...(sink.candidateGenerationHistory ??
-        (sink.candidateGeneration !== undefined ? [sink.candidateGeneration] : [])),
-      packet,
-    ]
-  } else if (packet.stage === "repair_seed" && sink.repairSeed === undefined) {
-    sink.repairSeed = packet
-    sink.repairSeedHistory = [packet]
-  } else if (packet.stage === "repair_seed") {
-    sink.repairSeedHistory = [
-      ...(sink.repairSeedHistory ?? (sink.repairSeed !== undefined ? [sink.repairSeed] : [])),
-      packet,
-    ]
-  } else if (packet.stage === "selection_explanation" && sink.selectionExplanation === undefined) {
-    sink.selectionExplanation = packet
-    sink.selectionExplanationHistory = [packet]
-  } else if (packet.stage === "selection_explanation") {
-    sink.selectionExplanationHistory = [
-      ...(sink.selectionExplanationHistory ??
-        (sink.selectionExplanation !== undefined ? [sink.selectionExplanation] : [])),
-      packet,
-    ]
+  if (packet.stage === "intake" && sink.intake === undefined) sink.intake = packet
+  if (packet.stage === "candidate_review") {
+    recordHistoricalPacket(sink, packet, "candidateReview", "candidateReviewHistory")
+  }
+  if (packet.stage === "candidate_post_review") {
+    recordHistoricalPacket(sink, packet, "candidatePostReview", "candidatePostReviewHistory")
+  }
+  if (packet.stage === "candidate_generation") {
+    recordHistoricalPacket(sink, packet, "candidateGeneration", "candidateGenerationHistory")
+  }
+  if (packet.stage === "repair_seed") {
+    recordHistoricalPacket(sink, packet, "repairSeed", "repairSeedHistory")
+  }
+  if (packet.stage === "selection_explanation") {
+    recordHistoricalPacket(sink, packet, "selectionExplanation", "selectionExplanationHistory")
   }
 }
 
@@ -694,7 +698,7 @@ const boundHead = (text: string, max = 220): string =>
   text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`
 
 const boundTail = (text: string, max = 220): string =>
-  text.length <= max ? text : `…${text.slice(-(Math.max(0, max - 1)))}`
+  text.length <= max ? text : `…${text.slice(-Math.max(0, max - 1))}`
 
 const fmtList = (values: readonly string[], empty = "<none>"): string =>
   values.length === 0 ? empty : values.join(", ")
@@ -784,22 +788,35 @@ export const extractSymbolSliceResult = (
 ): SymbolSliceResult => {
   if (looksNonSource(source)) return { miss: "non_source", matchCount: 0 }
   const lines = source.split(/\r?\n/)
-  const re = new RegExp(`^(\\s*)(?:async\\s+)?(?:def|class)\\s+${escapeRe(symbol)}\\b`)
-  const matches: { readonly index: number; readonly indent: number }[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (line === undefined) continue
-    const m = line.match(re)
-    if (m === null) continue
-    matches.push({ index: i, indent: (m[1] ?? "").length })
-  }
+  const matches = symbolDefinitionMatches(lines, symbol)
   if (matches.length === 0) return { miss: "not_found", matchCount: 0 }
   const chosen = matches[0]
   if (chosen === undefined) return { miss: "not_found", matchCount: 0 }
-  const { index: i, indent } = chosen
-  // (1) Walk BACKWARD over contiguous decorator lines at the SAME indent.
+  return {
+    slice: symbolBlockLines(lines, chosen, maxLines).join("\n").trimEnd(),
+    matchCount: matches.length,
+  }
+}
+
+const symbolDefinitionMatches = (
+  lines: readonly string[],
+  symbol: string,
+): { readonly index: number; readonly indent: number }[] => {
+  const re = new RegExp(`^(\\s*)(?:async\\s+)?(?:def|class)\\s+${escapeRe(symbol)}\\b`)
+  return lines.flatMap((line, index) => {
+    const m = line.match(re)
+    return m === null ? [] : [{ index, indent: (m[1] ?? "").length }]
+  })
+}
+
+const decoratorLinesBefore = (
+  lines: readonly string[],
+  index: number,
+  indent: number,
+  maxLines: number,
+): readonly string[] => {
   const decoratorLines: string[] = []
-  for (let k = i - 1; k >= 0; k--) {
+  for (let k = index - 1; k >= 0; k--) {
     const prev = lines[k]
     if (prev === undefined) break
     const trimmed = prev.trim()
@@ -816,8 +833,17 @@ export const extractSymbolSliceResult = (
     decoratorLines.length > decoratorBudget
       ? decoratorLines.slice(decoratorLines.length - decoratorBudget)
       : decoratorLines
-  const block: string[] = [...keptDecorators, lines[i] as string]
-  for (let j = i + 1; j < lines.length && block.length < maxLines; j++) {
+  return keptDecorators
+}
+
+const bodyLinesAfterDefinition = (
+  lines: readonly string[],
+  index: number,
+  indent: number,
+  remainingLines: number,
+): readonly string[] => {
+  const block: string[] = []
+  for (let j = index + 1; j < lines.length && block.length < remainingLines; j++) {
     const ln = lines[j]
     if (ln === undefined) break
     if (ln.trim() === "") {
@@ -828,7 +854,23 @@ export const extractSymbolSliceResult = (
     if (curIndent <= indent) break
     block.push(ln)
   }
-  return { slice: block.join("\n").trimEnd(), matchCount: matches.length }
+  return block
+}
+
+const symbolBlockLines = (
+  lines: readonly string[],
+  match: { readonly index: number; readonly indent: number },
+  maxLines: number,
+): readonly string[] => {
+  const decorators = decoratorLinesBefore(lines, match.index, match.indent, maxLines)
+  const definition = lines[match.index]
+  if (definition === undefined) return decorators
+  const remaining = Math.max(0, maxLines - decorators.length - 1)
+  return [
+    ...decorators,
+    definition,
+    ...bodyLinesAfterDefinition(lines, match.index, match.indent, remaining),
+  ]
 }
 
 /**
@@ -857,35 +899,51 @@ export const assembleOwnerEvidence = (args: {
 }): OwnerEvidenceFact[] => {
   const provenance = args.provenance ?? "selection-owner"
   const issueSymbols = args.issueSymbols ?? []
-  const out: OwnerEvidenceFact[] = []
-  for (const file of args.ownerFiles) {
-    if (file.trim() === "") continue
-    const source = args.readSource?.(file) ?? null
-    const definedSymbols =
-      source === null
-        ? []
-        : issueSymbols.filter((sym) =>
-            new RegExp(`^\\s*(?:async\\s+)?(?:def|class)\\s+${escapeRe(sym)}\\b`, "m").test(source),
-          )
-    const resolved =
-      source === null
-        ? undefined
-        : definedSymbols
-            .map((sym) => extractSymbolSliceResult(source, sym))
-            .find((r) => r.slice !== undefined)
-    // B4: when nothing resolved, classify WHY at the FILE level — a binary /
-    // non-source file is distinct from a readable source whose symbol is absent.
-    const miss = sliceMissForFile(source, resolved)
-    out.push({
-      file,
-      symbols: definedSymbols,
-      provenance,
-      ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
-      ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
-      ...(miss !== undefined ? { sliceMiss: miss } : {}),
-    })
+  return args.ownerFiles.flatMap((file) =>
+    file.trim() === ""
+      ? []
+      : [
+          ownerEvidenceFact({
+            file,
+            provenance,
+            issueSymbols,
+            source: args.readSource?.(file) ?? null,
+          }),
+        ],
+  )
+}
+
+const symbolDefinedInSource = (source: string, symbol: string): boolean =>
+  new RegExp(`^\\s*(?:async\\s+)?(?:def|class)\\s+${escapeRe(symbol)}\\b`, "m").test(source)
+
+const definedIssueSymbols = (source: string | null, issueSymbols: readonly string[]): string[] =>
+  source === null ? [] : issueSymbols.filter((symbol) => symbolDefinedInSource(source, symbol))
+
+const firstResolvedSymbolSlice = (
+  source: string | null,
+  symbols: readonly string[],
+): SymbolSliceResult | undefined =>
+  source === null
+    ? undefined
+    : symbols.map((symbol) => extractSymbolSliceResult(source, symbol)).find((r) => r.slice !== undefined)
+
+const ownerEvidenceFact = (args: {
+  readonly file: string
+  readonly provenance: string
+  readonly issueSymbols: readonly string[]
+  readonly source: string | null
+}): OwnerEvidenceFact => {
+  const symbols = definedIssueSymbols(args.source, args.issueSymbols)
+  const resolved = firstResolvedSymbolSlice(args.source, symbols)
+  const miss = sliceMissForFile(args.source, resolved)
+  return {
+    file: args.file,
+    symbols,
+    provenance: args.provenance,
+    ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
+    ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
+    ...(miss !== undefined ? { sliceMiss: miss } : {}),
   }
-  return out
 }
 
 /**
@@ -897,30 +955,31 @@ export const assembleStaticWitnessOwnerEvidence = (args: {
   readonly witnesses: readonly StaticWitness[]
   readonly readSource?: (rel: string) => string | null
 }): OwnerEvidenceFact[] => {
-  const out: OwnerEvidenceFact[] = []
-  for (const witness of args.witnesses) {
-    const files = uniqueLines(witness.subjectFiles)
-    const symbols = uniqueLines(witness.subjectSymbols)
-    for (const file of files) {
-      const source = args.readSource?.(file) ?? null
-      const resolved =
-        source === null
-          ? undefined
-          : symbols
-              .map((symbol) => extractSymbolSliceResult(source, symbol))
-              .find((r) => r.slice !== undefined)
-      const miss = sliceMissForFile(source, resolved)
-      out.push({
-        file,
-        symbols,
-        provenance: `static-witness:${witness.kind}/${witness.provenance}/${witness.authority}`,
-        ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
-        ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
-        ...(miss !== undefined ? { sliceMiss: miss } : {}),
-      })
-    }
+  return uniqueObjects(
+    args.witnesses.flatMap((witness) =>
+      uniqueLines(witness.subjectFiles).map((file) =>
+        staticWitnessOwnerEvidenceFact(witness, file, args.readSource?.(file) ?? null),
+      ),
+    ),
+  )
+}
+
+const staticWitnessOwnerEvidenceFact = (
+  witness: StaticWitness,
+  file: string,
+  source: string | null,
+): OwnerEvidenceFact => {
+  const symbols = uniqueLines(witness.subjectSymbols)
+  const resolved = firstResolvedSymbolSlice(source, symbols)
+  const miss = sliceMissForFile(source, resolved)
+  return {
+    file,
+    symbols,
+    provenance: `static-witness:${witness.kind}/${witness.provenance}/${witness.authority}`,
+    ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
+    ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
+    ...(miss !== undefined ? { sliceMiss: miss } : {}),
   }
-  return uniqueObjects(out)
 }
 
 /**

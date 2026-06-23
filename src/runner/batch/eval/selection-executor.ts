@@ -73,7 +73,7 @@ import {
   mergePublicContractBundles,
   requiredContractsSatisfiedCount,
 } from "./public-contract-bundle"
-import type { PublicContractBundle } from "./public-contract-types"
+import { filterAuthorityContractBundle, type PublicContractBundle } from "./public-contract-types"
 import type { ReproConsensusProofReceipt } from "./repair/resolved-consensus"
 import type { PublicRegressionProofReceipt } from "./repo-regression-discovery-adapter"
 import {
@@ -88,6 +88,7 @@ import {
   cleanUnprovenMultiSourceDriftRisk,
   declaredExpectedMatchOf,
   earlyAcceptable,
+  familyCoverageMissingHardReasons,
   minimalityOf,
   ownerCoverageOf,
   requireHardResolvedForEarlyAccept,
@@ -205,14 +206,32 @@ export const buildSelectionInputs = (args: {
   }
 }
 
-/**
- * Run the verify-and-select executor. Pure over the injected ports.
- *
- * `seeds[i]` is the localization focus for candidate i (`seeds[0]` is typically
- * `undefined` = an unbiased baseline). `owners` is the closure localization-
- * ranked file set used for owner-coverage.
- */
-export const runSelection = async (args: {
+const sanitizeCleanAuthorityContractsForMode = (
+  mode: SelectorMode,
+  bundle: PublicContractBundle | undefined,
+): PublicContractBundle | undefined => {
+  if (bundle === undefined) return undefined
+  if (mode !== "clean") return bundle
+  return filterAuthorityContractBundle(bundle)
+}
+
+const sanitizeCandidatePublicContractsForMode = (
+  mode: SelectorMode,
+  candidate: Candidate,
+): Candidate => {
+  const publicContracts = sanitizeCleanAuthorityContractsForMode(mode, candidate.publicContracts)
+  if (publicContracts === candidate.publicContracts) return candidate
+  if (publicContracts === undefined) {
+    const { publicContracts: _publicContracts, ...candidateWithoutPublicContracts } = candidate
+    return candidateWithoutPublicContracts
+  }
+  return {
+    ...candidate,
+    publicContracts,
+  }
+}
+
+export interface RunSelectionArgs {
   n: number
   seeds: readonly (string | undefined)[]
   owners: ReadonlySet<string>
@@ -300,707 +319,963 @@ export const runSelection = async (args: {
   /** OPC-07 runtime packet recorder. Stores which bounded packet stages were
    *  actually used on the live clean path without changing selector authority. */
   recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
-}): Promise<SelectionResult> => {
-  // ── generate ──────────────────────────────────────────────────────────────
-  // Results are collected in INDEX order regardless of completion timing, so
-  // dedup ("first wins") and scoring stay deterministic.
+}
+
+interface ScoredPorts {
+  readonly isEmpty: boolean
+  readonly size: number
+  readonly resolvedKofN: ResolvedKofNSignal | null
+  readonly resolvedMode: ResolvedKofNMode
+  readonly hard: HardGateSignals
+  readonly voterQuorum: number | null
+  readonly ownerCoverage: number | null
+  readonly declaredExpectedMatch: boolean | null
+  readonly staticSanityReasons: readonly string[]
+  /** SCAFF-06 selection-time MWE receipt (port-derived, else generation-set). */
+  readonly mweReceipt: MweProofReceipt | undefined
+  readonly publicRegressionReceipt: PublicRegressionProofReceipt | undefined
+  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
+}
+
+interface SelectionRunState {
+  generationFailures: number
+  cand0Facts?: CandidateRiskFacts
+  counterfactualOwnerFile?: string
+  counterfactualSeed?: string
+  readonly counterfactualCandidateIds: Set<string>
+  readonly portsMemo: Map<Candidate, ScoredPorts>
+}
+
+interface SelectionRunContext {
+  readonly args: RunSelectionArgs
+  readonly mode: SelectorMode
+  readonly proofRequired: boolean
+  readonly contractBundle: PublicContractBundle
+  readonly limit: number
+  readonly state: SelectionRunState
+}
+
+interface DedupedCandidates {
+  readonly candidates: readonly Candidate[]
+  readonly terminalRepresentativeByFirstId: Map<string, Candidate>
+}
+
+interface CounterfactualVerdictSet {
+  readonly contracts: readonly string[]
+  readonly violated: Set<string>
+}
+
+interface AppendSelectorRepairResult {
+  readonly rawCandidates: readonly Candidate[]
+  readonly appended: boolean
+  readonly stopReason?: RepairFeedbackStopReason
+}
+
+interface GeneratedCandidates {
+  readonly raw: Candidate[]
+  readonly riskGateTelemetry?: SelectionRiskGateTelemetry
+  readonly result?: SelectionResult
+}
+
+interface RiskGateStep {
+  readonly expanded: boolean
+  readonly telemetry?: SelectionRiskGateTelemetry
+  readonly result?: SelectionResult
+}
+
+const buildSelectionRunContext = (args: RunSelectionArgs): SelectionRunContext => {
   const mode: SelectorMode = args.mode ?? "research"
-  const proofRequired = mode === "clean" && args.proofRequired === true
-  // Clean contract-dominance tier is fed ONLY by genuinely-sourced public
-  // contracts the caller supplies (T-CON-10: public issue text / public tests /
-  // validated repros). We intentionally do NOT auto-derive an owner-must-touch
-  // contract from the closure owner list:
-  // those owners come from the additive heuristic score ranking (ISSUE_FILE_BOOST
-  // etc.), so promoting them into a `required` dominance tier would smuggle the
-  // very heuristic authority this clean path removes back in via a mislabeled
-  // contract. Structural static-witness evidence is advisory too; it may steer
-  // generation/repair, but it does not mint required clean contracts here.
-  const contractBundle: PublicContractBundle = args.publicContracts ?? { contracts: [] }
   const limit = Math.max(1, Math.floor(args.concurrency ?? 1))
   if (args.counterfactual === true && limit > 1) {
     throw new Error("verify-select-counterfactual requires verify-select-concurrency=1")
   }
-  let generationFailures = 0
-  // ── counterfactual-select state (sequential arm only) ───────────────────────
-  // Set after candidate 0's risk gate expands: cand0's deterministic risk facts,
-  // the counterfactual seed derived from them, and the ids of candidates spawned
-  // under that seed (so the selector can bar a contract-violating counterfactual
-  // from winning WITHOUT touching the global candidate gate).
-  let cand0Facts: CandidateRiskFacts | undefined
-  let counterfactualOwnerFile: string | undefined
-  let counterfactualSeed: string | undefined
-  const counterfactualCandidateIds = new Set<string>()
-  const withCandidatePublicContracts = (
-    candidate: Candidate,
-    publicContracts: PublicContractBundle | undefined,
-  ): Candidate =>
-    publicContracts === undefined
-      ? candidate
-      : {
-          ...candidate,
-          publicContracts:
-            mergePublicContractBundles(candidate.publicContracts, publicContracts) ??
-            publicContracts,
-        }
-  const withFamily = (candidate: Candidate, family: CandidateFamily): Candidate => ({
-    ...candidate,
-    familyId: family.familyId,
-    familyReason: family.reason,
-    familyOwnerFiles: family.ownerFiles,
-  })
-  const maybeRepairFamilyCoverage = async (
-    candidate: Candidate,
-    family: CandidateFamily,
-    seed: string | undefined,
-    index: number,
-    publicContracts?: PublicContractBundle,
-  ): Promise<Candidate> => {
-    const candidateWithFamily = withFamily(
-      withCandidatePublicContracts(candidate, publicContracts),
-      family,
+  return {
+    args,
+    mode,
+    proofRequired: mode === "clean" && args.proofRequired === true,
+    contractBundle: sanitizeCleanAuthorityContractsForMode(mode, args.publicContracts) ?? {
+      contracts: [],
+    },
+    limit,
+    state: {
+      generationFailures: 0,
+      counterfactualCandidateIds: new Set(),
+      portsMemo: new Map(),
+    },
+  }
+}
+
+const sanitizeCandidatePublicContracts = (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+): Candidate => sanitizeCandidatePublicContractsForMode(ctx.mode, candidate)
+
+const withCandidateAdvisoryContracts = (
+  candidate: Candidate,
+  advisoryContracts: PublicContractBundle | undefined,
+): Candidate =>
+  advisoryContracts === undefined
+    ? candidate
+    : {
+        ...candidate,
+        advisoryContracts:
+          mergePublicContractBundles(candidate.advisoryContracts, advisoryContracts) ??
+          advisoryContracts,
+      }
+
+const withFamily = (candidate: Candidate, family: CandidateFamily): Candidate => ({
+  ...candidate,
+  familyId: family.familyId,
+  familyReason: family.reason,
+  familyOwnerFiles: family.ownerFiles,
+})
+
+const familyCoverageRepairSeed = (
+  seed: string | undefined,
+  family: CandidateFamily,
+  missing: readonly string[],
+): string => `${seed ?? ""}\n\n${seedForCandidateFamilyCoverageRepair(family, missing)}`.trim()
+
+const shouldUseFamilyRepair = (
+  candidate: Candidate,
+  family: CandidateFamily,
+): readonly string[] => {
+  const missing = candidateFamilyCoverageMissing(family, candidate.files)
+  return candidate.patch.trim() === "" ? [] : missing
+}
+
+const maybeRepairFamilyCoverage = async (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+  family: CandidateFamily,
+  seed: string | undefined,
+  index: number,
+  advisoryContracts?: PublicContractBundle,
+): Promise<Candidate> => {
+  const candidateWithFamily = withFamily(
+    withCandidateAdvisoryContracts(candidate, advisoryContracts),
+    family,
+  )
+  const missing = shouldUseFamilyRepair(candidate, family)
+  if (missing.length === 0) return candidateWithFamily
+  try {
+    const repaired = await ctx.args.ports.generate(
+      index,
+      familyCoverageRepairSeed(seed, family, missing),
     )
-    const missing = candidateFamilyCoverageMissing(family, candidate.files)
-    if (missing.length === 0 || candidate.patch.trim() === "") return candidateWithFamily
-    const repairSeed =
-      `${seed ?? ""}\n\n${seedForCandidateFamilyCoverageRepair(family, missing)}`.trim()
-    try {
-      const repaired = await args.ports.generate(index, repairSeed)
-      const repairedMissing = candidateFamilyCoverageMissing(family, repaired.files)
-      return repaired.patch.trim() !== "" && repairedMissing.length < missing.length
-        ? withFamily(withCandidatePublicContracts(repaired, publicContracts), family)
-        : candidateWithFamily
-    } catch {
+    const repairedMissing = candidateFamilyCoverageMissing(family, repaired.files)
+    if (repaired.patch.trim() === "" || repairedMissing.length >= missing.length) {
       return candidateWithFamily
     }
+    return withFamily(withCandidateAdvisoryContracts(repaired, advisoryContracts), family)
+  } catch {
+    return candidateWithFamily
   }
-  const postprocessGeneratedCandidate = async (
-    candidate: Candidate,
-    index: number,
-    seed: string | undefined,
-    plannedFamily?: CandidateFamily,
-  ): Promise<Candidate> => {
-    if (plannedFamily !== undefined) {
-      return maybeRepairFamilyCoverage(candidate, plannedFamily, seed, index)
-    }
-    const derived = await args.ports.deriveCandidateStructuralRepair?.(candidate)
-    if (derived?.family !== undefined) {
-      return maybeRepairFamilyCoverage(
-        candidate,
-        derived.family,
-        seed,
-        index,
-        derived.publicContracts,
-      )
-    }
-    return withCandidatePublicContracts(candidate, derived?.publicContracts)
+}
+
+const postprocessGeneratedCandidate = async (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+  index: number,
+  seed: string | undefined,
+  plannedFamily?: CandidateFamily,
+): Promise<Candidate> => {
+  const sanitizedCandidate = sanitizeCandidatePublicContracts(ctx, candidate)
+  if (plannedFamily !== undefined) {
+    return maybeRepairFamilyCoverage(ctx, sanitizedCandidate, plannedFamily, seed, index)
   }
-  const tryGenerate = async (i: number): Promise<Candidate | null> => {
-    try {
-      // The counterfactual seed replaces ONLY cand1 (the primary minimal
-      // alternative). cand2+ keep their owner-focus seeds so the extra budget
-      // still spans DIFFERENT fix sites — diversity, not N copies of one seed.
-      const useCounterfactual = counterfactualSeed !== undefined && i === 1
-      const seed = useCounterfactual ? counterfactualSeed : args.seeds[i]
-      const candidate = await args.ports.generate(i, seed)
-      if (useCounterfactual) counterfactualCandidateIds.add(candidate.id)
-      const family = useCounterfactual ? undefined : args.candidateFamilies?.[i]
-      return await postprocessGeneratedCandidate(candidate, i, seed, family)
-    } catch {
-      generationFailures += 1
-      return null
-    }
+  const derived = await ctx.args.ports.deriveCandidateStructuralRepair?.(sanitizedCandidate)
+  if (derived?.family === undefined) {
+    return withCandidateAdvisoryContracts(sanitizedCandidate, derived?.advisoryContracts)
   }
-  // Per-candidate memo of the EXPENSIVE, candidate-only port probes
-  // (resolvedKofN / applyClean / regression / smoke — each a full tree reset +
-  // pytest / repro consensus / public smoke probe). These depend ONLY on the
-  // candidate, never on the relative `minB`/`maxB` minimality window, so with
-  // `earlyAccept` on we run them ONCE per candidate (the early-gate probe) and
-  // finalize reuses the verdict instead of re-materializing the tree a second
-  // time. Keyed by candidate identity.
-  interface ScoredPorts {
-    isEmpty: boolean
-    size: number
-    resolvedKofN: ResolvedKofNSignal | null
-    resolvedMode: ResolvedKofNMode
-    hard: HardGateSignals
-    voterQuorum: number | null
-    ownerCoverage: number | null
-    declaredExpectedMatch: boolean | null
-    staticSanityReasons: readonly string[]
-    /** SCAFF-06 selection-time MWE receipt (port-derived, else generation-set). */
-    mweReceipt: MweProofReceipt | undefined
-    publicRegressionReceipt: PublicRegressionProofReceipt | undefined
-    reproConsensusReceipt: ReproConsensusProofReceipt | undefined
+  return maybeRepairFamilyCoverage(
+    ctx,
+    sanitizedCandidate,
+    derived.family,
+    seed,
+    index,
+    derived.advisoryContracts,
+  )
+}
+
+const tryGenerateCandidate = async (
+  ctx: SelectionRunContext,
+  index: number,
+): Promise<Candidate | null> => {
+  try {
+    // The counterfactual seed replaces ONLY cand1 (the primary minimal
+    // alternative). cand2+ keep their owner-focus seeds so the extra budget
+    // still spans DIFFERENT fix sites — diversity, not N copies of one seed.
+    const useCounterfactual = ctx.state.counterfactualSeed !== undefined && index === 1
+    const seed = useCounterfactual ? ctx.state.counterfactualSeed : ctx.args.seeds[index]
+    const candidate = await ctx.args.ports.generate(index, seed)
+    if (useCounterfactual) ctx.state.counterfactualCandidateIds.add(candidate.id)
+    const family = useCounterfactual ? undefined : ctx.args.candidateFamilies?.[index]
+    return await postprocessGeneratedCandidate(ctx, candidate, index, seed, family)
+  } catch {
+    ctx.state.generationFailures += 1
+    return null
   }
-  const portsMemo = new Map<Candidate, ScoredPorts>()
-  const probeOne = async (c: Candidate): Promise<ScoredPorts> => {
-    const cached = portsMemo.get(c)
-    if (cached !== undefined) return cached
-    const isEmpty = c.patch.trim() === ""
-    const size = Buffer.byteLength(c.patch, "utf8")
-    const resolvedKofN = (await args.ports.resolvedKofN?.(c)) ?? null
-    const resolvedMode = args.resolvedKofNMode ?? "hard"
-    const hard: HardGateSignals = {
-      baseValidatedRed: c.baseValidatedRed,
-      patchProduced: !isEmpty,
-      applyClean: isEmpty ? null : ((await args.ports.applyClean?.(c)) ?? null),
-      regressionGreen: (await args.ports.regression?.(c)) ?? null,
-      smokeGreen: (await args.ports.smoke?.(c)) ?? null,
-      patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
-    }
-    const probed: ScoredPorts = {
-      isEmpty,
-      size,
-      resolvedKofN,
-      resolvedMode,
-      hard,
-      voterQuorum: voterQuorumOf(resolvedMode, resolvedKofN),
-      // an empty no-patch earns NO owner-coverage credit (even if a caller hands
-      // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
-      ownerCoverage: isEmpty ? null : ownerCoverageOf(c.files, args.owners),
-      declaredExpectedMatch: await declaredExpectedMatchOf(c, isEmpty, args.ports),
-      staticSanityReasons: await staticSanityReasonsOf(c, isEmpty, args.ports),
-      // SCAFF-06: a selection-time MWE run (port) is authoritative; it overrides a
-      // generation-set receipt. Absent port ⇒ keep the generation-set one (or none).
-      mweReceipt: (await args.ports.mweProof?.(c)) ?? c.mweReceipt,
-      publicRegressionReceipt:
-        (await args.ports.publicRegressionProof?.(c)) ?? c.publicRegressionReceipt,
-      reproConsensusReceipt: (await args.ports.reproConsensusProof?.(c)) ?? c.reproConsensusReceipt,
-    }
-    portsMemo.set(c, probed)
-    return probed
+}
+
+const proofReceiptsFor = async (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+): Promise<
+  Pick<ScoredPorts, "mweReceipt" | "publicRegressionReceipt" | "reproConsensusReceipt">
+> => ({
+  // SCAFF-06: a selection-time MWE run (port) is authoritative; it overrides a
+  // generation-set receipt. Absent port ⇒ keep the generation-set one (or none).
+  mweReceipt: (await ctx.args.ports.mweProof?.(candidate)) ?? candidate.mweReceipt,
+  publicRegressionReceipt:
+    (await ctx.args.ports.publicRegressionProof?.(candidate)) ?? candidate.publicRegressionReceipt,
+  reproConsensusReceipt:
+    (await ctx.args.ports.reproConsensusProof?.(candidate)) ?? candidate.reproConsensusReceipt,
+})
+
+const hardSignalsFor = async (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+  isEmpty: boolean,
+  resolvedKofN: ResolvedKofNSignal | null,
+  resolvedMode: ResolvedKofNMode,
+): Promise<HardGateSignals> => ({
+  baseValidatedRed: candidate.baseValidatedRed,
+  patchProduced: !isEmpty,
+  applyClean: isEmpty ? null : ((await ctx.args.ports.applyClean?.(candidate)) ?? null),
+  regressionGreen: (await ctx.args.ports.regression?.(candidate)) ?? null,
+  smokeGreen: (await ctx.args.ports.smoke?.(candidate)) ?? null,
+  patchedResolvedKofN: resolvedMode === "hard" ? resolvedKofN : null,
+})
+
+const probeOne = async (ctx: SelectionRunContext, candidate: Candidate): Promise<ScoredPorts> => {
+  const cached = ctx.state.portsMemo.get(candidate)
+  if (cached !== undefined) return cached
+  const isEmpty = candidate.patch.trim() === ""
+  const size = Buffer.byteLength(candidate.patch, "utf8")
+  const resolvedKofN = (await ctx.args.ports.resolvedKofN?.(candidate)) ?? null
+  const resolvedMode = ctx.args.resolvedKofNMode ?? "hard"
+  const probed: ScoredPorts = {
+    isEmpty,
+    size,
+    resolvedKofN,
+    resolvedMode,
+    hard: await hardSignalsFor(ctx, candidate, isEmpty, resolvedKofN, resolvedMode),
+    voterQuorum: voterQuorumOf(resolvedMode, resolvedKofN),
+    // an empty no-patch earns NO owner-coverage credit (even if a caller hands
+    // it stray `files`) — it is a non-fix, not a fix that "touches the owner".
+    ownerCoverage: isEmpty ? null : ownerCoverageOf(candidate.files, ctx.args.owners),
+    declaredExpectedMatch: await declaredExpectedMatchOf(candidate, isEmpty, ctx.args.ports),
+    staticSanityReasons: await staticSanityReasonsOf(candidate, isEmpty, ctx.args.ports),
+    ...(await proofReceiptsFor(ctx, candidate)),
   }
-  const scoreOne = async (c: Candidate, minB: number, maxB: number): Promise<ScoredEntry> => {
-    const probed = await probeOne(c)
-    const soft: SoftScoreSignals = {
-      declaredExpectedMatch: probed.declaredExpectedMatch,
-      rubricScore: null,
-      voterQuorum: probed.voterQuorum,
-      // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
-      // The ONLY signal that varies with the relative minimality window, so it is
-      // recomputed cheaply (pure arithmetic) on each scoring pass.
-      minimality: minimalityOf({ isEmpty: probed.isEmpty, size: probed.size, minB, maxB }),
-      ownerCoverage: probed.ownerCoverage,
-    }
-    const contractCandidate = {
-      touchedFiles: c.files,
-      touchedSymbols: diffTouchedSymbols(c.patch),
-    }
-    const effectiveContracts = mergePublicContractBundles(contractBundle, c.publicContracts)
-    const scoredContracts = effectiveContracts ?? contractBundle
-    const requiredContractsSatisfied = requiredContractsSatisfiedCount(
-      scoredContracts,
-      contractCandidate,
-    )
-    const contractsSatisfied = contractsSatisfiedCount(scoredContracts, contractCandidate)
-    const baseVerdict = scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, mode)
-    const proofState = selectionProofState({
-      resolved: probed.resolvedKofN,
-      hard: probed.hard,
-      mweReceipt: probed.mweReceipt,
-      publicRegressionReceipt: probed.publicRegressionReceipt,
-      reproConsensusReceipt: probed.reproConsensusReceipt,
-    })
-    const verdict = applyProofRequiredHardGate(
-      applyCleanAuthorityHardGate(
-        applyMweProofHardGate(
-          applyStaticSanityHardGate(baseVerdict, probed.staticSanityReasons),
-          mode,
-          probed.mweReceipt,
-        ),
-        cleanProofAuthorityMissing({
-          mode,
-          owners: args.owners,
-          candidate: c,
-          hard: probed.hard,
-          resolved: probed.resolvedKofN,
-          mweReceipt: probed.mweReceipt,
-          reproConsensusReceipt: probed.reproConsensusReceipt,
-          requiredContractsSatisfied,
-          contractsSatisfied,
-        }),
+  ctx.state.portsMemo.set(candidate, probed)
+  return probed
+}
+
+const effectiveContractBundleFor = (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+): PublicContractBundle =>
+  mergePublicContractBundles(ctx.contractBundle, candidate.publicContracts) ?? ctx.contractBundle
+
+const contractCandidateOf = (
+  candidate: Candidate,
+): {
+  readonly touchedFiles: readonly string[]
+  readonly touchedSymbols: readonly string[]
+} => ({
+  touchedFiles: candidate.files,
+  touchedSymbols: diffTouchedSymbols(candidate.patch),
+})
+
+const candidateWithSelectionReceipts = (candidate: Candidate, probed: ScoredPorts): Candidate => {
+  if (
+    probed.mweReceipt === undefined &&
+    probed.publicRegressionReceipt === undefined &&
+    probed.reproConsensusReceipt === undefined
+  ) {
+    return candidate
+  }
+  return {
+    ...candidate,
+    ...(probed.mweReceipt !== undefined ? { mweReceipt: probed.mweReceipt } : {}),
+    ...(probed.publicRegressionReceipt !== undefined
+      ? { publicRegressionReceipt: probed.publicRegressionReceipt }
+      : {}),
+    ...(probed.reproConsensusReceipt !== undefined
+      ? { reproConsensusReceipt: probed.reproConsensusReceipt }
+      : {}),
+  }
+}
+
+const scoreOne = async (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+  minB: number,
+  maxB: number,
+): Promise<ScoredEntry> => {
+  const probed = await probeOne(ctx, candidate)
+  const sanitizedCandidate = sanitizeCandidatePublicContracts(ctx, candidate)
+  const soft: SoftScoreSignals = {
+    declaredExpectedMatch: probed.declaredExpectedMatch,
+    rubricScore: null,
+    voterQuorum: probed.voterQuorum,
+    // smallest real diff ⇒ 1; all equal ⇒ 1; larger ⇒ lower; empty ⇒ null.
+    // The ONLY signal that varies with the relative minimality window, so it is
+    // recomputed cheaply (pure arithmetic) on each scoring pass.
+    minimality: minimalityOf({ isEmpty: probed.isEmpty, size: probed.size, minB, maxB }),
+    ownerCoverage: probed.ownerCoverage,
+  }
+  const scoredContracts = effectiveContractBundleFor(ctx, sanitizedCandidate)
+  const contractCandidate = contractCandidateOf(sanitizedCandidate)
+  const requiredContractsSatisfied = requiredContractsSatisfiedCount(
+    scoredContracts,
+    contractCandidate,
+  )
+  const contractsSatisfied = contractsSatisfiedCount(scoredContracts, contractCandidate)
+  const baseVerdict = scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, ctx.mode)
+  const structuralHardReasons =
+    ctx.mode === "clean" ? familyCoverageMissingHardReasons(sanitizedCandidate) : []
+  const proofState = selectionProofState({
+    resolved: probed.resolvedKofN,
+    hard: probed.hard,
+    mweReceipt: probed.mweReceipt,
+    publicRegressionReceipt: probed.publicRegressionReceipt,
+    reproConsensusReceipt: probed.reproConsensusReceipt,
+  })
+  const verdict = applyProofRequiredHardGate(
+    applyCleanAuthorityHardGate(
+      applyMweProofHardGate(
+        applyStaticSanityHardGate(baseVerdict, [
+          ...probed.staticSanityReasons,
+          ...structuralHardReasons,
+        ]),
+        ctx.mode,
+        probed.mweReceipt,
       ),
-      proofRequired,
-      proofState,
-    )
-    return {
-      // SCAFF-06: carry the selection-time MWE receipt on the scored candidate so
-      // the lexicographic top tier (buildLexTiers) sees it. Identity-preserving
-      // when there is no receipt (byte-identical to the pre-SCAFF-06 path).
-      candidate:
-        probed.mweReceipt !== undefined ||
-        probed.publicRegressionReceipt !== undefined ||
-        probed.reproConsensusReceipt !== undefined
-          ? {
-              ...c,
-              ...(probed.mweReceipt !== undefined ? { mweReceipt: probed.mweReceipt } : {}),
-              ...(probed.publicRegressionReceipt !== undefined
-                ? { publicRegressionReceipt: probed.publicRegressionReceipt }
-                : {}),
-              ...(probed.reproConsensusReceipt !== undefined
-                ? { reproConsensusReceipt: probed.reproConsensusReceipt }
-                : {}),
-            }
-          : c,
-      hard: probed.hard,
-      resolvedKofN: probed.resolvedKofN,
-      voterQuorum: probed.voterQuorum,
-      verdict,
-      requiredContractsSatisfied,
-      contractsSatisfied,
-    }
+      cleanProofAuthorityMissing({
+        mode: ctx.mode,
+        owners: ctx.args.owners,
+        candidate: sanitizedCandidate,
+        hard: probed.hard,
+        resolved: probed.resolvedKofN,
+        mweReceipt: probed.mweReceipt,
+        reproConsensusReceipt: probed.reproConsensusReceipt,
+        requiredContractsSatisfied,
+        contractsSatisfied,
+      }),
+    ),
+    ctx.proofRequired,
+    proofState,
+  )
+  return {
+    candidate: candidateWithSelectionReceipts(sanitizedCandidate, probed),
+    hard: probed.hard,
+    resolvedKofN: probed.resolvedKofN,
+    voterQuorum: probed.voterQuorum,
+    verdict,
+    requiredContractsSatisfied,
+    contractsSatisfied,
   }
+}
 
-  const applySetLevelCleanDriftGate = (scored: ScoredEntry[]): void => {
-    if (mode !== "clean") return
-    // If any executable public-MWE receipt exists, the MWE tier is the stronger
-    // authority. Do not let broad-drift protection overturn a candidate_red vs
-    // no-receipt ordering; the drift gate is only for proofless sets.
-    if (scored.some((s) => s.candidate.mweReceipt !== undefined)) return
-    for (const entry of scored) {
-      entry.verdict = applyCleanDriftHardGate(
-        entry.verdict,
-        cleanUnprovenMultiSourceDriftRisk({
-          mode,
-          candidate: entry.candidate,
-          owners: args.owners,
-          hard: entry.hard,
-          resolved: entry.resolvedKofN,
-          mweReceipt: entry.candidate.mweReceipt,
-          reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
-          requiredContractsSatisfied: entry.requiredContractsSatisfied,
-          contractsSatisfied: entry.contractsSatisfied,
-        }),
-      )
-    }
-  }
-
-  const maybeAppendSelectorRepair = async (
-    rawCandidates: readonly Candidate[],
-    result: SelectionResult,
-    seenRepairPrompts: Set<string>,
-  ): Promise<{
-    readonly rawCandidates: readonly Candidate[]
-    readonly appended: boolean
-    readonly stopReason?: RepairFeedbackStopReason
-  }> => {
-    if (mode !== "clean" || rawCandidates.length === 0) {
-      return { rawCandidates, appended: false }
-    }
-    const seed =
-      buildStaticSanityRepairSeed({ scored: result.scored, winner: result.winner }) ??
-      buildOracleFailureRepairSeed({
-        scored: result.scored,
-        proofRequired,
-        ...(args.oracleFailureRepairSeed !== undefined
-          ? { oracleFailureSeedText: args.oracleFailureRepairSeed }
-          : {}),
-      })
-    if (seed === undefined) {
-      // `missing_seed` telemetry is INTENTIONALLY proofRequired-only: there a
-      // repair was expected so "no derivable seed" is a notable diagnostic. In
-      // plain clean mode a missing seed is the ordinary "nothing to repair"
-      // resting state, so tagging it would be telemetry noise. Do NOT ungate.
-      return {
-        rawCandidates,
-        appended: false,
-        ...(proofRequired ? { stopReason: "missing_seed" } : {}),
-      }
-    }
-    try {
-      const prompt = buildRepairPacketText({
-        scored: result.scored,
-        seed,
-        winner: result.winner,
-        problemStatement: args.problemStatement ?? "",
-        ...(contractBundle !== undefined ? { contractBundle } : {}),
-        ...(args.verificationTarget !== undefined
-          ? { verificationTarget: args.verificationTarget }
-          : {}),
-        // jun-23 W2-2 (B1): give the SELECTOR repair packet the slice-capable
-        // owner evidence (real source slice) instead of the path-only stub that
-        // forced router localizationCertain=false. Both must be present for a
-        // slice to resolve; either absent ⇒ path-only (B2 gap surfaced).
-        ...(args.repairReadSource !== undefined ? { readSource: args.repairReadSource } : {}),
-        ...(args.repairIssueSymbols !== undefined ? { issueSymbols: args.repairIssueSymbols } : {}),
-        ...(args.repairOwnerEvidence !== undefined
-          ? { structuralOwnerEvidence: args.repairOwnerEvidence }
-          : {}),
-        ...(args.recordLlmEvidencePacket !== undefined
-          ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
-          : {}),
-      })
-      if (seenRepairPrompts.has(prompt)) {
-        return { rawCandidates, appended: false, stopReason: "duplicate_seed" }
-      }
-      seenRepairPrompts.add(prompt)
-      const repaired = await postprocessGeneratedCandidate(
-        await args.ports.generate(rawCandidates.length, prompt),
-        rawCandidates.length,
-        prompt,
-      )
-      return repaired.patch.trim() === ""
-        ? { rawCandidates, appended: false, stopReason: "empty_patch" }
-        : { rawCandidates: [...rawCandidates, repaired], appended: true }
-    } catch {
-      return { rawCandidates, appended: false, stopReason: "generation_failed" }
-    }
-  }
-
-  const withRepairFeedbackTelemetry = (
-    result: SelectionResult,
-    attempts: number,
-    stopReason: RepairFeedbackStopReason | undefined,
-  ): SelectionResult =>
-    attempts === 0 && stopReason === undefined
-      ? result
-      : {
-          ...result,
-          repairFeedbackAttempts: attempts,
-          ...(stopReason !== undefined ? { repairFeedbackStopReason: stopReason } : {}),
-        }
-
-  const hasProofPositiveWinner = (result: SelectionResult): boolean =>
-    result.winner !== null &&
-    result.scored.some(
-      (entry) =>
-        entry.candidate.id === result.winner?.id &&
-        selectionProofStateForEntry(entry) === "proof_positive",
-    )
-
-  const maybeFinalizeEarlyAccept = async (
-    rawCandidates: readonly Candidate[],
-    candidate: Candidate,
-  ): Promise<SelectionResult | null> => {
-    if (args.earlyAccept !== true) return null
-    const size = Buffer.byteLength(candidate.patch, "utf8")
-    const entry = await scoreOne(candidate, size, size)
-    return earlyAcceptable(
-      entry,
-      args.owners,
-      requireHardResolvedForEarlyAccept(args.ports, args.resolvedKofNMode),
-      mode,
-    )
-      ? await finalize(rawCandidates, true)
-      : null
-  }
-
-  const staticAccept = async (
-    rawCandidates: readonly Candidate[],
-    candidate: Candidate,
-    riskGate: SelectionRiskGateTelemetry,
-  ): Promise<SelectionResult> => {
-    const isEmpty = candidate.patch.trim() === ""
-    const hard: HardGateSignals = {
-      baseValidatedRed: candidate.baseValidatedRed,
-      patchProduced: !isEmpty,
-      applyClean: null,
-      regressionGreen: null,
-      smokeGreen: null,
-      patchedResolvedKofN: null,
-    }
-    const soft: SoftScoreSignals = {
-      declaredExpectedMatch: await declaredExpectedMatchOf(candidate, isEmpty, args.ports),
-      rubricScore: null,
-      voterQuorum: null,
-      minimality: isEmpty ? null : 1,
-      ownerCoverage: isEmpty ? null : ownerCoverageOf(candidate.files, args.owners),
-    }
-    const contractCandidate = {
-      touchedFiles: candidate.files,
-      touchedSymbols: diffTouchedSymbols(candidate.patch),
-    }
-    const effectiveContracts =
-      mergePublicContractBundles(contractBundle, candidate.publicContracts) ?? contractBundle
-    const entry = {
-      candidate,
-      hard,
-      resolvedKofN: null,
-      voterQuorum: null,
-      verdict: scoreWithAuthority(hard, soft, soft.declaredExpectedMatch, mode),
-      requiredContractsSatisfied: requiredContractsSatisfiedCount(
-        effectiveContracts,
-        contractCandidate,
-      ),
-      contractsSatisfied: contractsSatisfiedCount(effectiveContracts, contractCandidate),
-    }
-    const ranked = [{ id: candidate.id, verdict: entry.verdict }]
-    const fallbackRanked = bestEffortEligible(entry, mode) ? ranked : []
-    const winnerId = selectBest(ranked) ?? selectBestEffort(fallbackRanked)
-    const winner = winnerId === candidate.id ? candidate : null
-    return {
-      attempted: args.n,
-      ownerFiles: [...args.owners],
-      earlyAccepted: false,
-      successfulGenerations: rawCandidates.length,
-      generationFailures,
-      winner,
-      terminalCandidate: winner === null ? candidate : null,
-      scored: [entry],
-      admissibleCount: entry.verdict.admissible ? 1 : 0,
-      generated: 1,
-      proofRequired,
-      ...(proofRequired ? { noWinnerReason: "proof_required_missing" as const } : {}),
-      riskGate,
-    }
-  }
-
-  const finalize = async (
-    rawCandidates: readonly Candidate[],
-    earlyAccepted: boolean,
-    riskGate?: SelectionRiskGateTelemetry,
-  ): Promise<SelectionResult> => {
-    // ── dedup by normalized diff (Trae's pruning lever) ──────────────────────
-    const seen = new Set<string>()
-    const firstIdByPatchKey = new Map<string, string>()
-    const terminalRepresentativeByFirstId = new Map<string, Candidate>()
-    const cands = rawCandidates.filter((c) => {
-      const key = normalizePatch(c.patch)
-      if (seen.has(key)) {
-        const firstId = firstIdByPatchKey.get(key)
-        if (firstId !== undefined) {
-          const representative = terminalRepresentativeByFirstId.get(firstId)
-          if (representative !== undefined) {
-            terminalRepresentativeByFirstId.set(
-              firstId,
-              strongerTerminalRepresentative(representative, c),
-            )
-          }
-        }
-        return false
-      }
-      seen.add(key)
-      firstIdByPatchKey.set(key, c.id)
-      terminalRepresentativeByFirstId.set(c.id, c)
-      return true
-    })
-
-    // ── relative minimality across the deduped set (parameter-free) ──────────
-    // Computed over NON-EMPTY patches only: an empty diff is a non-fix, not a
-    // "minimal" fix, so it gets NO minimality signal (null) — otherwise size 0
-    // would score 1 and an empty no-patch could win best-effort over a real one.
-    const realSizes = cands
-      .filter((c) => c.patch.trim() !== "")
-      .map((c) => Buffer.byteLength(c.patch, "utf8"))
-    const minB = realSizes.length > 0 ? Math.min(...realSizes) : 0
-    const maxB = realSizes.length > 0 ? Math.max(...realSizes) : 0
-
-    const scored: ScoredEntry[] = []
-    for (let i = 0; i < cands.length; i++) {
-      scored.push(await scoreOne(cands[i] as Candidate, minB, maxB))
-    }
-    applySetLevelCleanDriftGate(scored)
-
-    // ── counterfactual contract gate (T-301) ────────────────────────────────
-    // A candidate spawned under the counterfactual seed that VIOLATES its own
-    // derived structural contract is barred from WINNING over candidate 0. This
-    // is a counterfactual-specific negative signal, NOT a global candidate gate:
-    // candidates with no contract (cand0, or any non-counterfactual candidate)
-    // are never excluded here, so a legitimately large patch still survives.
-    const cfContracts = cand0Facts !== undefined ? deriveCounterfactualContracts(cand0Facts) : []
-    const violatedCounterfactual = new Set<string>()
-    if (cfContracts.length > 0) {
-      for (const s of scored) {
-        if (!counterfactualCandidateIds.has(s.candidate.id)) continue
-        const ev = evaluateCounterfactualContracts({
-          contracts: cfContracts,
-          verdict: analyzePatchBudget(s.candidate.patch, {
-            ownerFiles: [...args.owners],
-            runtimeExpandingPolicy: "gate",
-          }),
-          emptyPatch: s.candidate.patch.trim() === "",
-          candidateFiles: s.candidate.files,
-          targetOwnerFile: counterfactualOwnerFile,
-        })
-        if (!ev.satisfied) violatedCounterfactual.add(s.candidate.id)
-      }
-    }
-    const ranked = scored
-      .filter((s) => !violatedCounterfactual.has(s.candidate.id))
-      .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
-    const fallbackRanked = scored
-      .filter((s) => bestEffortEligible(s, mode) && !violatedCounterfactual.has(s.candidate.id))
-      .map((s) => ({ id: s.candidate.id, verdict: s.verdict }))
-    // ── clean: contract-first lexicographic selection (T-SEL-06) ─────────────
-    // Executable proof dominates contracts dominates family dominates minimality;
-    // no weighted sum can let a small symptom patch overturn a stronger-proof
-    // root-cause patch. Research mode keeps the legacy weighted selectBest.
-    const lexCleanWinner = (): string | null => {
-      // `order` (the final lexicographic tie-break) MUST be the STABLE absolute
-      // index in `scored`, not a per-filter index — otherwise the same candidate
-      // would carry a different tie-break in the primary vs the best-effort pass
-      // and the winner could flip non-deterministically when all higher tiers tie.
-      const orderOf = new Map(scored.map((s, i) => [s.candidate.id, i]))
-      const toLex = (s: ScoredEntry, admissible: boolean) => ({
-        id: s.candidate.id,
-        admissible,
-        tiers: buildLexTiers(s, orderOf.get(s.candidate.id) ?? 0, args.owners, contractBundle),
-      })
-      const eligible = scored.filter((s) => !violatedCounterfactual.has(s.candidate.id))
-      const primary = selectLexicographic(eligible.map((s) => toLex(s, s.verdict.admissible)))
-      if (primary !== null) return primary
-      // best-effort: structurally-submittable + executable-clean candidates only
-      // (researchOnly smoke/declaredExpected carry NO clean veto), ranked lex.
-      const effort = eligible.filter((s) => bestEffortEligible(s, mode))
-      return selectLexicographic(effort.map((s) => toLex(s, true)))
-    }
-    const winnerId =
-      mode === "clean" ? lexCleanWinner() : (selectBest(ranked) ?? selectBestEffort(fallbackRanked))
-    // Report only counterfactual ids that SURVIVED dedup (are in `scored`): a
-    // cand1 whose patch collapsed onto cand0 is gone from scoring, so listing it
-    // would be a telemetry lie (and it carries no independent contract verdict).
-    const scoredIds = new Set(scored.map((s) => s.candidate.id))
-    const counterfactual: CounterfactualTelemetry | undefined =
-      args.counterfactual === true
-        ? {
-            enabled: true,
-            seedGenerated: counterfactualSeed !== undefined,
-            contracts: cfContracts,
-            candidateIds: [...counterfactualCandidateIds].filter((id) => scoredIds.has(id)),
-            violatedCandidateIds: [...violatedCounterfactual],
-          }
-        : undefined
-    const winner = scored.find((s) => s.candidate.id === winnerId)?.candidate ?? null
-    let terminalCandidate: Candidate | null = null
-    let noWinnerReason: SelectionNoWinnerReason | undefined
-    if (winner === null) {
-      const nonEmpty = scored.filter((entry) => entry.candidate.patch.trim() !== "")
-      if (proofRequired && nonEmpty.length > 0) {
-        const proofStates = nonEmpty.map((entry) => selectionProofStateForEntry(entry))
-        noWinnerReason = proofStates.every((state) => state === "infra_blocked")
-          ? "proof_infra_blocked"
-          : "proof_required_missing"
-      } else if (scored.length > 0) {
-        noWinnerReason = "no_submittable_candidate"
-      }
-      const bestTerminalRank = scored.reduce(
-        (best, entry) =>
-          Math.max(
-            best,
-            terminalAuthorityRank(
-              terminalRepresentativeByFirstId.get(entry.candidate.id) ?? entry.candidate,
-            ),
-          ),
-        0,
-      )
-      const terminalPool = scored
-        .filter(
-          (entry) =>
-            terminalAuthorityRank(
-              terminalRepresentativeByFirstId.get(entry.candidate.id) ?? entry.candidate,
-            ) === bestTerminalRank,
-        )
-        .map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict }))
-      const terminalId = selectBestEffort(terminalPool)
-      const chosen = scored.find((s) => s.candidate.id === terminalId)?.candidate ?? null
-      terminalCandidate =
-        chosen === null ? null : (terminalRepresentativeByFirstId.get(chosen.id) ?? chosen)
-    }
-    return {
-      attempted: args.n,
-      ownerFiles: [...args.owners],
-      earlyAccepted,
-      successfulGenerations: rawCandidates.length,
-      generationFailures,
-      winner,
-      terminalCandidate,
-      scored,
-      admissibleCount: scored.filter((s) => s.verdict.admissible).length,
-      generated: cands.length,
-      proofRequired,
-      ...(noWinnerReason !== undefined ? { noWinnerReason } : {}),
-      ...(riskGate !== undefined ? { riskGate } : {}),
-      ...(counterfactual !== undefined ? { counterfactual } : {}),
-    }
-  }
-
-  let raw: Candidate[]
-  let riskGateTelemetry: SelectionRiskGateTelemetry | undefined
-  if (limit <= 1) {
-    // Sequential: each candidate is a full agent run sharing the sandbox; the
-    // driver resets the tree between them. BYTE-IDENTICAL to the original loop.
-    raw = []
-    for (let i = 0; i < args.n; i++) {
-      const candidate = await tryGenerate(i)
-      if (candidate === null) continue
-      raw.push(candidate)
-      let riskGateExpanded = false
-      if (i === 0 && args.riskGate !== undefined) {
-        const decision = await args.riskGate(candidate)
-        if (decision.llmEvidencePacket !== undefined) {
-          args.recordLlmEvidencePacket?.(decision.llmEvidencePacket)
-        }
-        riskGateTelemetry = {
-          candidateId: candidate.id,
-          expanded: decision.expand,
-          reasons: decision.reasons,
-          ...(decision.shadow !== undefined
-            ? {
-                shadow: {
-                  expanded: decision.shadow.expand,
-                  reasons: decision.shadow.reasons,
-                },
-              }
-            : {}),
-        }
-        if (!decision.expand) {
-          // T-101 + clean-gate closure (B#3): clean mode must NEVER blind-static-
-          // accept. A no-expand cand0 still has to clear the real clean hard-gate
-          // chain (staticSanity / clean-authority / drift / mwe) and probe the
-          // wired ports via `finalize` — `staticAccept` hard-codes those ports to
-          // null and would launder a deterministically-broken cand0 straight to
-          // selection. Only the legacy/research arm keeps the cost-saving static
-          // accept (byte-identical for non-clean modes). Validating cand0 through
-          // finalize does NOT expand generation, so the cost rationale is intact.
-          return args.counterfactual === true || proofRequired || mode === "clean"
-            ? await finalize(raw, false, riskGateTelemetry)
-            : await staticAccept(raw, candidate, riskGateTelemetry)
-        }
-        riskGateExpanded = true
-        // T-202: derive cand0's risk facts and the counterfactual seed for cand1+.
-        if (args.counterfactual === true && decision.patchBudget !== undefined) {
-          counterfactualOwnerFile = [...args.owners][0]
-          cand0Facts = extractCandidateRiskFacts({
-            verdict: decision.patchBudget,
-            ownerFiles: [...args.owners],
-            emptyPatch: candidate.patch.trim() === "",
-            ...(decision.shadow !== undefined ? { llmShadowReasons: decision.shadow.reasons } : {}),
-          })
-          counterfactualSeed = buildCounterfactualSeed({
-            facts: cand0Facts,
-            ownerFile: counterfactualOwnerFile,
-          })
-        }
-      }
-      if (riskGateExpanded) continue
-      const earlyAccepted = await maybeFinalizeEarlyAccept(raw, candidate)
-      if (earlyAccepted !== null) {
-        if (riskGateTelemetry !== undefined) {
-          return { ...earlyAccepted, riskGate: riskGateTelemetry }
-        }
-        return earlyAccepted
-      }
-    }
-  } else {
-    // Bounded-parallel: at most `limit` generate() calls in flight at once.
-    const sem = new Semaphore(limit)
-    const maybeRaw = await Promise.all(
-      Array.from({ length: args.n }, async (_, i) => {
-        const release = await sem.acquire()
-        try {
-          return await tryGenerate(i)
-        } finally {
-          release()
-        }
+const applySetLevelCleanDriftGate = (ctx: SelectionRunContext, scored: ScoredEntry[]): void => {
+  if (ctx.mode !== "clean") return
+  // If any executable public-MWE receipt exists, the MWE tier is the stronger
+  // authority. Do not let broad-drift protection overturn a candidate_red vs
+  // no-receipt ordering; the drift gate is only for proofless sets.
+  if (scored.some((s) => s.candidate.mweReceipt !== undefined)) return
+  for (const entry of scored) {
+    entry.verdict = applyCleanDriftHardGate(
+      entry.verdict,
+      cleanUnprovenMultiSourceDriftRisk({
+        mode: ctx.mode,
+        candidate: entry.candidate,
+        owners: ctx.args.owners,
+        hard: entry.hard,
+        resolved: entry.resolvedKofN,
+        mweReceipt: entry.candidate.mweReceipt,
+        reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
+        requiredContractsSatisfied: entry.requiredContractsSatisfied,
+        contractsSatisfied: entry.contractsSatisfied,
       }),
     )
-    raw = maybeRaw.filter((candidate): candidate is Candidate => candidate !== null)
   }
-  let result = await finalize(raw, false, riskGateTelemetry)
+}
+
+const selectorRepairSeedOf = (
+  ctx: SelectionRunContext,
+  result: SelectionResult,
+): string | undefined =>
+  buildStaticSanityRepairSeed({ scored: result.scored, winner: result.winner }) ??
+  buildOracleFailureRepairSeed({
+    scored: result.scored,
+    proofRequired: ctx.proofRequired,
+    ...(ctx.args.oracleFailureRepairSeed !== undefined
+      ? { oracleFailureSeedText: ctx.args.oracleFailureRepairSeed }
+      : {}),
+  })
+
+const stopForMissingSelectorRepairSeed = (
+  ctx: SelectionRunContext,
+): { readonly stopReason?: RepairFeedbackStopReason } =>
+  ctx.proofRequired ? { stopReason: "missing_seed" } : {}
+
+const selectorRepairPromptOf = (
+  ctx: SelectionRunContext,
+  result: SelectionResult,
+  seed: string,
+): string =>
+  buildRepairPacketText({
+    scored: result.scored,
+    seed,
+    winner: result.winner,
+    problemStatement: ctx.args.problemStatement ?? "",
+    contractBundle: ctx.contractBundle,
+    ...(ctx.args.verificationTarget !== undefined
+      ? { verificationTarget: ctx.args.verificationTarget }
+      : {}),
+    ...(ctx.args.repairReadSource !== undefined ? { readSource: ctx.args.repairReadSource } : {}),
+    ...(ctx.args.repairIssueSymbols !== undefined
+      ? { issueSymbols: ctx.args.repairIssueSymbols }
+      : {}),
+    ...(ctx.args.repairOwnerEvidence !== undefined
+      ? { structuralOwnerEvidence: ctx.args.repairOwnerEvidence }
+      : {}),
+    ...(ctx.args.recordLlmEvidencePacket !== undefined
+      ? { recordLlmEvidencePacket: ctx.args.recordLlmEvidencePacket }
+      : {}),
+  })
+
+const tryAppendSelectorRepair = async (
+  ctx: SelectionRunContext,
+  rawCandidates: readonly Candidate[],
+  prompt: string,
+): Promise<AppendSelectorRepairResult> => {
+  try {
+    const repaired = await postprocessGeneratedCandidate(
+      ctx,
+      await ctx.args.ports.generate(rawCandidates.length, prompt),
+      rawCandidates.length,
+      prompt,
+    )
+    return repaired.patch.trim() === ""
+      ? { rawCandidates, appended: false, stopReason: "empty_patch" }
+      : { rawCandidates: [...rawCandidates, repaired], appended: true }
+  } catch {
+    return { rawCandidates, appended: false, stopReason: "generation_failed" }
+  }
+}
+
+const maybeAppendSelectorRepair = async (
+  ctx: SelectionRunContext,
+  rawCandidates: readonly Candidate[],
+  result: SelectionResult,
+  seenRepairPrompts: Set<string>,
+): Promise<AppendSelectorRepairResult> => {
+  if (ctx.mode !== "clean" || rawCandidates.length === 0) {
+    return { rawCandidates, appended: false }
+  }
+  const seed = selectorRepairSeedOf(ctx, result)
+  if (seed === undefined) {
+    return { rawCandidates, appended: false, ...stopForMissingSelectorRepairSeed(ctx) }
+  }
+  const prompt = selectorRepairPromptOf(ctx, result, seed)
+  if (seenRepairPrompts.has(prompt)) {
+    return { rawCandidates, appended: false, stopReason: "duplicate_seed" }
+  }
+  seenRepairPrompts.add(prompt)
+  return tryAppendSelectorRepair(ctx, rawCandidates, prompt)
+}
+
+const withRepairFeedbackTelemetry = (
+  result: SelectionResult,
+  attempts: number,
+  stopReason: RepairFeedbackStopReason | undefined,
+): SelectionResult =>
+  attempts === 0 && stopReason === undefined
+    ? result
+    : {
+        ...result,
+        repairFeedbackAttempts: attempts,
+        ...(stopReason !== undefined ? { repairFeedbackStopReason: stopReason } : {}),
+      }
+
+const hasProofPositiveWinner = (result: SelectionResult): boolean =>
+  result.winner !== null &&
+  result.scored.some(
+    (entry) =>
+      entry.candidate.id === result.winner?.id &&
+      selectionProofStateForEntry(entry) === "proof_positive",
+  )
+
+const maybeFinalizeEarlyAccept = async (
+  ctx: SelectionRunContext,
+  rawCandidates: readonly Candidate[],
+  candidate: Candidate,
+): Promise<SelectionResult | null> => {
+  if (ctx.args.earlyAccept !== true) return null
+  const size = Buffer.byteLength(candidate.patch, "utf8")
+  const entry = await scoreOne(ctx, candidate, size, size)
+  if (
+    !earlyAcceptable(
+      entry,
+      ctx.args.owners,
+      requireHardResolvedForEarlyAccept(ctx.args.ports, ctx.args.resolvedKofNMode),
+      ctx.mode,
+    )
+  ) {
+    return null
+  }
+  return finalize(ctx, rawCandidates, true)
+}
+
+const staticAcceptEntry = async (
+  ctx: SelectionRunContext,
+  candidate: Candidate,
+): Promise<ScoredEntry> => {
+  const sanitizedCandidate = sanitizeCandidatePublicContracts(ctx, candidate)
+  const isEmpty = sanitizedCandidate.patch.trim() === ""
+  const hard: HardGateSignals = {
+    baseValidatedRed: sanitizedCandidate.baseValidatedRed,
+    patchProduced: !isEmpty,
+    applyClean: null,
+    regressionGreen: null,
+    smokeGreen: null,
+    patchedResolvedKofN: null,
+  }
+  const soft: SoftScoreSignals = {
+    declaredExpectedMatch: await declaredExpectedMatchOf(
+      sanitizedCandidate,
+      isEmpty,
+      ctx.args.ports,
+    ),
+    rubricScore: null,
+    voterQuorum: null,
+    minimality: isEmpty ? null : 1,
+    ownerCoverage: isEmpty ? null : ownerCoverageOf(sanitizedCandidate.files, ctx.args.owners),
+  }
+  const effectiveContracts = effectiveContractBundleFor(ctx, sanitizedCandidate)
+  const contractCandidate = contractCandidateOf(sanitizedCandidate)
+  return {
+    candidate: sanitizedCandidate,
+    hard,
+    resolvedKofN: null,
+    voterQuorum: null,
+    verdict: scoreWithAuthority(hard, soft, soft.declaredExpectedMatch, ctx.mode),
+    requiredContractsSatisfied: requiredContractsSatisfiedCount(
+      effectiveContracts,
+      contractCandidate,
+    ),
+    contractsSatisfied: contractsSatisfiedCount(effectiveContracts, contractCandidate),
+  }
+}
+
+const staticAcceptWinnerOf = (ctx: SelectionRunContext, entry: ScoredEntry): Candidate | null => {
+  const ranked = [{ id: entry.candidate.id, verdict: entry.verdict }]
+  const bestEffortRanked = bestEffortEligible(entry, ctx.mode) ? ranked : []
+  const winnerId = selectBest(ranked) ?? selectBestEffort(bestEffortRanked)
+  return winnerId === entry.candidate.id ? entry.candidate : null
+}
+
+const staticAccept = async (
+  ctx: SelectionRunContext,
+  rawCandidates: readonly Candidate[],
+  candidate: Candidate,
+  riskGate: SelectionRiskGateTelemetry,
+): Promise<SelectionResult> => {
+  const entry = await staticAcceptEntry(ctx, candidate)
+  const winner = staticAcceptWinnerOf(ctx, entry)
+  return {
+    attempted: ctx.args.n,
+    ownerFiles: [...ctx.args.owners],
+    earlyAccepted: false,
+    successfulGenerations: rawCandidates.length,
+    generationFailures: ctx.state.generationFailures,
+    winner,
+    terminalCandidate: winner === null ? entry.candidate : null,
+    scored: [entry],
+    admissibleCount: entry.verdict.admissible ? 1 : 0,
+    generated: 1,
+    proofRequired: ctx.proofRequired,
+    ...(ctx.proofRequired ? { noWinnerReason: "proof_required_missing" as const } : {}),
+    riskGate,
+  }
+}
+
+const dedupeCandidates = (rawCandidates: readonly Candidate[]): DedupedCandidates => {
+  const seen = new Set<string>()
+  const firstIdByPatchKey = new Map<string, string>()
+  const terminalRepresentativeByFirstId = new Map<string, Candidate>()
+  const candidates = rawCandidates.filter((candidate) => {
+    const key = normalizePatch(candidate.patch)
+    if (!seen.has(key)) {
+      seen.add(key)
+      firstIdByPatchKey.set(key, candidate.id)
+      terminalRepresentativeByFirstId.set(candidate.id, candidate)
+      return true
+    }
+    const firstId = firstIdByPatchKey.get(key)
+    const representative =
+      firstId === undefined ? undefined : terminalRepresentativeByFirstId.get(firstId)
+    if (firstId !== undefined && representative !== undefined) {
+      terminalRepresentativeByFirstId.set(
+        firstId,
+        strongerTerminalRepresentative(representative, candidate),
+      )
+    }
+    return false
+  })
+  return { candidates, terminalRepresentativeByFirstId }
+}
+
+const realPatchSizeWindow = (
+  candidates: readonly Candidate[],
+): { readonly minB: number; readonly maxB: number } => {
+  const realSizes = candidates
+    .filter((candidate) => candidate.patch.trim() !== "")
+    .map((candidate) => Buffer.byteLength(candidate.patch, "utf8"))
+  return {
+    minB: realSizes.length > 0 ? Math.min(...realSizes) : 0,
+    maxB: realSizes.length > 0 ? Math.max(...realSizes) : 0,
+  }
+}
+
+const scoreCandidates = async (
+  ctx: SelectionRunContext,
+  candidates: readonly Candidate[],
+  minB: number,
+  maxB: number,
+): Promise<ScoredEntry[]> => {
+  const scored: ScoredEntry[] = []
+  for (const candidate of candidates) {
+    scored.push(await scoreOne(ctx, candidate, minB, maxB))
+  }
+  return scored
+}
+
+const counterfactualVerdictSet = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+): CounterfactualVerdictSet => {
+  const contracts =
+    ctx.state.cand0Facts !== undefined ? deriveCounterfactualContracts(ctx.state.cand0Facts) : []
+  const violated = new Set<string>()
+  for (const entry of scored) {
+    if (!ctx.state.counterfactualCandidateIds.has(entry.candidate.id)) continue
+    const ev = evaluateCounterfactualContracts({
+      contracts,
+      verdict: analyzePatchBudget(entry.candidate.patch, {
+        ownerFiles: [...ctx.args.owners],
+        runtimeExpandingPolicy: "gate",
+      }),
+      emptyPatch: entry.candidate.patch.trim() === "",
+      candidateFiles: entry.candidate.files,
+      targetOwnerFile: ctx.state.counterfactualOwnerFile,
+    })
+    if (!ev.satisfied) violated.add(entry.candidate.id)
+  }
+  return { contracts, violated }
+}
+
+const rankedEntries = (
+  scored: readonly ScoredEntry[],
+  violatedCounterfactual: ReadonlySet<string>,
+): { readonly id: string; readonly verdict: ScoredEntry["verdict"] }[] =>
+  scored
+    .filter((entry) => !violatedCounterfactual.has(entry.candidate.id))
+    .map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict }))
+
+const bestEffortRankedEntries = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+  violatedCounterfactual: ReadonlySet<string>,
+): { readonly id: string; readonly verdict: ScoredEntry["verdict"] }[] =>
+  scored
+    .filter(
+      (entry) =>
+        bestEffortEligible(entry, ctx.mode) && !violatedCounterfactual.has(entry.candidate.id),
+    )
+    .map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict }))
+
+const lexCandidateOf = (
+  ctx: SelectionRunContext,
+  orderOf: ReadonlyMap<string, number>,
+  entry: ScoredEntry,
+  admissible: boolean,
+) => ({
+  id: entry.candidate.id,
+  admissible,
+  tiers: buildLexTiers(
+    entry,
+    orderOf.get(entry.candidate.id) ?? 0,
+    ctx.args.owners,
+    ctx.contractBundle,
+  ),
+})
+
+const lexCleanWinnerId = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+  violatedCounterfactual: ReadonlySet<string>,
+): string | null => {
+  // `order` (the final lexicographic tie-break) MUST be the STABLE absolute
+  // index in `scored`, not a per-filter index — otherwise the same candidate
+  // would carry a different tie-break in the primary vs the best-effort pass
+  // and the winner could flip non-deterministically when all higher tiers tie.
+  const orderOf = new Map(scored.map((entry, i) => [entry.candidate.id, i]))
+  const eligible = scored.filter((entry) => !violatedCounterfactual.has(entry.candidate.id))
+  const primary = selectLexicographic(
+    eligible.map((entry) => lexCandidateOf(ctx, orderOf, entry, entry.verdict.admissible)),
+  )
+  if (primary !== null) return primary
+  const effort = eligible.filter((entry) => bestEffortEligible(entry, ctx.mode))
+  return selectLexicographic(effort.map((entry) => lexCandidateOf(ctx, orderOf, entry, true)))
+}
+
+const winnerIdOf = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+  violatedCounterfactual: ReadonlySet<string>,
+): string | null =>
+  ctx.mode === "clean"
+    ? lexCleanWinnerId(ctx, scored, violatedCounterfactual)
+    : (selectBest(rankedEntries(scored, violatedCounterfactual)) ??
+      selectBestEffort(bestEffortRankedEntries(ctx, scored, violatedCounterfactual)))
+
+const counterfactualTelemetryOf = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+  verdictSet: CounterfactualVerdictSet,
+): CounterfactualTelemetry | undefined => {
+  if (ctx.args.counterfactual !== true) return undefined
+  const scoredIds = new Set(scored.map((entry) => entry.candidate.id))
+  return {
+    enabled: true,
+    seedGenerated: ctx.state.counterfactualSeed !== undefined,
+    contracts: verdictSet.contracts,
+    candidateIds: [...ctx.state.counterfactualCandidateIds].filter((id) => scoredIds.has(id)),
+    violatedCandidateIds: [...verdictSet.violated],
+  }
+}
+
+const noWinnerReasonOf = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+  winner: Candidate | null,
+): SelectionNoWinnerReason | undefined => {
+  if (winner !== null) return undefined
+  const nonEmpty = scored.filter((entry) => entry.candidate.patch.trim() !== "")
+  if (ctx.proofRequired && nonEmpty.length > 0) {
+    const proofStates = nonEmpty.map((entry) => selectionProofStateForEntry(entry))
+    return proofStates.every((state) => state === "infra_blocked")
+      ? "proof_infra_blocked"
+      : "proof_required_missing"
+  }
+  return scored.length > 0 ? "no_submittable_candidate" : undefined
+}
+
+const terminalCandidateOf = (
+  scored: readonly ScoredEntry[],
+  terminalRepresentativeByFirstId: ReadonlyMap<string, Candidate>,
+): Candidate | null => {
+  if (scored.length === 0) return null
+  const bestTerminalRank = scored.reduce(
+    (best, entry) =>
+      Math.max(
+        best,
+        terminalAuthorityRank(
+          terminalRepresentativeByFirstId.get(entry.candidate.id) ?? entry.candidate,
+        ),
+      ),
+    0,
+  )
+  const terminalPool = scored
+    .filter(
+      (entry) =>
+        terminalAuthorityRank(
+          terminalRepresentativeByFirstId.get(entry.candidate.id) ?? entry.candidate,
+        ) === bestTerminalRank,
+    )
+    .map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict }))
+  const terminalId = selectBestEffort(terminalPool)
+  const chosen = scored.find((entry) => entry.candidate.id === terminalId)?.candidate ?? null
+  return chosen === null ? null : (terminalRepresentativeByFirstId.get(chosen.id) ?? chosen)
+}
+
+const finalize = async (
+  ctx: SelectionRunContext,
+  rawCandidates: readonly Candidate[],
+  earlyAccepted: boolean,
+  riskGate?: SelectionRiskGateTelemetry,
+): Promise<SelectionResult> => {
+  const { candidates, terminalRepresentativeByFirstId } = dedupeCandidates(rawCandidates)
+  const { minB, maxB } = realPatchSizeWindow(candidates)
+  const scored = await scoreCandidates(ctx, candidates, minB, maxB)
+  applySetLevelCleanDriftGate(ctx, scored)
+
+  const counterfactualVerdicts = counterfactualVerdictSet(ctx, scored)
+  const winnerId = winnerIdOf(ctx, scored, counterfactualVerdicts.violated)
+  const winner = scored.find((entry) => entry.candidate.id === winnerId)?.candidate ?? null
+  const noWinnerReason = noWinnerReasonOf(ctx, scored, winner)
+  const counterfactual = counterfactualTelemetryOf(ctx, scored, counterfactualVerdicts)
+  return {
+    attempted: ctx.args.n,
+    ownerFiles: [...ctx.args.owners],
+    earlyAccepted,
+    successfulGenerations: rawCandidates.length,
+    generationFailures: ctx.state.generationFailures,
+    winner,
+    terminalCandidate:
+      winner === null ? terminalCandidateOf(scored, terminalRepresentativeByFirstId) : null,
+    scored,
+    admissibleCount: scored.filter((entry) => entry.verdict.admissible).length,
+    generated: candidates.length,
+    proofRequired: ctx.proofRequired,
+    ...(noWinnerReason !== undefined ? { noWinnerReason } : {}),
+    ...(riskGate !== undefined ? { riskGate } : {}),
+    ...(counterfactual !== undefined ? { counterfactual } : {}),
+  }
+}
+
+const riskGateTelemetryOf = (
+  candidate: Candidate,
+  decision: SelectionRiskGateDecision,
+): SelectionRiskGateTelemetry => ({
+  candidateId: candidate.id,
+  expanded: decision.expand,
+  reasons: decision.reasons,
+  ...(decision.shadow !== undefined
+    ? {
+        shadow: {
+          expanded: decision.shadow.expand,
+          reasons: decision.shadow.reasons,
+        },
+      }
+    : {}),
+})
+
+const recordCounterfactualSeed = (
+  ctx: SelectionRunContext,
+  decision: SelectionRiskGateDecision,
+  candidate: Candidate,
+): void => {
+  if (ctx.args.counterfactual !== true || decision.patchBudget === undefined) return
+  const ownerFile = [...ctx.args.owners][0]
+  if (ownerFile !== undefined) ctx.state.counterfactualOwnerFile = ownerFile
+  ctx.state.cand0Facts = extractCandidateRiskFacts({
+    verdict: decision.patchBudget,
+    ownerFiles: [...ctx.args.owners],
+    emptyPatch: candidate.patch.trim() === "",
+    ...(decision.shadow !== undefined ? { llmShadowReasons: decision.shadow.reasons } : {}),
+  })
+  const counterfactualSeed = buildCounterfactualSeed({
+    facts: ctx.state.cand0Facts,
+    ownerFile,
+  })
+  if (counterfactualSeed !== undefined) ctx.state.counterfactualSeed = counterfactualSeed
+}
+
+const noExpandRiskGateResult = async (
+  ctx: SelectionRunContext,
+  raw: readonly Candidate[],
+  candidate: Candidate,
+  riskGateTelemetry: SelectionRiskGateTelemetry,
+): Promise<SelectionResult> =>
+  ctx.args.counterfactual === true || ctx.proofRequired || ctx.mode === "clean"
+    ? finalize(ctx, raw, false, riskGateTelemetry)
+    : staticAccept(ctx, raw, candidate, riskGateTelemetry)
+
+const handleRiskGateForCandidateZero = async (
+  ctx: SelectionRunContext,
+  raw: readonly Candidate[],
+  candidate: Candidate,
+  index: number,
+): Promise<RiskGateStep> => {
+  if (index !== 0 || ctx.args.riskGate === undefined) return { expanded: false }
+  const decision = await ctx.args.riskGate(candidate)
+  if (decision.llmEvidencePacket !== undefined) {
+    ctx.args.recordLlmEvidencePacket?.(decision.llmEvidencePacket)
+  }
+  const telemetry = riskGateTelemetryOf(candidate, decision)
+  if (!decision.expand) {
+    return {
+      expanded: false,
+      telemetry,
+      result: await noExpandRiskGateResult(ctx, raw, candidate, telemetry),
+    }
+  }
+  recordCounterfactualSeed(ctx, decision, candidate)
+  return { expanded: true, telemetry }
+}
+
+const withRiskGateTelemetry = (
+  result: SelectionResult,
+  riskGateTelemetry: SelectionRiskGateTelemetry | undefined,
+): SelectionResult =>
+  riskGateTelemetry === undefined || result.riskGate !== undefined
+    ? result
+    : { ...result, riskGate: riskGateTelemetry }
+
+const generatedResult = (
+  raw: Candidate[],
+  result: SelectionResult,
+  riskGateTelemetry: SelectionRiskGateTelemetry | undefined,
+): GeneratedCandidates =>
+  riskGateTelemetry === undefined ? { raw, result } : { raw, riskGateTelemetry, result }
+
+const runSequentialGeneration = async (ctx: SelectionRunContext): Promise<GeneratedCandidates> => {
+  const raw: Candidate[] = []
+  let riskGateTelemetry: SelectionRiskGateTelemetry | undefined
+  for (let i = 0; i < ctx.args.n; i++) {
+    const candidate = await tryGenerateCandidate(ctx, i)
+    if (candidate === null) continue
+    raw.push(candidate)
+    const riskGateStep = await handleRiskGateForCandidateZero(ctx, raw, candidate, i)
+    if (riskGateStep.telemetry !== undefined) riskGateTelemetry = riskGateStep.telemetry
+    if (riskGateStep.result !== undefined) {
+      return generatedResult(raw, riskGateStep.result, riskGateTelemetry)
+    }
+    if (riskGateStep.expanded) continue
+    const earlyAccepted = await maybeFinalizeEarlyAccept(ctx, raw, candidate)
+    if (earlyAccepted !== null) {
+      return generatedResult(
+        raw,
+        withRiskGateTelemetry(earlyAccepted, riskGateTelemetry),
+        riskGateTelemetry,
+      )
+    }
+  }
+  return riskGateTelemetry === undefined ? { raw } : { raw, riskGateTelemetry }
+}
+
+const runParallelGeneration = async (ctx: SelectionRunContext): Promise<GeneratedCandidates> => {
+  const sem = new Semaphore(ctx.limit)
+  const maybeRaw = await Promise.all(
+    Array.from({ length: ctx.args.n }, async (_, i) => {
+      const release = await sem.acquire()
+      try {
+        return await tryGenerateCandidate(ctx, i)
+      } finally {
+        release()
+      }
+    }),
+  )
+  return { raw: maybeRaw.filter((candidate): candidate is Candidate => candidate !== null) }
+}
+
+const runRepairFeedbackLoop = async (
+  ctx: SelectionRunContext,
+  raw: readonly Candidate[],
+  initialResult: SelectionResult,
+  riskGateTelemetry: SelectionRiskGateTelemetry | undefined,
+): Promise<SelectionResult> => {
+  let result = initialResult
   let repairedRaw = raw
   let repairFeedbackAttempts = 0
   let repairFeedbackStopReason: RepairFeedbackStopReason | undefined
-  const maxRepairFeedbackRounds = proofRequired ? 2 : 1
+  const maxRepairFeedbackRounds = ctx.proofRequired ? 2 : 1
   const seenRepairPrompts = new Set<string>()
   for (let repairRound = 0; repairRound < maxRepairFeedbackRounds; repairRound++) {
     if (hasProofPositiveWinner(result)) {
@@ -1008,14 +1283,14 @@ export const runSelection = async (args: {
         repairFeedbackAttempts > 0 ? "winner_found" : repairFeedbackStopReason
       break
     }
-    const next = await maybeAppendSelectorRepair(repairedRaw, result, seenRepairPrompts)
+    const next = await maybeAppendSelectorRepair(ctx, repairedRaw, result, seenRepairPrompts)
     if (!next.appended) {
       repairFeedbackStopReason = next.stopReason
       break
     }
     repairFeedbackAttempts += 1
     repairedRaw = [...next.rawCandidates]
-    result = await finalize(repairedRaw, false, riskGateTelemetry)
+    result = await finalize(ctx, repairedRaw, false, riskGateTelemetry)
     if (hasProofPositiveWinner(result)) {
       repairFeedbackStopReason = "winner_found"
       break
@@ -1029,4 +1304,20 @@ export const runSelection = async (args: {
     repairFeedbackStopReason = "max_attempts"
   }
   return withRepairFeedbackTelemetry(result, repairFeedbackAttempts, repairFeedbackStopReason)
+}
+
+/**
+ * Run the verify-and-select executor. Pure over the injected ports.
+ *
+ * `seeds[i]` is the localization focus for candidate i (`seeds[0]` is typically
+ * `undefined` = an unbiased baseline). `owners` is the closure localization-
+ * ranked file set used for owner-coverage.
+ */
+export const runSelection = async (args: RunSelectionArgs): Promise<SelectionResult> => {
+  const ctx = buildSelectionRunContext(args)
+  const generated =
+    ctx.limit <= 1 ? await runSequentialGeneration(ctx) : await runParallelGeneration(ctx)
+  if (generated.result !== undefined) return generated.result
+  const result = await finalize(ctx, generated.raw, false, generated.riskGateTelemetry)
+  return runRepairFeedbackLoop(ctx, generated.raw, result, generated.riskGateTelemetry)
 }

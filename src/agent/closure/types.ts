@@ -52,4 +52,5 @@ export interface PrimaryRailStep {
   readonly cmd: string
   readonly authority: "execution" | "structure" | "exact-diff"
   readonly successPredicate: SuccessPredicate
+  readonly pytestReportPath?: string
 }

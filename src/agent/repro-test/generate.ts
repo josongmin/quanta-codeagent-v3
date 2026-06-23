@@ -95,8 +95,8 @@ const groundingBlock = (mwe: string | undefined): readonly string[] => {
  * canonical submit oracle. It is spliced ONLY into a `kind === "hardening"`
  * prompt; the canonical prompt NEVER sees it.
  *
- * WHY the split: folding "print 'Issue resolved' ONLY if EVERY case behaves
- * correctly" into the SUBMIT oracle made it a 75% gold false-NEGATIVE (the
+ * WHY the split: folding "only pass if EVERY case behaves correctly" into the
+ * SUBMIT oracle made it a 75% gold false-NEGATIVE (the
  * canonical-correct gold fix could not satisfy the many incidental cases), which
  * the proof-required gate then treated as authority to WITHHOLD a correct patch —
  * structurally unwinnable. Hardening reproes stay RED on a shallow fix (good for
@@ -132,20 +132,52 @@ const hardeningBlock = (): readonly string[] => [
  *  call. Without the guard, pytest re-imports the file and the footer recurses
  *  ("error during collection"), collapsing pass and fail to the same exit code.
  *  `-p no:cacheprovider` keeps pytest from writing a `.pytest_cache` into the
- *  repo tree. Verbatim — the classifier depends on this exact shape. */
+ *  repo tree. The footer writes a sidecar JSON report; verdict code reads that
+ *  structured report, not stdout text. */
 const PYTEST_FOOTER = [
   "",
   "",
   'if __name__ == "__main__":',
+  "    import json",
   "    import os",
   '    os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")',
   "    import sys, pytest",
-  "    # Self-drive pytest on THIS file so `python <path>` yields a pass/fail",
-  "    # exit code (the execution-grounded verdict). Disable third-party plugin",
-  "    # autoload so host/user pytest entrypoints cannot perturb the oracle. The",
-  "    # __main__ guard keeps this inert during pytest's own collection (see",
-  "    # PYTEST_FOOTER docs).",
-  '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
+  "",
+  "    class _QuantaPytestReport:",
+  "        def __init__(self, path):",
+  "            self.path = path",
+  "            self.collected = 0",
+  "            self.reports = []",
+  "",
+  "        def pytest_collection_modifyitems(self, session, config, items):",
+  "            self.collected = len(items)",
+  "",
+  "        @pytest.hookimpl(hookwrapper=True)",
+  "        def pytest_runtest_makereport(self, item, call):",
+  "            outcome = yield",
+  "            report = outcome.get_result()",
+  '            rec = {"nodeid": report.nodeid, "when": report.when, "outcome": report.outcome}',
+  "            if call.excinfo is not None:",
+  '                rec["exc_type"] = call.excinfo.type.__name__',
+  '                rec["exc_module"] = call.excinfo.type.__module__',
+  "            self.reports.append(rec)",
+  "",
+  "        def pytest_collectreport(self, report):",
+  "            if report.failed:",
+  '                self.reports.append({"nodeid": report.nodeid, "when": "collect", "outcome": "failed"})',
+  "",
+  "        def pytest_sessionfinish(self, session, exitstatus):",
+  "            payload = {",
+  '                "schema": 1,',
+  '                "collected": self.collected,',
+  '                "exitstatus": int(exitstatus),',
+  '                "reports": self.reports,',
+  "            }",
+  '            with open(self.path, "w", encoding="utf-8") as f:',
+  "                json.dump(payload, f, sort_keys=True)",
+  "",
+  '    _quanta_pytest_report = _QuantaPytestReport(__file__ + ".pytest-report.json")',
+  '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"], plugins=[_quanta_pytest_report]))',
 ] as const
 
 /** Build the user message. The model emits a self-contained PYTEST test (P1):
@@ -197,13 +229,23 @@ export const buildReproTestPrompt = (
     "  - Put the bug-exercising code INSIDE the `def test_*` function, not at module",
     "    top level, so a triggered error is reported as a test failure/error by pytest",
     "    rather than crashing the import.",
+    "  - Use the public API shape stated by the issue. If the issue is not about an",
+    "    internal/private helper, do not call one.",
+    "  - Do not guess private method signatures or construct ad-hoc backend/compiler",
+    "    objects unless the issue itself is explicitly about that internal API.",
+    "  - A raw exception bubbling out of the test body is not a good oracle. If the",
+    "    bug path raises unexpectedly while you are asserting a non-exception",
+    "    behavior, catch it and fail the test with `pytest.fail(...)` or `assert False, ...`.",
     "  - Keep the test focused: a real assertion failure is the signal we want, not an",
     "    unrelated import or setup error.",
-    "  - END THE FILE with EXACTLY this footer (so `python <file>` runs pytest on itself):",
+    "  - END THE FILE with the pytest sidecar-report footer shown below (so `python <file>`",
+    "    runs pytest on itself and writes `<file>.pytest-report.json`):",
     '        if __name__ == "__main__":',
+    "            import json",
     "            import os",
     '            os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")',
     "            import sys, pytest",
+    "            # Use a pytest hook plugin to write structured phase/outcome/exception data.",
     '            sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
     ...(kind === "hardening" ? hardeningBlock() : []),
     "",
@@ -223,9 +265,11 @@ export const buildReproTestPrompt = (
     "",
     "",
     'if __name__ == "__main__":',
+    "    import json",
     "    import os",
     '    os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")',
     "    import sys, pytest",
+    "    # Use a pytest hook plugin to write structured phase/outcome/exception data.",
     '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
   ].join("\n")
 
@@ -263,12 +307,21 @@ export const stripMarkdownFences = (raw: string): string => {
   return lines.slice(start, end + 1).join("\n")
 }
 
-/** True when the source already self-drives pytest — i.e. it has BOTH the
- *  `__main__` guard and a `pytest.main(` call. We require both so we never
- *  double-append when the model complied, and never mistake a stray
- *  `pytest.main` inside a helper for a real footer. */
-const hasPytestFooter = (src: string): boolean =>
-  /if\s+__name__\s*==\s*["']__main__["']/.test(src) && /pytest\.main\s*\(/.test(src)
+const hasStructuredPytestFooter = (src: string): boolean =>
+  /if\s+__name__\s*==\s*["']__main__["']/.test(src) &&
+  /_QuantaPytestReport/.test(src) &&
+  /\.pytest-report\.json/.test(src)
+
+const stripTrailingPytestFooter = (src: string): string => {
+  const mainGuard = /(?:^|\n)if\s+__name__\s*==\s*["']__main__["']\s*:/g
+  let last: RegExpExecArray | null = null
+  for (let m = mainGuard.exec(src); m !== null; m = mainGuard.exec(src)) last = m
+  if (last === null) return src
+  const start = last.index + (last[0].startsWith("\n") ? 1 : 0)
+  const tail = src.slice(start)
+  if (!/pytest\.main\s*\(/.test(tail)) return src
+  return src.slice(0, start).replace(/\n+$/, "")
+}
 
 /**
  * Ensure the P1 `python <path>`→pytest bridge is present (see PYTEST_FOOTER).
@@ -283,10 +336,10 @@ const hasPytestFooter = (src: string): boolean =>
  * Exported for direct unit testing. Pure. */
 export const ensurePytestFooter = (src: string): string => {
   if (typeof src !== "string" || src.trim() === "") return typeof src === "string" ? src : ""
-  if (hasPytestFooter(src)) return src
+  if (hasStructuredPytestFooter(src)) return src
   // Trim a single trailing newline so we don't accumulate blank lines, then
   // splice the footer (which begins with two blank lines for PEP-8 spacing).
-  return `${src.replace(/\n+$/, "")}\n${PYTEST_FOOTER.join("\n")}`
+  return `${stripTrailingPytestFooter(src).replace(/\n+$/, "")}\n${PYTEST_FOOTER.join("\n")}`
 }
 
 /** Bounds-checked K. Returns 1 for any non-integer / negative / NaN / 0,

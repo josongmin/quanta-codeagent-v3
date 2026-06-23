@@ -153,6 +153,26 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-budget": "1",
     "patch-budget-strict": "1",
   },
+  // A/B arm (jun-24): IDENTICAL to agentless-v3-thin-strict EXCEPT in-loop test
+  // execution is FULL (not off). Isolates the single hypothesis that exec=off is
+  // the cause of the regression-class failures (the agent never runs the existing
+  // tests in-loop, so it can't catch that its edit broke a passToPass test).
+  // Everything else (minimality, budget-strict, localize-phase) held constant.
+  "agentless-v3-thin-strict-execfull": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "patch-hygiene": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+  },
   // Strict + late critic/select. Candidate generation stays mini-first/noexec;
   // only the outer selector runs regression checks after candidates exist.
   "agentless-v3-thin-strict-select": {

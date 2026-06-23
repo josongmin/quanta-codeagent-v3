@@ -55,6 +55,8 @@ export interface VerificationStep {
   successPredicate?: SuccessPredicate
   /** Optional negative contract (observed signal that hard-fails the step). */
   failurePredicate?: FailurePredicate
+  /** Structured pytest sidecar path for synthesized repro steps. */
+  pytestReportPath?: string
 }
 
 export interface VerificationPlan {
@@ -70,7 +72,7 @@ export interface VerificationPlan {
 
 export interface VerificationPlanInput {
   /** Synthesized/installed repro. Becomes primaryRail ONLY if baseValidatedRed. */
-  reproScript?: { cmd: string; baseValidatedRed: boolean }
+  reproScript?: { cmd: string; baseValidatedRed: boolean; pytestReportPath?: string }
   /** Owner-near test commands (public). */
   ownerNearTests?: readonly string[]
   /** Touched-module smoke commands (post-edit info). */

@@ -1,9 +1,9 @@
 /**
  * TC — patched-side resolved K-of-N consensus PORT (driver-facing).
  *
- * Re-runs the REPRODUCING repro set (the scripts that printed "Issue reproduced"
- * on the un-patched tree) inside a PATCHED sandbox and projects the resolved
- * count into the VerificationBundle's `patchedResolvedKofN` HARD signal via
+ * Re-runs the REPRODUCING repro set (the scripts whose sidecar was red on the
+ * un-patched tree) inside a PATCHED sandbox and projects the resolved count
+ * into the VerificationBundle's `patchedResolvedKofN` HARD signal via
  * {@link resolvedConsensus}. Symmetric to {@link makeReproVoteValidate} — same
  * execution seam, but it yields the bundle's `{votes, k} | null` signal instead
  * of a binary validator verdict, so the selection executor can fold it into
@@ -31,10 +31,16 @@
 import {
   executeReproTests,
   type ReproExecPort,
+  type ReproReadFilePort,
   type ReproWriteFilePort,
 } from "@/agent/repro-test/execute"
 import type { ReproTestConfig, ReproTestOutcome, ReproTestSample } from "@/agent/repro-test/types"
-import { type ReproResolvedVerdict, resolvedConsensus, voteResolved } from "@/agent/repro-test/vote"
+import {
+  type ReproResolvedVerdict,
+  type ReproVote,
+  resolvedConsensus,
+  voteResolved,
+} from "@/agent/repro-test/vote"
 
 export interface PatchedResolvedConsensusDeps {
   /** Reproducing scripts (outcome === "reproduced" on the un-patched tree). */
@@ -43,6 +49,8 @@ export interface PatchedResolvedConsensusDeps {
   exec: ReproExecPort
   /** Injected file-write port (writes each script under the sandbox). */
   writeFile: ReproWriteFilePort
+  /** Reads the controlled pytest report sidecar for each script. */
+  readFile?: ReproReadFilePort
   /** SWE-bench project-env argv builder, identical to the base-red run. */
   buildArgv?: (scriptPath: string) => readonly string[]
   pythonBin?: string
@@ -115,6 +123,70 @@ const withTrace = (
   }
 }
 
+const emptyVote: ReproVote = {
+  verdict: "inconclusive",
+  resolved: 0,
+  reproduced: 0,
+  inconclusive: 0,
+}
+
+const notAvailableReceipt = (): ReproConsensusProofReceipt => ({
+  state: "not_available",
+  votes: 0,
+  k: 0,
+  reproTrace: { vote: emptyVote, samples: [] },
+})
+
+const executionFailedReceipt = (
+  deps: PatchedResolvedConsensusDeps,
+): ReproConsensusProofReceipt => ({
+  state: "execution_failed",
+  votes: 0,
+  k: deps.k ?? majorityQuorum(deps.sources.length),
+  reproTrace: { vote: emptyVote, samples: [] },
+})
+
+const runConsensusSamples = (
+  deps: PatchedResolvedConsensusDeps,
+  sandbox: string,
+): Promise<readonly ReproTestSample[]> =>
+  executeReproTests({
+    tests: deps.sources,
+    repoRoot: sandbox,
+    exec: deps.exec,
+    writeFile: deps.writeFile,
+    ...(deps.readFile !== undefined ? { readFile: deps.readFile } : {}),
+    ...(deps.config !== undefined ? { config: deps.config } : {}),
+    ...(deps.buildArgv !== undefined ? { buildArgv: deps.buildArgv } : {}),
+    ...(deps.pythonBin !== undefined ? { pythonBin: deps.pythonBin } : {}),
+  })
+
+const unresolvedConsensusReceipt = (
+  samples: readonly ReproTestSample[],
+  vote: ReproVote,
+  k: number,
+): ReproConsensusProofReceipt => {
+  const everyExecFailed =
+    samples.length > 0 && samples.every((sample) => sample.outcome === "exec_failed")
+  return {
+    state: everyExecFailed ? "execution_failed" : "false_negative_suspected",
+    votes: vote.resolved,
+    k,
+    reproTrace: {
+      vote,
+      samples: traceSamples(samples),
+    },
+  }
+}
+
+const decisiveConsensusReceipt = (
+  signal: { readonly votes: number; readonly k: number },
+  samples: readonly ReproTestSample[],
+): ReproConsensusProofReceipt => ({
+  state: signal.votes >= signal.k ? "base_red_candidate_green" : "base_red_candidate_red",
+  ...withTrace(signal, samples),
+})
+
 /**
  * Build the patched-resolved consensus proof probe. Returns a function that,
  * given a PATCHED sandbox, re-runs the reproducing set there and yields a typed
@@ -123,50 +195,20 @@ const withTrace = (
 export const makePatchedResolvedConsensusProof =
   (deps: PatchedResolvedConsensusDeps) =>
   async (sandbox: string): Promise<ReproConsensusProofReceipt> => {
-    if (deps.sources.length === 0) return { state: "not_available", votes: 0, k: 0, reproTrace: { vote: { verdict: "inconclusive", resolved: 0, reproduced: 0, inconclusive: 0 }, samples: [] } }
+    if (deps.sources.length === 0) return notAvailableReceipt()
     try {
-      const samples = await executeReproTests({
-        tests: deps.sources,
-        repoRoot: sandbox,
-        exec: deps.exec,
-        writeFile: deps.writeFile,
-        ...(deps.config !== undefined ? { config: deps.config } : {}),
-        ...(deps.buildArgv !== undefined ? { buildArgv: deps.buildArgv } : {}),
-        ...(deps.pythonBin !== undefined ? { pythonBin: deps.pythonBin } : {}),
-      })
+      const samples = await runConsensusSamples(deps, sandbox)
       // Default quorum = majority of DECISIVE votes (resolved+reproduced), so
       // post-fix crashes don't inflate the bar. Explicit `k` is honored as-is.
       const v = voteResolved(samples)
       const k = deps.k ?? majorityQuorum(v.resolved + v.reproduced)
       const signal = resolvedConsensus(samples, k)
-      if (signal === null) {
-        const everyExecFailed =
-          samples.length > 0 && samples.every((sample) => sample.outcome === "exec_failed")
-        return {
-          state: everyExecFailed ? "execution_failed" : "false_negative_suspected",
-          votes: v.resolved,
-          k,
-          reproTrace: {
-            vote: v,
-            samples: traceSamples(samples),
-          },
-        }
-      }
-      return {
-        state: signal.votes >= signal.k ? "base_red_candidate_green" : "base_red_candidate_red",
-        ...withTrace(signal, samples),
-      }
+      return signal === null
+        ? unresolvedConsensusReceipt(samples, v, k)
+        : decisiveConsensusReceipt(signal, samples)
     } catch {
       // A broken exec must never be a false-RED rejection — fail-open to null.
-      return {
-        state: "execution_failed",
-        votes: 0,
-        k: deps.k ?? majorityQuorum(deps.sources.length),
-        reproTrace: {
-          vote: { verdict: "inconclusive", resolved: 0, reproduced: 0, inconclusive: 0 },
-          samples: [],
-        },
-      }
+      return executionFailedReceipt(deps)
     }
   }
 
