@@ -124,14 +124,28 @@ export interface AgentConfig
    * experiment can vary EXACTLY the information the LLM sees at a chosen
    * `turn` (inject corrected localization, swap evidence, drop a misleading
    * note) while everything up to that turn replays deterministically from a
-   * cassette. `turn` is the 0-based loop turn index; return the input unchanged
-   * for turns you don't want to touch.
+   * cassette. `turn` is the 1-based loop turn index (turn-loop.ts iterates
+   * `for (turn = 1; turn <= maxTurns; turn++)` — the first turn is 1, NOT 0);
+   * return the input unchanged for turns you don't want to touch.
+   *
+   * Contract (the seam does not enforce these — honour them):
+   *  - MAY fire MORE THAN ONCE for the same `turn` value: refusal-fallback /
+   *    nudge re-prompts re-enter `prepareTurnContext` within one logical turn
+   *    (same-turn-engine.ts `for (;;)`). If you need fire-once semantics, key
+   *    off your own counter, not `turn` alone.
+   *  - PURE: return a NEW object; do NOT mutate `input` or its nested members
+   *    in place. `baseMessages` is a shallow copy of working memory — mutating
+   *    a shared `message.content[*]` object corrupts the session transcript.
+   *    Use `{ ...input, baseMessages: [...input.baseMessages, extra] }`.
+   *  - Vary MESSAGE CONTENT only. Do NOT change `system` / `cwd` — they pin the
+   *    cached system-prompt prefix; rewriting them breaks per-turn cache reuse.
    *
    * DEFAULT-OFF: absent ⇒ the input reaches `buildTurnContext` untouched ⇒
-   * byte-identical prompt. Pure function: no I/O, replay-stable. This is the
-   * ONE seam the fork/replay/branch tooling needs — cassette truncation
-   * (replay 0..N-1, live from N) and the K-branch runner reuse existing
-   * primitives (ADR-0192 replay, `sampleBestOfN`).
+   * byte-identical prompt. No I/O; replay-stable. This is the ONE seam the
+   * fork/replay/branch tooling needs — cassette truncation (replay 0..N-1, live
+   * from N) and the K-branch runner reuse existing primitives (ADR-0192 replay,
+   * `sampleBestOfN`). Note: each branch MUST build its own replay port — a
+   * shared port's `used` set is consumed by branch 1 (see RFC §4.1).
    */
   turnContextMutator?: (
     turn: number,

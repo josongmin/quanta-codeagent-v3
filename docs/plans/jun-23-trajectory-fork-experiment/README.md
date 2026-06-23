@@ -1,6 +1,7 @@
 # Jun 23 — Trajectory Fork-Experiment (counterfactual troubleshooting)
 
-Status: **RFC** — foundational seam LANDED + proven; ergonomics layer pending decision.
+Status: **RFC** — foundational seam LANDED + proven; per-branch replay isolation
+invariant LANDED + pinned (§4.1); ergonomics/fan-out driver (§6/§7) pending decision.
 
 Related:
 
@@ -86,25 +87,64 @@ cassette (recorded trajectory)         turnContextMutator(turn, input)
 
 Because replay matches by **request hash** and `onMiss=passthrough` falls through
 to the real LLM, changing the turn-N prompt makes the cassette miss *exactly at N*
-and go live from there — **fork-at-N + live tail for free**. No cassette
-truncation needed for the mutator path (truncation stays an optional convenience
-for mutator-less re-sampling, e.g. temperature variance).
+and go live from there — **fork-at-N + live tail**. No cassette truncation needed
+for the mutator path (truncation stays an optional convenience for mutator-less
+re-sampling, e.g. temperature variance).
 
-K branches = `sampleBestOfN` with arm *i*'s `turnContextMutator` = mutation *i*,
-each replaying the same pristine cassette under `passthrough` (no write-back, so
-branches don't pollute each other).
+Caveat: this assumes the ONLY LLM calls during the turn window are the per-turn
+agent calls. Memory distillation runs *after* the loop (post-session) and
+language detection is pure, so neither shifts cassette alignment. But a custom
+plugin-activation callback that itself calls the LLM mid-turn WOULD consume
+cassette entries and offset the fork point — out of scope for the standard bench
+path, noted so it isn't a silent surprise.
 
-**Net new code beyond the landed seam: ~0 for the engine; only an ergonomics
-driver (§6) to select mutations without editing the loop.**
+### 4.1 Per-branch replay isolation (CORRECTION — reviewer jun-23)
 
-## 5. SOTA+ positioning
+The naive "K branches replay the same pristine cassette" is **NOT free with a
+shared port**. The replay store is stateful: `match` marks each cassette index
+`used` (`src/llm/replay/jsonl-store.ts:111,168`), and bench builds ONE replay
+port for the whole run (`src/apps/bench/index.ts` `resolveLLM`) reused across all
+Best-of-N attempts. So branch 1 *consumes* the prefix and branch 2+ MISS from
+turn 1.
 
-| System | Trajectory debugging affordance | Gap vs this |
+The fix is structural and cheap: **each branch builds its OWN port** —
+`replayTrajectoryPort({ path })` already constructs a fresh `jsonlReplayStore`
+(fresh `used`) per call, so calling it once per branch gives each an independent
+full-prefix replay over the same cassette file. (`store.reset()` clearing `used`
+is the equivalent in-place alternative.) The Phase-2 fan-out therefore does
+`sampleBestOfN` with a **fresh replay port per arm**, never the shared one.
+
+This invariant is pinned by
+`tests/integration/fork-branch-replay-isolation-hellgate.test.ts`: shared port ⇒
+branch 2 misses (sentinel for the bug); fresh-port-per-branch ⇒ both replay the
+prefix identically; mutated turn-N ⇒ live divergence.
+
+**Net new code beyond the landed seam: small — a fresh-port-per-branch fan-out
+driver (§6/§7) + an ergonomics layer to select mutations without editing the
+loop. The replay/concurrency engines are reused, NOT rewritten.**
+
+## 5. Positioning — a frontier debugging capability for coding-agent benchmarks
+
+This is **not a world-first concept**: LangGraph (time-travel + fork from a
+checkpoint with *modified state*) and LangSmith (server-side time travel) already
+ship checkpoint-based replay/fork with state edits. The honest framing is
+narrower and still defensible:
+
+> Unlike checkpoint rewind/fork systems, this path mutates the **exact
+> turn-level LLM input** (the assembled prompt the model sees) and **reuses
+> recorded prefix interactions** to keep branch cost near zero until divergence —
+> inside the agent loop, against an LLM cassette.
+
+| System | Trajectory debugging affordance | Gap vs this in coding-agent bench workflows |
 |---|---|---|
-| Claude Code / Codex | session rewind / fork (interactive, live re-run) | no cheap deterministic replay-prefix; no *counterfactual context injection* at a turn |
-| Cursor | checkpoint + restore working tree | tree-level, not LLM-input-level |
-| LangSmith / agent-eval harnesses | record + re-run, diff outputs | re-runs from scratch or full-live; no per-turn input mutation seam |
-| **This RFC** | **deterministic prefix replay + per-turn input mutation + K-branch fan-out, ~0 tokens on prefix** | — |
+| Claude Code | checkpoints / rewind (interactive, live re-run) | no cheap deterministic replay-prefix; no *turn-level LLM-input* counterfactual |
+| Codex CLI | session resume | resume, not per-turn input mutation or prefix replay |
+| LangGraph / LangSmith | time-travel + fork from checkpoint with modified state | state-level edits, not the agent's per-turn *prompt seam*; not LLM-cassette low-cost prefix replay |
+| **This RFC** | per-turn LLM-input mutation + recorded-prefix replay + K-branch fan-out, ≈0 tokens on prefix | — |
+
+(Cursor's checkpoint/restore was considered but is **omitted here — no clean
+official-doc grounding this pass**; do not cite it as a comparison without a
+verifiable source.)
 
 The differentiator is **input-level counterfactuals at an arbitrary turn**, not
 just "restart from a checkpoint". That is the lever that answers *"what
@@ -112,6 +152,9 @@ information at turn N changes the outcome"* — the question our campaign keeps
 hitting (localization gap, anchoring trap, evidence quality). It turns the
 bench-troubleshooting loop from *guess → expensive live run* into
 *hypothesis → cheap replayed branch → measured diff*.
+
+Grounding: Claude Code checkpoints/rewind; Codex CLI resume; LangGraph
+time-travel/fork; LangSmith server time travel.
 
 ## 6. Ergonomics layer — options (DECISION NEEDED)
 
@@ -144,9 +187,15 @@ registry is too clumsy.
   env selection wired into the bench config builder; gate `QUANTA_FORK_EXPERIMENT`
   (unset ⇒ inert). Hellgate: an experiment name flips a measurable prompt byte at
   turn N through the bench driver; unknown name = hard error (no silent no-op).
-- **Phase 2 — K-branch diff (small).** `sampleBestOfN` arm-per-name; emit a
-  per-branch outcome table (resolved? / patch bytes / repro oracle). Reuses the
-  existing sampler; no new concurrency code.
+- **Phase 2 — K-branch diff (small, but NOT "free").** `sampleBestOfN`
+  arm-per-name; emit a per-branch outcome table (resolved? / patch bytes / repro
+  oracle). Reuses the existing sampler — **but each arm MUST build its own replay
+  port** (§4.1); the current bench wiring shares one port and would break replay
+  for branch 2+. Hard-gate the replay mode: with branches, `onMiss=throw` fails
+  exactly at the intended fork point (good — surfaces an unintended divergence),
+  and `record-and-passthrough` would contaminate the shared cassette with
+  divergent tails unless each branch gets its own copy/path. Default to
+  `passthrough` (no write-back) per branch.
 - **Optional — `truncateCassette(path, n)`.** ~30 LOC; only for mutator-less
   re-sampling. Not on the critical path.
 
@@ -165,3 +214,9 @@ matches — same blindness contract as the evidence packet).
   as "40 turns replayed".
 - Mutators are ad-hoc by nature (different per bug). The registry keeps them in
   one auditable place so they can be reviewed for answer-key leakage.
+- **Remote/pool fan-out is a NON-GOAL for now.** `buildForwardedBenchEnv`
+  (`src/apps/bench/remote/box-session.ts`) explicitly THROWS when
+  `QUANTA_BENCH_REPLAY_TRAJECTORY` is set — a local cassette path cannot be
+  blindly forwarded to a box. So "parallel branches" here means **local**
+  `sampleBestOfN` workers. Remote replay needs explicit cassette-upload wiring
+  and is out of scope until proven needed.
