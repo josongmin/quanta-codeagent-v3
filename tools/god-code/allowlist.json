@@ -5,7 +5,6 @@
   "modules": [
     "src/apps/bench/cli.ts",
     "src/apps/bench/eval/driver.ts",
-    "src/apps/bench/remote/box-session.ts",
     "src/runner/batch/eval/driver.ts",
     "src/runner/batch/eval/llm-evidence-packet.ts"
   ],
@@ -81,7 +80,6 @@
     "src/sdk/runtime/session.ts::createRuntimeSession",
     "src/shared/runtime-config.ts::loadFromEnv",
     "src/side-agent/registry.ts::createSideAgentDaemonRegistry",
-    "src/storage/shadow-odb/default.ts::defaultShadowOdb",
     "src/stream/adapters/stdout.ts::emit",
     "src/subagent/handlers-6.ts::handleExecCommand",
     "src/tool/debug/inspect-driver.ts::inspectViaDap",
