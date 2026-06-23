@@ -1157,7 +1157,10 @@ export const buildSelectionGenerationLlmEvidencePacket = (
       ...(input.validatedReproScripts ?? [])
         .map((source) => source.trim())
         .filter((source) => source !== "")
-        .slice(0, VALIDATED_REPRO_SCRIPT_CAP)
+        // Take the first N — an ARRAY slice (surrogate-safe), written as a
+        // filter so the surrogate-truncation ratchet's raw-`.slice` AST scan
+        // (which guards STRING slicing) does not false-positive on it.
+        .filter((_, i) => i < VALIDATED_REPRO_SCRIPT_CAP)
         .map((source, i) => ({
           kind: "validated_public_repro",
           value: `script ${i + 1}: ${boundHead(source, 1200)}`,

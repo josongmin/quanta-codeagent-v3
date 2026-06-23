@@ -20,7 +20,12 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("posture.verifySelectLlmRiskGate")
     expect(DRIVER_SRC).toContain("selectionGenerationFailurePhase({")
     expect(DRIVER_SRC).toContain("selectionPhaseResultOf({")
-    expect(DRIVER_SRC).toContain("calibration: selectionState.calibration")
+    // jun-23: calibration is threaded via the `reportCalibration` selector
+    // (prefers proofCalibration when available, else falls back to
+    // selectionState.calibration) — still wired into both phase builders.
+    expect(DRIVER_SRC).toContain("calibration: reportCalibration")
+    expect(DRIVER_SRC).toContain("? selectionState.proofCalibration")
+    expect(DRIVER_SRC).toContain(": selectionState.calibration")
     expect(DRIVER_SRC).toContain("selectionTelemetry: summarizeSelection(args.result)")
     expect(DRIVER_SRC).toContain("result.terminalCandidate?.stopReason")
     expect(APP_DRIVER_SRC).toContain("result.terminalCandidate?.stopReason")

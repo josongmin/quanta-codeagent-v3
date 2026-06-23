@@ -12,7 +12,19 @@ describe("runner closure-repair driver parity", () => {
     expect(DRIVER_SRC).toContain('readFileSync(join(sandbox, rel), "utf8")')
     expect(DRIVER_SRC).toContain("...(ownerResolved !== undefined ? { ownerResolved } : {})")
     expect(DRIVER_SRC).toContain("siblingOwners: readonly string[]")
-    expect(DRIVER_SRC).toContain("const repairArgs = { ...ctxArgs, siblingOwners }")
+    // B1/B3: the classic-repair packet carries owner slices (paired with issue
+    // symbols + a read-source resolver) and names the active proof target — the
+    // multiline repairArgs replaced the old `{ ...ctxArgs, siblingOwners }`.
+    expect(DRIVER_SRC).toContain("const repairArgs = {")
+    expect(DRIVER_SRC).toContain("...ctxArgs,")
+    expect(DRIVER_SRC).toContain("issueSymbols: repairIssueSymbols,")
+    expect(DRIVER_SRC).toContain("readSource: (rel: string) => readSandboxSource(sandbox, rel),")
+    expect(DRIVER_SRC).toContain(
+      "...(verificationTarget !== undefined ? { verificationTarget } : {}),",
+    )
+    expect(DRIVER_SRC).toContain(
+      "const repairIssueSymbols = extractIssueHint(instance.problemStatement).symbols",
+    )
     expect(DRIVER_SRC).toContain("repair.buildContext?.(repairArgs)")
     expect(DRIVER_SRC).toContain("buildRepairRoundSeedMessage(")
     expect(DRIVER_SRC).toContain("recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)")

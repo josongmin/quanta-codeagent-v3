@@ -4570,6 +4570,137 @@ export const verifyAndFinalizeResult = async (args: {
  * retry loop. Exported as `runInstanceOnce` so tests can pin the single-pass
  * path independently of the retry wrapper.
  */
+// A1: the adaptive-router model call is constructed from the attempt's LLM port
+// + the live env/abort signal. Hoisted to a module-level helper so
+// `runInstanceOnce` stays under the god-FUNCTION ceiling — behavior identical.
+const buildRouterModelCall = (deps: RunInstanceDeps, signal: AbortSignal) =>
+  buildAdaptiveRouterModelCall({
+    basePort: deps.llm,
+    env: process.env,
+    signal,
+  })
+
+/**
+ * v5 adaptive attempt branch, hoisted out of `runInstanceOnce` so the
+ * orchestrator body stays under the god-FUNCTION ceiling. Behavior is identical
+ * to the inline branch: ONE thin main phase, then a router-driven decompose
+ * loop that re-prepares + re-runs the main phase per posture, then terminal /
+ * verify finalization — every exit stamps `adaptiveRoute`. The caller's
+ * `phase`/`prepared` closure vars were only assigned here for parity with the
+ * non-adaptive path's `finally`-time cleanup reads; the downstream helpers take
+ * explicit args, so capturing the finals locally is equivalent.
+ */
+const runV5AdaptiveAttempt = async (args: {
+  instance: Instance
+  deps: RunInstanceDeps
+  sandbox: string
+  signal: AbortSignal
+  wiring: Wiring
+  prepared: PreparedAttemptContext
+  reproTest: BenchReproTestTelemetry | undefined
+  startedAt: number
+  // Mirrors the inline branch's `phase = finalPhase; prepared = finalPrepared`
+  // BEFORE terminal/verify, so the caller's catch/finally observe the finals if
+  // those steps throw — byte-identical to the pre-extraction control flow.
+  onFinals: (phase: Phase, prepared: PreparedAttemptContext) => void
+}): Promise<InstanceResult> => {
+  const { instance, deps, sandbox, signal, wiring: w, reproTest, startedAt } = args
+  const preparedContext = args.prepared
+  const thinPhase = await runMainPhase({
+    instance,
+    deps,
+    sandbox,
+    signal,
+    wiring: w,
+    prepared: preparedContext,
+  })
+  let finalPrepared = preparedContext
+  let finalPhase = thinPhase
+  const revisions: string[] = []
+  const initialPacket = buildAdaptivePhasePacket({
+    instance,
+    phase: thinPhase,
+    prepared: preparedContext,
+    sandbox,
+  })
+  revisions.push(initialPacket.evidenceRevision)
+  const adaptive = await runAdaptiveBenchAttempt({
+    intakePacket: initialPacket,
+    base: preparedContext.state,
+    env: process.env,
+    modelCall: buildRouterModelCall(deps, signal),
+    runPhase: async ({ state, posture }) => {
+      const nextPrepared = await prepareAttemptContext(
+        instance,
+        sandbox,
+        deps,
+        signal,
+        posture,
+        state,
+      )
+      const nextPhase = await runMainPhase({
+        instance,
+        deps,
+        sandbox,
+        signal,
+        wiring: w,
+        prepared: nextPrepared,
+      })
+      finalPrepared = nextPrepared
+      finalPhase = nextPhase
+      const packet = buildAdaptivePhasePacket({
+        instance,
+        phase: nextPhase,
+        prepared: nextPrepared,
+        sandbox,
+      })
+      revisions.push(packet.evidenceRevision)
+      return { packet }
+    },
+  })
+  const adaptiveRoute = adaptiveRouteTelemetryOf(adaptive, revisions)
+  if (adaptive.outcome !== "finalize") {
+    return {
+      ...latePhaseFailureResultOf({
+        instance,
+        phase: finalPhase,
+        reproTest,
+        error: `adaptive controller stopped: ${String(adaptive.reason ?? adaptive.outcome)}`,
+        prepared: finalPrepared,
+        sandbox,
+      }),
+      adaptiveRoute,
+    }
+  }
+  args.onFinals(finalPhase, finalPrepared)
+  const terminal = await maybeValidateTerminalResult({
+    instance,
+    phase: finalPhase,
+    reproTest,
+    deps,
+    wiring: w,
+    startedAt,
+    signal,
+    prepared: finalPrepared,
+    sandbox,
+  })
+  if (terminal !== undefined) return { ...terminal, adaptiveRoute }
+  return {
+    ...(await verifyAndFinalizeResult({
+      instance,
+      phase: finalPhase,
+      deps,
+      sandbox,
+      signal,
+      reproTest,
+      wiring: w,
+      startedAt,
+      prepared: finalPrepared,
+    })),
+    adaptiveRoute,
+  }
+}
+
 export const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -4592,104 +4723,20 @@ export const runInstanceOnce = async (
     reproTest = preparedContext.reproTest
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
     if (v5AdaptiveEnabledForState(preparedContext.state, process.env)) {
-      const thinPhase = await runMainPhase({
+      return await runV5AdaptiveAttempt({
         instance,
         deps,
         sandbox,
         signal: abort.signal,
         wiring: w,
         prepared: preparedContext,
-      })
-      let finalPrepared = preparedContext
-      let finalPhase = thinPhase
-      const revisions: string[] = []
-      const initialPacket = buildAdaptivePhasePacket({
-        instance,
-        phase: thinPhase,
-        prepared: preparedContext,
-        sandbox,
-      })
-      revisions.push(initialPacket.evidenceRevision)
-      const adaptive = await runAdaptiveBenchAttempt({
-        intakePacket: initialPacket,
-        base: preparedContext.state,
-        env: process.env,
-        modelCall: buildAdaptiveRouterModelCall({
-          basePort: deps.llm,
-          env: process.env,
-          signal: abort.signal,
-        }),
-        runPhase: async ({ state, posture }) => {
-          const nextPrepared = await prepareAttemptContext(
-            instance,
-            sandbox,
-            deps,
-            abort.signal,
-            posture,
-            state,
-          )
-          const nextPhase = await runMainPhase({
-            instance,
-            deps,
-            sandbox,
-            signal: abort.signal,
-            wiring: w,
-            prepared: nextPrepared,
-          })
-          finalPrepared = nextPrepared
-          finalPhase = nextPhase
-          const packet = buildAdaptivePhasePacket({
-            instance,
-            phase: nextPhase,
-            prepared: nextPrepared,
-            sandbox,
-          })
-          revisions.push(packet.evidenceRevision)
-          return { packet }
+        reproTest,
+        startedAt,
+        onFinals: (p, pr) => {
+          phase = p
+          prepared = pr
         },
       })
-      const adaptiveRoute = adaptiveRouteTelemetryOf(adaptive, revisions)
-      if (adaptive.outcome !== "finalize") {
-        return {
-          ...latePhaseFailureResultOf({
-            instance,
-            phase: finalPhase,
-            reproTest,
-            error: `adaptive controller stopped: ${String(adaptive.reason ?? adaptive.outcome)}`,
-            prepared: finalPrepared,
-            sandbox,
-          }),
-          adaptiveRoute,
-        }
-      }
-      phase = finalPhase
-      prepared = finalPrepared
-      const terminal = await maybeValidateTerminalResult({
-        instance,
-        phase: finalPhase,
-        reproTest,
-        deps,
-        wiring: w,
-        startedAt,
-        signal: abort.signal,
-        prepared: finalPrepared,
-        sandbox,
-      })
-      if (terminal !== undefined) return { ...terminal, adaptiveRoute }
-      return {
-        ...(await verifyAndFinalizeResult({
-          instance,
-          phase: finalPhase,
-          deps,
-          sandbox,
-          signal: abort.signal,
-          reproTest,
-          wiring: w,
-          startedAt,
-          prepared: finalPrepared,
-        })),
-        adaptiveRoute,
-      }
     }
     phase = await runMainPhase({
       instance,
