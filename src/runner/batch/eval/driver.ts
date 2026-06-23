@@ -75,6 +75,8 @@ import type {
   ReproOracleCalibration,
 } from "../types"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
+import { runAdaptiveBenchAttempt } from "./adaptive-escalation"
+import { makeAdaptiveToolModelCall } from "./adaptive-escalation/live-model-call"
 import {
   buildCandidateFamilyBundleFromWitness,
   type CandidateFamilyBundle,
@@ -90,6 +92,7 @@ import { exec, execArgv } from "./exec"
 import { validateGoldPatch } from "./gold-sanity"
 import {
   applyBenchKnobs,
+  type BenchKnobState,
   type BenchIssueHintMode,
   type BenchPosture,
   benchPostureFromState,
@@ -98,14 +101,18 @@ import {
 } from "./knobs-bench"
 import {
   assertEvidenceTextBlind,
+  buildCandidatePostReviewLlmEvidencePacket,
   buildSelectionOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
   buildSelectionGenerationPrompt,
+  candidatePatchHash,
   type ContractFact,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
   type LlmEvidencePacketStage,
+  type MissingEvidenceFact,
+  type ProofReceiptFact,
   recordLlmEvidencePacket,
   type VerificationTargetFact,
   verificationTargetFromPlan,
@@ -1731,6 +1738,10 @@ export const buildConfig = (
   reproHint?: string,
   /** Optional one-line owner hint rendered from the ClosureBundle. */
   closureHint?: string,
+  /** Optional injected per-phase posture (v5 adaptive wiring). */
+  postureOverride?: BenchPosture,
+  /** Optional injected per-phase knob state (must match `postureOverride`). */
+  stateOverride?: BenchKnobState,
 ) => {
   // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI) OR
   // the bench-only `QUANTA_BENCH_LSP=1`. When the language-server binary
@@ -1738,8 +1749,8 @@ export const buildConfig = (
   // per-call probe in `lsp-bridge` makes the tools emit a clean `ok:false` —
   // registration is harmless without a server. Default-OFF preserves
   // byte-identical bench behavior.
-  const state = resolveBenchKnobs({ envVars: process.env })
-  const opt = benchPostureFromState(state, process.env)
+  const state = stateOverride ?? resolveBenchKnobs({ envVars: process.env })
+  const opt = postureOverride ?? benchPostureFromState(state, process.env)
   // Runtime-config-bridged knobs (read-outline / test-runner / repo-map): these
   // are NOT AgentConfig fields — they are read at wire time via `runtimeConfig()`
   // inside `wireOptionalAgentPorts`. The unified posture resolves them from the
@@ -1938,9 +1949,13 @@ interface Phase {
  * bytes (and the existing recorder maps the event onto the `recovery`
  * trajectory family, no new TrajectoryKind required).
  */
-export const emitKnobsApplied = (stream: StreamPort, envVars: NodeJS.ProcessEnv): void => {
+export const emitKnobsApplied = (
+  stream: StreamPort,
+  envVars: NodeJS.ProcessEnv,
+  stateOverride?: BenchKnobState,
+): void => {
   try {
-    const state = resolveBenchKnobs({ envVars })
+    const state = stateOverride ?? resolveBenchKnobs({ envVars })
     const knobs = knobsForReport(state)
     let cost = 0
     for (const id of Object.keys(knobs)) {
@@ -1988,6 +2003,8 @@ const runAgentOnce = async (
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<RunOnceResult> => {
   const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
   // Knob telemetry (2026-05-26): emit ONE `knobs_applied` event per
@@ -1995,7 +2012,7 @@ const runAgentOnce = async (
   // helper, so each round produces its own trajectory line (the env doesn't
   // change between rounds, so the lines are identical — useful as a
   // boundary marker).
-  emitKnobsApplied(tap, process.env)
+  emitKnobsApplied(tap, process.env, stateOverride)
   const outcome = await runAgent(
     buildConfig(
       instance,
@@ -2007,6 +2024,8 @@ const runAgentOnce = async (
       precomputedHint,
       reproHint,
       closureHint,
+      postureOverride,
+      stateOverride,
     ),
   )
   // Capture the cumulative diff CURRENTLY in the worktree (without resetting
@@ -2031,6 +2050,8 @@ const runAgentPhase = async (
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
   let turns = 0
   let stopReason: StopReason | undefined
@@ -2058,7 +2079,7 @@ const runAgentPhase = async (
       // Knob telemetry: emit once per phase entry (matches the contract
       // documented on `emitKnobsApplied`). The single-pass path bypasses
       // `runAgentOnce`, so the emit lives here directly.
-      emitKnobsApplied(tap, process.env)
+      emitKnobsApplied(tap, process.env, stateOverride)
       const outcome = await runAgent(
         buildConfig(
           instance,
@@ -2070,6 +2091,8 @@ const runAgentPhase = async (
           precomputedHint,
           reproHint,
           closureHint,
+          postureOverride,
+          stateOverride,
         ),
       )
       turns = outcome.turns
@@ -2274,6 +2297,8 @@ const runRepairPhase = async (
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
   reproSources: readonly string[],
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -2313,6 +2338,8 @@ const runRepairPhase = async (
             precomputedHint,
             reproHint,
             closureHint,
+            postureOverride,
+            stateOverride,
           ),
         validate,
         buildContext: (ctxArgs) => {
@@ -2449,6 +2476,8 @@ const generateSelectionCandidate = async (args: {
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly mergeHint: (seed: string | undefined) => string | undefined
+  readonly postureOverride?: BenchPosture
+  readonly stateOverride?: BenchKnobState
   readonly concurrency: number | undefined
   readonly baseValidatedRed: boolean | null
   readonly generationErrors: Map<number, string>
@@ -2468,6 +2497,8 @@ const generateSelectionCandidate = async (args: {
       args.precomputedHint,
       args.reproHint,
       args.mergeHint(args.seed),
+      args.postureOverride,
+      args.stateOverride,
     )
     args.addTurns(phase.turns)
     const generationError = selectionGenerationErrorOf({
@@ -2709,6 +2740,8 @@ const buildSelectionExecutorPorts = (args: {
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly closureHint: string | undefined
+  readonly postureOverride?: BenchPosture
+  readonly stateOverride?: BenchKnobState
   readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
@@ -2763,6 +2796,8 @@ const buildSelectionExecutorPorts = (args: {
         wiring: args.wiring,
         precomputedHint: args.precomputedHint,
         reproHint: args.reproHint,
+        postureOverride: args.postureOverride,
+        stateOverride: args.stateOverride,
         mergeHint: (seedHint) =>
           args.verifySelectProofRequired && args.selectorMode === "clean"
             ? seedHint
@@ -3176,6 +3211,7 @@ interface HintReproContext {
 }
 
 export interface PreparedAttemptContext extends HintReproContext {
+  readonly state: BenchKnobState
   readonly ownerResolved: readonly OwnerSibling[] | undefined
   readonly closureSession: ClosureSessionState | undefined
   readonly verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined

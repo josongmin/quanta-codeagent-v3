@@ -24,6 +24,7 @@ import { projectRouterEvidence } from "@/runner/batch/eval/adaptive-escalation/r
 import type { LlmEvidencePacket } from "@/runner/batch/eval/llm-evidence-packet"
 import {
   type BenchPosture,
+  type BenchKnobState,
   benchPostureFromState,
   resolveBenchKnobs,
 } from "@/runner/batch/eval/knobs-bench"
@@ -31,6 +32,7 @@ import {
   type AdaptiveAction,
   derivePhasePosture,
   PHASE_MODULES,
+  withKnobModules,
 } from "@/runner/batch/eval/posture"
 
 const ENV: NodeJS.ProcessEnv = {}
@@ -77,9 +79,14 @@ const uncertainPacket = (): LlmEvidencePacket => ({
 
 /** A fake runPhase that records the posture it received and returns a fixed packet. */
 const recordingRunPhase = (packet: LlmEvidencePacket) => {
-  const seen: { action?: AdaptiveAction; posture?: BenchPosture } = {}
-  const runPhase = async (args: { action: AdaptiveAction; posture: BenchPosture }) => {
+  const seen: { action?: AdaptiveAction; posture?: BenchPosture; state?: BenchKnobState } = {}
+  const runPhase = async (args: {
+    action: AdaptiveAction
+    state: BenchKnobState
+    posture: BenchPosture
+  }) => {
     seen.action = args.action
+    seen.state = args.state
     seen.posture = args.posture
     return { packet }
   }
@@ -95,7 +102,9 @@ describe("adaptive phase executor factory (P6)", () => {
     await executor({ action, modules: PHASE_MODULES[action], packet: projectRouterEvidence(goodPacket()) })
 
     const expected = derivePhasePosture(baseState(), PHASE_MODULES[action], ENV)
+    const expectedState = withKnobModules(baseState(), PHASE_MODULES[action])
     expect(seen.action).toBe(action)
+    expect(seen.state).toEqual(expectedState)
     expect(seen.posture).toEqual(expected)
     // proof-clean meaning, not just deep-equal: proof-required + clean selector.
     expect(seen.posture?.verifySelectProofRequired).toBe(true)
@@ -156,6 +165,7 @@ describe("adaptive phase executor factory (P6)", () => {
       const executor = makeAdaptiveExecutor({ base: baseState(), env: ENV, runPhase })
       await executor({ action, modules: PHASE_MODULES[action], packet: projectRouterEvidence(goodPacket()) })
       expect(PHASE_MODULES[action]).toEqual([])
+      expect(seen.state).toEqual(baseState())
       expect(seen.posture).toEqual(basePosture)
     }
   })

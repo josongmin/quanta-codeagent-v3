@@ -1,0 +1,35 @@
+{
+  "runId": "run-1782190012887",
+  "pricingVersion": "pricing.v2",
+  "snapshot": {
+    "counters": {
+      "instances": 3,
+      "degraded": 0,
+      "officialHarness": 0,
+      "localStructural": 0,
+      "researchContaminated": 0,
+      "unlabeledPassed": 0,
+      "inputTokens": 18397545,
+      "outputTokens": 66490
+    },
+    "gauges": {},
+    "timers": {
+      "turns": {
+        "count": 3,
+        "min": 121,
+        "max": 228,
+        "mean": 157.33333333333334,
+        "p50": 123,
+        "p95": 228
+      },
+      "durationMs": {
+        "count": 3,
+        "min": 528717,
+        "max": 854155,
+        "mean": 731939.3333333334,
+        "p50": 812946,
+        "p95": 854155
+      }
+    }
+  }
+}
