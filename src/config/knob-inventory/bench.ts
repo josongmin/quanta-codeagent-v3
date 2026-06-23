@@ -37,7 +37,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench: record the run's LLM trajectory to a replayable JSONL cassette (DEFAULT-OFF). Unset/''/'0' ⇒ no recording (byte-identical). '1'|'on' ⇒ <cwd>/bench-trajectory.jsonl; any other value ⇒ that path. Enables replaying a FAILED run deterministically up to any turn and DIVERGING there (bench-native 'fork from a point'; the CLI fork_session feature is REPL-scoped and cannot reach bench trajectories). full-remote propagates it to the box + fetches the cassette back to /tmp/full-remote-trajectory-<box>.jsonl.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/trajectory.ts",
   },
   {
     envKey: "QUANTA_BENCH_REPLAY_TRAJECTORY",
@@ -47,7 +47,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench: replay a recorded LLM trajectory cassette during local bench runs. Unset/''/'0' ⇒ off. '1'|'on' ⇒ <cwd>/bench-trajectory.jsonl; any other value ⇒ that path. Default miss behavior is fail-closed (`QUANTA_BENCH_REPLAY_ON_MISS=throw`); remote/pool surfaces reject this local-path seam until explicit cassette upload wiring exists.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/trajectory.ts",
   },
   {
     envKey: "QUANTA_BENCH_REPLAY_ON_MISS",
@@ -57,7 +57,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench: miss policy for `QUANTA_BENCH_REPLAY_TRAJECTORY`. `throw` (default, fail-closed), `passthrough`, or `record-and-passthrough` for intentional replay-then-diverge troubleshooting.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/trajectory.ts",
   },
   {
     envKey: "QUANTA_BENCH_CLOSURE_DIAG",

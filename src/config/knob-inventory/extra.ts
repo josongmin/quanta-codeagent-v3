@@ -375,7 +375,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "web-daemon",
     home: "runtime-config",
     describe: "Web-daemon DB backend/path.",
-    readSite: "apps/web-daemon/server.ts",
+    readSite: "apps/web-daemon/server/persistence.ts",
   },
   {
     envKey: "QUANTA_WEB_DB_DIR",
@@ -393,7 +393,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "web-daemon",
     home: "runtime-config",
     describe: "Web-daemon static dist dir.",
-    readSite: "apps/web-daemon/server.ts",
+    readSite: "apps/web-daemon/server/fetch-handler.ts",
   },
   {
     envKey: "QUANTA_WEB_STRICT_PORT",
