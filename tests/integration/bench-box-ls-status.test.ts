@@ -104,13 +104,13 @@ case "$host::$last" in
     ;;
   ubuntu@1.2.3.4::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"running","mode":"pool","runId":"wave7-s0","accountLabel":"acct-a","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"instancePreview":["demo__inst-1","demo__inst-2","demo__inst-3"],"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"startedAt":"${busyStartedAt}","updatedAt":"${busyUpdatedAt}","runLogPath":"~/runs/wave7-s0/run.log","reportPath":"~/runs/wave7-s0/report.json","predictionsPath":"~/runs/wave7-s0/preds.jsonl","observeDir":"~/runs/wave7-s0/observe","lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
+{"phase":"running","mode":"pool","runId":"wave7-s0","accountLabel":"acct-a","workload":"wave7-s0","dataset":"wave7-s0.jsonl","instanceCount":16,"instancePreview":["demo__inst-1","demo__inst-2","demo__inst-3"],"preset":"agentless-v2","model":"gpt-5.4","concurrency":16,"startedAt":"${busyStartedAt}","updatedAt":"${busyUpdatedAt}","runLogPath":"~/runs/wave7-s0/run.log","reportPath":"~/runs/wave7-s0/report.json","predictionsPath":"~/runs/wave7-s0/preds.jsonl","observeDir":"~/runs/wave7-s0/observe","lspGrounding":{"backend":"pyright","language":"pyright-langserver","launch":"ok"},"lastLogLine":"[PASS] demo__inst-1 (turns=2)"}
 EOF
     exit 0
     ;;
   ubuntu@1.2.3.5::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"instancePreview":["django__django-11179"],"preset":"agentless-v3-thin","model":"gpt-5.4","concurrency":16,"startedAt":"${idleStartedAt}","updatedAt":"${idleUpdatedAt}","runLogPath":"~/run.log","reportPath":"~/report.json","predictionsPath":"~/preds.jsonl","observeDir":"~/observe","resolvedCount":1,"unresolvedCount":0,"erroredCount":0,"emptyPatchCount":0,"lastExitCode":0,"lastLogLine":"resolved 1 | unresolved 0"}
+{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"instancePreview":["django__django-11179"],"preset":"agentless-v3-thin","model":"gpt-5.4","concurrency":16,"startedAt":"${idleStartedAt}","updatedAt":"${idleUpdatedAt}","runLogPath":"~/run.log","reportPath":"~/report.json","predictionsPath":"~/preds.jsonl","observeDir":"~/observe","resolvedCount":1,"unresolvedCount":0,"erroredCount":0,"emptyPatchCount":0,"lastExitCode":0,"lspGrounding":{"backend":"pyright","language":"pyright-langserver","launch":"ok","ready":"ready_timeout","durationMs":120,"reason":"readiness budget exhausted without resolve"},"lastLogLine":"resolved 1 | unresolved 0"}
 EOF
     exit 0
     ;;
@@ -217,9 +217,18 @@ describe("bench box ls status view", () => {
     expect(out).toContain(
       "source=snapshot  mode=pool  account=acct-a  workload=wave7-s0  dataset=wave7-s0.jsonl",
     )
+    // LSP-02: typed grounding status renders as its own line, NOT inferred from
+    // the log tail. (Red-on-injection: drop the renderer wiring and this line
+    // disappears.)
+    expect(out).toContain("lsp=pyright/pyright-langserver launch=ok")
     expect(out).toContain("log=[PASS] demo__inst-1 (turns=2)")
     expect(out).toContain("i-idle  running  c7i.8xlarge  1.2.3.5  status=idle/idle")
     expect(out).toContain("source=snapshot  mode=full-remote  workload=django__django-11179")
+    // LSP-02 discriminating-outcome render: the typed ready_timeout reaches the
+    // CLI as its own line — RCA reads the enum, not the "resolved 1" log tail.
+    expect(out).toContain(
+      "lsp=pyright/pyright-langserver launch=ok ready=ready_timeout (120ms): readiness budget exhausted without resolve",
+    )
     expect(out).toContain("i-probe  running  c7i.8xlarge  1.2.3.6  status=busy")
     expect(out).toContain(
       "source=probe  snapshot=write-failed  active=yes  report=no  runExit=no  preds=84",

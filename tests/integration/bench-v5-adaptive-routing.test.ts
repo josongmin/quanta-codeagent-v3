@@ -12,7 +12,9 @@ const ENV = scopedEnv([
   "QUANTA_BENCH_LOCALIZE_PHASE",
   "QUANTA_BENCH_PRESET",
   "QUANTA_BENCH_V5_ADAPTIVE",
-])
+], {
+  PATH: process.env.PATH,
+})
 
 const withPyrightOnPath = (pathValue: string | undefined): string => {
   const pyrightBinDir = join(process.env.HOME ?? "", ".local", "bin")

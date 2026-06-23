@@ -1,34 +1,37 @@
 /**
- * Hellgate — `adversarial-repro` knob (jun-19, #10999 under-fix class).
+ * Hellgate — `adversarial-repro` knob (jun-19 #10999 under-fix class, RE-PURPOSED
+ * jun-23 canonical/hardening split).
  *
- * RCA: django-10999 had ownerHit + a base-RED repro yet ended UNRESOLVED — the
- * agent copied the issue's incomplete suggested regex and the weak (happy-path)
- * repro printed "Issue resolved" on that under-fix (false-GREEN). The lever is a
- * STRONGER repro: a prompt block forcing boundary / must-reject / consistency
- * cases and an explicit "do NOT copy the issue's proposed fix", so a shallow
- * patch stays RED.
+ * jun-19 RCA: django-10999 ended UNRESOLVED because a weak happy-path repro
+ * false-GREENed an under-fix. The jun-19 lever made the repro adversarial.
  *
- * Teeth (each fails if the wiring is severed):
- *   1. OFF byte-identical — prompt with adversarial falsy === pre-feature prompt,
- *      and contains NO adversarial markers. (default-OFF safety)
- *   2. ON superset — adversarial prompt contains every OFF line PLUS the block.
- *   3. ON content — the load-bearing directives are present (red-on-injection:
- *      delete the block ⇒ these assertions fail).
- *   4. generate() threads `adversarial` into the LLM message (wiring proof).
- *   5. driver `prepareReproTestDetailed` threads `deps.adversarial` into generate.
+ * jun-23 MEASURED DEFECT: folding that over-strict "print 'Issue resolved' ONLY
+ * if EVERY case behaves correctly" into the SUBMIT oracle made it a 75% gold
+ * false-NEGATIVE — the canonical-correct GOLD fix could not satisfy the many
+ * incidental cases, so `verify-select-proof-required` WITHHELD the correct patch
+ * (django-11138 / 14315 measured: 3/4 reproducing repros stay RED on gold).
+ *
+ * FIX (this knob's new contract): the over-strict coverage moves to a SEPARATE
+ * ADVISORY `hardening` set; the SUBMIT-gate `canonical` set keeps the plain
+ * core-symptom contract so a minimal correct fix can flip it green.
+ *
+ * Teeth (each fails if the split is severed):
+ *   1. CANONICAL (default) carries NO over-strict markers — the submit oracle is
+ *      never the FN-inducing adversarial prompt (red-on-injection on the fix).
+ *   2. HARDENING is a SUPERSET — every canonical line survives PLUS the block.
+ *   3. HARDENING content — load-bearing adversarial directives present.
+ *   4. generate() threads `kind` into the LLM message (wiring proof).
+ *   5. driver `prepareReproTestDetailed`: deps.adversarial=true ⇒ generate runs
+ *      for BOTH canonical AND hardening; unset ⇒ canonical-only.
  *   6. posture: QUANTA_BENCH_ADVERSARIAL_REPRO ⇒ adversarialRepro, default OFF,
  *      isolated from siblings.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import "@/runner/knobs/knobs"
-import { prepareReproTestDetailed } from "@/runner/batch/eval/driver"
+import { prepareReproTestDetailed, resolveBenchKnobs } from "@/runner/batch/eval/driver"
 import { type BenchPosture, benchPostureFromState } from "@/runner/batch/eval/knobs-bench"
-import { resolveBenchKnobs } from "@/runner/batch/eval/driver"
 import { __resetKnobOverrides } from "@/shared/knob-overrides"
-import {
-  buildReproTestPrompt,
-  generateReproTests,
-} from "../../../src/agent/repro-test/generate"
+import { buildReproTestPrompt, generateReproTests } from "../../../src/agent/repro-test/generate"
 import type { LLMPort, StreamEvent, StreamInput } from "../../../src/llm"
 
 const ISSUE = "Fix parse_duration() for some negative durations. It doesn't match negatives."
@@ -48,44 +51,55 @@ const userTextOf = (input: StreamInput | undefined): string => {
   return part !== undefined && "text" in part ? part.text : ""
 }
 
-describe("adversarial-repro — prompt", () => {
-  test("OFF is byte-identical (undefined === false) and carries no adversarial markers", () => {
-    const off = buildReproTestPrompt(ISSUE)
-    expect(buildReproTestPrompt(ISSUE, undefined, false)).toBe(off)
-    expect(off).not.toContain("ADVERSARIAL")
-    expect(off).not.toContain("do NOT copy")
+// The over-strict marker that induced the 75% gold false-negative. It MUST be
+// absent from the canonical (submit-gate) prompt and present in hardening.
+const OVERSTRICT = '"Issue resolved" ONLY if EVERY case behaves correctly'
+
+describe("adversarial-repro — canonical/hardening prompt split", () => {
+  test("CANONICAL (default) carries NO over-strict adversarial markers (the FN fix)", () => {
+    const canonical = buildReproTestPrompt(ISSUE)
+    // Default kind is canonical and is byte-identical to an explicit canonical.
+    expect(buildReproTestPrompt(ISSUE, undefined, "canonical")).toBe(canonical)
+    expect(canonical).not.toContain("ADVERSARIAL")
+    expect(canonical).not.toContain("do NOT copy")
+    expect(canonical).not.toContain(OVERSTRICT)
+    // ...and it POSITIVELY instructs the core-symptom-only contract so a minimal
+    // correct fix can flip it green (red-on-injection on the canonical block).
+    expect(canonical).toContain("CORE symptom only")
   })
 
-  test("ON is a SUPERSET — every OFF line survives, plus the block", () => {
-    const off = buildReproTestPrompt(ISSUE)
-    const on = buildReproTestPrompt(ISSUE, undefined, true)
-    expect(on.length).toBeGreaterThan(off.length)
-    // Issue body + the three-marker contract must still be intact.
-    for (const line of off.split("\n")) {
-      if (line.trim() === "") continue
-      expect(on).toContain(line)
-    }
+  test("HARDENING is a SUPERSET — issue + marker contract survive, plus the block", () => {
+    const canonical = buildReproTestPrompt(ISSUE)
+    const hardening = buildReproTestPrompt(ISSUE, undefined, "hardening")
+    expect(hardening.length).toBeGreaterThan(canonical.length)
+    // Hardening drops the canonical-only "CORE symptom" line (it wants MORE than
+    // the core), so compare on the shared scaffold, not line-for-line.
+    expect(hardening).toContain(ISSUE)
+    expect(hardening).toContain('"Issue reproduced"')
+    expect(hardening).toContain('"Issue resolved"')
   })
 
-  test("ON content — load-bearing directives present (red-on-injection)", () => {
-    const on = buildReproTestPrompt(ISSUE, undefined, true)
-    expect(on).toContain("ADVERSARIAL")
-    expect(on).toContain('must STILL print "Issue reproduced"')
-    expect(on).toContain("rejected") // must-reject cases
-    expect(on).toContain("boundary")
-    expect(on).toMatch(/Do\s+NOT copy any fix, regex, or patch the issue itself proposes/)
+  test("HARDENING content — load-bearing adversarial directives present (red-on-injection)", () => {
+    const hardening = buildReproTestPrompt(ISSUE, undefined, "hardening")
+    expect(hardening).toContain("ADVERSARIAL")
+    expect(hardening).toContain('must STILL print "Issue reproduced"')
+    expect(hardening).toContain("rejected") // must-reject cases
+    expect(hardening).toContain("boundary")
+    expect(hardening).toContain(OVERSTRICT)
+    expect(hardening).toMatch(/Do\s+NOT copy any fix, regex, or patch the issue itself proposes/)
   })
 })
 
 describe("adversarial-repro — generate() wiring", () => {
-  test("adversarial:true reaches the LLM prompt; absent ⇒ not", async () => {
+  test("kind:hardening reaches the LLM prompt; canonical default ⇒ not", async () => {
     const on = new CapturingLLM()
-    await generateReproTests({ issue: ISSUE, llm: on, config: { samples: 1 }, adversarial: true })
+    await generateReproTests({ issue: ISSUE, llm: on, config: { samples: 1 }, kind: "hardening" })
     expect(userTextOf(on.lastInput)).toContain("ADVERSARIAL")
 
     const off = new CapturingLLM()
     await generateReproTests({ issue: ISSUE, llm: off, config: { samples: 1 } })
     expect(userTextOf(off.lastInput)).not.toContain("ADVERSARIAL")
+    expect(userTextOf(off.lastInput)).toContain("CORE symptom only")
   })
 })
 
@@ -95,10 +109,10 @@ describe("adversarial-repro — driver wiring", () => {
     problemStatement: ISSUE,
   } as unknown as Parameters<typeof prepareReproTestDetailed>[0]
 
-  test("deps.adversarial=true ⇒ generate receives adversarial:true", async () => {
-    let seen: boolean | undefined
-    const fakeGenerate = (async (args: { adversarial?: boolean }) => {
-      seen = args.adversarial
+  test("deps.adversarial=true ⇒ generate runs for BOTH canonical AND hardening", async () => {
+    const kinds: (string | undefined)[] = []
+    const fakeGenerate = (async (args: { kind?: string }) => {
+      kinds.push(args.kind)
       return [] as readonly string[] // empty ⇒ early return, no execute needed
     }) as unknown as typeof generateReproTests
     await prepareReproTestDetailed(instance, "/tmp/sbx", 5, {
@@ -106,20 +120,23 @@ describe("adversarial-repro — driver wiring", () => {
       generate: fakeGenerate,
       adversarial: true,
     })
-    expect(seen).toBe(true)
+    // Both kinds requested — the submit oracle (canonical) AND advisory (hardening).
+    expect(kinds).toContain("canonical")
+    expect(kinds).toContain("hardening")
   })
 
-  test("deps.adversarial unset ⇒ generate receives no adversarial flag", async () => {
-    let seen: boolean | undefined = "untouched" as unknown as boolean
-    const fakeGenerate = (async (args: { adversarial?: boolean }) => {
-      seen = args.adversarial
+  test("deps.adversarial unset ⇒ canonical-only (no hardening generation)", async () => {
+    const kinds: (string | undefined)[] = []
+    const fakeGenerate = (async (args: { kind?: string }) => {
+      kinds.push(args.kind)
       return [] as readonly string[]
     }) as unknown as typeof generateReproTests
     await prepareReproTestDetailed(instance, "/tmp/sbx", 5, {
       llm: new CapturingLLM(),
       generate: fakeGenerate,
     })
-    expect(seen).toBeUndefined()
+    expect(kinds).toContain("canonical")
+    expect(kinds).not.toContain("hardening")
   })
 })
 

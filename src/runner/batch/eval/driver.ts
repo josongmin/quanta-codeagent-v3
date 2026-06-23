@@ -32,6 +32,7 @@ import {
   lspBinaryAvailable,
   lspExtensionToLanguage,
   lspNavToolList,
+  proveStrictLspReady,
   type ReproExecPort,
   type ReproTestConfig,
   type ReproTestSelection,
@@ -54,12 +55,22 @@ import {
   SPEC_FIDELITY_STEER,
 } from "@/agent/localize-phase-guard"
 import { decideEscalation } from "@/agent/repair-escalation"
+import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
-import { errMessage, gateDisabled, gateOn, normalizePublicIssueText } from "@/shared"
+import {
+  errMessage,
+  foldGroundingReceipts,
+  gateDisabled,
+  gateOn,
+  isRealGroundingFailure,
+  type LspGroundingReceipt,
+  normalizePublicIssueText,
+  renderLspGroundingStatus,
+} from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Tool } from "@/tool"
@@ -74,9 +85,9 @@ import type {
   InstanceResult,
   ReproOracleCalibration,
 } from "../types"
-import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { runAdaptiveBenchAttempt } from "./adaptive-escalation"
 import { makeAdaptiveToolModelCall } from "./adaptive-escalation/live-model-call"
+import { computeAdaptedTimeout } from "./adaptive-timeout"
 import {
   buildCandidateFamilyBundleFromWitness,
   type CandidateFamilyBundle,
@@ -92,8 +103,8 @@ import { exec, execArgv } from "./exec"
 import { validateGoldPatch } from "./gold-sanity"
 import {
   applyBenchKnobs,
-  type BenchKnobState,
   type BenchIssueHintMode,
+  type BenchKnobState,
   type BenchPosture,
   benchPostureFromState,
   knobsForReport,
@@ -102,12 +113,12 @@ import {
 import {
   assertEvidenceTextBlind,
   buildCandidatePostReviewLlmEvidencePacket,
-  buildSelectionOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
   buildSelectionGenerationPrompt,
-  candidatePatchHash,
+  buildSelectionOwnerEvidence,
   type ContractFact,
+  candidatePatchHash,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
   type LlmEvidencePacketStage,
@@ -193,8 +204,8 @@ import { witnessAuthoritativeOwners } from "./static-witness"
 import { buildAstStaticWitnesses } from "./static-witness-adapter"
 import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
-import { discoverVerificationOwnerTests } from "./verification-owner-tests"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
+import { discoverVerificationOwnerTests } from "./verification-owner-tests"
 
 export interface RunInstanceDeps {
   llm: LLMPort
@@ -846,9 +857,16 @@ const dominantLspProbeTarget = (repoRoot: string): BenchLspProbeTarget | undefin
   dominantBinOf(enumerateRepoSources(repoRoot))
 
 export class StrictLspGroundingDegradedError extends Error {
-  constructor(message: string) {
+  /** The typed grounding receipt that triggered the degrade (LSP-02), so the
+   *  per-instance result can render the SAME status even though the gate threw
+   *  before a {@link PreparedAttemptContext} existed. Absent for the pre-probe
+   *  failures (missing binary / no mapped language / nav disabled) where no
+   *  receipt was produced. */
+  readonly receipt?: LspGroundingReceipt
+  constructor(message: string, receipt?: LspGroundingReceipt) {
     super(message)
     this.name = "StrictLspGroundingDegradedError"
+    if (receipt !== undefined) this.receipt = receipt
   }
 }
 
@@ -856,9 +874,10 @@ const verifyStrictPresetLspGrounding = async (
   posture: BenchPosture,
   sandbox: string,
   taskFiles?: readonly string[],
-): Promise<void> => {
+  signal?: AbortSignal,
+): Promise<LspGroundingReceipt | undefined> => {
   const preset = posture.preset
-  if (preset === undefined || !presetRequiresLiveLspGrounding(preset)) return
+  if (preset === undefined || !presetRequiresLiveLspGrounding(preset)) return undefined
   if (!posture.lspNav) {
     throw new StrictLspGroundingDegradedError(
       `[bench] preset ${preset} requires live LSP grounding, but LSP nav is disabled in the resolved posture.`,
@@ -880,11 +899,35 @@ const verifyStrictPresetLspGrounding = async (
       `[bench] preset ${preset} requires live LSP grounding, but this repo has no source file mapped to a configured language server.`,
     )
   }
-  if (await lspBinaryAvailable(probe.bin)) return
-  throw new StrictLspGroundingDegradedError(
-    `[bench] preset ${preset} requires live LSP grounding, but ${probe.bin} is not launchable on PATH ` +
-      `(dominant repo-language probe: ${probe.rel}, ${probe.count} file(s)).`,
-  )
+  // Cheap launch preflight first (a missing binary needs no pool spawn).
+  if (!(await lspBinaryAvailable(probe.bin))) {
+    throw new StrictLspGroundingDegradedError(
+      `[bench] preset ${preset} requires live LSP grounding, but ${probe.bin} is not launchable on PATH ` +
+        `(dominant repo-language probe: ${probe.rel}, ${probe.count} file(s)).`,
+    )
+  }
+  // READY proof (LSP-01): launchability is necessary but NOT sufficient. Drive
+  // the real warm-backend readiness probe on the task-relevant anchor, in THIS
+  // sandbox, so a launchable-but-cold workspace (ready_timeout / fatal transport)
+  // fails the strict preset closed instead of silently degrading to no-nav. A
+  // language with no warm pool returns a launch-stage `ok` (binary preflight is
+  // the only authority there). An expected lifecycle cancel is non-fatal — the
+  // attempt is being torn down anyway.
+  const receipt = await proveStrictLspReady(join(sandbox, probe.rel), sandbox, probe.bin, signal)
+  if (isRealGroundingFailure(receipt.outcome)) {
+    throw new StrictLspGroundingDegradedError(
+      `[bench] preset ${preset} requires live LSP grounding, but the task-relevant workspace did not ` +
+        `reach verified-ready. ${renderLspGroundingStatus({
+          backend: receipt.backend,
+          language: receipt.language,
+          [receipt.stage]: receipt.outcome,
+          ...(receipt.durationMs !== undefined ? { durationMs: receipt.durationMs } : {}),
+          ...(receipt.reason !== undefined ? { reason: receipt.reason } : {}),
+        })} (anchor: ${probe.rel}).`,
+      receipt,
+    )
+  }
+  return receipt
 }
 
 export interface PrepareIssueHintDeps {
@@ -1171,27 +1214,41 @@ const buildReproExecPort = (instance: Instance, deps: PrepareReproTestDeps) =>
       ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
     }))
 
+/** jun-23 canonical/hardening split. The CANONICAL set is the submit-gate
+ *  oracle (plain core-symptom contract); the optional HARDENING set is advisory
+ *  (adversarial coverage for tie-break / repair seeding, NEVER the submit gate).
+ *  Each returned candidate is tagged with its {@link ReproTestKind}. */
 const generateReproCandidateTests = async (
   instance: Instance,
   deps: PrepareReproTestDeps,
   config: ReproTestConfig,
-): Promise<readonly string[] | null> => {
+): Promise<readonly ReproTestCandidate[] | null> => {
   try {
     const mwe = extractIssueRepro(instance.problemStatement)?.code
-    return await (deps.generate ?? generateReproTests)({
+    const gen = deps.generate ?? generateReproTests
+    const base = {
       issue: instance.problemStatement,
       llm: deps.llm,
       config,
       ...(mwe !== undefined ? { mwe } : {}),
-      ...(deps.adversarial === true ? { adversarial: true } : {}),
-    })
+    }
+    const canonical = (await gen({ ...base, kind: "canonical" })).map(
+      (source): ReproTestCandidate => ({ kind: "canonical", source }),
+    )
+    if (deps.adversarial !== true) return canonical
+    // Advisory hardening set: a SEPARATE generation pass with the over-strict
+    // adversarial prompt. Kept distinct so it can never reach the submit gate.
+    const hardening = (await gen({ ...base, kind: "hardening" })).map(
+      (source): ReproTestCandidate => ({ kind: "hardening", source }),
+    )
+    return [...canonical, ...hardening]
   } catch {
     return null
   }
 }
 
 const executeReproCandidateTests = async (
-  tests: readonly string[],
+  candidates: readonly ReproTestCandidate[],
   instance: Instance,
   sandbox: string,
   deps: PrepareReproTestDeps,
@@ -1204,8 +1261,8 @@ const executeReproCandidateTests = async (
       ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
       : undefined
   try {
-    return await (deps.execute ?? executeReproTests)({
-      tests,
+    const samples = await (deps.execute ?? executeReproTests)({
+      tests: candidates.map((c) => c.source),
       repoRoot: sandbox,
       exec: buildReproExecPort(instance, deps),
       writeFile:
@@ -1216,6 +1273,11 @@ const executeReproCandidateTests = async (
       config,
       ...(buildArgv !== undefined ? { buildArgv } : {}),
     })
+    // jun-23 split: carry each candidate's KIND onto its sample by positional
+    // alignment (executeReproTests returns one sample per input, in order). This
+    // is what lets the driver route ONLY canonical reproducing sources into the
+    // submit-gate oracle (calibration + proof gate) and keep hardening advisory.
+    return samples.map((s, i) => ({ ...s, kind: candidates[i]?.kind ?? "canonical" }))
   } catch {
     return null
   }
@@ -1310,11 +1372,15 @@ export const prepareReproTest = async (
 interface InstallReproTestResult {
   readonly hint: string | undefined
   readonly telemetry: BenchReproTestTelemetry | undefined
-  /** #2 repro-vote: the scripts that REPRODUCED the bug on the un-patched tree
-   *  (outcome === "reproduced"). Re-run on the patched tree + majority-voted by
-   *  the K-of-N RESOLVED gate when the `repro-vote` knob is on. Empty/absent ⇒
-   *  no vote (byte-identical legacy gate). */
+  /** #2 repro-vote: the CANONICAL scripts that REPRODUCED the bug on the
+   *  un-patched tree (outcome === "reproduced", kind canonical). Re-run on the
+   *  patched tree + majority-voted by the K-of-N RESOLVED gate when the
+   *  `repro-vote` knob is on. Empty/absent ⇒ no vote (byte-identical legacy gate).
+   *  jun-23 split: canonical-only — the submit-gate set. */
   readonly reproSources?: readonly string[]
+  /** Advisory HARDENING reproducing scripts (jun-23 split). Tie-break / repair
+   *  seeding only — NEVER the submit gate. */
+  readonly hardeningReproSources?: readonly string[]
 }
 
 const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTelemetry => ({
@@ -1324,10 +1390,25 @@ const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTele
   ...(base.reproducedCount !== undefined ? { reproducedCount: base.reproducedCount } : {}),
 })
 
+/** The CANONICAL reproducing sources — the SUBMIT-GATE oracle set (jun-23
+ *  split). A sample with no `kind` is treated as canonical (legacy single-set
+ *  path ⇒ byte-identical to the pre-split behavior). Hardening reproes are
+ *  EXCLUDED here so they can never reach the proof gate / calibration. */
 const reproducingReproSources = (
   selection: ReproTestSelection | null | undefined,
 ): readonly string[] =>
-  selection?.samples.filter((s) => s.outcome === "reproduced").map((s) => s.source) ?? []
+  selection?.samples
+    .filter((s) => s.outcome === "reproduced" && (s.kind ?? "canonical") === "canonical")
+    .map((s) => s.source) ?? []
+
+/** The advisory HARDENING reproducing sources (jun-23 split). Advisory only —
+ *  tie-break / repair seeding — NEVER the submit gate. */
+const reproducingHardeningSources = (
+  selection: ReproTestSelection | null | undefined,
+): readonly string[] =>
+  selection?.samples
+    .filter((s) => s.outcome === "reproduced" && s.kind === "hardening")
+    .map((s) => s.source) ?? []
 
 const VALIDATED_REPRO_CONTRACT_SCRIPT_LIMIT = 2
 const VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT = 1_200
@@ -1338,9 +1419,12 @@ const boundValidatedReproSource = (source: string): string => {
   const head = trimmed.slice(0, Math.max(0, VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT - suffix.length))
   // Cut on a LINE boundary, not mid-token: a mid-line slice yields syntactically
   // broken Python that we'd then present to the model as an executable "contract".
-  // Keep only whole lines when the retained head contains a newline.
+  // Keep only whole lines when the retained head contains a newline (>=0 so a
+  // newline anywhere is preferred over a mid-token cut). A single >limit line with
+  // NO newline is inherently lossy — keep the bounded head (clearly marked
+  // truncated) rather than dropping the evidence entirely.
   const lastNewline = head.lastIndexOf("\n")
-  const safe = lastNewline > 0 ? head.slice(0, lastNewline) : head
+  const safe = lastNewline >= 0 ? head.slice(0, lastNewline) : head
   return `${safe}${suffix}`
 }
 
@@ -1349,9 +1433,7 @@ export const validatedReproContractSeed = (
   stage: LlmEvidencePacketStage = "candidate_generation",
 ): string | undefined => {
   assertEvidenceTextBlind(stage, sources)
-  const nonEmptySources = sources
-    .map(boundValidatedReproSource)
-    .filter((source) => source !== "")
+  const nonEmptySources = sources.map(boundValidatedReproSource).filter((source) => source !== "")
   const boundedSources = nonEmptySources.slice(0, VALIDATED_REPRO_CONTRACT_SCRIPT_LIMIT)
   if (boundedSources.length === 0) return undefined
   const scripts = boundedSources
@@ -1369,7 +1451,9 @@ export const validatedReproContractSeed = (
     // `Issue resolved`, but do not contort the patch merely to satisfy a script.
     "Treat them as strong public evidence of the bug's observable behavior. Prioritize fixing the root cause from the issue; a correct fix should make them report `Issue resolved`, but do not add unrelated design surface just to pass a single script.",
     ...(omitted > 0
-      ? [`Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`]
+      ? [
+          `Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`,
+        ]
       : []),
     scripts,
   ].join("\n\n")
@@ -1404,10 +1488,14 @@ export const prepareSelectionReproSources = async (
   deps: Omit<PrepareReproTestDeps, "llm" | "adversarial"> = {},
 ): Promise<{
   readonly telemetry: BenchReproTestTelemetry | undefined
+  /** CANONICAL reproducing sources — the submit-gate oracle set. */
   readonly reproSources: readonly string[]
+  /** Advisory HARDENING reproducing sources — tie-break / repair seeding only. */
+  readonly hardeningReproSources: readonly string[]
 }> => {
   const reproK = selectionReproPrepK(posture)
-  if (reproK === undefined) return { telemetry: undefined, reproSources: [] }
+  if (reproK === undefined)
+    return { telemetry: undefined, reproSources: [], hardeningReproSources: [] }
   const detail = await prepareReproTestDetailed(instance, sandbox, reproK, {
     ...deps,
     llm,
@@ -1419,6 +1507,7 @@ export const prepareSelectionReproSources = async (
   return {
     telemetry: detail.telemetry,
     reproSources: reproducingReproSources(detail.selection),
+    hardeningReproSources: reproducingHardeningSources(detail.selection),
   }
 }
 
@@ -1436,15 +1525,18 @@ export const installReproTestHint = async (
   })
   const { selection, telemetry } = preparation
   if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
-  // #2 repro-vote: keep EVERY reproducing script (not just the selected winner)
-  // so the validation-time K-of-N RESOLVED vote can re-run the whole set.
+  // #2 repro-vote: keep EVERY CANONICAL reproducing script (not just the selected
+  // winner) so the validation-time K-of-N RESOLVED vote can re-run the whole
+  // submit-gate set. jun-23 split: hardening reproes are kept SEPARATE (advisory).
   const reproSources = reproducingReproSources(selection)
+  const hardeningReproSources = reproducingHardeningSources(selection)
   const path = `${sandbox}/${REPRO_FILE_NAME}`
   try {
     await Bun.write(path, selection.selected)
     return {
       hint: REPRO_HINT_MESSAGE,
       reproSources,
+      hardeningReproSources,
       telemetry: {
         installed: true,
         path,
@@ -1453,7 +1545,12 @@ export const installReproTestHint = async (
       },
     }
   } catch {
-    return { hint: undefined, reproSources, telemetry: writeFailedTelemetry(telemetry) }
+    return {
+      hint: undefined,
+      reproSources,
+      hardeningReproSources,
+      telemetry: writeFailedTelemetry(telemetry),
+    }
   }
 }
 
@@ -2102,6 +2199,7 @@ const runAgentPhase = async (
       editCount = tap.editCount
       turnsToFirstEdit = tap.turnsToFirstEdit
     },
+    instance.swebench?.repo,
   )
   return {
     patch,
@@ -2364,6 +2462,7 @@ const runRepairPhase = async (
       repairFalseRed = out.primaryFalseRed
       repairRounds = out.rounds
     },
+    instance.swebench?.repo,
   )
   // `patch` (from withGitSnapshot's final diff) is the canonical capture; if
   // available we prefer it (it reflects the worktree at end of all rounds).
@@ -2411,12 +2510,78 @@ const unavailableReproCalibration = (): ReproOracleCalibration => ({
   goldK: null,
 })
 
+/**
+ * P4 (jun-23): GOLD-calibrate the PROOF-REQUIRED gate's CANONICAL oracle.
+ *
+ * Defect 2 root cause: `makeCalibratedReproConsensusPort` fail-opens the SOFT
+ * `resolvedKofN` selection port when the oracle is a confirmed gold false-negative,
+ * but the HARD proof gate (`makeReproConsensusProofSelectionPort` →
+ * `applyProofRequiredHardGate`) had NO calibration — a proven-broken (gold-FN)
+ * oracle still held hard submit authority and WITHHELD the correct candidate. And
+ * in `verify-select-repro: positive` (soft) mode the gold calibration NEVER RAN,
+ * so the proof gate ran fully blind.
+ *
+ * This runs the SAME canonical consensus probe used by the proof gate against the
+ * GOLD patch (EVAL-ONLY) so the driver can LIFT proofRequired for this instance
+ * when the canonical oracle is a confirmed gold-FN — a proven-broken oracle must
+ * never hold hard submit authority. Mirrors the soft-port calibration step in
+ * {@link makeCalibratedReproConsensusPort}, but for the proof path. Returns an
+ * UNAVAILABLE (no-claim) calibration when there is no reproducing canonical set
+ * (the gate is inert) or no gold (off-bench). */
+const calibrateProofOracle = async (
+  instance: Instance,
+  canonicalReproSources: readonly string[],
+  sandbox: string,
+  timeoutMs: number,
+): Promise<ReproOracleCalibration> => {
+  if (canonicalReproSources.length === 0) return unavailableReproCalibration()
+  const probe = makePatchedResolvedConsensus({
+    sources: canonicalReproSources,
+    ...reproExecBundle(instance),
+  })
+  return calibrateReproOracle({
+    resolvedProbe: probe,
+    goldPatch: instance.goldPatch,
+    sandbox,
+    baseCommit: instance.swebench?.baseCommit,
+    timeoutMs,
+  })
+}
+
+/**
+ * P4 PROOF-GATE FAIL-OPEN decision (THE structural fix for Defect 2) — pure +
+ * exported for direct mutation-grade testing of the EXACT decision the selection
+ * phase makes.
+ *
+ * A proof-required submit gate built on a CONFIRMED gold false-negative canonical
+ * oracle would WITHHOLD the canonical-correct fix forever: the broken oracle can
+ * never print "Issue resolved", so `applyProofRequiredHardGate` rejects every
+ * candidate. A proven-broken oracle must NOT hold hard submit authority ⇒ LIFT
+ * proofRequired for this instance (mirror of the soft-port fail-open in
+ * {@link makeCalibratedReproConsensusPort}). When the oracle is trustworthy
+ * (not gold-FN) OR proof was never required, the gate is unchanged.
+ *
+ * `proofCalibration.falseNegative` is gold-derived telemetry (EVAL-ONLY) — it
+ * flips a HARNESS submit gate only; it never reaches the agent or any prompt.
+ */
+export const computeEffectiveProofRequired = (
+  verifySelectProofRequired: boolean,
+  proofCalibration: ReproOracleCalibration,
+): { effectiveProofRequired: boolean; proofGateFailOpen: boolean } => {
+  const proofGateFailOpen = verifySelectProofRequired && proofCalibration.falseNegative
+  return {
+    effectiveProofRequired: verifySelectProofRequired && !proofGateFailOpen,
+    proofGateFailOpen,
+  }
+}
+
 const resolveSelectionReproConsensus = async (
   instance: Instance,
   sandbox: string,
   timeoutMs: number,
   reproSources: readonly string[],
   mode: BenchPosture["verifySelectRepro"],
+  proofRequired: boolean,
 ) => {
   const reproPolicy = selectionReproPolicy(mode)
   const calibrationUnavailable = unavailableReproCalibration()
@@ -2426,8 +2591,16 @@ const resolveSelectionReproConsensus = async (
       resolvedKofNSelectionPort: undefined,
       reproConsensusProofSelectionPort: undefined,
       calibration: calibrationUnavailable,
+      proofCalibration: calibrationUnavailable,
     }
   }
+  // P4: when the proof gate is active, ALWAYS gold-calibrate its canonical oracle
+  // — independent of `goldCalibrate` (soft `positive` mode also has a proof gate).
+  // `reproSources` here is the CANONICAL submit-gate set (hardening is excluded
+  // upstream by `reproducingReproSources`), so calibration is on the right set.
+  const proofCalibration = proofRequired
+    ? await calibrateProofOracle(instance, reproSources, sandbox, timeoutMs)
+    : calibrationUnavailable
   if (reproPolicy.goldCalibrate) {
     const { port, calibration } = await makeCalibratedReproConsensusPort(
       instance,
@@ -2444,7 +2617,11 @@ const resolveSelectionReproConsensus = async (
         sandbox,
         timeoutMs,
       ),
+      // The hard-mode soft-port calibration already probed gold on the same
+      // canonical set; prefer it (it carries goldVotes/goldK). The dedicated
+      // proof calibration is the fallback for the soft `positive` path.
       calibration,
+      proofCalibration: calibration.available ? calibration : proofCalibration,
     }
   }
   return {
@@ -2462,6 +2639,7 @@ const resolveSelectionReproConsensus = async (
       timeoutMs,
     ),
     calibration: calibrationUnavailable,
+    proofCalibration,
   }
 }
 
@@ -2476,8 +2654,8 @@ const generateSelectionCandidate = async (args: {
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly mergeHint: (seed: string | undefined) => string | undefined
-  readonly postureOverride?: BenchPosture
-  readonly stateOverride?: BenchKnobState
+  readonly postureOverride: BenchPosture | undefined
+  readonly stateOverride: BenchKnobState | undefined
   readonly concurrency: number | undefined
   readonly baseValidatedRed: boolean | null
   readonly generationErrors: Map<number, string>
@@ -2553,17 +2731,29 @@ export const selectionGenerationEnvCaveats = (args: {
   if (repro === undefined || repro.installed) return []
   switch (repro.reason) {
     case "not_installed":
-      return ["public repro helper is unavailable in this runtime; no executable public repro command is attached"]
+      return [
+        "public repro helper is unavailable in this runtime; no executable public repro command is attached",
+      ]
     case "generation_failed":
-      return ["public repro helper synthesis failed before execution; no executable public repro command is attached"]
+      return [
+        "public repro helper synthesis failed before execution; no executable public repro command is attached",
+      ]
     case "generation_empty":
-      return ["public repro helper synthesis produced no runnable script; no executable public repro command is attached"]
+      return [
+        "public repro helper synthesis produced no runnable script; no executable public repro command is attached",
+      ]
     case "write_failed":
-      return ["public repro helper could not be written into the sandbox; no executable public repro command is attached"]
+      return [
+        "public repro helper could not be written into the sandbox; no executable public repro command is attached",
+      ]
     case "execution_failed":
-      return ["attempted public repro helper failed to execute on the base environment; no executable public repro command is attached"]
+      return [
+        "attempted public repro helper failed to execute on the base environment; no executable public repro command is attached",
+      ]
     case "no_reproduced_candidate":
-      return ["generated public repro helpers did not reproduce on the base environment; no executable public repro command is attached"]
+      return [
+        "generated public repro helpers did not reproduce on the base environment; no executable public repro command is attached",
+      ]
     default:
       return []
   }
@@ -2634,7 +2824,8 @@ const buildSelectionPhaseContracts = (args: {
   readonly publicContracts: PublicContractBundle | undefined
   readonly n: number
 }) => {
-  const { effectivePublicContracts, selectionInputs, staticWitnesses } = buildSelectionStructuralPlan(args)
+  const { effectivePublicContracts, selectionInputs, staticWitnesses } =
+    buildSelectionStructuralPlan(args)
   return { effectivePublicContracts, selectionInputs, staticWitnesses }
 }
 
@@ -2648,20 +2839,27 @@ const resolveSelectionPhasePorts = async (args: {
   readonly llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"]
   readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
   readonly verifySelectRepro: BenchPosture["verifySelectRepro"]
+  readonly verifySelectProofRequired: boolean
   readonly regressionMaxTests: number | undefined
   readonly reproSources: readonly string[]
   readonly baseValidatedRed: boolean
   readonly selectionOwnerCandidates: readonly string[]
   readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
 }) => {
-  const { reproPolicy, resolvedKofNSelectionPort, reproConsensusProofSelectionPort, calibration } =
-    await resolveSelectionReproConsensus(
-      args.instance,
-      args.sandbox,
-      args.deps.timeoutMs,
-      args.reproSources,
-      args.verifySelectRepro,
-    )
+  const {
+    reproPolicy,
+    resolvedKofNSelectionPort,
+    reproConsensusProofSelectionPort,
+    calibration,
+    proofCalibration,
+  } = await resolveSelectionReproConsensus(
+    args.instance,
+    args.sandbox,
+    args.deps.timeoutMs,
+    args.reproSources,
+    args.verifySelectRepro,
+    args.verifySelectProofRequired,
+  )
   const regressionMaxTests =
     args.regressionMaxTests !== undefined ? { maxTests: args.regressionMaxTests } : {}
   const discoveredRegressionPort =
@@ -2717,6 +2915,7 @@ const resolveSelectionPhasePorts = async (args: {
     reproPolicy,
     resolvedKofNSelectionPort,
     calibration,
+    proofCalibration,
     regressionSelectionPort,
     publicRegressionProofSelectionPort,
     reproConsensusProofSelectionPort,
@@ -2740,8 +2939,8 @@ const buildSelectionExecutorPorts = (args: {
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly closureHint: string | undefined
-  readonly postureOverride?: BenchPosture
-  readonly stateOverride?: BenchKnobState
+  readonly postureOverride: BenchPosture | undefined
+  readonly stateOverride: BenchKnobState | undefined
   readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
@@ -2918,18 +3117,26 @@ const runSelectionPhase = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
+  hardeningReproSources: readonly string[],
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
-  const { effectivePublicContracts, selectionInputs, staticWitnesses } = buildSelectionPhaseContracts({
-    instance,
-    sandbox,
-    selectionOwnerCandidates,
-    ownerResolved,
-    publicContracts,
-    n,
-  })
-  const oracleFailureRepairSeed = validatedReproRepairSeed(reproSources)
+  const { effectivePublicContracts, selectionInputs, staticWitnesses } =
+    buildSelectionPhaseContracts({
+      instance,
+      sandbox,
+      selectionOwnerCandidates,
+      ownerResolved,
+      publicContracts,
+      n,
+    })
+  // jun-23 split: ADVISORY repair seed = canonical (submit-gate) scripts FIRST,
+  // then any hardening scripts as extra coverage guidance. Hardening NEVER gates
+  // submit; it only seeds repair / breaks ties. Canonical-only ⇒ byte-identical.
+  const oracleFailureRepairSeed = validatedReproRepairSeed([
+    ...reproSources,
+    ...hardeningReproSources,
+  ])
   const generationErrors = new Map<number, string>()
   const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   const verificationTarget = verificationTargetFromPlan(verificationPlan)
@@ -2955,11 +3162,24 @@ const runSelectionPhase = async (
     verifySelectRegression,
     regressionMaxTests,
     verifySelectRepro,
+    verifySelectProofRequired,
     reproSources,
     baseValidatedRed,
     selectionOwnerCandidates,
     selectionOwnerEvidence,
   })
+  // P4 PROOF-GATE FAIL-OPEN (THE structural fix for Defect 2): when the CANONICAL
+  // repro oracle is a CONFIRMED gold false-negative, a proof-required gate built on
+  // it would WITHHOLD the canonical-correct fix (the proven-broken oracle can never
+  // print "Issue resolved", so `applyProofRequiredHardGate` rejects every candidate).
+  // A proven-broken oracle must NOT hold hard submit authority ⇒ LIFT proofRequired
+  // for this instance. This is the EXACT decision point (mirror of the soft-port
+  // fail-open in makeCalibratedReproConsensusPort). Gold is EVAL-ONLY telemetry — it
+  // never reaches the agent or any prompt; this only flips a harness submit gate.
+  const { effectiveProofRequired } = computeEffectiveProofRequired(
+    verifySelectProofRequired,
+    selectionState.proofCalibration,
+  )
   const result = await runSelection({
     n,
     problemStatement: instance.problemStatement,
@@ -2975,7 +3195,7 @@ const runSelectionPhase = async (
       : {}),
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
-    ...(verifySelectProofRequired ? { proofRequired: true } : {}),
+    ...(effectiveProofRequired ? { proofRequired: true } : {}),
     ...(effectivePublicContracts !== undefined
       ? { publicContracts: effectivePublicContracts }
       : {}),
@@ -3019,18 +3239,26 @@ const runSelectionPhase = async (
       },
     }),
   })
+  // P4 RECORD: surface the CANONICAL repro oracle's gold false-negative measurement
+  // so a campaign self-measures the FN rate. In hard mode `calibration` already
+  // carries it (same canonical set + goldVotes/goldK); in the soft `positive` path
+  // only the dedicated `proofCalibration` ran, so prefer it when available. This is
+  // eval-only telemetry, NOT an inference-time gate.
+  const reportCalibration = selectionState.proofCalibration.available
+    ? selectionState.proofCalibration
+    : selectionState.calibration
   const generationFailure = selectionGenerationFailurePhase({
     result,
     generationErrors,
     totalTurns,
     n,
-    calibration: selectionState.calibration,
+    calibration: reportCalibration,
   })
   if (generationFailure !== undefined) return generationFailure
   const phase = selectionPhaseResultOf({
     result,
     totalTurns,
-    calibration: selectionState.calibration,
+    calibration: reportCalibration,
   })
   if (Object.keys(selectionLlmEvidence).length > 0) phase.llmEvidence = selectionLlmEvidence
   return phase
@@ -3211,7 +3439,10 @@ interface HintReproContext {
   readonly localizeCandidates: readonly string[]
   readonly reproHint: string | undefined
   readonly reproTest: BenchReproTestTelemetry | undefined
+  /** CANONICAL reproducing sources — the submit-gate oracle set (jun-23 split). */
   readonly reproSources: readonly string[]
+  /** Advisory HARDENING reproducing sources — repair seeding only (jun-23 split). */
+  readonly hardeningReproSources: readonly string[]
 }
 
 export interface PreparedAttemptContext extends HintReproContext {
@@ -3226,6 +3457,10 @@ export interface PreparedAttemptContext extends HintReproContext {
   readonly repairGateEligible: boolean
   readonly gateDecisionVerify: boolean
   readonly runRepair: boolean
+  /** Typed strict-admission LSP grounding proof (LSP-01/LSP-02). Present only
+   *  for presets that require live grounding; carried into the per-instance
+   *  result so the report/CLI render the SAME receipt the gate decided on. */
+  readonly lspGrounding: LspGroundingReceipt | undefined
 }
 
 export const envPrepFailedResult = (
@@ -3410,6 +3645,7 @@ const prepareHintAndReproContext = async (
       ? {
           telemetry: reproInstall.telemetry,
           reproSources: reproInstall.reproSources ?? [],
+          hardeningReproSources: reproInstall.hardeningReproSources ?? [],
         }
       : await prepareSelectionReproSources(instance, sandbox, llm, posture)
   return {
@@ -3419,6 +3655,7 @@ const prepareHintAndReproContext = async (
     reproHint: reproInstall.hint,
     reproTest: selectionRepro.telemetry,
     reproSources: selectionRepro.reproSources,
+    hardeningReproSources: selectionRepro.hardeningReproSources,
   }
 }
 
@@ -3535,7 +3772,7 @@ export const prepareAttemptContext = async (
   // language to require grounding for. Absent (non-swebench) ⇒ undefined, and the
   // gate falls back to the whole-repo probe (historical behavior).
   const taskFiles = instance.goldPatch ? filesFromPatch(instance.goldPatch) : undefined
-  await verifyStrictPresetLspGrounding(posture, sandbox, taskFiles)
+  const lspGrounding = await verifyStrictPresetLspGrounding(posture, sandbox, taskFiles, signal)
   const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm, posture)
   const stage1Files = stage1FilesOf(hintRepro.localizeCandidates)
   const ownerResolved = await resolveOwnerResolved({
@@ -3607,6 +3844,7 @@ export const prepareAttemptContext = async (
     primaryRailStep: closureSession?.primaryRailStep,
     closureHint: closureSession?.closureHint,
     intakeLlmEvidence,
+    lspGrounding,
     ...resolveRepairState({
       deps,
       instance,
@@ -3658,6 +3896,7 @@ const runMainPhase = async (args: {
       args.prepared.reproHint,
       args.prepared.closureHint,
       args.prepared.reproSources,
+      args.prepared.hardeningReproSources,
       args.prepared.posture,
       args.prepared.state,
     )
@@ -3728,15 +3967,19 @@ export const maybeValidateTerminalResult = async (args: {
 
 const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
 
-const v5AdaptiveEnabledForState = (
-  state: BenchKnobState,
-  envVars: NodeJS.ProcessEnv,
-): boolean => state.preset === V5_ADAPTIVE_PRESET && gateOn(envVars, "QUANTA_BENCH_V5_ADAPTIVE")
+const v5AdaptiveEnabledForState = (state: BenchKnobState, envVars: NodeJS.ProcessEnv): boolean =>
+  state.preset === V5_ADAPTIVE_PRESET && gateOn(envVars, "QUANTA_BENCH_V5_ADAPTIVE")
 
 const dedupeProofReceipts = (
   receipts: readonly ProofReceiptFact[],
-): readonly ProofReceiptFact[] =>
-  [...new Map(receipts.map((receipt) => [`${receipt.source}:${receipt.state}:${receipt.command ?? ""}`, receipt])).values()]
+): readonly ProofReceiptFact[] => [
+  ...new Map(
+    receipts.map((receipt) => [
+      `${receipt.source}:${receipt.state}:${receipt.command ?? ""}`,
+      receipt,
+    ]),
+  ).values(),
+]
 
 const adaptiveBaseReproReceipts = (
   reproTest: BenchReproTestTelemetry | undefined,
@@ -3762,7 +4005,7 @@ const adaptiveBaseReproReceipts = (
 const adaptiveSelectionProofReceipts = (
   proofSummary: Phase["selectionTelemetry"] extends infer T
     ? T extends { proofSummary?: infer S }
-      ? S
+      ? S | undefined
       : never
     : never,
 ): readonly ProofReceiptFact[] => {
@@ -3837,7 +4080,9 @@ export const buildAdaptivePhasePacket = (args: {
     })
   }
   const ownerFiles = cleanUniqueList([
-    ...(args.prepared.closureSession?.bundle.evidence.candidates.map((candidate) => candidate.file) ?? []),
+    ...(args.prepared.closureSession?.bundle.evidence.candidates.map(
+      (candidate) => candidate.file,
+    ) ?? []),
     ...(args.prepared.ownerResolved?.map((owner) => owner.file) ?? []),
     ...args.prepared.localizeCandidates,
   ])
@@ -3962,8 +4207,20 @@ const attachClosureMetrics = (args: {
   readonly phase: Phase
   readonly prepared: PreparedAttemptContext
 }): void => {
-  const { posture, verificationPlan, primaryRailStep, repairGateEligible, gateDecisionVerify } =
-    args.prepared
+  const {
+    posture,
+    verificationPlan,
+    primaryRailStep,
+    repairGateEligible,
+    gateDecisionVerify,
+    lspGrounding,
+  } = args.prepared
+  // LSP-02: carry the strict gate's typed grounding receipt into the report as a
+  // folded status so the report/CLI render the SAME outcome the gate proved.
+  if (lspGrounding !== undefined) {
+    const status = foldGroundingReceipts([lspGrounding])
+    if (status !== undefined) args.extra.lspGrounding = status
+  }
   if (posture.verificationPlan || posture.primaryRail) {
     args.extra.primaryRailPresent = primaryRailStep !== undefined
     args.extra.requiredVerificationCovered =
@@ -4167,7 +4424,7 @@ const latePhaseFailureResultFromError = (args: {
     })
   }
   if (args.error instanceof StrictLspGroundingDegradedError) {
-    return latePhaseFailureResultOf({
+    const result = latePhaseFailureResultOf({
       instance: args.instance,
       phase: args.phase,
       reproTest: args.reproTest,
@@ -4175,6 +4432,12 @@ const latePhaseFailureResultFromError = (args: {
       error: args.error.message,
       ...(args.prepared !== undefined ? { prepared: args.prepared, sandbox: args.sandbox } : {}),
     })
+    // The gate threw before a PreparedAttemptContext existed, so attach the typed
+    // status directly from the receipt (LSP-02) — the degraded report row still
+    // carries the launch/ready outcome enum, not just the error string.
+    const status =
+      args.error.receipt !== undefined ? foldGroundingReceipts([args.error.receipt]) : undefined
+    return status !== undefined ? { ...result, lspGrounding: status } : result
   }
   return latePhaseFailureResultOf({
     instance: args.instance,

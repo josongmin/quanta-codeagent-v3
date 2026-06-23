@@ -76,12 +76,65 @@ export interface ReproVoteOutcomeDetail {
   inconclusive: number
 }
 
-/** Optional, injectable observation sink. Absent ⇒ NO-OP ⇒ the validator result
- *  is byte-identical (additive observation only, never affects `ok`/`failTail`). */
+/** Optional, injectable observation sink. Absent ⇒ the DEFAULT module sink is
+ *  used instead (see {@link drainReproVoteOutcomes}); never a silent no-op, so
+ *  the A/B lever is observable BY CONSTRUCTION even when the call site (the
+ *  driver's `buildReproVoteValidate`) forgets to thread a recorder. Either way
+ *  this is additive observation only — it never affects `ok`/`failTail`. */
 export type RecordReproVoteOutcome = (
   outcome: ReproVoteOutcome,
   detail?: ReproVoteOutcomeDetail,
 ) => void
+
+/** One recorded round in the default sink: the outcome plus (for the three vote
+ *  paths) the tally. `detail` is OMITTED for the two pre-vote fallback paths
+ *  (`empty_sources` / `exec_failed`), matching {@link RecordReproVoteOutcome}. */
+export interface ReproVoteOutcomeRecord {
+  outcome: ReproVoteOutcome
+  detail?: ReproVoteOutcomeDetail
+}
+
+/**
+ * A5 LIVE-BY-CONSTRUCTION SEAM. `recordReproVoteOutcome` is OPTIONAL on the deps
+ * and the production call site (`buildReproVoteValidate` in the bench driver)
+ * does NOT pass it — so an optional-callback-only design would leave the vote
+ * lever STRUCTURALLY UNOBSERVABLE (the exact A5 defect). To make recording live
+ * without depending on the caller, every validator run records into this
+ * process-level sink. A campaign / report reads it with {@link drainReproVoteOutcomes}
+ * (consuming) and resets between instances with {@link resetReproVoteOutcomes};
+ * an explicitly injected recorder FANS OUT (it ALSO fires) rather than
+ * overriding the sink, so existing injected-recorder consumers are unaffected.
+ *
+ * Why this is the right channel (vs. mutating `ValidatorResult`): the result
+ * type lives in `repair/types.ts` and is read by the orchestrator
+ * (`repair/index.ts`) — neither is in this ticket's file-ownership scope, and
+ * the orchestrator does not persist diagnostic result fields into its round
+ * history anyway. The sink keeps the per-round outcome + tally observable
+ * end-to-end with no edit outside this module.
+ *
+ * Confound visibility (repro-vote.ts MEASUREMENT NOTE): each record carries the
+ * exact {@link ReproVoteOutcome}, so an analyst can SEE whether a round was
+ * VOTE-DECIDED (`vote_resolved` / `vote_unresolved` / `vote_inconclusive` — for
+ * which `primary_false_red_rate` is structurally suppressed) vs deferred to the
+ * legacy gate (`empty_sources` / `exec_failed`). The suppression is never
+ * silently conflated with an empirical signal.
+ */
+const reproVoteOutcomeSink: ReproVoteOutcomeRecord[] = []
+
+const recordToDefaultSink: RecordReproVoteOutcome = (outcome, detail) => {
+  reproVoteOutcomeSink.push(detail === undefined ? { outcome } : { outcome, detail })
+}
+
+/** CONSUMING read of the default sink — returns every outcome recorded since the
+ *  last drain/reset and clears it (each campaign read is exclusive, so a second
+ *  reader can never double-count). */
+export const drainReproVoteOutcomes = (): readonly ReproVoteOutcomeRecord[] =>
+  reproVoteOutcomeSink.splice(0, reproVoteOutcomeSink.length)
+
+/** Clear the default sink (e.g. between bench instances, or in test setup). */
+export const resetReproVoteOutcomes = (): void => {
+  reproVoteOutcomeSink.length = 0
+}
 
 export interface ReproVoteValidateDeps {
   /** Reproducing scripts (outcome === "reproduced" on the un-patched tree). The
@@ -100,7 +153,11 @@ export interface ReproVoteValidateDeps {
   fallback: (args: ValidateArgs) => Promise<ValidatorResult>
   /** OPTIONAL measurement seam — emits the {@link ReproVoteOutcome} taken on this
    *  round (with the vote tally for the three vote paths) so the A/B campaign can
-   *  attribute decisive-vs-inconclusive. Absent ⇒ NO-OP ⇒ behavior unchanged. */
+   *  attribute decisive-vs-inconclusive. When provided it FANS OUT alongside the
+   *  default process sink ({@link drainReproVoteOutcomes}); when ABSENT the
+   *  outcome is still recorded into that default sink — so the lever is observable
+   *  by construction, never dropped because the caller forgot the arg. Additive
+   *  observation only; never affects `ok`/`failTail`. */
   recordReproVoteOutcome?: RecordReproVoteOutcome
 }
 
@@ -115,8 +172,16 @@ const reproducedTail = (samples: readonly ReproTestSample[], bound: number): str
 export const makeReproVoteValidate =
   (deps: ReproVoteValidateDeps) =>
   async (args: ValidateArgs): Promise<ValidatorResult> => {
+    // LIVE-BY-CONSTRUCTION: always record into the default process sink, and ALSO
+    // fan out to an explicitly injected recorder when present. There is no
+    // "record nothing" path — the A/B lever is observable even when the call site
+    // (`buildReproVoteValidate`) passes no recorder.
+    const record: RecordReproVoteOutcome = (outcome, detail) => {
+      recordToDefaultSink(outcome, detail)
+      deps.recordReproVoteOutcome?.(outcome, detail)
+    }
     if (deps.sources.length === 0) {
-      deps.recordReproVoteOutcome?.("empty_sources")
+      record("empty_sources")
       return deps.fallback(args)
     }
     let samples: readonly ReproTestSample[]
@@ -132,7 +197,7 @@ export const makeReproVoteValidate =
       })
     } catch {
       // A broken exec port must never be a silent pass — defer to the legacy gate.
-      deps.recordReproVoteOutcome?.("exec_failed")
+      record("exec_failed")
       return deps.fallback(args)
     }
     const vote = voteResolved(samples)
@@ -142,15 +207,15 @@ export const makeReproVoteValidate =
       inconclusive: vote.inconclusive,
     }
     if (vote.verdict === "resolved") {
-      deps.recordReproVoteOutcome?.("vote_resolved", detail)
+      record("vote_resolved", detail)
       return { ok: true }
     }
     if (vote.verdict === "reproduced") {
-      deps.recordReproVoteOutcome?.("vote_unresolved", detail)
+      record("vote_unresolved", detail)
       const failTail = reproducedTail(samples, args.tailBytes ?? DEFAULT_TAIL)
       return { ok: false, failTail }
     }
     // Inconclusive (tie / all-noisy): don't guess — fall back to the legacy gate.
-    deps.recordReproVoteOutcome?.("vote_inconclusive", detail)
+    record("vote_inconclusive", detail)
     return deps.fallback(args)
   }

@@ -28,7 +28,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { lspServerBinForFile, PYRIGHT_LANGSERVER_BIN } from "@/lsp/server-registry"
 import { mirrorReportToSsot } from "@/runner/batch/report"
-import { errMessage, filesFromUnifiedDiff } from "@/shared"
+import {
+  errMessage,
+  filesFromUnifiedDiff,
+  foldGroundingReceipts,
+  type LspGroundingReceipt,
+  type LspGroundingStatus,
+  parseLspGroundingStatus,
+} from "@/shared"
 import { loadVerdicts } from "../analyze/verdicts"
 import { benchHome } from "../corpus"
 import { CURRENT_BENCH_BASE_PRESET, presetRequiresLiveLspGrounding } from "../preset"
@@ -693,6 +700,22 @@ export const pyrightLaunchProofVerdict = (probe: {
   return { ready: true, detail: out }
 }
 
+/** Map the box-side launch-proof verdict to the typed LSP-grounding SSOT receipt
+ *  (LSP-02): the remote probe is a LAUNCH-stage proof, so a not-ready verdict is
+ *  `missing_binary` (the userData pyright install failed), and a ready verdict is
+ *  `ok`. The same {@link LspGroundingStatus} shape the local report uses, so
+ *  `box ls` and the report agree on one enum. */
+export const remoteLspLaunchReceipt = (verdict: {
+  ready: boolean
+  detail: string
+}): LspGroundingReceipt => ({
+  backend: "pyright",
+  language: PYRIGHT_LANGSERVER_BIN,
+  stage: "launch",
+  outcome: verdict.ready ? "ok" : "missing_binary",
+  ...(verdict.detail !== "" ? { reason: verdict.detail } : {}),
+})
+
 const pyrightGroundingProbeCommand =
   'export PATH="$HOME/.local/bin:$PATH"; if command -v pyright-langserver >/dev/null 2>&1; then pyright --version 2>&1 | tail -1; else echo PYRIGHT_MISSING; exit 7; fi'
 
@@ -845,6 +868,11 @@ export interface BoxStatusSnapshot {
   readonly rateLimited?: boolean
   readonly lastExitCode?: number
   readonly lastLogLine?: string
+  /** LSP-02 — typed grounding status for THIS box at grade time (launch proof
+   *  of the task language server). Lets `box ls` distinguish missing_binary vs
+   *  ready vs degraded WITHOUT parsing `lastLogLine`. Absent for non-grounding
+   *  presets / when the probe was skipped. */
+  readonly lspGrounding?: LspGroundingStatus
   /** #9: the report bytes were present but failed to parse (truncated / corrupt
    *  fetch) — distinct from a genuinely-empty box-loss. Surfaced as machine-
    *  readable telemetry (not just a log) so `box ls` / postmortems can attribute
@@ -1023,7 +1051,15 @@ const normalizeSnapshotPayload = (
     updatedAt: asNonEmptyString(parsed.updatedAt) ?? "unknown",
     ...snapshotPathMeta(parsed),
     ...snapshotVerdictMeta(parsed),
+    ...lspGroundingMeta(parsed),
   }
+}
+
+const lspGroundingMeta = (
+  parsed: Partial<BoxStatusSnapshot>,
+): Partial<Pick<BoxStatusSnapshot, "lspGrounding">> => {
+  const status = parseLspGroundingStatus(parsed.lspGrounding)
+  return status === undefined ? {} : { lspGrounding: status }
 }
 
 const BOX_SNAPSHOT_MISSING_MARKER = "__QUANTA_BOX_SNAPSHOT_MISSING__"
@@ -2586,9 +2622,19 @@ export const gradeChunkOnBox = async (
   // remote command is built/run (shell-injection defense-in-depth).
   assertSafeArtifactSuffix(artifactSuffix)
   const state = createGradeChunkState()
+  // LSP-02: capture the box's typed grounding status (launch proof of the task
+  // server) once at grade start so every published snapshot — and thus `box ls`
+  // — carries the SAME enum the local report uses, not a log-tail guess. Reuses
+  // the existing cheap `--version` probe; skipped for non-grounding presets.
+  const lspGrounding = presetRequiresLiveLspGrounding(params.preset)
+    ? foldGroundingReceipts([remoteLspLaunchReceipt(await probePyrightGrounding((c) => ssh(c)))])
+    : undefined
   const snapshots = createSnapshotController(
     session,
-    createSnapshotBase(params, paths, artifactSuffix),
+    {
+      ...createSnapshotBase(params, paths, artifactSuffix),
+      ...(lspGrounding !== undefined ? { lspGrounding } : {}),
+    },
     state,
   )
   let result: FullRemoteResult | undefined

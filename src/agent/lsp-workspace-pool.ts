@@ -1,5 +1,12 @@
 import { type LspClient, LspRequestError } from "@/lsp"
-import { errMessage, logger } from "@/shared"
+import {
+  classifyLspGroundingError,
+  errMessage,
+  isExpectedLifecycleOutcome,
+  type LspGroundingErrorSignals,
+  type LspGroundingReceipt,
+  logger,
+} from "@/shared"
 import type { LspNavSession } from "@/tool"
 
 /**
@@ -135,13 +142,127 @@ export class SharedWorkspacePool {
       return this.handle(entry)
     } catch (e) {
       await this.release(entry)
+      // Route through the typed SSOT classifier (LSP-00). An expected lifecycle
+      // race/cancel stays OFF the warn channel so a successful bench run doesn't
+      // look LSP-broken just because the fire-and-forget prewarm lost to
+      // session-end eviction; a real failure carries its typed outcome.
+      const outcome = classifyLspGroundingError(this.errorSignals(e, cwd, signal), "ready")
+      if (isExpectedLifecycleOutcome(outcome)) {
+        logger.debug("lsp: shared nav session ready cancelled", {
+          backend: this.backend.id,
+          cwd,
+          file: filePath,
+          outcome,
+          reason: signal?.aborted === true ? "signal-aborted" : "hard-evicted",
+        })
+        return null
+      }
       logger.warn("lsp: failed to ready shared nav session", {
         backend: this.backend.id,
         cwd,
         file: filePath,
+        outcome,
         error: errMessage(e),
       })
       return null
+    }
+  }
+
+  /**
+   * Strict-admission ready proof (LSP-01). Drives the SAME backend readiness
+   * truth as {@link open} — the cwd-keyed entry, the `startPromise` join, and
+   * {@link warmFile}'s `ensureFileReady` probe — but returns a TYPED
+   * {@link LspGroundingReceipt} instead of a session handle, and surfaces the
+   * readiness BOOLEAN that `open` intentionally discards. A launchable server
+   * whose workspace never reaches verified-ready inside budget therefore yields
+   * `ready_timeout` (NOT a non-null session), which is what lets a strict preset
+   * fail closed on real readiness rather than mere launchability.
+   *
+   * On success the entry is RELEASED (idle-TTL kept warm), never evicted — the
+   * subsequent solve in the same cwd reuses the now-warm workspace. Never throws.
+   */
+  async proveReady(
+    filePath: string,
+    cwd: string,
+    opts?: { language?: string; signal?: AbortSignal },
+  ): Promise<LspGroundingReceipt> {
+    const language = opts?.language ?? ""
+    const signal = opts?.signal
+    const base = { backend: this.backend.id, language, file: filePath } as const
+    if (signal?.aborted) {
+      return { ...base, stage: "ready", outcome: "expected_cancel", reason: "aborted before probe" }
+    }
+    const startedAt = Date.now()
+    const elapsed = (): number => Date.now() - startedAt
+    const entry = this.acquire(cwd, signal)
+    if (entry.idleTimer !== undefined) {
+      clearTimeout(entry.idleTimer)
+      entry.idleTimer = undefined
+    }
+    entry.refs += 1
+    try {
+      try {
+        await entry.startPromise
+      } catch (e) {
+        return {
+          ...base,
+          stage: "launch",
+          outcome: classifyLspGroundingError(this.errorSignals(e, cwd, signal), "launch"),
+          reason: errMessage(e),
+          durationMs: elapsed(),
+        }
+      }
+      let ready: boolean
+      try {
+        ready = await this.warmFile(entry, filePath, signal)
+      } catch (e) {
+        return {
+          ...base,
+          stage: "ready",
+          outcome: classifyLspGroundingError(this.errorSignals(e, cwd, signal), "ready"),
+          reason: errMessage(e),
+          durationMs: elapsed(),
+        }
+      }
+      // Late-eviction reap parity with {@link open}: if the cwd was hard-evicted
+      // while we were booting/warming, reap the entry we just materialized
+      // (instead of leaking a daemon on a tombstoned cwd) and report the
+      // expected lifecycle cancel rather than a misleading ready result.
+      if (this.hardEvicted.has(cwd)) {
+        await this.stopClient(entry, "pool/prove-evict-late")
+        return {
+          ...base,
+          stage: "ready",
+          outcome: "expected_cancel",
+          reason: "workspace hard-evicted during ready proof",
+          durationMs: elapsed(),
+        }
+      }
+      return {
+        ...base,
+        stage: "ready",
+        outcome: ready ? "ok" : "ready_timeout",
+        durationMs: elapsed(),
+        ...(ready ? {} : { reason: "readiness budget exhausted without resolve" }),
+      }
+    } finally {
+      await this.release(entry)
+    }
+  }
+
+  /** Decompose a thrown launch/ready error into the pure SSOT signals
+   *  {@link classifyLspGroundingError} consumes — the ONE place the pool's
+   *  transport/sentinel heuristics meet the typed taxonomy. */
+  private errorSignals(
+    e: unknown,
+    cwd: string,
+    signal: AbortSignal | undefined,
+  ): LspGroundingErrorSignals {
+    return {
+      aborted: signal?.aborted === true,
+      evicted: this.hardEvicted.has(cwd),
+      fatalTransport: isFatalSharedSessionError(e),
+      closedSentinel: errMessage(e) === SHARED_SESSION_CLOSED,
     }
   }
 
@@ -247,31 +368,32 @@ export class SharedWorkspacePool {
   }
 
   /** Bring `filePath` to ready, deduping concurrent + repeat warms. Already
-   *  prepared ⇒ a cheap `prime` (re-open doc) and return; in-flight ⇒ join it;
-   *  otherwise drive the backend's readiness probe and mark prepared ONLY on a
-   *  verified-ready result. */
+   *  prepared ⇒ a cheap `prime` (re-open doc) and return true; in-flight ⇒ join
+   *  it (sharing its verified-ready result); otherwise drive the backend's
+   *  readiness probe and mark prepared ONLY on a verified-ready result. Returns
+   *  the readiness boolean (true = verified-ready) — {@link open} discards it
+   *  (best-effort warm) while {@link proveReady} surfaces it as admission proof. */
   private async warmFile(
     entry: WorkspaceEntry,
     filePath: string,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<boolean> {
     // A concurrent evict / fatal teardown may have stopped this entry between
     // `open`'s `await startPromise` and here — don't drive a dead client through
     // the backend's readiness probe (wasted work + a spurious warm-budget warn).
     if (entry.destroyed) throw new Error(SHARED_SESSION_CLOSED)
     if (entry.preparedFiles.has(filePath)) {
       await entry.client.prime(filePath, signal)
-      return
+      return true
     }
     const inFlight = entry.preparingFiles.get(filePath)
-    if (inFlight) {
-      await inFlight
-      return
-    }
+    if (inFlight) return await inFlight
     const prep = this.backend.ensureFileReady(entry.client, filePath, signal)
     entry.preparingFiles.set(filePath, prep)
     try {
-      if (await prep) entry.preparedFiles.add(filePath)
+      const ready = await prep
+      if (ready) entry.preparedFiles.add(filePath)
+      return ready
     } finally {
       entry.preparingFiles.delete(filePath)
     }

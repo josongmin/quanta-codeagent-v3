@@ -21,6 +21,38 @@
  *     which a downstream byte-writer would happily serialize).
  */
 
+/**
+ * The KIND of a reproduction-test candidate (jun-23 canonical/hardening split).
+ *
+ *   - `"canonical"`  — exercises the issue's CORE symptom ONLY. The minimal
+ *                       correct fix MUST be able to flip it to "Issue resolved".
+ *                       NO adversarial over-strictness, NO "every incidental
+ *                       case must pass". THIS is the submit-gate oracle (the set
+ *                       the proof gate calibrates + gates on).
+ *   - `"hardening"`  — the adversarial edge/boundary/must-reject cases. ADVISORY
+ *                       ONLY: used for selection tie-break + repair seeding. It
+ *                       must NEVER block submit / withhold a correct candidate.
+ *
+ * MEASURED ROOT CAUSE (jun-23): an adversarial repro that asserts MANY incidental
+ * cases is a 75% gold false-NEGATIVE — applying the canonical-correct gold fix
+ * leaves it RED 3/4 of the time. Folding that over-strictness into the SUBMIT
+ * oracle made `agentless-v4-proof-clean` structurally unwinnable. Splitting the
+ * concern keeps the submit gate on the core symptom (low FN) and demotes the
+ * adversarial coverage to advisory.
+ *
+ * Closed union; matching is exhaustive at every consumer. */
+export type ReproTestKind = "canonical" | "hardening"
+
+/** A generated reproduction-test candidate tagged with its {@link ReproTestKind}.
+ *  The `source` is the LLM-emitted Python (post fence-strip). Carrying the kind
+ *  on the candidate is what lets the driver route ONLY the canonical reproducing
+ *  set into the submit-gate oracle (calibration + proof gate), while hardening
+ *  candidates stay advisory. */
+export interface ReproTestCandidate {
+  readonly kind: ReproTestKind
+  readonly source: string
+}
+
 export interface ReproTestConfig {
   /**
    * How many test candidates to sample.
@@ -81,6 +113,11 @@ export interface ReproTestSample {
    *  (so a script that says "Issue reproduced" then "Issue resolved" is
    *  classified `"resolved"`). */
   outcome: ReproTestOutcome
+  /** jun-23 canonical/hardening split. Defaults to `"canonical"` when the
+   *  generator did not tag a kind (back-compat: the legacy single-set path is
+   *  the submit-gate / canonical oracle). HARDENING samples are advisory and
+   *  MUST NOT be routed into the submit-gate oracle. */
+  kind?: ReproTestKind
 }
 
 export interface ReproTestSelection {

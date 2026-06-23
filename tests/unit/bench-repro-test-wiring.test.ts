@@ -394,7 +394,7 @@ describe("prepareReproTest", () => {
         },
       },
     )
-    expect(out).toEqual({ telemetry: undefined, reproSources: [] })
+    expect(out).toEqual({ telemetry: undefined, reproSources: [], hardeningReproSources: [] })
   })
 })
 

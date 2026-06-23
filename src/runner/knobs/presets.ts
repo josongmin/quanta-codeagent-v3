@@ -264,6 +264,20 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
   // keep closure-grounded generation and clean selector authority, but restore
   // bounded executable public-repro feedback in repro-only mode. This makes the
   // selector consume proof receipts instead of relying on minimality-only wins.
+  //
+  // jun-23 RECONCILED to be WINNABLE (was 0/3 — two structural defects, both fixed
+  // in the driver, NOT by weakening the preset):
+  //   - `adversarial-repro: 1` NO LONGER over-strictens the SUBMIT repro. Post the
+  //     canonical/hardening split it means "ALSO generate an advisory HARDENING
+  //     set" (tie-break / repair seeding). The submit-gate oracle stays CANONICAL
+  //     (plain core-symptom), so a minimal correct fix can flip it green — removing
+  //     the measured 75% gold false-negative that the proof gate treated as authority.
+  //   - `verify-select-proof-required: 1` stays, but the proof gate is now CANONICAL
+  //     + GOLD-CALIBRATED + FAIL-OPEN: when the canonical oracle is a confirmed gold
+  //     false-negative, the driver lifts proofRequired for that instance (a
+  //     proven-broken oracle must never hold hard submit authority). Calibration runs
+  //     on the canonical set even under `verify-select-repro: positive` (soft).
+  // No other preset changes posture (byte-identical).
   "agentless-v4-proof-clean": {
     lsp: "1",
     "localize-phase": "5",

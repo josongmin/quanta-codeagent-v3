@@ -11,7 +11,7 @@ export { presetRequiresLiveLspGrounding }
  *  inert (runs as its thin-strict base posture) — so the LLM brain never engages
  *  until the operator opts in (the oracle-measurement wave gate). */
 export const v5AdaptiveEnabled = (args: {
-  readonly preset: string
+  readonly preset: string | undefined
   readonly envVars: Record<string, string | undefined>
 }): boolean => args.preset === V5_ADAPTIVE_PRESET && gateOn(args.envVars, "QUANTA_BENCH_V5_ADAPTIVE")
 

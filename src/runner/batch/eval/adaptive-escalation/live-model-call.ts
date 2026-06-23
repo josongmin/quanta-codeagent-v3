@@ -57,11 +57,9 @@ export const makeAdaptiveToolModelCall = (args: {
       events.push(event)
     }
     const assembled = assembleFromEvents([...events]).message
-    const toolCall = assembled.content.find(
-      (block): block is { type: "tool_use"; name: string; input: unknown } =>
-        block.type === "tool_use" && block.name === ROUTER_TOOL_NAME,
-    )
-    if (toolCall !== undefined) return toolCall.input
+    for (const block of assembled.content) {
+      if (block.type === "tool_use" && block.name === ROUTER_TOOL_NAME) return block.input
+    }
     const text = collectText(events)
     const parsed = validateAgainstResponseSchema(text, input.schema as Record<string, unknown>)
     return parsed.ok ? parsed.value : text === "" ? null : text

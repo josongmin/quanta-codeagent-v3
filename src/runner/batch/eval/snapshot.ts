@@ -7,9 +7,31 @@
  * via `getCachePathspecs`).
  */
 
+import { readFile, writeFile } from "node:fs/promises"
 import { type SandboxData, isTestFilePath } from "@/shared"
 import { getCachePathspecs } from "../corpus/cache-pathspecs"
+import {
+  type ProjectEnvSandboxFs,
+  prepareProjectEnvSandbox,
+  revertProjectEnvSandbox,
+} from "../corpus/project-env"
 import { type ExecResult, exec, execArgv, trimOut } from "./exec"
+
+/** Real-fs port for P0 build-env materialization (node:fs/promises). The
+ *  corpus helper is fs-injected so unit tests use a fake; production wires the
+ *  real filesystem here. */
+const snapshotFsPort: ProjectEnvSandboxFs = {
+  readFile: (p) => readFile(p, "utf8"),
+  writeFile: (p, c) => writeFile(p, c),
+  exists: async (p) => {
+    try {
+      await readFile(p)
+      return true
+    } catch {
+      return false
+    }
+  },
+}
 
 /**
  * Common git argv prefix for bench-internal commits — matches the `${G}`
@@ -131,6 +153,13 @@ export const withGitSnapshot = async (
   timeoutMs: number,
   baseCommit: string | undefined,
   body: () => Promise<void>,
+  /** SWE-bench `owner/name` slug. When set, P0 build-env materialization runs
+   *  AFTER the base checkout (so a repo whose build backend imports a dep at
+   *  build time — e.g. astropy's `import extension_helpers` — can actually build
+   *  under uv) and is surgically REVERTED before the candidate diff is captured,
+   *  so this env-only `pyproject.toml` mutation NEVER leaks into the submitted
+   *  patch. Undefined ⇒ byte-identical to the pre-P0 path (no-op). */
+  repo?: string,
 ): Promise<string> => {
   const G = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
   const hasGit = (await exec("git rev-parse --git-dir", sandbox, timeoutMs)).code === 0
@@ -139,8 +168,16 @@ export const withGitSnapshot = async (
       ? `${G} checkout -q -f ${baseCommit} && ${G} reset -q --hard ${baseCommit} && ${G} clean -qfdx`
       : `git init -q . && ${G} add -A && ${G} commit -q -m base --allow-empty`
   const init = await exec(prep, sandbox, timeoutMs)
+  // P0: materialize build-env deps into the checked-out tree BEFORE the agent
+  // (and its repro/test exec) runs. The base checkout above would wipe a
+  // pre-checkout materialization (`reset --hard`), so it MUST happen here.
+  if (repo !== undefined) await prepareProjectEnvSandbox(sandbox, repo, snapshotFsPort)
   await body()
   if (init.code !== 0) return ""
+  // P0: strip the env-only block back out BEFORE capture so it never leaks into
+  // the submitted diff (a genuine agent edit to pyproject.toml survives — the
+  // revert is surgical to the sentinel-fenced block).
+  if (repo !== undefined) await revertProjectEnvSandbox(sandbox, repo, snapshotFsPort)
   // T2: exclude cache/build paths at the git layer via pathspec — pruning at
   // source is structural, where the prior post-hoc filter let mixed
   // source+cache patches (django leak, 2026-05-21) through.

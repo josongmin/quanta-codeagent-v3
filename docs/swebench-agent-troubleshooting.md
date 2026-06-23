@@ -99,13 +99,33 @@ quanta-bench evaluate-repro --corpus <corpus-dir> --probe --instance astropy__as
 # persisted repro-scripts sidecar; script content matters here).
 quanta-bench evaluate-repro --corpus <corpus-dir> --repro-scripts <sidecar.jsonl>
 ```
+> ⚠️ **`--repro-scripts` status:** the sidecar reader works, but **nothing
+> auto-produces the sidecar yet** (the all-K repro-source persist writer was
+> deferred). So today the `--probe` mode (build-env class) is the usable path; for
+> the **no_reproduced** class use **Path 1 (cassette replay)** below — it's fully
+> implemented — until the sidecar producer lands. `evaluate-repro` checks out each
+> instance's `base_commit` before running, so the rescore hits the BUGGY tree.
+
 Flags: `--instance a,b` (subset), `--exec-timeout-ms` (default 60000, matches the
 live `DEFAULT_EXEC_TIMEOUT_MS` so a slow repro doesn't pass here yet die live).
+Requires a **real SWE-bench task corpus** (`tasks/repo/swebench` with checked-out
+repos + `swebench_meta`), NOT a manifest/dir corpus and NOT a bare instances.jsonl
+(those carry no `swebench_meta`, so every instance is filtered out). `evaluate-repro`
+checks out each instance's `base_commit` first, so it hits the BUGGY tree.
 
-Output per instance: `outcomes=[…] reproduced=N parity=match|drift (was […])`.
-`parity=drift` from `exec_failed` → `reproduced` is the **win signal** that a
-build-env fix worked. The summary exits non-zero if every instance errored or any
-were skipped (so `drift=0` can never silently read as "no regressions").
+Output per instance: `outcomes=[…] reproduced=N parity=match|drift|unknown`.
+- **`--probe` win signal = `reproduced` going 0→N** across a before/after-fix pair
+  (NOT parity — a probe has no recorded outcome, so parity is always `unknown`).
+  Note: for `--probe`, `reproduced` means "the project BUILDS & imports" (build-env
+  OK), not "the bug reproduced".
+- **`--repro-scripts` win signal = `parity=drift`** (`exec_failed`→`reproduced` vs
+  the recorded outcome). The summary exits non-zero if every instance errored or any
+  were skipped (so a result can never silently read as "all clean").
+- ⚠️ The corpus carries no `version` (parseTaskYaml's `swebench_meta` omits it), so
+  the probe builds under the repo's FALLBACK python, which may differ from the live
+  dataset run's per-version python for version-sensitive build envs. Fine for
+  dependency/build-flag fixes (e.g. astropy `extension_helpers`); approximate for
+  python-version-sensitive ones.
 
 Implementation: `src/runner/batch/eval/repro-rescore.ts` (pure core, reuses the
 live `executeReproTests` so it round-trips byte-identically) +

@@ -8,6 +8,7 @@
 
 import type { StopReason } from "@/agent"
 import type { LocalEnvSelection } from "@/runtime"
+import type { LspGroundingStatus } from "@/shared"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 
 /** Official SWE-bench instance metadata, present only for instances loaded
@@ -230,6 +231,14 @@ export interface InstanceResult {
    */
   primaryRailPresent?: boolean
   requiredVerificationCovered?: boolean
+  /**
+   * LSP-02 — typed strict-admission LSP-grounding status (jun-23 stability proof).
+   * The folded {@link LspGroundingStatus} the strict gate decided on (launch +
+   * ready outcomes). Present only for presets that require live grounding; absent
+   * ⇒ byte-identical report. The SAME typed shape is rendered by `bench box ls`
+   * and a degraded verdict line, so RCA reads a status enum instead of a log tail.
+   */
+  lspGrounding?: LspGroundingStatus
   /**
    * T-3 OBSERVE-ONLY — the repair round that cleared (ok by exit code) had a typed
    * rail predicate that was evaluable AND mismatched: the `primary_false_green`

@@ -850,6 +850,18 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     proofReceipts,
     contractFacts: input.contracts,
     staticFacts: [
+      // Evidence-toned framing for the scripts below (the old aggressive
+      // "MUST pass" contract-seed was removed; a short note keeps the LLM
+      // context-aware WITHOUT inviting reward-hacking the self-generated oracle).
+      ...((input.validatedReproScripts ?? []).some((s) => s.trim() !== "")
+        ? [
+            {
+              kind: "validated_public_repro_note",
+              value:
+                "Scripts below reproduce the issue on the UNPATCHED tree — they reflect the bug's observable behavior. Use them to understand the ROOT CAUSE; a correct fix should make them report `Issue resolved`, but fix the root cause rather than contorting the patch to satisfy any single script.",
+            },
+          ]
+        : []),
       ...(input.validatedReproScripts ?? [])
         .map((source) => source.trim())
         .filter((source) => source !== "")

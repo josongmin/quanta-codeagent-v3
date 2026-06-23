@@ -249,6 +249,33 @@ describe("llm evidence packet — stage builders", () => {
     })
   })
 
+  test("AUDIT: validated repro scripts carry an evidence-toned framing note (not a 'must pass' mandate)", () => {
+    const rendered = buildSelectionGenerationPacket({
+      problemStatement: "Connection settings are ignored.",
+      ownerEvidence: [],
+      contracts: [],
+      validatedReproScripts: ["print('Issue reproduced')"],
+    })
+    const parsed = parseRendered(rendered)
+    const facts = parsed.staticFacts as Array<{ kind: string; value: string }>
+    const note = facts.find((f) => f.kind === "validated_public_repro_note")
+    expect(note).toBeDefined()
+    expect(note?.value.toLowerCase()).toContain("root cause")
+    expect(note?.value.toLowerCase()).not.toContain("must make them report")
+  })
+
+  test("AUDIT: NO framing note when there are no validated repro scripts", () => {
+    const parsed = parseRendered(
+      buildSelectionGenerationPacket({
+        problemStatement: "issue",
+        ownerEvidence: [],
+        contracts: [],
+      }),
+    )
+    const facts = parsed.staticFacts as Array<{ kind: string; value: string }>
+    expect(facts.some((f) => f.kind === "validated_public_repro_note")).toBe(false)
+  })
+
   test("generation packet rejects hidden oracle markers inside validated repro scripts", () => {
     expect(() =>
       buildSelectionGenerationPacket({

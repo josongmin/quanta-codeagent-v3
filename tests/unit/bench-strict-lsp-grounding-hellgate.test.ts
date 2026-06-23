@@ -1,14 +1,18 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   __resetLspAvailabilityCacheForTest,
+  __resetSharedPyrightSessionsForTest,
   __setLspAvailabilityOverrideForTest,
+  __setPyrightClientFactoryForTest,
+  __setPyrightWarmupTimingForTest,
 } from "@/agent/lsp-bridge"
 import { runInstance } from "@/apps/bench/eval"
 import type { Instance } from "@/apps/bench/types"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { type Location, LspClient, type LspClientOptions } from "@/lsp"
 import { scopedEnv } from "../_support/scoped-env"
 
 class SpyLLM implements LLMPort {
@@ -20,6 +24,29 @@ class SpyLLM implements LLMPort {
     yield { type: "message_stop", stop_reason: "end_turn" }
   }
 }
+
+/** A fake pyright client so the LSP-01 READY proof (which drives a real warm
+ *  backend) is deterministic and does NOT depend on a pyright binary being
+ *  installed in the test env. `start`/`definition` are scriptable to model a
+ *  warm-ready vs a never-resolving (cold) server. */
+class FakePyrightClient extends LspClient {
+  defImpl: () => Promise<Location[] | null> = async () => []
+  constructor(options: LspClientOptions = {}) {
+    super({ defaultCommand: ["unused"], languageIdFor: () => "python" }, options)
+  }
+  override async start(): Promise<void> {}
+  override async stop(): Promise<void> {}
+  override async prime(): Promise<void> {}
+  override async definition(): Promise<Location[] | null> {
+    return this.defImpl()
+  }
+}
+
+afterEach(async () => {
+  await __resetSharedPyrightSessionsForTest()
+  __setPyrightClientFactoryForTest(null)
+  __setPyrightWarmupTimingForTest(null)
+})
 
 const env = scopedEnv(["QUANTA_BENCH_PRESET"])
 
@@ -144,6 +171,10 @@ describe("bench strict LSP grounding fail-closed", () => {
       env.set({ QUANTA_BENCH_PRESET: "agentless-v3-thin-strict" })
       __resetLspAvailabilityCacheForTest()
       __setLspAvailabilityOverrideForTest((bin) => bin !== "clangd")
+      // LSP-01: the strict gate now also runs a READY proof on the task anchor.
+      // Inject a warm-ready fake pyright so this case stays deterministic without
+      // a real pyright binary (the launch override only fakes `--version`).
+      __setPyrightClientFactoryForTest(() => new FakePyrightClient())
       const dir = mkdtempSync(join(tmpdir(), "bench-strict-lsp-taskrel-"))
       try {
         // Make C the whole-repo dominant language (5 .c > 1 .py) so the old probe
@@ -209,6 +240,59 @@ describe("bench strict LSP grounding fail-closed", () => {
         expect(result.turns).toBe(0)
         expect(result.error).toContain("requires live LSP grounding")
         expect(result.error).toContain("typescript-language-server")
+        expect(llm.invoked).toBe(false)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+        __setLspAvailabilityOverrideForTest(null)
+        __resetLspAvailabilityCacheForTest()
+      }
+    }),
+    60_000,
+  )
+
+  test.serial(
+    "LSP-01: strict preset fails CLOSED when pyright is launchable but the workspace never reaches ready",
+    env.run(async () => {
+      // The gap launchability-only admission could not see: the binary resolves
+      // (`--version` ok) but the task workspace never reaches verified-ready in
+      // budget. Strict admission must DEGRADE on ready_timeout, not run blind.
+      env.set({ QUANTA_BENCH_PRESET: "agentless-v3-thin-strict" })
+      __resetLspAvailabilityCacheForTest()
+      __setLspAvailabilityOverrideForTest(() => true) // pyright "launchable"
+      // A python file WITH an import gives the readiness probe a symbol to poll;
+      // a fake server that never resolves it exhausts the (tiny) ready budget.
+      const fake = new FakePyrightClient()
+      fake.defImpl = async () => []
+      __setPyrightClientFactoryForTest(() => fake)
+      __setPyrightWarmupTimingForTest({ budgetMs: 120, retryMs: 40 })
+      const dir = mkdtempSync(join(tmpdir(), "bench-strict-lsp-notready-"))
+      try {
+        writeFileSync(
+          join(dir, "core.py"),
+          "from pkg.dep import helper\n\n\ndef add(a, b):\n    return helper(a) - b\n",
+        )
+        const instance: Instance = {
+          id: "strict-lsp-notready",
+          repoPath: dir,
+          problemStatement: "Fix add().",
+          testCmd: "true",
+          goldPatch:
+            "--- a/core.py\n+++ b/core.py\n@@ -4,2 +4,2 @@\n-    return helper(a) - b\n+    return helper(a) + b\n",
+        }
+        const llm = new SpyLLM()
+        const result = await runInstance(instance, { llm, maxTurns: 3, timeoutMs: 20_000 })
+        expect(result.passed).toBe(false)
+        expect(result.verdict).toBe("degraded")
+        expect(result.turns).toBe(0)
+        expect(result.error).toContain("verified-ready")
+        expect(result.error).toContain("ready_timeout")
+        // LSP-02: the degraded row carries the TYPED status, not just the error
+        // string — and on the LIVE apps path (gate throws before `prepared`
+        // exists), proving the receipt is threaded off the error.
+        expect(result.lspGrounding?.ready).toBe("ready_timeout")
+        expect(result.lspGrounding?.backend).toBe("pyright")
+        // Red-on-injection: if the ready proof is reverted (launch-only), the task
+        // would RUN and llm.invoked would flip true.
         expect(llm.invoked).toBe(false)
       } finally {
         rmSync(dir, { recursive: true, force: true })

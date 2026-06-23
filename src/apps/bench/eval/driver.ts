@@ -8,9 +8,9 @@ import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
-import { withStaticWitnessFamilies } from "@/runner/batch/eval/candidate-families"
 import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
 import { makeAdaptiveToolModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
+import { withStaticWitnessFamilies } from "@/runner/batch/eval/candidate-families"
 import {
   applyBenchKnobs,
   type BenchKnobState,
@@ -56,16 +56,16 @@ import {
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
-  selectionReproPrepK,
   selectionGenerationEnvCaveats,
+  selectionReproPrepK,
   UsageTap,
   validatedReproRepairSeed,
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
 import {
-  buildSelectionOwnerEvidence,
   buildSelectionGenerationPrompt,
+  buildSelectionOwnerEvidence,
   type ContractFact,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
@@ -101,14 +101,14 @@ import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
-import { errMessage, gateDisabled, logger } from "@/shared"
+import { errMessage, foldGroundingReceipts, gateDisabled, logger } from "@/shared"
+import { v5AdaptiveEnabled } from "../preset"
 import type {
   BenchReproTestTelemetry,
   Instance,
   InstanceResult,
   ReproOracleCalibration,
 } from "../types"
-import { v5AdaptiveEnabled } from "../preset"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
 import { runRepairRounds } from "./repair/index"
@@ -441,6 +441,7 @@ const runAgentPhase = async (
       editCount = tap.editCount
       turnsToFirstEdit = tap.turnsToFirstEdit
     },
+    instance.swebench?.repo,
   )
   // Drain any in-flight snapshots, then select what to emit. `finalOk` = the
   // agent declared done cleanly; any other reason is the "ran out mid-validate"
@@ -547,6 +548,7 @@ const runRepairPhase = async (
       repairFalseRed = out.primaryFalseRed
       repairRounds = out.rounds
     },
+    instance.swebench?.repo,
   )
   return {
     patch: patch !== "" ? patch : finalPatch,
@@ -655,8 +657,8 @@ const generateSelectionCandidate = async (args: {
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly mergeHint: (seed: string | undefined) => string | undefined
-  readonly postureOverride?: BenchPosture
-  readonly stateOverride?: BenchKnobState
+  readonly postureOverride: BenchPosture | undefined
+  readonly stateOverride: BenchKnobState | undefined
   readonly concurrency: number | undefined
   readonly baseValidatedRed: boolean | null
   readonly generationErrors: Map<number, string>
@@ -995,7 +997,9 @@ const runSelectionPhase = async (
         (sample === "" ? "" : ` (${sample})`),
       reproOracleCalibration: calibration,
       selectionTelemetry: summarizeSelection(result),
-      ...(Object.keys(selectionLlmEvidence).length > 0 ? { llmEvidence: selectionLlmEvidence } : {}),
+      ...(Object.keys(selectionLlmEvidence).length > 0
+        ? { llmEvidence: selectionLlmEvidence }
+        : {}),
     }
   }
   return {
@@ -1139,7 +1143,14 @@ const runAdaptiveAttempt = async (args: {
     env: process.env,
     modelCall: makeAdaptiveToolModelCall({ llm: deps.llm, signal }),
     runPhase: async ({ state, posture }) => {
-      const nextPrepared = await prepareAttemptContext(instance, sandbox, deps, signal, posture, state)
+      const nextPrepared = await prepareAttemptContext(
+        instance,
+        sandbox,
+        deps,
+        signal,
+        posture,
+        state,
+      )
       const nextPhase = await runAppMainPhase({
         instance,
         deps,
@@ -1315,7 +1326,7 @@ const runInstanceOnce = async (
       })
     }
     if (error instanceof StrictLspGroundingDegradedError) {
-      return latePhaseFailureResultOf({
+      const degraded = latePhaseFailureResultOf({
         instance,
         phase,
         reproTest,
@@ -1323,6 +1334,13 @@ const runInstanceOnce = async (
         error: error.message,
         ...(prepared !== undefined ? { prepared, sandbox } : {}),
       })
+      // LSP-02: the gate threw before a PreparedAttemptContext existed, so the
+      // typed status would otherwise be lost on this LIVE degrade path. Attach it
+      // straight from the receipt so the report row carries the launch/ready
+      // outcome enum, not just the error string.
+      const status =
+        error.receipt !== undefined ? foldGroundingReceipts([error.receipt]) : undefined
+      return status !== undefined ? { ...degraded, lspGrounding: status } : degraded
     }
     if (error instanceof PacketBlindnessViolation) {
       // A blindness-guard throw means an evidence packet was built from a

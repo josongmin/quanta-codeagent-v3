@@ -40,7 +40,7 @@
  */
 
 import type { LLMPort, Message, StreamEvent } from "@/llm"
-import type { ReproTestConfig } from "./types"
+import type { ReproTestConfig, ReproTestKind } from "./types"
 
 /** Default K when the caller doesn't override. Paper uses 40; 5 is our
  *  measurement-budget default. */
@@ -81,34 +81,40 @@ const groundingBlock = (mwe: string | undefined): readonly string[] => {
   ]
 }
 
-/** Optional ADVERSARIAL-coverage block (jun-19, #10999 under-fix class). The
- *  default repro tests the issue's OWN happy-path example, so a *shallow* fix
- *  that only handles that one example prints "Issue resolved" and the agent
- *  stops — a false-GREEN self-check (measured: 10999 ownerHit+repro-base-RED yet
- *  unresolved, because the agent copied the issue's incomplete suggested regex
- *  and the weak repro passed it). This block forces the script to ALSO exercise
- *  boundary / must-reject / consistency cases derived by REASONING about a
- *  correct fix — and to NOT copy any fix the issue itself proposes — so a
- *  superficial patch stays RED and the agent keeps fixing. `adversarial !== true`
- *  ⇒ empty (byte-identical to the pre-feature prompt). Pure. */
-const adversarialBlock = (adversarial: boolean | undefined): readonly string[] => {
-  if (adversarial !== true) return []
-  return [
-    "",
-    "Make the reproduction ADVERSARIAL. A shallow fix that only handles the single",
-    'example in the issue must STILL print "Issue reproduced". Beyond that literal',
-    "example, exercise the cases below that apply to THIS bug:",
-    "  - boundary / edge values (empty, zero, negative, very large, range limits);",
-    "  - inputs that SHOULD be rejected or raise (malformed, out-of-domain): assert",
-    "    they are rejected / None / error, NOT silently accepted;",
-    "  - consistency a correct fix must preserve (a sign or transform applied",
-    "    uniformly, round-trip or symmetry equality).",
-    "Derive the EXPECTED behavior by reasoning about what a CORRECT fix must do. Do",
-    "NOT copy any fix, regex, or patch the issue itself proposes — issue-suggested",
-    "fixes are frequently incomplete. Use several concrete cases and print",
-    '"Issue resolved" ONLY if EVERY case behaves correctly.',
-  ]
-}
+/**
+ * HARDENING-coverage block (jun-19 #10999 under-fix class, jun-23 split).
+ *
+ * ⚠️ SCOPE CHANGE (jun-23): this block governs HARDENING generation ONLY. It is
+ * the ADVISORY adversarial set (boundary / must-reject / consistency), NOT the
+ * canonical submit oracle. It is spliced ONLY into a `kind === "hardening"`
+ * prompt; the canonical prompt NEVER sees it.
+ *
+ * WHY the split: folding "print 'Issue resolved' ONLY if EVERY case behaves
+ * correctly" into the SUBMIT oracle made it a 75% gold false-NEGATIVE (the
+ * canonical-correct gold fix could not satisfy the many incidental cases), which
+ * the proof-required gate then treated as authority to WITHHOLD a correct patch —
+ * structurally unwinnable. Hardening reproes stay RED on a shallow fix (good for
+ * tie-break / repair seeding) but must NEVER block submit.
+ *
+ * The over-strict "EVERY case must pass" demand is RETAINED here on purpose: it
+ * is exactly what makes a hardening repro a sensitive shallow-fix detector. It is
+ * safe ONLY because the driver routes hardening reproes to the advisory lane, not
+ * the submit gate. Pure. */
+const hardeningBlock = (): readonly string[] => [
+  "",
+  "Make this reproduction ADVERSARIAL / HARDENING. A shallow fix that only handles",
+  'the single example in the issue must STILL print "Issue reproduced". Beyond that',
+  "literal example, exercise the cases below that apply to THIS bug:",
+  "  - boundary / edge values (empty, zero, negative, very large, range limits);",
+  "  - inputs that SHOULD be rejected or raise (malformed, out-of-domain): assert",
+  "    they are rejected / None / error, NOT silently accepted;",
+  "  - consistency a correct fix must preserve (a sign or transform applied",
+  "    uniformly, round-trip or symmetry equality).",
+  "Derive the EXPECTED behavior by reasoning about what a CORRECT fix must do. Do",
+  "NOT copy any fix, regex, or patch the issue itself proposes — issue-suggested",
+  "fixes are frequently incomplete. Use several concrete cases and print",
+  '"Issue resolved" ONLY if EVERY case behaves correctly.',
+]
 
 /** Build the user message. Paper format: issue text + explicit print-contract
  *  + a tiny example so the LLM emits the exact sentinel strings (not
@@ -120,13 +126,17 @@ const adversarialBlock = (adversarial: boolean | undefined): readonly string[] =
  *  `mwe` is undefined/empty the output is byte-identical to the pre-feature
  *  prompt.
  *
- *  When `adversarial` is `true`, an {@link adversarialBlock} is spliced in so a
- *  shallow happy-path fix fails the script (#10999 under-fix class). Falsy ⇒
- *  byte-identical to the pre-adversarial prompt. */
+ *  `kind` (jun-23 canonical/hardening split) selects the contract:
+ *    - `"canonical"` (default): the PLAIN "reproduce the CORE symptom" contract.
+ *      The minimal correct fix MUST be able to flip it to "Issue resolved". NO
+ *      adversarial over-strictness. This is the submit-gate oracle prompt and is
+ *      byte-identical to the legacy un-adversarial prompt.
+ *    - `"hardening"`: the {@link hardeningBlock} is spliced in so a shallow
+ *      happy-path fix stays RED (#10999 under-fix class). ADVISORY only. */
 export const buildReproTestPrompt = (
   issue: string,
   mwe?: string,
-  adversarial?: boolean,
+  kind: ReproTestKind = "canonical",
 ): string =>
   [
     "Write a Python script that reproduces the bug described in the issue below.",
@@ -135,6 +145,14 @@ export const buildReproTestPrompt = (
     "1. Import the project's library code and exercise the buggy behavior described in the issue.",
     "2. Decide the verdict by comparing the ACTUAL behavior to the EXPECTED behavior",
     "   stated in the issue (what it should do vs what it currently does).",
+    ...(kind === "canonical"
+      ? [
+          "   Exercise the issue's CORE symptom only — the single behavior the issue is",
+          "   actually about. Do NOT demand secondary / incidental cases; a minimal",
+          '   correct fix of the reported bug must be enough to make it print "Issue',
+          '   resolved".',
+        ]
+      : []),
     "3. Print EXACTLY ONE of these three lines (no other variants):",
     '   - "Issue reproduced" if the bug is currently present (the issue is NOT fixed)',
     '   - "Issue resolved"   if the bug appears fixed (ACTUAL matches EXPECTED)',
@@ -144,10 +162,10 @@ export const buildReproTestPrompt = (
     "  - The marker line MUST be the LAST line the script prints.",
     "  - Do NOT run further code, assert, raise, or call sys.exit() AFTER printing",
     "    the marker — let the script exit cleanly (exit code 0). A correct fix that",
-    "    prints \"Issue resolved\" but then crashes would be misread as still-broken.",
+    '    prints "Issue resolved" but then crashes would be misread as still-broken.',
     "  - Wrap the bug-exercising code in try/except so an unexpected error prints",
     '    "Other issues" instead of aborting before any marker.',
-    ...adversarialBlock(adversarial),
+    ...(kind === "hardening" ? hardeningBlock() : []),
     "",
     "Output only the Python source code. No explanation. No markdown fences.",
     "",
@@ -279,14 +297,16 @@ export const generateReproTests = async (args: {
    *  known-reproducing code in the sentinel scaffold instead of guessing.
    *  Undefined/empty ⇒ byte-identical to the un-grounded prompt. */
   mwe?: string
-  /** When `true`, splice the ADVERSARIAL-coverage block so a shallow happy-path
-   *  fix fails the repro (#10999 under-fix class). Falsy ⇒ byte-identical. */
-  adversarial?: boolean
+  /** jun-23 canonical/hardening split. `"canonical"` (default) emits the plain
+   *  core-symptom submit-gate prompt; `"hardening"` emits the advisory
+   *  adversarial set. Back-compat: omitting it is byte-identical to the legacy
+   *  un-adversarial prompt. */
+  kind?: ReproTestKind
 }): Promise<readonly string[]> => {
-  const { issue, llm, signal, mwe, adversarial } = args
+  const { issue, llm, signal, mwe } = args
   if (typeof issue !== "string" || issue.length === 0) return []
   const samples = resolveSamples(args.config?.samples)
-  const userText = buildReproTestPrompt(issue, mwe, adversarial)
+  const userText = buildReproTestPrompt(issue, mwe, args.kind ?? "canonical")
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: userText }] }]
   const out: string[] = []
   for (let i = 0; i < samples; i++) {
@@ -295,3 +315,9 @@ export const generateReproTests = async (args: {
   }
   return out
 }
+
+// NOTE (jun-23): the canonical+hardening tagging used to live here as
+// `generateReproTestCandidates`, but the bench driver needs the INJECTABLE
+// `deps.generate` seam, so the split is performed in the driver's
+// `generateReproCandidateTests` (the single, tested real path). This module
+// stays the pure per-`kind` generator to avoid a second, untested code path.

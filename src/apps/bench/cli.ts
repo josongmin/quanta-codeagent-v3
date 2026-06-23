@@ -21,8 +21,8 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadCorpus } from "@/runner/batch/corpus/loader"
 import { reproRunArgv } from "@/runner/batch/corpus/dataset"
+import { loadCorpus } from "@/runner/batch/corpus/loader"
 import { execArgv } from "@/runner/batch/eval/exec"
 import {
   buildImportProbeInputs,
@@ -32,7 +32,14 @@ import {
   runReproRescore,
 } from "@/runner/batch/eval/repro-rescore-run"
 import { cleanupSandbox, copyRepo, createSandbox } from "@/runner/batch/eval/sandbox"
-import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import {
+  errMessage,
+  gateOn,
+  logger,
+  renderLspGroundingStatus,
+  runtimeConfig,
+  setTerminalIo,
+} from "@/shared"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
@@ -1197,6 +1204,9 @@ const renderBoxRow = (row: BoxRuntimeRow): string[] => {
     boxDetailLine(row),
     boxRuntimeLine(row),
     boxOutcomeLine(row),
+    row.snapshot?.lspGrounding !== undefined
+      ? `  lsp=${renderLspGroundingStatus(row.snapshot.lspGrounding)}`
+      : undefined,
     row.snapshot?.lastLogLine !== undefined
       ? `  log=${row.snapshot.lastLogLine}`
       : row.probe?.lastLogLine !== undefined
@@ -1930,11 +1940,26 @@ const cmdEvaluateRepro = async (): Promise<void> => {
   const execTimeoutMs = Number(argValue("--exec-timeout-ms") ?? "60000")
 
   const all = await loadCorpus(corpusRoot)
-  const instances = (wanted !== undefined ? all.filter((i) => wanted.has(i.id)) : all).filter(
-    (i) => i.swebench?.repo !== undefined,
-  )
+  const swebenchAll = all.filter((i) => i.swebench?.repo !== undefined)
+  const instances = wanted !== undefined ? swebenchAll.filter((i) => wanted.has(i.id)) : swebenchAll
   if (instances.length === 0) {
-    logger.info(`evaluate-repro: no swebench instances matched under ${corpusRoot}`)
+    // Distinguish "empty corpus" from "corpus has instances but no swebench_meta"
+    // (a manifest/dir corpus is NOT supported — evaluate-repro needs the real
+    // swebench task corpus where parseTaskYaml populates instance.swebench).
+    if (all.length === 0) {
+      logger.info(
+        `evaluate-repro: no instances found under ${corpusRoot} (empty/unreadable corpus)`,
+      )
+    } else if (swebenchAll.length === 0) {
+      logger.info(
+        `evaluate-repro: ${all.length} instance(s) under ${corpusRoot} but NONE carry swebench_meta ` +
+          `— evaluate-repro needs a real SWE-bench task corpus (tasks/repo/swebench), not a manifest/dir corpus.`,
+      )
+    } else {
+      logger.info(
+        `evaluate-repro: --instance matched none of the ${swebenchAll.length} swebench instance(s) under ${corpusRoot}`,
+      )
+    }
     return
   }
   const byId = new Map(instances.map((i) => [i.id, i]))
@@ -1979,6 +2004,19 @@ const cmdEvaluateRepro = async (): Promise<void> => {
       const sb = await createSandbox(inst)
       await copyRepo(inst, sb)
       sandboxes.push(sb)
+      // Check out the instance's BASE commit so the repro runs against the BUGGY
+      // tree. The corpus clone may sit at a different commit; without this the
+      // rescore measures the WRONG tree (a real build-env fix would look inert,
+      // and parity is meaningless). Mirrors the live driver's sandbox checkout.
+      const baseCommit = input.baseCommit ?? inst.swebench?.baseCommit
+      if (baseCommit !== undefined) {
+        const co = await execArgv(["git", "checkout", "-q", baseCommit], sb, 120_000)
+        if (co.code !== 0) {
+          throw new Error(
+            `git checkout ${baseCommit} failed for ${input.instanceId}: ${co.stderr.slice(-300)}`,
+          )
+        }
+      }
       return sb
     },
     exec: (argv, cwd, t) => execArgv(argv, cwd, t),

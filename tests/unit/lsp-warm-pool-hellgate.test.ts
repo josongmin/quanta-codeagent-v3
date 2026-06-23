@@ -32,12 +32,14 @@ class FakeClient extends LspClient {
   stopCalls = 0
   primeCalls = 0
   defCalls = 0
+  startImpl: () => Promise<void> = async () => {}
   defImpl: () => Promise<typeof LOC | null> = async () => LOC
   constructor() {
     super({ defaultCommand: ["unused"], languageIdFor: () => "fake" })
   }
   override async start(): Promise<void> {
     this.startCalls += 1
+    await this.startImpl()
   }
   override async stop(): Promise<void> {
     this.stopCalls += 1
@@ -219,5 +221,127 @@ describe("SharedWorkspacePool — generic engine-agnostic lifecycle (fake backen
     // and started despite the aborted signal.
     expect(probe.createCalls()).toBe(0)
     expect(pool.__sizeForTest).toBe(0)
+  })
+
+  test("WP-10: hard-evicted in-flight open degrades without warn noise", async () => {
+    const fake = new FakeClient()
+    let releaseStart!: () => void
+    fake.startImpl = () =>
+      new Promise<void>((resolve) => {
+        releaseStart = resolve
+      })
+    const probe = makeBackend({ client: fake })
+    const pool = new SharedWorkspacePool(probe.backend)
+    const origWrite = process.stderr.write.bind(process.stderr)
+    const stderr: string[] = []
+    // biome-ignore lint/suspicious/noExplicitAny: stream override for capture
+    ;(process.stderr.write as any) = (chunk: string | Uint8Array): boolean => {
+      stderr.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString())
+      return true
+    }
+    try {
+      const pending = pool.open("/repo/a.fake", "/repo")
+      expect(probe.createCalls()).toBe(1)
+      await pool.evict("/repo")
+      releaseStart()
+      expect(await pending).toBeNull()
+      expect(fake.stopCalls).toBe(1)
+      expect(stderr.join("")).not.toContain("failed to ready shared nav session")
+    } finally {
+      // biome-ignore lint/suspicious/noExplicitAny: restore stream
+      ;(process.stderr.write as any) = origWrite
+    }
+  })
+
+  // --- proveReady: typed strict-admission ready proof (LSP-01) ---------------
+
+  /** A backend whose readiness probe is scriptable to RESOLVE true/false or
+   *  REJECT — exercising proveReady's three outcome classes against the real
+   *  pool machinery (start join, warmFile boolean, fatal teardown). */
+  const makeProbeBackend = (
+    ensure: () => Promise<boolean>,
+    opts?: { startImpl?: () => Promise<void> },
+  ): { backend: WarmBackend; clients: () => FakeClient[] } => {
+    const clients: FakeClient[] = []
+    const backend: WarmBackend = {
+      id: "fake-engine",
+      supports: (f) => f.endsWith(".fake"),
+      createClient: () => {
+        const c = new FakeClient()
+        if (opts?.startImpl) c.startImpl = opts.startImpl
+        clients.push(c)
+        return c
+      },
+      ensureFileReady: () => ensure(),
+    }
+    return { backend, clients: () => clients }
+  }
+
+  test("WP-11: proveReady on a ready workspace ⇒ outcome=ok, stage=ready, kept warm", async () => {
+    const probe = makeProbeBackend(async () => true)
+    const pool = new SharedWorkspacePool(probe.backend)
+    const receipt = await pool.proveReady("/repo/a.fake", "/repo", { language: "fake" })
+    expect(receipt.outcome).toBe("ok")
+    expect(receipt.stage).toBe("ready")
+    expect(receipt.backend).toBe("fake-engine")
+    expect(receipt.language).toBe("fake")
+    expect(typeof receipt.durationMs).toBe("number")
+    // Released, not evicted: the entry stays warm for the subsequent solve.
+    expect(pool.__sizeForTest).toBe(1)
+    await pool.disposeAll()
+  })
+
+  test("WP-12: ensureFileReady=false ⇒ ready_timeout (proveReady is STRICTER than open)", async () => {
+    // PAIRED CONTROL — same not-ready backend, two callers:
+    //   open()      → returns a NON-null session (best-effort warm degrade)
+    //   proveReady()→ returns ready_timeout (admission must NOT pass)
+    // This is the exact gap launchability-only admission could not see.
+    const openProbe = makeProbeBackend(async () => false)
+    const openPool = new SharedWorkspacePool(openProbe.backend)
+    const session = await openPool.open("/repo/a.fake", "/repo")
+    expect(session).not.toBeNull() // open degrades soft — still hands back a handle
+    await openPool.disposeAll()
+
+    const proveProbe = makeProbeBackend(async () => false)
+    const provePool = new SharedWorkspacePool(proveProbe.backend)
+    const receipt = await provePool.proveReady("/repo/a.fake", "/repo", { language: "fake" })
+    expect(receipt.outcome).toBe("ready_timeout")
+    expect(receipt.stage).toBe("ready")
+    await provePool.disposeAll()
+  })
+
+  test("WP-13: start() rejection ⇒ outcome=start_failed, stage=launch", async () => {
+    const probe = makeProbeBackend(async () => true, {
+      startImpl: async () => {
+        throw new Error("spawn pyright-langserver ENOENT")
+      },
+    })
+    const pool = new SharedWorkspacePool(probe.backend)
+    const receipt = await pool.proveReady("/repo/a.fake", "/repo", { language: "fake" })
+    expect(receipt.outcome).toBe("start_failed")
+    expect(receipt.stage).toBe("launch")
+    expect(receipt.reason).toContain("ENOENT")
+    await pool.disposeAll()
+  })
+
+  test("WP-14: fatal transport during ready ⇒ fatal_transport; pre-aborted ⇒ expected_cancel", async () => {
+    const fatal = makeProbeBackend(async () => {
+      throw new Error("language server stopped unexpectedly")
+    })
+    const fatalPool = new SharedWorkspacePool(fatal.backend)
+    const r1 = await fatalPool.proveReady("/repo/a.fake", "/repo", { language: "fake" })
+    expect(r1.outcome).toBe("fatal_transport")
+    await fatalPool.disposeAll()
+
+    const ok = makeProbeBackend(async () => true)
+    const okPool = new SharedWorkspacePool(ok.backend)
+    const r2 = await okPool.proveReady("/repo/a.fake", "/repo", {
+      language: "fake",
+      signal: AbortSignal.abort(),
+    })
+    expect(r2.outcome).toBe("expected_cancel")
+    // A pre-aborted probe spawns NOTHING.
+    expect(ok.clients().length).toBe(0)
+    await okPool.disposeAll()
   })
 })

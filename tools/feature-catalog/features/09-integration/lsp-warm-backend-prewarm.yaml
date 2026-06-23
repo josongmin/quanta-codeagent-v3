@@ -6,7 +6,7 @@ order: 17
 maturity: L3
 status: new
 ui_surfaces: [cli]
-monitoring: none
+monitoring: partial
 modes: [interactive, batch]
 configurable: integrated
 config_refs:
@@ -22,9 +22,10 @@ surface_integration:
   evidence:
     cli: "session bootstrap fire-and-forgets the background warm (maybeStartLspPrewarm in agent/loop/session-bootstrap.ts, reachable from the CLI loop); the nav tools it warms are the QUANTA_LSP_TOOLS=full surface."
     web: "Pure latency/lifecycle primitive over the language-server subprocess — no user-visible render on any surface."
-purpose: 'RFC jun-17 — pyright 첫 LSP 호출의 2~6초 cold stall을 세 가지로 해소: (1) 세션 시작 background prewarm(Python workspace면 fire-and-forget로 workspace 선행 부팅 — session start는 절대 지연 안 함), (2) first-call join(첫 실호출이 warm 완료면 즉시, 진행 중이면 동일 cwd-key 공유 세션의 startPromise에 join — 새 promise 발명 안 함), (3) 호출 시 pre-open progress로 침묵 stall 제거. 핵심 구조 변경: lsp-bridge의 pyright-하드코딩 warm/pool 층을 제네릭 `SharedWorkspacePool` + 좁은 `WarmBackend`(id/supports/createClient/ensureFileReady 4점)로 분리 — lifecycle(cwd-key 맵/refcount/idle-TTL/join/fatal teardown/evict)은 엔진 무관, 엔진특화는 readiness 판정 한 점뿐이라 basedpyright/rust-analyzer 등으로 교체 가능. 불변식: open()은 READY 세션만 반환(premature+뒤indexing 금지 — 첫 def/hover correctness 보존, jun-16 pythonPath/didChangeConfiguration 경로 무손상). bench는 세션종료 시 HARD-evict(per-instance sandbox cwd당 pyright child 누수 봉인; tombstone으로 fire-and-forget prewarm의 late-creation 레이스까지 reap). DEFAULT-ON when nav enabled, off-switch=`QUANTA_LSP_PREWARM=0`(bench A/B cold arm). 실측(real pyright): cold 1.8s → warm-hit 1~4ms.'
+purpose: 'RFC jun-17 — pyright 첫 LSP 호출의 2~6초 cold stall을 세 가지로 해소: (1) 세션 시작 background prewarm(Python workspace면 fire-and-forget로 workspace 선행 부팅 — session start는 절대 지연 안 함), (2) first-call join(첫 실호출이 warm 완료면 즉시, 진행 중이면 동일 cwd-key 공유 세션의 startPromise에 join — 새 promise 발명 안 함), (3) 호출 시 pre-open progress로 침묵 stall 제거. 핵심 구조 변경: lsp-bridge의 pyright-하드코딩 warm/pool 층을 제네릭 `SharedWorkspacePool` + 좁은 `WarmBackend`(id/supports/createClient/ensureFileReady 4점)로 분리 — lifecycle(cwd-key 맵/refcount/idle-TTL/join/fatal teardown/evict)은 엔진 무관, 엔진특화는 readiness 판정 한 점뿐이라 basedpyright/rust-analyzer 등으로 교체 가능. open()은 best-effort warm 세션을 반환(verified-ready면 즉시 correct; readiness budget 소진 시에도 핸들은 반환 — runtime nav는 soft-degrade). 따라서 open() non-null ≠ ready: STRICT admission ready 증명은 ensureFileReady의 boolean을 직접 surface하는 `proveReady`/`proveStrictLspReady`(jun-23 LSP-01)가 권위. bench는 세션종료 시 HARD-evict(per-instance sandbox cwd당 pyright child 누수 봉인; tombstone으로 fire-and-forget prewarm의 late-creation 레이스까지 reap). DEFAULT-ON when nav enabled, off-switch=`QUANTA_LSP_PREWARM=0`(bench A/B cold arm). 실측(real pyright): cold 1.8s → warm-hit 1~4ms.'
 evidence:
   code:
+    - src/shared/lsp-grounding-receipt.ts
     - src/agent/lsp-workspace-pool.ts
     - src/agent/lsp-bridge.ts
     - src/agent/loop/session-bootstrap.ts
@@ -33,16 +34,23 @@ evidence:
     - src/agent/types.ts
     - src/host/runtime/agent-arg-builder.ts
     - src/runner/batch/eval/driver.ts
+    - src/runner/batch/types.ts
+    - src/apps/bench/remote/box-session.ts
+    - src/apps/bench/cli.ts
     - src/tool/lsp_nav/index.ts
   adrs: [15]
   tests:
     unit:
+      - tests/unit/lsp-grounding-receipt.test.ts
+      - tests/unit/lsp-strict-ready-proof.test.ts
       - tests/unit/lsp-warm-pool-hellgate.test.ts
+      - tests/unit/bench-strict-lsp-grounding-hellgate.test.ts
       - tests/unit/lsp-prewarm-orchestration-hellgate.test.ts
       - tests/unit/lsp-prewarm-wire-hellgate.test.ts
       - tests/unit/lsp-nav-prewarm-ux-hellgate.test.ts
       - tests/unit/lsp-pyright-pool-hellgate.test.ts
-    integration: []
+    integration:
+      - tests/integration/bench-box-ls-status.test.ts
     contract: []
 knobs:
   - name: QUANTA_LSP_PREWARM
@@ -51,4 +59,9 @@ knobs:
   - name: evictLspPoolOnEnd
     default: 'off (on for bench)'
     purpose: 'AgentConfig flag: HARD-evict pooled LSP workspaces at session end. Set by the bench driver whenever LSP nav is on (per-instance sandbox cwd must not leak a language-server child for the idle-TTL window). Interactive leaves the workspace on the pool 30-min idle-TTL for cross-turn reuse.'
-notes: 'ADR-0015 (LSP nav 흡수) 하위. 적대어딧 4R(concurrency/gate-security/refactor-equiv/fix-verify)에서 leak-race(fire-and-forget prewarm vs evict)·aborted-prewarm-boot·warmFile-dead-client 3실버그 적발→수정(hardEvicted tombstone + 조기 abort 가드 + destroyed 가드). real-pyright 헬게이트(evict-mid-boot/fatal-child-kill+recovery/18-concurrent-opens/refcount-churn/abort-mid-warm/broken-anchor) leak 0 검증. v1 비목표: diagnostics pooled 전환, TS/rust/go warm 확장, 실시간 elapsed warm-status 스트리밍.'
+notes: |
+  ADR-0015 (LSP nav 흡수) 하위. 적대어딧 4R(concurrency/gate-security/refactor-equiv/fix-verify)에서 leak-race(fire-and-forget prewarm vs evict)·aborted-prewarm-boot·warmFile-dead-client 3실버그 적발→수정(hardEvicted tombstone + 조기 abort 가드 + destroyed 가드). real-pyright 헬게이트(evict-mid-boot/fatal-child-kill+recovery/18-concurrent-opens/refcount-churn/abort-mid-warm/broken-anchor) leak 0 검증. v1 비목표: diagnostics pooled 전환, TS/rust/go warm 확장, 실시간 elapsed warm-status 스트리밍.
+
+  jun-23 LSP stability proof (docs/plans/jun-23-lsp-stability-proof): warm backend는 optimization이지 admission proof가 아니라는 갭을 닫음. LSP-00 typed receipt SSOT(src/shared/lsp-grounding-receipt.ts: launch/ready/runtime 7-outcome taxonomy, expected_cancel을 real failure와 영구 분리)·LSP-01 strict ready proof(proveStrictLspReady가 launchable→verified-ready로 admission 상향, ready_timeout/fatal_transport에 fail-closed)·LSP-02 typed status를 report.json·box ls가 동일 enum으로 소비(log-tail 해석 제거). monitoring을 none→partial로 정직화(typed receipt surfaced, but no live alerting/metrics yet).
+
+  PROMOTION GATE (다음 단계 = stability closure 주장 조건): LSP-03 live measurement가 필수. 즉 (1) 반복런(n>1) LspGroundingSummary로 ready duration 분포·ready_timeout/expected_cancel/fatal_transport 카운트를 기록(docs/plans/jun-23-lsp-stability-proof/measurement-protocol.md 표), (2) 그 receipt 증거 없이는 PYRIGHT_READY_TIMEOUT_MS/anchor 정책 변경 금지(이번 턴 budget 무변경), (3) monitoring을 partial→integrated로 올리려면 typed receipt 기반 알림/집계가 라이브여야 함. 이 게이트 충족 전엔 "launch+ready+typed-report는 LANDED, 그러나 measurement-validated closure는 미완"이 정확한 상태.

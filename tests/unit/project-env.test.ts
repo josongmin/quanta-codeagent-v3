@@ -4,11 +4,16 @@
  * `buildProjectEnvUvRunArgv` is the SINGLE builder every repo-local SWE-bench
  * exec path threads through (repro samples, issue-smoke MWE, synthesized
  * testCmd, regression oracle). The `astropy__astropy-13033` clean repro failed
- * with `No module named 'setuptools.dep_util'` — a too-new setuptools under
- * uv's build isolation, NOT a model/selector miss. These hellgates assert the
- * astropy-specific build env (pinned setuptools, extension_helpers, isolation
- * off) is baked into the real builder output, and that the config is repo-
- * SCOPED (a pure-python repo never inherits it) and deterministic.
+ * because astropy's `setup.py` does a build-time `import extension_helpers`
+ * (ModuleNotFoundError), NOT a model/selector miss.
+ *
+ * P0 (2026-06-23): the `--with extension_helpers --no-build-isolation` mechanism
+ * was PROVEN BROKEN under uv (the editable `.` target builds BEFORE `--with`
+ * packages reach the setuptools build backend). The build dep is now
+ * materialized into the repo's `pyproject.toml` `[tool.uv.extra-build-
+ * dependencies]` table at sandbox-prep time (see project-env-sandbox-hellgate).
+ * These hellgates therefore assert the argv NO LONGER carries the broken build
+ * flags, and that runtime pins / repo-scoping / determinism still hold.
  */
 import { describe, expect, test } from "bun:test"
 import { buildProjectEnvUvRunArgv } from "@/runner/batch/corpus/project-env"
@@ -16,36 +21,33 @@ import { buildProjectEnvUvRunArgv } from "@/runner/batch/corpus/project-env"
 const hasWithDep = (argv: readonly string[], dep: string): boolean =>
   argv.some((arg, idx) => arg === "--with" && argv[idx + 1] === dep)
 
-describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07)", () => {
-  test("astropy/astropy argv carries the full setuptools.dep_util build env", () => {
+describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07 / P0 mechanism)", () => {
+  test("astropy/astropy argv carries the base env but NOT the broken build flags", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
     // uv must not switch into the repo's own project env, which would hide
     // the `--with` pins behind the project layer.
     expect(argv).toContain("--no-project")
-    // The pinned setuptools (<60 still ships setuptools.dep_util) + the
-    // C-extension build helper astropy imports during editable install.
-    expect(hasWithDep(argv, "setuptools<60")).toBe(true)
-    expect(hasWithDep(argv, "extension_helpers")).toBe(true)
-    // Build isolation would otherwise hide the pinned setuptools from the
-    // build backend, re-triggering the dep_util ImportError.
-    expect(argv).toContain("--no-build-isolation")
+    // The build dep moved to pyproject materialization; the broken `--with`
+    // pins + isolation toggle are GONE (they never reached the build backend).
+    expect(hasWithDep(argv, "setuptools<60")).toBe(false)
+    expect(hasWithDep(argv, "extension_helpers")).toBe(false)
+    expect(argv).not.toContain("--no-build-isolation")
     // The repo itself is installed editable from the sandbox cwd.
     expect(argv).toContain("--with-editable")
     expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".")
   })
 
-  test("extraWith deps coexist with the astropy build pins (pytest path)", () => {
+  test("extraWith deps coexist with the base env (pytest path), still no build flags", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3", ["pytest"])
     expect(hasWithDep(argv, "pytest")).toBe(true)
-    expect(hasWithDep(argv, "setuptools<60")).toBe(true)
-    expect(hasWithDep(argv, "extension_helpers")).toBe(true)
-    expect(argv).toContain("--no-build-isolation")
+    expect(hasWithDep(argv, "extension_helpers")).toBe(false)
+    expect(argv).not.toContain("--no-build-isolation")
+    expect(hasWithDep(argv, "setuptools")).toBe(true)
   })
 
   // Paired control: the config is REPO-SCOPED, not a global default. A pure-
-  // python repo must not inherit astropy's build flags — otherwise the test
-  // above would pass for the wrong reason (flags applied everywhere).
-  test("a pure-python repo (sympy) does NOT inherit the astropy build flags", () => {
+  // python repo must not inherit any astropy override.
+  test("a pure-python repo (sympy) does NOT inherit any astropy override", () => {
     const argv = buildProjectEnvUvRunArgv("sympy/sympy", "1.5")
     expect(hasWithDep(argv, "setuptools<60")).toBe(false)
     expect(hasWithDep(argv, "extension_helpers")).toBe(false)
@@ -57,7 +59,9 @@ describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07)", () => {
   })
 
   // Slug match must be exact: `astropy/astropy`, not a substring/other form.
-  test("astropy build flags are keyed on the exact `astropy/astropy` slug", () => {
+  // (No build flags remain in the argv, so this guards the runtime-pin path
+  // does not over-match either.)
+  test("overrides are keyed on the exact `astropy/astropy` slug", () => {
     expect(buildProjectEnvUvRunArgv("astropy", "4.3")).not.toContain("--no-build-isolation")
     expect(
       hasWithDep(buildProjectEnvUvRunArgv("not-astropy/astropy", "4.3"), "extension_helpers"),
@@ -92,11 +96,12 @@ describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidati
     expect(argv).toContain("--with-editable")
   })
 
-  test("astropy carries BOTH override axes (pins + build flag) from the single table", () => {
+  test("astropy build dep is NOT a --with (it is materialized into pyproject)", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
-    expect(hasWithDep(argv, "setuptools<60")).toBe(true)
-    expect(hasWithDep(argv, "extension_helpers")).toBe(true)
-    expect(argv).toContain("--no-build-isolation")
+    expect(hasWithDep(argv, "setuptools<60")).toBe(false)
+    expect(hasWithDep(argv, "extension_helpers")).toBe(false)
+    expect(hasWithDep(argv, "extension-helpers")).toBe(false)
+    expect(argv).not.toContain("--no-build-isolation")
   })
 
   test("an unlisted repo gets NEITHER pins nor build flags (only the base env)", () => {
@@ -108,15 +113,16 @@ describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidati
     expect(hasWithDep(argv, "setuptools")).toBe(true) // base dep still present
   })
 
-  // Ordering invariant: build flags precede `--with` deps, which precede
-  // `--with-editable .` — the consolidation must not reshuffle the argv shape.
-  test("argv shape preserved: base flags → build flags → --with deps → --with-editable .", () => {
+  // Ordering invariant: base flags → `--with` deps → `--with-editable .`. No
+  // build flags remain (build deps moved to pyproject), so the shape is
+  // `--no-project … --python v --with <dep> … --with-editable .`.
+  test("argv shape preserved: base flags → --with deps → --with-editable .", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
-    const isoIdx = argv.indexOf("--no-build-isolation")
+    const noProjIdx = argv.indexOf("--no-project")
     const firstWith = argv.indexOf("--with")
     const editIdx = argv.indexOf("--with-editable")
-    expect(isoIdx).toBeGreaterThan(argv.indexOf("--no-project"))
-    expect(firstWith).toBeGreaterThan(isoIdx)
+    expect(noProjIdx).toBeGreaterThanOrEqual(0)
+    expect(firstWith).toBeGreaterThan(noProjIdx)
     expect(editIdx).toBeGreaterThan(firstWith)
     expect(argv[editIdx + 1]).toBe(".")
   })

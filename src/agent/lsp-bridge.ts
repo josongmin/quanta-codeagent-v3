@@ -10,10 +10,10 @@ import {
   DefaultSignatureHelpAdapter,
   GOPLS_BIN,
   GoplsAdapter,
-  lspExtensionToServerBin,
-  lspServerBinForFile,
   type LspClient,
   LspRequestError,
+  lspExtensionToServerBin,
+  lspServerBinForFile,
   PYRIGHT_LANGSERVER_BIN,
   PyrightAdapter,
   type RenameWorkspaceEdit,
@@ -22,7 +22,7 @@ import {
   TYPESCRIPT_LANGUAGE_SERVER_BIN,
   TypescriptAdapter,
 } from "@/lsp"
-import { errMessage, logger } from "@/shared"
+import { errMessage, type LspGroundingReceipt, logger } from "@/shared"
 import type { StaticEvidence as EvidenceStatic } from "@/tool"
 import {
   lspNavTools as buildLspNavTools,
@@ -426,6 +426,44 @@ export const prewarmLspWorkspace = async (
  *  per sandbox cwd for the whole idle-TTL window. */
 export const evictLspWorkspaces = async (cwd: string): Promise<void> => {
   for (const pool of warmPools.values()) await pool.evict(cwd)
+}
+
+/**
+ * Strict-admission READY proof (LSP-01). Given the task-relevant anchor file
+ * (absolute, inside `cwd`) and its language, prove the workspace can actually
+ * reach verified-ready — not merely that the binary is launchable.
+ *
+ * For a language with a warm pool (pyright today) this drives the SAME backend
+ * readiness truth the real solve will use ({@link SharedWorkspacePool.proveReady}),
+ * in the SAME sandbox, and surfaces the readiness boolean as a typed
+ * {@link LspGroundingReceipt} — so a launchable-but-cold workspace yields
+ * `ready_timeout` and a strict preset can fail closed on it. The opened entry is
+ * kept warm (released, not evicted), so the subsequent solve reuses it.
+ *
+ * For a language with NO warm pool, no ready probe exists; this returns a
+ * launch-stage `ok` receipt (the cheap binary preflight remains the only
+ * authority) rather than inventing a divergent second readiness heuristic.
+ * Never throws — the caller decides whether a non-`ok` outcome is fatal.
+ */
+export const proveStrictLspReady = async (
+  filePath: string,
+  cwd: string,
+  language: string,
+  signal?: AbortSignal,
+): Promise<LspGroundingReceipt> => {
+  const spec = specFor(filePath)
+  const pool = spec ? warmPools.get(spec) : undefined
+  if (!spec || !pool) {
+    return {
+      backend: spec?.bin ?? "",
+      language,
+      stage: "launch",
+      outcome: "ok",
+      file: filePath,
+      reason: "no warm pool for language; launch proof is the only admission authority",
+    }
+  }
+  return pool.proveReady(filePath, cwd, { language, ...(signal ? { signal } : {}) })
 }
 
 /** Resolve a deterministic anchor file under `cwd` whose language has a warm

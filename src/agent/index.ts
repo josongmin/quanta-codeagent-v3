@@ -209,6 +209,7 @@ export {
   lspDiagnosticsTool,
   lspExtensionToLanguage,
   lspNavToolList,
+  proveStrictLspReady,
 } from "./lsp-bridge"
 export {
   attachLspDiagnosticsHook,
@@ -434,9 +435,9 @@ export {
   type VerifyGuardState,
 } from "./verify-guard"
 export {
-  isVerifySignalCommand,
   isTestLikeCommand,
   isVerifyOutputFailing,
+  isVerifySignalCommand,
   matchesExactVerifyCommand,
   matchVerifyCommand,
   TEST_LIKE_RE,
