@@ -75,7 +75,6 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
-import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 import {
   loadSelectedInstances,
   mapWithConcurrency,
@@ -106,7 +105,17 @@ import { resolvedTotals, scoreTotals } from "./observe"
 import { renderBenchPresetListLines, seedBenchExecutionPreset } from "./preset"
 import { evaluateWithPythonSwebench } from "./python-swebench"
 import { patchVote, sampleBestOfN } from "./sampler"
+import {
+  applyBenchTrajectoryMode,
+  replayTrajectoryPort,
+  resolveBenchTrajectoryMode,
+} from "./trajectory"
 import type { BenchSummary, Instance, InstanceResult } from "./types"
+
+// Re-export the bench-native trajectory record/replay surface so importers of
+// `@/apps/bench` (e.g. tests/unit/bench-trajectory-record-wiring.test.ts) keep
+// the original byte-compatible public API after the split into ./trajectory.
+export { maybeRecordTrajectory, maybeReplayTrajectory } from "./trajectory"
 
 setTerminalIo({
   stdout: (chunk) => {
@@ -615,130 +624,6 @@ const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLM
     return null
   }
   return { provider, model, llm: applyBenchTrajectoryMode(llm, trajectory, { provider, model }) }
-}
-
-const defaultBenchTrajectoryPath = (): string => `${process.cwd()}/bench-trajectory.jsonl`
-
-const trajectoryPathFromRaw = (raw: string | undefined): string | undefined => {
-  if (raw === undefined || raw === "" || raw === "0") return undefined
-  return raw === "1" || raw.toLowerCase() === "on" ? defaultBenchTrajectoryPath() : raw
-}
-
-const replayOnMissFromRaw = (raw: string | undefined): OnMissPolicy => {
-  if (raw === undefined || raw === "") return "throw"
-  if (raw === "throw" || raw === "passthrough" || raw === "record-and-passthrough") return raw
-  throw new Error(
-    `invalid QUANTA_BENCH_REPLAY_ON_MISS=${JSON.stringify(raw)} — expected throw | passthrough | record-and-passthrough`,
-  )
-}
-
-type BenchTrajectoryMode =
-  | { kind: "off" }
-  | { kind: "record"; path: string }
-  | { kind: "replay"; path: string; onMiss: OnMissPolicy }
-
-const resolveBenchTrajectoryMode = (): BenchTrajectoryMode => {
-  const recordPath = trajectoryPathFromRaw(process.env.QUANTA_BENCH_RECORD_TRAJECTORY)
-  const replayPath = trajectoryPathFromRaw(process.env.QUANTA_BENCH_REPLAY_TRAJECTORY)
-  if (recordPath !== undefined && replayPath !== undefined) {
-    throw new Error(
-      "cannot combine QUANTA_BENCH_RECORD_TRAJECTORY with QUANTA_BENCH_REPLAY_TRAJECTORY",
-    )
-  }
-  if (replayPath !== undefined) {
-    return {
-      kind: "replay",
-      path: replayPath,
-      onMiss: replayOnMissFromRaw(process.env.QUANTA_BENCH_REPLAY_ON_MISS),
-    }
-  }
-  if (recordPath !== undefined) return { kind: "record", path: recordPath }
-  return { kind: "off" }
-}
-
-const replayTrajectoryPort = (args: {
-  path: string
-  onMiss: OnMissPolicy
-  fallback?: LLMPort
-  provider?: string
-  model?: string
-}): LLMPort => {
-  if (args.onMiss !== "throw" && args.fallback === undefined) {
-    throw new Error(`QUANTA_BENCH_REPLAY_ON_MISS=${args.onMiss} requires a live fallback LLMPort`)
-  }
-  return replayLlmPort({
-    store: jsonlReplayStore({ path: args.path }),
-    onMiss: args.onMiss,
-    ...(args.fallback !== undefined ? { fallback: args.fallback } : {}),
-    ...(args.provider !== undefined ? { provider: args.provider } : {}),
-    ...(args.model !== undefined ? { model: args.model } : {}),
-    ...(args.fallback?.surfaceId !== undefined ? { surfaceId: args.fallback.surfaceId } : {}),
-    ...(args.fallback?.transportId !== undefined ? { transportId: args.fallback.transportId } : {}),
-    ...(args.fallback?.authMode !== undefined ? { authMode: args.fallback.authMode } : {}),
-  })
-}
-
-/**
- * Optional LLM-trajectory recording for bench runs (default-OFF).
- *
- * WHY: when a bench instance FAILS, we want to replay its exact LLM trajectory
- * deterministically up to any turn and DIVERGE there — the bench-native "fork
- * from a point" for cheaply testing a localization/strategy fix on a recorded
- * failure WITHOUT re-running the whole expensive run. The CLI `fork_session`
- * feature is REPL-scoped (ConversationCheckpointStore) and CANNOT reach a bench
- * trajectory, so this is the only path that makes bench replay/fork possible.
- *
- * Single chokepoint: every bench LLM consumer (driver, localize, repro,
- * verify-guard …) takes the port `resolveLLM` returns, so wrapping here records
- * the ENTIRE run.
- *
- * Gate: `QUANTA_BENCH_RECORD_TRAJECTORY`. Absent / "" / "0" ⇒ NO wrap
- * (byte-identical). "1" | "on" ⇒ record to `<cwd>/bench-trajectory.jsonl`. Any
- * other value ⇒ treated as the cassette path.
- */
-export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
-  const mode = resolveBenchTrajectoryMode()
-  return mode.kind === "record"
-    ? recordingLlmPort({ inner: llm, store: jsonlReplayStore({ path: mode.path }) })
-    : llm
-}
-
-/**
- * Optional bench-native trajectory replay (default-OFF).
- *
- * STRICT by default: `QUANTA_BENCH_REPLAY_TRAJECTORY` replays from a cassette and
- * `QUANTA_BENCH_REPLAY_ON_MISS` defaults to `throw`, so a stale or short cassette
- * fails LOUDLY instead of silently drifting onto live model output. Operators who
- * intentionally want "replay until the fork point, then diverge live" opt into
- * `record-and-passthrough`.
- */
-export const maybeReplayTrajectory = (llm: LLMPort): LLMPort => {
-  const mode = resolveBenchTrajectoryMode()
-  if (mode.kind !== "replay") return llm
-  return replayTrajectoryPort({
-    path: mode.path,
-    onMiss: mode.onMiss,
-    ...(mode.onMiss === "throw" ? {} : { fallback: llm }),
-    ...(llm.provider !== undefined ? { provider: llm.provider } : {}),
-    ...(llm.model !== undefined ? { model: llm.model } : {}),
-  })
-}
-
-const applyBenchTrajectoryMode = (
-  llm: LLMPort,
-  mode: BenchTrajectoryMode,
-  identity: { provider: string; model: string },
-): LLMPort => {
-  if (mode.kind === "off") return llm
-  if (mode.kind === "record")
-    return recordingLlmPort({ inner: llm, store: jsonlReplayStore({ path: mode.path }) })
-  return replayTrajectoryPort({
-    path: mode.path,
-    onMiss: mode.onMiss,
-    ...(mode.onMiss === "throw" ? {} : { fallback: llm }),
-    provider: identity.provider,
-    model: identity.model,
-  })
 }
 
 /** Official-dataset entrypoint. Returns true when it handled the run (so main
