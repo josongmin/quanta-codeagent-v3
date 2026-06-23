@@ -50,7 +50,6 @@
     "src/codemode/runtime.ts::installToolsBinding",
     "src/git/cloud-branch-snapshot.ts::runSnapshot",
     "src/host/runtime/agent-arg-builder.ts::buildBaseFromArgs",
-    "src/host/runtime/internal/context-binding.ts::createRuntimeApprovalProtocolController",
     "src/host/runtime/mcp-oauth-provider.ts::createConnectorsMcpOAuthProvider",
     "src/ipc/session/bridge.ts::createSessionTransportBridge",
     "src/kernel/session/reducer.ts::reduceSessionCommand",
