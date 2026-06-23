@@ -88,6 +88,16 @@ describe("llm evidence packet — render + blindness guard", () => {
     expect(() => assertPacketBlind(poisoned)).toThrow(PacketBlindnessViolation)
   })
 
+  test("builders reject hidden oracle markers before issue-summary truncation", () => {
+    expect(() =>
+      buildSelectionGenerationPacket({
+        problemStatement: `${"x".repeat(300)}FAIL_TO_PASS`,
+        ownerEvidence: [],
+        contracts: [],
+      }),
+    ).toThrow(PacketBlindnessViolation)
+  })
+
   test("blindness guard does NOT trip on the forbiddenSources meta menu naming gold_patch", () => {
     const ok: LlmEvidencePacket = {
       stage: "candidate_generation",
@@ -221,6 +231,52 @@ describe("llm evidence packet — stage builders", () => {
     })
     expect(rendered).toContain("env caveat:")
     expect(rendered).toContain("attempted public repro helper failed to execute")
+  })
+
+  test("generation packet carries validated public repro scripts as bounded contracts", () => {
+    const rendered = buildSelectionGenerationPacket({
+      problemStatement: "Connection settings are ignored by the shell command.",
+      ownerEvidence: [],
+      contracts: [],
+      validatedReproScripts: [
+        "print('Issue reproduced')\nassert run_shell() == 'Issue reproduced'",
+      ],
+    })
+    const parsed = parseRendered(rendered)
+    expect(parsed.staticFacts).toContainEqual({
+      kind: "validated_public_repro",
+      value: "script 1: print('Issue reproduced')\nassert run_shell() == 'Issue reproduced'",
+    })
+  })
+
+  test("generation packet rejects hidden oracle markers inside validated repro scripts", () => {
+    expect(() =>
+      buildSelectionGenerationPacket({
+        problemStatement: "public issue",
+        ownerEvidence: [],
+        contracts: [],
+        validatedReproScripts: ["print('FAIL_TO_PASS')"],
+      }),
+    ).toThrow(PacketBlindnessViolation)
+  })
+
+  test("generation packet rejects hidden oracle markers before bounded truncation", () => {
+    expect(() =>
+      buildSelectionGenerationPacket({
+        problemStatement: "public issue",
+        ownerEvidence: [],
+        contracts: [],
+        validatedReproScripts: [`${"x".repeat(1_300)}FAIL_TO_PASS`],
+      }),
+    ).toThrow(PacketBlindnessViolation)
+    expect(() =>
+      buildSelectionGenerationPacket({
+        problemStatement: "public issue",
+        ownerEvidence: [],
+        contracts: [],
+        seed: `${"x".repeat(500)}PASS_TO_PASS`,
+      }),
+    ).toThrow(PacketBlindnessViolation)
   })
 
   test("post-exec review packet carries executed proof receipts without pretending to be a winner decision", () => {
@@ -476,6 +532,19 @@ describe("llm evidence packet — repair seed (self-contained, stable id)", () =
       contracts: [],
     })
     expect(rendered).toContain("no_positive_executed_public_proof_attached")
+  })
+
+  test("rejects hidden oracle markers before bounded repair guidance truncation", () => {
+    expect(() =>
+      buildRepairSeedPacket({
+        problemStatement: "Simple public bug",
+        candidatePatchHash: "deadbeef",
+        ownerEvidence: [],
+        proofReceipts: [],
+        contracts: [],
+        repairGuidance: `${"x".repeat(1_900)}FAIL_TO_PASS`,
+      }),
+    ).toThrow(PacketBlindnessViolation)
   })
 })
 

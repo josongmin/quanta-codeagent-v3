@@ -56,6 +56,7 @@ import {
   selectionReproPrepK,
   selectionGenerationEnvCaveats,
   UsageTap,
+  validatedReproContractSeed,
   validatedReproRepairSeed,
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
@@ -795,6 +796,7 @@ const runSelectionPhase = async (
     reproHint,
     reproTest,
   })
+  const validatedReproContractSeedText = validatedReproContractSeed(reproSources)
   const mergeHint = (seed: string | undefined): string | undefined =>
     verifySelectProofRequired && selectorMode === "clean"
       ? buildSelectionGenerationPrompt({
@@ -804,9 +806,18 @@ const runSelectionPhase = async (
           baseValidatedRed: selectionBaseValidatedRed,
           ...(verificationTarget !== undefined ? { verificationTarget } : {}),
           ...(reproHint !== undefined ? { reproCommand: reproHint } : {}),
+          ...(reproSources.length > 0 ? { validatedReproScripts: reproSources } : {}),
           ...(closureHint !== undefined ? { closureHint } : {}),
           ...(generationEnvCaveats.length > 0 ? { envCaveats: generationEnvCaveats } : {}),
-          ...(seed !== undefined ? { seed } : {}),
+          ...(() => {
+            const effectiveSeed =
+              validatedReproContractSeedText === undefined
+                ? seed
+                : seed === undefined
+                  ? validatedReproContractSeedText
+                  : `${validatedReproContractSeedText}\n\n${seed}`
+            return effectiveSeed !== undefined ? { seed: effectiveSeed } : {}
+          })(),
           recordLlmEvidencePacket: (packet) => {
             recordLlmEvidencePacket(selectionLlmEvidence, packet)
           },

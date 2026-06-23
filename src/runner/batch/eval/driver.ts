@@ -97,6 +97,7 @@ import {
   resolveBenchKnobs,
 } from "./knobs-bench"
 import {
+  assertEvidenceTextBlind,
   buildSelectionOwnerEvidence,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
@@ -104,6 +105,7 @@ import {
   type ContractFact,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
+  type LlmEvidencePacketStage,
   recordLlmEvidencePacket,
   type VerificationTargetFact,
   verificationTargetFromPlan,
@@ -1320,17 +1322,47 @@ const reproducingReproSources = (
 ): readonly string[] =>
   selection?.samples.filter((s) => s.outcome === "reproduced").map((s) => s.source) ?? []
 
-export const validatedReproRepairSeed = (sources: readonly string[]): string | undefined => {
-  if (sources.length === 0) return undefined
-  const scripts = sources
+const VALIDATED_REPRO_CONTRACT_SCRIPT_LIMIT = 2
+const VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT = 1_200
+const boundValidatedReproSource = (source: string): string => {
+  const trimmed = source.trim()
+  if (trimmed.length <= VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT) return trimmed
+  const suffix = "\n# ...[truncated]"
+  return `${trimmed.slice(0, Math.max(0, VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT - suffix.length))}${suffix}`
+}
+
+export const validatedReproContractSeed = (
+  sources: readonly string[],
+  stage: LlmEvidencePacketStage = "candidate_generation",
+): string | undefined => {
+  assertEvidenceTextBlind(stage, sources)
+  const nonEmptySources = sources
+    .map(boundValidatedReproSource)
+    .filter((source) => source !== "")
+  const boundedSources = nonEmptySources.slice(0, VALIDATED_REPRO_CONTRACT_SCRIPT_LIMIT)
+  if (boundedSources.length === 0) return undefined
+  const scripts = boundedSources
     .map((source, i) =>
-      [`Validated reproduction script ${i + 1}:`, "```python", source.trim(), "```"].join("\n"),
+      [`Validated reproduction script ${i + 1}:`, "```python", source, "```"].join("\n"),
     )
     .join("\n\n")
+  const omitted = nonEmptySources.length - boundedSources.length
   return [
     "The following reproduction script(s) were generated from the public issue and executed on the base tree; each printed `Issue reproduced` there.",
-    "They are admissible public oracle evidence for repair generation only after candidate selection has already shown every candidate unresolved.",
+    "They are admissible public executable contracts: a correct candidate must make them report `Issue resolved` without adding unrelated design surface.",
+    ...(omitted > 0
+      ? [`Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`]
+      : []),
     scripts,
+  ].join("\n\n")
+}
+
+export const validatedReproRepairSeed = (sources: readonly string[]): string | undefined => {
+  const contract = validatedReproContractSeed(sources, "repair_seed")
+  if (contract === undefined) return undefined
+  return [
+    contract,
+    "Use this as repair guidance only after candidate selection has already shown every candidate unresolved.",
   ].join("\n\n")
 }
 
@@ -2668,6 +2700,8 @@ const buildSelectionExecutorPorts = (args: {
   readonly closureHint: string | undefined
   readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
   readonly envCaveats: readonly string[]
+  readonly validatedReproScripts: readonly string[]
+  readonly validatedReproContractSeedText: string | undefined
   readonly publicContracts: PublicContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly recordLlmEvidencePacket: ((packet: LlmEvidencePacket) => void) | undefined
@@ -2698,9 +2732,20 @@ const buildSelectionExecutorPorts = (args: {
                   ? { verificationTarget: args.verificationTarget }
                   : {}),
                 ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
+                ...(args.validatedReproScripts.length > 0
+                  ? { validatedReproScripts: args.validatedReproScripts }
+                  : {}),
                 ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
                 ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
-                ...(seed !== undefined ? { seed } : {}),
+                ...(() => {
+                  const effectiveSeed =
+                    args.validatedReproContractSeedText === undefined
+                      ? seed
+                      : seed === undefined
+                        ? args.validatedReproContractSeedText
+                        : `${args.validatedReproContractSeedText}\n\n${seed}`
+                  return effectiveSeed !== undefined ? { seed: effectiveSeed } : {}
+                })(),
                 ...(args.recordLlmEvidencePacket !== undefined
                   ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
                   : {}),
@@ -2856,6 +2901,7 @@ const runSelectionPhase = async (
     reproHint,
     reproTest,
   })
+  const validatedReproContractSeedText = validatedReproContractSeed(reproSources)
   let totalTurns = 0
   const selectionState = await resolveSelectionPhasePorts({
     instance,
@@ -2922,6 +2968,8 @@ const runSelectionPhase = async (
       verifySelectProofRequired,
       selectionOwnerEvidence,
       envCaveats: generationEnvCaveats,
+      validatedReproScripts: reproSources,
+      validatedReproContractSeedText,
       publicContracts: effectivePublicContracts,
       verificationTarget,
       recordLlmEvidencePacket: (packet) => {

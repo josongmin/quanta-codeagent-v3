@@ -146,6 +146,7 @@ export type {
 import type {
   Candidate,
   CounterfactualTelemetry,
+  RepairFeedbackStopReason,
   ResolvedKofNMode,
   ScoredEntry,
   SelectionNoWinnerReason,
@@ -577,8 +578,15 @@ export const runSelection = async (args: {
   const maybeAppendSelectorRepair = async (
     rawCandidates: readonly Candidate[],
     result: SelectionResult,
-  ): Promise<readonly Candidate[]> => {
-    if (mode !== "clean" || rawCandidates.length === 0) return rawCandidates
+    seenRepairPrompts: Set<string>,
+  ): Promise<{
+    readonly rawCandidates: readonly Candidate[]
+    readonly appended: boolean
+    readonly stopReason?: RepairFeedbackStopReason
+  }> => {
+    if (mode !== "clean" || rawCandidates.length === 0) {
+      return { rawCandidates, appended: false }
+    }
     const seed =
       buildStaticSanityRepairSeed({ scored: result.scored, winner: result.winner }) ??
       buildOracleFailureRepairSeed({
@@ -588,7 +596,13 @@ export const runSelection = async (args: {
           ? { oracleFailureSeedText: args.oracleFailureRepairSeed }
           : {}),
       })
-    if (seed === undefined) return rawCandidates
+    if (seed === undefined) {
+      return {
+        rawCandidates,
+        appended: false,
+        ...(proofRequired ? { stopReason: "missing_seed" } : {}),
+      }
+    }
     try {
       const prompt = buildRepairPacketText({
         scored: result.scored,
@@ -603,16 +617,43 @@ export const runSelection = async (args: {
           ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
           : {}),
       })
+      if (seenRepairPrompts.has(prompt)) {
+        return { rawCandidates, appended: false, stopReason: "duplicate_seed" }
+      }
+      seenRepairPrompts.add(prompt)
       const repaired = await postprocessGeneratedCandidate(
         await args.ports.generate(rawCandidates.length, prompt),
         rawCandidates.length,
         prompt,
       )
-      return repaired.patch.trim() === "" ? rawCandidates : [...rawCandidates, repaired]
+      return repaired.patch.trim() === ""
+        ? { rawCandidates, appended: false, stopReason: "empty_patch" }
+        : { rawCandidates: [...rawCandidates, repaired], appended: true }
     } catch {
-      return rawCandidates
+      return { rawCandidates, appended: false, stopReason: "generation_failed" }
     }
   }
+
+  const withRepairFeedbackTelemetry = (
+    result: SelectionResult,
+    attempts: number,
+    stopReason: RepairFeedbackStopReason | undefined,
+  ): SelectionResult =>
+    attempts === 0 && stopReason === undefined
+      ? result
+      : {
+          ...result,
+          repairFeedbackAttempts: attempts,
+          ...(stopReason !== undefined ? { repairFeedbackStopReason: stopReason } : {}),
+        }
+
+  const hasProofPositiveWinner = (result: SelectionResult): boolean =>
+    result.winner !== null &&
+    result.scored.some(
+      (entry) =>
+        entry.candidate.id === result.winner?.id &&
+        selectionProofStateForEntry(entry) === "proof_positive",
+    )
 
   const maybeFinalizeEarlyAccept = async (
     rawCandidates: readonly Candidate[],
@@ -944,11 +985,35 @@ export const runSelection = async (args: {
   }
   let result = await finalize(raw, false, riskGateTelemetry)
   let repairedRaw = raw
-  for (let repairRound = 0; repairRound < 1; repairRound++) {
-    const nextRaw = await maybeAppendSelectorRepair(repairedRaw, result)
-    if (nextRaw.length === repairedRaw.length) return result
-    repairedRaw = [...nextRaw]
+  let repairFeedbackAttempts = 0
+  let repairFeedbackStopReason: RepairFeedbackStopReason | undefined
+  const maxRepairFeedbackRounds = proofRequired ? 2 : 1
+  const seenRepairPrompts = new Set<string>()
+  for (let repairRound = 0; repairRound < maxRepairFeedbackRounds; repairRound++) {
+    if (hasProofPositiveWinner(result)) {
+      repairFeedbackStopReason =
+        repairFeedbackAttempts > 0 ? "winner_found" : repairFeedbackStopReason
+      break
+    }
+    const next = await maybeAppendSelectorRepair(repairedRaw, result, seenRepairPrompts)
+    if (!next.appended) {
+      repairFeedbackStopReason = next.stopReason
+      break
+    }
+    repairFeedbackAttempts += 1
+    repairedRaw = [...next.rawCandidates]
     result = await finalize(repairedRaw, false, riskGateTelemetry)
+    if (hasProofPositiveWinner(result)) {
+      repairFeedbackStopReason = "winner_found"
+      break
+    }
   }
-  return result
+  if (
+    repairFeedbackAttempts >= maxRepairFeedbackRounds &&
+    !hasProofPositiveWinner(result) &&
+    repairFeedbackStopReason === undefined
+  ) {
+    repairFeedbackStopReason = "max_attempts"
+  }
+  return withRepairFeedbackTelemetry(result, repairFeedbackAttempts, repairFeedbackStopReason)
 }

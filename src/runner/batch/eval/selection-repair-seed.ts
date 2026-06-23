@@ -458,9 +458,10 @@ export const buildRepairPacketText = (args: {
   readonly verificationTarget?: VerificationTargetFact
   readonly recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
 }): string => {
+  const latestNonEmpty = [...args.scored].reverse().find(hasNonEmptyPatch)?.candidate
   const focusCandidate =
     (args.winner !== null && args.winner.patch.trim() !== "" ? args.winner : null) ??
-    args.scored.find(hasNonEmptyPatch)?.candidate
+    latestNonEmpty
   const patchAuthority = focusCandidate?.patch ?? args.scored[0]?.candidate.patch ?? args.seed
   const proofReceipts: ProofReceiptFact[] = [
     ...args.scored.flatMap((entry) => [

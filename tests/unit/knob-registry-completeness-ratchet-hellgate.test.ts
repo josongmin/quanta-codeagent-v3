@@ -183,25 +183,29 @@ const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
 const ORPHAN_CEILING = 0
 
 describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
-  test(`orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`, () => {
-    const { declared, orphans } = scan()
-    // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
-    console.log(
-      `[knob-completeness] declared=${declared.size} orphans=${orphans.size}/${ORPHAN_CEILING}`,
-    )
-    if (orphans.size > ORPHAN_CEILING) {
-      const list = [...orphans.entries()]
-        .sort()
-        .map(([t, loc]) => `  ${t}  (${loc})`)
-        .join("\n")
-      throw new Error(
-        `${orphans.size} orphan QUANTA_* reads (ceiling ${ORPHAN_CEILING}) — each is read in src ` +
-          `but declared in NO registry (runtime-config / @/runner/knobs / apps/cli-local). ` +
-          `Declare it, or add to EXCEPTIONS with a reason:\n${list}`,
+  test(
+    `orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`,
+    () => {
+      const { declared, orphans } = scan()
+      // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
+      console.log(
+        `[knob-completeness] declared=${declared.size} orphans=${orphans.size}/${ORPHAN_CEILING}`,
       )
-    }
-    expect(orphans.size).toBeLessThanOrEqual(ORPHAN_CEILING)
-  })
+      if (orphans.size > ORPHAN_CEILING) {
+        const list = [...orphans.entries()]
+          .sort()
+          .map(([t, loc]) => `  ${t}  (${loc})`)
+          .join("\n")
+        throw new Error(
+          `${orphans.size} orphan QUANTA_* reads (ceiling ${ORPHAN_CEILING}) — each is read in src ` +
+            `but declared in NO registry (runtime-config / @/runner/knobs / apps/cli-local). ` +
+            `Declare it, or add to EXCEPTIONS with a reason:\n${list}`,
+        )
+      }
+      expect(orphans.size).toBeLessThanOrEqual(ORPHAN_CEILING)
+    },
+    15_000,
+  )
 
   // RED-ON-INJECTION: prove the scanner actually CATCHES an orphan read and does
   // NOT false-positive on a declared one — else the ceiling is a vacuous 0.

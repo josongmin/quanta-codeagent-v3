@@ -215,6 +215,17 @@ export class PacketBlindnessViolation extends Error {
   }
 }
 
+export const assertEvidenceTextBlind = (
+  stage: LlmEvidencePacketStage,
+  values: readonly (string | undefined)[],
+): void => {
+  for (const marker of FORBIDDEN_PACKET_MARKERS) {
+    if (values.some((value) => value?.includes(marker) === true)) {
+      throw new PacketBlindnessViolation(marker, stage)
+    }
+  }
+}
+
 /** All strings drawn from EVIDENCE fields only (not the meta action menu). */
 const evidenceStrings = (packet: LlmEvidencePacket): string[] => {
   const out: string[] = [...packet.publicIssueFacts]
@@ -253,12 +264,7 @@ const evidenceStrings = (packet: LlmEvidencePacket): string[] => {
  * forbidden sources. Run by every packet through {@link cleanPacket}.
  */
 export const assertPacketBlind = (packet: LlmEvidencePacket): LlmEvidencePacket => {
-  const haystack = evidenceStrings(packet)
-  for (const marker of FORBIDDEN_PACKET_MARKERS) {
-    if (haystack.some((s) => s.includes(marker))) {
-      throw new PacketBlindnessViolation(marker, packet.stage)
-    }
-  }
+  assertEvidenceTextBlind(packet.stage, evidenceStrings(packet))
   return packet
 }
 
@@ -471,7 +477,11 @@ const fmtList = (values: readonly string[], empty = "<none>"): string =>
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 /** Actual normalized public issue facts — never a placeholder pointer. */
-export const describeIssueFacts = (problemStatement: string): string[] => {
+export const describeIssueFacts = (
+  problemStatement: string,
+  stage: LlmEvidencePacketStage = "intake",
+): string[] => {
+  assertEvidenceTextBlind(stage, [problemStatement])
   const normalized = normalizePublicIssueText(problemStatement)?.trim() ?? problemStatement.trim()
   const hint = extractIssueHint(problemStatement)
   return [
@@ -735,7 +745,7 @@ export const buildIntakeLlmEvidencePacket = (input: IntakeLlmEvidenceInput): Llm
       "generate_candidate",
     ],
     forbiddenSources: ["hidden_tests", "gold_patch", "official_harness_results", "contaminated_case_labels"],
-    publicIssueFacts: describeIssueFacts(input.problemStatement),
+    publicIssueFacts: describeIssueFacts(input.problemStatement, "intake"),
     ownerEvidence: ownerEvidenceFromFaultEvidence(input),
     proofReceipts: [
       {
@@ -771,6 +781,7 @@ export interface SelectionGenerationPacketInput {
   readonly contracts: readonly ContractFact[]
   readonly verificationTarget?: VerificationTargetFact
   readonly reproCommand?: string
+  readonly validatedReproScripts?: readonly string[]
   readonly baseValidatedRed?: boolean
   readonly closureHint?: string
   readonly seed?: string
@@ -785,6 +796,14 @@ export interface SelectionGenerationPacketInput {
 export const buildSelectionGenerationLlmEvidencePacket = (
   input: SelectionGenerationPacketInput,
 ): LlmEvidencePacket => {
+  assertEvidenceTextBlind("candidate_generation", [
+    input.problemStatement,
+    input.reproCommand,
+    input.closureHint,
+    input.seed,
+    ...(input.envCaveats ?? []),
+    ...(input.validatedReproScripts ?? []),
+  ])
   const missingEvidence: MissingEvidenceFact[] = [
     ...(input.reproCommand === undefined
       ? [{ kind: "public_repro", reason: "no_executable_public_repro_hint" }]
@@ -821,7 +840,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
       "broad_multifile_drift_without_public_evidence",
     ],
     publicIssueFacts: [
-      ...describeIssueFacts(input.problemStatement),
+      ...describeIssueFacts(input.problemStatement, "candidate_generation"),
       ...(input.closureHint !== undefined && input.closureHint.trim() !== ""
         ? [`co-change hint: ${boundHead(input.closureHint, 400)}`]
         : []),
@@ -831,6 +850,14 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     proofReceipts,
     contractFacts: input.contracts,
     staticFacts: [
+      ...(input.validatedReproScripts ?? [])
+        .map((source) => source.trim())
+        .filter((source) => source !== "")
+        .slice(0, 2)
+        .map((source, i) => ({
+          kind: "validated_public_repro",
+          value: `script ${i + 1}: ${boundHead(source, 1200)}`,
+        })),
       ...(input.seed !== undefined && input.seed.trim() !== ""
         ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
         : []),
@@ -864,6 +891,9 @@ export const buildSelectionGenerationPrompt = (
     ...(input.baseValidatedRed !== null ? { baseValidatedRed: input.baseValidatedRed } : {}),
     ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
     ...(input.reproCommand !== undefined ? { reproCommand: input.reproCommand } : {}),
+    ...(input.validatedReproScripts !== undefined && input.validatedReproScripts.length > 0
+      ? { validatedReproScripts: input.validatedReproScripts }
+      : {}),
     ...(input.closureHint !== undefined ? { closureHint: input.closureHint } : {}),
     ...(input.envCaveats !== undefined && input.envCaveats.length > 0
       ? { envCaveats: input.envCaveats }
@@ -908,7 +938,7 @@ export const buildCandidateReviewLlmEvidencePacket = (
       "official_harness_results",
       "benchmark_case_tables",
     ],
-    publicIssueFacts: describeIssueFacts(input.problemStatement),
+    publicIssueFacts: describeIssueFacts(input.problemStatement, "candidate_review"),
     ownerEvidence: input.ownerEvidence,
     proofReceipts: [],
     contractFacts: [],
@@ -971,7 +1001,7 @@ export const buildCandidatePostReviewLlmEvidencePacket = (
       "benchmark_case_tables",
       "selection_override",
     ],
-    publicIssueFacts: describeIssueFacts(input.problemStatement),
+    publicIssueFacts: describeIssueFacts(input.problemStatement, "candidate_post_review"),
     ownerEvidence: input.ownerEvidence,
     proofReceipts: input.proofReceipts,
     contractFacts: input.contracts,
@@ -1022,8 +1052,9 @@ export interface RepairSeedPacketInput {
  */
 export const buildRepairSeedLlmEvidencePacket = (
   input: RepairSeedPacketInput,
-): LlmEvidencePacket =>
-  cleanPacket({
+): LlmEvidencePacket => {
+  assertEvidenceTextBlind("repair_seed", [input.problemStatement, input.repairGuidance])
+  return cleanPacket({
     stage: "repair_seed",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
     evidenceRevision: "selector-repair-v2",
@@ -1041,7 +1072,7 @@ export const buildRepairSeedLlmEvidencePacket = (
       "benchmark_case_tables",
       "try_harder_generic_retry",
     ],
-    publicIssueFacts: describeIssueFacts(input.problemStatement),
+    publicIssueFacts: describeIssueFacts(input.problemStatement, "repair_seed"),
     ownerEvidence: input.ownerEvidence,
     proofReceipts: input.proofReceipts,
     contractFacts: input.contracts,
@@ -1056,6 +1087,7 @@ export const buildRepairSeedLlmEvidencePacket = (
         ? [{ kind: "executed_public_proof", reason: "no_positive_executed_public_proof_attached" }]
         : []),
   })
+}
 
 export const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
   renderLlmEvidencePacket(buildRepairSeedLlmEvidencePacket(input))
@@ -1202,7 +1234,7 @@ export const buildSelectionExplanationPacket = (
       "benchmark_case_tables",
       "selection_override",
     ],
-    publicIssueFacts: describeIssueFacts(input.problemStatement),
+    publicIssueFacts: describeIssueFacts(input.problemStatement, "selection_explanation"),
     ownerEvidence: input.ownerFiles.map((file) => ({ file, symbols: [], provenance: "selection-owner" })),
     proofReceipts: proofSummaryReceipts(input.proofSummary),
     contractFacts: input.candidates.map((c) => ({

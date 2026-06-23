@@ -7,6 +7,7 @@
  * 3.10 (numpy build fail) — ~13% of repros silently lost their oracle.
  */
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import { reproRunArgv } from "@/runner/batch/corpus/dataset"
 import {
   pythonForRepoVersion,
@@ -58,6 +59,12 @@ describe("reproRunArgv", () => {
       false,
     )
     expect(reproRunArgv("sympy/sympy", "1.5", "/s/x.py")).not.toContain("--no-build-isolation")
+  })
+
+  test("evaluate-repro CLI routes production rescoring through reproRunArgv", () => {
+    const cli = readFileSync("src/apps/bench/cli.ts", "utf8")
+    expect(cli).toContain("buildArgv: (input, scriptPath) =>")
+    expect(cli).toContain("return reproRunArgv(input.repo, input.version, scriptPath)")
   })
 })
 

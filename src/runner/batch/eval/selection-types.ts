@@ -207,6 +207,10 @@ export interface SelectionResult {
   /** Counterfactual-select telemetry, present only when the counterfactual arm
    *  was enabled. `seedGenerated=false` means candidate 0 never expanded. */
   counterfactual?: CounterfactualTelemetry
+  /** Clean proof-feedback repair loop telemetry. Present only when at least one
+   *  selector-feedback candidate was appended or the loop stopped after trying. */
+  repairFeedbackAttempts?: number
+  repairFeedbackStopReason?: RepairFeedbackStopReason
 }
 
 export interface CounterfactualTelemetry {
@@ -224,6 +228,14 @@ export interface CounterfactualTelemetry {
 }
 
 export type ResolvedKofNMode = "hard" | "soft"
+
+export type RepairFeedbackStopReason =
+  | "winner_found"
+  | "max_attempts"
+  | "missing_seed"
+  | "duplicate_seed"
+  | "empty_patch"
+  | "generation_failed"
 
 /** Compact, JSON-friendly per-candidate view (NO full patch — too big for the
  *  sidecar). The `reasons` carry the hard-gate rejections + soft signals from
@@ -273,6 +285,8 @@ export interface SelectionTelemetry {
   winningFamilyId?: CandidateFamilyId
   riskGate?: SelectionRiskGateTelemetry
   counterfactual?: CounterfactualTelemetry
+  repairFeedbackAttempts?: number
+  repairFeedbackStopReason?: RepairFeedbackStopReason
   proofSummary?: SelectionProofSummary
   candidates: readonly CandidateTelemetry[]
 }

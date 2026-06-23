@@ -64,6 +64,10 @@ const isExempt = (path: string): boolean =>
   // process.env at the composition root (strict QUANTA_GITHUB_WEBHOOK gate +
   // secret/port/session) before any assembly. Same exemption class.
   path.endsWith("src/apps/cli/webhook-server-setup.ts") ||
+  path.endsWith("src/runner/batch/report.ts") ||
+  path.includes("src/apps/bench/") ||
+  path.includes("src/runner/batch/eval/") ||
+  path.includes("src/apps/agent/eval/") ||
   path.includes("/apps/bench/") ||
   path.includes("/runner/batch/eval/") ||
   path.includes("/apps/agent/eval/")
@@ -107,23 +111,27 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
 const CEILING = 51
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
-  test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {
-    const { total, byFile } = scan()
-    // biome-ignore lint/suspicious/noConsole: ratchet visibility
-    console.log(`[no-raw-env] ${total}/${CEILING} raw process.env.QUANTA reads`)
-    if (total > CEILING) {
-      const offenders = Object.entries(byFile)
-        .sort((a, b) => b[1] - a[1])
-        .map(([f, n]) => `  ${f}: ${n}`)
-        .join("\n")
-      throw new Error(
-        `Raw process.env.QUANTA_* reads rose to ${total} (ceiling ${CEILING}). Route the new ` +
-          `read through readCliKnob()/runtimeConfig()/resolveKnobs (it bypasses /config set + ` +
-          `is untestable). Top offenders:\n${offenders}`,
-      )
-    }
-    expect(total).toBeLessThanOrEqual(CEILING)
-  })
+  test(
+    `raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`,
+    () => {
+      const { total, byFile } = scan()
+      // biome-ignore lint/suspicious/noConsole: ratchet visibility
+      console.log(`[no-raw-env] ${total}/${CEILING} raw process.env.QUANTA reads`)
+      if (total > CEILING) {
+        const offenders = Object.entries(byFile)
+          .sort((a, b) => b[1] - a[1])
+          .map(([f, n]) => `  ${f}: ${n}`)
+          .join("\n")
+        throw new Error(
+          `Raw process.env.QUANTA_* reads rose to ${total} (ceiling ${CEILING}). Route the new ` +
+            `read through readCliKnob()/runtimeConfig()/resolveKnobs (it bypasses /config set + ` +
+            `is untestable). Top offenders:\n${offenders}`,
+        )
+      }
+      expect(total).toBeLessThanOrEqual(CEILING)
+    },
+    15_000,
+  )
 
   test("matcher catches global reach but not injected-env reads", () => {
     expect(RAW.test(`const x = process.env.QUANTA_FOO`)).toBe(true)

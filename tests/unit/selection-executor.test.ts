@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import {
   buildCandidateReviewLlmEvidencePacket,
+  candidatePatchHash,
   type LlmEvidencePacket,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import {
@@ -602,21 +603,24 @@ describe("runSelection", () => {
 
     expect(r.winner).toBeNull()
     expect(r.noWinnerReason).toBe("proof_infra_blocked")
-    expect(seeds).toHaveLength(3)
+    expect(seeds).toHaveLength(4)
     expect(seeds[2]).toContain('"stage": "candidate_post_review"')
     expect(seeds[2]).toContain('"stage": "repair_seed"')
     expect(seeds[2]).toContain('"source": "public_mwe"')
     expect(seeds[2]).toContain("proofInfraBlocked")
     expect(seeds[2]).toContain('"state": "execution_failed"')
+    expect(seeds[3]).toContain("proofInfraBlocked")
+    expect(r.repairFeedbackAttempts).toBe(2)
+    expect(r.repairFeedbackStopReason).toBe("max_attempts")
   })
 
-  it("proof-required mode appends one bounded repair candidate for contract-only evidence", async () => {
+  it("proof-required mode appends two bounded feedback repair candidates for contract-only evidence", async () => {
     const seeds: (string | undefined)[] = []
     const gen: SelectionPorts["generate"] = async (i, seed) => {
       seeds.push(seed)
       return cand({
         id: `cand-${i}`,
-        patch: patchForFiles(["pkg/owner.py"]),
+        patch: `${patchForFiles(["pkg/owner.py"])}\n+feedback${i}`,
         files: ["pkg/owner.py"],
       })
     }
@@ -641,7 +645,7 @@ describe("runSelection", () => {
 
     expect(r.winner).toBeNull()
     expect(r.noWinnerReason).toBe("proof_required_missing")
-    expect(seeds).toHaveLength(2)
+    expect(seeds).toHaveLength(3)
     expect(seeds[1]).toContain('"stage": "candidate_post_review"')
     expect(seeds[1]).toContain('"stage": "repair_seed"')
     expect(seeds[1]).toContain('"verificationTarget"')
@@ -649,6 +653,80 @@ describe("runSelection", () => {
     expect(seeds[1]).toContain("no_positive_executed_public_proof_attached")
     expect(seeds[1]).toContain("owner-must-touch:pkg/owner.py")
     expect(seeds[1]).not.toContain("requiredContractsSatisfied=1")
+    expect(seeds[2]).toContain("proofRequiredMissing")
+    expect(r.repairFeedbackAttempts).toBe(2)
+    expect(r.repairFeedbackStopReason).toBe("max_attempts")
+  })
+
+  it("AUDIT generation_failed: a throw inside the repair generate port stops gracefully (telemetry, not crash)", async () => {
+    // Red-on-injection: drop the try/catch in maybeAppendSelectorRepair and this
+    // rejects instead of returning a clean `generation_failed` stop reason.
+    let calls = 0
+    const gen: SelectionPorts["generate"] = async (i) => {
+      calls += 1
+      if (i >= 1) throw new Error("generator OOM during repair")
+      return cand({ id: `cand-${i}`, patch: patchForFiles(["pkg/owner.py"]), files: ["pkg/owner.py"] })
+    }
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      problemStatement: "Public issue for a proof-required miss.",
+      seeds: [undefined],
+      owners: new Set(["pkg/owner.py"]),
+      publicContracts: { contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]) },
+      ports: { generate: gen },
+    })
+    expect(calls).toBe(2) // cand-0 + one repair attempt that throws
+    expect(r.repairFeedbackAttempts).toBe(0)
+    expect(r.repairFeedbackStopReason).toBe("generation_failed")
+  })
+
+  it("AUDIT byte-identical: research mode never enters the repair-feedback loop", async () => {
+    // Red-on-injection: if the `mode !== 'clean'` guard leaks, research mode would
+    // generate an extra repair candidate + emit repairFeedback telemetry.
+    const { gen, seeds } = genFrom([
+      cand({ id: "cand-0", patch: patchForFiles(["x.py"]), files: ["x.py"] }),
+    ])
+    const r = await runSelection({
+      n: 1,
+      mode: "research",
+      oracleFailureRepairSeed: "would-be-injected-feedback",
+      seeds: [undefined],
+      owners: new Set(["x.py"]),
+      ports: { generate: gen },
+    })
+    expect(seeds).toHaveLength(1) // only cand-0; no repair round
+    expect(r.repairFeedbackAttempts).toBeUndefined()
+    expect(r.repairFeedbackStopReason).toBeUndefined()
+  })
+
+  it("AUDIT first→latest: the repair packet focuses on the LATEST non-empty candidate, not the first", async () => {
+    // Two distinct non-empty candidates, neither a winner ⇒ the repair seed packet
+    // must carry the LATEST candidate's patch hash (cand-1), not the first (cand-0).
+    // Red-on-injection: revert buildRepairPacketText to `find` (first) and the
+    // captured repair_seed hash flips to cand-0.
+    const cand0 = cand({ id: "cand-0", patch: `${patchForFiles(["x.py"])}\n+first`, files: ["x.py"] })
+    const cand1 = cand({ id: "cand-1", patch: `${patchForFiles(["x.py"])}\n+latest`, files: ["x.py"] })
+    const repairPackets: LlmEvidencePacket[] = []
+    await runSelection({
+      n: 2,
+      mode: "clean",
+      oracleFailureRepairSeed: "feedback",
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      recordLlmEvidencePacket: (packet) => {
+        if (packet.stage === "repair_seed") repairPackets.push(packet)
+      },
+      ports: {
+        generate: async (i) => [cand0, cand1, cand({ id: "cand-2", patch: "", files: [] })][i] as Candidate,
+        // force no winner so the repair path runs
+        mweProof: async () => ({ state: "candidate_red" }),
+      },
+    })
+    expect(repairPackets.length).toBeGreaterThanOrEqual(1)
+    expect(repairPackets[0]?.candidatePatchHash).toBe(candidatePatchHash(cand1.patch))
+    expect(repairPackets[0]?.candidatePatchHash).not.toBe(candidatePatchHash(cand0.patch))
   })
 
   it("records candidate_post_review before repair_seed on the repair path", async () => {
@@ -676,6 +754,8 @@ describe("runSelection", () => {
       },
     })
     expect(recorded.map((packet) => packet.stage)).toEqual([
+      "candidate_post_review",
+      "repair_seed",
       "candidate_post_review",
       "repair_seed",
     ])
@@ -851,6 +931,106 @@ describe("runSelection", () => {
     expect(seeds[2]).toContain("AssertionError: env {} should stay None")
     expect(seeds[2]).toContain("validated repro source")
     expect(r.winner?.id).toBe("cand-2")
+  })
+
+  it("proof-required mode reinjects repro feedback twice and stops on proof-positive repair", async () => {
+    const seeds: (string | undefined)[] = []
+    const unresolvedWithTrace = {
+      votes: 0,
+      k: 1,
+      reproTrace: {
+        vote: { verdict: "reproduced", resolved: 0, reproduced: 1, inconclusive: 0 },
+        samples: [
+          {
+            outcome: "reproduced",
+            stdoutTail: "Issue reproduced",
+            stderrTail: "AssertionError: timezone still ignored",
+            source: "print('Issue reproduced')",
+          },
+        ],
+      },
+    } as const
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return cand({
+        id: `cand-${i}`,
+        patch: `+++ b/x.py\n+fix${i}`,
+        files: ["x.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      proofRequired: true,
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      resolvedKofNMode: "soft",
+      oracleFailureRepairSeed: "validated repro source",
+      ports: {
+        generate: gen,
+        resolvedKofN: async (c) => (c.id === "cand-3" ? { votes: 1, k: 1 } : unresolvedWithTrace),
+      },
+    })
+
+    expect(seeds).toHaveLength(4)
+    expect(seeds[2]).toContain("base-red validated reproduction set")
+    expect(seeds[3]).toContain("base-red validated reproduction set")
+    expect(r.winner?.id).toBe("cand-3")
+    expect(r.repairFeedbackAttempts).toBe(2)
+    expect(r.repairFeedbackStopReason).toBe("winner_found")
+  })
+
+  it("proof-required feedback loop stops when the repair generator returns an empty patch", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return cand({
+        id: `cand-${i}`,
+        patch: i === 1 ? "" : patchForFiles(["pkg/owner.py"]),
+        files: i === 1 ? [] : ["pkg/owner.py"],
+      })
+    }
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      publicContracts: {
+        contracts: buildOwnerMustTouchContracts(["pkg/owner.py"]),
+      },
+      seeds: [undefined],
+      owners: new Set(["pkg/owner.py"]),
+      ports: { generate: gen },
+    })
+
+    expect(seeds).toHaveLength(2)
+    expect(r.winner).toBeNull()
+    expect(r.repairFeedbackAttempts).toBe(0)
+    expect(r.repairFeedbackStopReason).toBe("empty_patch")
+  })
+
+  it("proof-required feedback loop stops when no repair seed can be derived", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (_i, seed) => {
+      seeds.push(seed)
+      return cand({
+        id: "cand-0",
+        patch: "",
+        files: [],
+      })
+    }
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      seeds: [undefined],
+      owners: new Set(["pkg/owner.py"]),
+      ports: { generate: gen },
+    })
+
+    expect(seeds).toHaveLength(1)
+    expect(r.winner).toBeNull()
+    expect(r.repairFeedbackAttempts).toBe(0)
+    expect(r.repairFeedbackStopReason).toBe("missing_seed")
   })
 
   it("clean mode appends one static-sanity repair candidate when a stronger structural patch is blocked only by deterministic sanity", async () => {

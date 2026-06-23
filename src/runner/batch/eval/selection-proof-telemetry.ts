@@ -230,6 +230,12 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
     ...(result.winner?.familyId !== undefined ? { winningFamilyId: result.winner.familyId } : {}),
     ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
     ...(result.counterfactual !== undefined ? { counterfactual: result.counterfactual } : {}),
+    ...(result.repairFeedbackAttempts !== undefined
+      ? { repairFeedbackAttempts: result.repairFeedbackAttempts }
+      : {}),
+    ...(result.repairFeedbackStopReason !== undefined
+      ? { repairFeedbackStopReason: result.repairFeedbackStopReason }
+      : {}),
     ...(proofSummary !== undefined ? { proofSummary } : {}),
     candidates: result.scored.map((s) => {
       const publicRegression =
