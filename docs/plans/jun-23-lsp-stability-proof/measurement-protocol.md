@@ -116,23 +116,42 @@ It is a ONE-TIME-per-box cost; the early opaque ~28–30 s is the rough ceiling 
 it. So budget for up to ~30 s on the very first LSP call per box; every call after
 is cold-server (~3–10 s) or warm (ms).
 
-## Measurement B — SWE-bench grounding-preset slice (operator-run, pending)
+## Measurement B — strict-gate ready-proof over real bench repos (DONE, token-free)
 
-The distribution that gates any budget/anchor change. Run a grounding preset
-(e.g. `agentless-v3-thin-strict`) over a real pick slice (local or EC2 full-remote),
-then aggregate the report(s):
+The ready-proof distribution across 6 DISTINCT real SWE-bench repos (the gate's
+actual `proveStrictLspReady` path on each instance's gold-patch target file, each
+freshly checked out at its base commit). Token-free, no LLM, no EC2 — measures the
+LSP-grounding admission dimension directly (default 90 s budget):
+
+| instance | repo (py files) | ready | ms |
+|----------|-----------------|-------|----|
+| psf__requests-5414 | requests (35) | ok | 2815 |
+| pallets__flask-5014 | flask (80) | ok | 3058 |
+| pytest-dev__pytest-7982 | pytest (223) | ok | 3306 |
+| sphinx-doc__sphinx-8595 | sphinx (530) | ok | 4342 |
+| pylint-dev__pylint-4970 | pylint (878) | ok | 4942 |
+| sympy__sympy-13480 | sympy (1181) | ok | 7177 |
+
+Summary: **6/6 ready=ok, ready_timeout=0, fatal_transport=0, expected_cancel=0**;
+ready ms 2815 / median ~3.8k / 7177. So the strict gate does NOT false-time-out on
+real bench repos (0%), admission costs ~3–7 s cold-server, and the 90 s budget is
+~12× the worst observed — comfortable headroom, NOT the binding constraint. No
+budget change warranted.
+
+### Remaining dimension — end-to-end RESOLVED rate (operator-run)
+
+Measurement B above proves the GROUNDING dimension (does the gate admit/fast/no-
+false-timeout). The orthogonal question — does strict grounding change the
+SWE-bench resolved rate — needs a real solve run. When a grounding-preset bench
+lands a `report.json`, aggregate it:
 
 ```
 bun run tools/dev/lsp-grounding-summary.ts <report.json> [more-runs.json ...]
 ```
 
-| arm | runs | n | ready_ok | ready_timeout | expected_cancel | fatal_transport | ready ms (min/med/max) |
-|-----|------|---|----------|---------------|-----------------|-----------------|------------------------|
-| baseline (current budgets) | — | — | — | — | — | — | — |
-| candidate (if any) | — | — | — | — | — | — | — |
-
 NOT auto-run: it spends LLM tokens / EC2 and must not collide with a live bench
-(throttle/pkill hazard). Operator triggers it; the aggregator fills the table.
+(throttle/pkill hazard). Operator triggers it; the aggregator fills in the
+per-instance ready outcomes from the live solve.
 
 ## Status
 
@@ -141,7 +160,10 @@ NOT auto-run: it spends LLM tokens / EC2 and must not collide with a live bench
 - Measurement A: DONE + CORRECTED (phase-separated) — spawn ~0.3 s, cold-server first
   resolve ~3–10 s (1 poll), warm-server ~ms. pyright is lazy/fast; the earlier
   "~28 s indexing / 1900×" was a confounded opaque-wall-time mislabel (retracted above).
-- Measurement B: PENDING an operator-run grounding bench.
+- Measurement B (grounding dimension): DONE — 6/6 distinct real bench repos ready=ok,
+  0 ready_timeout / 0 fatal over a 2.8–7.2 s spread (token-free, real gate path).
+  The strict gate does not false-time-out on real repos; 90 s budget is ~12× headroom.
+- Measurement B (resolved-rate dimension): PENDING an operator-run grounding solve.
 - Budget/anchor change: **NONE** — `PYRIGHT_READY_TIMEOUT_MS` (90 s) is ~9× the worst
   cold-server resolve (~10 s) and comfortably covers the one-time machine-cold first
   spawn (~30 s ceiling), so it is NOT the binding constraint. The knob lets an operator
