@@ -373,3 +373,16 @@ Rules (the seam does not enforce these — honour them; see `src/agent/types.ts`
 - **This is a troubleshooting tool, not a final measurement.** It forms
   hypotheses cheaply; confirming a config still requires a full live run
   (RFC §8).
+
+- **Record and replay MUST use the same preset.** The cassette matches by request
+  hash, and the preset shapes every prompt — so replaying with a different
+  `QUANTA_BENCH_PRESET` than you recorded with makes the very first turn miss.
+  Pin the same preset (or none) across the record and all replay/fork runs.
+
+- **LSP-gated presets need a language server on PATH.** Every `agentless-*`
+  preset sets `lsp=1`, whose strict-grounding gate aborts the run (turns=0,
+  empty patch) if the repo's language server (`pyright-langserver` for Python,
+  `typescript-language-server` for JS/TS) is not launchable. For real SWE-bench
+  Python instances that server is part of the environment; for ad-hoc/JS repos
+  use a non-LSP preset (`QUANTA_BENCH_PRESET=baseline`) for both record and
+  replay, or install the server first.
