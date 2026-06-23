@@ -22,6 +22,7 @@ import {
   PacketBlindnessViolation,
   type ProofReceiptFact,
   type ProofReceiptSourcePolicy,
+  ProofReceiptSourcePolicyError,
   type RepairSeedPacketInput,
   recordLlmEvidencePacket,
   renderLlmEvidencePacket,
@@ -275,6 +276,32 @@ describe("llm evidence packet — stage builders", () => {
     })
   })
 
+  test("generation packet surfaces static-witness unsupported-language diagnostics instead of staying silent", () => {
+    const parsed = parseRendered(
+      buildSelectionGenerationPacket({
+        problemStatement: "Fix render() in widget.ts.",
+        ownerEvidence: [],
+        contracts: [],
+        staticWitnessDiagnostics: [
+          {
+            kind: "static_witness_unsupported_language",
+            file: "widget.ts",
+            reason: "static-witness is Python-only and found no recognizable Python structure",
+          },
+        ],
+      }),
+    )
+    expect(parsed.staticFacts).toContainEqual({
+      kind: "static_witness_unsupported_language",
+      value:
+        "widget.ts: static-witness is Python-only and found no recognizable Python structure",
+    })
+    expect(parsed.missingEvidence).toContainEqual({
+      kind: "static_witness",
+      reason: "static_witness_unsupported_language:widget.ts",
+    })
+  })
+
   test("AUDIT: validated repro scripts carry an evidence-toned framing note (not a 'must pass' mandate)", () => {
     const rendered = buildSelectionGenerationPacket({
       problemStatement: "Connection settings are ignored.",
@@ -287,6 +314,7 @@ describe("llm evidence packet — stage builders", () => {
     const note = facts.find((f) => f.kind === "validated_public_repro_note")
     expect(note).toBeDefined()
     expect(note?.value.toLowerCase()).toContain("root cause")
+    expect(note?.value.toLowerCase()).toContain("exit 0")
     expect(note?.value.toLowerCase()).not.toContain("must make them report")
   })
 
@@ -453,6 +481,24 @@ describe("llm evidence packet — stage builders", () => {
     })
     expect(rendered).toContain('"stage": "candidate_generation"')
     expect(rendered).not.toContain("baseValidatedRed")
+  })
+
+  test("shared clean generation prompt forwards static-witness diagnostics into the rendered packet", () => {
+    const rendered = buildSelectionGenerationPrompt({
+      problemStatement: "Fix buildWidget() in widget.ts so it preserves the input object.",
+      ownerEvidence: [{ file: "widget.ts", symbols: [], provenance: "selection-owner" }],
+      contracts: [],
+      baseValidatedRed: false,
+      staticWitnessDiagnostics: [
+        {
+          kind: "static_witness_unsupported_language",
+          file: "widget.ts",
+          reason: "python-only analyzer could not interpret TS source",
+        },
+      ],
+    })
+    expect(rendered).toContain("static_witness_unsupported_language")
+    expect(rendered).toContain("widget.ts")
   })
 })
 
@@ -1110,13 +1156,34 @@ describe("B5 — ownerTestResultReceipt (result only, command WITHHELD)", () => 
 
 // ── B8: typed source-policy class on proof receipts ───────────────────────────
 describe("B8 — ProofReceiptFact source policy is explicit + typed", () => {
-  test("sourcePolicyOf classifies known identifiers; unknown/hard:* ⇒ undefined", () => {
+  test("sourcePolicyOf classifies known identifiers and hard deterministic reasons", () => {
     expect(sourcePolicyOf("public_mwe")).toBe("public_repro")
     expect(sourcePolicyOf("discovered_regression")).toBe("public_discovered_test")
     expect(sourcePolicyOf("repro_consensus")).toBe("public_repro")
     expect(sourcePolicyOf("selection")).toBe("static")
-    expect(sourcePolicyOf("hard:proofRequiredMissing")).toBeUndefined()
+    expect(sourcePolicyOf("hard:proofRequiredMissing")).toBe("static")
+    expect(sourcePolicyOf("module_smoke")).toBe("official_hidden_withheld")
     expect(sourcePolicyOf("totally-unknown")).toBeUndefined()
+  })
+
+  test("render path FAILS CLOSED when a proof receipt has an unknown source and no explicit policy", () => {
+    expect(() =>
+      renderLlmEvidencePacket({
+        stage: "candidate_post_review",
+        instanceIdHash: "x",
+        evidenceRevision: "v",
+        candidatePatchHash: "c",
+        question: "q",
+        allowedActions: [],
+        forbiddenSources: [],
+        publicIssueFacts: [],
+        ownerEvidence: [],
+        proofReceipts: [{ source: "totally-unknown", state: "not_run" }],
+        contractFacts: [],
+        staticFacts: [],
+        missingEvidence: [],
+      }),
+    ).toThrow(ProofReceiptSourcePolicyError)
   })
 
   test("in-file producers emit an explicit typed sourcePolicy", () => {

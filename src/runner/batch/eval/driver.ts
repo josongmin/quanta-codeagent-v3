@@ -63,6 +63,7 @@ import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
 import {
   errMessage,
+  filesFromUnifiedDiff,
   foldGroundingReceipts,
   gateDisabled,
   gateOn,
@@ -117,6 +118,7 @@ import {
   buildSelectionExplanationPacket,
   buildSelectionGenerationPrompt,
   buildSelectionOwnerEvidence,
+  type CandidateEditSurfaceFact,
   type ContractFact,
   candidatePatchHash,
   type LlmEvidenceArtifacts,
@@ -182,7 +184,10 @@ import {
   ObservationError,
   type Wiring,
 } from "./report"
-import { calibrateReproOracle } from "./repro-oracle-calibration"
+import {
+  calibrateReproOracle,
+  unavailableReproOracleCalibration,
+} from "./repro-oracle-calibration"
 import {
   type AttemptOutcome,
   classifyOutcome,
@@ -198,17 +203,23 @@ import {
   type Candidate,
   type DerivedCandidateStructuralRepair,
   filesFromPatch,
+  normalizeSelectionPaths,
   runSelection,
   type SelectionPorts,
   type SelectionTelemetry,
   summarizeSelection,
 } from "./selection-executor"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
+import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { witnessAuthoritativeOwners } from "./static-witness"
-import { buildAstStaticWitnesses } from "./static-witness-adapter"
+import {
+  buildAstStaticWitnesses,
+  staticWitnessLanguageDiagnostics,
+  type StaticWitnessDiagnostic,
+} from "./static-witness-adapter"
 import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -1174,9 +1185,9 @@ export const REPRO_FILE_NAME = "reproduce_issue.py"
  *  exact string. */
 export const REPRO_HINT_MESSAGE = [
   "A reproduction script has been placed at `reproduce_issue.py` in the sandbox.",
-  "After your fix, run `python reproduce_issue.py` — it must print exactly",
-  '"Issue resolved". If it prints anything else ("Issue reproduced",',
-  '"Other issues", or nothing), your fix is incorrect and you must iterate.',
+  "After your fix, run `python reproduce_issue.py` under the project env.",
+  "It must go green: all assertions pass and the process exits 0.",
+  "A failing assertion or non-zero exit means the bug is still present or the repro could not run cleanly.",
 ].join("\n")
 
 export interface PrepareReproTestDetailedResult {
@@ -1457,13 +1468,13 @@ export const validatedReproContractSeed = (
     .join("\n\n")
   const omitted = nonEmptySources.length - boundedSources.length
   return [
-    "The following reproduction script(s) were generated from the public issue and executed on the base tree; each printed `Issue reproduced` there.",
+    "The following reproduction script(s) were generated from the public issue and executed on the base tree; each failed there and therefore reproduced the bug.",
     // Evidence-toned, NOT an absolute "must pass" mandate: these are LLM-generated
     // SYMPTOM reproducers, not the hidden grading tests. Over-stating their
     // authority invites reward-hacking the self-generated oracle. Fix the ROOT
-    // CAUSE described in the issue; a correct fix should also make them report
-    // `Issue resolved`, but do not contort the patch merely to satisfy a script.
-    "Treat them as strong public evidence of the bug's observable behavior. Prioritize fixing the root cause from the issue; a correct fix should make them report `Issue resolved`, but do not add unrelated design surface just to pass a single script.",
+    // CAUSE described in the issue; a correct fix should also make them PASS /
+    // exit 0, but do not contort the patch merely to satisfy a script.
+    "Treat them as strong public evidence of the bug's observable behavior. Prioritize fixing the root cause from the issue; a correct fix should make them pass cleanly (all assertions green / exit 0), but do not add unrelated design surface just to pass a single script.",
     ...(omitted > 0
       ? [
           `Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`,
@@ -2338,18 +2349,6 @@ export const makeReproConsensusProofSelectionPort = (
     })
 }
 
-const CALIBRATION_UNAVAILABLE: ReproOracleCalibration = {
-  goldCalibrated: false,
-  falseNegative: false,
-  available: false,
-  goldVotes: null,
-  goldK: null,
-  baseResolved: false,
-  vacuous: false,
-  baseVotes: null,
-  baseK: null,
-}
-
 /**
  * EVAL-ONLY DIAGNOSTIC — the GOLD-CALIBRATED repro-consensus selection port (NOT a
  * production solving capability; gold is absent on live tasks ⇒ inert off-bench).
@@ -2383,7 +2382,9 @@ export const makeCalibratedReproConsensusPort = async (
   calibration: ReproOracleCalibration
 }> => {
   const base = makeReproConsensusSelectionPort(instance, reproSources, sandbox, timeoutMs)
-  if (reproSources.length === 0) return { port: base, calibration: CALIBRATION_UNAVAILABLE }
+  if (reproSources.length === 0) {
+    return { port: base, calibration: unavailableReproOracleCalibration() }
+  }
   const probe = makePatchedResolvedConsensus({
     sources: reproSources,
     ...reproExecBundle(instance),
@@ -2539,18 +2540,6 @@ export const selectionReproPolicy = (
   return { enabled: true, goldCalibrate: true, resolvedKofNMode: "hard" }
 }
 
-const unavailableReproCalibration = (): ReproOracleCalibration => ({
-  goldCalibrated: false,
-  falseNegative: false,
-  available: false,
-  goldVotes: null,
-  goldK: null,
-  baseResolved: false,
-  vacuous: false,
-  baseVotes: null,
-  baseK: null,
-})
-
 /**
  * P4 (jun-23): GOLD-calibrate the PROOF-REQUIRED gate's CANONICAL oracle.
  *
@@ -2575,7 +2564,7 @@ const calibrateProofOracle = async (
   sandbox: string,
   timeoutMs: number,
 ): Promise<ReproOracleCalibration> => {
-  if (canonicalReproSources.length === 0) return unavailableReproCalibration()
+  if (canonicalReproSources.length === 0) return unavailableReproOracleCalibration()
   const probe = makePatchedResolvedConsensus({
     sources: canonicalReproSources,
     ...reproExecBundle(instance),
@@ -2635,7 +2624,7 @@ const resolveSelectionReproConsensus = async (
   proofRequired: boolean,
 ) => {
   const reproPolicy = selectionReproPolicy(mode)
-  const calibrationUnavailable = unavailableReproCalibration()
+  const calibrationUnavailable = unavailableReproOracleCalibration()
   if (!reproPolicy.enabled) {
     return {
       reproPolicy,
@@ -2835,16 +2824,22 @@ const buildSelectionStructuralPlan = (args: {
   readonly publicContracts: PublicContractBundle | undefined
   readonly n: number
 }) => {
-  const staticWitnesses = buildAstStaticWitnesses({
+  const normalizedOwnerCandidates = normalizeSelectionPaths(
+    args.selectionOwnerCandidates,
+    args.sandbox,
+  )
+  const staticWitnessInput = {
     problemStatement: args.instance.problemStatement,
-    ownerCandidates: args.selectionOwnerCandidates,
+    ownerCandidates: normalizedOwnerCandidates,
     ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
-    readSource: (rel) => readSandboxSource(args.sandbox, rel),
-  })
+    readSource: (rel: string) => readSandboxSource(args.sandbox, rel),
+  }
+  const staticWitnesses = buildAstStaticWitnesses(staticWitnessInput)
+  const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(staticWitnessInput)
   const candidateFamilyBundle = withStaticWitnessFamilies(
     buildSelectionCandidateFamilyBundle({
       problemStatement: args.instance.problemStatement,
-      ownerCandidates: args.selectionOwnerCandidates,
+      ownerCandidates: normalizedOwnerCandidates,
       ownerResolved: args.ownerResolved,
       readSource: (rel) => readSandboxSource(args.sandbox, rel),
     }),
@@ -2860,11 +2855,17 @@ const buildSelectionStructuralPlan = (args: {
   )
   const selectionInputs = buildSelectionInputs({
     n: args.n,
-    ownerCandidates: args.selectionOwnerCandidates,
+    ownerCandidates: normalizedOwnerCandidates,
     sandbox: args.sandbox,
     ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
-  return { candidateFamilyBundle, effectivePublicContracts, selectionInputs, staticWitnesses }
+  return {
+    candidateFamilyBundle,
+    effectivePublicContracts,
+    selectionInputs,
+    staticWitnesses,
+    staticWitnessDiagnostics,
+  }
 }
 
 const buildSelectionPhaseContracts = (args: {
@@ -2875,9 +2876,9 @@ const buildSelectionPhaseContracts = (args: {
   readonly publicContracts: PublicContractBundle | undefined
   readonly n: number
 }) => {
-  const { effectivePublicContracts, selectionInputs, staticWitnesses } =
+  const { effectivePublicContracts, selectionInputs, staticWitnesses, staticWitnessDiagnostics } =
     buildSelectionStructuralPlan(args)
-  return { effectivePublicContracts, selectionInputs, staticWitnesses }
+  return { effectivePublicContracts, selectionInputs, staticWitnesses, staticWitnessDiagnostics }
 }
 
 const resolveSelectionPhasePorts = async (args: {
@@ -2995,6 +2996,7 @@ const buildSelectionExecutorPorts = (args: {
   readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
+  readonly staticWitnessDiagnostics: readonly StaticWitnessDiagnostic[]
   readonly publicContracts: PublicContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly recordLlmEvidencePacket: ((packet: LlmEvidencePacket) => void) | undefined
@@ -3030,6 +3032,9 @@ const buildSelectionExecutorPorts = (args: {
                   : {}),
                 ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
                 ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
+                ...(args.staticWitnessDiagnostics.length > 0
+                  ? { staticWitnessDiagnostics: args.staticWitnessDiagnostics }
+                  : {}),
                 // Scripts reach generation ONCE via `validatedReproScripts`
                 // staticFacts; NOT also merged into `seed` (that destroyed the
                 // diversity seed via the seed length cap + duplicated the scripts).
@@ -3172,7 +3177,7 @@ const runSelectionPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
-  const { effectivePublicContracts, selectionInputs, staticWitnesses } =
+  const { effectivePublicContracts, selectionInputs, staticWitnesses, staticWitnessDiagnostics } =
     buildSelectionPhaseContracts({
       instance,
       sandbox,
@@ -3288,6 +3293,7 @@ const runSelectionPhase = async (
       selectionOwnerEvidence,
       envCaveats: generationEnvCaveats,
       validatedReproScripts: reproSources,
+      staticWitnessDiagnostics,
       publicContracts: effectivePublicContracts,
       verificationTarget,
       recordLlmEvidencePacket: (packet) => {
@@ -4039,6 +4045,32 @@ const dedupeProofReceipts = (
   ).values(),
 ]
 
+const candidateEditSurfaceFromPatch = (patch: string): CandidateEditSurfaceFact | undefined => {
+  if (patch.trim() === "") return undefined
+  const touchedFiles = filesFromUnifiedDiff(patch)
+  const touchedSymbols = diffTouchedSymbols(patch)
+  if (touchedFiles.length === 0 && touchedSymbols.length === 0) return undefined
+  return { touchedFiles, touchedSymbols }
+}
+
+const adaptiveStaticWitnessEvidence = (args: {
+  readonly problemStatement: string
+  readonly ownerFiles: readonly string[]
+  readonly ownerResolved: readonly OwnerSibling[] | undefined
+  readonly sandbox: string
+}) => {
+  const input = {
+    problemStatement: args.problemStatement,
+    ownerCandidates: args.ownerFiles,
+    ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
+    readSource: (rel: string) => readSandboxSource(args.sandbox, rel),
+  }
+  return {
+    staticWitnesses: buildAstStaticWitnesses(input),
+    staticWitnessDiagnostics: staticWitnessLanguageDiagnostics(input),
+  }
+}
+
 const adaptiveBaseReproReceipts = (
   reproTest: BenchReproTestTelemetry | undefined,
 ): readonly ProofReceiptFact[] => {
@@ -4047,6 +4079,7 @@ const adaptiveBaseReproReceipts = (
     return [
       {
         source: "public_mwe",
+        sourcePolicy: "public_repro",
         state: reproTest.reproducedCount > 0 ? "base_red" : "base_green",
         command: reproTest.path,
         baseValidatedRed: reproTest.reproducedCount > 0,
@@ -4057,7 +4090,7 @@ const adaptiveBaseReproReceipts = (
     reproTest.reason === "not_installed" || reproTest.reason === "write_failed"
       ? "env_prep_failed"
       : "execution_failed"
-  return [{ source: "public_mwe", state: infraReason }]
+  return [{ source: "public_mwe", sourcePolicy: "public_repro", state: infraReason }]
 }
 
 const adaptiveSelectionProofReceipts = (
@@ -4071,47 +4104,101 @@ const adaptiveSelectionProofReceipts = (
   const receipts: ProofReceiptFact[] = []
   switch (proofSummary.publicMweState) {
     case "base_red":
-      receipts.push({ source: "public_mwe", state: "base_red", baseValidatedRed: true })
+      receipts.push({
+        source: "public_mwe",
+        sourcePolicy: "public_repro",
+        state: "base_red",
+        baseValidatedRed: true,
+      })
       break
     case "base_not_red":
-      receipts.push({ source: "public_mwe", state: "base_green" })
+      receipts.push({ source: "public_mwe", sourcePolicy: "public_repro", state: "base_green" })
       break
     case "patched_green":
-      receipts.push({ source: "public_mwe", state: "candidate_green", baseValidatedRed: true })
+      receipts.push({
+        source: "public_mwe",
+        sourcePolicy: "public_repro",
+        state: "candidate_green",
+        baseValidatedRed: true,
+      })
       break
     case "candidate_red":
-      receipts.push({ source: "public_mwe", state: "candidate_red", baseValidatedRed: true })
+      receipts.push({
+        source: "public_mwe",
+        sourcePolicy: "public_repro",
+        state: "candidate_red",
+        baseValidatedRed: true,
+      })
       break
     case "execution_failed":
-      receipts.push({ source: "public_mwe", state: "execution_failed" })
+      receipts.push({
+        source: "public_mwe",
+        sourcePolicy: "public_repro",
+        state: "execution_failed",
+      })
       break
   }
   switch (proofSummary.publicRegressionState) {
     case "safety_green":
-      receipts.push({ source: "discovered_regression", state: "candidate_green" })
+      receipts.push({
+        source: "discovered_regression",
+        sourcePolicy: "public_discovered_test",
+        state: "candidate_green",
+      })
       break
     case "candidate_red":
-      receipts.push({ source: "discovered_regression", state: "candidate_red" })
+      receipts.push({
+        source: "discovered_regression",
+        sourcePolicy: "public_discovered_test",
+        state: "candidate_red",
+      })
       break
     case "execution_failed":
-      receipts.push({ source: "discovered_regression", state: "execution_failed" })
+      receipts.push({
+        source: "discovered_regression",
+        sourcePolicy: "public_discovered_test",
+        state: "execution_failed",
+      })
       break
     case "coverage_capped":
-      receipts.push({ source: "discovered_regression", state: "static_only" })
+      receipts.push({
+        source: "discovered_regression",
+        sourcePolicy: "public_discovered_test",
+        state: "static_only",
+      })
       break
   }
   switch (proofSummary.reproConsensusState) {
     case "base_red_candidate_green":
-      receipts.push({ source: "repro_consensus", state: "candidate_green", baseValidatedRed: true })
+      receipts.push({
+        source: "repro_consensus",
+        sourcePolicy: "public_repro",
+        state: "candidate_green",
+        baseValidatedRed: true,
+      })
       break
     case "base_red_candidate_red":
-      receipts.push({ source: "repro_consensus", state: "candidate_red", baseValidatedRed: true })
+      receipts.push({
+        source: "repro_consensus",
+        sourcePolicy: "public_repro",
+        state: "candidate_red",
+        baseValidatedRed: true,
+      })
       break
     case "execution_failed":
-      receipts.push({ source: "repro_consensus", state: "execution_failed" })
+      receipts.push({
+        source: "repro_consensus",
+        sourcePolicy: "public_repro",
+        state: "execution_failed",
+      })
       break
     case "false_negative_suspected":
-      receipts.push({ source: "repro_consensus", state: "static_only", baseValidatedRed: true })
+      receipts.push({
+        source: "repro_consensus",
+        sourcePolicy: "public_repro",
+        state: "static_only",
+        baseValidatedRed: true,
+      })
       break
   }
   // B5 — surface the executed module-smoke (public issue-smoke) HARD-gate RESULT
@@ -4167,10 +4254,23 @@ const buildAdaptivePhaseEvidence = (args: {
   readonly sandbox: string
 }): LlmEvidencePacket => {
   const proofSummary = args.phase.selectionTelemetry?.proofSummary
+  const ownerFiles =
+    args.phase.selectionTelemetry?.ownerFiles ??
+    cleanUniqueList([
+      ...(args.prepared.closureSession?.bundle.evidence.candidates.map((candidate) => candidate.file) ?? []),
+      ...(args.prepared.ownerResolved?.map((owner) => owner.file) ?? []),
+      ...args.prepared.localizeCandidates,
+    ])
+  const { staticWitnesses, staticWitnessDiagnostics } = adaptiveStaticWitnessEvidence({
+    problemStatement: args.instance.problemStatement,
+    ownerFiles,
+    ownerResolved: args.prepared.ownerResolved,
+    sandbox: args.sandbox,
+  })
   if (args.phase.selectionTelemetry !== undefined) {
     return buildSelectionExplanationPacket({
       problemStatement: args.instance.problemStatement,
-      ownerFiles: args.phase.selectionTelemetry.ownerFiles,
+      ownerFiles,
       winnerId: args.phase.selectionTelemetry.winnerId,
       ...(args.phase.selectionTelemetry.noWinnerReason !== undefined
         ? { noWinnerReason: args.phase.selectionTelemetry.noWinnerReason }
@@ -4178,18 +4278,13 @@ const buildAdaptivePhaseEvidence = (args: {
       ...(args.phase.selectionTelemetry.proofRequired === true ? { proofRequired: true } : {}),
       ...(proofSummary !== undefined ? { proofSummary } : {}),
       candidates: args.phase.selectionTelemetry.candidates,
+      ...(staticWitnessDiagnostics.length > 0 ? { staticWitnessDiagnostics } : {}),
     })
   }
-  const ownerFiles = cleanUniqueList([
-    ...(args.prepared.closureSession?.bundle.evidence.candidates.map(
-      (candidate) => candidate.file,
-    ) ?? []),
-    ...(args.prepared.ownerResolved?.map((owner) => owner.file) ?? []),
-    ...args.prepared.localizeCandidates,
-  ])
   const ownerEvidence = buildSelectionOwnerEvidence({
     ownerFiles,
     issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+    staticWitnesses,
     readSource: (rel) => readSandboxSource(args.sandbox, rel),
   })
   const verificationTarget = verificationTargetFromPlan(args.prepared.verificationPlan)
@@ -4213,6 +4308,7 @@ const buildAdaptivePhaseEvidence = (args: {
       reason: args.phase.agentError.slice(0, 240),
     })
   }
+  const candidateEditSurface = candidateEditSurfaceFromPatch(args.phase.patch)
   return buildCandidatePostReviewLlmEvidencePacket({
     problemStatement: args.instance.problemStatement,
     candidatePatchHash: candidatePatchHash(args.phase.patch),
@@ -4220,6 +4316,8 @@ const buildAdaptivePhaseEvidence = (args: {
     proofReceipts: receipts,
     contracts: [],
     ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+    ...(candidateEditSurface !== undefined ? { candidateEditSurface } : {}),
+    ...(staticWitnessDiagnostics.length > 0 ? { staticWitnessDiagnostics } : {}),
     ...(missingEvidence.length > 0 ? { missingEvidence } : {}),
   })
 }

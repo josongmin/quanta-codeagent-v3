@@ -115,13 +115,29 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
     expect(DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
     expect(APP_DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
+    expect(DRIVER_SRC).toContain("const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(")
+    expect(APP_DRIVER_SRC).toContain("const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(")
     expect(DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
     expect(APP_DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
+    expect(DRIVER_SRC).toContain(
+      "...(args.staticWitnessDiagnostics.length > 0",
+    )
+    expect(APP_DRIVER_SRC).toContain(
+      "...(staticWitnessDiagnostics.length > 0",
+    )
     expect(DRIVER_SRC).toContain("ownerEvidence: args.selectionOwnerEvidence")
     expect(DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
     expect(APP_DRIVER_SRC).toContain("ownerEvidence: selectionOwnerEvidence")
     expect(APP_DRIVER_SRC).toContain("baseValidatedRed: selectionBaseValidatedRed")
     expect(APP_DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
+  })
+
+  test("both drivers use the shared unavailable repro calibration constructor", () => {
+    expect(DRIVER_SRC).toContain("unavailableReproOracleCalibration()")
+    expect(APP_DRIVER_SRC).toContain("unavailableReproOracleCalibration()")
+    expect(DRIVER_SRC).not.toContain("const CALIBRATION_UNAVAILABLE")
+    expect(DRIVER_SRC).not.toContain("const unavailableReproCalibration")
+    expect(APP_DRIVER_SRC).not.toContain("const unavailableReproCalibration")
   })
 
   test("runner driver emits patch-budget telemetry when the knob is on", () => {

@@ -7,6 +7,7 @@ import {
   type MissingEvidenceFact,
   type OwnerEvidenceFact,
   opaqueInstanceIdHash,
+  ownerTestResultReceipt,
   ownerSliceMissingEvidence,
   type ProofReceiptFact,
   type ProofReceiptState,
@@ -62,6 +63,21 @@ const proofSourceOf = (source: RepairValidationSource | undefined): string =>
         ? "public_repro"
         : "validation_gate"
 
+const ownerRailResultOf = (
+  source: RepairValidationSource | undefined,
+  exitCode: number | undefined,
+  outcome: RepairReproOutcome | undefined,
+): "green" | "red" | "infra_failed" | "not_run" => {
+  const state = proofStateOf(source, exitCode, outcome)
+  return state === "candidate_green"
+    ? "green"
+    : state === "candidate_red"
+      ? "red"
+      : state === "execution_failed" || state === "env_prep_failed"
+        ? "infra_failed"
+        : "not_run"
+}
+
 /**
  * B1: owner evidence for the classic-repair packet. REUSES the slice-capable
  * `assembleOwnerEvidence` factory so a readable owner file + issue symbols yields
@@ -93,6 +109,21 @@ const candidateEditSurfaceOf = (cumulativeDiff: string): CandidateEditSurfaceFac
 
 const proofReceiptsOf = (args: BuildRepairContextArgs): readonly ProofReceiptFact[] => {
   if (args.validationSource === undefined || args.validationSource === "none") return []
+  if (
+    args.validationSource === "primary_rail" &&
+    (args.validationStepKind === "owner-test" || args.validationStepKind === "module-smoke")
+  ) {
+    return [
+      ownerTestResultReceipt({
+        kind: args.validationStepKind === "owner-test" ? "owner_test" : "module_smoke",
+        result: ownerRailResultOf(
+          args.validationSource,
+          args.validationExitCode,
+          args.validationOutcome,
+        ),
+      }),
+    ]
+  }
   const receipt: ProofReceiptFact = {
     source: proofSourceOf(args.validationSource),
     state: proofStateOf(args.validationSource, args.validationExitCode, args.validationOutcome),
@@ -135,6 +166,7 @@ const missingEvidenceOf = (
     : []),
   ...(args.validationSource !== undefined &&
   args.validationSource !== "none" &&
+  args.validationCmdWithheld !== true &&
   (args.validationCmd === undefined || args.validationCmd.trim() === "")
     ? [{ kind: "verification_command", reason: "validation_gate_missing_command_text" }]
     : []),

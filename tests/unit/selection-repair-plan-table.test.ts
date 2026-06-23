@@ -93,7 +93,7 @@ const REPRO_PLAN = {
   summary:
     "Selector feedback: every generated candidate was re-run against the base-red validated reproduction set, and none reached resolved consensus.",
   directive:
-    "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts report `Issue resolved` without adding unnecessary helpers, files, or unrelated design surface.",
+    "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts pass cleanly (all assertions green / exit 0) without adding unnecessary helpers, files, or unrelated design surface.",
   includeFamilyRepair: true,
   includeReproFailureTrace: true,
   includeOracleFailureSeed: true,

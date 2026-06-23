@@ -8,6 +8,7 @@ import type { MweProofState } from "./mwe-proof"
 import type { ReproConsensusProofState } from "./repair/resolved-consensus"
 import type { PublicRegressionProofState } from "./repo-regression-discovery-adapter"
 import type { SelectionProofSource, SelectionProofState } from "./selection-types"
+import type { StaticWitnessDiagnostic } from "./static-witness-adapter"
 import type { StaticWitness } from "./static-witness"
 
 /**
@@ -143,6 +144,13 @@ export interface ProofReceiptFact {
   readonly candidatePatchHash?: string
 }
 
+export class ProofReceiptSourcePolicyError extends Error {
+  constructor(readonly source: string) {
+    super(`proof receipt source policy missing for source "${source}"`)
+    this.name = "ProofReceiptSourcePolicyError"
+  }
+}
+
 /**
  * B8: map a known free-string receipt `source` identifier to its typed policy
  * class. Unknown identifiers (including dynamic `hard:*` deterministic reasons)
@@ -151,6 +159,7 @@ export interface ProofReceiptFact {
  * of an already-blind identifier, no test/command text.
  */
 export const sourcePolicyOf = (source: string): ProofReceiptSourcePolicy | undefined => {
+  if (source.startsWith("hard:")) return "static"
   switch (source) {
     case "public_mwe":
     case "public_repro":
@@ -160,6 +169,9 @@ export const sourcePolicyOf = (source: string): ProofReceiptSourcePolicy | undef
     case "discovered_regression":
     case "public_discovered_test":
       return "public_discovered_test"
+    case "owner_test":
+    case "module_smoke":
+      return "official_hidden_withheld"
     case "verify_cmd":
     case "primary_rail":
     case "validation_gate":
@@ -456,6 +468,13 @@ export const opaqueInstanceIdHash = (problemStatement: string): string =>
 
 export const candidatePatchHash = (patch: string): string => stableHash(patch)
 
+const normalizeProofReceipt = (receipt: ProofReceiptFact): ProofReceiptFact => {
+  if (receipt.sourcePolicy !== undefined) return receipt
+  const sourcePolicy = sourcePolicyOf(receipt.source)
+  if (sourcePolicy === undefined) throw new ProofReceiptSourcePolicyError(receipt.source)
+  return { ...receipt, sourcePolicy }
+}
+
 /** Normalize + dedupe + HARD blindness check. Idempotent. */
 export const cleanPacket = (packet: LlmEvidencePacket): LlmEvidencePacket =>
   assertPacketBlind({
@@ -464,7 +483,7 @@ export const cleanPacket = (packet: LlmEvidencePacket): LlmEvidencePacket =>
     forbiddenSources: uniqueLines(packet.forbiddenSources),
     publicIssueFacts: uniqueLines(packet.publicIssueFacts),
     ownerEvidence: uniqueObjects(packet.ownerEvidence),
-    proofReceipts: uniqueObjects(packet.proofReceipts),
+    proofReceipts: uniqueObjects(packet.proofReceipts).map(normalizeProofReceipt),
     contractFacts: uniqueObjects(packet.contractFacts),
     staticFacts: uniqueObjects(packet.staticFacts),
     missingEvidence: uniqueObjects(packet.missingEvidence),
@@ -633,6 +652,24 @@ export const ownerSliceMissingEvidence = (
           ? `non_source_file:${o.file}`
           : `no_resolvable_slice:${o.file}`,
     }))
+
+export const staticWitnessDiagnosticsFacts = (
+  diagnostics: readonly StaticWitnessDiagnostic[] | undefined,
+): { readonly staticFacts: readonly StaticFact[]; readonly missingEvidence: readonly MissingEvidenceFact[] } => {
+  if (diagnostics === undefined || diagnostics.length === 0) {
+    return { staticFacts: [], missingEvidence: [] }
+  }
+  return {
+    staticFacts: diagnostics.map((diagnostic) => ({
+      kind: diagnostic.kind,
+      value: `${diagnostic.file}: ${diagnostic.reason}`,
+    })),
+    missingEvidence: diagnostics.map((diagnostic) => ({
+      kind: "static_witness",
+      reason: `${diagnostic.kind}:${diagnostic.file}`,
+    })),
+  }
+}
 
 const firstNonEmptyLine = (text: string): string | undefined =>
   text
@@ -1084,6 +1121,7 @@ export interface SelectionGenerationPacketInput {
   readonly closureHint?: string
   readonly seed?: string
   readonly envCaveats?: readonly string[]
+  readonly staticWitnessDiagnostics?: readonly StaticWitnessDiagnostic[]
 }
 
 /**
@@ -1111,6 +1149,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
       : []),
     ...ownerSliceMissingEvidence(input.ownerEvidence),
   ]
+  const staticWitnessDiagnostics = staticWitnessDiagnosticsFacts(input.staticWitnessDiagnostics)
   const proofReceipts: ProofReceiptFact[] =
     input.reproCommand === undefined
       ? []
@@ -1162,7 +1201,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
             {
               kind: "validated_public_repro_note",
               value:
-                "Scripts below reproduce the issue on the UNPATCHED tree — they reflect the bug's observable behavior. Use them to understand the ROOT CAUSE; a correct fix should make them report `Issue resolved`, but fix the root cause rather than contorting the patch to satisfy any single script.",
+                "Scripts below reproduce the issue on the UNPATCHED tree — they reflect the bug's observable behavior. Use them to understand the ROOT CAUSE; a correct fix should make them pass cleanly (all assertions green / exit 0), but fix the root cause rather than contorting the patch to satisfy any single script.",
             },
           ]
         : []),
@@ -1194,6 +1233,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
             ]
           : []
       })(),
+      ...staticWitnessDiagnostics.staticFacts,
       ...(input.seed !== undefined && input.seed.trim() !== ""
         ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
         : []),
@@ -1201,7 +1241,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     ...(input.verificationTarget !== undefined
       ? { verificationTarget: input.verificationTarget }
       : {}),
-    missingEvidence,
+    missingEvidence: [...missingEvidence, ...staticWitnessDiagnostics.missingEvidence],
   })
 }
 
@@ -1232,6 +1272,9 @@ export const buildSelectionGenerationPrompt = (input: SelectionGenerationPromptI
     ...(input.closureHint !== undefined ? { closureHint: input.closureHint } : {}),
     ...(input.envCaveats !== undefined && input.envCaveats.length > 0
       ? { envCaveats: input.envCaveats }
+      : {}),
+    ...(input.staticWitnessDiagnostics !== undefined && input.staticWitnessDiagnostics.length > 0
+      ? { staticWitnessDiagnostics: input.staticWitnessDiagnostics }
       : {}),
     ...(input.seed !== undefined ? { seed: input.seed } : {}),
   })
@@ -1310,13 +1353,15 @@ export interface CandidatePostReviewPacketInput {
   readonly verificationTarget?: VerificationTargetFact
   /** SOURCE-ONLY candidate edit surface (B7). */
   readonly candidateEditSurface?: CandidateEditSurfaceFact
+  readonly staticWitnessDiagnostics?: readonly StaticWitnessDiagnostic[]
   readonly missingEvidence?: readonly MissingEvidenceFact[]
 }
 
 export const buildCandidatePostReviewLlmEvidencePacket = (
   input: CandidatePostReviewPacketInput,
-): LlmEvidencePacket =>
-  cleanPacket({
+): LlmEvidencePacket => {
+  const staticWitnessDiagnostics = staticWitnessDiagnosticsFacts(input.staticWitnessDiagnostics)
+  return cleanPacket({
     stage: "candidate_post_review",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
     evidenceRevision: "candidate-post-review-v1",
@@ -1345,6 +1390,7 @@ export const buildCandidatePostReviewLlmEvidencePacket = (
         value:
           "Post-exec diagnosis only: use executed proof receipts and deterministic hard reasons to decide what the next bounded repair must preserve or fix.",
       },
+      ...staticWitnessDiagnostics.staticFacts,
     ],
     ...(input.verificationTarget !== undefined
       ? { verificationTarget: input.verificationTarget }
@@ -1366,8 +1412,10 @@ export const buildCandidatePostReviewLlmEvidencePacket = (
             ])),
       // B2: a missing owner slice is VISIBLE here, mirroring candidate_generation.
       ...ownerSliceMissingEvidence(input.ownerEvidence),
+      ...staticWitnessDiagnostics.missingEvidence,
     ],
   })
+}
 
 /* ------------------------------------------------------------------ */
 /* Repair seed packet (SHARED)                                         */
@@ -1453,6 +1501,7 @@ export const buildRepairSeedLlmEvidencePacket = (
 export interface SelectionExplanationCandidateInput {
   readonly id: string
   readonly files: readonly string[]
+  readonly touchedSymbols?: readonly string[]
   readonly admissible: boolean
   readonly reasons: readonly string[]
   readonly proofState?: SelectionProofState
@@ -1485,6 +1534,7 @@ export interface SelectionExplanationLlmEvidenceInput {
   readonly proofRequired?: boolean
   readonly proofSummary?: SelectionExplanationProofSummaryInput
   readonly candidates: readonly SelectionExplanationCandidateInput[]
+  readonly staticWitnessDiagnostics?: readonly StaticWitnessDiagnostic[]
 }
 
 const proofSummaryReceipts = (
@@ -1583,6 +1633,11 @@ const proofSummaryReceipts = (
 export const buildSelectionExplanationPacket = (
   input: SelectionExplanationLlmEvidenceInput,
 ): LlmEvidencePacket => {
+  const staticWitnessDiagnostics = staticWitnessDiagnosticsFacts(input.staticWitnessDiagnostics)
+  const focusCandidate =
+    input.winnerId === null
+      ? undefined
+      : input.candidates.find((candidate) => candidate.id === input.winnerId)
   const missingEvidence: MissingEvidenceFact[] = [
     ...(input.winnerId === null ? [{ kind: "winner", reason: "no_selected_candidate" }] : []),
     ...(input.proofSummary?.proofRequiredMissing === true
@@ -1591,6 +1646,7 @@ export const buildSelectionExplanationPacket = (
     ...(input.proofSummary?.proofState === "infra_blocked"
       ? [{ kind: "public_proof", reason: "public_proof_infra_blocked" }]
       : []),
+    ...staticWitnessDiagnostics.missingEvidence,
   ]
   return cleanPacket({
     stage: "selection_explanation",
@@ -1636,11 +1692,20 @@ export const buildSelectionExplanationPacket = (
       ...(input.noWinnerReason !== undefined
         ? [{ kind: "no_winner_reason", value: input.noWinnerReason }]
         : []),
+      ...staticWitnessDiagnostics.staticFacts,
       ...input.candidates.map((c) => ({
         kind: `candidate:${c.id}`,
         value: `admissible=${c.admissible}; files=${fmtList(c.files)}; reasons=${fmtList(c.reasons)}`,
       })),
     ],
+    ...(focusCandidate !== undefined
+      ? {
+          candidateEditSurface: {
+            touchedFiles: focusCandidate.files,
+            touchedSymbols: [...(focusCandidate.touchedSymbols ?? [])],
+          },
+        }
+      : {}),
     missingEvidence,
   })
 }

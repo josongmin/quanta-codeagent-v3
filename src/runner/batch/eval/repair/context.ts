@@ -61,13 +61,28 @@ const trimHead = (s: string, target: number): string => {
 
 const renderValidationGate = (args: {
   source: BuildRepairContextArgs["validationSource"]
+  kind: BuildRepairContextArgs["validationStepKind"]
   cmd: string | undefined
+  cmdWithheld: boolean
   exitCode: number | undefined
   maxCmdBytes: number
 }): string[] => {
   const cmd = args.cmd === undefined || args.cmd === "" ? "(missing command)" : trimHead(args.cmd, args.maxCmdBytes)
   switch (args.source) {
     case "primary_rail":
+      if (args.cmdWithheld) {
+        const kindLabel =
+          args.kind === "owner-test"
+            ? "OWNER TEST"
+            : args.kind === "module-smoke"
+              ? "MODULE SMOKE"
+              : "PRIMARY RAIL"
+        return [
+          `The loop clears only on the ${kindLabel} primary rail below; a different green command does not count.`,
+          "Command: (withheld: hidden verification selector)",
+          ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
+        ]
+      }
       return [
         "The loop clears only on the PRIMARY RAIL command below; a different green command does not count.",
         `Command: ${cmd}`,
@@ -103,7 +118,9 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
   let failTail = args.failTail
   const validationGate = renderValidationGate({
     source: args.validationSource,
+    kind: args.validationStepKind,
     cmd: args.validationCmd,
+    cmdWithheld: args.validationCmdWithheld === true,
     exitCode: args.validationExitCode,
     maxCmdBytes: Math.max(96, Math.floor(maxBytes / 5)),
   })

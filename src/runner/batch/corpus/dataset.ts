@@ -228,7 +228,15 @@ export const reproRunArgv = (
   // footer run under `python <script>`. Without `--with pytest` the footer's
   // `import pytest` raises ModuleNotFoundError ⇒ every repro is `exec_failed`
   // (measured on the box re-measure: django repros all crashed on `import pytest`).
-  return [...buildProjectEnvUvRunArgv(repo, version, ["pytest"]), "python", scriptPath]
+  return [
+    ...buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
+      PYTHONNOUSERSITE: "1",
+    }),
+    "python",
+    "-s",
+    scriptPath,
+  ]
 }
 
 const synthesizeTestCmd = (raw: Record<string, unknown>): string => {

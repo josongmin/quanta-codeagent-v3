@@ -111,7 +111,8 @@ Use only the bounded packet below. Do not assume hidden tests, gold patches, ben
   "proofReceipts": [
     {
       "source": "hard:proofRequiredMissing",
-      "state": "not_run"
+      "state": "not_run",
+      "sourcePolicy": "static"
     }
   ],
   "contractFacts": [

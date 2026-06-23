@@ -254,6 +254,7 @@ export type RepairFeedbackStopReason =
 export interface CandidateTelemetry {
   id: string
   files: readonly string[]
+  touchedSymbols?: readonly string[]
   admissible: boolean
   score: number
   reasons: readonly string[]

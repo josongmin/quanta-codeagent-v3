@@ -78,21 +78,17 @@ describe("validator — observe-only predicate", () => {
 })
 
 /**
- * jun-18 RCA fix — REPRO-SENTINEL gating. The repro's Agentless contract is the
- * stdout marker, not the incidental exit code (base reproduction is classified by
- * marker via classifyStdout; the patched check MUST be consistent). Confirmed
- * locally: a well-formed repro prints "Issue resolved" + exit 0 on a correct
- * patch, but malformed repros print "resolved" yet exit ≠0 — the false-RED that
- * forced wasteful churn (46→131 turns re-deriving the same correct patch). The
- * sentinel overrides the exit code; when NO sentinel is present the legacy
- * exit-code decision is byte-identical (non-repro verify cmds unaffected).
+ * P1 — execution-grounded repro validation. A synthesized repro is a real pytest
+ * test now, so the patched check must read pytest's pass/fail summary first, not
+ * a model-printed sentinel string. Older marker-style repros remain as fallback
+ * when no pytest signal exists.
  */
-describe("validator — repro-sentinel gating (RCA fix)", () => {
-  test("🔴 repro authority: exit ≠0 BUT stdout 'Issue resolved' ⇒ ok:true (false-RED eliminated)", async () => {
+describe("validator — execution-grounded repro gating", () => {
+  test("pytest-green repro authority: exit 0 + passed summary ⇒ ok:true", async () => {
     const r = await validate({
       sandbox: "/tmp/x",
       reproPath: "/tmp/x/reproduce_issue.py",
-      exec: fakeExec(1, "warn...\nIssue resolved\n", "DeprecationWarning"),
+      exec: fakeExec(0, "1 passed in 0.12s"),
       timeoutMs: 1000,
       evaluatePredicate: evaluateSuccessPredicate,
     })
@@ -104,29 +100,29 @@ describe("validator — repro-sentinel gating (RCA fix)", () => {
     expect(r.ok).toBe(false)
   })
 
-  test("exit 0 BUT stdout 'Issue reproduced' ⇒ ok:false (repro says NOT fixed — false-green caught)", async () => {
+  test("pytest-red repro authority: exit 1 + failed summary ⇒ ok:false", async () => {
     const r = await validate({
       sandbox: "/tmp/x",
       reproPath: "/tmp/x/reproduce_issue.py",
-      exec: fakeExec(0, "Issue reproduced\n"),
+      exec: fakeExec(1, "F\n1 failed in 0.12s"),
       timeoutMs: 1000,
       evaluatePredicate: evaluateSuccessPredicate,
     })
     expect(r.ok).toBe(false)
   })
 
-  test("exit 0 + stdout 'Other issues' ⇒ ok:false (repro blew up, not resolved)", async () => {
+  test("pytest error summary ⇒ ok:false (repro blew up, not resolved)", async () => {
     const r = await validate({
       sandbox: "/tmp/x",
       reproPath: "/tmp/x/reproduce_issue.py",
-      exec: fakeExec(0, "Other issues: boom\n"),
+      exec: fakeExec(1, "", "1 error in 0.12s"),
       timeoutMs: 1000,
       evaluatePredicate: evaluateSuccessPredicate,
     })
     expect(r.ok).toBe(false)
   })
 
-  test("last-marker-wins: 'reproduced' then 'resolved' ⇒ ok:true", async () => {
+  test("legacy marker fallback still works when no pytest summary exists", async () => {
     const r = await validate({
       sandbox: "/tmp/x",
       reproPath: "/tmp/x/reproduce_issue.py",

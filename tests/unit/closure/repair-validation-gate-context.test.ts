@@ -49,6 +49,47 @@ describe("runRepairRounds — validation gate context", () => {
     expect(captured?.validationExitCode).toBe(1)
   })
 
+  test("owner-test primary rail preserves kind and withholds the hidden selector command", async () => {
+    let captured: BuildRepairContextArgs | undefined
+    const runOnce = async (_seed: string | undefined): Promise<RunOnceResult> => ({
+      patch: "diff --git a/x b/x\n",
+      turns: 1,
+      lastVerifyCmd: "pytest tests/test_x.py -k repro",
+      reproPath: "repro.py",
+    })
+    const validate = async (_args: ValidateArgs): Promise<ValidatorResult> => ({
+      ok: false,
+      failTail: "AssertionError\n",
+      observed: { exitCode: 1, stdout: "", stderr: "AssertionError\n" },
+    })
+
+    await runRepairRounds({
+      config: { maxRounds: 1 },
+      problem: "fix it",
+      runOnce,
+      validate,
+      buildContext: (args) => {
+        captured = args
+        return "seed"
+      },
+      sandbox: "/tmp/sb",
+      exec,
+      timeoutMs: 1000,
+      primaryRailStep: {
+        kind: "owner-test",
+        cmd: "pytest hidden_tests/test_secret.py -q",
+        authority: "structure",
+        successPredicate: { type: "selected_test_passes" },
+      },
+    })
+
+    expect(captured?.validationSource).toBe("primary_rail")
+    expect(captured?.validationStepKind).toBe("owner-test")
+    expect(captured?.validationCmdWithheld).toBe(true)
+    expect(captured?.validationCmd).toBeUndefined()
+    expect(captured?.validationExitCode).toBe(1)
+  })
+
   test("missing verify signal is called out explicitly in the repair seed context", async () => {
     let captured: BuildRepairContextArgs | undefined
     const runOnce = async (_seed: string | undefined): Promise<RunOnceResult> => ({

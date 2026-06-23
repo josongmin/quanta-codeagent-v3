@@ -161,7 +161,12 @@ const validationGateContextOf = (
   validator: ValidatorResult,
 ): Pick<
   BuildRepairContextArgs,
-  "validationSource" | "validationCmd" | "validationExitCode" | "validationOutcome"
+  | "validationSource"
+  | "validationCmd"
+  | "validationCmdWithheld"
+  | "validationStepKind"
+  | "validationExitCode"
+  | "validationOutcome"
 > => {
   const exitCode = validator.observed?.exitCode
   // A3 (producer): forward the validator's OWN classified repro/exec outcome so
@@ -172,7 +177,14 @@ const validationGateContextOf = (
   // observed stdout/exit code); NOTHING is inferred/thresholded here. Absent ⇒
   // the consumer falls back to the exit-code path, byte-identical to before.
   const outcome = reproOutcomeOf(validator)
-  const withExit = <T extends { validationSource: RepairValidationSource; validationCmd?: string }>(
+  const withExit = <
+    T extends {
+      validationSource: RepairValidationSource
+      validationCmd?: string
+      validationCmdWithheld?: boolean
+      validationStepKind?: BuildRepairContextArgs["validationStepKind"]
+    },
+  >(
     base: T,
   ): T & { validationExitCode?: number; validationOutcome?: RepairReproOutcome } => {
     const withCode = exitCode !== undefined ? { ...base, validationExitCode: exitCode } : base
@@ -182,7 +194,10 @@ const validationGateContextOf = (
   if (args.primaryRailStep !== undefined) {
     return withExit({
       validationSource: "primary_rail",
-      validationCmd: args.primaryRailStep.cmd,
+      validationStepKind: args.primaryRailStep.kind,
+      ...(args.primaryRailStep.kind === "repro"
+        ? { validationCmd: args.primaryRailStep.cmd }
+        : { validationCmdWithheld: true }),
     })
   }
   const lastVerifyCmd = run.lastVerifyCmd

@@ -21,10 +21,12 @@
  * Bun and Node `string.slice`. The tail is taken from the END (the failure
  * tends to be at the tail of test runner output).
  */
+import { classifyPytest } from "@/agent/repro-test/execute"
 import type { ValidateArgs, ValidatorResult } from "./types"
 import { classifyReproOutcome } from "./repro-outcome"
 
 const DEFAULT_TAIL = 2000
+const HAS_PYTEST_SUMMARY = /\b(?:\d+\s+failed|\d+\s+errors?|\d+\s+passed|no tests ran)\b/
 
 export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => {
   const tailBound = args.tailBytes ?? DEFAULT_TAIL
@@ -49,22 +51,19 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
 
   const combined = `${r.stdout}\n${r.stderr}`
   const failTail = combined.length > tailBound ? combined.slice(-tailBound) : combined
-  const reproOutcome = classifyReproOutcome(r.stdout, r.code)
+  const reproOutcome = picked.reproAuthority
+    ? classifyValidationReproOutcome(r.stdout, r.stderr, r.code)
+    : classifyReproOutcome(r.stdout, r.code)
   const ok = (result: boolean): ValidatorResult =>
     result
       ? { ok: true, observed, reproOutcome, ...(predicate !== undefined ? { predicate } : {}) }
       : { ok: false, failTail, observed, reproOutcome, ...(predicate !== undefined ? { predicate } : {}) }
 
-  // jun-18 RCA fix — REPRO-SENTINEL gating. A repro is an Agentless script whose
-  // CONTRACT is the stdout marker ("Issue resolved"/"reproduced"/"Other issues"),
-  // not its incidental exit code. The base reproduction check classifies by the
-  // SAME `classifyStdout` marker — so the patched resolution check MUST be
-  // consistent, else a repro that prints "Issue resolved" but exits ≠0 (a
-  // warning-turned-error, post-marker cleanup, …) is a FALSE-RED that forces
-  // wasteful repair churn (measured: 46→131 turns re-deriving the same correct
-  // patch). When a marker is present the marker decides; a non-repro verify cmd
-  // (pytest, …) carries no marker ⇒ classifyStdout is unknown/exec_failed ⇒ the
-  // legacy exit-code decision below is byte-identical.
+  // P1 (jun-23): a repro is now an execution-grounded pytest test, so the
+  // patched resolution check must read the SAME signal as the base-side oracle:
+  // pytest pass/fail semantics. For compatibility with older scripted repros we
+  // still fall back to the legacy sentinel markers when no pytest summary is
+  // present. Non-repro verify commands keep the legacy exit-code decision below.
   if (picked.reproAuthority) {
     if (reproOutcome === "resolved") return ok(true)
     if (reproOutcome === "reproduced" || reproOutcome === "other") return ok(false)
@@ -72,6 +71,13 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
 
   // No repro sentinel — legacy exit-code decision (byte-identical to pre-fix).
   return ok(r.code === 0)
+}
+
+const classifyValidationReproOutcome = (stdout: string, stderr: string, code: number) => {
+  const combined = `${stdout}\n${stderr}`
+  if (!HAS_PYTEST_SUMMARY.test(combined)) return classifyReproOutcome(stdout, code)
+  const pytestOutcome = classifyPytest(stdout, stderr, code)
+  return pytestOutcome
 }
 
 const pickCmd = (

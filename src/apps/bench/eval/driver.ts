@@ -65,6 +65,7 @@ import {
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
+import { unavailableReproOracleCalibration } from "@/runner/batch/eval/repro-oracle-calibration"
 import {
   buildSelectionGenerationPrompt,
   buildSelectionOwnerEvidence,
@@ -92,6 +93,7 @@ import {
   buildSelectionInputs,
   type Candidate,
   filesFromPatch,
+  normalizeSelectionPaths,
   runSelection,
   type SelectionTelemetry,
   summarizeSelection,
@@ -99,7 +101,10 @@ import {
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
-import { buildAstStaticWitnesses } from "@/runner/batch/eval/static-witness-adapter"
+import {
+  buildAstStaticWitnesses,
+  staticWitnessLanguageDiagnostics,
+} from "@/runner/batch/eval/static-witness-adapter"
 import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
@@ -598,14 +603,6 @@ export const selectionReproPolicy = (
   return { enabled: true, goldCalibrate: true, resolvedKofNMode: "hard" }
 }
 
-const unavailableReproCalibration = (): ReproOracleCalibration => ({
-  goldCalibrated: false,
-  falseNegative: false,
-  available: false,
-  goldVotes: null,
-  goldK: null,
-})
-
 const resolveSelectionReproConsensus = async (
   instance: Instance,
   sandbox: string,
@@ -614,7 +611,7 @@ const resolveSelectionReproConsensus = async (
   mode: BenchPosture["verifySelectRepro"],
 ) => {
   const reproPolicy = selectionReproPolicy(mode)
-  const calibrationUnavailable = unavailableReproCalibration()
+  const calibrationUnavailable = unavailableReproOracleCalibration()
   if (!reproPolicy.enabled) {
     return {
       reproPolicy,
@@ -776,18 +773,22 @@ const runSelectionPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
+  const normalizedSelectionOwnerCandidates = normalizeSelectionPaths(
+    selectionOwnerCandidates,
+    sandbox,
+  )
   // SCAFF-04/05 parity (see runner driver): AST witnesses feed BOTH generation
   // families (complete candidate is generated) and required contracts (it wins).
   const staticWitnesses = buildAstStaticWitnesses({
     problemStatement: instance.problemStatement,
-    ownerCandidates: selectionOwnerCandidates,
+    ownerCandidates: normalizedSelectionOwnerCandidates,
     ...(ownerResolved !== undefined ? { ownerResolved } : {}),
     readSource: (rel) => readSandboxSource(sandbox, rel),
   })
   const candidateFamilyBundle = withStaticWitnessFamilies(
     buildSelectionCandidateFamilyBundle({
       problemStatement: instance.problemStatement,
-      ownerCandidates: selectionOwnerCandidates,
+      ownerCandidates: normalizedSelectionOwnerCandidates,
       ownerResolved,
       readSource: (rel) => readSandboxSource(sandbox, rel),
     }),
@@ -813,7 +814,7 @@ const runSelectionPhase = async (
         }
   const selectionInputs = buildSelectionInputs({
     n,
-    ownerCandidates: selectionOwnerCandidates,
+    ownerCandidates: normalizedSelectionOwnerCandidates,
     sandbox,
     ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
   })
@@ -821,6 +822,12 @@ const runSelectionPhase = async (
   const generationErrors = new Map<number, string>()
   const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   const verificationTarget = verificationTargetFromPlan(verificationPlan)
+  const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics({
+    problemStatement: instance.problemStatement,
+    ownerCandidates: normalizedSelectionOwnerCandidates,
+    ...(ownerResolved !== undefined ? { ownerResolved } : {}),
+    readSource: (rel) => readSandboxSource(sandbox, rel),
+  })
   const selectionOwnerEvidence = buildSelectionOwnerEvidence({
     ownerFiles: selectionInputs.ownerFiles,
     issueSymbols: extractIssueHint(instance.problemStatement).symbols,
@@ -845,6 +852,9 @@ const runSelectionPhase = async (
           ...(reproSources.length > 0 ? { validatedReproScripts: reproSources } : {}),
           ...(closureHint !== undefined ? { closureHint } : {}),
           ...(generationEnvCaveats.length > 0 ? { envCaveats: generationEnvCaveats } : {}),
+          ...(staticWitnessDiagnostics.length > 0
+            ? { staticWitnessDiagnostics }
+            : {}),
           // NOTE: the validated repro scripts reach generation ONCE, via
           // `validatedReproScripts` → `validated_public_repro` staticFacts (full,
           // bounded). They are deliberately NOT also merged into `seed`: that

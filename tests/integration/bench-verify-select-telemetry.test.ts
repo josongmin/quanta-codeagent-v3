@@ -267,6 +267,10 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
         available: false,
         goldVotes: null,
         goldK: null,
+        baseResolved: false,
+        vacuous: false,
+        baseVotes: null,
+        baseK: null,
       })
       expect(classifyOutcome(result)).toEqual({
         kind: "real-fail",
@@ -332,6 +336,10 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
           available: false,
           goldVotes: null,
           goldK: null,
+          baseResolved: false,
+          vacuous: false,
+          baseVotes: null,
+          baseK: null,
         })
         expect(result.error).toContain("observation failed (strict)")
       } finally {

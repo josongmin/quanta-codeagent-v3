@@ -18,6 +18,7 @@ const hasWithDep = (argv: readonly string[], dep: string): boolean =>
   argv.some((arg, idx) => arg === "--with" && argv[idx + 1] === dep)
 const uvRunIndex = (argv: readonly string[]): number =>
   argv.findIndex((arg, idx) => arg === "uv" && argv[idx + 1] === "run")
+const hasEnvAssign = (argv: readonly string[], env: string): boolean => argv.includes(env)
 
 describe("reproRunArgv", () => {
   test("wraps the script in a uv-run editable-install env (not a bare python)", () => {
@@ -28,7 +29,10 @@ describe("reproRunArgv", () => {
     expect(argv).toContain("--with-editable")
     expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".")
     expect(argv[argv.length - 1]).toBe("/sandbox/__repro_0.py")
-    expect(argv[argv.length - 2]).toBe("python")
+    expect(argv[argv.length - 2]).toBe("-s")
+    expect(argv[argv.length - 3]).toBe("python")
+    expect(hasEnvAssign(argv, "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1")).toBe(true)
+    expect(hasEnvAssign(argv, "PYTHONNOUSERSITE=1")).toBe(true)
   })
 
   // THE bug fix: django 5.0 needs 3.11. The old static "django→3.9" map produced

@@ -27,6 +27,25 @@ const ENV = scopedEnv(
   { PATH: process.env.PATH },
 )
 
+const VERIFY_SELECT_ENV = scopedEnv(
+  [
+    "PATH",
+    "QUANTA_BENCH_VERIFY_SELECT",
+    "QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED",
+    "QUANTA_BENCH_SELECTOR_MODE",
+    "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
+    "QUANTA_BENCH_VERIFY_SELECT_REPRO",
+  ],
+  {
+    PATH: process.env.PATH,
+    QUANTA_BENCH_VERIFY_SELECT: "1",
+    QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED: "1",
+    QUANTA_BENCH_SELECTOR_MODE: "clean",
+    QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
+    QUANTA_BENCH_VERIFY_SELECT_REPRO: "positive",
+  },
+)
+
 const withPyrightOnPath = (pathValue: string | undefined): string => {
   const pyrightBinDir = join(process.env.HOME ?? "", ".local", "bin")
   if (pathValue === undefined || pathValue === "") return pyrightBinDir
@@ -113,6 +132,21 @@ class CapturingRouteLLM implements LLMPort {
   }
 }
 
+class CapturingPromptLLM implements LLMPort {
+  prompts: string[] = []
+
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.prompts.push(
+      input.messages
+        .flatMap((m) => m.content)
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .join("\n"),
+    )
+    yield { type: "text_delta", delta: "noop" }
+    yield { type: "message_stop", stop_reason: "end_turn" }
+  }
+}
+
 const withTmp = async (fn: (dir: string) => Promise<void>): Promise<void> => {
   const dir = mkdtempSync(join(tmpdir(), "bench-v5-engage-"))
   try {
@@ -127,6 +161,18 @@ const calcInstance = (repo: string): Instance => ({
   repoPath: repo,
   problemStatement: "Fix add() in calc.py so it returns the sum.",
   testCmd: 'python -c "from calc import add; raise SystemExit(0 if add(2, 3) == 5 else 1)"',
+})
+
+const tsInstance = (repo: string): Instance => ({
+  id: "inst-widget-ts",
+  repoPath: repo,
+  problemStatement: "Fix buildWidget() in widget.ts so it preserves the input object.",
+  testCmd: "true",
+  swebench: {
+    instanceId: "demo__widget-1",
+    repo: "demo/demo",
+    baseCommit: "0".repeat(40),
+  },
 })
 
 describe("bench v5 evidence ENGAGE (jun-23)", () => {
@@ -155,6 +201,7 @@ describe("bench v5 evidence ENGAGE (jun-23)", () => {
           expect(prompt).not.toContain('"stage": "selection_explanation"')
           expect(prompt).not.toContain("explain_selection_outcome")
         }
+        expect(llm.routePrompts.some((prompt) => prompt.includes('"candidateEditSurface"'))).toBe(true)
       })
     }),
     20_000,
@@ -185,6 +232,33 @@ describe("bench v5 evidence ENGAGE (jun-23)", () => {
         expect(result.reproVoteOutcomes).toBeUndefined()
         // The driver consumed/cleared the sink; a post-run drain is empty.
         expect(drainReproVoteOutcomes()).toHaveLength(0)
+      })
+    }),
+    20_000,
+  )
+
+  test(
+    "B6 engage: apps-driver verify-select generation prompt carries static_witness_unsupported_language for non-Python owners",
+    VERIFY_SELECT_ENV.run(async () => {
+      await withTmp(async (dir) => {
+        const repo = join(dir, "repo")
+        mkdirSync(repo, { recursive: true })
+        writeFileSync(
+          join(repo, "widget.ts"),
+          "export function buildWidget(spec: object) {\n  return spec\n}\n",
+        )
+        const llm = new CapturingPromptLLM()
+        const result = await runInstance(tsInstance(repo), { llm, maxTurns: 3, timeoutMs: 30_000 })
+        expect(result.passed).toBe(false)
+        expect(result.llmEvidence?.candidateGenerationHistory?.length ?? 0).toBeGreaterThan(0)
+        expect(
+          llm.prompts.some(
+            (prompt) =>
+              prompt.includes('"stage": "candidate_generation"') &&
+              prompt.includes("static_witness_unsupported_language") &&
+              prompt.includes("widget.ts"),
+          ),
+        ).toBe(true)
       })
     }),
     20_000,

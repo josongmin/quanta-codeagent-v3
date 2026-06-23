@@ -147,6 +147,14 @@ export interface BuildRepairContextArgs {
   validationSource?: RepairValidationSource
   /** Exact command the validator ran for the previous round (when any). */
   validationCmd?: string
+  /** When true, the validator DID run a gate command but the command text is
+   *  intentionally withheld from the model because it can encode a hidden
+   *  verification selector path (owner-test / module-smoke primary rail). */
+  validationCmdWithheld?: boolean
+  /** Typed kind of the validation step when the gate was the selected primary
+   *  rail. Lets downstream evidence preserve repro vs owner-test vs module-smoke
+   *  provenance instead of collapsing all primary rails into one string bucket. */
+  validationStepKind?: PrimaryRailStep["kind"]
   /** Exit code observed from the validation gate (when a command actually ran). */
   validationExitCode?: number
   /** A3: the validator's OWN already-classified repro/exec outcome. When

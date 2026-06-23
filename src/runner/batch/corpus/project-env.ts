@@ -147,10 +147,11 @@ export const buildProjectEnvUvRunArgv = (
   repo: string,
   version: string | undefined,
   extraWith: readonly string[] = [],
+  extraExecEnv: Readonly<Record<string, string>> = {},
 ): readonly string[] => {
   const deps = [...new Set([...extraWith, ...repoPinnedDeps(repo), ...BASE_PROJECT_ENV_DEPS])]
   const argv = [] as string[]
-  for (const [name, value] of Object.entries(repoExecEnv(repo))) {
+  for (const [name, value] of Object.entries({ ...extraExecEnv, ...repoExecEnv(repo) })) {
     if (argv.length === 0) argv.push("env")
     argv.push(`${name}=${value}`)
   }

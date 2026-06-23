@@ -359,6 +359,7 @@ describe("ensurePytestFooter — python <path> → pytest bridge guarantee", () 
     const out = ensurePytestFooter(src)
     expect(out).toContain(src)
     expect(out).toContain('if __name__ == "__main__"')
+    expect(out).toContain('PYTEST_DISABLE_PLUGIN_AUTOLOAD')
     expect(out).toContain("pytest.main([__file__")
     expect(out).toContain("sys.exit")
   })
@@ -370,6 +371,8 @@ describe("ensurePytestFooter — python <path> → pytest bridge guarantee", () 
       "",
       "",
       'if __name__ == "__main__":',
+      "    import os",
+      '    os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")',
       "    import sys, pytest",
       '    sys.exit(pytest.main([__file__, "-q"]))',
     ].join("\n")

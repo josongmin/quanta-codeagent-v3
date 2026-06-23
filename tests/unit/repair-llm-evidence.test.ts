@@ -123,6 +123,57 @@ describe("repair-round llm evidence", () => {
     expect(packet.verificationTarget?.primaryRail?.kind).toBe("repro")
   })
 
+  test("owner-test primary rail stays hidden: result receipt is withheld and seed prose does not leak the command", () => {
+    const out = buildRepairRoundSeedMessage({
+      problem: "Fix add().",
+      cumulativeDiff: "",
+      failTail: "AssertionError",
+      validationSource: "primary_rail",
+      validationStepKind: "owner-test",
+      validationCmdWithheld: true,
+      validationExitCode: 1,
+      round: 1,
+    })
+    expect(out.packet.proofReceipts).toEqual([
+      {
+        source: "owner_test",
+        sourcePolicy: "official_hidden_withheld",
+        state: "candidate_red",
+        cmdWithheld: true,
+      },
+    ])
+    expect(
+      out.packet.missingEvidence.some(
+        (m) =>
+          m.kind === "verification_command" &&
+          m.reason === "validation_gate_missing_command_text",
+      ),
+    ).toBe(false)
+    expect(out.seedMsg).toContain("Command: (withheld: hidden verification selector)")
+    expect(out.seedMsg).not.toContain("pytest hidden_tests")
+  })
+
+  test("module-smoke primary rail infra failure is surfaced as withheld execution_failed", () => {
+    const packet = buildRepairRoundLlmEvidencePacket({
+      problem: "Fix add().",
+      cumulativeDiff: "",
+      failTail: "python: command not found",
+      validationSource: "primary_rail",
+      validationStepKind: "module-smoke",
+      validationCmdWithheld: true,
+      validationExitCode: 127,
+      round: 1,
+    })
+    expect(packet.proofReceipts).toEqual([
+      {
+        source: "module_smoke",
+        sourcePolicy: "official_hidden_withheld",
+        state: "execution_failed",
+        cmdWithheld: true,
+      },
+    ])
+  })
+
   // ── B7: candidate edit surface (source-only) on the classic-repair packet ─────
   test("B7 — candidate touched files/symbols appear as a source-only edit surface", () => {
     const patch =

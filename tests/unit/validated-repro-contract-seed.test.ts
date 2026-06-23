@@ -59,6 +59,7 @@ describe("validatedReproContractSeed", () => {
     const seed = validatedReproContractSeed(['print("x")']) ?? ""
     expect(seed).not.toContain("a correct candidate must make them report")
     expect(seed.toLowerCase()).toContain("root cause")
+    expect(seed.toLowerCase()).toContain("exit 0")
   })
 
   test("AUDIT line-safe truncation: an over-limit script is cut at a line boundary, not mid-line", () => {

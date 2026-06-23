@@ -36,6 +36,46 @@
 - **부분집합 천장 ≠ 진짜 천장.** 초기 17개 부분집합으로 천장을 재서 72→이후 55로 봤으나, 전수 134로 재계산하니 **32개**. 17엔 없지만 다른 제출이 푼 게 23개(예: sympy-17630). 천장 주장은 **반드시 전수 union**으로.
 - **EASY-CORE는 전부=0이 아니라 ≥90%로** 본다(약한 RAG 제출이 끼면 전부-교집합은 무의미).
 
+### 정적엔진 도움 태그 (manual, 2026-06-23)
+
+> `SE-HELP-*` = "기깔나는 정적엔진이 있으면 **풀 확률이 유의미하게 오를** likely-help 후보".
+> `MUST` 태그 아님. oracle counterfactual 기반 수기 태깅이라 최종 결론은 A/B 전까지 보류.
+> 같은 인스턴스에 태그가 여러 개 붙을 수 있고, `SE-HELP-*`가 붙어도 **최종 병목이 reasoning / domain / design**일 수 있다.
+
+#### 태그 뜻
+
+- `SE-HELP-IMPACT` — cross-file impact / delegation / blast-radius.
+  shared helper, call chain, signature propagation, sibling site 누락을 잡는 용도.
+- `SE-HELP-MRO` — override / sibling reachability / explicit MRO walk.
+  일반 lookup으론 한쪽만 보이고 형제/베이스 구현을 놓치는 경우.
+- `SE-HELP-DEFUSE` — def-use / alias / reference-closure.
+  symptom-site가 아니라 실제 ref source / alias invariant를 따라가야 하는 경우.
+- `SE-HELP-AST` — AST shape search / bulk callsite enumeration.
+  같은 호출모양 / same-shape raise / boilerplate family를 전수 열거해야 하는 경우.
+- `SE-NO-PRIMARY` — 정적신호가 있어도 최종 병목이 reasoning / domain / hard-design 쪽에 남는 군.
+
+#### 고신뢰 likely-help 후보
+
+| tag | 대표 문제 | 해석 |
+|---|---|---|
+| `SE-HELP-IMPACT` | `django__django-11400`, `django__django-12406`, `django__django-15629`, `sphinx-doc__sphinx-7462` | 한 군데 수정으로 닫히지 않고 caller / delegatee / sibling site를 같이 따라가야 한다. |
+| `SE-HELP-MRO` | `pytest-dev__pytest-10356`, `astropy__astropy-14182`, `matplotlib__matplotlib-26466` | override / base / sibling 구현을 다 걷지 않으면 한쪽만 보고 끝난다. |
+| `SE-HELP-DEFUSE` | `django__django-11734`, `django__django-16263` | ref-use / alias / annotation reference closure를 직접 추적해야 한다. |
+| `SE-HELP-AST` | `django__django-13212` | 같은 구조 호출부를 bulk-enumerate 해야 누락이 줄어든다. |
+
+#### 정적엔진이 primary bottleneck은 아닌 대표군
+
+| tag | 대표 문제 | 해석 |
+|---|---|---|
+| `SE-NO-PRIMARY` | `astropy__astropy-13398`, `sympy__sympy-13852`, `sympy__sympy-18199`, `sphinx-doc__sphinx-11510` | primary bottleneck이 수학 추론, 프레임워크 의미, hard-design / spec synthesis 쪽에 남는다. |
+
+#### 실무 해석
+
+- 회귀군 / 멀티사이트 누락군은 `SE-HELP-*` ROI가 높다.
+- `엄밀 MUST`로 확정된 문제는 아직 없다. 다만 `SE-HELP-IMPACT` 군은 **실무상 near-MUST**에 가깝다.
+- 하나만 만든다면 범용 정적엔진 전체보다 **finalize 직전 blast-radius 체크용 impact backend**가 1순위다.
+- 진짜 검증은 `SE-HELP-*` 후보셋에 대해 finalize 직전 신호 주입 A/B로 해야 한다.
+
 ## 2. 표시 17개 스캐폴드 (134 리더보드 상위/다양)
 
 | 스캐폴드 | 모델 | resolved/500 | % | OSS | repo |

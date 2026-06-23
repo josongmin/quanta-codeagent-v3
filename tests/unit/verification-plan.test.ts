@@ -85,17 +85,12 @@ describe("buildVerificationPlan", () => {
     }
   })
 
-  test("repro primary contract is the stdout sentinel; owner-test → test_exit_zero", () => {
+  test("repro primary contract is exit-grounded pytest green; owner-test → test_exit_zero", () => {
     const p = buildVerificationPlan({
       reproScript: { cmd: "python reproduce_issue.py", baseValidatedRed: true },
       ownerNearTests: ["pytest owner.py"],
     })
-    // The repro's Agentless contract is the marker, not the exit code (RCA fix) —
-    // consistent with the base classifyStdout check and the validator's gating.
-    expect(p.primaryRail?.successPredicate).toEqual({
-      type: "stdout_contains",
-      substring: "Issue resolved",
-    })
+    expect(p.primaryRail?.successPredicate).toEqual({ type: "test_exit_zero" })
     const owner = p.required.find((s) => s.kind === "owner-test")
     expect(owner?.successPredicate?.type).toBe("test_exit_zero")
     expect(owner?.authority).toBe("execution")

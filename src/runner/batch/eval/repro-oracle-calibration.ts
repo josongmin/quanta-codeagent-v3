@@ -51,7 +51,7 @@ import { withCandidatePatch } from "./rematerialize"
 
 export type { ReproOracleCalibration }
 
-const UNAVAILABLE: ReproOracleCalibration = {
+const UNAVAILABLE_REPRO_ORACLE_CALIBRATION: Readonly<ReproOracleCalibration> = {
   goldCalibrated: false,
   falseNegative: false,
   available: false,
@@ -62,6 +62,10 @@ const UNAVAILABLE: ReproOracleCalibration = {
   baseVotes: null,
   baseK: null,
 }
+
+export const unavailableReproOracleCalibration = (): ReproOracleCalibration => ({
+  ...UNAVAILABLE_REPRO_ORACLE_CALIBRATION,
+})
 
 /**
  * Calibrate a patched-resolved oracle against the gold patch. Returns
@@ -85,7 +89,9 @@ export const calibrateReproOracle = async (args: {
    *  false-negative. Undefined ⇒ no materialization (byte-identical). */
   repo?: string
 }): Promise<ReproOracleCalibration> => {
-  if (args.goldPatch === undefined || args.goldPatch.trim() === "") return UNAVAILABLE
+  if (args.goldPatch === undefined || args.goldPatch.trim() === "") {
+    return unavailableReproOracleCalibration()
+  }
   // P3 metamorphic non-vacuity: probe the canonical oracle on the BASE (un-patched)
   // tree FIRST. The sandbox arrives at base (calibration runs before candidate gen,
   // and leaves it at base). A SOUND oracle reports NOT-resolved here (the repro is
@@ -125,9 +131,9 @@ export const calibrateReproOracle = async (args: {
       },
     })
   } catch {
-    return UNAVAILABLE // materialize/reset threw ⇒ no calibration claim
+    return unavailableReproOracleCalibration() // materialize/reset threw ⇒ no calibration claim
   }
-  if (wrapped === null) return UNAVAILABLE // gold did not materialize → no claim
+  if (wrapped === null) return unavailableReproOracleCalibration() // gold did not materialize → no claim
   const verdict = wrapped.verdict
   // `k >= 1` guard: a degenerate `{votes:0, k:0}` verdict must NOT read as
   // calibrated (`0 >= 0`). The production probe guarantees `k >= 1` (vote.ts), but

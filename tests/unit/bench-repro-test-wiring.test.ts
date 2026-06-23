@@ -258,7 +258,10 @@ describe("prepareReproTest", () => {
     expect(seen[0]).toContain("--no-project")
     expect(seen[0]).toContain("setuptools")
     expect(seen[0]).toContain("--with-editable")
-    expect(seen[0]?.[seen[0].length - 2]).toBe("python")
+    expect(seen[0]).toContain("PYTEST_DISABLE_PLUGIN_AUTOLOAD=1")
+    expect(seen[0]).toContain("PYTHONNOUSERSITE=1")
+    expect(seen[0]?.[seen[0].length - 3]).toBe("python")
+    expect(seen[0]?.[seen[0].length - 2]).toBe("-s")
   })
 
   test("WIRING: non-swebench fixture ⇒ repro runs bare python3 (no uv-run)", async () => {
@@ -526,8 +529,9 @@ describe("exported constants", () => {
     expect(REPRO_FILE_NAME).toBe("reproduce_issue.py")
   })
 
-  test("REPRO_HINT_MESSAGE mentions Issue resolved + file name", () => {
+  test("REPRO_HINT_MESSAGE mentions exit-grounded repro contract + file name", () => {
     expect(REPRO_HINT_MESSAGE).toContain("reproduce_issue.py")
-    expect(REPRO_HINT_MESSAGE).toContain('"Issue resolved"')
+    expect(REPRO_HINT_MESSAGE).toContain("all assertions pass")
+    expect(REPRO_HINT_MESSAGE).toContain("exits 0")
   })
 })

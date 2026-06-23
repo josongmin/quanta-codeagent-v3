@@ -34,6 +34,56 @@
 
 secondary로 **REGRESSION-TRAP은 사실상 전 instance에 깔려있다**(P2P 4~3154). 즉 "픽스 자체"가 아니라 "옆 동작 안 깨기"가 진짜 벽인 경우가 압도적.
 
+## 정적엔진 관점 재태깅 (manual, 2026-06-23)
+
+> 아래는 "정적엔진이 있으면 도움되나?"를 보기 위한 **counterfactual 수기 태깅**이다.
+> `MUST` 판정이 아니다. 특히 `SE-HELP-*`는 "실무상 확률을 올린다"는 뜻이지, 정적엔진만 넣으면 닫힌다는 뜻이 아니다.
+
+### 태그 정의
+
+- `SE-HELP-IMPACT` — cross-file impact / delegation / blast-radius
+- `SE-HELP-MRO` — override / sibling reachability / explicit MRO walk
+- `SE-HELP-DEFUSE` — def-use / alias / reference-closure
+- `SE-HELP-AST` — AST shape search / bulk callsite enumeration
+- `SE-NO-PRIMARY` — 정적신호가 있어도 최종 병목이 domain / reasoning / hard-design
+
+### 이 문서의 원인분포와 정적엔진 태그의 관계
+
+| 여기 원인축 | 정적엔진 관점 | 메모 |
+|---|---|---|
+| `HARD-LOCALIZE` | 주로 `SE-HELP-IMPACT` / `SE-HELP-MRO` / `SE-HELP-DEFUSE` | 정적엔진이 가장 직접적으로 먹히는 구간 |
+| `OVERFIT-TRAP` / `REGRESSION-TRAP` | `SE-HELP-IMPACT` 보조 + regression gate 병행 | 엔진만으로 닫히지 않고 verify rail이 같이 필요 |
+| `DOMAIN-KNOWLEDGE` / `HARD-DESIGN` / `CONSTRAINT-REASON` | 대체로 `SE-NO-PRIMARY` | 정적신호가 있어도 주병목은 남음 |
+| `SPEC-INFERENCE` | mixed | callsite 열거엔 도움되지만 의도합성은 모델 몫 |
+
+### 고신뢰 likely-help 묶음
+
+- `SE-HELP-IMPACT`
+  - `django-11400`, `django-12406`, `django-15629`, `sphinx-7462`
+  - 공통점: shared helper / delegation / sibling site를 같이 따라가야 하고, 한 곳 수정으로는 closure가 안 난다.
+- `SE-HELP-MRO`
+  - `pytest-10356`, `astropy-14182`, `matplotlib-26466`
+  - 공통점: 일반 lookup / grep으로는 형제 베이스나 override 전부를 못 본다.
+- `SE-HELP-DEFUSE`
+  - `django-11734`, `django-16263`
+  - 공통점: alias / ref-use closure를 실제로 따라가야 한다.
+- `SE-HELP-AST`
+  - `django-13212`
+  - 공통점: 같은 shape 호출부를 bulk-enumerate 해야 누락이 줄어든다.
+
+### 정적엔진이 primary bottleneck은 아닌 대표군
+
+- `SE-NO-PRIMARY`
+  - `astropy-13398`, `sympy-13852`, `sympy-18199`, `sphinx-11510`, `xarray-6992`
+  - 공통점: 최종 병목이 수학 추론, 프레임워크 의미, hard-design / lifecycle 재설계 쪽에 있다.
+
+### 실무 결론
+
+- `엄밀 MUST`로 확정된 케이스는 아직 없다.
+- 하지만 `SE-HELP-IMPACT` 군은 이 셋업에선 **실무상 near-MUST**에 가깝다.
+- 하나만 만들면 범용 "정적엔진"보다 **finalize 직전 blast-radius를 보는 impact backend**가 우선이다.
+- 다음 검증은 `SE-HELP-*` 후보군을 묶어 finalize 직전 신호 주입 A/B로 해야 한다.
+
 ## "easy-but-failed" — 천장의 진짜 정체 (~36)
 
 difficulty가 아니라 아래 4개 함정 중 하나로 0/9가 된 케이스들. **여기가 우리 ROI 구간.**

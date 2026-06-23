@@ -12,6 +12,7 @@ import {
   resolvedKofNPositive,
 } from "@/agent/verification-bundle"
 import { candidateFamilyCoverageMissing, candidateFamilyRank } from "./candidate-families"
+import { diffTouchedSymbols } from "./diff-touched-symbols"
 import type { MweProofReceipt } from "./mwe-proof"
 import type {
   ReproConsensusProofReceipt,
@@ -257,6 +258,9 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
       return {
         id: s.candidate.id,
         files: s.candidate.files,
+        ...(s.candidate.patch.trim() !== ""
+          ? { touchedSymbols: diffTouchedSymbols(s.candidate.patch) }
+          : {}),
         admissible: s.verdict.admissible,
         score: s.verdict.score,
         reasons: s.verdict.reasons,
