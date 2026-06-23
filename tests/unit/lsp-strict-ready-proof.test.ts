@@ -24,6 +24,10 @@ import {
   proveStrictLspReady,
 } from "@/agent/lsp-bridge"
 import { type Location, LspClient, type LspClientOptions } from "@/lsp"
+import { __resetRuntimeConfig } from "@/shared"
+
+const READY_BUDGET_KEY = "QUANTA_LSP_READY_TIMEOUT_MS"
+const priorReadyBudget = process.env[READY_BUDGET_KEY]
 
 type DefFn = () => Promise<Location[] | null>
 
@@ -49,6 +53,9 @@ afterEach(async () => {
   await __resetSharedPyrightSessionsForTest()
   __setPyrightClientFactoryForTest(null)
   __setPyrightWarmupTimingForTest(null)
+  if (priorReadyBudget === undefined) delete process.env[READY_BUDGET_KEY]
+  else process.env[READY_BUDGET_KEY] = priorReadyBudget
+  __resetRuntimeConfig()
 })
 
 describe("strict LSP ready proof (LSP-01)", () => {
@@ -137,4 +144,32 @@ describe("strict LSP ready proof (LSP-01)", () => {
     expect(r.reason).toContain("no warm pool")
     rmSync(dir, { recursive: true, force: true })
   })
+
+  test("SR-05: QUANTA_LSP_READY_TIMEOUT_MS reaches the READ SITE (knob → budgetMs, not just parse)", async () => {
+    // The audit gap: the knob test only proved env→runtimeConfig parse. THIS
+    // proves the value actually becomes ensurePyrightFileReady's budget. Set a
+    // tiny budget + a never-resolving server: the ready proof must time out
+    // FAST (~one poll). RED-on-injection: if the read site drops
+    // `?? runtimeConfig().lspReadyTimeoutMs`, the budget falls back to 90_000 →
+    // this blocks ~90 s and fails the durationMs assertion / the test timeout.
+    // NOTE: no `__setPyrightWarmupTimingForTest` — that override would mask the
+    // knob (it takes precedence), so the knob must be the ONLY budget source.
+    const dir = mkRepo("sr-knob-")
+    const file = join(dir, "withimport.py")
+    writeFileSync(file, "from exc import MyError\n\n\ndef g():\n    return MyError\n")
+    const fake = new FakePyrightClient()
+    fake.defImpl = async () => [] // never resolves the probe symbol
+    __setPyrightClientFactoryForTest(() => fake)
+    process.env[READY_BUDGET_KEY] = "300" // 300ms budget via the knob
+    __resetRuntimeConfig()
+    try {
+      const r = await proveStrictLspReady(file, dir, "pyright-langserver")
+      expect(r.outcome).toBe("ready_timeout")
+      // The budget the knob set bounds the wall time. Inert knob ⇒ 90s default
+      // ⇒ this far exceeds 5s. (retryMs is the real 1s, so ~1 poll ≈ ~1s here.)
+      expect(r.durationMs ?? Number.POSITIVE_INFINITY).toBeLessThan(5000)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 20_000)
 })
