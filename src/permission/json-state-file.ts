@@ -1,4 +1,3 @@
-import { errMessage, writeStderr } from "@/shared"
 /**
  * Generic JSON-state-file persistence engine (ADR-0046, extracted from
  * permission-store.ts #3).
@@ -38,161 +37,26 @@ import { errMessage, writeStderr } from "@/shared"
  *     (Still not a substitute for an OS lock under pathological interleaving —
  *     a true lockfile remains the v4 follow-up — but it removes the silent
  *     clobber of grants/denials, which is the security-critical loss.)
+ *
+ * The file-IO/lock/flush machinery lives in `./json-state-file/engine.ts` and
+ * `./json-state-file/locking.ts`; this module owns the public factory and the
+ * domain-parameter type surface, threading the closed-over state through an
+ * {@link EngineState} record passed BY REFERENCE to each delegated helper.
  */
 
 import { randomBytes } from "node:crypto"
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises"
-import { dirname } from "node:path"
+import type { EngineState } from "./json-state-file/engine"
+import * as engine from "./json-state-file/engine"
 
-const stderrWarn = (msg: string): void => {
-  writeStderr(`[quanta] permission-store: ${msg}\n`)
-}
+export {
+  acquireLock,
+  LOCK_STALE_MS,
+  LOCK_TIMEOUT_MS,
+  type ParseOutcome,
+  type PersistOutcome,
+} from "./json-state-file/locking"
 
-/** Route a fire-and-forget write's rejection to the same stderr-warn surface
- *  the synchronous write path uses, so a rejected `enqueueWrite()` (e.g. with
- *  `debounceMs:0` in tests) can never surface as an unhandled rejection.
- *  `writeToDisk` already swallows its own IO errors, so this is a defensive
- *  backstop for the promise-chain itself — the happy path is unaffected. */
-const swallowWriteRejection =
-  (filePath: string) =>
-  (e: unknown): void => {
-    const message = errMessage(e)
-    stderrWarn(`flush failed (${filePath}): ${message}`)
-  }
-
-/** Distinguished outcomes of a state `parse`. The engine takes the right
- *  action per outcome — schema mismatch quarantines to a versioned sidecar so
- *  a future migration can recover, while malformed-shape just starts empty. */
-export type ParseOutcome<T> =
-  | { kind: "ok"; state: T }
-  | { kind: "version-mismatch"; foundVersion: number | string | null }
-  | { kind: "shape-invalid"; reason: string }
-
-/**
- * Typed persistence outcome (T08 — May-31 bugbash, audit L8 M5/M6).
- *
- * The store's in-memory state is ALWAYS authoritative — a failed flush never
- * loses the live grant/denial. But the prior `flush(): Promise<void>` made the
- * durable-write failure INVISIBLE to the caller: a `grant()` that landed in
- * memory but never reached disk (EACCES on `~/.quanta`, a full disk, a
- * read-only mount) resolved `await flush()` exactly like a successful write.
- * A caller that needs the grant to survive a process restart (a CI bot pinning
- * a host to read-only; a security denial that MUST persist) had no way to know
- * it didn't.
- *
- * `flush()` now returns this discriminated outcome so callers can DISTINGUISH
- * "applied in memory" (`durable: false` + opaque `reason`) from "durably
- * persisted" (`durable: true`). It is part of the store contract, not a log
- * line. Callers that don't care keep ignoring the return (it widens
- * `Promise<void>` → `Promise<PersistOutcome>`, source-compatible).
- */
-export type PersistOutcome =
-  | { readonly durable: true }
-  | { readonly durable: false; readonly reason: string }
-
-const PERSISTED: PersistOutcome = Object.freeze({ durable: true })
-
-/**
- * Cross-process advisory lock around the read-merge-rename critical section.
- *
- * WHY: `mergeWithDisk` re-reads the on-disk file then renames our merged
- * payload over it. Without a lock, two SEPARATE OS PROCESSES can both re-read
- * the SAME (e.g. empty) state, both serialize their own records, and the second
- * `rename` clobbers the first — a silent last-write-WINS lost-update (TOCTOU)
- * that the in-process `pendingFlush` queue cannot prevent (it only serializes
- * writes WITHIN one process). The per-instance tmp suffix prevents TORN JSON
- * but not the lost grant. A security grant/denial that races a peer must NOT be
- * dropped, so we serialize the critical section across processes too.
- *
- * MECHANISM: `open(path, "wx")` (O_CREAT|O_EXCL) is an atomic "create-if-absent"
- * on POSIX — exactly one racer wins the create; losers retry. The lock file
- * holds the holder's `{pid, ts}` so a peer can break a STALE lock (holder died
- * mid-section, e.g. SIGKILL) after `staleMs`, avoiding a permanent deadlock.
- * The retry spin yields to the event loop (`await` of a resolved microtask) so
- * it is cooperative, not a busy-CPU spin, and is bounded by `timeoutMs` so a
- * truly stuck peer degrades to "write anyway" rather than hanging the caller.
- *
- * CLOCK: lock expiry compares a peer's written `ts` against now. In production
- * each process uses the real global clock (the default `now` param). Injecting
- * the clock makes stale-lock STEALING deterministically testable — the whole
- * point of the injected-clock rule (`opts?.now ?? Date.now`).
- */
-export const LOCK_STALE_MS = 5_000
-export const LOCK_TIMEOUT_MS = 10_000
-
-/** Best-effort: read the lock holder's birth timestamp; null when unreadable. */
-const readLockBirth = async (lockPath: string): Promise<number | null> => {
-  try {
-    const raw = await readFile(lockPath, "utf8")
-    const parsed = JSON.parse(raw) as { ts?: unknown }
-    return typeof parsed.ts === "number" && Number.isFinite(parsed.ts) ? parsed.ts : null
-  } catch {
-    return null
-  }
-}
-
-/** Acquire the lock or return false if we timed out (caller then proceeds
- *  best-effort — non-durability never blocks the in-memory authority).
- *  `now` is injected so stale-lock STEALING is deterministically testable; the
- *  literal `Date.now` is only the default-factory fallback (no call form). */
-export const acquireLock = async (
-  lockPath: string,
-  tmpSuffix: string,
-  now: () => number = Date.now,
-): Promise<boolean> => {
-  const deadline = now() + LOCK_TIMEOUT_MS
-  const body = JSON.stringify({ pid: process.pid, ts: now() })
-  for (;;) {
-    try {
-      const handle = await open(lockPath, "wx")
-      await handle.writeFile(body, "utf8")
-      await handle.close()
-      return true
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return false
-    }
-    // Lock held by a peer. Break it if it is stale (holder likely died).
-    const birth = await readLockBirth(lockPath)
-    const ageKnown = birth !== null
-    let stale = false
-    if (ageKnown) {
-      stale = now() - birth > LOCK_STALE_MS
-    } else {
-      // Unreadable lock body — fall back to mtime so a partially-written or
-      // legacy lock can still be reclaimed once it ages out.
-      try {
-        const st = await stat(lockPath)
-        stale = now() - st.mtimeMs > LOCK_STALE_MS
-      } catch {
-        // Lock vanished between EEXIST and stat — retry the create immediately.
-        continue
-      }
-    }
-    if (stale) {
-      // Steal: unlink the stale lock (atomic enough — a double-unlink is a
-      // harmless ENOENT) and retry the create. Use the tmpSuffix only to keep
-      // the linter happy that each instance is distinguishable in traces.
-      void tmpSuffix
-      try {
-        await unlink(lockPath)
-      } catch {
-        // Someone else already broke it — fine, just retry.
-      }
-      continue
-    }
-    if (now() > deadline) return false
-    // Cooperative yield before retrying — not a CPU spin.
-    await new Promise<void>((resolve) => setTimeout(resolve, 1))
-  }
-}
-
-const releaseLock = async (lockPath: string): Promise<void> => {
-  try {
-    await unlink(lockPath)
-  } catch {
-    // Already released / stolen — nothing to do.
-  }
-}
+import type { ParseOutcome, PersistOutcome } from "./json-state-file/locking"
 
 export interface JsonStateFileOptions<T> {
   /** Absolute path of the JSON state file. */
@@ -267,288 +131,46 @@ export interface JsonStateFile<T> {
 }
 
 export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonStateFile<T> => {
-  const { filePath, debounceMs, emptyState, serialize, parse, stateVersion, mergeWithDisk } = opts
-  /** Injected lock-staleness clock; the literal `Date.now` is only the
-   *  default-factory fallback (no call form ⇒ scanner-clean). */
-  const lockNow = opts.now ?? Date.now
-  let loaded = false
-  let pendingTimer: ReturnType<typeof setTimeout> | null = null
-  let pendingFlush: Promise<PersistOutcome> | null = null
-  /** Snapshot getter captured at the time a flush is scheduled, so a debounced
-   *  or queued write serializes the LATEST state at write time. */
-  let snapshotState: () => T = emptyState
-  /** The state this instance last loaded-from / persisted-to disk. Drives the
-   *  3-way merge (peer-added vs locally-deleted). `null` until first load/write
-   *  resolves; the merge treats `null` baseline as "adopt all on-disk records"
-   *  (we have no proof we ever deleted anything). */
-  let baseline: T | null = null
-
   /** Per-instance unique tmp suffix. Two stores sharing the same `filePath`
    *  (multi-process scenario) use DIFFERENT tmp paths so they don't clobber
    *  each other's in-flight write. The final `rename` is still last-write-
    *  wins (atomic), but neither write tears the JSON. */
   const tmpSuffix = `.tmp.${process.pid}.${randomBytes(4).toString("hex")}`
-  const tmpPath = `${filePath}${tmpSuffix}`
-  /** Cross-process critical-section lock path. Only used when a `mergeWithDisk`
-   *  reconciler is supplied (the read-merge-rename window that can lose a peer's
-   *  grant). Blind-overwrite callers keep their lock-free path. */
-  const lockPath = `${filePath}.lock`
-
-  /**
-   * Atomic write: write to per-instance `.tmp.<pid>.<rand>`, then `rename`
-   * over the final path. Avoids torn-write on crash AND prevents two
-   * processes from clobbering each other's tmp file. On the unhappy path
-   * the `.tmp` is unlinked so a crashed previous attempt can never linger.
-   *
-   * Concurrency:
-   *   - Intra-process: serialized externally via {@link enqueueWrite} so two
-   *     back-to-back mutations never `rename` over each other.
-   *   - Multi-process: per-instance tmp suffix avoids tmp clobber; the final
-   *     rename is still last-write-wins (see module comment).
-   */
-  /** Silent re-read used by the merge path (NOT load). Returns the parsed
-   *  on-disk state, or `null` when the file is absent OR unreadable OR corrupt
-   *  OR a version/shape mismatch. Crucially this NEVER quarantines and NEVER
-   *  throws: a peer process mid-rename, a corrupt peer file, or a future-schema
-   *  peer must NOT wipe our in-memory state nor crash our flush — we simply
-   *  fall back to writing our own state (`null` ⇒ merge sees no disk records).
-   *  The real `load()` path keeps its quarantine/sidecar behavior intact. */
-  const rereadForMerge = async (): Promise<T | null> => {
-    if (mergeWithDisk === undefined) return null
-    let raw: string
-    try {
-      raw = await readFile(filePath, "utf8")
-    } catch {
-      return null // absent (first write) or unreadable — fall back to our state.
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      return null // corrupt peer file — do NOT let it wipe us, do NOT crash.
-    }
-    const outcome = parse(parsed)
-    return outcome.kind === "ok" ? outcome.state : null
+  /** All closed-over config + mutable runtime state, boxed into one record
+   *  passed BY REFERENCE to every engine helper so reassignments (`baseline`,
+   *  `dirty`, `pendingFlush`, …) stay shared — the prior closure variables. */
+  const st: EngineState<T> = {
+    filePath: opts.filePath,
+    debounceMs: opts.debounceMs,
+    emptyState: opts.emptyState,
+    serialize: opts.serialize,
+    parse: opts.parse,
+    stateVersion: opts.stateVersion,
+    mergeWithDisk: opts.mergeWithDisk,
+    /** Injected lock-staleness clock; the literal `Date.now` is only the
+     *  default-factory fallback (no call form ⇒ scanner-clean). */
+    lockNow: opts.now ?? Date.now,
+    tmpSuffix,
+    tmpPath: `${opts.filePath}${tmpSuffix}`,
+    /** Cross-process critical-section lock path. Only used when a `mergeWithDisk`
+     *  reconciler is supplied (the read-merge-rename window that can lose a
+     *  peer's grant). Blind-overwrite callers keep their lock-free path. */
+    lockPath: `${opts.filePath}.lock`,
+    loaded: false,
+    pendingTimer: null,
+    pendingFlush: null,
+    snapshotState: opts.emptyState,
+    baseline: null,
+    dirty: false,
   }
 
-  const writeToDisk = async (): Promise<PersistOutcome> => {
-    // Cross-process lock ONLY guards the merge path's read-merge-rename window
-    // (the lost-update TOCTOU). Blind-overwrite callers stay lock-free.
-    const useLock = mergeWithDisk !== undefined
-    let locked = false
-    try {
-      await mkdir(dirname(filePath), { recursive: true })
-      if (useLock) locked = await acquireLock(lockPath, tmpSuffix, lockNow)
-      const inMemory = snapshotState()
-      // Read-reconcile-MERGE: fold any peer-written records on disk into our
-      // payload so a concurrent flush is last-write-MERGE, not -WINS. Absent
-      // mergeWithDisk ⇒ legacy blind-overwrite (identical bytes). Single
-      // process ⇒ onDisk deep-equals baseline ⇒ merge is identity (see law).
-      // The reread + rename below run UNDER the lock so a peer cannot slip a
-      // write between our read and our rename (the silent lost-grant).
-      const merged =
-        mergeWithDisk === undefined
-          ? inMemory
-          : mergeWithDisk({ onDisk: await rereadForMerge(), inMemory, baseline })
-      const payload = serialize(merged)
-      await writeFile(tmpPath, payload, "utf8")
-      await rename(tmpPath, filePath)
-      // The merged state is now what's on disk → it becomes our new baseline so
-      // the next 3-way merge diffs against what we actually persisted.
-      baseline = merged
-      if (locked) await releaseLock(lockPath)
-      return PERSISTED
-    } catch (e) {
-      if (locked) await releaseLock(lockPath)
-      const message = errMessage(e)
-      stderrWarn(`flush failed (${filePath}): ${message}`)
-      // Best-effort cleanup: remove a partial `.tmp` so the next write
-      // starts from a clean slate (no orphan-tmp accumulation).
-      try {
-        await unlink(tmpPath)
-      } catch {
-        // tmp may not exist — that's fine.
-      }
-      // In-memory state stays authoritative; the caller learns the bytes did
-      // NOT reach disk via the typed outcome (audit L8 M5/M6).
-      return { durable: false, reason: message }
-    }
+  return {
+    load: (setState) => engine.load(st, setState),
+    flush: async (getState) => {
+      await engine.flushDurable(st, getState)
+    },
+    flushDurable: (getState) => engine.flushDurable(st, getState),
+    flushDebounced: (getState) => engine.flushDebounced(st, getState),
+    reset: () => engine.reset(st),
   }
-
-  /** True ⇨ a mutation since the last successful write is awaiting flush.
-   *  Set by every mutating API (via markDirty/flushDebounced), cleared right
-   *  before `writeToDisk` is called. Used to skip "write nothing" rewrites in
-   *  `flush()` so idempotent set*() cannot bump the file's mtime. */
-  let dirty = false
-
-  /**
-   * Serialize writes through `pendingFlush`. A second mutation that arrives
-   * while the first is in flight does NOT race a second `rename` — it queues
-   * to run after the in-flight one resolves. Returns the promise of the
-   * write that captured this mutation, so callers awaiting `flush()` see
-   * their bytes hit disk.
-   *
-   * Behavior:
-   *   - dirty + idle ⇒ start a fresh write, clear dirty.
-   *   - dirty + in-flight ⇒ chain a new write after the current one
-   *     (captures the latest state on the chained `writeToDisk` callback).
-   *   - clean + in-flight ⇒ just return the in-flight promise (no double-write).
-   *   - clean + idle ⇒ no-op (returns resolved promise).
-   */
-  const enqueueWrite = (): Promise<PersistOutcome> => {
-    if (!dirty) return pendingFlush ?? Promise.resolve(PERSISTED)
-    const prior = pendingFlush ?? Promise.resolve(PERSISTED)
-    // Capture the dirty bit at queue time so a NEW mutation arriving while
-    // we're awaiting `prior` still gets its own write (it re-sets dirty).
-    dirty = false
-    const next = prior.then(writeToDisk)
-    pendingFlush = next.finally(() => {
-      // Clear the slot ONLY if we were the most recent enqueue. A later
-      // enqueue would have overwritten `pendingFlush` already.
-      if (pendingFlush === next) pendingFlush = null
-    })
-    return next
-  }
-
-  const flushDurable = async (getState: () => T): Promise<PersistOutcome> => {
-    snapshotState = getState
-    if (pendingTimer !== null) {
-      clearTimeout(pendingTimer)
-      pendingTimer = null
-    }
-    // First-persist barrier: if nothing has ever reached disk (baseline null),
-    // an explicit flushDurable must ATTEMPT the write — otherwise enqueueWrite's
-    // `!dirty` short-circuit returns {durable:true} without touching disk, so a
-    // read-only/unwritable target would falsely report success (audit L8 M5/M6).
-    // Once a baseline exists, normal dirty-tracking holds (idempotent flushes
-    // stay no-ops so repeated/clean flushes don't bump mtime).
-    if (baseline === null) dirty = true
-    // If a debounced write was queued but not yet started, run it now
-    // (combined with any new mutations since). Also waits on any in-flight
-    // write so `await flush()` is a true "bytes are durable" barrier — and
-    // returns whether those bytes actually reached disk (audit L8 M5/M6).
-    return enqueueWrite()
-  }
-
-  /** Void-returning flush — source-compatible with the pre-T08 callers. */
-  const flush = async (getState: () => T): Promise<void> => {
-    await flushDurable(getState)
-  }
-
-  const flushDebounced = (getState: () => T): void => {
-    snapshotState = getState
-    dirty = true
-    if (debounceMs <= 0) {
-      // Tests with debounceMs:0 still serialize through the queue — fixes
-      // the prior "fire-and-forget hits a deleted tmpdir during teardown"
-      // noise by ensuring `await flush()` drains all queued writes.
-      enqueueWrite().catch(swallowWriteRejection(filePath))
-      return
-    }
-    if (pendingTimer !== null) clearTimeout(pendingTimer)
-    pendingTimer = setTimeout(() => {
-      pendingTimer = null
-      enqueueWrite().catch(swallowWriteRejection(filePath))
-    }, debounceMs)
-    // Don't keep the event loop alive solely for the flush.
-    if (typeof (pendingTimer as { unref?: () => void }).unref === "function") {
-      ;(pendingTimer as { unref?: () => void }).unref?.()
-    }
-  }
-
-  /** Quarantine bytes to a versioned sidecar (`.corrupt`, `.unsupported-vN`).
-   *  Best-effort — if the sidecar write fails we keep going with an empty
-   *  state in memory. */
-  const quarantine = async (suffix: string, raw: string): Promise<void> => {
-    try {
-      await writeFile(`${filePath}.${suffix}`, raw, "utf8")
-    } catch {
-      // best-effort — the in-memory state is still safe.
-    }
-  }
-
-  /** Read bytes from disk OR signal "not present yet" via `null`. Surfaces
-   *  unexpected IO errors (permission denied, EISDIR, …) to the caller as a
-   *  warning rather than crashing the process. */
-  const readRawState = async (): Promise<string | null> => {
-    try {
-      return await readFile(filePath, "utf8")
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      if (code === "ENOENT") return null
-      const message = errMessage(e)
-      stderrWarn(`load failed (${filePath}): ${message} — starting empty`)
-      return null
-    }
-  }
-
-  /** Parse bytes already known to exist. Splits the three terminal cases so
-   *  `load()` stays well under the complexity ceiling. */
-  const parseRawState = async (raw: string): Promise<T | null> => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch (e) {
-      const message = errMessage(e)
-      stderrWarn(`state file corrupt JSON (${filePath}): ${message} — starting empty`)
-      await quarantine("corrupt", raw)
-      return null
-    }
-    const outcome = parse(parsed)
-    if (outcome.kind === "ok") return outcome.state
-    if (outcome.kind === "version-mismatch") {
-      stderrWarn(
-        `state file schema mismatch (${filePath}) — found version=${String(outcome.foundVersion)}, expected ${stateVersion} — starting empty (quarantined)`,
-      )
-      await quarantine(`unsupported-v${String(outcome.foundVersion)}`, raw)
-      return null
-    }
-    stderrWarn(`state file shape invalid (${filePath}): ${outcome.reason} — starting empty`)
-    return null
-  }
-
-  const load = async (setState: (state: T) => void): Promise<void> => {
-    if (loaded) return
-    loaded = true
-    const raw = await readRawState()
-    if (raw === null) {
-      const cold = emptyState()
-      // Establish a baseline even on cold start: we KNOW we loaded an empty
-      // file, so any record that later appears on disk is peer-added (adopt),
-      // and any record we never set was never ours to delete.
-      baseline = cold
-      setState(cold)
-      return
-    }
-    const validated = await parseRawState(raw)
-    const initial = validated ?? emptyState()
-    baseline = initial
-    setState(initial)
-  }
-
-  const reset = async (): Promise<void> => {
-    if (pendingTimer !== null) {
-      clearTimeout(pendingTimer)
-      pendingTimer = null
-    }
-    // Wait on any in-flight write so we don't unlink mid-rename — without
-    // this, a flush queued by a recent set*() could resurrect the file we
-    // just deleted (Heisenbug seen in stress tests).
-    if (pendingFlush !== null) {
-      try {
-        await pendingFlush
-      } catch {
-        // Surfaced via stderrWarn already.
-      }
-    }
-    loaded = false
-    baseline = null
-    try {
-      await unlink(filePath)
-    } catch {
-      // best-effort — file may not exist yet.
-    }
-  }
-
-  return { load, flush, flushDurable, flushDebounced, reset }
 }

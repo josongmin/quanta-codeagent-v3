@@ -64,7 +64,6 @@
     "src/observability/metrics/in-memory-registry.ts::defaultMetricsRegistry",
     "src/observability/otel-exporter.ts::otelHttpExporter",
     "src/observability/prompt-cache/default.ts::defaultPromptCacheObserver",
-    "src/permission/json-state-file.ts::createJsonStateFile",
     "src/permission/trust-scope-store.ts::createPersistentTrustScopeRegistry",
     "src/realtime/default-adapter.ts::createBunWebSocketAdapter",
     "src/realtime/voice-session/default-session.ts::createDefaultVoiceSession",
