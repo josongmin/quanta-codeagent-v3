@@ -11,6 +11,10 @@ import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 const baseCfg = (): AgentConfig => ({}) as AgentConfig
 
 describe("localize-phase knob — parse", () => {
+  test("'0' ⇒ explicit OFF sentinel", () => {
+    expect(localizePhaseKnob.parse("0")).toEqual({ phase1Turns: 0 })
+  })
+
   test("integer N in [1, 20] ⇒ { phase1Turns: N }", () => {
     expect(localizePhaseKnob.parse("1")).toEqual({ phase1Turns: 1 })
     expect(localizePhaseKnob.parse("10")).toEqual({ phase1Turns: 10 })
@@ -22,8 +26,7 @@ describe("localize-phase knob — parse", () => {
     expect(localizePhaseKnob.parse("")).toBeUndefined()
   })
 
-  test("0 / negative ⇒ undefined", () => {
-    expect(localizePhaseKnob.parse("0")).toBeUndefined()
+  test("negative ⇒ undefined", () => {
     expect(localizePhaseKnob.parse("-1")).toBeUndefined()
   })
 
@@ -42,6 +45,13 @@ describe("localize-phase knob — parse", () => {
 })
 
 describe("localize-phase knob — apply", () => {
+  test("bench surface + explicit OFF sentinel ⇒ cfg unchanged", () => {
+    const cfg = baseCfg()
+    const out = localizePhaseKnob.apply(cfg, { phase1Turns: 0 }, { surface: "bench" })
+    expect(out).toBe(cfg)
+    expect(out.localizePhase).toBeUndefined()
+  })
+
   test("bench surface ⇒ cfg.localizePhase = { phase1Turns: N }", () => {
     const out = localizePhaseKnob.apply(baseCfg(), { phase1Turns: 5 }, { surface: "bench" })
     expect(out.localizePhase).toEqual({ phase1Turns: 5 })

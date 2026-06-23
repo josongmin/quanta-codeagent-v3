@@ -9,7 +9,9 @@
  * Hellgate criteria (from definition-of-done.ts):
  *   - Exercises the real composition path (resolveBenchKnobs → applyBenchKnobs),
  *     not just the isolated knob factory.
- *   - gate-OFF (env absent / empty / "0") → byte-identical cfg, no mutations.
+ *   - gate-OFF (env absent / empty) → byte-identical cfg, no mutations.
+ *   - explicit OFF (`"0"`) survives the real resolver as an env-layer value and
+ *     suppresses a preset-provided localize-phase.
  *   - Active knob end-to-end: env "5" → cfg.localizePhase = { phase1Turns: 5 }.
  *   - Adversarial env values (NUL, very long, non-integer) → parse rejects →
  *     knob inactive → no cfg mutation.
@@ -104,9 +106,10 @@ describe("hellgate — gate-OFF (env absent)", () => {
     expect(state.inactive).toContain(localizePhaseKnob.id)
   })
 
-  test("'0' → parse returns undefined (0 is out of [1,20] domain)", () => {
+  test("'0' → explicit OFF sentinel resolves as env-layer value", () => {
     const state = resolveBenchKnobs({ envVars: { [ENV_KEY]: "0" } })
-    expect(state.values.has(localizePhaseKnob.id)).toBe(false)
+    expect(state.values.get(localizePhaseKnob.id)?.value).toEqual({ phase1Turns: 0 })
+    expect(state.values.get(localizePhaseKnob.id)?.source).toBe("env")
   })
 
   test("negative integer → knob inactive", () => {
@@ -118,6 +121,17 @@ describe("hellgate — gate-OFF (env absent)", () => {
 // ── 2. Active end-to-end: env "5" → cfg.localizePhase ─────────────────────────
 
 describe("hellgate — active knob end-to-end", () => {
+  test("preset localize-phase + env '0' ⇒ explicit OFF suppresses the preset", () => {
+    const state = resolveBenchKnobs({
+      envVars: { [ENV_KEY]: "0" },
+      preset: "agentless-v5-thin-and-expanded",
+    })
+    expect(state.values.get(localizePhaseKnob.id)?.value).toEqual({ phase1Turns: 0 })
+
+    const out = applyBenchKnobs(baseCfg(), state, {})
+    expect(out.localizePhase).toBeUndefined()
+  })
+
   test("'5' → resolveBenchKnobs resolves → applyBenchKnobs sets cfg.localizePhase", () => {
     const state = resolveBenchKnobs({ envVars: { [ENV_KEY]: "5" } })
     expect(state.values.has(localizePhaseKnob.id)).toBe(true)

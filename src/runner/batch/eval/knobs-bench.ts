@@ -433,7 +433,7 @@ export const benchPostureFromState = (
   // `lsp-steer:off` (the A/B baseline). Pointless without nav, so nav-gated.
   const lspGroundingSteer = lspNav && readKnobValue(state, "lsp-steer", isFalse) !== false
   const localizePhase =
-    lp !== undefined
+    lp !== undefined && lp.phase1Turns > 0
       ? { phase1Turns: lp.phase1Turns, ...(lspGroundingSteer ? { lspGroundingSteer: true } : {}) }
       : undefined
   const bs = readKnobValue(state, "branch-search", isBranchValue)

@@ -7,7 +7,12 @@ import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
 import { scopedEnv } from "../_support/scoped-env"
 
-const ENV = scopedEnv(["PATH", "QUANTA_BENCH_PRESET", "QUANTA_BENCH_V5_ADAPTIVE"])
+const ENV = scopedEnv([
+  "PATH",
+  "QUANTA_BENCH_LOCALIZE_PHASE",
+  "QUANTA_BENCH_PRESET",
+  "QUANTA_BENCH_V5_ADAPTIVE",
+])
 
 const withPyrightOnPath = (pathValue: string | undefined): string => {
   const pyrightBinDir = join(process.env.HOME ?? "", ".local", "bin")
@@ -64,14 +69,13 @@ class AdaptiveRouteLLM implements LLMPort {
     if (this.pendingExpandedEdit && !this.expandedEditDone) {
       this.pendingExpandedEdit = false
       this.expandedEditDone = true
-      yield { type: "tool_use_start", id: "edit-2", name: "edit" }
+      yield { type: "tool_use_start", id: "write-2", name: "write" }
       yield {
         type: "tool_use_end",
-        id: "edit-2",
+        id: "write-2",
         input: {
           path: join(sandbox, "calc.py"),
-          old_string: "return a - b",
-          new_string: "return a + b",
+          content: "def add(a, b):\n    return a + b\n",
         },
       }
       yield { type: "message_stop", stop_reason: "tool_use" }
@@ -102,6 +106,7 @@ describe("bench v5 adaptive routing", () => {
     ENV.run(async () => {
       ENV.set({
         PATH: withPyrightOnPath(process.env.PATH),
+        QUANTA_BENCH_LOCALIZE_PHASE: "0",
         QUANTA_BENCH_PRESET: "agentless-v5-thin-and-expanded",
         QUANTA_BENCH_V5_ADAPTIVE: "1",
       })

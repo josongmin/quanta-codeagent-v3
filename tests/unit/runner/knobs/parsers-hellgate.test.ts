@@ -399,14 +399,16 @@ describe("hellgate / parsers — repro-test numeric domain [1..40]", () => {
 })
 
 describe("hellgate / parsers — localize-phase numeric domain [1..20]", () => {
+  test("N=0 accepted as explicit OFF sentinel", () => {
+    expect(localizePhaseKnob.parse("0")?.phase1Turns).toBe(0)
+  })
   test("N=1 accepted (min)", () => {
     expect(localizePhaseKnob.parse("1")?.phase1Turns).toBe(1)
   })
   test("N=20 accepted (max)", () => {
     expect(localizePhaseKnob.parse("20")?.phase1Turns).toBe(20)
   })
-  test("N=0 / negative rejected", () => {
-    expect(localizePhaseKnob.parse("0")).toBeUndefined()
+  test("negative rejected", () => {
     expect(localizePhaseKnob.parse("-1")).toBeUndefined()
   })
   test("N=21+ rejected (measurement cap)", () => {

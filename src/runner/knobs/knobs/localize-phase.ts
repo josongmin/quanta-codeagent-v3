@@ -2,23 +2,26 @@
  * Knob: `localize-phase` — Agentless "localize-first" guard (Tier-0
  * absorption, Agentless paper §3.1).
  *
- * Default-OFF. Migrated verbatim from `parseLocalizePhaseEnv` in
- * `src/runner/batch/eval/driver.ts`. Apply sets
+ * Default-OFF. `0` is the EXPLICIT-OFF env sentinel: it resolves as a real
+ * env-layer value so it can suppress a preset-provided localize-phase instead
+ * of falling through to that preset. Positive integers still apply
  * `cfg.localizePhase = { phase1Turns: N }`.
  *
  * Domain (ACTIVE):
+ *   - `"0"` ⇒ explicit OFF sentinel `{ phase1Turns: 0 }` (env-layer disable).
  *   - integer N in [1, 20] ⇒ `{ phase1Turns: N }`.
  *
  * Domain (INACTIVE — `parse` returns `undefined`):
  *   - absent / empty string
  *   - non-numeric (`"garbage"`, `"1.5"`, `"abc"`)
- *   - 0 / negative / NaN / Infinity
+ *   - negative / NaN / Infinity
  *   - > 20 (measurement-integrity cap — phase1Turns > 20 on a maxTurns=30 run
  *     would starve repair)
  *
  * Closed parser: explicit `Number.isFinite` + `Number.isInteger` checks (no
  * `parseInt`-then-coerce that would silently swallow "1abc" as 1). No
- * heuristics.
+ * heuristics. The only special sentinel is the exact integer `0`, which means
+ * "disable this knob even if a preset enabled it".
  *
  * Conflicts with `branch-search` — both strengthen explore; running them
  * together confounds A/B measurement.
@@ -42,7 +45,8 @@ const parseLocalizePhase = (raw: string | undefined): LocalizePhaseValue | undef
   const n = Number(raw)
   if (!Number.isFinite(n)) return undefined
   if (!Number.isInteger(n)) return undefined
-  if (n < 1) return undefined
+  if (n === 0) return { phase1Turns: 0 }
+  if (n < 0) return undefined
   if (n > 20) return undefined
   return { phase1Turns: n }
 }
@@ -53,6 +57,7 @@ const applyLocalizePhase = (
   ctx: { surface: Surface },
 ): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg
+  if (value.phase1Turns === 0) return cfg
   return { ...cfg, localizePhase: { phase1Turns: value.phase1Turns } }
 }
 

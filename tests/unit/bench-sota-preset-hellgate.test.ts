@@ -151,6 +151,13 @@ describe("bench SOTA preset hellgate — QUANTA_BENCH_SOTA=1", () => {
     expect(opt.localizePhase?.phase1Turns).not.toBe(5)
   })
 
+  test("SOTA-7b: explicit QUANTA_BENCH_LOCALIZE_PHASE=0 with SOTA=1 disables preset localizePhase", () => {
+    process.env.QUANTA_BENCH_SOTA = "1"
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "0"
+    const opt = benchOptIns()
+    expect(opt.localizePhase).toBeUndefined()
+  })
+
   // SOTA-8: issueHintExpectedActual must be true when SOTA=1, even without the
   // explicit QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL flag.
   // Mechanism: agentless-v1 sets `issue-hint-expected-actual:1`, and the field
