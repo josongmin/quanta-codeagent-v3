@@ -26,6 +26,9 @@ purpose: |
   grading posture. `closure-repair` preset knob declares the repair budget.
 evidence:
   code:
+    - src/runner/batch/eval/repair/llm-evidence.ts
+    - src/apps/bench/eval/repair/llm-evidence.ts
+    - src/runner/batch/eval/repair/repro-outcome.ts
     - src/runner/batch/eval/repair-phase-policy.ts
     - src/runner/batch/eval/prompt-augment.ts
     - src/runner/batch/eval/rematerialize.ts

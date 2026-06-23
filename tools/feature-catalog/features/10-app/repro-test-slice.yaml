@@ -42,6 +42,7 @@ purpose: |
   appearance wins (deterministic given input order).
 evidence:
   code:
+    - src/runner/knobs/knobs/repro-exec-timeout.ts
     - src/agent/repro-test/index.ts
     - src/agent/repro-test/generate.ts
     - src/agent/repro-test/execute.ts

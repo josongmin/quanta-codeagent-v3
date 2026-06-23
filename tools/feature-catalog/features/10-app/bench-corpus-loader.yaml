@@ -44,6 +44,8 @@ purpose: |
   a sandbox before `git checkout <base_commit>` per instance).
 evidence:
   code:
+    - src/runner/batch/corpus/project-env.ts
+    - src/runner/batch/corpus/repo-version-python.ts
     - src/apps/bench/corpus/loader.ts
     - src/apps/bench/corpus/dataset.ts
     - src/apps/bench/corpus/index.ts

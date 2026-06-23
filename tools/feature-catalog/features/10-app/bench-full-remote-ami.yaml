@@ -30,6 +30,9 @@ purpose: |
   wave.
 evidence:
   code:
+    - src/apps/bench/remote/verdict-buckets.ts
+    - src/apps/bench/remote/single-box-guard.ts
+    - src/apps/bench/remote/fresh-auth.ts
     - src/apps/bench/remote/backend.ts
     - src/apps/bench/remote/box-session.ts
     - src/apps/bench/remote/ec2.ts

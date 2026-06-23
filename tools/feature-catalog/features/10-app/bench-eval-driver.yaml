@@ -40,6 +40,9 @@ purpose: |
   single-responsibility helper consumed only here.
 evidence:
   code:
+    - src/runner/batch/eval/score-label.ts
+    - src/runner/batch/core.ts
+    - src/runner/batch/observe.ts
     - src/apps/bench/eval/driver.ts
     - src/apps/bench/eval/sandbox.ts
     - src/apps/bench/eval/snapshot.ts

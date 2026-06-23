@@ -25,6 +25,7 @@ surface_integration:
 purpose: 'Default-OFF NOOP-apply registry knob: force best-edit commit when budget spent with no edit; explicit exhausted verdict.'
 evidence:
   code:
+    - src/runner/knobs/knobs/no-patch-force-fraction.ts
     - src/runner/knobs/knobs/no-patch-breaker.ts
     - src/runner/batch/eval/no-patch-breaker-adapter.ts
   adrs: []

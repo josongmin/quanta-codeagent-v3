@@ -38,6 +38,8 @@ purpose: |
   that rejects any path not in the supplied file tree.
 evidence:
   code:
+    - src/shared/public-issue-text.ts
+    - src/runner/knobs/knobs/localize-budget.ts
     - src/agent/issue-hint/extract-files.ts
     - src/agent/issue-hint/extract-errors.ts
     - src/agent/issue-hint/extract-code.ts

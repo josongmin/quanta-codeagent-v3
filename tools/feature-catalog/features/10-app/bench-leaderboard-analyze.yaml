@@ -1,0 +1,38 @@
+id: bench-leaderboard-analyze
+title: bench — leaderboard / verdict analysis + dashboard
+section: 10
+subsystem: Bench harness — result analysis & leaderboard surfaces
+order: 2431
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-23"
+  evidence:
+    cli: "bench analyze/leaderboard CLI + local dashboard server"
+    web: "local leaderboard-dashboard server only"
+purpose: |
+  Post-run analysis of bench results: per-instance verdict bucketing, diff
+  summaries, and the leaderboard rollup, plus the local leaderboard-dashboard
+  server + knob-catalog generator that render the SSOT results for inspection.
+evidence:
+  code:
+    - src/apps/bench/analyze/diff.ts
+    - src/apps/bench/analyze/leaderboard.ts
+    - src/apps/bench/analyze/verdicts.ts
+    - tools/leaderboard-dashboard/gen-knob-catalog.ts
+    - tools/leaderboard-dashboard/server.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
