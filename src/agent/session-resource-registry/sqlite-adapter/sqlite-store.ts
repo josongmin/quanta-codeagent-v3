@@ -65,32 +65,20 @@
  */
 
 import { Database } from "bun:sqlite"
-import {
-  createInMemorySystemPromptCache,
-  type SystemPromptCacheKey,
-  type SystemPromptCachePort,
-} from "@/llm/system-prompt-cache"
-import {
-  createInMemoryTypedHistoryEventStore,
-  type TypedHistoryEvent,
-  type TypedHistoryEventStore,
-} from "@/memory/typed-event"
-import type { SessionResourceRegistry, SessionResources } from "../types"
+import type { SessionResourceRegistry } from "../types"
 import { applyMigrations } from "./schema"
 import {
-  type CacheRow,
-  type EventRow,
-  estimateCacheBytes,
-  estimateEventBytes,
-  rowToCache,
-  rowToEvent,
-} from "./serializer"
+  clear,
+  type Deps,
+  type Entry,
+  evict,
+  getOrCreate,
+  listSessionIds,
+  peek,
+  size,
+} from "./sqlite-store/operations"
+import { prepareStatements } from "./sqlite-store/statements"
 import type { SqliteRegistryConfig } from "./types"
-
-interface Entry {
-  readonly resources: SessionResources
-  lastTouched: number
-}
 
 /**
  * Open an SQLite-backed `SessionResourceRegistry`.
@@ -109,313 +97,26 @@ export const createSqliteSessionResourceRegistry = (
   const db = new Database(cfg.databasePath)
   applyMigrations(db)
 
-  const now = cfg.now ?? Date.now
-
   // Prepared statements. All writes go through these so the schema
   // is single-sourced from `schema.ts` / `serializer.ts`.
+  const stmts = prepareStatements(db)
 
-  const upsertSessionStmt = db.query(`
-    INSERT INTO sessions (session_id, last_touched, total_estimated_bytes)
-    VALUES ($sid, $touched, $bytes)
-    ON CONFLICT(session_id) DO UPDATE SET
-      last_touched = $touched,
-      total_estimated_bytes = sessions.total_estimated_bytes + $bytes
-  `)
-
-  const touchSessionStmt = db.query(`
-    INSERT INTO sessions (session_id, last_touched, total_estimated_bytes)
-    VALUES ($sid, $touched, 0)
-    ON CONFLICT(session_id) DO UPDATE SET last_touched = $touched
-  `)
-
-  const nextSeqStmt = db.query(
-    "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM events WHERE session_id = ?",
-  )
-
-  const insertEventStmt = db.query(`
-    INSERT INTO events (session_id, seq, kind, at, estimated_bytes, payload)
-    VALUES ($sid, $seq, $kind, $at, $bytes, $payload)
-  `)
-
-  const upsertCacheStmt = db.query(`
-    INSERT INTO cache_entries (
-      session_id, cache_key, text, content_hash, built_at, estimated_bytes
-    ) VALUES ($sid, $key, $text, $hash, $built, $bytes)
-    ON CONFLICT(session_id, cache_key) DO UPDATE SET
-      text = excluded.text,
-      content_hash = excluded.content_hash,
-      built_at = excluded.built_at,
-      estimated_bytes = excluded.estimated_bytes
-  `)
-
-  const selectEventsStmt = db.query("SELECT * FROM events WHERE session_id = ? ORDER BY seq ASC")
-  const selectCacheStmt = db.query(
-    "SELECT * FROM cache_entries WHERE session_id = ? ORDER BY cache_key ASC",
-  )
-  const deleteSessionStmt = db.query("DELETE FROM sessions WHERE session_id = ?")
-  const truncateSessionsStmt = db.query("DELETE FROM sessions")
-
-  /** In-process Map of live resources. Same shape + invariants as the
-   *  in-memory sibling (`../in-memory-registry.ts`). */
-  const entries = new Map<string, Entry>()
-
-  /** Write one event row. NO-THROW. */
-  const writeEventRow = (sessionId: string, event: TypedHistoryEvent): void => {
-    try {
-      const bytes = estimateEventBytes(event)
-      const seqRow = nextSeqStmt.get(sessionId) as { next_seq: number } | null
-      const seq = seqRow !== null ? seqRow.next_seq : 0
-      upsertSessionStmt.run({
-        $sid: sessionId,
-        $touched: now(),
-        $bytes: bytes,
-      })
-      insertEventStmt.run({
-        $sid: sessionId,
-        $seq: seq,
-        $kind: event.kind,
-        $at: event.at,
-        $bytes: bytes,
-        $payload: JSON.stringify(event),
-      })
-    } catch {
-      // NO-THROW — silent drop on disk side; in-memory append already ran.
-    }
+  /** Everything the registry methods close over, passed BY REFERENCE.
+   *  In-process Map of live resources has the same shape + invariants
+   *  as the in-memory sibling (`../in-memory-registry.ts`). */
+  const deps: Deps = {
+    db,
+    stmts,
+    now: cfg.now ?? Date.now,
+    entries: new Map<string, Entry>(),
   }
 
-  /** Write one cache row. NO-THROW. */
-  const writeCacheRow = (
-    sessionId: string,
-    cacheKey: SystemPromptCacheKey,
-    text: string,
-    contentHash: string,
-    builtAt: number,
-  ): void => {
-    try {
-      const bytes = estimateCacheBytes(text)
-      upsertSessionStmt.run({
-        $sid: sessionId,
-        $touched: now(),
-        $bytes: bytes,
-      })
-      upsertCacheStmt.run({
-        $sid: sessionId,
-        $key: String(cacheKey),
-        $text: text,
-        $hash: contentHash,
-        $built: builtAt,
-        $bytes: bytes,
-      })
-    } catch {
-      // NO-THROW.
-    }
+  return {
+    getOrCreate: (sessionId) => getOrCreate(deps, sessionId),
+    peek: (sessionId) => peek(deps, sessionId),
+    evict: (sessionId) => evict(deps, sessionId),
+    size: () => size(deps),
+    clear: () => clear(deps),
+    listSessionIds: () => listSessionIds(deps),
   }
-
-  /** Read all prior events for `sessionId`. NO-THROW. */
-  const readEvents = (sessionId: string): readonly TypedHistoryEvent[] => {
-    try {
-      const rows = selectEventsStmt.all(sessionId) as EventRow[]
-      const out: TypedHistoryEvent[] = []
-      for (const r of rows) {
-        const ev = rowToEvent(r)
-        if (ev !== null) out.push(ev)
-      }
-      return out
-    } catch {
-      return []
-    }
-  }
-
-  /** Read all prior cache rows for `sessionId`. NO-THROW. */
-  const readCache = (
-    sessionId: string,
-  ): readonly { readonly key: SystemPromptCacheKey; readonly text: string }[] => {
-    try {
-      const rows = selectCacheStmt.all(sessionId) as CacheRow[]
-      return rows.map((r) => {
-        const decoded = rowToCache(r)
-        return { key: decoded.key, text: decoded.entry.text }
-      })
-    } catch {
-      return []
-    }
-  }
-
-  /**
-   * Wrap an in-memory event store so every `append` is mirrored to
-   * SQLite. NO-THROW: disk writes fail silently; in-memory append
-   * still runs and the running process keeps a usable store.
-   */
-  const wrapStore = (inner: TypedHistoryEventStore, sessionId: string): TypedHistoryEventStore => ({
-    append(event: TypedHistoryEvent): void {
-      inner.append(event)
-      writeEventRow(sessionId, event)
-    },
-    snapshot() {
-      return inner.snapshot()
-    },
-    since(at: number) {
-      return inner.since(at)
-    },
-    clear() {
-      inner.clear()
-      // Truncate the events rows for this session. NO-THROW.
-      try {
-        db.query("DELETE FROM events WHERE session_id = ?").run(sessionId)
-      } catch {
-        // NO-THROW.
-      }
-    },
-  })
-
-  /**
-   * Wrap an in-memory cache so every `getOrBuild` MISS mirrors a row
-   * to SQLite. Hits do NOT touch the disk. `invalidate` / `clearAll`
-   * also mirror (best effort). NO-THROW.
-   */
-  const wrapCache = (inner: SystemPromptCachePort, sessionId: string): SystemPromptCachePort => ({
-    getOrBuild(key, factory) {
-      const before = inner.peek(key) !== null
-      const out = inner.getOrBuild(key, factory)
-      if (!before) {
-        writeCacheRow(sessionId, key, out.text, out.contentHash, out.builtAt)
-      }
-      return out
-    },
-    peek(key) {
-      return inner.peek(key)
-    },
-    invalidate(key, reason) {
-      inner.invalidate(key, reason)
-      try {
-        db.query("DELETE FROM cache_entries WHERE session_id = ? AND cache_key = ?").run(
-          sessionId,
-          String(key),
-        )
-      } catch {
-        // NO-THROW.
-      }
-    },
-    clearAll(reason) {
-      inner.clearAll(reason)
-      try {
-        db.query("DELETE FROM cache_entries WHERE session_id = ?").run(sessionId)
-      } catch {
-        // NO-THROW.
-      }
-    },
-    stats() {
-      return inner.stats()
-    },
-  })
-
-  /** Mint a fresh `{ store, cache }` pair, wrapped + rehydrated from
-   *  any prior SQLite rows. NO-THROW: rehydrate failures leave the
-   *  pair empty (degraded but functional). */
-  const mintResources = (sessionId: string): SessionResources => {
-    const innerStore = createInMemoryTypedHistoryEventStore()
-    const innerCache = createInMemorySystemPromptCache()
-    // Rehydrate prior rows BEFORE wrapping, so the replay does not
-    // re-write what we just read.
-    try {
-      for (const ev of readEvents(sessionId)) innerStore.append(ev)
-      for (const { key, text } of readCache(sessionId)) {
-        innerCache.getOrBuild(key, () => text)
-      }
-    } catch {
-      // NO-THROW: replay failure leaves the fresh pair as-is.
-    }
-    return {
-      store: wrapStore(innerStore, sessionId),
-      cache: wrapCache(innerCache, sessionId),
-    }
-  }
-
-  const touchRow = (sessionId: string, t: number): void => {
-    try {
-      touchSessionStmt.run({ $sid: sessionId, $touched: t })
-    } catch {
-      // NO-THROW.
-    }
-  }
-
-  /** Same-id same-ref invariant lives here (the closed-port contract). */
-  const getOrCreate = (sessionId: string): SessionResources => {
-    try {
-      const t = now()
-      const hit = entries.get(sessionId)
-      if (hit !== undefined) {
-        hit.lastTouched = t
-        touchRow(sessionId, t)
-        return hit.resources
-      }
-      const resources = mintResources(sessionId)
-      entries.set(sessionId, { resources, lastTouched: t })
-      touchRow(sessionId, t)
-      return resources
-    } catch {
-      // Worst case: degraded one-shot pair, unmirrored. The closed-port
-      // contract says NO-THROW so we hand back a functional pair even
-      // though the registry could not register it.
-      return {
-        store: createInMemoryTypedHistoryEventStore(),
-        cache: createInMemorySystemPromptCache(),
-      }
-    }
-  }
-
-  const peek = (sessionId: string): SessionResources | null => {
-    try {
-      const hit = entries.get(sessionId)
-      return hit !== undefined ? hit.resources : null
-    } catch {
-      return null
-    }
-  }
-
-  const evict = (sessionId: string): void => {
-    try {
-      entries.delete(sessionId)
-      // FK cascade drops dependent events + cache_entries.
-      deleteSessionStmt.run(sessionId)
-    } catch {
-      // NO-THROW.
-    }
-  }
-
-  const size = (): number => {
-    try {
-      return entries.size
-    } catch {
-      return 0
-    }
-  }
-
-  const clear = (): void => {
-    try {
-      entries.clear()
-      truncateSessionsStmt.run()
-    } catch {
-      // NO-THROW.
-    }
-  }
-
-  /**
-   * ADR-0386 — read-only enumerate of in-process tracked session ids.
-   *
-   * Reads from the in-process Map (same surface as `size()`). Does NOT
-   * issue `SELECT session_id FROM sessions` — the SQLite file is the
-   * durable mirror, not the source of truth for in-process port
-   * semantics (cross-process visibility belongs to the inspector
-   * slash command, not the closed port). NO-THROW.
-   */
-  const listSessionIds = (): readonly string[] => {
-    try {
-      return Array.from(entries.keys())
-    } catch {
-      return []
-    }
-  }
-
-  return { getOrCreate, peek, evict, size, clear, listSessionIds }
 }
