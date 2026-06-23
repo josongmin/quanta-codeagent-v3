@@ -155,11 +155,18 @@ export const foldGroundingReceipts = (
 ): LspGroundingStatus | undefined => {
   if (receipts.length === 0) return undefined
   // Mutable accumulator keyed by stage; last write per stage wins. Building it
-  // imperatively (vs nested ternary spreads) keeps cognitive complexity low.
-  const acc: { backend: string; language: string } & Partial<LspGroundingStatus> = {
-    backend: "",
-    language: "",
-  }
+  // imperatively (vs nested ternary spreads) keeps cognitive complexity low. A
+  // writable shape (not Partial<LspGroundingStatus>, whose fields are readonly)
+  // is returned as the readonly LspGroundingStatus — structurally compatible.
+  const acc: {
+    backend: string
+    language: string
+    launch?: LspGroundingOutcome
+    ready?: LspGroundingOutcome
+    runtime?: LspGroundingOutcome
+    durationMs?: number
+    reason?: string
+  } = { backend: "", language: "" }
   for (const r of receipts) {
     if (r.backend !== "") acc.backend = r.backend
     if (r.language !== "") acc.language = r.language

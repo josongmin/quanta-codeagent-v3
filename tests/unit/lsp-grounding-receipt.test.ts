@@ -196,7 +196,7 @@ describe("LSP-grounding receipt SSOT (LSP-00)", () => {
     expect(isLspGroundingOutcome("nope")).toBe(false)
     expect(isLspGroundingOutcome(undefined)).toBe(false)
 
-    const valid = {
+    const valid: LspGroundingStatus = {
       backend: "pyright",
       language: "pyright-langserver",
       launch: "ok",
