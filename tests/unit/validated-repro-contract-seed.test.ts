@@ -52,6 +52,28 @@ describe("validatedReproContractSeed", () => {
     expect(over).toContain("# ...[truncated]")
   })
 
+  test("AUDIT wording: framing is evidence-toned, not an absolute 'must pass' contract (anti-overfit)", () => {
+    // The aggressive "a correct candidate MUST make them report Issue resolved"
+    // wording invites reward-hacking the self-generated symptom oracle. Softened
+    // to prioritize the root-cause fix over narrowly satisfying any single script.
+    const seed = validatedReproContractSeed(['print("x")']) ?? ""
+    expect(seed).not.toContain("a correct candidate must make them report")
+    expect(seed.toLowerCase()).toContain("root cause")
+  })
+
+  test("AUDIT line-safe truncation: an over-limit script is cut at a line boundary, not mid-line", () => {
+    // Red-on-injection: a mid-line slice produces syntactically broken Python
+    // injected as a 'contract'. The cut must land on a complete line.
+    const longSource = `${"print('keep')\n".repeat(120)}` // ~1680 chars, well over 1200
+    const seed = validatedReproContractSeed([longSource]) ?? ""
+    expect(seed).toContain("# ...[truncated]")
+    const body = seed.split("# ...[truncated]")[0] ?? ""
+    // the kept region (after the last ```python fence) contains only WHOLE lines:
+    const kept = body.slice(body.lastIndexOf("```python") + "```python\n".length)
+    // every retained line is a complete "print('keep')" — no partial fragment
+    expect(kept.replace(/print\('keep'\)\n?/g, "").trim()).toBe("")
+  })
+
   test("AUDIT seed order: the public-repro contract precedes the repair-guidance line", () => {
     // Salience: the executable contract must come BEFORE the generic guidance.
     const repairSeed = validatedReproRepairSeed(['print("x")']) ?? ""

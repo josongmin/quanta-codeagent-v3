@@ -1328,7 +1328,13 @@ const boundValidatedReproSource = (source: string): string => {
   const trimmed = source.trim()
   if (trimmed.length <= VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT) return trimmed
   const suffix = "\n# ...[truncated]"
-  return `${trimmed.slice(0, Math.max(0, VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT - suffix.length))}${suffix}`
+  const head = trimmed.slice(0, Math.max(0, VALIDATED_REPRO_CONTRACT_SOURCE_LIMIT - suffix.length))
+  // Cut on a LINE boundary, not mid-token: a mid-line slice yields syntactically
+  // broken Python that we'd then present to the model as an executable "contract".
+  // Keep only whole lines when the retained head contains a newline.
+  const lastNewline = head.lastIndexOf("\n")
+  const safe = lastNewline > 0 ? head.slice(0, lastNewline) : head
+  return `${safe}${suffix}`
 }
 
 export const validatedReproContractSeed = (
@@ -1349,7 +1355,12 @@ export const validatedReproContractSeed = (
   const omitted = nonEmptySources.length - boundedSources.length
   return [
     "The following reproduction script(s) were generated from the public issue and executed on the base tree; each printed `Issue reproduced` there.",
-    "They are admissible public executable contracts: a correct candidate must make them report `Issue resolved` without adding unrelated design surface.",
+    // Evidence-toned, NOT an absolute "must pass" mandate: these are LLM-generated
+    // SYMPTOM reproducers, not the hidden grading tests. Over-stating their
+    // authority invites reward-hacking the self-generated oracle. Fix the ROOT
+    // CAUSE described in the issue; a correct fix should also make them report
+    // `Issue resolved`, but do not contort the patch merely to satisfy a script.
+    "Treat them as strong public evidence of the bug's observable behavior. Prioritize fixing the root cause from the issue; a correct fix should make them report `Issue resolved`, but do not add unrelated design surface just to pass a single script.",
     ...(omitted > 0
       ? [`Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`]
       : []),
