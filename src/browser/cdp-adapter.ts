@@ -19,24 +19,27 @@
  */
 
 import { err, errMessage, ok, type Result } from "@/shared"
-import { type CdpSession, createCdpSession } from "./cdp/cdp-session"
+import type { CdpSession } from "./cdp/cdp-session"
 import { COLLECT_SCRIPT, parseDomModel } from "./cdp/collect"
-import {
-  type ConsoleBuffer,
-  consoleArgsToText,
-  createConsoleBuffer,
-  mapConsoleApiType,
-  mapLogEntryLevel,
-} from "./cdp/console-buffer"
+import type { ConsoleBuffer } from "./cdp/console-buffer"
 import { readDevToolsEndpoint } from "./cdp/dev-tools-endpoint"
-import type {
-  BrowserFs,
-  CdpTransport,
-  Clock,
-  ProcessSpawner,
-  Scheduler,
-  SpawnedProcess,
-} from "./cdp/ports"
+import type { Clock, Scheduler, SpawnedProcess } from "./cdp/ports"
+import { connectAndEnable } from "./cdp-adapter/bring-up"
+import { type CdpBrowserDeps, resolveChromeBinary } from "./cdp-adapter/deps"
+import { keyEventBase, mouseClick, mouseDrag, type Pt } from "./cdp-adapter/input-events"
+import {
+  boxJs,
+  clickJs,
+  fillJs,
+  highlightJs,
+  readJs,
+  rectJs,
+  scrollByJs,
+  scrollToRefJs,
+  selectJs,
+  selectorPresentJs,
+  typeJs,
+} from "./cdp-adapter/page-scripts"
 import { isCdpMethodAllowed } from "./cdp-allowlist"
 import type { BrowserPort } from "./port"
 import { buildSnapshot, createRefMap, type RefMap } from "./snapshot"
@@ -45,7 +48,6 @@ import type {
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
-  ConsoleEntry,
   ConsoleOpts,
   DragTarget,
   HighlightOpts,
@@ -57,31 +59,14 @@ import type {
   WaitOpts,
 } from "./types"
 
-export const DEFAULT_CHROME_CANDIDATES = [
-  "google-chrome",
-  "google-chrome-stable",
-  "chromium",
-  "chromium-browser",
-] as const
-
-export const DEFAULT_MAC_CHROME_PATHS = [
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-] as const
-
-export interface CdpBrowserDeps {
-  readonly spawner: ProcessSpawner
-  readonly transport: CdpTransport
-  readonly fs: BrowserFs
-  readonly scheduler: Scheduler
-  readonly clock: Clock
-  /** Directory (already inside the fs-jail, supplied by the tool layer) under
-   *  which each session's isolated profile is created. */
-  readonly profileRoot: string
-  readonly chromeCandidates?: readonly string[]
-  readonly macPaths?: readonly string[]
-  readonly endpointTimeoutMs?: number
-}
+// Re-export the dependency contract + chrome-discovery so every external
+// importer of `@/browser/cdp-adapter` stays byte-compatible after the split.
+export {
+  type CdpBrowserDeps,
+  DEFAULT_CHROME_CANDIDATES,
+  DEFAULT_MAC_CHROME_PATHS,
+  resolveChromeBinary,
+} from "./cdp-adapter/deps"
 
 /** TICKET-24 Wave B — one open tab. The `refMap` is PER-TAB so a ref minted on
  *  tab A fails closed when tab B is active (same invariant a navigation enforces).
@@ -142,151 +127,6 @@ const resolveTab = (s: SessionState, idOrIndex: string): TabState | null => {
   return null
 }
 
-const pathIndices = (path: string): number[] =>
-  path
-    .split("/")
-    .filter((seg) => seg.length > 0)
-    .map((seg) => Number(seg))
-
-const resolveJs = (path: string): string => {
-  const idx = JSON.stringify(pathIndices(path))
-  return `(() => { let el = document.body; for (const i of ${idx}) { if (!el) return null; el = (el.shadowRoot ? el.shadowRoot.children : el.children)[i]; } return el; })()`
-}
-
-const clickJs = (path: string): string =>
-  `(() => { const el = ${resolveJs(path)}; if (!el) return false; if (el.focus) el.focus(); el.click(); return true; })()`
-
-// Branches on element kind (R1 audit [10]): form controls get `.value` set +
-// change event; contenteditable gets text appended into the node; anything else
-// returns false so the tool surfaces element-not-found instead of silently
-// writing a junk `value` property.
-const typeJs = (path: string, text: string, clear: boolean): string =>
-  `(() => {
-    const el = ${resolveJs(path)};
-    if (!el) return false;
-    const t = ${JSON.stringify(text)};
-    if (el.focus) el.focus();
-    if ('value' in el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
-      if (${clear ? "true" : "false"}) el.value = '';
-      el.value = (el.value || '') + t;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    }
-    if (el.isContentEditable) {
-      if (${clear ? "true" : "false"}) el.textContent = '';
-      el.textContent = (el.textContent || '') + t;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      return true;
-    }
-    return false;
-  })()`
-
-const fillJs = (path: string, value: string): string =>
-  `(() => {
-    const el = ${resolveJs(path)};
-    if (!el) return false;
-    const v = ${JSON.stringify(value)};
-    if (el.focus) el.focus();
-    if ('value' in el) { el.value = v; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); return true; }
-    if (el.isContentEditable) { el.textContent = v; el.dispatchEvent(new Event('input',{bubbles:true})); return true; }
-    return false;
-  })()`
-
-const selectJs = (path: string, values: readonly string[]): string =>
-  `(() => {
-    const el = ${resolveJs(path)};
-    if (!el || el.tagName !== 'SELECT') return false;
-    const vs = ${JSON.stringify(values)};
-    for (const o of el.options) o.selected = vs.includes(o.value);
-    el.dispatchEvent(new Event('change',{bubbles:true}));
-    return true;
-  })()`
-
-const scrollToRefJs = (path: string): string =>
-  `(() => { const el = ${resolveJs(path)}; if (!el) return false; el.scrollIntoView({block:'center',inline:'center'}); return true; })()`
-
-const scrollByJs = (dx: number, dy: number): string =>
-  `(() => { window.scrollBy(${dx}, ${dy}); return true; })()`
-
-const rectJs = (path: string): string =>
-  `(() => { const el = ${resolveJs(path)}; if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 }; })()`
-
-// SINGLE SOURCE for the "is this element visible" fold (JS source injected into
-// the page). Assumes `el`, `cs` (= getComputedStyle(el)) and `r` (=
-// el.getBoundingClientRect()) are in scope. Shared by boxJs + readJs so the two
-// can never drift on what "visible" means.
-const VISIBLE_FOLD_JS =
-  "!!(el.offsetParent || (cs.position === 'fixed' && cs.display !== 'none')) && cs.visibility !== 'hidden' && cs.display !== 'none' && (r.width > 0 || r.height > 0)"
-
-// Full bounding rect + visibility (the same fold readJs(visible) uses) for the
-// model-facing bounding_box. Returns null when the ref's element is missing so
-// the adapter surfaces element-not-found rather than a junk zero-rect.
-const boxJs = (path: string): string =>
-  `(() => {
-    const el = ${resolveJs(path)};
-    if (!el) return null;
-    const cs = getComputedStyle(el);
-    const r = el.getBoundingClientRect();
-    const visible = ${VISIBLE_FOLD_JS};
-    return { x: r.x, y: r.y, w: r.width, h: r.height, visible };
-  })()`
-
-// Cosmetic highlight: append ONE absolutely-positioned overlay div over the
-// element's viewport rect (outline only, NO fill, pointer-events:none so it
-// never intercepts clicks), removing any prior overlay first so a double-
-// highlight never leaks stacked divs, and self-removing after `durationMs`.
-// Mutates nothing on the page's own DOM. Returns false (→ element-not-found)
-// when the ref is stale. `color` is JSON.stringify-escaped at the call site.
-const HIGHLIGHT_OVERLAY_ID = "__quanta_highlight_overlay__"
-const highlightJs = (path: string, color: string, durationMs: number): string =>
-  `(() => {
-    const el = ${resolveJs(path)};
-    if (!el) return false;
-    const ID = ${JSON.stringify(HIGHLIGHT_OVERLAY_ID)};
-    const prior = document.getElementById(ID);
-    if (prior && prior.parentNode) prior.parentNode.removeChild(prior);
-    const r = el.getBoundingClientRect();
-    const o = document.createElement('div');
-    o.id = ID;
-    o.style.position = 'fixed';
-    o.style.left = r.x + 'px';
-    o.style.top = r.y + 'px';
-    o.style.width = r.width + 'px';
-    o.style.height = r.height + 'px';
-    o.style.outline = '3px solid ' + ${JSON.stringify(color)};
-    o.style.background = 'transparent';
-    o.style.pointerEvents = 'none';
-    o.style.zIndex = '2147483647';
-    document.body.appendChild(o);
-    setTimeout(() => { const n = document.getElementById(ID); if (n && n.parentNode) n.parentNode.removeChild(n); }, ${Number.isFinite(durationMs) ? Math.max(0, Math.floor(durationMs)) : 1500});
-    return true;
-  })()`
-
-// Read a precise property off the resolved element. Returns a tagged object so
-// the adapter can distinguish "element missing" (null) from a falsy-but-present
-// value (e.g. visible:false, empty text). text uses innerText (rendered text);
-// attribute returns "" when the attr is absent; visible folds offsetParent +
-// computed-style + a non-zero rect.
-const readJs = (path: string, what: string, attr: string | undefined): string => {
-  const a = JSON.stringify(attr ?? "")
-  const w = JSON.stringify(what)
-  return `(() => {
-    const el = ${resolveJs(path)};
-    if (!el) return null;
-    const what = ${w};
-    if (what === 'text') return { value: (el.innerText !== undefined ? el.innerText : el.textContent) || '' };
-    if (what === 'attribute') { const v = el.getAttribute(${a}); return { value: v === null ? '' : v }; }
-    const cs = getComputedStyle(el);
-    const r = el.getBoundingClientRect();
-    const vis = ${VISIBLE_FOLD_JS};
-    return { value: vis };
-  })()`
-}
-
-const selectorPresentJs = (selector: string): string =>
-  `(() => { try { return !!document.querySelector(${JSON.stringify(selector)}); } catch { return false; } })()`
-
 /** Sleep `ms` on the injected scheduler, racing an optional abort and cancelling
  *  the timer on settle (same deterministic pattern as readDevToolsEndpoint). */
 const sleep = (scheduler: Scheduler, ms: number, signal: AbortSignal | undefined): Promise<void> =>
@@ -334,11 +174,6 @@ const pollForSelector = async (
     if (d.clock.now() - start >= timeoutMs) return err({ kind: "timeout", ms: timeoutMs })
     await sleep(d.scheduler, pollMs, signal)
   }
-}
-
-interface Pt {
-  readonly x: number
-  readonly y: number
 }
 
 type EvalFn = (
@@ -396,53 +231,6 @@ const refPoint = async (
   return ok({ x: pt.x, y: pt.y })
 }
 
-// Named-key descriptors. Real Blink needs windowsVirtualKeyCode + code (and a
-// `text` for text-generating keys) to drive implicit form submit / default
-// actions — `{key}` alone delivers an inert event (real-chrome e2e bug).
-const KEY_DESCRIPTORS: Record<string, { code: string; vk: number; text?: string }> = {
-  Enter: { code: "Enter", vk: 13, text: "\r" },
-  Tab: { code: "Tab", vk: 9 },
-  Escape: { code: "Escape", vk: 27 },
-  Backspace: { code: "Backspace", vk: 8 },
-  Delete: { code: "Delete", vk: 46 },
-  ArrowUp: { code: "ArrowUp", vk: 38 },
-  ArrowDown: { code: "ArrowDown", vk: 40 },
-  ArrowLeft: { code: "ArrowLeft", vk: 37 },
-  ArrowRight: { code: "ArrowRight", vk: 39 },
-  Home: { code: "Home", vk: 36 },
-  End: { code: "End", vk: 35 },
-  PageUp: { code: "PageUp", vk: 33 },
-  PageDown: { code: "PageDown", vk: 34 },
-  Space: { code: "Space", vk: 32, text: " " },
-}
-
-/** Build the Input.dispatchKeyEvent params for a key — full virtual-key fields
- *  for named keys, a printable `text` for single characters. */
-const keyEventBase = (key: string): Record<string, unknown> => {
-  const named = KEY_DESCRIPTORS[key]
-  if (named !== undefined) {
-    return {
-      key,
-      code: named.code,
-      windowsVirtualKeyCode: named.vk,
-      nativeVirtualKeyCode: named.vk,
-      ...(named.text !== undefined ? { text: named.text } : {}),
-    }
-  }
-  if (key.length === 1) {
-    // Only letters/digits have a derivable KeyboardEvent.code; for symbols a
-    // synthetic `Key<symbol>` is wrong — omit it and let the browser derive
-    // (R3 audit [6]).
-    const code = /[a-z]/i.test(key)
-      ? `Key${key.toUpperCase()}`
-      : /[0-9]/.test(key)
-        ? `Digit${key}`
-        : undefined
-    return code !== undefined ? { key, text: key, code } : { key, text: key }
-  }
-  return { key }
-}
-
 // Globally-unique profile-dir suffix (R4 audit [8]) — independent of the
 // per-instance seq so concurrent adapters sharing a profileRoot never collide.
 const uniqueNonce = (): string => `${process.pid}-${crypto.randomUUID().slice(0, 8)}`
@@ -455,196 +243,6 @@ const killQuietly = (proc: SpawnedProcess): void => {
   } catch {
     // proc already gone / unkillable — the profile cleanup still runs
   }
-}
-
-const mouseClick = async (
-  session: CdpSession,
-  x: number,
-  y: number,
-  signal: AbortSignal | undefined,
-): Promise<Result<void, BrowserError>> => {
-  const opts = signal ? { signal } : undefined
-  const base = { x, y, button: "left", clickCount: 1 }
-  const down = await session.request(
-    "Input.dispatchMouseEvent",
-    { ...base, type: "mousePressed" },
-    opts,
-  )
-  if (!down.ok) return down
-  const up = await session.request(
-    "Input.dispatchMouseEvent",
-    { ...base, type: "mouseReleased" },
-    opts,
-  )
-  return up.ok ? ok(undefined) : up
-}
-
-const mouseDrag = async (
-  session: CdpSession,
-  from: Pt,
-  to: Pt,
-  signal: AbortSignal | undefined,
-): Promise<Result<void, BrowserError>> => {
-  const opts = signal ? { signal } : undefined
-  const press = await session.request(
-    "Input.dispatchMouseEvent",
-    { type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1 },
-    opts,
-  )
-  if (!press.ok) return press
-  const move = await session.request(
-    "Input.dispatchMouseEvent",
-    { type: "mouseMoved", x: to.x, y: to.y, button: "left" },
-    opts,
-  )
-  if (!move.ok) return move
-  const release = await session.request(
-    "Input.dispatchMouseEvent",
-    { type: "mouseReleased", x: to.x, y: to.y, button: "left", clickCount: 1 },
-    opts,
-  )
-  return release.ok ? ok(undefined) : release
-}
-
-export const resolveChromeBinary = (
-  deps: Pick<CdpBrowserDeps, "spawner" | "fs" | "chromeCandidates" | "macPaths">,
-): string | null => {
-  for (const cmd of deps.chromeCandidates ?? DEFAULT_CHROME_CANDIDATES) {
-    const found = deps.spawner.which(cmd)
-    if (found !== null) return found
-  }
-  for (const p of deps.macPaths ?? DEFAULT_MAC_CHROME_PATHS) {
-    if (deps.fs.existsSync(p)) return p
-  }
-  return null
-}
-
-/** Connect the transport + enable the Page domain. A failed bring-up (chrome
- *  died right after the ws opened) surfaces as `spawn-failed` now rather than a
- *  confusing closed/timeout on first use (R1 audit [4]). */
-interface BringUp {
-  readonly session: CdpSession
-  readonly console: ConsoleBuffer
-  /** The first tab's CDP target + flat-protocol page session (TICKET-24 Wave B). */
-  readonly targetId: string
-  readonly sessionId: string
-}
-
-// Subscribe the persistent console/error/log streams into the ring buffer, plus
-// the dialog auto-dismiss. Called once after the page session is attached +
-// Page.enable succeeds. Runtime.enable / Log.enable are best-effort: a console
-// capture failure must NOT fail the whole bring-up (the page still drives), so
-// these errors are swallowed — the buffer simply stays empty.
-const installPageObservers = async (
-  session: CdpSession,
-  buffer: ConsoleBuffer,
-  opts: { signal?: AbortSignal } | undefined,
-): Promise<void> => {
-  // consoleAPICalled.type → level; args flattened to text.
-  session.onEvent("Runtime.consoleAPICalled", (p) => {
-    const entry: ConsoleEntry = {
-      level: mapConsoleApiType(p.type),
-      text: consoleArgsToText(p.args),
-      ...(typeof p.timestamp === "number" ? { ts: p.timestamp } : {}),
-    }
-    buffer.push(entry)
-  })
-  // exceptionThrown → level "error", text from exceptionDetails.text.
-  session.onEvent("Runtime.exceptionThrown", (p) => {
-    const d = p.exceptionDetails as
-      | { text?: unknown; exception?: { description?: unknown } }
-      | undefined
-    const text =
-      typeof d?.exception?.description === "string"
-        ? d.exception.description
-        : typeof d?.text === "string"
-          ? d.text
-          : "uncaught exception"
-    buffer.push({
-      level: "error",
-      text,
-      ...(typeof p.timestamp === "number" ? { ts: p.timestamp } : {}),
-    })
-  })
-  // Log.entryAdded → its own level + text.
-  session.onEvent("Log.entryAdded", (p) => {
-    const e = p.entry as { level?: unknown; text?: unknown; timestamp?: unknown } | undefined
-    buffer.push({
-      level: mapLogEntryLevel(e?.level),
-      text: typeof e?.text === "string" ? e.text : "",
-      ...(typeof e?.timestamp === "number" ? { ts: e.timestamp } : {}),
-    })
-  })
-  // SAFETY: a page alert()/confirm()/prompt() fires javascriptDialogOpening and
-  // BLOCKS the renderer (and thus every CDP request) until handled. Auto-DISMISS
-  // (accept:false) so a page can never wedge the automation. A future
-  // accept-policy is out of scope — default-dismiss is the safe posture.
-  session.onEvent("Page.javascriptDialogOpening", () => {
-    void session.request("Page.handleJavaScriptDialog", { accept: false })
-  })
-  await session.request("Runtime.enable", undefined, opts)
-  await session.request("Log.enable", undefined, opts)
-}
-
-const connectAndEnable = async (
-  deps: CdpBrowserDeps,
-  wsUrl: string,
-  signal: AbortSignal | undefined,
-): Promise<Result<BringUp, BrowserError>> => {
-  const conn = await deps.transport.connect(wsUrl, signal)
-  if (!conn.ok) return err({ kind: "spawn-failed", detail: conn.error.detail })
-  const session = createCdpSession({ conn: conn.value, scheduler: deps.scheduler })
-  const opts = signal ? { signal } : undefined
-  // DevToolsActivePort gives the BROWSER-level endpoint, where Page.*/Runtime.*
-  // do not exist. Create + attach a page target (flat protocol) and route all
-  // subsequent page calls through its sessionId (real-chrome e2e bug fix). The
-  // Target.* calls below are browser-level — made BEFORE useSessionId.
-  const created = await session.request("Target.createTarget", { url: "about:blank" }, opts)
-  if (!created.ok) {
-    session.dispose()
-    return err({ kind: "spawn-failed", detail: "Target.createTarget failed during bring-up" })
-  }
-  const targetId = (created.value as { targetId?: unknown }).targetId
-  if (typeof targetId !== "string") {
-    session.dispose()
-    return err({ kind: "spawn-failed", detail: "Target.createTarget returned no targetId" })
-  }
-  const attached = await session.request("Target.attachToTarget", { targetId, flatten: true }, opts)
-  if (!attached.ok) {
-    session.dispose()
-    return err({ kind: "spawn-failed", detail: "Target.attachToTarget failed during bring-up" })
-  }
-  const sessionId = (attached.value as { sessionId?: unknown }).sessionId
-  if (typeof sessionId !== "string") {
-    session.dispose()
-    return err({ kind: "spawn-failed", detail: "Target.attachToTarget returned no sessionId" })
-  }
-  session.useSessionId(sessionId)
-  // R2 audit [3]: thread the abort signal into the bring-up request too — a turn
-  // aborted during a hung Page.enable must cancel promptly, not wait the timeout.
-  const enabled = await session.request("Page.enable", undefined, opts)
-  if (!enabled.ok) {
-    session.dispose()
-    return err({ kind: "spawn-failed", detail: "Page.enable failed during bring-up" })
-  }
-  // R2 audit [8]: deny downloads at the source — a page must not be able to write
-  // files outside the temp profile (defense-in-depth; download-to-jail is Phase 2).
-  // R3 audit [3]: a failed deny would leave downloads ENABLED — fail bring-up
-  // rather than silently proceed with an unguarded download surface.
-  const dl = await session.request("Page.setDownloadBehavior", { behavior: "deny" }, opts)
-  if (!dl.ok) {
-    session.dispose()
-    return err({
-      kind: "spawn-failed",
-      detail: "Page.setDownloadBehavior(deny) failed during bring-up",
-    })
-  }
-  // After the page session is live: subscribe console/error/log capture +
-  // dialog auto-dismiss, and enable the producing domains. Non-fatal — a console
-  // capture failure leaves the buffer empty but the page still drives.
-  const consoleBuffer = createConsoleBuffer()
-  await installPageObservers(session, consoleBuffer, opts)
-  return ok({ session, console: consoleBuffer, targetId, sessionId })
 }
 
 export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
@@ -870,9 +468,13 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       if (path === null) return err({ kind: "element-not-found", ref })
       const r = await evalValue(s.value, boxJs(path), signal)
       if (!r.ok) return r
-      const v = r.value as
-        | { x?: unknown; y?: unknown; w?: unknown; h?: unknown; visible?: unknown }
-        | null
+      const v = r.value as {
+        x?: unknown
+        y?: unknown
+        w?: unknown
+        h?: unknown
+        visible?: unknown
+      } | null
       if (v === null) return err({ kind: "element-not-found", ref })
       if (
         typeof v.x !== "number" ||
@@ -1090,11 +692,20 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       )
       if (!dl.ok) {
         void s.value.session.request("Target.closeTarget", { targetId }, { sessionId: null })
-        return err({ kind: "cdp-error", detail: "Page.setDownloadBehavior(deny) failed for new tab" })
+        return err({
+          kind: "cdp-error",
+          detail: "Page.setDownloadBehavior(deny) failed for new tab",
+        })
       }
       // Best-effort: enable console producers so the tab's logs flow once active.
       await s.value.session.request("Runtime.enable", undefined, { sessionId, ...sig })
-      const tab: TabState = { targetId, sessionId, url: targetUrl, title: "", refMap: createRefMap() }
+      const tab: TabState = {
+        targetId,
+        sessionId,
+        url: targetUrl,
+        title: "",
+        refMap: createRefMap(),
+      }
       s.value.tabs.set(targetId, tab)
       // newTab does NOT auto-foreground — active stays put; the model switchTabs.
       return ok({ id: targetId, url: tab.url, title: tab.title, active: false })
@@ -1141,7 +752,10 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
         return err({ kind: "tab-not-found", id: idOrIndex, open: [...s.value.tabs.keys()] })
       }
       if (s.value.tabs.size === 1) {
-        return err({ kind: "cdp-error", detail: "cannot close the last tab — close the browser instead" })
+        return err({
+          kind: "cdp-error",
+          detail: "cannot close the last tab — close the browser instead",
+        })
       }
       const closed = await s.value.session.request(
         "Target.closeTarget",
@@ -1179,7 +793,12 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
         )
         const v = t.ok ? (t.value as { result?: { value?: unknown } }).result?.value : undefined
         const title = typeof v === "string" ? v : tab.title
-        out.push({ id: tab.targetId, url: tab.url, title, active: s.value.activeTabId === tab.targetId })
+        out.push({
+          id: tab.targetId,
+          url: tab.url,
+          title,
+          active: s.value.activeTabId === tab.targetId,
+        })
       }
       return ok(out)
     },
