@@ -119,10 +119,11 @@ describe("bench-in-loop-exec posture flip", () => {
     expect(cfg.protectTestPaths).toBe(true)
   })
 
-  // IN-LOOP-5: the agentless-v2-safe preset resolves the knob OFF AND drops the
-  // host-python repro-test (reproTestK undefined), without touching localization.
-  test("IN-LOOP-5: preset agentless-v2-safe ⇒ OFF posture + no repro, lsp kept", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v2-safe"
+  // IN-LOOP-5: the agentless-v3-thin-strict preset resolves the knob OFF AND drops
+  // the host-python repro-test (reproTestK undefined), without touching localization.
+  // (Repointed from the retired agentless-v2-safe — same OFF/no-repro/lsp-kept shape.)
+  test("IN-LOOP-5: preset agentless-v3-thin-strict ⇒ OFF posture + no repro, lsp kept", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict"
     const opt = benchOptIns()
     expect(opt.inLoopExec).toBe(false)
     expect(opt.inLoopExecMode).toBe("off")

@@ -16,8 +16,8 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { benchOptIns, buildReproVoteValidate } from "@/runner/batch/eval/driver"
-import type { Instance } from "@/runner/batch/types"
 import type { ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/types"
+import type { Instance } from "@/runner/batch/types"
 
 const ENV_KEYS = ["QUANTA_BENCH_REPRO_VOTE", "QUANTA_BENCH_PRESET"] as const
 const saved: Record<string, string | undefined> = {}
@@ -37,7 +37,10 @@ afterEach(() => {
 })
 
 const INSTANCE = { swebench: { repo: "django/django" } } as unknown as Instance
-const FALLBACK = async (_a: ValidateArgs): Promise<ValidatorResult> => ({ ok: false, failTail: "legacy" })
+const FALLBACK = async (_a: ValidateArgs): Promise<ValidatorResult> => ({
+  ok: false,
+  failTail: "legacy",
+})
 
 describe("repro-vote knob gates the validator (PROD buildReproVoteValidate)", () => {
   test("DEFAULT-OFF: returns the fallback UNCHANGED (byte-identical legacy gate)", () => {
@@ -60,30 +63,12 @@ describe("repro-vote knob gates the validator (PROD buildReproVoteValidate)", ()
     expect(v).toBe(FALLBACK)
   })
 
-  test("preset agentless-v2-reprovote enables BOTH the repair loop AND the vote (else INERT)", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v2-reprovote"
-    const p = benchOptIns()
-    expect(p.reproVote).toBe(true)
-    // The vote gate lives INSIDE the repair loop — without `closure-repair`
-    // (⇒ repairRounds) the loop never runs and the vote is inert theater. This is
-    // exactly the defect the #2 adversarial audit caught: a preset that enables
-    // the knob but never runs the gate. Red-on-injection: drop closure-repair from
-    // the preset and this fails.
-    expect(p.repairRounds).toBeGreaterThan(0)
-  })
-
   test("preset agentless-v2 leaves the knob OFF (repair baseline, repro-vote off)", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v2"
     expect(benchOptIns().reproVote).toBe(false)
   })
 
-  test("baseline preset agentless-v2-repair: repair loop ON, vote OFF (the isolated-vote control)", () => {
-    // A boolean knob's env value can't turn a preset-ON knob off (parse is
-    // true|undefined), so the single-variable baseline is its OWN preset: same
-    // repair loop, legacy single-sentinel gate, repro-vote off.
-    process.env.QUANTA_BENCH_PRESET = "agentless-v2-repair"
-    const p = benchOptIns()
-    expect(p.reproVote).toBe(false)
-    expect(p.repairRounds).toBeGreaterThan(0)
-  })
+  // NOTE: the agentless-v2-reprovote / agentless-v2-repair A/B presets were
+  // retired (jun-23 preset cleanup). The repro-vote KNOB wiring itself stays
+  // covered by the env-driven cases above (`QUANTA_BENCH_REPRO_VOTE`).
 })

@@ -33,7 +33,6 @@ describe("preset ⇄ composite raw identity (D2 + P2)", () => {
       "baseline",
       "agentless-v1",
       "agentless-v2",
-      "agentless-v2-safe",
       "agentless-full",
       "hint-only",
       "everything",

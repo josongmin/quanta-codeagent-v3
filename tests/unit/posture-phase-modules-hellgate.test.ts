@@ -28,7 +28,6 @@ import {
 import {
   CLOSURE_SELECT_CLEAN_MODULES,
   derivePhasePosture,
-  GATED_MODULES,
   type KnobModule,
   PHASE_MODULES,
   PROOF_CLEAN_MODULES,
@@ -63,7 +62,6 @@ const EQUIVALENCES: ReadonlyArray<{
   readonly modules: readonly KnobModule[]
   readonly preset: string
 }> = [
-  { name: "gated", modules: GATED_MODULES, preset: "agentless-v3-thin-strict-gated" },
   { name: "select", modules: SELECT_MODULES, preset: "agentless-v3-thin-strict-select" },
   {
     name: "closure-select-clean",

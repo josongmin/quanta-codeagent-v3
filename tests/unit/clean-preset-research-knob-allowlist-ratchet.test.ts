@@ -95,13 +95,10 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   // floor — a refactor that breaks `selector-mode:clean` resolution trips here
   // instead of silently disarming every per-preset assertion below.
   test("auto-discovers a non-empty clean-preset set (anti-vacuous floor)", () => {
-    expect(cleanPresets.length).toBeGreaterThanOrEqual(5)
+    expect(cleanPresets.length).toBeGreaterThanOrEqual(3)
     // And every known-clean preset (these set `selector-mode:clean` literally)
     // is in the discovered set — the discovery isn't dropping any.
     for (const known of [
-      "agentless-v3-thin-strict-gated",
-      "agentless-v3-thin-strict-counterfactual",
-      "agentless-v3-thin-strict-counterfactual-shadow",
       "agentless-v3-thin-strict-closure-select-clean",
       "agentless-v3-thin-strict-closure-select-clean-witness-only",
       "agentless-v4-proof-clean",
@@ -134,17 +131,15 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
     const posture = resolvePreset("agentless-v3-select-regression")
     expect(posture.selectorMode).toBe("research")
     expect(cleanPresets).not.toContain("agentless-v3-select-regression")
-
-    const llm = resolvePreset("agentless-v3-thin-strict-gated-llm")
-    expect(llm.selectorMode).toBe("research")
-    expect(llm.verifySelectLlmRiskGate).toBe("on")
-    expect(cleanPresets).not.toContain("agentless-v3-thin-strict-gated-llm")
+    // (The gated-llm research arm — verify-select-llm-risk-gate=on — was retired
+    // in the jun-23 preset cleanup; the llm-risk-gate=on case is still proven by
+    // the red-on-injection test below.)
   })
 
   // ── HELLGATE teeth #2: red-on-injection mutation — the checker REJECTS a
   // synthetic clean posture that an injected research-only knob would produce. ──
   test("red-on-injection: researchViolations rejects each injected research-only authority", () => {
-    const base = resolvePreset("agentless-v3-thin-strict-gated")
+    const base = resolvePreset("agentless-v3-thin-strict-closure-select-clean")
     expect(researchViolations(base)).toEqual([])
 
     const llmInjected: BenchPosture = { ...base, verifySelectLlmRiskGate: "on" }
@@ -172,7 +167,7 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
     expect(SIGNAL_AUTHORITY.regressionGreen).toBe("hardExecutable")
     expect(
       researchContaminationReasons({
-        ...resolvePreset("agentless-v3-thin-strict-gated"),
+        ...resolvePreset("agentless-v3-thin-strict-closure-select-clean"),
         verifySelectLlmRiskGate: "on",
         reproDoubt: true,
         verifySelectRegression: "gold",

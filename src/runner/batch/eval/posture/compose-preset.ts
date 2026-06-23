@@ -29,29 +29,18 @@
  * everything) are excluded.
  */
 
-import { KNOB_PRESETS } from "@/runner/knobs/presets"
 import {
   CLEAN_SELECTOR,
   CLOSURE_GROUNDING,
-  CLOSURE_REPAIR,
   CLOSURE_SELECT_CLEAN_MODULES,
-  COUNTERFACTUAL,
-  GATED_MODULES,
-  LLM_RISK_GATE,
   LOCALIZATION_CORE,
   MULTI_AGENT,
-  PATCH_HYGIENE,
   PROOF_CLEAN_MODULES,
   REGRESSION,
   REPRO_DOUBT,
-  REPRO_VOTE,
-  RISK_GATE,
-  ROUND0_MINIMAL,
-  SELECT_EARLY_ACCEPT,
   SELECT_MODULES,
   SELECT_N,
   SELECT_REPRO_OFF,
-  SELECT_REPRO_POSITIVE,
   STEER_OFF,
   THIN_BASE,
   THIN_STRICT_BASE,
@@ -87,22 +76,7 @@ interface PresetComposite {
 export const PRESET_COMPOSITES: readonly PresetComposite[] = [
   // ── localization-core (agentless-v1) base ──
   { preset: "agentless-v1-nosteer", base: LOCALIZATION_CORE.knobs, modules: [STEER_OFF] },
-  {
-    preset: "agentless-mini-parity",
-    base: LOCALIZATION_CORE.knobs,
-    modules: [CLOSURE_GROUNDING, PATCH_HYGIENE, ROUND0_MINIMAL],
-  },
   { preset: "everything-v1", base: LOCALIZATION_CORE.knobs, modules: [MULTI_AGENT] },
-  {
-    preset: "agentless-v2-repair",
-    base: LOCALIZATION_CORE.knobs,
-    modules: [CLOSURE_GROUNDING, PATCH_HYGIENE, CLOSURE_REPAIR(3)],
-  },
-  {
-    preset: "agentless-v2-reprovote",
-    base: LOCALIZATION_CORE.knobs,
-    modules: [CLOSURE_GROUNDING, PATCH_HYGIENE, CLOSURE_REPAIR(3), REPRO_VOTE],
-  },
   // ── base-as-self (identity) ──
   { preset: "agentless-v3-thin", base: THIN_BASE.knobs, modules: [] },
   { preset: "agentless-v3-thin-strict", base: THIN_STRICT_BASE.knobs, modules: [] },
@@ -110,11 +84,6 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
   // runtime, not into the preset literal).
   { preset: "agentless-v5-thin-and-expanded", base: THIN_STRICT_BASE.knobs, modules: [] },
   // ── thin-strict base — reuse the SAME composite arrays the controller routes to ──
-  {
-    preset: "agentless-v3-thin-strict-gated",
-    base: THIN_STRICT_BASE.knobs,
-    modules: GATED_MODULES,
-  },
   {
     preset: "agentless-v3-thin-strict-select",
     base: THIN_STRICT_BASE.knobs,
@@ -129,39 +98,6 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
     preset: "agentless-v4-proof-clean",
     base: THIN_STRICT_BASE.knobs,
     modules: PROOF_CLEAN_MODULES,
-  },
-  // ── thin-strict research arms ──
-  {
-    preset: "agentless-v3-thin-strict-counterfactual",
-    base: THIN_STRICT_BASE.knobs,
-    modules: [...GATED_MODULES, COUNTERFACTUAL],
-  },
-  {
-    preset: "agentless-v3-thin-strict-counterfactual-shadow",
-    base: THIN_STRICT_BASE.knobs,
-    modules: [...GATED_MODULES, COUNTERFACTUAL, LLM_RISK_GATE("shadow")],
-  },
-  {
-    preset: "agentless-v3-thin-strict-gated-llm-shadow",
-    base: THIN_STRICT_BASE.knobs,
-    modules: [
-      SELECT_N(2),
-      REGRESSION("discovered"),
-      RISK_GATE,
-      SELECT_REPRO_OFF,
-      LLM_RISK_GATE("shadow"),
-    ],
-  },
-  {
-    preset: "agentless-v3-thin-strict-gated-llm",
-    base: THIN_STRICT_BASE.knobs,
-    modules: [
-      SELECT_N(2),
-      REGRESSION("discovered"),
-      RISK_GATE,
-      SELECT_REPRO_OFF,
-      LLM_RISK_GATE("on"),
-    ],
   },
   {
     preset: "agentless-v3-thin-strict-closure-select",

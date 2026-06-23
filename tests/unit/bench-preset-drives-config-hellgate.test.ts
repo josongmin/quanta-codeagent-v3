@@ -329,123 +329,6 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 
-  test("PRESET-14b: agentless-v3-thin-strict-gated is adaptive strict@2 without repro precompute", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated"
-    const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.patchBudgetStrict).toBe(true)
-    expect(opt.verifySelectN).toBe(2)
-    expect(opt.verifySelectConcurrency).toBe(1)
-    expect(opt.verifySelectRiskGate).toBe(true)
-    expect(opt.verifySelectLlmRiskGate).toBeUndefined()
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("off")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated"]).toMatchObject({
-      "bench-in-loop-exec": "off",
-      "patch-budget-strict": "1",
-      "verify-select": "2",
-      "verify-select-concurrency": "1",
-      "verify-select-risk-gate": "1",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "off",
-    })
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated"]?.["repro-test"]).toBeUndefined()
-  })
-
-  test("PRESET-14e: agentless-v3-thin-strict-counterfactual enables the counterfactual cand1 seed over the gated baseline", () => {
-    // Default arm (gated, no counterfactual) resolves the new posture field to
-    // FALSE — proves the field is OFF unless the preset opts in (red-on-injection:
-    // if benchPostureFromState defaulted verifySelectCounterfactual to true, or the
-    // gated preset leaked the knob, this would flip).
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated"
-    expect(benchOptIns().verifySelectCounterfactual).toBe(false)
-    expect(
-      KNOB_PRESETS["agentless-v3-thin-strict-gated"]?.["verify-select-counterfactual"],
-    ).toBeUndefined()
-
-    // Counterfactual preset = gated baseline PLUS the counterfactual seed ON.
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-counterfactual"
-    const opt = benchOptIns()
-    expect(opt.verifySelectCounterfactual).toBe(true)
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.patchBudgetStrict).toBe(true)
-    expect(opt.verifySelectN).toBe(2)
-    expect(opt.verifySelectConcurrency).toBe(1)
-    expect(opt.verifySelectRiskGate).toBe(true)
-    expect(opt.verifySelectLlmRiskGate).toBeUndefined()
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("off")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-counterfactual"]).toMatchObject({
-      "bench-in-loop-exec": "off",
-      "patch-budget-strict": "1",
-      "verify-select": "2",
-      "verify-select-concurrency": "1",
-      "verify-select-risk-gate": "1",
-      "verify-select-counterfactual": "on",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "off",
-    })
-  })
-
-  test("PRESET-14f: agentless-v3-thin-strict-counterfactual-shadow combines the counterfactual seed with the shadow semantic gate", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-counterfactual-shadow"
-    const opt = benchOptIns()
-    expect(opt.verifySelectCounterfactual).toBe(true)
-    expect(opt.verifySelectN).toBe(2)
-    expect(opt.verifySelectConcurrency).toBe(1)
-    expect(opt.verifySelectRiskGate).toBe(true)
-    expect(opt.verifySelectLlmRiskGate).toBe("shadow")
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("off")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-counterfactual-shadow"]).toMatchObject({
-      "verify-select": "2",
-      "verify-select-concurrency": "1",
-      "verify-select-risk-gate": "1",
-      "verify-select-counterfactual": "on",
-      "verify-select-llm-risk-gate": "shadow",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "off",
-    })
-  })
-
-  test("PRESET-14c: agentless-v3-thin-strict-gated-llm-shadow records the semantic gate without changing submit authority", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated-llm-shadow"
-    const opt = benchOptIns()
-    expect(opt.verifySelectN).toBe(2)
-    expect(opt.verifySelectConcurrency).toBe(1)
-    expect(opt.verifySelectRiskGate).toBe(true)
-    expect(opt.verifySelectLlmRiskGate).toBe("shadow")
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("off")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated-llm-shadow"]).toMatchObject({
-      "verify-select": "2",
-      "verify-select-concurrency": "1",
-      "verify-select-risk-gate": "1",
-      "verify-select-llm-risk-gate": "shadow",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "off",
-    })
-  })
-
-  test("PRESET-14d: agentless-v3-thin-strict-gated-llm enables fail-closed semantic expansion", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-gated-llm"
-    const opt = benchOptIns()
-    expect(opt.verifySelectN).toBe(2)
-    expect(opt.verifySelectConcurrency).toBe(1)
-    expect(opt.verifySelectRiskGate).toBe(true)
-    expect(opt.verifySelectLlmRiskGate).toBe("on")
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("off")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-gated-llm"]).toMatchObject({
-      "verify-select": "2",
-      "verify-select-concurrency": "1",
-      "verify-select-risk-gate": "1",
-      "verify-select-llm-risk-gate": "on",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "off",
-    })
-  })
-
   test("PRESET-15b: agentless-v3-thin-strict-closure-select combines noexec selector with ClosureBundle grounding", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-closure-select"
     const opt = benchOptIns()
@@ -616,9 +499,6 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
   // to "clean", or a clean preset dropped the key, these flip.
   test("PRESET-SM: clean presets resolve selectorMode=clean, research preset stays research", () => {
     for (const preset of [
-      "agentless-v3-thin-strict-gated",
-      "agentless-v3-thin-strict-counterfactual",
-      "agentless-v3-thin-strict-counterfactual-shadow",
       "agentless-v3-thin-strict-closure-select-clean",
       "agentless-v3-thin-strict-closure-select-clean-witness-only",
       "agentless-v4-proof-clean",
