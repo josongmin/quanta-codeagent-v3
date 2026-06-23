@@ -1,632 +1,82 @@
 import { randomBytes } from "node:crypto"
 import { readdir, rename, unlink } from "node:fs/promises"
-import { basename, dirname } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { pathToFileURL } from "node:url"
 import type { Subprocess } from "bun"
 import { PUMP_DEATH_EXIT_GRACE_MS } from "@/plugin-isolation"
 import { errMessage, logger } from "@/shared"
 import type { LspPort } from "../ports"
-import type {
-  CodeAction,
-  CodeActionKind,
-  CodeActionTextEdit,
-  CodeActionWorkspaceEdit,
-} from "../ports/code-action-port"
+import type { CodeAction, CodeActionWorkspaceEdit } from "../ports/code-action-port"
 import type { FormatRange, TextEdit as FormatTextEdit } from "../ports/format-port"
 import type { RenameWorkspaceEdit } from "../ports/rename-apply-port"
 import type { SignatureInfo } from "../ports/signature-help-port"
 import type {
   CallHierarchyEntry,
   Diagnostic,
-  DiagnosticSeverity,
   Hover,
   Location,
   LspServerInfo,
   Pos,
-  Range,
   RenamePreview,
   SymbolInfo,
-  SymbolKind,
 } from "../types"
+import { applyWorkspaceEditAtomic } from "./base/atomic-edit"
 import {
-  encodeMessage,
-  type JsonRpcError,
-  type JsonRpcMessage,
-  type JsonRpcResponse,
-  MessageReader,
-} from "./jsonrpc"
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  type LspClientOptions,
+  type LspClientSpec,
+  STDERR_TAIL_MAX,
+} from "./base/config"
+import { isUnsupportedError, LspRequestError } from "./base/errors"
+import {
+  abortError,
+  codeActionFilterFor,
+  flattenDocumentSymbol,
+  flattenHoverContents,
+  isNotification,
+  isRawRange,
+  isRequest,
+  isResponse,
+  isSymbolInformationList,
+  mapCodeAction,
+  mapDiagnostic,
+  mapSignature,
+  mapSymbolInformation,
+  mapWorkspaceSymbolEntry,
+  pointRange,
+  throwIfAborted,
+  toCallEntry,
+  toFormatTextEdit,
+  toLocation,
+  toLocationOrLink,
+  toRange,
+  toRawRange,
+  toRenameWorkspaceEdit,
+} from "./base/mappers"
+import type {
+  InitializeResult,
+  PendingRequest,
+  PublishDiagnosticsParams,
+  RawCallHierarchyItem,
+  RawCallHierarchyResult,
+  RawCodeActionResult,
+  RawDefinitionResult,
+  RawDocumentSymbolResult,
+  RawHover,
+  RawLocation,
+  RawPrepareRenameResult,
+  RawSignatureHelpResult,
+  RawTextEdit,
+  RawWorkspaceEdit,
+  RawWorkspaceSymbolResult,
+  WorkspaceConfigurationParams,
+} from "./base/raw-types"
+import { resolveWorkspaceConfiguration, toWorkspaceFolder } from "./base/workspace"
+import { encodeMessage, type JsonRpcMessage, MessageReader } from "./jsonrpc"
 
-/** A JSON-RPC error raised by a server response. Preserves the wire `code`
- *  so call sites can distinguish "method not supported" (-32601) from other
- *  failures without re-parsing the message. */
-export class LspRequestError extends Error {
-  readonly code: number
-  readonly data?: unknown
-  constructor(method: string, err: JsonRpcError) {
-    super(`LSP error in "${method}": ${err.message}`)
-    this.name = "LspRequestError"
-    this.code = err.code
-    if (err.data !== undefined) this.data = err.data
-  }
-}
-
-/** LSP `SymbolKind` numeric → our string union. Anything off-spec → "unknown". */
-const SYMBOL_KIND: Record<number, SymbolKind> = {
-  1: "file",
-  2: "module",
-  3: "namespace",
-  4: "package",
-  5: "class",
-  6: "method",
-  7: "property",
-  8: "field",
-  9: "constructor",
-  10: "enum",
-  11: "interface",
-  12: "function",
-  13: "variable",
-  14: "constant",
-  15: "string",
-  16: "number",
-  17: "boolean",
-  18: "array",
-  19: "object",
-  20: "key",
-  21: "null",
-  22: "enum_member",
-  23: "struct",
-  24: "event",
-  25: "operator",
-  26: "type_parameter",
-}
-
-const toSymbolKind = (n: number): SymbolKind => SYMBOL_KIND[n] ?? "unknown"
-
-/** Raw LSP shapes consumed by the nav RPC methods. Kept minimal: we narrow
- *  only the fields we actually map (same pattern as the diagnostics path). */
-interface RawLocation {
-  uri: string
-  range: RawRange
-}
-interface RawLocationLink {
-  targetUri: string
-  targetRange: RawRange
-  targetSelectionRange?: RawRange
-}
-type RawDefinitionResult = RawLocation | RawLocation[] | RawLocationLink[] | null
-/** LSP `CallHierarchyItem` — the resolved callable returned by
- *  `prepareCallHierarchy` and embedded as `from`/`to` in the incoming/outgoing
- *  responses. We narrow only the fields we map. */
-interface RawCallHierarchyItem {
-  name: string
-  kind: number
-  uri: string
-  range: RawRange
-  selectionRange: RawRange
-}
-interface RawIncomingCall {
-  from: RawCallHierarchyItem
-  fromRanges?: RawRange[]
-}
-interface RawOutgoingCall {
-  to: RawCallHierarchyItem
-  fromRanges?: RawRange[]
-}
-type RawCallHierarchyResult = RawIncomingCall[] | RawOutgoingCall[] | null
-interface RawMarkupContent {
-  kind: "plaintext" | "markdown"
-  value: string
-}
-type RawMarkedString = string | { language: string; value: string }
-type RawHoverContents = RawMarkupContent | RawMarkedString | RawMarkedString[]
-interface RawHover {
-  contents: RawHoverContents
-  range?: RawRange
-}
-interface RawDocumentSymbol {
-  name: string
-  kind: number
-  range: RawRange
-  selectionRange: RawRange
-  children?: RawDocumentSymbol[]
-}
-interface RawSymbolInformation {
-  name: string
-  kind: number
-  location: { uri: string; range: RawRange }
-  containerName?: string
-}
-interface RawWorkspaceSymbol {
-  name: string
-  kind: number
-  location: { uri: string; range?: RawRange }
-  containerName?: string
-}
-type RawDocumentSymbolResult = RawDocumentSymbol[] | RawSymbolInformation[] | null
-type RawWorkspaceSymbolResult = Array<RawSymbolInformation | RawWorkspaceSymbol> | null
-interface RawPrepareRenameObject {
-  range?: RawRange
-  placeholder?: string
-  defaultBehavior?: boolean
-}
-type RawPrepareRenameResult = RawRange | RawPrepareRenameObject | null
-
-/** Raw shapes for the 3 new wire methods (code-action / format / signatureHelp)
- *  + the WorkspaceEdit `applyEdit` consumes. Kept minimal — narrow only fields
- *  we map (same posture as the nav RPC raw types). */
-interface RawTextEdit {
-  range: RawRange
-  newText: string
-}
-interface RawCodeAction {
-  title: string
-  kind?: string
-  edit?: RawWorkspaceEdit
-}
-/** Servers may answer `textDocument/codeAction` with the legacy `Command`
- *  shape (no `edit`). We treat those as `quickfix` with no edit — the model
- *  surfaces the title but cannot apply automatically. */
-interface RawCommand {
-  title: string
-  command: string
-}
-type RawCodeActionEntry = RawCodeAction | RawCommand
-type RawCodeActionResult = RawCodeActionEntry[] | null
-
-/** LSP `WorkspaceEdit`. v1 reads both `changes` (legacy: map of uri → edits)
- *  AND `documentChanges` (newer: array of {textDocument, edits}). Resource ops
- *  (create/rename/delete file) are not surfaced — we ignore them. */
-interface RawWorkspaceEdit {
-  changes?: Record<string, RawTextEdit[]>
-  documentChanges?: RawTextDocumentEdit[]
-}
-interface RawTextDocumentEdit {
-  textDocument: { uri: string; version?: number | null }
-  edits?: RawTextEdit[]
-}
-interface RawParameterInformation {
-  label: string | [number, number]
-  documentation?: string | RawMarkupContent
-}
-interface RawSignatureInformation {
-  label: string
-  documentation?: string | RawMarkupContent
-  parameters?: RawParameterInformation[]
-  activeParameter?: number | null
-}
-interface RawSignatureHelp {
-  signatures?: RawSignatureInformation[]
-  activeSignature?: number | null
-  activeParameter?: number | null
-}
-type RawSignatureHelpResult = RawSignatureHelp | null
-
-/** Detect a "method not supported" JSON-RPC error so the nav RPCs can surface
- *  `null` (capability missing) instead of throwing — per the LspPort contract. */
-const isUnsupportedError = (e: unknown): boolean => {
-  if (!(e instanceof LspRequestError)) return false
-  if (e.code === -32601 || e.code === -32602) return true
-  const m = e.message.toLowerCase()
-  return m.includes("not supported") || m.includes("unsupported")
-}
-
-/** Options shared by every stdio LSP adapter. The two concrete adapters differ
- *  only in their default {@link spawnCommand} and {@link languageId}; everything
- *  else (handshake, framing, request correlation, lifecycle) is identical and
- *  lives here once (RFC §3.1: 2+ implementations ⇒ extract a shared base). */
-export interface LspClientOptions {
-  /** Argv used to spawn the server. Defaults to the standard stdio launcher. */
-  command?: string[]
-  /** Project root the server analyses. Defaults to `process.cwd()`. */
-  cwd?: string
-  /** Per-request timeout (also bounds the diagnostics wait). Default 8000ms. */
-  requestTimeoutMs?: number
-  /** Optional workspace roots advertised during `initialize`. */
-  workspaceFolders?: readonly string[]
-  /** Client-side config surfaced via `workspace/configuration` requests. */
-  workspaceConfiguration?: Readonly<Record<string, unknown>>
-}
-
-/** Per-server identity supplied by the concrete adapter (its only variance). */
-export interface LspClientSpec {
-  /** Default argv when {@link LspClientOptions.command} is not given. */
-  defaultCommand: string[]
-  /** Resolve the LSP `languageId` for a file (e.g. `python`, `typescriptreact`). */
-  languageIdFor(filePath: string): string
-}
-
-const DEFAULT_REQUEST_TIMEOUT_MS = 8_000
-
-/** Cap on the retained stderr tail (bytes of decoded text). The drain pump must
- *  still consume the whole stream to keep the OS pipe empty (deadlock guard);
- *  this only bounds how much of the MOST RECENT stderr we keep so an unexpected
- *  server exit (crash / OOM) can be diagnosed. Flat literal so the magic-number
- *  scan does not trip. */
-const STDERR_TAIL_MAX = 8_192
-
-/** Raw LSP shapes we read off the wire. Kept minimal: we narrow only the
- *  fields we consume (same pattern as the LLM adapters). */
-interface RawRange {
-  start: { line: number; character: number }
-  end: { line: number; character: number }
-}
-interface RawDiagnostic {
-  range: RawRange
-  severity?: number
-  message: string
-  source?: string
-  code?: string | number
-}
-interface PublishDiagnosticsParams {
-  uri: string
-  diagnostics: RawDiagnostic[]
-}
-interface InitializeResult {
-  serverInfo?: { name: string; version?: string }
-}
-
-interface WorkspaceFolder {
-  uri: string
-  name: string
-}
-
-interface WorkspaceConfigurationParams {
-  items?: Array<{ section?: string }>
-}
-
-interface PendingRequest {
-  resolve: (value: unknown) => void
-  reject: (reason: Error) => void
-  timer: ReturnType<typeof setTimeout>
-  method: string
-  detachAbort?: () => void
-}
-
-const SEVERITY: Record<number, DiagnosticSeverity> = {
-  1: "error",
-  2: "warning",
-  3: "information",
-  4: "hint",
-}
-
-const abortError = (context: string): Error => {
-  const e = new Error(`${context} aborted`)
-  e.name = "AbortError"
-  return e
-}
-
-const throwIfAborted = (signal: AbortSignal | undefined, context: string): void => {
-  if (signal?.aborted) throw abortError(context)
-}
-
-const toPos = (p: { line: number; character: number }): Pos => ({
-  line: p.line,
-  character: p.character,
-})
-
-const mapDiagnostic = (uri: string, d: RawDiagnostic): Diagnostic => ({
-  uri,
-  severity: SEVERITY[d.severity ?? 1] ?? "error",
-  message: d.message,
-  range: { start: toPos(d.range.start), end: toPos(d.range.end) },
-  ...(d.source !== undefined ? { source: d.source } : {}),
-  ...(d.code !== undefined ? { code: String(d.code) } : {}),
-})
-
-const toRange = (r: RawRange): Range => ({ start: toPos(r.start), end: toPos(r.end) })
-
-const toLocation = (l: RawLocation): Location => ({ uri: l.uri, range: toRange(l.range) })
-
-/** Map a single hit from `definition`/`typeDefinition`/`implementation`. The
- *  server may emit either a `Location` (uri+range) or a `LocationLink`
- *  (target* fields). `LocationLink.targetSelectionRange` — when present — is
- *  the tighter "navigate-to" range; we prefer it over `targetRange`. */
-const toLocationOrLink = (l: RawLocation | RawLocationLink): Location => {
-  if ("uri" in l) return toLocation(l)
-  return { uri: l.targetUri, range: toRange(l.targetSelectionRange ?? l.targetRange) }
-}
-
-/** Map a resolved `CallHierarchyItem` + its `fromRanges` to our normalized
- *  {@link CallHierarchyEntry}. Pure — reuses the shared `toRange` + `SYMBOL_KIND`
- *  primitives. Missing `fromRanges` collapses to `[]` (some servers omit it for
- *  a 0-call-site edge). */
-const toCallEntry = (
-  item: RawCallHierarchyItem,
-  fromRanges: RawRange[] | undefined,
-): CallHierarchyEntry => ({
-  name: item.name,
-  kind: toSymbolKind(item.kind),
-  uri: item.uri,
-  range: toRange(item.range),
-  selectionRange: toRange(item.selectionRange),
-  fromRanges: (fromRanges ?? []).map(toRange),
-})
-
-/** Closed set of `CodeActionKind` strings we surface. Anything off-list is
- *  collapsed to `"other"` (same posture as `SymbolKind`'s `"unknown"`). */
-const KNOWN_CODE_ACTION_KINDS = new Set<string>([
-  "quickfix",
-  "refactor",
-  "refactor.extract",
-  "refactor.inline",
-  "refactor.rewrite",
-  "source",
-  "source.organizeImports",
-  "source.fixAll",
-])
-
-const toCodeActionKind = (k: string | undefined): CodeActionKind => {
-  if (k === undefined) return "quickfix"
-  return KNOWN_CODE_ACTION_KINDS.has(k) ? (k as CodeActionKind) : "other"
-}
-
-/** Type-narrow guard: a `RawCodeAction` carries (at minimum) a `title` and
- *  may carry an `edit`/`kind`. A `RawCommand` has a `command` string. */
-const isCommandOnly = (e: RawCodeActionEntry): e is RawCommand =>
-  "command" in e && typeof (e as RawCommand).command === "string" && !("edit" in e)
-
-const flattenParameterLabel = (label: string | [number, number], signature: string): string => {
-  if (typeof label === "string") return label
-  // [start, end] offset into the signature's `label` (UTF-16 code units per LSP).
-  return signature.slice(label[0], label[1])
-}
-
-const flattenParameterDoc = (d: string | RawMarkupContent | undefined): string | undefined => {
-  if (d === undefined) return undefined
-  if (typeof d === "string") return d
-  return d.value
-}
-
-const toCodeActionTextEdit = (e: RawTextEdit): CodeActionTextEdit => ({
-  range: toRange(e.range),
-  newText: e.newText,
-})
-
-const toFormatTextEdit = (e: RawTextEdit): FormatTextEdit => ({
-  range: toRange(e.range),
-  newText: e.newText,
-})
-
-/** Normalize the two LSP `WorkspaceEdit` variants into a flat per-document
- *  changes list. `documentChanges` wins when both are present (LSP spec). */
-const toCodeActionWorkspaceEdit = (raw: RawWorkspaceEdit): CodeActionWorkspaceEdit => {
-  if (raw.documentChanges) {
-    return {
-      changes: raw.documentChanges.map((d) => ({
-        uri: d.textDocument.uri,
-        edits: (d.edits ?? []).map(toCodeActionTextEdit),
-      })),
-    }
-  }
-  if (raw.changes) {
-    return {
-      changes: Object.entries(raw.changes).map(([uri, edits]) => ({
-        uri,
-        edits: edits.map(toCodeActionTextEdit),
-      })),
-    }
-  }
-  return { changes: [] }
-}
-
-/** Normalize the two LSP `WorkspaceEdit` variants into the `RenameWorkspaceEdit`
- *  port shape. Structurally identical to {@link toCodeActionWorkspaceEdit} but
- *  typed to the rename port so `computeRename` returns the exact contract the
- *  `RenameApplyPort` expects (no `as`-cast across the two families). */
-const toRenameWorkspaceEdit = (raw: RawWorkspaceEdit): RenameWorkspaceEdit => {
-  if (raw.documentChanges) {
-    return {
-      changes: raw.documentChanges.map((d) => ({
-        uri: d.textDocument.uri,
-        edits: (d.edits ?? []).map(toCodeActionTextEdit),
-      })),
-    }
-  }
-  if (raw.changes) {
-    return {
-      changes: Object.entries(raw.changes).map(([uri, edits]) => ({
-        uri,
-        edits: edits.map(toCodeActionTextEdit),
-      })),
-    }
-  }
-  return { changes: [] }
-}
-
-const mapCodeAction = (e: RawCodeActionEntry): CodeAction => {
-  if (isCommandOnly(e)) {
-    return { title: e.title, kind: "quickfix" }
-  }
-  const ca = e as RawCodeAction
-  const base: CodeAction = { title: ca.title, kind: toCodeActionKind(ca.kind) }
-  if (ca.edit !== undefined) base.edit = toCodeActionWorkspaceEdit(ca.edit)
-  return base
-}
-
-const mapSignature = (s: RawSignatureInformation): SignatureInfo => {
-  const params = (s.parameters ?? []).map((p) => {
-    const out: { label: string; documentation?: string } = {
-      label: flattenParameterLabel(p.label, s.label),
-    }
-    const doc = flattenParameterDoc(p.documentation)
-    if (doc !== undefined) out.documentation = doc
-    return out
-  })
-  const out: SignatureInfo = {
-    label: s.label,
-    parameters: params,
-  }
-  const doc = flattenParameterDoc(s.documentation)
-  if (doc !== undefined) out.documentation = doc
-  if (s.activeParameter !== undefined) out.activeParameter = s.activeParameter
-  return out
-}
-
-/** LSP `CodeActionKind` filter mapping for `textDocument/codeAction` params.
- *  "all" omits the filter entirely (server returns every kind). The other
- *  values are passed as-is (prefix-match per LSP spec). */
-const codeActionFilterFor = (
-  kind: "quickfix" | "refactor" | "source" | "all" | undefined,
-): string[] | undefined => {
-  if (kind === undefined || kind === "all") return undefined
-  return [kind]
-}
-
-/** Half-open zero-width range covering the whole document — sent as the
- *  `range` argument to `textDocument/codeAction` when the caller asked at a
- *  single position. We anchor the range at the requested position (not the
- *  file head) so servers that filter by range respect the cursor. */
-const pointRange = (line: number, col: number): RawRange => ({
-  start: { line, character: col },
-  end: { line, character: col },
-})
-
-/** Convert a Format port `range` (or a `Range` from rangeFormatting wire) to
- *  the raw LSP shape with `character` keys. */
-const toRawRange = (r: FormatRange): RawRange => ({
-  start: { line: r.start.line, character: r.start.character },
-  end: { line: r.end.line, character: r.end.character },
-})
-
-/** Convert a zero-based (line, character) position to a UTF-16 offset in
- *  `text`. Handles `\n` only (LSP positions are line+character, no separator
- *  variant). Character offsets past EOL clamp to the line length — same
- *  behaviour as VS Code's `TextDocument.offsetAt`. */
-const positionToOffset = (text: string, line: number, character: number): number => {
-  let offset = 0
-  let currentLine = 0
-  for (let i = 0; i < text.length; i++) {
-    if (currentLine === line) {
-      const lineEnd = text.indexOf("\n", i)
-      const max = lineEnd === -1 ? text.length - i : lineEnd - i
-      return offset + Math.min(character, max)
-    }
-    if (text.charCodeAt(i) === 0x0a) {
-      currentLine++
-    }
-    offset++
-  }
-  // Past EOF — clamp to file end.
-  return text.length
-}
-
-/** Apply a list of LSP `TextEdit`s to `text`, returning the patched string.
- *  Edits MUST NOT overlap (LSP spec); we apply them in reverse start-offset
- *  order so earlier edits don't shift later ones' offsets. Stable for ties
- *  (preserves caller-supplied order among edits at the same start position). */
-const applyEditsToText = (
-  text: string,
-  edits: readonly { range: { start: Pos; end: Pos }; newText: string }[],
-): string => {
-  if (edits.length === 0) return text
-  const indexed = edits.map((e, i) => ({
-    e,
-    i,
-    startOff: positionToOffset(text, e.range.start.line, e.range.start.character),
-    endOff: positionToOffset(text, e.range.end.line, e.range.end.character),
-  }))
-  // Sort by start desc; for ties keep the higher original index later (which
-  // we apply first since we're walking the sorted array forward and slicing
-  // from the back — `[...].sort` is stable in V8/JSC).
-  indexed.sort((a, b) => b.startOff - a.startOff || b.i - a.i)
-  let out = text
-  for (const { startOff, endOff, e } of indexed) {
-    out = out.slice(0, startOff) + e.newText + out.slice(endOff)
-  }
-  return out
-}
-
-const isRawRange = (v: RawRange | RawPrepareRenameObject): v is RawRange =>
-  "start" in v && "end" in v
-
-const flattenMarkedString = (m: RawMarkedString): string => (typeof m === "string" ? m : m.value)
-
-const isMarkupContent = (c: RawHoverContents): c is RawMarkupContent =>
-  !Array.isArray(c) && typeof c === "object" && "kind" in c && "value" in c
-
-/** Reduce the union `MarkupContent | MarkedString | MarkedString[]` to a
- *  single string. `MarkedString` arrays are newline-joined; legacy
- *  `{language, value}` entries surface their `value` only (we drop the
- *  language tag since downstream tools render the text untyped). */
-const flattenHoverContents = (c: RawHoverContents): string => {
-  if (typeof c === "string") return c
-  if (Array.isArray(c)) return c.map(flattenMarkedString).join("\n")
-  if (isMarkupContent(c)) return c.value
-  return flattenMarkedString(c)
-}
-
-const isSymbolInformationList = (
-  list: RawDocumentSymbol[] | RawSymbolInformation[],
-): list is RawSymbolInformation[] => {
-  const first = list[0]
-  return first !== undefined && "location" in first
-}
-
-/** Map an LSP `SymbolInformation`. The legacy form has no separate
- *  selectionRange, so we mirror `range` into both per the type contract. */
-const mapSymbolInformation = (s: RawSymbolInformation): SymbolInfo => {
-  const range = toRange(s.location.range)
-  return {
-    name: s.name,
-    kind: toSymbolKind(s.kind),
-    range,
-    selectionRange: range,
-    uri: s.location.uri,
-    ...(s.containerName !== undefined ? { containerName: s.containerName } : {}),
-  }
-}
-
-/** Recursive walk of nested `DocumentSymbol` trees into a flat list.
- *  `containerName` is propagated to children as their parent's name; the
- *  owning file URI is stamped on every entry. */
-const flattenDocumentSymbol = (
-  s: RawDocumentSymbol,
-  uri: string,
-  parentName: string | undefined,
-  out: SymbolInfo[],
-): void => {
-  out.push({
-    name: s.name,
-    kind: toSymbolKind(s.kind),
-    range: toRange(s.range),
-    selectionRange: toRange(s.selectionRange),
-    uri,
-    ...(parentName !== undefined ? { containerName: parentName } : {}),
-  })
-  if (s.children) {
-    for (const child of s.children) flattenDocumentSymbol(child, uri, s.name, out)
-  }
-}
-
-/** Map either form of workspace symbol entry into our normalized shape.
- *  `WorkspaceSymbol` is the newer (>=3.17) form that may omit `range`; in
- *  that case we use a zero-width range at the document origin since we have
- *  no better signal without resolving the symbol. */
-const mapWorkspaceSymbolEntry = (s: RawSymbolInformation | RawWorkspaceSymbol): SymbolInfo => {
-  const rawRange = s.location.range
-  const range: Range = rawRange
-    ? toRange(rawRange)
-    : { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
-  return {
-    name: s.name,
-    kind: toSymbolKind(s.kind),
-    range,
-    selectionRange: range,
-    uri: s.location.uri,
-    ...(s.containerName !== undefined ? { containerName: s.containerName } : {}),
-  }
-}
-
-const isResponse = (m: JsonRpcMessage): m is JsonRpcResponse => "id" in m && !("method" in m)
-
-const isRequest = (
-  m: JsonRpcMessage,
-): m is { jsonrpc: "2.0"; id: number | string; method: string; params?: unknown } =>
-  "id" in m && "method" in m
-
-const isNotification = (
-  m: JsonRpcMessage,
-): m is { jsonrpc: "2.0"; method: string; params?: unknown } => "method" in m && !("id" in m)
+export type { LspClientOptions, LspClientSpec } from "./base/config"
+// Re-export the complete original public surface so every importer of
+// `@/lsp/adapters/base` stays byte-compatible after the god-module split.
+export { LspRequestError } from "./base/errors"
 
 /** A real LSP client over stdio, parameterised by an {@link LspClientSpec}.
  *
@@ -704,7 +154,7 @@ export class LspClient implements LspPort {
           clientInfo: { name: "quanta-codeagent", version: "0.1.0" },
           rootUri: pathToFileURL(this.cwd).href,
           ...(this.workspaceFolders.length > 0
-            ? { workspaceFolders: this.workspaceFolders.map((dir) => this.toWorkspaceFolder(dir)) }
+            ? { workspaceFolders: this.workspaceFolders.map((dir) => toWorkspaceFolder(dir)) }
             : {}),
           capabilities: {
             workspace: {
@@ -1014,97 +464,27 @@ export class LspClient implements LspPort {
     return raw.signatures.map(mapSignature)
   }
 
-  /** Apply a workspace edit using 2-phase temp+rename atomic commit (ADR-0152,
-   *  upgrade of ADR-0143 per-file sequential write).
-   *
-   *  Phases (per call):
-   *    0. **Cleanup** — best-effort scan of each target dir for leftover
-   *       `<original>.quanta-tmp-<sessionId>-*` files from prior failed runs;
-   *       silently unlinked. Scoped by `sessionId`, so concurrent sessions
-   *       don't clobber each other.
-   *    1. **Prepare** — for every doc, compute patched text and write to a
-   *       sibling tmp file `<original>.quanta-tmp-<sessionId>-<rand>`
-   *       (`<rand>` = 4 hex bytes, prevents same-session same-file collisions).
-   *       If ANY prepare fails, all already-written tmps are unlinked and the
-   *       originating error re-thrown. Originals are NEVER touched in Phase 1.
-   *    2. **Commit** — `fs.rename(tmp, target)` per doc. POSIX rename is atomic
-   *       on the same filesystem (Linux/macOS); same-FS is the steady-state
-   *       assumption (LSP edits hit workspace files which live with their tmps).
-   *
-   *  Failure model:
-   *    - Phase 1 fails ⇒ NO original modified, NO tmp remains.
-   *    - Phase 2 fails on file K of N ⇒ files 1..K-1 are committed, file K's
-   *      tmp + remaining unrenamed tmps stay on disk under `.quanta-tmp-…`
-   *      suffix. Caller can recover via dir scan; we surface a typed error
-   *      naming the failed path. Cross-FS rename (EXDEV) is the most likely
-   *      Phase 2 cause — that's a follow-up (copy+delete fallback).
-   *
-   *  Concurrency: the random hex suffix means two parallel calls editing the
-   *  same file under the same `sessionId` get distinct tmps; neither clobbers
-   *  the other's prepare buffer. Default `sessionId` is per-call random, so
-   *  callers that don't pass one are naturally isolated. */
+  /** Apply a workspace edit via the shared 2-phase temp+rename atomic commit
+   *  (ADR-0152). The 3-phase core lives in {@link applyWorkspaceEditAtomic};
+   *  this binds the client's `protected` FS seams (so test subclasses still
+   *  capture / fail-inject without touching disk) and defaults `sessionId`. */
   async applyWorkspaceEdit(
     edit: CodeActionWorkspaceEdit | RenameWorkspaceEdit,
     sessionId: string = randomBytes(8).toString("hex"),
     signal?: AbortSignal,
   ): Promise<void> {
-    throwIfAborted(signal, "LSP applyWorkspaceEdit")
-    // Resolve URIs to paths once; reuse across all 3 phases.
-    const resolved = edit.changes.map((doc) => ({
-      path: fileURLToPath(doc.uri),
-      edits: doc.edits,
-    }))
-
-    // --- Phase 0 — best-effort cleanup of leftover tmps from prior runs ---
-    // Scoped by sessionId so a concurrent session's in-flight tmps survive.
-    // Errors here are intentionally swallowed: a stale-tmp scan must NEVER
-    // block a legitimate edit (e.g. dir missing → caller will fail in Phase 1
-    // with a clearer error than "couldn't list dir for cleanup").
-    const cleanupDirs = new Set(resolved.map((d) => dirname(d.path)))
-    for (const dir of cleanupDirs) {
-      throwIfAborted(signal, "LSP applyWorkspaceEdit")
-      await this.cleanupStaleTmps(dir, sessionId)
-    }
-
-    // --- Phase 1 — prepare: write all tmps before touching any original. ---
-    const prepared: { tmp: string; target: string }[] = []
-    try {
-      for (const { path, edits } of resolved) {
-        throwIfAborted(signal, "LSP applyWorkspaceEdit")
-        const original = await this.readFileText(path)
-        const patched = applyEditsToText(original, edits)
-        const tmp = `${path}.quanta-tmp-${sessionId}-${randomBytes(4).toString("hex")}`
-        await this.writeFileText(tmp, patched)
-        prepared.push({ tmp, target: path })
-      }
-    } catch (e) {
-      // Phase 1 failure ⇒ unlink every tmp we wrote so far; no original touched.
-      for (const { tmp } of prepared) {
-        await this.unlinkTmp(tmp).catch(() => undefined)
-      }
-      throw e
-    }
-
-    // --- Phase 2 — commit: atomic rename per file (same-FS POSIX). ---
-    // If rename K fails: files 1..K-1 are committed; K and later tmps remain
-    // on disk under `.quanta-tmp-<sessionId>-*`. Caller can scan + recover.
-    for (let i = 0; i < prepared.length; i++) {
-      const entry = prepared[i]
-      if (!entry) continue
-      throwIfAborted(signal, "LSP applyWorkspaceEdit")
-      try {
-        await this.renameFile(entry.tmp, entry.target)
-      } catch (e) {
-        const remaining = prepared.length - i
-        const err = new Error(
-          `LSP applyWorkspaceEdit Phase 2 (commit) failed on "${entry.target}" ` +
-            `(${i}/${prepared.length} files renamed, ${remaining} tmp file(s) remain): ${errMessage(
-              e,
-            )}`,
-        )
-        throw err
-      }
-    }
+    await applyWorkspaceEditAtomic(
+      {
+        readFileText: (p) => this.readFileText(p),
+        writeFileText: (p, t) => this.writeFileText(p, t),
+        renameFile: (from, to) => this.renameFile(from, to),
+        unlinkTmp: (p) => this.unlinkTmp(p),
+        listDir: (dir) => this.listDir(dir),
+      },
+      edit,
+      sessionId,
+      signal,
+    )
   }
 
   /** On-disk write seam (Bun.file/write). Protected so tests can capture the
@@ -1131,23 +511,6 @@ export class LspClient implements LspPort {
    *  effort and must not block legitimate edits). */
   protected listDir(dir: string): Promise<string[]> {
     return readdir(dir).catch(() => [])
-  }
-
-  /** Best-effort sweep of `<dir>` for leftover tmps from prior `sessionId`
-   *  runs. Pattern: any entry matching `*.quanta-tmp-<sessionId>-*` is
-   *  unlinked. Errors per-entry are swallowed (file may already be gone or
-   *  owned by another process). */
-  private async cleanupStaleTmps(dir: string, sessionId: string): Promise<void> {
-    const entries = await this.listDir(dir)
-    const marker = `.quanta-tmp-${sessionId}-`
-    for (const name of entries) {
-      // Match the marker anywhere after the original-filename portion. The
-      // suffix is always `<original>.quanta-tmp-<sessionId>-<hex>` so we look
-      // for the marker substring; presence ⇒ this is our tmp.
-      if (!name.includes(marker)) continue
-      const full = `${dir}/${basename(name)}`
-      await this.unlinkTmp(full).catch(() => undefined)
-    }
   }
 
   async stop(): Promise<void> {
@@ -1483,7 +846,9 @@ export class LspClient implements LspPort {
       case "workspace/configuration": {
         const items = (msg.params as WorkspaceConfigurationParams | undefined)?.items
         const result = Array.isArray(items)
-          ? items.map((item) => this.resolveWorkspaceConfiguration(item.section))
+          ? items.map((item) =>
+              resolveWorkspaceConfiguration(this.workspaceConfiguration, item.section),
+            )
           : []
         this.sendServerResult(msg.id, result)
         return
@@ -1492,7 +857,7 @@ export class LspClient implements LspPort {
         this.sendServerResult(
           msg.id,
           this.workspaceFolders.length > 0
-            ? this.workspaceFolders.map((dir) => this.toWorkspaceFolder(dir))
+            ? this.workspaceFolders.map((dir) => toWorkspaceFolder(dir))
             : null,
         )
         return
@@ -1552,21 +917,6 @@ export class LspClient implements LspPort {
     })
     this.opened.set(uri, { version, text })
     return uri
-  }
-
-  private resolveWorkspaceConfiguration(section: string | undefined): unknown {
-    if (!section || section.length === 0) return this.workspaceConfiguration
-    let cur: unknown = this.workspaceConfiguration
-    for (const part of section.split(".")) {
-      if (typeof cur !== "object" || cur === null || Array.isArray(cur)) return null
-      cur = (cur as Record<string, unknown>)[part]
-    }
-    return cur ?? null
-  }
-
-  private toWorkspaceFolder(dir: string): WorkspaceFolder {
-    const name = basename(dir)
-    return { uri: pathToFileURL(dir).href, name: name.length > 0 ? name : dir }
   }
 
   private sendServerResult(id: number | string, result: unknown): void {
