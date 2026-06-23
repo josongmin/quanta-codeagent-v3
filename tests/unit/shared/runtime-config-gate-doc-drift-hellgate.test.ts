@@ -28,7 +28,19 @@ import { join } from "node:path"
  */
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
-const SRC = join(REPO_ROOT, "src/shared/runtime-config.ts")
+// The god-module split moved the `RuntimeConfig` interface (the field JSDoc
+// corpus) into `runtime-config/types.ts`; the `loadFromEnv` resolver lines stay
+// in `runtime-config.ts`. The drift ratchet cross-checks the two, so it reads
+// BOTH sources — resolvers from the parent, field docs from the type module.
+const RESOLVER_SRC = join(REPO_ROOT, "src/shared/runtime-config.ts")
+// The `RuntimeConfig` interface is split across two type modules (`types.ts`
+// holds the feature-gate half + `extends RuntimeConfigPaths`; `types-extra.ts`
+// holds the launcher/path/bench half). Both carry per-field JSDoc, so the drift
+// corpus reads both.
+const FIELD_DOC_SRCS = [
+  join(REPO_ROOT, "src/shared/runtime-config/types.ts"),
+  join(REPO_ROOT, "src/shared/runtime-config/types-extra.ts"),
+]
 
 /** Strict claim = the literal `=== "1"` appears in the prose. */
 const claimsExactOne = (text: string): boolean => text.includes('=== "1"')
@@ -115,10 +127,10 @@ const parseFieldDocs = (lines: string[]): Map<string, string> => {
   return docs
 }
 
-const SOURCE = readFileSync(SRC, "utf8")
-const LINES = SOURCE.split("\n")
-const RESOLVERS = parseResolvers(LINES)
-const FIELD_DOCS = parseFieldDocs(LINES)
+const RESOLVER_LINES = readFileSync(RESOLVER_SRC, "utf8").split("\n")
+const FIELD_DOC_LINES = FIELD_DOC_SRCS.flatMap((src) => readFileSync(src, "utf8").split("\n"))
+const RESOLVERS = parseResolvers(RESOLVER_LINES)
+const FIELD_DOCS = parseFieldDocs(FIELD_DOC_LINES)
 
 describe("#24 — runtime-config gate doc ↔ resolver consistency ratchet", () => {
   test("the parser actually found the resolver + doc corpus (anti-vacuous)", () => {

@@ -25,7 +25,6 @@
     "src/runner/batch/eval/driver.ts",
     "src/runner/batch/eval/llm-evidence-packet.ts",
     "src/shared/runtime-config-knobs.ts",
-    "src/shared/runtime-config.ts",
     "src/tool/index.ts"
   ],
   "functions": [
