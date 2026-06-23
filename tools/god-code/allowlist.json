@@ -4,7 +4,6 @@
   "godFunctionMaxLines": 150,
   "modules": [
     "src/agent/admissibility-gate.ts",
-    "src/agent/compaction.ts",
     "src/agent/dispatch.ts",
     "src/agent/hooks.ts",
     "src/agent/types.ts",
