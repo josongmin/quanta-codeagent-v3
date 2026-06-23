@@ -16,8 +16,9 @@
  * route → admit → execute → re-project — is unit-testable with fakes and free of
  * any LLM / driver / fs coupling. Wave-3 integration supplies the real
  * `modelCall` (LLMPort + StructuredOutput adapter) and `runPhase` (a driver phase
- * under the injected posture); the gate (`adaptive-escalate`, default-OFF) decides
- * whether the driver calls this at all.
+ * under the injected posture); the gate (`v5AdaptiveEnabled` /
+ * `QUANTA_BENCH_V5_ADAPTIVE`, default-OFF) decides whether the driver calls this
+ * at all.
  *
  * # Authority fence preserved
  * The router port returns raw model output; the controller validates it
