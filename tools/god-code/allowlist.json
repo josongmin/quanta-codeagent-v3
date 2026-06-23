@@ -19,7 +19,6 @@
     "src/host/runtime/internal/context-binding.ts",
     "src/runner/batch/eval/driver.ts",
     "src/runner/batch/eval/llm-evidence-packet.ts",
-    "src/shared/runtime-config-knobs.ts",
     "src/tool/index.ts"
   ],
   "functions": [
