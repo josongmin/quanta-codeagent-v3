@@ -2712,7 +2712,6 @@ const buildSelectionExecutorPorts = (args: {
   readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
-  readonly validatedReproContractSeedText: string | undefined
   readonly publicContracts: PublicContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly recordLlmEvidencePacket: ((packet: LlmEvidencePacket) => void) | undefined
@@ -2748,15 +2747,10 @@ const buildSelectionExecutorPorts = (args: {
                   : {}),
                 ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
                 ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
-                ...(() => {
-                  const effectiveSeed =
-                    args.validatedReproContractSeedText === undefined
-                      ? seed
-                      : seed === undefined
-                        ? args.validatedReproContractSeedText
-                        : `${args.validatedReproContractSeedText}\n\n${seed}`
-                  return effectiveSeed !== undefined ? { seed: effectiveSeed } : {}
-                })(),
+                // Scripts reach generation ONCE via `validatedReproScripts`
+                // staticFacts; NOT also merged into `seed` (that destroyed the
+                // diversity seed via the seed length cap + duplicated the scripts).
+                ...(seed !== undefined ? { seed } : {}),
                 ...(args.recordLlmEvidencePacket !== undefined
                   ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
                   : {}),
@@ -2912,7 +2906,6 @@ const runSelectionPhase = async (
     reproHint,
     reproTest,
   })
-  const validatedReproContractSeedText = validatedReproContractSeed(reproSources)
   let totalTurns = 0
   const selectionState = await resolveSelectionPhasePorts({
     instance,
@@ -2980,7 +2973,6 @@ const runSelectionPhase = async (
       selectionOwnerEvidence,
       envCaveats: generationEnvCaveats,
       validatedReproScripts: reproSources,
-      validatedReproContractSeedText,
       publicContracts: effectivePublicContracts,
       verificationTarget,
       recordLlmEvidencePacket: (packet) => {

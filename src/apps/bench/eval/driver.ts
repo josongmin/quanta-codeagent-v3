@@ -56,7 +56,6 @@ import {
   selectionReproPrepK,
   selectionGenerationEnvCaveats,
   UsageTap,
-  validatedReproContractSeed,
   validatedReproRepairSeed,
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
@@ -796,7 +795,6 @@ const runSelectionPhase = async (
     reproHint,
     reproTest,
   })
-  const validatedReproContractSeedText = validatedReproContractSeed(reproSources)
   const mergeHint = (seed: string | undefined): string | undefined =>
     verifySelectProofRequired && selectorMode === "clean"
       ? buildSelectionGenerationPrompt({
@@ -809,15 +807,12 @@ const runSelectionPhase = async (
           ...(reproSources.length > 0 ? { validatedReproScripts: reproSources } : {}),
           ...(closureHint !== undefined ? { closureHint } : {}),
           ...(generationEnvCaveats.length > 0 ? { envCaveats: generationEnvCaveats } : {}),
-          ...(() => {
-            const effectiveSeed =
-              validatedReproContractSeedText === undefined
-                ? seed
-                : seed === undefined
-                  ? validatedReproContractSeedText
-                  : `${validatedReproContractSeedText}\n\n${seed}`
-            return effectiveSeed !== undefined ? { seed: effectiveSeed } : {}
-          })(),
+          // NOTE: the validated repro scripts reach generation ONCE, via
+          // `validatedReproScripts` → `validated_public_repro` staticFacts (full,
+          // bounded). They are deliberately NOT also merged into `seed`: that
+          // prepend pushed the real diversity/counterfactual seed past the seed's
+          // length cap (destroying fix-site diversity) and duplicated the scripts.
+          ...(seed !== undefined ? { seed } : {}),
           recordLlmEvidencePacket: (packet) => {
             recordLlmEvidencePacket(selectionLlmEvidence, packet)
           },
