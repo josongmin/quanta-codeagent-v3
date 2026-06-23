@@ -176,359 +176,386 @@ const cmdSynthetic = async (): Promise<number> => {
   return 0
 }
 
+type LoadGroundingReport = (runId: string) => ReturnType<typeof buildGroundingReport>
+
+const groundingRun = async (storeDir: string | undefined): Promise<number> => {
+  const suite = argValue("--suite")
+  const corpus = argValue("--corpus")
+  if (suite !== undefined && suite !== "canary" && suite !== "nightly") {
+    console.error("eval grounding run: --suite must be canary or nightly")
+    return 1
+  }
+  if (
+    corpus !== undefined &&
+    !GROUNDING_CORPORA.includes(corpus as (typeof GROUNDING_CORPORA)[number])
+  ) {
+    console.error(`eval grounding run: --corpus must be one of ${GROUNDING_CORPORA.join(", ")}`)
+    return 1
+  }
+  const mode = argValue("--mode")
+  if (mode !== undefined && !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number])) {
+    console.error(`eval grounding run: --mode must be one of ${GROUNDING_MODES.join(", ")}`)
+    return 1
+  }
+  const limitRaw = argValue("--limit")
+  const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined
+  if (
+    limitRaw !== undefined &&
+    (!Number.isFinite(limit) || limit === undefined || limit < 0 || !Number.isInteger(limit))
+  ) {
+    console.error(`eval grounding run: invalid --limit ${limitRaw}`)
+    return 1
+  }
+  const concurrencyRaw = argValue("--concurrency")
+  const concurrency = concurrencyRaw !== undefined ? Number.parseInt(concurrencyRaw, 10) : undefined
+  if (
+    concurrencyRaw !== undefined &&
+    (!Number.isFinite(concurrency) ||
+      concurrency === undefined ||
+      concurrency < 1 ||
+      !Number.isInteger(concurrency))
+  ) {
+    console.error(`eval grounding run: invalid --concurrency ${concurrencyRaw}`)
+    return 1
+  }
+  const agent = resolveLLM("agent")
+  if (agent === null) return 0
+  const summary = await runGrounding({
+    llm: agent.llm,
+    ...(suite !== undefined ? { suite } : {}),
+    ...(corpus !== undefined ? { corpus: corpus as (typeof GROUNDING_CORPORA)[number] } : {}),
+    ...(mode !== undefined ? { mode: mode as (typeof GROUNDING_MODES)[number] } : {}),
+    ...(storeDir !== undefined ? { storeDir } : {}),
+    ...(argValue("--case") !== undefined ? { caseId: argValue("--case")! } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+    ...(concurrency !== undefined ? { concurrency } : {}),
+  })
+  const jsonOut = argValue("--json-out")
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(summary, null, 2)}\n`)
+  console.log(
+    `grounding run=${summary.runId} corpus=${summary.corpus} mode=${summary.mode} total=${summary.total} pass=${summary.counts.pass} partial=${summary.counts.partial} fail=${summary.counts.fail} err=${summary.counts.error} concurrency=${summary.concurrency} (${summary.durationMs}ms)`,
+  )
+  return 0
+}
+
+const groundingPreflight = async (): Promise<number> => {
+  const agent = resolveLLM("agent")
+  if (agent === null) return 0
+  const out = await runGroundingPreflightCheck(agent.llm)
+  const jsonOut = argValue("--json-out")
+  const payload = {
+    provider: out.provider ?? null,
+    model: out.model ?? null,
+    surfaceId: out.surfaceId ?? null,
+    transportId: out.transportId ?? null,
+    authMode: out.authMode ?? null,
+    durationMs: out.durationMs,
+    ok: out.error === undefined && out.decision !== undefined,
+    error: out.error ?? null,
+    errorKind: out.errorKind ?? null,
+    rawText: out.rawText,
+  }
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
+  console.log(JSON.stringify(payload, null, 2))
+  return payload.ok ? 0 : 1
+}
+
+const groundingReport = (loadGroundingReport: LoadGroundingReport): number => {
+  const runId = argValue("--run-id")
+  if (runId === undefined) {
+    console.error("eval grounding report: --run-id <id> is required")
+    return 1
+  }
+  const out = loadGroundingReport(runId)
+  const markdownOut = argValue("--markdown-out")
+  const jsonOut = argValue("--json-out")
+  if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out.report, null, 2)}\n`)
+  console.log(out.markdown)
+  console.error(out.headline)
+  return 0
+}
+
+const groundingBaseline = (store: ResultStore): number => {
+  const candidateRunId = argValue("--candidate")
+  if (candidateRunId === undefined) {
+    console.error("eval grounding baseline: --candidate <id> is required")
+    return 1
+  }
+  const out = resolveGroundingBaseline(candidateRunId, store.readRunSummaries("grounding"))
+  const jsonOut = argValue("--json-out")
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out, null, 2)}\n`)
+  console.log(
+    `grounding baseline candidate=${candidateRunId} status=${out.status}${out.baselineRunId !== undefined ? ` baseline=${out.baselineRunId}` : ""} reason=${out.reason}`,
+  )
+  return 0
+}
+
+const groundingRouteMatrixGate = (
+  routeMatrix: string,
+  loadGroundingReport: LoadGroundingReport,
+): number => {
+  if (!isGroundingRouteMatrixName(routeMatrix)) {
+    console.error("eval grounding gate: --route-matrix must name a known matrix")
+    return 1
+  }
+  const runIds = csvValues(argValue("--run-ids"))
+  if (runIds === undefined || runIds.length === 0) {
+    console.error("eval grounding gate: --run-ids <id1,id2,...> is required with --route-matrix")
+    return 1
+  }
+  const profile = argValue("--profile")
+  if (profile === undefined || !isGroundingGateProfile(profile)) {
+    console.error(
+      `eval grounding gate: --profile must be one of ${GROUNDING_GATE_PROFILES.join(", ")}`,
+    )
+    return 1
+  }
+  const reports = runIds.map((runId) => loadGroundingReport(runId).report)
+  const gate = buildGroundingRouteMatrixGateResult(reports, routeMatrix, profile)
+  const markdownOut = argValue("--markdown-out")
+  const jsonOut = argValue("--json-out")
+  if (markdownOut !== undefined) writeTextFile(markdownOut, gate.markdown)
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
+  if (gate.result.failures.length === 0) {
+    console.error(`grounding route-matrix gate passed: matrix=${routeMatrix}`)
+    return 0
+  }
+  console.error(`grounding route-matrix gate failed: matrix=${routeMatrix}`)
+  for (const failure of gate.result.failures) {
+    console.error(`- ${failure.kind}:${failure.cellId} ${failure.message}`)
+  }
+  return 1
+}
+
+const groundingGate = (loadGroundingReport: LoadGroundingReport): number => {
+  const routeMatrix = argValue("--route-matrix")
+  if (routeMatrix !== undefined) {
+    return groundingRouteMatrixGate(routeMatrix, loadGroundingReport)
+  }
+  const runId = argValue("--run-id")
+  if (runId === undefined) {
+    console.error("eval grounding gate: --run-id <id> is required")
+    return 1
+  }
+  const profile = argValue("--profile")
+  if (profile === undefined || !isGroundingGateProfile(profile)) {
+    console.error(
+      `eval grounding gate: --profile must be one of ${GROUNDING_GATE_PROFILES.join(", ")}`,
+    )
+    return 1
+  }
+  const out = loadGroundingReport(runId)
+  const gate = buildGroundingGateResult(out.report, profile)
+  const markdownOut = argValue("--markdown-out")
+  const jsonOut = argValue("--json-out")
+  if (markdownOut !== undefined) writeTextFile(markdownOut, gate.markdown)
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
+  if (gate.result.failures.length === 0) {
+    console.error(`grounding gate passed: profile=${profile} runId=${runId}`)
+    return 0
+  }
+  console.error(`grounding gate failed: profile=${profile} runId=${runId}`)
+  for (const failure of gate.result.failures) {
+    console.error(`- ${failure.metric}: expected ${failure.expected}, got ${failure.actual}`)
+  }
+  return 1
+}
+
+const groundingScaffoldReplay = (): number => {
+  const source = argValue("--source")
+  const id = argValue("--id")
+  const targetUtterance = argValue("--target-utterance")
+  const bucket = argValue("--bucket")
+  const severity = argValue("--severity")
+  const outPath = argValue("--out")
+  if (
+    source === undefined ||
+    id === undefined ||
+    targetUtterance === undefined ||
+    bucket === undefined ||
+    severity === undefined ||
+    outPath === undefined
+  ) {
+    console.error(
+      "eval grounding scaffold-replay: --source, --id, --target-utterance, --bucket, --severity, --out are required",
+    )
+    return 1
+  }
+  const sessionSnapshotPath = argValue("--session-snapshot")
+  const stateJsonPath = argValue("--state-json")
+  const candidateThreadIds = csvValues(argValue("--candidate-threads"))
+  const candidateReferentIds = csvValues(argValue("--candidate-referents"))
+  const ambiguityClass = argValue("--ambiguity-class")
+  const scaffoldOpts: Parameters<typeof writeGroundingReplayDraft>[0] = {
+    source,
+    id,
+    targetUtterance,
+    bucket: bucket as never,
+    severity: severity as never,
+    outPath,
+  }
+  if (sessionSnapshotPath !== undefined) scaffoldOpts.sessionSnapshotPath = sessionSnapshotPath
+  if (stateJsonPath !== undefined) scaffoldOpts.stateContract = readJsonFile(stateJsonPath) as never
+  if (candidateThreadIds !== undefined) scaffoldOpts.candidateThreadIds = candidateThreadIds
+  if (candidateReferentIds !== undefined) scaffoldOpts.candidateReferentIds = candidateReferentIds
+  if (ambiguityClass !== undefined) scaffoldOpts.ambiguityClass = ambiguityClass as never
+  const result = writeGroundingReplayDraft(scaffoldOpts)
+  const jsonOut = argValue("--json-out")
+  const payload = {
+    outPath: result.outPath,
+    id: result.draft.id,
+    source: result.draft.sourceProvenance,
+  }
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
+  console.log(`grounding scaffold-replay wrote ${result.outPath}`)
+  return 0
+}
+
+const groundingPromoteReplay = (): number => {
+  const draftPath = argValue("--draft")
+  const goldJson = argValue("--gold-json")
+  const corpus = argValue("--corpus")
+  const outPath = argValue("--out")
+  if (
+    draftPath === undefined ||
+    goldJson === undefined ||
+    corpus === undefined ||
+    outPath === undefined
+  ) {
+    console.error(
+      "eval grounding promote-replay: --draft, --gold-json, --corpus, --out are required",
+    )
+    return 1
+  }
+  if (corpus !== "replay_critical" && corpus !== "replay_nightly") {
+    console.error(
+      "eval grounding promote-replay: --corpus must be replay_critical or replay_nightly",
+    )
+    return 1
+  }
+  const blockingEligibleRaw = argValue("--blocking-eligible")
+  const reviewer = argValue("--reviewer")
+  const reviewedAt = argValue("--reviewed-at")
+  const humanAudit =
+    reviewer !== undefined || reviewedAt !== undefined
+      ? {
+          status: "reviewed" as const,
+          ...(reviewer !== undefined ? { reviewer } : {}),
+          ...(reviewedAt !== undefined ? { reviewedAt } : {}),
+        }
+      : undefined
+  const result = writePromotedGroundingReplayCase({
+    draft: readGroundingReplayDraft(draftPath),
+    gold: readJsonFile(goldJson) as never,
+    corpus,
+    ...(blockingEligibleRaw !== undefined
+      ? { blockingEligible: blockingEligibleRaw === "true" }
+      : {}),
+    ...(humanAudit !== undefined ? { humanAudit } : {}),
+    outPath,
+  })
+  const jsonOut = argValue("--json-out")
+  const payload = {
+    outPath: result.outPath,
+    id: result.fixture.id,
+    corpus: result.fixture.corpus ?? corpus,
+    source: result.fixture.sourceProvenance ?? null,
+    humanAudit: result.fixture.humanAudit ?? null,
+  }
+  if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
+  console.log(`grounding promote-replay wrote ${result.outPath}`)
+  return 0
+}
+
+const groundingCompare = (loadGroundingReport: LoadGroundingReport): number => {
+  const baselineRunId = argValue("--baseline")
+  const candidateRunId = argValue("--candidate")
+  if (baselineRunId === undefined || candidateRunId === undefined) {
+    console.error("eval grounding compare: --baseline <id> and --candidate <id> are required")
+    return 1
+  }
+  const out = buildGroundingComparison(
+    loadGroundingReport(baselineRunId).report,
+    loadGroundingReport(candidateRunId).report,
+  )
+  const markdownOut = argValue("--markdown-out")
+  const jsonOut = argValue("--json-out")
+  if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
+  if (jsonOut !== undefined) {
+    writeTextFile(jsonOut, `${JSON.stringify(out.comparison, null, 2)}\n`)
+  }
+  console.log(out.markdown)
+  console.error(out.headline)
+  return 0
+}
+
+const groundingRegress = (loadGroundingReport: LoadGroundingReport): number => {
+  const baselineRunId = argValue("--baseline")
+  const candidateRunId = argValue("--candidate")
+  if (baselineRunId === undefined || candidateRunId === undefined) {
+    console.error("eval grounding regress: --baseline <id> and --candidate <id> are required")
+    return 1
+  }
+  const profile = argValue("--profile")
+  if (profile === undefined || !isGroundingRegressionProfile(profile)) {
+    console.error(
+      `eval grounding regress: --profile must be one of ${GROUNDING_REGRESSION_PROFILES.join(", ")}`,
+    )
+    return 1
+  }
+  const out = buildGroundingComparison(
+    loadGroundingReport(baselineRunId).report,
+    loadGroundingReport(candidateRunId).report,
+  )
+  const markdownOut = argValue("--markdown-out")
+  const jsonOut = argValue("--json-out")
+  const regression = buildGroundingRegressionResult(out.comparison, profile)
+  if (markdownOut !== undefined) writeTextFile(markdownOut, regression.markdown)
+  if (jsonOut !== undefined)
+    writeTextFile(jsonOut, `${JSON.stringify(regression.result, null, 2)}\n`)
+  if (regression.result.failures.length === 0) {
+    console.error(
+      `grounding regress passed: profile=${profile} baseline=${baselineRunId} candidate=${candidateRunId}`,
+    )
+    return 0
+  }
+  console.error(
+    `grounding regress failed: profile=${profile} baseline=${baselineRunId} candidate=${candidateRunId}`,
+  )
+  for (const failure of regression.result.failures) {
+    console.error(`- ${failure.kind}: ${failure.message}`)
+  }
+  return 1
+}
+
 const cmdGrounding = async (): Promise<number> => {
   const sub = argv[1]
   const storeDir = argValue("--store-dir")
   const store = new ResultStore({
     ...(storeDir !== undefined ? { dir: storeDir } : {}),
   })
-  const loadGroundingReport = (runId: string) =>
+  const loadGroundingReport: LoadGroundingReport = (runId) =>
     buildGroundingReport(store.readRunRecords(runId), runId, store.readRunSummary(runId))
   switch (sub) {
-    case "run": {
-      const suite = argValue("--suite")
-      const corpus = argValue("--corpus")
-      if (suite !== undefined && suite !== "canary" && suite !== "nightly") {
-        console.error("eval grounding run: --suite must be canary or nightly")
-        return 1
-      }
-      if (
-        corpus !== undefined &&
-        !GROUNDING_CORPORA.includes(corpus as (typeof GROUNDING_CORPORA)[number])
-      ) {
-        console.error(`eval grounding run: --corpus must be one of ${GROUNDING_CORPORA.join(", ")}`)
-        return 1
-      }
-      const mode = argValue("--mode")
-      if (
-        mode !== undefined &&
-        !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number])
-      ) {
-        console.error(`eval grounding run: --mode must be one of ${GROUNDING_MODES.join(", ")}`)
-        return 1
-      }
-      const limitRaw = argValue("--limit")
-      const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined
-      if (
-        limitRaw !== undefined &&
-        (!Number.isFinite(limit) || limit === undefined || limit < 0 || !Number.isInteger(limit))
-      ) {
-        console.error(`eval grounding run: invalid --limit ${limitRaw}`)
-        return 1
-      }
-      const concurrencyRaw = argValue("--concurrency")
-      const concurrency =
-        concurrencyRaw !== undefined ? Number.parseInt(concurrencyRaw, 10) : undefined
-      if (
-        concurrencyRaw !== undefined &&
-        (!Number.isFinite(concurrency) ||
-          concurrency === undefined ||
-          concurrency < 1 ||
-          !Number.isInteger(concurrency))
-      ) {
-        console.error(`eval grounding run: invalid --concurrency ${concurrencyRaw}`)
-        return 1
-      }
-      const agent = resolveLLM("agent")
-      if (agent === null) return 0
-      const summary = await runGrounding({
-        llm: agent.llm,
-        ...(suite !== undefined ? { suite } : {}),
-        ...(corpus !== undefined ? { corpus: corpus as (typeof GROUNDING_CORPORA)[number] } : {}),
-        ...(mode !== undefined ? { mode: mode as (typeof GROUNDING_MODES)[number] } : {}),
-        ...(storeDir !== undefined ? { storeDir } : {}),
-        ...(argValue("--case") !== undefined ? { caseId: argValue("--case")! } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-        ...(concurrency !== undefined ? { concurrency } : {}),
-      })
-      const jsonOut = argValue("--json-out")
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(summary, null, 2)}\n`)
-      console.log(
-        `grounding run=${summary.runId} corpus=${summary.corpus} mode=${summary.mode} total=${summary.total} pass=${summary.counts.pass} partial=${summary.counts.partial} fail=${summary.counts.fail} err=${summary.counts.error} concurrency=${summary.concurrency} (${summary.durationMs}ms)`,
-      )
-      return 0
-    }
-    case "preflight": {
-      const agent = resolveLLM("agent")
-      if (agent === null) return 0
-      const out = await runGroundingPreflightCheck(agent.llm)
-      const jsonOut = argValue("--json-out")
-      const payload = {
-        provider: out.provider ?? null,
-        model: out.model ?? null,
-        surfaceId: out.surfaceId ?? null,
-        transportId: out.transportId ?? null,
-        authMode: out.authMode ?? null,
-        durationMs: out.durationMs,
-        ok: out.error === undefined && out.decision !== undefined,
-        error: out.error ?? null,
-        errorKind: out.errorKind ?? null,
-        rawText: out.rawText,
-      }
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
-      console.log(JSON.stringify(payload, null, 2))
-      return payload.ok ? 0 : 1
-    }
-    case "report": {
-      const runId = argValue("--run-id")
-      if (runId === undefined) {
-        console.error("eval grounding report: --run-id <id> is required")
-        return 1
-      }
-      const out = loadGroundingReport(runId)
-      const markdownOut = argValue("--markdown-out")
-      const jsonOut = argValue("--json-out")
-      if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out.report, null, 2)}\n`)
-      console.log(out.markdown)
-      console.error(out.headline)
-      return 0
-    }
-    case "baseline": {
-      const candidateRunId = argValue("--candidate")
-      if (candidateRunId === undefined) {
-        console.error("eval grounding baseline: --candidate <id> is required")
-        return 1
-      }
-      const out = resolveGroundingBaseline(candidateRunId, store.readRunSummaries("grounding"))
-      const jsonOut = argValue("--json-out")
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out, null, 2)}\n`)
-      console.log(
-        `grounding baseline candidate=${candidateRunId} status=${out.status}${out.baselineRunId !== undefined ? ` baseline=${out.baselineRunId}` : ""} reason=${out.reason}`,
-      )
-      return 0
-    }
-    case "gate": {
-      const routeMatrix = argValue("--route-matrix")
-      if (routeMatrix !== undefined) {
-        if (!isGroundingRouteMatrixName(routeMatrix)) {
-          console.error("eval grounding gate: --route-matrix must name a known matrix")
-          return 1
-        }
-        const runIds = csvValues(argValue("--run-ids"))
-        if (runIds === undefined || runIds.length === 0) {
-          console.error(
-            "eval grounding gate: --run-ids <id1,id2,...> is required with --route-matrix",
-          )
-          return 1
-        }
-        const profile = argValue("--profile")
-        if (profile === undefined || !isGroundingGateProfile(profile)) {
-          console.error(
-            `eval grounding gate: --profile must be one of ${GROUNDING_GATE_PROFILES.join(", ")}`,
-          )
-          return 1
-        }
-        const reports = runIds.map((runId) => loadGroundingReport(runId).report)
-        const gate = buildGroundingRouteMatrixGateResult(reports, routeMatrix, profile)
-        const markdownOut = argValue("--markdown-out")
-        const jsonOut = argValue("--json-out")
-        if (markdownOut !== undefined) writeTextFile(markdownOut, gate.markdown)
-        if (jsonOut !== undefined)
-          writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
-        if (gate.result.failures.length === 0) {
-          console.error(`grounding route-matrix gate passed: matrix=${routeMatrix}`)
-          return 0
-        }
-        console.error(`grounding route-matrix gate failed: matrix=${routeMatrix}`)
-        for (const failure of gate.result.failures) {
-          console.error(`- ${failure.kind}:${failure.cellId} ${failure.message}`)
-        }
-        return 1
-      }
-      const runId = argValue("--run-id")
-      if (runId === undefined) {
-        console.error("eval grounding gate: --run-id <id> is required")
-        return 1
-      }
-      const profile = argValue("--profile")
-      if (profile === undefined || !isGroundingGateProfile(profile)) {
-        console.error(
-          `eval grounding gate: --profile must be one of ${GROUNDING_GATE_PROFILES.join(", ")}`,
-        )
-        return 1
-      }
-      const out = loadGroundingReport(runId)
-      const gate = buildGroundingGateResult(out.report, profile)
-      const markdownOut = argValue("--markdown-out")
-      const jsonOut = argValue("--json-out")
-      if (markdownOut !== undefined) writeTextFile(markdownOut, gate.markdown)
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
-      if (gate.result.failures.length === 0) {
-        console.error(`grounding gate passed: profile=${profile} runId=${runId}`)
-        return 0
-      }
-      console.error(`grounding gate failed: profile=${profile} runId=${runId}`)
-      for (const failure of gate.result.failures) {
-        console.error(`- ${failure.metric}: expected ${failure.expected}, got ${failure.actual}`)
-      }
-      return 1
-    }
-    case "scaffold-replay": {
-      const source = argValue("--source")
-      const id = argValue("--id")
-      const targetUtterance = argValue("--target-utterance")
-      const bucket = argValue("--bucket")
-      const severity = argValue("--severity")
-      const outPath = argValue("--out")
-      if (
-        source === undefined ||
-        id === undefined ||
-        targetUtterance === undefined ||
-        bucket === undefined ||
-        severity === undefined ||
-        outPath === undefined
-      ) {
-        console.error(
-          "eval grounding scaffold-replay: --source, --id, --target-utterance, --bucket, --severity, --out are required",
-        )
-        return 1
-      }
-      const sessionSnapshotPath = argValue("--session-snapshot")
-      const stateJsonPath = argValue("--state-json")
-      const candidateThreadIds = csvValues(argValue("--candidate-threads"))
-      const candidateReferentIds = csvValues(argValue("--candidate-referents"))
-      const ambiguityClass = argValue("--ambiguity-class")
-      const scaffoldOpts: Parameters<typeof writeGroundingReplayDraft>[0] = {
-        source,
-        id,
-        targetUtterance,
-        bucket: bucket as never,
-        severity: severity as never,
-        outPath,
-      }
-      if (sessionSnapshotPath !== undefined) scaffoldOpts.sessionSnapshotPath = sessionSnapshotPath
-      if (stateJsonPath !== undefined)
-        scaffoldOpts.stateContract = readJsonFile(stateJsonPath) as never
-      if (candidateThreadIds !== undefined) scaffoldOpts.candidateThreadIds = candidateThreadIds
-      if (candidateReferentIds !== undefined)
-        scaffoldOpts.candidateReferentIds = candidateReferentIds
-      if (ambiguityClass !== undefined) scaffoldOpts.ambiguityClass = ambiguityClass as never
-      const result = writeGroundingReplayDraft(scaffoldOpts)
-      const jsonOut = argValue("--json-out")
-      const payload = {
-        outPath: result.outPath,
-        id: result.draft.id,
-        source: result.draft.sourceProvenance,
-      }
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
-      console.log(`grounding scaffold-replay wrote ${result.outPath}`)
-      return 0
-    }
-    case "promote-replay": {
-      const draftPath = argValue("--draft")
-      const goldJson = argValue("--gold-json")
-      const corpus = argValue("--corpus")
-      const outPath = argValue("--out")
-      if (
-        draftPath === undefined ||
-        goldJson === undefined ||
-        corpus === undefined ||
-        outPath === undefined
-      ) {
-        console.error(
-          "eval grounding promote-replay: --draft, --gold-json, --corpus, --out are required",
-        )
-        return 1
-      }
-      if (corpus !== "replay_critical" && corpus !== "replay_nightly") {
-        console.error(
-          "eval grounding promote-replay: --corpus must be replay_critical or replay_nightly",
-        )
-        return 1
-      }
-      const blockingEligibleRaw = argValue("--blocking-eligible")
-      const reviewer = argValue("--reviewer")
-      const reviewedAt = argValue("--reviewed-at")
-      const humanAudit =
-        reviewer !== undefined || reviewedAt !== undefined
-          ? {
-              status: "reviewed" as const,
-              ...(reviewer !== undefined ? { reviewer } : {}),
-              ...(reviewedAt !== undefined ? { reviewedAt } : {}),
-            }
-          : undefined
-      const result = writePromotedGroundingReplayCase({
-        draft: readGroundingReplayDraft(draftPath),
-        gold: readJsonFile(goldJson) as never,
-        corpus,
-        ...(blockingEligibleRaw !== undefined
-          ? { blockingEligible: blockingEligibleRaw === "true" }
-          : {}),
-        ...(humanAudit !== undefined ? { humanAudit } : {}),
-        outPath,
-      })
-      const jsonOut = argValue("--json-out")
-      const payload = {
-        outPath: result.outPath,
-        id: result.fixture.id,
-        corpus: result.fixture.corpus ?? corpus,
-        source: result.fixture.sourceProvenance ?? null,
-        humanAudit: result.fixture.humanAudit ?? null,
-      }
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
-      console.log(`grounding promote-replay wrote ${result.outPath}`)
-      return 0
-    }
-    case "compare": {
-      const baselineRunId = argValue("--baseline")
-      const candidateRunId = argValue("--candidate")
-      if (baselineRunId === undefined || candidateRunId === undefined) {
-        console.error("eval grounding compare: --baseline <id> and --candidate <id> are required")
-        return 1
-      }
-      const out = buildGroundingComparison(
-        loadGroundingReport(baselineRunId).report,
-        loadGroundingReport(candidateRunId).report,
-      )
-      const markdownOut = argValue("--markdown-out")
-      const jsonOut = argValue("--json-out")
-      if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
-      if (jsonOut !== undefined) {
-        writeTextFile(jsonOut, `${JSON.stringify(out.comparison, null, 2)}\n`)
-      }
-      console.log(out.markdown)
-      console.error(out.headline)
-      return 0
-    }
-    case "regress": {
-      const baselineRunId = argValue("--baseline")
-      const candidateRunId = argValue("--candidate")
-      if (baselineRunId === undefined || candidateRunId === undefined) {
-        console.error("eval grounding regress: --baseline <id> and --candidate <id> are required")
-        return 1
-      }
-      const profile = argValue("--profile")
-      if (profile === undefined || !isGroundingRegressionProfile(profile)) {
-        console.error(
-          `eval grounding regress: --profile must be one of ${GROUNDING_REGRESSION_PROFILES.join(", ")}`,
-        )
-        return 1
-      }
-      const out = buildGroundingComparison(
-        loadGroundingReport(baselineRunId).report,
-        loadGroundingReport(candidateRunId).report,
-      )
-      const markdownOut = argValue("--markdown-out")
-      const jsonOut = argValue("--json-out")
-      const regression = buildGroundingRegressionResult(out.comparison, profile)
-      if (markdownOut !== undefined) writeTextFile(markdownOut, regression.markdown)
-      if (jsonOut !== undefined)
-        writeTextFile(jsonOut, `${JSON.stringify(regression.result, null, 2)}\n`)
-      if (regression.result.failures.length === 0) {
-        console.error(
-          `grounding regress passed: profile=${profile} baseline=${baselineRunId} candidate=${candidateRunId}`,
-        )
-        return 0
-      }
-      console.error(
-        `grounding regress failed: profile=${profile} baseline=${baselineRunId} candidate=${candidateRunId}`,
-      )
-      for (const failure of regression.result.failures) {
-        console.error(`- ${failure.kind}: ${failure.message}`)
-      }
-      return 1
-    }
+    case "run":
+      return groundingRun(storeDir)
+    case "preflight":
+      return groundingPreflight()
+    case "report":
+      return groundingReport(loadGroundingReport)
+    case "baseline":
+      return groundingBaseline(store)
+    case "gate":
+      return groundingGate(loadGroundingReport)
+    case "scaffold-replay":
+      return groundingScaffoldReplay()
+    case "promote-replay":
+      return groundingPromoteReplay()
+    case "compare":
+      return groundingCompare(loadGroundingReport)
+    case "regress":
+      return groundingRegress(loadGroundingReport)
     default:
       console.error(
         "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
