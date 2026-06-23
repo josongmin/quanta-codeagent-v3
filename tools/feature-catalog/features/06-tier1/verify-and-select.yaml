@@ -42,6 +42,8 @@ evidence:
     - src/agent/verification-bundle/types.ts
     - src/agent/verification-bundle/score.ts
     - src/agent/verification-bundle/index.ts
+    - src/agent/verification-bundle/authority.ts
+    - src/agent/verification-bundle/select-lexicographic.ts
     - src/runner/batch/eval/impacted-test-discovery.ts
     - src/runner/batch/eval/regression-oracle.ts
     - src/apps/bench/eval/regression-oracle-adapter.ts
@@ -55,6 +57,36 @@ evidence:
     - src/runner/knobs/knobs/verify-select-early-accept.ts
     - src/runner/knobs/knobs/verify-select-regression.ts
     - src/runner/knobs/knobs/verify-select-repro.ts
+    # jun-21/22 clean-selector authority layer (extracted/added around selection-executor)
+    - src/runner/batch/eval/selection-gates.ts
+    - src/runner/batch/eval/selection-paths.ts
+    - src/runner/batch/eval/selection-types.ts
+    - src/runner/batch/eval/selection-proof-telemetry.ts
+    - src/runner/batch/eval/selection-repair-seed.ts
+    - src/runner/batch/eval/selection-risk-gate.ts
+    - src/runner/batch/eval/strict-risk-gate.ts
+    - src/runner/batch/eval/selection-smoke.ts
+    - src/runner/batch/eval/candidate-families.ts
+    - src/runner/batch/eval/diff-touched-symbols.ts
+    - src/runner/batch/eval/verification-owner-tests.ts
+    - src/runner/batch/eval/mwe-proof.ts
+    - src/runner/batch/eval/mwe-proof-port.ts
+    - src/runner/batch/eval/static-witness.ts
+    - src/runner/batch/eval/static-witness-adapter.ts
+    - src/runner/batch/eval/static-witness-contracts.ts
+    - src/runner/batch/eval/public-contract-bundle.ts
+    - src/runner/batch/eval/public-contract-types.ts
+    - src/runner/batch/eval/counterfactual-contract.ts
+    - src/runner/batch/eval/counterfactual-risk.ts
+    - src/runner/batch/eval/counterfactual-seed.ts
+    - src/runner/batch/eval/patch-static-sanity.ts
+    - src/runner/batch/eval/llm-evidence-packet.ts
+    - src/runner/batch/eval/llm-risk-gate.ts
+    - src/runner/knobs/knobs/selector-mode.ts
+    - src/runner/knobs/knobs/verify-select-counterfactual.ts
+    - src/runner/knobs/knobs/verify-select-llm-risk-gate.ts
+    - src/runner/knobs/knobs/verify-select-proof-required.ts
+    - src/runner/knobs/knobs/regression-max-tests.ts
     - src/runner/knobs/presets.ts
   adrs: []
   tests:
@@ -90,6 +122,21 @@ knobs:
   - name: verify-select-repro
     where: QUANTA_BENCH_VERIFY_SELECT_REPRO
     purpose: "Generated repro consensus mode for verify-select: unset/hard preserves legacy reject; positive uses votes/k as soft-only; off ablates."
+  - name: selector-mode
+    where: QUANTA_BENCH_SELECTOR_MODE
+    purpose: "Selector authority: clean (executable/structural hard gates only) vs research (legacy heuristic gates allowed). Unset ⇒ research (byte-identical)."
+  - name: verify-select-counterfactual
+    where: QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL
+    purpose: "Counterfactual cand1 seed when cand0 trips the structural risk gate."
+  - name: verify-select-llm-risk-gate
+    where: QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE
+    purpose: "Optional LLM semantic risk gate over the structural gate: shadow (advisory telemetry) | on (expands fail-closed)."
+  - name: verify-select-proof-required
+    where: QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED
+    purpose: "v4 clean submit rail: only candidates with positive executed public proof may submit."
+  - name: regression-max-tests
+    where: QUANTA_BENCH_REGRESSION_MAX_TESTS
+    purpose: "Cap on discovered regression witnesses run; unset ⇒ 12."
 deliberate_hold: null
 notes: |
   FAIL-OPEN is the encoding of the north-star: every nullable signal
