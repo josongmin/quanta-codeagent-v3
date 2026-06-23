@@ -46,7 +46,6 @@
     "src/apps/web-daemon/runtime-factory.ts::buildProductionRuntimeFactory",
     "src/browser/cdp-adapter.ts::createCdpBrowser",
     "src/browser/cdp/cdp-session.ts::createCdpSession",
-    "src/browser/headless-stub.ts::createHeadlessBrowser",
     "src/codemode/runtime.ts::installToolsBinding",
     "src/git/cloud-branch-snapshot.ts::runSnapshot",
     "src/host/runtime/agent-arg-builder.ts::buildBaseFromArgs",
