@@ -627,7 +627,10 @@ describe("ADR-0076 Gap-4 — REGRESSION GUARD: loop NOT yet consuming steerInjec
     // with the negative guards above to show the gap is structural, not
     // accidental. Uses `\bsteerInjection\s*:` so the assertion survives a
     // rename of the local steer variable (e.g. `steer` → `steerText`).
-    const gatePath = resolve(__dirname, "../../src/agent/admissibility-gate.ts")
+    // God-module split (fix-on-sight): `denyFromConfirm` — the sole
+    // `steerInjection:` assignment site — now lives in the gate's shared
+    // helper sibling. The positive control follows the code to its new home.
+    const gatePath = resolve(__dirname, "../../src/agent/admissibility-gate/shared.ts")
     const src = stripComments(readFileSync(gatePath, "utf8"))
     const count = (src.match(/\bsteerInjection\s*:/g) ?? []).length
     expect(count).toBe(1)

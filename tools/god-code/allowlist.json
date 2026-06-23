@@ -3,7 +3,6 @@
   "godModuleMaxLines": 1000,
   "godFunctionMaxLines": 150,
   "modules": [
-    "src/agent/admissibility-gate.ts",
     "src/agent/dispatch.ts",
     "src/apps/bench/cli.ts",
     "src/apps/bench/eval/driver.ts",
