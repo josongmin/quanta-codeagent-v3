@@ -22,7 +22,6 @@ export type StaticWitnessKind =
   | "override-family"
   | "producer-consumer"
   | "registration-callback"
-  | "lifecycle-owner"
 
 export type StaticWitnessAuthority = "authoritative" | "advisory"
 
@@ -72,7 +71,6 @@ const ALLOWED_PROVENANCE: ReadonlySet<string> = new Set<StaticWitnessProvenance>
 /** Kinds that express a structural OWNER / FAMILY obligation over files. */
 const OWNER_FAMILY_KINDS: ReadonlySet<StaticWitnessKind> = new Set<StaticWitnessKind>([
   "override-family",
-  "lifecycle-owner",
 ])
 
 /**
@@ -181,8 +179,8 @@ export function canBeMultiSiteObligation(witness: StaticWitness): boolean {
  * Kinds whose AUTHORITATIVE witness promotes its files to CLEAN owner authority
  * (SCAFF-03 owner-evidence lattice). Conservative — TYPED-RELATION provenance
  * only: a unique symbol definer, a COMPLETE override family, or a both-ends
- * producer/consumer. `registration-callback` / `lifecycle-owner` may shape
- * public contracts but do NOT, on their own, confer owner-admission authority.
+ * producer/consumer. `registration-callback` may shape public contracts but does
+ * NOT, on its own, confer owner-admission authority.
  */
 const CLEAN_OWNER_AUTHORITY_KINDS: ReadonlySet<StaticWitnessKind> = new Set<StaticWitnessKind>([
   "unique-symbol-definer",

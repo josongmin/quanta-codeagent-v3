@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto"
-import { extractIssueHint } from "@/agent/issue-hint"
 import type { FaultEvidencePacket } from "@/agent/fault-evidence"
-import { extractIssueReproSeed } from "@/agent/verification-plan"
+import { extractIssueHint } from "@/agent/issue-hint"
 import type { VerificationPlan, VerificationStep } from "@/agent/verification-plan"
+import { extractIssueReproSeed } from "@/agent/verification-plan"
 import { normalizePublicIssueText } from "@/shared"
 import type { MweProofState } from "./mwe-proof"
-import type { PublicRegressionProofState } from "./repo-regression-discovery-adapter"
 import type { ReproConsensusProofState } from "./repair/resolved-consensus"
+import type { PublicRegressionProofState } from "./repo-regression-discovery-adapter"
 import type { SelectionProofSource, SelectionProofState } from "./selection-types"
 import type { StaticWitness } from "./static-witness"
 
@@ -124,6 +124,22 @@ export interface VerificationTargetFact {
   readonly baseValidatedRed: boolean
 }
 
+/**
+ * The candidate's OWN edit surface — SOURCE-ONLY facts derived from the
+ * candidate's unified diff (`filesFromUnifiedDiff` / `diffTouchedSymbols`). It
+ * lets the LLM/router tell whether the candidate actually touched the
+ * owner/proof surface. ANSWER-KEY FENCE: never a hidden-test path, never an
+ * executable command — only the files/symbols the candidate's own diff edits,
+ * plus an OPTIONAL bounded summary (never the full diff). Blindness-scanned like
+ * every other evidence field (see {@link evidenceStrings}).
+ */
+export interface CandidateEditSurfaceFact {
+  readonly touchedFiles: readonly string[]
+  readonly touchedSymbols: readonly string[]
+  /** OPTIONAL bounded, source-only patch SUMMARY — never the full diff. */
+  readonly patchSummary?: string
+}
+
 export interface LlmEvidencePacket {
   readonly stage: LlmEvidencePacketStage
   readonly instanceIdHash: string
@@ -138,6 +154,8 @@ export interface LlmEvidencePacket {
   readonly contractFacts: readonly ContractFact[]
   readonly staticFacts: readonly StaticFact[]
   readonly verificationTarget?: VerificationTargetFact
+  /** SOURCE-ONLY candidate edit surface (candidate-local packets only). */
+  readonly candidateEditSurface?: CandidateEditSurfaceFact
   readonly missingEvidence: readonly MissingEvidenceFact[]
 }
 
@@ -155,9 +173,7 @@ export interface LlmEvidenceArtifacts {
   readonly selectionExplanationHistory?: readonly LlmEvidencePacket[]
 }
 
-export type LlmEvidenceRevisionByStage = Readonly<
-  Partial<Record<LlmEvidencePacketStage, string>>
->
+export type LlmEvidenceRevisionByStage = Readonly<Partial<Record<LlmEvidencePacketStage, string>>>
 
 export interface LlmEvidencePacketCounts {
   readonly candidateGeneration: number
@@ -242,6 +258,15 @@ const evidenceStrings = (packet: LlmEvidencePacket): string[] => {
   for (const c of packet.contractFacts) out.push(c.contractId, c.authority)
   for (const s of packet.staticFacts) out.push(s.kind, s.value)
   for (const m of packet.missingEvidence) out.push(m.kind, m.reason)
+  if (packet.candidateEditSurface !== undefined) {
+    out.push(
+      ...packet.candidateEditSurface.touchedFiles,
+      ...packet.candidateEditSurface.touchedSymbols,
+    )
+    if (packet.candidateEditSurface.patchSummary !== undefined) {
+      out.push(packet.candidateEditSurface.patchSummary)
+    }
+  }
   if (packet.verificationTarget !== undefined) {
     const steps = [
       ...(packet.verificationTarget.primaryRail ? [packet.verificationTarget.primaryRail] : []),
@@ -343,7 +368,8 @@ const stagePackets = (
 ): readonly LlmEvidencePacket[] => {
   if (stage === "intake") return artifacts.intake !== undefined ? [artifacts.intake] : []
   if (stage === "candidate_review") {
-    if ((artifacts.candidateReviewHistory?.length ?? 0) > 0) return artifacts.candidateReviewHistory ?? []
+    if ((artifacts.candidateReviewHistory?.length ?? 0) > 0)
+      return artifacts.candidateReviewHistory ?? []
     return artifacts.candidateReview !== undefined ? [artifacts.candidateReview] : []
   }
   if (stage === "candidate_post_review") {
@@ -353,7 +379,8 @@ const stagePackets = (
     return artifacts.candidatePostReview !== undefined ? [artifacts.candidatePostReview] : []
   }
   if (stage === "candidate_generation") {
-    if ((artifacts.candidateGenerationHistory?.length ?? 0) > 0) return artifacts.candidateGenerationHistory ?? []
+    if ((artifacts.candidateGenerationHistory?.length ?? 0) > 0)
+      return artifacts.candidateGenerationHistory ?? []
     return artifacts.candidateGeneration !== undefined ? [artifacts.candidateGeneration] : []
   }
   if (stage === "repair_seed") {
@@ -412,7 +439,8 @@ export const recordLlmEvidencePacket = (
     sink.candidateReviewHistory = [packet]
   } else if (packet.stage === "candidate_review") {
     sink.candidateReviewHistory = [
-      ...(sink.candidateReviewHistory ?? (sink.candidateReview !== undefined ? [sink.candidateReview] : [])),
+      ...(sink.candidateReviewHistory ??
+        (sink.candidateReview !== undefined ? [sink.candidateReview] : [])),
       packet,
     ]
   } else if (packet.stage === "candidate_post_review" && sink.candidatePostReview === undefined) {
@@ -424,15 +452,13 @@ export const recordLlmEvidencePacket = (
         (sink.candidatePostReview !== undefined ? [sink.candidatePostReview] : [])),
       packet,
     ]
-  } else if (
-    packet.stage === "candidate_generation" &&
-    sink.candidateGeneration === undefined
-  ) {
+  } else if (packet.stage === "candidate_generation" && sink.candidateGeneration === undefined) {
     sink.candidateGeneration = packet
     sink.candidateGenerationHistory = [packet]
   } else if (packet.stage === "candidate_generation") {
     sink.candidateGenerationHistory = [
-      ...(sink.candidateGenerationHistory ?? (sink.candidateGeneration !== undefined ? [sink.candidateGeneration] : [])),
+      ...(sink.candidateGenerationHistory ??
+        (sink.candidateGeneration !== undefined ? [sink.candidateGeneration] : [])),
       packet,
     ]
   } else if (packet.stage === "repair_seed" && sink.repairSeed === undefined) {
@@ -443,10 +469,7 @@ export const recordLlmEvidencePacket = (
       ...(sink.repairSeedHistory ?? (sink.repairSeed !== undefined ? [sink.repairSeed] : [])),
       packet,
     ]
-  } else if (
-    packet.stage === "selection_explanation" &&
-    sink.selectionExplanation === undefined
-  ) {
+  } else if (packet.stage === "selection_explanation" && sink.selectionExplanation === undefined) {
     sink.selectionExplanation = packet
     sink.selectionExplanationHistory = [packet]
   } else if (packet.stage === "selection_explanation") {
@@ -461,6 +484,19 @@ export const recordLlmEvidencePacket = (
 /* ------------------------------------------------------------------ */
 /* Typed evidence assembly helpers (shared by all builders)            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Per-file `owner_slice` missingEvidence for owners whose source slice could not
+ * be resolved (B2). SAME emission `candidate_generation` already does
+ * (llm-evidence-packet.ts), now SHARED so repair_seed / candidate_post_review
+ * make a missing slice VISIBLE instead of silently dropping it.
+ */
+export const ownerSliceMissingEvidence = (
+  ownerEvidence: readonly OwnerEvidenceFact[],
+): MissingEvidenceFact[] =>
+  ownerEvidence
+    .filter((o) => o.sourceSlice === undefined)
+    .map((o) => ({ kind: "owner_slice", reason: `no_resolvable_slice:${o.file}` }))
 
 const firstNonEmptyLine = (text: string): string | undefined =>
   text
@@ -637,7 +673,9 @@ export const verificationTargetFromPlan = (
       kind: step.kind,
       ...(cmdIsBlind ? { cmd: step.cmd } : { cmdWithheld: true }),
       ...(step.authority !== undefined ? { authority: step.authority } : {}),
-      ...(step.successPredicate !== undefined ? { successPredicate: step.successPredicate.type } : {}),
+      ...(step.successPredicate !== undefined
+        ? { successPredicate: step.successPredicate.type }
+        : {}),
     }
   }
   return {
@@ -710,8 +748,12 @@ const reproReceipts = (repro: IntakeReproTelemetry | undefined): ProofReceiptFac
     {
       source: "public_mwe",
       state: repro.reason.includes("env") ? "env_prep_failed" : "execution_failed",
-      ...(repro.sampleStdoutTail !== undefined ? { stdoutTail: boundHead(repro.sampleStdoutTail, 600) } : {}),
-      ...(repro.sampleStderrTail !== undefined ? { stderrTail: boundHead(repro.sampleStderrTail, 600) } : {}),
+      ...(repro.sampleStdoutTail !== undefined
+        ? { stdoutTail: boundHead(repro.sampleStdoutTail, 600) }
+        : {}),
+      ...(repro.sampleStderrTail !== undefined
+        ? { stderrTail: boundHead(repro.sampleStderrTail, 600) }
+        : {}),
     },
   ]
 }
@@ -744,14 +786,21 @@ export const buildIntakeLlmEvidencePacket = (input: IntakeLlmEvidenceInput): Llm
       "inspect_owner_slice",
       "generate_candidate",
     ],
-    forbiddenSources: ["hidden_tests", "gold_patch", "official_harness_results", "contaminated_case_labels"],
+    forbiddenSources: [
+      "hidden_tests",
+      "gold_patch",
+      "official_harness_results",
+      "contaminated_case_labels",
+    ],
     publicIssueFacts: describeIssueFacts(input.problemStatement, "intake"),
     ownerEvidence: ownerEvidenceFromFaultEvidence(input),
     proofReceipts: [
       {
         source: "public_mwe",
         state: "static_only",
-        ...(issueReproSeed !== undefined ? { command: `issue-seed:${issueReproSeed.provenance}` } : {}),
+        ...(issueReproSeed !== undefined
+          ? { command: `issue-seed:${issueReproSeed.provenance}` }
+          : {}),
       },
       ...reproReceipts(input.reproTest),
     ],
@@ -811,9 +860,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     ...(input.verificationTarget === undefined
       ? [{ kind: "verification_target", reason: "no_verification_plan_available" }]
       : []),
-    ...input.ownerEvidence
-      .filter((o) => o.sourceSlice === undefined)
-      .map((o) => ({ kind: "owner_slice", reason: `no_resolvable_slice:${o.file}` })),
+    ...ownerSliceMissingEvidence(input.ownerEvidence),
   ]
   const proofReceipts: ProofReceiptFact[] =
     input.reproCommand === undefined
@@ -823,15 +870,22 @@ export const buildSelectionGenerationLlmEvidencePacket = (
             source: "public_mwe",
             state: input.baseValidatedRed === true ? "base_red" : "static_only",
             command: input.reproCommand,
-            ...(input.baseValidatedRed !== undefined ? { baseValidatedRed: input.baseValidatedRed } : {}),
+            ...(input.baseValidatedRed !== undefined
+              ? { baseValidatedRed: input.baseValidatedRed }
+              : {}),
           },
         ]
   return cleanPacket({
     stage: "candidate_generation",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
     evidenceRevision: "selection-generation-v2",
-    question: "Produce one minimal candidate patch that satisfies the active proof target against the bounded owner surface below.",
-    allowedActions: ["edit_candidate_sandbox_only", "inspect_named_owner_files", "produce_minimal_patch"],
+    question:
+      "Produce one minimal candidate patch that satisfies the active proof target against the bounded owner surface below.",
+    allowedActions: [
+      "edit_candidate_sandbox_only",
+      "inspect_named_owner_files",
+      "produce_minimal_patch",
+    ],
     forbiddenSources: [
       "hidden_tests",
       "gold_patch",
@@ -874,7 +928,9 @@ export const buildSelectionGenerationLlmEvidencePacket = (
         ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
         : []),
     ],
-    ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
+    ...(input.verificationTarget !== undefined
+      ? { verificationTarget: input.verificationTarget }
+      : {}),
     missingEvidence,
   })
 }
@@ -893,15 +949,15 @@ export interface SelectionGenerationPromptInput
  * authority exists in this posture, so the field is omitted instead of being
  * coerced into a false hard gate.
  */
-export const buildSelectionGenerationPrompt = (
-  input: SelectionGenerationPromptInput,
-): string => {
+export const buildSelectionGenerationPrompt = (input: SelectionGenerationPromptInput): string => {
   const packet = buildSelectionGenerationLlmEvidencePacket({
     problemStatement: input.problemStatement,
     ownerEvidence: input.ownerEvidence,
     contracts: input.contracts,
     ...(input.baseValidatedRed !== null ? { baseValidatedRed: input.baseValidatedRed } : {}),
-    ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
+    ...(input.verificationTarget !== undefined
+      ? { verificationTarget: input.verificationTarget }
+      : {}),
     ...(input.reproCommand !== undefined ? { reproCommand: input.reproCommand } : {}),
     ...(input.validatedReproScripts !== undefined && input.validatedReproScripts.length > 0
       ? { validatedReproScripts: input.validatedReproScripts }
@@ -988,6 +1044,8 @@ export interface CandidatePostReviewPacketInput {
   readonly proofReceipts: readonly ProofReceiptFact[]
   readonly contracts: readonly ContractFact[]
   readonly verificationTarget?: VerificationTargetFact
+  /** SOURCE-ONLY candidate edit surface (B7). */
+  readonly candidateEditSurface?: CandidateEditSurfaceFact
   readonly missingEvidence?: readonly MissingEvidenceFact[]
 }
 
@@ -1024,17 +1082,27 @@ export const buildCandidatePostReviewLlmEvidencePacket = (
           "Post-exec diagnosis only: use executed proof receipts and deterministic hard reasons to decide what the next bounded repair must preserve or fix.",
       },
     ],
-    ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
-    missingEvidence:
-      input.missingEvidence ??
-      (input.proofReceipts.some((receipt) => receipt.state !== "not_run" && receipt.state !== "static_only")
-        ? []
-        : [
-            {
-              kind: "executed_public_proof",
-              reason: "no_executed_public_proof_receipts_attached_to_post_exec_review",
-            },
-          ]),
+    ...(input.verificationTarget !== undefined
+      ? { verificationTarget: input.verificationTarget }
+      : {}),
+    ...(input.candidateEditSurface !== undefined
+      ? { candidateEditSurface: input.candidateEditSurface }
+      : {}),
+    missingEvidence: [
+      ...(input.missingEvidence ??
+        (input.proofReceipts.some(
+          (receipt) => receipt.state !== "not_run" && receipt.state !== "static_only",
+        )
+          ? []
+          : [
+              {
+                kind: "executed_public_proof",
+                reason: "no_executed_public_proof_receipts_attached_to_post_exec_review",
+              },
+            ])),
+      // B2: a missing owner slice is VISIBLE here, mirroring candidate_generation.
+      ...ownerSliceMissingEvidence(input.ownerEvidence),
+    ],
   })
 
 export const buildCandidatePostReviewPacket = (input: CandidatePostReviewPacketInput): string =>
@@ -1053,6 +1121,8 @@ export interface RepairSeedPacketInput {
   /** Deterministic repair instruction text (bounded) assembled by the selector. */
   readonly repairGuidance?: string
   readonly verificationTarget?: VerificationTargetFact
+  /** SOURCE-ONLY candidate edit surface (B7). */
+  readonly candidateEditSurface?: CandidateEditSurfaceFact
   readonly missingEvidence?: readonly MissingEvidenceFact[]
 }
 
@@ -1071,7 +1141,8 @@ export const buildRepairSeedLlmEvidencePacket = (
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
     evidenceRevision: "selector-repair-v2",
     candidatePatchHash: input.candidatePatchHash,
-    question: "Generate a bounded repair instruction for the next candidate that satisfies the named public proof.",
+    question:
+      "Generate a bounded repair instruction for the next candidate that satisfies the named public proof.",
     allowedActions: [
       "bounded_repair_only",
       "preserve_stronger_structural_coverage",
@@ -1092,12 +1163,25 @@ export const buildRepairSeedLlmEvidencePacket = (
       input.repairGuidance !== undefined && input.repairGuidance.trim() !== ""
         ? [{ kind: "repair_guidance", value: boundHead(input.repairGuidance, 1800) }]
         : [],
-    ...(input.verificationTarget !== undefined ? { verificationTarget: input.verificationTarget } : {}),
-    missingEvidence:
-      input.missingEvidence ??
-      (input.proofReceipts.every((r) => r.state !== "candidate_red" && r.state !== "base_red")
-        ? [{ kind: "executed_public_proof", reason: "no_positive_executed_public_proof_attached" }]
-        : []),
+    ...(input.verificationTarget !== undefined
+      ? { verificationTarget: input.verificationTarget }
+      : {}),
+    ...(input.candidateEditSurface !== undefined
+      ? { candidateEditSurface: input.candidateEditSurface }
+      : {}),
+    missingEvidence: [
+      ...(input.missingEvidence ??
+        (input.proofReceipts.every((r) => r.state !== "candidate_red" && r.state !== "base_red")
+          ? [
+              {
+                kind: "executed_public_proof",
+                reason: "no_positive_executed_public_proof_attached",
+              },
+            ]
+          : [])),
+      // B2: a missing owner slice is VISIBLE here, mirroring candidate_generation.
+      ...ownerSliceMissingEvidence(input.ownerEvidence),
+    ],
   })
 }
 
@@ -1146,7 +1230,9 @@ const proofSummaryReceipts = (
   summary: SelectionExplanationProofSummaryInput | undefined,
 ): ProofReceiptFact[] => {
   if (summary === undefined) return [{ source: "selection", state: "not_run" }]
-  const publicMweReceiptState = (state: MweProofState | undefined): ProofReceiptState | undefined => {
+  const publicMweReceiptState = (
+    state: MweProofState | undefined,
+  ): ProofReceiptState | undefined => {
     switch (state) {
       case undefined:
         return undefined
@@ -1233,7 +1319,8 @@ export const buildSelectionExplanationPacket = (
     stage: "selection_explanation",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
     evidenceRevision: "selection-explanation-v2",
-    question: "Explain the deterministic selection outcome and the remaining missing public evidence.",
+    question:
+      "Explain the deterministic selection outcome and the remaining missing public evidence.",
     allowedActions: [
       "explain_selection_outcome",
       "identify_missing_public_evidence",
@@ -1247,7 +1334,11 @@ export const buildSelectionExplanationPacket = (
       "selection_override",
     ],
     publicIssueFacts: describeIssueFacts(input.problemStatement, "selection_explanation"),
-    ownerEvidence: input.ownerFiles.map((file) => ({ file, symbols: [], provenance: "selection-owner" })),
+    ownerEvidence: input.ownerFiles.map((file) => ({
+      file,
+      symbols: [],
+      provenance: "selection-owner",
+    })),
     proofReceipts: proofSummaryReceipts(input.proofSummary),
     contractFacts: input.candidates.map((c) => ({
       contractId: `candidate:${c.id}`,

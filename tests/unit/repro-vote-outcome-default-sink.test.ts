@@ -49,7 +49,10 @@ const baseArgs = (): ValidateArgs => ({
   timeoutMs: 1000,
 })
 
-const LOUD_FALLBACK = async (): Promise<ValidatorResult> => ({ ok: false, failTail: "FALLBACK_RAN" })
+const LOUD_FALLBACK = async (): Promise<ValidatorResult> => ({
+  ok: false,
+  failTail: "FALLBACK_RAN",
+})
 
 describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)", () => {
   beforeEach(() => {

@@ -31,10 +31,10 @@ import {
 } from "@/runner/batch/eval/public-contract-bundle"
 import type { PublicContract } from "@/runner/batch/eval/public-contract-types"
 import {
-  type StaticWitness,
-  type StaticWitnessKind,
   canBeCleanAuthority,
   canBeMultiSiteObligation,
+  type StaticWitness,
+  type StaticWitnessKind,
 } from "@/runner/batch/eval/static-witness"
 
 /** Witness kinds that map to a required `multi-site-family` co-change obligation. */

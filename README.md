@@ -101,7 +101,7 @@ retry가 최내곽, fallback이 최외곽이며 `QUANTA_PERMISSION=auto` 분류�
 | `bun run test:eval` | 실 LLM SWE-bench (비차단, 점수) |
 | `bun run smoke` / `:live` / `:report` / `:record` | 스모크 배터리(실 loop + 도구/LLM replay + LLM-judge). `:live`=실 LLM, `:record`=cassette 녹화 |
 | `bun run e2e:pty` | raw-mode 인터랙티브 CLI e2e (FFI openpty; 입력층 LLM0 결정론) |
-| `bun run bench …` | 통합 SWE-bench CLI (`quanta-bench`; `grade`/`run`/`evaluate-repro`/`pool`/`auth`). §벤치 참조 |
+| `bun run bench …` | 통합 SWE-bench CLI (`quanta-bench`; `grade`/`run`/`pool`/`auth`). §벤치 참조 |
 | `bun fc list` | 기능 카탈로그 (AGENTS.md 워크플로우) |
 | `bun run test:cov` | 커버리지 측정 (게이트 아님) |
 | `bun run typecheck` | `tsc --noEmit` |
@@ -130,7 +130,7 @@ SOTA++ 흡수로 wired(ADR-0011, `buildSessionFeatures` — env knob 설정 시 
 
 진입점은 통합 CLI `bun run bench <sub>` (= `src/apps/bench/cli.ts`, ADR-0536):
 `run`(로컬 patch-gen) · `grade --mode full`(EC2 spot/on-demand patch-gen + 채점) ·
-`evaluate-repro`(오프라인 repro-오라클 rescore) · `pool` · `auth` · `presets`.
+`pool` · `auth` · `presets`.
 
 ### 돌리는 법 (복붙 가능)
 
@@ -181,24 +181,17 @@ bun run bench run --swebench /tmp/subset.jsonl --predictions /tmp/preds.jsonl --
 - **채점은 remote가 정본** — 로컬 docker 쓰지 말 것; `grade --mode full --allow-remote-secrets`가 EC2서 공식 swebench harness로 채점.
 
 문서: 측정 인프라·EC2 런북([docs/swebench-ec2-runbook.md](docs/swebench-ec2-runbook.md)) ·
-실패 디버깅([docs/swebench-agent-troubleshooting.md](docs/swebench-agent-troubleshooting.md)) ·
 스모크 기준선(`tests/smoke/swebench/`).
 
-### 실패 디버깅 — 토큰 안 태우고 반복
+### 실패 디버깅 — 카세트로 토큰 안 태우고 반복
 
-매번 풀 파이프라인(LLM patch-gen + repro-gen + EC2)을 재실행하지 말 것. 비싼 건
-stochastic LLM rollout뿐이고 결정론부(repro실행/빌드env/grade/selection)는 공짜
-재구동된다. 두 경로:
-- **Trajectory cassette (녹화→재생)**: `QUANTA_BENCH_RECORD_TRAJECTORY=1`로 LLM
-  스트림 전체를 1회 녹화 → `QUANTA_BENCH_REPLAY_TRAJECTORY=<file>`(⚠️generic
-  `QUANTA_LLM_REPLAY` 아님)로 토큰 0에 재생(결정론 코드 수정 반복용).
-- **`bun run bench evaluate-repro --corpus <dir> {--probe | --repro-scripts <f>}`**:
-  repro 스크립트/빌드env import probe를 fresh base에 LLM 0으로 재실행 → 오라클
-  `exec_failed → reproduced` flip 관찰.
+실패한 run을 매번 풀 파이프라인으로 재실행하지 말 것. `QUANTA_BENCH_RECORD_TRAJECTORY=1`로
+LLM 스트림 전체를 1회 녹화 → `QUANTA_BENCH_REPLAY_TRAJECTORY=<file>`(⚠️generic
+`QUANTA_LLM_REPLAY` 아님)로 토큰 0에 재생하며 결정론 코드(오라클/selection)를 반복 수정.
+진단 시작점: `closure-*.json` → `synth_repro_base_red_rate`(0 = repro 오라클 미수립 = 통상 병목).
 
-진단 시작점: `closure-*.json` → `synth_repro_base_red_rate`(0 = repro 오라클 미수립 =
-통상 병목; localize 아님). 전체 워크플로우 + 실패 taxonomy는
-**[docs/swebench-agent-troubleshooting.md](docs/swebench-agent-troubleshooting.md)**.
+빌드env 같은 결정론 실패는 LLM/카세트도 필요없이 해당 repo를 base commit으로 체크아웃 +
+`uv run`(reproRunArgv가 만드는 argv) 직접 실행이 가장 싸다.
 
 ## 개발/디버깅 흔한 함정 (자주 헛삽질)
 

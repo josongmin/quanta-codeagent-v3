@@ -8,7 +8,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises"
-import { type SandboxData, isTestFilePath } from "@/shared"
+import { isTestFilePath, type SandboxData } from "@/shared"
 import { getCachePathspecs } from "../corpus/cache-pathspecs"
 import {
   type ProjectEnvSandboxFs,

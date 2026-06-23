@@ -49,6 +49,13 @@ export interface CandidateFamily {
   readonly reason: string
   readonly seed: string | undefined
   readonly sourceEvidence: readonly string[]
+  /**
+   * Producer endpoint of a DIRECTED structural relation (producer→consumer /
+   * registration site→callback impl), when the source witness carried one. This
+   * is real localization signal: "this file PRODUCES the symbol the other files
+   * consume". `undefined` for undirected families (override-family, unique-owner).
+   */
+  readonly producerFile?: string
 }
 
 /** Bundle of candidate families produced by the static engine. */
@@ -244,7 +251,6 @@ const WITNESS_KIND_TO_FAMILY: Readonly<Record<StaticWitness["kind"], CandidateFa
   "producer-consumer": "producer-consumer",
   "registration-callback": "registration-callback",
   "unique-symbol-definer": "unique-owner",
-  "lifecycle-owner": "lifecycle-owner",
 }
 
 /**
@@ -264,12 +270,32 @@ export const staticWitnessesToFamilies = (
     if (COCHANGE_FAMILY_IDS.has(familyId) && !canBeMultiSiteObligation(w)) continue
     const ownerFiles = cleanList(w.subjectFiles)
     if (ownerFiles.length === 0) continue
+    // A6: CONSUME the directional edge (`fromFile`). When the witness carries a
+    // producer endpoint that is one of the owner files, surface it structurally
+    // (`producerFile` + producer-lead ordering) and bake the direction into the
+    // model-facing seed, instead of discarding it into `witnessId` only.
+    const producer = w.fromFile?.trim()
+    const directed =
+      producer !== undefined && producer !== "" && ownerFiles.includes(producer)
+        ? producer
+        : undefined
+    const orderedFiles =
+      directed === undefined ? ownerFiles : [directed, ...ownerFiles.filter((f) => f !== directed)]
+    const consumers = directed === undefined ? [] : ownerFiles.filter((f) => f !== directed)
+    const symbol = cleanList([...w.subjectSymbols])[0]
+    const seed =
+      directed === undefined
+        ? undefined
+        : `Directed ${w.kind}: \`${directed}\` produces${
+            symbol === undefined ? "" : ` \`${symbol}\``
+          } consumed by ${consumers.map((f) => `\`${f}\``).join(", ")}. Fix the root cause at the producer, not only the consumption site.`
     families.push({
       familyId,
-      ownerFiles,
+      ownerFiles: orderedFiles,
       reason: w.reason,
-      seed: undefined,
+      seed,
       sourceEvidence: [`static-witness:${w.provenance}`],
+      ...(directed === undefined ? {} : { producerFile: directed }),
     })
   }
   return families

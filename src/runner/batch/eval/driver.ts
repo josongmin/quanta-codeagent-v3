@@ -2395,9 +2395,14 @@ const runRepairPhase = async (
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
   reproSources: readonly string[],
+  verificationTarget: VerificationTargetFact | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
+  // B1/B3: thread the slice-resolving inputs into the classic-repair packet so
+  // its owner evidence carries exact slices (paired with issue symbols) and it
+  // names the active proof target — parity with the selector-repair sibling.
+  const repairIssueSymbols = extractIssueHint(instance.problemStatement).symbols
   let turns = 0
   let finalPatch = ""
   let repairValidated = false
@@ -2441,7 +2446,13 @@ const runRepairPhase = async (
           ),
         validate,
         buildContext: (ctxArgs) => {
-          const repairArgs = { ...ctxArgs, siblingOwners }
+          const repairArgs = {
+            ...ctxArgs,
+            siblingOwners,
+            issueSymbols: repairIssueSymbols,
+            readSource: (rel: string) => readSandboxSource(sandbox, rel),
+            ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+          }
           const repairSeed = buildRepairRoundSeedMessage(
             repairArgs,
             repair.buildContext?.(repairArgs),
@@ -3915,6 +3926,7 @@ const runMainPhase = async (args: {
       args.prepared.primaryRailStep,
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
+      verificationTargetFromPlan(args.prepared.verificationPlan),
       args.prepared.posture,
       args.prepared.state,
     )

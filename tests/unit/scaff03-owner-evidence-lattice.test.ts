@@ -73,7 +73,7 @@ describe("SCAFF-03 — witnessAuthoritativeOwners extractor (typed-relation only
     expect(witnessAuthoritativeOwners([single])).toEqual([])
   })
 
-  it("registration-callback / lifecycle-owner do NOT confer owner-admission authority", () => {
+  it("registration-callback does NOT confer owner-admission authority", () => {
     const reg = makeStaticWitness({
       kind: "registration-callback",
       authority: "authoritative",
@@ -82,15 +82,7 @@ describe("SCAFF-03 — witnessAuthoritativeOwners extractor (typed-relation only
       subjectSymbols: ["register"],
       reason: "callback registration",
     })
-    const life = makeStaticWitness({
-      kind: "lifecycle-owner",
-      authority: "authoritative",
-      provenance: "ast",
-      subjectFiles: [A],
-      subjectSymbols: ["setUp"],
-      reason: "lifecycle owner",
-    })
-    expect(witnessAuthoritativeOwners([reg, life])).toEqual([])
+    expect(witnessAuthoritativeOwners([reg])).toEqual([])
   })
 })
 

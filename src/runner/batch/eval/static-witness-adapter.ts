@@ -7,9 +7,18 @@
  * reads a benchmark label, gold patch, or path regex. Provenance is always
  * `"ast"`.
  *
- * Source-language scope: Python source, best-effort. A non-Python file (no
- * recognizable `def`/`class`) or a missing source (`readSource` returns null)
- * simply contributes no witness — the adapter never fabricates authority.
+ * Source-language scope: Python source ONLY, best-effort regex. The relation
+ * extractors recognize Python `def`/`class` syntax and nothing else — there is
+ * no JS/TS/Go/Rust support. Honesty contract:
+ *  - A missing source (`readSource` returns null) contributes no witness and is
+ *    NOT a language problem (the file was never read).
+ *  - A non-Python source that IS read but yields no Python `def`/`class`
+ *    structure also contributes no witness — but that silence is now made
+ *    EXPLICIT via {@link staticWitnessLanguageDiagnostics}, which emits a
+ *    `static_witness_unsupported_language` diagnostic so a non-Python repo no
+ *    longer looks like "the analyzer ran and found nothing".
+ * The adapter never fabricates authority and never claims language support it
+ * does not have.
  *
  * The `readSource` is injected, so the provider is PURE/testable: no fs, no
  * spawn, deterministic for a fixed input.
@@ -36,12 +45,8 @@
  * authoritative on ripgrep provenance alone (no typed relation provenance).
  */
 
-import {
-  dedupeWitnesses,
-  makeStaticWitness,
-  type StaticWitness,
-} from "./static-witness"
 import { normalizePublicIssueText } from "@/shared"
+import { dedupeWitnesses, makeStaticWitness, type StaticWitness } from "./static-witness"
 
 export interface StaticWitnessProviderInput {
   readonly problemStatement: string
@@ -169,7 +174,9 @@ const collectFacts = (input: StaticWitnessProviderInput): FileFacts[] => {
   const out: FileFacts[] = []
   for (const file of input.ownerCandidates) {
     const source = input.readSource(file)
-    // Non-Python / missing source => no witness contribution.
+    // Missing source (readSource null) => no witness contribution. A read but
+    // non-Python source is handled honestly by `staticWitnessLanguageDiagnostics`
+    // (it contributes no Python `def`/`class` facts here, by construction).
     if (source === null) continue
     out.push({
       file,
@@ -419,14 +426,70 @@ const legacySiblingWitnesses = (input: StaticWitnessProviderInput): StaticWitnes
 }
 
 /**
+ * An explicit honesty diagnostic emitted when the adapter READ a source but its
+ * Python-only regexes recognized no structure in it — most often because the
+ * file is not Python. Surfacing this stops a non-Python repo from silently
+ * looking like "the static analyzer ran and legitimately found nothing".
+ */
+export interface StaticWitnessDiagnostic {
+  /** stable diagnostic kind for the evidence packet. */
+  readonly kind: "static_witness_unsupported_language"
+  /** the owner file that was read but yielded no Python structure. */
+  readonly file: string
+  /** human-readable reason; carries NO source text and NO authority. */
+  readonly reason: string
+}
+
+/** File extensions the Python regex extractors actually understand. */
+const PYTHON_EXTENSIONS: ReadonlySet<string> = new Set([".py", ".pyi"])
+
+const looksLikePythonPath = (file: string): boolean => {
+  const lower = file.toLowerCase()
+  for (const ext of PYTHON_EXTENSIONS) if (lower.endsWith(ext)) return true
+  return false
+}
+
+/**
+ * Per-file language-scope diagnostics over the owner candidates. A file earns a
+ * `static_witness_unsupported_language` diagnostic ONLY when ALL of:
+ *  - its source was actually READ (`readSource` returned a non-null string), AND
+ *  - the source yielded ZERO Python `def`/`class` structure, AND
+ *  - the path is not a Python file (`.py`/`.pyi`).
+ *
+ * A missing source (null) is NOT flagged — it was never read, so it is not a
+ * language problem. A `.py` file with no defs (e.g. a constants module) is NOT
+ * flagged either — that is a legitimate empty result for a supported language.
+ *
+ * PURE + deterministic: no I/O beyond the injected `readSource`, no clock/random.
+ */
+export const staticWitnessLanguageDiagnostics = (
+  input: StaticWitnessProviderInput,
+): StaticWitnessDiagnostic[] => {
+  const out: StaticWitnessDiagnostic[] = []
+  for (const file of input.ownerCandidates) {
+    const source = input.readSource(file)
+    if (source === null) continue // never read => not a language problem.
+    if (looksLikePythonPath(file)) continue // supported language; empty is legit.
+    if (allDefsInSource(source).size > 0) continue // Python-shaped despite the path.
+    out.push({
+      kind: "static_witness_unsupported_language",
+      file,
+      reason:
+        "static-witness is Python-only (def/class regex); this source was read but has no recognizable Python structure, so it contributes no static witness",
+    })
+  }
+  return out
+}
+
+/**
  * PURE provider: Python source facts -> typed static witnesses.
  *
- * Python source-language best-effort; non-Python / missing source => no witness.
+ * Python source-language ONLY; a missing source contributes nothing, and a read
+ * non-Python source is reported via {@link staticWitnessLanguageDiagnostics}.
  */
-export const buildAstStaticWitnesses = (
-  input: StaticWitnessProviderInput,
-): StaticWitness[] => {
-  const problemStatement = normalizePublicIssueText(input.problemStatement) ?? input.problemStatement
+export const buildAstStaticWitnesses = (input: StaticWitnessProviderInput): StaticWitness[] => {
+  const problemStatement =
+    normalizePublicIssueText(input.problemStatement) ?? input.problemStatement
   const facts = collectFacts(input)
   const witnesses: StaticWitness[] = [
     ...overrideFamilyWitnesses(facts, problemStatement),

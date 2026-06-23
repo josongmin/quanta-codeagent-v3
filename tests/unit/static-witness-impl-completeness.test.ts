@@ -15,16 +15,18 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { staticWitnessesToFamilies } from "@/runner/batch/eval/candidate-families"
+import { makeStaticWitness } from "@/runner/batch/eval/static-witness"
 import {
   buildAstStaticWitnesses,
-  staticWitnessLanguageDiagnostics,
   type StaticWitnessProviderInput,
+  staticWitnessLanguageDiagnostics,
 } from "@/runner/batch/eval/static-witness-adapter"
-import { makeStaticWitness } from "@/runner/batch/eval/static-witness"
-import { staticWitnessesToFamilies } from "@/runner/batch/eval/candidate-families"
 
-const sourceMap = (m: Record<string, string>): ((rel: string) => string | null) =>
-  (rel) => m[rel] ?? null
+const sourceMap =
+  (m: Record<string, string>): ((rel: string) => string | null) =>
+  (rel) =>
+    m[rel] ?? null
 
 // ---------------------------------------------------------------------------
 // A6 — producer→consumer direction reaches the emitted family artifact.
@@ -120,11 +122,7 @@ describe("B6 — non-Python source yields an explicit diagnostic, not silence", 
       problemStatement: "Something broke in the bundler.",
       ownerCandidates: ["pkg/widget.ts"],
       readSource: sourceMap({
-        "pkg/widget.ts": [
-          "export function buildWidget(spec) {",
-          "  return spec;",
-          "}",
-        ].join("\n"),
+        "pkg/widget.ts": ["export function buildWidget(spec) {", "  return spec;", "}"].join("\n"),
       }),
     }
     const diags = staticWitnessLanguageDiagnostics(input)

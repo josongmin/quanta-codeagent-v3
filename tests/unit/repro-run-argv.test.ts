@@ -7,7 +7,6 @@
  * 3.10 (numpy build fail) — ~13% of repros silently lost their oracle.
  */
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
 import { reproRunArgv } from "@/runner/batch/corpus/dataset"
 import {
   pythonForRepoVersion,
@@ -49,22 +48,23 @@ describe("reproRunArgv", () => {
     expect(hasWithDep(reproRunArgv("sympy/sympy", "1.5", "/s/x.py"), "numpy<2")).toBe(false)
   })
 
-  test("astropy inherits the legacy setuptools.dep_util guard in its repro env", () => {
+  // jun-23 P0: astropy's build deps moved OUT of the repro argv. The old
+  // `--with extension_helpers --no-build-isolation` mechanism does NOT reach the
+  // setuptools build backend under uv (the editable `.` builds before `--with`
+  // resolves), so it is materialized into pyproject.toml's
+  // `[tool.uv.extra-build-dependencies]` at sandbox-prep time instead. The repro
+  // argv therefore carries NEITHER the build `--with` pins NOR `--no-build-isolation`.
+  test("astropy repro argv NO LONGER carries the (broken) build `--with`/isolation flags", () => {
     const argv = reproRunArgv("astropy/astropy", "4.3", "/s/x.py")
-    expect(hasWithDep(argv, "setuptools<60")).toBe(true)
-    expect(hasWithDep(argv, "extension_helpers")).toBe(true)
-    expect(argv).toContain("--no-build-isolation")
-    expect(hasWithDep(reproRunArgv("sympy/sympy", "1.5", "/s/x.py"), "setuptools<60")).toBe(false)
-    expect(hasWithDep(reproRunArgv("sympy/sympy", "1.5", "/s/x.py"), "extension_helpers")).toBe(
-      false,
-    )
+    expect(hasWithDep(argv, "setuptools<60")).toBe(false)
+    expect(hasWithDep(argv, "extension_helpers")).toBe(false)
+    expect(hasWithDep(argv, "extension-helpers")).toBe(false)
+    expect(argv).not.toContain("--no-build-isolation")
+    // ...but the shared base repro env is intact (control — not vacuous).
+    expect(hasWithDep(argv, "setuptools")).toBe(true)
+    expect(argv).toContain("--with-editable")
+    // sympy never had these flags either (unchanged).
     expect(reproRunArgv("sympy/sympy", "1.5", "/s/x.py")).not.toContain("--no-build-isolation")
-  })
-
-  test("evaluate-repro CLI routes production rescoring through reproRunArgv", () => {
-    const cli = readFileSync("src/apps/bench/cli.ts", "utf8")
-    expect(cli).toContain("buildArgv: (input, scriptPath) =>")
-    expect(cli).toContain("return reproRunArgv(input.repo, input.version, scriptPath)")
   })
 })
 

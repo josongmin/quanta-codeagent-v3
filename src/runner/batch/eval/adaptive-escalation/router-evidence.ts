@@ -44,18 +44,38 @@ const PROOF_ID = "proof"
 export const deriveEvidenceFactsFromPacket = (packet: LlmEvidencePacket): EvidenceFacts => {
   const receipts = packet.proofReceipts
   const target = packet.verificationTarget
+  const editSurface = packet.candidateEditSurface
+  const thisHash = packet.candidatePatchHash
+  // B9: a receipt is THIS candidate's proof when it carries no hash (unattributed
+  // generation-path receipt) OR its hash matches the packet's candidate. A green
+  // tagged to a DIFFERENT candidate must NOT count as this candidate's proof.
+  const isThisCandidatesReceipt = (r: (typeof receipts)[number]): boolean =>
+    r.candidatePatchHash === undefined ||
+    thisHash === undefined ||
+    r.candidatePatchHash === thisHash
   return {
     issueId: ISSUE_ID,
     candidateId: CANDIDATE_ID,
     ownersId: OWNERS_ID,
     proofId: PROOF_ID,
-    // A resolved owner source-slice = a confident fix site.
-    localizationCertain: packet.ownerEvidence.some((o) => o.sourceSlice !== undefined),
+    // B9: a confident fix site is a resolved owner source-slice for a file the
+    // CURRENT candidate actually TOUCHED (aligned via its edit surface). With no
+    // edit surface (e.g. generation packets) this stays the coarse "any owner
+    // sourceSlice" — backward-compatible. A slice for an UNTOUCHED owner no
+    // longer fakes localization certainty for this candidate.
+    localizationCertain: packet.ownerEvidence.some(
+      (o) =>
+        o.sourceSlice !== undefined &&
+        (editSurface === undefined || editSurface.touchedFiles.includes(o.file)),
+    ),
     // primary rail present ⇒ the declared condition has an executable check;
     // a target with no rail ⇒ declared-but-not-evidenced; no target ⇒ none.
     declaredConditionEvidenced:
       target === undefined ? null : target.primaryRail !== null ? true : false,
-    positiveProof: receipts.some((r) => r.state === "candidate_green"),
+    // B9: only THIS candidate's executed green counts as its positive proof.
+    positiveProof: receipts.some(
+      (r) => r.state === "candidate_green" && isThisCandidatesReceipt(r),
+    ),
     multiOwnerLikely: packet.ownerEvidence.length > 1,
     baseReproEstablished:
       receipts.some((r) => r.baseValidatedRed === true) || target?.baseValidatedRed === true,

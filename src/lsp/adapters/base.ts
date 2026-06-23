@@ -71,7 +71,12 @@ import type {
   WorkspaceConfigurationParams,
 } from "./base/raw-types"
 import { resolveWorkspaceConfiguration, toWorkspaceFolder } from "./base/workspace"
-import { encodeMessage, type JsonRpcMessage, MessageReader } from "./jsonrpc"
+import {
+  encodeMessage,
+  type JsonRpcMessage,
+  type JsonRpcResponse,
+  MessageReader,
+} from "./jsonrpc"
 
 export type { LspClientOptions, LspClientSpec } from "./base/config"
 // Re-export the complete original public surface so every importer of

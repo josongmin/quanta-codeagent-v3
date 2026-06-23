@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "bun:test"
 import {
   canBeCleanAuthority,
   canBeMultiSiteObligation,
@@ -208,7 +208,7 @@ describe("dedupeWitnesses", () => {
   it("collapses same kind+subjects to ONE stable id, preserving first-seen order", () => {
     const make = (reason: string): StaticWitness =>
       makeStaticWitness({
-        kind: "lifecycle-owner",
+        kind: "producer-consumer",
         authority: "authoritative",
         provenance: "repo-map",
         subjectFiles: ["b.py", "a.py"],

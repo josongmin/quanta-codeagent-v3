@@ -135,18 +135,16 @@ run_evaluation → scp report → terminate. The `ssh:<host>` backend skips stag
 
 ## Troubleshooting *why* an instance fails (without re-paying)
 
-Don't re-run the whole pipeline on every fix. Two cheap-iteration paths:
-- **Trajectory cassette** — `QUANTA_BENCH_RECORD_TRAJECTORY=1` records the agent's
-  full LLM stream once (full-remote fetches it as `trajectory-<suffix>.jsonl`);
-  `QUANTA_BENCH_REPLAY_TRAJECTORY=<file>` replays it for **zero tokens** while you
-  change deterministic code (oracle/build-env/selection).
-- **`quanta-bench evaluate-repro --corpus <dir> {--probe | --repro-scripts <f>}`** —
-  re-runs repro scripts / a build-env import probe against a fresh base checkout
-  with **zero LLM**, to watch the repro oracle flip `exec_failed → reproduced`.
+Don't re-run the whole pipeline on every fix. **Trajectory cassette**:
+`QUANTA_BENCH_RECORD_TRAJECTORY=1` records the agent's full LLM stream once
+(full-remote fetches it as `trajectory-<suffix>.jsonl`); `QUANTA_BENCH_REPLAY_TRAJECTORY=<file>`
+replays it for **zero tokens** while you change deterministic code (oracle/selection).
 
 Start from `closure-<suffix>.json` → `synth_repro_base_red_rate` (0 ⇒ oracle never
 established = the usual bottleneck) and `report-<suffix>.json` →
-`perInstance[].reproTest.reason`. Full workflow: **[swebench-agent-troubleshooting.md](swebench-agent-troubleshooting.md)**.
+`perInstance[].reproTest.reason`. For a deterministic build-env failure, the cheapest
+repro is to check out the repo at `base_commit` and run `uv run` (the `reproRunArgv`
+argv) directly — no LLM, no cassette.
 
 ## Gotchas (this account/region)
 

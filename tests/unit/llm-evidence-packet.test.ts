@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import {
-  buildCandidatePostReviewPacket,
   assembleOwnerEvidence,
   assertPacketBlind,
+  buildCandidatePostReviewLlmEvidencePacket,
+  buildCandidatePostReviewPacket,
   buildCandidateReviewPacket,
-  buildSelectionOwnerEvidence,
   buildIntakeLlmEvidencePacket,
+  buildRepairSeedLlmEvidencePacket,
   buildRepairSeedPacket,
   buildSelectionExplanationPacket,
   buildSelectionGenerationPacket,
   buildSelectionGenerationPrompt,
+  buildSelectionOwnerEvidence,
   candidatePatchHash,
   extractSymbolSlice,
   type LlmEvidenceArtifacts,
@@ -59,9 +61,13 @@ describe("llm evidence packet — render + blindness guard", () => {
       publicIssueFacts: ["issue summary: the bug"],
       ownerEvidence: [{ file: "x.py", symbols: ["run"], provenance: "repair-owner" }],
       proofReceipts: [{ source: "public_mwe", state: "candidate_red" }],
-      contractFacts: [{ contractId: "multi-site-family:x.py", authority: "static-witness", satisfied: false }],
+      contractFacts: [
+        { contractId: "multi-site-family:x.py", authority: "static-witness", satisfied: false },
+      ],
       staticFacts: [{ kind: "edit_surface", value: "preserve bounded" }],
-      missingEvidence: [{ kind: "regression", reason: "no_issue_positive_public_regression_proof" }],
+      missingEvidence: [
+        { kind: "regression", reason: "no_issue_positive_public_regression_proof" },
+      ],
     })
     expect(rendered).toContain("## LLM Evidence Packet")
     expect(rendered).toContain('"stage": "repair_seed"')
@@ -310,7 +316,9 @@ describe("llm evidence packet — stage builders", () => {
     const rendered = buildCandidatePostReviewPacket({
       problemStatement: "Axis inversion still fails when explicit limits are preserved.",
       candidatePatchHash: "deadbeef",
-      ownerEvidence: [{ file: "pkg/axis.py", symbols: ["invert_axis"], provenance: "repair-owner" }],
+      ownerEvidence: [
+        { file: "pkg/axis.py", symbols: ["invert_axis"], provenance: "repair-owner" },
+      ],
       proofReceipts: [
         { source: "public_mwe", state: "candidate_red", command: "python repro.py" },
         { source: "hard:proofRequiredMissing", state: "not_run" },
@@ -322,6 +330,98 @@ describe("llm evidence packet — stage builders", () => {
     expect(rendered).toContain('"source": "public_mwe"')
     expect(rendered).toContain('"state": "candidate_red"')
     expect(rendered).not.toContain("select_winner")
+  })
+
+  // ── B2: owner_slice missingEvidence mirrored into post_review + repair_seed ────
+  test("B2 — post_review auto-emits owner_slice missingEvidence for an unresolved owner slice", () => {
+    const packet = buildCandidatePostReviewLlmEvidencePacket({
+      problemStatement: "Axis inversion fails.",
+      candidatePatchHash: "deadbeef",
+      ownerEvidence: [{ file: "pkg/axis.py", symbols: [], provenance: "repair-owner" }],
+      proofReceipts: [{ source: "public_mwe", state: "candidate_red" }],
+      contracts: [],
+    })
+    expect(packet.missingEvidence).toContainEqual({
+      kind: "owner_slice",
+      reason: "no_resolvable_slice:pkg/axis.py",
+    })
+  })
+
+  test("B2 — repair_seed auto-emits owner_slice missingEvidence for an unresolved owner slice", () => {
+    const packet = buildRepairSeedLlmEvidencePacket({
+      problemStatement: "Axis inversion fails.",
+      candidatePatchHash: "deadbeef",
+      ownerEvidence: [{ file: "pkg/axis.py", symbols: [], provenance: "repair-owner" }],
+      proofReceipts: [{ source: "public_mwe", state: "candidate_red" }],
+      contracts: [],
+    })
+    expect(packet.missingEvidence).toContainEqual({
+      kind: "owner_slice",
+      reason: "no_resolvable_slice:pkg/axis.py",
+    })
+  })
+
+  test("B2 — an owner WITH a resolved slice emits NO owner_slice missingEvidence (paired-control)", () => {
+    const packet = buildCandidatePostReviewLlmEvidencePacket({
+      problemStatement: "Axis inversion fails.",
+      candidatePatchHash: "deadbeef",
+      ownerEvidence: [
+        {
+          file: "pkg/axis.py",
+          symbols: ["invert_axis"],
+          provenance: "repair-owner",
+          sourceSlice: "def invert_axis(): ...",
+        },
+      ],
+      proofReceipts: [{ source: "public_mwe", state: "candidate_red" }],
+      contracts: [],
+    })
+    expect(packet.missingEvidence.some((m) => m.kind === "owner_slice")).toBe(false)
+  })
+
+  // ── B7: candidate edit surface on candidate-local packets (source-only) ───────
+  test("B7 — post_review carries the candidate's touched files/symbols (source-only)", () => {
+    const rendered = buildCandidatePostReviewPacket({
+      problemStatement: "Axis inversion fails.",
+      candidatePatchHash: "deadbeef",
+      ownerEvidence: [
+        { file: "pkg/axis.py", symbols: ["invert_axis"], provenance: "repair-owner" },
+      ],
+      proofReceipts: [{ source: "public_mwe", state: "candidate_red" }],
+      contracts: [],
+      candidateEditSurface: { touchedFiles: ["pkg/axis.py"], touchedSymbols: ["invert_axis"] },
+    })
+    expect(rendered).toContain('"candidateEditSurface"')
+    expect(rendered).toContain('"pkg/axis.py"')
+    expect(rendered).toContain('"invert_axis"')
+  })
+
+  test("B7 — repair_seed carries the candidate's touched files/symbols (source-only)", () => {
+    const rendered = buildRepairSeedPacket({
+      problemStatement: "Axis inversion fails.",
+      candidatePatchHash: "deadbeef",
+      ownerEvidence: [
+        { file: "pkg/axis.py", symbols: ["invert_axis"], provenance: "repair-owner" },
+      ],
+      proofReceipts: [{ source: "public_mwe", state: "candidate_red" }],
+      contracts: [],
+      candidateEditSurface: { touchedFiles: ["pkg/axis.py"], touchedSymbols: ["invert_axis"] },
+    })
+    expect(rendered).toContain('"candidateEditSurface"')
+    expect(rendered).toContain('"invert_axis"')
+  })
+
+  test("B7 — edit-surface blindness: a leaked marker in a touched file THROWS at build", () => {
+    expect(() =>
+      buildCandidatePostReviewLlmEvidencePacket({
+        problemStatement: "Axis inversion fails.",
+        candidatePatchHash: "deadbeef",
+        ownerEvidence: [],
+        proofReceipts: [],
+        contracts: [],
+        candidateEditSurface: { touchedFiles: ["FAIL_TO_PASS"], touchedSymbols: [] },
+      }),
+    ).toThrow()
   })
 
   test("shared clean generation prompt omits baseValidatedRed when repro authority is null", () => {
@@ -359,7 +459,9 @@ describe("llm evidence packet — stage history aggregation", () => {
     expect(summary?.stages).toEqual(["candidate_generation"])
     expect(summary?.revisionByStage).toEqual({ candidate_generation: "v2" })
     expect(summary?.missingKinds).toEqual(["first", "second"])
-    expect((artifacts as { candidateGenerationHistory?: unknown[] }).candidateGenerationHistory).toHaveLength(2)
+    expect(
+      (artifacts as { candidateGenerationHistory?: unknown[] }).candidateGenerationHistory,
+    ).toHaveLength(2)
   })
 
   test("candidate_review stage is retained in artifact summaries", () => {
@@ -437,7 +539,11 @@ describe("llm evidence packet — bounded source slice (assembleOwnerEvidence / 
   })
 
   test("assembleOwnerEvidence yields path-only (no slice, no whole-file) when source is unreadable", () => {
-    const ev = assembleOwnerEvidence({ ownerFiles: ["m.py"], issueSymbols: ["foo"], readSource: () => null })
+    const ev = assembleOwnerEvidence({
+      ownerFiles: ["m.py"],
+      issueSymbols: ["foo"],
+      readSource: () => null,
+    })
     expect(ev[0]?.file).toBe("m.py")
     expect(ev[0]?.sourceSlice).toBeUndefined()
     expect(ev[0]?.symbols).toEqual([])
@@ -475,13 +581,25 @@ describe("llm evidence packet — intake (typed, public-only)", () => {
     problemStatement: "The callback should stop raising in run().",
     localizeCandidates: ["pkg/core.py", "pkg/hooks.py"],
     faultEvidence: {
-      candidates: [{ file: "pkg/core.py", score: 5, sources: ["issue-file", "owner-resolve"], symbols: ["run"] }],
+      candidates: [
+        {
+          file: "pkg/core.py",
+          score: 5,
+          sources: ["issue-file", "owner-resolve"],
+          symbols: ["run"],
+        },
+      ],
       issueSymbols: ["run"],
       truncated: false,
       partial: false,
     },
     verificationPlan: VERIFICATION_PLAN,
-    reproTest: { installed: false, reason: "no_reproduced_candidate", samples: 3, reproducedCount: 0 },
+    reproTest: {
+      installed: false,
+      reason: "no_reproduced_candidate",
+      samples: 3,
+      reproducedCount: 0,
+    },
   })
 
   test("owner evidence is typed and carries the fault file + provenance", () => {
@@ -496,7 +614,9 @@ describe("llm evidence packet — intake (typed, public-only)", () => {
   })
 
   test("missing evidence is typed reasons, not free strings", () => {
-    expect(packet.missingEvidence.some((m) => m.reason === "public_mwe_base_not_attempted")).toBe(false)
+    expect(packet.missingEvidence.some((m) => m.reason === "public_mwe_base_not_attempted")).toBe(
+      false,
+    )
     expect(packet.proofReceipts.some((r) => r.source === "public_mwe")).toBe(true)
   })
 })
@@ -513,7 +633,9 @@ describe("llm evidence packet — generation (self-contained, bounded)", () => {
           sourceSlice: "def resolve_owner(cfg):\n    return cfg.owner",
         },
       ],
-      contracts: [{ contractId: "owner-touch", authority: "static-witness/weak", satisfied: "unknown" }],
+      contracts: [
+        { contractId: "owner-touch", authority: "static-witness/weak", satisfied: "unknown" },
+      ],
       reproCommand: "python repro.py",
       baseValidatedRed: true,
     })
@@ -608,14 +730,20 @@ describe("llm evidence packet — selection explanation (report-only, no submit 
   test("is advisory: its allowed actions cannot admit or override", () => {
     expect(packet.stage).toBe("selection_explanation")
     expect(packet.allowedActions).toContain("explain_selection_outcome")
-    expect(packet.allowedActions.every((a) => !/submit|admit|override|select_winner/.test(a))).toBe(true)
+    expect(packet.allowedActions.every((a) => !/submit|admit|override|select_winner/.test(a))).toBe(
+      true,
+    )
     expect(packet.forbiddenSources).toContain("selection_override")
   })
 
   test("surfaces the deterministic outcome + typed candidate breakdown", () => {
-    expect(packet.staticFacts.some((s) => s.kind === "selected_candidate" && s.value === "<none>")).toBe(true)
+    expect(
+      packet.staticFacts.some((s) => s.kind === "selected_candidate" && s.value === "<none>"),
+    ).toBe(true)
     expect(packet.contractFacts.some((c) => c.contractId === "candidate:cand-0")).toBe(true)
-    expect(packet.missingEvidence.some((m) => m.reason === "no_positive_executed_public_proof")).toBe(true)
+    expect(
+      packet.missingEvidence.some((m) => m.reason === "no_positive_executed_public_proof"),
+    ).toBe(true)
   })
 
   test("maps proof receipts by exact proof-state enums instead of string heuristics", () => {
@@ -656,7 +784,12 @@ describe("OPC-07 3-case golden snapshots (full-shape regression fence)", () => {
         buildIntakeLlmEvidencePacket({
           problemStatement: "astropy: import fails building C extension on the target env.",
           localizeCandidates: ["astropy/io/fits/header.py"],
-          reproTest: { installed: false, reason: "env prep failed: gcc missing", samples: 0, reproducedCount: 0 },
+          reproTest: {
+            installed: false,
+            reason: "env prep failed: gcc missing",
+            samples: 0,
+            reproducedCount: 0,
+          },
         }),
       ),
     ).toMatchSnapshot()
@@ -668,10 +801,16 @@ describe("OPC-07 3-case golden snapshots (full-shape regression fence)", () => {
         problemStatement: "django-11138: tz conversion wrong across DB backends.",
         candidatePatchHash: "fixedhash11138",
         ownerEvidence: [
-          { file: "django/db/backends/mysql/operations.py", symbols: [], provenance: "repair-owner" },
+          {
+            file: "django/db/backends/mysql/operations.py",
+            symbols: [],
+            provenance: "repair-owner",
+          },
         ],
         proofReceipts: [{ source: "hard:proofRequiredMissing", state: "not_run" }],
-        contracts: [{ contractId: "owner-touch", authority: "static-witness/weak", satisfied: true }],
+        contracts: [
+          { contractId: "owner-touch", authority: "static-witness/weak", satisfied: true },
+        ],
         repairGuidance: "Satisfy the public proof before submit.",
       }),
     ).toMatchSnapshot()
@@ -682,14 +821,24 @@ describe("OPC-07 3-case golden snapshots (full-shape regression fence)", () => {
       buildSelectionGenerationPacket({
         problemStatement: "django-14315: dbshell ignores connection settings.",
         ownerEvidence: [
-          { file: "django/db/backends/base/client.py", symbols: ["runshell"], provenance: "selection-owner" },
+          {
+            file: "django/db/backends/base/client.py",
+            symbols: ["runshell"],
+            provenance: "selection-owner",
+          },
         ],
         contracts: [],
         reproCommand: "python -m pytest dbshell/tests -q",
         baseValidatedRed: true,
         verificationTarget: {
-          primaryRail: { kind: "repro", cmd: "python -m pytest dbshell/tests -q", authority: "execution" },
-          required: [{ kind: "repro", cmd: "python -m pytest dbshell/tests -q", authority: "execution" }],
+          primaryRail: {
+            kind: "repro",
+            cmd: "python -m pytest dbshell/tests -q",
+            authority: "execution",
+          },
+          required: [
+            { kind: "repro", cmd: "python -m pytest dbshell/tests -q", authority: "execution" },
+          ],
           optional: [],
           baseValidatedRed: true,
         },
@@ -704,9 +853,16 @@ describe("llm evidence packet — 3-case packet semantics", () => {
     const packet = buildIntakeLlmEvidencePacket({
       problemStatement: "astropy: import fails building C extension.",
       localizeCandidates: ["astropy/io/fits/x.py"],
-      reproTest: { installed: false, reason: "env prep failed: gcc missing", samples: 0, reproducedCount: 0 },
+      reproTest: {
+        installed: false,
+        reason: "env prep failed: gcc missing",
+        samples: 0,
+        reproducedCount: 0,
+      },
     })
-    const mwe = packet.proofReceipts.find((r) => r.source === "public_mwe" && r.state !== "static_only")
+    const mwe = packet.proofReceipts.find(
+      (r) => r.source === "public_mwe" && r.state !== "static_only",
+    )
     expect(mwe?.state).toBe("env_prep_failed")
     expect(packet.proofReceipts.every((r) => r.state !== "candidate_red")).toBe(true)
   })
@@ -715,7 +871,9 @@ describe("llm evidence packet — 3-case packet semantics", () => {
     const rendered = buildRepairSeedPacket({
       problemStatement: "django: tz conversion across backends.",
       candidatePatchHash: "c0",
-      ownerEvidence: [{ file: "django/db/backends/mysql/operations.py", symbols: [], provenance: "repair-owner" }],
+      ownerEvidence: [
+        { file: "django/db/backends/mysql/operations.py", symbols: [], provenance: "repair-owner" },
+      ],
       proofReceipts: [{ source: "hard:proofRequiredMissing", state: "not_run" }],
       contracts: [{ contractId: "owner-touch", authority: "static-witness/weak", satisfied: true }],
     })
@@ -729,7 +887,9 @@ describe("llm evidence packet — 3-case packet semantics", () => {
   test("django 14315 shell/env ⇒ generation carries the runshell proof command", () => {
     const rendered = buildSelectionGenerationPacket({
       problemStatement: "django: dbshell ignores settings.",
-      ownerEvidence: [{ file: "django/db/backends/base/client.py", symbols: [], provenance: "selection-owner" }],
+      ownerEvidence: [
+        { file: "django/db/backends/base/client.py", symbols: [], provenance: "selection-owner" },
+      ],
       contracts: [],
       reproCommand: "python -m pytest dbshell/tests -q",
       baseValidatedRed: true,

@@ -22,8 +22,10 @@ import {
 } from "./candidate-families"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import {
+  assembleOwnerEvidence,
   buildCandidatePostReviewLlmEvidencePacket,
   buildRepairSeedLlmEvidencePacket,
+  type CandidateEditSurfaceFact,
   type ContractFact,
   candidatePatchHash,
   type LlmEvidencePacket,
@@ -456,12 +458,18 @@ export const buildRepairPacketText = (args: {
   readonly contractBundle?: PublicContractBundle
   readonly problemStatement: string
   readonly verificationTarget?: VerificationTargetFact
+  /** B1: issue symbols used to resolve the EXACT owner source slice (paired with
+   *  `readSource`). Blind — public issue text only. */
+  readonly issueSymbols?: readonly string[]
+  /** B1: sandbox source reader (rel ⇒ source | null). With `issueSymbols`, owner
+   *  evidence carries the exact symbol slice instead of a path-only stub; absent
+   *  ⇒ path-only (B2 surfaces the gap as `owner_slice` missingEvidence). */
+  readonly readSource?: (rel: string) => string | null
   readonly recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
 }): string => {
   const latestNonEmpty = [...args.scored].reverse().find(hasNonEmptyPatch)?.candidate
   const focusCandidate =
-    (args.winner !== null && args.winner.patch.trim() !== "" ? args.winner : null) ??
-    latestNonEmpty
+    (args.winner !== null && args.winner.patch.trim() !== "" ? args.winner : null) ?? latestNonEmpty
   const patchAuthority = focusCandidate?.patch ?? args.scored[0]?.candidate.patch ?? args.seed
   const proofReceipts: ProofReceiptFact[] = [
     ...args.scored.flatMap((entry) => [
@@ -482,11 +490,25 @@ export const buildRepairPacketText = (args: {
         : (focusCandidate.familyOwnerFiles ?? focusCandidate.files),
     ),
   ]
-  const ownerEvidence: OwnerEvidenceFact[] = ownerFiles.map((file) => ({
-    file,
-    symbols: [],
+  // B1: REUSE the slice-capable factory so a readable owner + issue symbols
+  // attaches the EXACT symbol slice (was a path-only `symbols:[]` stub that
+  // forced the router's localizationCertain=false in every repair phase). No
+  // reader / no resolvable symbol ⇒ path-only (B2 surfaces the gap downstream).
+  const ownerEvidence: OwnerEvidenceFact[] = assembleOwnerEvidence({
+    ownerFiles,
     provenance: "repair-owner",
-  }))
+    ...(args.issueSymbols !== undefined ? { issueSymbols: args.issueSymbols } : {}),
+    ...(args.readSource !== undefined ? { readSource: args.readSource } : {}),
+  })
+  // B7: the focus candidate's SOURCE-ONLY edit surface (touched files/symbols
+  // from its OWN diff). Never a hidden-test path / command. Empty patch ⇒ none.
+  const candidateEditSurface: CandidateEditSurfaceFact | undefined =
+    focusCandidate === undefined || focusCandidate.patch.trim() === ""
+      ? undefined
+      : {
+          touchedFiles: focusCandidate.files,
+          touchedSymbols: diffTouchedSymbols(focusCandidate.patch),
+        }
   const contracts: ContractFact[] =
     focusCandidate === undefined
       ? []
@@ -518,6 +540,7 @@ export const buildRepairPacketText = (args: {
     ...(args.verificationTarget !== undefined
       ? { verificationTarget: args.verificationTarget }
       : {}),
+    ...(candidateEditSurface !== undefined ? { candidateEditSurface } : {}),
   })
   const reviewPacket = buildCandidatePostReviewLlmEvidencePacket({
     problemStatement: args.problemStatement,
@@ -528,6 +551,7 @@ export const buildRepairPacketText = (args: {
     ...(args.verificationTarget !== undefined
       ? { verificationTarget: args.verificationTarget }
       : {}),
+    ...(candidateEditSurface !== undefined ? { candidateEditSurface } : {}),
   })
   args.recordLlmEvidencePacket?.(reviewPacket)
   args.recordLlmEvidencePacket?.(packet)

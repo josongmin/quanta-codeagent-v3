@@ -23,6 +23,7 @@ import type {
   PrimaryRailStep,
   SuccessPredicate,
 } from "@/agent/closure"
+import type { VerificationTargetFact } from "@/runner/batch/eval/llm-evidence-packet"
 
 /** Caller-facing config (mirror the optional-feature pattern). */
 export interface RepairConfig {
@@ -148,6 +149,22 @@ export interface BuildRepairContextArgs {
   validationCmd?: string
   /** Exit code observed from the validation gate (when a command actually ran). */
   validationExitCode?: number
+  /** A3: the validator's OWN already-classified repro/exec outcome. When
+   *  `exec_failed`, the proof receipt is an INFRA failure (`execution_failed`),
+   *  NOT a candidate-correctness verdict (`candidate_red`). Pre-classified
+   *  upstream (no re-derivation/heuristic here). Absent ⇒ exit-code only. */
+  validationOutcome?: RepairReproOutcome
+  /** B3: the active proof target the repaired patch must satisfy. Forwarded into
+   *  the classic-repair packet so it names the public proof (selector-repair
+   *  sibling already carries this; classic repair structurally lacked it). */
+  verificationTarget?: VerificationTargetFact
+  /** B1: issue symbols used to resolve the EXACT owner source slice (paired with
+   *  `readSource`). Blind — derived from public issue text only. */
+  issueSymbols?: readonly string[]
+  /** B1: sandbox source reader (rel path ⇒ source | null). When supplied with
+   *  `issueSymbols`, owner evidence carries the exact symbol slice instead of a
+   *  path-only reconstruction. No reader ⇒ path-only (B2 surfaces the gap). */
+  readSource?: (rel: string) => string | null
   /** Advisory typed-rail mismatch summary for the next round's seed. */
   predicateSummary?: string
   /** 1-based round number we are about to start (for prose only). */
