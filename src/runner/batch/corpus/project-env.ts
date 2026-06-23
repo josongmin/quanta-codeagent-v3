@@ -52,10 +52,20 @@ interface RepoEnvOverride {
 const REPO_ENV_OVERRIDES: Record<string, RepoEnvOverride> = {
   // astropy's `setup.py` does a build-time `import extension_helpers`. Old bench
   // snapshots don't declare it for uv, so the editable build raises
-  // ModuleNotFoundError. `--with` cannot fix this (uv builds `.` before `--with`
-  // packages are importable by the build backend); materialize it into the repo's
-  // pyproject `[tool.uv.extra-build-dependencies]` instead. PyPI name is the
-  // HYPHENATED `extension-helpers`; table key is the dist name `astropy`.
+  // ModuleNotFoundError. `--with` cannot fix this under uv 0.11.23 (uv builds `.`
+  // before `--with` packages reach the build backend — measured); materialize it
+  // into the repo's pyproject `[tool.uv.extra-build-dependencies]` instead. PyPI
+  // name is the HYPHENATED `extension-helpers`; table key is the dist name `astropy`.
+  //
+  // 🔴 KNOWN-UNSOLVED (box re-measure jun-23): extension-helpers gets the build PAST
+  // that import, but astropy's setup.py THEN needs `setuptools.dep_util` (removed in
+  // setuptools 60). The naive fix `setuptools<60` is a DEAD END under uv: setuptools
+  // <60 has no PEP-660 `build_editable`, so `uv run --with-editable .` fails with
+  // `build_meta has no attribute build_editable` (verified A/B/C combos). dep_util
+  // (needs <60) vs editable build (needs >=64) is a hard contradiction for uv's
+  // PEP-517 path. Real fix is a separate change (pip legacy `develop` install, or a
+  // `setuptools/dep_util` → `distutils.dep_util` shim materialized into the sandbox)
+  // — NOT a version pin. astropy-13033 stays build-blocked until then.
   "astropy/astropy": {
     buildDeps: ["extension-helpers"],
     distName: "astropy",

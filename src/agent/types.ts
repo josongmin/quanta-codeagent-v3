@@ -117,6 +117,26 @@ export interface AgentConfig
    * stream) only when developer-mode is on.
    */
   decisionEmitter?: DecisionEmitter
+  /**
+   * Trajectory fork-experiment seam (troubleshooting). A pure rewriter applied
+   * to the fully-assembled per-turn {@link TurnContextInput} (in
+   * `prepareTurnContext`) JUST BEFORE `buildTurnContext` renders it — so an
+   * experiment can vary EXACTLY the information the LLM sees at a chosen
+   * `turn` (inject corrected localization, swap evidence, drop a misleading
+   * note) while everything up to that turn replays deterministically from a
+   * cassette. `turn` is the 0-based loop turn index; return the input unchanged
+   * for turns you don't want to touch.
+   *
+   * DEFAULT-OFF: absent ⇒ the input reaches `buildTurnContext` untouched ⇒
+   * byte-identical prompt. Pure function: no I/O, replay-stable. This is the
+   * ONE seam the fork/replay/branch tooling needs — cassette truncation
+   * (replay 0..N-1, live from N) and the K-branch runner reuse existing
+   * primitives (ADR-0192 replay, `sampleBestOfN`).
+   */
+  turnContextMutator?: (
+    turn: number,
+    input: import("./prompt").TurnContextInput,
+  ) => import("./prompt").TurnContextInput
   permission: PermissionContext
   /** Conversation seed (typically one user message). */
   messages: Message[]

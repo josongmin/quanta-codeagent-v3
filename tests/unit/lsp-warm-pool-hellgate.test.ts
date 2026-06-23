@@ -344,4 +344,21 @@ describe("SharedWorkspacePool — generic engine-agnostic lifecycle (fake backen
     expect(ok.clients().length).toBe(0)
     await okPool.disposeAll()
   })
+
+  test("WP-15: proveReady on a hard-evicted cwd reaps + reports expected_cancel (open() parity)", async () => {
+    // Late-eviction reap parity with open()'s WP-10: a bench session-end evict
+    // tombstones the cwd, then proveReady materializes a FRESH entry for it. The
+    // reap branch must tear that entry down (no leaked daemon on a tombstoned
+    // cwd) and report the lifecycle cancel — NOT a misleading ready result.
+    // RED-on-injection: delete the `hardEvicted` reap branch ⇒ outcome=ok with a
+    // leaked entry (__sizeForTest === 1).
+    const probe = makeProbeBackend(async () => true)
+    const pool = new SharedWorkspacePool(probe.backend)
+    await pool.evict("/repo") // tombstone the cwd (no live entry yet)
+    const receipt = await pool.proveReady("/repo/a.fake", "/repo", { language: "fake" })
+    expect(receipt.outcome).toBe("expected_cancel")
+    expect(receipt.stage).toBe("ready")
+    expect(pool.__sizeForTest).toBe(0) // reaped, not leaked
+    await pool.disposeAll()
+  })
 })

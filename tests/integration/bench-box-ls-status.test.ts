@@ -110,7 +110,7 @@ EOF
     ;;
   ubuntu@1.2.3.5::*"cat ~/.quanta/bench-box-status.json"*)
     cat <<'EOF'
-{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"instancePreview":["django__django-11179"],"preset":"agentless-v3-thin","model":"gpt-5.4","concurrency":16,"startedAt":"${idleStartedAt}","updatedAt":"${idleUpdatedAt}","runLogPath":"~/run.log","reportPath":"~/report.json","predictionsPath":"~/preds.jsonl","observeDir":"~/observe","resolvedCount":1,"unresolvedCount":0,"erroredCount":0,"emptyPatchCount":0,"lastExitCode":0,"lspGrounding":{"backend":"pyright","language":"pyright-langserver","launch":"ok","ready":"ready_timeout","durationMs":120,"reason":"readiness budget exhausted without resolve"},"lastLogLine":"resolved 1 | unresolved 0"}
+{"phase":"idle","mode":"full-remote","workload":"django__django-11179","dataset":"single.jsonl","instanceCount":1,"instancePreview":["django__django-11179"],"preset":"agentless-v3-thin","model":"gpt-5.4","concurrency":16,"startedAt":"${idleStartedAt}","updatedAt":"${idleUpdatedAt}","runLogPath":"~/run.log","reportPath":"~/report.json","predictionsPath":"~/preds.jsonl","observeDir":"~/observe","resolvedCount":1,"unresolvedCount":0,"erroredCount":0,"emptyPatchCount":0,"lastExitCode":0,"lspGrounding":{"backend":"pyright","language":"pyright-langserver","launch":"missing_binary","reason":"PYRIGHT_MISSING"},"lastLogLine":"resolved 1 | unresolved 0"}
 EOF
     exit 0
     ;;
@@ -224,11 +224,12 @@ describe("bench box ls status view", () => {
     expect(out).toContain("log=[PASS] demo__inst-1 (turns=2)")
     expect(out).toContain("i-idle  running  c7i.8xlarge  1.2.3.5  status=idle/idle")
     expect(out).toContain("source=snapshot  mode=full-remote  workload=django__django-11179")
-    // LSP-02 discriminating-outcome render: the typed ready_timeout reaches the
-    // CLI as its own line — RCA reads the enum, not the "resolved 1" log tail.
-    expect(out).toContain(
-      "lsp=pyright/pyright-langserver launch=ok ready=ready_timeout (120ms): readiness budget exhausted without resolve",
-    )
+    // LSP-02: the box's LAUNCH probe (`pyright --version`) distinguishes
+    // missing_binary from ok as a TYPED line — RCA reads the enum, not the
+    // "resolved 1" log tail. (The box probe is launch-only; per-instance ready
+    // outcomes like ready_timeout live in report.json, surfaced via the
+    // lsp-grounding-summary aggregator — not the box snapshot.)
+    expect(out).toContain("lsp=pyright/pyright-langserver launch=missing_binary: PYRIGHT_MISSING")
     expect(out).toContain("i-probe  running  c7i.8xlarge  1.2.3.6  status=busy")
     expect(out).toContain(
       "source=probe  snapshot=write-failed  active=yes  report=no  runExit=no  preds=84",

@@ -223,7 +223,12 @@ export const reproRunArgv = (
   version: string | undefined,
   scriptPath: string,
 ): readonly string[] => {
-  return [...buildProjectEnvUvRunArgv(repo, version), "python", scriptPath]
+  // `pytest` MUST be in the repro exec env: P1 (jun-23) made repros real pytest
+  // tests whose verdict is the process exit code, via a `pytest.main([__file__])`
+  // footer run under `python <script>`. Without `--with pytest` the footer's
+  // `import pytest` raises ModuleNotFoundError ⇒ every repro is `exec_failed`
+  // (measured on the box re-measure: django repros all crashed on `import pytest`).
+  return [...buildProjectEnvUvRunArgv(repo, version, ["pytest"]), "python", scriptPath]
 }
 
 const synthesizeTestCmd = (raw: Record<string, unknown>): string => {

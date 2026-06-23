@@ -156,6 +156,42 @@ describe("calibrateReproOracle", () => {
     expect(c.falseNegative).toBe(true)
   })
 
+  // P3 metamorphic non-vacuity (jun-23): the probe reports RESOLVED even on the
+  // UN-PATCHED base tree ⇒ the oracle is VACUOUS (its "green" is meaningless and
+  // would false-GREEN a wrong candidate). This is a DISTINCT failure from
+  // falseNegative — here gold ALSO resolves, so it is NOT a false-negative; the
+  // base probe is what catches it. red-on-injection: without the base probe,
+  // `vacuous` could never be true and a meaningless-green oracle would gate.
+  test("VACUOUS oracle (resolved on BASE) ⇒ vacuous=true, baseResolved=true, NOT falseNegative", async () => {
+    const c = await calibrateReproOracle({
+      resolvedProbe: async () => ({ votes: 2, k: 2 }), // always green — even on the buggy base
+      goldPatch: goldPatchAddingMarker(),
+      sandbox: repo,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+    })
+    expect(c.available).toBe(true)
+    expect(c.baseResolved).toBe(true)
+    expect(c.vacuous).toBe(true)
+    expect(c.falseNegative).toBe(false) // gold resolves ⇒ not FN; vacuous is the separate reason
+    expect(c.baseVotes).toBe(2)
+    expect(c.baseK).toBe(2)
+  })
+
+  // Paired control: a SOUND oracle (red on base, green on gold) is NOT vacuous.
+  test("SOUND oracle (NOT-resolved on base) ⇒ vacuous=false", async () => {
+    const c = await calibrateReproOracle({
+      resolvedProbe: treeReadingProbe, // resolves ONLY when the gold marker is present
+      goldPatch: goldPatchAddingMarker(),
+      sandbox: repo,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+    })
+    expect(c.baseResolved).toBe(false)
+    expect(c.vacuous).toBe(false)
+    expect(c.goldCalibrated).toBe(true)
+  })
+
   // jun-20 audit REAL-BUG fix: `withCandidatePatch` can throw OUTSIDE the probe's
   // try/catch. A bogus (non-git, non-existent) sandbox exercises that path; the
   // "Never throws" contract must hold ⇒ resolve to UNAVAILABLE, not reject.

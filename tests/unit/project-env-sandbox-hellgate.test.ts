@@ -81,7 +81,9 @@ const writeBuildTimeImportPackage = (dir: string, pyproject: string): void => {
 // Minimal pyproject that drives setuptools as the build backend so setup.py runs.
 const SETUPTOOLS_PYPROJECT = [
   "[build-system]",
-  'requires = ["setuptools>=61"]',
+  // Unpinned so the materialized `setuptools<60` build-dep coexists (astropy's
+  // legacy snapshot is likewise unpinned and needs setuptools<60 for dep_util).
+  'requires = ["setuptools"]',
   'build-backend = "setuptools.build_meta"',
   "",
   "[project]",

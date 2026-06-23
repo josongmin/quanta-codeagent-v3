@@ -282,7 +282,7 @@ export const prepareTurnContext = async (
   // `buildLanguageHint` returns undefined when the gate is off / English /
   // ambiguous, so the prompt stays byte-identical.
   const languageHint = buildLanguageHint(latestUserTextFromWm(wm), runtimeConfig().langDetect)
-  const ctx = buildTurnContext({
+  const turnInput: import("../prompt").TurnContextInput = {
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
     planMode: config.planMode ?? false,
@@ -316,7 +316,14 @@ export const prepareTurnContext = async (
     // byte-identical default-OFF. ORTHOGONAL to effort/language (all compose).
     ...(config.sessionBrief?.() === true ? { brief: true } : {}),
     untrustedEnvelope: runtimeConfig().untrustedEnvelope,
-  })
+  }
+  // Trajectory fork-experiment seam (AgentConfig.turnContextMutator). DEFAULT-OFF:
+  // absent ⇒ `turnInput` reaches buildTurnContext untouched ⇒ byte-identical.
+  const ctx = buildTurnContext(
+    config.turnContextMutator !== undefined
+      ? config.turnContextMutator(turn, turnInput)
+      : turnInput,
+  )
   const finalCtx = injectRedactionBanner(config, await injectIdeContext(config, ctx))
   emitPromptAssembled(config, finalCtx, activeModel)
   return { ctx: finalCtx, breakerVerdict }

@@ -21,7 +21,10 @@
 /** Which proof stage the receipt describes.
  *  - `launch`  — the server binary is present + spawnable (cheap preflight);
  *  - `ready`   — the task-relevant workspace reached verified-ready state;
- *  - `runtime` — a real tool call against an already-ready session. */
+ *  - `runtime` — RESERVED: a real tool call against an already-ready session.
+ *                Part of the taxonomy (the receipt shape supports it) but NOT
+ *                yet produced by any caller — admission only emits launch/ready.
+ *                Kept so the report/CLI surface is forward-compatible. */
 export type LspGroundingStage = "launch" | "ready" | "runtime"
 
 /** The closed set of LSP-grounding outcomes. ORDER/membership is the contract:
@@ -35,9 +38,10 @@ export type LspGroundingStage = "launch" | "ready" | "runtime"
  *                        event (turn/session abort, bench session-end evict) —
  *                        observable but NON-alarming;
  *  - `fatal_transport` — the server process/transport died (exited, pump dead);
- *  - `tool_unavailable`— a runtime tool call degraded to "no answer / unavailable"
- *                        on an otherwise-ready session (utility loss, NOT an
- *                        admission failure). */
+ *  - `tool_unavailable`— RESERVED (runtime-stage): a tool call degraded to "no
+ *                        answer / unavailable" on an otherwise-ready session
+ *                        (utility loss, NOT an admission failure). Part of the
+ *                        taxonomy but NOT yet produced by any caller. */
 export type LspGroundingOutcome =
   | "ok"
   | "missing_binary"
@@ -48,8 +52,11 @@ export type LspGroundingOutcome =
   | "tool_unavailable"
 
 /** One typed grounding observation. Pure data — safe to embed in a report row,
- *  a box snapshot, or a CLI render. `language`/`backend` identify WHICH server;
- *  `file` is the anchor/task file the stage exercised. */
+ *  a box snapshot, or a CLI render. `backend` is the engine id (`"pyright"`);
+ *  `language` is the server/language KEY — in this codebase that is the server
+ *  binary (`"pyright-langserver"`), the same key `lspExtensionToLanguage()` maps
+ *  to (server identity, not a human language name). `file` is the anchor/task
+ *  file the stage exercised. */
 export interface LspGroundingReceipt {
   readonly backend: string
   readonly language: string
@@ -76,11 +83,10 @@ export const isExpectedLifecycleOutcome = (outcome: LspGroundingOutcome): boolea
   outcome === "expected_cancel"
 
 /** A genuine, operator-facing failure: not `ok` and not an expected lifecycle
- *  cancellation. These are the outcomes a warn channel reacts to. NOTE: this
- *  includes `tool_unavailable` — that is "real" in the warn-channel sense (a
- *  runtime utility loss worth surfacing), even though it is a RUNTIME-stage
- *  outcome that never reaches the strict-admission gate (which only ever emits
- *  launch/ready receipts). Admission authority uses {@link isAdmissibleGroundingOutcome}
+ *  cancellation. These are the outcomes a warn channel / fail-closed gate reacts
+ *  to (today: missing_binary / start_failed / ready_timeout / fatal_transport).
+ *  It would also classify the RESERVED `tool_unavailable` as real, but nothing
+ *  produces that yet. Admission authority uses {@link isAdmissibleGroundingOutcome}
  *  (ok only), not this predicate, so the two never conflict. */
 export const isRealGroundingFailure = (outcome: LspGroundingOutcome): boolean =>
   outcome !== "ok" && !isExpectedLifecycleOutcome(outcome)
