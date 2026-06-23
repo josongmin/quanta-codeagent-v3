@@ -1,6 +1,18 @@
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
-import { errMessage, QuantaError, runtimeConfig } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
 import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
+import { httpStatusOf, isUnauthorizedError, McpError, unsupported } from "./client/errors"
+import { initializeWithDowngrade, pinNegotiatedVersion } from "./client/negotiate"
+import {
+  asRecord,
+  capResultText,
+  extractMedia,
+  joinTextBlocks,
+  mapTool,
+  type ToolsCallResult,
+  type ToolsListResult,
+} from "./client/result-folding"
+import { defaultTransportFor, type McpClientTransport } from "./client/transport-factory"
 import { headlessRejecter } from "./elicitation"
 import {
   type ElicitationResponse,
@@ -12,12 +24,7 @@ import { isResponse, type JsonRpcMessage, type JsonRpcResponse } from "./jsonrpc
 import { headlessOAuthRejecter } from "./oauth"
 import type { McpOAuthProviderPort } from "./oauth/port"
 import { isProgressMethod, type McpProgressHandler, parseProgress } from "./progress"
-import {
-  isSupportedProtocolVersion,
-  PROTOCOL_DOWNGRADE_FLOOR,
-  resolveOfferedVersion,
-  SUPPORTED_PROTOCOL_VERSIONS,
-} from "./protocol-version"
+import { resolveOfferedVersion } from "./protocol-version"
 import type {
   McpCompletionArgument,
   McpCompletionRef,
@@ -47,16 +54,8 @@ import {
 import { headlessSamplingRejecter } from "./sampling"
 import { isSamplingMethod, routeSampling, type SamplingResponse } from "./sampling/inbound-router"
 import type { SamplingHandlerPort } from "./sampling/port"
-import { HttpSseMcpTransport } from "./transports/http-sse"
 import type { McpTransport } from "./transports/port"
-import { StdioMcpTransport } from "./transports/stdio"
-import type {
-  McpCallResult,
-  McpMediaBlock,
-  McpServerConfig,
-  McpToolAnnotations,
-  McpToolDef,
-} from "./types"
+import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 
 const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
@@ -73,268 +72,17 @@ const MAX_TOOLS_LIST_PAGES = 256
  *  flood. */
 const MAX_INBOUND_SAMPLING_IN_FLIGHT = 8
 
-/** Max chars of joined tool-result text we hand back from `callTool`. A
- *  malicious/buggy MCP server returning a huge text blob would otherwise flow
- *  unbounded into memory and the model prompt (DOS). Mirrors the repo-wide
- *  tool-output cap (`@/tool` `output-spill.ts` `DEFAULT_TOOL_OUTPUT_MAX =
- *  200_000`); kept as a local constant because `@/mcp` may not import `@/tool`
- *  (slice isolation, RFC §3.1). Sub-cap results are returned byte-identical. */
-const MAX_RESULT_CHARS = 200_000
-
-/** Typed MCP failure. Stable code lets callers branch without string matching.
- *
- *  R4 (structured-401) — when a failure originated from an HTTP transport
- *  non-2xx, the carrier surfaces the REAL numeric status through the JSON-RPC
- *  error's `data.httpStatus` slot; `dispatch` copies it onto `httpStatus` here
- *  so auth-staleness can key off a STRUCTURED signal rather than substring-
- *  matching the message text (the conservative legacy fallback is kept for
- *  transports/servers that carry no structured status). `undefined` for every
- *  non-HTTP error (stdio, timeout, local refusal). */
-export class McpError extends QuantaError {
-  /** R4 — the HTTP status this error carried, when the transport surfaced one
-   *  structurally (`error.data.httpStatus`). `undefined` otherwise. */
-  readonly httpStatus?: number
-  /** Ticket misc-jun-7/01 R2 — the JSON-RPC error `code` this failure carried,
-   *  when it originated from a server `error` envelope (copied by
-   *  {@link McpClient.resolveResponse}). `undefined` for a non-protocol failure
-   *  (timeout, connection refusal, transport synth) — the absence is itself the
-   *  signal that the §4.c re-offer must NOT fire (a re-offer is scoped to a
-   *  genuine version-REJECTION code, not any McpError). */
-  readonly jsonRpcCode?: number
-  constructor(
-    message: string,
-    options?: { cause?: unknown; httpStatus?: number; jsonRpcCode?: number },
-  ) {
-    super("mcp", message, options)
-    if (options?.httpStatus !== undefined) this.httpStatus = options.httpStatus
-    if (options?.jsonRpcCode !== undefined) this.jsonRpcCode = options.jsonRpcCode
-  }
-}
-
-/** Ticket misc-jun-7/01 R2 — the JSON-RPC error codes a strict server uses to
- *  REJECT an unspeakable `initialize` offer (a version-rejection), per JSON-RPC
- *  2.0 §5.1: `InvalidParams (-32602)` (the ticket §4.c canonical) and
- *  `InvalidRequest (-32600)`. A re-offer at the floor is scoped to EXACTLY these
- *  — a timeout / connection refusal (no code) or a transient server fault
- *  (`InternalError -32603`, app-defined `-32000`) is NOT a version rejection and
- *  must propagate WITHOUT a downgrade probe (else a transient hiccup silently
- *  pins the OLDER protocol — a capability loss). */
-const VERSION_REJECTION_CODES: ReadonlySet<number> = new Set([-32602, -32600])
+/** Re-export the public surface (error class + folding cluster + transport
+ *  factory type) so EVERY external importer of `@/mcp/client` stays
+ *  byte-compatible after the split. */
+export { McpError } from "./client/errors"
+export { extractMedia, sanitizeAnnotations } from "./client/result-folding"
+export type { McpClientTransport } from "./client/transport-factory"
 
 interface PendingRequest {
   resolve: (value: unknown) => void
   reject: (reason: Error) => void
   timer: ReturnType<typeof setTimeout>
-}
-
-/** Raw `tools/list` shapes — only the fields we consume are narrowed. */
-interface RawTool {
-  name: string
-  description?: string
-  inputSchema?: Record<string, unknown>
-  /** §19.1 — server-advertised `ToolAnnotations` (spec 2025-06-18). UNTRUSTED —
-   *  sanitized by {@link sanitizeAnnotations} so only real JSON booleans survive
-   *  (a poisoned non-boolean is dropped, never coerced). */
-  annotations?: unknown
-}
-interface ToolsListResult {
-  tools?: RawTool[]
-  nextCursor?: string
-}
-/** §19.3 — extended to carry the non-text content shapes (`image` data/mimeType,
- *  embedded `resource` blob/mimeType) the spec defines. Every field stays
- *  optional so a pure text block is byte-identical to the pre-§19.3 shape. */
-interface ContentBlock {
-  type: string
-  text?: string
-  data?: string
-  mimeType?: string
-  resource?: unknown
-}
-interface ToolsCallResult {
-  content?: ContentBlock[]
-  isError?: boolean
-  /** §19.2 — the spec's typed `structuredContent` payload (a JSON object whose
-   *  shape the server's `outputSchema` describes). Carried opaque; the bridge
-   *  maps it onto `ToolResult.structured`. Absent ⇒ unchanged text-only result. */
-  structuredContent?: unknown
-}
-
-/** H19 — build the typed `unsupported` failure for a method whose required
- *  server capability was not advertised. Refusing locally (instead of emitting
- *  the request and surfacing the server's raw `-32601`) gives the caller a
- *  stable, branchable reason. */
-const unsupported = <T>(capability: string, serverName: string): McpResult<T> => ({
-  ok: false,
-  reason: "unsupported",
-  message: `mcp server "${serverName}" does not advertise the "${capability}" capability`,
-})
-
-/** H18 / R2 #1 / R4 — does `err` represent a GENUINE HTTP 401 (Unauthorized)
- *  surfaced through the request core, as opposed to an arbitrary error whose
- *  text merely mentions "401" or "unauthorized"?
- *
- *  R4 (structured-401) — PREFER the STRUCTURED signal: an {@link McpError} that
- *  carries `httpStatus` (copied by `dispatch` from the transport's
- *  `error.data.httpStatus`) is auth-stale IFF that number is exactly `401`.
- *  This is immune to message-text spoofing entirely — a server whose 500-body
- *  text contains "HTTP 401" cannot trigger a re-auth because the structured
- *  status it carries is 500, not 401. A non-401 structured status (403/500/…)
- *  is DEFINITIVELY not auth-stale and short-circuits without consulting text.
- *
- *  FALLBACK (only when NO structured status is present — stdio carriers, or a
- *  transport that did not surface one): the conservative legacy substring match
- *  on the transport's own `HTTP 401` status marker. The ONLY non-structured way
- *  a real auth failure reaches here is the HTTP-SSE carrier's synthesized
- *  `transport POST failed: HTTP 401` message. We key off that token — NOT a bare
- *  `401` (which would spuriously fire on, e.g., `access-401.txt`, a line number,
- *  or a version string) and NOT a bare `unauthorized` (which would fire on any
- *  application-level authorization error a tool/server happens to phrase that
- *  way). Matching is bounded to the literal `HTTP 401` token (case-insensitive
- *  on `HTTP`, word-bounded on `401` so `HTTP 4012` / `HTTP 401x` never match). */
-const isUnauthorizedError = (err: unknown): boolean => {
-  // Structured signal wins when present: it is unforgeable by message text.
-  if (err instanceof McpError && err.httpStatus !== undefined) {
-    return err.httpStatus === 401
-  }
-  const msg = errMessage(err)
-  return /\bHTTP\s+401\b/i.test(msg)
-}
-
-/** R4 (structured-401) — extract a numeric `httpStatus` from a JSON-RPC error's
- *  `data` slot when the transport attached one. Only a finite integer in the
- *  HTTP status range is accepted; anything else (absent, non-object, non-number,
- *  NaN, out-of-range) yields `undefined` so the conservative substring fallback
- *  applies. A hostile server cannot smuggle a non-401 into a 401 because we read
- *  the EXACT number, not its string form. */
-const httpStatusOf = (data: unknown): number | undefined => {
-  if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined
-  const raw = (data as Record<string, unknown>).httpStatus
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 100 || raw > 599) return undefined
-  return raw
-}
-
-/** Narrow an unknown value to a plain record (object, not array/null). Used to
- *  safely walk the `initialize` response's nested `capabilities` slot. */
-const asRecord = (v: unknown): Record<string, unknown> | null =>
-  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
-
-/** §19.1 — lift ONE annotation field iff it arrived as a real JSON boolean. A
- *  poisoned non-boolean (`"true"`, `1`, `{}`, `null`) is DROPPED — never coerced
- *  — so a downstream `=== true` test on the result is always honest. */
-const liftBoolHint = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined)
-
-/** §19.1 — sanitize raw server-advertised annotations into the boolean-only
- *  {@link McpToolAnnotations}. Returns `undefined` when the input is not a plain
- *  object OR carries no usable field — so absent/garbage annotations stay absent
- *  (the bridge's predicates remain byte-identical to the pre-annotation path).
- *  The `title` is carried only as a display string (no security meaning). */
-export const sanitizeAnnotations = (raw: unknown): McpToolAnnotations | undefined => {
-  const obj = asRecord(raw)
-  if (obj === null) return undefined
-  const out: McpToolAnnotations = {}
-  if (typeof obj.title === "string") out.title = obj.title
-  const ro = liftBoolHint(obj.readOnlyHint)
-  if (ro !== undefined) out.readOnlyHint = ro
-  const de = liftBoolHint(obj.destructiveHint)
-  if (de !== undefined) out.destructiveHint = de
-  const id = liftBoolHint(obj.idempotentHint)
-  if (id !== undefined) out.idempotentHint = id
-  const ow = liftBoolHint(obj.openWorldHint)
-  if (ow !== undefined) out.openWorldHint = ow
-  return Object.keys(out).length === 0 ? undefined : out
-}
-
-const mapTool = (t: RawTool): McpToolDef => {
-  const annotations = sanitizeAnnotations(t.annotations)
-  return {
-    name: t.name,
-    description: t.description ?? "",
-    inputSchema: t.inputSchema ?? { type: "object" },
-    ...(annotations !== undefined ? { annotations } : {}),
-  }
-}
-
-const joinTextBlocks = (content: ContentBlock[] | undefined): string =>
-  (content ?? [])
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text ?? "")
-    .join("\n")
-
-/** §19.3 — extract non-text content blocks (image / embedded resource) into the
- *  typed {@link McpMediaBlock} carrier. Text blocks are left to
- *  {@link joinTextBlocks}.
- *
- *  - `image`: needs base64 `data` + a string `mimeType`.
- *  - `resource`: an embedded resource with a base64 `blob` + `mimeType` becomes
- *    a document-class block (a text resource is left to the text join — the
- *    server already exposes that via its content text where present).
- *
- *  Size enforcement (the 5 MB inbound cap + magic-byte sniff) lives in the
- *  BRIDGE where the `@/tool` image-cap policy is reachable — this stays a pure
- *  shape extractor (slice fence: `@/mcp` may not import `@/tool`). A block
- *  missing `data`/`mimeType` is SKIPPED rather than throwing, so a buggy or
- *  malicious server can never crash the call. */
-export const extractMedia = (content: ContentBlock[] | undefined): McpMediaBlock[] => {
-  const out: McpMediaBlock[] = []
-  for (const b of content ?? []) {
-    if (b.type === "image") {
-      if (typeof b.data === "string" && typeof b.mimeType === "string") {
-        out.push({ kind: "image", data: b.data, mimeType: b.mimeType })
-      }
-    } else if (b.type === "resource") {
-      const r = asRecord(b.resource)
-      if (r !== null && typeof r.blob === "string" && typeof r.mimeType === "string") {
-        out.push({ kind: "resource", data: r.blob, mimeType: r.mimeType })
-      }
-    }
-  }
-  return out
-}
-
-/** Bound the joined text to {@link MAX_RESULT_CHARS}. Sub-cap input is returned
- *  by reference (byte-identical, no allocation). Over-cap input is truncated to
- *  the head with a clear `[truncated: N bytes omitted]` marker so the model and
- *  any downstream caller can see the result was clipped. */
-const capResultText = (text: string): string => {
-  if (text.length <= MAX_RESULT_CHARS) return text
-  const omitted = text.length - MAX_RESULT_CHARS
-  return `${text.slice(0, MAX_RESULT_CHARS)}\n[truncated: ${omitted} bytes omitted]`
-}
-
-/** How to construct the carrier for a {@link McpClient}. Omitting it (the
- *  default) selects the stdio transport, which is byte-identical to every
- *  pre-ADR-0391 deployment. A function lets callers fully control construction
- *  (e.g. an HTTP transport, or a test double); an explicit `McpTransport`
- *  instance is also accepted. */
-export type McpClientTransport = McpTransport | ((config: McpServerConfig) => McpTransport)
-
-/** Build the default transport for a config. Stdio is the default carrier; the
- *  HTTP-SSE carrier is selected only when the config carries a `url` (an
- *  explicit opt-in), preserving stdio byte-identity for every command-based
- *  server. */
-const defaultTransportFor = (
-  config: McpServerConfig,
-  offeredVersion: string,
-  proxyEnv?: ProxyEnvInput,
-): McpTransport => {
-  if (config.url !== undefined && config.url !== "") {
-    return new HttpSseMcpTransport({
-      url: config.url,
-      name: config.name,
-      // Ticket misc-jun-7/01 — stamp the OFFERED protocol version on the header
-      // until negotiation pins the server-chosen one (client calls
-      // `setProtocolVersion` after `initialize`).
-      protocolVersion: offeredVersion,
-      ...(config.headers !== undefined ? { headers: config.headers } : {}),
-      // §1.2 (ticket-09) — seed the SSE resume cursor so the standalone GET sends
-      // `Last-Event-ID` (the supervisor carries it across a restart).
-      ...(config.resumeFromEventId !== undefined
-        ? { resumeFromEventId: config.resumeFromEventId }
-        : {}),
-    })
-  }
-  return new StdioMcpTransport(config, proxyEnv !== undefined ? { proxyEnv } : {})
 }
 
 /** A real MCP client speaking newline-delimited JSON-RPC 2.0 over a pluggable
@@ -551,66 +299,27 @@ export class McpClient {
     // a standalone SSE GET. `stop()` is idempotent and closes the carrier, drops
     // the subscriptions, and fails any pending request.
     try {
-      const { result: initResult, offered } = await this.initializeWithDowngrade(transport)
+      const { result: initResult, offered } = await initializeWithDowngrade(
+        this.offeredVersion,
+        transport,
+        (version) => this.sendInitialize(version),
+      )
       this.serverCapabilities = asRecord(initResult)?.capabilities
         ? (asRecord(asRecord(initResult)?.capabilities) ?? {})
         : {}
       // Read + accept/legacy-tolerant/fail-closed the server's chosen
       // protocolVersion (previously discarded), then pin the HTTP header to it.
-      this.pinNegotiatedVersion(initResult, offered, transport)
+      this.negotiatedVersion = pinNegotiatedVersion(
+        initResult,
+        offered,
+        transport,
+        this.config.name,
+      )
     } catch (err) {
       await this.stop().catch(() => {})
       throw err
     }
     this.notify("notifications/initialized", {})
-  }
-
-  /** Ticket misc-jun-7/01 — issue `initialize` offering {@link offeredVersion};
-   *  on a rejection from a STRICT server (a JSON-RPC error rather than a
-   *  negotiated-down reply) AND only when the offer was newer than the floor,
-   *  retry exactly ONCE at the floor ({@link PROTOCOL_DOWNGRADE_FLOOR}). The
-   *  re-offer is bounded — a second failure (or a non-McpError, or an offer that
-   *  was already the floor) propagates, never looping. The §5 worst case is one
-   *  extra round-trip, then byte-identical.
-   *
-   *  Returns BOTH the raw result AND the version that ultimately succeeded on
-   *  the wire, so the legacy-tolerant pin (server omits `protocolVersion`) uses
-   *  the offer that actually connected — not the pre-downgrade offer.
-   *
-   *  The downgrade is offer-side only: a spec-compliant server that negotiates
-   *  DOWN (returns the floor in a SUCCESSFUL reply) never enters the catch — it
-   *  is handled by {@link pinNegotiatedVersion}'s accept branch. */
-  private async initializeWithDowngrade(
-    transport: McpTransport,
-  ): Promise<{ result: unknown; offered: string }> {
-    const offer = this.offeredVersion
-    try {
-      return { result: await this.sendInitialize(offer), offered: offer }
-    } catch (err) {
-      // Ticket misc-jun-7/01 R2 — re-offer ONLY when (a) the offered version was
-      // newer than the floor (so the floor is a real downgrade) AND (b) the
-      // failure is a genuine VERSION-REJECTION: a server JSON-RPC `error` whose
-      // code is in {@link VERSION_REJECTION_CODES} (-32602 / -32600), the §4.c
-      // canonical strict-reject shape.
-      //
-      // It must NOT fire on any other McpError. A request TIMEOUT, a
-      // connection-level transport failure, or a transient server fault
-      // (`InternalError -32603`, an app-defined `-32000` transport synth) carries
-      // NO version-rejection code — re-offering the floor on those would (1)
-      // waste a round-trip and (2) WORSE, silently pin the OLDER protocol if the
-      // floor then succeeds, masking a transient fault as a permanent version
-      // incompatibility (a capability loss). Those propagate untouched.
-      const isVersionRejection =
-        err instanceof McpError &&
-        err.jsonRpcCode !== undefined &&
-        VERSION_REJECTION_CODES.has(err.jsonRpcCode)
-      if (offer === PROTOCOL_DOWNGRADE_FLOOR || !isVersionRejection) throw err
-      // Re-pin the transport header to the floor for the re-offer POST so the
-      // header and body agree on the retry.
-      transport.setProtocolVersion?.(PROTOCOL_DOWNGRADE_FLOOR)
-      const result = await this.sendInitialize(PROTOCOL_DOWNGRADE_FLOOR)
-      return { result, offered: PROTOCOL_DOWNGRADE_FLOOR }
-    }
   }
 
   /** Emit a single `initialize` request with `version` as the offered
@@ -621,37 +330,6 @@ export class McpClient {
       clientInfo: CLIENT_INFO,
       capabilities: this.negotiator.compile(),
     })
-  }
-
-  /** Ticket misc-jun-7/01 — read the server's chosen `protocolVersion` from the
-   *  `initialize` reply and decide:
-   *   - ABSENT (legacy-tolerant) ⇒ pin the OFFERED version that connected
-   *     (today's behavior, no regression). A malformed/non-string slot is
-   *     treated as absent — routed around, never thrown on (§4.e).
-   *   - IN the supported set ⇒ accept + pin it (this is what the HTTP header then
-   *     carries on every subsequent request).
-   *   - PRESENT but NOT in the set ⇒ fail closed with a typed `McpError` (Codex
-   *     `UNSUPPORTED_PROTOCOL` parity). We never proceed on a version we do not
-   *     implement. This is a PROTOCOL error ⇒ a throw, NOT an `isError` result. */
-  private pinNegotiatedVersion(
-    initResult: unknown,
-    offered: string,
-    transport: McpTransport,
-  ): void {
-    const replied = asRecord(initResult)?.protocolVersion
-    if (typeof replied !== "string") {
-      // Absent or malformed → legacy-tolerant: pin the offer that connected.
-      this.negotiatedVersion = offered
-      transport.setProtocolVersion?.(offered)
-      return
-    }
-    if (!isSupportedProtocolVersion(replied)) {
-      throw new McpError(
-        `mcp server "${this.config.name}" replied with unsupported protocolVersion "${replied}"; supported: ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")}`,
-      )
-    }
-    this.negotiatedVersion = replied
-    transport.setProtocolVersion?.(replied)
   }
 
   /** Ticket misc-jun-7/01 — the protocol version pinned for this session (the
