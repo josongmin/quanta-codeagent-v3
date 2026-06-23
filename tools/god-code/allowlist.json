@@ -3,22 +3,14 @@
   "godModuleMaxLines": 1000,
   "godFunctionMaxLines": 150,
   "modules": [
-    "src/agent/dispatch.ts",
     "src/apps/bench/cli.ts",
     "src/apps/bench/eval/driver.ts",
     "src/apps/bench/index.ts",
     "src/apps/bench/remote/box-session.ts",
     "src/apps/bench/remote/pool.ts",
-    "src/apps/cli/raw-line-reader.ts",
-    "src/apps/cli/repl/session-loop.ts",
-    "src/apps/cli/repl/surface-compose.ts",
-    "src/apps/cli/slash/registry-surface.ts",
-    "src/apps/web-daemon/server.ts",
     "src/config/knob-inventory.ts",
-    "src/host/runtime/internal/context-binding.ts",
     "src/runner/batch/eval/driver.ts",
-    "src/runner/batch/eval/llm-evidence-packet.ts",
-    "src/tool/index.ts"
+    "src/runner/batch/eval/llm-evidence-packet.ts"
   ],
   "functions": [
     "src/agent/approval-state-machine/store.ts::createApprovalStateMachine",
@@ -47,7 +39,7 @@
     "src/apps/cli/cost-panel.ts::createCostPanel",
     "src/apps/cli/index.ts::main",
     "src/apps/cli/mcp-server-setup.ts::assembleAndServe",
-    "src/apps/cli/raw-line-reader.ts::<anonymous@371>",
+    "src/apps/cli/raw-line-reader.ts::<anonymous@123>",
     "src/apps/cli/raw-line-reader.ts::onKey",
     "src/apps/cli/raw-line-reader.ts::readLine",
     "src/apps/cli/repl/session-loop.ts::runSessionLoop",
