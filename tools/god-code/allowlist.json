@@ -8,7 +8,6 @@
     "src/apps/bench/index.ts",
     "src/apps/bench/remote/box-session.ts",
     "src/apps/bench/remote/pool.ts",
-    "src/config/knob-inventory.ts",
     "src/runner/batch/eval/driver.ts",
     "src/runner/batch/eval/llm-evidence-packet.ts"
   ],
