@@ -67,7 +67,6 @@
     "src/runtime/node-repl/default-kernel.ts::createDefaultNodeReplKernel",
     "src/runtime/shell.ts::runShell",
     "src/scheduler/automation-engine/in-memory.ts::inMemoryAutomationEngine",
-    "src/scheduler/automation-engine/sqlite.ts::sqliteAutomationEngine",
     "src/scheduler/runtime.ts::processAutomation",
     "src/sdk/runtime/session.ts::createRuntimeSession",
     "src/shared/runtime-config.ts::loadFromEnv",
