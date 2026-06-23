@@ -58,10 +58,12 @@ const isDeclarationFile = (path: string): boolean =>
   path.includes("src/runner/knobs/") ||
   // the CLI-local registry (ADR-0503 P1) — declared, not orphan
   path.endsWith("src/apps/cli/cli-knobs.ts") ||
-  // the daemon/agent-side declaration inventory (ADR-0503 P1)
-  path.endsWith("src/config/knob-inventory.ts") ||
-  // the typed runtime-config knob declaration registry (ADR-0503 P3)
-  path.endsWith("src/shared/runtime-config-knobs.ts")
+  // the daemon/agent-side declaration inventory (ADR-0503 P1; god-module split →
+  // entries live in src/config/knob-inventory/{host,runner,daemon,bench,extra,const-keyed}.ts)
+  path.includes("src/config/knob-inventory") ||
+  // the typed runtime-config knob declaration registry (ADR-0503 P3; god-module
+  // split → entries live in src/shared/runtime-config-knobs/knobs-{a,b,c}.ts)
+  path.includes("src/shared/runtime-config-knobs")
 
 /** Files excluded from the orphan scan entirely: tests, type decls, and the
  *  `--help` doc renderer (it NAMES knobs as documentation, not reads). */
