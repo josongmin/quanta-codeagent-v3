@@ -5,7 +5,6 @@
   "modules": [
     "src/agent/admissibility-gate.ts",
     "src/agent/dispatch.ts",
-    "src/agent/hooks.ts",
     "src/apps/bench/cli.ts",
     "src/apps/bench/eval/driver.ts",
     "src/apps/bench/index.ts",
